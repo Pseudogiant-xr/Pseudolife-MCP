@@ -1,17 +1,21 @@
-"""Reference Bank — ChromaDB-backed RAG document store.
+"""Reference Bank — the document store (``document_ingest``).
 
 The 4th tier of the Continuum Memory System: a persistent vector store
 for uploaded documents. Unlike the neural banks (instant/short-term/long-term),
 the reference bank does not learn via gradient descent. It uses pure cosine
-similarity search via ChromaDB, but participates in the same retrieval
-merging pipeline as the neural banks.
+similarity search, but participates in the same retrieval merging pipeline
+as the neural banks.
+
+Since schema v57 the chunks live in the Postgres bank (``reference_chunks``),
+so every backup and transfer of the bank carries them. Before v57 they lived
+in a chromadb store under ``<data_dir>/chromadb``; ``storage/migrate_chroma.py``
+copies such a store in once.
 """
 
 from __future__ import annotations
 
 import hashlib
 import logging
-import threading
 import time
 from pathlib import Path
 
@@ -35,11 +39,11 @@ INGEST_ENCODE_BATCH = 8
 
 
 def cosine_similarity_from_distance(dist: float) -> float:
-    """ChromaDB cosine *distance* is ``1 − cos`` (range [0, 2]), so the
-    similarity is ``1 − dist``, clamped at 0. The old ``1 − dist/2`` mapped
-    an orthogonal chunk to 0.5 — above the 0.25 retrieval floor — so
-    unrelated documents were appended to essentially every search result
-    (2026-07-02 review M1)."""
+    """Cosine *distance* (chromadb's, and pgvector's ``<=>``) is ``1 − cos``
+    (range [0, 2]), so the similarity is ``1 − dist``, clamped at 0. The old
+    ``1 − dist/2`` mapped an orthogonal chunk to 0.5 — above the 0.25
+    retrieval floor — so unrelated documents were appended to essentially
+    every search result (2026-07-02 review M1)."""
     return max(0.0, 1.0 - float(dist))
 
 
@@ -55,6 +59,12 @@ def _chunk_text(text: str, chunk_size: int = 512, chunk_overlap: int = 64) -> li
         if chunk:
             chunks.append(chunk)
     return chunks
+
+
+def chunk_id(source: str, index: int, chunk: str) -> str:
+    """A chunk's id: unchanged from the chromadb store, so a re-ingest
+    replaces the rows an earlier ingest (or the v57 import) wrote."""
+    return hashlib.md5(f"{source}:{index}:{chunk[:100]}".encode()).hexdigest()
 
 
 def _read_file(path: Path) -> str:
@@ -78,86 +88,44 @@ def _read_file(path: Path) -> str:
 
 
 class ReferenceBank:
-    """ChromaDB-backed reference document store.
+    """The document store over the Postgres bank's ``reference_chunks``.
 
-    Stores document chunks as embeddings in a persistent ChromaDB collection.
-    Uses pre-computed embeddings from the shared EmbeddingPipeline (not
-    ChromaDB's built-in embedding function).
+    Stores document chunks with pre-computed embeddings from the shared
+    EmbeddingPipeline. Search is an exact cosine scan in SQL (no approximate
+    index), ordered by distance and then chunk id, so equal inputs serve
+    equal results in a deterministic order.
 
-    The ChromaDB client opens lazily: on the first ingest, or on the first
-    read once a store exists on disk. chromadb keeps every opened client's
-    System in a process-wide cache for the life of the process (about 19
-    threads, ~3 MB and ~0.08 s per open on a 16-CPU Windows host, measured
-    2026-09-23 over 50 service starts with evals/service_init_bench.py), so
-    a bank never used for documents must not open one. A
-    store that does not exist yet reads as an empty collection. A store that
-    fails to open disables the bank the way a constructor failure used to:
-    reads come back empty and ingest refuses.
+    What the chromadb store provided implicitly, and what stands now:
+
+    * **Chunk identity.** The id is still md5 of ``source:index:text[:100]``,
+      and a re-ingest still replaces rows with the same id (chromadb's
+      upsert). A shorter re-ingest still leaves the old tail chunks in place.
+    * **Order among equal distances.** chromadb left it to its index
+      (insertion order before compaction, HNSW order after). Now: chunk id,
+      byte order.
+    * **Lazy open.** There is no client to open: the bank reads the storage
+      the service already holds. A bank with no documents costs one empty
+      query per search.
+    * **Disabled when unavailable.** A store that failed to open made reads
+      empty and ingest refuse. Now a failed read in the memory-search pool
+      (``strict=False``) logs and serves no reference hits, retrying on the
+      next call; ``document_search`` (``strict=True``) and ingest raise. File
+      mode has no bank at all (the service builds none without Postgres).
     """
 
     def __init__(
         self,
         config: ReferenceConfig,
-        embedding_dim: int = 384,
+        storage,
+        embedding_dim: int = 1024,
     ) -> None:
         self.config = config
+        self.storage = storage
         self.embedding_dim = embedding_dim
-
-        # A missing dependency still fails here, at construction.
-        import chromadb  # noqa: F401
-
-        self._persist_dir = Path(config.persist_dir)
-        self._persist_dir.mkdir(parents=True, exist_ok=True)
-        self._client = None
-        self._collection = None
-        self._open_error: Exception | None = None
-        self._open_lock = threading.Lock()
-
-    def _store_exists(self) -> bool:
-        try:
-            return any(self._persist_dir.iterdir())
-        except FileNotFoundError:
-            return False
-
-    def _open(self, create: bool):
-        """The collection, opening the client on first need.
-
-        Returns None when no store exists yet and ``create`` is false, or
-        when the store failed to open; ingest (``create``) raises instead.
-        """
-        if self._collection is not None:
-            return self._collection
-        with self._open_lock:
-            if self._collection is not None:
-                return self._collection
-            if self._open_error is None:
-                try:
-                    # Inside the try: an unreadable directory is an open
-                    # failure like any other, never an error out of search.
-                    if not create and not self._store_exists():
-                        return None
-                    import chromadb
-
-                    client = chromadb.PersistentClient(path=str(self._persist_dir))
-                    self._collection = client.get_or_create_collection(
-                        name=self.config.collection_name,
-                        metadata={"hnsw:space": "cosine"},
-                    )
-                    self._client = client
-                    return self._collection
-                except Exception as exc:  # noqa: BLE001 — optional tier
-                    self._open_error = exc
-                    logger.warning("ReferenceBank disabled: %s", exc)
-            if create:
-                raise RuntimeError(
-                    "Reference bank disabled (ChromaDB init failed: "
-                    f"{self._open_error}). Documents cannot be ingested.")
-            return None
 
     @property
     def size(self) -> int:
-        collection = self._open(create=False)
-        return 0 if collection is None else collection.count()
+        return self.storage.count_reference_chunks()
 
     def ingest_text(
         self,
@@ -167,7 +135,7 @@ class ReferenceBank:
         chunk_size: int | None = None,
         chunk_overlap: int | None = None,
     ) -> dict:
-        """Chunk text, embed, and store in ChromaDB.
+        """Chunk text, embed, and store the chunks in the bank.
 
         Args:
             text: Raw text content.
@@ -185,8 +153,6 @@ class ReferenceBank:
 
         if not chunks:
             return {"chunks_total": 0, "chunks_stored": 0}
-        # Open (or refuse) before spending the embedding work.
-        collection = self._open(create=True)
 
         # Embed in bounded slices, never the whole document in one call.
         embeddings: list = []
@@ -196,31 +162,21 @@ class ReferenceBank:
                 batch = batch.cpu().numpy().tolist()
             embeddings.extend(batch)
 
-        # Build IDs, documents, metadatas
-        ids = []
-        documents = []
-        metadatas = []
-        emb_list = []
         now = time.time()
-
-        for i, chunk in enumerate(chunks):
-            chunk_id = hashlib.md5(f"{source}:{i}:{chunk[:100]}".encode()).hexdigest()
-            ids.append(chunk_id)
-            documents.append(chunk)
-            metadatas.append({
+        rows = [
+            {
+                "id": chunk_id(source, i, chunk),
                 "source": source,
                 "chunk_index": i,
-                "timestamp": now,
-            })
-            emb_list.append(embeddings[i])
-
-        # Upsert into ChromaDB (handles duplicates by ID)
-        collection.upsert(
-            ids=ids,
-            embeddings=emb_list,
-            documents=documents,
-            metadatas=metadatas,
-        )
+                "text": chunk,
+                "embedding": embeddings[i],
+                "metadata": {"source": source, "chunk_index": i,
+                             "timestamp": now},
+                "ingested_at": now,
+            }
+            for i, chunk in enumerate(chunks)
+        ]
+        self.storage.upsert_reference_chunks(rows)
 
         return {"chunks_total": len(chunks), "chunks_stored": len(chunks)}
 
@@ -243,85 +199,56 @@ class ReferenceBank:
         self,
         query_embedding: torch.Tensor,
         top_k: int | None = None,
+        *,
+        strict: bool = False,
     ) -> RetrievalResult:
-        """Query ChromaDB and return results as RetrievalResult."""
+        """The ``top_k`` nearest chunks as a RetrievalResult.
+
+        ``strict=False`` (the memory-search reference pool) turns a failed
+        read into no hits; ``strict=True`` raises it."""
         k = top_k or self.config.max_results
-        collection = self._open(create=False)
-        if collection is None or collection.count() == 0:
+        q = query_embedding
+        if isinstance(q, torch.Tensor):
+            q = q.detach().cpu().reshape(-1, q.shape[-1])[0].numpy()
+        try:
+            rows = self.storage.search_reference_chunks(q, k)
+        except Exception as exc:  # noqa: BLE001 — optional tier
+            if strict:
+                raise
+            logger.warning("reference pool skipped: document query failed: %s",
+                           exc)
             return RetrievalResult(entries=[], scores=[], surprises=[])
-
-        # Convert tensor to list for ChromaDB
-        q = query_embedding.cpu().numpy().tolist()
-        if isinstance(q[0], list):
-            q = q[0]  # Handle batch dimension
-
-        results = collection.query(
-            query_embeddings=[q],
-            n_results=min(k, collection.count()),
-            include=["documents", "metadatas", "distances"],
-        )
 
         entries = []
         scores = []
         surprises = []
-
-        if results["documents"] and results["documents"][0]:
-            docs = results["documents"][0]
-            metas = results["metadatas"][0] if results["metadatas"] else [{}] * len(docs)
-            dists = results["distances"][0] if results["distances"] else [0.0] * len(docs)
-
-            for doc, meta, dist in zip(docs, metas, dists):
-                similarity = cosine_similarity_from_distance(dist)
-                entry = MemoryEntry(
-                    text=doc,
-                    embedding=torch.zeros(self.embedding_dim),  # Placeholder
-                    surprise_score=0.0,
-                    timestamp=meta.get("timestamp", 0.0),
-                    access_count=0,
-                    source=meta.get("source", ""),
-                    bank="reference",
-                )
-                entries.append(entry)
-                scores.append(similarity)
-                surprises.append(0.0)
+        for text, source, ingested_at, dist in rows:
+            entries.append(MemoryEntry(
+                text=text,
+                embedding=torch.zeros(self.embedding_dim),  # Placeholder
+                surprise_score=0.0,
+                timestamp=ingested_at,
+                access_count=0,
+                source=source,
+                bank="reference",
+            ))
+            scores.append(cosine_similarity_from_distance(dist))
+            surprises.append(0.0)
 
         return RetrievalResult(entries=entries, scores=scores, surprises=surprises)
 
     def list_documents(self) -> list[dict]:
-        """List unique documents with their chunk counts."""
-        collection = self._open(create=False)
-        if collection is None or collection.count() == 0:
-            return []
-
-        # Get all metadatas
-        all_data = collection.get(include=["metadatas"])
-        source_map: dict[str, dict] = {}
-
-        for meta in (all_data["metadatas"] or []):
-            src = meta.get("source", "unknown")
-            if src not in source_map:
-                source_map[src] = {
-                    "source": src,
-                    "chunk_count": 0,
-                    "uploaded_at": meta.get("timestamp", 0),
-                }
-            source_map[src]["chunk_count"] += 1
-
-        docs = sorted(source_map.values(), key=lambda d: d["uploaded_at"], reverse=True)
-        return docs
+        """Unique documents with their chunk counts, newest ingest first."""
+        return self.storage.reference_documents()
 
     def clear(self) -> None:
-        """Delete all entries from the collection."""
-        collection = self._open(create=False)
-        if collection is not None and collection.count() > 0:
-            all_ids = collection.get()["ids"]
-            if all_ids:
-                collection.delete(ids=all_ids)
+        """Delete every chunk."""
+        self.storage.clear_reference_chunks()
 
     def stats(self) -> dict:
         """Return reference bank statistics."""
         docs = self.list_documents()
         return {
-            "reference_bank_size": self.size,
+            "reference_bank_size": sum(d["chunk_count"] for d in docs),
             "reference_document_count": len(docs),
         }

@@ -1,7 +1,8 @@
 #Requires -Version 7
 # pg_dump the Pseudolife-MCP database to data\backups\ with 7-day rotation,
-# plus a tar of the daemon state volume (ChromaDB reference documents, cortex
-# snapshot, graph snapshots) — the bank alone does not cover document_ingest.
+# plus a tar of the daemon state volume (cortex snapshot, graph snapshots,
+# and any pre-v57 ChromaDB store). Ingested documents are in the bank since
+# schema v57, so the dump carries them.
 #
 #   ops\backup.ps1                 # dump into <repo>\data\backups
 #   ops\backup.ps1 -KeepDays 30
@@ -254,9 +255,9 @@ if ($rotation -eq "held") {
         "and this backup is the new baseline.")
 }
 
-# State volume (ChromaDB reference documents + cortex snapshot + graph
-# snapshots), tarred from inside the daemon container — the only place those
-# live; a pg_dump alone loses every document_ingest on restore. Warn, never
+# State volume (cortex snapshot + graph snapshots + any pre-v57 ChromaDB
+# store, which a restored pre-v57 dump imports at its first start), tarred
+# from inside the daemon container — the only place those live. Warn, never
 # throw: the DB dump above is the critical artifact and deploys must not
 # abort because the daemon happens to be stopped (the skip is loud).
 $stateOut = Join-Path $OutDir "pseudolife_state-$stamp.tgz"
@@ -271,7 +272,7 @@ try {
     }
     Write-Host "State volume -> $stateOut"
 } catch {
-    Write-Warning "STATE VOLUME NOT BACKED UP (ingested documents + cortex/graph snapshots live there; is the daemon running?): $_"
+    Write-Warning "STATE VOLUME NOT BACKED UP (cortex/graph snapshots and pre-v57 documents live there; is the daemon running?): $_"
 }
 
 # Rotation. Rejected .part artifacts age out on the same window: they are

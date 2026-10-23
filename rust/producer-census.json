@@ -8,7 +8,7 @@
     "docs/README.md": "344f55f1081ec2899af8136ae9428c6e53ea6b9dd9e3ba43e263ab636b705807",
     "docs/atlas/README.md": "77897a89250cf80f9f3fe707f8f681bc6d8e6233908270cfd1a107471cb82e88",
     "docs/atlas/atlas.html": "a6b4c8f505d05c9c176fc7eb24b72e47b186c0c8e172ce61ac07cdf5e4cc94cb",
-    "docs/atlas/atlas.json": "04cca5c434c8c641499ab38d3fa52a0abc55c26d11d844a3ba5ebd3613f9900e",
+    "docs/atlas/atlas.json": "563e88a403123298622629c0a59937d5e9ac0938c6446fa8b3df99ee34707e68",
     "docs/cortex-mcp-spec.md": "43fba1fe5e5cd3710f59d7e99b414f7b78ea15eaa70b620b23716f3fae308d32",
     "docs/dev/dev-machines.md": "135cb4cbd97e7b34fddbc858df6e0d53e131fb2ec0589e7f3ce26026670dc0a1",
     "docs/dev/merge-batches.md": "342cf14d11bf2deea74e2a3d2394250279d378276898eaba775ff582d7cd6a39",
@@ -16,11 +16,11 @@
     "docs/guide/agent-isolation.md": "465b0c24a386ae3a92bf1a3d46e01114db061dc6ddd4a68836512fd191ff23f4",
     "docs/guide/benchmarks.md": "577a6a8230de0d57351e3e57262bb2b5385b27e6292bfc131c21c3522330fb97",
     "docs/guide/comparison.md": "841d814e64e6d2aa2385d7d0bdf3069e9ec216bea0e43adf1c286d18810e9bab",
-    "docs/guide/configuration.md": "df1c50e49568f33628b9691876eda699bd5402e5bb3842f9bc41b49b1a36fb3c",
+    "docs/guide/configuration.md": "dd75283a8148f593d2bbd9639616fb4ed4f8f8af38a8a579a906a525ddacb11a",
     "docs/guide/coordination-recovery.md": "04425509736ec7e40beb4bc46e7810d32ee0a68d791a969b77876c945ab5cb79",
     "docs/guide/dreaming.md": "f7d4b4cc8a121bb40f9b6d1814e207afc0d164cd0c9983725abd11bdc9c23e80",
     "docs/guide/episodes.md": "547f36bb2469f3ae352107374ba63ebbeecb3929be344730af9c7501d8802f49",
-    "docs/guide/memory-model.md": "e3c8ed20bf5f21815438cbbb7695a56e8b6e325574082d79f280860a06d22742",
+    "docs/guide/memory-model.md": "43c3ac10e20b733119a64ec1212d3fb5b5183a3bcb6c5ee294b7634fbaa0e036",
     "docs/guide/providers.md": "755967b36f1b4fe65a189b925a9df8f7c0244025270746fc9cc002966d793d16",
     "docs/guide/remote-bank.md": "12b55f74654258c7dcc5d6eb0a0e900ac4baed3d35a561a54ebd903fd02bde89",
     "docs/guide/retrieval.md": "460f9d577022bc6b888f3de05bec0519e4a196b1f92414074ec1dc1bc2f5bb91",
@@ -35,7 +35,7 @@
     "docs/plans/2026-06-27-memory-lifecycle-utilization.md": "5acddc5b17d8efc1a87fa98b3e1b980b36c475a9b2df69d96767c5037512f661",
     "docs/plans/2026-08-14-readme-demo-gif-storyboard.md": "dc55a640e549d3b05f691eed65bd168e3cd6b2de4716b20068df798412a4f42d",
     "docs/runbooks/deep-dream.md": "226d53e857d5e4b4d3b183396b9ffbfbf7a6bc4f238c2b9ed699d642d1957696",
-    "docs/runbooks/docker-disk-retention.md": "af85e60e1e9614bcea9339c5589c5cff3985e4fc0578a8b47ae57e89e67aa09e",
+    "docs/runbooks/docker-disk-retention.md": "6d1f10b79a5707bca05ecc892496f907b10c6393e0fde7a7f5e429db3b44b5f3",
     "docs/runbooks/embedding-v25-migration.md": "b89bebab2c3603a4afe91e318a3644d606828edfd0adf20aab411408935cdeff",
     "docs/runbooks/incremental-builds.md": "fc979134d68e40823930bc4981502d6b9746c2fd2d93098622a38d57318d0bab",
     "docs/runbooks/overnight-band-wabl-and-lme-v2-slice2.md": "84ccd4477d7986c9ab9e00a1847accb24aa14b228cd1dd4ae285b7ce42191362",
@@ -215,8 +215,8 @@
     "ops/Dockerfile.pg": "06308c96aaa3ceedf2fc988c1fccfe8573e4ae1836143546ce1fb7d996707201",
     "ops/assemble_changelog.py": "5462bfcb97a59e280311f0a1628e406fd3a47a45ed3ef39418e1e263b422fb38",
     "ops/backfill_edge_confidence.py": "4ebb4ebd55c853c3d146a98dd2a5bc140ba1ab630c5a3545eae4a639de4081ea",
-    "ops/backup.ps1": "e6db82d1ab42484d7ffba4e41c95781e3d711411bfffa17c4c9947b035cea544",
-    "ops/backup.sh": "354ed4673c9e42a858a999fd0859f31e8bb4a0ffd24b620c1f8ac02e0680a85d",
+    "ops/backup.ps1": "8295e7325c213d0b354d26fa7dc5924cf630ed980bafc04a83260c5f2d7c7aae",
+    "ops/backup.sh": "e178b5305643df7d8812e358b193c806432972fea18c7c9843f851be6e97277e",
     "ops/batch_timeline.py": "dc8140968be897f9db79287355f41eb5ab6a017b0a6372c0927dacbc210968be",
     "ops/check_lock_resolves.py": "5fd39ee5a66b551c3a12404981a203ce6b9f28ae75681511c89f0b22904e97a5",
     "ops/ci_tests.sh": "b7707384934379e136176a09460b89a9555998a4c966cf78e8f56a90fd1bff32",
@@ -226,7 +226,7 @@
     "ops/dedup_cortex.py": "483aa26a4edaa5e75dc41b6133f7e663e0d826dbf61ebd83a20a9b3b29ac2727",
     "ops/docker-compose.ghcr.yml": "a64059a8d81e18ccb441bedd3510c366e90172e3d70681ce7a91e8aa58d174de",
     "ops/docker-compose.rust.yml": "128ea0dd72104ef8f436115750e26be6417d24845027759086238cdf526411a1",
-    "ops/docker-compose.yml": "56c3adaa9469b6f769aa3176fb3ffe6d7af48405a7c3aad3447a17e0277de50f",
+    "ops/docker-compose.yml": "2fba3ba8e0ea631891029a00db66200191aa8d6bd4c901beba87bfd3565d1200",
     "ops/gen_llms_txt.py": "de91c3fc65ea1960cb1dd25c913cf8bf7dfef6302454468fcd03e42a9bbb2803",
     "ops/install-autostart.ps1": "453da0472d4b9566f6774aca6128b531341a2ef91e79d44f980e0b571a22671b",
     "ops/install-backup-task.ps1": "5fa15b92ff18a616d3165436cc283ea32c3790590e6e4b969ca22461ae85830f",
@@ -243,7 +243,7 @@
     "ops/measure_reverify_population.py": "413ff8baa0e0b25b8a727b6bead248df753d4d26e7c697aa6a0542b68715cfa5",
     "ops/migrate-pg18.ps1": "a2a8bd96ab754249395a9d42b26bfd8e6b5ecf8d6da1cd72383ebf745c0acde8",
     "ops/migrate_drop_age.py": "bad14579affef14699a3e1898afd4ba6326944f5db1e9b5c0486ee2b23153eac",
-    "ops/migrate_embeddings.py": "46eafcffe865d83828e024243883e4cd26d5953ff0ac9071a632e2577665f1ed",
+    "ops/migrate_embeddings.py": "cacea54fa136c98c9d5b8fb4f982a1cdb6f5f53931e323d56af641d1ec1478f2",
     "ops/plugin_marketplace.py": "97f1b9d8089f9906359b93bd1de0dfd2722ea0e87854fe99379285d8dcdc4d30",
     "ops/preflight.ps1": "e5b23a6eb784bc258e6374d54eea8d111f9fa8789f85ecc7c2522545aa5ffb5d",
     "ops/preflight.sh": "e96d0fb344f5e6a7b82142d33bed5d1be93a7af955ff795837997e564dc4647a",
@@ -255,9 +255,9 @@
     "ops/pytest_retry_once.py": "213f6297068459a9296bbba26fc7e4d19fbce78b85819e61b70349b7e86b5e2a",
     "ops/register_claude_desktop.py": "a653438874cb1af0ec859083239ba35adc5e74747d3aceae055640f80ee37534",
     "ops/remote-suite.ps1": "003e04513c035f0252d7dcc5646e59ec0fe49591c84b833a4a754349553187e1",
-    "ops/requirements.lock.txt": "4111a07384a6eb594f09bbc8229dc13b244fedcbc968a0f93ec584b4155b4816",
-    "ops/restore.ps1": "96cd7f5920736c975fa0cf415d4674b9ca0e2a99f1eb0a3e26e9ab857b6703f5",
-    "ops/restore.sh": "56286c9a5b191821f670fdcd497e2472dd95cec4094521f03587e2d20c0bac2f",
+    "ops/requirements.lock.txt": "daa0d6b23c651b1c90f10f0b163b770c534f32c94d9f7c2855feeda5f468175c",
+    "ops/restore.ps1": "c2301e8f41ce876eaddc2befbd10b108c101c6a6ae22d7cf8901a1db12b90795",
+    "ops/restore.sh": "58d15a15a2b175bb189182bf175557f89dd37575c5a9e763a8502904055efb4f",
     "ops/restore_from_pt.py": "bceaeb79d8ff9a537ab41d2a8ac783a167cd370e75786275211ba5baa30c213e",
     "ops/retire_by_writer.py": "5fb2b8152e3fa249a00295714f88f5fbcb6c7d61bdd6d22ef6ad6cfb9a6ee801",
     "ops/setup-codex-coordination.py": "fbd43cc2efee3b38fdabf237ea988c77a4230d703fa2a1b22b20b228c9ea4086",
@@ -288,8 +288,8 @@
     "plugin/hooks/user-prompt-submit.sh": "39c583c145c97e9c0fea6a9b36ea9c2e879a1bd4733a6362a493d4a194750ba9",
     "plugin/release.json": "2720f3c4439435ec60acd5215418b1dc2d705af039273a92f4dc8169529b54a8",
     "pseudolife_memory/coordination.py": "8f171a2ca10c6c4887cb3503ea6dcc76c9a11602460b24a9ff59fe64a2f17e82",
-    "pseudolife_memory/mcp_server.py": "660b54e03c589da9ce280ef6be6cbad8009d9c5a41547a17ba819dc374a4db81",
-    "pseudolife_memory/utils/config.py": "82ff6089e7d422a68b92dec5555b28a9b43de187f490956b32805633dd58076b",
+    "pseudolife_memory/mcp_server.py": "06c2481953719a829ce8cf312e7eb890c180de04956e332c9e94ac3416fdc66a",
+    "pseudolife_memory/utils/config.py": "9e8cda2a3aee96fe725a9c64d30fabda01ffac69e03a65418e5cc72a291efce4",
     "pseudolife_memory/web/api.py": "deb35259f0dfd306f4877bf36d1d52aba59e2c3d950590c28a1797bded938d67",
     "pseudolife_memory/web/routes.py": "ea742529395f85091eebb03d60e8f7e6561be3f7c70c7e40d8949f6fe8bf23f2",
     "pseudolife_memory/web/static/assets/Geist-LICENSE.txt": "930853ee1daa68554d9e35c8a9175affb74f699fad9a5da6ee5ebe76379d9137",
@@ -298,8 +298,8 @@
     "pseudolife_memory/web/static/theme.js": "f2399e3aaa94b61d639937aab791511ef83efb27276330b82324a21be9eea17e",
     "rust/contract-inventory.json": "27555edf13a3f8c27cae2c68fa0cf6e5d11f5695fe3ecb28563a6cb97f1d09cc",
     "rust/shim/src/argv.rs": "0273c36c6b105f38ec77692a9835868bf9695dd31920cdda3b98926f9dfbf5bb",
-    "rust/shim/src/board.rs": "b8dbae3a8fc0bf42a92a17adf53669fa073a40601a5b0fa2ab3e7107af581a2c",
-    "rust/shim/src/board/adapter.rs": "96c3f3ca0725cd87e6ddc0fc768849389f69f0fbfe5b10f1807ea748d5e7bfc2",
+    "rust/shim/src/board.rs": "e26d86951a23d2def4e081e1062dd17487588245e14cd0b98fb940cb3156efd7",
+    "rust/shim/src/board/adapter.rs": "293ee821eef2561344a3e97a35fcb66ab1a303b3991504f2449c7399a9f29b08",
     "rust/shim/src/board/claim_name.rs": "b02abab0114e281ee82f1c7ec1d52e797b16afec2964ca0d88e41bd06116bab6",
     "rust/shim/src/board/claims.rs": "1a287a8dc7e0a5c73e356174ed921e216e4feb00cb07f6d939cb51f4ddc3ea2b",
     "rust/shim/src/board/delivery.rs": "9607cc730219593fa71a82f66b3f9dd505bfa80963819472c88e9c4beb0d0f25",
@@ -307,10 +307,10 @@
     "rust/shim/src/board/doorbell_linux_cleanup.rs": "7256f818abebe40fae9c730e88b73a34b46b917380ab3bc7eb43f85c7071128e",
     "rust/shim/src/board/doorbell_posix.rs": "690504d199014803a065c0d0eb8362d486b6bb6aa09cd2cb738353affab2881e",
     "rust/shim/src/board/doorbell_windows.rs": "c1516b80d4ee895778edb9e10cb7f536b882c595dc0f756afae25fcc1927b9b3",
-    "rust/shim/src/board/identity.rs": "cc8a3f8b1b5d3e7debe7c26ecafecc0b2fffec608dad0192e0bb95788500deb1",
+    "rust/shim/src/board/identity.rs": "2b57272bbd6edc72ae810e2308ed677622336eeca249fd04a10e2e23838975fe",
     "rust/shim/src/board/liveness.rs": "7f167b55aa3dd68377d6df05bf24374677cc31f3506c27087bbb3abca61a5b8a",
     "rust/shim/src/board/notice.rs": "d00a9bde9899eb9d9379848dc69bf19ff5cdc3222079067a6bfd80186b0d25a5",
-    "rust/shim/src/board/policy.rs": "49c468b766bdc621dba514b882cf04484a77fca5d1af1a1990a480d26045b080",
+    "rust/shim/src/board/policy.rs": "a57e3c19e6814a5498d81f5e32674c9b3709ca849a55015517733bf9cb1432fc",
     "rust/shim/src/board/state.rs": "62f3d5586ed70160d6d0363bfd2ebc2c219596200229f6fe99d7a5f3b6328a44",
     "rust/shim/src/board/unicode14.rs": "0305821a91aedd6cbebec63cefcaa76cb70b96f3b77aff8589013cca073dfbbb",
     "rust/shim/src/cache.rs": "12f79ec63ebb7ef019cc7897d56bc78e2b752e3fecb327e495e6936a0fa41753",
@@ -399,10 +399,10 @@
     "rust/shim/src/cli/test_login/mod.rs": "d23544181f5823ee1aa9a1f92aade815694c5794e13fec6599683263e949dd55",
     "rust/shim/src/cli/test_login/scram.rs": "7433382dd2709a856ea0568017def16347839589b6b38a5bdec70b5d09a1d7a5",
     "rust/shim/src/cli/test_login/sql.rs": "d81f5f393862545a3e7e4d021da2ab0fd9734e18afc19e7d6ca20dd7469e5384",
-    "rust/shim/src/cli/transfer.rs": "d004015a03d50411719556f1103946c3e61fcbec5fb7fa31e021c1eb9f19ec1c",
-    "rust/shim/src/cli/transfer/export.rs": "d7d148f7b3ae0202890f3f1068546db04c4f51e5acb58a068251f5097ca737fa",
+    "rust/shim/src/cli/transfer.rs": "35eea9f4ab378a2b23a28d3d7d6ef00c79341f66e28f92a3ce7fec64df603b6c",
+    "rust/shim/src/cli/transfer/export.rs": "30c438bfcf355207e008db09de6b24733e4d86a49d18c056bcb86b8b5247b649",
     "rust/shim/src/cli/transfer/export_help.txt": "665910581b4428fcd8c23c4e868ddd86fb6612a09f4bc519c758ab60c0da1452",
-    "rust/shim/src/cli/transfer/import.rs": "9c2205e19b301e9ccc170c22dcf5e99f304b3473637b9518dfe0f2ed1545800b",
+    "rust/shim/src/cli/transfer/import.rs": "3b08b6fc57445d214d5266cea97bdb45417efbf25700c529c8482ac766565e69",
     "rust/shim/src/cli/transfer/import_help.txt": "a535c9fb6e748c614155806ab8264f2006d3152695b2a079547574362fde0236",
     "rust/shim/src/cli/transfer/json.rs": "266af9e82893edb6dec7d8cf7be03194df07800ad74b1089760b2058fa9a4b56",
     "rust/shim/src/cli/transfer/sql.rs": "faeeb860b38a10be0a29158c06630d814b0339df350d015611bccd62976fb717",
@@ -418,8 +418,8 @@
     "rust/shim/src/credentials/unix_accounts.rs": "d30f56e73eb66cb4dad5989bab84e4ccb33692b0433262f50caca02dcf58a0be",
     "rust/shim/src/daemon_url.rs": "5aabc9e4811af93f9292d84e2abc7c182884ea201284b7bbc2f722ff94d3817e",
     "rust/shim/src/errors.rs": "fbc3d61cd678051ab68ea1a3d7f9a91b4df392e5019d143ad05f8e9a7a48290c",
-    "rust/shim/src/lib.rs": "c29756d8ac56dde4c071cdcffcdb04bc68c272e127f8eb99a67980c39c331bb3",
-    "rust/shim/src/lifecycle.rs": "04c7ff62e703c7a4c170d386359b6eadaa30c5a4a885cc08425fb24ca96307bd",
+    "rust/shim/src/lib.rs": "e6050e25a30372d2116366736fd20a4ae95b829a47c5577bac0ec09925163e6a",
+    "rust/shim/src/lifecycle.rs": "cf7c95133e0fcea0cca8484d1fa53ca57334970a5672aa31ab73a4a54f6a623f",
     "rust/shim/src/lifecycle_executable.rs": "da0f66066d4e12bd383ce4b505c0882425a8897a2ca6c548a2b6e7b3246f6995",
     "rust/shim/src/main.rs": "39fdd4b9e90a07c226967320d25d60af5d6db28822ea0a44c1d13b593824ffe2",
     "rust/shim/src/maintainer_sent.rs": "26a539f852d669eb93f1a99d4f96f757ea74c548fde1d3830e2dba6dbe661af3",
@@ -483,7 +483,7 @@
       "dynamic": "unresolved",
       "reason": "Manual source fingerprint changed or source is missing; prior trusted shapes withdrawn.",
       "expected_sha256": "e033c719f4f32ee2a3513923481e5ef9c75617a143981ca2c814e4b6e2c4fffc",
-      "actual_sha256": "96c3f3ca0725cd87e6ddc0fc768849389f69f0fbfe5b10f1807ea748d5e7bfc2"
+      "actual_sha256": "293ee821eef2561344a3e97a35fcb66ab1a303b3991504f2449c7399a9f29b08"
     },
     {
       "path": "rust/shim/src/cli/episode.rs",
@@ -549,7 +549,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:3619",
+          "location": "docs/guide/configuration.md:3626",
           "shape": {
             "argv_source": "backup",
             "channel": "argv",
@@ -560,7 +560,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:3660",
+          "location": "docs/guide/configuration.md:3667",
           "shape": {
             "argv_source": "backup",
             "channel": "argv",
@@ -784,7 +784,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:4110",
+          "location": "docs/guide/configuration.md:4117",
           "shape": {
             "argv_source": "board-audit",
             "channel": "argv",
@@ -795,7 +795,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:4114",
+          "location": "docs/guide/configuration.md:4121",
           "shape": {
             "argv_source": "board-audit redact",
             "channel": "argv",
@@ -854,7 +854,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "docs/atlas/atlas.json:1197",
+          "location": "docs/atlas/atlas.json:1198",
           "shape": {
             "argv_source": "briefing --hook-json` and its `--coordination` check-in to settings.json / hooks.json, replacing the unconditional check-in echo older installers wrote\",",
             "channel": "argv",
@@ -2105,7 +2105,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "docs/atlas/atlas.json:1563",
+          "location": "docs/atlas/atlas.json:1564",
           "shape": {
             "argv_source": "doctor · read-only diagnostics\",",
             "channel": "argv",
@@ -2124,6 +2124,19 @@
             "channel": "argv",
             "complete": false,
             "expression": "`` reports them.",
+            "omitted_optional": null,
+            "parameters": {}
+          }
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "rust/shim/src/board/policy.rs:21",
+          "shape": {
+            "argv_source": "doctor `.\"",
+            "channel": "argv",
+            "complete": false,
+            "expression": "`.\"",
             "omitted_optional": null,
             "parameters": {}
           }
@@ -2224,7 +2237,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:3819",
+          "location": "docs/guide/configuration.md:3826",
           "shape": {
             "argv_source": "doctor",
             "channel": "argv",
@@ -2250,7 +2263,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:4042",
+          "location": "docs/guide/configuration.md:4049",
           "shape": {
             "argv_source": "doctor",
             "channel": "argv",
@@ -2742,7 +2755,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:3680",
+          "location": "docs/guide/configuration.md:3687",
           "shape": {
             "argv_source": "export",
             "channel": "argv",
@@ -3088,7 +3101,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:3692",
+          "location": "docs/guide/configuration.md:3699",
           "shape": {
             "argv_source": "import <archive.zip>",
             "channel": "argv",
@@ -3415,7 +3428,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:4121",
+          "location": "docs/guide/configuration.md:4128",
           "shape": {
             "argv_source": "invite",
             "channel": "argv",
@@ -3596,7 +3609,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "docs/atlas/atlas.json:1535",
+          "location": "docs/atlas/atlas.json:1536",
           "shape": {
             "argv_source": "lease · named shared-resource holds\",",
             "channel": "argv",
@@ -4004,7 +4017,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:4113",
+          "location": "docs/guide/configuration.md:4120",
           "shape": {
             "argv_source": "lease run",
             "channel": "argv",
@@ -4147,7 +4160,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "docs/atlas/atlas.json:1423",
+          "location": "docs/atlas/atlas.json:1424",
           "shape": {
             "argv_source": "move · the bank to another host\",",
             "channel": "argv",
@@ -4444,7 +4457,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "docs/atlas/atlas.json:1198",
+          "location": "docs/atlas/atlas.json:1199",
           "shape": {
             "argv_source": "prompt-hook ` (Docker tier: `docker exec -i`), replacing the exact static discipline echoes older installers wrote\",",
             "channel": "argv",
@@ -4698,7 +4711,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/lifecycle.rs:297",
+          "location": "rust/shim/src/lifecycle.rs:303",
           "shape": {
             "argv": [
               {
@@ -4716,7 +4729,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/lifecycle.rs:33",
+          "location": "rust/shim/src/lifecycle.rs:39",
           "shape": {
             "argv_source": "serve (run it in a terminal — the daemon logs to its own stderr, so this shows why it died)\";",
             "channel": "argv",
@@ -5593,7 +5606,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:3831",
+          "location": "docs/guide/configuration.md:3838",
           "shape": {
             "argv_source": "update --clients-only --tag <the daemon's",
             "channel": "argv",
@@ -5613,7 +5626,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "docs/atlas/atlas.json:1222",
+          "location": "docs/atlas/atlas.json:1223",
           "shape": {
             "argv_source": "update \",",
             "channel": "argv",
@@ -5626,7 +5639,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "docs/atlas/atlas.json:1225",
+          "location": "docs/atlas/atlas.json:1226",
           "shape": {
             "argv_source": "update runs); -ClientsOnly is refused (ops/update_clients.py); -NoTestLogin / --no-test-login pass --no-test-login through (skips the checkout-mode test-suite login step)\",",
             "channel": "argv",
@@ -5643,7 +5656,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "docs/atlas/atlas.json:1592",
+          "location": "docs/atlas/atlas.json:1593",
           "shape": {
             "argv_source": "update · the one deploy implementation\",",
             "channel": "argv",
@@ -5656,7 +5669,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "docs/atlas/atlas.json:2644",
+          "location": "docs/atlas/atlas.json:2645",
           "shape": {
             "argv_source": "update (ops/update.* wrap its checkout mode): backup → rollback tag → daemon-only --no-deps recreate → health poll → client side (shim runtime, plugin cache, Codex hooks). The distilled E4B model is the one eval artifact baked into a shipped image.\",",
             "channel": "argv",
@@ -5732,7 +5745,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/lifecycle.rs:1078",
+          "location": "rust/shim/src/lifecycle.rs:1084",
           "shape": {
             "argv": [
               {
@@ -5829,7 +5842,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:3551",
+          "location": "docs/guide/configuration.md:3557",
           "shape": {
             "argv_source": "update",
             "channel": "argv",
@@ -5840,7 +5853,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:3713",
+          "location": "docs/guide/configuration.md:3720",
           "shape": {
             "argv_source": "update",
             "channel": "argv",
@@ -5851,7 +5864,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:3725",
+          "location": "docs/guide/configuration.md:3732",
           "shape": {
             "argv_source": "update",
             "channel": "argv",
@@ -5862,7 +5875,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:3733",
+          "location": "docs/guide/configuration.md:3740",
           "shape": {
             "argv_source": "update",
             "channel": "argv",
@@ -5873,7 +5886,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:3734",
+          "location": "docs/guide/configuration.md:3741",
           "shape": {
             "argv_source": "update --tag 0.15.1",
             "channel": "argv",
@@ -5888,7 +5901,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:3735",
+          "location": "docs/guide/configuration.md:3742",
           "shape": {
             "argv_source": "update --check",
             "channel": "argv",
@@ -5903,7 +5916,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:3820",
+          "location": "docs/guide/configuration.md:3827",
           "shape": {
             "argv_source": "update",
             "channel": "argv",
@@ -5914,7 +5927,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:3829",
+          "location": "docs/guide/configuration.md:3836",
           "shape": {
             "argv_source": "update --daemon-only",
             "channel": "argv",
@@ -5929,7 +5942,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:3850",
+          "location": "docs/guide/configuration.md:3857",
           "shape": {
             "argv_source": "update",
             "channel": "argv",
@@ -5940,7 +5953,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:3859",
+          "location": "docs/guide/configuration.md:3866",
           "shape": {
             "argv_source": "update --schedule 03:30   # once: a daily task (Windows) or systemd --user timer (Linux)",
             "channel": "argv",
@@ -5958,7 +5971,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:3860",
+          "location": "docs/guide/configuration.md:3867",
           "shape": {
             "argv_source": "update --unattended       # what that run does; exit 0 updated, 3 current, 4 held off",
             "channel": "argv",
@@ -5973,7 +5986,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:3861",
+          "location": "docs/guide/configuration.md:3868",
           "shape": {
             "argv_source": "update --unschedule",
             "channel": "argv",
@@ -5988,7 +6001,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:3873",
+          "location": "docs/guide/configuration.md:3880",
           "shape": {
             "argv_source": "update",
             "channel": "argv",
@@ -5999,7 +6012,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:3905",
+          "location": "docs/guide/configuration.md:3912",
           "shape": {
             "argv_source": "update",
             "channel": "argv",
@@ -6010,7 +6023,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:3981",
+          "location": "docs/guide/configuration.md:3988",
           "shape": {
             "argv_source": "update --unattended",
             "channel": "argv",
@@ -6025,7 +6038,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:4070",
+          "location": "docs/guide/configuration.md:4077",
           "shape": {
             "argv_source": "update",
             "channel": "argv",
@@ -7046,7 +7059,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:3882",
+          "location": "docs/guide/configuration.md:3889",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -7062,7 +7075,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:3921",
+          "location": "docs/guide/configuration.md:3928",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -7078,7 +7091,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:3938",
+          "location": "docs/guide/configuration.md:3945",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -7094,7 +7107,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:4110",
+          "location": "docs/guide/configuration.md:4117",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -7110,7 +7123,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:4117",
+          "location": "docs/guide/configuration.md:4124",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -7431,7 +7444,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "docs/atlas/atlas.json:1598",
+          "location": "docs/atlas/atlas.json:1599",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -7447,7 +7460,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "docs/atlas/atlas.json:1625",
+          "location": "docs/atlas/atlas.json:1626",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -7479,7 +7492,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "docs/atlas/atlas.json:822",
+          "location": "docs/atlas/atlas.json:823",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -7495,7 +7508,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "docs/atlas/atlas.json:824",
+          "location": "docs/atlas/atlas.json:825",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -7511,7 +7524,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "docs/atlas/atlas.json:836",
+          "location": "docs/atlas/atlas.json:837",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -7527,7 +7540,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "docs/atlas/atlas.json:840",
+          "location": "docs/atlas/atlas.json:841",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -7543,7 +7556,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "docs/atlas/atlas.json:844",
+          "location": "docs/atlas/atlas.json:845",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -7772,7 +7785,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:3921",
+          "location": "docs/guide/configuration.md:3928",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -7876,7 +7889,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "docs/atlas/atlas.json:836",
+          "location": "docs/atlas/atlas.json:837",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -8030,7 +8043,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:4110",
+          "location": "docs/guide/configuration.md:4117",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -8056,7 +8069,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "docs/atlas/atlas.json:840",
+          "location": "docs/atlas/atlas.json:841",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -8113,7 +8126,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:3882",
+          "location": "docs/guide/configuration.md:3889",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -8126,7 +8139,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:3938",
+          "location": "docs/guide/configuration.md:3945",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -8187,7 +8200,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "docs/atlas/atlas.json:822",
+          "location": "docs/atlas/atlas.json:823",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -8261,7 +8274,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:4117",
+          "location": "docs/guide/configuration.md:4124",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -8274,7 +8287,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "docs/atlas/atlas.json:844",
+          "location": "docs/atlas/atlas.json:845",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -8371,7 +8384,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:4101",
+          "location": "docs/guide/configuration.md:4108",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -8387,7 +8400,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:4103",
+          "location": "docs/guide/configuration.md:4110",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -8980,7 +8993,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:4103",
+          "location": "docs/guide/configuration.md:4110",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -9081,7 +9094,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:4101",
+          "location": "docs/guide/configuration.md:4108",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -9173,7 +9186,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:4098",
+          "location": "docs/guide/configuration.md:4105",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -9647,7 +9660,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:4098",
+          "location": "docs/guide/configuration.md:4105",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -10311,7 +10324,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:4095",
+          "location": "docs/guide/configuration.md:4102",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -10327,7 +10340,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:4096",
+          "location": "docs/guide/configuration.md:4103",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -11570,7 +11583,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:4096",
+          "location": "docs/guide/configuration.md:4103",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -12781,7 +12794,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:4095",
+          "location": "docs/guide/configuration.md:4102",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -14341,7 +14354,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:4105",
+          "location": "docs/guide/configuration.md:4112",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -15255,7 +15268,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:4105",
+          "location": "docs/guide/configuration.md:4112",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -16320,7 +16333,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:4111",
+          "location": "docs/guide/configuration.md:4118",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -16376,7 +16389,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:4111",
+          "location": "docs/guide/configuration.md:4118",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -17266,7 +17279,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:4099",
+          "location": "docs/guide/configuration.md:4106",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -17282,7 +17295,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:4099",
+          "location": "docs/guide/configuration.md:4106",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -17298,7 +17311,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:4099",
+          "location": "docs/guide/configuration.md:4106",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -17314,7 +17327,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:4112",
+          "location": "docs/guide/configuration.md:4119",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -17386,7 +17399,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:4099",
+          "location": "docs/guide/configuration.md:4106",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -17399,7 +17412,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:4112",
+          "location": "docs/guide/configuration.md:4119",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -17433,7 +17446,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:4099",
+          "location": "docs/guide/configuration.md:4106",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -17454,7 +17467,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:4099",
+          "location": "docs/guide/configuration.md:4106",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -18381,7 +18394,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:3804",
+          "location": "docs/guide/configuration.md:3811",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -18393,7 +18406,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:3805",
+          "location": "docs/guide/configuration.md:3812",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -18408,7 +18421,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:3806",
+          "location": "docs/guide/configuration.md:3813",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -18423,7 +18436,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:3807",
+          "location": "docs/guide/configuration.md:3814",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -18438,7 +18451,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:3856",
+          "location": "docs/guide/configuration.md:3863",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -18454,7 +18467,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:3865",
+          "location": "docs/guide/configuration.md:3872",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -18466,7 +18479,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:3866",
+          "location": "docs/guide/configuration.md:3873",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -18481,7 +18494,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:3870",
+          "location": "docs/guide/configuration.md:3877",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -18497,7 +18510,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "docs/atlas/atlas.json:1582",
+          "location": "docs/atlas/atlas.json:1583",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -18529,7 +18542,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/lifecycle.rs:1098",
+          "location": "rust/shim/src/lifecycle.rs:1104",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -18565,7 +18578,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:3806",
+          "location": "docs/guide/configuration.md:3813",
           "shape": {
             "channel": "config",
             "complete": true,
@@ -18587,7 +18600,7 @@
       "producers": [
         {
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:3805",
+          "location": "docs/guide/configuration.md:3812",
           "shape": {
             "channel": "config",
             "complete": true,
@@ -18610,7 +18623,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/lifecycle.rs:1098",
+          "location": "rust/shim/src/lifecycle.rs:1104",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -18622,7 +18635,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:3807",
+          "location": "docs/guide/configuration.md:3814",
           "shape": {
             "channel": "config",
             "complete": true,
@@ -18645,7 +18658,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:3856",
+          "location": "docs/guide/configuration.md:3863",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -18658,7 +18671,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:3870",
+          "location": "docs/guide/configuration.md:3877",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -18671,7 +18684,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "docs/atlas/atlas.json:1582",
+          "location": "docs/atlas/atlas.json:1583",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -18683,7 +18696,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:3866",
+          "location": "docs/guide/configuration.md:3873",
           "shape": {
             "channel": "config",
             "complete": true,
@@ -19147,7 +19160,7 @@
           "dynamic": "unresolved",
           "evidence": "documented",
           "forwarded_from_tool": "memory_agents",
-          "location": "docs/guide/configuration.md:4115",
+          "location": "docs/guide/configuration.md:4122",
           "mapping_source": "pseudolife_memory/coordination.py:835",
           "shape": {
             "channel": "body",
@@ -19344,7 +19357,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/board/adapter.rs:438",
+          "location": "rust/shim/src/board/adapter.rs:471",
           "shape": {
             "channel": "body",
             "complete": false,
@@ -19356,7 +19369,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/board/adapter.rs:460",
+          "location": "rust/shim/src/board/adapter.rs:493",
           "shape": {
             "channel": "body",
             "complete": false,
@@ -19368,7 +19381,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/board/adapter.rs:772",
+          "location": "rust/shim/src/board/adapter.rs:815",
           "shape": {
             "channel": "body",
             "complete": false,
@@ -19380,7 +19393,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/board/adapter.rs:786",
+          "location": "rust/shim/src/board/adapter.rs:829",
           "shape": {
             "channel": "body",
             "complete": false,
@@ -19405,7 +19418,7 @@
       "producers": [
         {
           "evidence": "static",
-          "location": "rust/shim/src/board/adapter.rs:1437",
+          "location": "rust/shim/src/board/adapter.rs:1481",
           "shape": {
             "channel": "body",
             "complete": true,
@@ -19444,7 +19457,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "docs/atlas/atlas.json:1568",
+          "location": "docs/atlas/atlas.json:1569",
           "shape": {
             "channel": "body",
             "complete": false,
@@ -19456,7 +19469,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/board/adapter.rs:211",
+          "location": "rust/shim/src/board/adapter.rs:229",
           "shape": {
             "channel": "body",
             "complete": false,
@@ -19492,7 +19505,7 @@
       "producers": [
         {
           "evidence": "static",
-          "location": "rust/shim/src/board/adapter.rs:1288",
+          "location": "rust/shim/src/board/adapter.rs:1332",
           "shape": {
             "channel": "body",
             "complete": true,
@@ -19530,7 +19543,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/board/adapter.rs:735",
+          "location": "rust/shim/src/board/adapter.rs:778",
           "shape": {
             "channel": "body",
             "complete": false,
@@ -19736,7 +19749,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "docs/atlas/atlas.json:1538",
+          "location": "docs/atlas/atlas.json:1539",
           "shape": {
             "channel": "body",
             "complete": false,
@@ -19748,7 +19761,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "docs/atlas/atlas.json:2405",
+          "location": "docs/atlas/atlas.json:2406",
           "shape": {
             "channel": "body",
             "complete": false,
@@ -19989,7 +20002,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/board/adapter.rs:1370",
+          "location": "rust/shim/src/board/adapter.rs:1414",
           "shape": {
             "channel": "body",
             "complete": false,
@@ -20079,7 +20092,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/board/adapter.rs:383",
+          "location": "rust/shim/src/board/adapter.rs:416",
           "shape": {
             "channel": "body",
             "complete": false,
@@ -20091,7 +20104,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/board/adapter.rs:401",
+          "location": "rust/shim/src/board/adapter.rs:434",
           "shape": {
             "channel": "body",
             "complete": false,
@@ -20103,7 +20116,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/board/adapter.rs:839",
+          "location": "rust/shim/src/board/adapter.rs:882",
           "shape": {
             "channel": "body",
             "complete": false,
@@ -20115,7 +20128,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/board/adapter.rs:854",
+          "location": "rust/shim/src/board/adapter.rs:897",
           "shape": {
             "channel": "body",
             "complete": false,
@@ -20414,7 +20427,7 @@
           "dynamic": "unresolved",
           "evidence": "documented",
           "forwarded_from_tool": "memory_agents",
-          "location": "docs/guide/configuration.md:4115",
+          "location": "docs/guide/configuration.md:4122",
           "mapping_source": "pseudolife_memory/coordination.py:835",
           "shape": {
             "channel": "body",
@@ -20440,7 +20453,7 @@
           "dynamic": "unresolved",
           "evidence": "documented",
           "forwarded_from_tool": "memory_agents",
-          "location": "docs/guide/configuration.md:4117",
+          "location": "docs/guide/configuration.md:4124",
           "mapping_source": "pseudolife_memory/coordination.py:835",
           "shape": {
             "channel": "body",
@@ -20472,7 +20485,7 @@
           "dynamic": "unresolved",
           "evidence": "documented",
           "forwarded_from_tool": "memory_agents",
-          "location": "docs/guide/configuration.md:4123",
+          "location": "docs/guide/configuration.md:4130",
           "mapping_source": "pseudolife_memory/coordination.py:835",
           "shape": {
             "channel": "body",
@@ -20982,7 +20995,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/board.rs:106",
+          "location": "rust/shim/src/board.rs:119",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -21164,7 +21177,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:3923",
+          "location": "docs/guide/configuration.md:3930",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -21239,7 +21252,7 @@
         },
         {
           "evidence": "static",
-          "location": "docs/atlas/atlas.json:2279",
+          "location": "docs/atlas/atlas.json:2280",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -21314,7 +21327,7 @@
         },
         {
           "evidence": "static",
-          "location": "rust/shim/src/board.rs:396",
+          "location": "rust/shim/src/board.rs:409",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -21379,7 +21392,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/board.rs:113",
+          "location": "rust/shim/src/board.rs:126",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -21426,7 +21439,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/board.rs:115",
+          "location": "rust/shim/src/board.rs:128",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -21590,7 +21603,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/board.rs:269",
+          "location": "rust/shim/src/board.rs:112",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -21603,7 +21616,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/board.rs:99",
+          "location": "rust/shim/src/board.rs:282",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -21754,7 +21767,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/board.rs:269",
+          "location": "rust/shim/src/board.rs:100",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -21767,7 +21780,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/board.rs:87",
+          "location": "rust/shim/src/board.rs:282",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -21887,7 +21900,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/board.rs:116",
+          "location": "rust/shim/src/board.rs:129",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -21921,7 +21934,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "docs/atlas/atlas.json:1512",
+          "location": "docs/atlas/atlas.json:1513",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -21934,7 +21947,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "docs/atlas/atlas.json:2279",
+          "location": "docs/atlas/atlas.json:2280",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -21986,7 +21999,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/board.rs:117",
+          "location": "rust/shim/src/board.rs:130",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -22340,7 +22353,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:3587",
+          "location": "docs/guide/configuration.md:3594",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -22353,7 +22366,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:3635",
+          "location": "docs/guide/configuration.md:3642",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -22366,7 +22379,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:3658",
+          "location": "docs/guide/configuration.md:3665",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -22379,7 +22392,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/backup.ps1:27",
+          "location": "ops/backup.ps1:28",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -22392,7 +22405,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/backup.sh:19",
+          "location": "ops/backup.sh:20",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -22405,7 +22418,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/backup.sh:33",
+          "location": "ops/backup.sh:34",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -22452,7 +22465,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/backup.ps1:33",
+          "location": "ops/backup.ps1:34",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -22465,7 +22478,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/backup.sh:22",
+          "location": "ops/backup.sh:23",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -22478,7 +22491,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/backup.sh:34",
+          "location": "ops/backup.sh:35",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -22490,7 +22503,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:3588",
+          "location": "docs/guide/configuration.md:3595",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -23349,7 +23362,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/board.rs:121",
+          "location": "rust/shim/src/board.rs:134",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -23362,7 +23375,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/board.rs:367",
+          "location": "rust/shim/src/board.rs:380",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -23375,7 +23388,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/board.rs:370",
+          "location": "rust/shim/src/board.rs:383",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -23476,7 +23489,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/board.rs:120",
+          "location": "rust/shim/src/board.rs:133",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -23489,7 +23502,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/board.rs:390",
+          "location": "rust/shim/src/board.rs:403",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -23502,7 +23515,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/board.rs:399",
+          "location": "rust/shim/src/board.rs:412",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -23846,7 +23859,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/board.rs:119",
+          "location": "rust/shim/src/board.rs:132",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -23880,7 +23893,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/board.rs:118",
+          "location": "rust/shim/src/board.rs:131",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -24196,7 +24209,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:3573",
+          "location": "docs/guide/configuration.md:3579",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -24637,7 +24650,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/board.rs:95",
+          "location": "rust/shim/src/board.rs:108",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -24684,7 +24697,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:3792",
+          "location": "docs/guide/configuration.md:3799",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -25426,7 +25439,7 @@
         },
         {
           "evidence": "static",
-          "location": "rust/shim/src/lifecycle.rs:856",
+          "location": "rust/shim/src/lifecycle.rs:862",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -26952,7 +26965,7 @@
         },
         {
           "evidence": "static",
-          "location": "rust/shim/src/lifecycle.rs:856",
+          "location": "rust/shim/src/lifecycle.rs:862",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -27235,7 +27248,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:3788",
+          "location": "docs/guide/configuration.md:3795",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -27248,7 +27261,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "docs/atlas/atlas.json:1277",
+          "location": "docs/atlas/atlas.json:1278",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -28086,7 +28099,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:3793",
+          "location": "docs/guide/configuration.md:3800",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -28099,7 +28112,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:3978",
+          "location": "docs/guide/configuration.md:3985",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -29492,7 +29505,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:3500",
+          "location": "docs/guide/configuration.md:3502",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -29505,7 +29518,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:3531",
+          "location": "docs/guide/configuration.md:3537",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -29518,7 +29531,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:3706",
+          "location": "docs/guide/configuration.md:3713",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -29700,7 +29713,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "docs/atlas/atlas.json:1539",
+          "location": "docs/atlas/atlas.json:1540",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -29713,7 +29726,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "docs/atlas/atlas.json:1552",
+          "location": "docs/atlas/atlas.json:1553",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -29726,7 +29739,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "docs/atlas/atlas.json:1642",
+          "location": "docs/atlas/atlas.json:1643",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -29739,7 +29752,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "docs/atlas/atlas.json:1657",
+          "location": "docs/atlas/atlas.json:1658",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -29752,7 +29765,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "docs/atlas/atlas.json:820",
+          "location": "docs/atlas/atlas.json:821",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -29869,7 +29882,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/migrate_embeddings.py:409",
+          "location": "ops/migrate_embeddings.py:413",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -30194,7 +30207,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/transfer.rs:325",
+          "location": "rust/shim/src/cli/transfer.rs:328",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -30338,7 +30351,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:3501",
+          "location": "docs/guide/configuration.md:3503",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -30351,7 +30364,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:3908",
+          "location": "docs/guide/configuration.md:3915",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -30624,7 +30637,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/transfer.rs:216",
+          "location": "rust/shim/src/cli/transfer.rs:219",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -30637,7 +30650,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/transfer.rs:351",
+          "location": "rust/shim/src/cli/transfer.rs:354",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -30918,7 +30931,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:3844",
+          "location": "docs/guide/configuration.md:3851",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -31100,7 +31113,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/lifecycle.rs:313",
+          "location": "rust/shim/src/lifecycle.rs:319",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -31113,7 +31126,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/lifecycle.rs:314",
+          "location": "rust/shim/src/lifecycle.rs:320",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -31126,7 +31139,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/lifecycle.rs:420",
+          "location": "rust/shim/src/lifecycle.rs:426",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -31139,7 +31152,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/lifecycle.rs:645",
+          "location": "rust/shim/src/lifecycle.rs:651",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -31152,7 +31165,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/lifecycle.rs:735",
+          "location": "rust/shim/src/lifecycle.rs:741",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -31509,7 +31522,7 @@
         },
         {
           "evidence": "static",
-          "location": "docs/atlas/atlas.json:1441",
+          "location": "docs/atlas/atlas.json:1442",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -32065,6 +32078,19 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
+          "location": "rust/shim/src/lib.rs:365",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
           "location": "rust/shim/src/upstream.rs:493",
           "shape": {
             "channel": "environment",
@@ -32112,7 +32138,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/board.rs:78",
+          "location": "rust/shim/src/board.rs:91",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -32768,7 +32794,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:3935",
+          "location": "docs/guide/configuration.md:3942",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -32781,7 +32807,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:3944",
+          "location": "docs/guide/configuration.md:3951",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -32794,7 +32820,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:3967",
+          "location": "docs/guide/configuration.md:3974",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -32807,7 +32833,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:4121",
+          "location": "docs/guide/configuration.md:4128",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -33233,7 +33259,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "rust/shim/src/lifecycle.rs:592",
+          "location": "rust/shim/src/lifecycle.rs:598",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -34200,7 +34226,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/lifecycle.rs:581",
+          "location": "rust/shim/src/lifecycle.rs:587",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -34446,7 +34472,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:4121",
+          "location": "docs/guide/configuration.md:4128",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -35135,7 +35161,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:3935",
+          "location": "docs/guide/configuration.md:3942",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -35148,7 +35174,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:3940",
+          "location": "docs/guide/configuration.md:3947",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -35161,7 +35187,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:3944",
+          "location": "docs/guide/configuration.md:3951",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -35174,7 +35200,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:3959",
+          "location": "docs/guide/configuration.md:3966",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -35187,7 +35213,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:3977",
+          "location": "docs/guide/configuration.md:3984",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -35402,7 +35428,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "rust/shim/src/lifecycle.rs:592",
+          "location": "rust/shim/src/lifecycle.rs:598",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -36814,7 +36840,7 @@
         },
         {
           "evidence": "static",
-          "location": "rust/shim/src/lifecycle.rs:581",
+          "location": "rust/shim/src/lifecycle.rs:587",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -36829,7 +36855,7 @@
         },
         {
           "evidence": "static",
-          "location": "rust/shim/src/lifecycle.rs:597",
+          "location": "rust/shim/src/lifecycle.rs:603",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -37982,7 +38008,7 @@
       "producers": [
         {
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:3852",
+          "location": "docs/guide/configuration.md:3859",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -38366,7 +38392,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/lifecycle.rs:1126",
+          "location": "rust/shim/src/lifecycle.rs:1132",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -38538,7 +38564,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/lifecycle.rs:1127",
+          "location": "rust/shim/src/lifecycle.rs:1133",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -39741,7 +39767,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "docs/atlas/atlas.json:1568",
+          "location": "docs/atlas/atlas.json:1569",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -39904,7 +39930,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:3543",
+          "location": "docs/guide/configuration.md:3549",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -39917,7 +39943,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "docs/atlas/atlas.json:1596",
+          "location": "docs/atlas/atlas.json:1597",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -40204,7 +40230,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/memory-model.md:903",
+          "location": "docs/guide/memory-model.md:905",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -40646,7 +40672,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/lifecycle.rs:81",
+          "location": "rust/shim/src/lifecycle.rs:87",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -41393,7 +41419,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "docs/atlas/atlas.json:1757",
+          "location": "docs/atlas/atlas.json:1758",
           "shape": {
             "channel": "query",
             "complete": false,
@@ -43747,7 +43773,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "docs/atlas/atlas.json:842",
+          "location": "docs/atlas/atlas.json:843",
           "shape": {
             "channel": "query",
             "complete": false,
@@ -43784,7 +43810,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/board.rs:469",
+          "location": "rust/shim/src/board.rs:482",
           "shape": {
             "channel": "query",
             "complete": false,
@@ -44029,7 +44055,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "docs/atlas/atlas.json:844",
+          "location": "docs/atlas/atlas.json:845",
           "shape": {
             "channel": "query",
             "complete": false,
@@ -44142,7 +44168,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "docs/atlas/atlas.json:1745",
+          "location": "docs/atlas/atlas.json:1746",
           "shape": {
             "channel": "query",
             "complete": false,
@@ -44154,7 +44180,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "docs/atlas/atlas.json:1757",
+          "location": "docs/atlas/atlas.json:1758",
           "shape": {
             "channel": "query",
             "complete": false,
@@ -44190,7 +44216,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "unverified",
-          "location": "docs/atlas/atlas.json:2619",
+          "location": "docs/atlas/atlas.json:2620",
           "method": null,
           "shape": {
             "channel": "body",
@@ -45251,7 +45277,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "docs/atlas/atlas.json:824",
+          "location": "docs/atlas/atlas.json:825",
           "shape": {
             "channel": "body",
             "complete": false,
@@ -45480,7 +45506,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "docs/atlas/atlas.json:1582",
+          "location": "docs/atlas/atlas.json:1583",
           "shape": {
             "channel": "body",
             "complete": false,
@@ -45492,7 +45518,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "docs/atlas/atlas.json:2363",
+          "location": "docs/atlas/atlas.json:2364",
           "shape": {
             "channel": "body",
             "complete": false,
@@ -45845,7 +45871,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "unverified",
-          "location": "rust/shim/src/lifecycle.rs:820",
+          "location": "rust/shim/src/lifecycle.rs:826",
           "method": null,
           "shape": {
             "channel": "body",
@@ -45877,7 +45903,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:4111",
+          "location": "docs/guide/configuration.md:4118",
           "shape": {
             "channel": "body",
             "complete": false,
@@ -47576,7 +47602,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "docs/atlas/atlas.json:1751",
+          "location": "docs/atlas/atlas.json:1752",
           "shape": {
             "channel": "body",
             "complete": false,
@@ -47695,7 +47721,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "docs/atlas/atlas.json:845",
+          "location": "docs/atlas/atlas.json:846",
           "shape": {
             "channel": "body",
             "complete": false,
@@ -47804,7 +47830,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:4105",
+          "location": "docs/guide/configuration.md:4112",
           "shape": {
             "channel": "body",
             "complete": false,
@@ -47984,7 +48010,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:4105",
+          "location": "docs/guide/configuration.md:4112",
           "shape": {
             "channel": "body",
             "complete": false,
@@ -48034,7 +48060,7 @@
       "producers": [
         {
           "evidence": "documented",
-          "location": "docs/guide/memory-model.md:848",
+          "location": "docs/guide/memory-model.md:849",
           "shape": {
             "channel": "parameters",
             "complete": true,
@@ -48066,7 +48092,7 @@
       "producers": [
         {
           "evidence": "documented",
-          "location": "docs/guide/memory-model.md:850",
+          "location": "docs/guide/memory-model.md:851",
           "shape": {
             "channel": "parameters",
             "complete": true,
@@ -48149,7 +48175,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:4117",
+          "location": "docs/guide/configuration.md:4124",
           "shape": {
             "channel": "parameters",
             "complete": false,
@@ -48528,7 +48554,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:4115",
+          "location": "docs/guide/configuration.md:4122",
           "shape": {
             "channel": "parameters",
             "complete": true,
@@ -48558,7 +48584,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:4115",
+          "location": "docs/guide/configuration.md:4122",
           "shape": {
             "channel": "parameters",
             "complete": true,
@@ -48590,7 +48616,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:4123",
+          "location": "docs/guide/configuration.md:4130",
           "shape": {
             "channel": "parameters",
             "complete": true,
@@ -49513,7 +49539,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:4095",
+          "location": "docs/guide/configuration.md:4102",
           "shape": {
             "channel": "parameters",
             "complete": true,
@@ -49893,7 +49919,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/memory-model.md:968",
+          "location": "docs/guide/memory-model.md:970",
           "shape": {
             "channel": "parameters",
             "complete": true,
@@ -50638,7 +50664,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/memory-model.md:913",
+          "location": "docs/guide/memory-model.md:915",
           "shape": {
             "channel": "parameters",
             "complete": false,
@@ -51394,7 +51420,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:4105",
+          "location": "docs/guide/configuration.md:4112",
           "shape": {
             "channel": "parameters",
             "complete": false,
@@ -52262,7 +52288,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:4105",
+          "location": "docs/guide/configuration.md:4112",
           "shape": {
             "channel": "parameters",
             "complete": true,
@@ -53209,7 +53235,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/memory-model.md:909",
+          "location": "docs/guide/memory-model.md:911",
           "shape": {
             "channel": "parameters",
             "complete": true,
@@ -54150,7 +54176,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:4099",
+          "location": "docs/guide/configuration.md:4106",
           "shape": {
             "channel": "parameters",
             "complete": false,
@@ -54324,7 +54350,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:4126",
+          "location": "docs/guide/configuration.md:4134",
           "shape": {
             "channel": "parameters",
             "complete": true,
@@ -55119,7 +55145,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/memory-model.md:965",
+          "location": "docs/guide/memory-model.md:967",
           "shape": {
             "channel": "parameters",
             "complete": true,
@@ -56941,7 +56967,7 @@
       "dynamic": "unresolved",
       "evidence": "documented",
       "kind": "environment",
-      "location": "docs/guide/configuration.md:3536",
+      "location": "docs/guide/configuration.md:3542",
       "name": "PSEUDOLIFE_TEST_PG_LOGIN_FILE",
       "shape": {
         "channel": "environment",
@@ -57970,7 +57996,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "cli",
-      "location": "docs/atlas/atlas.json:1358",
+      "location": "docs/atlas/atlas.json:1359",
       "name": "on",
       "shape": {
         "argv_source": "on PyPI\",",
@@ -57984,7 +58010,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "cli",
-      "location": "docs/atlas/atlas.json:1598",
+      "location": "docs/atlas/atlas.json:1599",
       "name": "maintainer",
       "shape": {
         "argv_source": "maintainer setup while a bearer-gated daemon has no valid coordination.maintainer name or no active passkey (maintainer_setup.passkeys_set_up); at a terminal it offers to run it (default no) after the update lock is released, passing --yes\"",
@@ -57998,7 +58024,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "cli",
-      "location": "docs/atlas/atlas.json:1628",
+      "location": "docs/atlas/atlas.json:1629",
       "name": "maintainer",
       "shape": {
         "argv_source": "maintainer enrol-code) stays pending until maintainer confirm; later keys need an enrol-approve signature and sit 24 h in quarantine, cancellable by any older key; a key revokes only itself; host revoke and reset (rotates the secret) via maintainer_cli.py\",",
@@ -58012,7 +58038,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "cli",
-      "location": "docs/atlas/atlas.json:1638",
+      "location": "docs/atlas/atlas.json:1639",
       "name": "maintainer",
       "shape": {
         "argv_source": "maintainer · host passkey ops\",",
@@ -58026,7 +58052,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "cli",
-      "location": "docs/atlas/atlas.json:1653",
+      "location": "docs/atlas/atlas.json:1654",
       "name": "test-login",
       "shape": {
         "argv_source": "test-login · a test-suite login that cannot open the bank\",",
@@ -58450,7 +58476,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "config",
-      "location": "docs/atlas/atlas.json:1598",
+      "location": "docs/atlas/atlas.json:1599",
       "name": "CoordinationConfig.maintainer",
       "shape": {
         "channel": "config",
@@ -58464,7 +58490,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "config",
-      "location": "docs/atlas/atlas.json:1625",
+      "location": "docs/atlas/atlas.json:1626",
       "name": "CoordinationConfig.maintainer",
       "shape": {
         "channel": "config",
@@ -58492,7 +58518,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "config",
-      "location": "docs/atlas/atlas.json:824",
+      "location": "docs/atlas/atlas.json:825",
       "name": "CoordinationConfig.maintainer",
       "shape": {
         "channel": "config",
@@ -58506,7 +58532,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "config",
-      "location": "docs/atlas/atlas.json:849",
+      "location": "docs/atlas/atlas.json:850",
       "name": "MaintainerConfig.maintainer_per_recipient_per_hour",
       "shape": {
         "channel": "config",
@@ -58604,7 +58630,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "docs/atlas/atlas.json:1399",
+      "location": "docs/atlas/atlas.json:1400",
       "name": "PSEUDOLIFE_TEST_LOGIN_ADMIN_URL",
       "shape": {
         "channel": "environment",
@@ -58618,7 +58644,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "docs/atlas/atlas.json:1539",
+      "location": "docs/atlas/atlas.json:1540",
       "name": "PSEUDOLIFE_DAEMON_EXEC",
       "shape": {
         "channel": "environment",
@@ -58632,7 +58658,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "docs/atlas/atlas.json:1552",
+      "location": "docs/atlas/atlas.json:1553",
       "name": "PSEUDOLIFE_DAEMON_EXEC",
       "shape": {
         "channel": "environment",
@@ -58646,7 +58672,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "docs/atlas/atlas.json:1642",
+      "location": "docs/atlas/atlas.json:1643",
       "name": "PSEUDOLIFE_DAEMON_EXEC",
       "shape": {
         "channel": "environment",
@@ -58660,7 +58686,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "docs/atlas/atlas.json:1658",
+      "location": "docs/atlas/atlas.json:1659",
       "name": "PSEUDOLIFE_TEST_PG_LOGIN_FILE",
       "shape": {
         "channel": "environment",
@@ -58674,7 +58700,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "docs/atlas/atlas.json:1658",
+      "location": "docs/atlas/atlas.json:1659",
       "name": "PSEUDOLIFE_TEST_PG_USER",
       "shape": {
         "channel": "environment",
@@ -59360,7 +59386,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "rust/shim/src/lifecycle.rs:124",
+      "location": "rust/shim/src/lifecycle.rs:130",
       "name": "PSEUDOLIFE_HOOK_PROBE_MS",
       "shape": {
         "channel": "environment",
@@ -59374,7 +59400,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "rust/shim/src/lifecycle.rs:155",
+      "location": "rust/shim/src/lifecycle.rs:161",
       "name": "PSEUDOLIFE_HOOK_PROBE_MS",
       "shape": {
         "channel": "environment",
@@ -59388,7 +59414,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "rust/shim/src/lifecycle.rs:282",
+      "location": "rust/shim/src/lifecycle.rs:288",
       "name": "PSEUDOLIFE_MCP_SERVE_COMMAND",
       "shape": {
         "channel": "environment",
@@ -59402,7 +59428,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "rust/shim/src/lifecycle.rs:286",
+      "location": "rust/shim/src/lifecycle.rs:292",
       "name": "PSEUDOLIFE_MCP_SERVE_COMMAND",
       "shape": {
         "channel": "environment",
@@ -59416,7 +59442,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "rust/shim/src/lifecycle.rs:313",
+      "location": "rust/shim/src/lifecycle.rs:319",
       "name": "PSEUDOLIFE_MCP_PYTHON",
       "shape": {
         "channel": "environment",
@@ -59430,7 +59456,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "rust/shim/src/lifecycle.rs:313",
+      "location": "rust/shim/src/lifecycle.rs:319",
       "name": "PSEUDOLIFE_MCP_SERVE_COMMAND",
       "shape": {
         "channel": "environment",
@@ -59444,7 +59470,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "rust/shim/src/lifecycle.rs:314",
+      "location": "rust/shim/src/lifecycle.rs:320",
       "name": "PSEUDOLIFE_MCP_SERVE_COMMAND",
       "shape": {
         "channel": "environment",
@@ -59458,7 +59484,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "rust/shim/src/lifecycle.rs:650",
+      "location": "rust/shim/src/lifecycle.rs:656",
       "name": "PSEUDOLIFE_MCP_PYTHON",
       "shape": {
         "channel": "environment",
@@ -59472,7 +59498,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "rust/shim/src/lifecycle.rs:651",
+      "location": "rust/shim/src/lifecycle.rs:657",
       "name": "PSEUDOLIFE_MCP_SERVE_COMMAND",
       "shape": {
         "channel": "environment",
@@ -59486,7 +59512,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "rust/shim/src/lifecycle.rs:731",
+      "location": "rust/shim/src/lifecycle.rs:737",
       "name": "PSEUDOLIFE_MCP_PYTHON",
       "shape": {
         "channel": "environment",
@@ -59514,7 +59540,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "route",
-      "location": "docs/atlas/atlas.json:1455",
+      "location": "docs/atlas/atlas.json:1456",
       "method": "POST",
       "name": "/api/pair",
       "shape": {
@@ -59528,7 +59554,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "route",
-      "location": "docs/atlas/atlas.json:1538",
+      "location": "docs/atlas/atlas.json:1539",
       "method": "POST",
       "name": "/api/coordination/lease",
       "shape": {
@@ -59542,7 +59568,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "route",
-      "location": "docs/atlas/atlas.json:1568",
+      "location": "docs/atlas/atlas.json:1569",
       "method": "POST",
       "name": "/api/coordination/context",
       "shape": {
@@ -59556,7 +59582,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "route",
-      "location": "docs/atlas/atlas.json:1569",
+      "location": "docs/atlas/atlas.json:1570",
       "method": "GET",
       "name": "/api/maintainer",
       "shape": {
@@ -59570,7 +59596,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "route",
-      "location": "docs/atlas/atlas.json:1582",
+      "location": "docs/atlas/atlas.json:1583",
       "method": "POST",
       "name": "/health",
       "shape": {
@@ -59584,7 +59610,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "route",
-      "location": "docs/atlas/atlas.json:2291",
+      "location": "docs/atlas/atlas.json:2292",
       "method": "POST",
       "name": "/api/coordination",
       "shape": {
@@ -59598,7 +59624,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "route",
-      "location": "docs/atlas/atlas.json:2363",
+      "location": "docs/atlas/atlas.json:2364",
       "method": "POST",
       "name": "/health",
       "shape": {
@@ -59612,7 +59638,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "route",
-      "location": "docs/atlas/atlas.json:2405",
+      "location": "docs/atlas/atlas.json:2406",
       "method": "POST",
       "name": "/api/coordination/lease",
       "shape": {
@@ -59626,7 +59652,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "route",
-      "location": "docs/atlas/atlas.json:2453",
+      "location": "docs/atlas/atlas.json:2454",
       "method": "POST",
       "name": "/api/pair",
       "shape": {
@@ -59654,7 +59680,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "route",
-      "location": "docs/atlas/atlas.json:844",
+      "location": "docs/atlas/atlas.json:845",
       "method": "GET",
       "name": "/api/hook/woke",
       "shape": {
@@ -59835,7 +59861,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "route",
-      "location": "rust/shim/src/board/adapter.rs:145",
+      "location": "rust/shim/src/board/adapter.rs:150",
       "method": "POST",
       "name": "/api/coordination/{action}",
       "shape": {
@@ -59961,7 +59987,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "route",
-      "location": "rust/shim/src/lifecycle.rs:361",
+      "location": "rust/shim/src/lifecycle.rs:367",
       "method": "GET",
       "name": "/health",
       "shape": {
@@ -59975,7 +60001,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "route",
-      "location": "rust/shim/src/lifecycle.rs:410",
+      "location": "rust/shim/src/lifecycle.rs:416",
       "method": "GET",
       "name": "/health",
       "shape": {
@@ -60199,7 +60225,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "docs/guide/configuration.md:3574",
+      "location": "docs/guide/configuration.md:3580",
       "method": null,
       "name": "/health",
       "shape": {
@@ -60213,7 +60239,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "docs/guide/configuration.md:3617",
+      "location": "docs/guide/configuration.md:3624",
       "method": null,
       "name": "/health",
       "shape": {
@@ -60227,7 +60253,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "docs/guide/configuration.md:3733",
+      "location": "docs/guide/configuration.md:3740",
       "method": null,
       "name": "/health",
       "shape": {
@@ -60241,7 +60267,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "docs/guide/configuration.md:3812",
+      "location": "docs/guide/configuration.md:3819",
       "method": null,
       "name": "/health",
       "shape": {
@@ -60255,7 +60281,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "docs/guide/configuration.md:3823",
+      "location": "docs/guide/configuration.md:3830",
       "method": null,
       "name": "/health",
       "shape": {
@@ -60269,7 +60295,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "docs/guide/configuration.md:3851",
+      "location": "docs/guide/configuration.md:3858",
       "method": null,
       "name": "/health",
       "shape": {
@@ -60283,7 +60309,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "docs/guide/configuration.md:3871",
+      "location": "docs/guide/configuration.md:3878",
       "method": null,
       "name": "/health",
       "shape": {
@@ -60297,7 +60323,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "docs/guide/configuration.md:3875",
+      "location": "docs/guide/configuration.md:3882",
       "method": null,
       "name": "/health",
       "shape": {
@@ -62373,7 +62399,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "ops/migrate_embeddings.py:120",
+      "location": "ops/migrate_embeddings.py:124",
       "method": null,
       "name": "/health",
       "shape": {
@@ -62639,7 +62665,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "rust/shim/src/lifecycle.rs:581",
+      "location": "rust/shim/src/lifecycle.rs:587",
       "method": null,
       "name": "/health",
       "shape": {
@@ -62653,7 +62679,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "rust/shim/src/lifecycle.rs:592",
+      "location": "rust/shim/src/lifecycle.rs:598",
       "method": null,
       "name": "/health",
       "shape": {
@@ -62828,7 +62854,7 @@
     {
       "evidence": "documented",
       "kind": "cli",
-      "location": "docs/guide/configuration.md:3517",
+      "location": "docs/guide/configuration.md:3523",
       "name": "test-login",
       "shape": {
         "argv_source": "test-login",
@@ -62840,7 +62866,7 @@
     {
       "evidence": "documented",
       "kind": "cli",
-      "location": "docs/guide/configuration.md:3525",
+      "location": "docs/guide/configuration.md:3531",
       "name": "test-login",
       "shape": {
         "argv_source": "test-login create            # --rotate for a new password",
@@ -62856,7 +62882,7 @@
     {
       "evidence": "documented",
       "kind": "cli",
-      "location": "docs/guide/configuration.md:3744",
+      "location": "docs/guide/configuration.md:3751",
       "name": "maintainer",
       "shape": {
         "argv_source": "maintainer setup",
@@ -64363,19 +64389,19 @@
   ],
   "unresolved": [
     {
+      "actual_sha256": "293ee821eef2561344a3e97a35fcb66ab1a303b3991504f2449c7399a9f29b08",
+      "dynamic": "unresolved",
+      "expected_sha256": "e033c719f4f32ee2a3513923481e5ef9c75617a143981ca2c814e4b6e2c4fffc",
+      "location": "rust/shim/src/board/adapter.rs:1",
+      "path": "rust/shim/src/board/adapter.rs",
+      "reason": "Manual source fingerprint changed or source is missing; prior trusted shapes withdrawn."
+    },
+    {
       "actual_sha256": "5e71b66bea81affc2f9335c00e026fce741e30e8e1499df99c22c41b86e4eff4",
       "dynamic": "unresolved",
       "expected_sha256": "ae43493784145e5808512f2e3e4142d59a4d7902706f6758612ab0673430938e",
       "location": "plugin/hooks/lifecycle.ps1:1",
       "path": "plugin/hooks/lifecycle.ps1",
-      "reason": "Manual source fingerprint changed or source is missing; prior trusted shapes withdrawn."
-    },
-    {
-      "actual_sha256": "96c3f3ca0725cd87e6ddc0fc768849389f69f0fbfe5b10f1807ea748d5e7bfc2",
-      "dynamic": "unresolved",
-      "expected_sha256": "e033c719f4f32ee2a3513923481e5ef9c75617a143981ca2c814e4b6e2c4fffc",
-      "location": "rust/shim/src/board/adapter.rs:1",
-      "path": "rust/shim/src/board/adapter.rs",
       "reason": "Manual source fingerprint changed or source is missing; prior trusted shapes withdrawn."
     },
     {
@@ -64467,61 +64493,61 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:1197",
+      "location": "docs/atlas/atlas.json:1198",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:briefing"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:1198",
+      "location": "docs/atlas/atlas.json:1199",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:prompt-hook"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:1222",
+      "location": "docs/atlas/atlas.json:1223",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:update"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:1225",
+      "location": "docs/atlas/atlas.json:1226",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:update"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:1277",
+      "location": "docs/atlas/atlas.json:1278",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_IMAGE_TAG"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:1358",
+      "location": "docs/atlas/atlas.json:1359",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:cli:on"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:1399",
+      "location": "docs/atlas/atlas.json:1400",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_TEST_LOGIN_ADMIN_URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:1423",
+      "location": "docs/atlas/atlas.json:1424",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:move"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:1455",
+      "location": "docs/atlas/atlas.json:1456",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/api/pair"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:1512",
+      "location": "docs/atlas/atlas.json:1513",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_AGENT_WAKE"
     },
@@ -64533,43 +64559,43 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:1535",
+      "location": "docs/atlas/atlas.json:1536",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:lease"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:1538",
+      "location": "docs/atlas/atlas.json:1539",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "coordination:lease"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:1538",
+      "location": "docs/atlas/atlas.json:1539",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/api/coordination/lease"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:1539",
+      "location": "docs/atlas/atlas.json:1540",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_DATABASE_URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:1539",
+      "location": "docs/atlas/atlas.json:1540",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_DAEMON_EXEC"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:1552",
+      "location": "docs/atlas/atlas.json:1553",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_DATABASE_URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:1552",
+      "location": "docs/atlas/atlas.json:1553",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_DAEMON_EXEC"
     },
@@ -64581,145 +64607,145 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:1563",
+      "location": "docs/atlas/atlas.json:1564",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:doctor"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:1568",
+      "location": "docs/atlas/atlas.json:1569",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "coordination:context"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:1568",
+      "location": "docs/atlas/atlas.json:1569",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_TEST_DATABASE_URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:1568",
+      "location": "docs/atlas/atlas.json:1569",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/api/coordination/context"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:1569",
+      "location": "docs/atlas/atlas.json:1570",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/api/maintainer"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:1582",
+      "location": "docs/atlas/atlas.json:1583",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:UpdatesConfig"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:1582",
+      "location": "docs/atlas/atlas.json:1583",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:UpdatesConfig.unattended_daemon"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:1582",
+      "location": "docs/atlas/atlas.json:1583",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "route:POST /api/daemon-notice"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:1582",
+      "location": "docs/atlas/atlas.json:1583",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:1592",
+      "location": "docs/atlas/atlas.json:1593",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:update"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:1596",
+      "location": "docs/atlas/atlas.json:1597",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_TEST_PG_HOST_PORT"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:1598",
+      "location": "docs/atlas/atlas.json:1599",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:CoordinationConfig"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:1598",
+      "location": "docs/atlas/atlas.json:1599",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:cli:maintainer"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:1598",
+      "location": "docs/atlas/atlas.json:1599",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:config:CoordinationConfig.maintainer"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:1625",
+      "location": "docs/atlas/atlas.json:1626",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:CoordinationConfig"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:1625",
+      "location": "docs/atlas/atlas.json:1626",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:config:CoordinationConfig.maintainer"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:1628",
+      "location": "docs/atlas/atlas.json:1629",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:cli:maintainer"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:1638",
+      "location": "docs/atlas/atlas.json:1639",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:cli:maintainer"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:1642",
+      "location": "docs/atlas/atlas.json:1643",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_DATABASE_URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:1642",
+      "location": "docs/atlas/atlas.json:1643",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_DAEMON_EXEC"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:1653",
+      "location": "docs/atlas/atlas.json:1654",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:cli:test-login"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:1657",
+      "location": "docs/atlas/atlas.json:1658",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_DATABASE_URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:1658",
+      "location": "docs/atlas/atlas.json:1659",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_TEST_PG_LOGIN_FILE"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:1658",
+      "location": "docs/atlas/atlas.json:1659",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_TEST_PG_USER"
     },
@@ -64731,25 +64757,25 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:1745",
+      "location": "docs/atlas/atlas.json:1746",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "route:GET /api/hook/session-start"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:1751",
+      "location": "docs/atlas/atlas.json:1752",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "route:POST /api/hook/session-end"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:1757",
+      "location": "docs/atlas/atlas.json:1758",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "route:GET /api/briefing"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:1757",
+      "location": "docs/atlas/atlas.json:1758",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "route:GET /api/hook/session-start"
     },
@@ -64809,37 +64835,37 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:2279",
+      "location": "docs/atlas/atlas.json:2280",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_AGENT_WAKE"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:2291",
+      "location": "docs/atlas/atlas.json:2292",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/api/coordination"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:2363",
+      "location": "docs/atlas/atlas.json:2364",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "route:POST /api/daemon-notice"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:2363",
+      "location": "docs/atlas/atlas.json:2364",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:2405",
+      "location": "docs/atlas/atlas.json:2406",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "coordination:lease"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:2405",
+      "location": "docs/atlas/atlas.json:2406",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/api/coordination/lease"
     },
@@ -64851,7 +64877,7 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:2453",
+      "location": "docs/atlas/atlas.json:2454",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/api/pair"
     },
@@ -64881,18 +64907,18 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:2619",
+      "location": "docs/atlas/atlas.json:2620",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "route:GET /api/hook/session-start"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:2619",
+      "location": "docs/atlas/atlas.json:2620",
       "reason": "built URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:2644",
+      "location": "docs/atlas/atlas.json:2645",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:update"
     },
@@ -64988,103 +65014,103 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:820",
+      "location": "docs/atlas/atlas.json:821",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_DATABASE_URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:822",
+      "location": "docs/atlas/atlas.json:823",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:CoordinationConfig"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:822",
+      "location": "docs/atlas/atlas.json:823",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:CoordinationConfig.enabled"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:824",
+      "location": "docs/atlas/atlas.json:825",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:CoordinationConfig"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:824",
+      "location": "docs/atlas/atlas.json:825",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "route:POST /api/config"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:824",
+      "location": "docs/atlas/atlas.json:825",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:config:CoordinationConfig.maintainer"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:836",
+      "location": "docs/atlas/atlas.json:837",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:CoordinationConfig"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:836",
+      "location": "docs/atlas/atlas.json:837",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:CoordinationConfig.allowed_principals"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:840",
+      "location": "docs/atlas/atlas.json:841",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:CoordinationConfig"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:840",
+      "location": "docs/atlas/atlas.json:841",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:CoordinationConfig.audit_retention_days"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:842",
+      "location": "docs/atlas/atlas.json:843",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "route:GET /api/hook/coordination-start"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:844",
+      "location": "docs/atlas/atlas.json:845",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:CoordinationConfig"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:844",
+      "location": "docs/atlas/atlas.json:845",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:CoordinationConfig.wake"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:844",
+      "location": "docs/atlas/atlas.json:845",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "route:GET /api/hook/park-gate"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:844",
+      "location": "docs/atlas/atlas.json:845",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/api/hook/woke"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:845",
+      "location": "docs/atlas/atlas.json:846",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "route:POST /api/hook/subagent"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:849",
+      "location": "docs/atlas/atlas.json:850",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:config:MaintainerConfig.maintainer_per_recipient_per_hour"
     },
@@ -66785,72 +66811,66 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:3499",
+      "location": "docs/guide/configuration.md:3501",
       "reason": "forwarded parameters"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:3500",
+      "location": "docs/guide/configuration.md:3502",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_DATABASE_URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:3501",
+      "location": "docs/guide/configuration.md:3503",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_DATA_DIR"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:3531",
+      "location": "docs/guide/configuration.md:3537",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_DATABASE_URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:3536",
+      "location": "docs/guide/configuration.md:3542",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_TEST_PG_LOGIN_FILE"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:3543",
+      "location": "docs/guide/configuration.md:3549",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_TEST_PG_HOST_PORT"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:3573",
+      "location": "docs/guide/configuration.md:3579",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_DAEMON_MEM_LIMIT"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:3574",
+      "location": "docs/guide/configuration.md:3580",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:3587",
+      "location": "docs/guide/configuration.md:3594",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_BACKUP_MIRROR"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:3617",
+      "location": "docs/guide/configuration.md:3624",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:3635",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_BACKUP_MIRROR"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:3658",
+      "location": "docs/guide/configuration.md:3642",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_BACKUP_MIRROR"
     },
@@ -66862,217 +66882,217 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:3692",
+      "location": "docs/guide/configuration.md:3665",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_BACKUP_MIRROR"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/guide/configuration.md:3699",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:import"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:3706",
+      "location": "docs/guide/configuration.md:3713",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_DATABASE_URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:3733",
+      "location": "docs/guide/configuration.md:3740",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:3788",
+      "location": "docs/guide/configuration.md:3795",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_IMAGE_TAG"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:3792",
+      "location": "docs/guide/configuration.md:3799",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_DOCKER"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:3793",
+      "location": "docs/guide/configuration.md:3800",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_DAEMON_URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:3804",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "config:UpdatesConfig"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:3805",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "config:UpdatesConfig"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:3806",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "config:UpdatesConfig"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:3807",
+      "location": "docs/guide/configuration.md:3811",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:UpdatesConfig"
     },
     {
       "dynamic": "unresolved",
       "location": "docs/guide/configuration.md:3812",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "config:UpdatesConfig"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/guide/configuration.md:3813",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "config:UpdatesConfig"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/guide/configuration.md:3814",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "config:UpdatesConfig"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/guide/configuration.md:3819",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:3823",
+      "location": "docs/guide/configuration.md:3830",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:3831",
+      "location": "docs/guide/configuration.md:3838",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:update"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:3844",
+      "location": "docs/guide/configuration.md:3851",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_NO_SPAWN"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:3851",
+      "location": "docs/guide/configuration.md:3858",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:3856",
+      "location": "docs/guide/configuration.md:3863",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:UpdatesConfig"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:3856",
+      "location": "docs/guide/configuration.md:3863",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:UpdatesConfig.unattended_daemon"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:3865",
+      "location": "docs/guide/configuration.md:3872",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:UpdatesConfig"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:3866",
+      "location": "docs/guide/configuration.md:3873",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:UpdatesConfig"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:3870",
+      "location": "docs/guide/configuration.md:3877",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:UpdatesConfig"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:3870",
+      "location": "docs/guide/configuration.md:3877",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:UpdatesConfig.unattended_daemon"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:3871",
-      "reason": "Unknown or forwarded inventory target/shape.",
-      "surface": "inventory-gap:route:/health"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:3875",
+      "location": "docs/guide/configuration.md:3878",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
     },
     {
       "dynamic": "unresolved",
       "location": "docs/guide/configuration.md:3882",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:route:/health"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/guide/configuration.md:3889",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:CoordinationConfig"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:3882",
+      "location": "docs/guide/configuration.md:3889",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:CoordinationConfig.daemon_notice_principals"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:3908",
+      "location": "docs/guide/configuration.md:3915",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_DATA_DIR"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:3921",
+      "location": "docs/guide/configuration.md:3928",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:CoordinationConfig"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:3921",
+      "location": "docs/guide/configuration.md:3928",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:CoordinationConfig.allowed_principals"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:3935",
+      "location": "docs/guide/configuration.md:3942",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:3935",
+      "location": "docs/guide/configuration.md:3942",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:3938",
+      "location": "docs/guide/configuration.md:3945",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:CoordinationConfig"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:3938",
+      "location": "docs/guide/configuration.md:3945",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:CoordinationConfig.daemon_notice_principals"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:3940",
+      "location": "docs/guide/configuration.md:3947",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:3944",
+      "location": "docs/guide/configuration.md:3951",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:3944",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:3959",
+      "location": "docs/guide/configuration.md:3951",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
     },
@@ -67083,19 +67103,25 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:3967",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:3977",
+      "location": "docs/guide/configuration.md:3966",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:3978",
+      "location": "docs/guide/configuration.md:3974",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/guide/configuration.md:3984",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/guide/configuration.md:3985",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_DAEMON_URL"
     },
@@ -67107,232 +67133,232 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:4056",
+      "location": "docs/guide/configuration.md:4063",
       "reason": "forwarded parameters"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:4095",
+      "location": "docs/guide/configuration.md:4102",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:DreamConfig"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:4095",
+      "location": "docs/guide/configuration.md:4102",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:DreamConfig.runs_keep"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:4096",
+      "location": "docs/guide/configuration.md:4103",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:DreamConfig"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:4096",
+      "location": "docs/guide/configuration.md:4103",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:DreamConfig.chronicle"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:4098",
+      "location": "docs/guide/configuration.md:4105",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:DeepDreamConfig"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:4098",
+      "location": "docs/guide/configuration.md:4105",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:DeepDreamConfig.judge_mode"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:4099",
+      "location": "docs/guide/configuration.md:4106",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:RetrievalLogConfig"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:4099",
+      "location": "docs/guide/configuration.md:4106",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:RetrievalLogConfig.enabled"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:4099",
+      "location": "docs/guide/configuration.md:4106",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:RetrievalLogConfig.retention_days"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:4099",
+      "location": "docs/guide/configuration.md:4106",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:RetrievalLogConfig.use_window_seconds"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:4099",
+      "location": "docs/guide/configuration.md:4106",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "tool:memory_outcome"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:4101",
+      "location": "docs/guide/configuration.md:4108",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:CortexConfig"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:4101",
+      "location": "docs/guide/configuration.md:4108",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:CortexConfig.read_tracking"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:4103",
+      "location": "docs/guide/configuration.md:4110",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:CortexConfig"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:4103",
+      "location": "docs/guide/configuration.md:4110",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:CortexConfig.pin_constraints"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:4105",
+      "location": "docs/guide/configuration.md:4112",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:MemoryConfig"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:4105",
+      "location": "docs/guide/configuration.md:4112",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:MemoryConfig.compaction"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:4105",
+      "location": "docs/guide/configuration.md:4112",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "route:POST /api/lessons/restore"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:4105",
+      "location": "docs/guide/configuration.md:4112",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "route:POST /api/world/restore"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:4105",
+      "location": "docs/guide/configuration.md:4112",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "tool:memory_forget"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:4107",
+      "location": "docs/guide/configuration.md:4114",
       "reason": "forwarded parameters"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:4110",
+      "location": "docs/guide/configuration.md:4117",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:CoordinationConfig"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:4110",
+      "location": "docs/guide/configuration.md:4117",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:CoordinationConfig.audit_retention_days"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:4111",
+      "location": "docs/guide/configuration.md:4118",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:MemoryPolicyConfig"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:4111",
+      "location": "docs/guide/configuration.md:4118",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:MemoryPolicyConfig.ab_arms"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:4111",
+      "location": "docs/guide/configuration.md:4118",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "route:POST /api/episode/start"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:4111",
+      "location": "docs/guide/configuration.md:4118",
       "reason": "built URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:4112",
+      "location": "docs/guide/configuration.md:4119",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:RetrievalLogConfig"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:4112",
+      "location": "docs/guide/configuration.md:4119",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:RetrievalLogConfig.enabled"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:4115",
+      "location": "docs/guide/configuration.md:4122",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "coordination:agents"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:4115",
+      "location": "docs/guide/configuration.md:4122",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "coordination:update"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:4117",
+      "location": "docs/guide/configuration.md:4124",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:CoordinationConfig"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:4117",
+      "location": "docs/guide/configuration.md:4124",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:CoordinationConfig.wake"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:4117",
+      "location": "docs/guide/configuration.md:4124",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "coordination:update"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:4117",
+      "location": "docs/guide/configuration.md:4124",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "tool:memory_agents"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:4121",
+      "location": "docs/guide/configuration.md:4128",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:4121",
+      "location": "docs/guide/configuration.md:4128",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKENS"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:4123",
+      "location": "docs/guide/configuration.md:4130",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "coordination:update"
     },
@@ -68444,29 +68470,29 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/memory-model.md:866",
+      "location": "docs/guide/memory-model.md:868",
       "reason": "forwarded parameters"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/memory-model.md:903",
+      "location": "docs/guide/memory-model.md:905",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_WRITER_ID"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/memory-model.md:913",
+      "location": "docs/guide/memory-model.md:915",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "tool:memory_fact_get"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/memory-model.md:974",
+      "location": "docs/guide/memory-model.md:976",
       "reason": "forwarded parameters"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/memory-model.md:994",
+      "location": "docs/guide/memory-model.md:996",
       "reason": "forwarded parameters"
     },
     {
@@ -78369,37 +78395,37 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/backup.ps1:27",
+      "location": "ops/backup.ps1:28",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_BACKUP_MIRROR"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/backup.ps1:33",
+      "location": "ops/backup.ps1:34",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_BACKUP_MIRROR_KEEP"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/backup.sh:19",
+      "location": "ops/backup.sh:20",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_BACKUP_MIRROR"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/backup.sh:22",
+      "location": "ops/backup.sh:23",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_BACKUP_MIRROR_KEEP"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "ops/backup.sh:33",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_BACKUP_MIRROR"
     },
     {
       "dynamic": "unresolved",
       "location": "ops/backup.sh:34",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_BACKUP_MIRROR"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/backup.sh:35",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_BACKUP_MIRROR_KEEP"
     },
@@ -80813,7 +80839,7 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/migrate_embeddings.py:120",
+      "location": "ops/migrate_embeddings.py:124",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
     },
@@ -80825,7 +80851,7 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/migrate_embeddings.py:409",
+      "location": "ops/migrate_embeddings.py:413",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_DATABASE_URL"
     },
@@ -83161,203 +83187,203 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/board.rs:106",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_AGENT_COORDINATION"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "rust/shim/src/board.rs:113",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_AGENT_LABEL"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "rust/shim/src/board.rs:115",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_AGENT_PROJECT"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "rust/shim/src/board.rs:116",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_AGENT_TASK"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "rust/shim/src/board.rs:117",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_AGENT_WAKE"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "rust/shim/src/board.rs:118",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_CODEX_SERVER_URL"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "rust/shim/src/board.rs:119",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_CODEX_SERVER_TOKEN"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "rust/shim/src/board.rs:120",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_CODEX_DOORBELL"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "rust/shim/src/board.rs:121",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_CODEX_BIN"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "rust/shim/src/board.rs:269",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_AGENT_STATE"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "rust/shim/src/board.rs:269",
+      "location": "rust/shim/src/board.rs:100",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_AGENT_STATE_DIR"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/board.rs:367",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_CODEX_BIN"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "rust/shim/src/board.rs:370",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_CODEX_BIN"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "rust/shim/src/board.rs:390",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_CODEX_DOORBELL"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "rust/shim/src/board.rs:399",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_CODEX_DOORBELL"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "rust/shim/src/board.rs:469",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "route:GET /api/hook/coordination-start"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "rust/shim/src/board.rs:469",
-      "reason": "built URL"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "rust/shim/src/board.rs:78",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_MCP_SHARED_HOST"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "rust/shim/src/board.rs:87",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_AGENT_STATE_DIR"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "rust/shim/src/board.rs:95",
+      "location": "rust/shim/src/board.rs:108",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_DIGEST_DIR"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/board.rs:99",
+      "location": "rust/shim/src/board.rs:112",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_AGENT_STATE"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/board/adapter.rs:1370",
+      "location": "rust/shim/src/board.rs:119",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_AGENT_COORDINATION"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/board.rs:126",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_AGENT_LABEL"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/board.rs:128",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_AGENT_PROJECT"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/board.rs:129",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_AGENT_TASK"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/board.rs:130",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_AGENT_WAKE"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/board.rs:131",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_CODEX_SERVER_URL"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/board.rs:132",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_CODEX_SERVER_TOKEN"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/board.rs:133",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_CODEX_DOORBELL"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/board.rs:134",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_CODEX_BIN"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/board.rs:282",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_AGENT_STATE"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/board.rs:282",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_AGENT_STATE_DIR"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/board.rs:380",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_CODEX_BIN"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/board.rs:383",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_CODEX_BIN"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/board.rs:403",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_CODEX_DOORBELL"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/board.rs:412",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_CODEX_DOORBELL"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/board.rs:482",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "route:GET /api/hook/coordination-start"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/board.rs:482",
+      "reason": "built URL"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/board.rs:91",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_SHARED_HOST"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/board/adapter.rs:1414",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "coordination:receive"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/board/adapter.rs:145",
+      "location": "rust/shim/src/board/adapter.rs:150",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/api/coordination/{action}"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/board/adapter.rs:145",
+      "location": "rust/shim/src/board/adapter.rs:150",
       "reason": "built URL, forwarded request action/body"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/board/adapter.rs:211",
+      "location": "rust/shim/src/board/adapter.rs:229",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "coordination:context"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/board/adapter.rs:383",
+      "location": "rust/shim/src/board/adapter.rs:416",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "coordination:register"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/board/adapter.rs:401",
+      "location": "rust/shim/src/board/adapter.rs:434",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "coordination:register"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/board/adapter.rs:438",
+      "location": "rust/shim/src/board/adapter.rs:471",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "coordination:attach"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/board/adapter.rs:460",
+      "location": "rust/shim/src/board/adapter.rs:493",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "coordination:attach"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/board/adapter.rs:735",
+      "location": "rust/shim/src/board/adapter.rs:778",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "coordination:heartbeat"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/board/adapter.rs:772",
+      "location": "rust/shim/src/board/adapter.rs:815",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "coordination:attach"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/board/adapter.rs:786",
+      "location": "rust/shim/src/board/adapter.rs:829",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "coordination:attach"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/board/adapter.rs:839",
+      "location": "rust/shim/src/board/adapter.rs:882",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "coordination:register"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/board/adapter.rs:854",
+      "location": "rust/shim/src/board/adapter.rs:897",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "coordination:register"
     },
@@ -83366,6 +83392,12 @@
       "location": "rust/shim/src/board/doorbell.rs:31",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_CODEX_BIN"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/board/policy.rs:21",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "cli:doctor"
     },
     {
       "dynamic": "unresolved",
@@ -84664,19 +84696,19 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/transfer.rs:216",
+      "location": "rust/shim/src/cli/transfer.rs:219",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_DATA_DIR"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/transfer.rs:325",
+      "location": "rust/shim/src/cli/transfer.rs:328",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_DATABASE_URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/transfer.rs:351",
+      "location": "rust/shim/src/cli/transfer.rs:354",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_DATA_DIR"
     },
@@ -84808,189 +84840,195 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/lifecycle.rs:1078",
+      "location": "rust/shim/src/lib.rs:365",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_PROXY_TIMEOUT_SECONDS"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/lifecycle.rs:1084",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:update"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/lifecycle.rs:1098",
+      "location": "rust/shim/src/lifecycle.rs:1104",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:UpdatesConfig"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/lifecycle.rs:1098",
+      "location": "rust/shim/src/lifecycle.rs:1104",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:UpdatesConfig.unattended_clients"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/lifecycle.rs:1126",
+      "location": "rust/shim/src/lifecycle.rs:1132",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_SHIM_LAUNCHER"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/lifecycle.rs:1127",
+      "location": "rust/shim/src/lifecycle.rs:1133",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_SHIM_RUNTIMES"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/lifecycle.rs:124",
+      "location": "rust/shim/src/lifecycle.rs:130",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_HOOK_PROBE_MS"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/lifecycle.rs:155",
+      "location": "rust/shim/src/lifecycle.rs:161",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_HOOK_PROBE_MS"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/lifecycle.rs:282",
+      "location": "rust/shim/src/lifecycle.rs:288",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_MCP_SERVE_COMMAND"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/lifecycle.rs:286",
+      "location": "rust/shim/src/lifecycle.rs:292",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_MCP_SERVE_COMMAND"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/lifecycle.rs:297",
+      "location": "rust/shim/src/lifecycle.rs:303",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:serve"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/lifecycle.rs:313",
+      "location": "rust/shim/src/lifecycle.rs:319",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_NO_SPAWN"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/lifecycle.rs:313",
+      "location": "rust/shim/src/lifecycle.rs:319",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_MCP_PYTHON"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/lifecycle.rs:313",
+      "location": "rust/shim/src/lifecycle.rs:319",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_MCP_SERVE_COMMAND"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/lifecycle.rs:314",
+      "location": "rust/shim/src/lifecycle.rs:320",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_NO_SPAWN"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/lifecycle.rs:314",
+      "location": "rust/shim/src/lifecycle.rs:320",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_MCP_SERVE_COMMAND"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/lifecycle.rs:33",
+      "location": "rust/shim/src/lifecycle.rs:367",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:route:/health"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/lifecycle.rs:39",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:serve"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/lifecycle.rs:361",
+      "location": "rust/shim/src/lifecycle.rs:416",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/lifecycle.rs:410",
-      "reason": "Unknown or forwarded inventory target/shape.",
-      "surface": "inventory-gap:route:/health"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "rust/shim/src/lifecycle.rs:420",
+      "location": "rust/shim/src/lifecycle.rs:426",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_NO_SPAWN"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/lifecycle.rs:581",
+      "location": "rust/shim/src/lifecycle.rs:587",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/lifecycle.rs:581",
+      "location": "rust/shim/src/lifecycle.rs:587",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/lifecycle.rs:592",
+      "location": "rust/shim/src/lifecycle.rs:598",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/lifecycle.rs:592",
+      "location": "rust/shim/src/lifecycle.rs:598",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/lifecycle.rs:592",
+      "location": "rust/shim/src/lifecycle.rs:598",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/lifecycle.rs:645",
+      "location": "rust/shim/src/lifecycle.rs:651",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_NO_SPAWN"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/lifecycle.rs:650",
+      "location": "rust/shim/src/lifecycle.rs:656",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_MCP_PYTHON"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/lifecycle.rs:651",
+      "location": "rust/shim/src/lifecycle.rs:657",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_MCP_SERVE_COMMAND"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/lifecycle.rs:731",
+      "location": "rust/shim/src/lifecycle.rs:737",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_MCP_PYTHON"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/lifecycle.rs:735",
+      "location": "rust/shim/src/lifecycle.rs:741",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_NO_SPAWN"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/lifecycle.rs:81",
+      "location": "rust/shim/src/lifecycle.rs:826",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_WRITER_ID"
+      "surface": "route:POST /api/episode/end"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/lifecycle.rs:820",
+      "location": "rust/shim/src/lifecycle.rs:87",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "route:POST /api/episode/end"
+      "surface": "environment:PSEUDOLIFE_WRITER_ID"
     },
     {
       "dynamic": "unresolved",

@@ -46,8 +46,8 @@ impl Proxy {
         &self,
         mut params: CallToolRequestParams,
         context: &RequestContext<RoleServer>,
+        deadline: tokio::time::Instant,
     ) -> Result<(CallToolResult, Option<serde_json::Value>), ErrorData> {
-        let deadline = tokio::time::Instant::now() + upstream::operation_timeout();
         let meta = serde_json::to_value(&context.meta).map_err(|_| {
             ErrorData::internal_error("request metadata serialization failed", None)
         })?;
@@ -362,7 +362,32 @@ impl ServerHandler for Proxy {
         let toolset = params.name == "memory_toolset";
         let modern = context.protocol_version() == Some(ProtocolVersion::V_2026_07_28);
         self.link.remember(context.peer.clone(), modern);
-        let (mut result, raw) = match self.prepared_call(params, &context).await {
+        // One total deadline (PSEUDOLIFE_MCP_PROXY_TIMEOUT_SECONDS) covers the
+        // call and any resend below.
+        let deadline = tokio::time::Instant::now() + upstream::operation_timeout();
+        let resend = params.clone();
+        let outcome = match self.prepared_call(params, &context, deadline).await {
+            Err(error)
+                if errors::never_reached(&error)
+                    && self.link.up()
+                    && tokio::time::Instant::now() + lifecycle::UNREACHED_RETRY < deadline =>
+            {
+                // Nothing ran, and the daemon answered calls before: one
+                // failed connection is sent once more before the call is
+                // refused, inside the same deadline. A daemon already known
+                // to be down is not.
+                tokio::select! {
+                    biased;
+                    _ = self.upstream.ownership.cancelled() => Err(Ownership::closed_error()),
+                    _ = context.ct.cancelled() => Err(ErrorData::internal_error("request cancelled", None)),
+                    _ = tokio::time::sleep(lifecycle::UNREACHED_RETRY) => {
+                        self.prepared_call(resend, &context, deadline).await
+                    }
+                }
+            }
+            outcome => outcome,
+        };
+        let (mut result, raw) = match outcome {
             Ok(result) => {
                 self.link.request_succeeded().await;
                 result

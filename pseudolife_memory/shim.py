@@ -1310,13 +1310,16 @@ def _report_coordination_unavailable(state_path) -> None:
 def _transient_board_failure(exc: BaseException) -> bool:
     """Whether a failed board registration is worth retrying: the daemon did
     not answer (a timeout, a refused or dropped connection), said it is
-    overloaded (5xx, 429), or still holds the saved address's previous
-    attachment (``attachment_busy``: an attach the startup budget cancelled
-    after the daemon committed it, or a killed process's; its lease runs out
-    within a minute). A verdict about this bearer, this bank or the saved
-    adapter state is not; retrying cannot change it, and a state file another
-    process is registering must not end up shared by two. The daemon answers
-    those verdicts with 4xx codes, never 5xx or 429."""
+    overloaded (5xx, 429), answered the identity check with something that is
+    not a bank identity (``context_unreadable``: a proxy's error page, a body
+    reshaped on the way; it names no bank, so it is no verdict about one), or
+    still holds the saved address's previous attachment (``attachment_busy``:
+    an attach the startup budget cancelled after the daemon committed it, or
+    a killed process's; its lease runs out within a minute). A verdict about
+    this bearer, this bank or the saved adapter state is not; retrying cannot
+    change it, and a state file another process is registering must not end
+    up shared by two. The daemon answers those verdicts with 4xx codes, never
+    5xx or 429."""
     import asyncio
     from pseudolife_memory.coordination_adapter import AdapterError
 
@@ -1324,7 +1327,7 @@ def _transient_board_failure(exc: BaseException) -> bool:
         return True
     if not isinstance(exc, AdapterError):
         return False
-    if exc.code in {"transport_unavailable", "attachment_busy"}:
+    if exc.code in {"transport_unavailable", "context_unreadable", "attachment_busy"}:
         return True
     return exc.status is not None and (exc.status >= 500 or exc.status == 429)
 
@@ -1349,7 +1352,10 @@ _BOARD_CHECK_FAILED_MESSAGE = (
 
 def _board_check_cause(exc: BaseException) -> str:
     # A proxy in front of the daemon can be the one answering, so the
-    # status is the check's, not necessarily the daemon's.
+    # status is the check's, not necessarily the daemon's. The Rust shim's
+    # policy::identity_check_failed words each cause byte for byte the same.
+    if getattr(exc, "code", None) == "context_unreadable":
+        return "the check's answer could not be read"
     status = getattr(exc, "status", None)
     if status is not None:
         return f"the check was answered with HTTP {status}"

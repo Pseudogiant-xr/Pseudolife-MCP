@@ -35,7 +35,7 @@ Configuration
   resolved DSN through this same variable (see
   :mod:`pseudolife_memory.storage.embedded_pg`;
   ``PSEUDOLIFE_MCP_STORAGE=files`` opts out).
-* ``PSEUDOLIFE_MCP_DATA_DIR`` — where weights + ChromaDB live. **Set this
+* ``PSEUDOLIFE_MCP_DATA_DIR`` — where weights and local state live. **Set this
   explicitly** so the data path is stable regardless of cwd.
 * ``PSEUDOLIFE_MCP_CONFIG`` — path to a ``config.yaml`` (optional; sane
   defaults baked in by :class:`MemoryService`).

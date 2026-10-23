@@ -45,6 +45,7 @@ pub struct Answer {
     pub bytes: Vec<u8>,
     pub delay: Duration,
     gate: Option<Arc<GateState>>,
+    declared: Option<usize>,
 }
 struct GateState {
     entered: Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
@@ -79,6 +80,7 @@ impl Answer {
             bytes: value.to_string().into_bytes(),
             delay: Duration::ZERO,
             gate: None,
+            declared: None,
         }
     }
     pub fn text(status: u16, value: &[u8]) -> Self {
@@ -87,6 +89,7 @@ impl Answer {
             bytes: value.to_vec(),
             delay: Duration::ZERO,
             gate: None,
+            declared: None,
         }
     }
     pub fn gated(mut self) -> (Self, ResponseGate) {
@@ -98,6 +101,12 @@ impl Answer {
         });
         self.gate = Some(state.clone());
         (self, ResponseGate { entered, state })
+    }
+    /// Declare a longer body than is sent, then close: the body read fails
+    /// after the status line arrived.
+    pub fn truncated(mut self) -> Self {
+        self.declared = Some(self.bytes.len() + 64);
+        self
     }
     pub fn delayed(mut self, delay: Duration) -> Self {
         self.delay = delay;
@@ -272,7 +281,7 @@ impl Fixture {
                     let response = format!(
                         "HTTP/1.1 {} OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
                         answer.status,
-                        answer.bytes.len()
+                        answer.declared.unwrap_or(answer.bytes.len())
                     );
                     let _ = stream.write_all(response.as_bytes());
                     let _ = stream.write_all(&answer.bytes);

@@ -35,21 +35,18 @@ class _RecordingEmbedder:
         return torch.tensor([self.vector(t) for t in texts])
 
 
-class _FakeCollection:
+class _FakeStorage:
     def __init__(self) -> None:
-        self.upserts: list[dict] = []
+        self.upserts: list[list[dict]] = []
 
-    def upsert(self, **kwargs) -> None:
-        self.upserts.append(kwargs)
+    def upsert_reference_chunks(self, rows, *, replace=True) -> int:
+        self.upserts.append(rows)
+        return len(rows)
 
 
 def _bank() -> rb.ReferenceBank:
-    # ingest_text touches only config and the collection; skip ChromaDB.
-    bank = rb.ReferenceBank.__new__(rb.ReferenceBank)
-    bank.config = ReferenceConfig()
-    bank.embedding_dim = 4
-    bank._collection = _FakeCollection()
-    return bank
+    # ingest_text touches only config and the storage; skip Postgres.
+    return rb.ReferenceBank(ReferenceConfig(), _FakeStorage(), embedding_dim=4)
 
 
 def _document() -> str:
@@ -78,9 +75,9 @@ def test_slicing_keeps_every_chunk_paired_with_its_own_vector() -> None:
 
     chunks = rb._chunk_text(text, bank.config.chunk_size, bank.config.chunk_overlap)
     assert [t for call in emb.calls for t in call] == chunks
-    (upsert,) = bank._collection.upserts
-    assert upsert["documents"] == chunks
-    assert len(upsert["ids"]) == len(set(upsert["ids"])) == len(chunks)
-    for doc, vec in zip(upsert["documents"], upsert["embeddings"]):
-        assert vec == _RecordingEmbedder.vector(doc)
+    (rows,) = bank.storage.upserts
+    assert [r["text"] for r in rows] == chunks
+    assert len({r["id"] for r in rows}) == len(chunks)
+    for row in rows:
+        assert row["embedding"] == _RecordingEmbedder.vector(row["text"])
     assert result == {"chunks_total": len(chunks), "chunks_stored": len(chunks)}

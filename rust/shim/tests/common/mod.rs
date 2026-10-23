@@ -25,6 +25,8 @@ pub enum Reply {
     RpcError(i32, String, Option<Value>),
     Sse(Value),
     Cut,
+    /// Close the connection before any response, as a refused path does.
+    Close,
     Redirect(String),
     AfterCommit(Box<Reply>),
 }
@@ -314,6 +316,7 @@ fn respond(
             while !stopped.load(Ordering::SeqCst) && !deleted.lock().unwrap().contains(&session) { thread::sleep(Duration::from_millis(2)); }
             return;
         }
+        Reply::Close => return,
         Reply::Cut => { let _ = write!(stream,"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n{session_header}Connection: close\r\n\r\n"); return; }
         Reply::Result(result) => (200,"application/json",json!({"jsonrpc":"2.0","id":message["id"],"result":result}).to_string(),String::new()),
         Reply::RpcError(code,message_text,data) => (200,"application/json",json!({"jsonrpc":"2.0","id":message["id"],"error":{"code":code,"message":message_text,"data":data}}).to_string(),String::new()),
