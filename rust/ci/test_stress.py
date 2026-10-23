@@ -42,6 +42,285 @@ def test_anything_else_is_refused_with_the_accepted_forms(selection):
         stress.parse(selection)
 
 
+@pytest.mark.parametrize("selection, parsed", [
+    ("cargo:pseudolife-stdio/board_retry_contract", ("cargo", ["pseudolife-stdio/board_retry_contract"])),
+    (" cargo:pseudolife-stdio/board_retry_contract::board_identity_check_rides_out_one_failure ",
+     ("cargo", ["pseudolife-stdio/board_retry_contract::board_identity_check_rides_out_one_failure"])),
+    # A test inside a module keeps its libtest path.
+    ("cargo:pseudolife-daemon/http_contract::tests::Inner_case",
+     ("cargo", ["pseudolife-daemon/http_contract::tests::Inner_case"])),
+    # #844's four binaries in one loop.
+    ("cargo:pseudolife-stdio/board_retry_contract cargo:pseudolife-stdio/board_codex_recovery",
+     ("cargo", ["pseudolife-stdio/board_retry_contract", "pseudolife-stdio/board_codex_recovery"])),
+])
+def test_a_selection_can_name_cargo_integration_test_binaries(selection, parsed):
+    assert stress.parse(selection) == parsed
+
+
+@pytest.mark.parametrize("selection", [
+    "cargo:", "cargo:pseudolife-stdio", "cargo:pseudolife-stdio/", "cargo:/board_retry_contract",
+    "cargo:Pseudolife/board", "cargo:pseudolife-stdio/board::", "cargo:pseudolife-stdio/board::a::",
+    "cargo:pseudolife-stdio/board::a-b", "cargo:pseudolife-stdio/board::a;rm",
+    "cargo:pseudolife-stdio/board -E all()", "cargo:pseudolife-stdio/../board",
+    # One kind per loop: the build and the evidence differ by kind.
+    "cargo:pseudolife-stdio/board tests/test_a.py", "tests/test_a.py cargo:pseudolife-stdio/board",
+])
+def test_a_malformed_or_mixed_cargo_selection_is_refused(selection):
+    with pytest.raises(ValueError, match=r"cargo:<package>/<test binary>\[::<test>\]"):
+        stress.parse(selection)
+
+
+def test_cargo_items_become_one_nextest_filterset():
+    names = ["pseudolife-stdio/board_retry_contract::a::b", "pseudolife-stdio/board_codex_recovery"]
+    assert stress.filterset(names) == ("(binary_id(=pseudolife-stdio::board_retry_contract) & test(=a::b))"
+                                       " | (binary_id(=pseudolife-stdio::board_codex_recovery))")
+    # The archive holds whole binaries; test() is a run-time choice.
+    assert stress.filterset(names, binaries_only=True) == (
+        "binary_id(=pseudolife-stdio::board_retry_contract) | binary_id(=pseudolife-stdio::board_codex_recovery)")
+
+
+def test_the_build_archives_only_the_selected_binaries_from_the_rust_workspace(tmp_path):
+    archive = tmp_path / "stress-tests.tar.zst"
+    argv = stress.archive_command(["pseudolife-stdio/board_retry_contract::x",
+                                   "pseudolife-stdio/board_codex_recovery"], archive)
+    # The Rust job's profile and lockfile: `cargo nextest` from rust/, so
+    # rust-toolchain.toml pins the compiler, --locked, the test profile.
+    assert argv[:4] == ["cargo", "nextest", "archive", "--locked"]
+    assert argv[argv.index("--archive-file") + 1] == str(archive)
+    assert [argv[i + 1] for i, a in enumerate(argv) if a == "-p"] == ["pseudolife-stdio"]
+    assert [argv[i + 1] for i, a in enumerate(argv) if a == "--test"] == ["board_retry_contract",
+                                                                          "board_codex_recovery"]
+    assert argv[argv.index("-E") + 1] == stress.filterset(
+        ["pseudolife-stdio/board_retry_contract::x", "pseudolife-stdio/board_codex_recovery"], binaries_only=True)
+    assert "--release" not in argv and "--no-default-features" not in argv
+
+
+def test_archive_runs_cargo_in_the_rust_workspace(tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.setattr(stress.subprocess, "run",
+                        lambda argv, cwd: calls.append((argv, cwd)) or SimpleNamespace(returncode=0))
+    archive = tmp_path / "a.tar.zst"
+    assert stress.main(["archive", "--selection", "cargo:pseudolife-stdio/board_retry_contract",
+                        "--archive-file", str(archive)]) == 0
+    assert calls[0][1] == "rust" and calls[0][0][:3] == ["cargo", "nextest", "archive"]
+
+
+def test_archive_refuses_a_selection_that_is_not_cargo(tmp_path, capsys):
+    assert stress.main(["archive", "--selection", "row:hook", "--archive-file", str(tmp_path / "a")]) == 2
+    assert "only cargo: selections" in capsys.readouterr().err
+
+
+def test_a_cargo_iteration_runs_the_archive_as_the_rust_job_runs_nextest(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    archive = tmp_path / "stress-tests.tar.zst"
+    names = ["pseudolife-stdio/board_retry_contract"]
+    argv = stress.command("cargo", names, tmp_path / "bin", tmp_path / "scratch", archive)
+    assert argv[:3] == ["cargo-nextest", "nextest", "run"]
+    assert argv[argv.index("--archive-file") + 1] == str(archive)
+    # Extracted where the build put its target dir, so the env!() paths the
+    # tests compiled in (CARGO_BIN_EXE_pseudolife-stdio) still resolve.
+    workspace = str((tmp_path / "rust").resolve())
+    assert argv[argv.index("--workspace-remap") + 1] == workspace
+    assert argv[argv.index("--extract-to") + 1] == workspace and "--extract-overwrite" in argv
+    assert argv[argv.index("--profile") + 1] == "stress"
+    # A retry would turn a flake into a pass.
+    assert argv[argv.index("--retries") + 1] == "0" and "--no-fail-fast" in argv
+    # The Rust job's `cargo nextest run -j 4`: nextest reads -j as test threads.
+    assert argv[argv.index("--test-threads") + 1] == "4"
+    assert argv[argv.index("-E") + 1] == stress.filterset(names)
+
+
+def test_a_cargo_iteration_needs_its_archive(tmp_path):
+    with pytest.raises(ValueError, match="--archive-file"):
+        stress.command("cargo", ["pseudolife-stdio/board"], tmp_path, tmp_path, None)
+
+
+def test_a_cargo_iteration_gets_the_rust_jobs_environment_not_the_parity_candidates(tmp_path):
+    env = stress.environment("cargo", ["pseudolife-stdio/board"], tmp_path / "bin", tmp_path)
+    # The Rust job binds the selected interpreter for the Python fixtures.
+    assert env == {"PSEUDOLIFE_MCP_PYTHON": sys.executable}
+
+
+def test_the_stress_nextest_profile_reports_every_skip_and_never_retries():
+    import tomllib
+    config = tomllib.loads((ROOT / "rust/.config/nextest.toml").read_text(encoding="utf-8"))
+    profile = config["profile"]["stress"]
+    assert profile["retries"] == 0 and profile["fail-fast"] is False
+    assert profile["junit"] == {"path": "junit.xml", "report-skipped": "all"}
+    # The stress profile inherits the default's slow-timeout, as it must.
+    assert "slow-timeout" not in profile and "slow-timeout" in config["profile"]["default"]
+    assert stress.cargo_junit(Path("rust")) == Path("rust/target/nextest/stress/junit.xml")
+
+
+def nextest_junit(suites):
+    """A nextest JUnit report: {binary id: [(test, child element or "")]}."""
+    body = "".join(
+        f'<testsuite name="{suite}" tests="{len(cases)}">'
+        + "".join(f'<testcase name="{name}" classname="{suite}">{child}</testcase>' for name, child in cases)
+        + "</testsuite>" for suite, cases in suites.items())
+    return f'<?xml version="1.0"?><testsuites name="nextest-run">{body}</testsuites>'
+
+
+FILTERED = '<skipped message="Skipped: test does not match the provided expression filters"/>'
+IGNORED = '<skipped message="Skipped: test does not match the run-ignored option"/>'
+RETRY = "board_retry_contract"
+
+
+@pytest.mark.parametrize("names, suites, note", [
+    (["pseudolife-stdio/board_retry_contract"],
+     {f"pseudolife-stdio::{RETRY}": [("a", ""), ("m::b", "")]}, ""),
+    # A named test: the rest of its binary is filtered out, which is not a skip of the selection.
+    (["pseudolife-stdio/board_retry_contract::m::b"],
+     {f"pseudolife-stdio::{RETRY}": [("a", FILTERED), ("c", IGNORED), ("m::b", "")]}, ""),
+    (["pseudolife-stdio/board_retry_contract"],
+     {f"pseudolife-stdio::{RETRY}": [("a", ""), ("c", IGNORED)]}, "1 of 2 selected tests skipped"),
+    (["pseudolife-stdio/board_retry_contract::c"],
+     {f"pseudolife-stdio::{RETRY}": [("a", FILTERED), ("c", IGNORED)]}, "1 of 1 selected tests skipped"),
+    (["pseudolife-stdio/board_retry_contract"],
+     {f"pseudolife-stdio::{RETRY}": [("a", '<failure message="x"/>')]}, "1 of 1 selected tests did not pass"),
+    (["pseudolife-stdio/board_retry_contract"],
+     {f"pseudolife-stdio::{RETRY}": [("a", '<flakyFailure message="x"/>')]}, "1 of 1 selected tests did not pass"),
+    # A wrong binary or test name must not pass as "nothing failed".
+    (["pseudolife-stdio/board_retry_contract", "pseudolife-stdio/board_codex_recovery"],
+     {f"pseudolife-stdio::{RETRY}": [("a", "")]}, "no test ran for pseudolife-stdio/board_codex_recovery"),
+    (["pseudolife-stdio/board_retry_contract::missing"],
+     {f"pseudolife-stdio::{RETRY}": [("a", FILTERED)]}, "no test ran for pseudolife-stdio/board_retry_contract::missing"),
+    (["pseudolife-stdio/board_retry_contract"], {}, "no test ran for pseudolife-stdio/board_retry_contract"),
+])
+def test_a_cargo_iteration_needs_every_selected_test_to_run_and_pass(tmp_path, names, suites, note):
+    (tmp_path / "junit.xml").write_text(nextest_junit(suites), encoding="utf-8")
+    found = stress.evidence("cargo", names, tmp_path)
+    assert found.startswith(note) and bool(found) == bool(note), found
+
+
+def test_a_cargo_iteration_without_a_junit_report_is_no_evidence(tmp_path):
+    assert stress.evidence("cargo", ["pseudolife-stdio/board"], tmp_path) == "no JUnit report from nextest"
+
+
+def built_here(tmp_path, workspace=None):
+    """An archive path whose workspace record names this checkout (or another)."""
+    archive = tmp_path / "a.tar.zst"
+    Path(str(archive) + ".workspace").write_text(workspace or str((tmp_path / "rust").resolve()), encoding="utf-8")
+    return archive
+
+
+def cargo_run(out, archive):
+    return stress.main(["run", "--selection", f"cargo:pseudolife-stdio/{RETRY}", "--iteration", "1",
+                        "--candidates", "rust/target/release", "--archive-file", str(archive), "--out", str(out)])
+
+
+def test_a_cargo_run_keeps_this_iterations_junit_report(tmp_path, monkeypatch):
+    # The report lands under the remapped workspace's target dir; a stale one
+    # from an earlier run must never count, and the row keeps a copy.
+    monkeypatch.chdir(tmp_path)
+    junit = stress.cargo_junit(Path("rust"))
+    junit.parent.mkdir(parents=True)
+    junit.write_text(nextest_junit({f"pseudolife-stdio::{RETRY}": [("stale", "")]}), encoding="utf-8")
+
+    def fresh(argv, env):
+        assert not junit.exists(), "a stale report survived into the run"
+        junit.write_text(nextest_junit({f"pseudolife-stdio::{RETRY}": [("a", "")]}).replace(
+            'name="a"', 'name="a" time="1.250"'), encoding="utf-8")
+        return SimpleNamespace(returncode=0)
+    monkeypatch.setattr(stress.subprocess, "run", fresh)
+    out = tmp_path / "stress" / "stress-row-1.json"
+    assert cargo_run(out, built_here(tmp_path)) == 0
+    assert 'name="a"' in (out.parent / "junit.xml").read_text(encoding="utf-8")
+    row = json.loads(out.read_text(encoding="utf-8"))
+    # Each selected test's time, so a test that returned at once (an
+    # env-gated child helper) shows as 0 s rather than hiding in "pass".
+    assert row["outcome"] == "pass" and row["tests"] == {f"pseudolife-stdio::{RETRY}::a": 1.25}
+
+
+def test_a_cargo_run_that_left_no_report_fails(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(stress.subprocess, "run", lambda argv, env: SimpleNamespace(returncode=0))
+    out = tmp_path / "stress" / "stress-row-1.json"
+    assert cargo_run(out, built_here(tmp_path)) == 1
+    assert json.loads(out.read_text(encoding="utf-8"))["note"] == "no JUnit report from nextest"
+
+
+@pytest.mark.parametrize("workspace", ["D:\\a\\other\\other\\rust", None])
+def test_a_cargo_run_refuses_an_archive_built_in_another_checkout_path(tmp_path, monkeypatch, workspace):
+    # The tests compiled in env!() paths under the build job's checkout; on a
+    # runner whose path differs they would fail to spawn and read as flakes
+    # (reviewer, 2026-10-23). A missing record is refused too.
+    monkeypatch.chdir(tmp_path)
+    archive = built_here(tmp_path, workspace) if workspace else tmp_path / "a.tar.zst"
+    calls = []
+    monkeypatch.setattr(stress.subprocess, "run", lambda argv, env: calls.append(argv))
+    out = tmp_path / "stress" / "stress-row-1.json"
+    assert cargo_run(out, archive) == 1
+    assert not calls
+    row = json.loads(out.read_text(encoding="utf-8"))
+    assert row["outcome"] == "fail" and "checkout path" in row["note"]
+
+
+def test_archive_records_the_checkout_path_it_was_built_in(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(stress.subprocess, "run", lambda argv, cwd: SimpleNamespace(returncode=0))
+    archive = tmp_path / "out" / "a.tar.zst"
+    archive.parent.mkdir()
+    assert stress.main(["archive", "--selection", f"cargo:pseudolife-stdio/{RETRY}",
+                        "--archive-file", str(archive)]) == 0
+    assert Path(str(archive) + ".workspace").read_text(encoding="utf-8") == str((tmp_path / "rust").resolve())
+
+
+def test_a_failed_archive_build_records_nothing(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(stress.subprocess, "run", lambda argv, cwd: SimpleNamespace(returncode=101))
+    archive = tmp_path / "a.tar.zst"
+    assert stress.main(["archive", "--selection", f"cargo:pseudolife-stdio/{RETRY}",
+                        "--archive-file", str(archive)]) == 101
+    assert not Path(str(archive) + ".workspace").exists()
+
+
+# nextest 0.9.146's report-skipped = "all" JUnit, verbatim from a toy
+# workspace run (2026-10-23): one named test of probe_one, all of probe_two.
+NEXTEST_0_9_146 = """<?xml version="1.0" encoding="UTF-8"?>
+<testsuites name="nextest-run" tests="5" skipped="3" failures="0" errors="0" uuid="ed590db6-d378-40b9-bb1e-358db7a7b697" timestamp="2026-10-23T19:46:47.034+11:00" time="0.018">
+    <testsuite name="app-x::probe_one" tests="4" skipped="3" errors="0" failures="0">
+        <testcase name="ignored" classname="app-x::probe_one" time="0.000">
+            <skipped message="Skipped: test does not match the run-ignored option"/>
+        </testcase>
+        <testcase name="plain" classname="app-x::probe_one" time="0.000">
+            <skipped message="Skipped: test does not match the provided expression filters"/>
+        </testcase>
+        <testcase name="uses_bin" classname="app-x::probe_one" time="0.000">
+            <skipped message="Skipped: test does not match the provided expression filters"/>
+        </testcase>
+        <testcase name="inner::nested" classname="app-x::probe_one" timestamp="2026-10-23T19:46:47.035+11:00" time="0.012"/>
+    </testsuite>
+    <testsuite name="app-x::probe_two" tests="1" skipped="0" errors="0" failures="0">
+        <testcase name="other" classname="app-x::probe_two" timestamp="2026-10-23T19:46:47.035+11:00" time="0.018"/>
+    </testsuite>
+</testsuites>
+"""
+
+
+@pytest.mark.parametrize("names, note", [
+    (["app-x/probe_one::inner::nested", "app-x/probe_two"], ""),
+    # Whole probe_one: its ignored test and the two the run filtered out are skips.
+    (["app-x/probe_one"], "3 of 4 selected tests skipped"),
+    (["app-x/probe_one::ignored"], "1 of 1 selected tests skipped"),
+])
+def test_cargo_evidence_reads_a_real_nextest_report(tmp_path, names, note):
+    (tmp_path / "junit.xml").write_text(NEXTEST_0_9_146, encoding="utf-8")
+    found = stress.evidence("cargo", names, tmp_path)
+    assert found.startswith(note) and bool(found) == bool(note), found
+
+
+@pytest.mark.parametrize("child, ok", [
+    ("<system-out>log</system-out><system-err>log</system-err>", True),
+    ('<error message="x"/>', False),
+    ('<rerunFailure message="x"/>', False),
+])
+def test_captured_output_is_not_a_failure_but_an_error_is(tmp_path, child, ok):
+    (tmp_path / "junit.xml").write_text(nextest_junit({f"pseudolife-stdio::{RETRY}": [("a", child)]}),
+                                        encoding="utf-8")
+    assert (stress.evidence("cargo", [f"pseudolife-stdio/{RETRY}"], tmp_path) == "") == ok
+
+
 @pytest.mark.parametrize("value, ok", [("1", True), ("20", True), ("50", True), ("0", False), ("51", False)])
 def test_iterations_are_bounded(value, ok):
     if ok:
@@ -186,10 +465,11 @@ def test_an_all_skipped_pytest_iteration_fails(tmp_path, monkeypatch):
     assert row["outcome"] == "fail" and "skipped" in row["note"]
 
 
-def test_plan_lists_the_iterations(tmp_path):
+@pytest.mark.parametrize("selection, kind", [("row:hook", "row"), ("cargo:pseudolife-stdio/board", "cargo")])
+def test_plan_lists_the_iterations_and_the_kind(tmp_path, selection, kind):
     output = tmp_path / "out"
-    assert stress.main(["plan", "--selection", "row:hook", "--iterations", "3", "--github-output", str(output)]) == 0
-    assert output.read_text(encoding="utf-8") == "iterations=[1, 2, 3]\n"
+    assert stress.main(["plan", "--selection", selection, "--iterations", "3", "--github-output", str(output)]) == 0
+    assert output.read_text(encoding="utf-8") == f"iterations=[1, 2, 3]\nkind={kind}\n"
 
 
 @pytest.mark.parametrize("selection, count", [("-k x", "20"), ("row:hook", "0")])
@@ -286,16 +566,23 @@ def test_stress_jobs_run_only_in_stress_mode_and_reuse_the_candidate():
     jobs = raw_workflow()["jobs"]
     plan, loop, report = jobs["stress-plan"], jobs["stress"], jobs["stress-report"]
     assert plan["if"] == "github.event_name == 'workflow_dispatch' && inputs.mode == 'stress'"
-    assert loop["needs"] == ["stress-plan", "candidate"]
+    assert plan["outputs"] == {"iterations": "${{ steps.plan.outputs.iterations }}",
+                               "kind": "${{ steps.plan.outputs.kind }}"}
+    assert loop["needs"] == ["stress-plan", "candidate", "stress-build"]
     assert loop["if"] == ("${{ !cancelled() && needs.stress-plan.result == 'success' "
-                          "&& needs.candidate.result == 'success' }}")
+                          "&& needs.candidate.result == 'success' "
+                          "&& (needs.stress-plan.outputs.kind != 'cargo' || needs.stress-build.result == 'success') }}")
     assert loop["strategy"] == {"fail-fast": False, "max-parallel": 10,
                                 "matrix": {"iteration": "${{ fromJSON(needs.stress-plan.outputs.iterations) }}"}}
     assert loop["runs-on"] == "${{ inputs.os }}"
     assert loop["name"] == "Stress / ${{ inputs.os }} / ${{ matrix.iteration }}"
-    download = next(step for step in loop["steps"] if step.get("uses") == "actions/download-artifact@v4")
+    download = next(step for step in loop["steps"] if step.get("uses") == "actions/download-artifact@v4"
+                    and step["with"]["name"].startswith("rust-shim-"))
     assert download["with"] == {"name": "rust-shim-${{ runner.os }}", "path": "rust/target/release"}
-    assert not any("cargo" in step.get("run", "") for step in loop["steps"])
+    # An iteration never compiles: a cargo selection runs stress-build's archive.
+    for step in loop["steps"]:
+        assert not re.search(r"\bcargo (build|test|nextest (archive|run))\b|\bcargo \+", step.get("run", "")), \
+            step.get("name")
     # The event oracle binding accepts only master dispatches with frozen_head,
     # so a loop on a branch must not stop there (Codex review of e56fe0f6);
     # but oracle-dependent pytest selections need it when it can bind (Codex
@@ -323,6 +610,83 @@ def test_stress_jobs_run_only_in_stress_mode_and_reuse_the_candidate():
     # The candidate build (and scope, which it needs) runs for a stress loop.
     for name in ("scope", "candidate"):
         assert NOT_CAPTURE.strip("()") in jobs[name]["if"], name
+
+
+def step_named(job, name):
+    return next(step for step in job["steps"] if step.get("name") == name)
+
+
+def test_a_cargo_loop_builds_its_test_binaries_once_as_the_rust_job_does():
+    jobs = raw_workflow()["jobs"]
+    build, rust = jobs["stress-build"], jobs["rust"]
+    assert build["needs"] == "stress-plan"
+    assert build["if"] == ("${{ !cancelled() && needs.stress-plan.result == 'success' "
+                           "&& needs.stress-plan.outputs.kind == 'cargo' }}")
+    # Same OS as the iterations: the archive's env!() paths are this job's.
+    assert build["runs-on"] == "${{ inputs.os }}" and build["env"] == {"STRESS_SELECTION": "${{ inputs.selection }}"}
+    toolchain = next(step for step in build["steps"] if step.get("uses", "").startswith("dtolnay/rust-toolchain"))
+    rust_toolchain = next(step for step in rust["steps"] if step.get("uses", "").startswith("dtolnay/rust-toolchain"))
+    assert toolchain["with"]["toolchain"] == rust_toolchain["with"]["toolchain"]
+    for name in ("Keep only the pinned Rust toolchain", "Install pinned nextest in the runner temporary directory"):
+        # Nextest must be the same version where the archive is built and run.
+        assert step_named(build, name)["run"] == step_named(rust, name)["run"], name
+    cache = next(step for step in build["steps"] if step.get("uses") == "Swatinem/rust-cache@v2")
+    assert cache["with"] == {"workspaces": "rust", "shared-key": "stress-tests", "cache-on-failure": True}
+    archive = step_named(build, "Build the selected test binaries into a nextest archive")
+    assert "rust/ci/stress.py archive --selection $env:STRESS_SELECTION" in archive["run"]
+    assert "stress-tests.tar.zst" in archive["run"]
+    upload = next(step for step in build["steps"] if step.get("uses") == "actions/upload-artifact@v4")
+    # The archive and the checkout path it was built in, which every
+    # iteration checks before running it.
+    assert upload["with"] == {"name": "stress-tests-${{ runner.os }}",
+                              "path": "${{ runner.temp }}/stress-tests.tar.zst\n"
+                                      "${{ runner.temp }}/stress-tests.tar.zst.workspace\n",
+                              "if-no-files-found": "error"}
+
+
+def test_a_cargo_iteration_gets_the_rust_jobs_setup_and_not_the_parity_lanes():
+    loop = raw_workflow()["jobs"]["stress"]
+    assert loop["env"] == {"STRESS_SELECTION": "${{ inputs.selection }}",
+                           "STRESS_KIND": "${{ needs.stress-plan.outputs.kind }}"}
+    # The Rust job runs nextest with no PostgreSQL and only the Python SDK
+    # fixture dependency; a cargo iteration matches it.
+    for name in ("Install checkout and test dependencies", "Prepare disposable PostgreSQL"):
+        assert step_named(loop, name)["if"] == "env.STRESS_KIND != 'cargo'", name
+    rust = raw_workflow()["jobs"]["rust"]
+    # The Rust job also exports the selected oracle's package metadata, which
+    # cli_version_contract reads (Codex review of 50ca4be5). It binds only
+    # where the event oracle does, so both steps stay best-effort here: on a
+    # branch the test that needs it fails rather than passing.
+    bind = step_named(loop, "Bind the event-selected Python oracle when the dispatch has one")
+    assert "if" not in bind and bind["continue-on-error"] is True
+    metadata = step_named(loop, "Prepare selected package metadata for the Rust identity contract")
+    assert metadata["if"] == "env.STRESS_KIND == 'cargo'" and metadata["continue-on-error"] is True
+    assert metadata["run"] == step_named(rust, "Prepare selected package metadata for the Rust identity contract")["run"]
+    names = [step.get("name") for step in loop["steps"]]
+    assert names.index(bind["name"]) < names.index(metadata["name"]) < names.index("Run the selection once")
+    fixture = step_named(loop, "Install the Python SDK fixture dependency")
+    assert fixture["if"] == "env.STRESS_KIND == 'cargo'"
+    assert fixture["run"] == step_named(rust, "Install the Python SDK fixture dependency")["run"]
+    nextest = step_named(loop, "Install pinned nextest in the runner temporary directory")
+    assert nextest["if"] == "env.STRESS_KIND == 'cargo'"
+    assert nextest["run"] == step_named(rust, "Install pinned nextest in the runner temporary directory")["run"]
+    archive = next(step for step in loop["steps"] if step.get("uses") == "actions/download-artifact@v4"
+                   and step["with"]["name"].startswith("stress-tests-"))
+    assert archive["if"] == "env.STRESS_KIND == 'cargo'"
+    assert archive["with"] == {"name": "stress-tests-${{ runner.os }}", "path": "${{ runner.temp }}/stress-tests"}
+    names = [step.get("name") for step in loop["steps"]]
+    run = step_named(loop, "Run the selection once")
+    assert "--archive-file (Join-Path $env:RUNNER_TEMP 'stress-tests/stress-tests.tar.zst')" in run["run"]
+    for step in (fixture, nextest, archive):
+        assert names.index(step.get("name")) < names.index("Run the selection once")
+
+
+def test_the_selection_input_lists_every_kind():
+    description = raw_workflow().get("on", raw_workflow().get(True))["workflow_dispatch"]["inputs"]["selection"][
+        "description"]
+    for kind in ("row:<row>[/<case>]", "scenario:<run.py scenario>", "cargo:<package>/<test binary>[::<test>]",
+                 "pytest node ids"):
+        assert kind in description, kind
 
 
 def test_a_stress_loop_runs_no_ordinary_ci_job():

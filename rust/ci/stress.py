@@ -12,15 +12,29 @@ A selection is one of:
                          checkout's Python, run as its required lane runs it
   scenario:<name>        one live daemon comparison (run.py live --only), on
                          the binary and settings the scenario's lane uses
+  cargo:<package>/<test binary>[::<test>] [cargo:...]
+                         Rust integration test binaries, or single tests in
+                         them, under nextest with the Rust job's toolchain,
+                         lockfile, test profile, default features and 4 test
+                         threads: the stress-build job compiles them once
+                         into a nextest archive (``archive``), and each
+                         iteration runs that archive without compiling. Like
+                         every kind, the selection runs alone, not beside
+                         the rest of its lane, and only the selected
+                         packages are built (the Rust job builds the whole
+                         workspace, and also runs --no-default-features)
   <node id> [<node id>]  pytest node ids, run with -ra and a junit report, with
                          the parity shards' candidate binaries in the env
 
-An iteration passes only with evidence: a pytest run where every selected
-test ran (a skip is not evidence), or a row or scenario that compared at
-least one case. Subcommands: ``plan`` checks the inputs and lists the
-iterations, ``run`` runs one iteration and writes its row, ``report`` joins
-the rows into stress-report.json and fails unless every iteration passed in
-the same run attempt.
+An iteration passes only with evidence: a pytest or cargo run where every
+selected test ran and passed (a skip is not evidence, so a binary holding
+#[ignore] tests is selected test by test; a Rust test that returns early
+still counts as run, so a cargo row lists each test's seconds), or a row or scenario that
+compared at least one case. Subcommands: ``plan`` checks the inputs and
+lists the iterations, ``archive`` builds a cargo selection's archive,
+``run`` runs one iteration and writes its row, ``report`` joins the rows
+into stress-report.json and fails unless every iteration passed in the same
+run attempt.
 """
 
 from __future__ import annotations
@@ -32,6 +46,7 @@ import re
 import subprocess
 import sys
 import time
+import xml.etree.ElementTree as ElementTree
 from pathlib import Path
 
 MAX_ITERATIONS = 50
@@ -51,6 +66,13 @@ STATIC_PREFIXES = ("body-", "security-", "static-")
 # These need the debug build's loopback-bind override, which only the rust
 # job builds, and a stress loop runs no rust job.
 REMOTE_BIND = {"trust-bind", "security-remote-open", "security-remote-auth"}
+# A cargo item: package and integration test binary, optionally one test by
+# its libtest path (module::test).
+CARGO = re.compile(r"cargo:([a-z0-9][a-z0-9_-]{0,63})/([a-z0-9][a-z0-9_-]{0,63})"
+                   r"(?:::([A-Za-z_][A-Za-z0-9_]*(?:::[A-Za-z_][A-Za-z0-9_]*)*))?")
+CARGO_FORM = "cargo:<package>/<test binary>[::<test>]"
+# The Rust workspace; nextest reads rust/.config/nextest.toml from it.
+WORKSPACE = Path("rust")
 
 
 def parse(selection: str) -> tuple[str, list[str]]:
@@ -70,10 +92,58 @@ def parse(selection: str) -> tuple[str, list[str]]:
                              "does not build; dispatch manual CI (mode=ci) for it, or pick another scenario:")
         return "scenario", [name]
     nodes = selection.split()
+    if any(node.startswith("cargo:") for node in nodes):
+        if not all(CARGO.fullmatch(node) for node in nodes):
+            raise ValueError(f"cargo selection {selection!r}: expected {CARGO_FORM} items, "
+                             "separated by spaces and not mixed with other kinds")
+        return "cargo", [node[6:] for node in nodes]
     if not nodes or not all(NODE.fullmatch(node) and ".." not in node for node in nodes):
         raise ValueError(f"selection {selection!r}: expected row:<row>[/<case>], scenario:<name>, "
-                         "or pytest node ids such as tests/test_x.py::test_y")
+                         f"{CARGO_FORM}, or pytest node ids such as tests/test_x.py::test_y")
     return "pytest", nodes
+
+
+def cargo_item(name: str) -> tuple[str, str, str | None]:
+    """A parsed cargo item's (package, test binary, test or None)."""
+    package, _, rest = name.partition("/")
+    binary, _, test = rest.partition("::")
+    return package, binary, test or None
+
+
+def filterset(names: list[str], binaries_only: bool = False) -> str:
+    """The nextest filterset selecting a cargo selection's tests; with
+    binaries_only, the binaries holding them (an archive holds whole binaries)."""
+    items = [cargo_item(name) for name in names]
+    if binaries_only:
+        ids = dict.fromkeys(f"{package}::{binary}" for package, binary, _ in items)
+        return " | ".join(f"binary_id(={binary_id})" for binary_id in ids)
+    return " | ".join(f"(binary_id(={package}::{binary})" + (f" & test(={test}))" if test else ")")
+                      for package, binary, test in items)
+
+
+def archive_command(names: list[str], archive: Path) -> list[str]:
+    """The build of a cargo selection's archive, run from the Rust workspace
+    with the Rust job's pinned toolchain, --locked, test profile and default
+    features, limited to the selected packages and binaries (so dependency
+    features unify over those packages, not the whole workspace)."""
+    items = [cargo_item(name) for name in names]
+    argv = ["cargo", "nextest", "archive", "--locked"]
+    for package in dict.fromkeys(package for package, _, _ in items):
+        argv += ["-p", package]
+    for binary in dict.fromkeys(binary for _, binary, _ in items):
+        argv += ["--test", binary]
+    return argv + ["-E", filterset(names, binaries_only=True), "--archive-file", str(archive)]
+
+
+def workspace_record(archive: Path) -> Path:
+    """The file beside an archive naming the checkout path it was built in."""
+    return archive.with_name(archive.name + ".workspace")
+
+
+def cargo_junit(workspace: Path) -> Path:
+    """Where the stress nextest profile writes its JUnit report: under the
+    (remapped) workspace's target dir, not the archive's extraction dir."""
+    return workspace / "target" / "nextest" / "stress" / "junit.xml"
 
 
 def iterations(value: str) -> int:
@@ -95,8 +165,23 @@ def daemon(name: str, candidates: Path) -> tuple[Path, bool]:
     return binary(candidates, "pseudolife-daemon"), True
 
 
-def command(kind: str, names: list[str], candidates: Path, scratch: Path) -> list[str]:
+def command(kind: str, names: list[str], candidates: Path, scratch: Path,
+            archive: Path | None = None) -> list[str]:
     """The argv one iteration runs, from the repository root."""
+    if kind == "cargo":
+        if archive is None:
+            raise ValueError("a cargo selection runs stress-build's archive: pass --archive-file")
+        # Extracted over the workspace, the archive's target dir lands where
+        # the build job's was. A hosted runner's checkout path is the same in
+        # every job of one OS, so the paths the tests compiled in with env!()
+        # (CARGO_BIN_EXE_pseudolife-stdio) resolve. --extract-overwrite keeps
+        # the candidate binaries already in rust/target/release.
+        workspace = str(WORKSPACE.resolve())
+        # --test-threads 4 is the Rust job's `cargo nextest run -j 4`.
+        return ["cargo-nextest", "nextest", "run", "--archive-file", str(archive),
+                "--workspace-remap", workspace, "--extract-to", workspace, "--extract-overwrite",
+                "--profile", "stress", "--retries", "0", "--no-fail-fast", "--no-tests", "fail",
+                "--test-threads", "4", "-E", filterset(names)]
     if kind == "row":
         argv = [sys.executable, "rust/cli_harness", "--row", names[0]]
         if len(names) > 1:
@@ -116,6 +201,10 @@ def command(kind: str, names: list[str], candidates: Path, scratch: Path) -> lis
 
 def environment(kind: str, names: list[str], candidates: Path, scratch: Path) -> dict:
     """The env the selection's lane step sets, on top of the job's."""
+    if kind == "cargo":
+        # The Rust job binds the selected interpreter for its Python fixtures
+        # and gives nextest no parity candidate.
+        return {"PSEUDOLIFE_MCP_PYTHON": sys.executable}
     env = {"PSEUDOLIFE_RUST_BINARY": str(binary(candidates, "pseudolife-stdio"))}
     if kind == "scenario":
         env["PL_HARNESS_SCRATCH"] = str(scratch / "harness-scratch")
@@ -152,6 +241,53 @@ def junit_counts(report: Path) -> tuple[int, int]:
     return total, skipped
 
 
+def selected_cases(names: list[str], report: Path) -> list | None:
+    """The (suite, testcase, matching items) a nextest JUnit report holds for
+    a cargo selection, or None without a readable report. Tests outside the
+    selection (the rest of a binary when one test is named) are left out."""
+    try:
+        root = ElementTree.parse(report).getroot()
+    except (OSError, ElementTree.ParseError):
+        return None
+    items = [cargo_item(name) for name in names]
+    selected = []
+    for suite in root.iter("testsuite"):
+        for case in suite.iter("testcase"):
+            matched = [name for name, (package, binary, test) in zip(names, items)
+                       if suite.get("name") == f"{package}::{binary}" and test in (None, case.get("name"))]
+            if matched:
+                selected.append((suite.get("name"), case, matched))
+    return selected
+
+
+def cargo_times(names: list[str], report: Path) -> dict:
+    """Each selected test's seconds, so a test that returned at once (an
+    env-gated child helper) is visible as 0 s rather than hidden in "pass"."""
+    return {f"{suite}::{case.get('name')}": float(case.get("time") or 0)
+            for suite, case, _ in selected_cases(names, report) or []}
+
+
+def cargo_evidence(names: list[str], report: Path) -> str:
+    """Why a nextest JUnit report shows the cargo selection did not all run
+    and pass, or "" when it did."""
+    found = selected_cases(names, report)
+    if found is None:
+        return "no JUnit report from nextest"
+    selected, ran = [(case, matched) for _, case, matched in found], dict.fromkeys(names, 0)
+    skipped = sum(case.find("skipped") is not None for case, _ in selected)
+    if skipped:
+        return f"{skipped} of {len(selected)} selected tests skipped; a skip is not evidence"
+    # A failure, an error, or a flaky attempt that a retry would have hidden.
+    failed = sum(any(child.tag not in ("system-out", "system-err") for child in case) for case, _ in selected)
+    if failed:
+        return f"{failed} of {len(selected)} selected tests did not pass"
+    for _, matched in selected:
+        for name in matched:
+            ran[name] += 1
+    missing = [name for name, count in ran.items() if not count]
+    return "no test ran for " + ", ".join(missing) if missing else ""
+
+
 def compared(kind: str, names: list[str], scratch: Path) -> int:
     """How many cases a row or scenario run compared, from its summary."""
     try:
@@ -173,6 +309,8 @@ def evidence(kind: str, names: list[str], scratch: Path) -> str:
         if skipped:
             return f"{skipped} of {total} selected tests skipped; a skip is not evidence"
         return ""
+    if kind == "cargo":
+        return cargo_evidence(names, scratch / "junit.xml")
     if compared(kind, names, scratch) == 0:
         return "no case was compared (all filtered out on this platform, or no summary)"
     return ""
@@ -186,15 +324,44 @@ def runner() -> dict:
 
 def plan(options) -> int:
     try:
-        parse(options.selection)
+        kind, _ = parse(options.selection)
         count = iterations(options.iterations)
     except ValueError as error:
         print(f"stress: {error}; nothing was started", file=sys.stderr)
         return 2
     with open(options.github_output, "a", encoding="utf-8") as output:
         output.write(f"iterations={json.dumps(list(range(1, count + 1)))}\n")
+        output.write(f"kind={kind}\n")
     print(f"stress: {count} iterations of {options.selection.strip()}")
     return 0
+
+
+def archive(options) -> int:
+    kind, names = parse(options.selection)
+    if kind != "cargo":
+        print(f"stress: archive builds only cargo: selections, not {kind}; nothing was built", file=sys.stderr)
+        return 2
+    archive_file = Path(options.archive_file).resolve()
+    argv = archive_command(names, archive_file)
+    print(f"stress: (in {WORKSPACE}) " + " ".join(argv), flush=True)
+    code = subprocess.run(argv, cwd=str(WORKSPACE)).returncode
+    if code == 0:
+        workspace_record(archive_file).write_text(str(WORKSPACE.resolve()), encoding="utf-8")
+    return code
+
+
+def checkout_mismatch(archive_file: Path) -> str:
+    """Why an archive cannot run in this checkout, or "" when it can: its
+    tests compiled in env!() paths under the build job's checkout."""
+    try:
+        built = workspace_record(archive_file).read_text(encoding="utf-8").strip()
+    except OSError:
+        return "the archive has no record of the checkout path it was built in"
+    here = str(WORKSPACE.resolve())
+    if built != here:
+        return (f"the archive was built in checkout path {built}, this runner's is {here}; "
+                "its tests' compiled-in paths would not resolve")
+    return ""
 
 
 def run(options) -> int:
@@ -202,12 +369,25 @@ def run(options) -> int:
     scratch = Path(options.out).parent
     scratch.mkdir(parents=True, exist_ok=True)
     candidates = Path(options.candidates)
-    argv = command(kind, names, candidates, scratch)
+    archive_file = Path(options.archive_file).resolve() if options.archive_file else None
+    argv = command(kind, names, candidates, scratch, archive_file)
     env = dict(os.environ, **environment(kind, names, candidates, scratch))
-    started, code, note = time.monotonic(), None, ""
+    started, code, note, tests = time.monotonic(), None, "", None
     try:
+        if kind == "cargo":
+            note = checkout_mismatch(archive_file)
+            if note:
+                code = 1
+                print(f"stress: {note}", flush=True)
+                return code
+            # Only this iteration's report may count.
+            cargo_junit(WORKSPACE).unlink(missing_ok=True)
         print("stress: " + " ".join(argv), flush=True)
         code = subprocess.run(argv, env=env).returncode
+        if kind == "cargo" and cargo_junit(WORKSPACE).is_file():
+            # The row's artifact keeps the report; evidence reads this copy.
+            (scratch / "junit.xml").write_bytes(cargo_junit(WORKSPACE).read_bytes())
+            tests = cargo_times(names, scratch / "junit.xml")
         if code == 0:
             note = evidence(kind, names, scratch)
             if note:
@@ -218,7 +398,7 @@ def run(options) -> int:
                "selection": options.selection.strip(), "runner": runner(), "exit_code": code,
                "outcome": "pass" if code == 0 else "fail",
                "seconds": round(time.monotonic() - started, 1),
-               **({"note": note} if note else {})}
+               **({"note": note} if note else {}), **({"tests": tests} if tests is not None else {})}
         Path(options.out).write_text(json.dumps(row, indent=2) + "\n", encoding="utf-8")
     return code
 
@@ -271,7 +451,11 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--selection", required=True)
     r.add_argument("--iteration", required=True, type=int)
     r.add_argument("--candidates", required=True)
+    r.add_argument("--archive-file", help="a cargo selection's nextest archive, from stress-build")
     r.add_argument("--out", required=True)
+    a = sub.add_parser("archive")
+    a.add_argument("--selection", required=True)
+    a.add_argument("--archive-file", required=True)
     s = sub.add_parser("report")
     s.add_argument("--selection", required=True)
     s.add_argument("--iterations", required=True)
@@ -280,7 +464,7 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--out", required=True)
     s.add_argument("--summary")
     options = parser.parse_args(argv)
-    return {"plan": plan, "run": run, "report": report}[options.action](options)
+    return {"plan": plan, "archive": archive, "run": run, "report": report}[options.action](options)
 
 
 if __name__ == "__main__":
