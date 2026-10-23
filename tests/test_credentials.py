@@ -1,6 +1,7 @@
 """Credential snapshots stay private, bounded, and rotation-safe."""
 from __future__ import annotations
 
+import contextlib
 import os
 from pathlib import Path
 import shlex
@@ -342,33 +343,120 @@ def _current_user_sid() -> str:
     return out.strip().split(",")[-1].strip('"')
 
 
-@pytest.mark.skipif(os.name != "nt", reason="Windows ACLs")
-def test_a_token_file_is_protected_in_a_directory_granting_modify_only(tmp_path: Path) -> None:
-    """A secondary drive often grants users Modify, not Full Control: no
-    WRITE_OWNER, even on a file the user just created and owns. Setting the
-    owner it already has must not be required there (2026-10-23, a
-    `register_claude_desktop.py --token-file` on such a drive refused with
-    "permissions could not be protected")."""
-    from pseudolife_memory import credentials
+TAKE_OWNERSHIP = "SeTakeOwnershipPrivilege"
 
+
+def _token_privilege(name: str, enable: bool | None = None) -> bool:
+    """Whether this process's token has privilege `name` enabled; with
+    `enable`, set it first (only a privilege the token holds can change)."""
+    import ctypes
+    from ctypes import wintypes
+
+    class LUID(ctypes.Structure):
+        _fields_ = [("LowPart", wintypes.DWORD), ("HighPart", wintypes.LONG)]
+
+    class LUID_AND_ATTRIBUTES(ctypes.Structure):
+        _fields_ = [("Luid", LUID), ("Attributes", wintypes.DWORD)]
+
+    advapi = ctypes.WinDLL("advapi32", use_last_error=True)
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    advapi.OpenProcessToken.argtypes = [wintypes.HANDLE, wintypes.DWORD,
+                                        ctypes.POINTER(wintypes.HANDLE)]
+    advapi.LookupPrivilegeValueW.argtypes = [wintypes.LPCWSTR, wintypes.LPCWSTR,
+                                             ctypes.POINTER(LUID)]
+    advapi.AdjustTokenPrivileges.argtypes = [wintypes.HANDLE, wintypes.BOOL, ctypes.c_void_p,
+                                             wintypes.DWORD, ctypes.c_void_p, ctypes.c_void_p]
+    advapi.GetTokenInformation.argtypes = [wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p,
+                                           wintypes.DWORD, ctypes.POINTER(wintypes.DWORD)]
+    kernel.GetCurrentProcess.restype = wintypes.HANDLE
+    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+    token = wintypes.HANDLE()
+    # TOKEN_QUERY | TOKEN_ADJUST_PRIVILEGES
+    assert advapi.OpenProcessToken(kernel.GetCurrentProcess(), 0x0008 | 0x0020,
+                                   ctypes.byref(token))
+    try:
+        luid = LUID()
+        assert advapi.LookupPrivilegeValueW(None, name, ctypes.byref(luid))
+        if enable is not None:
+            class ONE(ctypes.Structure):
+                _fields_ = [("PrivilegeCount", wintypes.DWORD),
+                            ("Privileges", LUID_AND_ATTRIBUTES * 1)]
+            change = ONE(1, (LUID_AND_ATTRIBUTES * 1)(LUID_AND_ATTRIBUTES(luid, 2 if enable else 0)))
+            advapi.AdjustTokenPrivileges(token, False, ctypes.byref(change), 0, None, None)
+        needed = wintypes.DWORD()
+        advapi.GetTokenInformation(token, 3, None, 0, ctypes.byref(needed))   # TokenPrivileges
+        buffer = ctypes.create_string_buffer(needed.value)
+        assert advapi.GetTokenInformation(token, 3, buffer, needed, ctypes.byref(needed))
+        count = ctypes.cast(buffer, ctypes.POINTER(wintypes.DWORD))[0]
+        entries = ctypes.cast(ctypes.addressof(buffer) + ctypes.sizeof(wintypes.DWORD),
+                              ctypes.POINTER(LUID_AND_ATTRIBUTES))
+        for i in range(count):
+            entry = entries[i]
+            if (entry.Luid.LowPart, entry.Luid.HighPart) == (luid.LowPart, luid.HighPart):
+                return bool(entry.Attributes & 2)   # SE_PRIVILEGE_ENABLED
+        return False
+    finally:
+        kernel.CloseHandle(token)
+
+
+@contextlib.contextmanager
+def _take_ownership(mode: str):
+    """The token as it is, or with SeTakeOwnership disabled for the block (an
+    elevated SSH session or hosted runner holds it enabled; an elevated
+    console holds it disabled; an unelevated token does not hold it)."""
+    was = _token_privilege(TAKE_OWNERSHIP)
+    if mode == "disabled" and was:
+        assert not _token_privilege(TAKE_OWNERSHIP, enable=False)
+    try:
+        yield
+    finally:
+        if mode == "disabled" and was:
+            assert _token_privilege(TAKE_OWNERSHIP, enable=True)
+
+
+def _modify_only_folder(tmp_path: Path, sid: str) -> Path:
     folder = tmp_path / "modify-only"
     folder.mkdir()
-    sid = _current_user_sid()
     subprocess.run(["icacls", str(folder), "/inheritance:r", "/grant:r", f"*{sid}:(OI)(CI)M"],
                    check=True, capture_output=True, timeout=60)
+    return folder
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows ACLs")
+@pytest.mark.parametrize("take_ownership", ["as-is", "disabled"])
+def test_a_token_file_in_a_modify_only_folder_is_owner_only_whenever_the_token_allows(
+        tmp_path: Path, take_ownership: str, record_property) -> None:
+    """A secondary drive often grants users Modify, not Full Control, so no
+    WRITE_OWNER even on a file the user just created (2026-10-23, a
+    `register_claude_desktop.py --token-file` on such a drive refused with
+    "permissions could not be protected"). Measured 2026-10-23 on the Windows
+    dev VM over SSH (elevated, SeTakeOwnership and SeRestore enabled) and
+    matched by the hosted runner: a new file is owned by Administrators;
+    replacing that owner succeeds with SeTakeOwnership enabled (SeRestore
+    alone does not suffice) and fails with error 5 without it. So the write
+    must end owner-only and user-owned when this token's files are already
+    the user's (the access list alone is set) or SeTakeOwnership is enabled
+    (the owner is replaced), and refuse, naming the error and the fix,
+    otherwise. Each token kind takes the branch its own state predicts."""
+    from pseudolife_memory import credentials
+
+    sid = _current_user_sid()
+    folder = _modify_only_folder(tmp_path, sid)
     try:
-        path = folder / "token"
-        probe = folder / "probe"
-        probe.write_text("", encoding="utf-8")
-        if credentials._windows_owner_sid(probe) != sid:
-            # This token's new files are owned by someone else (an elevated
-            # one's Administrators default, as on GitHub's runners): that owner
-            # must still be replaced and cannot be here, so the write refuses,
-            # naming the Windows error and the fix.
-            with pytest.raises(CredentialError, match=r"Windows error 5 .*full control"):
-                private_token(path, "fixture-secret")
-            return
-        private_token(path, "fixture-secret")
+        with _take_ownership(take_ownership):
+            probe = folder / "probe"
+            probe.write_text("", encoding="utf-8")
+            own_files = credentials._windows_owner_sid(probe) == sid
+            can_take = _token_privilege(TAKE_OWNERSHIP)
+            record_property("new_files_owned_by_user", own_files)
+            record_property("take_ownership_enabled", can_take)
+            path = folder / "token"
+            if not (own_files or can_take):
+                with pytest.raises(CredentialError, match=r"Windows error 5 .*full control"):
+                    private_token(path, "fixture-secret")
+                return
+            private_token(path, "fixture-secret")
+        assert credentials._windows_owner_sid(path) == sid
         fd = os.open(path, os.O_RDONLY)
         try:
             assert credentials._windows_owner_only(fd)
@@ -380,22 +468,20 @@ def test_a_token_file_is_protected_in_a_directory_granting_modify_only(tmp_path:
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows ACLs")
-def test_an_owner_other_than_the_user_is_still_pinned_or_refused(tmp_path: Path,
-                                                                 monkeypatch) -> None:
-    """The near miss: the DACL-only shortcut is for a file the user already
-    owns. Any other owner (an elevated token's Administrators default) must
-    be replaced, so where that is denied the write refuses, naming why."""
+def test_an_owner_other_than_the_user_is_refused_where_it_cannot_be_replaced(
+        tmp_path: Path, monkeypatch) -> None:
+    """The near miss: the access-list-only fallback is for a file the user
+    already owns. With the owner reported as Administrators (an elevated
+    token's default) and SeTakeOwnership disabled, the owner can be neither
+    kept nor replaced, so the write refuses, naming why, on every token."""
     from pseudolife_memory import credentials
 
-    folder = tmp_path / "modify-only"
-    folder.mkdir()
-    subprocess.run(["icacls", str(folder), "/inheritance:r", "/grant:r",
-                    f"*{_current_user_sid()}:(OI)(CI)M"], check=True, capture_output=True,
-                   timeout=60)
+    folder = _modify_only_folder(tmp_path, _current_user_sid())
     monkeypatch.setattr(credentials, "_windows_owner_sid", lambda path: "S-1-5-32-544")
     try:
-        with pytest.raises(CredentialError, match=r"Windows error 5 setting the owner"):
-            private_token(folder / "token", "fixture-secret")
+        with _take_ownership("disabled"):
+            with pytest.raises(CredentialError, match=r"Windows error 5 setting the owner"):
+                private_token(folder / "token", "fixture-secret")
     finally:
         subprocess.run(["icacls", str(folder), "/reset", "/T"], capture_output=True, timeout=60)
 
