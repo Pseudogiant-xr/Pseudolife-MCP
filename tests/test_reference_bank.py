@@ -510,15 +510,17 @@ def test_service_start_opens_no_chromadb_client(tmp_path, monkeypatch):
 
 def test_file_mode_has_no_document_store(tmp_path, monkeypatch):
     """Documents live in the Postgres bank, like the cortex: a file-mode
-    service (no DSN, no lite tier) serves no reference hits and refuses
-    ingest with the reason."""
+    service (no DSN, no lite tier) serves no reference hits in memory
+    search, and both document tools refuse with the reason and the fix
+    rather than answering as if no document had ever been ingested."""
     svc = _service(tmp_path, monkeypatch)
     doc = tmp_path / "doc.txt"
     doc.write_text("alpha", encoding="utf-8")
 
     assert svc._reference is None  # noqa: SLF001
-    assert svc.search_documents("alpha") == {"count": 0, "entries": []}
-    with pytest.raises(RuntimeError, match="Postgres"):
+    with pytest.raises(RuntimeError, match="cannot search .*DATABASE_URL"):
+        svc.search_documents("alpha")
+    with pytest.raises(RuntimeError, match="cannot ingest .*DATABASE_URL"):
         svc.ingest_document(str(doc))
 
 
@@ -687,3 +689,48 @@ def test_a_postgres_start_with_no_store_opens_nothing_and_marks_nothing(
         assert svc.search_documents("anything") == {"count": 0, "entries": []}
     finally:
         _close(svc)
+
+
+def test_an_import_without_room_for_its_copy_copies_nothing(
+        tmp_path, storage, monkeypatch):
+    """A store that cannot be imported for a lasting reason must not be
+    copied in full on every start: the copy is refused up front when the
+    volume lacks room for it, with the sizes in the message."""
+    import shutil
+    from collections import namedtuple
+
+    from pseudolife_memory.storage import migrate_chroma
+
+    store = tmp_path / "chromadb"
+    _legacy_ingest(store, dict(list(CORPUS.items())[:2]), compact=False)
+    usage = namedtuple("usage", "total used free")
+    monkeypatch.setattr(shutil, "disk_usage", lambda path: usage(1, 1, 1024))
+
+    with pytest.raises(RuntimeError, match="free some space"):
+        _migrate(store, storage)
+
+    assert not (tmp_path / migrate_chroma.SCRATCH_NAME).exists()
+    assert storage.meta_get("reference_chroma_import") is None
+
+
+def test_unclean_legacy_metadata_does_not_stop_the_import(tmp_path, storage):
+    """A chunk whose metadata carries a non-numeric chunk index or timestamp
+    imports with 0 there instead of failing the whole store on every start."""
+    import chromadb
+
+    store = tmp_path / "chromadb"
+    client = chromadb.PersistentClient(path=str(store))
+    try:
+        col = client.get_or_create_collection(
+            name=COLLECTION, metadata={"hnsw:space": "cosine"})
+        col.add(ids=["odd"], documents=["odd chunk"],
+                embeddings=[_Embedder.row("odd chunk").tolist()],
+                metadatas=[{"source": "odd.md", "chunk_index": "first",
+                            "timestamp": "yesterday"}])
+    finally:
+        client.close()
+
+    assert _migrate(store, storage)["inserted"] == 1
+    row = storage.conn.execute(
+        "SELECT source, chunk_index, ingested_at FROM reference_chunks").fetchone()
+    assert row == ("odd.md", 0, 0.0)

@@ -1,6 +1,6 @@
 {
   "format": 1,
-  "source_sha256": "af5a427de79198ec318e586ebb6ad4843a4699721a544ac32a8df883f6b410c0",
+  "source_sha256": "3722b5933e5fd87583277be7081a26789318bf31e1b79011a8a053cc6ef785e9",
   "schema_version": 57,
   "embedding_dimension": 1024,
   "embedding_probe": "SELECT atttypmod FROM pg_attribute WHERE attrelid = to_regclass('public.entries') AND attname = 'embedding' AND attnum > 0 AND NOT attisdropped",

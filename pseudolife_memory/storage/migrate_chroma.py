@@ -11,25 +11,30 @@ any such store in:
   either state. Opening a store rewrites chroma.sqlite3 (measured 2026-10-09
   with chromadb 1.5.5), so the store is copied to a scratch directory beside
   it and the copy is opened: the user's store stays byte-identical on disk.
-  Nothing here deletes or writes it. The scratch copy has one fixed path,
-  removed before and after each attempt, so a copy Windows would not let go
-  of (chromadb can hold its files open) is cleared by the next attempt
-  instead of piling up.
-* **Idempotent and resumable.** Rows keep their chromadb ids and are
-  inserted with ``ON CONFLICT DO NOTHING``, so a rerun adds nothing and
-  never undoes a later ingest. Each page commits on its own; the marker is
-  written last, after every chunk read from the store is checked to be in
-  the bank. An import cut short leaves no marker, and the next start skips
-  the chunks already in the bank (embedding none of them again) and carries
-  on with the rest.
+  Nothing here deletes or writes it. The copy is refused, before it starts,
+  when the volume lacks room for it. Each attempt copies into its own
+  subdirectory of one fixed scratch directory, which is removed before and
+  after every attempt, so a copy Windows would not let go of (chromadb can
+  hold its files open) is cleared by a later attempt instead of piling up or
+  blocking the next copy.
+* **Idempotent and resumable.** Every chunk id is listed first; the chunks
+  are then read and written page by page, by id, so no order chromadb gives
+  an offset can skip or repeat one, and no more than a page is held in
+  memory. Rows keep their chromadb ids and are inserted with
+  ``ON CONFLICT DO NOTHING``, so a rerun adds nothing and never undoes a
+  later ingest. Each page commits on its own; the marker is written last,
+  after every listed id is checked to be in the bank. An import cut short
+  leaves no marker, and the next start skips the chunks already in the bank
+  (embedding none of them again) and carries on with the rest.
 * **Once.** With the marker set, the store is never opened again (an open
-  costs chromadb's per-process System cache: about 19 threads and ~3 MB).
-  The marker is bank-local: a logical transfer does not carry it
-  (``transfer_cli._META_SKIP_KEYS``), so a target host's own legacy store is
-  still imported.
+  costs chromadb's per-process System cache: about 19 threads and ~3 MB,
+  released here once the read ends). The marker is bank-local: a logical
+  transfer does not carry it (``transfer_cli._META_SKIP_KEYS``), so a target
+  host's own legacy store is still imported.
 * **Vectors of another dimension** (documents ingested before the v25
   backbone swap carry 384-d vectors) are embedded again from their text with
-  the bank's current model, the way ingest embeds them.
+  the bank's current model, the way ingest embeds them. That runs while the
+  daemon starts, so each page logs its progress.
 """
 
 from __future__ import annotations
@@ -37,16 +42,20 @@ from __future__ import annotations
 import logging
 import shutil
 import time
+import uuid
+from contextlib import contextmanager
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
 MIGRATION_META_KEY = "reference_chroma_import"
-# Rows per chromadb ``get`` while reading the store, and per committed page
+# Chunks per chromadb ``get`` while reading the store, and per committed page
 # while writing the bank.
 _PAGE = 256
-# The scratch copy's directory name, beside the store.
+# The scratch directory's name, beside the store.
 SCRATCH_NAME = ".chromadb-import-copy"
+# Free space the copy needs beyond the store's own size.
+_COPY_HEADROOM_BYTES = 256 * 1024 * 1024
 
 
 def _store_present(store: Path) -> bool:
@@ -60,14 +69,32 @@ def _remove_scratch(scratch: Path) -> None:
     shutil.rmtree(scratch, ignore_errors=True)
     if scratch.exists():
         logger.warning(
-            "could not remove the chromadb import's scratch copy at %s; the "
-            "next import attempt removes it, or delete it by hand", scratch)
+            "could not remove the chromadb import's scratch copy at %s; a "
+            "later import attempt removes it, or delete it by hand", scratch)
 
 
-def _read_store(store: Path, collection_name: str) -> list[tuple] | None:
-    """Every chunk in the store's collection as ``(id, document, metadata,
-    embedding)``, read from a scratch copy; None when the store holds no
-    such collection."""
+def _tree_bytes(root: Path) -> int:
+    return sum(p.stat().st_size for p in root.rglob("*") if p.is_file())
+
+
+def _as_int(value) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _as_float(value) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+@contextmanager
+def _open_copy(store: Path, collection_name: str):
+    """The store's collection, opened on a scratch copy; None when the store
+    holds no such collection."""
     try:
         import chromadb
     except ImportError as exc:
@@ -78,8 +105,16 @@ def _read_store(store: Path, collection_name: str) -> list[tuple] | None:
 
     scratch = store.parent / SCRATCH_NAME
     _remove_scratch(scratch)
+    need = _tree_bytes(store) + _COPY_HEADROOM_BYTES
+    free = shutil.disk_usage(store.parent).free
+    if free < need:
+        raise RuntimeError(
+            f"importing the chromadb store at {store} needs a scratch copy of "
+            f"about {need // 2**20} MB beside it and only {free // 2**20} MB "
+            "is free; free some space on that volume and restart. Nothing "
+            "was copied or written.")
+    copy = scratch / uuid.uuid4().hex / "chromadb"
     try:
-        copy = scratch / "chromadb"
         shutil.copytree(store, copy)
         client = chromadb.PersistentClient(path=str(copy))
         try:
@@ -88,32 +123,17 @@ def _read_store(store: Path, collection_name: str) -> list[tuple] | None:
             # InvalidCollectionException, NotFoundError). list_collections
             # returns names in 0.6 and Collection objects before and after.
             names = {getattr(c, "name", c) for c in client.list_collections()}
-            if collection_name not in names:
-                return None
-            collection = client.get_collection(collection_name)
-            out: list[tuple] = []
-            offset = 0
-            while True:
-                page = collection.get(
-                    include=["embeddings", "documents", "metadatas"],
-                    limit=_PAGE, offset=offset)
-                ids = page["ids"]
-                if not ids:
-                    break
-                embeddings = page["embeddings"]
-                for i, chunk in enumerate(ids):
-                    out.append((
-                        chunk,
-                        page["documents"][i] if page["documents"] else None,
-                        (page["metadatas"][i] if page["metadatas"] else None) or {},
-                        None if embeddings is None else embeddings[i],
-                    ))
-                offset += len(ids)
-            return out
+            yield (client.get_collection(collection_name)
+                   if collection_name in names else None)
         finally:
             close = getattr(client, "close", None)
             if close is not None:
                 close()
+            # chromadb caches each path's System (threads, open files) for
+            # the life of the process; dropping it lets the scratch copy go.
+            clear = getattr(client, "clear_system_cache", None)
+            if clear is not None:
+                clear()
     finally:
         _remove_scratch(scratch)
 
@@ -141,59 +161,74 @@ def import_legacy_store(store, collection_name: str, storage,
     if not _store_present(store):
         return {"migrated": False, "reason": "no_store"}
 
-    rows: list[dict] = []
-    skipped = 0
-    for chunk, document, metadata, embedding in (
-            _read_store(store, collection_name) or []):
-        if document is None:
-            skipped += 1
-            continue
-        rows.append({
-            "id": chunk,
-            "source": str(metadata.get("source", "")),
-            "chunk_index": int(metadata.get("chunk_index", 0)),
-            "text": document,
-            "embedding": embedding,
-            "metadata": dict(metadata),
-            "ingested_at": float(metadata.get("timestamp", 0.0)),
-        })
+    with _open_copy(store, collection_name) as collection:
+        ids = [] if collection is None else list(
+            collection.get(include=[])["ids"])
+        written: list[str] = []
+        inserted = reembedded = resumed = skipped = 0
+        for start in range(0, len(ids), _PAGE):
+            page_ids = ids[start:start + _PAGE]
+            present = storage.reference_chunk_ids_present(page_ids)
+            resumed += len(present)
+            todo_ids = [i for i in page_ids if i not in present]
+            written.extend(present)
+            if not todo_ids:
+                continue
+            page = collection.get(
+                ids=todo_ids, include=["embeddings", "documents", "metadatas"])
+            documents = page["documents"] or [None] * len(page["ids"])
+            metadatas = page["metadatas"] or [None] * len(page["ids"])
+            embeddings = page["embeddings"]
+            rows: list[dict] = []
+            for i, chunk in enumerate(page["ids"]):
+                if documents[i] is None:
+                    skipped += 1
+                    continue
+                metadata = dict(metadatas[i] or {})
+                rows.append({
+                    "id": chunk,
+                    "source": str(metadata.get("source", "")),
+                    "chunk_index": _as_int(metadata.get("chunk_index", 0)),
+                    "text": documents[i],
+                    "embedding": None if embeddings is None else embeddings[i],
+                    "metadata": metadata,
+                    "ingested_at": _as_float(metadata.get("timestamp", 0.0)),
+                })
+            stale = [r for r in rows if r["embedding"] is None
+                     or len(r["embedding"]) != _EXPECTED_EMBEDDING_DIM]
+            for at in range(0, len(stale), INGEST_ENCODE_BATCH):
+                batch = stale[at:at + INGEST_ENCODE_BATCH]
+                vectors = embedder.encode([r["text"] for r in batch])
+                if hasattr(vectors, "detach"):
+                    vectors = vectors.detach().cpu().numpy()
+                for row, vector in zip(batch, vectors):
+                    row["embedding"] = vector
+            reembedded += len(stale)
+            inserted += storage.upsert_reference_chunks(rows, replace=False)
+            written.extend(r["id"] for r in rows)
+            logger.warning(
+                "chromadb document import: %d of %d chunks done (%d embedded "
+                "again so far)", min(start + _PAGE, len(ids)), len(ids),
+                reembedded)
 
-    inserted = reembedded = resumed = 0
-    for start in range(0, len(rows), _PAGE):
-        page = rows[start:start + _PAGE]
-        present = storage.reference_chunk_ids_present([r["id"] for r in page])
-        todo = [r for r in page if r["id"] not in present]
-        resumed += len(page) - len(todo)
-        stale = [r for r in todo if r["embedding"] is None
-                 or len(r["embedding"]) != _EXPECTED_EMBEDDING_DIM]
-        for at in range(0, len(stale), INGEST_ENCODE_BATCH):
-            batch = stale[at:at + INGEST_ENCODE_BATCH]
-            vectors = embedder.encode([r["text"] for r in batch])
-            if hasattr(vectors, "detach"):
-                vectors = vectors.detach().cpu().numpy()
-            for row, vector in zip(batch, vectors):
-                row["embedding"] = vector
-        reembedded += len(stale)
-        inserted += storage.upsert_reference_chunks(todo, replace=False)
-
-    # Verified before it is marked: every chunk read is in the bank now.
-    ids = [r["id"] for r in rows]
-    missing = len(ids) - len(storage.reference_chunk_ids_present(ids))
+    # Verified before it is marked: every chunk with text is in the bank.
+    missing = len(written) - len(storage.reference_chunk_ids_present(written))
     if missing:
         raise RuntimeError(
-            f"{missing} of {len(ids)} chunks read from the chromadb store at "
-            f"{store} are not in the bank after the import; not marking it "
+            f"{missing} of {len(written)} chunks read from the chromadb store "
+            f"at {store} are not in the bank after the import; not marking it "
             "done, so the next start tries again")
+    chunks = len(written)
     storage.meta_set(MIGRATION_META_KEY, {
-        "status": "done", "chunks": len(rows), "inserted": inserted,
+        "status": "done", "chunks": chunks, "inserted": inserted,
         "reembedded": reembedded, "resumed": resumed, "skipped": skipped,
         "at": time.time(),
     })
-    if rows or skipped:
+    if chunks or skipped:
         logger.warning(
             "imported %d document chunk(s) from the chromadb store at %s into "
             "the bank (%d new, %d already there, %d embedded again, %d "
             "without text skipped); the store is left in place and no longer "
-            "read", len(rows), store, inserted, resumed, reembedded, skipped)
-    return {"migrated": True, "chunks": len(rows), "inserted": inserted,
+            "read", chunks, store, inserted, resumed, reembedded, skipped)
+    return {"migrated": True, "chunks": chunks, "inserted": inserted,
             "reembedded": reembedded, "resumed": resumed, "skipped": skipped}

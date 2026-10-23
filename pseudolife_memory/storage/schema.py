@@ -880,9 +880,13 @@ SCHEMA_SQL += MAINTAINER_SCHEMA_SQL
 # chunk_index, timestamp}); ``ingested_at`` is that timestamp (the latest
 # ingest of the chunk) and ``created_at`` the first. No vector index on
 # purpose: search is an exact ``ORDER BY embedding <=> q, id`` scan, whose
-# deterministic order the Rust port's differential harness compares, and a
-# reference store is small next to the entries table. Revisit only with a
-# measured need.
+# deterministic order the Rust port's differential harness compares (exact
+# search is the maintainer's 2026-10-09 decision, D5 in rust/CUTOVER.md),
+# and a reference store is small next to the entries table. Measured
+# 2026-10-23 on the Windows host's bench PostgreSQL, top 5 of N random
+# 1024-d chunks, median: 2.2 ms at 1,000, 17.9 ms at 10,000, 139 ms at
+# 50,000; the live bank then held no documents. Revisit with an index only
+# when a bank's reference store nears the tens of thousands.
 REFERENCE_SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS reference_chunks (
     id          TEXT PRIMARY KEY,

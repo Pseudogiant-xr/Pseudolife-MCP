@@ -144,6 +144,16 @@ class PendingEntryReinstatementRecovery:
     request_sha256: str
 
 
+# Documents live in the Postgres bank since schema v57; file mode has none.
+_FILE_MODE_DOCUMENTS = (
+    "Documents are stored in the Postgres bank, and this daemon runs in file "
+    "mode (no Postgres), so it cannot {verb} them. Set "
+    "PSEUDOLIFE_MCP_DATABASE_URL or install the lite tier "
+    "(pip install \"pseudolife-mcp[lite]\"); documents ingested before v57 "
+    "under <data_dir>/chromadb are imported the first time the daemon starts "
+    "with Postgres.")
+
+
 def _entry_to_dict(
     entry: MemoryEntry,
     score: float | None = None,
@@ -3505,12 +3515,7 @@ class MemoryService(DreamOps, MaintainerOps):
         with self._lock:
             self._ensure_init()
             if self._reference is None:
-                raise RuntimeError(
-                    "Documents are stored in the Postgres bank, and this "
-                    "daemon runs in file mode (no Postgres). Set "
-                    "PSEUDOLIFE_MCP_DATABASE_URL or install the lite tier "
-                    "to ingest documents.",
-                )
+                raise RuntimeError(_FILE_MODE_DOCUMENTS.format(verb="ingest"))
             assert self._embedder is not None
             file_path = Path(path)
             if not file_path.exists():
@@ -3541,7 +3546,7 @@ class MemoryService(DreamOps, MaintainerOps):
         with self._lock:
             self._ensure_init()
             if self._reference is None:
-                return {"count": 0, "entries": []}
+                raise RuntimeError(_FILE_MODE_DOCUMENTS.format(verb="search"))
             assert self._embedder is not None
             embedding = self._embedder.encode_query(query)
             result = self._reference.retrieve(embedding, top_k=top_k,
