@@ -269,7 +269,7 @@ if docker exec "$DAEMON_CONTAINER" sh -c "tar czf $state_tmp -C /data ." \
     && [ -s "$state_out" ]; then
     echo "State volume -> $state_out"
 else
-    echo "WARNING: STATE VOLUME NOT BACKED UP (ingested documents + cortex/graph snapshots live there; is the daemon running?)" >&2
+    echo "WARNING: STATE VOLUME NOT BACKED UP (cortex/graph snapshots and pre-v57 documents live there; is the daemon running?)" >&2
 fi
 
 # Rotation. Rejected .part artifacts age out on the same window: they are

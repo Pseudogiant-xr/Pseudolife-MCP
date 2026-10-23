@@ -12,8 +12,8 @@
 #                                         #   restore, start daemon, health.
 #   ops/restore.sh --apply --state-archive <pseudolife_state-*.tgz>
 #                                         # ALSO replace the daemon state
-#                                         # volume (ingested documents +
-#                                         # cortex/graph snapshots) from a
+#                                         # volume (cortex/graph snapshots,
+#                                         # pre-v57 documents) from a
 #                                         # backup.sh state tar. Opt-in: a
 #                                         # DB-only restore must not clobber
 #                                         # current state.
@@ -86,7 +86,7 @@ if [ -n "$STATE_ARCHIVE" ]; then
 else
     newest_state="$(ls -1t "$repo/data/backups"/pseudolife_state-*.tgz 2>/dev/null | head -1 || true)"
     if [ -n "$newest_state" ]; then
-        echo "==> Note: state archives exist (newest: $(basename "$newest_state")); pass --state-archive to restore ingested documents + cortex/graph snapshots too."
+        echo "==> Note: state archives exist (newest: $(basename "$newest_state")); pass --state-archive to restore the cortex/graph snapshots (and pre-v57 documents) too."
     fi
 fi
 
