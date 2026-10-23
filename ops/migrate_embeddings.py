@@ -55,8 +55,12 @@ SAFETY
   between fetch and cast), restore NOT NULL on ``entries``. No vector index
   is created or rebuilt — there is currently none: ``ensure_schema`` drops
   ``entries_embedding_idx`` unconditionally on every boot (2026-07-02
-  zombie sweep) because all similarity search happens in Python over the
-  hydrated bands, not via a SQL vector query.
+  zombie sweep) because similarity search over these four tables happens in
+  Python over the hydrated bands, not via a SQL vector query. The one SQL
+  vector query, over v57's ``reference_chunks`` (ingested documents), is an
+  exact scan with no index either, and that table is not in ``_TABLES``:
+  the dimension guard refuses a 384-d bank before ``ensure_schema`` creates
+  it, so it first appears at vector(1024), after this migration.
 * ``SCHEMA_META_VERSION`` (the live constant -- this script always stamps
   whatever the current build's value is, not a value fixed at the time this
   migration was written for v25) is stamped in ``meta`` LAST, only after

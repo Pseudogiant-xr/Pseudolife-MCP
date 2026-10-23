@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # pg_dump the Pseudolife-MCP database to data/backups/ with 7-day rotation,
-# plus a tar of the daemon state volume (ChromaDB reference documents, cortex
-# snapshot, graph snapshots) — the bank alone does not cover document_ingest.
+# plus a tar of the daemon state volume (cortex snapshot, graph snapshots,
+# and any pre-v57 ChromaDB store). Ingested documents are in the bank since
+# schema v57, so the dump carries them.
 # Bash port of ops/backup.ps1 for Linux/macOS hosts.
 #
 #   ops/backup.sh                  # dump into <repo>/data/backups
@@ -255,9 +256,9 @@ elif [ "$rotation" = accepted ]; then
     echo "WARNING: ROW-COUNT GATE: $note. Accepted (--accept-row-drop): rotating, and this backup is the new baseline." >&2
 fi
 
-# State volume (ChromaDB reference documents + cortex snapshot + graph
-# snapshots), tarred from inside the daemon container — the only place those
-# live; a pg_dump alone loses every document_ingest on restore. Warn, never
+# State volume (cortex snapshot + graph snapshots + any pre-v57 ChromaDB
+# store, which a restored pre-v57 dump imports at its first start), tarred
+# from inside the daemon container — the only place those live. Warn, never
 # fail: the DB dump above is the critical artifact and deploys must not
 # abort because the daemon happens to be stopped (the skip is loud).
 state_out="$OUT_DIR/pseudolife_state-$stamp.tgz"

@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "Apache-2.0"}
 
-# Core deps — same memory stack as Pseudolife (torch + MIRAS + ChromaDB),
+# Core deps — same memory stack as Pseudolife (torch + MIRAS),
 # minus the LLM backends, FastAPI, and Electron-side machinery. MCP SDK on
 # top so MCP-compatible clients can attach over stdio or Streamable HTTP.
 dependencies = [
@@ -19,6 +19,10 @@ dependencies = [
     "sentence-transformers>=2.2.0",
     "numpy>=1.24.0",
     "pyyaml>=6.0",
+    # Reader only since schema v57: documents live in the bank, and chromadb
+    # is imported just to copy a pre-v57 store in once
+    # (storage/migrate_chroma.py). Kept until a release has carried that
+    # import, so an upgrade straight past v57 still finds its documents.
     "chromadb>=0.5.0",
     # Migrated to SDK v2 (2026-08-25, spec 2026-08-25-mcp-v2-session-identity):
     # serves protocol 2026-07-28 plus every earlier revision. The range is

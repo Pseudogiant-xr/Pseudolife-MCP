@@ -90,6 +90,20 @@
             ],
             "rows": []
           },
+          "public.cms_counters": {
+            "columns": [
+              "id",
+              "preset_name",
+              "interaction_count",
+              "logical_turn_count",
+              "tier_queries",
+              "tier_hits",
+              "surprise_history",
+              "consolidation_events",
+              "updated_at"
+            ],
+            "rows": []
+          },
           "public.communities": {
             "columns": [
               "id",
@@ -873,7 +887,7 @@
               ],
               [
                 "schema_version",
-                56
+                57
               ],
               [
                 "writer_lease_epoch",
@@ -909,6 +923,19 @@
               "created_at",
               "paired_at",
               "revoked_at"
+            ],
+            "rows": []
+          },
+          "public.reference_chunks": {
+            "columns": [
+              "id",
+              "source",
+              "chunk_index",
+              "text",
+              "embedding",
+              "metadata",
+              "ingested_at",
+              "created_at"
             ],
             "rows": []
           },
@@ -1252,6 +1279,20 @@
             ],
             "rows": []
           },
+          "public.cms_counters": {
+            "columns": [
+              "id",
+              "preset_name",
+              "interaction_count",
+              "logical_turn_count",
+              "tier_queries",
+              "tier_hits",
+              "surprise_history",
+              "consolidation_events",
+              "updated_at"
+            ],
+            "rows": []
+          },
           "public.communities": {
             "columns": [
               "id",
@@ -2035,7 +2076,7 @@
               ],
               [
                 "schema_version",
-                56
+                57
               ],
               [
                 "writer_lease_epoch",
@@ -2071,6 +2112,19 @@
               "created_at",
               "paired_at",
               "revoked_at"
+            ],
+            "rows": []
+          },
+          "public.reference_chunks": {
+            "columns": [
+              "id",
+              "source",
+              "chunk_index",
+              "text",
+              "embedding",
+              "metadata",
+              "ingested_at",
+              "created_at"
             ],
             "rows": []
           },
@@ -2362,6 +2416,20 @@
             ],
             "rows": []
           },
+          "public.cms_counters": {
+            "columns": [
+              "id",
+              "preset_name",
+              "interaction_count",
+              "logical_turn_count",
+              "tier_queries",
+              "tier_hits",
+              "surprise_history",
+              "consolidation_events",
+              "updated_at"
+            ],
+            "rows": []
+          },
           "public.communities": {
             "columns": [
               "id",
@@ -3145,7 +3213,7 @@
               ],
               [
                 "schema_version",
-                56
+                57
               ],
               [
                 "writer_lease_epoch",
@@ -3181,6 +3249,19 @@
               "created_at",
               "paired_at",
               "revoked_at"
+            ],
+            "rows": []
+          },
+          "public.reference_chunks": {
+            "columns": [
+              "id",
+              "source",
+              "chunk_index",
+              "text",
+              "embedding",
+              "metadata",
+              "ingested_at",
+              "created_at"
             ],
             "rows": []
           },
@@ -3473,6 +3554,20 @@
             ],
             "rows": []
           },
+          "public.cms_counters": {
+            "columns": [
+              "id",
+              "preset_name",
+              "interaction_count",
+              "logical_turn_count",
+              "tier_queries",
+              "tier_hits",
+              "surprise_history",
+              "consolidation_events",
+              "updated_at"
+            ],
+            "rows": []
+          },
           "public.communities": {
             "columns": [
               "id",
@@ -4256,7 +4351,7 @@
               ],
               [
                 "schema_version",
-                56
+                57
               ],
               [
                 "writer_lease_epoch",
@@ -4292,6 +4387,19 @@
               "created_at",
               "paired_at",
               "revoked_at"
+            ],
+            "rows": []
+          },
+          "public.reference_chunks": {
+            "columns": [
+              "id",
+              "source",
+              "chunk_index",
+              "text",
+              "embedding",
+              "metadata",
+              "ingested_at",
+              "created_at"
             ],
             "rows": []
           },
@@ -4637,6 +4745,20 @@
             ],
             "rows": []
           },
+          "public.cms_counters": {
+            "columns": [
+              "id",
+              "preset_name",
+              "interaction_count",
+              "logical_turn_count",
+              "tier_queries",
+              "tier_hits",
+              "surprise_history",
+              "consolidation_events",
+              "updated_at"
+            ],
+            "rows": []
+          },
           "public.communities": {
             "columns": [
               "id",
@@ -5420,7 +5542,7 @@
               ],
               [
                 "schema_version",
-                56
+                57
               ],
               [
                 "writer_lease_epoch",
@@ -5456,6 +5578,19 @@
               "created_at",
               "paired_at",
               "revoked_at"
+            ],
+            "rows": []
+          },
+          "public.reference_chunks": {
+            "columns": [
+              "id",
+              "source",
+              "chunk_index",
+              "text",
+              "embedding",
+              "metadata",
+              "ingested_at",
+              "created_at"
             ],
             "rows": []
           },
@@ -5745,6 +5880,20 @@
             ],
             "rows": []
           },
+          "public.cms_counters": {
+            "columns": [
+              "id",
+              "preset_name",
+              "interaction_count",
+              "logical_turn_count",
+              "tier_queries",
+              "tier_hits",
+              "surprise_history",
+              "consolidation_events",
+              "updated_at"
+            ],
+            "rows": []
+          },
           "public.communities": {
             "columns": [
               "id",
@@ -6528,7 +6677,7 @@
               ],
               [
                 "schema_version",
-                56
+                57
               ],
               [
                 "writer_lease_epoch",
@@ -6564,6 +6713,19 @@
               "created_at",
               "paired_at",
               "revoked_at"
+            ],
+            "rows": []
+          },
+          "public.reference_chunks": {
+            "columns": [
+              "id",
+              "source",
+              "chunk_index",
+              "text",
+              "embedding",
+              "metadata",
+              "ingested_at",
+              "created_at"
             ],
             "rows": []
           },
@@ -6852,6 +7014,20 @@
               "policy_variant",
               "episode_ids",
               "start_times"
+            ],
+            "rows": []
+          },
+          "public.cms_counters": {
+            "columns": [
+              "id",
+              "preset_name",
+              "interaction_count",
+              "logical_turn_count",
+              "tier_queries",
+              "tier_hits",
+              "surprise_history",
+              "consolidation_events",
+              "updated_at"
             ],
             "rows": []
           },
@@ -7638,7 +7814,7 @@
               ],
               [
                 "schema_version",
-                56
+                57
               ],
               [
                 "writer_lease_epoch",
@@ -7674,6 +7850,19 @@
               "created_at",
               "paired_at",
               "revoked_at"
+            ],
+            "rows": []
+          },
+          "public.reference_chunks": {
+            "columns": [
+              "id",
+              "source",
+              "chunk_index",
+              "text",
+              "embedding",
+              "metadata",
+              "ingested_at",
+              "created_at"
             ],
             "rows": []
           },
@@ -7966,6 +8155,20 @@
             ],
             "rows": []
           },
+          "public.cms_counters": {
+            "columns": [
+              "id",
+              "preset_name",
+              "interaction_count",
+              "logical_turn_count",
+              "tier_queries",
+              "tier_hits",
+              "surprise_history",
+              "consolidation_events",
+              "updated_at"
+            ],
+            "rows": []
+          },
           "public.communities": {
             "columns": [
               "id",
@@ -8749,7 +8952,7 @@
               ],
               [
                 "schema_version",
-                56
+                57
               ],
               [
                 "writer_lease_epoch",
@@ -8785,6 +8988,19 @@
               "created_at",
               "paired_at",
               "revoked_at"
+            ],
+            "rows": []
+          },
+          "public.reference_chunks": {
+            "columns": [
+              "id",
+              "source",
+              "chunk_index",
+              "text",
+              "embedding",
+              "metadata",
+              "ingested_at",
+              "created_at"
             ],
             "rows": []
           },
@@ -9076,6 +9292,20 @@
             ],
             "rows": []
           },
+          "public.cms_counters": {
+            "columns": [
+              "id",
+              "preset_name",
+              "interaction_count",
+              "logical_turn_count",
+              "tier_queries",
+              "tier_hits",
+              "surprise_history",
+              "consolidation_events",
+              "updated_at"
+            ],
+            "rows": []
+          },
           "public.communities": {
             "columns": [
               "id",
@@ -9859,7 +10089,7 @@
               ],
               [
                 "schema_version",
-                56
+                57
               ],
               [
                 "writer_lease_epoch",
@@ -9895,6 +10125,19 @@
               "created_at",
               "paired_at",
               "revoked_at"
+            ],
+            "rows": []
+          },
+          "public.reference_chunks": {
+            "columns": [
+              "id",
+              "source",
+              "chunk_index",
+              "text",
+              "embedding",
+              "metadata",
+              "ingested_at",
+              "created_at"
             ],
             "rows": []
           },

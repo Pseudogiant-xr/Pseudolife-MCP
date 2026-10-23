@@ -316,6 +316,16 @@ def _seed_bank(conn) -> None:
         "VALUES (NULL, 'last spring', 156.0, 'Gadget', 'gadget', "
         "'was painted', 'was painted')"
     )
+    # v57: an ingested document chunk, metadata and vector included.
+    cur.execute(
+        "INSERT INTO reference_chunks (id, source, chunk_index, text, "
+        "embedding, metadata, ingested_at, created_at) "
+        "VALUES ('0123456789abcdef0123456789abcdef', 'manual.md', 0, "
+        "'Widgets ship in blue.', %s::vector, "
+        "'{\"source\": \"manual.md\", \"chunk_index\": 0, "
+        "\"timestamp\": 157.0}'::jsonb, 157.0, 150.0)",
+        (_VEC,),
+    )
     cur.execute(
         "INSERT INTO meta (key, value) VALUES "
         "('cortex_dream_cursor', '160.5'::jsonb), "
@@ -373,6 +383,7 @@ def test_export_import_roundtrip_preserves_every_table(pg_url, tmp_path):
     assert result["counts"]["entries"] == 2
     assert result["counts"]["facts"] == 3
     assert result["counts"]["edge_evidence"] == 1
+    assert result["counts"]["reference_chunks"] == 1
 
     with _bank(pg_url):
         pass  # truncate back to empty, then release the connection
@@ -620,7 +631,8 @@ def test_export_skips_transient_meta_and_telemetry(pg_url, tmp_path):
             "('dream_ack_secret_v1', '\"bank-local-secret\"'::jsonb), "
             "('coordination_hlc_highwater', '[10000, 1]'::jsonb), "
             "('coordination_bank_id', '\"11111111-1111-4111-8111-111111111111\"'::jsonb), "
-            "('writer_lease_epoch', '7'::jsonb) "
+            "('writer_lease_epoch', '7'::jsonb), "
+            "('reference_chroma_import', '{\"status\": \"done\"}'::jsonb) "
             "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
         )
         conn.commit()
@@ -646,6 +658,9 @@ def test_export_skips_transient_meta_and_telemetry(pg_url, tmp_path):
         # imported value could move it backwards under a writer that
         # remembers a higher one.
         assert "writer_lease_epoch" not in meta_keys
+        # v57: whether THIS host's chromadb store was imported; the target
+        # imports its own.
+        assert "reference_chroma_import" not in meta_keys
         assert "cortex_dream_cursor" in meta_keys
         signals = [json.loads(line) for line in
                    zf.read("outcome_signals.jsonl").decode().split("\n")

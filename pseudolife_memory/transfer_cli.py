@@ -51,6 +51,9 @@ import psycopg
 
 from pseudolife_memory.backup_cli import _default_data_dir
 from pseudolife_memory.storage import embedded_pg
+from pseudolife_memory.storage.migrate_chroma import (
+    MIGRATION_META_KEY as REFERENCE_IMPORT_META_KEY,
+)
 from pseudolife_memory.storage.schema import (
     BENCH_RESET_TABLES,
     _backfill_trace_invalidations,
@@ -79,6 +82,8 @@ EXPORTED_TABLES = (
     # v37: the retire/restore audit is the only copy of a retired lesson or
     # world fact once compaction has purged the row — it travels with them.
     "store_decisions",
+    # v57: ingested documents, with their vectors.
+    "reference_chunks",
 )
 
 # Operational, not knowledge: the dream pre-image journal only exists to
@@ -105,6 +110,10 @@ EXCLUDED_TABLES = (
     # v54: the maintainer's passkeys, bootstrap codes and spent challenge
     # nonces are credentials of this deployment (its RP ID): full backups only.
     "maintainer_passkeys", "maintainer_bootstrap", "maintainer_nonces",
+    # v57: the CMS counters (interaction and logical-turn counts, retrieval
+    # hits, surprise history) describe this daemon's serving history, like
+    # the weights.pt file they replace, which no transfer carried either.
+    "cms_counters",
 )
 
 # Columns of an exported table that are serving telemetry under the same
@@ -131,6 +140,9 @@ _META_SKIP_KEYS = {
     "writer_lease_epoch",
     # v54: the key that MACs maintainer challenges belongs to this bank.
     "maintainer_secret_v1",
+    # v57: this host's pre-v57 chromadb store was imported. The documents
+    # travel as reference_chunks rows; the target imports its own store.
+    REFERENCE_IMPORT_META_KEY,
 }
 
 

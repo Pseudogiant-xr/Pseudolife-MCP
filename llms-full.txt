@@ -384,8 +384,8 @@ value per `entity.attribute`, or a member set for set-valued slots — with
 provenance tiers and contender parking instead of silent overwrites); a typed **knowledge graph** over those facts
 with a closed relation vocabulary and on-read inference; the **world
 cortex** (durable *cited* facts about external reality, age-decayed trust);
-**procedural lessons** learned from the agent's own work; and a ChromaDB
-**reference bank** for document RAG. The canonical layers in depth:
+**procedural lessons** learned from the agent's own work; and a
+**reference bank** for document RAG, stored in the bank since schema v57. The canonical layers in depth:
 [the memory model](docs/guide/memory-model.md); the graph and multi-hop
 recall: [retrieval](docs/guide/retrieval.md).
 
@@ -1313,7 +1313,7 @@ mistaken for a real bank.
 | Capability | Status |
 |---|---|
 | Transport | Streamable-HTTP MCP daemon (`/mcp`); stdio shim is the installer default (per-session identity) — HTTP remains for single-session setups |
-| Storage | Postgres 18 + pgvector (source of truth); ChromaDB for the reference bank |
+| Storage | Postgres 18 + pgvector (source of truth, ingested documents included since v57) |
 | Associative store | Flat similarity store (default since the 2026-08-15 measured verdict; the 8-tier banded preset remains opt-in); hybrid dense + BM25 ranking (BM25 on by default); contradiction detection admits potential updates, including a deterministic slot-identity path regardless of embedding similarity, while retaining earlier source notes; whole-note supersession requires an explicit replacement operation |
 | Canonical-fact cortex | Single-writer: LLM dream pass + `memory_fact_*` (regex auto-promote opt-in, default off) |
 | Set-valued slots | `memory_set_add` / `memory_set_remove` for many-current-value slots; one-way scalar→set conversion, aggregate scalars guarded (park as contender); an `assistant`-origin add cannot convert or join another tier's set, and cannot retract another tier's member |
@@ -1329,7 +1329,7 @@ mistaken for a real bank.
 | Consolidation | `memory_consolidation_candidates` + `memory_consolidate` |
 | Optional components | Cross-encoder reranker (`rerank=True`, ~80 MB, downloaded on first use; the offline daemon image does not include it); ONNX embedding backend (`pip install .[onnx]` — load-only, and auto-selected when installed and the configured model's artifact is already on disk, ~3x faster CPU encode on MiniLM. The configured artifact must already exist locally: the daemon image provisions MiniLM's while building, while a pip install stays on torch until you provision it yourself. Models whose Transformer module loads from a subfolder use torch on native Windows, and the default Qwen3-Embedding-0.6B has no ONNX export at all); NLI contradiction scorer (`pip install .[nli]`, ~278 MB) |
 | Web console | Cortex Console at `/ui/` — health/stats, fact review + history, 3D graph and review queue, search/trace, coordination board, config editor (read-mostly, token-gated like `/mcp`) |
-| Schema version | v56 (Postgres meta version) — additive `ADD COLUMN IF NOT EXISTS` migrations on daemon start, **except v25**: the `vector(384)`→`vector(1024)` move is not additive, so the daemon refuses to start against an older-dimensioned bank until you run [`ops/migrate_embeddings.py`](docs/runbooks/embedding-v25-migration.md); legacy file-mode `.pt` banks auto-migrate into Postgres; [full version history](docs/guide/configuration.md#schema-version-history) |
+| Schema version | v57 (Postgres meta version) — additive `ADD COLUMN IF NOT EXISTS` migrations on daemon start, **except v25**: the `vector(384)`→`vector(1024)` move is not additive, so the daemon refuses to start against an older-dimensioned bank until you run [`ops/migrate_embeddings.py`](docs/runbooks/embedding-v25-migration.md); legacy file-mode `.pt` banks auto-migrate into Postgres; [full version history](docs/guide/configuration.md#schema-version-history) |
 
 ## Troubleshooting
 
@@ -2355,10 +2355,12 @@ its unmatched outputs.
 ## Background documents — the reference bank
 
 A fifth layer holds *source material* rather than memories: the **reference
-bank**, a ChromaDB chunk store for background documents (papers, manuals,
-specs, codebases). `document_ingest(path)` extracts the text of a `.txt` /
+bank**, a chunk store for background documents (papers, manuals,
+specs, codebases), kept in the Postgres bank's `reference_chunks` table
+since schema v57 (a pre-v57 ChromaDB store is imported once at start). `document_ingest(path)` extracts the text of a `.txt` /
 `.md` / `.pdf` / `.html` file, chunks it, and indexes it;
-`document_search(query)` retrieves chunks by pure cosine similarity.
+`document_search(query)` retrieves chunks by exact cosine similarity
+(ties broken by chunk id, so the order is deterministic).
 It is deliberately kept apart from conversational memory — nothing ingested
 here feeds the cortex, the graph, or the dream pass, and `memory_search`
 surfaces document chunks alongside memories without mixing the stores.
@@ -4613,7 +4615,7 @@ backups. Part of the [user guide](../../README.md#documentation).
 
 | Variable | Default | Effect |
 |----------|---------|--------|
-| `PSEUDOLIFE_MCP_DATABASE_URL` | _(unset → lite/file mode)_ | Postgres DSN; when set, PG is the source of truth (schema v56). Unset: with the `[lite]` extra installed the daemon auto-starts an embedded PostgreSQL and fills this in itself; otherwise v0.1 file-only mode (announced loudly at startup). |
+| `PSEUDOLIFE_MCP_DATABASE_URL` | _(unset → lite/file mode)_ | Postgres DSN; when set, PG is the source of truth (schema v57). Unset: with the `[lite]` extra installed the daemon auto-starts an embedded PostgreSQL and fills this in itself; otherwise v0.1 file-only mode (announced loudly at startup). |
 | `PSEUDOLIFE_MCP_STORAGE` | `auto` | `files` opts the daemon out of the `[lite]` embedded Postgres (file mode even when pg0-embedded is installed). Only consulted when no DSN is set. |
 | `PSEUDOLIFE_MCP_DAEMON_URL` | `http://127.0.0.1:8765` | Daemon the shim connects to (and auto-starts). Use an HTTP(S) origin: scheme, host and optional port, without a path, user information, query or fragment. |
 | `PSEUDOLIFE_MCP_NO_SPAWN` | _(unset)_ | Set `1` on the **shim** to disable its spawn-a-daemon fallback: when nothing answers at `PSEUDOLIFE_MCP_DAEMON_URL` it waits up to 5 s for an external daemon instead, then starts the session without it (the last handshake it cached for that URL, retried until the daemon answers; see [the remote bank guide](remote-bank.md#when-the-daemon-is-unreachable)). The Docker-tier installers set this on every shim registration — after a reboot the shim can probe before Docker Desktop has bound the port, and a spawned host fallback then wins the bind race and shadows the real bank with whatever stale local state it finds. Leave unset on pip/lite installs, where the spawn fallback is the intended zero-config path. |
@@ -4623,7 +4625,7 @@ backups. Part of the [user guide](../../README.md#documentation).
 | `PSEUDOLIFE_MCP_PROXY_TIMEOUT_SECONDS` | `180` | Total deadline for one upstream shim operation, including connection and initialization. Accepts finite positive seconds; invalid values use the default. Set the client's tool timeout above this value to leave time for the shim's sanitized failure response. An uncertain write is never automatically replayed. |
 | `PSEUDOLIFE_MCP_TOKENS` | _(unset)_ | Per-principal bearer tokens: `token:principal,token:principal`. A matched token's principal **is** the writer id and keys the toolset tier (the identity axis that survives the MCP 2026-07-28 stateless core). Malformed entries are logged and skipped — a skipped token does not authenticate, and a map that parses to zero entries with no singular token refuses startup rather than running open. May be set alongside `PSEUDOLIFE_MCP_TOKEN`; the map wins for its tokens. Note the singular-token holder is fully trusted and may still assert any writer via `X-PL-Writer` — mint per-principal tokens when that distinction matters. |
 | `PSEUDOLIFE_MCP_TRUST_BIND` | _(unset)_ | Set `1` to allow a non-loopback bind without a token when the boundary is external (containerized, loopback-published). The compose daemon sets this; never set it for a host daemon. |
-| `PSEUDOLIFE_MCP_DATA_DIR` | `./data` (cwd-relative) | Weights cache + legacy-migration source + ChromaDB. When the `[lite]` embedded Postgres engages, the default moves to a stable per-user dir instead (`%LOCALAPPDATA%\pseudolife-mcp`, `~/.local/share/pseudolife-mcp`, or `~/Library/Application Support/pseudolife-mcp`) — a per-launch-directory Postgres bank would be a data-scattering footgun. Windows lite note: must be ASCII-only (the daemon refuses otherwise, with the remedy in the message). |
+| `PSEUDOLIFE_MCP_DATA_DIR` | `./data` (cwd-relative) | Weights cache + legacy-migration source (including a pre-v57 ChromaDB document store, imported once). When the `[lite]` embedded Postgres engages, the default moves to a stable per-user dir instead (`%LOCALAPPDATA%\pseudolife-mcp`, `~/.local/share/pseudolife-mcp`, or `~/Library/Application Support/pseudolife-mcp`) — a per-launch-directory Postgres bank would be a data-scattering footgun. Windows lite note: must be ASCII-only (the daemon refuses otherwise, with the remedy in the message). |
 | `PSEUDOLIFE_MCP_CONFIG` | `<data_dir>/config.yaml` if present, else built-ins | Override MIRAS / embedding / memory config. |
 | `PSEUDOLIFE_WRITER_ID` | `unknown` | Identifies this writer on every canonical write (schema v11). The shim forwards it as the `X-PL-Writer` header; the compose daemon defaults to `mcp-client`, and the installer pins `claude-code` / `claude-desktop` / `codex` / `gemini` / `mcp-client` in `ops/.env` per the selected `--client`. Existing installs that predate the client selector should set `PSEUDOLIFE_WRITER_ID=claude-code` in `ops/.env` to keep their writer identity (and any `PSEUDOLIFE_MCP_TIER_MAP` keyed on it) stable. |
 | `PSEUDOLIFE_MCP_SHARED_HOST` | _(unset)_ | Set `1` on a stdio shim launcher serving multiple cloud/ChatGPT/Dot conversations without a supported per-conversation binding. It registers no board address and refuses mailbox operations, while memory and awareness calls remain available. Writer IDs `claude-desktop` and `tunnel` always use this guard. The operator setting takes precedence over Codex metadata and channel mode; it does not authenticate a caller. See [Delivery and recovery](#delivery-and-recovery). |
@@ -8088,8 +8090,10 @@ admission, and client-only installs.
 **Containerized / daemon mode (recommended).** The durable source of truth
 is **Postgres**, which lives in an *external* Docker volume —
 `pseudolife-mcp-bank` by default (entries + facts + graph). A second
-external volume, `pseudolife-mcp-state`, holds the daemon's ChromaDB
-reference bank, the counter file `weights.pt`, and the cortex snapshot.
+external volume, `pseudolife-mcp-state`, holds the counter file
+`weights.pt`, the cortex snapshot, and any pre-v57 ChromaDB document store
+(kept on disk after its one-time import; ingested documents live in the
+bank since v57).
 Both are declared `external` in `ops/docker-compose.yml` precisely so a
 container teardown can't take them with it. The host `data/` dir then holds
 only backups (`data/backups/` from `ops/backup.ps1` — a `pg_dump` of the
@@ -8110,13 +8114,17 @@ data/
 ├── memory_state/
 │   └── cms_state.pt        # Associative entries + metadata (file mode)
 ├── cortex_state.pt         # Slot-keyed canonical facts (cortex, schema v8)
-├── chromadb/               # Reference bank (RAG documents)
 └── config.yaml             # Optional overrides
 ```
 
+File mode has no document store: since schema v57 ingested documents live in
+the Postgres bank (`reference_chunks`), so `document_ingest` needs a DSN or
+the lite tier. A `data/chromadb/` directory left by a pre-v57 install is
+imported into the bank the first time the data dir runs with Postgres, and is
+never written or removed.
+
 In **file mode only**, wipe memory by deleting `data/` and restarting; wipe
-just documents via `data/chromadb/`; wipe just the associative store via
-`data/memory_state/`. (In containerized mode these files are not the source
+just the associative store via `data/memory_state/`. (In containerized mode these files are not the source
 of truth — see the volume note above.)
 
 ## The test suite's Postgres login: `pseudolife-mcp test-login`
@@ -8270,8 +8278,8 @@ against a role-named PostgreSQL 18; since the Docker tier's 16→18 bump
 straight into the Docker tier; the lite tier uses the embedded
 runtime's own bundled `pg_dump`, attaching to the running instance or
 starting it for the duration) plus a
-`pseudolife_lite_state-*.tar.gz` of the data dir (ChromaDB, weights,
-config; `embedded_pg/` is excluded — the dump covers it), with the same
+`pseudolife_lite_state-*.tar.gz` of the data dir (weights, config, any
+pre-v57 ChromaDB store; ingested documents are in the dump since v57; `embedded_pg/` is excluded — the dump covers it), with the same
 7-day rotation (`--keep-days`). The artifact names
 (`pseudolife_lite_memory-*` / `pseudolife_lite_state-*`) are deliberately
 disjoint from `ops/backup.*`'s, so the two tools can share a directory
@@ -8658,7 +8666,7 @@ session's note points at them.
 
 ## Schema version history
 
-The current Postgres meta version is **v56**; migrations are additive
+The current Postgres meta version is **v57**; migrations are additive
 `ADD COLUMN IF NOT EXISTS` on daemon start, and legacy file-mode `.pt`
 banks auto-migrate into Postgres. The one exception is v25 itself: a
 vector *dimension* change on an existing column is not additive, so
@@ -8720,6 +8728,7 @@ The milestones:
 | v54 | Maintainer messages and Board roles from the Console, proven by a passkey (2026-10-04). Three new tables: `maintainer_passkeys` (each WebAuthn credential the maintainer enrolled: its id, COSE public key, algorithm, sign count, label, who enrolled it, `pending`/`active`/`revoked` state, the end of its quarantine, its times, and `flagged_at` when its sign count went backwards), `maintainer_bootstrap` (the SHA-256 of each one-time host code that admits the first passkey, its expiry, which credential redeemed it, and `failed_attempts`, the wrong-code guesses that burn it at five) and `maintainer_nonces` (spent challenge nonces, kept 7 days past their payload's expiry so a clock step back cannot reopen one). `coordination_messages` gains `origin` (`agent`, or `maintainer` for a message the daemon verified from a passkey signature), `maintainer_proof` (the signed payload, authenticatorData, clientDataJSON, signature and passkey label, so a stored message can be re-verified) and `repudiated_at`. The challenge MAC key is the meta row `maintainer_secret_v1`. All three tables and the meta key stay out of logical exports (credentials of this deployment); a physical backup carries them. Additive/idempotent: `CREATE TABLE IF NOT EXISTS`, and the message columns are added only when missing. |
 | v55 | Board session names (2026-10-05). `coordination_agents` gains `name` (what the board shows for the row), `name_source` (who set it: `agent` — `memory_agents(action="update", name=...)` — over `harness` — the shim, from the title Claude Code or Codex already shows for the session — over `title` — a `memory_session_title` rename of the row's session; `''` means unnamed), `name_set_at` and `harness_name` (the newest harness title, kept while an agent name outranks it), plus a partial index on `episode` for the retitle path. An unnamed row reads as its label and the first 8 characters of its id. Additive/idempotent: the columns are added only when missing. |
 | v56 | Review-queue judge votes (2026-10-17). `edge_proposals` gains `judge2_verdict`, `judge2_confidence`, `judge2_model`, `judged2_at`, `judge2_relation`, `judge2_served_model` and `judge2_policy`: the link judge's second opinion beside its first (`link_judge_two_vote`, shadow by default). `entity_proposals` gains `judge2_served_model`, `judge2_policy`, `judge3_verdict`, `judge3_confidence`, `judge3_model`, `judged3_at`, `judge3_served_model` and `judge3_policy`: the merge judge's third opinion on a row whose first two disagree (`judge_tiebreak_mode`, shadow by default), and for each later vote the model its endpoint reported serving and that endpoint's judging-policy fingerprint. Both proposal tables gain `judge_served_model`: the model the first opinion's endpoint reported serving (`judge_model` is the configured name; the served name lived only in the judging memo, which every refresh prunes to pending rows). `merge_decisions` gains `votes` (JSONB): room for the judge votes a merge or junk proposal carried when it was decided, kept on the FK-free audit row because an accepted merge CASCADE-deletes the proposal with its votes; nothing writes it yet. All nullable; NULL = not asked (or, for a served model, not reported; for `votes`, no snapshot), the pre-v56 behaviour. Additive/idempotent (`ADD COLUMN IF NOT EXISTS`). |
+| v57 | Documents and CMS counters in the bank (2026-10-23). Ingested documents (`document_ingest` / `document_search`) move from the chromadb store under `<data_dir>/chromadb` into the `reference_chunks` table: chunk id (unchanged md5 of source, chunk index and text head), `source`, `chunk_index`, `text`, `embedding vector(1024)`, `metadata` (the chromadb metadata dict verbatim), `ingested_at` and `created_at`. Search is exact (`ORDER BY embedding <=> q, id COLLATE "C"`, no approximate index), so equal inputs serve equal results in one order. A start on a bank without the `reference_chroma_import` meta marker copies an existing chromadb store in once, committing page by page and writing the marker last, idempotently (`ON CONFLICT DO NOTHING`), reading a temporary copy so the store on disk stays byte-identical; vectors of another dimension are embedded again. Backups and transfers carry the documents inside the bank; an old backup whose documents are only in its state archive imports them at the first start after restore. File mode has no document store (a deprecation: file mode retires with the Rust cutover, decision D1). The same bump adds `cms_counters`, one row (`id = 1`) for the CMS counters that `memory_state/weights.pt` holds: `interaction_count`, `logical_turn_count`, `tier_queries`, `tier_hits` and `surprise_history` (per band, JSONB), `consolidation_events` (JSONB), `preset_name` and `updated_at`; it is bank-local (not exported) and nothing writes it yet. Additive/idempotent. |
 
 Later additions that write into these tables without new DDL are listed with the feature that added them rather than as schema milestones: `memory_outcome(used_ids=[...])` (2026-09-05; every in-window serving event credited since 2026-09-08) labels served entries under `used_via="outcome"` — see the memory-model guide.
 

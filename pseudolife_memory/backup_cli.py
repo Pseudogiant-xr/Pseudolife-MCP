@@ -8,9 +8,9 @@ script's shape:
   ``PSEUDOLIFE_MCP_DATABASE_URL``, or the lite tier's embedded instance
   (attached, or started for the duration; a data dir with no existing
   pgdata is NEVER initialized by a backup);
-* a tar.gz of the rest of the data dir (chromadb, memory_state, config)
-  — a pg_dump alone loses every ``document_ingest`` on restore, same
-  reasoning as ops/backup.ps1;
+* a tar.gz of the rest of the data dir (memory_state, config, and any
+  pre-v57 chromadb store, which a restored pre-v57 dump imports at its
+  first start; ingested documents are in the dump since v57);
 * rotation of this tool's own files past ``--keep-days`` (default 7),
   run only after the fresh backup succeeded, and never touching files
   it didn't create.

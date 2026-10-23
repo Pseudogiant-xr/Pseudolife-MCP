@@ -574,6 +574,6 @@ def pristine_service(warm_service: MemoryService) -> MemoryService:
     if warm_service._reference is not None:
         try:
             warm_service._reference.clear()
-        except Exception:  # noqa: BLE001 — chromadb may complain on empty.
+        except Exception:  # noqa: BLE001 — best-effort reset between tests.
             pass
     return warm_service

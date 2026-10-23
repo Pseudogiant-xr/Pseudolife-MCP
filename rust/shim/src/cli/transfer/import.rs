@@ -16,7 +16,7 @@ use std::{
 use zip::{CompressionMethod, ZipArchive};
 
 /// `SCHEMA_META_VERSION` at the pinned oracle, as meta's jsonb text.
-const CURRENT_SCHEMA: &str = "56";
+const CURRENT_SCHEMA: &str = "57";
 /// `schema._EXPECTED_EMBEDDING_DIM`: ensure_schema refuses any other live dim.
 const EXPECTED_DIM: i64 = 1024;
 /// `transfer_cli._BATCH_ROWS`: rows grouped per executemany flush.

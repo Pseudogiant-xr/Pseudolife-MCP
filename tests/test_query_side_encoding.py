@@ -206,7 +206,16 @@ def test_trace_query_uses_encode_query(recording_service):
 
 
 def test_search_documents_query_uses_encode_query(recording_service):
+    from pseudolife_memory.memory.titans_memory import RetrievalResult
+
+    class _NoDocuments:
+        # File mode has no document store (schema v57 keeps documents in
+        # Postgres); stand one in so the query reaches the embedder.
+        def retrieve(self, embedding, top_k=None, *, strict=False):
+            return RetrievalResult(entries=[], scores=[], surprises=[])
+
     svc, embedder = recording_service
+    svc._reference = _NoDocuments()  # noqa: SLF001
     embedder.calls.clear()
 
     svc.search_documents("what color is the sky")

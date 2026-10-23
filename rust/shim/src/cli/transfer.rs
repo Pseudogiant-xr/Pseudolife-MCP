@@ -21,7 +21,7 @@ const IMPORT_HELP: &str = include_str!("transfer/import_help.txt");
 const NO_DATABASE: &str = "no database configured — set PSEUDOLIFE_MCP_DATABASE_URL (Docker tier: postgresql://pseudolife:<POSTGRES_PASSWORD from ops/.env>@127.0.0.1:5433/pseudolife_memory) or use a lite data dir that holds a bank.\n";
 
 /// `transfer_cli.py` table roster and meta policy, in its order.
-pub(super) const EXPORTED_TABLES: [&str; 26] = [
+pub(super) const EXPORTED_TABLES: [&str; 27] = [
     "meta",
     "episodes",
     "entries",
@@ -48,8 +48,9 @@ pub(super) const EXPORTED_TABLES: [&str; 26] = [
     "chronicle_events",
     "curation_judgments",
     "store_decisions",
+    "reference_chunks",
 ];
-pub(super) const EXCLUDED_TABLES: [&str; 17] = [
+pub(super) const EXCLUDED_TABLES: [&str; 18] = [
     "dream_runs",
     "dream_run_slots",
     "retrieval_events",
@@ -67,8 +68,9 @@ pub(super) const EXCLUDED_TABLES: [&str; 17] = [
     "maintainer_passkeys",
     "maintainer_bootstrap",
     "maintainer_nonces",
+    "cms_counters",
 ];
-const META_SKIP_KEYS: [&str; 7] = [
+const META_SKIP_KEYS: [&str; 8] = [
     "schema_version",
     "active_session_pointer",
     "dream_ack_secret_v1",
@@ -76,6 +78,7 @@ const META_SKIP_KEYS: [&str; 7] = [
     "coordination_bank_id",
     "writer_lease_epoch",
     "maintainer_secret_v1",
+    "reference_chroma_import",
 ];
 
 pub(super) fn skip_meta_key(key: &str) -> bool {
@@ -267,7 +270,7 @@ fn finish(mode: &str, outcome: Outcome) -> Option<ExitCode> {
         Outcome::SchemaDeferred => (
             emit(
                 &mut io::stderr().lock(),
-                "pseudolife-stdio: import into a bank not at this build's schema (56) is deferred in this candidate (needs native ensure_schema)\n",
+                "pseudolife-stdio: import into a bank not at this build's schema (57) is deferred in this candidate (needs native ensure_schema)\n",
             ),
             1,
         ),

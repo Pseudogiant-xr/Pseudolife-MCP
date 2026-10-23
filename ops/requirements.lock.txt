@@ -38,7 +38,8 @@
 #   user), CVE-2026-45831 (SimpleRBACAuthorizationProvider ignores
 #   tenant/database/collection scope). All three live in the Chroma HTTP
 #   server and its auth providers; the daemon's only chromadb use is the
-#   embedded PersistentClient in pseudolife_memory/memory/reference_bank.py
+#   embedded PersistentClient in pseudolife_memory/storage/migrate_chroma.py
+#   (since schema v57, a one-time read of a pre-v57 store)
 #   (no HttpClient, no server, no auth providers anywhere in the tree), so
 #   none of the paths exist at runtime. Re-check on the next chromadb release.
 # - transformers is held at 4.57.6 (the last 4.x release): optimum-onnx (the

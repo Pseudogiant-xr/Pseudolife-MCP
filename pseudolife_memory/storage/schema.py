@@ -17,7 +17,7 @@ from typing import Iterable
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_META_VERSION = 56
+SCHEMA_META_VERSION = 57
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -871,6 +871,58 @@ END $$;
 """
 SCHEMA_SQL += MAINTAINER_SCHEMA_SQL
 
+# v57: ingested documents (document_ingest), one row per chunk. Until v57 they
+# lived in a chromadb store under <data_dir>/chromadb, outside the bank, so no
+# backup or transfer of the bank carried them; storage/migrate_chroma.py
+# copies such a store in once. ``id`` is the chromadb chunk id (md5 of
+# source, chunk index and text head), so a re-ingest replaces the same rows.
+# ``metadata`` is the chunk's metadata dict as chromadb held it ({source,
+# chunk_index, timestamp}); ``ingested_at`` is that timestamp (the latest
+# ingest of the chunk) and ``created_at`` the first. No vector index on
+# purpose: search is an exact ``ORDER BY embedding <=> q, id`` scan, whose
+# deterministic order the Rust port's differential harness compares, and a
+# reference store is small next to the entries table. Revisit only with a
+# measured need.
+REFERENCE_SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS reference_chunks (
+    id          TEXT PRIMARY KEY,
+    source      TEXT NOT NULL,
+    chunk_index INTEGER NOT NULL,
+    text        TEXT NOT NULL,
+    embedding   vector(1024) NOT NULL,
+    metadata    JSONB NOT NULL DEFAULT '{}',
+    ingested_at DOUBLE PRECISION NOT NULL,
+    created_at  DOUBLE PRECISION NOT NULL
+);
+CREATE INDEX IF NOT EXISTS reference_chunks_source_idx
+    ON reference_chunks (source);
+"""
+SCHEMA_SQL += REFERENCE_SCHEMA_SQL
+
+# v57: the CMS counters, one row. Until v57 they lived only in
+# <data_dir>/memory_state/weights.pt (a torch file, despite the name holding
+# no weights since v0.5), which no backup dump, logical transfer or Rust
+# daemon reads. The columns are that file's payload: the interaction and
+# logical-turn counters (consolidation eligibility and entries'
+# last_logical_turn read them), the retrieval query count, and per band
+# name the hit count and the last 100 surprise samples, plus the last 50
+# consolidation events and the preset the counters were taken under.
+# Bank-local, like the file: a logical transfer does not carry it.
+CMS_COUNTERS_SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS cms_counters (
+    id                   INTEGER PRIMARY KEY CHECK (id = 1),
+    preset_name          TEXT NOT NULL,
+    interaction_count    BIGINT NOT NULL,
+    logical_turn_count   BIGINT NOT NULL,
+    tier_queries         BIGINT NOT NULL,
+    tier_hits            JSONB NOT NULL,
+    surprise_history     JSONB NOT NULL,
+    consolidation_events JSONB NOT NULL,
+    updated_at           DOUBLE PRECISION NOT NULL
+);
+"""
+SCHEMA_SQL += CMS_COUNTERS_SCHEMA_SQL
+
 # Every table this schema declares — the ONE list a bench/test reset
 # truncates. It lives here, beside the DDL, because it has to grow in the
 # same edit that adds a table; `tests/test_bench_reset_tables.py` fails the
@@ -908,6 +960,7 @@ BENCH_RESET_TABLES = (
     "coordination_leases", "coordination_lease_waiters", "coordination_wakes",
     "principals",
     "maintainer_passkeys", "maintainer_bootstrap", "maintainer_nonces",
+    "reference_chunks", "cms_counters",
 )
 
 # A test or bench reset reaps every other backend on its database, applies
@@ -1108,7 +1161,9 @@ def _refuse_on_embedding_dim_mismatch(cur) -> None:
 
     Checked on ``entries.embedding`` only — all four embedding columns move
     together in lockstep (one model, one dimension), so one column is a
-    sufficient sentinel for the other three.
+    sufficient sentinel for the other three. v57's ``reference_chunks``
+    is a fifth vector column of the same dimension; a future dimension
+    change re-embeds it with the others.
 
     ``atttypmod`` on a pgvector column IS the declared dimension verbatim
     (unlike e.g. ``varchar``, which offsets it) — confirmed against a live
