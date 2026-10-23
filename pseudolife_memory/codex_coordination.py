@@ -359,7 +359,7 @@ class CodexCoordinationRegistry:
             except Exception as error:
                 code = getattr(error, "code", None)
                 transient = (isinstance(error, asyncio.TimeoutError)
-                             or code == "transport_unavailable"
+                             or code in {"transport_unavailable", "context_unreadable"}
                              or (code == "context_unavailable"
                                  and getattr(error, "status", None) in {429, 500, 502, 503, 504}))
                 if transient and not self._closing:
@@ -396,7 +396,7 @@ class CodexCoordinationRegistry:
             hint = f"Coordination: {origin} was refused by authentication or access policy; saved state was preserved. Check the configured credential and access."
         elif isinstance(error, asyncio.TimeoutError):
             hint = f"Coordination: {origin} timed out (timeout); saved state was preserved. Retry when the bank responds."
-        elif code in {"transport_unavailable", "context_unavailable"}:
+        elif code in {"transport_unavailable", "context_unavailable", "context_unreadable"}:
             hint = f"Coordination: {origin} failed ({code}); saved state was preserved. Retry when the bank responds."
         elif code == "attachment_busy" and phase == "adapter_startup":
             hint = "Coordination: identity attachment is busy (attachment_busy); saved state was preserved. Wait for the prior attachment lease to expire."

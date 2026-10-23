@@ -129,7 +129,9 @@ class MIRASConfig:
 
 @dataclass
 class ReferenceConfig:
-    """ChromaDB-backed reference bank for RAG document storage."""
+    """Reference bank (document RAG) settings. Chunks live in the Postgres
+    bank since schema v57; ``persist_dir`` is where a pre-v57 chromadb store
+    is read from, once, by the v57 import."""
     persist_dir: str = "./memory_state/chromadb"
     collection_name: str = "reference_bank"
     chunk_size: int = 512
@@ -1241,7 +1243,7 @@ class MemoryConfig:
     # bit-for-bit, so behaviour is unchanged for anyone who doesn't opt into
     # a different preset.
     miras: MIRASConfig = field(default_factory=MIRASConfig)
-    # Reference bank (RAG via ChromaDB)
+    # Reference bank (document RAG)
     reference: ReferenceConfig = field(default_factory=ReferenceConfig)
     # NLI contradiction-detection (fourth path)
     nli: NLIConfig = field(default_factory=NLIConfig)
