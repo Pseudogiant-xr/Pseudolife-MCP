@@ -16,8 +16,8 @@ none, so the push runs everything as before:
   with that commit as its merge commit, from an ``integrate/`` branch of this
   repository into master;
 - the batch head's tree is the pushed commit's tree;
-- the newest pull_request run of the same workflow file on that head (and
-  branch) is completed;
+- the newest pull_request run of the same workflow file on that head (its
+  branch, from this repository, not a fork) is completed;
 - the job, in that run's latest attempt, is listed once, completed with
   conclusion ``success``, on that head. ``skipped`` is not ``success``: a
   Rust-only batch skips ci.yml's Python lanes, and its master push still runs
@@ -123,9 +123,14 @@ def _batch_run(get: Get, repo: str, workflow: str, branch: str, head_sha: str) -
     listing = get(f"/repos/{repo}/actions/workflows/{name}/runs?{query}")
     _require(isinstance(listing, dict) and isinstance(listing.get("workflow_runs"), list),
              "the batch's workflow runs could not be read")
+    # The head repository too: a fork can push the same commit to a branch of
+    # the same name and open its own pull request, whose run tested another
+    # merge. A run without one matches nothing.
     runs = [run for run in listing["workflow_runs"]
             if isinstance(run, dict) and run.get("path") == workflow and run.get("event") == "pull_request"
-            and run.get("head_sha") == head_sha and run.get("head_branch") == branch]
+            and run.get("head_sha") == head_sha and run.get("head_branch") == branch
+            and isinstance(run.get("head_repository"), dict)
+            and run["head_repository"].get("full_name") == repo]
     _require(runs, f"no completed {workflow} run of the batch on {head_sha[:12]}")
     newest = max(runs, key=lambda run: (str(run.get("created_at", "")), int(run.get("id") or 0)))
     _require(newest.get("status") == "completed",

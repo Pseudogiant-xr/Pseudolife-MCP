@@ -66,12 +66,19 @@ def runs_path(workflow=CI):
             f"?event=pull_request&head_sha={HEAD}&per_page=100")
 
 
+HEAD_REPOSITORY = object()  # the default: this repository
+
+
 def run(run_id=RUN, *, workflow=CI, status="completed", attempt=1, branch=BRANCH, sha=HEAD,
-        created="2026-10-23T11:59:26Z"):
-    return {"id": run_id, "path": workflow, "event": "pull_request", "status": status,
-            "conclusion": "success" if status == "completed" else None,
-            "run_attempt": attempt, "head_branch": branch, "head_sha": sha,
-            "created_at": created, "pull_requests": []}
+        created="2026-10-23T11:59:26Z", head_repository=HEAD_REPOSITORY):
+    value = {"id": run_id, "path": workflow, "event": "pull_request", "status": status,
+             "conclusion": "success" if status == "completed" else None,
+             "run_attempt": attempt, "head_branch": branch, "head_sha": sha,
+             "head_repository": {"full_name": REPO} if head_repository is HEAD_REPOSITORY else head_repository,
+             "created_at": created, "pull_requests": []}
+    if head_repository is None:
+        del value["head_repository"]
+    return value
 
 
 def pull(**changes):
@@ -146,11 +153,14 @@ def test_only_success_counts(conclusion):
 
 
 def test_a_job_still_running_on_the_batch_does_not_count():
+    # A unique name with conclusion success, so only the status check keeps
+    # it out (a duplicate or a non-success conclusion would hide that).
     table = routes()
-    table[jobs_path()]["jobs"].append(job("test", None, status="in_progress"))
+    table[jobs_path()]["jobs"].append(job("frontend-still-running", "success", status="in_progress"))
     table[jobs_path()]["total_count"] += 1
     passed, _ = decide(FakeGitHub(table))
-    assert "test" not in passed
+    assert "frontend-still-running" not in passed
+    assert passed == ["frontend", "guards", "lock-resolve", "scope"]
 
 
 def test_matrix_jobs_match_by_their_expanded_name_only():
@@ -248,10 +258,27 @@ def test_a_tree_mismatch_skips_nothing():
     ([run(workflow=RUST)], "no completed"),
     ([run(branch="integrate/2026-10-23-batch-4")], "no completed"),
     ([run(sha="2" * 40)], "no completed"),
+    # The near miss: a fork can push the batch head to a branch of the same
+    # name and open its own pull request; its run tested another merge.
+    ([run(head_repository={"full_name": "someone/Pseudolife-MCP"})], "no completed"),
+    ([run(head_repository=None)], "no completed"),
+    ([run(head_repository={})], "no completed"),
+    ([run(head_repository="Pseudogiant-xr/Pseudolife-MCP")], "no completed"),
 ])
 def test_a_missing_or_unfinished_batch_run_skips_nothing(runs, words):
     passed, reason = decide(FakeGitHub(routes(runs=runs)))
     assert passed == [] and words in reason
+
+
+def test_a_fork_run_never_stands_in_for_the_batch_run():
+    # Same sha, same branch name, newer and green, but from a fork: the
+    # batch's own run decides, and its failed job still runs.
+    fork = run(RUN + 9, created="2026-10-23T12:45:00Z", head_repository={"full_name": "someone/Pseudolife-MCP"})
+    table = routes([("test", "failure"), ("frontend", "success")], runs=[run(), fork])
+    table[jobs_path(run=RUN + 9)] = {"total_count": 1, "jobs": [job("test", "success")]}
+    github = FakeGitHub(table)
+    assert decide(github)[0] == ["frontend"]
+    assert jobs_path(run=RUN + 9) not in github.calls
 
 
 def test_the_newest_completed_run_is_used():
