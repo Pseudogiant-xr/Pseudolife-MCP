@@ -779,12 +779,14 @@ async fn board_identity_pending_registration_is_not_retried_as_a_blip() {
     let home = Home::new();
     let runtime = runtime(&fixture, false);
     let mut options = fast(&runtime, &home, "1");
-    options.timing.identity_check_retry = Duration::from_secs(5);
+    // A retry would wait the whole delay: far above the bound, which leaves a
+    // stalled hosted runner wide headroom.
+    options.timing.identity_check_retry = Duration::from_secs(60);
     let board = Board::attach_options(runtime.clone(), options).await;
     let started = std::time::Instant::now();
     let error = board_call(&board, "memory_agents").await.err().unwrap();
     assert_eq!(error.message, policy::PENDING);
-    assert!(started.elapsed() < Duration::from_secs(2));
+    assert!(started.elapsed() < Duration::from_secs(30));
     board.close().await;
 }
 
