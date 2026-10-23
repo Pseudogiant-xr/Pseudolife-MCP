@@ -136,6 +136,7 @@ class Dropped:
     comment: bool = True
     commented: bool = False
     unlabelled: bool = False
+    waiting: bool = False   # held back for the census; listed apart, never commented
 
 
 @dataclass
@@ -460,7 +461,7 @@ def _census_keys(rev: str) -> set[str]:
         return set()
     try:
         hashes = json.loads(shown.stdout).get("input_sha256")
-    except (ValueError, AttributeError):
+    except (ValueError, AttributeError, RecursionError):
         return set()
     return set(hashes) if isinstance(hashes, dict) else set()
 
@@ -477,7 +478,11 @@ def _census_hashed(root: Path, base_sha: str, changers: list[Member]) -> set[str
     paths = set(getattr(module, "CONTRACT_SOURCES", ()))
     producer_paths = getattr(module, "producer_paths", None)
     if producer_paths is not None:
-        paths |= set(producer_paths(root))
+        try:
+            paths |= set(producer_paths(root))
+        except subprocess.CalledProcessError as exc:
+            raise Refusal(f"listing the census's files on the batch head failed ({exc}); "
+                          f"check `git ls-files` works in {root}, then build again") from None
     for rev in (base_sha, *(m.sha for m in changers)):
         paths |= _census_keys(rev)
     return paths
@@ -573,16 +578,24 @@ def _census_waiters(plan: Plan, members: list[Member], dropped: list[Dropped],
     regenerate its census. Only when the changers' census passes without
     the other members, and the batch without those waiters passes too;
     then HEAD is that batch and the waiters are returned (keeping their
-    label). Otherwise returns none, the trial heads left for the caller to
-    reset."""
+    label). A member a waiter had kept out (a conflict with it) merges in
+    that trial, so each trial head is searched again and its own waiters
+    join, until the check passes or a trial finds none. Otherwise returns
+    none, the trial heads left for the caller to reset."""
     changers = [m for m, _ in culprits]
     numbers = {m.number for m in changers}
     root = Path(_out("rev-parse", "--show-toplevel"))
-    hashed = _census_hashed(root, plan.base_sha, changers)
-    waiting = [(m, sorted(_changed(m.sha, plan.base_sha) & hashed))
-               for m in plan.merged if m.number not in numbers]
-    waiting = [(m, files) for m, files in waiting if files]
-    if not waiting:
+    before = {d.member.number for d in dropped}
+
+    def touching() -> dict[int, list[str]]:
+        """The merged non-changers on HEAD whose own diff touches a hashed path."""
+        hashed = _census_hashed(root, plan.base_sha, changers)
+        found = {m.number: sorted(_changed(m.sha, plan.base_sha) & hashed)
+                 for m in plan.merged if m.number not in numbers}
+        return {n: files for n, files in found.items() if files}
+
+    files = touching()
+    if not files:
         return []
     print("  checking the census changers' census without the other members")
     _remerge(plan, members, dropped, {m.number for m in members} - numbers)
@@ -590,19 +603,26 @@ def _census_waiters(plan: Plan, members: list[Member], dropped: list[Dropped],
             or _census_ci_fails(root, plan.base_sha)):
         print("  it fails without them too, so the census changers leave")
         return []
-    waiters = [Dropped(m, _waiting_reason(files, changers, plan.label), comment=False)
-               for m, files in waiting]
-    out = {d.member.number for d in waiters}
-    print("  merging again without " + ", ".join(f"#{n}" for n in sorted(out))
-          + ", which touch paths the census hashes")
-    _remerge(plan, members, dropped + waiters, out)
-    if (not numbers <= {m.number for m in plan.merged}
-            or _census_ci_fails(root, plan.base_sha)):
-        print("  the census still fails without them, so the census changers leave")
-        return []
-    for d in waiters:
-        print(f"  waiting #{d.member.number}: {d.reason}")
-    return waiters
+    while True:
+        # Label order, so the reasons and the output are deterministic.
+        waiters = [Dropped(m, _waiting_reason(files[m.number], changers, plan.label),
+                           comment=False, waiting=True)
+                   for m in members if m.number in files]
+        print("  merging again without " + ", ".join(f"#{n}" for n in sorted(files))
+              + ", which touch paths the census hashes")
+        _remerge(plan, members, dropped + waiters, before | set(files))
+        if not numbers <= {m.number for m in plan.merged}:
+            break
+        if not _census_ci_fails(root, plan.base_sha):
+            for d in waiters:
+                print(f"  waiting #{d.member.number}: {d.reason}")
+            return waiters
+        more = touching()
+        if not more:
+            break
+        files.update(more)
+    print("  the census still fails without them, so the census changers leave")
+    return []
 
 
 def _merge_batch(plan: Plan, members: list[Member]) -> None:
@@ -656,9 +676,14 @@ def body(plan: Plan, suite: str | None = None, harness: str | None = None) -> st
     for m in plan.merged:
         lines.append(f"| #{m.number} {_cell(m.title)} | `{m.sha}` | {m.url} "
                      f"({m.review.lower().replace('_', ' ')}) | {m.checks} |")
-    if plan.dropped:
+    dropped = [d for d in plan.dropped if not d.waiting]
+    waiting = [d for d in plan.dropped if d.waiting]
+    if dropped:
         lines += ["", "## Dropped", ""]
-        lines += [f"- #{d.member.number}: {d.reason}" for d in plan.dropped]
+        lines += [f"- #{d.member.number}: {d.reason}" for d in dropped]
+    if waiting:
+        lines += ["", "## Waiting (no action needed)", ""]
+        lines += [f"- #{d.member.number}: {d.reason}" for d in waiting]
     if plan.markers:
         lines += ["", "## Warning: conflict markers", "",
                   "These files carry conflict markers that master does not; "

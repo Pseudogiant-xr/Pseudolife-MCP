@@ -153,11 +153,18 @@ the other members whose own diff touches a path the census hashes, and
 runs the check once more. Those paths are what master's census module
 lists in the batch tree (so an added file counts), what master's census
 hashes (so a deleted one counts) and what each changer's census hashes
-(since a changer may widen the scopes). If that head passes, it is the
-batch: the members left out keep their label, need no action and join the
-next batch, where CI only reports the census because their diffs leave its
-inputs alone. A member touching only paths the census does not hash, such
-as `ops/tool.sh.bak` beside a hashed `ops/tool.sh`, stays in.
+(since a changer may widen the scopes). A member that conflicted with one
+of those merges once it is left out, so each trial head is searched again
+and its own such members are left out too, until the check passes or a
+trial finds none. If the check passes, that head is the batch: the members
+left out are listed in the batch pull request under `## Waiting (no action
+needed)`, get no comment, keep their label and join the next batch, where
+CI only reports the census because their diffs leave its inputs alone. A
+member touching only paths the census does not hash, such as
+`ops/tool.sh.bak` beside a hashed `ops/tool.sh`, stays in. Nothing bounds
+the wait: while census changers keep arriving, a member can wait batch
+after batch, and the operator then builds one batch without the changer
+(for example by removing the changer's label for that one build).
 
 If either check fails, `build` drops the census changers instead, naming
 the others that change the inputs too, and merges the rest again from

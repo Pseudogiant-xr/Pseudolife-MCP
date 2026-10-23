@@ -209,6 +209,7 @@ def world(tmp_path, monkeypatch):
         _git(seed, "fetch", "-q", "origin")
         _git(seed, "switch", "-q", "-C", "master", "origin/master")
         for name, text in files.items():
+            (seed / name).parent.mkdir(parents=True, exist_ok=True)
             (seed / name).write_text(text, encoding="utf-8")
         _git(seed, "add", "-A")
         _git(seed, "commit", "-q", "-m", "master moves")
@@ -1199,9 +1200,12 @@ def test_census_inputs_come_from_masters_census_module(world):
     assert integrate._census_inputs(first) is None
 
 
+WAITING = "## Waiting (no action needed)"
+
+
 def _waiting(body: str) -> dict[str, str]:
-    """The `## Dropped` lines of a batch body, by member number."""
-    lines = body.split("## Dropped", 1)[1].split("\n## ", 1)[0].splitlines()
+    """The waiting members' lines of a batch body, by member number."""
+    lines = body.split(WAITING, 1)[1].split("\n## ", 1)[0].splitlines()
     return {line.split(":", 1)[0].removeprefix("- #"): line for line in lines
             if line.startswith("- #")}
 
@@ -1228,6 +1232,7 @@ def test_members_that_stale_a_current_census_wait_and_the_changer_lands(world, c
     assert "merging again without #11, #12" in out
     assert world.gh.bodies("comment") == [] and world.gh.bodies("edit") == []
     (_, body), = world.gh.bodies("create")
+    assert "## Dropped" not in body           # they wait; nothing was dropped
     dropped = _waiting(body)
     assert set(dropped) == {"11", "12"}
     assert "ops/eleven.sh" in dropped["11"] and "ops/tool.sh" in dropped["12"]
@@ -1252,6 +1257,33 @@ def test_several_census_changers_stay_while_the_rest_waits(world, capsys):
     assert world.gh.bodies("comment") == [] and world.gh.bodies("edit") == []
     (_, body), = world.gh.bodies("create")
     assert set(_waiting(body)) == {"11"} and "#10 and #14" in _waiting(body)["11"]
+
+
+def test_a_member_colliding_with_a_waiter_waits_too(world, capsys):
+    # #13 conflicts with #11, so the full head never shows that #13 stales
+    # the census; without #11 it merges, and it must wait as well.
+    _with_census(world)
+    sha10 = world.pr(10, {"ops/ten.sh": "10\n",
+                          "rust/producer-census.json": _census(tool="t\n", ten="10\n")})
+    sha11 = world.pr(11, {"docs/foo.md": "w\n"})
+    sha13 = world.pr(13, {"docs/foo.md": "c\n"})
+    for n, sha in ((10, sha10), (11, sha11), (13, sha13)):
+        world.gh.add(n, sha)
+
+    assert _publish(world) == 0, capsys.readouterr()
+
+    assert _second_parents(world.origin, f"integrate/{DATE}-batch-1") == [sha10]
+    assert world.gh.bodies("comment") == [] and world.gh.bodies("edit") == []
+    (_, body), = world.gh.bodies("create")
+    waiting = _waiting(body)
+    assert set(waiting) == {"11", "13"}
+    assert all("docs/foo.md" in line for line in waiting.values())
+    assert "## Dropped" not in body
+
+
+def test_a_census_too_deep_to_parse_lists_no_paths(world):
+    world.advance_master({"rust/producer-census.json": "[" * 200000})
+    assert integrate._census_keys(_git(world.work, "rev-parse", "origin/master")) == set()
 
 
 def test_changers_stale_against_master_itself_leave_and_the_rest_stays(world, capsys):
@@ -1335,9 +1367,13 @@ def test_census_hashed_paths_join_masters_rules_and_every_census(world):
     _with_census(world)
     # Master's census once hashed a file the head has deleted; a changer's
     # census hashes a path master's rules do not reach; the head adds one
-    # master's rules do reach, and two near misses they do not.
-    world.advance_master({"rust/producer-census.json":
-                          _census(tool="t\n", gone="g\n")})
+    # master's rules do reach, and two near misses they do not. Master's
+    # module names one contract source.
+    stub = (world.seed / "rust" / "producer_census.py").read_text(encoding="utf-8")
+    world.advance_master({
+        "rust/producer-census.json": _census(tool="t\n", gone="g\n"),
+        "rust/producer_census.py": stub.replace(
+            "CONTRACT_SOURCES = ()", 'CONTRACT_SOURCES = ("contract/source.py",)')})
     base = _git(world.work, "rev-parse", "origin/master")
     sha10 = world.pr(10, {"rust/producer-census.json":
                           _census(tool="t\n", **{"wider/scope.txt": "w\n"})})
@@ -1351,7 +1387,8 @@ def test_census_hashed_paths_join_masters_rules_and_every_census(world):
 
     hashed = integrate._census_hashed(world.work, base, [member])
 
-    assert {"ops/tool.sh", "ops/gone.sh", "wider/scope.txt", "ops/new.sh"} <= hashed
+    assert {"ops/tool.sh", "ops/gone.sh", "wider/scope.txt", "ops/new.sh",
+            "contract/source.py"} <= hashed
     assert "ops/tool.sh.bak" not in hashed and "b.txt" not in hashed
 
 
