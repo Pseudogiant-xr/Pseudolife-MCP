@@ -89,9 +89,12 @@ them in this order (first done 2026-07-16, v0.8.0; GHCR images added
 
    **The same PR also bumps the native shim** (`evals/rust_port/README.md`,
    the version-only release paragraph; #751 did it for 0.18.1): the
-   `version` in `rust/shim/Cargo.toml`, the `pseudolife-stdio` entry in
-   `rust/Cargo.lock`, `PACKAGE_VERSION` in `rust/shim/src/lifecycle.rs`,
-   and the version literals in `rust/shim/tests/auth_lifecycle_http.rs`.
+   `version` in `rust/shim/Cargo.toml` and in `rust/daemon/Cargo.toml`
+   (the Rust daemon's `/health` version), the `pseudolife-stdio` and
+   `pseudolife-daemon` entries in `rust/Cargo.lock`, `PACKAGE_VERSION` in
+   `rust/shim/src/lifecycle.rs`, and the version literals in
+   `rust/shim/tests/auth_lifecycle_http.rs`
+   (`tests/test_plugin_packaging.py` pins both crates to `pyproject.toml`).
    Without them `evals/rust_port/test_phase1_inventory.py`
    (`test_candidate_runtime_identity_matches_the_selected_python_pin`)
    fails, as it did at the first 0.18.2 cut.

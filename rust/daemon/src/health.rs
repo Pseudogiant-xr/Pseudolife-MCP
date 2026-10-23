@@ -352,6 +352,14 @@ mod tests {
             p["schema"],
             json!(crate::storage::schema::SCHEMA_META_VERSION)
         );
+        // The release version, which the shims compare with their own: at
+        // the crate default 0.0.0 they told users to install release 0.0.0.
+        let release = include_str!("../../../pyproject.toml")
+            .lines()
+            .find_map(|line| line.trim_end().strip_prefix("version = \""))
+            .and_then(|rest| rest.strip_suffix('"'))
+            .unwrap();
+        assert_eq!(p["version"], json!(release));
         // Never initialized, and no principal read: not ready, status untouched.
         assert_eq!(
             (

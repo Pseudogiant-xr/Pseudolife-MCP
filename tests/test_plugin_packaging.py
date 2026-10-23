@@ -179,6 +179,25 @@ def test_server_json_versions_match_pyproject():
     assert match.group(1) == pyproject_version
 
 
+def test_the_native_crates_report_the_release_version():
+    """The Rust daemon reports its crate version on /health, and the shims
+    compare it with their own: at the crate's default 0.0.0 every shim told
+    the user to install release 0.0.0, which does not exist (found by #896's
+    activation rehearsal). Both native crates carry the release version, as
+    a checkout-built Python daemon reports the last release's, and the cut
+    moves them with the rest (release-procedure skill; the oracle selection's
+    VERSION_FILES)."""
+    pyproject_version = re.search(r'^version\s*=\s*"([^"]+)"',
+                                   _read("pyproject.toml"), re.M).group(1)
+    lock = _read("rust/Cargo.lock")
+    for crate, package in (("daemon", "pseudolife-daemon"), ("shim", "pseudolife-stdio")):
+        manifest = _read(f"rust/{crate}/Cargo.toml")
+        assert re.search(rf'^name = "{package}"\nversion = "([^"]+)"', manifest, re.M).group(1) \
+            == pyproject_version, f"rust/{crate}/Cargo.toml"
+        assert re.search(rf'^name = "{package}"\nversion = "([^"]+)"', lock, re.M).group(1) \
+            == pyproject_version, f"rust/Cargo.lock {package}"
+
+
 def test_plugin_ships_no_mcp_server():
     """The plugin is the hooks/commands layer only (2026-07-19): MCP transport
     is registered by ops/install.* (stdio shim by default — per-session
