@@ -138,6 +138,11 @@ async def fetch_context(client, url: str, snapshot, *, identity=None,
         # No response body is trusted as a diagnostic or recovery instruction.
         code = "unauthorized" if response.status_code == 401 else "context_unavailable"
         raise AdapterError("coordination bank context was refused", status=response.status_code, code=code)
+    # An answer that cannot be read as a bank identity (a proxy's error page,
+    # a body reshaped on the way) names no bank, so it is an outage callers
+    # retry, never a verdict that the identity changed. On 2026-10-23 one such
+    # answer to a heartbeat stopped background delivery until the credential
+    # rotated. The code is not a public daemon error, so no 4xx body carries it.
     try:
         value = response.json()
         bank_id, principal = value["bank_id"], value["principal"]
@@ -145,18 +150,21 @@ async def fetch_context(client, url: str, snapshot, *, identity=None,
                 or not isinstance(principal, str) or not 1 <= len(principal) <= 256
                 or any(ord(char) < 32 for char in principal)):
             raise ValueError
-        context = {"bank_id": bank_id, "principal": principal}
-        if identity is not None:
-            message = json.dumps(["pseudolife-context-v1", bank_id, principal,
-                identity["agent_id"], body["nonce"]], separators=(",", ":"), ensure_ascii=True).encode("ascii")
-            expected = hmac.new(hashlib.sha256(identity["credential"].encode()).digest(),
-                                message, hashlib.sha256).hexdigest()
-            proof = value.get("proof")
-            if not isinstance(proof, str) or not hmac.compare_digest(proof, expected):
-                raise ValueError
-        return context
     except (KeyError, TypeError, ValueError, AttributeError):
-        raise AdapterError("coordination bank identity could not be verified", code="bank_identity_mismatch") from None
+        raise AdapterError("coordination bank context answer could not be read",
+                           code="context_unreadable") from None
+    context = {"bank_id": bank_id, "principal": principal}
+    if identity is not None:
+        # A readable answer that does not prove this mailbox is a verdict.
+        message = json.dumps(["pseudolife-context-v1", bank_id, principal,
+            identity["agent_id"], body["nonce"]], separators=(",", ":"), ensure_ascii=True).encode("ascii")
+        expected = hmac.new(hashlib.sha256(identity["credential"].encode()).digest(),
+                            message, hashlib.sha256).hexdigest()
+        proof = value.get("proof")
+        if not isinstance(proof, str) or not hmac.compare_digest(proof, expected):
+            raise AdapterError("coordination bank identity could not be verified",
+                               code="bank_identity_mismatch")
+    return context
 
 
 def check_binding(state: dict, context: dict) -> None:

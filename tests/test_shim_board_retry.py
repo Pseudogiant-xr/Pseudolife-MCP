@@ -700,6 +700,10 @@ class _CheckDaemon(Daemon):
                 if self.blip == "other_bank":
                     return httpx.Response(200, json={"bank_id": OTHER_BANK,
                                                      "principal": "claude-code"})
+                if self.blip == "garbled":
+                    # A proxy's error page, or a body cut and reshaped on the
+                    # way: complete, answered 200, and not a bank identity.
+                    return httpx.Response(200, content=b"<html>proxy</html>")
         return await super().__call__(request)
 
 
@@ -728,7 +732,7 @@ def _checked_board_call(monkeypatch, blip, failures, params=None):
     return seen
 
 
-@pytest.mark.parametrize("blip", ["dropped", "timeout", "cold"])
+@pytest.mark.parametrize("blip", ["dropped", "timeout", "cold", "garbled"])
 def test_a_board_call_rides_out_one_failed_identity_check(monkeypatch, blip):
     """2026-10-19: a delegate's ``memory_agents`` update (after a host
     reboot) and ``memory_message`` receive (after an app sign-out) were
@@ -748,6 +752,7 @@ def test_a_board_call_rides_out_one_failed_identity_check(monkeypatch, blip):
 @pytest.mark.parametrize("blip,cause", [
     ("dropped", "got no answer"),
     ("cold", "HTTP 500"),
+    ("garbled", "answer could not be read"),
 ])
 def test_an_identity_check_that_keeps_failing_names_its_real_cause(monkeypatch, blip, cause):
     """Still failing after the retries: refused, and the error says what
@@ -763,6 +768,24 @@ def test_an_identity_check_that_keeps_failing_names_its_real_cause(monkeypatch, 
     assert "reattach" not in refusal.message
     assert refusal.data["classification"] == "coordination_unavailable"
     assert refusal.data["operation_outcome"] == "not_dispatched"
+
+
+def test_an_unreadable_identity_check_is_refused_with_its_cause(monkeypatch):
+    """2026-10-23: an answer that could not be read as a bank identity (a
+    proxy's error page) was treated as a verdict that the identity belongs
+    to another bank: refused at once with "reattach coordination", which no
+    tool does. It is retried like any failed check, and one that stays
+    unreadable says so. The Rust shim's refusal is pinned to the same bytes
+    (rust/shim/tests/board_retry_contract.rs)."""
+    seen = _checked_board_call(monkeypatch, "garbled", failures=99)
+    assert seen["checks"] == 1 + len(shim._BOARD_CHECK_RETRY_DELAYS)
+    assert seen["forwarded"] == []
+    assert seen["refusal"].message == (
+        "This session's board identity could not be checked with the memory daemon "
+        "(the check's answer could not be read), so this board call did not run. "
+        "A failed check does not by itself mean the identity is lost: retry this "
+        "call in a few seconds. If it keeps failing, check the daemon with "
+        "`pseudolife-mcp doctor`.")
 
 
 def test_a_permanent_identity_verdict_is_refused_without_retrying(monkeypatch):

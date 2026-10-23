@@ -1,6 +1,6 @@
 mod board_fixture;
 use board_fixture::*;
-use pseudolife_stdio::board::{Board, Options, Preparation, policy};
+use pseudolife_stdio::board::{Board, Options, Preparation, adapter::Adapter, policy};
 use serde_json::json;
 use std::time::Duration;
 
@@ -659,6 +659,9 @@ fn checking(runtime: &pseudolife_stdio::lifecycle::Runtime, home: &Home) -> Opti
 fn blip(mode: &str) -> Answer {
     match mode {
         "dropped" => Answer::text(0, b""),
+        // A proxy's error page, or a body reshaped on the way: complete,
+        // answered 200, and not a bank identity.
+        "garbled" => Answer::text(200, b"<html>proxy</html>"),
         _ => Answer::json(500, json!({"error":"coordination_unavailable"})),
     }
 }
@@ -679,7 +682,7 @@ async fn board_call(board: &Board, name: &str) -> Result<Preparation, rmcp::Erro
 
 #[tokio::test]
 async fn board_identity_check_rides_out_one_failure() {
-    for mode in ["dropped", "cold"] {
+    for mode in ["dropped", "cold", "garbled"] {
         let fixture = Fixture::new(0);
         let home = Home::new();
         let runtime = runtime(&fixture, false);
@@ -698,7 +701,11 @@ async fn board_identity_check_rides_out_one_failure() {
 
 #[tokio::test]
 async fn board_identity_check_that_keeps_failing_names_its_cause() {
-    for (mode, cause) in [("dropped", "got no answer"), ("cold", "HTTP 500")] {
+    for (mode, cause) in [
+        ("dropped", "got no answer"),
+        ("cold", "HTTP 500"),
+        ("garbled", "answer could not be read"),
+    ] {
         let fixture = Fixture::new(0);
         let home = Home::new();
         let runtime = runtime(&fixture, false);
@@ -711,7 +718,14 @@ async fn board_identity_check_that_keeps_failing_names_its_cause() {
         assert_eq!(fixture.count("/context") - before, 2, "{mode}");
         assert_eq!(
             error.message,
-            policy::identity_check_failed(if mode == "cold" { Some(500) } else { None })
+            policy::identity_check_failed(
+                match mode {
+                    "garbled" => "context_unreadable",
+                    "cold" => "context_unavailable",
+                    _ => "transport_unavailable",
+                },
+                if mode == "cold" { Some(500) } else { None }
+            )
         );
         assert!(error.message.contains(cause), "{}", error.message);
         assert!(error.message.contains("did not run") && error.message.contains("retry"));
@@ -838,10 +852,12 @@ async fn board_identity_recovered_check_leaves_no_degraded_note() {
 
 #[tokio::test]
 async fn board_identity_refused_check_does_not_stop_background_delivery() {
-    // A per-call check that the daemon (or a proxy in front of it) answers
-    // with something that is not a bank identity refuses that call, but,
-    // as in Python's validate_snapshot, records nothing: background
-    // delivery is not reported stopped, and later calls carry no note.
+    // A per-call check that the daemon (or a proxy in front of it) keeps
+    // answering with something that is not a bank identity refuses that
+    // call with its cause, but, as in Python's validate_snapshot, records
+    // nothing: background delivery is not reported stopped or degraded, and
+    // later calls carry no note. The refusal is byte for byte the Python
+    // shim's (tests/test_shim_board_retry.py).
     if capture(
         "board_identity_refused_check_does_not_stop_background_delivery",
         &[],
@@ -856,11 +872,14 @@ async fn board_identity_refused_check_does_not_stop_background_delivery() {
     let call = registered(&board).await;
     let mut result = rmcp::model::CallToolResult::success(vec![]);
     board.finish_call(&call, &mut result).await;
-    fixture.answer("context", Answer::text(200, b"<html>proxy</html>"));
+    let before = fixture.count("/context");
+    fixture.answer("context", blip("garbled"));
+    fixture.answer("context", blip("garbled"));
     let error = board_call(&board, "memory_agents").await.err().unwrap();
+    assert_eq!(fixture.count("/context") - before, 2);
     assert_eq!(
         error.message,
-        "Coordination identity is unavailable; reattach coordination and retry."
+        "This session's board identity could not be checked with the memory daemon (the check's answer could not be read), so this board call did not run. A failed check does not by itself mean the identity is lost: retry this call in a few seconds. If it keeps failing, check the daemon with `pseudolife-mcp doctor`."
     );
     let Ok(Preparation::Forward(call)) = board_call(&board, "memory_search").await else {
         panic!("an ordinary memory call was refused");
@@ -872,4 +891,71 @@ async fn board_identity_refused_check_does_not_stop_background_delivery() {
         .unwrap_or_default();
     assert!(!hint.contains("stopped"), "{hint}");
     board.close().await;
+}
+
+// 2026-10-23: one unreadable answer to a background request's identity
+// check was a permanent identity verdict, so background delivery stopped
+// until the credential rotated. It is an outage now: reported, retried and
+// restored. The heartbeat's 20 s period is fixed, so the background request
+// here is the pull downgrade's reattach, which records what it meets the
+// same way (record_failure) and leaves recovery to the same renew loop.
+async fn background_check(name: &str, answer: Option<Answer>) {
+    let fixture = Fixture::new(0);
+    let home = Home::new();
+    let adapter = Adapter::enter(adapter_config(&fixture, &home))
+        .await
+        .unwrap();
+    let attaches = fixture.count("/attach");
+    match answer {
+        Some(answer) => fixture.answer("context", answer),
+        None => *fixture.bank.lock().unwrap() = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb".into(),
+    }
+    assert!(!adapter.downgrade_to_pull().await, "{name}");
+    let hint = adapter.deliver_hint().await.unwrap_or_default();
+    if name == "garbled" {
+        assert!(hint.contains("degraded"), "{name}: {hint}");
+        // The renew loop's first reattach comes after a 1 s backoff.
+        tokio::time::timeout(Duration::from_secs(20), async {
+            loop {
+                if fixture.count("/attach") > attaches && adapter.deliver_hint().await.is_none() {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("background delivery was not restored");
+    } else {
+        assert!(hint.contains("stopped"), "{name}: {hint}");
+    }
+    adapter.close().await;
+}
+
+#[tokio::test]
+async fn board_unreadable_context_answer_does_not_stop_background_delivery() {
+    if capture(
+        "board_unreadable_context_answer_does_not_stop_background_delivery",
+        &[
+            "live coordination delivery unavailable; retrying",
+            "live coordination delivery restored",
+        ],
+        &["background delivery stopped"],
+    ) {
+        return;
+    }
+    background_check("garbled", Some(blip("garbled"))).await;
+}
+
+#[tokio::test]
+async fn board_other_bank_context_answer_stops_background_delivery() {
+    // The near miss: a readable answer naming another bank is a verdict
+    // about the saved address, and still stops background delivery.
+    if capture(
+        "board_other_bank_context_answer_stops_background_delivery",
+        &["live coordination background delivery stopped"],
+        &["delivery restored"],
+    ) {
+        return;
+    }
+    background_check("other bank", None).await;
 }

@@ -7,11 +7,13 @@ pub const STOPPED: &str = "Coordination: board registration stopped retrying (th
 pub const SHARED_REFUSAL: &str = "This Pseudolife server is one process shared by every conversation in the host, and this shared shim has no authenticated per-conversation board binding: posting, status updates and mail here would act as every conversation at once, and are refused. Use a per-session Pseudolife server with a supported host session binding; in Claude Desktop its entry needs a separate name. memory_agents list here shows open sessions only, not the board.";
 pub const SHARED_NOTE: &str = "Agent board: this server is shared by every conversation in its host and this shared shim has no authenticated per-conversation binding, so skip memory_agents update and memory_message here; memory tools work as usual.";
 /// The refusal for a board call whose identity check still failed after its
-/// retry: the cause, that nothing ran, and that the identity is not lost.
-/// A proxy in front of the daemon can be the one answering, so the status is
-/// the check's, not necessarily the daemon's.
-pub fn identity_check_failed(status: Option<u16>) -> String {
+/// retry: the cause, that nothing ran, and that the identity is not lost
+/// (Python `_BOARD_CHECK_FAILED_MESSAGE` and `_board_check_cause`, byte for
+/// byte). A proxy in front of the daemon can be the one answering, so the
+/// status is the check's, not necessarily the daemon's.
+pub fn identity_check_failed(code: &str, status: Option<u16>) -> String {
     let cause = match status {
+        _ if code == "context_unreadable" => "the check's answer could not be read".to_owned(),
         Some(status) => format!("the check was answered with HTTP {status}"),
         None => "the check got no answer".to_owned(),
     };
@@ -69,7 +71,7 @@ pub fn registry_failure_hint(code: &str, status: Option<u16>, validation: bool) 
             format!("Coordination: {origin} was refused by authentication or access policy; saved state was preserved. Check the configured credential and access.")
         }
         "timeout" => format!("Coordination: {origin} timed out (timeout); saved state was preserved. Retry when the bank responds."),
-        "transport_unavailable" | "context_unavailable" => format!("Coordination: {origin} failed ({code}); saved state was preserved. Retry when the bank responds."),
+        "transport_unavailable" | "context_unavailable" | "context_unreadable" => format!("Coordination: {origin} failed ({code}); saved state was preserved. Retry when the bank responds."),
         "attachment_busy" if !validation => "Coordination: identity attachment is busy (attachment_busy); saved state was preserved. Wait for the prior attachment lease to expire.".to_owned(),
         _ => format!("Coordination: {origin} unavailable; saved state was preserved. Check bank access and private adapter state."),
     }

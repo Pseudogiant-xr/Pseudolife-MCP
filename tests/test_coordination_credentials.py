@@ -132,6 +132,119 @@ def test_context_mode_preserves_mailbox_proof_body(read_only):
     asyncio.run(run())
 
 
+_UNREADABLE_CONTEXT_ANSWERS = [
+    b"<html>proxy</html>",
+    b"[]",
+    b'"fixture"',
+    b'{"principal": "fixture-user"}',
+    b'{"bank_id": "11111111-1111-4111-8111-111111111111"}',
+    b'{"bank_id": 7, "principal": "fixture-user"}',
+    b'{"bank_id": "11111111-1111-4111-8111-111111111111", "principal": 7}',
+    b'{"bank_id": "11111111111141118111111111111111", "principal": "fixture-user"}',
+    b'{"bank_id": "11111111-1111-4111-8111-111111111111", "principal": ""}',
+    b'{"bank_id": "11111111-1111-4111-8111-111111111111", "principal": "a\\nb"}',
+]
+
+
+@pytest.mark.parametrize("answer", _UNREADABLE_CONTEXT_ANSWERS)
+@pytest.mark.parametrize("proved", [False, True])
+def test_unreadable_context_answer_is_not_an_identity_verdict(answer, proved):
+    """An answer that cannot be read as a bank identity (a proxy's error
+    page, a cut or reshaped body) says nothing about which bank answered,
+    so it is ``context_unreadable``, which callers retry, never
+    ``bank_identity_mismatch``, which stops background delivery for good."""
+    from pseudolife_memory.coordination_identity import fetch_context
+
+    async def run():
+        provider = Provider()
+        identity = {"agent_id": "a" * 32, "credential": "fixture-instance-key"}
+        transport = httpx.MockTransport(lambda request: httpx.Response(200, content=answer))
+        async with httpx.AsyncClient(transport=transport) as client:
+            with pytest.raises(AdapterError) as caught:
+                await fetch_context(client, URL, provider.snapshot(),
+                                    identity=identity if proved else None, read_only=True)
+        assert caught.value.code == "context_unreadable"
+        assert caught.value.status is None
+        assert "fixture" not in str(caught.value)
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("proof", [None, 7, "f" * 64])
+def test_failed_mailbox_proof_on_a_readable_answer_stays_an_identity_verdict(proof):
+    """The near miss: a well-formed answer whose proof is missing or wrong
+    was read fine and did not prove this mailbox, so it is still
+    ``bank_identity_mismatch``."""
+    from pseudolife_memory.coordination_identity import fetch_context
+
+    async def run():
+        provider, bank = Provider(), Bank()
+        value = {"bank_id": bank.bank_id, "principal": bank.principal}
+        if proof is not None:
+            value["proof"] = proof
+        transport = httpx.MockTransport(lambda request: httpx.Response(200, json=value))
+        async with httpx.AsyncClient(transport=transport) as client:
+            with pytest.raises(AdapterError) as caught:
+                await fetch_context(client, URL, provider.snapshot(),
+                    identity={"agent_id": "a" * 32, "credential": bank.credential})
+        assert caught.value.code == "bank_identity_mismatch"
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("answer", ["garbled", "other_bank"])
+def test_one_unreadable_context_answer_does_not_stop_background_delivery(
+        tmp_path, monkeypatch, capsys, answer):
+    """2026-10-23: one unparseable 200 to the heartbeat's read-only identity
+    check was a permanent identity verdict, so background board delivery
+    stopped until the credential rotated. It is now an outage: reported
+    once, retried, and restored. The near miss, a readable answer naming
+    another bank, still stops delivery."""
+    async def run():
+        provider, bank = Provider(), Bank()
+        monkeypatch.setattr(CoordinationAdapter, "HEARTBEAT_SECONDS", 0.01)
+        monkeypatch.setattr(CoordinationAdapter, "REATTACH_DELAYS", (0,))
+        armed, served = [], asyncio.Event()
+
+        async def daemon(request):
+            if (armed and request.url.path.endswith("/context")
+                    and json.loads(request.content).get("read_only")):
+                armed.clear()
+                served.set()
+                if answer == "garbled":
+                    return httpx.Response(200, content=b"<html>proxy</html>")
+                bank.bank_id = "22222222-2222-4222-8222-222222222222"
+            return await bank(request)
+
+        client = httpx.AsyncClient(transport=httpx.MockTransport(daemon))
+        adapter = CoordinationAdapter(URL, provider.token, client=client,
+            provider=provider, state_path=tmp_path / "state.json")
+        async with client, adapter:
+            attaches = [action for action, _, _ in bank.calls].count("attach")
+            armed.append(True)
+            await asyncio.wait_for(served.wait(), 5)
+
+            async def settled():
+                while True:
+                    attached = [action for action, _, _ in bank.calls].count("attach")
+                    if answer == "other_bank" and adapter._permanent_failure:
+                        return
+                    if (answer == "garbled" and adapter._failure is None
+                            and attached > attaches):
+                        return
+                    await asyncio.sleep(0.01)
+
+            await asyncio.wait_for(settled(), 5)
+        return bank.registered
+
+    assert asyncio.run(run()) == 1
+    stderr = capsys.readouterr().err
+    if answer == "garbled":
+        assert stderr.count("live coordination delivery unavailable; retrying") == 1
+        assert stderr.count("live coordination delivery restored") == 1
+        assert "background delivery stopped" not in stderr
+    else:
+        assert stderr.count("background delivery stopped") == 1
+
+
 def test_context_accepts_existing_maximum_length_principal(tmp_path):
     async def run():
         provider, bank = Provider(), Bank()

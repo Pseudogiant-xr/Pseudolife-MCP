@@ -30,11 +30,16 @@ impl Failure {
     fn local(code: &'static str) -> Self {
         Self { code, status: None }
     }
+    /// Worth checking or registering again (Python `_transient_board_failure`):
+    /// no answer, an overloaded daemon, an identity check answered with
+    /// something that is not a bank identity, or a busy previous attachment.
     pub fn transient(&self) -> bool {
-        matches!(self.code, "transport_unavailable" | "attachment_busy")
-            || self
-                .status
-                .is_some_and(|status| status >= 500 || status == 429)
+        matches!(
+            self.code,
+            "transport_unavailable" | "context_unreadable" | "attachment_busy"
+        ) || self
+            .status
+            .is_some_and(|status| status >= 500 || status == 429)
     }
 }
 #[derive(Clone)]
@@ -231,15 +236,20 @@ async fn fetch_context(
     )
     .await
     .map_err(|failure| {
-        // An answer that cannot be read as a bank identity verifies none
-        // (Python `fetch_context`).
+        // An answer that cannot be read as a bank identity (a proxy's error
+        // page, a body reshaped on the way) names no bank: an outage callers
+        // retry, never a verdict that the identity changed (Python
+        // `fetch_context`). On 2026-10-23 one such answer to a background
+        // check stopped delivery until the credential rotated. The code is
+        // not a public daemon error, so no 4xx body carries it.
         if failure.code == "invalid_response" {
-            Failure::local("bank_identity_mismatch")
+            Failure::local("context_unreadable")
         } else {
             failure
         }
     })?;
-    let context = Context::parse(&value).map_err(Failure::local)?;
+    let context = Context::parse(&value).map_err(|_| Failure::local("context_unreadable"))?;
+    // A readable answer that does not prove this mailbox is a verdict.
     if let Some(saved) = saved {
         let credential = saved
             .get("credential")

@@ -670,9 +670,11 @@ impl Board {
                     Ok(Err(failure)) => (failure.code, failure.status),
                     Err(_) => ("timeout", None),
                 };
-                let transient = matches!(code, "timeout" | "transport_unavailable")
-                    || (code == "context_unavailable"
-                        && matches!(status, Some(429 | 500 | 502 | 503 | 504)));
+                let transient = matches!(
+                    code,
+                    "timeout" | "transport_unavailable" | "context_unreadable"
+                ) || (code == "context_unavailable"
+                    && matches!(status, Some(429 | 500 | 502 | 503 | 504)));
                 // A credential rotated meanwhile is not retried under the old
                 // one: validated_headers refuses a stale snapshot before its
                 // request (credential_unavailable), as Python's explicit
@@ -868,7 +870,8 @@ impl Board {
                 bound.validated_headers(&snapshot).await
             };
             // A board call checks once more before a transient failure (no
-            // answer, 5xx, 429) refuses it; ordinary memory calls never wait.
+            // answer, an unreadable answer, 5xx, 429) refuses it; ordinary
+            // memory calls never wait.
             // A credential rotated meanwhile is not retried: the check
             // refuses a stale snapshot before its request.
             if required && !registry && checked.as_ref().is_err_and(adapter::Failure::transient) {
@@ -889,7 +892,7 @@ impl Board {
                 }
                 Err(failure) if required && !registry && failure.transient() => {
                     return Err(coordination_error(
-                        Some(&policy::identity_check_failed(failure.status)),
+                        Some(&policy::identity_check_failed(failure.code, failure.status)),
                         None,
                     ));
                 }
