@@ -526,5 +526,791 @@
    "name": "events_401",
    "status": 401
   }
+ ],
+ "stage_bodies": [
+  {
+   "arg": "Session: deploy\nSub-task: probe\n- (conversation) caf\u00e9 \"q\" \\ tab\t",
+   "bodies": [
+    "{\"cache_prompt\": false, \"reasoning_effort\": \"high\", \"model\": \"qwen-27b\", \"messages\": [{\"role\": \"system\", \"content\": \"You review the stored record of one work session and infer what OUTCOMES it reached. Reply with JSON only: {\\\"outcomes\\\": [{\\\"task\\\": <short stable task-type phrase>, \\\"outcome\\\": \\\"success\\\" | \\\"failure\\\" | \\\"correction\\\", \\\"about\\\": <tool/approach concerned, or null>, \\\"detail\\\": <one sentence of evidence quoted or paraphrased from the record>}]}.\\n- Claim only outcomes the record actually evidences; prefer fewer, better-grounded claims.\\n- failure = an approach was TRIED and hit a dead-end; correction = the USER explicitly corrected the assistant's belief or approach (an approach failing on its own is failure, not correction); success = something verifiably worked.\\n- An outcome requires an ATTEMPT: something was tried, deployed, fixed, or decided, and its result is visible in the record. Sessions that only read, browse, take notes, or collect facts have NO outcome. An unfinished task, a deferred decision, or 'revisit later' is NOT an outcome \\u2014 abstain. When unsure, abstain \\u2014 a missed outcome is cheap, an invented one poisons downstream lessons.\\n- Abstain example: record = 'Session: reading about css grid\\\\n- (notes) grid-template-areas allows named layout regions' -> {\\\"outcomes\\\": []} \\u2014 a fact was noted, nothing was attempted.\\n- If the record shows no clear outcome, return {\\\"outcomes\\\": []}.\"}, {\"role\": \"user\", \"content\": \"Session: deploy\\nSub-task: probe\\n- (conversation) caf\\u00e9 \\\"q\\\" \\\\ tab\\t\"}], \"response_format\": {\"type\": \"json_object\"}, \"max_tokens\": 2048, \"temperature\": 0, \"chat_template_kwargs\": {\"enable_thinking\": false}}"
+   ],
+   "ctor": "primary",
+   "extra": 3,
+   "method": "infer"
+  },
+  {
+   "arg": [
+    {
+     "about": "pipeline's",
+     "created_at": 1.0,
+     "detail": "line\nbreak \u0378 \u00e9 \"q\"",
+     "episode_id": "e",
+     "id": 1,
+     "origin": "inferred",
+     "outcome": "success",
+     "polarity": "+",
+     "task": "deploy engine",
+     "used_ids": null
+    },
+    {
+     "about": null,
+     "created_at": 2.0,
+     "detail": null,
+     "episode_id": null,
+     "id": 2,
+     "origin": "action",
+     "outcome": "failure",
+     "polarity": null,
+     "task": "say \"hi\" and 'bye'",
+     "used_ids": null
+    }
+   ],
+   "bodies": [
+    "{\"cache_prompt\": false, \"reasoning_effort\": \"high\", \"model\": \"qwen-27b\", \"messages\": [{\"role\": \"system\", \"content\": \"You consolidate an agent's work-outcome signals into reusable LESSONS. Each signal records something that happened while doing a task: a success, a failure/dead-end, or a user correction. Produce durable, actionable lessons as JSON: {\\\"lessons\\\":[{\\\"task\\\":..,\\\"aspect\\\":..,\\\"lesson\\\":..,\\\"about\\\":..,\\\"polarity\\\":\\\"+\\\"|\\\"-\\\",\\\"outcome\\\":\\\"success\\\"|\\\"failure\\\"|\\\"correction\\\",\\\"confidence\\\":0..1}]}.\\n- task = the kind of task, reusing stable wording across signals.\\n- aspect = approach | pitfall | tool-choice | correction.\\n- lesson = the actionable takeaway, phrased as what to DO (or what to avoid).\\n- about = the tool/source/approach the lesson concerns.\\n- outcome = the signal class it came from.\\n- polarity = \\\"+\\\" when the lesson is something to DO \\u2014 an approach that worked, or the corrected, now-correct way; \\\"-\\\" ONLY when the lesson is something to AVOID (a dead-end), phrased as \\\"avoid X\\\". A CORRECTION is almost always \\\"+\\\": state the new correct behavior to follow, never the mistake.\\nCluster related signals into one lesson. SKIP trivial or non-durable signals \\u2014 generic knowledge any competent agent already has (e.g. basic language/library usage), one-off chatter, or anything a future run would not benefit from recalling. Return {\\\"lessons\\\":[]} if nothing qualifies.\"}, {\"role\": \"user\", \"content\": \"[machine-inferred] [success] task='deploy engine' about=\\\"pipeline's\\\" detail='line\\\\nbreak \\\\u0378 \\u00e9 \\\"q\\\"' polarity=+\\n[failure] task='say \\\"hi\\\" and \\\\'bye\\\\''\"}], \"response_format\": {\"type\": \"json_object\"}, \"max_tokens\": 2048, \"temperature\": 0, \"chat_template_kwargs\": {\"enable_thinking\": false}}"
+   ],
+   "ctor": "primary",
+   "extra": null,
+   "method": "lessons"
+  },
+  {
+   "arg": [
+    {
+     "about": "rule: cart",
+     "created_at": 3.0,
+     "detail": "user asked for refund\nMUST INCLUDE: Alpha; beta",
+     "episode_id": null,
+     "id": 7,
+     "origin": "action",
+     "outcome": "success",
+     "polarity": null,
+     "task": "checkout",
+     "used_ids": null
+    }
+   ],
+   "bodies": [
+    "{\"cache_prompt\": false, \"reasoning_effort\": \"high\", \"model\": \"qwen-27b\", \"messages\": [{\"role\": \"system\", \"content\": \"You turn ONE outcome signal from an agent's episode into ONE situation-specific RULE. Reply with JSON only: {\\\"lessons\\\":[{\\\"task\\\":..,\\\"aspect\\\":\\\"rule\\\",\\\"lesson\\\":..,\\\"about\\\":..,\\\"polarity\\\":\\\"+\\\"|\\\"-\\\",\\\"outcome\\\":\\\"success\\\"|\\\"failure\\\"|\\\"correction\\\",\\\"confidence\\\":0..1}]} containing exactly one lesson.\\n- task = a short name for the SITUATION: the request and the observable behaviour that distinguishes it from look-alike situations, taken from the signal's detail. Specific to this situation, never a generic task type.\\n- lesson = one sentence. A success: \\\"WHEN <situation> THEN <the exact action(s) that produced the outcome>\\\". A correction (the detail carries a CORRECT SOLUTION): \\\"WHEN <situation> THEN <the exact correct action(s), copied verbatim from the correct solution>\\\"; if an ACTION DIFF is given, add one clause naming the decisive divergence. A failure with no correct solution: \\\"WHEN <situation> do NOT <the exact action(s) taken> \\u2014 verified wrong against the outcome\\\"; never invent the right answer.\\n- Copy decision-critical values (names of things, options, amounts, reasons, arguments) VERBATIM from the signal; do not paraphrase, soften, or add conditions, alternatives or exceptions the signal does not contain. Identifiers of people become placeholders. If the detail lists MUST INCLUDE values, every one of them appears verbatim in the lesson.\\n- polarity = \\\"+\\\" for a THEN rule, \\\"-\\\" for a do-NOT rule. outcome = the signal's class. about = the tool or action the rule concerns. confidence = 0..1.\\nDo not cluster and do not skip: this signal yields exactly one rule.\"}, {\"role\": \"user\", \"content\": \"[success] task='checkout' about='rule: cart' detail='user asked for refund\\\\nMUST INCLUDE: Alpha; beta'\"}], \"response_format\": {\"type\": \"json_object\"}, \"max_tokens\": 2048, \"temperature\": 0, \"chat_template_kwargs\": {\"enable_thinking\": false}}",
+    "{\"cache_prompt\": false, \"reasoning_effort\": \"high\", \"model\": \"qwen-27b\", \"messages\": [{\"role\": \"system\", \"content\": \"You turn ONE outcome signal from an agent's episode into ONE situation-specific RULE. Reply with JSON only: {\\\"lessons\\\":[{\\\"task\\\":..,\\\"aspect\\\":\\\"rule\\\",\\\"lesson\\\":..,\\\"about\\\":..,\\\"polarity\\\":\\\"+\\\"|\\\"-\\\",\\\"outcome\\\":\\\"success\\\"|\\\"failure\\\"|\\\"correction\\\",\\\"confidence\\\":0..1}]} containing exactly one lesson.\\n- task = a short name for the SITUATION: the request and the observable behaviour that distinguishes it from look-alike situations, taken from the signal's detail. Specific to this situation, never a generic task type.\\n- lesson = one sentence. A success: \\\"WHEN <situation> THEN <the exact action(s) that produced the outcome>\\\". A correction (the detail carries a CORRECT SOLUTION): \\\"WHEN <situation> THEN <the exact correct action(s), copied verbatim from the correct solution>\\\"; if an ACTION DIFF is given, add one clause naming the decisive divergence. A failure with no correct solution: \\\"WHEN <situation> do NOT <the exact action(s) taken> \\u2014 verified wrong against the outcome\\\"; never invent the right answer.\\n- Copy decision-critical values (names of things, options, amounts, reasons, arguments) VERBATIM from the signal; do not paraphrase, soften, or add conditions, alternatives or exceptions the signal does not contain. Identifiers of people become placeholders. If the detail lists MUST INCLUDE values, every one of them appears verbatim in the lesson.\\n- polarity = \\\"+\\\" for a THEN rule, \\\"-\\\" for a do-NOT rule. outcome = the signal's class. about = the tool or action the rule concerns. confidence = 0..1.\\nDo not cluster and do not skip: this signal yields exactly one rule.\"}, {\"role\": \"user\", \"content\": \"[success] task='checkout' about='rule: cart' detail='user asked for refund\\\\nMUST INCLUDE: Alpha; beta'\\n\\nYour previous rule omitted these values, which must appear verbatim: beta. Reply again with the complete rule.\"}], \"response_format\": {\"type\": \"json_object\"}, \"max_tokens\": 2048, \"temperature\": 0, \"chat_template_kwargs\": {\"enable_thinking\": false}}"
+   ],
+   "ctor": "primary",
+   "extra": null,
+   "method": "rules"
+  },
+  {
+   "arg": "Session: deploy\nSub-task: probe\n- (conversation) caf\u00e9 \"q\" \\ tab\t",
+   "bodies": [
+    "{\"cache_prompt\": false, \"reasoning_effort\": \"high\", \"model\": \"qwen-27b\", \"messages\": [{\"role\": \"system\", \"content\": \"You write a factual narrative digest of one work session from its stored record. Reply with JSON only: {\\\"digest\\\": <the digest text>}.\\n- Target length about 1200 characters of plain prose.\\n- Cover, in order: what the session set out to do; the phases or steps it went through; key decisions and the stated reasons for them; problems hit and how each was resolved; stated preferences or changes of direction.\\n- Use ONLY events present in the record. Omit anything uncertain rather than inferring it \\u2014 a missing detail is cheap, an invented one poisons later recall.\\n- Keep explicit dates, versions, and numbers exactly as recorded.\\n- Write in past tense anchored to the session (\\\"in this session\\u2026\\\", \\\"the user then\\u2026\\\") so the digest reads as history, never as a claim about the present.\\n- No headings, no bullet lists \\u2014 one compact narrative paragraph (two at most).\"}, {\"role\": \"user\", \"content\": \"Session: deploy\\nSub-task: probe\\n- (conversation) caf\\u00e9 \\\"q\\\" \\\\ tab\\t\"}], \"response_format\": {\"type\": \"json_object\"}, \"max_tokens\": 2048, \"temperature\": 0, \"chat_template_kwargs\": {\"enable_thinking\": false}}"
+   ],
+   "ctor": "primary",
+   "extra": 1200,
+   "method": "digest"
+  },
+  {
+   "arg": "Session: deploy\nSub-task: probe\n- (conversation) caf\u00e9 \"q\" \\ tab\t",
+   "bodies": [
+    "{\"cache_prompt\": false, \"reasoning_effort\": \"high\", \"model\": \"qwen-27b\", \"messages\": [{\"role\": \"system\", \"content\": \"You write a factual narrative digest of one work session from its stored record. Reply with JSON only: {\\\"digest\\\": <the digest text>}.\\n- Target length about 7 characters of plain prose.\\n- Cover, in order: what the session set out to do; the phases or steps it went through; key decisions and the stated reasons for them; problems hit and how each was resolved; stated preferences or changes of direction.\\n- Use ONLY events present in the record. Omit anything uncertain rather than inferring it \\u2014 a missing detail is cheap, an invented one poisons later recall.\\n- Keep explicit dates, versions, and numbers exactly as recorded.\\n- Write in past tense anchored to the session (\\\"in this session\\u2026\\\", \\\"the user then\\u2026\\\") so the digest reads as history, never as a claim about the present.\\n- No headings, no bullet lists \\u2014 one compact narrative paragraph (two at most).\"}, {\"role\": \"user\", \"content\": \"Session: deploy\\nSub-task: probe\\n- (conversation) caf\\u00e9 \\\"q\\\" \\\\ tab\\t\"}], \"response_format\": {\"type\": \"json_object\"}, \"max_tokens\": 2048, \"temperature\": 0, \"chat_template_kwargs\": {\"enable_thinking\": false}}"
+   ],
+   "ctor": "primary",
+   "extra": 7,
+   "method": "digest"
+  },
+  {
+   "arg": "Session: deploy\nSub-task: probe\n- (conversation) caf\u00e9 \"q\" \\ tab\t",
+   "bodies": [
+    "{\"model\": \"m\", \"messages\": [{\"role\": \"system\", \"content\": \"You review the stored record of one work session and infer what OUTCOMES it reached. Reply with JSON only: {\\\"outcomes\\\": [{\\\"task\\\": <short stable task-type phrase>, \\\"outcome\\\": \\\"success\\\" | \\\"failure\\\" | \\\"correction\\\", \\\"about\\\": <tool/approach concerned, or null>, \\\"detail\\\": <one sentence of evidence quoted or paraphrased from the record>}]}.\\n- Claim only outcomes the record actually evidences; prefer fewer, better-grounded claims.\\n- failure = an approach was TRIED and hit a dead-end; correction = the USER explicitly corrected the assistant's belief or approach (an approach failing on its own is failure, not correction); success = something verifiably worked.\\n- An outcome requires an ATTEMPT: something was tried, deployed, fixed, or decided, and its result is visible in the record. Sessions that only read, browse, take notes, or collect facts have NO outcome. An unfinished task, a deferred decision, or 'revisit later' is NOT an outcome \\u2014 abstain. When unsure, abstain \\u2014 a missed outcome is cheap, an invented one poisons downstream lessons.\\n- Abstain example: record = 'Session: reading about css grid\\\\n- (notes) grid-template-areas allows named layout regions' -> {\\\"outcomes\\\": []} \\u2014 a fact was noted, nothing was attempted.\\n- If the record shows no clear outcome, return {\\\"outcomes\\\": []}.\"}, {\"role\": \"user\", \"content\": \"Session: deploy\\nSub-task: probe\\n- (conversation) caf\\u00e9 \\\"q\\\" \\\\ tab\\t\"}], \"response_format\": {\"type\": \"json_object\"}, \"max_tokens\": 7, \"temperature\": 0, \"chat_template_kwargs\": {\"enable_thinking\": false}}"
+   ],
+   "ctor": "plain",
+   "extra": 3,
+   "method": "infer"
+  },
+  {
+   "arg": [
+    {
+     "about": "pipeline's",
+     "created_at": 1.0,
+     "detail": "line\nbreak \u0378 \u00e9 \"q\"",
+     "episode_id": "e",
+     "id": 1,
+     "origin": "inferred",
+     "outcome": "success",
+     "polarity": "+",
+     "task": "deploy engine",
+     "used_ids": null
+    },
+    {
+     "about": null,
+     "created_at": 2.0,
+     "detail": null,
+     "episode_id": null,
+     "id": 2,
+     "origin": "action",
+     "outcome": "failure",
+     "polarity": null,
+     "task": "say \"hi\" and 'bye'",
+     "used_ids": null
+    }
+   ],
+   "bodies": [
+    "{\"model\": \"m\", \"messages\": [{\"role\": \"system\", \"content\": \"You consolidate an agent's work-outcome signals into reusable LESSONS. Each signal records something that happened while doing a task: a success, a failure/dead-end, or a user correction. Produce durable, actionable lessons as JSON: {\\\"lessons\\\":[{\\\"task\\\":..,\\\"aspect\\\":..,\\\"lesson\\\":..,\\\"about\\\":..,\\\"polarity\\\":\\\"+\\\"|\\\"-\\\",\\\"outcome\\\":\\\"success\\\"|\\\"failure\\\"|\\\"correction\\\",\\\"confidence\\\":0..1}]}.\\n- task = the kind of task, reusing stable wording across signals.\\n- aspect = approach | pitfall | tool-choice | correction.\\n- lesson = the actionable takeaway, phrased as what to DO (or what to avoid).\\n- about = the tool/source/approach the lesson concerns.\\n- outcome = the signal class it came from.\\n- polarity = \\\"+\\\" when the lesson is something to DO \\u2014 an approach that worked, or the corrected, now-correct way; \\\"-\\\" ONLY when the lesson is something to AVOID (a dead-end), phrased as \\\"avoid X\\\". A CORRECTION is almost always \\\"+\\\": state the new correct behavior to follow, never the mistake.\\nCluster related signals into one lesson. SKIP trivial or non-durable signals \\u2014 generic knowledge any competent agent already has (e.g. basic language/library usage), one-off chatter, or anything a future run would not benefit from recalling. Return {\\\"lessons\\\":[]} if nothing qualifies.\"}, {\"role\": \"user\", \"content\": \"[machine-inferred] [success] task='deploy engine' about=\\\"pipeline's\\\" detail='line\\\\nbreak \\\\u0378 \\u00e9 \\\"q\\\"' polarity=+\\n[failure] task='say \\\"hi\\\" and \\\\'bye\\\\''\"}], \"response_format\": {\"type\": \"json_object\"}, \"max_tokens\": 7, \"temperature\": 0, \"chat_template_kwargs\": {\"enable_thinking\": false}}"
+   ],
+   "ctor": "plain",
+   "extra": null,
+   "method": "lessons"
+  },
+  {
+   "arg": [
+    {
+     "about": "rule: cart",
+     "created_at": 3.0,
+     "detail": "user asked for refund\nMUST INCLUDE: Alpha; beta",
+     "episode_id": null,
+     "id": 7,
+     "origin": "action",
+     "outcome": "success",
+     "polarity": null,
+     "task": "checkout",
+     "used_ids": null
+    }
+   ],
+   "bodies": [
+    "{\"model\": \"m\", \"messages\": [{\"role\": \"system\", \"content\": \"You turn ONE outcome signal from an agent's episode into ONE situation-specific RULE. Reply with JSON only: {\\\"lessons\\\":[{\\\"task\\\":..,\\\"aspect\\\":\\\"rule\\\",\\\"lesson\\\":..,\\\"about\\\":..,\\\"polarity\\\":\\\"+\\\"|\\\"-\\\",\\\"outcome\\\":\\\"success\\\"|\\\"failure\\\"|\\\"correction\\\",\\\"confidence\\\":0..1}]} containing exactly one lesson.\\n- task = a short name for the SITUATION: the request and the observable behaviour that distinguishes it from look-alike situations, taken from the signal's detail. Specific to this situation, never a generic task type.\\n- lesson = one sentence. A success: \\\"WHEN <situation> THEN <the exact action(s) that produced the outcome>\\\". A correction (the detail carries a CORRECT SOLUTION): \\\"WHEN <situation> THEN <the exact correct action(s), copied verbatim from the correct solution>\\\"; if an ACTION DIFF is given, add one clause naming the decisive divergence. A failure with no correct solution: \\\"WHEN <situation> do NOT <the exact action(s) taken> \\u2014 verified wrong against the outcome\\\"; never invent the right answer.\\n- Copy decision-critical values (names of things, options, amounts, reasons, arguments) VERBATIM from the signal; do not paraphrase, soften, or add conditions, alternatives or exceptions the signal does not contain. Identifiers of people become placeholders. If the detail lists MUST INCLUDE values, every one of them appears verbatim in the lesson.\\n- polarity = \\\"+\\\" for a THEN rule, \\\"-\\\" for a do-NOT rule. outcome = the signal's class. about = the tool or action the rule concerns. confidence = 0..1.\\nDo not cluster and do not skip: this signal yields exactly one rule.\"}, {\"role\": \"user\", \"content\": \"[success] task='checkout' about='rule: cart' detail='user asked for refund\\\\nMUST INCLUDE: Alpha; beta'\"}], \"response_format\": {\"type\": \"json_object\"}, \"max_tokens\": 7, \"temperature\": 0, \"chat_template_kwargs\": {\"enable_thinking\": false}}",
+    "{\"model\": \"m\", \"messages\": [{\"role\": \"system\", \"content\": \"You turn ONE outcome signal from an agent's episode into ONE situation-specific RULE. Reply with JSON only: {\\\"lessons\\\":[{\\\"task\\\":..,\\\"aspect\\\":\\\"rule\\\",\\\"lesson\\\":..,\\\"about\\\":..,\\\"polarity\\\":\\\"+\\\"|\\\"-\\\",\\\"outcome\\\":\\\"success\\\"|\\\"failure\\\"|\\\"correction\\\",\\\"confidence\\\":0..1}]} containing exactly one lesson.\\n- task = a short name for the SITUATION: the request and the observable behaviour that distinguishes it from look-alike situations, taken from the signal's detail. Specific to this situation, never a generic task type.\\n- lesson = one sentence. A success: \\\"WHEN <situation> THEN <the exact action(s) that produced the outcome>\\\". A correction (the detail carries a CORRECT SOLUTION): \\\"WHEN <situation> THEN <the exact correct action(s), copied verbatim from the correct solution>\\\"; if an ACTION DIFF is given, add one clause naming the decisive divergence. A failure with no correct solution: \\\"WHEN <situation> do NOT <the exact action(s) taken> \\u2014 verified wrong against the outcome\\\"; never invent the right answer.\\n- Copy decision-critical values (names of things, options, amounts, reasons, arguments) VERBATIM from the signal; do not paraphrase, soften, or add conditions, alternatives or exceptions the signal does not contain. Identifiers of people become placeholders. If the detail lists MUST INCLUDE values, every one of them appears verbatim in the lesson.\\n- polarity = \\\"+\\\" for a THEN rule, \\\"-\\\" for a do-NOT rule. outcome = the signal's class. about = the tool or action the rule concerns. confidence = 0..1.\\nDo not cluster and do not skip: this signal yields exactly one rule.\"}, {\"role\": \"user\", \"content\": \"[success] task='checkout' about='rule: cart' detail='user asked for refund\\\\nMUST INCLUDE: Alpha; beta'\\n\\nYour previous rule omitted these values, which must appear verbatim: beta. Reply again with the complete rule.\"}], \"response_format\": {\"type\": \"json_object\"}, \"max_tokens\": 7, \"temperature\": 0, \"chat_template_kwargs\": {\"enable_thinking\": false}}"
+   ],
+   "ctor": "plain",
+   "extra": null,
+   "method": "rules"
+  },
+  {
+   "arg": "Session: deploy\nSub-task: probe\n- (conversation) caf\u00e9 \"q\" \\ tab\t",
+   "bodies": [
+    "{\"model\": \"m\", \"messages\": [{\"role\": \"system\", \"content\": \"You write a factual narrative digest of one work session from its stored record. Reply with JSON only: {\\\"digest\\\": <the digest text>}.\\n- Target length about 1200 characters of plain prose.\\n- Cover, in order: what the session set out to do; the phases or steps it went through; key decisions and the stated reasons for them; problems hit and how each was resolved; stated preferences or changes of direction.\\n- Use ONLY events present in the record. Omit anything uncertain rather than inferring it \\u2014 a missing detail is cheap, an invented one poisons later recall.\\n- Keep explicit dates, versions, and numbers exactly as recorded.\\n- Write in past tense anchored to the session (\\\"in this session\\u2026\\\", \\\"the user then\\u2026\\\") so the digest reads as history, never as a claim about the present.\\n- No headings, no bullet lists \\u2014 one compact narrative paragraph (two at most).\"}, {\"role\": \"user\", \"content\": \"Session: deploy\\nSub-task: probe\\n- (conversation) caf\\u00e9 \\\"q\\\" \\\\ tab\\t\"}], \"response_format\": {\"type\": \"json_object\"}, \"max_tokens\": 7, \"temperature\": 0, \"chat_template_kwargs\": {\"enable_thinking\": false}}"
+   ],
+   "ctor": "plain",
+   "extra": 1200,
+   "method": "digest"
+  },
+  {
+   "arg": "Session: deploy\nSub-task: probe\n- (conversation) caf\u00e9 \"q\" \\ tab\t",
+   "bodies": [
+    "{\"model\": \"m\", \"messages\": [{\"role\": \"system\", \"content\": \"You write a factual narrative digest of one work session from its stored record. Reply with JSON only: {\\\"digest\\\": <the digest text>}.\\n- Target length about 7 characters of plain prose.\\n- Cover, in order: what the session set out to do; the phases or steps it went through; key decisions and the stated reasons for them; problems hit and how each was resolved; stated preferences or changes of direction.\\n- Use ONLY events present in the record. Omit anything uncertain rather than inferring it \\u2014 a missing detail is cheap, an invented one poisons later recall.\\n- Keep explicit dates, versions, and numbers exactly as recorded.\\n- Write in past tense anchored to the session (\\\"in this session\\u2026\\\", \\\"the user then\\u2026\\\") so the digest reads as history, never as a claim about the present.\\n- No headings, no bullet lists \\u2014 one compact narrative paragraph (two at most).\"}, {\"role\": \"user\", \"content\": \"Session: deploy\\nSub-task: probe\\n- (conversation) caf\\u00e9 \\\"q\\\" \\\\ tab\\t\"}], \"response_format\": {\"type\": \"json_object\"}, \"max_tokens\": 7, \"temperature\": 0, \"chat_template_kwargs\": {\"enable_thinking\": false}}"
+   ],
+   "ctor": "plain",
+   "extra": 7,
+   "method": "digest"
+  }
+ ],
+ "stage_replies": [
+  {
+   "arg": "Session: deploy\nSub-task: probe\n- (conversation) caf\u00e9 \"q\" \\ tab\t",
+   "extra": 2,
+   "method": "infer",
+   "name": "infer_mixed",
+   "ok": "[{\"task\": \"deploy\", \"outcome\": \"success\", \"about\": null, \"detail\": \"ok\"}, {\"task\": \"5\", \"outcome\": \"failure\", \"about\": null, \"detail\": \"[1]\"}]",
+   "queue": [
+    [
+     200,
+     "{\"choices\": [{\"message\": {\"content\": \"sure: {\\\"outcomes\\\": [{\\\"task\\\": \\\" deploy \\\", \\\"outcome\\\": \\\"success\\\", \\\"about\\\": \\\"\\\", \\\"detail\\\": \\\" ok \\\"}, {\\\"task\\\": \\\"\\\", \\\"outcome\\\": \\\"success\\\"}, {\\\"task\\\": \\\"x\\\", \\\"outcome\\\": \\\"win\\\"}, {\\\"task\\\": 5, \\\"outcome\\\": \\\"failure\\\", \\\"about\\\": 0, \\\"detail\\\": [1]}, {\\\"task\\\": \\\"third\\\", \\\"outcome\\\": \\\"correction\\\"}]}\"}}], \"model\": \"m\"}"
+    ]
+   ]
+  },
+  {
+   "arg": "Session: deploy\nSub-task: probe\n- (conversation) caf\u00e9 \"q\" \\ tab\t",
+   "extra": 0,
+   "method": "infer",
+   "name": "infer_cap_zero",
+   "ok": "[]",
+   "queue": [
+    [
+     200,
+     "{\"choices\": [{\"message\": {\"content\": \"not json\"}}], \"model\": \"m\"}"
+    ]
+   ]
+  },
+  {
+   "arg": "Session: deploy\nSub-task: probe\n- (conversation) caf\u00e9 \"q\" \\ tab\t",
+   "extra": 3,
+   "method": "infer",
+   "name": "infer_no_object",
+   "ok": "null",
+   "queue": [
+    [
+     200,
+     "{\"choices\": [{\"message\": {\"content\": \"nothing here\"}}], \"model\": \"m\"}"
+    ]
+   ]
+  },
+  {
+   "arg": "Session: deploy\nSub-task: probe\n- (conversation) caf\u00e9 \"q\" \\ tab\t",
+   "extra": 3,
+   "method": "infer",
+   "name": "infer_bad_json",
+   "ok": "null",
+   "queue": [
+    [
+     200,
+     "{\"choices\": [{\"message\": {\"content\": \"{\\\"outcomes\\\": [1 2]}\"}}], \"model\": \"m\"}"
+    ]
+   ]
+  },
+  {
+   "arg": "Session: deploy\nSub-task: probe\n- (conversation) caf\u00e9 \"q\" \\ tab\t",
+   "extra": 3,
+   "method": "infer",
+   "name": "infer_not_list",
+   "ok": "null",
+   "queue": [
+    [
+     200,
+     "{\"choices\": [{\"message\": {\"content\": \"{\\\"outcomes\\\": {}}\"}}], \"model\": \"m\"}"
+    ]
+   ]
+  },
+  {
+   "arg": "Session: deploy\nSub-task: probe\n- (conversation) caf\u00e9 \"q\" \\ tab\t",
+   "extra": 3,
+   "method": "infer",
+   "name": "infer_missing",
+   "ok": "null",
+   "queue": [
+    [
+     200,
+     "{\"choices\": [{\"message\": {\"content\": \"{\\\"other\\\": []}\"}}], \"model\": \"m\"}"
+    ]
+   ]
+  },
+  {
+   "arg": "Session: deploy\nSub-task: probe\n- (conversation) caf\u00e9 \"q\" \\ tab\t",
+   "extra": 3,
+   "method": "infer",
+   "name": "infer_empty",
+   "ok": "[]",
+   "queue": [
+    [
+     200,
+     "{\"choices\": [{\"message\": {\"content\": \"{\\\"outcomes\\\": []}\"}}], \"model\": \"m\"}"
+    ]
+   ]
+  },
+  {
+   "arg": "Session: deploy\nSub-task: probe\n- (conversation) caf\u00e9 \"q\" \\ tab\t",
+   "extra": 3,
+   "method": "infer",
+   "name": "infer_null_content",
+   "ok": "null",
+   "queue": [
+    [
+     200,
+     "{\"choices\": [{\"message\": {\"content\": null}}], \"model\": \"m\"}"
+    ]
+   ]
+  },
+  {
+   "arg": "Session: deploy\nSub-task: probe\n- (conversation) caf\u00e9 \"q\" \\ tab\t",
+   "error": "infer_outcomes failed: HTTP Error 500: Internal Server Error",
+   "extra": 3,
+   "method": "infer",
+   "name": "infer_500",
+   "queue": [
+    [
+     500,
+     "boom"
+    ]
+   ]
+  },
+  {
+   "arg": [
+    {
+     "about": "pipeline's",
+     "created_at": 1.0,
+     "detail": "line\nbreak \u0378 \u00e9 \"q\"",
+     "episode_id": "e",
+     "id": 1,
+     "origin": "inferred",
+     "outcome": "success",
+     "polarity": "+",
+     "task": "deploy engine",
+     "used_ids": null
+    },
+    {
+     "about": null,
+     "created_at": 2.0,
+     "detail": null,
+     "episode_id": null,
+     "id": 2,
+     "origin": "action",
+     "outcome": "failure",
+     "polarity": null,
+     "task": "say \"hi\" and 'bye'",
+     "used_ids": null
+    }
+   ],
+   "extra": null,
+   "method": "lessons",
+   "name": "lessons_mixed",
+   "ok": "[{\"task\": \"deploy\", \"aspect\": \"lesson\", \"lesson\": \"use the pipeline\", \"about\": null, \"polarity\": \"-\", \"outcome\": \"success\", \"confidence\": 0.95}, {\"task\": \"t\", \"aspect\": \"lesson\", \"lesson\": \"l\", \"about\": null, \"polarity\": \"+\", \"outcome\": \"success\", \"confidence\": 1.0}, {\"task\": \"t\", \"aspect\": \"pitfall\", \"lesson\": \"l2\", \"about\": \"7\", \"polarity\": \"+\", \"outcome\": \"success\", \"confidence\": 0.6}, {\"task\": \"t\", \"aspect\": \"lesson\", \"lesson\": \"l3\", \"about\": null, \"polarity\": \"+\", \"outcome\": \"correction\", \"confidence\": 1.0}]",
+   "queue": [
+    [
+     200,
+     "{\"choices\": [{\"message\": {\"content\": \"{\\\"lessons\\\": [{\\\"task\\\": \\\" deploy \\\", \\\"aspect\\\": \\\"\\\", \\\"lesson\\\": \\\" use the pipeline \\\", \\\"about\\\": null, \\\"polarity\\\": \\\"-\\\", \\\"outcome\\\": \\\"win\\\", \\\"confidence\\\": \\\"0.95\\\"}, {\\\"task\\\": \\\"t\\\", \\\"aspect\\\": 0, \\\"lesson\\\": \\\"l\\\", \\\"polarity\\\": 1, \\\"confidence\\\": 3}, {\\\"task\\\": \\\"t\\\", \\\"aspect\\\": \\\" pitfall \\\", \\\"lesson\\\": \\\"l2\\\", \\\"about\\\": 7, \\\"confidence\\\": null}, {\\\"task\\\": \\\"\\\", \\\"lesson\\\": \\\"x\\\"}, \\\"not a dict\\\", {\\\"task\\\": \\\"t\\\", \\\"lesson\\\": \\\"l3\\\", \\\"confidence\\\": \\\"nan\\\", \\\"outcome\\\": \\\"correction\\\"}]}\"}}], \"model\": \"m\"}"
+    ]
+   ]
+  },
+  {
+   "arg": [
+    {
+     "about": "pipeline's",
+     "created_at": 1.0,
+     "detail": "line\nbreak \u0378 \u00e9 \"q\"",
+     "episode_id": "e",
+     "id": 1,
+     "origin": "inferred",
+     "outcome": "success",
+     "polarity": "+",
+     "task": "deploy engine",
+     "used_ids": null
+    },
+    {
+     "about": null,
+     "created_at": 2.0,
+     "detail": null,
+     "episode_id": null,
+     "id": 2,
+     "origin": "action",
+     "outcome": "failure",
+     "polarity": null,
+     "task": "say \"hi\" and 'bye'",
+     "used_ids": null
+    }
+   ],
+   "extra": null,
+   "method": "lessons",
+   "name": "lessons_not_list",
+   "ok": "[]",
+   "queue": [
+    [
+     200,
+     "{\"choices\": [{\"message\": {\"content\": \"{\\\"lessons\\\": {\\\"a\\\": 1}}\"}}], \"model\": \"m\"}"
+    ]
+   ]
+  },
+  {
+   "arg": [
+    {
+     "about": "pipeline's",
+     "created_at": 1.0,
+     "detail": "line\nbreak \u0378 \u00e9 \"q\"",
+     "episode_id": "e",
+     "id": 1,
+     "origin": "inferred",
+     "outcome": "success",
+     "polarity": "+",
+     "task": "deploy engine",
+     "used_ids": null
+    },
+    {
+     "about": null,
+     "created_at": 2.0,
+     "detail": null,
+     "episode_id": null,
+     "id": 2,
+     "origin": "action",
+     "outcome": "failure",
+     "polarity": null,
+     "task": "say \"hi\" and 'bye'",
+     "used_ids": null
+    }
+   ],
+   "extra": null,
+   "method": "lessons",
+   "name": "lessons_array_top",
+   "ok": "[]",
+   "queue": [
+    [
+     200,
+     "{\"choices\": [{\"message\": {\"content\": \"[1]\"}}], \"model\": \"m\"}"
+    ]
+   ]
+  },
+  {
+   "arg": [
+    {
+     "about": "pipeline's",
+     "created_at": 1.0,
+     "detail": "line\nbreak \u0378 \u00e9 \"q\"",
+     "episode_id": "e",
+     "id": 1,
+     "origin": "inferred",
+     "outcome": "success",
+     "polarity": "+",
+     "task": "deploy engine",
+     "used_ids": null
+    },
+    {
+     "about": null,
+     "created_at": 2.0,
+     "detail": null,
+     "episode_id": null,
+     "id": 2,
+     "origin": "action",
+     "outcome": "failure",
+     "polarity": null,
+     "task": "say \"hi\" and 'bye'",
+     "used_ids": null
+    }
+   ],
+   "error": "extract_lessons failed: Expecting property name enclosed in double quotes: line 1 column 2 (char 1)",
+   "extra": null,
+   "method": "lessons",
+   "name": "lessons_bad_json",
+   "queue": [
+    [
+     200,
+     "{\"choices\": [{\"message\": {\"content\": \"{bad\"}}], \"model\": \"m\"}"
+    ]
+   ]
+  },
+  {
+   "arg": [
+    {
+     "about": "pipeline's",
+     "created_at": 1.0,
+     "detail": "line\nbreak \u0378 \u00e9 \"q\"",
+     "episode_id": "e",
+     "id": 1,
+     "origin": "inferred",
+     "outcome": "success",
+     "polarity": "+",
+     "task": "deploy engine",
+     "used_ids": null
+    },
+    {
+     "about": null,
+     "created_at": 2.0,
+     "detail": null,
+     "episode_id": null,
+     "id": 2,
+     "origin": "action",
+     "outcome": "failure",
+     "polarity": null,
+     "task": "say \"hi\" and 'bye'",
+     "used_ids": null
+    }
+   ],
+   "error": "extract_lessons failed: HTTP Error 500: Internal Server Error",
+   "extra": null,
+   "method": "lessons",
+   "name": "lessons_500",
+   "queue": [
+    [
+     500,
+     "boom"
+    ]
+   ]
+  },
+  {
+   "arg": [
+    {
+     "about": "rule: cart",
+     "created_at": 3.0,
+     "detail": "user asked for refund\nMUST INCLUDE: Alpha; beta",
+     "episode_id": null,
+     "id": 7,
+     "origin": "action",
+     "outcome": "success",
+     "polarity": null,
+     "task": "checkout",
+     "used_ids": null
+    }
+   ],
+   "extra": null,
+   "method": "rules",
+   "name": "rules_retry_ok",
+   "ok": "{\"claims\": [{\"task\": \"refund\", \"aspect\": \"rule\", \"lesson\": \"WHEN refund THEN use Alpha and BETA\", \"about\": \"x\", \"polarity\": \"+\", \"outcome\": \"success\", \"confidence\": 0.9}], \"failed\": [], \"empty\": []}",
+   "queue": [
+    [
+     200,
+     "{\"choices\": [{\"message\": {\"content\": \"{\\\"lessons\\\": [{\\\"task\\\": \\\"refund\\\", \\\"lesson\\\": \\\"WHEN refund THEN use Alpha\\\", \\\"about\\\": \\\"rule: x\\\", \\\"polarity\\\": \\\"+\\\", \\\"outcome\\\": \\\"success\\\", \\\"confidence\\\": 0.9}]}\"}}], \"model\": \"m\"}"
+    ],
+    [
+     200,
+     "{\"choices\": [{\"message\": {\"content\": \"{\\\"lessons\\\": [{\\\"task\\\": \\\"refund\\\", \\\"lesson\\\": \\\"WHEN refund THEN use Alpha and BETA\\\", \\\"about\\\": \\\"rule: x\\\", \\\"polarity\\\": \\\"+\\\", \\\"outcome\\\": \\\"success\\\", \\\"confidence\\\": 0.9}, {\\\"task\\\": \\\"refund\\\", \\\"lesson\\\": \\\"WHEN refund THEN use Alpha and BETA\\\", \\\"about\\\": \\\"rule: x\\\", \\\"polarity\\\": \\\"+\\\", \\\"outcome\\\": \\\"success\\\", \\\"confidence\\\": 0.9}]}\"}}], \"model\": \"m\"}"
+    ]
+   ]
+  },
+  {
+   "arg": [
+    {
+     "about": "rule: cart",
+     "created_at": 3.0,
+     "detail": "user asked for refund\nMUST INCLUDE: Alpha; beta",
+     "episode_id": null,
+     "id": 7,
+     "origin": "action",
+     "outcome": "success",
+     "polarity": null,
+     "task": "checkout",
+     "used_ids": null
+    },
+    {
+     "about": null,
+     "created_at": 2.0,
+     "detail": null,
+     "episode_id": null,
+     "id": 8,
+     "origin": "action",
+     "outcome": "failure",
+     "polarity": null,
+     "task": "say \"hi\" and 'bye'",
+     "used_ids": null
+    }
+   ],
+   "extra": null,
+   "method": "rules",
+   "name": "rules_retry_empty",
+   "ok": "{\"claims\": [{\"task\": \"refund\", \"aspect\": \"rule\", \"lesson\": \"WHEN refund THEN use Alpha and BETA\", \"about\": \"x\", \"polarity\": \"-\", \"outcome\": \"failure\", \"confidence\": 0.9}], \"failed\": [7], \"empty\": []}",
+   "queue": [
+    [
+     200,
+     "{\"choices\": [{\"message\": {\"content\": \"{\\\"lessons\\\": [{\\\"task\\\": \\\"refund\\\", \\\"lesson\\\": \\\"WHEN refund THEN use Alpha\\\", \\\"about\\\": \\\"rule: x\\\", \\\"polarity\\\": \\\"+\\\", \\\"outcome\\\": \\\"success\\\", \\\"confidence\\\": 0.9}]}\"}}], \"model\": \"m\"}"
+    ],
+    [
+     200,
+     "{\"choices\": [{\"message\": {\"content\": \"{\\\"lessons\\\": []}\"}}], \"model\": \"m\"}"
+    ],
+    [
+     200,
+     "{\"choices\": [{\"message\": {\"content\": \"{\\\"lessons\\\": [{\\\"task\\\": \\\"refund\\\", \\\"lesson\\\": \\\"WHEN refund THEN use Alpha and BETA\\\", \\\"about\\\": \\\"rule: x\\\", \\\"polarity\\\": \\\"-\\\", \\\"outcome\\\": \\\"failure\\\", \\\"confidence\\\": 0.9}]}\"}}], \"model\": \"m\"}"
+    ]
+   ]
+  },
+  {
+   "arg": [
+    {
+     "about": "rule: cart",
+     "created_at": 3.0,
+     "detail": "user asked for refund\nMUST INCLUDE: Alpha; beta",
+     "episode_id": null,
+     "id": 7,
+     "origin": "action",
+     "outcome": "success",
+     "polarity": null,
+     "task": "checkout",
+     "used_ids": null
+    },
+    {
+     "about": null,
+     "created_at": 2.0,
+     "detail": null,
+     "episode_id": null,
+     "id": 8,
+     "origin": "action",
+     "outcome": "failure",
+     "polarity": null,
+     "task": "say \"hi\" and 'bye'",
+     "used_ids": null
+    }
+   ],
+   "extra": null,
+   "method": "rules",
+   "name": "rules_still_missing",
+   "ok": "{\"claims\": [], \"failed\": [7], \"empty\": [8]}",
+   "queue": [
+    [
+     200,
+     "{\"choices\": [{\"message\": {\"content\": \"{\\\"lessons\\\": [{\\\"task\\\": \\\"refund\\\", \\\"lesson\\\": \\\"WHEN refund THEN use Alpha\\\", \\\"about\\\": \\\"rule: x\\\", \\\"polarity\\\": \\\"+\\\", \\\"outcome\\\": \\\"success\\\", \\\"confidence\\\": 0.9}]}\"}}], \"model\": \"m\"}"
+    ],
+    [
+     200,
+     "{\"choices\": [{\"message\": {\"content\": \"{\\\"lessons\\\": [{\\\"task\\\": \\\"refund\\\", \\\"lesson\\\": \\\"WHEN refund THEN use Alpha\\\", \\\"about\\\": \\\"rule: x\\\", \\\"polarity\\\": \\\"+\\\", \\\"outcome\\\": \\\"success\\\", \\\"confidence\\\": 0.9}]}\"}}], \"model\": \"m\"}"
+    ],
+    [
+     200,
+     "{\"choices\": [{\"message\": {\"content\": \"{\\\"lessons\\\": []}\"}}], \"model\": \"m\"}"
+    ]
+   ]
+  },
+  {
+   "arg": [
+    {
+     "about": "pipeline's",
+     "created_at": 1.0,
+     "detail": "line\nbreak \u0378 \u00e9 \"q\"",
+     "episode_id": "e",
+     "id": 9,
+     "origin": "inferred",
+     "outcome": "success",
+     "polarity": "+",
+     "task": "deploy engine",
+     "used_ids": null
+    }
+   ],
+   "error": "extract_rules failed for every signal: rule has invalid outcome or polarity",
+   "extra": null,
+   "method": "rules",
+   "name": "rules_invalid_enum",
+   "queue": [
+    [
+     200,
+     "{\"choices\": [{\"message\": {\"content\": \"{\\\"lessons\\\": [{\\\"task\\\": \\\"refund\\\", \\\"lesson\\\": \\\"WHEN refund THEN use Alpha and BETA\\\", \\\"about\\\": \\\"rule: x\\\", \\\"polarity\\\": \\\"?\\\", \\\"outcome\\\": \\\"success\\\", \\\"confidence\\\": 0.9}]}\"}}], \"model\": \"m\"}"
+    ]
+   ]
+  },
+  {
+   "arg": [
+    {
+     "about": "pipeline's",
+     "created_at": 1.0,
+     "detail": "line\nbreak \u0378 \u00e9 \"q\"",
+     "episode_id": "e",
+     "id": 9,
+     "origin": "inferred",
+     "outcome": "success",
+     "polarity": null,
+     "task": "deploy engine",
+     "used_ids": null
+    }
+   ],
+   "error": "extract_rules failed for every signal: rule contradicts the source verdict",
+   "extra": null,
+   "method": "rules",
+   "name": "rules_contradiction",
+   "queue": [
+    [
+     200,
+     "{\"choices\": [{\"message\": {\"content\": \"{\\\"lessons\\\": [{\\\"task\\\": \\\"refund\\\", \\\"lesson\\\": \\\"WHEN refund THEN use Alpha and BETA\\\", \\\"about\\\": \\\"rule: x\\\", \\\"polarity\\\": \\\"-\\\", \\\"outcome\\\": \\\"success\\\", \\\"confidence\\\": 0.9}]}\"}}], \"model\": \"m\"}"
+    ]
+   ]
+  },
+  {
+   "arg": [
+    {
+     "about": "pipeline's",
+     "created_at": 1.0,
+     "detail": "line\nbreak \u0378 \u00e9 \"q\"",
+     "episode_id": "e",
+     "id": 9,
+     "origin": "inferred",
+     "outcome": "success",
+     "polarity": "+",
+     "task": "deploy engine",
+     "used_ids": null
+    },
+    {
+     "about": null,
+     "created_at": 2.0,
+     "detail": null,
+     "episode_id": null,
+     "id": 10,
+     "origin": "action",
+     "outcome": "failure",
+     "polarity": null,
+     "task": "say \"hi\" and 'bye'",
+     "used_ids": null
+    }
+   ],
+   "error": "extract_rules failed for every signal: extract_lessons failed: HTTP Error 500: Internal Server Error",
+   "extra": null,
+   "method": "rules",
+   "name": "rules_all_failed",
+   "queue": [
+    [
+     500,
+     "boom"
+    ],
+    [
+     500,
+     "boom"
+    ]
+   ]
+  },
+  {
+   "arg": [
+    {
+     "about": "rule: cart",
+     "created_at": 3.0,
+     "detail": "plain",
+     "episode_id": null,
+     "id": 7,
+     "origin": "action",
+     "outcome": "success",
+     "polarity": null,
+     "task": "checkout",
+     "used_ids": null
+    }
+   ],
+   "extra": null,
+   "method": "rules",
+   "name": "rules_about_fallback",
+   "ok": "{\"claims\": [{\"task\": \"refund\", \"aspect\": \"rule\", \"lesson\": \"WHEN refund THEN use Alpha and BETA\", \"about\": \"cart\", \"polarity\": \"+\", \"outcome\": \"success\", \"confidence\": 0.9}], \"failed\": [], \"empty\": []}",
+   "queue": [
+    [
+     200,
+     "{\"choices\": [{\"message\": {\"content\": \"{\\\"lessons\\\": [{\\\"task\\\": \\\"refund\\\", \\\"lesson\\\": \\\"WHEN refund THEN use Alpha and BETA\\\", \\\"about\\\": \\\"  RULE:  \\\", \\\"polarity\\\": \\\"+\\\", \\\"outcome\\\": \\\"success\\\", \\\"confidence\\\": 0.9}]}\"}}], \"model\": \"m\"}"
+    ]
+   ]
+  },
+  {
+   "arg": "Session: deploy\nSub-task: probe\n- (conversation) caf\u00e9 \"q\" \\ tab\t",
+   "extra": 1200,
+   "method": "digest",
+   "name": "digest_ok",
+   "ok": "\"In this session the user deployed.\"",
+   "queue": [
+    [
+     200,
+     "{\"choices\": [{\"message\": {\"content\": \"x {\\\"digest\\\": \\\"  In this session the user deployed.  \\\"} y\"}}], \"model\": \"m\"}"
+    ]
+   ]
+  },
+  {
+   "arg": "Session: deploy\nSub-task: probe\n- (conversation) caf\u00e9 \"q\" \\ tab\t",
+   "extra": 1200,
+   "method": "digest",
+   "name": "digest_blank",
+   "ok": "null",
+   "queue": [
+    [
+     200,
+     "{\"choices\": [{\"message\": {\"content\": \"{\\\"digest\\\": \\\"   \\\"}\"}}], \"model\": \"m\"}"
+    ]
+   ]
+  },
+  {
+   "arg": "Session: deploy\nSub-task: probe\n- (conversation) caf\u00e9 \"q\" \\ tab\t",
+   "extra": 1200,
+   "method": "digest",
+   "name": "digest_not_str",
+   "ok": "null",
+   "queue": [
+    [
+     200,
+     "{\"choices\": [{\"message\": {\"content\": \"{\\\"digest\\\": 5}\"}}], \"model\": \"m\"}"
+    ]
+   ]
+  },
+  {
+   "arg": "Session: deploy\nSub-task: probe\n- (conversation) caf\u00e9 \"q\" \\ tab\t",
+   "extra": 7,
+   "method": "digest",
+   "name": "digest_echo",
+   "ok": "null",
+   "queue": [
+    [
+     200,
+     "{\"choices\": [{\"message\": {\"content\": \"{\\\"digest\\\": \\\"It reads as history, never as a claim about the present.\\\"}\"}}], \"model\": \"m\"}"
+    ]
+   ]
+  },
+  {
+   "arg": "Session: deploy\nSub-task: probe\n- (conversation) caf\u00e9 \"q\" \\ tab\t",
+   "error": "summarize_session failed: HTTP Error 500: Internal Server Error",
+   "extra": 1200,
+   "method": "digest",
+   "name": "digest_500",
+   "queue": [
+    [
+     500,
+     "boom"
+    ]
+   ]
+  }
  ]
 }

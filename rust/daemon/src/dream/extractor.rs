@@ -14,8 +14,8 @@
 //! exception. [`ExtractFailure::Uncaught`] carries those.
 //!
 //! The outcome-inference, lesson and digest calls (`infer_outcomes`,
-//! `extract_lessons` / `extract_rules`, `summarize_session`) land with the
-//! dream run: each is one more `Compat` method over [`Compat::completion`].
+//! `extract_lessons` / `extract_rules`, `summarize_session`) are the
+//! `Compat` methods in `stage_calls.rs`, over the same request.
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -104,17 +104,39 @@ pub fn lone_surrogate(c: char) -> Option<u32> {
 /// field encodes. Python reaches it on the database write (or the embedder
 /// refuses the string first); the dream pass fails that write the same way.
 pub fn unencodable(fields: &[&str]) -> Option<String> {
+    encode_error(fields).map(|e| format!("UnicodeEncodeError: {e}"))
+}
+
+/// `str(exc)` of that `UnicodeEncodeError`, without the type prefix: what
+/// a caller reporting `str(exc)` says. The position counts within the
+/// field as psycopg received it.
+pub fn encode_error(fields: &[&str]) -> Option<String> {
     for f in fields {
         for (pos, c) in f.chars().enumerate() {
             if let Some(s) = lone_surrogate(c) {
                 return Some(format!(
-                    "UnicodeEncodeError: 'utf-8' codec can't encode character '\\u{s:04x}' \
+                    "'utf-8' codec can't encode character '\\u{s:04x}' \
                      in position {pos}: surrogates not allowed"
                 ));
             }
         }
     }
     None
+}
+
+/// `str(exc)` of the `TypeError` the embedder's tokenizer raises
+/// (tokenizers 0.22 `encode_batch`, CPython 3.11) on a string holding a
+/// lone surrogate.
+pub const EMBED_REFUSED: &str =
+    "TextEncodeInput must be Union[TextInputSequence, Tuple[InputSequence, InputSequence]]";
+
+/// [`EMBED_REFUSED`] when a text the embedder would encode holds a reply's
+/// lone surrogate, or None.
+pub fn embed_refused(texts: &[&str]) -> Option<&'static str> {
+    texts
+        .iter()
+        .any(|t| t.chars().any(|c| lone_surrogate(c).is_some()))
+        .then_some(EMBED_REFUSED)
 }
 
 /// `repr(s)`: as `crate::storage::py_repr`, except that a lone-surrogate
@@ -194,7 +216,7 @@ pub fn py_str(v: &Value) -> String {
 }
 
 /// Python truthiness of a JSON value.
-fn truthy(v: &Value) -> bool {
+pub(super) fn truthy(v: &Value) -> bool {
     match v {
         Value::Null => false,
         Value::Bool(b) => *b,
@@ -361,7 +383,7 @@ fn clamp01(x: f64) -> f64 {
 
 /// `max(0.0, min(1.0, float(v.get(key, default))))`, the default on a
 /// TypeError/ValueError.
-fn confidence(obj: &Map<String, Value>, default: f64) -> Result<f64, Uncaught> {
+pub(super) fn confidence(obj: &Map<String, Value>, default: f64) -> Result<f64, Uncaught> {
     let x = match obj.get("confidence") {
         None => Some(default),
         Some(v) => py_float(v)?,
@@ -380,7 +402,7 @@ fn source_index(obj: &Map<String, Value>, n: usize) -> Result<Option<usize>, Unc
 }
 
 /// `str(obj.get(key, "")).strip()`.
-fn field(obj: &Map<String, Value>, key: &str) -> String {
+pub(super) fn field(obj: &Map<String, Value>, key: &str) -> String {
     match obj.get(key) {
         None => String::new(),
         Some(v) => crate::storage::py_strip(&py_str(v)).to_string(),
@@ -847,12 +869,12 @@ impl From<Uncaught> for ExtractFailure {
 }
 
 /// A failure inside the request's `try`, before it is labelled.
-struct Raised {
-    text: String,
+pub(super) struct Raised {
+    pub(super) text: String,
     auth: bool,
     /// Auth words in text Python's message has and `text` redacts.
     redacted_auth_words: bool,
-    cause: Cause,
+    pub(super) cause: Cause,
 }
 
 impl Raised {
@@ -865,11 +887,11 @@ impl Raised {
         }
     }
 
-    fn other(type_name: &str, text: impl Into<String>) -> Self {
+    pub(super) fn other(type_name: &str, text: impl Into<String>) -> Self {
         Raised::new(Cause::Other(type_name.into()), text)
     }
 
-    fn label(self, label: &str, keep_auth: bool) -> ExtractorError {
+    pub(super) fn label(self, label: &str, keep_auth: bool) -> ExtractorError {
         ExtractorError {
             message: format!("{label} failed: {}", self.text),
             // Only `extract` copies the HTTP auth hint onto its error.
@@ -883,7 +905,7 @@ impl Raised {
 /// `json.loads(text)` of a reply (lone surrogates kept, as
 /// [`crate::mcp::py_loads::loads_reply`] documents), with the exception
 /// class Python's chain ends in.
-fn loads(text: &str) -> Result<Value, Raised> {
+pub(super) fn loads(text: &str) -> Result<Value, Raised> {
     let parsed = if crate::mutants::active("mcp-dream-extractor-strict-surrogates") {
         crate::mcp::py_loads::loads(text)
     } else {
@@ -892,13 +914,12 @@ fn loads(text: &str) -> Result<Value, Raised> {
     if let Some(v) = parsed {
         return Ok(v);
     }
+    // `str(exc)`: Python's own message, which the lesson stage reports.
+    let message = super::py_json_error::message(text).unwrap_or_else(|| "invalid JSON".into());
     Err(match json_error_kind(text) {
-        JsonFail::ExpectingValue => Raised::other("StopIteration", "Expecting value"),
-        JsonFail::Decode => Raised::other("JSONDecodeError", "invalid JSON"),
-        JsonFail::Recursion => Raised::other(
-            "RecursionError",
-            "maximum recursion depth exceeded while decoding a JSON document",
-        ),
+        JsonFail::ExpectingValue => Raised::other("StopIteration", message),
+        JsonFail::Decode => Raised::other("JSONDecodeError", message),
+        JsonFail::Recursion => Raised::other("RecursionError", message),
     })
 }
 
@@ -1474,7 +1495,7 @@ impl Compat {
     /// POST the body, then `data["choices"][0]["message"]["content"] or ""`,
     /// cut from the first `{` to the last `}`, then `json.loads`. Every step
     /// sits inside the method's `try`.
-    async fn completion(&self, body: String) -> Result<Value, Raised> {
+    pub(super) async fn completion(&self, body: String) -> Result<Value, Raised> {
         let content = self.content(body).await?;
         let content = match (content.find('{'), content.rfind('}')) {
             (Some(s), Some(e)) if e > s => &content[s..=e],
@@ -1484,7 +1505,7 @@ impl Compat {
     }
 
     /// The reply's message content, as `completion` reads it.
-    async fn content(&self, body: String) -> Result<String, Raised> {
+    pub(super) async fn content(&self, body: String) -> Result<String, Raised> {
         let timeout = Duration::try_from_secs_f64(self.timeout)
             .map_err(|_| Raised::other("ValueError", "Timeout value must be positive"))?;
         let url = format!("{}/chat/completions", self.base_url);

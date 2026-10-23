@@ -74,8 +74,18 @@ pub struct MemoryConfig {
     pub lessons_infer_outcomes: bool,
     pub lessons_infer_outcomes_max_signals: i64,
     /// `memory.lessons.synthesize_in_dream` (on): whether the dream pass
-    /// runs lesson synthesis (not ported: `memory_dream run` refuses).
+    /// runs lesson synthesis (`dream/lessons.rs`).
     pub lessons_synthesize_in_dream: bool,
+    /// `memory.lessons.signal_retention_days` (3650) and `signal_retry_days`
+    /// (30): the synthesis prune cutoff and the pending-signal retry window.
+    pub lessons_signal_retention_days: i64,
+    pub lessons_signal_retry_days: i64,
+    /// `memory.lessons.synthesis_dedup_min_similarity` (0.88; 0 disables).
+    pub lessons_synthesis_dedup_min_similarity: f64,
+    /// `memory.lessons.synthesis_max_signals` (200; 0 drains everything).
+    pub lessons_synthesis_max_signals: i64,
+    /// `memory.lessons.rule_mode` (off): every signal under the rule contract.
+    pub lessons_rule_mode: bool,
     /// `memory.graph_insight.enabled` (on): the dream's graph-insight
     /// refresh (not ported: `memory_dream run` refuses while it is on).
     pub graph_insight_enabled: bool,
@@ -381,6 +391,10 @@ pub struct DreamConfig {
     pub max_batch: i64,
     pub digest_enabled: bool,
     pub digest_max_per_cycle: i64,
+    /// `digest_context_chars` (24000): the map-reduce split per call;
+    /// `digest_target_chars` (1200): the prompt's length target.
+    pub digest_context_chars: i64,
+    pub digest_target_chars: i64,
     /// The consolidation pass (`service_dream.py:_dream_run_locked`).
     pub stall_notice: bool,
     pub quarantine_low_trust: bool,
@@ -621,6 +635,11 @@ impl Default for MemoryConfig {
             lessons_infer_outcomes: true,
             lessons_infer_outcomes_max_signals: 3,
             lessons_synthesize_in_dream: true,
+            lessons_signal_retention_days: 3650,
+            lessons_signal_retry_days: 30,
+            lessons_synthesis_dedup_min_similarity: 0.88,
+            lessons_synthesis_max_signals: 200,
+            lessons_rule_mode: false,
             graph_insight_enabled: true,
             scopes_exclude: ["status", "claude", "agent", "correction"]
                 .map(String::from)
@@ -720,6 +739,8 @@ impl Default for DreamConfig {
             max_batch: 40,
             digest_enabled: false,
             digest_max_per_cycle: 4,
+            digest_context_chars: 24000,
+            digest_target_chars: 1200,
             stall_notice: true,
             quarantine_low_trust: false,
             trusted_sources: Vec::new(),
@@ -1589,6 +1610,15 @@ fn load_str(text: &str) -> Result<Config, ConfigError> {
                 want_int(l, "infer_outcomes_max_signals", "memory.lessons", 3)?;
             memory.lessons_synthesize_in_dream =
                 want_bool(l, "synthesize_in_dream", "memory.lessons", true)?;
+            memory.lessons_signal_retention_days =
+                want_int(l, "signal_retention_days", "memory.lessons", 3650)?;
+            memory.lessons_signal_retry_days =
+                want_int(l, "signal_retry_days", "memory.lessons", 30)?;
+            memory.lessons_synthesis_dedup_min_similarity =
+                want_float(l, "synthesis_dedup_min_similarity", "memory.lessons", 0.88)?;
+            memory.lessons_synthesis_max_signals =
+                want_int(l, "synthesis_max_signals", "memory.lessons", 200)?;
+            memory.lessons_rule_mode = want_bool(l, "rule_mode", "memory.lessons", false)?;
         }
         if let Some(g) = section(m, "graph_insight", "memory.")? {
             memory.graph_insight_enabled = want_bool(g, "enabled", "memory.graph_insight", true)?;
@@ -2041,6 +2071,8 @@ fn read_dream(d: &[(Node, Node)]) -> Result<DreamConfig, ConfigError> {
         max_batch: want_int(d, "max_batch", p, def.max_batch)?,
         digest_enabled: want_bool(d, "digest_enabled", p, def.digest_enabled)?,
         digest_max_per_cycle: want_int(d, "digest_max_per_cycle", p, def.digest_max_per_cycle)?,
+        digest_context_chars: want_int(d, "digest_context_chars", p, def.digest_context_chars)?,
+        digest_target_chars: want_int(d, "digest_target_chars", p, def.digest_target_chars)?,
         stall_notice: want_bool(d, "stall_notice", p, def.stall_notice)?,
         quarantine_low_trust: want_bool(d, "quarantine_low_trust", p, def.quarantine_low_trust)?,
         trusted_sources: match lookup(d, "trusted_sources") {

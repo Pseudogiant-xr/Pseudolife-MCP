@@ -231,10 +231,9 @@ pub async fn connect(
     }
 }
 
-/// Python's `repr()` of a `str`, for the lease refusal's `{bank!r}`.
-/// Exact for ASCII; for other characters it escapes the C1 controls and the
-/// common non-printing separators and format characters (unassigned code
-/// points, which Python also escapes, are passed through).
+/// Python's `repr()` of a `str`: the quote choice, the backslash escapes and
+/// the hex escapes for every code point `str.isprintable()` rejects (CPython
+/// 3.11, Unicode 14: [`py_printable`]).
 pub fn py_repr(s: &str) -> String {
     let quote = if s.contains('\'') && !s.contains('"') {
         '"'
@@ -270,16 +269,16 @@ pub fn py_repr(s: &str) -> String {
     out
 }
 
+/// `str.isprintable()` for one code point, from CPython 3.11's Unicode 14
+/// data (`py_repr_unicode14.rs`).
 pub(crate) fn py_printable(c: char) -> bool {
     let n = c as u32;
     if n < 0x80 {
         return (0x20..0x7f).contains(&n);
     }
-    !matches!(n,
-        0x80..=0xa0 | 0xad | 0x600..=0x605 | 0x61c | 0x6dd | 0x70f | 0x1680
-        | 0x180e | 0x2000..=0x200f | 0x2028..=0x202f | 0x205f..=0x2064
-        | 0x2066..=0x206f | 0x3000 | 0xd800..=0xf8ff | 0xfeff | 0xfff9..=0xfffb
-        | 0xe0001 | 0xe0020..=0xe007f | 0xf0000..=0x10ffff)
+    let table = crate::py_repr_unicode14::NONPRINTABLE;
+    let i = table.partition_point(|&(_, hi)| hi < n);
+    table.get(i).is_none_or(|&(lo, _)| lo > n)
 }
 
 /// `_describe_lease_holder`'s message (postgres.py:584-601), from the

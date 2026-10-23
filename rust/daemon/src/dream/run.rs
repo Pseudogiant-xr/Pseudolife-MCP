@@ -13,10 +13,13 @@
 //! transaction. Then the separate events pass, the commit, the run stamp,
 //! and the post-commit graph work (`relations.rs`).
 //!
-//! Stages that are not ported (outcome inference, session digests, lesson
-//! synthesis, the graph-insight refresh) refuse the whole action with
-//! `not_implemented` naming the stage while their switch is on; with it off
-//! Python returns a fixed `disabled` answer, reproduced here.
+//! The post-consolidation stages run in Python's order: on an empty pull
+//! outcome inference, session digests and lesson synthesis
+//! (`stages.rs`, `lessons.rs`); after a commit outcome inference and lesson
+//! synthesis (whose tallies join the run row). The graph-insight refresh is
+//! not ported: while `memory.graph_insight.enabled` is on the whole action
+//! refuses with `not_implemented` naming it; with it off Python returns a
+//! fixed `disabled` answer, reproduced here.
 
 use std::collections::{BTreeSet, HashMap};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -84,6 +87,10 @@ pub struct RunState {
     pub stall: Mutex<StallTracker>,
     /// `_last_dream_extractor`: `{which, base_url, at}`.
     pub last_dream_extractor: Mutex<Option<Value>>,
+    /// `_lesson_signal_cursor`: where the next capped lesson batch starts.
+    pub(super) lesson_cursor: Mutex<Option<(f64, i64)>>,
+    /// `_lesson_selected_cursor`: the last signal the latest selection took.
+    pub(super) lesson_selected: Mutex<Option<(f64, i64)>>,
 }
 
 /// Releases the single-flight guard however the pass ends.
@@ -234,46 +241,19 @@ impl StallTracker {
 // Stages
 // ---------------------------------------------------------------------------
 
-/// The `not_implemented` refusal while a stage this port does not run is
-/// switched on, or None.
+/// The `not_implemented` refusal while the one stage this port does not run
+/// (the graph-insight refresh) is switched on, or None.
 pub fn refusal(config: &Config) -> Option<ToolError> {
-    let m = &config.memory;
-    let stage = if m.lessons_enabled
-        && m.lessons_infer_outcomes
-        && m.lessons_infer_outcomes_max_signals > 0
-    {
-        "infer_outcomes_stage (memory.lessons.infer_outcomes)"
-    } else if m.lessons_enabled && m.lessons_synthesize_in_dream {
-        "synthesize_lessons (memory.lessons.synthesize_in_dream)"
-    } else if config.dream.digest_enabled {
-        "generate_digests_stage (memory.dream.digest_enabled)"
-    } else if m.graph_insight_enabled {
-        "_safe_refresh_graph_insight (memory.graph_insight.enabled)"
-    } else {
+    if !config.memory.graph_insight_enabled {
         return None;
-    };
+    }
+    let stage = "_safe_refresh_graph_insight (memory.graph_insight.enabled)";
     Some(ToolError::refused(
         "not_implemented",
         Some(&format!(
-            "memory_dream run: the {stage} stage is not yet served by the Rust daemon; \
-             switch it off to run the consolidation pass"
+            "memory_dream run: the {stage} stage is not yet served by the Rust daemon; switch it off to run the consolidation pass"
         )),
     ))
-}
-
-/// `infer_outcomes_stage` with its switch off.
-fn outcome_inference_disabled() -> Value {
-    json!({"scanned": 0, "written": 0, "skipped": "disabled"})
-}
-
-/// `generate_digests_stage` with its switch off.
-fn digests_disabled() -> Value {
-    json!({"scanned": 0, "written": 0, "skipped": "disabled"})
-}
-
-/// `synthesize_lessons` with its switch off.
-fn lessons_disabled() -> Value {
-    json!({"signals": 0, "lessons": 0, "skipped": "disabled"})
 }
 
 /// `_safe_refresh_graph_insight` with `memory.graph_insight.enabled` off.
@@ -1649,6 +1629,12 @@ async fn run_locked(
     }
     let entries = parse_entries(&pulled);
     if entries.is_empty() {
+        // No new memories, but pending signals and closed sessions may
+        // still wait: the stages run regardless, in Python's order.
+        let outcome_inference = super::stages::infer_outcomes_stage(svc, ready, extractor).await?;
+        let digests = super::stages::generate_digests_stage(svc, ready, extractor).await?;
+        let lessons =
+            super::lessons::synthesize_lessons(svc, ready, caller, writer, extractor).await?;
         let retyped = super::relations::retype_quarantined_links(
             svc,
             ready,
@@ -1679,9 +1665,9 @@ async fn run_locked(
         m.insert("constraint_verbatim".into(), json!(0));
         m.insert("constraint_misses".into(), json!([]));
         m.insert("cursor".into(), pulled["cursor"].clone());
-        m.insert("lessons".into(), lessons_disabled());
-        m.insert("outcome_inference".into(), outcome_inference_disabled());
-        m.insert("digests".into(), digests_disabled());
+        m.insert("lessons".into(), lessons);
+        m.insert("outcome_inference".into(), outcome_inference);
+        m.insert("digests".into(), digests);
         m.insert("graph_insight".into(), graph_insight_disabled());
         m.insert("retyped".into(), retyped);
         return Ok(m);
@@ -1937,12 +1923,15 @@ async fn run_locked(
     .await;
     let alias_candidates =
         super::relations::propose_alias_candidates(svc, ready, &new_entities, &known).await;
-    let lessons = lessons_disabled();
+    let outcome_inference = super::stages::infer_outcomes_stage(svc, ready, extractor).await?;
+    let lessons = super::lessons::synthesize_lessons(svc, ready, caller, writer, extractor).await?;
+    let tally = |k: &str| lessons.get(k).and_then(Value::as_i64).unwrap_or(0);
     if let Some(id) = pass.run_id
         && let Err(e) = update_run_tallies(
             ready,
             id,
-            json!({"lesson_signals": 0, "lessons_written": 0, "lessons_deduped": 0}),
+            json!({"lesson_signals": tally("signals"), "lessons_written": tally("lessons"),
+                   "lessons_deduped": tally("deduped")}),
         )
         .await
     {
@@ -1971,7 +1960,7 @@ async fn run_locked(
         json!({"scanned": 0, "written": 0, "skipped": "claims-branch"}),
     );
     m.insert("lessons".into(), lessons);
-    m.insert("outcome_inference".into(), outcome_inference_disabled());
+    m.insert("outcome_inference".into(), outcome_inference);
     m.insert("graph_insight".into(), graph_insight_disabled());
     counters_tail(&mut m, c, true);
     m.insert("constraint_verbatim".into(), json!(c.carried.len()));
@@ -2050,20 +2039,15 @@ mod tests {
     }
 
     #[test]
-    fn refusal_names_the_first_enabled_stage() {
+    fn only_the_graph_insight_stage_refuses() {
         let mut c = Config::default();
         let text = |c: &Config| match refusal(c) {
             Some(ToolError::Refused { detail, .. }) => detail.unwrap_or_default(),
             _ => String::new(),
         };
-        assert!(text(&c).contains("infer_outcomes_stage"));
-        c.memory.lessons_infer_outcomes = false;
-        assert!(text(&c).contains("synthesize_lessons"));
-        c.memory.lessons_enabled = false;
         assert!(text(&c).contains("_safe_refresh_graph_insight"));
         c.dream.digest_enabled = true;
-        assert!(text(&c).contains("generate_digests_stage"));
-        c.dream.digest_enabled = false;
+        assert!(text(&c).contains("_safe_refresh_graph_insight"));
         c.memory.graph_insight_enabled = false;
         assert!(refusal(&c).is_none());
     }

@@ -43,7 +43,7 @@ fn entity(row: &Row) -> Value {
         "created_at": row.get::<_, f64>(4)})
 }
 
-async fn ensure_entity_body(
+pub(crate) async fn ensure_entity_body(
     client: &Client,
     canonical: &str,
     display: Option<&str>,
@@ -224,7 +224,7 @@ pub struct Edge<'a> {
     pub source_entry_ids: &'a [i64],
 }
 
-async fn upsert_edge_body(client: &Client, edge: Edge<'_>) -> anyhow::Result<Value> {
+pub(crate) async fn upsert_edge_body(client: &Client, edge: Edge<'_>) -> anyhow::Result<Value> {
     let tx = client;
     let mut ids = edge.source_entry_ids.to_vec();
     ids.sort_unstable();
