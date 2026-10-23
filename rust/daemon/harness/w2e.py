@@ -14,7 +14,8 @@ Any Rust build serves ``memory_store``, ``memory_fact_set``,
 ``memory_episode_summary``, ``memory_outcome``, ``memory_reinforce``,
 ``memory_history``, ``memory_world_set``, ``memory_world_search``,
 ``memory_lesson_search``, ``memory_supersede``, ``memory_reinstate``,
-``memory_forget`` and ``memory_consolidation_candidates`` on ``/mcp`` (``--features mutants`` adds the
+``memory_forget``, ``memory_consolidation_candidates`` and ``memory_consolidate`` on ``/mcp``
+(``--features mutants`` adds the
 deliberate breaks). Each scenario prepares
 one template bank through the Python daemon's own write path (seed calls
 only, never hand-written rows, except the declared ``sql`` seed op below),
@@ -362,6 +363,11 @@ MUTANTS = ["store-tags-raw", "store-skip-session-episode", "store-no-hint", "sto
            # memory_consolidation_candidates (spec CC1-CC9): caught by
            # consolidation-candidates.
            "mcp-consolidation-unsorted", "mcp-consolidation-unverified",
+           # memory_consolidate (spec CN1-CN7): caught by the consolidate-*
+           # scenarios.
+           "mcp-consolidate-no-dedupe", "mcp-consolidate-first-error-only",
+           "mcp-consolidate-labels-first-only", "mcp-consolidate-victim-first-only",
+           "mcp-consolidate-derived-keys", "mcp-consolidate-default-source",
            # the graph store's write tools (spec GW1-GW12): caught by the
            # graph-writes and graph-relations scenarios.
            "mcp-graph-no-etype-backfill", "mcp-graph-no-slot-fold", "mcp-graph-no-warnings",
@@ -1447,7 +1453,8 @@ def supersede(new_text, headers=(), **kw) -> dict:
 
 # Scenarios whose operations may include ``external`` writes.
 EXTERNAL_WRITES = {"supersede-branches", "reinstate", "consolidation-candidates",
-                   "review-list", "review-actions", "review-slots"}
+                   "review-list", "review-actions", "review-slots",
+                   "consolidate-branches"}
 
 
 def external(statement: str) -> dict:
@@ -1979,6 +1986,148 @@ SCENARIOS.update({
             candidates(query=STAGING),
             # the episode walk's candidates are checked too, before the cut
             candidates(episode="@root:sess-c2:32", top_k=1, min_cluster_size=1),
+        ],
+    },
+})
+
+
+# memory_consolidate (spec CN1-CN7): the correction body over lists of
+# targets, on templates the Python daemon's own tools wrote. The duplicate
+# row and the trace rows are SQL seeds, as for memory_supersede.
+def consolidate(new_text, headers=(), **kw) -> dict:
+    return {"op": "tool", "name": "memory_consolidate", "args": {"new_text": new_text, **kw},
+            "headers": list(headers)}
+
+
+STAGE = ["The staging cluster runs three nodes.",
+         "Staging cluster has three nodes running.",
+         "According to the runbook, the staging cluster runs 3 nodes."]
+RESTART = ["Primary restarts happen after hours.",
+           "Never restart the primary during business hours."]
+SCENARIOS.update({
+    "consolidate-branches": {
+        "config": None,
+        "seed": [
+            store(STAGE[0], [sess("sess-k1")]),
+            store(STAGE[1], [sess("sess-k2")]),
+            store(STAGE[2], [sess("sess-k1")]),
+            trace_sql(STAGE[0], "staging-cluster", "nodes"),
+            trace_sql(STAGE[1], "staging-cluster", "nodes"),
+            trace_sql(STAGE[1], "staging-cluster", "size"),
+            store(RESTART[0]),
+            store(RESTART[1]),
+            store("The cache warms at boot."),
+            store("Cache warming happens on boot."),
+            store("Gamma retired note."),
+            supersede("Gamma replacement note.", old_text="Gamma retired note."),
+            store("Delta duplicated note."),
+            store("Epsilon row to vanish."),
+            store("Epsilon twin to vanish."),
+            store("Zeta row retired behind the daemon's back."),
+            store("Zeta partner note."),
+            store("Eta first note retired behind the daemons' backs."),
+            store("Eta second note retired behind the daemons' backs."),
+            dict(sql("INSERT INTO entries (band, text, embedding, surprise, ts, access_count, "
+                     "source, episode_id, episode_title, tags, slots, authority, "
+                     "distortion_tolerance, dream_state) SELECT band, text, embedding, surprise, "
+                     "ts + 1, 0, 'user', episode_id, episode_title, tags, slots, authority, "
+                     "distortion_tolerance, dream_state FROM entries "
+                     "WHERE text = 'Delta duplicated note.'"), after_stop=True),
+        ],
+        "ops": [
+            # by ids, with a session header and tags to normalize: every target
+            # retired at one stamp, the invalidations for each, the strictest
+            # label (the third target's quoted), no derived-slot keys
+            consolidate("The staging cluster runs three nodes in total.", [sess("sess-k1")],
+                        entry_ids=[f"@id:{t}" for t in STAGE],
+                        tags=[" Consolidated ", "ops", "consolidated", "", "OPS"]),
+            # by exact texts, repeated: one retirement each; the caller's
+            # source; the second target's constraint carries over
+            consolidate("Primary restarts are scheduled outside business hours.",
+                        replaces=[RESTART[0], RESTART[1], RESTART[0]], source="user"),
+            # a repeated id; an empty source takes the default
+            consolidate("The cache warms when the service boots.",
+                        entry_ids=["@id:The cache warms at boot.", "@id:The cache warms at boot.",
+                                   "@id:Cache warming happens on boot."], source=""),
+            # refusals: nothing changes
+            consolidate("x", replaces=["Zeta partner note."], entry_ids=[1]),
+            consolidate("x"),
+            consolidate("x", replaces=[]),
+            consolidate("x", entry_ids=[]),
+            consolidate("x", entry_ids=["@id:Zeta partner note.", 0]),
+            consolidate("x", entry_ids=[-4, "@id:Zeta partner note."]),
+            consolidate("x", replaces=["Zeta partner note.", "  "]),
+            consolidate("   ", replaces=["Zeta partner note."]),
+            consolidate("   "),
+            # every target's error, the first one's reason; a good target in
+            # the list changes nothing
+            consolidate("x", replaces=["no such note", "Zeta partner note.", "Gamma retired note.",
+                                       "Delta duplicated note.", "no such note"]),
+            consolidate("x", entry_ids=["@id:Zeta partner note.", "@id:Gamma retired note.", 999999,
+                                        99999999999999999999]),
+            consolidate("x", replaces=["Delta duplicated note.", "Gamma retired note."]),
+            # rows deleted behind the daemons' backs: each one reported
+            external("DELETE FROM entries WHERE text IN "
+                     "('Epsilon row to vanish.', 'Epsilon twin to vanish.')"),
+            consolidate("x", replaces=["Zeta partner note.", "Epsilon twin to vanish.",
+                                       "Epsilon row to vanish."]),
+            # one target retired behind the daemons' backs: supersede_entries
+            # refuses the whole list
+            external("UPDATE entries SET superseded_at = 1700000000.5, "
+                     "superseded_by_text = 'elsewhere' "
+                     "WHERE text = 'Zeta row retired behind the daemon''s back.'"),
+            consolidate("x", replaces=["Zeta partner note.",
+                                       "Zeta row retired behind the daemon's back."]),
+            # two retired, listed against id order: already_retired is sorted
+            external("UPDATE entries SET superseded_at = 1700000001.5, "
+                     "superseded_by_text = 'elsewhere' WHERE text LIKE 'Eta % note retired%'"),
+            consolidate("x", replaces=["Eta second note retired behind the daemons' backs.",
+                                       "Eta first note retired behind the daemons' backs."]),
+        ],
+    },
+    # Capacity: the victim is chosen with every target retired. The first
+    # target is a system prompt (heavily weighted even retired), the second
+    # an agent note: retired together, the agent note is the cheapest entry;
+    # with only the first retired, the thinking trace would be.
+    "consolidate-capacity": {
+        "config": "memory:\n  miras:\n    preset: custom\n    bands:\n      - name: flat\n        max_entries: 5\n",
+        "seed": [
+            store("System prompt one, retained.", source="system"),
+            store("System prompt two, retained.", source="system"),
+            store("System prompt three, retained.", source="system"),
+            store("Agent note about the release checklist."),
+            store("Thinking trace about the index rebuild.", source="llm_thinking"),
+        ],
+        "ops": [
+            consolidate("System prompt one and the release checklist, consolidated.",
+                        entry_ids=["@id:System prompt one, retained.",
+                                   "@id:Agent note about the release checklist."]),
+        ],
+    },
+    # The meta filter refuses the replacement: the whole consolidation rolls
+    # back, every target's invalidation included, and the targets stay live.
+    "consolidate-meta-filter": {
+        "config": "memory:\n  meta_filter:\n    enabled: true\n",
+        "seed": [
+            store("The on-call rotation changes on Mondays."),
+            store("On-call rotation switches every Monday."),
+            store("The pager escalates after ten minutes."),
+            store("Pager escalation happens after 10 minutes."),
+            trace_sql("The on-call rotation changes on Mondays.", "on-call", "rotation"),
+            trace_sql("On-call rotation switches every Monday.", "on-call", "rotation"),
+        ],
+        "ops": [
+            consolidate("No relevant memories about the rotation.",
+                        replaces=["The on-call rotation changes on Mondays.",
+                                  "On-call rotation switches every Monday."]),
+            consolidate("The on-call rotation changes every Monday.",
+                        replaces=["The on-call rotation changes on Mondays.",
+                                  "On-call rotation switches every Monday."]),
+            # the filter judges with the caller's source as the role: the same
+            # kind of text is stored with source "user"
+            consolidate("No relevant memories about the pager.", source="user",
+                        replaces=["The pager escalates after ten minutes.",
+                                  "Pager escalation happens after 10 minutes."]),
         ],
     },
 })
@@ -4495,6 +4644,11 @@ def resolve_args(args: dict, dsn: str) -> dict:
     out = {}
     import psycopg
     for k, v in args.items():
+        if isinstance(v, list) and any(isinstance(x, str) and x.startswith(("@id:", "@idn:"))
+                                       for x in v):
+            # a list of row ids: each element resolved as a value of its own
+            out[k] = [resolve_args({"v": x}, dsn)["v"] for x in v]
+            continue
         if isinstance(v, str) and v.startswith("@root:"):
             _, key, n = v.split(":")
             with psycopg.connect(dsn) as c:
