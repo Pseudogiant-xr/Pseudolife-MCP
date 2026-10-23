@@ -28,7 +28,7 @@ use crate::storage::graph;
 #[path = "graph_review_actions.rs"]
 pub(crate) mod actions;
 #[path = "graph_review_slots.rs"]
-mod slots;
+pub(crate) mod slots;
 
 const TOOL: &str = "memory_graph_review";
 /// `review_decisions._INDEX_KEY`.
@@ -122,7 +122,7 @@ const PENDING_PROPOSALS_SQL: &str = "SELECT p.id, s.display, p.relation, d.displ
      JOIN entities s ON s.id = p.src_id JOIN entities d ON d.id = p.dst_id \
      WHERE p.status = 'pending' ORDER BY p.confidence DESC, p.id";
 
-const PENDING_ENTITY_PROPOSALS_SQL: &str = "SELECT p.id, p.kind, p.entity_id, p.into_id, \
+pub(crate) const PENDING_ENTITY_PROPOSALS_SQL: &str = "SELECT p.id, p.kind, p.entity_id, p.into_id, \
      p.score::text::double precision, p.reason, p.judge_verdict, \
      p.judge_confidence::text::double precision, p.judge_note, p.judge_model, \
      p.judge2_verdict, p.judge2_confidence::text::double precision, p.judge2_model, \
@@ -132,6 +132,30 @@ const PENDING_ENTITY_PROPOSALS_SQL: &str = "SELECT p.id, p.kind, p.entity_id, p.
      JOIN entities e ON e.id = p.entity_id \
      LEFT JOIN entities i ON i.id = p.into_id \
      WHERE p.status = 'pending' ORDER BY p.kind, p.score DESC NULLS LAST, p.id";
+
+/// One `PENDING_ENTITY_PROPOSALS_SQL` row.
+pub(crate) fn entity_proposal_row(r: &tokio_postgres::Row) -> EntityProposal {
+    EntityProposal {
+        id: r.get(0),
+        kind: r.get(1),
+        entity_id: Some(r.get(2)),
+        into_id: r.get(3),
+        score: r.get(4),
+        reason: r.get(5),
+        judge_verdict: r.get(6),
+        judge_confidence: r.get(7),
+        judge_note: r.get(8),
+        judge_model: r.get(9),
+        judge2_verdict: r.get(10),
+        judge2_confidence: r.get(11),
+        judge2_model: r.get(12),
+        judge3_verdict: r.get(13),
+        judge3_confidence: r.get(14),
+        judge3_model: r.get(15),
+        entity: r.get(16),
+        into: r.get(17),
+    }
+}
 
 async fn load_block(c: &Client) -> anyhow::Result<Loaded> {
     let mut src_map: BTreeMap<i64, Vec<String>> = BTreeMap::new();
@@ -174,26 +198,7 @@ async fn load_block(c: &Client) -> anyhow::Result<Loaded> {
         .query(PENDING_ENTITY_PROPOSALS_SQL, &[])
         .await?
         .iter()
-        .map(|r| EntityProposal {
-            id: r.get(0),
-            kind: r.get(1),
-            entity_id: Some(r.get(2)),
-            into_id: r.get(3),
-            score: r.get(4),
-            reason: r.get(5),
-            judge_verdict: r.get(6),
-            judge_confidence: r.get(7),
-            judge_note: r.get(8),
-            judge_model: r.get(9),
-            judge2_verdict: r.get(10),
-            judge2_confidence: r.get(11),
-            judge2_model: r.get(12),
-            judge3_verdict: r.get(13),
-            judge3_confidence: r.get(14),
-            judge3_model: r.get(15),
-            entity: r.get(16),
-            into: r.get(17),
-        })
+        .map(entity_proposal_row)
         .collect();
     // `review_proposal_states` (3746-3764): unordered scans, a repeated key
     // keeping the last row, as the Python dict comprehension does.

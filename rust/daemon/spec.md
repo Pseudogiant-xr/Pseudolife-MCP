@@ -1362,7 +1362,7 @@ building 1999-2395); `memory/cortex.py` (the dream inputs of `write`,
 
 | # | Exact item | Source |
 |---|---|---|
-| DR1 | Bound arguments: `memory_dream(action, limit=None, commit_token=None, cursor=None, apply=False, snippets=True, run_id=None)`; an unknown action answers `unknown_action` with the seven actions. `deep` and `rollback` answer the `not_implemented` refusal (tasks P2a and P1-rollback). | `mcp_server.py:2171-2238` |
+| DR1 | Bound arguments: `memory_dream(action, limit=None, commit_token=None, cursor=None, apply=False, snippets=True, run_id=None)`; an unknown action answers `unknown_action` with the seven actions. `deep` is the deep dream (DD1-DD18); `rollback` answers the `not_implemented` refusal (task P1-rollback). | `mcp_server.py:2171-2238` |
 | DR2 | `status`: backlog, idle seconds, the display cursor, `would_fire`, the outcome-inference and digest counters, the deep-dream need block, the review queue with judge agreement, the stall record, then the extractor fields (with the alias served-model lookup and the primary probe when a fallback is set). | `service_dream.py:3035-3118,3677-3787`; `dream.py:2250-2275` |
 | DR3 | `pull`: the pending entries of the resident bank (not excluded sources, ordered by timestamp, row id and dream id, at most `limit or 40`, capped at 4096), with an HMAC commit token over them; `commit` acknowledges a token's entries (a legacy cursor or no token refused); `runs` lists recent run rows. Dream tracking covers entries stored after start. | `service_dream.py:1033-1302` |
 | DR4 | Endpoints: config or environment (`PSEUDOLIFE_DREAM_*`), the model override, the mode; `auto` with a fallback probes the primary's `/health` (a 404 retrying `/models`) twice, two seconds apart; the primary carries its key and `cache_prompt`/`reasoning_effort`, the fallback only its own key. No URL and model: a no-op extractor. | `dream.py:1999-2247,2366-2395` |
@@ -1443,6 +1443,176 @@ unit-tested against Python's own extractor (`stage_bodies`,
 `stage_replies` in `harness/goldens/dream-extractor.json`), the JSON error
 messages against CPython's, and `repr()` against CPython's Unicode 14
 table (`harness/gen_py_repr_unicode.py`).
+
+### memory_dream deep: the deep dream (2026-10-20)
+
+`dream/deep.rs` (the tool, the read snapshot, the snippets and merge
+enrichment, the apply writes, the snapshot file, the response bound) and
+`graph_consolidation.rs` (the pure half) with `openblas_sdot.rs` (numpy's float32 dot), over `graph_review.rs` (the
+analyzer, `merge_veto`, `lesson_only_ids`, the merge groups and judge
+blocks), `junk_names.rs`, `dream/relations.rs` (the entity-proposal insert
+and the derived scope upsert), `graph_review_tools.rs` (the pending merge
+rows, `insert_proposal`, the vote snapshot, the merge-decision audit) and the
+graph store's merge, supersede and delete. Python: `mcp_server.py`
+`memory_dream` / `_bound_deep_response` (2172-2287); `service_dream.py`
+`deep_dream` (3355-3675), `_file_analyzer_duplicates` (6095-6156),
+`_unreachable_orphans` / `_sweep_unreachable_orphans` (6158-6203),
+`_write_graph_snapshot[_locked]` (6205-6228), `_edge_label`, `_merge_labels`
+(6230-6237), `_attach_candidate_snippets` (6253-6340), `_enrich_merge_proposals`
+(6342-6413); `service.py` `_kept_junk_norms` (499-503),
+`_slot_duplicate_listings` (7989-8001), `_curation_records` (8766-8785),
+`_fold_direction` (8787-8799); all of `memory/graph_consolidation.py`;
+`storage/postgres.py` `dump_graph_tables`, `set_edge_confidence`,
+`supersede_edge`, `merge_entity`, `insert_entity_proposal`,
+`entity_proposal_keys`, `pending_entity_proposals`, `delete_entity`,
+`delete_entity_audited`, `record_merge_decision`, `entity_proposal_votes`,
+`junk_accepted_displays`, `zero_evidence_entities`, `upsert_entity_source`,
+`max_entity_id`, `set_meta` and the read queries listed in DD2.
+
+| # | Exact item | Source |
+|---|---|---|
+| DD1 | `deep` binds `apply` (default False) and `snippets` (default True) and runs detached. The writer lock is held for the read snapshot (DD2); the computation (DD3-DD12) runs on a blocking thread; a dry run computes with the lock released and takes it again for the orphan census alone, and an apply holds it from the read snapshot to the end (DD14-DD17). The answer is bounded: when it has a top-level list and its `json.dumps(payload, default=str)` text (default separators, `ensure_ascii`) exceeds 250,000 characters, every top-level list longer than the head is cut to its leading items, the head starting at 40 and halving until the text fits or the head is 1; cut lists' full lengths go under `truncated` and a fixed `hint` naming the head follows, both appended after the existing keys. An answer without lists (`snapshot_failed`) is returned untouched. | `mcp_server.py:2172-2287` |
+| DD2 | The read snapshot: `load_graph` (entities by id with `etype`, aliases, live edges by id with REAL confidence read through its text), `entity_sources_map`, `traces_by_entity_norm`, every `entries` row by id (embedding as float32), `dismissed_pairs`, `entity_proposal_keys` (`("merge", lo, hi)` or `(kind, id)`, any status), `pending_entity_proposals`, the pending link pairs, `lesson_entity_ids`, `entity_fact_counts`, `current_fact_counts_by_entity_text` (folded by graph `norm_name` into `facts_by_norm`), and the resident lesson and world stores' current records (`_slot_key`, label fields in Python's order, the value cut to `snippet_max_chars` code points with Python's slice semantics). | `service_dream.py:3368-3384`; `service.py:8766-8785`; `postgres.py:1435,3392,3427,3731,3777,4228-4268,4425` |
+| DD3 | Re-score: every edge with origin `agent` whose `edge_confidence(src display, relation, dst display)` differs from its stored confidence rounded to 3 places (`rescored` counts them); an apply writes each new value first (`UPDATE edges SET confidence`, float8 into REAL). | `graph_consolidation.py:37-49`; `service_dream.py:3387,3514-3515`; `postgres.py:3387-3390` |
+| DD4 | Hard violations: agent edges both of whose endpoints are confidently typed and incompatible, labelled `{src, relation, dst, confidence}` (`would_supersede`); an apply supersedes them only under `auto_apply_safe` (`superseded` counts true returns). | `graph_consolidation.py:52-59`; `service_dream.py:3388,3516-3519,6230-6233` |
+| DD5 | Exact duplicates: entity pairs whose full lowercase `[a-z0-9]` token sets are equal and non-empty, neither a concat artifact, the lower-degree side folded into the higher (a tie folds the higher id into the lower), sorted; `would_merge` labels them. An apply merges them in order under `auto_apply_safe`; a merged-away id is dropped from every later step. | `graph_consolidation.py:62-90`; `service_dream.py:3389,3520-3523,6235-6237` |
+| DD6 | Junk: concat and list artifacts at any degree; with known names (canonicals and normalized aliases) the compound artifact (first spaced `/` or any `+`, both halves known, distinct and not the whole) and the slot-key artifact (a known dotted head, the tail neither a code/data extension under `re.I` nor code-shaped); then, at degree at most `junk_max_degree`, bare numbers (Unicode decimal), displays of at most two code points, status words, metric readings. Names a junk proposal was rejected for (`("junk:<canonical>",)*2` dismissals) are dropped. `junk_owned` is the junk ids plus pending junk proposals' entities. | `graph_consolidation.py:368-686`; `service.py:486-503`; `service_dream.py:3391-3410` |
+| DD7 | Context vectors: an entity's trace entries, or when it has none the entries whose `_token_set` contains its display's (excluded outright over `max_fallback_mentions`, 0 uncapped); kept at `min_entity_mentions` distinct live entries; the vector is `np.mean` of their float32 embeddings (a float32 sum in CPython's set iteration order, divided by the count) L2-normalized by `np.linalg.norm` (OpenBLAS `sdot`, then float32 `sqrt` and division). Every `sdot` here and in DD8 and DD12 sums in the order of the kernel numpy's DYNAMIC_ARCH OpenBLAS picks for the CPU (`openblas_sdot.rs`: `dynamic.c`'s core table, CPU feature tests and fallback, the build's five kernels and their aliases). | `graph_consolidation.py:95-142`; `service_dream.py:3411-3413`; OpenBLAS 0.3.31 `driver/others/dynamic.c`, `kernel/x86_64/sdot.c`, `sdot_microk_{nehalem,sandy,haswell,skylakex}-2.c`, `kernel/generic/dot.c` |
+| DD8 | Link candidates: entity pairs (ascending ids, junk-owned and lesson-only ids excluded) not linked by an edge or a pending link proposal, not exact duplicates, not dismissed (sorted canonicals), whose supporting entries are not co-mentions (containment `|shared| / min` at or above `max_support_overlap`, name-contained pairs exempt), not in disjoint non-empty scopes, with `float(np.dot)` (float32 `sdot`) at or above `min_similarity`; `similarity` is Python's `round(sim, 4)`; sorted by `(-similarity, src_id, dst_id)`, cut to `top_k_candidates` with Python slice semantics. | `graph_consolidation.py:171-277`; `service_dream.py:3414-3425` |
+| DD9 | Partition: a pair at or above `merge_min_similarity` without a variant conflict (size, quant and dotted-version tokens, casefolded, `_` as `-`) whose names are token-subset or substring contained (both sides at least two tokens, no concat artifact) is a merge candidate, folded into the side with more `(degree + facts, degree)` (a tie folds the higher id into the lower); merge candidates `merge_veto` vetoes (event slug, numeric substitution) or touching a junk-owned id are dropped; the rest are link candidates. | `graph_consolidation.py:398-613`; `service_dream.py:3426-3439` |
+| DD10 | Snippets (`snippets=True`): per side the trace entries that resolve, then its sorted mentions not yet seen, else a token scan capped at 12; up to `max_context_snippets` distinct texts cut to `snippet_max_chars`. Link candidates keep pool order (`src_snippets`, `dst_snippets` after the five candidate keys); merge rows lead with entries exclusive to the side and stamp `evidence_overlap` (shared share of the shown snippets, rounded to 2) and `low_differential` (an empty side, a side's pool contained in the other's, or overlap at or above 0.5). | `service_dream.py:3440-3445,6245-6340` |
+| DD11 | `merge_proposals`: each pending merge row oriented by `_fold_direction` (swap when the stored source has strictly more degree + facts), grouped by `shared_pair_groups` on the stored ids, as `{id, score, reason, group, from, into}` with sides `{display, etype, degree, scopes (sorted), snippets}`, then (with snippets) the evidence stamps, then the `judge` / `judge2` / `judge3` blocks with relate relations. | `service_dream.py:3446-3449,6342-6413`; `graph_review.py:87-97,466-485` |
+| DD12 | `lesson_duplicates` / `world_duplicates`: cross-key pairs of current records with embeddings, cosine over float32 L2-normalized vectors (`sdot`) at or above `curation_min_similarity` (0.95 for one entity's aspect siblings), identifier-keyed siblings (`^([A-Za-z][\w.-]*):(\S+)$`, same prefix, different id) and the store's dismissed pairs skipped, `{a_key, b_key, a, b, similarity}` sorted by `(-similarity, a_key, b_key)`, cut to `curation_top_k`. | `graph_consolidation.py:280-363`; `service_dream.py:3454-3455`; `service.py:7989-8001` |
+| DD13 | A dry run answers `{dry_run, rescored, would_orphan_count, would_orphan, would_supersede, would_merge, would_merge_propose (with already_proposed from the proposal keys), would_junk (with already_proposed), merge_proposals, lesson_duplicates, world_duplicates, candidates, totals}`; `would_orphan` is the orphan census (DD16) of at most 200 `{entity, age_days}` with `age_days = round((now - (created_at or now)) / 86400, 1)`, and writes nothing. | `service_dream.py:3468-3496` |
+| DD14 | An apply first writes the snapshot: `dump_graph_tables` (`SELECT * ... ORDER BY 1` of entities, edges, entity_aliases, edge_proposals, entity_proposals, each row a column-ordered dict, REAL through its shortest text) as `json.dumps(tables, default=str)` to `<data_dir>/graph_snapshots/graph-%Y%m%d-%H%M%S.json` (UTC), then deletes all but the newest `max(1, snapshot_keep)` `graph-*.json` (case-insensitive on Windows); an OS error answers `{error: "snapshot_failed", applied: false, detail}` and nothing is written. | `service_dream.py:3498-3501,6205-6228`; `postgres.py:3766-3775` |
+| DD15 | Apply, junk: each junk finding is filed (`insert_entity_proposal("junk", id, None, None, reason)`, a conflict or vanished entity not counted); then each pending junk row (re-read) whose entity is contentless (the larger of its id fact count and `facts_by_norm` at its display's and canonical's norm is at most 1) and either has degree 0 or is tombstoned (its display's norm among accepted target-less `merge_decisions`) at degree at most `junk_max_degree` (snapshot degrees) is deleted, its vote snapshot read first, then audited `accepted` by `dream-auto` with reason `junk auto-delete: <reason>[ (tombstoned)]`; deleted ids are dropped. | `service_dream.py:3524-3595` (the pending loop 3559-3595); `postgres.py:2906-2916,3933-3974,4005-4014` |
+| DD16 | Apply, then: merge candidates filed as merge proposals (similarity as score) unless an endpoint was dropped; scope stamping for live entities with mentions and no scope (each mentioning entry's source stripped and lowercased, excluded tags dropped, a rollup umbrella added unless excluded or equal, each key upserted `derived` in sorted order, `scoped` counting entities); with `analyzer_file_duplicates` the analyzer's duplicates over live, non-junk entities filed (`merge` proposals with the evidence fold and variant screen, `<file> implements <concept>` link proposals with `edge_confidence`, pairs the merge queue held at the read skipped); with `orphan_sweep` the census (zero-evidence entities older than `orphan_min_age_days`, unmentioned, no fact naming them, not dropped) deleted with a `deleted` / `orphan-unreachable auto-delete` / `dream-auto` audit in one transaction, at most `orphan_max_per_apply` (0 uncapped). | `service_dream.py:3596-3652,6095-6203`; `postgres.py:2918-2937,3862-3893,4189-4203` |
+| DD17 | Apply, last: `deep_last_apply = {ts, max_entity_id}` is stamped (so `status`'s `deep_dream` block resets), the pending merge rows re-read and enriched, and the answer is `{applied, rescored, superseded, merged, merge_proposed, junk_proposed, junk_deleted, scoped, analyzer_filed, orphans_deleted, snapshot, merge_proposals, lesson_duplicates, world_duplicates, candidates, totals}`. | `service_dream.py:3653-3675`; `postgres.py:2733-2739,4016-4022` |
+| DD18 | Config: `memory.deep_dream` `min_similarity` 0.55, `top_k_candidates` 50, `max_context_snippets` 3, `auto_apply_safe` true, `min_entity_mentions` 2, `max_fallback_mentions` 30, `merge_min_similarity` 0.90, `junk_max_degree` 1, `max_support_overlap` 0.8, `snippet_max_chars` 240, `snapshot_keep` 10, `curation_min_similarity` 0.80, `curation_top_k` 20, `orphan_sweep` false, `orphan_min_age_days` 7.0, `orphan_max_per_apply` 50; `memory.scopes.exclude` / `rollup`. | `utils/config.py:513-719,939-947` |
+
+`harness/w2e.py live --only dream-deep-dry dream-deep-apply
+dream-deep-apply-cautious dream-deep-bound dream-deep-snapshot-failed
+dream-deep-exclusion`
+compares every answer and the full bank after each step, and through the
+`snapshot_file` operation each side's newest snapshot file (its name's
+shape, the file count, every table's columns and rows, clock columns
+null-or-not). The scenarios cover a dry run with and without snippets;
+re-scoring; hard violations superseded with `auto_apply_safe` on and left
+with it off; an exact duplicate merged and its dropped id kept out of the
+merge filing; junk filed, a kept name (a rejected junk proposal) not
+re-filed, the zero-structure and tombstoned auto-deletes (one through a
+tombstone whose display is NULL, normalizing to the empty name of a `-`
+entity), a tombstoned name above the degree bar and a junk name with two
+facts kept; merge candidates
+filed with an event-slug pair vetoed and an already-proposed pair; link
+candidates with a pending pair, a dismissed pair, co-mentions, disjoint
+scopes, and a junk-owned and a lesson-only entity that have context vectors
+left out; scope stamping with an excluded tag and a rollup; analyzer
+filing on and off; the orphan census, its sweep on (capped at one) and off;
+lesson and world duplicates with a dismissed pair and identifier-keyed
+siblings; a response cut by the bound; `status` after an apply; and an
+unwritable snapshot directory (`snapshot_failed`). `would_orphan[].age_days`
+compares numerically within 0.1 day, `deep_last_apply.ts` and `last_apply_at` by presence, the
+snapshot name by shape. The `mcp-dream-deep-*` mutants must be caught: no
+re-score, violations superseded with `auto_apply_safe` off, the tombstone
+degree bar ignored, dropped ids filed, the rollup skipped, the stamp
+missing, the bound skipped, kept names re-filed, junk-owned and lesson-only
+ids left in the candidates. The pure half is also
+unit-tested against Python's own functions
+(`harness/goldens/w2e-deep-dream.json`, `gen_w2e_deep_dream_goldens.py`):
+CPython's set order; numpy's `sdot` per OpenBLAS kernel (each recorded
+with `OPENBLAS_CORETYPE` forced, every blocking boundary and remainder
+length) and the float32 context vectors and cosines bit for bit under each
+kernel; the kernel dispatcher against `dynamic.c`'s table on synthetic CPUs;
+candidate pairs (with excluded ids and pending pairs) and partition, slot duplicates, variant tokens, name
+containment, compound halves, junk and exact duplicates.
+
+### The merge judge and its tiebreak (2026-10-20)
+
+`dream/judge.rs` (the sweep's judge tick, its endpoints, the request and
+reply, the model-identity checks, the two-vote and three-judge gates, the
+dream-judge decisions and the relate link) and `dream/review_judgments.rs`
+(the fingerprints, the judging policy, response identity, moved vote
+endpoints, the evidence signing of one tick, and the versioned automatic
+reject records with their reconsideration), over `dream/deep.rs` (the
+evidence pack: `judge_evidence_body`, `judge_enrich_from`, the snapshot
+file), `dream/extractor.rs` (the client: `judge_body`, `judge_request`),
+`dream/prompts.rs` (`JUDGE_SYSTEM_PROMPT`, `RELATION_VOCAB`),
+`graph_review*.rs` (`merge_veto`, relate relations, the vote snapshot, the
+merge-decision audit) and the graph store's merge. Python:
+`memory/dream.py` `run_sweep_once` (2398-2547), `_RELATION_VOCAB` /
+`_JUDGE_SYSTEM_PROMPT` / `format_judge_proposal` (374-465), `judge_merges` /
+`_judge_request` (1661-1822); `service_dream.py` 3849-4524 and
+`deep_dream_judge` (4525-4932); `memory/review_judgments.py` (merge);
+`memory/review_decisions.py` (proposal records, 1-527);
+`memory/graph_review.py` 18-97; `service.py` 8965-9083.
+
+The claim: given identical model replies, both daemons send byte-identical
+judge requests and write identical banks. It claims nothing about model
+behaviour.
+
+| # | Exact item | Source |
+|---|---|---|
+| JM1 | The sweep runs the judge after the reapers, only while `memory.dream.enabled`; a tick is logged when it judged, reopened, took a second or third opinion, refused a same-model reject or a tiebreak, saw a served-model mismatch, lost an endpoint, or applied anything. | `memory/dream.py:2458-2507` |
+| JM2 | `judges_enabled` false answers `{judged: 0, skipped: "judges_disabled"}`; a `judge_mode` other than `shadow`, `auto-reject`, `auto` answers `skipped: "disabled"`; no pending merge row and no active merge decision answers `{judged: 0}` with no extractor built; no judge extractor answers `skipped: "no_judge_extractor"`; the gates are checked before the daemon initializes, whose failure (the database down) answers `{judged: 0, error}` like any other failure, which never reaches the sweep. | `service_dream.py:4576-4596,4930-4932` |
+| JM3 | Endpoints: `judge_url` builds its own client (`model or judge_model or "judge"`, `PSEUDOLIFE_JUDGE_API_KEY`, the dream config's `extractor_max_tokens` / `extractor_timeout_seconds`, no extra body), else the dream extractor (`build_extractor_with_fallback`, a no-op extractor meaning none) with a requested model swapped on; the second opinion uses `judge_second_url` (`judge_second_model or "judge"`, `PSEUDOLIFE_JUDGE_SECOND_API_KEY`), else `judge_second_model` swapped onto the first's endpoint, else none (the first's endpoint object); the third uses `judge_third_url` (`PSEUDOLIFE_JUDGE_THIRD_API_KEY`), else `judge_third_model` swapped, else none. Every endpoint is built per tick. | `service_dream.py:3849-3936` |
+| JM4 | The request: `{**extra_body without reasoning_effort, model, messages: [system, user], response_format: json_object, max_tokens: max(max_tokens, 120 * rows), temperature: 0, chat_template_kwargs: {enable_thinking: false}}` as `json.dumps`; the reply's truthy `model` (as `str`) is stored as the endpoint's served model once the reply decodes, before its content is read; the content is cut from the first `{` to the last `}` and its `verdicts` list returned; any failure is `judge_merges failed: <cause>`. | `memory/dream.py:1752-1822` |
+| JM5 | The user text: each proposal `[n] FROM '<display>' (degree d, scopes <list repr>) evidence: <two snippets cut to snippet_chars, "; ">` / `    INTO ...` / `    detector: <reason or ?>[ (score <repr>)]`, the low-differential caution when stamped, joined by blank lines; the system prompt is `_JUDGE_SYSTEM_PROMPT` byte for byte. | `memory/dream.py:374-465,1679-1682` |
+| JM6 | Reply rows: `int(id)` (TypeError/ValueError skip the row; OverflowError fails the call), verdict `str().strip().lower()` among accept/reject/relate/leave for a known id, confidence clamped to [0, 1] (0.5 on a failed `float()`), note stripped and cut to 200; a reject or relate whose `norm_name(relation)` is a vocabulary name is `relate` with it, else `reject` with none. | `memory/dream.py:1683-1713` |
+| JM7 | Reconsideration before the batch: a fair, bounded batch of active merge decisions (after the cursor, then wrapped, at most the cap); a missing record or a changed terminal row or dismissal retires the marker (`externally_superseded`); the rest are re-signed over their projection (the recorded row, current non-judge fields, status pending, current displays) and reopened when the fingerprint, an observed model, or a later vote's endpoint identity moved: the row reset to pending with every judge column cleared and its dismissal deleted (the dismissal must still be the record's), the marker retired `reopened`; the cursor is written. | `memory/review_decisions.py:358-527` |
+| JM8 | Signing: `fingerprint` is the SHA-256 of `json.dumps(sort_keys=True, separators=(",", ":"))` over `{proposal: the row without n, id and judge* keys, evidence: its pack likewise with group signed as null, policy}`; the policy is `{version: 1, prompt, deep_dream, model, endpoint, max_tokens, extra_body, thinking: false, override, effort}` with `deep_dream` as `dataclasses.asdict` holds it, minus `link_judge_two_vote` and `judge_tiebreak_mode` and minus `judge_second_url`, `judge_third_model`, `judge_third_url` (empty or null) and `link_two_vote_min_confidence` (0.7) at their unset values. `prepare` reads the evidence for the verdict rows and the first `cap` unjudged rows; signing runs unlocked. | `memory/review_judgments.py:14-103,213-316` |
+| JM9 | `refresh` (one transaction): the memo (`review_judgments_v1_merge`) keeps live rows; a verdict whose memo fingerprint or served model (against the alias probe, the endpoint's served model and the last response identity under the request policy) no longer matches is cleared (every judge column) with its memo entry; then a later vote whose endpoint has since served another model (`review_response_identity_v1_merge_<opinion>` under its policy against its stored served model) is cleared, a moved second taking the third with it, and the note loses the cleared tails. | `memory/review_judgments.py:106-135,318-413` |
+| JM10 | The evidence pack: the graph, scopes, traces, entry texts and fact counts under the lock; mentions without vectors (every entry counts) for the rows' own entities; `_enrich_merge_proposals` at `max_context_snippets` and `judge_snippet_max_chars`. | `service_dream.py:4328-4363` |
+| JM11 | The queues: `first` (no verdict); `awaiting` (a verdict, no second, `judge_second_opinion`), all skipped and counted when no `judge_second_url` is set and `judge_second_model` is empty or the first endpoint's configured name; `split` (first and second verdict classes differ, no third; tiebreak `shadow` or `auto`), whose third endpoint is unconfigured (counted) or the first or second model again (`_third_model_taken`: the same object, or a non-alias third name among the first's configured name, the row's stamps and second served model and a non-alias `judge_second_model`; counted); `replay` (tiebreak `auto`, three votes, no refusal tail, a deciding majority, at most the cap). Nothing to do answers the idle dict. | `service_dream.py:4610-4672,3998-4015` |
+| JM12 | Order and budget: replay, then second opinions on `second[:cap]`, third opinions on `cap - len(second[:cap])`, first opinions on what is left; each loop takes the lock, validates the judged batch (the response identity and policy recorded for its endpoint, the served model checked against an alias probe, the rows re-signed), and applies the verdicts reject-class and `keep` first (stable), each verdict one transaction that first checks the row is still valid, pending and carrying the votes it pairs with. A reply's text the database cannot take fails that transaction and the tick (`{judged: 0, error}`, the error logged) before any of the verdict is written: a lone surrogate in a note or a served model name (psycopg's `UnicodeEncodeError` on a text parameter, or PostgreSQL refusing the response identity's or memo's JSON) and a confidence that underflows REAL (`value out of range: underflow`). | `service_dream.py:4685-4928`; `memory/review_judgments.py:415-489` |
+| JM13 | A second or third endpoint that fails (another object, and another URL or key) records `second_opinion_error` / `third_opinion_error`, leaves its rows waiting and gives its budget to first opinions; a failure on the first's endpoint fails the tick. | `service_dream.py:4709-4731,4859-4871` |
+| JM14 | A second opinion writes `<first note[:160]> \| 2nd (<model>): <verdict or relate:rel> <conf:.2f> [split\|agree]` with its served model and policy. Two reject-class votes under `auto-reject` / `auto` at mean at or above `judge_reject_min_confidence_2` reject when the second is distinct (both served names known and different, another endpoint object, the first's stamp neither the second's model nor its configured name), else the note gains `\| auto-reject needs a distinct second model` (cut to 400) and nothing applies. | `service_dream.py:4754-4807,3976-3991` |
+| JM15 | Two accepts under `auto` on a row whose `low_differential` is false at mean at or above `judge_accept_min_confidence`: a pair already dismissed closes the row instead (a reject, `auto_accept_refused`); a second that is not distinct, an analyzer-filed row, a `merge_veto`, a variant conflict, or a failed graph snapshot (written once per call, before the first fold; its failure forgets the row's memo) refuses with the reason in the note; otherwise the pair folds. | `service_dream.py:4808-4842,4242-4264,4414-4421` |
+| JM16 | A first opinion writes its verdict, confidence, note (a relate's `relate:<rel>[ \| note]`), the served model's stamp (else the configured name) and served model, and records the memo; under `auto-reject` / `auto` a reject-class verdict at or above `judge_reject_min_confidence` rejects. `pending_unjudged` is the unjudged rows less the judged. | `service_dream.py:4877-4928` |
+| JM17 | A third opinion writes its vote with `note_with_tail(note, " \| 3rd (<model>): <token> <conf:.2f> [2-1 reject\|2-1 accept\|no majority]")` (only the free text gives way to the 400 cap), its served model and policy, then decides the tiebreak. Repeated verdicts for one id share the batch's row, as Python's one dict: a later one's tail stacks on the earlier one's note, and a refusal the earlier one noted is not noted again. | `service_dream.py:4266-4326`; `memory/graph_review.py:60-73` |
+| JM18 | The tiebreak (`auto`): two reject-class votes under `auto-reject` / `auto` at mean at or above `judge_reject_min_confidence_2` reject; two accepts under `auto` on a non-low-differential row at mean at or above `judge_accept_min_confidence` fold; a moved second or third endpoint applies nothing; an accept on a dismissed pair closes the row; an unknown second served model or a third not distinct by served name and stamp from both earlier votes (or a configured third among them) is refused once in the note (`tiebreak needs the second vote's served model` / `tiebreak needs a distinct third model`) and counted; an accept passes the accept guards; the decision records both later votes' policy and served model. | `service_dream.py:4018-4157` |
+| JM19 | Replay applies the tiebreak from recorded votes with no model call: the batch re-signed, each row still pending with its first and second votes. | `service_dream.py:4159-4174` |
+| JM20 | A served-model mismatch (the reply's model neither the requested name, a launch alias, nor the requested name plus `-YYYYMMDD` / `-YYYY-MM-DD`) is counted and listed in the answer and logged; it never blocks a verdict. | `service_dream.py:3940-3973` |
+| JM21 | A row the model skipped is recorded as `leave` at 0.0 (`model returned no verdict`); a relate without a relation is a reject; a vote's stamp is the served model, else the configured name. | `service_dream.py:4408-4412,4424-4446` |
+| JM22 | The decisions (`decided_by` `dream-judge`): a reject re-checks the row, sets status, writes the audit with the vote snapshot and closes the canonical pair, retiring no automatic record; a fold re-checks the row, folds over current evidence, writes the audit, merges and sets status. A reject is recorded (`automatic_review_decision_v1:<n>` and the index) when the row is the judge's terminal, the pair was open before and is closed now; a no-op forgets the memo entry; a fold invalidates the rest of the batch. | `service.py:8965-9083`; `memory/review_judgments.py:497-521`; `memory/review_decisions.py:78-198` |
+| JM23 | After an applied reject, the most confident typed relate vote (not `related-to`, a registered relation) files a link proposal oriented as the judge saw the pair, by entity id through the link gate (`merge-judge-relate`, rationale `merge judge: relate (<rel>) <conf:.2f> on merge proposal #<id>, rejected as distinct`), unless an edge or a link proposal already joins the pair; in a savepoint, its failure counted. | `service_dream.py:4448-4518` |
+| JM24 | Config: `memory.deep_dream` `judge_mode` shadow, `judge_batch` 8, `judge_snippet_max_chars` 240, `judge_reject_min_confidence` 0.8, `judge_url` / `judge_model` "", `judges_enabled` true, `judge_second_opinion` true, `judge_second_model` / `judge_second_url` "", `judge_reject_min_confidence_2` 0.7, `judge_accept_min_confidence` 0.6, `judge_tiebreak_mode` shadow, `judge_third_model` / `judge_third_url` "" (each string knob also null), `snapshot_keep` 10; every field signs as YAML gave it. | `utils/config.py:513-719` |
+
+`harness/w2e.py live --only judge-merge-shadow judge-merge-auto-reject
+judge-merge-auto judge-merge-same-model judge-merge-served-mismatch
+judge-merge-unknown-served judge-merge-tiebreak
+judge-merge-tiebreak-same-model judge-merge-tiebreak-unknown-second
+judge-merge-tiebreak-skip judge-merge-endpoint-errors
+judge-merge-reconsider` runs both daemons with dreaming on, a 0.25 s
+sweep and every other sweep step switched off (the analyzer filing and the
+deep tick, the link, junk, curation and candidate judges, the automatic
+dream), against one stub serving both (`shared_stub`, each side with its
+own key) with second and third opinion endpoints answering by pair. Each
+inserts its pending proposals out of band and compares the banks (the
+memo's and the decision records' fingerprints exactly, verdict clocks by
+presence) and the two request sequences byte for byte once both judges
+have settled, then the review listing. The scenarios cover: shadow (first,
+second and third opinions recorded, nothing applied, an evidence change
+clearing and re-asking a row); auto-reject (a single reject exactly at the
+bar with its relate link, a distinct two-vote reject at the mean bar, a
+split and a mean below the bar left); auto (two folds, one at the accept
+bar, each snapshot first, a name veto refused, a dismissed pair's row
+closed); a second endpoint configured with the first's model name; a
+second endpoint serving the first's model (a served-model mismatch); a
+first endpoint naming no model; the tiebreak deciding a 2-1 reject with
+its relate link and leaving a 2-1 accept under auto-reject and no
+majority; the tiebreak refused for a third serving the first's model and
+for an unknown second served model; a third configured as the first model
+(no call); a second and a third endpoint each failing once; and an
+automatic reject reopened by an evidence change and rejected again. The
+`mcp-dream-judge-*` mutants must be caught: the reject bar compared
+strictly, the two-vote reject on one vote, a same-model reject allowed,
+the served-name check skipped, the tiebreak taking the minority, a third
+of the first model asked, an evidence change not reopening, a stale verdict
+not cleared. `harness/goldens/w2e-merge-judge.json`
+(`gen_w2e_merge_judge_goldens.py`) pins against Python's own functions the
+prompt bytes, the proposal format, the reply validation, note tails, the
+served-model mismatch, the signed config and a policy fingerprint.
 
 ### Board tools over MCP (2026-10-16)
 

@@ -109,6 +109,14 @@ Normalizers (declared, spec "Free for W1 and W2"):
   ``entity_proposals.created_at`` keep only null-or-not; a ``dream_runs``
   ``cursor_before`` / ``cursor_after`` equal to an entry's ``ts`` becomes
   ``<ts:ENTRY_ID>``, as the cortex dream cursor does;
+* the merge judge's clocks: ``entity_proposals`` ``judged_at``,
+  ``judged2_at`` and ``judged3_at``, and in an automatic review decision
+  record (``automatic_review_decision_v1:<n>``) its ``recorded_at``,
+  ``ended_at``, ``decided_at`` and ``dismissed_at`` and its proposal
+  snapshot's verdict clocks keep only null-or-not (in memory_graph_review's
+  ``automatic_decisions`` listing, a decision's ``recorded_at`` likewise
+  when within a day of now); every fingerprint and policy compares
+  exactly;
 * rows are compared as sorted sets (row order is the primary key's order,
   which renamed ids change), except that entry ids themselves must match.
 
@@ -131,6 +139,39 @@ An operation may be ``external(statement)``: a write by another process,
 run on both banks between two calls (its result is not compared, only what
 the next call makes of it), for a row changed behind the daemons' backs.
 Only the scenarios in ``EXTERNAL_WRITES`` may use it.
+
+An operation may carry ``"settle": {"quiet_s", "timeout_s", "until"}``:
+after it runs on both sides, the comparison waits until each side's
+background work has settled (``settle_sides``): the optional ``until``
+query answers true, then neither the judge tables nor that side's stub
+requests change for ``quiet_s`` seconds. The merge judge runs from the
+sweep, not from a call, so its scenarios (``judge-merge-*``) insert the
+pending proposals out of band and compare the banks and the request
+sequences once both judges are idle.
+
+An operation may carry ``"expect"``: queries whose first column must
+answer true on both banks once it (and its settle) is done, so a scenario
+whose two sides both miss the path it is written for still fails
+(``expect_diffs``). ``{"op": "restart", "config": ...}`` stops both daemons,
+writes the new config on each side and starts them again on fresh ports
+(``restart_sides``), for a knob read only at start.
+
+A scenario with ``"shared_stub": true`` points both daemons at one stub:
+the merge judge signs each verdict with a fingerprint over its endpoint's
+URL, which must be the same on both sides for the banks to compare
+exactly. Each side then sends its own bearer key (``side-python``,
+``side-rust``) to every endpoint, and the stub's records are read per key.
+``@STUB@`` in its config is that stub's origin.
+
+Two operations act on each side's data directory instead of its daemon
+(``HOME_OPS``): ``snapshot_file`` answers that side's newest deep-dream
+graph snapshot (``graph_snapshots/graph-*.json``: the name's shape, the file
+count, every table's columns and rows with CLOCK columns null-or-not), and
+``block_snapshots`` puts a plain file where that directory goes so the next
+snapshot write fails. In a ``memory_dream`` answer the snapshot name
+compares by shape, ``would_orphan[].age_days`` numerically within 0.1 day
+(``orphan_age_diffs``), and ``last_apply_at`` (like the meta
+``deep_last_apply.ts``) by presence.
 
 A scenario may carry ``"extractor": {...}``, the spec of a stub
 OpenAI-style chat-completions endpoint (``stub_extractor.py``: health,
@@ -210,13 +251,18 @@ CLOCK = {("entries", "ts"), ("entries", "superseded_at"), ("episodes", "started_
          ("dream_runs", "started_at"), ("dream_runs", "finished_at"),
          ("dream_run_slots", "at"), ("chronicle_events", "recorded_at"),
          ("memory_traces", "created_at"), ("entity_sources", "updated_at"),
-         ("entity_proposals", "created_at")}
+         ("entity_proposals", "created_at"),
+         # the merge judge's verdict clocks
+         ("entity_proposals", "judged_at"), ("entity_proposals", "judged2_at"),
+         ("entity_proposals", "judged3_at")}
 # dream_runs cursor columns: an entry's ts becomes its <ts:ID> token.
 DREAM_RUN_CURSORS = ("cursor_before", "cursor_after")
 # memory_dream answer keys holding wall-clock seconds (the stall record and
 # the last extractor record).
 DREAM_CLOCK_KEYS = ("since", "last_success_at", "recovered_at", "at", "finished_at",
-                    "rolled_back_at")
+                    "rolled_back_at", "last_apply_at")
+# A deep apply's snapshot file name (its UTC second differs by side).
+SNAPSHOT_NAME = re.compile(r"graph-\d{8}-\d{6}\.json")
 # memory_dream answer keys holding a dream cursor (an entry's ts).
 DREAM_TS_KEYS = ("timestamp", "cursor", "dream_cursor", "cursor_before", "cursor_after")
 # Columns that are wall-clock only when written from the clock: a value
@@ -242,6 +288,10 @@ RECENT_S = 86400.0
 RESPONSE_CLOCK = {"asserted_at", "last_confirmed", "superseded_at", "tx_time", "valid_time",
                   "started_at", "ended_at"}
 RESPONSE_RECENT_CLOCK = {"retrieved_at", "decided_at"}
+# memory_graph_review's ``automatic_decisions`` listing: each decision's
+# ``recorded_at`` is the merge judge's clock (its ``ended_at`` is already a
+# RESPONSE_CLOCK key).
+DECISION_LISTING_RECENT_CLOCK = {"recorded_at"}
 # A response score's allowance: embeddings within the measured tolerance
 # move a 4-place cosine by at most one rounding unit.
 SCORE_TOLERANCE = 1.5e-4
@@ -253,7 +303,15 @@ META_CLOCK = {"capacity_true_drops": {"last_at"}, "active_session_pointer": {"ts
               # automatic review decisions a human verdict retires
               "automatic_review_decision_v1:d1": {"ended_at"},
               "automatic_review_decision_v1:d2": {"ended_at"},
-              "automatic_review_decision_v1:d3": {"ended_at"}}
+              "automatic_review_decision_v1:d3": {"ended_at"},
+              # the deep dream's apply watermark (memory_dream deep)
+              "deep_last_apply": {"ts"}}
+# An automatic review decision record (``automatic_review_decision_v1:<n>``,
+# written by the merge judge): its clocks, and the verdict clocks of the
+# proposal snapshot it carries.
+DECISION_RECORD_PREFIX = "automatic_review_decision_v1:"
+DECISION_RECORD_CLOCK = {"recorded_at", "ended_at", "decided_at", "dismissed_at"}
+DECISION_PROPOSAL_CLOCK = {"judged_at", "judged2_at", "judged3_at"}
 EP_ID = re.compile(r"^[0-9a-f]{32}$")
 GENERIC = re.compile(r"^session - \d{4}-\d{2}-\d{2} \d{2}:\d{2}$")
 # store-cancellable is w2e_shutdown.py's control: over MCP every call runs
@@ -357,7 +415,33 @@ MUTANTS = ["store-tags-raw", "store-skip-session-episode", "store-no-hint", "sto
            "mcp-dream-stage-lessons-ack-unlanded", "mcp-dream-stage-snapshot-restore-skipped",
            # a compound about's lone surrogate fails the slot sync
            # (dream-stages-lessons).
-           "mcp-dream-stage-lessons-about-unchecked"]
+           "mcp-dream-stage-lessons-about-unchecked",
+           # memory_dream deep (spec DD1-DD16): caught by the dream-deep-*
+           # scenarios.
+           "mcp-dream-deep-no-rescore", "mcp-dream-deep-supersede-unsafe",
+           "mcp-dream-deep-tombstone-any-degree", "mcp-dream-deep-dropped-merge-filed",
+           "mcp-dream-deep-no-rollup", "mcp-dream-deep-no-stamp", "mcp-dream-deep-unbounded",
+           "mcp-dream-deep-kept-refiled",
+           # junk-owned and lesson-only ids reach the link candidates
+           # (dream-deep-exclusion).
+           "mcp-dream-deep-no-exclusion",
+           # the merge judge (spec JM1-JM24): each caught by the judge-merge-*
+           # scenario named beside it.
+           "mcp-dream-judge-confidence-bar",       # judge-merge-auto-reject
+           "mcp-dream-judge-one-vote",             # judge-merge-auto-reject
+           "mcp-dream-judge-same-model-reject",    # judge-merge-same-model
+           "mcp-dream-judge-no-served-check",      # judge-merge-unknown-served
+           "mcp-dream-judge-tiebreak-minority",    # judge-merge-tiebreak
+           "mcp-dream-judge-third-same-model",     # judge-merge-tiebreak-skip
+           "mcp-dream-judge-evidence-no-reopen",   # judge-merge-reconsider
+           "mcp-dream-judge-no-stale-clear",       # judge-merge-shadow
+           "mcp-dream-judge-third-row-copy",       # judge-merge-duplicates
+           "mcp-dream-judge-alias-unprobed",       # judge-merge-alias
+           "mcp-dream-judge-moved-applies",        # judge-merge-moved
+           "mcp-dream-judge-moved-not-cleared",    # judge-merge-moved
+           "mcp-dream-judge-replay-no-refusal-filter",  # judge-merge-replay
+           "mcp-dream-judge-encode-unchecked",     # judge-merge-unencodable
+           "mcp-dream-judge-real-unchecked"]       # judge-merge-unencodable
 
 
 # ── MCP client for the Python oracle ──────────────────────────────────────
@@ -3831,6 +3915,731 @@ SCENARIOS.update({
 })
 
 
+# memory_dream deep (P2a): the deep dream, dry run and apply, compared
+# answer by answer and bank by bank, plus each side's newest graph snapshot
+# file (the ``snapshot_file`` op reads both daemons' data dirs). The graph
+# is seeded through the oracle's own tools (relate, store, fact_set,
+# outcome, world_set, the review tool's propose and dismiss_pair); declared
+# SQL seeds stand for what only the dream or the reviewer writes: junk
+# tombstones and a kept-junk dismissal, pending merge and junk proposals
+# with judge votes, scope attribution, a memory trace, lessons with fixed
+# embeddings, and entities whose evidence a forget or merge removed (the
+# orphan census; their created_at is a fixed old stamp, so the default
+# seven-day age bar admits only them). The dream's background tick and the
+# shallow sweep are off. min_similarity -1 lists every scope-coherent pair,
+# so candidate order rests on the float32 cosines both banks compute over
+# the same stored vectors.
+DEEP_DREAM_CONFIG = (
+    "memory:\n"
+    "  dream:\n    enabled: false\n"
+    "  scopes:\n"
+    "    exclude: [status, claude, agent, correction, noise]\n"
+    "    rollup:\n      proj-a: family\n"
+    "  deep_dream:\n"
+    "    auto_tick: false\n"
+    "    min_similarity: -1.0\n"
+    "    merge_min_similarity: -1.0\n"
+    "    min_entity_mentions: 1\n"
+    "    top_k_candidates: 25\n"
+    "    curation_min_similarity: -1.0\n"
+    "    curation_top_k: 8\n"
+)
+
+
+def deep_config(extra: str = "") -> str:
+    return DEEP_DREAM_CONFIG + extra
+
+
+def snapshot_file() -> dict:
+    """Each side's newest ``graph_snapshots/graph-*.json``, normalized."""
+    return {"op": "snapshot_file"}
+
+
+def block_snapshots() -> dict:
+    """A plain file where each side's ``graph_snapshots`` directory goes."""
+    return {"op": "block_snapshots"}
+
+
+def deep_lesson(task, aspect, lesson, seed) -> dict:
+    return slot_row_sql("lesson", slot_lesson(task, aspect, lesson,
+                                              embedding=slot_embedding(seed)))
+
+
+DEEP_NOTES = [
+    ("The Kafka Broker cluster feeds the Harbor Registry nightly.", "proj-a"),
+    ("Broker Kafka handles retries for the billing-service.", "proj-a"),
+    ("Tide Gauge readings land in the Ocean warehouse.", "proj-b"),
+    ("Kelp Farm sensors report to the Tide Gauge hub.", "proj-b"),
+    ("The orbit station alpha two telemetry is noisy.", "noise"),
+    ("orbit station alpha docking schedule changed.", "conversation"),
+    ("deploy runbook 2026-10-01 final covers the rollback.", "proj-a"),
+    ("The deploy runbook lives in the ops wiki.", "Proj-A"),
+    ("payments ledger prod reconciles every night.", "proj-b"),
+    ("payments ledger exports to the Warehouse.", "proj-b"),
+    ("tidecalc.py computes the tide tables; tidecalc is the module.", "proj-b"),
+    ("Mentioned Orphan shows up in this note.", "status"),
+    ("The deploy agent pushes images to the Harbor Registry.", "proj-a"),
+    ("postgres backs the billing-service ledger.", "proj-a"),
+]
+
+DEEP_SEED = [
+    *[store(t, source=s) for t, s in DEEP_NOTES],
+    # rescore (an agent edge stored at 0.8) and a hard violation
+    relate("deploy agent", "uses", "Harbor Registry", origin="agent"),
+    relate("billing-service", "runs-on", "postgres", origin="agent"),
+    relate("Warehouse", "related-to", "Ocean", confidence=0.45, origin="agent"),
+    # an exact duplicate (same token set) and a name-contained third
+    relate("Kafka Broker", "uses", "Harbor Registry"),
+    relate("Broker Kafka", "related-to", "billing-service"),
+    relate("Kafka Broker Cluster", "related-to", "Warehouse"),
+    relate("Tide Gauge", "related-to", "Ocean"),
+    relate("Kelp Farm", "related-to", "Ocean"),
+    relate("orbit station alpha", "related-to", "Ocean"),
+    relate("orbit station alpha two", "related-to", "Ocean"),
+    # a name-contained pair the event-slug veto keeps out of the merge queue
+    relate("deploy runbook 2026-10-01 final", "related-to", "Warehouse"),
+    relate("deploy runbook", "related-to", "Warehouse"),
+    # analyzer duplicates: a merge pair and a file and its stem
+    relate("payments ledger", "related-to", "Warehouse"),
+    relate("payments ledger prod", "related-to", "Warehouse"),
+    relate("tidecalc.py", "related-to", "Ocean"),
+    relate("tidecalc", "related-to", "Ocean"),
+    # junk: zero structure (one fact), tombstoned at degree 1 and 2, a junk
+    # name with two facts, a kept name
+    fact("QQ", "color", "blue"),
+    relate("ZZ", "related-to", "Ocean"),
+    relate("alpha, beta", "related-to", "Ocean"),
+    relate("alpha, beta", "related-to", "Warehouse"),
+    fact("WW", "color", "red"),
+    fact("WW", "size", "large"),
+    relate("KK", "related-to", "Ocean"),
+    # a fact naming an orphan-shaped entity, lesson-minted nodes
+    fact("Named Orphan", "status", "parked"),
+    outcome("ship the release", "success", about="release checklist"),
+    # world duplicates across entities, identifier-keyed siblings
+    world_set("Host A", "os", "Debian 12", source_url="https://example.org/a"),
+    world_set("Host B", "os", "Debian 12", source_url="https://example.org/b"),
+    world_set("Host A", "distro", "Debian bookworm", source_url="https://example.org/a"),
+    world_set("arxiv:2602-05665", "title", "Graph memory", source_url="https://arxiv.org/a"),
+    world_set("arxiv:2602-05666", "title", "Graph memory", source_url="https://arxiv.org/b"),
+    # a pending link proposal (its pair leaves the candidates) and a
+    # dismissed pair
+    review("propose", proposals=[{"src": "Tide Gauge", "relation": "related-to",
+                                  "dst": "Harbor Registry"}]),
+    review("dismiss_pair", src="Kelp Farm", dst="Harbor Registry"),
+    trace_sql(DEEP_NOTES[12][0], "harbor-registry", "receives"),
+    # lessons with fixed embeddings: a near-verbatim cross-key pair, aspect
+    # siblings, a dismissed pair
+    deep_lesson("Rotate Keys", "Cadence", "Rotate keys quarterly.", 3),
+    deep_lesson("Rotate Secrets", "Cadence", "Rotate secrets quarterly.", 3),
+    deep_lesson("Rotate Keys", "Owner", "The security team owns rotation.", 5),
+    deep_lesson("Ship Release", "Checklist", "Run the checklist.", 7),
+    deep_lesson("Ship Release", "Freeze", "Freeze merges a day ahead.", 7),
+    sql("INSERT INTO dismissed_pairs (a_norm, b_norm, dismissed_at) VALUES "
+        "('lesson:rotate-keys|owner', 'lesson:ship-release|checklist', 1), "
+        "('junk:kk', 'junk:kk', 1)", after_stop=True),
+    # junk tombstones (accepted junk verdicts), one with a NULL display
+    # (norm_name(None) is "", the norm of the "-" entity below: at degree 1
+    # only that tombstone lets the apply delete it)
+    sql("INSERT INTO merge_decisions (proposal_id, entity_display, into_display, status, score, "
+        "reason, decided_by, decided_at) VALUES (NULL, 'ZZ', NULL, 'accepted', NULL, 'junk: x', "
+        "'agent', 1), (NULL, 'alpha, beta', NULL, 'accepted', NULL, 'junk: y', 'agent', 2), "
+        "(NULL, NULL, NULL, 'accepted', NULL, 'junk: z', 'agent', 3)", after_stop=True),
+    sql("INSERT INTO entities (canonical, display, etype, created_at) VALUES "
+        "('dash-node', '-', NULL, 1700000000.0)", after_stop=True),
+    sql("INSERT INTO edges (src_id, relation, dst_id, confidence, origin, asserted_at) VALUES "
+        f"({eid('dash-node')}, 'related-to', {eid('ocean')}, 0.8, NULL, 1.0)", after_stop=True),
+    # scope attribution (only the dream writes it): disjoint scopes drop a pair
+    sql("INSERT INTO entity_sources (entity_id, source, count, origin, updated_at) "
+        f"VALUES ({eid('harbor-registry')}, 'proj-a', 1, 'derived', 0), "
+        f"({eid('ocean')}, 'proj-b', 1, 'derived', 0), "
+        f"({eid('kafka-broker')}, 'proj-a', 1, 'manual', 0)", after_stop=True),
+    # pending proposals (only the dream files them): merges with judge votes
+    # sharing an endpoint, an already-proposed merge, a pending junk row
+    sql("INSERT INTO entity_proposals (kind, entity_id, into_id, score, reason, created_at, "
+        "judge_verdict, judge_confidence, judge_note, judge_model, judged_at) VALUES "
+        f"('merge', {eid('tide-gauge')}, {eid('kelp-farm')}, 0.71, 'write-dedup: a', 1, "
+        "'relate', 0.8, 'relate:related-to distinct sensors', 'judge-a', 2), "
+        f"('merge', {eid('tide-gauge')}, {eid('ocean')}, 0.6, 'write-dedup: b', 1, "
+        "'reject', 0.9, 'different', 'judge-a', 2), "
+        f"('merge', {eid('orbit-station-alpha-two')}, {eid('orbit-station-alpha')}, NULL, "
+        "'write-dedup: c', 1, NULL, NULL, NULL, NULL, NULL)", after_stop=True),
+    sql("INSERT INTO entity_proposals (kind, entity_id, score, reason, created_at) VALUES "
+        f"('junk', {eid('ww')}, NULL, 'too-short', 1)", after_stop=True),
+    # entities whose evidence is gone: two unmentioned (the census and the
+    # sweep's cap), one an entry mentions, one a fact names
+    sql("INSERT INTO entities (canonical, display, etype, created_at) VALUES "
+        "('orphan-node', 'Orphan Node', NULL, 1700000000.0), "
+        "('orphan-two', 'Orphan Two', NULL, 1700000100.0), "
+        "('mentioned-orphan', 'Mentioned Orphan', NULL, 1700000000.0), "
+        "('named-orphan-x', 'Named Orphan', NULL, 1700000000.0)", after_stop=True),
+]
+
+# Long notes (about 6 KB each) for the response bound: every candidate
+# carries up to three snippets a side at snippet_max_chars 100000.
+DEEP_LONG = [
+    (f"{name} long note {i}: " + " ".join(f"{word}{i}x{j}" for j in range(700)), "proj-a")
+    for i, (name, word) in enumerate([
+        ("Alder Node", "alder"), ("Birch Node", "birch"), ("Cedar Node", "cedar"),
+        ("Dogwood Node", "dogwood"), ("Elm Node", "elm"), ("Fir Node", "fir"),
+        ("Alder Node and Birch Node", "pair"), ("Cedar Node with Elm Node", "duo")])
+]
+
+# Junk-owned and lesson-only entities WITH context vectors (a note mentions
+# each), on a graph small enough that every candidate pair fits top_k: the
+# exclusion alone keeps them out of the candidates.
+DEEP_EXCLUSION_NOTES = [
+    ("Harbor Crane lifts containers at dawn.", "proj-a"),
+    ("Tide Gauge readings land in the warehouse.", "proj-a"),
+    ("Kelp Farm sensors report every hour.", "proj-a"),
+    ("The alpha, beta rollout reached the fleet.", "proj-a"),
+    ("The release checklist gained a smoke test step.", "proj-a"),
+    ("The backup window moved to Sunday night.", "proj-a"),
+]
+
+DEEP_EXCLUSION_SEED = [
+    *[store(t, source=s) for t, s in DEEP_EXCLUSION_NOTES],
+    relate("Harbor Crane", "related-to", "Ocean"),
+    relate("Tide Gauge", "related-to", "Ocean"),
+    relate("Kelp Farm", "related-to", "Ocean"),
+    # junk at any degree (a list artifact)
+    relate("alpha, beta", "related-to", "Ocean"),
+    # lesson-only, both ways: "release checklist" has only a prefers edge
+    # (as a lesson's task-type link mints it); "Backup Window" is a lesson's
+    # entity_id
+    sql("INSERT INTO entities (canonical, display, etype, created_at) VALUES "
+        "('ship-the-release', 'ship the release', NULL, 1700000000.0), "
+        "('release-checklist', 'release checklist', NULL, 1700000000.0), "
+        "('backup-window', 'Backup Window', NULL, 1700000000.0)", after_stop=True),
+    sql("INSERT INTO edges (src_id, relation, dst_id, confidence, origin, asserted_at) VALUES "
+        f"({eid('ship-the-release')}, 'prefers', {eid('release-checklist')}, 0.7, 'action', 1.0)",
+        after_stop=True),
+    deep_lesson("Backup Window", "Day", "Sunday night.", 9),
+    sql(f"UPDATE lessons SET entity_id = {eid('backup-window')} WHERE attribute = 'Day'",
+        after_stop=True),
+]
+
+DEEP_BOUND_SEED = [
+    *[store(t, source=s) for t, s in DEEP_LONG],
+    *[relate(n, "related-to", "Hub") for n in
+      ("Alder Node", "Birch Node", "Cedar Node", "Dogwood Node", "Elm Node", "Fir Node")],
+]
+
+SCENARIOS.update({
+    "dream-deep-dry": {
+        "config": deep_config(),
+        "seed": DEEP_SEED,
+        "ops": [
+            dream("deep"),
+            dream("deep", snippets=False),
+            dream("deep", apply=False, snippets=True),
+            dream("status"),
+        ],
+    },
+    "dream-deep-apply": {
+        "config": deep_config("    orphan_sweep: true\n    orphan_max_per_apply: 1\n"
+                              "    snapshot_keep: 1\n"),
+        "seed": DEEP_SEED,
+        "ops": [
+            dream("deep", apply=True),
+            snapshot_file(),
+            dream("status"),
+            dream("deep"),
+            {"op": "sleep", "s": 1.2},
+            dream("deep", apply=True, snippets=False),
+            snapshot_file(),
+            review(),
+        ],
+    },
+    "dream-deep-apply-cautious": {
+        "config": deep_config("    auto_apply_safe: false\n"
+                              "    analyzer_file_duplicates: false\n"),
+        "seed": DEEP_SEED,
+        "ops": [dream("deep", apply=True), snapshot_file(), dream("status")],
+    },
+    "dream-deep-bound": {
+        "config": deep_config("    snippet_max_chars: 100000\n    top_k_candidates: 50\n"),
+        "seed": DEEP_BOUND_SEED,
+        "ops": [dream("deep"), dream("deep", snippets=False)],
+    },
+    "dream-deep-snapshot-failed": {
+        "config": deep_config(),
+        "seed": DEEP_SEED,
+        "ops": [block_snapshots(), dream("deep", apply=True), dream("status"), dream("deep")],
+    },
+    "dream-deep-exclusion": {
+        "config": deep_config(),
+        "seed": DEEP_EXCLUSION_SEED,
+        "ops": [dream("deep"), dream("deep", apply=True, snippets=False)],
+    },
+})
+
+
+# ── the merge judge (deep_dream_judge, run from the sweep) ────────────────
+#
+# The judge runs on the sweep timer, never from a call: each scenario seeds
+# notes and entities through the Python write path, inserts its pending
+# merge proposals out of band (only the dream files them) and compares
+# both banks and both request sequences once each side's judge is idle
+# (``settle``). Dreaming is enabled for the sweep's judge step; every other
+# step a tick would run is switched off by config: the analyzer filing and
+# the deep tick (P4), the link, junk, curation and candidate judges (P3b),
+# and the automatic dream (an unreachable min_batch and idle time, no
+# outcome inference). One stub serves both daemons (``shared_stub``), so
+# the fingerprints over each endpoint's URL agree.
+
+JUDGE_NOTES = [
+    "Alpha Node runs the nightly batch on rack one.",
+    "Alpha Node reboots every Sunday morning.",
+    "The Alpha Service exposes the billing API to partners.",
+    "Alpha Service writes its audit logs to the archive.",
+    "Beta Node caches the search index in memory.",
+    "The Beta Store keeps the order history in Postgres.",
+    "Gamma Node schedules the render queue.",
+    "The Gamma Tool converts the render output to video.",
+    "Delta Node mirrors the package registry.",
+    "The Delta Unit measures the cooling loop pressure.",
+    "Llama 26B answers the long questions.",
+    "Llama 4B answers the quick questions.",
+    "Epsilon Node backs up the wiki.",
+    "The Epsilon Box stores the spare drives.",
+]
+JUDGE_ENTITIES = ["Alpha Node", "Alpha Service", "Beta Node", "Beta Store", "Gamma Node",
+                  "Gamma Tool", "Delta Node", "Delta Unit", "Llama 26B", "Llama 4B",
+                  "Epsilon Node", "Epsilon Box"]
+JUDGE_SEED = [
+    *[store(t, source="proj-a") for t in JUDGE_NOTES],
+    *[relate(n, "related-to", "Hub") for n in JUDGE_ENTITIES],
+    # a pair settled as distinct before any judge saw it
+    sql("INSERT INTO dismissed_pairs (a_norm, b_norm, dismissed_at) VALUES "
+        "('epsilon-box', 'epsilon-node', 1)", after_stop=True),
+]
+
+# The proposals, by pair; the score orders the queue.
+JUDGE_PAIRS = {
+    "A": ("alpha-node", "alpha-service", 0.95), "B": ("beta-node", "beta-store", 0.9),
+    "G": ("gamma-node", "gamma-tool", 0.85), "D": ("delta-node", "delta-unit", 0.8),
+    "L": ("llama-26b", "llama-4b", 0.75), "E": ("epsilon-node", "epsilon-box", 0.7),
+}
+JUDGE_KEYS = {"A": "Alpha Node|Alpha Service", "B": "Beta Node|Beta Store",
+              "G": "Gamma Node|Gamma Tool", "D": "Delta Node|Delta Unit",
+              "L": "Llama 26B|Llama 4B", "E": "Epsilon Node|Epsilon Box"}
+JUDGE_SETTLE = {"quiet_s": 3.0, "timeout_s": 240.0}
+JUDGE_ALL_FIRST = ("SELECT NOT EXISTS (SELECT 1 FROM entity_proposals "
+                   "WHERE status = 'pending' AND judge_verdict IS NULL)")
+
+
+def judge_config(mode="shadow", tiebreak="off", second="judge-two", third=None, extra=""):
+    """The merge judge's config: second and third opinions on the shared
+    stub's own endpoints, every other sweep step off."""
+    text = ("memory:\n"
+            "  dream:\n    enabled: true\n    sweep_interval_seconds: 0.25\n"
+            "    min_batch: 1000000\n    idle_seconds: 1000000000\n"
+            "  lessons:\n    infer_outcomes: false\n"
+            "  deep_dream:\n"
+            "    auto_tick: false\n    analyzer_file_duplicates: false\n"
+            "    link_judge_mode: \"off\"\n    junk_judge_mode: \"off\"\n"
+            "    curation_judge_mode: \"off\"\n    candidate_judge_mode: \"off\"\n"
+            f"    judge_mode: \"{mode}\"\n    judge_tiebreak_mode: \"{tiebreak}\"\n")
+    if second:
+        text += f"    judge_second_url: \"@STUB@/second/v1\"\n    judge_second_model: \"{second}\"\n"
+    if third:
+        text += f"    judge_third_url: \"@STUB@/third/v1\"\n    judge_third_model: \"{third}\"\n"
+    return text + extra
+
+
+def V(verdict, confidence, relation=None, note=None) -> dict:
+    """One stub verdict."""
+    out = {"verdict": verdict, "confidence": confidence}
+    if relation is not None:
+        out["relation"] = relation
+    if note is not None:
+        out["note"] = note
+    return out
+
+
+def judge_stub(first, second=None, third=None, *, reply_model="judge-one",
+               second_model="judge-two", third_model="judge-three", extra=()) -> dict:
+    """A stub answering each endpoint's judge request by pair (keys of
+    ``JUDGE_KEYS``); ``extra`` entries answer first (an erroring call)."""
+    def by_pair(table):
+        return {JUDGE_KEYS[k]: v for k, v in table.items()}
+    replies = list(extra) + [{"kind": "judge_merges", "verdicts": by_pair(first)}]
+    if second is not None:
+        replies.append({"kind": "judge_merges", "endpoint": "second", "verdicts": by_pair(second)})
+    if third is not None:
+        replies.append({"kind": "judge_merges", "endpoint": "third", "verdicts": by_pair(third)})
+    spec = {"model": "judge-one", "reply_model": reply_model,
+            "second_reply_model": second_model, "third_reply_model": third_model,
+            "replies": replies}
+    return spec
+
+
+def judge_insert(*pairs, until=JUDGE_ALL_FIRST) -> dict:
+    """The pending merge proposals, inserted on both banks at once, then
+    the judges' settle."""
+    rows = ", ".join(
+        f"('merge', {eid(JUDGE_PAIRS[p][0])}, {eid(JUDGE_PAIRS[p][1])}, "
+        f"{JUDGE_PAIRS[p][2]}, 'write-dedup: {p.lower()}', 1.0)" for p in pairs)
+    op = external("INSERT INTO entity_proposals (kind, entity_id, into_id, score, reason, "
+                  f"created_at) VALUES {rows}")
+    op["settle"] = {**JUDGE_SETTLE, "until": until}
+    return op
+
+
+def judge_evidence_change(entity: str) -> dict:
+    """A new edge on ``entity`` (its degree moves), then the settle."""
+    op = external("INSERT INTO edges (src_id, relation, dst_id, confidence, origin, asserted_at) "
+                  f"VALUES ({eid(entity)}, 'uses', {eid('hub')}, 0.8, NULL, 1.0)")
+    op["settle"] = dict(JUDGE_SETTLE)
+    return op
+
+
+def judge_scenario(config: str, stub: dict, ops: list) -> dict:
+    return {"config": config, "seed": JUDGE_SEED, "extractor": stub, "shared_stub": True,
+            "ops": ops}
+
+
+def expect(op: dict, *queries: str) -> dict:
+    """``op`` with queries that must answer true on both banks after it."""
+    return {**op, "expect": [*op.get("expect", ()), *queries]}
+
+
+def ep(pair: str, cond: str) -> str:
+    """The pair's proposal (by its ``judge_insert`` reason) satisfies ``cond``."""
+    return ("SELECT EXISTS (SELECT 1 FROM entity_proposals "
+            f"WHERE reason = 'write-dedup: {pair.lower()}' AND {cond})")
+
+
+def judged_by_dream(pair: str, status: str) -> str:
+    return ep(pair, f"status = '{status}' AND decided_by = 'dream-judge'")
+
+
+def folded(pair: str) -> str:
+    """An automatic fold of the pair, audited in ``merge_decisions``."""
+    a, b = JUDGE_KEYS[pair].split("|")
+    return ("SELECT EXISTS (SELECT 1 FROM merge_decisions WHERE status = 'accepted' "
+            f"AND decided_by = 'dream-judge' AND '{a}' IN (entity_display, into_display) "
+            f"AND '{b}' IN (entity_display, into_display))")
+
+
+def relate_link(relation: str) -> str:
+    """A link proposal the merge judge filed from a relate vote."""
+    return ("SELECT EXISTS (SELECT 1 FROM edge_proposals WHERE source = 'merge-judge-relate' "
+            f"AND relation = '{relation}')")
+
+
+def decisions_for(pair: str, status: str, n: int) -> str:
+    """Exactly ``n`` ``merge_decisions`` rows of ``status`` for the pair."""
+    a, b = JUDGE_KEYS[pair].split("|")
+    return (f"SELECT count(*) = {n} FROM merge_decisions WHERE status = '{status}' "
+            f"AND '{a}' IN (entity_display, into_display) "
+            f"AND '{b}' IN (entity_display, into_display)")
+
+
+def pending(*pairs: str) -> list[str]:
+    return [ep(p, "status = 'pending'") for p in pairs]
+
+
+def judge_restart(config: str, until: str | None = None) -> dict:
+    """Both daemons restarted on ``config``, then the judges' settle."""
+    op = {"op": "restart", "config": config, "settle": dict(JUDGE_SETTLE)}
+    if until:
+        op["settle"]["until"] = until
+    return op
+
+
+def three_votes(*pairs: str) -> str:
+    reasons = ", ".join(f"'write-dedup: {p.lower()}'" for p in pairs)
+    return ("SELECT NOT EXISTS (SELECT 1 FROM entity_proposals WHERE reason IN "
+            f"({reasons}) AND judge3_verdict IS NULL)")
+
+
+# A lone surrogate, as a reply's JSON escapes it.
+LONE = chr(0xD83D)
+REFUSED_SECOND = "tiebreak needs the second vote''s served model"
+
+
+SCENARIOS.update({
+    # Shadow: every verdict is recorded, nothing applies; a split row gets
+    # its third opinion; an evidence change clears a row's verdicts, which
+    # are asked again.
+    "judge-merge-shadow": judge_scenario(
+        judge_config("shadow", "shadow", third="judge-three"),
+        judge_stub({"A": V("accept", 0.9, note="same service"),
+                    "B": V("reject", 0.9, note="different roles"),
+                    "G": V("accept", 0.7)},
+                   {"A": V("accept", 0.8), "B": V("reject", 0.85, relation="part-of"),
+                    "G": V("reject", 0.8), "D": V("accept", 0.6)},
+                   {"G": V("reject", 0.9), "D": V("leave", 0.5)}),
+        [expect(judge_insert("A", "B", "G", "D"),
+                ep("G", "judge_note LIKE '%| 3rd (judge-three): reject 0.90 [2-1 reject]'"),
+                *pending("A", "B", "G", "D")),
+         judge_evidence_change("alpha-node"), review()]),
+    # auto-reject: a single reject at the bar applies (and files its
+    # relate link), two distinct rejects at the mean apply, a split and a
+    # mean below the bar do not.
+    "judge-merge-auto-reject": judge_scenario(
+        judge_config("auto-reject"),
+        judge_stub({"A": V("reject", 0.8, relation="uses", note="a host and a service"),
+                    "B": V("reject", 0.79), "G": V("accept", 0.9), "D": V("reject", 0.6)},
+                   {"B": V("reject", 0.7), "G": V("reject", 0.9), "D": V("reject", 0.6)}),
+        [expect(judge_insert("A", "B", "G", "D"),
+                judged_by_dream("A", "rejected"), relate_link("uses"),
+                judged_by_dream("B", "rejected"), *pending("G", "D")),
+         review()]),
+    # auto: two distinct accepts on differential evidence fold (snapshot
+    # first), at the bar too; a name veto refuses; a dismissed pair's row
+    # is closed instead.
+    "judge-merge-auto": judge_scenario(
+        judge_config("auto", extra="    snapshot_keep: 1\n"),
+        judge_stub({"A": V("accept", 0.9), "L": V("accept", 0.9), "E": V("accept", 0.9),
+                    "B": V("accept", 0.6)},
+                   {"A": V("accept", 0.8), "L": V("accept", 0.8), "E": V("accept", 0.8),
+                    "B": V("accept", 0.6)}),
+        [expect(judge_insert("A", "B", "L", "E"),
+                folded("A"), folded("B"), judged_by_dream("E", "rejected"),
+                ep("L", "status = 'pending' AND judge_note LIKE "
+                        "'%| auto-accept refused: name veto'")),
+         snapshot_file(), review()]),
+    # The second endpoint is configured with the first's model name: its
+    # votes authorize neither a reject nor a fold.
+    "judge-merge-same-model": judge_scenario(
+        judge_config("auto", second="judge-one"),
+        judge_stub({"A": V("accept", 0.9), "B": V("reject", 0.75)},
+                   {"A": V("accept", 0.9), "B": V("reject", 0.9)},
+                   second_model="judge-one-b"),
+        [expect(judge_insert("A", "B"),
+                ep("A", "judge_note LIKE '%| auto-accept needs a distinct second model'"),
+                ep("B", "judge_note LIKE '%| auto-reject needs a distinct second model'"),
+                *pending("A", "B")),
+         review()]),
+    # The second endpoint asked for judge-two serves the first's model.
+    "judge-merge-served-mismatch": judge_scenario(
+        judge_config("auto-reject"),
+        judge_stub({"B": V("reject", 0.75), "D": V("reject", 0.75)},
+                   {"B": V("reject", 0.9), "D": V("reject", 0.75)},
+                   second_model="judge-one"),
+        [expect(judge_insert("B", "D"),
+                ep("B", "judge_note LIKE '%| auto-reject needs a distinct second model'"),
+                ep("D", "judge_note LIKE '%| auto-reject needs a distinct second model'"),
+                *pending("B", "D")),
+         review()]),
+    # The first endpoint names no served model: the two-vote reject is
+    # refused for want of the first vote's identity.
+    "judge-merge-unknown-served": judge_scenario(
+        judge_config("auto-reject"),
+        judge_stub({"B": V("reject", 0.75)}, {"B": V("reject", 0.9)}, reply_model=None),
+        [expect(judge_insert("B"),
+                ep("B", "status = 'pending' AND judge_note LIKE "
+                        "'%| auto-reject needs a distinct second model'")),
+         review()]),
+    # The tiebreak in auto: a 2-1 reject applies (filing the third vote's
+    # relation), a 2-1 accept under auto-reject does not, no majority
+    # leaves the row.
+    "judge-merge-tiebreak": judge_scenario(
+        judge_config("auto-reject", "auto", third="judge-three"),
+        judge_stub({"G": V("accept", 0.8), "B": V("reject", 0.7), "D": V("accept", 0.9)},
+                   {"G": V("reject", 0.8), "B": V("accept", 0.9), "D": V("reject", 0.9)},
+                   {"G": V("reject", 0.9, relation="part-of"), "B": V("accept", 0.8),
+                    "D": V("leave", 0.5)}),
+        [expect(judge_insert("G", "B", "D"),
+                judged_by_dream("G", "rejected"), relate_link("part-of"),
+                ep("B", "status = 'pending' AND judge_note LIKE '%[2-1 accept]'"),
+                ep("D", "status = 'pending' AND judge_note LIKE '%[no majority]'")),
+         review()]),
+    # The third endpoint serves the first's model: the tiebreak is refused.
+    "judge-merge-tiebreak-same-model": judge_scenario(
+        judge_config("auto-reject", "auto", third="judge-three"),
+        judge_stub({"G": V("accept", 0.8)}, {"G": V("reject", 0.8)}, {"G": V("reject", 0.9)},
+                   third_model="judge-one"),
+        [expect(judge_insert("G"),
+                ep("G", "status = 'pending' AND judge_note LIKE "
+                        "'%| tiebreak needs a distinct third model'")),
+         review()]),
+    # The second endpoint named no served model: the tiebreak is refused.
+    "judge-merge-tiebreak-unknown-second": judge_scenario(
+        judge_config("auto-reject", "auto", third="judge-three"),
+        judge_stub({"G": V("accept", 0.8)}, {"G": V("reject", 0.8)}, {"G": V("reject", 0.9)},
+                   second_model=None),
+        [expect(judge_insert("G"),
+                ep("G", f"status = 'pending' AND judge_note LIKE '%| {REFUSED_SECOND}'")),
+         review()]),
+    # The third model is configured as the first's: no third call.
+    "judge-merge-tiebreak-skip": judge_scenario(
+        judge_config("auto-reject", "auto", third="judge-one"),
+        judge_stub({"G": V("accept", 0.8)}, {"G": V("reject", 0.8)}, {"G": V("reject", 0.9)}),
+        [expect(judge_insert("G"),
+                ep("G", "status = 'pending' AND judge2_verdict IS NOT NULL "
+                        "AND judge3_verdict IS NULL")),
+         review()]),
+    # The second and the third endpoints each fail once: the first opinions
+    # go on in the same tick, and the failed opinions are asked again.
+    "judge-merge-endpoint-errors": judge_scenario(
+        judge_config("shadow", "shadow", third="judge-three",
+                     extra="    judge_batch: 2\n"),
+        judge_stub({"A": V("accept", 0.9), "B": V("reject", 0.9), "G": V("accept", 0.8)},
+                   {"A": V("accept", 0.8), "B": V("accept", 0.7), "G": V("reject", 0.9)},
+                   {"B": V("reject", 0.8), "G": V("accept", 0.6)},
+                   extra=[{"kind": "judge_merges", "endpoint": "second", "times": 1,
+                           "status": 500, "body": "{\"error\": \"down\"}"},
+                          {"kind": "judge_merges", "endpoint": "third", "times": 1,
+                           "status": 503, "body": "{\"error\": \"down\"}"}]),
+        [expect(judge_insert("A", "B", "G"),
+                ep("A", "judge2_verdict = 'accept'"), ep("B", "judge3_verdict = 'reject'"),
+                ep("G", "judge3_verdict = 'accept'")),
+         review()]),
+    # An automatic reject is reconsidered when its evidence changes: the
+    # row reopens, its pair is released, and the judge rejects it again.
+    "judge-merge-reconsider": judge_scenario(
+        judge_config("auto-reject", second=None),
+        judge_stub({"A": V("reject", 0.9), "B": V("reject", 0.9)}),
+        [expect(judge_insert("A", "B"), judged_by_dream("A", "rejected"),
+                judged_by_dream("B", "rejected")),
+         expect(judge_evidence_change("alpha-node"), judged_by_dream("A", "rejected"),
+                decisions_for("A", "rejected", 2), decisions_for("B", "rejected", 1)),
+         review()]),
+    # A reply repeating an id: the third opinion's verdicts for one row
+    # share that row (Python's one dict), so each stacks its own tail and a
+    # refusal the first noted is not noted again; the second opinion's
+    # repeat overwrites. The second endpoint names no model, so the 2-1
+    # reject is refused.
+    "judge-merge-duplicates": judge_scenario(
+        judge_config("auto-reject", "auto", third="judge-three"),
+        judge_stub({"G": V("accept", 0.8), "D": V("accept", 0.9), "B": V("accept", 0.7)},
+                   {"G": V("reject", 0.8), "D": V("reject", 0.9),
+                    "B": [V("accept", 0.6), V("accept", 0.65)]},
+                   {"G": [V("reject", 0.9), V("reject", 0.85, relation="part-of")],
+                    "D": [V("leave", 0.5), V("leave", 0.4)]},
+                   second_model=None),
+        [expect(judge_insert("G", "D", "B"),
+                ep("G", "status = 'pending' AND judge_note LIKE "
+                        f"'%[2-1 reject] | {REFUSED_SECOND} | 3rd (judge-three): "
+                        "relate:part-of 0.85 [2-1 reject]'"),
+                ep("D", "judge_note LIKE '%| 3rd (judge-three): leave 0.50 [no majority] "
+                        "| 3rd (judge-three): leave 0.40 [no majority]'"),
+                ep("B", "judge_note LIKE '%| 2nd (judge-two): accept 0.65 [agree]' "
+                        "AND judge2_confidence = 0.65::real")),
+         review()]),
+    # The Docker default: the first endpoint's model is the launch alias
+    # ``extractor`` and the second's ``judge``, so each tick probes GET
+    # /models for the served identity (observed_model) and checks the
+    # reply's served model against it: the first reply, served as
+    # judge-one-x while /models says judge-one, records nothing and is
+    # asked again. (The shared stub cannot tell whose keyless GET a probe
+    # is, so the probe shows only through what it decides.) The two
+    # distinct served models then authorize the two-vote reject.
+    "judge-merge-alias": judge_scenario(
+        judge_config("auto-reject", second="judge"),
+        {**judge_stub({"B": V("reject", 0.75), "A": V("accept", 0.9)},
+                      {"B": V("reject", 0.9), "A": V("accept", 0.8)},
+                      extra=[{"kind": "judge_merges", "times": 1, "model": "judge-one-x",
+                              "verdicts": {JUDGE_KEYS["A"]: V("reject", 0.95),
+                                           JUDGE_KEYS["B"]: V("reject", 0.95)}}]),
+         "model": "extractor", "served_model": "judge-one"},
+        [expect(judge_insert("A", "B"), judged_by_dream("B", "rejected"),
+                ep("A", "status = 'pending' AND judge_model = 'judge-one' "
+                        "AND judge2_model = 'judge-two'")),
+         review()]),
+    # The second endpoint moves (judge-two, then judge-two-b) under a batch
+    # of two: its first call fails, so three rows await it; the second call
+    # (judge-two) rejects B on two votes and splits G; the third
+    # (judge-two-b, on D) moves its identity in the same tick as G's third
+    # vote, so that tiebreak applies nothing; the next tick reopens B's
+    # decision from the moved vote (reconsideration) and clears G's moved
+    # second and third votes, which are asked again and reject.
+    "judge-merge-moved": judge_scenario(
+        judge_config("auto-reject", "auto", third="judge-three",
+                     extra="    judge_batch: 2\n"),
+        judge_stub({"B": V("reject", 0.75), "G": V("accept", 0.8), "D": V("accept", 0.9)},
+                   {"B": V("reject", 0.9), "G": V("reject", 0.8), "D": V("accept", 0.8)},
+                   {"G": V("reject", 0.9, relation="part-of")},
+                   second_model="judge-two-b",
+                   extra=[{"kind": "judge_merges", "endpoint": "second", "times": 1,
+                           "status": 500, "body": "{\"error\": \"down\"}"},
+                          {"kind": "judge_merges", "endpoint": "second", "times": 1,
+                           "model": "judge-two",
+                           "verdicts": {JUDGE_KEYS["B"]: V("reject", 0.9),
+                                        JUDGE_KEYS["G"]: V("reject", 0.8),
+                                        JUDGE_KEYS["D"]: V("accept", 0.8)}}]),
+        [expect(judge_insert("B", "G", "D"),
+                judged_by_dream("B", "rejected"), decisions_for("B", "rejected", 2),
+                judged_by_dream("G", "rejected"), decisions_for("G", "rejected", 1),
+                ep("G", "judge2_served_model = 'judge-two-b'"), relate_link("part-of"),
+                *pending("D")),
+         review()]),
+    # The first endpoint moves (judge-one, then judge-one-b) under a batch
+    # of one: the first verdict recorded under judge-one is cleared once
+    # the endpoint has served judge-one-b, and asked again.
+    "judge-merge-first-moved": judge_scenario(
+        judge_config("shadow", extra="    judge_batch: 1\n"),
+        judge_stub({"A": V("accept", 0.85), "B": V("accept", 0.8)},
+                   {"A": V("accept", 0.7), "B": V("accept", 0.75)},
+                   reply_model="judge-one-b",
+                   extra=[{"kind": "judge_merges", "times": 1, "model": "judge-one",
+                           "verdicts": {JUDGE_KEYS["A"]: V("accept", 0.9),
+                                        JUDGE_KEYS["B"]: V("accept", 0.9)}}]),
+        [expect(judge_insert("A", "B"),
+                ep("A", "judge_model = 'judge-one-b' AND judge_confidence = 0.85::real "
+                        "AND judge2_verdict IS NOT NULL"),
+                ep("B", "judge_model = 'judge-one-b'")),
+         review()]),
+    # Replay: votes recorded under tiebreak shadow, the mode then promoted
+    # to auto (a restart): the recorded 2-1 reject applies with no model
+    # call and files its link, and a 2-1 accept on a dismissed pair closes
+    # the row, recording the policies the previous row's tiebreak left on
+    # the review. A row the live tiebreak refused (its note carries the
+    # refusal) is not replayed when its pair is later dismissed.
+    "judge-merge-replay": judge_scenario(
+        judge_config("auto", "shadow", third="judge-three", extra="    snapshot_keep: 1\n"),
+        judge_stub({"G": V("accept", 0.8), "E": V("accept", 0.9), "L": V("accept", 0.9)},
+                   {"G": V("reject", 0.8), "E": V("reject", 0.7), "L": V("reject", 0.7)},
+                   {"G": V("reject", 0.9, relation="part-of"), "E": V("accept", 0.8),
+                    "L": V("accept", 0.8)}),
+        [expect(judge_insert("G", "E", until=three_votes("G", "E")), *pending("G", "E")),
+         expect(judge_restart(
+             judge_config("auto", "auto", third="judge-three", extra="    snapshot_keep: 1\n"),
+             until=("SELECT NOT EXISTS (SELECT 1 FROM entity_proposals WHERE status = "
+                    "'pending' AND reason IN ('write-dedup: g', 'write-dedup: e'))")),
+             judged_by_dream("G", "rejected"), relate_link("part-of"),
+             judged_by_dream("E", "rejected")),
+         expect(judge_insert("L", until=three_votes("L")),
+                ep("L", "status = 'pending' AND judge_note LIKE "
+                        "'%| auto-accept refused: name veto'")),
+         expect({**external("INSERT INTO dismissed_pairs (a_norm, b_norm, dismissed_at) "
+                            "VALUES ('llama-26b', 'llama-4b', 1)"),
+                 "settle": dict(JUDGE_SETTLE)}, *pending("L")),
+         review()]),
+    # Reply values the database refuses, each once: a first opinion's note
+    # holding a lone surrogate (psycopg's UnicodeEncodeError), a confidence
+    # that underflows REAL, and a second endpoint whose served model holds
+    # one (PostgreSQL refuses the response identity's JSON). Each fails its
+    # tick before anything of it is written; the next reply records.
+    "judge-merge-unencodable": judge_scenario(
+        judge_config("shadow"),
+        judge_stub({"A": V("accept", 0.9), "B": V("accept", 0.8)},
+                   {"A": V("accept", 0.8), "B": V("reject", 0.7)},
+                   extra=[{"kind": "judge_merges", "times": 1,
+                           "verdicts": {JUDGE_KEYS["A"]: V("accept", 0.9, note=f"x{LONE}"),
+                                        JUDGE_KEYS["B"]: V("accept", 0.8)}},
+                          {"kind": "judge_merges", "times": 1,
+                           "verdicts": {JUDGE_KEYS["A"]: V("accept", 1e-50),
+                                        JUDGE_KEYS["B"]: V("accept", 0.8)}},
+                          {"kind": "judge_merges", "endpoint": "second", "times": 1,
+                           "model": f"judge-{LONE}",
+                           "verdicts": {JUDGE_KEYS["A"]: V("accept", 0.8),
+                                        JUDGE_KEYS["B"]: V("accept", 0.7)}}]),
+        [expect(judge_insert("A", "B"),
+                ep("A", "judge_confidence = 0.9::real AND judge2_model = 'judge-two' "
+                        "AND judge_note = ' | 2nd (judge-two): accept 0.80 [agree]'"),
+                ep("B", "judge2_verdict = 'reject'"),
+                "SELECT value->>'model' = 'judge-two' FROM meta "
+                "WHERE key = 'review_response_identity_v1_merge_second'"),
+         review()]),
+})
+EXTERNAL_WRITES.update(n for n in SCENARIOS if n.startswith("judge-merge-"))
+
+
 def resolve_args(args: dict, dsn: str) -> dict:
     out = {}
     import psycopg
@@ -4020,6 +4829,16 @@ def compare_fact_numeric(py: dict, rs: dict, tol: dict, stats: dict,
     return diffs
 
 
+def decision_record_clocks(value: dict) -> dict:
+    """A decision record with its clocks (and its proposal snapshot's
+    verdict clocks) reduced to null-or-not."""
+    out = {k: (_clock(x) if k in DECISION_RECORD_CLOCK else x) for k, x in value.items()}
+    if isinstance(out.get("proposal"), dict):
+        out["proposal"] = {k: (_clock(x) if k in DECISION_PROPOSAL_CLOCK else x)
+                           for k, x in out["proposal"].items()}
+    return out
+
+
 def episode_map(state: dict) -> dict[str, str]:
     ids: list[str] = []
     t = _table(state, "episodes")
@@ -4184,8 +5003,47 @@ def dream_tokens(value, ts_map: dict[float, str]):
             return payload
         if key == "idle_seconds" or key in DREAM_CLOCK_KEYS:
             return _clock(v)
+        if key == "snapshot" and isinstance(v, str) and SNAPSHOT_NAME.fullmatch(v):
+            return "<snapshot>"
         return v
     return walk(value)
+
+
+# ``age_days`` is rounded to 0.1 day and each side reads its own clock: two
+# reads straddling a rounding boundary differ by one unit.
+ORPHAN_AGE_TOL_DAYS = 0.1
+
+
+def orphan_age_diffs(py, rs) -> list[str]:
+    """A deep dry run's ``would_orphan[].age_days`` (wall-clock days since
+    each orphan's creation), compared pairwise by position within
+    ``ORPHAN_AGE_TOL_DAYS``, then masked as ``<age>`` on both sides in place
+    so the answer comparison checks the rest of each entry. An unpaired
+    entry or a non-number is left to that comparison."""
+    out: list[str] = []
+
+    def walk(a, b, path):
+        if isinstance(a, dict) and isinstance(b, dict):
+            for k in a.keys() & b.keys():
+                if k == "would_orphan" and isinstance(a[k], list) and isinstance(b[k], list):
+                    for i, (x, y) in enumerate(zip(a[k], b[k])):
+                        if not (isinstance(x, dict) and isinstance(y, dict)):
+                            continue
+                        u, v = x.get("age_days"), y.get("age_days")
+                        if not (_number(u) and _number(v)):
+                            continue
+                        if abs(u - v) > ORPHAN_AGE_TOL_DAYS + 1e-9:
+                            out.append(f"{path}would_orphan[{i}].age_days: python {u} vs "
+                                       f"rust {v} (apart by more than {ORPHAN_AGE_TOL_DAYS} d)")
+                        x["age_days"] = y["age_days"] = "<age>"
+                else:
+                    walk(a[k], b[k], f"{path}{k}.")
+        elif isinstance(a, list) and isinstance(b, list):
+            for i, (x, y) in enumerate(zip(a, b)):
+                walk(x, y, f"{path}[{i}].")
+
+    walk(py, rs, "")
+    return out
 
 
 def _values_at(v, key: str):
@@ -4295,6 +5153,8 @@ def normalize_state(state: dict, before: dict,
                 key, value = row
                 if key in META_CLOCK and isinstance(value, dict):
                     row[1] = {k: (_clock(x) if k in META_CLOCK[key] else x) for k, x in value.items()}
+                elif key.startswith(DECISION_RECORD_PREFIX) and isinstance(value, dict):
+                    row[1] = decision_record_clocks(value)
                 elif key == "episode_tombstones" and isinstance(value, dict):
                     row[1] = {k: {**x, "ended_at": _clock(x.get("ended_at"))} if isinstance(x, dict) else x
                               for k, x in value.items()}
@@ -4421,6 +5281,13 @@ def normalize_records(a, b, stats=None):
                 a[k], b[k] = _clock(a[k]), _clock(b[k])
             elif k in RESPONSE_RECENT_CLOCK:
                 a[k], b[k] = _recent_clock(a[k]), _recent_clock(b[k])
+            elif (k == "automatic_decisions" and isinstance(a[k], list)
+                  and isinstance(b[k], list)):
+                for x, y in zip(a[k], b[k]):
+                    if isinstance(x, dict) and isinstance(y, dict):
+                        for c in DECISION_LISTING_RECENT_CLOCK & set(x) & set(y):
+                            x[c], y[c] = _recent_clock(x[c]), _recent_clock(y[c])
+                normalize_records(a[k], b[k], stats)
             elif (k in ("cohesion", "seed_score") and "members" in a and "members" in b
                   and isinstance(a[k], (int, float)) and isinstance(b[k], (int, float))
                   and not isinstance(a[k], bool)):
@@ -4603,12 +5470,16 @@ def replace_origin(value, origin: str, token: str = STUB_ORIGIN_TOKEN):
 
 
 def start_stubs(scn: dict, names) -> dict[str, StubExtractor]:
-    """One started stub per name when the scenario declares an extractor."""
+    """One started stub per name when the scenario declares an extractor
+    (``shared_stub``: one for both daemons, another for the seed)."""
     if "extractor" not in scn:
         return {}
     stubs: dict[str, StubExtractor] = {}
     try:
         for n in names:
+            if scn.get("shared_stub") and n == "rust" and "python" in stubs:
+                stubs[n] = stubs["python"]
+                continue
             stubs[n] = StubExtractor(scn["extractor"], n).start()
     except BaseException:
         close_stubs(stubs)
@@ -4621,13 +5492,90 @@ def close_stubs(stubs: dict[str, StubExtractor]) -> None:
         stub.close()
 
 
-def extractor_env(scn: dict, stub: StubExtractor | None) -> dict:
-    """The dream-extractor endpoint variables pointing a daemon at its stub."""
+def side_key(side: str) -> str:
+    """The bearer key a side sends to a shared stub."""
+    return f"side-{side}"
+
+
+def side_auth(side: str) -> str:
+    from stub_extractor import auth_digest
+    return auth_digest(f"Bearer {side_key(side)}")
+
+
+def scenario_config(scn: dict, stub: StubExtractor | None) -> str | None:
+    """The scenario's config, ``@STUB@`` replaced by the stub's origin."""
+    config = scn.get("config")
+    if config and stub is not None:
+        config = config.replace("@STUB@", stub.origin)
+    return config
+
+
+def drain_side(stubs: dict[str, StubExtractor], scn: dict, side: str) -> list[dict]:
+    if scn.get("shared_stub"):
+        return stubs[side].drain(auth=side_auth(side))
+    return stubs[side].drain()
+
+
+# The tables the merge judge writes: settled when none of them changes.
+JUDGE_TABLES = ("entity_proposals", "merge_decisions", "dismissed_pairs", "edge_proposals",
+                "entities", "edges", "meta")
+
+
+def judge_digest(dsn: str) -> str:
+    import psycopg
+    parts = []
+    with psycopg.connect(dsn, autocommit=True) as conn:
+        for t in JUDGE_TABLES:
+            row = conn.execute(f"SELECT md5(COALESCE(string_agg(x, '|' ORDER BY x), '')) "
+                               f"FROM (SELECT t::text AS x FROM {t} t) s").fetchone()
+            parts.append(row[0])
+    return ",".join(parts)
+
+
+def settle_sides(spec: dict, dsns: dict, stubs: dict, scn: dict) -> None:
+    """Wait until each side's background work is idle: ``until`` (a query
+    whose first column must be true) holds, then neither the judge tables
+    nor the side's stub requests change for ``quiet_s`` seconds."""
+    import psycopg
+    quiet = float(spec.get("quiet_s", 3.0))
+    deadline = time.monotonic() + float(spec.get("timeout_s", 180.0))
+    for side in ("python", "rust"):
+        dsn = dsns[side]
+        if spec.get("until"):
+            while True:
+                with psycopg.connect(dsn, autocommit=True) as conn:
+                    ok = conn.execute(spec["until"]).fetchone()[0]
+                if ok:
+                    break
+                if time.monotonic() > deadline:
+                    raise RuntimeError(f"{side}: settle condition never held: {spec['until']}")
+                time.sleep(0.2)
+        last, since = None, time.monotonic()
+        while True:
+            count = stubs[side].count(side_auth(side) if scn.get("shared_stub") else None) \
+                if stubs else 0
+            snap = (judge_digest(dsn), count)
+            if snap != last:
+                last, since = snap, time.monotonic()
+            elif time.monotonic() - since >= quiet:
+                break
+            if time.monotonic() > deadline:
+                raise RuntimeError(f"{side}: background work did not settle")
+            time.sleep(0.2)
+
+
+def extractor_env(scn: dict, stub: StubExtractor | None, side: str | None = None) -> dict:
+    """The dream-extractor endpoint variables pointing a daemon at its stub
+    (``shared_stub``: with the side's own key on every judge endpoint)."""
     if stub is None:
         return {}
     spec = scn.get("extractor") or {}
     env = {"PSEUDOLIFE_DREAM_BASE_URL": stub.base_url,
            "PSEUDOLIFE_DREAM_MODEL": spec.get("model", "stub-model")}
+    if scn.get("shared_stub") and side:
+        for name in ("PSEUDOLIFE_DREAM_API_KEY", "PSEUDOLIFE_JUDGE_API_KEY",
+                     "PSEUDOLIFE_JUDGE_SECOND_API_KEY", "PSEUDOLIFE_JUDGE_THIRD_API_KEY"):
+            env[name] = side_key(side)
     if scn.get("extractor_fallback"):
         env["PSEUDOLIFE_DREAM_FALLBACK_BASE_URL"] = stub.fallback_base_url
         env["PSEUDOLIFE_DREAM_FALLBACK_MODEL"] = spec.get("fallback_model", "stub-fallback-model")
@@ -4759,6 +5707,94 @@ def run_op(op: dict, port: int, mcp: Mcp, dsn: str) -> dict | None:
     return mcp.call(op["name"], args, headers)
 
 
+# Operations on each side's data directory rather than its daemon.
+HOME_OPS = ("snapshot_file", "block_snapshots")
+
+
+def restart_sides(op: dict, scn: dict, procs: dict, homes: dict, envs: dict,
+                  stubs: dict, binary: Path) -> dict:
+    """``restart``: stop both daemons once their background work has
+    settled, write ``op["config"]`` (``@STUB@`` replaced) as each side's
+    config, and start them again on fresh ports, for a knob read only at
+    start (``judge_tiebreak_mode`` promoted after votes were recorded).
+    Answers the new MCP clients."""
+    import psycopg
+    dsns = {side: procs[side].env["PSEUDOLIFE_MCP_DATABASE_URL"] for side in procs}
+    probes = "SELECT count(*) FROM retrieval_events WHERE query_text = 'warmup probe'"
+
+    def count(side):
+        with psycopg.connect(dsns[side], autocommit=True) as conn:
+            return conn.execute(probes).fetchone()[0]
+    booted = {side: count(side) + 1 for side in procs}
+    for d in procs.values():
+        d.stop()
+    for side in ("python", "rust"):
+        config = op["config"]
+        if stubs.get(side) is not None:
+            config = config.replace("@STUB@", stubs[side].origin)
+        (homes[side] / "data" / "config.yaml").write_text(config, encoding="utf-8")
+    procs["python"] = daemons.python_daemon(
+        homes["python"], daemons.free_port(), daemons.base_env(homes["python"], envs["python"]))
+    procs["rust"] = daemons.rust_daemon(
+        binary, homes["rust"], daemons.free_port(), daemons.base_env(homes["rust"], envs["rust"]))
+    for d in procs.values():
+        d.start(300)
+    w1a.wait_settled([d.port for d in procs.values()], token=TOKEN)
+    # Each boot's warmup search logs one event, which the state comparison
+    # scrubs once per run (``scrub_declared_rows``): once the restart's
+    # probe has landed, both boots' probes leave both banks alike.
+    deadline = time.monotonic() + 120
+    for side in procs:
+        while count(side) < booted[side] and time.monotonic() < deadline:
+            time.sleep(0.2)
+        with psycopg.connect(dsns[side], autocommit=True) as conn:
+            conn.execute("DELETE FROM retrieval_events WHERE query_text = 'warmup probe' "
+                         "AND id > (SELECT COALESCE(min(id), 0) FROM retrieval_events "
+                         "WHERE query_text = 'warmup probe')")
+    clients = {side: Mcp(d.port) for side, d in procs.items()}
+    for client in clients.values():
+        client.init()
+    return clients
+
+
+def expect_diffs(op: dict, dsns: dict) -> list[str]:
+    """``op["expect"]``: queries whose first column must answer true on
+    both banks once the operation (and its settle) is done, so a scenario
+    whose sides both miss the path it is written for still fails."""
+    import psycopg
+    out = []
+    for query in op.get("expect", ()):
+        for side in ("python", "rust"):
+            with psycopg.connect(dsns[side], autocommit=True) as conn:
+                row = conn.execute(query).fetchone()
+            if not (row and row[0]):
+                out.append(f"expect {side}: {query}")
+    return out
+
+
+def home_op(op: dict, home: Path) -> dict:
+    """``snapshot_file``: the side's newest ``graph_snapshots/graph-*.json``
+    with its name's shape, the file count and every table's columns and rows
+    (CLOCK columns null-or-not, rows as a sorted set); ``block_snapshots``:
+    a plain file where the directory goes, so the snapshot write fails."""
+    snaps = home / "data" / "graph_snapshots"
+    if op["op"] == "block_snapshots":
+        snaps.write_text("blocked", encoding="utf-8")
+        return {"isError": False, "value": None}
+    names = sorted(p.name for p in snaps.glob("graph-*.json")) if snaps.is_dir() else []
+    if not names:
+        return {"isError": False, "value": {"files": 0}}
+    raw = (snaps / names[-1]).read_text(encoding="utf-8")
+    tables = {}
+    for t, rows in json.loads(raw).items():
+        cols = list(rows[0]) if rows else []
+        norm = [[_clock(r[c]) if (t, c) in CLOCK else r[c] for c in cols] for r in rows]
+        tables[t] = {"columns": cols, "rows": sorted(norm, key=json.dumps)}
+    return {"isError": False, "value": {
+        "files": len(names), "name_shape": bool(SNAPSHOT_NAME.fullmatch(names[-1])),
+        "ascii": raw.isascii(), "tables": tables}}
+
+
 def wait_landed(dsn: str, text: str, deadline_s: float = 30.0) -> None:
     """Wait until an abandoned store's row exists, up to the deadline: a
     store that survives its caller's disconnect lands whatever the embedder's
@@ -4830,8 +5866,8 @@ def prepare_template(scn: dict, tag: str, root: Path, owned: list[str],
     template = pg.name(f"pl_cf_w2e_{tag}_t")
     owned.append(template)
     dsn = pg.create(template)
-    home = daemons.make_home(root, f"{tag}-seed", scn.get("config"))
-    extra = {**extractor_env(scn, stub), **(scn.get("seed_env") or {})}
+    home = daemons.make_home(root, f"{tag}-seed", scenario_config(scn, stub))
+    extra = {**extractor_env(scn, stub, "seed"), **(scn.get("seed_env") or {})}
     d = daemons.python_daemon(home, daemons.free_port(),
                               daemons.base_env(home, side_env(scn, dsn, extra)))
     try:
@@ -4888,15 +5924,20 @@ def _run_live(name: str, scn: dict, tag: str, binary: Path, root: Path, record: 
     procs = {}
     steps, stats = [], {}
     try:
-        home = daemons.make_home(root, f"{tag}-py", scn.get("config"))
-        penv = side_env(scn, dsns["python"], extractor_env(scn, stubs.get("python")))
+        home = daemons.make_home(root, f"{tag}-py", scenario_config(scn, stubs.get("python")))
+        homes = {"python": home}
+        penv = side_env(scn, dsns["python"],
+                        extractor_env(scn, stubs.get("python"), "python"))
         procs["python"] = daemons.python_daemon(home, daemons.free_port(),
                                                 daemons.base_env(home, penv))
-        renv = w1a.rust_env(side_env(scn, dsns["rust"], extractor_env(scn, stubs.get("rust"))))
+        renv = w1a.rust_env(side_env(scn, dsns["rust"],
+                                     extractor_env(scn, stubs.get("rust"), "rust")))
         if mutant:
             renv["PSEUDOLIFE_DAEMON_MUTANT"] = mutant
-        home = daemons.make_home(root, f"{tag}-rs", scn.get("config"))
+        home = daemons.make_home(root, f"{tag}-rs", scenario_config(scn, stubs.get("rust")))
+        homes["rust"] = home
         procs["rust"] = daemons.rust_daemon(binary, home, daemons.free_port(), daemons.base_env(home, renv))
+        envs = {"python": penv, "rust": renv}
         daemons.start_all(procs, 300)
         w1a.wait_settled([d.port for d in procs.values()], token=TOKEN)
         warmup_diffs = wait_warmups(dsns, before) if warmup_expected(scn) else []
@@ -4909,10 +5950,19 @@ def _run_live(name: str, scn: dict, tag: str, binary: Path, root: Path, record: 
             row = {"step": i, "op": op, "diffs": [] if i else list(warmup_diffs)}
             if op["op"] != "init":
                 started = time.monotonic()
-                py = run_op(with_pull_token(op, tokens["python"]), procs["python"].port,
-                            clients["python"], dsns["python"])
-                rs = run_op(with_pull_token(op, tokens["rust"]), procs["rust"].port,
-                            clients["rust"], dsns["rust"])
+                if op["op"] in HOME_OPS:
+                    py, rs = home_op(op, homes["python"]), home_op(op, homes["rust"])
+                elif op["op"] == "restart":
+                    clients = restart_sides(op, scn, procs, homes, envs, stubs, binary)
+                    py = rs = {"isError": False, "value": None}
+                else:
+                    py = run_op(with_pull_token(op, tokens["python"]), procs["python"].port,
+                                clients["python"], dsns["python"])
+                    rs = run_op(with_pull_token(op, tokens["rust"]), procs["rust"].port,
+                                clients["rust"], dsns["rust"])
+                if op.get("settle"):
+                    settle_sides(op["settle"], dsns, stubs, scn)
+                row["diffs"] += expect_diffs(op, dsns)
                 row["wall_s"] = time.monotonic() - started
                 max_wall = max(max_wall, row["wall_s"])
                 for side, r in (("python", py), ("rust", rs)):
@@ -4924,8 +5974,13 @@ def _run_live(name: str, scn: dict, tag: str, binary: Path, root: Path, record: 
                     rs = replace_origin(rs, stubs["rust"].origin)
                 row["python"], row["rust"] = py, rs
             if stubs:
-                sent = {side: stubs[side].drain() for side in ("python", "rust")}
+                sent = {side: drain_side(stubs, scn, side) for side in ("python", "rust")}
                 row["extractor"] = {side: extractor_summary(r) for side, r in sent.items()}
+                if scn.get("shared_stub"):
+                    # Each side sends its own key by design; drain_side
+                    # already read each side's requests by it.
+                    sent = {side: [{**r, "authorization": None} for r in recs]
+                            for side, recs in sent.items()}
                 row["diffs"] += extractor_diffs(sent["python"], sent["rust"])
                 for side in ("python", "rust"):
                     row["diffs"] += extractor_key_diffs(side, scn, sent[side])
@@ -4940,6 +5995,7 @@ def _run_live(name: str, scn: dict, tag: str, binary: Path, root: Path, record: 
                 if op.get("name") == "memory_dream":
                     row["diffs"] += idle_diffs(row["python"], row["rust"],
                                                max_wall + IDLE_SLACK_S)
+                    row["diffs"] += orphan_age_diffs(row["python"], row["rust"])
                     row["python"] = dream_tokens(row["python"], tsm_py)
                     row["rust"] = dream_tokens(row["rust"], tsm_rs)
                 row["python"] = rename_prefixes(row["python"], ep)

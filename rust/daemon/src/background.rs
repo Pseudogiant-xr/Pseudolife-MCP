@@ -41,7 +41,9 @@ pub trait Duties: Send + Sync + 'static {
     fn autosave(&self) -> Duty<'_>;
     fn warmup(&self, stop: watch::Receiver<bool>) -> Duty<'_>;
     fn reap(&self, idle_seconds: f64) -> Duty<'_>;
-    fn sweep(&self) -> Duty<'_>;
+    /// One sweep tick; `stop` fires when shutdown begins, so a long
+    /// lock-free phase (a model call) can give way to it.
+    fn sweep(&self, stop: watch::Receiver<bool>) -> Duty<'_>;
 }
 
 pub struct Background {
@@ -78,10 +80,12 @@ impl Background {
             return false;
         }
         let stop = self.stop.subscribe();
+        let sweep_stop = self.stop.subscribe();
         self.push(tokio::spawn(async move {
             periodic(stop, seconds, "dream sweep", move || {
                 let duties = duties.clone();
-                Box::pin(async move { duties.sweep().await }) as Duty<'static>
+                let stop = sweep_stop.clone();
+                Box::pin(async move { duties.sweep(stop).await }) as Duty<'static>
             })
             .await;
         }));
@@ -232,7 +236,7 @@ mod tests {
         reap: AtomicUsize,
     }
     impl Duties for Fake {
-        fn sweep(&self) -> Duty<'_> {
+        fn sweep(&self, _stop: watch::Receiver<bool>) -> Duty<'_> {
             Box::pin(async { Ok(()) })
         }
         fn autosave(&self) -> Duty<'_> {

@@ -4,6 +4,7 @@ import importlib
 import json
 import re
 import sys
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -503,6 +504,130 @@ def test_dream_answers_normalize_stall_clocks_and_run_cursors(harness):
     assert out["last_dream_extractor"]["at"] == "<clock>"
     assert out["runs"][0] == {"id": 1, "cursor_before": 0.0, "cursor_after": "<ts:3>",
                               "finished_at": "<clock>"}
+
+
+def test_deep_dream_scenarios_register_their_mutants_and_normalizers(harness, tmp_path):
+    names = sorted(n for n in harness.SCENARIOS if n.startswith("dream-deep-"))
+    assert names == ["dream-deep-apply", "dream-deep-apply-cautious", "dream-deep-bound",
+                     "dream-deep-dry", "dream-deep-exclusion", "dream-deep-snapshot-failed"]
+    for n in names:
+        # No background tick or sweep may run a deep dream behind the ops.
+        assert "auto_tick: false" in harness.SCENARIOS[n]["config"]
+        assert "dream:\n    enabled: false" in harness.SCENARIOS[n]["config"]
+    deep_mutants = [m for m in harness.MUTANTS if m.startswith("mcp-dream-deep-")]
+    assert len(deep_mutants) == 9
+    text = (Path(__file__).resolve().parents[1] / "src" / "dream" / "deep.rs").read_text(
+        encoding="utf-8")
+    assert all(f'"{m}"' in text for m in deep_mutants)
+    # Orphan ages compare numerically within 0.1 day, then mask; the
+    # snapshot name compares by shape.
+    def ages(*days):
+        return {"value": {"would_orphan": [{"entity": f"e{i}", "age_days": d}
+                                           for i, d in enumerate(days)]}}
+    py, rs = ages(1077.3, 0.0, 1077.3), ages(1077.4, 0.0, 1077.3)
+    assert harness.orphan_age_diffs(py, rs) == []
+    assert [o["age_days"] for o in py["value"]["would_orphan"]] == ["<age>"] * 3
+    assert py == rs
+    # 100 s apart is under 0.1 day, but a day apart is caught even when the
+    # order of ages agrees.
+    py, rs = ages(1077.3, 2.0), ages(1076.3, 2.0)
+    diffs = harness.orphan_age_diffs(py, rs)
+    assert len(diffs) == 1 and "would_orphan[0].age_days" in diffs[0]
+    py, rs = ages(1077.3, "x"), ages(1077.3, 2.0)
+    assert harness.orphan_age_diffs(py, rs) == []
+    assert py["value"]["would_orphan"][1]["age_days"] == "x"
+    got = harness.dream_tokens({"snapshot": "graph-20261020-121500.json",
+                                "would_orphan": [{"entity": "a", "age_days": 3.1}]}, {})
+    assert got["snapshot"] == "<snapshot>"
+    assert got["would_orphan"][0]["age_days"] == 3.1
+    # The snapshot file op reads the newest file and drops clocks.
+    snaps = tmp_path / "data" / "graph_snapshots"
+    snaps.mkdir(parents=True)
+    (snaps / "graph-20261020-121500.json").write_text('{"entities": []}', encoding="utf-8")
+    (snaps / "graph-20261020-121501.json").write_text(
+        '{"entities": [{"id": 1, "created_at": 5.5}], "edges": []}', encoding="utf-8")
+    v = harness.home_op({"op": "snapshot_file"}, tmp_path)["value"]
+    assert v["files"] == 2 and v["name_shape"]
+    assert v["tables"]["entities"] == {"columns": ["id", "created_at"], "rows": [[1, "<clock>"]]}
+
+
+def test_merge_judge_scenarios_isolate_the_judge_and_register_their_mutants(harness):
+    names = sorted(n for n in harness.SCENARIOS if n.startswith("judge-merge-"))
+    assert names == ["judge-merge-alias", "judge-merge-auto", "judge-merge-auto-reject",
+                     "judge-merge-duplicates", "judge-merge-endpoint-errors",
+                     "judge-merge-first-moved", "judge-merge-moved",
+                     "judge-merge-reconsider", "judge-merge-replay", "judge-merge-same-model",
+                     "judge-merge-served-mismatch", "judge-merge-shadow",
+                     "judge-merge-tiebreak", "judge-merge-tiebreak-same-model",
+                     "judge-merge-tiebreak-skip", "judge-merge-tiebreak-unknown-second",
+                     "judge-merge-unencodable", "judge-merge-unknown-served"]
+    for n in names:
+        scn = harness.SCENARIOS[n]
+        config = scn["config"]
+        # The sweep's judge runs; every other step a tick would run is off.
+        assert "dream:\n    enabled: true" in config
+        for off in ("auto_tick: false", "analyzer_file_duplicates: false",
+                    'link_judge_mode: "off"', 'junk_judge_mode: "off"',
+                    'curation_judge_mode: "off"', 'candidate_judge_mode: "off"',
+                    "min_batch: 1000000", "idle_seconds: 1000000000", "infer_outcomes: false"):
+            assert off in config, (n, off)
+        assert scn["shared_stub"] and n in harness.EXTERNAL_WRITES
+        # The proposals land out of band and every such op waits for both
+        # judges to settle; no proposal is seeded where a judge could race
+        # the first comparison.
+        assert all("entity_proposals" not in op.get("sql", "") for op in scn["seed"])
+        assert all(op.get("settle") for op in scn["ops"] if op["op"] in ("sql", "restart"))
+        # Every scenario asserts the path it is written for on both banks.
+        assert any(op.get("expect") for op in scn["ops"]), n
+        for op in scn["ops"]:
+            if op["op"] == "restart":
+                for off in ("auto_tick: false", 'link_judge_mode: "off"'):
+                    assert off in op["config"], (n, off)
+    judge_mutants = [m for m in harness.MUTANTS if m.startswith("mcp-dream-judge-")]
+    assert len(judge_mutants) == 15
+    src = Path(__file__).resolve().parents[1] / "src" / "dream"
+    text = "".join((src / f).read_text(encoding="utf-8")
+                   for f in ("judge.rs", "review_judgments.rs"))
+    assert all(f'"{m}"' in text for m in judge_mutants)
+    # A decision record's clocks, and its proposal snapshot's verdict
+    # clocks, keep only null-or-not; the rest compares exactly.
+    rec = {"recorded_at": 1.5, "ended_at": None, "decided_at": 2.5, "dismissed_at": 3.0,
+           "fingerprint": "ab", "proposal": {"judged_at": 4.0, "judged3_at": None, "id": 7}}
+    assert harness.decision_record_clocks(rec) == {
+        "recorded_at": "<clock>", "ended_at": None, "decided_at": "<clock>",
+        "dismissed_at": "<clock>", "fingerprint": "ab",
+        "proposal": {"judged_at": "<clock>", "judged3_at": None, "id": 7}}
+    for col in ("judged_at", "judged2_at", "judged3_at"):
+        assert ("entity_proposals", col) in harness.CLOCK
+    # A listed decision's recorded_at is a clock only in memory_graph_review's
+    # automatic_decisions listing; elsewhere it compares exactly.
+    now = time.time()
+    a = {"recorded_at": now, "automatic_decisions": [{"recorded_at": now, "state": "applied"}]}
+    b = {"recorded_at": now + 1, "automatic_decisions": [{"recorded_at": now + 1,
+                                                          "state": "applied"}]}
+    harness.normalize_records(a, b)
+    assert a["automatic_decisions"] == b["automatic_decisions"]
+    assert a["recorded_at"] != b["recorded_at"]
+
+
+def test_expect_reports_each_bank_that_misses_its_path(harness, monkeypatch):
+    import types
+    answers = {"py": [(True,), (False,)], "rs": [(True,), (None,)]}
+
+    class Conn:
+        def __init__(self, dsn):
+            self.dsn = dsn
+        def __enter__(self):
+            return self
+        def __exit__(self, *exc):
+            return False
+        def execute(self, query):
+            return types.SimpleNamespace(fetchone=lambda: answers[self.dsn].pop(0))
+
+    fake = types.SimpleNamespace(connect=lambda dsn, autocommit=True: Conn(dsn))
+    monkeypatch.setitem(sys.modules, "psycopg", fake)
+    out = harness.expect_diffs({"expect": ["q1", "q2"]}, {"python": "py", "rust": "rs"})
+    assert out == ["expect python: q2", "expect rust: q2"]
 
 
 def test_warmups_are_awaited_per_side_until_each_probe_lands(harness, monkeypatch):

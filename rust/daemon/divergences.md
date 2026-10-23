@@ -51,7 +51,7 @@ The integration batch retains W2-G's refusal stubs for every tool except
 `memory_graph_relate`, `memory_graph_unrelate`, `memory_alias`,
 `memory_relation_define`, `memory_graph`, `memory_recall`,
 `memory_graph_review`, `memory_consolidate`,
-`memory_dream` (all but `deep` and `rollback`, below), `memory_agents` and
+`memory_dream` (all but `rollback`, below), `memory_agents` and
 `memory_message`. The two board tools
 inherit W2F-CLOCK-RETRY and W2F-SHARED-HLC below (both affect `send`, on
 REST and MCP alike).
@@ -394,7 +394,7 @@ of its own.
 | A merge-group tie between keys of different types (merge rows with a NULL target) | `TypeError: '<' not supported between instances of …` | `invalid_argument` with Rust's own wording | merge rows always carry a target |
 | A corrupt automatic-decision index (`next_seq` not an integer, `cursors`/`active` not mappings) | `int()` / `dict()` raise | read leniently in `list` | corrupt persisted data only; the judges write the index |
 | A NaN in a REAL proposal or decision column | serialized as `NaN` | `null` | NaN is not a stored score |
-| The judges (merge two- and three-vote, link, junk, curation, candidates), their freshness and the sweep tick that runs them | served by the background sweep | not run | task O2, with the dream (task P), behind a stub extractor |
+| The link, junk, curation and candidate judges, their freshness, and the sweep steps around the merge judge (the analyzer and deep ticks, the stall tick, the automatic dream) | served by the background sweep | not run (the merge judge is served: see "The merge judge and its tiebreak" below) | tasks P3b (the judges) and P4 (the ticks) |
 | Wrong-type `memory.deep_dream.judges_enabled` / `analyzer_file_duplicates` | taken by truthiness | refused at config load | the existing config-type substitution |
 
 ### memory_dream: status, pull, commit, runs and the consolidation pass (2026-10-20)
@@ -402,7 +402,7 @@ of its own.
 | Item | Python | Rust | Owner / why |
 |---|---|---|---|
 | `run` while graph insight (`memory.graph_insight.enabled`) is on, which is the default | refreshes the graph-insight digest | refused (`not_implemented`, naming the stage) | task P2b (a maintainer decision on a structurally compared divergence); with it off the pass and the other stages are served |
-| `deep` and `rollback` | served | refused | tasks P2a (deep dream) and the rollback increment |
+| `rollback` | served | refused | the rollback increment (`deep` is served since 2026-10-20) |
 | When dream tracking initializes (rows with no dream state classified) | at hydration | at the first `memory_dream` call | a Rust boot must not change the bank (the W1 boot comparison); every answer is the same once the call runs |
 | A pending entry whose row is missing at a write failure | re-flushed (`cms.reflush_entries`) | detected, not re-inserted | the store slice's persistence follow-up; the answer (a write hold) is the same |
 | The stall record's board notice and the overdue rule | posted by the sweep | logged; the overdue rule is never armed | the sweep (task P4) |
@@ -433,6 +433,38 @@ of its own.
 | A stage cursor whose `retry` is a list of pairs with non-string keys, or whose lists hold non-strings where they are sorted | coerced by `dict()` / compared by `sorted()` (or raises) | refused (`internal_error`) | corrupt persisted data only; the stages write these cursors |
 | A lesson audit snapshot with a non-string `task`/`aspect`/`lesson`/`about`/`outcome`/`polarity`/`origin` or provenance item | passed to `lesson_write` as is | refused (`internal_error`) before that slot is written | corrupt audit rows only; as for world snapshots |
 | A `RecursionError` message from a too-deep reply | `while decoding a JSON object/array` at the interpreter's depth | the same text at a fixed depth of 900 | as for the consolidation pass |
+
+### memory_dream deep: the deep dream (2026-10-20)
+
+| Item | Python | Rust | Owner / why |
+|---|---|---|---|
+| An apply's lock windows (read snapshot, snapshot file, apply writes, stamp and re-read) | the service lock is released between them and for the computation; a concurrent edit there is tolerated (supersede, merge and rescore are no-ops on a changed row) | the writer lock is held from the read snapshot to the end of the apply, the computation (steps A and B, snippets, merge enrichment, curation listings, and the closing re-enrichment) on a blocking thread meanwhile; a dry run matches Python (the lock for the read snapshot, released for the computation, taken again for the orphan census) | no write can interleave with an apply; with no concurrent writer the two are identical |
+| float32 dot products (`np.dot`, `np.linalg.norm`) behind context vectors, candidate and curation cosines, off the build this port mirrors | OpenBLAS `sdot` in the order of the kernel numpy's OpenBLAS selects | x86_64: the scipy-openblas 0.3.31 DYNAMIC_ARCH selection (`dynamic.c`'s core table, feature tests and fallback, its five-kernel `DYNAMIC_LIST` aliasing) and each kernel's order (Prescott generic, Nehalem, Sandybridge, Haswell, SkylakeX), bit-exact against numpy 2.4 with each core type forced; other architectures use the SkylakeX order | the cosines can differ in the last float32 bit, so a 4th-decimal rounding boundary, `top_k` or a floor can fall differently, when: the host is not x86_64; numpy links another BLAS or an OpenBLAS whose `DYNAMIC_LIST`, kernels or core table differ (a numpy built from source, conda's MKL/OpenBLAS); or the Python process runs with `OPENBLAS_CORETYPE` set, which this process does not read |
+| `top_k_candidates` negative | the early-exit scan stops after the first survivor's rounded-similarity tie band, then `[:top_k]` drops the last `-top_k` of those | the last `-top_k` of every surviving pair dropped | no shipped config sets one (`curation_top_k` negative slices alike in both) |
+| Two applies within one UTC second | the second snapshot overwrites the first (same name) | the same | the harness compares the name by shape and sleeps between applies; within one daemon the behaviour is identical |
+| A snapshot column of a type other than integer, float, boolean, text or JSON | `str(value)` (`default=str`) | PostgreSQL's text form | the five graph tables have no such column |
+| `re.IGNORECASE` letter classes at the variant-token boundaries (`(?<![A-Za-z0-9])`) | `ı` and `İ` count as letters | they do not (the Kelvin sign and long s match in both) | variant tokens in names with those letters only |
+| `\w` in the identifier-keyed entity pattern | `str.isalnum` or `_` | Unicode letters, numbers or `_` | rare characters only, as in `junk_names.rs` |
+| A deep call on a bank with storage unavailable | `_GRAPH_UNAVAILABLE` | not reachable: the Rust daemon always has storage | |
+| A missing embedding on an entry a context vector stacks, or `min_entity_mentions` at 0 with no mention | numpy's `ValueError` text | an internal error with Rust's wording | `entries.embedding` is `NOT NULL`; the default is 2 |
+| A non-finite float (REAL or double) in the pre-apply graph snapshot file | `NaN`, `Infinity`, `-Infinity` (`json.dumps` defaults) | `null` | the five tables' float columns hold confidences, scores and timestamps; matching Python needs a non-standard JSON writer |
+| Wrong-type `memory.deep_dream` deep knobs (`top_k_candidates: 2.5`, `auto_apply_safe: "yes"`) | taken as given (slicing or truthiness) | refused at config load | the existing config-type substitution |
+
+### The merge judge and its tiebreak (2026-10-20)
+
+| Item | Python | Rust | Owner / why |
+|---|---|---|---|
+| The sweep steps around the merge judge: the analyzer filing tick (and its analyzer-pair reconciliation) and the deep tick before it; the link, junk, curation and candidate judges after it; `dream_status`, the stall tick and the automatic dream | run on every tick while dreaming is enabled | not run (the judge runs after the reapers) | tasks P3b (the review-queue judges) and P4 (the ticks and the automatic dream); the `judge-merge-*` scenarios switch each off on the Python side |
+| `/api/graph/rejudge` (`review_rejudge`, `review_judgments.requeue`) | served | not served: the daemon serves no `/api/graph/*` route | the web API slice; `requeue` also reads the curation and candidate queues (task P3b) |
+| `deep_dream_judge`'s `extractor`, `limit`, `second_extractor` and `third_extractor` arguments | test hooks | absent: the sweep passes none | no production caller passes them |
+| A judge memo, decision index or response identity meta value that is not an object, or a decision record missing a key | `.items()` / `.get()` / `int()` raise, and the tick answers `error` | read as empty, or the key as absent | corrupt persisted data only; the judge writes these values |
+| The deep_dream values the fingerprints sign | what PyYAML 1.1 made of the YAML (`yes`, `on` and `1e3` are a boolean and a string) | what yaml-rust2 (YAML 1.2) made of it | only such scalars differ: a fingerprint then differs and the verdicts are asked again once; the typed knobs refuse a wrong type at load as before |
+| A tick's `error` text for a database failure | psycopg's message | tokio-postgres' message | the answer is only logged |
+| A merge decision audit for an entity whose display is NULL | `entity_display` / `into_display` NULL (`disp.get(id, "?")` finds the NULL) | `?` | as the review actions write it; a display is NULL only for hand-written rows |
+| Transactions inside one verdict | nested `transaction()` savepoints around each storage call | one transaction per verdict, with one savepoint around the relate link | no data differs: a nested block only rolls back on an exception, which ends the tick in both |
+| The sweep tick's log line (`deep-dream judge: …`) | the answer as a Python dict repr | the answer as JSON | log-only; no caller parses it |
+| Shutdown while a judge tick is running | the sweep's daemon thread dies with the process, wherever it is (an open transaction rolls back with the connection) | the tick stops at the next lock-free phase: an endpoint construction, alias probe, model call or signing in flight is abandoned, no new phase starts, and a verdict transaction already begun runs to its end; the tick answers `skipped: "stopping"` | so `Background::shutdown` does not wait out a model's timeout (240 s by default); no committed state differs from a Python process killed between the same two transactions |
+| A reply's served model holding a lone surrogate | PostgreSQL refuses the response identity's JSON (`invalid input syntax for type json`, with its DETAIL and CONTEXT) | the same statement fails on the same server, its text laid out as psycopg's (message, DETAIL, CONTEXT) without psycopg's closing parameter line | log-only, as the tick's `error` text for a database failure (above) |
 
 ## Coordination board completion (W2-F)
 
