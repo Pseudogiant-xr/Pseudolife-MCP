@@ -2,12 +2,17 @@
 
 This tests whether a client would actually reach the Rust shim and daemon
 after an install, and whether rolling back leaves both the executable choice
-and the bank usable, on disposable state only. The launcher selected every
-runtime correctly through a real client registration, and a bank written by
-Rust was fully readable by Python after a rollback. Two things block a real
-activation: the Rust daemon reports version `0.0.0`, which every shim refuses,
-and the Python daemon stamps a bank from a newer build back down to its own
-version without a warning.
+and the bank usable, on disposable state only. 23 of 24 steps held:
+
+- The launcher selected every runtime correctly through a real client
+  registration.
+- A call through that registration reached the Rust daemon.
+- A bank written by Rust was fully readable by Python after a rollback.
+
+Two things still need fixing before a real activation. The Python daemon
+stamps a bank from a newer build back down to its own version without a
+warning. And the Rust daemon reports version `0.0.0`, so the shim tells the
+user to install a release that does not exist.
 
 - Driver: `rust/daemon/harness/rehearse_activation.py` (this PR), run on
   demand from a working tree on master `bd8217a1`:
@@ -25,8 +30,11 @@ version without a warning.
   end) and one disposable home.
 - Embeddings: both daemons use the same 1,024-dimension ONNX fixture (run.py's
   CI fixture), so this proves durable-state compatibility, not model parity.
-- Result: `fail`, 23 of 24 steps. The one failure is the version refusal
-  below, recorded as a non-fatal step so the rollback steps still ran.
+- Result: `fail`, 23 of 24 steps. The one failing step is an expectation
+  today's code does not meet: the Python daemon leaves a newer build's
+  schema stamp alone (below). Every daemon stop exited 0. The evidence
+  records the driver's SHA-256 and the uncommitted files of the tree it ran
+  from (this PR's files, before they were committed).
 
 ## What held
 
@@ -46,9 +54,15 @@ version without a warning.
    - after 000004 was removed, 000002 again.
 
    Which binary answered came from the shim's own `version` output (its
-   `runtime` line) and the console's SHA-256. Nothing ships a Rust shim to
+   `runtime` line), and the SHA-256 of that runtime's console is recorded:
+   the Rust shim's at 000002, a Python console at 000001 and 000004. Nothing ships a Rust shim to
    users today, so this proves the mechanism, not a shipped path.
-2. **Durable state across Python -> Rust -> restart -> Python on one bank.**
+2. **The registered client path reaches the Rust daemon.** An MCP session
+   over stdio through the registered command (launcher -> Rust shim -> Rust
+   daemon) read a fact the Rust daemon had written. It initialized, waited
+   for the answer, made the call and waited for its reply before closing
+   stdin, as a client does; the Rust shim treats EOF as the session ending.
+3. **Durable state across Python -> Rust -> restart -> Python on one bank.**
    - Rust read the fact and found the entry Python wrote.
    - Rust wrote an entry, superseded that fact and set a new one, and read
      all three again after a restart.
@@ -56,35 +70,42 @@ version without a warning.
      the Rust-written entry, and still found its own entry.
    - `meta.schema_version` stayed 56 through all four starts, and
      `writer_lease_epoch` counted each open (1 to 4).
-3. **The Rust daemon refuses a newer bank.** With the stamp set to 57 (a JSON
-   number, as `ensure_schema` writes it), Rust stayed up, not ready, logging
-   "Refusing to start: bank schema version 57 is newer than this build's
-   schema version 56."
+4. **The Rust daemon refuses a newer bank and leaves it as it was.** With the
+   stamp set to 57 (a JSON number, as `ensure_schema` writes it), Rust stayed
+   up, not ready, logging "Refusing to start: bank schema version 57 is newer
+   than this build's schema version 56", and the stamp still read 57 after it
+   stopped.
 
-## What did not
+## What still needs fixing
 
-1. **No registered client reaches the Rust daemon.** The call through the
-   registered client path (launcher -> Rust shim -> Rust daemon) was refused
-   by the shim's version-skew check. The daemon's `/health` reports
-   `version: 0.0.0`, which is `rust/daemon/Cargo.toml`'s crate version
-   (`health.rs` uses `CARGO_PKG_VERSION`), while the shims are 0.19.0. The
-   refusal tells the user to run `update --clients-only --tag 0.0.0`. Until
-   the daemon's version follows the release, no installed client can use a
-   Rust daemon.
-2. **The Python daemon stamps a newer bank down.** On the same 57-stamped
+1. **The Python daemon stamps a newer bank down.** On the same 57-stamped
    bank, the Python daemon started normally and rewrote `schema_version` to 56
    (`ensure_schema` upserts its own version and refuses no newer bank). A
    rollback to any older Python release, from Rust or from a newer Python,
-   crosses this silently.
+   crosses this silently. This is the rehearsal's failing step: the
+   expectation stays in the driver, so the rehearsal passes once the Python
+   daemon refuses a newer bank or leaves its stamp alone.
+2. **The version notice points at a release that does not exist.** The Rust
+   daemon's `/health` reports `version: 0.0.0`, which is
+   `rust/daemon/Cargo.toml`'s crate version (`health.rs` uses
+   `CARGO_PKG_VERSION`), while the shims are 0.19.0. The call still succeeds,
+   but the shim prints a mismatch notice telling the user to run `update
+   --clients-only --tag 0.0.0`. The daemon's version should follow the
+   release.
 3. **The only opt-in Rust stack keeps no state.** `ops/docker-compose.rust.yml`
    puts the bank and `/data` on tmpfs, so it survives no restart and cannot
    carry an activation or a rollback. That is why this rehearsal runs the
    binaries directly instead.
 
+An earlier run of this driver misread the second item as a refusal. Its
+client closed stdin straight after sending the call; the Codex review caught
+it, and this evidence is from the corrected driver.
+
 ## Not covered
 
 - Linux and macOS: the driver has POSIX paths (the `/bin/sh` launcher,
-  SIGTERM) but ran only on Windows here.
+  SIGTERM, the ONNX Runtime `.so` or `.dylib`) but ran only on Windows here,
+  so they are unproven.
 - The daemon's own install path (a container image or a release update):
   none ships the Rust daemon, so the daemon was started from the CI binary.
 - Claude Code, Codex and Gemini registrations; hooks (the plugin's hooks call

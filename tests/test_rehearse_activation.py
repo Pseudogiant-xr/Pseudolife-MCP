@@ -17,13 +17,20 @@ HARNESS = ROOT / "rust" / "daemon" / "harness"
 
 
 def _load():
-    if str(HARNESS) not in sys.path:
+    # The harness modules import each other by name; the path entry is only
+    # needed while they load, and is removed again so no later test sees it.
+    added = str(HARNESS) not in sys.path
+    if added:
         sys.path.insert(0, str(HARNESS))
-    spec = importlib.util.spec_from_file_location("rehearse_activation_under_test",
-                                                  HARNESS / "rehearse_activation.py")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    try:
+        spec = importlib.util.spec_from_file_location("rehearse_activation_under_test",
+                                                      HARNESS / "rehearse_activation.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+    finally:
+        if added:
+            sys.path.remove(str(HARNESS))
 
 
 rehearse = _load()
@@ -77,6 +84,17 @@ def test_evidence_names_no_machine_path():
     assert str(home) not in text and str(home).replace("\\", "/") not in text
     assert str(ROOT) not in text and home.name not in text
     assert "<scratch>" in text and "<repo>" in text and "<home>" in text
+
+
+def test_text_is_scrubbed_before_it_is_cut(monkeypatch):
+    # A tail that starts inside a home path must not keep the account name.
+    home = Path.home()
+    monkeypatch.setattr(rehearse, "SCRATCH", home / "scratch-root")
+    text = f"failed at {home / 'scratch-root' / 'bin' / 'x.exe'} and " + "y" * 30
+    for n in range(5, len(text)):
+        assert home.name.lower() not in rehearse.tail(text, n).lower()
+    shouted = str(home).upper() + "/data"
+    assert home.name.lower() not in str(rehearse.scrub(shouted, scratch=home / "s")).lower()
 
 
 def test_a_failed_step_stops_the_run_unless_it_is_a_recorded_blocker():

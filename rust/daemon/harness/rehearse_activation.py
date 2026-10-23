@@ -19,9 +19,9 @@ ONNX fixture for both daemons (run.py's CI fixture). The Python daemon writes;
 the Rust daemon reads those rows, writes its own and restarts; a call goes
 through the registered client path (launcher -> Rust shim -> Rust daemon);
 the Python daemon starts again and reads what Rust wrote. ``meta.
-schema_version`` is read before and after every start. Then a newer stamp
-is written by hand to observe what each daemon does with a bank from a
-newer build.
+schema_version`` is read after every start. Then a newer stamp is written by
+hand: the Rust daemon must refuse it, and the Python daemon is expected to
+leave it alone (today it stamps it down: a recorded, failing expectation).
 
     python rust/daemon/harness/rehearse_activation.py \
         --rust-shim <pseudolife-stdio[.exe]> --rust-daemon <pseudolife-daemon-static[.exe]> \
@@ -41,6 +41,7 @@ import hashlib
 import json
 import os
 import platform
+import re
 import shutil
 import signal
 import subprocess
@@ -87,10 +88,13 @@ def disposable_dsn(dsn: str, owned: list[str]) -> str:
     return dsn
 
 
+SCRATCH: Path | None = None   # set by main(); evidence text is scrubbed against it
+
+
 def _spellings(path: Path) -> list[str]:
-    """A path as Windows, forward-slash and Git Bash spell it."""
+    """A path as Windows, forward-slash, Git Bash and JSON-escaped text spell it."""
     text = str(path)
-    out = [text, text.replace("\\", "/")]
+    out = [text, text.replace("\\", "/"), text.replace("\\", "\\\\")]
     if len(text) > 2 and text[1] == ":":
         out.append("/" + text[0].lower() + text[2:].replace("\\", "/"))
     return out
@@ -104,12 +108,12 @@ def scrub(value, *, scratch: Path):
     pairs += [(s, "<repo>") for s in _spellings(REPO)]
     pairs += [(s, "<home>") for s in _spellings(Path.home())]
     pairs.sort(key=lambda p: -len(p[0]))
-    user = Path.home().name
+    user = re.compile(re.escape(Path.home().name), re.IGNORECASE)
 
     def text(s: str) -> str:
         for old, new in pairs:
-            s = s.replace(old, new)
-        return s.replace(user, "<user>") if len(user) >= 3 else s
+            s = re.sub(re.escape(old), new.replace("\\", "\\\\"), s, flags=re.IGNORECASE)
+        return user.sub("<user>", s) if len(Path.home().name) >= 3 else s
     if isinstance(value, dict):
         return {k: scrub(v, scratch=scratch) for k, v in value.items()}
     if isinstance(value, (list, tuple)):
@@ -117,6 +121,12 @@ def scrub(value, *, scratch: Path):
     if isinstance(value, Path):
         return text(str(value))
     return text(value) if isinstance(value, str) else value
+
+
+def tail(text: str, n: int) -> str:
+    """The last `n` characters of `text`, scrubbed first, so a cut never
+    leaves part of a machine path the scrub can no longer recognize."""
+    return scrub(text or "", scratch=SCRATCH or Path.home() / ".nonexistent")[-n:]
 
 
 def selected_runtime(version_output: str) -> str | None:
@@ -140,7 +150,8 @@ class Log:
         self.steps.append({"step": name, "ok": bool(ok), **observed})
         print(f"[{'ok' if ok else 'FAIL'}] {name}", flush=True)
         if not ok and fatal:
-            raise Failed(f"{name}: {json.dumps(observed, default=str)[:600]}")
+            raise Failed(f"{name}: " + scrub(json.dumps(observed, default=str),
+                                             scratch=SCRATCH or Path.home())[:600])
 
 
 # ---------------------------------------------------------------- launcher
@@ -160,7 +171,7 @@ def _python_runtime(path: Path, log: Log, commit: str) -> None:
     proc = subprocess.run([str(py), "-m", "pip", "install", "-q", "--no-deps", str(REPO)],
                           capture_output=True, text=True)
     log.step("python runtime installed", proc.returncode == 0 and rt._console(path, WINDOWS).is_file(),
-             runtime=str(path), pip_tail=proc.stderr[-400:])
+             runtime=str(path), pip_tail=tail(proc.stderr, 400))
     _marker(path, "rehearsal: this checkout's Python shim", commit)
 
 
@@ -172,9 +183,28 @@ def _rust_runtime(path: Path, shim: Path, commit: str, *, complete: bool = True)
         _marker(path, "rehearsal: Rust shim candidate", commit)
 
 
+def _stop_tree(proc: subprocess.Popen) -> None:
+    """Stop our own child and its children, by its PID (the launcher runs the
+    selected console as a child)."""
+    if proc.poll() is not None:
+        return
+    if WINDOWS:
+        subprocess.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"], capture_output=True)
+    else:
+        proc.kill()
+    proc.wait(timeout=10)
+
+
 def _run_registered(entry: dict, args: list[str], env: dict) -> subprocess.CompletedProcess:
-    return subprocess.run([entry["command"], *args], capture_output=True, text=True,
-                          env={**env, **(entry.get("env") or {})}, timeout=120)
+    proc = subprocess.Popen([entry["command"], *args], stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE, text=True,
+                            env={**env, **(entry.get("env") or {})})
+    try:
+        out, err = proc.communicate(timeout=120)
+    except subprocess.TimeoutExpired:
+        _stop_tree(proc)
+        out, err = proc.communicate()
+    return subprocess.CompletedProcess(proc.args, proc.returncode, out, err)
 
 
 def launcher_leg(root: Path, shim: Path, shim_commit: str, log: Log, env: dict,
@@ -206,14 +236,17 @@ def launcher_leg(root: Path, shim: Path, shim_commit: str, log: Log, env: dict,
     foreign = servers.get("someone-else")
     log.step("client registered with the launcher as its command",
              proc.returncode == 0 and Path(entry.get("command", "")) == launcher and foreign is not None,
-             exit=proc.returncode, entry=entry, out=(proc.stdout + proc.stderr)[-400:])
+             exit=proc.returncode, entry=entry, out=tail(proc.stdout + proc.stderr, 400))
 
     def resolve(label: str, want: Path) -> dict:
         out = _run_registered(entry, ["version"], env)
         got = selected_runtime(out.stdout)
+        console = rt._console(Path(got), WINDOWS) if got else None
         observed = {"want": str(want), "got": got, "exit": out.returncode,
-                    "stdout": out.stdout.strip()[-300:],
-                    "console_sha256": sha256(rt._console(want, WINDOWS))}
+                    "stdout": tail(out.stdout.strip(), 300),
+                    # The console of the runtime that answered, not of the one wanted.
+                    "answered_console_sha256": sha256(console) if console and console.is_file()
+                    else None}
         log.step(label, out.returncode == 0 and got is not None
                  and Path(got).resolve() == want.resolve(), **observed)
         return observed
@@ -236,41 +269,75 @@ def launcher_leg(root: Path, shim: Path, shim_commit: str, log: Log, env: dict,
             "rolled_back": rolled_back, "reverted": reverted, "layout": layout, "env": env}
 
 
-def stdio_call(entry: dict, env: dict, tool: str, arguments: dict) -> dict:
+def stdio_call(entry: dict, env: dict, tool: str, arguments: dict, timeout: float = 120) -> dict:
     """One tool call through the registered command, over MCP stdio, the way
-    a client makes it."""
+    a client makes it: initialize and wait for the answer, then the call and
+    wait for its answer, and only then close stdin (the shim treats EOF as
+    the session ending and cancels what is in flight)."""
+    import queue
+    import threading
     proc = subprocess.Popen([entry["command"]], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                             stderr=subprocess.PIPE, text=True, encoding="utf-8",
                             env={**env, **(entry.get("env") or {})})
-    messages = [
-        {"jsonrpc": "2.0", "id": 1, "method": "initialize",
-         "params": {"protocolVersion": "2025-03-26", "capabilities": {},
-                    "clientInfo": {"name": "rehearsal", "version": "1"}}},
-        {"jsonrpc": "2.0", "method": "notifications/initialized"},
-        {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
-         "params": {"name": tool, "arguments": arguments}},
-    ]
+    lines: queue.Queue = queue.Queue()
+    err: list[str] = []
+    threading.Thread(target=lambda: [lines.put(line) for line in proc.stdout], daemon=True).start()
+    threading.Thread(target=lambda: err.extend(proc.stderr), daemon=True).start()
+    deadline = time.monotonic() + timeout
+
+    def send(message: dict) -> None:
+        proc.stdin.write(json.dumps(message) + "\n")
+        proc.stdin.flush()
+
+    def answer(request_id: int) -> dict | None:
+        while time.monotonic() < deadline:
+            try:
+                line = lines.get(timeout=max(0.1, deadline - time.monotonic()))
+            except queue.Empty:
+                return None
+            try:
+                message = json.loads(line)
+            except ValueError:
+                continue
+            if message.get("id") == request_id:
+                return message
+        return None
+
+    result = {"isError": True, "value": None}
     try:
-        out, err = proc.communicate("".join(json.dumps(m) + "\n" for m in messages), timeout=120)
-    except subprocess.TimeoutExpired:
-        proc.kill()
-        out, err = proc.communicate()
-    for line in out.splitlines():
-        try:
-            msg = json.loads(line)
-        except ValueError:
-            continue
-        if msg.get("id") == 2:
-            result = msg.get("result") or {}
-            value = result.get("structuredContent")
-            if value is None and result.get("content"):
+        send({"jsonrpc": "2.0", "id": 1, "method": "initialize",
+              "params": {"protocolVersion": "2025-03-26", "capabilities": {},
+                         "clientInfo": {"name": "rehearsal", "version": "1"}}})
+        init = answer(1)
+        result["initialize"] = "answered" if init and "result" in init else (init or "no answer")
+        if init and "result" in init:
+            send({"jsonrpc": "2.0", "method": "notifications/initialized"})
+            send({"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                  "params": {"name": tool, "arguments": arguments}})
+            reply = answer(2) or {}
+            body = reply.get("result") or {}
+            value = body.get("structuredContent")
+            if value is None and body.get("content"):
                 try:
-                    value = json.loads(result["content"][0]["text"])
-                except (ValueError, KeyError, IndexError):
-                    value = result["content"][0].get("text")
-            return {"isError": bool(result.get("isError") or "error" in msg), "value": value,
-                    "stderr": err[-400:]}
-    return {"isError": True, "value": None, "stderr": err[-400:], "stdout": out[-400:]}
+                    value = json.loads(body["content"][0]["text"])
+                except (ValueError, KeyError, IndexError, TypeError):
+                    value = body["content"][0].get("text")
+            result.update(isError=bool(not reply or body.get("isError") or "error" in reply),
+                          value=value, error=reply.get("error"))
+    except (BrokenPipeError, OSError) as exc:
+        result["transport_error"] = f"{type(exc).__name__}: {exc}"
+    finally:
+        try:
+            proc.stdin.close()
+        except OSError:
+            pass
+        try:
+            proc.wait(timeout=30)
+        except subprocess.TimeoutExpired:
+            _stop_tree(proc)
+    result["exit"] = proc.returncode
+    result["stderr"] = tail("".join(err), 400)
+    return result
 
 
 # -------------------------------------------------------------------- bank
@@ -295,7 +362,8 @@ def _fixture_env(home: Path) -> dict:
                            "cpu_dtype": "fp32", "query_prefix": "", "max_seq_length": 32}
     path.write_text(yaml.safe_dump(config), encoding="utf-8")
     capi = Path(onnxruntime.__file__).parent / "capi"
-    library = capi / "onnxruntime.dll" if WINDOWS else next(capi.glob("libonnxruntime.so.*"))
+    library = capi / "onnxruntime.dll" if WINDOWS else next(
+        iter(sorted(capi.glob("libonnxruntime.so.*")) + sorted(capi.glob("libonnxruntime*.dylib"))))
     return {"ORT_DYLIB_PATH": str(library), "PSEUDOLIFE_DAEMON_ONNX_DIR": str(model),
             "PSEUDOLIFE_DAEMON_ORT_THREADS": "1", "OMP_NUM_THREADS": "1",
             "TOKENIZERS_PARALLELISM": "false"}
@@ -331,17 +399,24 @@ class Bank:
         if refused:
             # A refusing daemon keeps answering /health without becoming ready.
             d.start(120, stages=())
-            return d
-        d.start(300)
-        h.w1a.wait_settled([self.port], token=h.TOKEN)
+        else:
+            d.start(300)
+        # The port was chosen before the launcher leg; only our own process,
+        # announcing it, may answer on it.
+        listening = f"listening on 127.0.0.1:{self.port}"
+        if d.proc.poll() is not None or listening not in d.log.read_text(errors="replace"):
+            raise Failed(f"the {kind} daemon this run started is not the one on port "
+                         f"{self.port}; another process may hold it")
+        if not refused:
+            h.w1a.wait_settled([self.port], token=h.TOKEN)
         return d
 
     def stop(self) -> int | None:
         d, self.running = self.running, None
         if d is None or d.proc is None:
             return None
-        code = d.proc.returncode
-        if d.proc.poll() is None:
+        code = d.proc.poll()
+        if code is None:
             d.proc.send_signal(STOP)
             try:
                 code = d.proc.wait(timeout=120)
@@ -386,7 +461,8 @@ def bank_leg(root: Path, rust_daemon: Path, log: Log, owned: list[str], client, 
                                           "value": "python"})
         log.step("Python daemon writes an entry and a fact", not stored["isError"] and not fset["isError"],
                  store=_value(stored), fact_set=_value(fset))
-        log.step("Python stop is clean", bank.stop() is not None)
+        code = bank.stop()
+        log.step("Python stop is clean", code == 0, exit=code)
 
         bank.start("rust")
         seen["metas"].append(("rust start 1", _meta(bank.dsn)))
@@ -401,7 +477,8 @@ def bank_leg(root: Path, rust_daemon: Path, log: Log, owned: list[str], client, 
         log.step("Rust daemon writes an entry, supersedes the fact and sets a new one",
                  not any(r["isError"] for r in (stored, fset, fnew)),
                  store=_value(stored), fact_set=_value(fset), new=_value(fnew))
-        log.step("Rust stop is clean", bank.stop() is not None)
+        code = bank.stop()
+        log.step("Rust stop is clean", code == 0, exit=code)
 
         bank.start("rust")
         seen["metas"].append(("rust start 2", _meta(bank.dsn)))
@@ -410,7 +487,10 @@ def bank_leg(root: Path, rust_daemon: Path, log: Log, owned: list[str], client, 
                  _fact(m, "rehearsal", "written by") == "rust"
                  and _fact(m, "rehearsal rust", "slot") == "rust only"
                  and _found(m, "memory cache", rust_text))
-        if client is not None:
+        if client is None:
+            log.steps.append({"step": "client path (launcher -> Rust shim -> Rust daemon)",
+                              "ok": True, "skipped": "--leg bank registers no client"})
+        else:
             via = stdio_call(client["entry"], client["env"], "memory_fact_get",
                              {"entity": "rehearsal rust", "attribute": "slot"})
             record = (via.get("value") or {}).get("record") if isinstance(via.get("value"), dict) else None
@@ -419,7 +499,8 @@ def bank_leg(root: Path, rust_daemon: Path, log: Log, owned: list[str], client, 
                      not via["isError"] and isinstance(record, dict) and record.get("value") == "rust only",
                      fatal=False, result=via,
                      daemon_version=h.w1a.call(bank.port, "GET", "/health").get("json", {}).get("version"))
-        log.step("Rust stop is clean (2)", bank.stop() is not None)
+        code = bank.stop()
+        log.step("Rust stop is clean (2)", code == 0, exit=code)
 
         bank.start("python")
         seen["metas"].append(("python start 2 (rollback)", _meta(bank.dsn)))
@@ -432,7 +513,8 @@ def bank_leg(root: Path, rust_daemon: Path, log: Log, owned: list[str], client, 
                  _found(m, "memory cache", rust_text))
         log.step("after rollback the Python daemon still finds its own entry",
                  _found(m, "memory cursor", py_text))
-        log.step("Python stop is clean (2)", bank.stop() is not None)
+        code = bank.stop()
+        log.step("Python stop is clean (2)", code == 0, exit=code)
 
         # A bank stamped by a newer build: what each side does with it.
         import psycopg
@@ -442,27 +524,29 @@ def bank_leg(root: Path, rust_daemon: Path, log: Log, owned: list[str], client, 
             conn.execute("UPDATE meta SET value = %s::jsonb WHERE key = 'schema_version'",
                          (str(newer),))
         rust_refusal = bank.start("rust", refused=True)
-        deadline, tail, health = time.monotonic() + 60, "", {}
+        deadline, log_text, health = time.monotonic() + 60, "", {}
         while time.monotonic() < deadline:
-            tail = rust_refusal.log.read_text(errors="replace")
+            log_text = rust_refusal.log.read_text(errors="replace")
             health = h.w1a.call(bank.port, "GET", "/health").get("json") or {}
-            if "is newer than this build" in tail or rust_refusal.proc.poll() is not None:
+            if "is newer than this build" in log_text or rust_refusal.proc.poll() is not None:
                 break
             time.sleep(1)
         exited = rust_refusal.proc.poll()
         bank.stop()
+        after_rust = _meta(bank.dsn).get("schema_version")
         log.step("the Rust daemon refuses a bank stamped by a newer build",
-                 "is newer than this build" in tail and health.get("ready") is not True,
+                 "is newer than this build" in log_text and health.get("ready") is not True
+                 and str(after_rust) == str(newer),
                  exited=exited, health={k: health.get(k) for k in ("status", "ready", "pending", "db")},
-                 log_tail=tail[-500:])
+                 stamp_after=after_rust, log_tail=globals()["tail"](log_text, 500))
         bank.start("python")
         stamped = _meta(bank.dsn).get("schema_version")
-        seen["newer_bank"] = {"stamped_before": str(newer), "after_python_start": stamped}
-        # Observed, not asserted: Python's ensure_schema upserts its own
-        # version and refuses no newer bank (a recorded finding).
-        log.step("observed: the Python daemon's start on a newer-stamped bank",
-                 True, stamped_before=str(newer), after_python_start=stamped,
-                 python_stamped_it_down=str(stamped) == str(SCHEMA_META_VERSION))
+        seen["newer_bank"] = {"stamped_before": str(newer), "after_rust_refusal": after_rust,
+                              "after_python_start": stamped}
+        # Expected, not met today: Python's ensure_schema upserts its own
+        # version and refuses no newer bank, so a rollback stamps it down.
+        log.step("the Python daemon leaves a newer build's stamp alone", str(stamped) == str(newer),
+                 fatal=False, stamped_before=str(newer), after_python_start=stamped)
         bank.stop()
         return seen
     finally:
@@ -481,13 +565,18 @@ def main(argv: list[str] | None = None) -> int:
             print(f"rehearsal: unset {key}; this run creates its own disposable bank",
                   file=sys.stderr)
             return 2
+    global SCRATCH
     root = h.run_root("rehearse-activation")
+    SCRATCH = root
     log = Log()
     owned: list[str] = []
     commit = subprocess.run(["git", "-C", str(REPO), "rev-parse", "HEAD"], capture_output=True,
                             text=True).stdout.strip()
     evidence = {"started": dt.datetime.now(dt.timezone.utc).isoformat(), "checkout": commit,
-                "platform": f"{platform.system()} {platform.release()}",
+                "platform": f"{platform.system()} {platform.release()} ({platform.version()})",
+                "driver_sha256": sha256(Path(__file__).resolve()),
+                "tree_changes": subprocess.run(["git", "-C", str(REPO), "status", "--porcelain"],
+                                               capture_output=True, text=True).stdout.splitlines(),
                 "python": sys.version.split()[0], "schema_meta_version": SCHEMA_META_VERSION,
                 "rust_shim_sha256": sha256(args.rust_shim),
                 "rust_daemon_sha256": sha256(args.rust_daemon), "leg": args.leg}
@@ -498,7 +587,12 @@ def main(argv: list[str] | None = None) -> int:
         if args.leg in ("launcher", "all"):
             # The daemon URL is known before the bank leg starts its daemon.
             port_hint = h.daemons.free_port()
-            env = h.daemons.base_env(root / "client-home", {})
+            home = root / "client-home"
+            env = h.daemons.base_env(home, {
+                "LOCALAPPDATA": str(home / "AppData" / "Local"),
+                "APPDATA": str(home / "AppData" / "Roaming"),
+                "XDG_DATA_HOME": str(home / ".local" / "share"),
+                "PSEUDOLIFE_RELEASE_CHECK": "0"})  # unattended client updates are off by default
             (root / "client-home").mkdir(exist_ok=True)
             leg = launcher_leg(root, args.rust_shim.resolve(), commit, log, env,
                                f"http://127.0.0.1:{port_hint}", token_file)

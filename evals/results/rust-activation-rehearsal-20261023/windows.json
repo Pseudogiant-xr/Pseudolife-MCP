@@ -1,7 +1,15 @@
 {
- "started": "2026-10-23T00:37:29.841533+00:00",
- "checkout": "bd8217a1c2ed17876cf5dc27419c5f49710869df",
- "platform": "Windows 10",
+ "started": "2026-10-23T00:56:25.289868+00:00",
+ "checkout": "2052d57eba20e4c0eac2a5cb28cfa11fc0a98d60",
+ "platform": "Windows 10 (10.0.26300)",
+ "driver_sha256": "a5a3110da091909213a1539d67098a582434b249279e5bd002de82b28a7c5d48",
+ "tree_changes": [
+  " M changelog.d/2026-10-23-rust-activation-rehearsal.md",
+  " M evals/results/rust-activation-rehearsal-20261023/README.md",
+  " M evals/results/rust-activation-rehearsal-20261023/windows.json",
+  " M rust/daemon/harness/rehearse_activation.py",
+  " M tests/test_rehearse_activation.py"
+ ],
  "python": "3.11.9",
  "schema_meta_version": 56,
  "rust_shim_sha256": "57ed14e9dfa0b2ca250ebc3697e816327f2f58bf8531452a3c2e590614e2cc40",
@@ -14,7 +22,7 @@
    "env": {
     "PSEUDOLIFE_WRITER_ID": "claude-desktop",
     "PSEUDOLIFE_MCP_NO_SPAWN": "1",
-    "PSEUDOLIFE_MCP_DAEMON_URL": "http://127.0.0.1:61576",
+    "PSEUDOLIFE_MCP_DAEMON_URL": "http://127.0.0.1:58534",
     "PSEUDOLIFE_MCP_TOKEN_FILE": "<scratch>\\credentials\\token"
    }
   },
@@ -22,29 +30,29 @@
    "want": "<scratch>\\runtimes\\000001",
    "got": "<scratch>\\runtimes\\000001",
    "exit": 0,
-   "stdout": "pseudolife-mcp 0.19.0\nruntime <scratch>\\runtimes\\000001 (source commit bd8217a1c2ed17876cf5dc27419c5f49710869df)",
-   "console_sha256": "19028d9a07279499800a5e3c276b930409d4adadd9c82bec1d4a535aa6f0ff43"
+   "stdout": "pseudolife-mcp 0.19.0\nruntime <scratch>\\runtimes\\000001 (source commit 2052d57eba20e4c0eac2a5cb28cfa11fc0a98d60)",
+   "answered_console_sha256": "722a4ee4a6fb106226c5d51fa9ed98ddfea1bfbfc530802539d1571ef1989a99"
   },
   "activated": {
    "want": "<scratch>\\runtimes\\000002",
    "got": "<scratch>\\runtimes\\000002",
    "exit": 0,
-   "stdout": "pseudolife-mcp 0.19.0\nruntime <scratch>\\runtimes\\000002 (source commit bd8217a1c2ed17876cf5dc27419c5f49710869df)",
-   "console_sha256": "57ed14e9dfa0b2ca250ebc3697e816327f2f58bf8531452a3c2e590614e2cc40"
+   "stdout": "pseudolife-mcp 0.19.0\nruntime <scratch>\\runtimes\\000002 (source commit 2052d57eba20e4c0eac2a5cb28cfa11fc0a98d60)",
+   "answered_console_sha256": "57ed14e9dfa0b2ca250ebc3697e816327f2f58bf8531452a3c2e590614e2cc40"
   },
   "rolled_back": {
    "want": "<scratch>\\runtimes\\000004",
    "got": "<scratch>\\runtimes\\000004",
    "exit": 0,
-   "stdout": "pseudolife-mcp 0.19.0\nruntime <scratch>\\runtimes\\000004 (source commit bd8217a1c2ed17876cf5dc27419c5f49710869df)",
-   "console_sha256": "6f0816fd7f66fd2ea9df181a6b8cb8433745a637a0e5d5c2f925fd34ab21a30c"
+   "stdout": "pseudolife-mcp 0.19.0\nruntime <scratch>\\runtimes\\000004 (source commit 2052d57eba20e4c0eac2a5cb28cfa11fc0a98d60)",
+   "answered_console_sha256": "e25f9206bcda394f49c57a1b0b08a7d78530e82a51f82d3bb987a73bd776fdc2"
   },
   "reverted": {
    "want": "<scratch>\\runtimes\\000002",
    "got": "<scratch>\\runtimes\\000002",
    "exit": 0,
-   "stdout": "pseudolife-mcp 0.19.0\nruntime <scratch>\\runtimes\\000002 (source commit bd8217a1c2ed17876cf5dc27419c5f49710869df)",
-   "console_sha256": "57ed14e9dfa0b2ca250ebc3697e816327f2f58bf8531452a3c2e590614e2cc40"
+   "stdout": "pseudolife-mcp 0.19.0\nruntime <scratch>\\runtimes\\000002 (source commit 2052d57eba20e4c0eac2a5cb28cfa11fc0a98d60)",
+   "answered_console_sha256": "57ed14e9dfa0b2ca250ebc3697e816327f2f58bf8531452a3c2e590614e2cc40"
   }
  },
  "bank": {
@@ -80,6 +88,7 @@
   ],
   "newer_bank": {
    "stamped_before": "57",
+   "after_rust_refusal": 57,
    "after_python_start": 56
   }
  },
@@ -105,11 +114,11 @@
     "env": {
      "PSEUDOLIFE_WRITER_ID": "claude-desktop",
      "PSEUDOLIFE_MCP_NO_SPAWN": "1",
-     "PSEUDOLIFE_MCP_DAEMON_URL": "http://127.0.0.1:61576",
+     "PSEUDOLIFE_MCP_DAEMON_URL": "http://127.0.0.1:58534",
      "PSEUDOLIFE_MCP_TOKEN_FILE": "<scratch>\\credentials\\token"
     }
    },
-   "out": "fe-desktop -> <scratch>\\bin\\pseudolife-mcp.exe)\ntoken file: written <scratch>\\credentials\\token (owner-only; the shim reloads it per call)\nnext: fully quit Claude Desktop (tray/menu-bar icon, not just the window) and relaunch it so the new entry loads\n"
+   "out": "ch>\\bin\\pseudolife-mcp.exe reads PSEUDOLIFE_MCP_TOKEN_FILE\nbackup: <scratch>\\claude_desktop_config.json.bak-20261023-115638\nentry: written (pseudolife-desktop -> <scratch>\\bin\\pseudolife-mcp.exe)\ntoken file: written <scratch>\\credentials\\token (owner-only; the shim reloads it per call)\nnext: fully quit Claude Desktop (tray/menu-bar icon, not just the window) and relaunch it so the new entry loads\n"
   },
   {
    "step": "registered command runs the only runtime (000001, Python)",
@@ -117,8 +126,8 @@
    "want": "<scratch>\\runtimes\\000001",
    "got": "<scratch>\\runtimes\\000001",
    "exit": 0,
-   "stdout": "pseudolife-mcp 0.19.0\nruntime <scratch>\\runtimes\\000001 (source commit bd8217a1c2ed17876cf5dc27419c5f49710869df)",
-   "console_sha256": "19028d9a07279499800a5e3c276b930409d4adadd9c82bec1d4a535aa6f0ff43"
+   "stdout": "pseudolife-mcp 0.19.0\nruntime <scratch>\\runtimes\\000001 (source commit 2052d57eba20e4c0eac2a5cb28cfa11fc0a98d60)",
+   "answered_console_sha256": "722a4ee4a6fb106226c5d51fa9ed98ddfea1bfbfc530802539d1571ef1989a99"
   },
   {
    "step": "after installing the Rust shim as 000002 (and an incomplete 000003), the registered command runs 000002",
@@ -126,8 +135,8 @@
    "want": "<scratch>\\runtimes\\000002",
    "got": "<scratch>\\runtimes\\000002",
    "exit": 0,
-   "stdout": "pseudolife-mcp 0.19.0\nruntime <scratch>\\runtimes\\000002 (source commit bd8217a1c2ed17876cf5dc27419c5f49710869df)",
-   "console_sha256": "57ed14e9dfa0b2ca250ebc3697e816327f2f58bf8531452a3c2e590614e2cc40"
+   "stdout": "pseudolife-mcp 0.19.0\nruntime <scratch>\\runtimes\\000002 (source commit 2052d57eba20e4c0eac2a5cb28cfa11fc0a98d60)",
+   "answered_console_sha256": "57ed14e9dfa0b2ca250ebc3697e816327f2f58bf8531452a3c2e590614e2cc40"
   },
   {
    "step": "python runtime installed",
@@ -141,8 +150,8 @@
    "want": "<scratch>\\runtimes\\000004",
    "got": "<scratch>\\runtimes\\000004",
    "exit": 0,
-   "stdout": "pseudolife-mcp 0.19.0\nruntime <scratch>\\runtimes\\000004 (source commit bd8217a1c2ed17876cf5dc27419c5f49710869df)",
-   "console_sha256": "6f0816fd7f66fd2ea9df181a6b8cb8433745a637a0e5d5c2f925fd34ab21a30c"
+   "stdout": "pseudolife-mcp 0.19.0\nruntime <scratch>\\runtimes\\000004 (source commit 2052d57eba20e4c0eac2a5cb28cfa11fc0a98d60)",
+   "answered_console_sha256": "e25f9206bcda394f49c57a1b0b08a7d78530e82a51f82d3bb987a73bd776fdc2"
   },
   {
    "step": "removing 000004 falls back to the newest complete runtime, 000002",
@@ -150,8 +159,8 @@
    "want": "<scratch>\\runtimes\\000002",
    "got": "<scratch>\\runtimes\\000002",
    "exit": 0,
-   "stdout": "pseudolife-mcp 0.19.0\nruntime <scratch>\\runtimes\\000002 (source commit bd8217a1c2ed17876cf5dc27419c5f49710869df)",
-   "console_sha256": "57ed14e9dfa0b2ca250ebc3697e816327f2f58bf8531452a3c2e590614e2cc40"
+   "stdout": "pseudolife-mcp 0.19.0\nruntime <scratch>\\runtimes\\000002 (source commit 2052d57eba20e4c0eac2a5cb28cfa11fc0a98d60)",
+   "answered_console_sha256": "57ed14e9dfa0b2ca250ebc3697e816327f2f58bf8531452a3c2e590614e2cc40"
   },
   {
    "step": "Python daemon writes an entry and a fact",
@@ -176,16 +185,16 @@
      "agent"
     ],
     "provenance": [],
-    "asserted_at": 1792715882.650842,
-    "last_confirmed": 1792715882.650842,
+    "asserted_at": 1792717019.3401773,
+    "last_confirmed": 1792717019.3401773,
     "freshness_class": "evergreen",
     "effective_confidence": 0.8,
     "stale": false,
     "supersedes_value": null,
     "superseded_by_value": null,
     "superseded_at": null,
-    "tx_time": 1792715882.650842,
-    "valid_time": 1792715882.650842,
+    "tx_time": 1792717019.3401773,
+    "valid_time": 1792717019.3401773,
     "writer_id": "unknown",
     "session_id": null,
     "age": "just now"
@@ -193,7 +202,8 @@
   },
   {
    "step": "Python stop is clean",
-   "ok": true
+   "ok": true,
+   "exit": 0
   },
   {
    "step": "Rust daemon reads Python's fact",
@@ -226,16 +236,16 @@
      "agent"
     ],
     "provenance": [],
-    "asserted_at": 1792715884.086863,
-    "last_confirmed": 1792715884.086863,
+    "asserted_at": 1792717020.7711058,
+    "last_confirmed": 1792717020.7711058,
     "freshness_class": "evergreen",
     "effective_confidence": 0.8,
     "stale": false,
     "supersedes_value": "python",
     "superseded_by_value": null,
     "superseded_at": null,
-    "tx_time": 1792715884.086863,
-    "valid_time": 1792715884.086863,
+    "tx_time": 1792717020.7711058,
+    "valid_time": 1792717020.7711058,
     "writer_id": "unknown",
     "session_id": null,
     "age": "just now"
@@ -254,16 +264,16 @@
      "agent"
     ],
     "provenance": [],
-    "asserted_at": 1792715884.131386,
-    "last_confirmed": 1792715884.131386,
+    "asserted_at": 1792717020.8168736,
+    "last_confirmed": 1792717020.8168736,
     "freshness_class": "evergreen",
     "effective_confidence": 0.8,
     "stale": false,
     "supersedes_value": null,
     "superseded_by_value": null,
     "superseded_at": null,
-    "tx_time": 1792715884.131386,
-    "valid_time": 1792715884.131386,
+    "tx_time": 1792717020.8168736,
+    "valid_time": 1792717020.8168736,
     "writer_id": "unknown",
     "session_id": null,
     "age": "just now"
@@ -271,7 +281,8 @@
   },
   {
    "step": "Rust stop is clean",
-   "ok": true
+   "ok": true,
+   "exit": 0
   },
   {
    "step": "after a restart the Rust daemon still reads its own writes",
@@ -279,17 +290,43 @@
   },
   {
    "step": "a call through the registered client path (launcher -> Rust shim -> Rust daemon) reads the Rust-written fact",
-   "ok": false,
+   "ok": true,
    "result": {
-    "isError": true,
-    "value": null,
-    "stderr": "on-39820-wuxebcq1\\bin\\pseudolife-mcp.exe update --clients-only --tag 0.0.0 (installs the daemon's release as a new shim runtime beside this one and refreshes the plugin cache; from a checkout: python ops/update_clients.py --only shim), or update the daemon (<scratch>\\bin\\pseudolife-mcp.exe update); then start a new session.\n"
+    "isError": false,
+    "value": {
+     "record": {
+      "entity": "rehearsal rust",
+      "attribute": "slot",
+      "value": "rust only",
+      "kind": "scalar",
+      "confidence": 0.8,
+      "origin": "agent",
+      "asserted_at": 1792717020.8168736,
+      "last_confirmed": 1792717020.8168736,
+      "age": "just now",
+      "freshness_class": "evergreen",
+      "stale": false,
+      "source_entries": []
+     },
+     "contenders": [],
+     "entity_ref": {
+      "entity_id": 2,
+      "canonical": "rehearsal-rust",
+      "etype": null,
+      "aliases": []
+     }
+    },
+    "initialize": "answered",
+    "error": null,
+    "exit": 0,
+    "stderr": " is pseudolife-mcp 0.19.0 but the daemon at http://127.0.0.1:58534 is 0.0.0 \u2014 run <scratch>\\bin\\pseudolife-mcp.exe update --clients-only --tag 0.0.0 (installs the daemon's release as a new shim runtime beside this one and refreshes the plugin cache; from a checkout: python ops/update_clients.py --only shim), or update the daemon (<scratch>\\bin\\pseudolife-mcp.exe update); then start a new session.\n"
    },
    "daemon_version": "0.0.0"
   },
   {
    "step": "Rust stop is clean (2)",
-   "ok": true
+   "ok": true,
+   "exit": 0
   },
   {
    "step": "after rollback the Python daemon reads the fact Rust superseded",
@@ -309,7 +346,8 @@
   },
   {
    "step": "Python stop is clean (2)",
-   "ok": true
+   "ok": true,
+   "exit": 0
   },
   {
    "step": "the Rust daemon refuses a bank stamped by a newer build",
@@ -323,16 +361,16 @@
     ],
     "db": null
    },
-   "log_tail": "daemon: listening on 127.0.0.1:61576 (auth=true)\nwarmup init failed: Refusing to start: bank schema version 57 is newer than this build's schema version 56.\n"
+   "stamp_after": 57,
+   "log_tail": "daemon: listening on 127.0.0.1:58534 (auth=true)\nwarmup init failed: Refusing to start: bank schema version 57 is newer than this build's schema version 56.\n"
   },
   {
-   "step": "observed: the Python daemon's start on a newer-stamped bank",
-   "ok": true,
+   "step": "the Python daemon leaves a newer build's stamp alone",
+   "ok": false,
    "stamped_before": "57",
-   "after_python_start": 56,
-   "python_stamped_it_down": true
+   "after_python_start": 56
   }
  ],
- "finished": "2026-10-23T00:38:18.956989+00:00",
+ "finished": "2026-10-23T00:57:16.064508+00:00",
  "result": "fail"
 }
