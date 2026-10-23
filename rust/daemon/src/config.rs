@@ -69,6 +69,30 @@ pub struct MemoryConfig {
     /// (`memory.lessons.top_k` is never read over MCP: the binder always
     /// passes a width.)
     pub lessons_min_confidence: f64,
+    /// `memory.lessons.infer_outcomes` (on) and `infer_outcomes_max_signals`
+    /// (3): whether `dream_status` counts sessions awaiting outcome inference.
+    pub lessons_infer_outcomes: bool,
+    pub lessons_infer_outcomes_max_signals: i64,
+    /// `memory.lessons.synthesize_in_dream` (on): whether the dream pass
+    /// runs lesson synthesis (`dream/lessons.rs`).
+    pub lessons_synthesize_in_dream: bool,
+    /// `memory.lessons.signal_retention_days` (3650) and `signal_retry_days`
+    /// (30): the synthesis prune cutoff and the pending-signal retry window.
+    pub lessons_signal_retention_days: i64,
+    pub lessons_signal_retry_days: i64,
+    /// `memory.lessons.synthesis_dedup_min_similarity` (0.88; 0 disables).
+    pub lessons_synthesis_dedup_min_similarity: f64,
+    /// `memory.lessons.synthesis_max_signals` (200; 0 drains everything).
+    pub lessons_synthesis_max_signals: i64,
+    /// `memory.lessons.rule_mode` (off): every signal under the rule contract.
+    pub lessons_rule_mode: bool,
+    /// `memory.graph_insight.enabled` (on): the dream's graph-insight
+    /// refresh (not ported: `memory_dream run` refuses while it is on).
+    pub graph_insight_enabled: bool,
+    /// `memory.scopes` (`ScopesConfig`): source tags that never become
+    /// projects, and fine-grained sources rolled up to an umbrella.
+    pub scopes_exclude: Vec<String>,
+    pub scopes_rollup: Vec<(String, String)>,
     /// `memory.delete_confirm_threshold` (20): a memory-scope forget matching
     /// more entries is refused unless confirmed; zero or less disables it.
     pub delete_confirm_threshold: i64,
@@ -82,12 +106,27 @@ pub struct MemoryConfig {
     pub deep_dream: DeepDreamConfig,
 }
 
-/// `DeepDreamConfig` (`utils/config.py:513-712`), the switches
-/// `graph_review`'s automation accounting reads (`service.py:7880-7884`).
+/// `DeepDreamConfig` (`utils/config.py:513-712`): the switches
+/// `graph_review`'s automation accounting reads (`service.py:7880-7884`),
+/// and the need signal, judge modes and gates `dream_status` reports
+/// (`service_dream.py:3677-3819`).
 #[derive(Debug, Clone, PartialEq)]
 pub struct DeepDreamConfig {
     pub judges_enabled: bool,
     pub analyzer_file_duplicates: bool,
+    pub auto_min_new_entities: i64,
+    pub auto_interval_days: f64,
+    pub review_queue_alert_pending: i64,
+    pub review_queue_alert_age_days: f64,
+    pub review_queue_alert_min_pending: i64,
+    pub judge_mode: String,
+    pub link_judge_mode: String,
+    pub junk_judge_mode: String,
+    pub curation_judge_mode: String,
+    pub candidate_judge_mode: String,
+    pub judge_accept_min_confidence: f64,
+    pub judge_reject_min_confidence_2: f64,
+    pub link_two_vote_min_confidence: f64,
 }
 
 impl Default for DeepDreamConfig {
@@ -95,6 +134,19 @@ impl Default for DeepDreamConfig {
         Self {
             judges_enabled: true,
             analyzer_file_duplicates: true,
+            auto_min_new_entities: 150,
+            auto_interval_days: 7.0,
+            review_queue_alert_pending: 500,
+            review_queue_alert_age_days: 14.0,
+            review_queue_alert_min_pending: 100,
+            judge_mode: "shadow".into(),
+            link_judge_mode: "shadow".into(),
+            junk_judge_mode: "shadow".into(),
+            curation_judge_mode: "shadow".into(),
+            candidate_judge_mode: "off".into(),
+            judge_accept_min_confidence: 0.6,
+            judge_reject_min_confidence_2: 0.7,
+            link_two_vote_min_confidence: 0.7,
         }
     }
 }
@@ -190,6 +242,8 @@ pub struct CortexConfig {
     pub protect_provenance: bool,
     pub supersede_confidence_margin: f64,
     pub reinforce_rate: f64,
+    /// `dream_slot_match_threshold` (0.0, off): the dream's slot resolver.
+    pub dream_slot_match_threshold: f64,
 }
 
 impl Default for CortexConfig {
@@ -203,6 +257,7 @@ impl Default for CortexConfig {
             protect_provenance: true,
             supersede_confidence_margin: 0.15,
             reinforce_rate: 0.34,
+            dream_slot_match_threshold: 0.0,
         }
     }
 }
@@ -317,6 +372,45 @@ pub struct DreamConfig {
     pub sweep_interval_ok: bool,
     pub sweep_interval_seconds: f64,
     pub runs_keep: i64,
+    pub extractor_api_key: Option<String>,
+    /// `extractor_reasoning_effort`: sent as `reasoning_effort` to the
+    /// primary only (`memory/dream.py:2192-2204`).
+    pub extractor_reasoning_effort: Option<String>,
+    pub extractor_max_tokens: i64,
+    /// `extractor_cache_prompt` (`bool | None`, default false): `None`
+    /// leaves the field out of the request body (`memory/dream.py:2181-2189`).
+    pub extractor_cache_prompt: Option<bool>,
+    pub extractor_timeout_seconds: f64,
+    pub fallback_api_key: Option<String>,
+    pub extractor_mode: String,
+    /// `None` (default) consolidates every source not in `exclude_sources`.
+    pub eligible_sources: Option<Vec<String>>,
+    pub exclude_sources: Vec<String>,
+    pub min_batch: i64,
+    pub idle_seconds: f64,
+    pub max_batch: i64,
+    pub digest_enabled: bool,
+    pub digest_max_per_cycle: i64,
+    /// `digest_context_chars` (24000): the map-reduce split per call;
+    /// `digest_target_chars` (1200): the prompt's length target.
+    pub digest_context_chars: i64,
+    pub digest_target_chars: i64,
+    /// The consolidation pass (`service_dream.py:_dream_run_locked`).
+    pub stall_notice: bool,
+    pub quarantine_low_trust: bool,
+    pub trusted_sources: Vec<String>,
+    pub assistant_claims: String,
+    pub extract_relations: bool,
+    pub min_relation_confidence: f64,
+    pub relation_quarantine_below: f64,
+    pub retype_quarantined_max: i64,
+    pub write_dedup_min_jaccard: f64,
+    pub alias_candidate_min_cosine: f64,
+    pub known_facts_window: i64,
+    pub literal_gate: String,
+    pub literal_gate_scope: String,
+    pub span_gate: String,
+    pub chronicle: bool,
 }
 
 impl Config {
@@ -538,6 +632,19 @@ impl Default for MemoryConfig {
             retrieval_retention_days: 365.0,
             lessons_enabled: true,
             lessons_min_confidence: 0.0,
+            lessons_infer_outcomes: true,
+            lessons_infer_outcomes_max_signals: 3,
+            lessons_synthesize_in_dream: true,
+            lessons_signal_retention_days: 3650,
+            lessons_signal_retry_days: 30,
+            lessons_synthesis_dedup_min_similarity: 0.88,
+            lessons_synthesis_max_signals: 200,
+            lessons_rule_mode: false,
+            graph_insight_enabled: true,
+            scopes_exclude: ["status", "claude", "agent", "correction"]
+                .map(String::from)
+                .to_vec(),
+            scopes_rollup: Vec::new(),
             delete_confirm_threshold: 20,
             compaction_enabled: true,
             compaction_keep_per_slot: 3,
@@ -616,6 +723,39 @@ impl Default for DreamConfig {
             sweep_interval_ok: true,
             sweep_interval_seconds: 600.0,
             runs_keep: 50,
+            extractor_api_key: None,
+            extractor_reasoning_effort: None,
+            extractor_max_tokens: 2048,
+            extractor_cache_prompt: Some(false),
+            extractor_timeout_seconds: 240.0,
+            fallback_api_key: None,
+            extractor_mode: "auto".to_string(),
+            eligible_sources: None,
+            exclude_sources: ["consolidation", "reflection", "status", "log", "digest"]
+                .map(String::from)
+                .to_vec(),
+            min_batch: 8,
+            idle_seconds: 600.0,
+            max_batch: 40,
+            digest_enabled: false,
+            digest_max_per_cycle: 4,
+            digest_context_chars: 24000,
+            digest_target_chars: 1200,
+            stall_notice: true,
+            quarantine_low_trust: false,
+            trusted_sources: Vec::new(),
+            assistant_claims: "contender".into(),
+            extract_relations: true,
+            min_relation_confidence: 0.2,
+            relation_quarantine_below: 0.5,
+            retype_quarantined_max: 3,
+            write_dedup_min_jaccard: 0.6,
+            alias_candidate_min_cosine: 0.7,
+            known_facts_window: 0,
+            literal_gate: "enforce".into(),
+            literal_gate_scope: "batch".into(),
+            span_gate: "off".into(),
+            chronicle: true,
         }
     }
 }
@@ -1465,6 +1605,50 @@ fn load_str(text: &str) -> Result<Config, ConfigError> {
         if let Some(l) = section(m, "lessons", "memory.")? {
             memory.lessons_enabled = want_bool(l, "enabled", "memory.lessons", true)?;
             memory.lessons_min_confidence = want_float(l, "min_confidence", "memory.lessons", 0.0)?;
+            memory.lessons_infer_outcomes = want_bool(l, "infer_outcomes", "memory.lessons", true)?;
+            memory.lessons_infer_outcomes_max_signals =
+                want_int(l, "infer_outcomes_max_signals", "memory.lessons", 3)?;
+            memory.lessons_synthesize_in_dream =
+                want_bool(l, "synthesize_in_dream", "memory.lessons", true)?;
+            memory.lessons_signal_retention_days =
+                want_int(l, "signal_retention_days", "memory.lessons", 3650)?;
+            memory.lessons_signal_retry_days =
+                want_int(l, "signal_retry_days", "memory.lessons", 30)?;
+            memory.lessons_synthesis_dedup_min_similarity =
+                want_float(l, "synthesis_dedup_min_similarity", "memory.lessons", 0.88)?;
+            memory.lessons_synthesis_max_signals =
+                want_int(l, "synthesis_max_signals", "memory.lessons", 200)?;
+            memory.lessons_rule_mode = want_bool(l, "rule_mode", "memory.lessons", false)?;
+        }
+        if let Some(g) = section(m, "graph_insight", "memory.")? {
+            memory.graph_insight_enabled = want_bool(g, "enabled", "memory.graph_insight", true)?;
+        }
+        if let Some(sc) = section(m, "scopes", "memory.")? {
+            if let Some(node) = lookup(sc, "exclude") {
+                memory.scopes_exclude = want_str_list(node, "memory.scopes.exclude")?;
+            }
+            match lookup(sc, "rollup") {
+                None | Some(Node::Null) => {}
+                Some(Node::Map(pairs)) => {
+                    let mut out = Vec::new();
+                    for (k, v) in pairs {
+                        match (k, v) {
+                            (Node::Str(k), Node::Str(v)) => out.push((k.clone(), v.clone())),
+                            (_, other) => {
+                                return Err(wrong_type(
+                                    "memory.scopes.rollup",
+                                    "a mapping of strings",
+                                    other,
+                                ));
+                            }
+                        }
+                    }
+                    memory.scopes_rollup = out;
+                }
+                Some(other) => {
+                    return Err(wrong_type("memory.scopes.rollup", "a mapping", other));
+                }
+            }
         }
         if let Some(r) = section(m, "compaction", "memory.")? {
             memory.compaction_enabled = want_bool(r, "enabled", "memory.compaction", true)?;
@@ -1516,6 +1700,59 @@ fn load_str(text: &str) -> Result<Config, ConfigError> {
                     p,
                     d.analyzer_file_duplicates,
                 )?,
+                auto_min_new_entities: want_int(
+                    r,
+                    "auto_min_new_entities",
+                    p,
+                    d.auto_min_new_entities,
+                )?,
+                auto_interval_days: want_float(r, "auto_interval_days", p, d.auto_interval_days)?,
+                review_queue_alert_pending: want_int(
+                    r,
+                    "review_queue_alert_pending",
+                    p,
+                    d.review_queue_alert_pending,
+                )?,
+                review_queue_alert_age_days: want_float(
+                    r,
+                    "review_queue_alert_age_days",
+                    p,
+                    d.review_queue_alert_age_days,
+                )?,
+                review_queue_alert_min_pending: want_int(
+                    r,
+                    "review_queue_alert_min_pending",
+                    p,
+                    d.review_queue_alert_min_pending,
+                )?,
+                judge_mode: want_str(r, "judge_mode", p, &d.judge_mode)?,
+                link_judge_mode: want_str(r, "link_judge_mode", p, &d.link_judge_mode)?,
+                junk_judge_mode: want_str(r, "junk_judge_mode", p, &d.junk_judge_mode)?,
+                curation_judge_mode: want_str(r, "curation_judge_mode", p, &d.curation_judge_mode)?,
+                candidate_judge_mode: want_str(
+                    r,
+                    "candidate_judge_mode",
+                    p,
+                    &d.candidate_judge_mode,
+                )?,
+                judge_accept_min_confidence: want_float(
+                    r,
+                    "judge_accept_min_confidence",
+                    p,
+                    d.judge_accept_min_confidence,
+                )?,
+                judge_reject_min_confidence_2: want_float(
+                    r,
+                    "judge_reject_min_confidence_2",
+                    p,
+                    d.judge_reject_min_confidence_2,
+                )?,
+                link_two_vote_min_confidence: want_float(
+                    r,
+                    "link_two_vote_min_confidence",
+                    p,
+                    d.link_two_vote_min_confidence,
+                )?,
             };
         }
         if let Some(r) = section(m, "reranker", "memory.")? {
@@ -1546,6 +1783,12 @@ fn load_str(text: &str) -> Result<Config, ConfigError> {
                     d.supersede_confidence_margin,
                 )?,
                 reinforce_rate: want_float(c, "reinforce_rate", p, d.reinforce_rate)?,
+                dream_slot_match_threshold: want_float(
+                    c,
+                    "dream_slot_match_threshold",
+                    p,
+                    d.dream_slot_match_threshold,
+                )?,
             };
         }
         if let Some(c) = section(m, "mcp", "memory.")? {
@@ -1792,6 +2035,101 @@ fn read_dream(d: &[(Node, Node)]) -> Result<DreamConfig, ConfigError> {
             Some(value) => node_f64(value).unwrap_or(f64::NAN),
         },
         runs_keep: want_int(d, "runs_keep", p, def.runs_keep)?,
+        extractor_api_key: want_opt_str(d, "extractor_api_key", p)?,
+        extractor_reasoning_effort: want_opt_str(d, "extractor_reasoning_effort", p)?,
+        extractor_max_tokens: want_int(d, "extractor_max_tokens", p, def.extractor_max_tokens)?,
+        extractor_cache_prompt: match lookup(d, "extractor_cache_prompt") {
+            None => def.extractor_cache_prompt,
+            Some(Node::Null) => None,
+            Some(Node::Bool(b)) => Some(*b),
+            Some(other) => {
+                return Err(wrong_type(
+                    &format!("{p}.extractor_cache_prompt"),
+                    "a boolean or null",
+                    other,
+                ));
+            }
+        },
+        extractor_timeout_seconds: want_float(
+            d,
+            "extractor_timeout_seconds",
+            p,
+            def.extractor_timeout_seconds,
+        )?,
+        fallback_api_key: want_opt_str(d, "fallback_api_key", p)?,
+        extractor_mode: want_str(d, "extractor_mode", p, &def.extractor_mode)?,
+        eligible_sources: match lookup(d, "eligible_sources") {
+            None | Some(Node::Null) => None,
+            Some(node) => Some(want_str_list(node, &format!("{p}.eligible_sources"))?),
+        },
+        exclude_sources: match lookup(d, "exclude_sources") {
+            None => def.exclude_sources.clone(),
+            Some(node) => want_str_list(node, &format!("{p}.exclude_sources"))?,
+        },
+        min_batch: want_int(d, "min_batch", p, def.min_batch)?,
+        idle_seconds: want_float(d, "idle_seconds", p, def.idle_seconds)?,
+        max_batch: want_int(d, "max_batch", p, def.max_batch)?,
+        digest_enabled: want_bool(d, "digest_enabled", p, def.digest_enabled)?,
+        digest_max_per_cycle: want_int(d, "digest_max_per_cycle", p, def.digest_max_per_cycle)?,
+        digest_context_chars: want_int(d, "digest_context_chars", p, def.digest_context_chars)?,
+        digest_target_chars: want_int(d, "digest_target_chars", p, def.digest_target_chars)?,
+        stall_notice: want_bool(d, "stall_notice", p, def.stall_notice)?,
+        quarantine_low_trust: want_bool(d, "quarantine_low_trust", p, def.quarantine_low_trust)?,
+        trusted_sources: match lookup(d, "trusted_sources") {
+            None | Some(Node::Null) => Vec::new(),
+            Some(node) => want_str_list(node, &format!("{p}.trusted_sources"))?,
+        },
+        assistant_claims: match lookup(d, "assistant_claims") {
+            None | Some(Node::Null) => def.assistant_claims.clone(),
+            Some(Node::Str(s)) if s.is_empty() => def.assistant_claims.clone(),
+            Some(Node::Str(s)) => s.clone(),
+            Some(other) => {
+                return Err(wrong_type(
+                    &format!("{p}.assistant_claims"),
+                    "a string",
+                    other,
+                ));
+            }
+        },
+        extract_relations: want_bool(d, "extract_relations", p, def.extract_relations)?,
+        min_relation_confidence: want_float(
+            d,
+            "min_relation_confidence",
+            p,
+            def.min_relation_confidence,
+        )?,
+        relation_quarantine_below: want_float(
+            d,
+            "relation_quarantine_below",
+            p,
+            def.relation_quarantine_below,
+        )?,
+        retype_quarantined_max: want_int(
+            d,
+            "retype_quarantined_max",
+            p,
+            def.retype_quarantined_max,
+        )?,
+        write_dedup_min_jaccard: want_float(
+            d,
+            "write_dedup_min_jaccard",
+            p,
+            def.write_dedup_min_jaccard,
+        )?,
+        alias_candidate_min_cosine: want_float(
+            d,
+            "alias_candidate_min_cosine",
+            p,
+            def.alias_candidate_min_cosine,
+        )?,
+        known_facts_window: match lookup(d, "known_facts_window") {
+            None | Some(Node::Null) => 0,
+            Some(_) => want_int(d, "known_facts_window", p, 0)?,
+        },
+        literal_gate: want_str(d, "literal_gate", p, &def.literal_gate)?,
+        literal_gate_scope: want_str(d, "literal_gate_scope", p, &def.literal_gate_scope)?,
+        span_gate: want_str(d, "span_gate", p, &def.span_gate)?,
+        chronicle: want_bool(d, "chronicle", p, def.chronicle)?,
     };
     // DreamConfig.__post_init__ (utils/config.py:503-509).
     if let Some(hours) = lookup(d, "stall_repeat_hours") {
@@ -1805,6 +2143,20 @@ fn read_dream(d: &[(Node, Node)]) -> Result<DreamConfig, ConfigError> {
         }
     }
     Ok(dream)
+}
+
+/// A list of strings (`list[str]` dataclass fields); anything else refuses.
+fn want_str_list(node: &Node, path: &str) -> Result<Vec<String>, ConfigError> {
+    match node {
+        Node::Seq(items) => items
+            .iter()
+            .map(|item| match item {
+                Node::Str(s) => Ok(s.clone()),
+                other => Err(wrong_type(path, "a list of strings", other)),
+            })
+            .collect(),
+        other => Err(wrong_type(path, "a list of strings", other)),
+    }
 }
 
 /// A principal list: a YAML list of strings, each non-blank after Python's

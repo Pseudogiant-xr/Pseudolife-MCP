@@ -11,13 +11,13 @@ use tokio_postgres::Client;
 /// Python distinguishes ValueError refusals from operational failures; an
 /// exception's text is never evidence for its class (`service.py:3736`).
 #[derive(Debug)]
-enum Failure {
+pub(crate) enum Failure {
     Refusal(String),
     Operational(String),
 }
 
 impl Failure {
-    fn text(&self) -> &str {
+    pub(crate) fn text(&self) -> &str {
         match self {
             Self::Refusal(s) | Self::Operational(s) => s,
         }
@@ -222,7 +222,7 @@ fn cursor_value(value: Option<Value>) -> Result<f64, Failure> {
     }
 }
 
-async fn initialize(client: &Client, policy: &Policy) -> Result<Value, Failure> {
+pub(crate) async fn initialize(client: &Client, policy: &Policy) -> Result<Value, Failure> {
     crate::txn::run(client, |client| async move {
         let unclassified = client.query("SELECT id FROM entries WHERE dream_state IS NULL ORDER BY id FOR UPDATE",&[]).await.map_err(db_error)?;
         let cursor = cursor_value(meta(client,"cortex_dream_cursor").await?)?;
@@ -403,7 +403,11 @@ fn acknowledgement_args(action: &Value) -> Result<(Vec<i64>, f64), Failure> {
     Ok((ids, timestamp))
 }
 
-async fn acknowledge(client: &Client, ids: &[i64], timestamp: f64) -> Result<Value, Failure> {
+pub(crate) async fn acknowledge(
+    client: &Client,
+    ids: &[i64],
+    timestamp: f64,
+) -> Result<Value, Failure> {
     crate::txn::run(client, |client| async move {
         let rows = client.query("SELECT id,dream_state FROM entries WHERE id=ANY($1) FOR UPDATE", &[&ids]).await.map_err(db_error)?;
         let states: HashMap<i64,Option<String>> = rows.iter().map(|r|(r.get(0),r.get(1))).collect();

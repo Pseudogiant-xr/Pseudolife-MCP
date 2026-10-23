@@ -512,9 +512,10 @@ and helpers; `storage/sync.py` `sync_cortex_slots` (225).
 Readers (`memory_fact_get`, the cortex block of `memory_search` and
 `/api/search`) take a snapshot of the resident cortex and never hold its
 lock across an await; the writer mutates it in place under `Ready.write`.
-Not reachable over MCP, so not ported: the quarantine park
-(`force_contend`), the dream guards and tier marks (`dream=True`) and the
-assistant-origin park (`support="assistant"`), see `divergences.md`.
+Not reachable over MCP, but ported for the dream (P1), which calls
+`fact_set::cortex_write` with them: the quarantine park (`force_contend`),
+the dream guards and tier marks (`dream=True`), the assistant-origin park
+(`support="assistant"`), stance and provenance, see `divergences.md`.
 
 `harness/w2e.py live --only fact-set-branches fact-set-newer-wins
 fact-set-tuned fact-set-freshness-auto fact-set-set-slot` compares every
@@ -558,9 +559,10 @@ settle and audit log; registered in `mcp::dispatch::registry`. Python:
 | SA10 | After `add_member`, whatever its action: `_ensure_subject_entity(entity)` (FS10; a blank, invalid or capped add can still mint the subject), then `_save_cortex` (FS11: member rows carry `value_norm` = `_norm_value(value)`, so the rewrite satisfies the one-current-member-per-value unique index). | `service.py:4087-4091`; `sync.py:170-209`; `schema.py:1565-1578` |
 | SA11 | `set_remove` under the service lock: no encode, no HLC tick, no writer resolution, no entity mint. `remove_member` takes the first current member (insertion order) whose `_norm_value` matches; none answers `member_not_found` and changes nothing. A match: slot dirty, `status` = `removed`, `superseded_at` = now, out of the member index (the row is kept), log `member_removed/user_removed` anchored on it with the raw `member` as `new_value`, `confidence_delta` 0.0, writer and session null; answers `member_removed`. Then `_save_cortex` and the SA2 answer. The removal refusal needs a support tier or `dream`, which the tool never passes. | `service.py:4100-4133`; `cortex.py:1083-1135` |
 
-Not reachable over MCP, so not ported: the assistant-origin guards, the
-conversion tier guard, the dream direct-write guard and tier mark, and the
-removal refusal (`divergences.md`).
+Not reachable over MCP, but ported for the dream (P1), which calls
+`set_members::set_add` / `set_remove` with them: the assistant-origin guards,
+the conversion tier guard, the dream direct-write guard and tier mark,
+provenance, and the removal refusal (`divergences.md`).
 
 `harness/w2e.py live --only set-add-branches set-add-aggregate set-cap`
 compares every answer and the full bank after each call, on templates
@@ -600,7 +602,7 @@ registered in `mcp::dispatch::registry`. Python: `mcp_server.py:1785-1801`;
 | FR5 | Accept: the slot is dirty. The current scalar (the slot's entry in the current index, if any) becomes `superseded` with `superseded_at` = now and `superseded_by_value` = the contender's value. The contender becomes `current`; `_norm_support("user") or "agent"` is marked (a direct tier clears its `dream:<tier>` provenance mark) and unioned into `support`; `last_confirmed` = `tx_time` = now; the fresh HLC stamp replaces its own; `supersedes_value` = the old current's value when there was one, else its own is kept; `asserted_at`, `valid_time`, confidence, labels, writer and session are unchanged. The current index names the contender. Log `resolved/accepted` anchored on the old current, or the contender when there is none (`new_value` the contender's value, `confidence_delta` = round(contender - anchor, 4), writer and session null). The action is `superseded`, naming the contender. | `cortex.py:1486-1508, 227-234, 731-751` |
 | FR6 | Reject: the slot is dirty; the contender becomes `retired` with `superseded_at` = now (`superseded_by_value` untouched); log `resolved/rejected` anchored as FR5. The action is `contested` (as Python names it), naming the current scalar, or the contender when the slot has none (a set slot, or one whose members were all removed). | `cortex.py:1509-1513` |
 | FR7 | After FR5 or FR6: `_save_cortex` (FS11), then the answer `{"resolved": true, "accepted": accept, "action", "current", "record"}`: `current` is `lookup(entity, attribute)` (the slot's current scalar, null for a set slot or an empty one) and `record` the named record, both as `_cortex_record_to_dict` with `age` and the stale policy (FS12). | `service.py:297-344, 4517-4528` |
-| FR8 | `refused_direct` (`dream=True` only) and `refused_changed` (`expect_value` only), with their `direct_write` and `contender_changed` answers, are unreachable over MCP and not ported (`divergences.md`). | `cortex.py:1477-1485`; `service.py:4509-4516` |
+| FR8 | `refused_direct` (`dream=True` only) and `refused_changed` (`expect_value` only), with their `direct_write` and `contender_changed` answers, are unreachable over MCP; ported for the dream's quarantine promotion (P1), which calls `fact_resolve::cortex_resolve` with them (`divergences.md`). | `cortex.py:1477-1485`; `service.py:4509-4516` |
 
 `harness/w2e.py live --only fact-resolve-scalar fact-resolve-set-slot`
 compares every answer and the full bank after each call, on templates whose
@@ -1059,15 +1061,54 @@ and cut. Inside a cluster, `seed_score` compares within 1.5e-4 and
 `mcp-consolidation-unsorted` and `mcp-consolidation-unverified` mutants
 must be caught.
 
-`memory_consolidate` needs nothing from the W3-H graph/dream engine:
-`service.consolidate` (`service.py:7462-7516`) resolves its targets with
-`_resolve_correction_targets_locked` over lists and stores the replacement
-through `_apply_correction_locked` (source `consolidation` by default, the
-caller's tags, no derived-slot report), the correction machinery that
-`memory_supersede` ports. What remains for it is the list selectors (every
-target's error reported, the first error's reason), several targets in one
-retirement, label inheritance and capacity victim over them, and the tags
-path.
+### memory_consolidate over MCP (2026-10-19)
+
+`correction_tools.rs`: `resolve_targets` and `apply_correction` are the
+correction body `memory_supersede` runs (CO1-CO10), generalized to lists of
+targets; `memory_supersede` calls them with one selector, `memory_consolidate`
+with the caller's lists. Registered in `mcp::dispatch::registry`. It needs
+nothing from the W3-H graph/dream engine. Python: `mcp_server.py`
+`_correction_noted` (753-760), `memory_consolidate` (2547-2572);
+`service.py` `_inherited_labels` (682-692), `_correction_noop`
+(2250-2263), `_stage_correction_locked` (2809-2850),
+`_apply_correction_under_mutation_lock_locked` (2927-3102),
+`_resolve_correction_targets_locked` (3104-3199), `_retire_entries_locked`
+(3231-3262), `consolidate` (7462-7519); `storage/postgres.py`
+`supersede_entries` (962-1029), `existing_entry_ids` (4359-4368);
+`memory/cms.py` `store` and `_store` (411-611); `memory/episodes.py`
+`normalize_tags` (41-61).
+
+| # | Exact item | Source |
+|---|---|---|
+| CN1 | Bound arguments: `memory_consolidate(replaces=None, *, new_text, source=None, tags=None, entry_ids=None)` (`replaces` and `tags` lists of strings, `entry_ids` a list of strict ints of any size). Not read-only (an internal failure carries `mutation: "unknown"`); the body runs detached from the request, under the service lock (Rust: `Ready.write`). The answer goes through `_correction_noted`. | `mcp_server.py:753-760, 2547-2572` |
+| CN2 | `new_text` stripped empty answers the no-op `empty_input` ("Replacement text must be non-empty.") before any selector check. Every no-op has CO2's shape, the `derived_flagged` keys included. | `service.py:2250-2263, 7504-7506` |
+| CN3 | Selector checks, in order, each over the whole list before any lookup: both or neither of `replaces` / `entry_ids` is `invalid_selector` ("Supply exactly one of entry IDs or exact texts."); a selector that is not a list is `invalid_selector` ("Correction targets must be a list."; the binding admits only lists); an empty list is `empty_input` ("No correction targets supplied."); any id not positive is `invalid_selector` (CO3's sentence); any text not a string is `invalid_selector` ("Exact-text targets must be strings."; unreachable through the binding); any text stripped empty is `empty_input` (CO3's sentence). | `service.py:3114-3135` |
+| CN4 | The list deduplicated in first-seen order (`dict.fromkeys`), then each distinct selector resolved as CO4. Every selector's error is collected in that order; with any error the no-op carries them all as `target_errors` and takes the first one's `reason`, and a selector that did resolve changes nothing. Then, over every selected target, CO4's held-by-one check and CO5's existence check; the missing rows are reported in selection order. | `service.py:3137-3198` |
+| CN5 | Labels (`_inherited_labels`): the new text's own label wins its axis, else the strictest across every target in selection order, the first of equals. The replacement's source is the caller's when truthy (unstripped), else `consolidation`; its tags are `normalize_tags(tags)` (stripped, lowercased, empties and repeats dropped, first-seen order); the meta filter judges it with that source as the role. | `service.py:682-692, 7513-7518`; `cms.py:498, 568`; `episodes.py:41-61` |
+| CN6 | One transaction, as CO7 and CO9 over every target: `supersede_entries` locks the sorted distinct rows, refuses with sorted distinct `missing` / `already_retired` lists, retires them all at one `stamp` and invalidates every target's traces; no derived slots are read (`report_derivations=False`); the capacity victim is chosen with every target already retired. The meta filter refusing the replacement rolls the whole transaction back (`replacement_rejected`). | `service.py:2809-2850, 3231-3262`; `postgres.py:962-1029` |
+| CN7 | After commit, CO10's publication with every target retired. The answer: `{superseded_count, superseded_texts, superseded_ids, new_memory_stored: true, new_memory_surprise (4 places)}`, the texts and ids in selection order, with no `derived_flagged` keys. | `service.py:3043-3102` |
+
+`harness/w2e.py live --only consolidate-branches consolidate-capacity
+consolidate-meta-filter` compares every answer and the full bank after each
+call, on templates the Python daemon's own tools wrote (the twin row and the
+trace rows are SQL seeds, as for `memory_supersede`): three targets by id
+with a session header and tags to normalize (one stamp, every target's
+invalidations, the third target's quoted label inherited); repeated exact
+texts with the caller's source (the second target's constraint inherited);
+a repeated id with an empty source; refusals for both and neither selector,
+empty lists, ids not positive, a blank text and a blank replacement; every
+error reported over lists that mix good, missing, retired, ambiguous and
+out-of-range targets; rows deleted behind the daemons' backs; one target
+retired behind their backs (`supersede_entries` refuses the whole list);
+two targets retired behind them, listed against id order (the refusal's
+sorted ids); a blank replacement with no selector; a full band whose cheapest
+entry is a target only when every target counts as retired; and a
+replacement the meta filter refuses under the default source and stores
+under the caller's `user` source. The
+`mcp-consolidate-no-dedupe`, `-first-error-only`, `-labels-first-only`,
+`-victim-first-only`, `-derived-keys` and `-default-source` mutants must be
+caught, and the `supersede-*` scenarios still agree after the
+generalization.
 
 ### The graph store's write tools over MCP (2026-10-19)
 
@@ -1266,7 +1307,7 @@ tiebreak and the filers run from the background sweep and are task O2.
 | RV15 | `dismiss_slot_pair`: `store`, `src` and `dst` required, each key `entity|attribute` with exactly one bare `|` (`%7C` a literal pipe), else `store_src_dst_required` with its detail; an unknown store `bad_store`; keys normalized with the cortex `_norm_key`, a blank or identical slot `bad_pair`; in one transaction `<store>:<key>` pairs dismissed and `curation_auto_dismissals_v1` rewritten (always, `{}` included). `{dismissed, new, store, a_key, b_key}`. | `mcp_server.py:2376-2385`; `service.py:477-483,7944-7967`; `curation_safety.py:531-545` |
 | RV16 | `restore_slot`: `store` `lesson` or `world` and `src` required (`store_src_required`); a `|` key restores that slot, a bare name every retired aspect of it; `decided_by` "agent". | `mcp_server.py:2386-2399` |
 | RV17 | A slot a curated duplicate retired (its retire row carrying `_curation_duplicate`) restores through `restore_curated_duplicate`: the target and evidence checks (`curation_restore_requires_attribute`, `curation_target_mismatch`, `curation_evidence_changed`), the loser staged on a copy (rebuilt from its evidence when compaction purged it), then one transaction re-validating under `FOR UPDATE`, rewriting the slots with entity links and adding the restore audit; the copy published after commit. A failed commit reloads the store and classifies it: committed answers `source: "reconciled"`, rolled back raises `curation restore rolled back: …` (`internal_error`). | `curation_safety.py:1140-1231`; `service.py:4898-4943` |
-| RV18 | Otherwise the resident store restores the newest retired record of each slot without a current one (`superseded_at` cleared), each with a `store_decisions` restore row and, for lessons, its graph link, then the store is saved; slots whose retired rows compaction purged come back from their `retired_slots` audit snapshots, world facts through `world_write` (an unsafe source URL skipped, `source_doc_id` kept) with a restore row `from audit snapshot`. | `service.py:5231-5266,5390-5440,5476-5604`; `memory/lessons.py:283-314` |
+| RV18 | Otherwise the resident store restores the newest retired record of each slot without a current one (`superseded_at` cleared), each with a `store_decisions` restore row and, for lessons, its graph link, then the store is saved; slots whose retired rows compaction purged come back from their `retired_slots` audit snapshots, world facts through `world_write` (an unsafe source URL skipped, `source_doc_id` kept) and lessons through `lesson_write` (DS13), with a restore row `from audit snapshot`. | `service.py:5231-5266,5390-5440,5476-5604`; `memory/lessons.py:283-314` |
 | RV19 | The answer: `{restored, source: retired_record|audit_snapshot|mixed|reconciled, task+aspect or entity+attribute, entries}`, or `{restored: 0, label, reason: slot_live|nothing_retired}` with its note. | `service.py:5522-5537` |
 
 `harness/w2e.py live --only review-list review-list-gated
@@ -1297,6 +1338,111 @@ restores, the world audit-snapshot fallback; its `mcp-review-slot-meta-noop`,
 `-restore-oldest`, `-restore-over-live` and `-no-decision` mutants must be
 caught. The lesson-fallback prediction and the reconciliation classifier
 are unit-tested against Python's own functions.
+
+### memory_dream over MCP: status, pull, commit, runs and the consolidation pass (2026-10-20)
+
+`dream/extractor.rs` (endpoint resolution, probing, the OpenAI-compatible
+client, reply parsing and error classification), `dream/prompts.rs`,
+`dream/service.rs` (the tool, status and the cursor engine over the live
+bank), `dream/run.rs` (the pass, the run journal, the stall record),
+`dream/relations.rs` (the post-commit graph work), `dream/gates.rs` (the
+literal, span and citation gates, the constraint carrier) and
+`dream/judge_agreement.rs` (the review-queue block of status), over the
+cortex write paths' dream inputs (`stores/cortex_write.rs`,
+`cortex_members.rs`, `cortex_resolve.rs`) and the graph store. Python:
+`mcp_server.py` `memory_dream` (2171-2287); `service_dream.py`
+`dream_status` (3035-3118), `dream_pull` / `dream_commit` (1045-1302),
+`dream_runs` (1033-1043), `dream_run_auto` (2922-2951), `dream_run` and
+`_dream_run_locked` (1491-2394), the relation linking (367-466), the alias
+screen (1349-1489), the constraint carrier (2411-2475), the quarantine route
+(2494-2568) and the citation helpers (264-303); `memory/dream.py` (prompts
+147-371, parsing 619-880, the extractor 1189-1630, endpoint resolution and
+building 1999-2395); `memory/cortex.py` (the dream inputs of `write`,
+`add_member`, `remove_member` and `resolve`).
+
+| # | Exact item | Source |
+|---|---|---|
+| DR1 | Bound arguments: `memory_dream(action, limit=None, commit_token=None, cursor=None, apply=False, snippets=True, run_id=None)`; an unknown action answers `unknown_action` with the seven actions. `deep` and `rollback` answer the `not_implemented` refusal (tasks P2a and P1-rollback). | `mcp_server.py:2171-2238` |
+| DR2 | `status`: backlog, idle seconds, the display cursor, `would_fire`, the outcome-inference and digest counters, the deep-dream need block, the review queue with judge agreement, the stall record, then the extractor fields (with the alias served-model lookup and the primary probe when a fallback is set). | `service_dream.py:3035-3118,3677-3787`; `dream.py:2250-2275` |
+| DR3 | `pull`: the pending entries of the resident bank (not excluded sources, ordered by timestamp, row id and dream id, at most `limit or 40`, capped at 4096), with an HMAC commit token over them; `commit` acknowledges a token's entries (a legacy cursor or no token refused); `runs` lists recent run rows. Dream tracking covers entries stored after start. | `service_dream.py:1033-1302` |
+| DR4 | Endpoints: config or environment (`PSEUDOLIFE_DREAM_*`), the model override, the mode; `auto` with a fallback probes the primary's `/health` (a 404 retrying `/models`) twice, two seconds apart; the primary carries its key and `cache_prompt`/`reasoning_effort`, the fallback only its own key. No URL and model: a no-op extractor. | `dream.py:1999-2247,2366-2395` |
+| DR5 | Requests: `POST {base}/chat/completions` with Python's `json.dumps` bytes (default separators, `ensure_ascii`), the system prompt with the vocabulary hint (the top 60 of 120 slots ranked by cosine to the batch embedding) and the known-facts hint, the numbered notes; redirects refused; 240-second timeout. Replies: the outermost object of the content parsed as Python's `json.loads` would (lone surrogates and non-finite numbers included), each field coerced as `dream.py` does; failures classified (`login_expired`, `extractor_unreachable`, `extractor_error`) with Python's error class names. | `dream.py:619-880,1189-1630,2278-2308` |
+| DR6 | `run`: refused (`not_implemented`, naming the stage) while graph insight (`memory.graph_insight.enabled`) is enabled; otherwise a single-flight guard (`dream_in_progress`), then the extraction of the pending batch (hold twice on a failure, isolate per entry on the third, quarantine what fails alone). | `service_dream.py:1491-1735` |
+| DR7 | Each claim: the write tier from the source entry, raised only when the claim's citation backs it; the assistant-speaker policy; the slot resolver; the literal gate (digit-bearing tokens must occur in the batch or source, Unicode digits folded as `float()` folds them) and the span gate; the trace skip; the constraint carrier; then the cortex write, set add or remove, or the quarantine route, each with `dream` set; a journal row and a trace with reinforcement for each, except the listed actions. Events go to the chronicle; a separate events pass follows. | `service_dream.py:264-303,1892-2270,2411-2568` |
+| DR8 | A write failure fails the run and holds (phase write); otherwise the batch is committed and the run stamped. After commit, unlocked and best effort: relations (the gates in order: generic hubs, junk names, the confidence floor, the cross-project and low-confidence proposals; write-dedup merge proposals for minted endpoints), alias candidates, outcome inference and lesson synthesis (DS1-DS12; the lesson tallies merged into the run row), the source backfill and the retype pass. An empty pull runs outcome inference, digests and lesson synthesis, then the retype pass. The answer is Python's, key for key, with `extractor` last. | `service_dream.py:367-466,1349-1489,2270-2394,2922-2951` |
+
+`harness/w2e.py live --only dream-*` compares every answer, the full bank
+and, through `harness/stub_extractor.py`, the two daemons' model requests:
+each daemon talks to its own stub, which answers from the scenario's reply
+table (keyed by the request body's digest or by prompt kind and user
+content) and records method, path, body and a digest of the authorization
+header; the request sequences must be identical after every step, and a
+request with no table entry is itself a difference. **What this claims:**
+given identical model replies, both daemons send byte-identical requests and
+write identical banks. It claims nothing about model behaviour. The
+scenarios cover the basics (status, pull, commit, runs, refusals), a full
+run of every claim kind and relation gate, holds and isolation, the
+quarantine and span gates, an empty bank, the fallback endpoint and its
+stall, the hint knobs, the literal gate's modes, outages, refused redirects
+and login failures, and lone surrogates; the stages are switched off there
+and covered by the `dream-stages-*` scenarios below. The `mcp-dream-*` mutants must be caught. Request bodies and reply
+parsing are also unit-tested against Python's own extractor
+(`harness/goldens/dream-extractor.json`).
+
+### memory_dream run: outcome inference, lesson synthesis and digests (2026-10-20)
+
+`dream/stages.rs`, `dream/lessons.rs`, `dream/stage_calls.rs` and
+`lesson_write.rs`. Python: `service_dream.py` `infer_outcomes_stage`
+(497-568), `generate_digests_stage` (570-708), `_pending_lesson_signals`
+(710-744), `synthesize_lessons` (746-1019), `_staged_slot` (315-340) and
+the cursor and candidate helpers (3134-3283); `memory/dream.py`
+`_format_signals`, `is_rule_signal`, `_must_include`, `_missing_values`,
+`_parse_outcome_claims`, `_parse_digest`, `split_session_context`,
+`_lessons_completion`, `_lesson_claims`, `extract_lessons`,
+`extract_rules`, `infer_outcomes` and `summarize_session`; `service.py`
+`lesson_write`, `_write_lesson_locked`, `_link_lesson_graph`,
+`_lesson_duplicate_locked` and `_restore_from_snapshot` (5131-5267,
+5553-5604, 5654-5672); `memory/lessons.py` `write_fact`; `storage/postgres.py`
+`add_signal`, `pending_signals`, `consume_signals`, `prune_signals`,
+`count_signals_for_episodes`, `lesson_batch_status`,
+`lesson_synthesis_transaction` and `lesson_lineage_sources`.
+
+| # | Exact item | Source |
+|---|---|---|
+| DS1 | Order: an empty pull runs outcome inference, digests, lesson synthesis, the (refused-if-on) graph insight, then the retype pass; after a commit outcome inference and lesson synthesis (its `lesson_signals`, `lessons_written`, `lessons_deduped` merged into the run row; digests answer `claims-branch`). A stage switched off answers its fixed `disabled` dict; with the no-op extractor `no-extractor` (lesson synthesis only after selecting signals). | `service_dream.py:1520-1545,2290-2370` |
+| DS2 | Outcome inference candidates: closed session roots (no parent, a session key, `ended_at` strictly past the cursor's `ts`), oldest first, with at least one subtree entry (digests not counted) and no subtree signal, at most eight; the context is `Session: <title or (untitled)>`, `Sub-task: <title>` per titled descendant, then every subtree entry but digests (status and log included) by timestamp, `- (<source>)[ [superseded]] <text>`. | `service_dream.py:3149-3195` |
+| DS3 | Outcome inference: one unlocked `infer_outcomes(context, cap=infer_outcomes_max_signals)` per candidate; a transport failure halts the stage (cursor held). Under the writer lock the cursor is reloaded and the root skipped when the cursor passed it or it gained a signal; a malformed reply records `retry[root] += 1` and stops the stage, the second advances past it; claims become `origin="inferred"` signals (one insert each, a refused one skipped), then `ts = ended_at` and the retry dropped. The cursor is the meta `outcome_inference_cursor` `{ts, retry}`. `{scanned, written}`. | `service_dream.py:497-568,3134-3147` |
+| DS4 | `_parse_outcome_claims`: `[]` for a cap under one; the first `{` to the last `}` parsed, `None` when that fails (`ValueError`; a `RecursionError` escapes) or when `outcomes` is missing or not a list; claims need a stripped `task` and an outcome in the enum (else dropped), `about`/`detail` stripped or `None`; at most `cap`. | `dream.py:1092-1126` |
+| DS5 | Lesson selection: signals older than `signal_retention_days` pruned; pending signals created within `signal_retry_days` (all when 0), oldest first, at most `synthesis_max_signals` (0 uncapped), rotated by the process-local cursor with a wrap to the oldest; a signal whose credited entries (`used_ids.credited`, positive integers) are all gone held back; the selected cursor kept only when something was selected. | `service_dream.py:710-744,746-781` |
+| DS6 | Routing: a signal is a rule when `rule_mode` is on or its `about` starts with `rule:`; the rest go to one `extract_lessons` call (the clustering prompt over `_format_signals`, `repr()` of task, about and detail, CPython 3.11's exact `str.isprintable`, `[machine-inferred]` for inferred signals); rules to `extract_rules`: one call per signal, retried once naming the `MUST INCLUDE:` values a rule dropped, an empty retry, a still-missing value, a contradicted verdict or an invalid enum failing that signal, `rule:` stripped from `about`; only a batch whose every call failed raises. A failure's `str(exc)` (Python's `json.loads` messages included) lands in `error`. | `service_dream.py:782-850`; `dream.py:1072-1087,1445-1597` |
+| DS7 | `_lesson_claims`: stripped `task` and `lesson` required; clustering repairs `aspect` (default `lesson`), polarity (`-` or `+`), outcome (`success`) and confidence (clamped `float()`, 0.6 on a `TypeError`/`ValueError`, an `OverflowError` escaping); a rule refuses a bad outcome or polarity and keeps the first. | `dream.py:1480-1520` |
+| DS8 | Acknowledgement plan: the clustering route as a whole when it returned claims; each rule signal not failed or empty; a rule result count that does not match its handled signals voids the rule route. The answer starts `{signals, lessons: 0, deduped: 0}` plus `rule_signals`, `rules_failed`, `rules_empty` and `error` when set. | `service_dream.py:851-900` |
+| DS9 | The commit: claim embeddings (`task aspect lesson`, stripped) first; then one transaction locks the contributors' credited entries and the selected signal rows (`FOR UPDATE`), answering `skipped: signals-changed` when a row changed or no claim's route still has a source; a dirty current lesson is linked to the graph; each claim (unless `synthesis_dedup_min_similarity` finds a same-polarity current lesson at another slot among the top three, rules exempt) is written on a staged copy in a savepoint (its RAM write undone on failure, counted in `write_errors`): `write_fact` with confidence 0.4 when every selected signal is inferred, origin `agent`, the lineage provenance (`signal:`, `episode:`, `entry:`, `lineage:batch`, `inferred`) and valid time (the oldest source), then the graph link, then a `lineage` audit for the sources newly verified (all on insert or supersede, the unknown ones on a confirm of a lesson that has lineage). The dirty slots are rewritten and the handled signals consumed (a count mismatch fails the batch); the copy is published after the commit. A failure counts a persistence error and reports `str(exc)`; a commit whose outcome is uncertain is reconciled from the signal rows. | `service_dream.py:901-1019`; `postgres.py:1311-1330,2066-2145` |
+| DS10 | `write_fact` / `lesson_write`: insert at an empty slot; the same normalized lesson confirms (last confirmed, `min(1, max(old, new))` confidence, set unions, the new outcome and polarity, a non-empty `about`/`origin`, the new vector, `tx_time`, HLC, writer and session); a different one supersedes unless its HLC is older (`stale`). `_link_lesson_graph`: the task-type entity, the `about` object unless blank, the task itself, junk or a compound, and the `prefers`/`avoids` edge at 0.7, origin `action`. | `lessons.py:91-208`; `service.py:5131-5171,5231-5267` |
+| DS11 | Digest candidates: closed session roots past the cursor or queued in `regenerate`, ordered by their `context_deferred` position then `ended_at`, without a live digest entry, with subtree entries, at most `digest_max_per_cycle`. One unlocked `summarize_session` (the digest prompt with `digest_target_chars`) per context of at most `digest_context_chars`, else one per `split_session_context` part and a reduce over the part digests joined by blank lines; a malformed part fails the root. `_parse_digest` refuses a blank digest and one echoing the prompt's own phrases that the record lacks. | `service_dream.py:570-612,3217-3262`; `dream.py:1129-1185,1955-1987` |
+| DS12 | Digest commit (writer lock): the cursor reloaded; skipped when the cursor passed the root (unless queued) or it has a live digest; a changed context re-queues it (`regenerate` sorted, `context_deferred` rotated); malformed output or a failed write: one held retry, then advance (`ts = max(ts, ended_at)`, the root dropped from both lists); a digest is stored as a `source="digest"` first-band entry at surprise 1.0, tagged `digest`, stamped to the root, text `Session digest: <title> (<UTC day[–day]>, <n> entries)\n<digest>`, outside the gate pipeline (the capacity victim dropped first). The cursor is the meta `session_digest_cursor`. | `service_dream.py:613-708,3197-3215,3263-3283` |
+| DS13 | `restore_slot` for lessons rewrites each purged slot's audit snapshot through `lesson_write` (task, aspect and lesson required; outcome, polarity, confidence, origin, provenance and support defaulted as Python does), then records a restore row `from audit snapshot` per slot; mixed with retired records it answers `source: mixed`. | `service.py:5476-5537,5553-5604` |
+
+`harness/w2e.py live --only dream-stages-infer dream-stages-lessons
+dream-stages-rules dream-stages-inferred dream-stages-digests review-slots`
+compares every answer, the full bank and both daemons' model requests
+through the stub (new prompt kinds `outcomes`, `lessons`, `rules`,
+`digest`): inference with a dropped enum, a refused lone surrogate, the cap,
+a malformed reply held then passed, a nothing-found reply, a root that
+already has a signal and a failing endpoint that halts the stage;
+clustering synthesis with lineage audits, then a supersede and a confirm,
+then a claim whose write fails (its route left pending); rule mode by the
+`rule:` prefix with the missing-value retry, an empty and a failing rule
+beside a clustering signal; an inferred signal feeding synthesis in the
+same run (confidence 0.4); digests in one call, by map-reduce and a
+prompt-echo reply held then passed; and the lesson audit-snapshot restore.
+Session roots are closed by a declared `sql` seed at fixed clocks (only the
+SessionEnd hook and the idle reaper close them). The `mcp-dream-stage-*`
+mutants must be caught. The stage calls' bodies and replies are
+unit-tested against Python's own extractor (`stage_bodies`,
+`stage_replies` in `harness/goldens/dream-extractor.json`), the JSON error
+messages against CPython's, and `repr()` against CPython's Unicode 14
+table (`harness/gen_py_repr_unicode.py`).
 
 ### Board tools over MCP (2026-10-16)
 
