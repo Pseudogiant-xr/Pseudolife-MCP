@@ -145,21 +145,37 @@ stale *and* the diff from master touches the census inputs (the census
 module's `CURRENCY_INPUTS`: the census, its script and the port inventory).
 Elsewhere, drift is only reported. After merging, `build` runs that check on
 the batch head with a pull request event naming the batch's base. If the
-check would fail, `build` drops every member whose own diff changes those
-inputs, naming the other members that change them too, and merges the rest
-again from master. `open` comments on and unlabels each dropped member, as
-it does after a conflict. Its author merges master forward once master
-holds the rest of the batch, regenerates the census with `python rust/producer_census.py`, reruns
-its targeted tests and re-applies the label. A census that is stale while no member
-touches its inputs is printed as report-only and left alone, as CI leaves
-it. Before the push, `open` runs the same check and refuses if it would
-fail, so a plan built without it cannot reach CI.
+check would fail, the members whose own diff changes those inputs (the
+census changers) usually carry a census regenerated on master, which the
+other members' changes staled. So `build` first merges the census changers
+alone and runs the check. If it passes, it merges the batch again without
+the other members whose own diff touches a path the census hashes, and
+runs the check once more. Those paths are what master's census module
+lists in the batch tree (so an added file counts), what master's census
+hashes (so a deleted one counts) and what each changer's census hashes
+(since a changer may widen the scopes). If that head passes, it is the
+batch: the members left out keep their label, need no action and join the
+next batch, where CI only reports the census because their diffs leave its
+inputs alone. A member touching only paths the census does not hash, such
+as `ops/tool.sh.bak` beside a hashed `ops/tool.sh`, stays in.
+
+If either check fails, `build` drops the census changers instead, naming
+the others that change the inputs too, and merges the rest again from
+master. `open` comments on and unlabels each dropped changer, as it does
+after a conflict. Its author merges master forward once master holds the
+rest of the batch, regenerates the census with `python
+rust/producer_census.py`, reruns its targeted tests and re-applies the
+label. A census that is stale while no member touches its inputs is printed
+as report-only and left alone, as CI leaves it. Before the push, `open`
+runs the same check and refuses if it would fail, so a plan built without
+it cannot reach CI.
 
 That check runs the batch head's census script, which is member code, so
 `build` (including `--dry-run`) executes it on this machine, as the full
 suite will. It runs with only the environment Python and git need to start,
-without tokens such as `GH_TOKEN`. The list of inputs is read from master's
-copy of the script, so no member code runs inside `ops/integrate.py`
+without tokens such as `GH_TOKEN`. The list of inputs and of hashed paths
+is read from master's copy of the script and from the committed census
+files, parsed as data, so no member code runs inside `ops/integrate.py`
 itself. A member that changes the script changes one of the inputs, so it
 is caught either way. With no census on master there is no check.
 
