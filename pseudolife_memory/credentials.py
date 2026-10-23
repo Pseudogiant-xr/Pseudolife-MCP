@@ -199,12 +199,16 @@ def _secure_windows_file(path: Path) -> None:
         # withholds even from the file's owner. When the owner already is
         # TokenUser, the protected DACL alone is the whole job; any other
         # owner (an elevated default) still has to be pinned, so it refuses.
-        if (error == 5 and _windows_owner_sid(path) == user_text
-                and apply(str(path), 0x80000004, descriptor)):
-            return
+        step = "the owner and access list"
+        if error == 5 and _windows_owner_sid(path) == user_text:
+            if apply(str(path), 0x80000004, descriptor):
+                return
+            error, step = ctypes.get_last_error(), "the access list"
+        # The folder, not the file: for a token write the file is a temporary
+        # one that is gone by the time the user reads this.
         raise CredentialError(
             f"credential file permissions could not be protected (Windows error {error} "
-            f"setting the owner and access list of {path}); keep it in a folder you have "
+            f"setting {step} of a file in {path.parent}); keep it in a folder you have "
             "full control of, such as one under your user profile")
     finally:
         kernel.LocalFree(descriptor)

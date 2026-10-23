@@ -338,7 +338,7 @@ def _run_repair(path: Path) -> subprocess.CompletedProcess:
 def _current_user_sid() -> str:
     whoami = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "whoami.exe"
     out = subprocess.run([str(whoami), "/user", "/fo", "csv", "/nh"], check=True,
-                         capture_output=True, text=True).stdout
+                         capture_output=True, text=True, timeout=60).stdout
     return out.strip().split(",")[-1].strip('"')
 
 
@@ -355,14 +355,16 @@ def test_a_token_file_is_protected_in_a_directory_granting_modify_only(tmp_path:
     folder.mkdir()
     sid = _current_user_sid()
     subprocess.run(["icacls", str(folder), "/inheritance:r", "/grant:r", f"*{sid}:(OI)(CI)M"],
-                   check=True, capture_output=True)
+                   check=True, capture_output=True, timeout=60)
     try:
         path = folder / "token"
-        import ctypes
-        if ctypes.windll.shell32.IsUserAnAdmin():
-            # Elevated (GitHub's runners): a new file's owner defaults to
-            # Administrators, which must still be replaced and cannot be here;
-            # the refusal then names the Windows error and the fix.
+        probe = folder / "probe"
+        probe.write_text("", encoding="utf-8")
+        if credentials._windows_owner_sid(probe) != sid:
+            # This token's new files are owned by someone else (an elevated
+            # one's Administrators default, as on GitHub's runners): that owner
+            # must still be replaced and cannot be here, so the write refuses,
+            # naming the Windows error and the fix.
             with pytest.raises(CredentialError, match=r"Windows error 5 .*full control"):
                 private_token(path, "fixture-secret")
             return
@@ -374,7 +376,7 @@ def test_a_token_file_is_protected_in_a_directory_granting_modify_only(tmp_path:
             os.close(fd)
         assert CredentialProvider(path=path).snapshot().token == "fixture-secret"
     finally:
-        subprocess.run(["icacls", str(folder), "/reset", "/T"], capture_output=True)
+        subprocess.run(["icacls", str(folder), "/reset", "/T"], capture_output=True, timeout=60)
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows ACLs")
@@ -388,13 +390,77 @@ def test_an_owner_other_than_the_user_is_still_pinned_or_refused(tmp_path: Path,
     folder = tmp_path / "modify-only"
     folder.mkdir()
     subprocess.run(["icacls", str(folder), "/inheritance:r", "/grant:r",
-                    f"*{_current_user_sid()}:(OI)(CI)M"], check=True, capture_output=True)
+                    f"*{_current_user_sid()}:(OI)(CI)M"], check=True, capture_output=True,
+                   timeout=60)
     monkeypatch.setattr(credentials, "_windows_owner_sid", lambda path: "S-1-5-32-544")
     try:
         with pytest.raises(CredentialError, match=r"Windows error 5 setting the owner"):
             private_token(folder / "token", "fixture-secret")
     finally:
-        subprocess.run(["icacls", str(folder), "/reset", "/T"], capture_output=True)
+        subprocess.run(["icacls", str(folder), "/reset", "/T"], capture_output=True, timeout=60)
+
+
+@pytest.mark.parametrize("owner, retried", [("user", True), ("administrators", False)])
+def test_a_denied_owner_set_falls_back_only_for_the_users_own_file(monkeypatch, owner, retried):
+    """The fallback's decision on every OS (GitHub's elevated runner never
+    reaches it for real): when setting the owner is denied (error 5), the
+    owner-only access list alone is set only if the file already is the
+    user's; any other owner refuses, naming the error and the folder."""
+    import ctypes
+    from types import SimpleNamespace
+
+    from pseudolife_memory import credentials
+
+    user_sid = "S-1-5-21-100-200-300-1001"
+    calls, buffers, state = [], [], {}
+
+    def convert_descriptor(sddl, revision, output, size):
+        state["descriptor"] = sddl
+        ctypes.cast(output, ctypes.POINTER(ctypes.c_void_p))[0] = 123
+        return True
+
+    def apply_security(path, flags, descriptor):
+        calls.append(flags)
+        return not flags & 1           # setting the owner is denied
+
+    def open_token(process, access, output):
+        ctypes.cast(output, ctypes.POINTER(ctypes.c_void_p))[0] = 456
+        return True
+
+    def get_token(handle, info_class, buffer, length, needed):
+        ctypes.cast(needed, ctypes.POINTER(ctypes.c_ulong))[0] = 32
+        if buffer is None:
+            return False
+        ctypes.cast(buffer, ctypes.POINTER(ctypes.c_void_p))[0] = 789
+        return True
+
+    def sid_to_string(sid, output):
+        buffer = ctypes.create_unicode_buffer(user_sid)
+        buffers.append(buffer)
+        ctypes.cast(output, ctypes.POINTER(ctypes.c_void_p))[0] = ctypes.addressof(buffer)
+        return True
+
+    advapi = SimpleNamespace(
+        ConvertStringSecurityDescriptorToSecurityDescriptorW=convert_descriptor,
+        SetFileSecurityW=apply_security, OpenProcessToken=open_token,
+        GetTokenInformation=get_token, ConvertSidToStringSidW=sid_to_string)
+    kernel = SimpleNamespace(LocalFree=lambda *a: True, CloseHandle=lambda *a: True,
+                             GetCurrentProcess=lambda *a: True)
+    monkeypatch.setattr(ctypes, "WinDLL",
+                        lambda name, **kwargs: advapi if name == "advapi32" else kernel,
+                        raising=False)
+    monkeypatch.setattr(ctypes, "get_last_error", lambda: 5, raising=False)
+    monkeypatch.setattr(credentials, "_windows_owner_sid",
+                        lambda path: user_sid if owner == "user" else "S-1-5-32-544")
+    target = Path("folder") / "new-credential-file"
+    if retried:
+        credentials._secure_windows_file(target)
+        assert calls == [0x80000005, 0x80000004]   # owner+DACL denied, then DACL alone
+    else:
+        with pytest.raises(CredentialError) as refused:
+            credentials._secure_windows_file(target)
+        assert calls == [0x80000005]
+        assert "Windows error 5 setting the owner and access list of a file in folder"             in str(refused.value)
 
 
 # (WD), not W: FILE_GENERIC_WRITE carries SYNCHRONIZE, and denying it makes
