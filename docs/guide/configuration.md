@@ -3587,8 +3587,9 @@ pseudolife-mcp-daemon` re-establishes it.
 
 `ops\backup.ps1` (Windows) / `ops/backup.sh` (Linux/macOS) runs `pg_dump`
 inside the container into `data\backups\` with 7-day rotation, and also
-tars the daemon **state volume** (ingested `document_ingest` files, cortex
-snapshot, graph snapshots — those live only there, not in Postgres) into a
+tars the daemon **state volume** (cortex snapshot, graph snapshots and any
+pre-v57 chromadb document store — those live only there; ingested documents
+are in Postgres since v57) into a
 sibling `pseudolife_state-*.tgz`. An optional off-disk mirror via
 `PSEUDOLIFE_BACKUP_MIRROR` carries both artifacts;
 `PSEUDOLIFE_BACKUP_MIRROR_KEEP=N` (or `-MirrorKeep` / `--mirror-keep`) caps

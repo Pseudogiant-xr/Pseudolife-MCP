@@ -21,6 +21,7 @@ from pseudolife_memory.memory.reference_bank import (
     ReferenceBank,
     cosine_similarity_from_distance,
 )
+from pseudolife_memory.storage.schema import SCHEMA_META_VERSION
 from pseudolife_memory.utils.config import ReferenceConfig
 
 DIM = 1024
@@ -552,7 +553,7 @@ def test_an_old_backup_restores_with_its_documents(
         assert svc._reference.size == len(CORPUS)  # noqa: SLF001
         hit = svc.search_documents(next(iter(CORPUS.values())), top_k=1)
         assert hit["entries"][0]["source"] == next(iter(CORPUS))
-        assert svc._storage.meta_get("schema_version") == 57  # noqa: SLF001
+        assert svc._storage.meta_get("schema_version") == SCHEMA_META_VERSION  # noqa: SLF001
     finally:
         _close(svc)
 
@@ -662,6 +663,29 @@ def test_the_scratch_copy_is_cleared_before_and_after_an_import(
 
     assert _migrate(store, storage)["inserted"] == 2
 
+    assert not leftover.exists()
+
+
+def test_a_scratch_copy_left_by_a_finished_import_is_cleared_later(
+        tmp_path, storage, monkeypatch):
+    """A chromadb without ``close()`` holds the copy's files until the
+    process exits, so on Windows a successful import can leave its scratch
+    copy behind. Later starts skip the import, so the marker check itself
+    clears that copy, without opening the store."""
+    from pseudolife_memory.storage import migrate_chroma
+
+    store = tmp_path / "chromadb"
+    _legacy_ingest(store, dict(list(CORPUS.items())[:2]), compact=False)
+    assert _migrate(store, storage)["inserted"] == 2
+    leftover = tmp_path / migrate_chroma.SCRATCH_NAME
+    (leftover / "0" / "chromadb").mkdir(parents=True)
+    (leftover / "0" / "chromadb" / "chroma.sqlite3").write_bytes(b"x")
+
+    opened = _count_opened_clients(monkeypatch)
+    again = _migrate(store, storage)
+
+    assert again == {"migrated": False, "reason": "already_imported"}
+    assert opened == []
     assert not leftover.exists()
 
 

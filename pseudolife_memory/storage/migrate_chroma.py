@@ -156,10 +156,16 @@ def import_legacy_store(store, collection_name: str, storage,
     from pseudolife_memory.memory.reference_bank import INGEST_ENCODE_BATCH
     from pseudolife_memory.storage.schema import _EXPECTED_EMBEDDING_DIM
 
+    store = Path(store)
     marker = storage.meta_get(MIGRATION_META_KEY)
     if isinstance(marker, dict) and marker.get("status") == "done":
+        # A finished import can leave its scratch copy behind (a chromadb
+        # without close() holds it until the process exits), and no later
+        # start opens the store again to clear it, so clear it here.
+        scratch = store.parent / SCRATCH_NAME
+        if scratch.exists():
+            _remove_scratch(scratch)
         return {"migrated": False, "reason": "already_imported"}
-    store = Path(store)
     if not _store_present(store):
         return {"migrated": False, "reason": "no_store"}
 
