@@ -410,7 +410,7 @@ async fn merge_entity_body(client: &Client, from: i64, into: i64) -> anyhow::Res
     Ok(true)
 }
 
-async fn load_graph_body(client: &Client) -> anyhow::Result<Value> {
+pub(crate) async fn load_graph_body(client: &Client) -> anyhow::Result<Value> {
     let entities: Vec<Value> = client
         .query(
             "SELECT id,canonical,display,etype,created_at FROM entities \
