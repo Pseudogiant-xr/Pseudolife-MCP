@@ -20,8 +20,8 @@
 #
 # ⚠️  TWO VOLUMES HOLD STATE. The bank volume (default `pseudolife-mcp-bank`) is
 #     the canonical bank (entries + facts + graph). The state volume (default
-#     `pseudolife-mcp-state`) holds ChromaDB (ingested documents) + the cortex
-#     and graph snapshots. To rebuild images (e.g. CVE hardening) use `up -d
+#     `pseudolife-mcp-state`) holds the cortex and graph snapshots (and any
+#     pre-v57 ChromaDB store; ingested documents are in the bank since v57). To rebuild images (e.g. CVE hardening) use `up -d
 #     --build` or `stop`/`start` — these keep both volumes. NEVER use `down -v`,
 #     `docker volume rm`, or `docker system prune --volumes`: they DELETE state.
 #     (Both volumes are `external` below so `down -v` skips them, but the manual
@@ -309,7 +309,7 @@ volumes:
   pseudolife_pgdata:
     external: true
     name: ${PSEUDOLIFE_BANK_VOLUME:-pseudolife-mcp-bank}
-  # Daemon state (neural weights + ChromaDB + cortex snapshot). External for the
+  # Daemon state (neural weights + cortex snapshot). External for the
   # same reason as the bank — survives any container teardown/rebuild.
   #   docker volume create pseudolife-mcp-state
   pseudolife_data:

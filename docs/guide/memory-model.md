@@ -844,10 +844,12 @@ its unmatched outputs.
 ## Background documents — the reference bank
 
 A fifth layer holds *source material* rather than memories: the **reference
-bank**, a ChromaDB chunk store for background documents (papers, manuals,
-specs, codebases). `document_ingest(path)` extracts the text of a `.txt` /
+bank**, a chunk store for background documents (papers, manuals,
+specs, codebases), kept in the Postgres bank's `reference_chunks` table
+since schema v57 (a pre-v57 ChromaDB store is imported once at start). `document_ingest(path)` extracts the text of a `.txt` /
 `.md` / `.pdf` / `.html` file, chunks it, and indexes it;
-`document_search(query)` retrieves chunks by pure cosine similarity.
+`document_search(query)` retrieves chunks by exact cosine similarity
+(ties broken by chunk id, so the order is deterministic).
 It is deliberately kept apart from conversational memory — nothing ingested
 here feeds the cortex, the graph, or the dream pass, and `memory_search`
 surfaces document chunks alongside memories without mixing the stores.

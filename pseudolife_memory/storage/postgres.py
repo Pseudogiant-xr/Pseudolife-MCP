@@ -228,6 +228,18 @@ _ENTRY_UPDATABLE = {
 }
 
 
+def _without_nul(value: Any):
+    """``value`` with every NUL in its strings (nested in dicts and lists
+    too) replaced by U+FFFD, which PostgreSQL text and jsonb accept."""
+    if isinstance(value, str):
+        return value.replace("\x00", "\ufffd")
+    if isinstance(value, dict):
+        return {_without_nul(k): _without_nul(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_without_nul(v) for v in value]
+    return value
+
+
 def _embedding_in(value: Any):
     """Accept numpy / torch / list; hand pgvector a float32 numpy array."""
     if value is None:
@@ -2006,6 +2018,95 @@ class PostgresStorage:
             d["embedding"] = _embedding_out(d["embedding"])
             out.append(d)
         return out
+
+    # ── reference documents (schema v57; memory/reference_bank.py) ─────────
+
+    def upsert_reference_chunks(self, rows: list[dict], *,
+                                replace: bool = True) -> int:
+        """Write document chunks; returns how many rows were new.
+
+        Each row: id, source, chunk_index, text, embedding, metadata,
+        ingested_at. ``replace`` (ingest) overwrites a chunk with the same id
+        the way chromadb's upsert did, keeping its first ``created_at``;
+        ``replace=False`` (the chromadb import) leaves an existing row as it
+        stands, so a rerun never undoes a later ingest.
+
+        PostgreSQL text and jsonb refuse the NUL character, which chromadb
+        stored and a PDF's extracted text can carry, so every NUL in the
+        text, the source and the metadata's strings is written as U+FFFD
+        (one character for one, offsets unchanged). The id is not touched:
+        it is computed from the original text, as before."""
+        if not rows:
+            return 0
+        conflict = (
+            "DO UPDATE SET source = EXCLUDED.source, "
+            "chunk_index = EXCLUDED.chunk_index, text = EXCLUDED.text, "
+            "embedding = EXCLUDED.embedding, metadata = EXCLUDED.metadata, "
+            "ingested_at = EXCLUDED.ingested_at"
+            if replace else "DO NOTHING")
+        ids = {r["id"] for r in rows}
+        with self._txn(), self.conn.cursor() as cur:
+            before = len(self.reference_chunk_ids_present(list(ids)))
+            cur.executemany(
+                "INSERT INTO reference_chunks (id, source, chunk_index, text, "
+                "embedding, metadata, ingested_at, created_at) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s) "
+                f"ON CONFLICT (id) {conflict}",
+                [(r["id"], _without_nul(r["source"]), int(r["chunk_index"]),
+                  _without_nul(r["text"]), _embedding_in(r["embedding"]),
+                  Jsonb(_without_nul(r.get("metadata") or {})),
+                  float(r["ingested_at"]), float(r["ingested_at"]))
+                 for r in rows],
+            )
+            return len(ids) - before
+
+    def reference_chunk_ids_present(self, ids: list[str]) -> set[str]:
+        """Which of ``ids`` are chunks in the bank."""
+        if not ids:
+            return set()
+        return {r[0] for r in self.conn.execute(
+            "SELECT id FROM reference_chunks WHERE id = ANY(%s)",
+            (list(ids),)).fetchall()}
+
+    def search_reference_chunks(self, query_embedding,
+                                limit: int) -> list[tuple]:
+        """The ``limit`` nearest chunks by exact cosine distance, as
+        ``(text, source, ingested_at, distance)``. Ties on distance break by
+        chunk id in byte order (``COLLATE "C"``), so the order is total and
+        the same on every server.
+
+        Inside an open transaction the query runs under a savepoint, so a
+        failure the memory-search pool swallows cannot leave the caller's
+        transaction aborted; outside one (the usual autocommit read) it costs
+        no extra round trip."""
+        query = ("SELECT text, source, ingested_at, "
+                 "embedding <=> %s::vector AS distance "
+                 "FROM reference_chunks "
+                 'ORDER BY distance, id COLLATE "C" LIMIT %s')
+        params = (_embedding_in(query_embedding), int(limit))
+        conn = self.conn
+        if conn.info.transaction_status == psycopg.pq.TransactionStatus.IDLE:
+            return conn.execute(query, params).fetchall()
+        with conn.transaction():
+            return conn.execute(query, params).fetchall()
+
+    def count_reference_chunks(self) -> int:
+        return self.conn.execute(
+            "SELECT count(*) FROM reference_chunks").fetchone()[0]
+
+    def reference_documents(self) -> list[dict]:
+        """One row per source: its chunk count and latest ingest time,
+        newest first, then by source in byte order."""
+        rows = self.conn.execute(
+            "SELECT source, count(*), max(ingested_at) FROM reference_chunks "
+            'GROUP BY source ORDER BY max(ingested_at) DESC, source COLLATE "C"'
+        ).fetchall()
+        return [{"source": s, "chunk_count": n, "uploaded_at": t}
+                for s, n, t in rows]
+
+    def clear_reference_chunks(self) -> int:
+        with self._txn():
+            return self.conn.execute("DELETE FROM reference_chunks").rowcount
 
     # ── outcome signals (append-only log the dream drains into lessons) ─────
 

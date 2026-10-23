@@ -1,6 +1,8 @@
 """Approval hints describe each tool's entire argument space, not one probe."""
 import asyncio
 
+from tests.pg_fixtures import pg_conn, pg_service, pg_url  # noqa: F401  (fixtures)
+
 
 READS = {
     "memory_search", "memory_recent", "memory_stats", "memory_fact_get",
@@ -45,19 +47,20 @@ def test_store_can_replace_a_canonical_value_when_auto_promotion_is_enabled(pris
     assert manifest["memory_store"].annotations.destructive_hint is True
 
 
-def test_document_reingest_can_replace_existing_chunk_text(pristine_service, tmp_path):
+def test_document_reingest_can_replace_existing_chunk_text(pg_service, tmp_path):
     from pseudolife_memory.mcp_server import mcp
 
-    svc = pristine_service
+    svc = pg_service
     document = tmp_path / "fixture.txt"
     prefix = "Stable fixture document introduction. " * 4
     document.write_text(prefix + "Original ending.", encoding="utf-8")
+    query = "SELECT id, text FROM reference_chunks ORDER BY id"
     assert svc.ingest_document(str(document), source="fixture-doc")["chunks_stored"] == 1
-    before = svc._reference._collection.get(include=["documents"])
+    before = svc._storage.conn.execute(query).fetchall()
     document.write_text(prefix + "Replacement ending.", encoding="utf-8")
     assert svc.ingest_document(str(document), source="fixture-doc")["chunks_stored"] == 1
-    after = svc._reference._collection.get(include=["documents"])
-    assert after["ids"] == before["ids"]
-    assert after["documents"] == [prefix + "Replacement ending."]
+    after = svc._storage.conn.execute(query).fetchall()
+    assert [r[0] for r in after] == [r[0] for r in before]
+    assert [r[1] for r in after] == [prefix + "Replacement ending."]
     manifest = {t.name: t for t in asyncio.run(mcp.list_tools())}
     assert manifest["document_ingest"].annotations.destructive_hint is True

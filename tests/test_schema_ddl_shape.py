@@ -125,6 +125,12 @@ _REQUIRED_COLUMNS = [
     ("coordination_messages", {"origin", "maintainer_proof", "repudiated_at"}),
     # v55 — the board name and who set it ('' = unnamed).
     ("coordination_agents", {"name", "name_source", "name_set_at", "harness_name"}),
+    # v57 — documents in the bank, and the CMS counters weights.pt held.
+    ("reference_chunks", {"id", "source", "chunk_index", "text", "embedding",
+                          "metadata", "ingested_at", "created_at"}),
+    ("cms_counters", {"id", "preset_name", "interaction_count", "logical_turn_count",
+                      "tier_queries", "tier_hits", "surprise_history",
+                      "consolidation_events", "updated_at"}),
 ]
 
 
@@ -160,6 +166,14 @@ _COLUMN_TYPES = [
     ("lesson_search_events", "served", "jsonb"),  # v44
     ("coordination_messages", "maintainer_proof", "jsonb"),  # v54: read back as a dict
     ("coordination_messages", "origin", "text"),             # v54
+    ("reference_chunks", "metadata", "jsonb"),               # v57
+    ("reference_chunks", "chunk_index", "integer"),
+    ("cms_counters", "interaction_count", "bigint"),         # v57
+    ("cms_counters", "logical_turn_count", "bigint"),
+    ("cms_counters", "tier_queries", "bigint"),
+    ("cms_counters", "tier_hits", "jsonb"),
+    ("cms_counters", "surprise_history", "jsonb"),
+    ("cms_counters", "consolidation_events", "jsonb"),
     ("maintainer_passkeys", "public_key", "bytea"),          # v54: the COSE key as registered
     ("maintainer_passkeys", "sign_count", "bigint"),         # v54: a 32-bit counter, unsigned
     ("maintainer_bootstrap", "failed_attempts", "integer"),  # v54: wrong guesses; 5 burn a code
@@ -453,3 +467,16 @@ def test_entries_dream_state_defaults_to_pending_under_its_named_check(pg_conn):
         "WHERE conname = 'entries_dream_state_check'").fetchone()
     assert row is not None, "entries_dream_state_check is missing"
     assert "dream_state" in row[0]
+
+
+def test_cms_counters_holds_one_row(pg_conn):
+    """v57. The counters are one CMS's state, so the table admits the row
+    ``id = 1`` and nothing else: an upsert keyed on it can never fork."""
+    import psycopg
+    insert = ("INSERT INTO cms_counters (id, preset_name, interaction_count, "
+              "logical_turn_count, tier_queries, tier_hits, surprise_history, "
+              "consolidation_events, updated_at) "
+              "VALUES (%s, 'flat', 0, 0, 0, '{}', '{}', '[]', 0)")
+    pg_conn.execute(insert, (1,))
+    with pytest.raises(psycopg.errors.CheckViolation):
+        pg_conn.execute(insert, (2,))

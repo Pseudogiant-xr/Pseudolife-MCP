@@ -378,8 +378,8 @@ value per `entity.attribute`, or a member set for set-valued slots — with
 provenance tiers and contender parking instead of silent overwrites); a typed **knowledge graph** over those facts
 with a closed relation vocabulary and on-read inference; the **world
 cortex** (durable *cited* facts about external reality, age-decayed trust);
-**procedural lessons** learned from the agent's own work; and a ChromaDB
-**reference bank** for document RAG. The canonical layers in depth:
+**procedural lessons** learned from the agent's own work; and a
+**reference bank** for document RAG, stored in the bank since schema v57. The canonical layers in depth:
 [the memory model](docs/guide/memory-model.md); the graph and multi-hop
 recall: [retrieval](docs/guide/retrieval.md).
 
@@ -1307,7 +1307,7 @@ mistaken for a real bank.
 | Capability | Status |
 |---|---|
 | Transport | Streamable-HTTP MCP daemon (`/mcp`); stdio shim is the installer default (per-session identity) — HTTP remains for single-session setups |
-| Storage | Postgres 18 + pgvector (source of truth); ChromaDB for the reference bank |
+| Storage | Postgres 18 + pgvector (source of truth, ingested documents included since v57) |
 | Associative store | Flat similarity store (default since the 2026-08-15 measured verdict; the 8-tier banded preset remains opt-in); hybrid dense + BM25 ranking (BM25 on by default); contradiction detection admits potential updates, including a deterministic slot-identity path regardless of embedding similarity, while retaining earlier source notes; whole-note supersession requires an explicit replacement operation |
 | Canonical-fact cortex | Single-writer: LLM dream pass + `memory_fact_*` (regex auto-promote opt-in, default off) |
 | Set-valued slots | `memory_set_add` / `memory_set_remove` for many-current-value slots; one-way scalar→set conversion, aggregate scalars guarded (park as contender); an `assistant`-origin add cannot convert or join another tier's set, and cannot retract another tier's member |
@@ -1323,7 +1323,7 @@ mistaken for a real bank.
 | Consolidation | `memory_consolidation_candidates` + `memory_consolidate` |
 | Optional components | Cross-encoder reranker (`rerank=True`, ~80 MB, downloaded on first use; the offline daemon image does not include it); ONNX embedding backend (`pip install .[onnx]` — load-only, and auto-selected when installed and the configured model's artifact is already on disk, ~3x faster CPU encode on MiniLM. The configured artifact must already exist locally: the daemon image provisions MiniLM's while building, while a pip install stays on torch until you provision it yourself. Models whose Transformer module loads from a subfolder use torch on native Windows, and the default Qwen3-Embedding-0.6B has no ONNX export at all); NLI contradiction scorer (`pip install .[nli]`, ~278 MB) |
 | Web console | Cortex Console at `/ui/` — health/stats, fact review + history, 3D graph and review queue, search/trace, coordination board, config editor (read-mostly, token-gated like `/mcp`) |
-| Schema version | v56 (Postgres meta version) — additive `ADD COLUMN IF NOT EXISTS` migrations on daemon start, **except v25**: the `vector(384)`→`vector(1024)` move is not additive, so the daemon refuses to start against an older-dimensioned bank until you run [`ops/migrate_embeddings.py`](docs/runbooks/embedding-v25-migration.md); legacy file-mode `.pt` banks auto-migrate into Postgres; [full version history](docs/guide/configuration.md#schema-version-history) |
+| Schema version | v57 (Postgres meta version) — additive `ADD COLUMN IF NOT EXISTS` migrations on daemon start, **except v25**: the `vector(384)`→`vector(1024)` move is not additive, so the daemon refuses to start against an older-dimensioned bank until you run [`ops/migrate_embeddings.py`](docs/runbooks/embedding-v25-migration.md); legacy file-mode `.pt` banks auto-migrate into Postgres; [full version history](docs/guide/configuration.md#schema-version-history) |
 
 ## Troubleshooting
 

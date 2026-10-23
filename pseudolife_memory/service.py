@@ -144,6 +144,16 @@ class PendingEntryReinstatementRecovery:
     request_sha256: str
 
 
+# Documents live in the Postgres bank since schema v57; file mode has none.
+_FILE_MODE_DOCUMENTS = (
+    "Documents are stored in the Postgres bank, and this daemon runs in file "
+    "mode (no Postgres), so it cannot {verb} them. Set "
+    "PSEUDOLIFE_MCP_DATABASE_URL or install the lite tier "
+    "(pip install \"pseudolife-mcp[lite]\"); documents ingested before v57 "
+    "under <data_dir>/chromadb are imported the first time the daemon starts "
+    "with Postgres.")
+
+
 def _entry_to_dict(
     entry: MemoryEntry,
     score: float | None = None,
@@ -859,6 +869,7 @@ class MemoryService(DreamOps, MaintainerOps):
         # Override save_dir so memory tensors land inside data_dir even
         # when the config wasn't tailored for this install.
         self.config.memory.save_dir = str(self.data_dir / "memory_state")
+        # The pre-v57 chromadb document store, read once by the v57 import.
         self.config.memory.reference.persist_dir = str(self.data_dir / "chromadb")
 
         # Defaults that make sense for the *Claude* use-case differ from
@@ -1481,17 +1492,29 @@ class MemoryService(DreamOps, MaintainerOps):
         ``migration_partial``), the weights file, the optional reference
         bank, dream tracking (a failure disables the dream alone, surfaced
         as ``dream_tracking_error``), and the v0.1 file-mode loads."""
-        try:
+        # Documents live in the Postgres bank (schema v57); file mode has no
+        # document store, like it has no cortex. A pre-v57 chromadb store in
+        # the data dir is copied in once first. A failed import never fails
+        # the start: it is logged, nothing is marked, and the next start
+        # tries again.
+        self._reference = None
+        if self._storage is not None:
+            from pseudolife_memory.storage import migrate_chroma
+            ref_cfg = self.config.memory.reference
+            try:
+                migrate_chroma.import_legacy_store(
+                    Path(ref_cfg.persist_dir), ref_cfg.collection_name,
+                    self._storage, self._embedder)
+            except Exception as exc:  # noqa: BLE001
+                logger.error(
+                    "importing the pre-v57 chromadb document store at %s "
+                    "failed (%s); its documents are not searchable until a "
+                    "start imports them. The store is untouched.",
+                    ref_cfg.persist_dir, exc)
             self._reference = ReferenceBank(
-                self.config.memory.reference,
+                ref_cfg, self._storage,
                 embedding_dim=self._embedder.embedding_dim,
             )
-        except Exception as exc:  # noqa: BLE001
-            # ChromaDB is optional — if it fails to start (corrupt DB,
-            # missing dep), continue without the reference bank. Memory
-            # tier still works.
-            logger.warning("ReferenceBank disabled: %s", exc)
-            self._reference = None
         # Reranker is always *constructible* (the model is lazy-loaded on
         # the first rerank()), so attach one unconditionally and let the
         # rerank-enabled flag in cms.retrieve gate actual firing. Reading
@@ -3492,10 +3515,7 @@ class MemoryService(DreamOps, MaintainerOps):
         with self._lock:
             self._ensure_init()
             if self._reference is None:
-                raise RuntimeError(
-                    "Reference bank disabled (ChromaDB init failed). "
-                    "Documents cannot be ingested.",
-                )
+                raise RuntimeError(_FILE_MODE_DOCUMENTS.format(verb="ingest"))
             assert self._embedder is not None
             file_path = Path(path)
             if not file_path.exists():
@@ -3526,10 +3546,11 @@ class MemoryService(DreamOps, MaintainerOps):
         with self._lock:
             self._ensure_init()
             if self._reference is None:
-                return {"count": 0, "entries": []}
+                raise RuntimeError(_FILE_MODE_DOCUMENTS.format(verb="search"))
             assert self._embedder is not None
             embedding = self._embedder.encode_query(query)
-            result = self._reference.retrieve(embedding, top_k=top_k)
+            result = self._reference.retrieve(embedding, top_k=top_k,
+                                              strict=True)
             return {
                 "count": len(result.entries),
                 "entries": [
@@ -3543,7 +3564,7 @@ class MemoryService(DreamOps, MaintainerOps):
     # ------------------------------------------------------------------
 
     def save(self) -> dict[str, Any]:
-        """Persist CMS state. ChromaDB persists itself."""
+        """Persist CMS state. Documents are rows in the bank already."""
         with self._lock:
             self._ensure_init()
             assert self._cms is not None

@@ -22,7 +22,7 @@ Architecture
   ``instant`` / ``short_term`` / ``long_term`` the CMS exposes those as
   attribute shims (``cms.instant``, ``cms.short_term``, ``cms.long_term``).
 
-Reference bank (4th tier, ChromaDB) is unchanged from v0.4.x — it sits
+Reference bank (4th tier; Postgres-backed since schema v57) sits
 outside the MIRAS spectrum (no gradient updates, documents not memories).
 """
 
@@ -295,7 +295,7 @@ class ContinuumMemorySystem:
         self._logical_turn_count = 0
         self._in_logical_turn = False
 
-        # Reference bank (4th tier — ChromaDB RAG, optional).
+        # Reference bank (4th tier — document RAG, optional).
         self.reference = reference_bank
 
         # Introspection: surprise history per band (last 100). Keyed by band
@@ -765,7 +765,7 @@ class ContinuumMemorySystem:
           ``top_k`` slots, ranked by blended (cosine × source × recency)
           score. Entries from earlier (faster) bands get a recency
           boost; later bands rely on raw similarity.
-        * **Reference pool** (ChromaDB documents): capped at
+        * **Reference pool** (ingested documents): capped at
           ``ref_top_k`` slots, appended after the neural pool.
 
         Args:
@@ -2247,7 +2247,7 @@ class ContinuumMemorySystem:
         """Save the CMS state to ``directory/cms_state.pt``.
 
         Always writes the current ``SCHEMA_VERSION``. Reference bank
-        persists itself via ChromaDB so we don't touch it here.
+        rows live in the Postgres bank, so we don't touch it here.
         """
         directory = Path(directory)
         directory.mkdir(parents=True, exist_ok=True)

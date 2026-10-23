@@ -1,4 +1,4 @@
-"""Neural memory subsystem — MIRAS continuum + ChromaDB reference bank.
+"""Neural memory subsystem — MIRAS continuum + reference (document) bank.
 
 Slimmed copy from Pseudolife: only the memory layer travels — no LLM
 backends, no chat engine, no Electron. Built to be wrapped by an MCP
