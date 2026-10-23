@@ -20,5 +20,7 @@
   backup taken before the upgrade. Restore its state archive with the dump
   (`ops/restore.ps1 -StateArchive` / `ops/restore.sh --state-archive`) and
   the older build finds its `weights.pt` again; restoring only the dump
-  leaves the file set aside as `weights.pt.imported`, so rename it back to
-  `weights.pt` before starting the older build, or its counters start fresh.
+  leaves the file set aside as `weights.pt.imported` (`weights.pt.bak.imported`
+  when the backup copy was read, numbered `-2`, `-3` after later upgrades), so
+  rename the newest back to `weights.pt` before starting the older build, or
+  its counters start fresh.
