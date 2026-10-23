@@ -135,8 +135,7 @@ def test_package_version_matches_pyproject():
     reason) only in that stale-local-install case; the equality against
     whatever metadata *is* installed is always asserted, since a drift there
     would be a real code bug."""
-    pyproject_version = re.search(r'^version\s*=\s*"([^"]+)"',
-                                   _read("pyproject.toml"), re.M).group(1)
+    pyproject_version = _pyproject_version()
 
     try:
         installed_version = version("pseudolife-mcp")
@@ -157,6 +156,10 @@ def test_package_version_matches_pyproject():
     assert __version__ == pyproject_version
 
 
+def _pyproject_version() -> str:
+    return re.search(r'^version\s*=\s*"([^"]+)"', _read("pyproject.toml"), re.M).group(1)
+
+
 def test_server_json_versions_match_pyproject():
     """The MCP registry's version guard used to run in the `registry` GitHub
     Actions job, which only executes AFTER the irreversible PyPI publish
@@ -166,8 +169,7 @@ def test_server_json_versions_match_pyproject():
     (`ops/docker-compose.yml`) calls itself the deploy source of truth but
     was unguarded against pyproject.toml too. Pin all three here so a bad
     version cut fails locally, before any workflow runs."""
-    pyproject_version = re.search(r'^version\s*=\s*"([^"]+)"',
-                                   _read("pyproject.toml"), re.M).group(1)
+    pyproject_version = _pyproject_version()
 
     server = json.loads(_read("server.json"))
     assert server["version"] == pyproject_version
@@ -187,8 +189,7 @@ def test_the_native_crates_report_the_release_version():
     a checkout-built Python daemon reports the last release's, and the cut
     moves them with the rest (release-procedure skill; the oracle selection's
     VERSION_FILES)."""
-    pyproject_version = re.search(r'^version\s*=\s*"([^"]+)"',
-                                   _read("pyproject.toml"), re.M).group(1)
+    pyproject_version = _pyproject_version()
     lock = _read("rust/Cargo.lock")
     for crate, package in (("daemon", "pseudolife-daemon"), ("shim", "pseudolife-stdio")):
         manifest = _read(f"rust/{crate}/Cargo.toml")

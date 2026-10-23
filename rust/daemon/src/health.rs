@@ -337,6 +337,24 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    async fn payload_reports_the_release_version_never_the_placeholder() {
+        // The shims compare this with their own version: at the crate
+        // default 0.0.0 they told users to install release 0.0.0.
+        // tests/test_plugin_packaging.py pins the crate to pyproject.toml.
+        let env = crate::config::DaemonEnv::from_env(&|_| None).unwrap();
+        let service = Service::new(
+            Config::default(),
+            env,
+            std::path::PathBuf::from("__release_version_test_without_storage__"),
+            String::new(),
+            false,
+        );
+        let p = payload(&service, &crate::auth::PrincipalStore::new()).await;
+        assert_eq!(p["version"], json!(env!("CARGO_PKG_VERSION")));
+        assert_ne!(p["version"], json!("0.0.0"));
+    }
+
+    #[tokio::test]
     async fn payload_reports_the_generated_schema_version() {
         let env = crate::config::DaemonEnv::from_env(&|_| None).unwrap();
         let service = Service::new(
@@ -352,14 +370,6 @@ mod tests {
             p["schema"],
             json!(crate::storage::schema::SCHEMA_META_VERSION)
         );
-        // The release version, which the shims compare with their own: at
-        // the crate default 0.0.0 they told users to install release 0.0.0.
-        let release = include_str!("../../../pyproject.toml")
-            .lines()
-            .find_map(|line| line.trim_end().strip_prefix("version = \""))
-            .and_then(|rest| rest.strip_suffix('"'))
-            .unwrap();
-        assert_eq!(p["version"], json!(release));
         // Never initialized, and no principal read: not ready, status untouched.
         assert_eq!(
             (

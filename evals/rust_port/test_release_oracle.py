@@ -249,6 +249,21 @@ def test_a_cut_that_moves_the_daemon_crate_is_still_a_release(release):
     assert select_release(root, base, head)["oracle_head"] == head
 
 
+def test_a_cut_from_before_the_daemon_crate_carried_the_version_is_a_release(release):
+    """Earlier cuts left the lock's daemon entry at 0.0.0, untouched: their
+    receipts must still recompute as releases."""
+    root, _, _ = release
+    daemon = '[[package]]\nname = "pseudolife-daemon"\nversion = "0.0.0"\n\n'
+    lock = root / "rust/Cargo.lock"
+    bump(root, "0.18.0")
+    write(root, "rust/Cargo.lock", daemon + lock.read_text(encoding="utf-8"))
+    base = commit(root)
+    bump(root, "0.18.1")
+    write(root, "rust/Cargo.lock", daemon + lock.read_text(encoding="utf-8"))
+    head = commit(root)
+    assert select_release(root, base, head)["oracle_head"] == head
+
+
 @pytest.mark.parametrize("lock_daemon,extra", [("0.18.0", ""), (None, '[dependencies]\nnew = "1"\n')])
 def test_a_half_moved_or_edited_daemon_crate_is_not_a_release(release, lock_daemon, extra):
     root, _, _ = release

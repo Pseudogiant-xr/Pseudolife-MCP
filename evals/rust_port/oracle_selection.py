@@ -21,13 +21,14 @@ VERSION_FILES = {
     "rust/shim/Cargo.toml", "rust/daemon/Cargo.toml", "rust/Cargo.lock",
     "rust/shim/src/lifecycle.rs", "rust/shim/tests/auth_lifecycle_http.rs",
 }
-# The native crates a cut moves, by file, the first one required. The lock's
-# daemon entry is optional: cuts made before the daemon crate carried the
-# release version left it at 0.0.0, and they must still be recognised.
+# The native crates a cut moves, by file: package name -> required. The
+# lock's daemon entry is optional (absent, or left at another version, and
+# then untouched): cuts made before the daemon crate carried the release
+# version left it at 0.0.0, and they must still be recognised.
 CARGO_PACKAGES = {
-    "rust/shim/Cargo.toml": ("pseudolife-stdio",),
-    "rust/daemon/Cargo.toml": ("pseudolife-daemon",),
-    "rust/Cargo.lock": ("pseudolife-stdio", "pseudolife-daemon"),
+    "rust/shim/Cargo.toml": {"pseudolife-stdio": True},
+    "rust/daemon/Cargo.toml": {"pseudolife-daemon": True},
+    "rust/Cargo.lock": {"pseudolife-stdio": True, "pseudolife-daemon": False},
 }
 DOCUMENTS = {
     "CHANGELOG.md", "CONTRIBUTING.md", "README.md", "SECURITY.md",
@@ -58,16 +59,12 @@ def version_metadata_matches(path, before, after, previous, current):
         old, new = tomllib.loads(before.decode("utf-8")), tomllib.loads(after.decode("utf-8"))
         packages = old["package"] if path.endswith(".lock") else [old["package"]]
         expected = before
-        for index, name in enumerate(CARGO_PACKAGES[path]):
+        for name, required in CARGO_PACKAGES[path].items():
             members = [package for package in packages if package["name"] == name]
-            if len(members) != 1:
-                if not members and index:
-                    continue
+            if len(members) > 1 or (required and (not members or members[0]["version"] != previous)):
                 return False
-            if members[0]["version"] != previous:
-                if index == 0:
-                    return False
-                continue
+            if not members or members[0]["version"] != previous:
+                continue  # an optional entry not at the old version stays as it was
             members[0]["version"] = current
             # Replace only this package's canonical Cargo stanza, not
             # dependencies that happen to have the same version number.
