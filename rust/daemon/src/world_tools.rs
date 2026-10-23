@@ -155,29 +155,19 @@ async fn world_write(
     a: SetArgs,
 ) -> Result<Value, ToolError> {
     let ws = ready.write.lock().await;
-    let text = format!("{} {} {}", a.entity, a.attribute, a.value);
-    let embedding = embed(ready, py_strip(&text).to_string()).await?;
-    let session = ws.resolve_session(caller).map_err(ToolError::Invalid)?;
-    let hlc = ready.tick_hlc();
-    let now = crate::episodes::now();
-    let w = WorldWrite {
+    let args = WorldWriteArgs {
+        entity: &a.entity,
+        attribute: &a.attribute,
+        value: &a.value,
         confidence: a.confidence,
         source_url: &a.source_url,
         source_quote: &a.source_quote,
         freshness_class: &a.freshness_class,
         retrieved_at: a.retrieved_at,
         content_hash: a.content_hash.as_deref(),
-        now,
-        hlc,
-        writer_id: Some(writer.as_str()),
-        session_id: session.as_deref(),
+        source_doc_id: None,
     };
-    let (action, idx) = ready
-        .world
-        .write(|s| s.write_fact(&a.entity, &a.attribute, &a.value, Some(embedding), &w));
-    if !crate::mutants::active("mcp-world-set-no-save") {
-        save_world(svc, ready).await?;
-    }
+    let (action, idx) = write_locked(svc, ready, &ws, caller, &writer, &args).await?;
     let snap = ready.world.snapshot();
     let policy = &svc.config.memory.search.stale_policy;
     let mut out = Map::new();
@@ -189,6 +179,64 @@ async fn world_write(
     ));
     drop(ws);
     Ok(Value::Object(out))
+}
+
+/// One `world_write` past its URL check, its arguments as Python passes
+/// them to `write_fact`.
+pub(crate) struct WorldWriteArgs<'a> {
+    pub entity: &'a str,
+    pub attribute: &'a str,
+    pub value: &'a str,
+    pub confidence: f64,
+    pub source_url: &'a str,
+    pub source_quote: &'a str,
+    pub freshness_class: &'a str,
+    pub retrieved_at: Option<f64>,
+    pub content_hash: Option<&'a str>,
+    pub source_doc_id: Option<i64>,
+}
+
+/// The body of `service.world_write` with the write lock held: the
+/// embedding, the writer's session, one HLC tick, the store write and the
+/// slot save. Returns the action and the answered record's index.
+pub(crate) async fn write_locked(
+    svc: &Service,
+    ready: &Ready,
+    ws: &crate::episodes::WriteState,
+    caller: &Caller,
+    writer: &str,
+    a: &WorldWriteArgs<'_>,
+) -> Result<(&'static str, usize), ToolError> {
+    let text = format!("{} {} {}", a.entity, a.attribute, a.value);
+    let embedding = embed(ready, py_strip(&text).to_string()).await?;
+    let session = ws.resolve_session(caller).map_err(ToolError::Invalid)?;
+    let hlc = ready.tick_hlc();
+    let now = crate::episodes::now();
+    let w = WorldWrite {
+        confidence: a.confidence,
+        source_url: a.source_url,
+        source_quote: a.source_quote,
+        freshness_class: a.freshness_class,
+        retrieved_at: a.retrieved_at,
+        content_hash: a.content_hash,
+        source_doc_id: a.source_doc_id,
+        now,
+        hlc,
+        writer_id: Some(writer),
+        session_id: session.as_deref(),
+    };
+    let (action, idx) = ready
+        .world
+        .write(|s| s.write_fact(a.entity, a.attribute, a.value, Some(embedding), &w));
+    if !crate::mutants::active("mcp-world-set-no-save") {
+        save_world(svc, ready).await?;
+    }
+    Ok((action, idx))
+}
+
+/// `_is_safe_source_url`, for the audit-snapshot restore's `world_write`.
+pub(crate) fn safe_source_url(url: &str) -> bool {
+    is_safe_source_url(url)
 }
 
 /// `_save_world`: the dirty slots' rows; a failure counts a persistence

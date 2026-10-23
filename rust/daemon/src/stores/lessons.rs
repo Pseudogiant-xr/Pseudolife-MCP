@@ -7,7 +7,7 @@
 //! is not ported; `memory_forget` retires lessons (scope `lesson`, and the
 //! source cascade of scope `memory`).
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::{Arc, RwLock};
 
 use anyhow::Result;
@@ -146,6 +146,36 @@ impl LessonStore {
         out
     }
 
+    /// The records `restore` brings back, without changing anything.
+    pub fn restore_picks(&self, task: &str, aspect: Option<&str>) -> Vec<usize> {
+        let live: HashSet<&SlotKey> = self.current_records().map(|r| &r.key).collect();
+        restore_picks(
+            self.records
+                .iter()
+                .map(|r| (&r.key, r.status.as_str(), r.superseded_at, r.asserted_at)),
+            &live,
+            task,
+            aspect,
+        )
+    }
+
+    /// `restore` (`memory/lessons.py:283-314`): at every slot of the task, or
+    /// at the one exact slot, that has a retired record and no current one,
+    /// the newest retired record (by `superseded_at`, then `asserted_at`)
+    /// becomes current again with `superseded_at` cleared, its slot dirty.
+    /// Returns the restored record indexes, in the order Python's dict
+    /// first met each slot.
+    pub fn restore(&mut self, task: &str, aspect: Option<&str>) -> Vec<usize> {
+        let picks = self.restore_picks(task, aspect);
+        for &i in &picks {
+            let r = &mut self.records[i];
+            r.status = "current".into();
+            r.superseded_at = None;
+            self.dirty_slots.insert(r.key.clone());
+        }
+        picks
+    }
+
     /// `_refresh_source_retired_lessons_locked` (`service.py:5173-5203`):
     /// mirror the cascade's committed retirements, matched by stable record
     /// identity `(entity_norm, attribute_norm, value, asserted_at)`, onto
@@ -174,6 +204,51 @@ impl LessonStore {
             }
         }
     }
+}
+
+/// The pick both slot stores' `restore` makes (`lessons.py:283-314`,
+/// `world_cortex.py:284-315`): over `(key, status, superseded_at,
+/// asserted_at)` in record order, the retired records at the entity (or the
+/// one slot) whose slot has no current record; per slot the newest by
+/// `(superseded_at or 0.0, asserted_at)`, an equal pair keeping the earlier
+/// record. Slots come in the order the first candidate met them.
+pub fn restore_picks<'k>(
+    records: impl Iterator<Item = (&'k SlotKey, &'k str, Option<f64>, f64)>,
+    live: &HashSet<&SlotKey>,
+    entity: &str,
+    attribute: Option<&str>,
+) -> Vec<usize> {
+    let ne = norm_key(entity);
+    let na = attribute.map(norm_key);
+    let over_live = crate::mutants::active("mcp-review-slot-restore-over-live");
+    let oldest = crate::mutants::active("mcp-review-slot-restore-oldest");
+    let mut order: Vec<&SlotKey> = Vec::new();
+    let mut best: HashMap<&SlotKey, (usize, f64, f64)> = HashMap::new();
+    for (i, (key, status, superseded_at, asserted_at)) in records.enumerate() {
+        if status != "retired"
+            || key.0 != ne
+            || na.as_ref().is_some_and(|a| key.1 != *a)
+            || (live.contains(key) && !over_live)
+        {
+            continue;
+        }
+        let rank = (superseded_at.unwrap_or(0.0), asserted_at);
+        match best.get(key) {
+            None => {
+                order.push(key);
+                best.insert(key, (i, rank.0, rank.1));
+            }
+            Some(&(_, s, a)) => {
+                // Python's tuple `>`: the first unequal position decides.
+                let newer = if rank.0 != s { rank.0 > s } else { rank.1 > a };
+                let older = if rank.0 != s { rank.0 < s } else { rank.1 < a };
+                if (newer && !oldest) || (older && oldest) {
+                    best.insert(key, (i, rank.0, rank.1));
+                }
+            }
+        }
+    }
+    order.iter().map(|k| best[k].0).collect()
 }
 
 /// The cascade's retirement cause (`storage/postgres.py:1350`).
@@ -277,11 +352,7 @@ pub async fn sync_slot_rows(db: &Client, store: &LessonStore) -> Result<BTreeSet
     if slots.is_empty() {
         return Ok(slots);
     }
-    let rows: Vec<&LessonRecord> = store
-        .records
-        .iter()
-        .filter(|r| slots.contains(&r.key))
-        .collect();
+    let rows = slot_records(store, &slots);
     // `_link_entity_ids` runs before the transaction, a lookup per row.
     let mut links = Vec::with_capacity(rows.len());
     for r in &rows {
@@ -294,21 +365,64 @@ pub async fn sync_slot_rows(db: &Client, store: &LessonStore) -> Result<BTreeSet
     }
     crate::txn::run(db, |c| {
         let (slots, rows, links) = (&slots, &rows, &links);
-        async move {
-            let ents: Vec<&str> = slots.iter().map(|s| s.0.as_str()).collect();
-            let attrs: Vec<&str> = slots.iter().map(|s| s.1.as_str()).collect();
-            c.execute(
-                "DELETE FROM lessons WHERE (entity_norm, attribute_norm) IN \
+        async move { write_slot_rows(c, slots, rows, links).await }
+    })
+    .await?;
+    Ok(slots)
+}
+
+/// `sync_lesson_slots` inside a transaction the caller holds (the curation
+/// restore's `slot_curation_transaction`): the same entity lookups and the
+/// same rewrite, on the borrowed client. Returns the slots written.
+pub async fn sync_slot_rows_in(c: &Client, store: &LessonStore) -> Result<BTreeSet<SlotKey>> {
+    let slots = store.dirty_slots.clone();
+    if slots.is_empty() {
+        return Ok(slots);
+    }
+    let rows = slot_records(store, &slots);
+    let mut links = Vec::with_capacity(rows.len());
+    for r in &rows {
+        let subject = entity_id_in(c, &r.entity).await?;
+        let object = match r.about.as_deref() {
+            Some(about) if !about.is_empty() => entity_id_in(c, about).await?,
+            _ => None,
+        };
+        links.push((subject, object));
+    }
+    write_slot_rows(c, &slots, &rows, &links).await?;
+    Ok(slots)
+}
+
+/// The dirty slots' records, in record order.
+fn slot_records<'s>(store: &'s LessonStore, slots: &BTreeSet<SlotKey>) -> Vec<&'s LessonRecord> {
+    store
+        .records
+        .iter()
+        .filter(|r| slots.contains(&r.key))
+        .collect()
+}
+
+/// `_replace_slot_rows` for `lessons`, on a client inside a transaction.
+async fn write_slot_rows(
+    c: &Client,
+    slots: &BTreeSet<SlotKey>,
+    rows: &[&LessonRecord],
+    links: &[(Option<i64>, Option<i64>)],
+) -> Result<(), tokio_postgres::Error> {
+    let ents: Vec<&str> = slots.iter().map(|s| s.0.as_str()).collect();
+    let attrs: Vec<&str> = slots.iter().map(|s| s.1.as_str()).collect();
+    c.execute(
+        "DELETE FROM lessons WHERE (entity_norm, attribute_norm) IN \
                  (SELECT * FROM unnest($1::text[], $2::text[]))",
-                &[&ents, &attrs],
-            )
-            .await?;
-            for (r, (subject, object)) in rows.iter().zip(links.iter()) {
-                let embedding: Option<Vec<f32>> = r.embedding.as_deref().map(<[f32]>::to_vec);
-                let version = if r.version == 0 { 1 } else { r.version };
-                let origin = r.origin.as_deref().filter(|o| !o.is_empty());
-                c.execute(
-                    "INSERT INTO lessons (entity, attribute, entity_norm, attribute_norm, value, \
+        &[&ents, &attrs],
+    )
+    .await?;
+    for (r, (subject, object)) in rows.iter().zip(links.iter()) {
+        let embedding: Option<Vec<f32>> = r.embedding.as_deref().map(<[f32]>::to_vec);
+        let version = if r.version == 0 { 1 } else { r.version };
+        let origin = r.origin.as_deref().filter(|o| !o.is_empty());
+        c.execute(
+            "INSERT INTO lessons (entity, attribute, entity_norm, attribute_norm, value, \
                      about, polarity, outcome, status, confidence, origin, support, provenance, \
                      asserted_at, last_confirmed, supersedes_value, superseded_by_value, \
                      superseded_at, embedding, entity_id, object_entity_id, tx_time, \
@@ -316,50 +430,53 @@ pub async fn sync_slot_rows(db: &Client, store: &LessonStore) -> Result<BTreeSet
                      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::float8, $11, $12, $13, \
                      $14, $15, $16, $17, $18, $19::real[]::vector, $20, $21, $22, $23, $24, \
                      $25, $26, $27, $28)",
-                    &[
-                        &r.entity,
-                        &r.attribute,
-                        &norm_key(&r.entity),
-                        &norm_key(&r.attribute),
-                        &r.value,
-                        &r.about,
-                        &r.polarity,
-                        &r.outcome,
-                        &r.status,
-                        &r.confidence,
-                        &origin,
-                        &json!(sorted_set(&r.support)),
-                        &json!(sorted_set(&r.provenance)),
-                        &r.asserted_at,
-                        &r.last_confirmed,
-                        &r.supersedes_value,
-                        &r.superseded_by_value,
-                        &r.superseded_at,
-                        &embedding,
-                        subject,
-                        object,
-                        &r.tx_time,
-                        &r.valid_time,
-                        &r.hlc_phys,
-                        &r.hlc_logical,
-                        &r.writer_id,
-                        &r.session_id,
-                        &version,
-                    ],
-                )
-                .await?;
-            }
-            Ok::<_, tokio_postgres::Error>(())
-        }
-    })
-    .await?;
-    Ok(slots)
+            &[
+                &r.entity,
+                &r.attribute,
+                &norm_key(&r.entity),
+                &norm_key(&r.attribute),
+                &r.value,
+                &r.about,
+                &r.polarity,
+                &r.outcome,
+                &r.status,
+                &r.confidence,
+                &origin,
+                &json!(sorted_set(&r.support)),
+                &json!(sorted_set(&r.provenance)),
+                &r.asserted_at,
+                &r.last_confirmed,
+                &r.supersedes_value,
+                &r.superseded_by_value,
+                &r.superseded_at,
+                &embedding,
+                subject,
+                object,
+                &r.tx_time,
+                &r.valid_time,
+                &r.hlc_phys,
+                &r.hlc_logical,
+                &r.writer_id,
+                &r.session_id,
+                &version,
+            ],
+        )
+        .await?;
+    }
+    Ok(())
 }
 
 /// `storage.find_entity(norm_name(name))["id"]`, or none.
 async fn entity_id(db: &Client, name: &str) -> Result<Option<i64>> {
     let n = crate::storage::graph::norm_name(name);
     let found = crate::storage::graph::find_entity(db, &n).await?;
+    Ok(found.get("id").and_then(Value::as_i64))
+}
+
+/// `entity_id` on a client inside a transaction the caller holds.
+async fn entity_id_in(c: &Client, name: &str) -> Result<Option<i64>> {
+    let n = crate::storage::graph::norm_name(name);
+    let found = crate::storage::graph::find_entity_body(c, &n).await?;
     Ok(found.get("id").and_then(Value::as_i64))
 }
 
@@ -422,5 +539,39 @@ mod tests {
         assert_eq!(v["support"], json!(["a", "b"]));
         assert_eq!(v["provenance"], json!(["ep:1", "ep:2"]));
         assert_eq!(v["confidence"], json!(0.7));
+    }
+
+    #[test]
+    fn restore_brings_back_the_newest_retired_record_of_each_dead_slot() {
+        let at = |task: &str, aspect: &str, status: &str, sup: Option<f64>, asserted: f64| {
+            let mut r = rec(task, aspect, status);
+            r.superseded_at = sup;
+            r.asserted_at = asserted;
+            r
+        };
+        let mut s = LessonStore {
+            records: vec![
+                at("Deploy", "pitfall", "retired", Some(5.0), 1.0),
+                at("Deploy", "approach", "retired", Some(5.0), 1.0),
+                // Same superseded_at: the later assertion wins.
+                at("Deploy", "approach", "retired", Some(5.0), 2.0),
+                // An equal pair keeps the earlier record.
+                at("Deploy", "pitfall", "retired", Some(5.0), 1.0),
+                // A live slot is never restored.
+                at("Deploy", "tool", "retired", Some(9.0), 1.0),
+                at("Deploy", "tool", "current", None, 3.0),
+                at("Deploy", "approach", "superseded", Some(8.0), 1.0),
+                at("Other", "approach", "retired", Some(5.0), 1.0),
+            ],
+            ..Default::default()
+        };
+        assert_eq!(s.restore_picks("deploy", Some("Approach")), vec![2]);
+        assert_eq!(s.restore("DEPLOY", None), vec![0, 2]);
+        assert_eq!(s.records[2].status, "current");
+        assert_eq!(s.records[2].superseded_at, None);
+        assert_eq!(s.records[4].status, "retired");
+        assert_eq!(s.dirty_slots.len(), 2);
+        // Restored slots are live now: nothing more to restore.
+        assert!(s.restore("deploy", None).is_empty());
     }
 }

@@ -173,7 +173,8 @@ def _secure_windows_file(path: Path) -> None:
             raise CredentialError("credential file owner could not be determined")
         # Elevated tokens can default new file ownership to Administrators.
         # Pin TokenUser explicitly; protecting the DACL alone retains that owner.
-        sddl = f"O:{sid_text.value}D:P(A;;FA;;;OW)"
+        user_text = sid_text.value
+        sddl = f"O:{user_text}D:P(A;;FA;;;OW)"
     finally:
         if sid_text:
             kernel.LocalFree(sid_text)
@@ -190,8 +191,58 @@ def _secure_windows_file(path: Path) -> None:
     if not convert(sddl, 1, ctypes.byref(descriptor), None):
         raise CredentialError("credential file permissions could not be protected")
     try:
-        if not apply(str(path), 0x80000005, descriptor):
-            raise CredentialError("credential file permissions could not be protected")
+        if apply(str(path), 0x80000005, descriptor):
+            return
+        error = ctypes.get_last_error()
+        # Setting an owner needs WRITE_OWNER, which a directory granting
+        # Modify rather than Full Control (common on a secondary drive)
+        # withholds even from the file's owner. When the owner already is
+        # TokenUser, the protected DACL alone is the whole job; any other
+        # owner (an elevated default) still has to be pinned, so it refuses.
+        step = "the owner and access list"
+        if error == 5 and _windows_owner_sid(path) == user_text:
+            if apply(str(path), 0x80000004, descriptor):
+                return
+            error, step = ctypes.get_last_error(), "the access list"
+        # The folder, not the file: for a token write the file is a temporary
+        # one that is gone by the time the user reads this.
+        raise CredentialError(
+            f"credential file permissions could not be protected (Windows error {error} "
+            f"setting {step} of a file in {path.parent}); keep it in a folder you have "
+            "full control of, such as one under your user profile")
+    finally:
+        kernel.LocalFree(descriptor)
+
+
+def _windows_owner_sid(path: Path) -> str | None:
+    """The owner of `path` as a SID string, or None when it cannot be read."""
+    import ctypes
+    from ctypes import wintypes
+
+    advapi = ctypes.WinDLL("advapi32", use_last_error=True)
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    get_info = advapi.GetNamedSecurityInfoW
+    get_info.argtypes = [wintypes.LPCWSTR, ctypes.c_int, wintypes.DWORD,
+                         ctypes.POINTER(ctypes.c_void_p), ctypes.POINTER(ctypes.c_void_p),
+                         ctypes.POINTER(ctypes.c_void_p), ctypes.POINTER(ctypes.c_void_p),
+                         ctypes.POINTER(ctypes.c_void_p)]
+    get_info.restype = wintypes.DWORD
+    sid_to_string = advapi.ConvertSidToStringSidW
+    sid_to_string.argtypes = [ctypes.c_void_p, ctypes.POINTER(wintypes.LPWSTR)]
+    sid_to_string.restype = wintypes.BOOL
+    kernel.LocalFree.argtypes = [ctypes.c_void_p]
+    owner, descriptor, text = ctypes.c_void_p(), ctypes.c_void_p(), wintypes.LPWSTR()
+    # SE_FILE_OBJECT, OWNER_SECURITY_INFORMATION
+    if get_info(str(path), 1, 1, ctypes.byref(owner), None, None, None,
+                ctypes.byref(descriptor)) != 0:
+        return None
+    try:
+        if not sid_to_string(owner, ctypes.byref(text)):
+            return None
+        try:
+            return text.value
+        finally:
+            kernel.LocalFree(text)
     finally:
         kernel.LocalFree(descriptor)
 

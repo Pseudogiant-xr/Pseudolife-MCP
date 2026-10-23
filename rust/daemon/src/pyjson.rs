@@ -35,7 +35,7 @@ pub fn float_repr(x: f64) -> String {
 
 /// A JSON number as Python would hold it after `json.loads`: an int literal
 /// stays an integer (`-0` is `0`), anything else is a float.
-fn number_text(n: &Number) -> String {
+pub(crate) fn number_text(n: &Number) -> String {
     let raw = n.to_string();
     if !raw.contains(['.', 'e', 'E']) {
         let (neg, digits) = match raw.strip_prefix('-') {

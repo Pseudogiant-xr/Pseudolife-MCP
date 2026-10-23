@@ -248,6 +248,56 @@ def test_a_release_update_pulls_backs_up_tags_recreates_and_moves_the_clients(wo
     assert world.slept == [0.001]
 
 
+@pytest.mark.parametrize("schemas, moved", [((56, 57), True), ((57, 57), False), ((None, 57), False)])
+def test_a_rollback_across_a_schema_change_names_the_restore(world, clients, tmp_path, capsys, schemas, moved):
+    """An older daemon refuses a bank a newer build stamped, so the printed
+    image-only rollback no longer starts after a deploy that moved the
+    schema: the instructions say the backup must be restored too."""
+    _project(world, tmp_path)
+    before, after = schemas
+    world.health = [{"status": "ok", "version": "0.15.0", **({"schema": before} if before else {})}, None,
+                    {"status": "ok", "version": "0.15.1", "schema": after, "persist_errors": 0}]
+    assert _run(["--health-delay-ms", "1"]) == 0
+    out = capsys.readouterr().out
+    assert "PSEUDOLIFE_IMAGE_TAG=0.15.0-pre-update-" in out
+    note = f"The new daemon's schema is v{after}, the previous one's v{before}"
+    assert (note in out) is moved
+    assert ("restore the backup taken above" in out) is moved
+    assert ("ops/restore.ps1 -Apply -BackupFile <dump>" in out) is moved
+
+
+def test_a_checkout_deploy_that_moves_the_schema_names_the_restore(world, clients, tmp_path, capsys):
+    root, _ = _checkout(world, tmp_path)
+    world.health = [{"status": "ok", "version": "0.1.0", "schema": 49, "persist_errors": 0},
+                    {"status": "ok", "version": "0.1.0", "schema": 50, "persist_errors": 0}]
+    assert _run(["--checkout", str(root), "--no-backup", "--no-cache-prune", "--rollback-tag", "unittest"]) == 0
+    out = capsys.readouterr().out
+    assert "docker tag pseudolife-daemon:0.1.0-unittest pseudolife-daemon:0.1.0" in out
+    assert "The new daemon's schema is v50, the previous one's v49" in out
+    # --no-backup: the note never points at a backup this run did not take
+    assert "this run took none: --no-backup" in out and "taken above" not in out
+    assert "ops/restore.sh --apply --backup-file <dump>" in out
+
+
+def test_an_unhealthy_deploy_names_the_restore_in_case_the_schema_moved(world, clients, tmp_path, capsys):
+    root, _ = _checkout(world, tmp_path)
+    world.health = [{"status": "ok", "version": "0.1.0", "schema": 49, "persist_errors": 0}, None]
+    assert _run(["--checkout", str(root), "--no-backup", "--no-cache-prune", "--health-retries", "2",
+                 "--health-delay-ms", "1"]) == 1
+    err = capsys.readouterr().err
+    assert "did not report healthy" in err and "docker tag " in err
+    assert "If the new daemon upgraded the bank's schema before failing" in err
+
+
+def test_the_json_report_says_a_rollback_needs_the_restore(world, clients, tmp_path, capsys):
+    _project(world, tmp_path)
+    world.health = [{"status": "ok", "version": "0.15.0", "schema": 56}, None,
+                    {"status": "ok", "version": "0.15.1", "schema": 57, "persist_errors": 0}]
+    assert _run(["--health-delay-ms", "1", "--json"]) == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report["rollback"]["restore_required"] is True
+
+
 def test_the_same_version_is_not_redeployed_without_reinstall(world, clients, tmp_path):
     _project(world, tmp_path, version="0.15.1")
     assert _run([]) == 0

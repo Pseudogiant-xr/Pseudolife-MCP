@@ -425,6 +425,9 @@ class Update:
         self._warn = warn or (lambda line: print(f"WARNING: {line}", file=sys.stderr, flush=True))
         self.docker = docker_cmd()
         self.rollback_lines: list[str] = []
+        # The bank's schema version on the daemon this run replaces, when
+        # /health said; a deploy that moves it changes what a rollback takes.
+        self.schema_before: int | None = None
 
     # -- output ------------------------------------------------------------
     def step(self, text: str) -> None:
@@ -876,9 +879,15 @@ class Update:
                 sleep(self.o.health_delay_ms / 1000.0)
         if not health:
             lines = ["daemon did not report healthy. Logs: docker logs " + DAEMON_CONTAINER, "to roll back:"] + self.rollback_lines
+            if self.rollback_lines:
+                lines += self._schema_rollback_note(None)
             raise UpdateError("\n".join(lines))
         self.step(f"healthy. version={health.get('version')} schema={health.get('schema')} "
                   f"persist_errors={health.get('persist_errors')}")
+        before, after = self.schema_before, health.get("schema")
+        if self.rollback_lines and type(before) is int and type(after) is int and after > before:
+            self.rollback_lines = self.rollback_lines + self._schema_rollback_note(after)
+            self.report.rollback["restore_required"] = True
         if expect_version and health.get("version") != expect_version:
             lines = [f"the daemon reports version {health.get('version')}, not the {expect_version} that was pulled: "
                      f"the compose project's image setting won (check `docker compose config` for the daemon "
@@ -890,6 +899,23 @@ class Update:
                 print(line)
             sys.stdout.flush()   # ahead of a warning on stderr, or a streamed child
         return health
+
+    def _schema_rollback_note(self, after: int | None) -> list[str]:
+        """The rollback lines' schema caveat. An older daemon refuses a bank
+        a newer build has upgraded, so an image-only rollback across a
+        schema change no longer starts: the bank must be restored too.
+        ``after`` is the new daemon's schema, or None when it never
+        reported healthy (then whether the schema moved is unknown)."""
+        if after is not None:
+            head = (f"      The new daemon's schema is v{after}, the previous one's v{self.schema_before}: "
+                    "the older daemon refuses the upgraded bank,")
+        else:
+            head = "      If the new daemon upgraded the bank's schema before failing, the older daemon refuses it,"
+        source = ("a backup taken before this deploy (this run took none: --no-backup)" if self.o.no_backup
+                  else "the backup taken above")
+        return [head,
+                f"      so after rolling back the image, restore {source} with",
+                "      ops/restore.ps1 -Apply -BackupFile <dump> (ops/restore.sh --apply --backup-file <dump>)."]
 
     def prune_cache(self, checkout: Path | None) -> None:
         if self.o.no_cache_prune:
@@ -965,7 +991,9 @@ class Update:
             self.step("scaffolded ops/.env from ops/.env.example (all values commented)")
         compose = self._compose_args([compose_file, repo / "ops" / "docker-compose.override.yml"], env_file)
         self._compose_shown = compose
-        previous_digest = (self.daemon_health() or {}).get("hooks_digest")
+        before = self.daemon_health() or {}
+        previous_digest = before.get("hooks_digest")
+        self.schema_before = before.get("schema")
         self.backup(repo)
         image_tag = _compose_image_tag(compose_file)
         if not image_tag:
@@ -1107,6 +1135,7 @@ class Update:
             health = self.daemon_health()
             current = (health or {}).get("version") if isinstance((health or {}).get("version"), str) else None
             previous_digest = (health or {}).get("hooks_digest")
+            self.schema_before = (health or {}).get("schema")
         self.report.current = current
         if current is None:
             # /health silent (the daemon crashed, say): the image the container

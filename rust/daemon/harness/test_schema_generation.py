@@ -149,6 +149,8 @@ class SchemaGeneration(unittest.TestCase):
                 for step in steps:
                     if step["op"] == "embedding_guard":
                         oracle._refuse_on_embedding_dim_mismatch(cursor)
+                    elif step["op"] == "version_guard":
+                        oracle._refuse_on_future_or_malformed_version(cursor)
                     elif step["op"] == "sql":
                         sql = step["sql"]
                         for i in range(len(step["parameters"])):

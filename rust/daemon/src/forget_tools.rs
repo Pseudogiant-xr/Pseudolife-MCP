@@ -708,7 +708,7 @@ async fn retire_lessons_for_entries(
 /// `record_store_decision` (`storage/postgres.py:3527-3543`): the FK-free
 /// audit row, on the transaction the caller holds.
 #[allow(clippy::too_many_arguments)]
-async fn record_store_decision(
+pub(crate) async fn record_store_decision(
     c: &tokio_postgres::Client,
     store: &str,
     key: (&str, &str),
@@ -907,7 +907,7 @@ async fn write_store_decision(
 
 /// `_save_lessons` (`service.py:3774-3785`): the per-slot sync; a failure is
 /// counted and raised.
-async fn save_lessons(svc: &Service, ready: &Ready) -> Result<(), ToolError> {
+pub(crate) async fn save_lessons(svc: &Service, ready: &Ready) -> Result<(), ToolError> {
     ensure_lessons_refreshed(ready).await.map_err(internal)?;
     let snap = ready.lessons.snapshot();
     let synced = crate::stores::lessons::sync_slot_rows(ready.storage.client(), &snap).await;

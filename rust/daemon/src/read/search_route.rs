@@ -162,6 +162,9 @@ fn now() -> f64 {
 pub struct Request {
     pub query: String,
     pub top_k: i64,
+    /// A bound `top_k` past i64 as given: Python logs the unbounded integer
+    /// in the event's params, while the search itself serves every hit.
+    pub top_k_beyond: Option<Value>,
     pub sources: Option<Vec<String>>,
     pub bands: Option<Vec<String>>,
     pub tags: Option<Vec<String>>,
@@ -359,6 +362,9 @@ pub async fn run(svc: &Service, ready: &Arc<Ready>, req: Request) -> anyhow::Res
         }
         let mut params_json = params_json;
         params_json["contiguity_neighbors"] = json!(n_ctg);
+        if let Some(raw) = &req.top_k_beyond {
+            params_json["top_k"] = raw.clone();
+        }
         let event_id = if cfg.retrieval_log_enabled && !crate::mutants::active("search-skip-event")
         {
             log_event(db, &req, &entries_out, &served_comps, &params_json).await
@@ -465,6 +471,7 @@ pub async fn route(app: &App, raw_query: Option<&str>, h: &HeaderMap) -> Respons
             .filter(|s| !s.is_empty())
             .and_then(|s| py_int(s))
             .unwrap_or(search::ROUTE_TOP_K),
+        top_k_beyond: None,
         sources: list(&q, "source"),
         bands,
         tags: list(&q, "tag"),
@@ -599,6 +606,7 @@ pub async fn warmup_probe(svc: &Service, ready: &Arc<Ready>) {
     let req = Request {
         query: "warmup probe".into(),
         top_k: 1,
+        top_k_beyond: None,
         sources: None,
         bands: None,
         tags: None,
