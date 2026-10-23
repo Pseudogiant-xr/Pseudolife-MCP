@@ -495,6 +495,44 @@ def test_a_token_file_in_a_modify_only_folder_is_owner_only_whenever_the_token_a
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows ACLs")
+def test_the_access_list_alone_protects_the_users_own_file_in_a_modify_only_folder(
+        tmp_path: Path, monkeypatch, record_property) -> None:
+    """The fallback itself, against real ACLs on every token, the elevated
+    runner included: a file the user already owns, in a Modify-only folder,
+    with SeTakeOwnership disabled, so setting its owner is denied. Only the
+    owner-only access list can be set, and that is what makes it private."""
+    from pseudolife_memory import credentials
+
+    sid = _current_user_sid()
+    folder = _modify_only_folder(tmp_path, sid)
+    try:
+        path = folder / "credential"
+        path.write_text("fixture-secret", encoding="utf-8")
+        if _file_owner_sid(path) != sid:
+            # An elevated token's new files are Administrators'; icacls enables
+            # its own take-ownership privilege to hand this one to the user.
+            subprocess.run(["icacls", str(path), "/setowner", f"*{sid}"], check=True,
+                           capture_output=True, timeout=60)
+        assert _file_owner_sid(path) == sid
+        looked_up = []
+        real = credentials._windows_owner_sid
+        monkeypatch.setattr(credentials, "_windows_owner_sid",
+                            lambda p: looked_up.append(p) or real(p))
+        with _take_ownership("disabled"):
+            credentials._secure_windows_file(path)
+        record_property("fallback_taken", bool(looked_up))
+        assert looked_up == [path]          # the owner set was denied; the fallback ran
+        assert _file_owner_sid(path) == sid
+        fd = os.open(path, os.O_RDONLY)
+        try:
+            assert credentials._windows_owner_only(fd)
+        finally:
+            os.close(fd)
+    finally:
+        subprocess.run(["icacls", str(folder), "/reset", "/T"], capture_output=True, timeout=60)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows ACLs")
 def test_an_owner_other_than_the_user_is_refused_where_it_cannot_be_replaced(
         tmp_path: Path, monkeypatch) -> None:
     """The near miss: the access-list-only fallback is for a file the user
@@ -573,7 +611,8 @@ def test_a_denied_owner_set_falls_back_only_for_the_users_own_file(monkeypatch, 
         with pytest.raises(CredentialError) as refused:
             credentials._secure_windows_file(target)
         assert calls == [0x80000005]
-        assert "Windows error 5 setting the owner and access list of a file in folder"             in str(refused.value)
+        assert ("Windows error 5 setting the owner and access list of a file in folder"
+                in str(refused.value))
 
 
 # (WD), not W: FILE_GENERIC_WRITE carries SYNCHRONIZE, and denying it makes
