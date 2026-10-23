@@ -8,13 +8,15 @@ use pseudolife_stdio::{
 use serde_json::{Value, json};
 use std::{sync::Arc, time::Duration};
 const OTHER: &str = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
-/// Options for a test that needs registration done but is not about its
-/// budgets: startup and probe become a hang guard, so attach (or a Codex
-/// thread's first call) returns as soon as registration completes and the
-/// test goes on from that event, not from the 3 s / 2 s defaults. The
-/// Windows dev VM missed those defaults in 3 of 20 runs of this binary at
-/// b361ea26 and a hosted runner did in batch #916 (#917), as the sibling
-/// test did in afff98d4.
+/// Options for a test that needs the board check or registration answered
+/// but is not about their budgets: startup and probe become a hang guard,
+/// so attach (or a Codex thread's first call) returns as soon as the answer
+/// arrives and the test goes on from that event, not from the 3 s startup /
+/// 2 s probe defaults. The Windows dev VM missed the startup default in 3
+/// of 20 runs of this binary at b361ea26, and a hosted runner did in batch
+/// #916 (#917), as the sibling test did in afff98d4. 30 s matches
+/// `Timing::retry_attempt`, production's bound for the same registration
+/// when it is retried.
 fn registered(mut options: pseudolife_stdio::board::Options) -> pseudolife_stdio::board::Options {
     options.timing.startup = Duration::from_secs(30);
     options.timing.probe = Duration::from_secs(30);
@@ -171,9 +173,10 @@ async fn board_channel_default_probe_status_byte_and_redirect_matrix() {
         let fixture = Fixture::new(0);
         let home = Home::new();
         let runtime = board_fixture::runtime(&fixture, false);
+        // The status and bytes decide the probe's answer, not its budget.
         let board = Board::attach_options(
             runtime.clone(),
-            board_fixture::options(&runtime, &home, "off"),
+            registered(board_fixture::options(&runtime, &home, "off")),
         )
         .await;
         fixture.answer("coordination-start", Answer::text(status, bytes));
@@ -257,8 +260,13 @@ async fn board_channel_default_opt_out_no_bearer_and_failed_checkin_matrix() {
     fixture.answer("context", Answer::json(403, json!({})));
     let home = Home::new();
     let runtime = board_fixture::runtime(&fixture, false);
-    let board =
-        Board::attach_options(runtime.clone(), board_fixture::options(&runtime, &home, "")).await;
+    // The 403 must be what refuses registration, not a missed budget, which
+    // falls back to a background retry that reports checkin.
+    let board = Board::attach_options(
+        runtime.clone(),
+        registered(board_fixture::options(&runtime, &home, "")),
+    )
+    .await;
     assert!(!board.board_checkin().await);
     assert_eq!(fixture.count("/register"), 0);
     board.close().await;
@@ -469,9 +477,10 @@ async fn board_channel_registry_unavailable_fails_before_dispatch_and_reuses_fai
     fixture.answer("context", Answer::json(503, json!({})));
     let home = Home::new();
     let runtime = board_fixture::runtime(&fixture, true);
+    // The 503 must be the hint's cause, not the thread attach's own budget.
     let board = Board::attach_options(
         runtime.clone(),
-        board_fixture::options(&runtime, &home, "1"),
+        registered(board_fixture::options(&runtime, &home, "1")),
     )
     .await;
     for _ in 0..2 {
