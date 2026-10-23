@@ -51,7 +51,7 @@ The integration batch retains W2-G's refusal stubs for every tool except
 `memory_graph_relate`, `memory_graph_unrelate`, `memory_alias`,
 `memory_relation_define`, `memory_graph`, `memory_recall`,
 `memory_graph_review`, `memory_consolidate`,
-`memory_dream` (all but `deep` and `rollback`, below), `memory_agents` and
+`memory_dream` (all but `rollback`, below), `memory_agents` and
 `memory_message`. The two board tools
 inherit W2F-CLOCK-RETRY and W2F-SHARED-HLC below (both affect `send`, on
 REST and MCP alike).
