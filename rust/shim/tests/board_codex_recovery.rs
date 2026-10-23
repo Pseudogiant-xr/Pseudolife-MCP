@@ -11,6 +11,7 @@ use std::{sync::Arc, time::Duration};
 const OTHER: &str = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
 const TRANSPORT: &str = "Coordination: authority validation failed (transport_unavailable); saved state was preserved. Retry when the bank responds.";
 const UNAVAILABLE: &str = "Coordination: authority validation failed (context_unavailable); saved state was preserved. Retry when the bank responds.";
+const UNREADABLE: &str = "Coordination: authority validation failed (context_unreadable); saved state was preserved. Retry when the bank responds.";
 const TIMEOUT: &str = "Coordination: authority validation timed out (timeout); saved state was preserved. Retry when the bank responds.";
 const ACCESS: &str = "Coordination: authority validation was refused by authentication or access policy; saved state was preserved. Check the configured credential and access.";
 const BANK_HINT: &str = "Coordination: bank or principal differs from the saved mailbox; state was preserved. Check the configured bank and credential.";
@@ -102,6 +103,10 @@ async fn codex_existing_thread_recovers_one_transient_check() {
         ("body cut", ordinary().truncated()),
         ("503", Answer::json(503, json!({"error":"private fixture"}))),
         ("deadline", ordinary().delayed(Duration::from_millis(3500))),
+        // An answer that cannot be read as a bank identity names no bank:
+        // an outage, not a verdict (2026-10-23, Python `fetch_context`).
+        ("malformed", Answer::json(200, json!({"private":"fixture"}))),
+        ("not json", Answer::text(200, b"private fixture")),
     ] {
         let fixture = Fixture::new(0);
         let home = Home::new();
@@ -155,13 +160,29 @@ async fn codex_unresolved_check_never_forwards_and_names_its_cause() {
         ("403", vec![Answer::json(403, json!({}))], 1, ACCESS),
         (
             "malformed",
-            vec![Answer::json(200, json!({"private":"fixture"}))],
-            1,
-            BANK_HINT,
+            vec![
+                Answer::json(200, json!({"private":"fixture"})),
+                Answer::json(200, json!({"private":"fixture"})),
+            ],
+            2,
+            UNREADABLE,
         ),
         (
             "not json",
-            vec![Answer::text(200, b"private fixture")],
+            vec![
+                Answer::text(200, b"private fixture"),
+                Answer::text(200, b"private fixture"),
+            ],
+            2,
+            UNREADABLE,
+        ),
+        // The near miss: a readable answer naming another bank is a verdict.
+        (
+            "other bank",
+            vec![Answer::json(
+                200,
+                json!({"bank_id":OTHER,"principal":"fixture"}),
+            )],
             1,
             BANK_HINT,
         ),
