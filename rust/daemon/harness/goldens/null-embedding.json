@@ -960,7 +960,11 @@
      "source": "unavailable"
     },
     "not_ready": "entry hydration failed: <free>",
+    "pending": [
+     "init"
+    ],
     "persist_errors": 0,
+    "ready": false,
     "schema": 55,
     "status": "degraded",
     "storage": "postgres",

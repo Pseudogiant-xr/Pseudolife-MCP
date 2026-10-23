@@ -2,7 +2,9 @@
 # (ops/wsl-suite.ps1) or a second Linux machine over SSH.
 #
 #   pwsh ops/remote-suite.ps1                 # the full suite, wherever is free
-#   pwsh ops/remote-suite.ps1 -q -x           # any pytest arguments
+#   pwsh ops/remote-suite.ps1 -q -n 2         # still the full suite (display
+#                                             # and worker options only)
+#   pwsh ops/remote-suite.ps1 tests/x.py -x   # any other pytest arguments
 #   $env:PSEUDOLIFE_SUITE_WHERE='remote'      # force a machine: local | remote
 #
 # Each machine allows one full suite (its own lock), so two machines give
@@ -45,8 +47,10 @@
 # there, e.g. full-suite@box).
 #
 # Output streams here and is kept as a log plus a JSON result (machine,
-# commit, exit code, pytest's summary line) under
-# ~/.pseudolife-mcp/suite-results. The exit code is pytest's.
+# commit, pytest arguments, exit code, pytest's summary line) under
+# ~/.pseudolife-mcp/suite-results. The exit code is pytest's. Only a result
+# with empty `args` counts as full-suite evidence for ops/integrate.py open,
+# even though display and worker options alone still run the full suite.
 
 $ErrorActionPreference = 'Stop'
 # Refusals exit 2 (usage); Write-Error would throw under Stop and exit 1.
@@ -158,8 +162,10 @@ if ($target -eq 'local') {
     $lines.Add('server="$(printf %s "${PSEUDOLIFE_TEST_PG_HOST_PORT:-}" | tr -d "[:space:]")"; port="${server##*:}"')
     $lines.Add('if [[ "$server" != *:* || ! "$port" =~ ^[0-9]+$ ]] || (( 10#$port == 5433 )); then echo "remote-suite: PSEUDOLIFE_TEST_PG_HOST_PORT is not set to a test server other than port 5433 on this machine after env=; refusing" >&2; exit 2; fi')
     $lines.Add('export PSEUDOLIFE_SUITE_DISPATCHED=1')
-    # The pruning settings set here win over env= there.
-    foreach ($k in 'PSEUDOLIFE_SUITE_PRUNE', 'PSEUDOLIFE_SUITE_PRUNE_DAYS', 'PSEUDOLIFE_SUITE_KEEP') {
+    # The pruning and worker settings set here win over env= there.
+    foreach ($k in 'PSEUDOLIFE_SUITE_PRUNE', 'PSEUDOLIFE_SUITE_PRUNE_DAYS', 'PSEUDOLIFE_SUITE_KEEP',
+             'PSEUDOLIFE_SUITE_WORKERS', 'PSEUDOLIFE_SUITE_PROFILE',
+             'PSEUDOLIFE_SUITE_PROFILE_INTERVAL') {
         $v = [Environment]::GetEnvironmentVariable($k)
         if ($v) { $lines.Add("export $k=" + (Quote $v)) }
     }
@@ -179,12 +185,20 @@ if ($target -eq 'local') {
 
 $summary = (Select-String -Path $log -Pattern '\d+ (passed|failed)|no tests ran|error' -ErrorAction SilentlyContinue |
     Select-Object -Last 1).Line
+# The profile directory the run named, by name only (it stays under
+# ~/.pseudolife-mcp/suite-profiles on the machine that ran it; the full path
+# names that machine's account, and results get cited in public PRs).
+$profileDir = (Select-String -Path $log -Pattern '^wsl-suite: profiling to (.+)$' -ErrorAction SilentlyContinue |
+    Select-Object -Last 1)
+$profileDir = if ($profileDir) { ($profileDir.Matches[0].Groups[1].Value.Trim() -split '/')[-1] } else { $null }
 [ordered]@{
     # The machine kind only: the SSH destination names a host and a user,
     # and results get cited in public PRs.
     machine = $(if ($target -eq 'remote') { 'remote' } else { 'local-wsl' })
-    commit = $sha; checkout = $name; started = $started.ToString('o'); ended = (Get-Date).ToString('o')
+    commit = $sha; checkout = $name; args = @($args)
+    started = $started.ToString('o'); ended = (Get-Date).ToString('o')
     exit_code = $code; summary = $summary; log = $log
+    profile = $profileDir
 } | ConvertTo-Json | Set-Content -Path ($log -replace '\.log$', '.json') -Encoding utf8
 Write-Host "remote-suite: $target exit $code; $summary"
 exit $code

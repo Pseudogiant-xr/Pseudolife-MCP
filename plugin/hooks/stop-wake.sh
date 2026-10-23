@@ -217,6 +217,14 @@ RING="$DIGEST_DIR/$KEY.ring"
 AGENT="$DIGEST_DIR/$KEY.agent"
 TURN="$DIGEST_DIR/$KEY.turn"
 [ -L "$FILE" ] && exit 0
+# Whether the digest was there when the Stop fired. The watch's first look
+# comes after the park gate and the lease write: one spawn later on an idle
+# host, seconds on a loaded Windows one. A digest the shim removed inside
+# that gap (it exits with Claude Code) would otherwise read as one not yet
+# written and be waited for, and the watcher would fire on a later
+# session's mail.
+DIGEST_AT_ARM=0
+[ -f "$FILE" ] && DIGEST_AT_ARM=1
 
 # A bearer file the hook may read: a regular, owner-only, single-link file
 # of bounded size under no symlinked directory. The same check as
@@ -495,7 +503,10 @@ renew_listener() {
     epoch_now
     now=$NOW_EPOCH
     remaining=$((WAIT - SECONDS))
-    [ "$remaining" -gt 0 ] || return 1
+    # Past the wait already (SECONDS counts this script's own start-up):
+    # advertise nothing, but let the caller take its look; its own deadline
+    # check ends the wait right after.
+    [ "$remaining" -gt 0 ] || return 0
     [ "$remaining" -le "$LISTENER_LEASE" ] || remaining=$LISTENER_LEASE
     expiry=$((now + remaining))
     printf '%s\n%s\n' "$TOKEN" "$expiry" > "$ARMED.$$" && mv -f "$ARMED.$$" "$ARMED"
@@ -613,8 +624,11 @@ wake_budget_ok() {
 # not run (an install without the plugin's Stop hook); this loop keeps the
 # lease, parent and cap checks.
 wait_for_mail() {
-    # SECONDS counts from the start of the script, spawns included.
-    local deadline=$WAIT snapshot present=0
+    # SECONDS counts from the start of the script, spawns included. The
+    # first look always happens, however much of the wait start-up used;
+    # the last sleep is cut to the time left, so a short wait ends at its
+    # deadline instead of a whole poll later.
+    local deadline=$WAIT snapshot present=$DIGEST_AT_ARM nap
     while :; do
         still_owner || return 3
         if [ -n "$PARENT" ] && ! parent_alive; then return 3; fi
@@ -641,7 +655,9 @@ wait_for_mail() {
             esac
         fi
         [ "$SECONDS" -lt "$deadline" ] || return 3
-        if [ "$SECONDS" -lt "$FAST_WAIT" ]; then sleep "$POLL"; else sleep "$IDLE_POLL"; fi
+        if [ "$SECONDS" -lt "$FAST_WAIT" ]; then nap=$POLL; else nap=$IDLE_POLL; fi
+        [ $((deadline - SECONDS)) -ge "$nap" ] || nap=$((deadline - SECONDS))
+        sleep "$nap"
     done
 }
 

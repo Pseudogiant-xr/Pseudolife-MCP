@@ -1,8 +1,9 @@
 """mcp_wire.request reads a refusal that arrives while the body is still sending.
 
-The Rust daemon refuses an MCP body over its 4 MiB budget after reading the
-budget, then closes with the overshoot unread, so its stack resets the
-connection. These servers do the same over real sockets.
+Until #860 the Rust daemon refused an MCP body over its 4 MiB budget after
+reading the budget, then closed with the overshoot unread, so its stack reset
+the connection; it now discards the rest and closes by lingering. These
+servers still close that way over real sockets.
 """
 import http.client
 import os

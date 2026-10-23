@@ -296,7 +296,11 @@ def test_the_published_defaults_are_not_known_passwords(tmp_path):
 def test_an_unclosed_quote_before_backslashes_does_not_stall_the_report():
     """Overlapping escape alternatives backtracked exponentially here: 0.2 s
     at 10 path segments, x16 per two more (2026-09-25). The hook runs on
-    every failing report, so that was a suite hang with no output."""
+    every failing report, so that was a suite hang with no output.
+
+    At 13 segments the backtracking form takes about 14 s and the fixed one
+    well under a millisecond, so a 2 s bound separates them by an order of
+    magnitude each way; a runner stall cannot reach it, as it could 0.5 s."""
     import time
 
     path = "D:\\cache\\x" * 13
@@ -304,7 +308,7 @@ def test_an_unclosed_quote_before_backslashes_does_not_stall_the_report():
                  "a." * 32_000):
         started = time.perf_counter()
         report_redaction.redact_text(text, frozenset())
-        assert time.perf_counter() - started < 0.5, text[:30]
+        assert time.perf_counter() - started < 2.0, text[:30]
 
 
 def test_a_repr_doubled_escape_does_not_end_the_value_early():
