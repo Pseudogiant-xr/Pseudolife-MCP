@@ -288,7 +288,7 @@ python ops/batch_timeline.py report batches.json --cutoff 2026-10-21T06:45:04Z
 
 `report` works offline. It splits each member's wait (opened to the label,
 then to its first batch build) and each batch's time: build, local
-validation, the CI first pass along its critical path (runner wait against
+validation, the CI first pass along its critical path (queue wait against
 execution) and failure repair (reruns). It also flags reruns, drops and
 rebuilt batches. GitHub records no review event here, so review time stays
 inside "awaiting admission". The first measurement is in

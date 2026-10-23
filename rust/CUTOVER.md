@@ -254,12 +254,13 @@ Measured per batch, 2026-10-23, over every integration batch opened since
 2026-10-19 ([`evals/results/batch-lifecycle-20261023/`](../evals/results/batch-lifecycle-20261023/README.md),
 `python ops/batch_timeline.py`): 8 merged batches (n=7 before #890's
 batch-only heavy CI, n=1 after it) and one closed and rebuilt. Before #890,
-a member's median time from opened to `ready-to-batch` was 7h47m (n=21), of
-which 4h38m came after its last push; from the label to merged it was
-2h35m. Inside that, a batch's CI first pass took a median 1h17m (n=7), of
-which 15m07s was runner wait on the critical path; local validation took
-10m09s and the build seconds. Every merged batch's critical path ran through
-a Windows parity shard (8 of 8). The one post-#890 batch (#892, n=1) took
+a member's median time from opened to `ready-to-batch` was 7h47m (n=21),
+and the median from its last commit to the label 4h38m; from the label to
+merged it was 2h35m. A batch's CI first pass took a median 1h17m (n=7), with
+a median 15m07s of queue wait on its critical path (37% pooled over the 8
+merged batches, 19% without #868's burst); local validation took 10m09s
+and the build seconds. Every merged batch's critical path ran through a
+Windows parity shard (8 of 8). The one post-#890 batch (#892, n=1) took
 1h16m from its PR to merged, 15m43s of it a rerun of a macOS lane the
 ruleset does not require, which no hosted runner had acquired. So the wait
 before a change joins a batch, which includes its review, is the largest

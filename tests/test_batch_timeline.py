@@ -180,10 +180,10 @@ def test_critical_path_splits_runner_wait_from_execution():
         "Rust shim: Scope", "Rust shim: Rust / windows-latest",
         "Rust shim: Parity checks / windows-latest / w1c-connection",
         "Rust shim: Parity / ubuntu-latest"]
-    assert p["ci_runner_wait"] == 856       # 2 + 3 + 621 + 230
+    assert p["ci_queue_wait"] == 856       # 2 + 3 + 621 + 230
     assert p["ci_execution"] == 2672        # 14 + 1127 + 1521 + 10
     assert p["ci_orchestration"] == 4       # PR -> run 3, run -> first job 1
-    assert p["ci_runner_wait"] + p["ci_execution"] + p["ci_orchestration"] \
+    assert p["ci_queue_wait"] + p["ci_execution"] + p["ci_orchestration"] \
         == p["ci_first_pass"]
 
 
@@ -199,7 +199,7 @@ def test_rerun_is_flagged_with_its_cause_and_click_latency():
                                      "annotations": [NOT_ACQUIRED]}]
     assert rerun["wait"] == 1737           # attempt 1 done 08:43:21 -> rerun 09:12:18
     assert rerun["execution"] == 800       # 09:12:18 -> 09:25:38
-    assert rerun["runner_wait"] == 70      # only the re-executed job waited
+    assert rerun["queue_wait"] == 70      # only the re-executed job waited
 
 
 def test_retained_and_skipped_jobs_never_count_as_waiting():
@@ -228,11 +228,11 @@ def test_member_admission_build_wait_and_lead():
     m = {r["number"]: r for r in rep["members"]}
     assert m[888]["admission"] == 20978         # opened 02:10:03 -> labelled 07:59:41
     assert m[888]["revising"] == 16342          # opened -> last push 06:42:25
-    assert m[888]["after_last_push"] == 4636
+    assert m[888]["after_last_commit"] == 4636
     assert m[888]["awaiting_build"] == 39       # labelled -> first merge 08:00:20
     assert m[888]["lead"] == 5252               # labelled -> batch merged 09:27:13
     assert m[891]["revising"] == 0              # last commit predates opening
-    assert m[891]["after_last_push"] == 3232
+    assert m[891]["after_last_commit"] == 3232
     assert m[891]["outcome"] == "merged" and m[891]["batch"] == 892
 
 
@@ -244,7 +244,7 @@ def test_a_member_never_labelled_has_no_admission_split():
     m = {r["number"]: r for r in timeline.report(
         artifact(batch_892(), members=members))["members"]}
     assert m[888]["admission"] is None and m[888]["revising"] is None
-    assert m[888]["after_last_push"] is None and m[888]["lead"] is None
+    assert m[888]["after_last_commit"] is None and m[888]["lead"] is None
 
 
 def test_member_whose_ci_was_pending_at_build_is_flagged():
@@ -304,7 +304,7 @@ def test_a_broken_job_chain_reports_no_critical_path_rather_than_a_guess():
     p = timeline.report(artifact(b, members=members_892()))["batches"][0]
     assert p["critical_path"] is None
     assert "no job" in p["critical_path_note"]
-    assert p["phases"]["ci_runner_wait"] is None
+    assert p["phases"]["ci_queue_wait"] is None
     assert p["phases"]["ci_first_pass"] == 3532
 
 
@@ -360,8 +360,88 @@ def test_markdown_names_n_and_every_phase():
     text = timeline.render(report_892(cutoff=CUTOFF_890))
     assert "#892" in text and "n=1" in text
     for phase in ("awaiting admission", "awaiting build", "local validation",
-                  "runner wait", "execution", "failure repair", "awaiting merge"):
+                  "queue wait", "execution", "failure repair", "awaiting merge"):
         assert phase in text
+
+
+def _earlier_batch_with(member: int) -> dict:
+    """A merged batch before #892 that carried an older head of `member`."""
+    early = copy.deepcopy(batch_892())
+    early.update(number=876, createdAt="2026-10-21T06:00:00Z",
+                 mergedAt="2026-10-21T06:50:00Z", closedAt="2026-10-21T06:50:00Z",
+                 headRefName="integrate/2026-10-21-batch-1", headRefOid="2" * 40, runs=[])
+    early["commits"] = [
+        {"oid": "3" * 40, "committedDate": "2026-10-21T05:50:00Z",
+         "messageHeadline": f"Merge #{member} into integrate/2026-10-21-batch-1: x"},
+        {"oid": "2" * 40, "committedDate": "2026-10-21T05:50:02Z",
+         "messageHeadline": f"Merge #{member} into integrate/2026-10-21-batch-1: x"}]
+    early["body"] = (f"## Members\n\n| PR | Head merged | Review evidence | CI on its head |\n"
+                     f"| --- | --- | --- | --- |\n| #{member} x | `{'4' * 40}` | u | green |\n")
+    return early
+
+
+def test_a_member_lands_with_the_batch_that_merged_its_final_head():
+    # #860 was in #876 with an old head, got commits, and merged with #882:
+    # GitHub's mergedAt for the member names the batch that landed it.
+    members = members_892()
+    members["891"]["events"].insert(0, {"event": "labeled", "at": "2026-10-21T05:40:00Z",
+                                        "label": "ready-to-batch"})
+    rep = timeline.report(artifact(_earlier_batch_with(891), batch_892(), members=members))
+    m = {r["number"]: r for r in rep["members"]}
+    assert m[891]["batch"] == 892 and m[891]["batches"] == [876, 892]
+    assert m[891]["rebatched"] is True
+    assert m[891]["rebuild_repair"] == 7820          # 05:50:00 -> 08:00:20
+    assert m[891]["lead"] == 13633                   # 05:40:00 label -> 09:27:13
+
+
+def test_a_dropped_member_that_merged_directly_stays_a_direct_merge():
+    b = batch_892()
+    b["body"] = b["body"].replace("## Validation", "## Dropped\n\n- #884: census\n\n## Validation")
+    rep = timeline.report(artifact(b, members=members_892(), direct=[
+        {"number": 884, "title": "census", "mergedAt": "2026-10-21T08:30:00Z",
+         "headRefName": "x"}]))
+    assert [d["number"] for d in rep["direct_merges"]] == [884]
+
+
+def test_unexpanded_matrix_placeholder_jobs_are_not_jobs():
+    b = batch_892()
+    b["runs"][1]["attempts"][0]["jobs"].append(job(
+        "Parity live (non-gating) / ${{ matrix.os }} / ${{ matrix.suite }}",
+        "08:30:14", "08:30:14", "08:30:13", "cancelled", 0))
+    rep = timeline.report(artifact(b, members=members_892()))["batches"][0]
+    assert not any("${{" in j["name"] for j in rep["jobs"])
+    assert all(j["wait"] >= 0 for j in rep["jobs"])
+
+
+def test_a_cutoff_given_as_a_date_or_naive_time_is_utc():
+    for cutoff in ("2026-10-21", "2026-10-21T06:45:04"):
+        assert report_892(cutoff=cutoff)["batches"][0]["regime"] == "after"
+    with pytest.raises(timeline.Refusal):
+        report_892(cutoff="yesterday")
+
+
+def test_two_candidate_dependencies_are_named_not_silently_picked():
+    b = batch_892()
+    shim = b["runs"][1]["attempts"][0]["jobs"]
+    # A second job finishing within the window when the gate was queued.
+    shim.append(job("Rust daemon / disposable image", "08:11:23", "08:11:39", "09:05:57"))
+    p = timeline.report(artifact(b, members=members_892()))["batches"][0]
+    assert "2 jobs finished" in p["critical_path_note"]
+
+
+def test_collect_refuses_a_window_its_listing_limit_may_have_cut(monkeypatch):
+    fake = FakeGh()
+    real = fake.__call__
+
+    def full(*args, input=None):
+        if list(args[:2]) == ["pr", "list"] and "all" in args:
+            return json.dumps([{"number": i, "headRefName": f"x/{i}",
+                                "isCrossRepository": False,
+                                "createdAt": "2026-10-21T00:00:00Z"} for i in range(500)])
+        return real(*args, input=input)
+    monkeypatch.setattr(timeline, "gh", full)
+    with pytest.raises(timeline.Refusal, match="500"):
+        timeline.collect("2026-10-19T00:00:00Z")
 
 
 EVIDENCE = ROOT / "evals" / "results" / "batch-lifecycle-20261023"
@@ -370,45 +450,81 @@ EVIDENCE = ROOT / "evals" / "results" / "batch-lifecycle-20261023"
 def test_committed_artifact_backs_the_findings():
     """Every number the findings note and rust/CUTOVER.md cite, recomputed
     from the committed artifact, so a report change that moves one fails."""
+    import statistics
     art = json.loads((EVIDENCE / "artifact.json").read_text(encoding="utf-8"))
     rep = timeline.report(art, cutoff=CUTOFF_890)
-    before, after = rep["summary"]["before"], rep["summary"]["after"]
     d = timeline._d
+    before, after = rep["summary"]["before"], rep["summary"]["after"]
     assert (before["batches"], before["closed"], after["batches"]) == (7, 1, 1)
-    assert before["phases"]["admission"]["n"] == 21
-    assert d(before["phases"]["admission"]["median"]) == "7h47m"
-    assert d(before["phases"]["admission"]["max"]) == "29h54m"
-    assert d(before["phases"]["after_last_push"]["median"]) == "4h38m"
-    assert d(before["phases"]["awaiting_build"]["median"]) == "1m08s"
-    assert d(before["phases"]["lead"]["median"]) == "2h35m"
-    assert d(before["phases"]["lead"]["max"]) == "6h23m"
-    assert d(before["phases"]["ci_first_pass"]["median"]) == "1h17m"
-    assert d(before["phases"]["ci_first_pass"]["max"]) == "2h55m"
-    assert d(before["phases"]["ci_runner_wait"]["median"]) == "15m07s"
-    assert d(before["phases"]["local_validation"]["median"]) == "10m09s"
-    assert d(before["phases"]["suite"]["median"]) == "8m01s"
-    assert d(before["phases"]["awaiting_merge"]["max"]) == "1h09m"
-    assert d(before["phases"]["failure_repair"]["max"]) == "25m21s"
+    assert before["members"] + after["members"] == 33
+    assert before["rebatched"] + after["rebatched"] == 1
+    assert len(rep["direct_merges"]) == 12
+    assert {884, 851, 890, 893} <= {x["number"] for x in rep["direct_merges"]}
+
+    def cited(summary, phase, *, n, median, max_=None):
+        st = summary["phases"][phase]
+        assert st["n"] == n and d(st["median"]) == median, (phase, st)
+        if max_ is not None:
+            assert d(st["max"]) == max_, (phase, st)
+    cited(before, "admission", n=21, median="7h47m", max_="29h54m")
+    cited(after, "admission", n=2, median="3h21m")
+    cited(before, "after_last_commit", n=21, median="4h38m")
+    cited(after, "after_last_commit", n=2, median="1h05m")
+    cited(before, "awaiting_build", n=21, median="1m08s", max_="5h15m")
+    cited(after, "awaiting_build", n=2, median="38s")
+    cited(before, "build", n=6, median="4s")
+    cited(after, "build", n=1, median="2s")
+    cited(before, "local_validation", n=6, median="10m09s")
+    cited(before, "suite", n=6, median="8m01s")
+    cited(after, "local_validation", n=1, median="10m41s")
+    cited(after, "suite", n=1, median="9m36s")
+    cited(before, "ci_first_pass", n=7, median="1h17m", max_="2h55m")
+    cited(after, "ci_first_pass", n=1, median="58m52s")
+    cited(before, "ci_queue_wait", n=7, median="15m07s", max_="2h23m")
+    cited(after, "ci_queue_wait", n=1, median="14m16s")
+    cited(before, "failure_repair", n=7, median="0s", max_="25m21s")
+    cited(after, "failure_repair", n=1, median="15m43s")
+    cited(before, "awaiting_merge", n=7, median="56s", max_="1h09m")
+    cited(after, "awaiting_merge", n=1, median="1m35s")
+    cited(before, "lead", n=21, median="2h35m", max_="6h40m")
+    cited(after, "lead", n=2, median="1h27m")
+
     merged = [b for b in rep["batches"] if b["outcome"] == "merged"]
     assert len(merged) == 8
     assert all(any("Parity checks / windows-latest" in step for step in b["critical_path"])
                for b in merged)
-    wait = sum(b["phases"]["ci_runner_wait"] for b in merged)
-    execution = sum(b["phases"]["ci_execution"] for b in merged)
-    assert (d(execution), d(wait)) == ("6h47m", "3h54m")
-    assert round(100 * wait / (wait + execution)) == 37
+    assert all(b["critical_path_note"] == "" for b in merged)   # one candidate per step
+    wait = [b["phases"]["ci_queue_wait"] for b in merged]
+    execution = [b["phases"]["ci_execution"] for b in merged]
+    assert (d(sum(execution)), d(sum(wait))) == ("6h47m", "3h54m")
+    assert round(100 * sum(wait) / (sum(wait) + sum(execution))) == 37
+    assert round(100 * statistics.median(w / (w + e) for w, e in zip(wait, execution))) == 25
+    rest = [(b["phases"]["ci_queue_wait"], b["phases"]["ci_execution"])
+            for b in merged if b["number"] != 868]
+    assert round(100 * sum(w for w, _ in rest) / sum(w + e for w, e in rest)) == 19
+
     b = {x["number"]: x for x in rep["batches"]}
-    assert d(b[868]["phases"]["ci_runner_wait"]) == "2h23m"
+    assert d(b[868]["phases"]["ci_queue_wait"]) == "2h23m"
+    assert d(b[868]["phases"]["ci_first_pass"]) == "2h55m"
+    jobs868 = {j["name"]: j for j in b[868]["jobs"] if j["attempt"] == 1}
+    assert round(jobs868["Rust shim: Scope"]["wait"] / 60) == 35
+    assert round(jobs868["Rust shim: Parity checks / windows-latest / w1c-doctor"]["wait"] / 60) == 89
     assert b[865]["replaced_by"] == 866
+    assert sum(len(x["reruns"]) for x in merged) == 3
     assert d(b[892]["phases"]["batch_wall"]) == "1h16m"
     assert d(b[892]["phases"]["failure_repair"]) == "15m43s"
     (rerun,) = b[892]["reruns"]
     assert (d(rerun["wait"]), d(rerun["execution"])) == ("28m57s", "13m20s")
     assert not rerun["failed_jobs"][0]["required"]
+    # The Rust workflow kept #892 busy until 09:09:55: its first pass ends there.
+    assert b[892]["created"] == "2026-10-21T08:11:03Z" and b[892]["phases"]["ci_first_pass"] == 3532
+    for n in (866, 882):
+        assert any(j["required"] for r in b[n]["reruns"] for j in r["failed_jobs"])
     assert [drop["number"] for x in rep["batches"] for drop in x["dropped"]] == [884]
     m = {x["number"]: x for x in rep["members"]}
-    assert d(m[842]["rebuild_repair"]) == "1h47m"
-    assert len(rep["direct_merges"]) == 11
+    assert d(m[842]["rebuild_repair"]) == "1h47m" and d(m[853]["rebuild_repair"]) == "1h47m"
+    assert m[860]["rebatched"] and m[860]["batch"] == 882
+    assert (d(m[860]["rebuild_repair"]), d(m[860]["lead"])) == ("5h30m", "6h40m")
 
 
 class FakeGh:

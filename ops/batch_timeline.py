@@ -10,8 +10,9 @@ reads: no comment, label or merge. `report` works offline on that artifact
 and splits each batch, and each member, into phases:
 
 - awaiting admission: member opened (or marked ready) -> `ready-to-batch`
-  label, split at the last push before the label into revising and waiting
-  after it. GitHub holds no review event here (reviews live in PR bodies),
+  label, split at the last commit (or force-push) before the label into
+  revising and waiting after it. A timeline commit carries its commit
+  date, not its push time. GitHub holds no review event here (reviews live in PR bodies),
   so review time is inside this phase, not separable from it.
 - awaiting build: label -> the batch's first `Merge #N into` commit.
 - rebuild repair: a member's first batch build -> the build of the batch
@@ -21,8 +22,9 @@ and splits each batch, and each member, into phases:
   suite, whose own duration the body's suite line records, plus the Rust
   harness run and `open`).
 - CI first pass: batch PR opened -> the last job of every run's first
-  attempt, split along the critical path into runner wait (queued ->
-  started; a job no runner ever acquired is all wait), execution, and
+  attempt, split along the critical path into queue wait (queued ->
+  started, which includes the account's concurrent-job cap as well as
+  runner supply; a job no runner ever acquired is all wait), execution, and
   orchestration (event dispatch and the gaps between dependent jobs).
 - failure repair: first pass done -> the last rerun job done, with each
   rerun's click latency, cause and whether its failed lane is required.
@@ -60,6 +62,9 @@ LABEL, PREFIX, REQUIRED_CHECKS = integrate.LABEL, integrate.PREFIX, integrate.RE
 Refusal = integrate.Refusal
 
 SCHEMA = 1
+# `gh pr list` returns at most this many; a listing that reaches it may
+# have cut older pull requests, so `collect` refuses instead.
+LIST_LIMIT = 500
 # Runs a batch's merge waits on. Code scanning's `dynamic` runs and
 # scheduled or dispatched workflows are not the batch's CI.
 CI_EVENTS = {"pull_request", "pull_request_target", "merge_group", "push"}
@@ -76,10 +81,10 @@ DROPPED_RE = re.compile(r"^- #(\d+): (.*)$")
 SUITE_RE = re.compile(r"in (\d+(?:\.\d+)?)s\b")
 TIMELINE_EVENTS = ("labeled", "unlabeled", "committed", "head_ref_force_pushed",
                    "ready_for_review", "convert_to_draft", "reviewed")
-BATCH_PHASES = ("build", "local_validation", "suite", "ci_first_pass", "ci_runner_wait",
+BATCH_PHASES = ("build", "local_validation", "suite", "ci_first_pass", "ci_queue_wait",
                 "ci_execution", "ci_orchestration", "failure_repair", "awaiting_merge",
                 "batch_wall")
-MEMBER_PHASES = ("admission", "revising", "after_last_push", "awaiting_build",
+MEMBER_PHASES = ("admission", "revising", "after_last_commit", "awaiting_build",
                  "rebuild_repair", "lead")
 
 
@@ -94,8 +99,29 @@ def _lines(text: str) -> list:
 
 # ---------------------------------------------------------------- collect
 
+def _when(value: str) -> dt.datetime:
+    """An ISO date or time as UTC: a date is its midnight, a time without an
+    offset is UTC."""
+    try:
+        when = dt.datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+    except ValueError:
+        raise Refusal(f"{value!r} is not an ISO date or time (e.g. 2026-10-21 or "
+                      "2026-10-21T06:45:04Z)") from None
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=dt.timezone.utc)
+    return when.astimezone(dt.timezone.utc)
+
+
 def _since(value: str) -> str:
-    return value + "T00:00:00Z" if len(value) == 10 else value
+    return _when(value).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _listed(rows: list, what: str) -> list:
+    if len(rows) >= LIST_LIMIT:
+        raise Refusal(f"the {what} listing returned {LIST_LIMIT} pull requests, gh's limit "
+                      "here, so older ones may be missing; collect a shorter window "
+                      "(a later --since)")
+    return rows
 
 
 def _runs(sha: str) -> list[dict]:
@@ -152,9 +178,10 @@ def _member(number: int) -> dict:
 def collect(since: str) -> dict:
     """Read the batches opened since `since`, their CI and their members."""
     since = _since(since)
-    rows = json.loads(gh("pr", "list", "--state", "all", "--limit", "500", "--search",
-                         f"created:>={since[:10]}", "--json",
-                         "number,headRefName,isCrossRepository,createdAt") or "[]")
+    rows = _listed(json.loads(gh("pr", "list", "--state", "all", "--limit", str(LIST_LIMIT),
+                                 "--search", f"created:>={since[:10]}", "--json",
+                                 "number,headRefName,isCrossRepository,createdAt") or "[]"),
+                   "batch")
     rows = sorted((r for r in rows if r.get("headRefName", "").startswith(PREFIX)
                    and not r.get("isCrossRepository") and r.get("createdAt", "") >= since),
                   key=lambda r: r["createdAt"])
@@ -170,9 +197,10 @@ def collect(since: str) -> dict:
         for number in sorted(_member_numbers(view)):
             if str(number) not in members:
                 members[str(number)] = _member(number)
-    merged = json.loads(gh("pr", "list", "--state", "merged", "--base", integrate.BASE,
-                           "--limit", "500", "--search", f"merged:>={since[:10]}", "--json",
-                           "number,title,mergedAt,headRefName") or "[]")
+    merged = _listed(json.loads(gh("pr", "list", "--state", "merged", "--base", integrate.BASE,
+                                   "--limit", str(LIST_LIMIT), "--search",
+                                   f"merged:>={since[:10]}", "--json",
+                                   "number,title,mergedAt,headRefName") or "[]"), "merged")
     direct = [{k: r.get(k) for k in ("number", "title", "mergedAt", "headRefName")}
               for r in merged if (r.get("mergedAt") or "") >= since
               and not r.get("headRefName", "").startswith(PREFIX)]
@@ -246,18 +274,20 @@ def _jobs(batch: dict) -> list[dict]:
                 if (job.get("conclusion") or "").lower() == "skipped":
                     continue
                 c, s, e = (_t(job.get(k)) for k in ("created_at", "started_at", "completed_at"))
-                if c is None or e is None:
+                if c is None or e is None or "${{" in job["name"]:
                     continue
                 if attempt["attempt"] > 1 and s is not None and start is not None \
                         and _secs(s, start) > CHAIN_TOLERANCE:
                     continue
                 never = not job.get("steps") or s is None
+                if never and e < c:
+                    continue
                 out.append({
                     "name": f"{run['name']}: {job['name']}", "job": job["name"],
                     "run": run["name"], "run_id": run["id"], "attempt": attempt["attempt"],
                     "run_created": run.get("created_at"),
                     "created": c, "started": s, "completed": e,
-                    "wait": _secs(c, e) if never else max(0, _secs(c, s)),
+                    "wait": max(0, _secs(c, e)) if never else max(0, _secs(c, s)),
                     "execution": 0 if never else max(0, _secs(s, e)),
                     "conclusion": (job.get("conclusion") or "").lower(),
                     "never_started": never, "required": job["name"] in REQUIRED_CHECKS,
@@ -269,7 +299,7 @@ def _critical_path(first: list[dict]) -> tuple[list[dict] | None, str]:
     if not first:
         return None, "no CI job ran"
     cur = max(first, key=lambda j: j["completed"])
-    chain = [cur]
+    chain, notes = [cur], []
     while _secs(_t(cur["run_created"]), cur["created"]) > RUN_START_TOLERANCE:
         # Only a job queued before this one can be its dependency; instant
         # jobs ending in the same second would otherwise name each other.
@@ -279,9 +309,14 @@ def _critical_path(first: list[dict]) -> tuple[list[dict] | None, str]:
         if not preds:
             return None, (f"no job in {cur['run']} finished when {cur['job']} was queued "
                           f"({cur['created']:%H:%M:%S}Z), so its dependency is unknown")
-        cur = max(preds, key=lambda j: (j["completed"], j["wait"] + j["execution"]))
+        pick = max(preds, key=lambda j: (j["completed"], j["wait"] + j["execution"]))
+        if len(preds) > 1:
+            notes.append(f"{len(preds)} jobs finished when {cur['job']} was queued "
+                         f"({', '.join(j['job'] for j in preds)}); the latest, {pick['job']}, "
+                         "is taken as its dependency")
+        cur = pick
         chain.insert(0, cur)
-    return chain, ""
+    return chain, "; ".join(notes)
 
 
 def _reruns(batch: dict, jobs: list[dict]) -> list[dict]:
@@ -310,7 +345,7 @@ def _reruns(batch: dict, jobs: list[dict]) -> list[dict]:
                                  "never_started": j["never_started"],
                                  "annotations": j["annotations"]} for j in failed],
                 "wait": _secs(prev_end, start), "execution": _secs(start, end),
-                "runner_wait": sum(j["wait"] for j in this)})
+                "queue_wait": sum(j["wait"] for j in this)})
     return out
 
 
@@ -350,7 +385,7 @@ def _batch(b: dict, cutoff: dt.datetime | None) -> dict:
             "local_validation": _secs(build_end, created),
             "suite": _suite(body),
             "ci_first_pass": ci_first,
-            "ci_runner_wait": wait, "ci_execution": execution,
+            "ci_queue_wait": wait, "ci_execution": execution,
             "ci_orchestration": orchestration,
             "failure_repair": (_secs(first_end, final_end) if reruns else 0)
             if first_end else None,
@@ -375,7 +410,14 @@ def _members(art: dict, batches: list[dict]) -> list[dict]:
     for n, where in sorted(seen.items()):
         info = art["members"].get(str(n), {})
         where = sorted(where, key=lambda b: (b["build_start"] or _t(b["created"])))
-        landed = next((b for b in where if b["outcome"] == "merged" and n in b["members"]), None)
+        carried = [b for b in where if b["outcome"] == "merged" and n in b["members"]]
+        own = _t(info.get("mergedAt"))
+        # A member that took commits after a merged batch carried an older
+        # head lands with a later batch: the one merged when GitHub marked
+        # the member merged (#860: carried by #876, merged by #882).
+        landed = next((b for b in carried if own is not None
+                       and abs(_secs(_t(b["merged"]), own)) <= 300), None) \
+            or (carried[0] if carried else None)
         first_build = where[0]["build_start"] or _t(where[0]["created"])
         events = info.get("events") or []
 
@@ -400,11 +442,12 @@ def _members(art: dict, batches: list[dict]) -> list[dict]:
         out.append({
             "number": n, "title": info.get("title"), "batches": [b["number"] for b in where],
             "batch": landed["number"] if landed else None, "outcome": outcome,
+            "rebatched": bool(landed) and any(b is not landed for b in carried),
             "regime": (landed or where[0])["regime"],
             "admission": _secs(opened, labeled),
             "revising": None if labeled is None or opened is None else (
                 max(0, _secs(opened, last_push)) if last_push else 0),
-            "after_last_push": _secs(anchor, labeled),
+            "after_last_commit": _secs(anchor, labeled),
             "awaiting_build": _secs(labeled, first_build),
             "rebuild_repair": _secs(first_build, landed["build_start"]) if landed else None,
             "lead": _secs(labeled, _t(landed["merged"])) if landed else None,
@@ -422,7 +465,7 @@ def _stat(values: list) -> dict:
 
 def report(art: dict, cutoff: str | None = None) -> dict:
     """Phase split of every batch and member in a collected artifact."""
-    when = _t(cutoff)
+    when = _when(cutoff) if cutoff else None
     batches = sorted((_batch(b, when) for b in art["batches"]),
                      key=lambda b: b["created"])
     for b in batches:
@@ -431,7 +474,8 @@ def report(art: dict, cutoff: str | None = None) -> dict:
                      and set(o["members"]) & set(b["members"])]
             b["replaced_by"] = later[0]["number"] if later else None
     members = _members(art, batches)
-    in_batch = {m["number"] for m in members}
+    # A dropped member that later merged on its own is a direct merge (#884).
+    in_batch = {m["number"] for m in members if m["outcome"] == "merged"}
     direct = [dict(d, regime=None if when is None else
                    ("after" if _t(d["mergedAt"]) >= when else "before"))
               for d in art.get("direct_merges") or [] if d["number"] not in in_batch]
@@ -440,10 +484,12 @@ def report(art: dict, cutoff: str | None = None) -> dict:
         bs = [b for b in batches if b["regime"] == regime]
         landed = [b for b in bs if b["outcome"] == "merged"]
         ms = [m for m in members if m["regime"] == regime and m["outcome"] == "merged"]
+        rebatched = sum(1 for m in ms if m["rebatched"])
         summary[regime or "all"] = {
             "batches": len(landed), "closed": sum(b["outcome"] == "closed" for b in bs),
             "members": len(ms),
             "dropped": sum(len(b["dropped"]) for b in bs),
+            "rebatched": rebatched,
             "reruns": sum(len(b["reruns"]) for b in bs),
             "reruns_on_lanes_not_required": sum(
                 1 for b in bs for r in b["reruns"]
@@ -476,15 +522,15 @@ def _d(seconds) -> str:
 
 PHASE_NAMES = {
     "admission": "awaiting admission (opened -> label)",
-    "revising": "  of which revising (opened -> last push)",
-    "after_last_push": "  of which after the last push",
+    "revising": "  revising (opened -> last commit)",
+    "after_last_commit": "  after the last commit (-> label)",
     "awaiting_build": "awaiting build (label -> first build)",
     "rebuild_repair": "rebuild repair (first build -> landing build)",
     "build": "build (merge commits)",
     "local_validation": "local validation (head -> batch PR)",
     "suite": "  of which the local full suite",
     "ci_first_pass": "CI first pass (batch PR -> last attempt-1 job)",
-    "ci_runner_wait": "  critical path: runner wait",
+    "ci_queue_wait": "  critical path: queue wait (incl. the concurrent-job cap)",
     "ci_execution": "  critical path: execution",
     "ci_orchestration": "  critical path: dispatch and job gaps",
     "failure_repair": "failure repair (reruns after the first pass)",
@@ -492,8 +538,8 @@ PHASE_NAMES = {
     "batch_wall": "batch PR wall (opened -> merged)",
     "lead": "member lead (label -> merged)",
 }
-ORDER = ("admission", "revising", "after_last_push", "awaiting_build", "rebuild_repair",
-         "build", "local_validation", "suite", "ci_first_pass", "ci_runner_wait",
+ORDER = ("admission", "revising", "after_last_commit", "awaiting_build", "rebuild_repair",
+         "build", "local_validation", "suite", "ci_first_pass", "ci_queue_wait",
          "ci_execution", "ci_orchestration", "failure_repair", "awaiting_merge",
          "batch_wall", "lead")
 
@@ -505,8 +551,9 @@ def render(rep: dict) -> str:
     for regime, s in rep["summary"].items():
         out += [f"## {regime}: n={s['batches']} merged batches, {s['members']} landed "
                 f"members ({s['closed']} closed batches, {s['dropped']} drops, "
-                f"{s['reruns']} reruns, {s['reruns_on_lanes_not_required']} of them for "
-                f"lanes the ruleset does not require, {s['direct_merges']} direct merges)",
+                f"{s['rebatched']} re-batched members, {s['reruns']} reruns, "
+                f"{s['reruns_on_lanes_not_required']} of them for lanes the ruleset does not "
+                f"require, {s['direct_merges']} direct merges)",
                 "", "| Phase | n | median | max | total |", "| --- | --- | --- | --- | --- |"]
         for p in ORDER:
             st = s["phases"][p]
@@ -515,7 +562,7 @@ def render(rep: dict) -> str:
         out.append("")
     out += ["## Batches", "",
             "| Batch | regime | members | outcome | build | local validation (suite) | "
-            "CI first pass (runner wait / execution / dispatch) | failure repair | "
+            "CI first pass (queue wait / execution / dispatch) | failure repair | "
             "awaiting merge | wall |", "| --- " * 10 + "|"]
     for b in rep["batches"]:
         p = b["phases"]
@@ -524,36 +571,40 @@ def render(rep: dict) -> str:
             f"{', '.join(f'#{n}' for n in b['members'])} | {b['outcome']}"
             + (f" (rebuilt as #{b['replaced_by']})" if b["replaced_by"] else "")
             + f" | {_d(p['build'])} | {_d(p['local_validation'])} ({_d(p['suite'])}) | "
-            f"{_d(p['ci_first_pass'])} ({_d(p['ci_runner_wait'])} / {_d(p['ci_execution'])}"
+            f"{_d(p['ci_first_pass'])} ({_d(p['ci_queue_wait'])} / {_d(p['ci_execution'])}"
             f" / {_d(p['ci_orchestration'])}) | {_d(p['failure_repair'])} | "
             f"{_d(p['awaiting_merge'])} | {_d(p['batch_wall'])} |")
     out += ["", "## Critical paths, reruns, drops", ""]
     for b in rep["batches"]:
         path = " -> ".join(b["critical_path"]) if b["critical_path"] \
             else f"none ({b['critical_path_note']})"
-        out.append(f"- #{b['number']} critical path: {path}")
+        out.append(f"- #{b['number']} critical path: {path}"
+                   + (f" (note: {b['critical_path_note']})"
+                      if b["critical_path"] and b["critical_path_note"] else ""))
         for r in b["reruns"]:
             causes = "; ".join(
                 f"{j['name']} {j['conclusion']}"
-                + (" (required)" if j["required"] else " (not a required lane)")
+                + (" (required)" if j["required"] else
+                   " (not required; a required gate failed with it)"
+                   if any(k["required"] for k in r["failed_jobs"]) else " (not a required lane)")
                 + (" , no runner acquired" if j["never_started"] else "")
                 + (f": {j['annotations'][0]}" if j["annotations"] else "")
                 for j in r["failed_jobs"]) or "no failed job recorded"
             out.append(f"  - rerun {r['run']} attempt {r['attempt']}: clicked "
-                       f"{_d(r['wait'])} after the failed attempt, ran {_d(r['execution'])} "
-                       f"(runner wait {_d(r['runner_wait'])}); cause: {causes}")
+                       f"{_d(r['wait'])} after that run's failed attempt, ran "
+                       f"{_d(r['execution'])} (queue wait {_d(r['queue_wait'])}); cause: {causes}")
         for d in b["dropped"]:
             out.append(f"  - dropped #{d['number']}: {d['reason']}")
         if b["pending_at_build"]:
             out.append("  - CI on the member's own head was not green at build: "
                        + ", ".join(f"#{n}" for n in b["pending_at_build"]))
     out += ["", "## Members", "",
-            "| Member | batches | outcome | awaiting admission (revising / after last push) | "
+            "| Member | batches | outcome | awaiting admission (revising / after last commit) | "
             "awaiting build | rebuild repair | lead |", "| --- " * 7 + "|"]
     for m in rep["members"]:
         out.append(f"| #{m['number']} | {', '.join(f'#{n}' for n in m['batches'])} | "
-                   f"{m['outcome']} | {_d(m['admission'])} ({_d(m['revising'])} / "
-                   f"{_d(m['after_last_push'])}) | {_d(m['awaiting_build'])} | "
+                   f"{m['outcome']}{' (re-batched)' if m['rebatched'] else ''} | {_d(m['admission'])} ({_d(m['revising'])} / "
+                   f"{_d(m['after_last_commit'])}) | {_d(m['awaiting_build'])} | "
                    f"{_d(m['rebuild_repair'])} | {_d(m['lead'])} |")
     if rep["direct_merges"]:
         out += ["", "## Merged to master outside a batch", ""]
