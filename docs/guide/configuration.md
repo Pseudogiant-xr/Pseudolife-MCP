@@ -4068,6 +4068,13 @@ v24 or earlier instead of attempting an in-place ALTER — run the
 human-gated `ops/migrate_embeddings.py` first. Full step-by-step operator
 procedure (backup, stop, dry-run, apply, deploy, verify, rollback):
 [the v25 migration runbook](../runbooks/embedding-v25-migration.md).
+A daemon also refuses to start against a bank stamped by a newer build
+(or with a stamp that is not a positive integer) and leaves the stamp as
+it is, so rolling back to an older release after an upgrade that moved
+the schema means restoring the backup taken before that upgrade
+(`ops/restore.ps1 -Apply -BackupFile <dump>` or
+`ops/restore.sh --apply --backup-file <dump>`); `pseudolife-mcp update`
+says so beside its printed rollback when the deploy moved the schema.
 Separately from the schema meta version, Docker-tier installs created
 before 2026-08-14 also need the PostgreSQL 16 → 18 volume cutover —
 [the PostgreSQL 18 migration runbook](../runbooks/postgres-18-migration.md).

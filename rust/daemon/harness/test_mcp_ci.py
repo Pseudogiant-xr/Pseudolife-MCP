@@ -21,7 +21,7 @@ def refusal_close(index):
 def baseline():
     """The shapes the strict corpus records on mcp 2.2.0: only the two 413s
     declaring a body past the daemon's discard budget (MCP-REFUSAL-CLEANUP)."""
-    return {"summary": {"responses": 320, "cases": 18, "diffs": 2, "unserved_checked": list(UNSERVED)},
+    return {"summary": {"responses": 318, "cases": 18, "diffs": 2, "unserved_checked": list(UNSERVED)},
             "diffs": [refusal_close(i) for i in (4, 5)]}
 
 

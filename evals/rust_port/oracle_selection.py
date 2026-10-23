@@ -18,8 +18,17 @@ SELECTION_ENV = "PSEUDOLIFE_PORT_ORACLE_SELECTION"
 VERSION_FILES = {
     "plugin/release.json", "server.json", "ops/docker-compose.yml",
     "pseudolife_memory/compose/docker-compose.yml",
-    "rust/shim/Cargo.toml", "rust/Cargo.lock",
+    "rust/shim/Cargo.toml", "rust/daemon/Cargo.toml", "rust/Cargo.lock",
     "rust/shim/src/lifecycle.rs", "rust/shim/tests/auth_lifecycle_http.rs",
+}
+# The native crates a cut moves, by file: package name -> required. The
+# lock's daemon entry is optional (absent, or left at another version, and
+# then untouched): cuts made before the daemon crate carried the release
+# version left it at 0.0.0, and they must still be recognised.
+CARGO_PACKAGES = {
+    "rust/shim/Cargo.toml": {"pseudolife-stdio": True},
+    "rust/daemon/Cargo.toml": {"pseudolife-daemon": True},
+    "rust/Cargo.lock": {"pseudolife-stdio": True, "pseudolife-daemon": False},
 }
 DOCUMENTS = {
     "CHANGELOG.md", "CONTRIBUTING.md", "README.md", "SECURITY.md",
@@ -46,18 +55,23 @@ def blob(root, entry):
 def version_metadata_matches(path, before, after, previous, current):
     if path in ("rust/shim/src/lifecycle.rs", "rust/shim/tests/auth_lifecycle_http.rs"):
         return before.replace(previous.encode(), current.encode()) == after
-    if path in ("rust/shim/Cargo.toml", "rust/Cargo.lock"):
+    if path in CARGO_PACKAGES:
         old, new = tomllib.loads(before.decode("utf-8")), tomllib.loads(after.decode("utf-8"))
         packages = old["package"] if path.endswith(".lock") else [old["package"]]
-        members = [package for package in packages if package["name"] == "pseudolife-stdio"]
-        if len(members) != 1 or members[0]["version"] != previous:
-            return False
-        members[0]["version"] = current
-        # Replace only this package's canonical Cargo stanza, not dependencies
-        # that happen to have the same version number.
-        pattern = rb'(?m)^(name = "pseudolife-stdio"\r?\nversion = ")' + re.escape(previous.encode()) + rb'("\r?$)'
-        return old == new and re.sub(
-            pattern, lambda match: match[1] + current.encode() + match[2], before, count=1) == after
+        expected = before
+        for name, required in CARGO_PACKAGES[path].items():
+            members = [package for package in packages if package["name"] == name]
+            if len(members) > 1 or (required and (not members or members[0]["version"] != previous)):
+                return False
+            if not members or members[0]["version"] != previous:
+                continue  # an optional entry not at the old version stays as it was
+            members[0]["version"] = current
+            # Replace only this package's canonical Cargo stanza, not
+            # dependencies that happen to have the same version number.
+            pattern = (rb'(?m)^(name = "' + re.escape(name.encode()) + rb'"\r?\nversion = ")'
+                       + re.escape(previous.encode()) + rb'("\r?$)')
+            expected = re.sub(pattern, lambda match: match[1] + current.encode() + match[2], expected, count=1)
+        return old == new and expected == after
     if path.endswith(".json"):
         old, new = json.loads(before), json.loads(after)
         if old.get("version") == previous:
