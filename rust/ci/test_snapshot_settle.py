@@ -21,7 +21,8 @@ def snapshot_harness(monkeypatch, tmp_path):
 
     def daemon(side, home):
         return SimpleNamespace(port=ports[side], cwd=home,
-                               start=lambda timeout: events.append(("start", side)),
+                               launch=lambda: None,
+                               wait=lambda timeout, stages=None: events.append(("start", side, stages)),
                                stop=lambda: events.append(("stop", side)))
 
     def dump(dsn):
@@ -34,9 +35,6 @@ def snapshot_harness(monkeypatch, tmp_path):
 
     def call(port, method, path, headers=(), *args, **kwargs):
         events.append(("request", port))
-        if ("Authorization", run.PRINCIPAL_PROBE) in list(headers):
-            # A loaded stored-principal view refuses the probe's bearer.
-            return {"status": 401, "headers": {}, "json": {"error": "unauthorized"}}
         return {"status": 200, "headers": {}, "json": {"ok": True}}
 
     monkeypatch.setattr(run.pg, "name", lambda label: label)

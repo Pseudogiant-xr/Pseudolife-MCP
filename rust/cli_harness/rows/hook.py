@@ -23,7 +23,7 @@ import uuid
 from pathlib import Path
 
 from .. import producers as p
-from ..core import Case
+from ..core import HOOK_PROBE_ENV, Case
 from ..fixture_daemon import TLS_CA, Trickle, factory, json_body, redirect, text
 from ..mutants import Mutant
 
@@ -56,6 +56,8 @@ def daemon(**overrides):
 
 
 TOKEN = {"PSEUDOLIFE_MCP_TOKEN": "w1b-fixture-token"}
+# Unset: the arm probes /health with the product's 250 ms budget.
+DEFAULT_PROBE = {HOOK_PROBE_ENV: None}
 
 
 def _briefing_cases() -> list[Case]:
@@ -113,8 +115,11 @@ def _briefing_cases() -> list[Case]:
              daemon=daemon(**{"/api/hook/session-start": redirect("/elsewhere")}), env=TOKEN))
     # Trickled replies: every gap inside the per-read timeout (health 0.25 s,
     # payload 5 s), the whole reply longer than it. urllib times each
-    # receive, so Python completes; a total-time budget would not.
-    add(Case("briefing-health-trickle", expect_output=True, argv=["briefing", "--hook-json"], env=TOKEN,
+    # receive, so Python completes; a total-time budget would not. The
+    # health cases keep the product's 250 ms probe (DEFAULT_PROBE), since
+    # the harness's wider budget would let a whole-reply deadline pass.
+    add(Case("briefing-health-trickle", expect_output=True, argv=["briefing", "--hook-json"],
+             env={**TOKEN, **DEFAULT_PROBE},
              daemon=daemon(**{"/health": Trickle(json_body(HEALTH), 16, 0.1)})))
     add(Case("briefing-payload-trickle", expect_output=True, argv=["briefing", "--hook-json"], env=TOKEN,
              daemon=daemon(**{"/api/hook/session-start": Trickle(text(SESSION_START), 24, 0.6)})))
@@ -133,7 +138,8 @@ def _briefing_cases() -> list[Case]:
     tls_env = {**TOKEN, "SSL_CERT_FILE": str(TLS_CA)}
     add(Case("briefing-https-hook-json", expect_output=True, argv=["briefing", "--hook-json"], env=tls_env,
              daemon=factory(routes(), tls=True)))
-    add(Case("briefing-https-health-trickle", expect_output=True, argv=["briefing", "--hook-json"], env=tls_env,
+    add(Case("briefing-https-health-trickle", expect_output=True, argv=["briefing", "--hook-json"],
+             env={**tls_env, **DEFAULT_PROBE},
              daemon=factory(routes(**{"/health": Trickle(json_body(HEALTH), 16, 0.1)}),
                             tls=True)))
     add(Case("briefing-https-untrusted", ["briefing", "--hook-json"], env=TOKEN,

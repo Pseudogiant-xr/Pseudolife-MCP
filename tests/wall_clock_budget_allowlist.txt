@@ -1,0 +1,137 @@
+# Sub-second wall-clock intervals that a slower machine cannot turn red.
+# Read by tests/test_wall_clock_budgets.py; see its docstring for the rule.
+#
+# One entry per flagged line: <path> | <function> | <source line> | <reason>.
+# Reasons start with the class:
+#   negative:      asserts nothing happened in the interval; slowness only
+#                  makes it easier to pass (weaker, never red)
+#   minimum:       the interval only has to be at least that long
+#   product input: a timing value under test whose outcome does not depend
+#                  on how fast the machine is
+#   poll:          a poll the scanner cannot see as one
+#   debt:          a real budget a slow machine can fail; it needs a product
+#                  hook before it can be converted (tracked, not accepted)
+# A new entry needs one of the first four; prefer converting the test.
+
+rust/cli_harness/rows/lease_operator.py | hold_case.during | time.sleep(0.5) | negative: the no-board hold must still be up after it; slowness only keeps it up longer
+
+rust/cli_harness/rows/maintainer.py | terminate_during | time.sleep(0.5) | minimum: lets the enrol-code poll pass once; the 57P01 reaches the CLI either way
+
+rust/daemon/harness/w2d_search.py | disconnect | time.sleep(0.05) | minimum: holds the socket briefly before hang-up; nothing is asserted on the server's reaction
+
+rust/shim/src/board/doorbell_linux_cleanup_deadline_tests.rs | metadata_success_after_deadline_is_rejected | let deadline = Instant::now() + Duration::from_millis(10); | minimum: the read below sleeps past it; a stall before the first check also times out
+rust/shim/src/board/doorbell_linux_cleanup_deadline_tests.rs | metadata_success_after_deadline_is_rejected | std::thread::sleep(Duration::from_millis(40)); | minimum: must outlast the 10 ms deadline on the same clock; slowness only helps
+
+rust/shim/src/board/doorbell_linux_cleanup_wait_deadline_tests.rs | wait_cutoff_control | tokio::time::sleep(Duration::from_millis(10)).await; | poll: proves the timer advances; the test awaits it with no bound
+
+rust/shim/tests/auth_lifecycle_runtime.rs | sleep | tokio::time::sleep(Duration::from_millis(5)).await; | poll: the fake DaemonControl::sleep inside ensure_daemon's own retry loops
+
+rust/shim/tests/auth_lifecycle_updates.rs | test_two_sessions_starting_together_spawn_one_run | std::thread::sleep(Duration::from_millis(25)); | negative: widens the overlap inside the stubbed spawn; asserts only one run
+
+rust/shim/tests/auth_windows_security.rs | test_windows_transient_permission_error_is_retried | std::thread::sleep(Duration::from_millis(40)); | debt: the lock must clear inside the product's 20x5 ms retry; needs an attempt-count hook
+
+rust/shim/tests/board_bridge_contract.rs | board_bridge_page_credential_rotation_is_fenced_before_attempt | tokio::time::sleep(Duration::from_millis(110)).await; | negative: then asserts the stale page was never attempted after rotation
+
+rust/shim/tests/board_doorbell.rs | board_doorbell_definite_prelaunch_failure_rolls_back_exact_reservation | tokio::time::sleep(Duration::from_millis(100)).await; | negative: then asserts the failed prelaunch left no pending notice
+
+rust/shim/tests/board_renewal.rs | board_identity_rejection_pauses_background_instance_requests | tokio::time::sleep(std::time::Duration::from_millis(350)).await; | negative: after the identity rejection, asserts no further instance requests
+
+rust/shim/tests/board_retry_contract.rs | board_retry_close_cancels_hung_and_continuously_refused_attempts | tokio::time::sleep(Duration::from_millis(120)).await; | negative: close has returned; asserts no further attempt
+rust/shim/tests/board_retry_contract.rs | board_retry_codex_close_cancels_unanswered_probe | tokio::time::sleep(Duration::from_millis(80)).await; | negative: close has returned; asserts no further check or registration
+rust/shim/tests/board_retry_contract.rs | board_retry_close_wins_late_transport_failure_without_another_attempt | tokio::time::sleep(Duration::from_millis(150)).await; | negative: close has returned and the held answer is released; asserts no further attempt
+
+rust/shim/tests/board_ring_contract.rs | ring_settled | tokio::time::sleep(Duration::from_millis(20)).await; | negative: ring_settled pads absence checks; the ordering comes from the drain
+rust/shim/tests/board_ring_contract.rs | ring_settled | tokio::time::sleep(Duration::from_millis(10)).await; | negative: ring_settled pads absence checks; the ordering comes from the drain
+rust/shim/tests/board_ring_contract.rs | board_ring_local_listener_lease_and_attention_never_write_idle_marker | tokio::time::sleep(Duration::from_millis(10)).await; | negative: then asserts an attention wake wrote no ring marker
+
+rust/shim/tests/cli_wait_mail_contract.rs | fifo_replacement_is_interruptible_and_listener_permissions_override_umask | std::thread::sleep(Duration::from_millis(150)); | minimum: non-Linux only; a SIGINT any time after the guard exits 130, the wait only aims it at open()
+
+rust/shim/tests/lease_sigint.rs | run | thread::sleep(Duration::from_millis(100)); | debt: SIGINT must land before the child exits; needs a stop-taken marker in the product
+
+tests/test_board_status.py | test_board_off_when_the_daemon_is_unreachable | on, line = board_status(url, "fixture-token", timeout=0.5) | product input: the fixture daemon is closed, so the connection is refused at any speed
+
+tests/test_codex_delivery.py | test_startup_deadline_expiring_during_send_still_cancels.handler | time.sleep(0.5) | minimum: the handler must outlast the 0.3 s deadline on the same clock; slowness only helps
+tests/test_codex_delivery.py | test_startup_deadline_expiring_during_send_still_cancels.drive | await asyncio.wait_for(bridge.__aenter__(), timeout=0.3) | product input: the 0.3 s deadline under test against a 0.5 s block; it expires however late it lands
+tests/test_codex_delivery.py | test_real_redirect_is_rejected_before_destination_contact.drive | await asyncio.sleep(0.05) | negative: then asserts the redirect target was never contacted
+
+tests/test_codex_shim_health.py | test_health_ttl_is_configurable | time.sleep(0.1) | negative: lets a wrong background refresh show before asserting exactly one call
+
+tests/test_coordination_adapter.py | test_outage_reattaches_replays_pending_mail_and_reports_recovery.drive | await asyncio.sleep(0.05)          # healthy polling, empty mailbox | minimum: lets healthy empty-mailbox polling run before the outage; nothing counts it
+tests/test_coordination_adapter.py | test_page_in_flight_across_a_new_generation_is_discarded.drive | await asyncio.sleep(0.1) | negative: then asserts the stale page was discarded
+tests/test_coordination_adapter.py | test_stale_reservation_lock_releases_after_cancelled_registration.drive | await asyncio.wait_for(cancelled.__aenter__(), 0.05) | product input: the slow daemon never answers in time, so TimeoutError is the verdict at any speed
+tests/test_coordination_adapter.py | test_permanent_background_identity_failure_stops_retrying_and_preserves_state.drive | await asyncio.sleep(0.05) | negative: after the heartbeat task ended, asserts no further daemon calls
+tests/test_coordination_adapter.py | test_failed_registration_releases_state_reservation.drive | await asyncio.wait_for(instance.__aenter__(), 0.05) | product input: the slow daemon never answers in time, so TimeoutError is the verdict at any speed
+tests/test_coordination_adapter.py | test_a_daemon_ring_becomes_a_marker_beside_the_digest.drive | await asyncio.sleep(0.05)      # a due ring is written at once | minimum: the ring is a call_later(0) timer scheduled first, so it fires before this sleep ends
+tests/test_coordination_adapter.py | test_a_staggered_ring_waits_for_its_time.drive | await asyncio.sleep(0.1) | negative: the not-yet check is guarded by ring.pending(); the due ring is awaited via ring.wait()
+tests/test_coordination_adapter.py | test_a_nudged_wake_rings_nothing.drive | await asyncio.sleep(0.05) | negative: then asserts a nudged wake wrote no ring marker
+tests/test_coordination_adapter.py | test_a_malformed_wake_answer_rings_nothing.drive | await asyncio.sleep(0.05) | negative: then asserts a malformed wake wrote no ring marker
+tests/test_coordination_adapter.py | test_a_ring_marker_the_filesystem_refused_is_written_at_the_next_heartbeat.drive | await asyncio.sleep(0.05) | minimum: the refused ring is a call_later(0) timer scheduled before this sleep, so it ran first
+tests/test_coordination_adapter.py | test_a_ring_marker_the_filesystem_refused_is_written_at_the_next_heartbeat.drive | await asyncio.sleep(0.05) | minimum: the retried write runs inside the awaited heartbeat; the sleep only yields
+tests/test_coordination_adapter.py | test_a_refused_ring_marker_is_dropped_once_its_mail_was_shown.drive | await asyncio.sleep(0.05) | minimum: yields so the call_later(0) ring timer, scheduled first, refuses its write
+tests/test_coordination_adapter.py | test_a_refused_ring_marker_is_dropped_once_its_mail_was_shown.drive | await asyncio.sleep(0.05) | negative: then asserts the dropped ring wrote no marker
+tests/test_coordination_adapter.py | test_a_newer_ring_replaces_a_refused_one_and_keeps_its_stagger.drive | await asyncio.sleep(0.05) | minimum: the refused ring is a call_later(0) timer scheduled before this sleep, so it ran first
+tests/test_coordination_adapter.py | test_a_newer_ring_replaces_a_refused_one_and_keeps_its_stagger.drive | await asyncio.sleep(0.05) | negative: the not-yet check is guarded by newer.pending(); the due ring is awaited via newer.wait()
+tests/test_coordination_adapter.py | test_codex_authoritative_withdrawal_clears_offer_and_marker_paths.drive | await asyncio.sleep(0.01) | minimum: the call_later(0) marker timer, scheduled first, has run when this sleep ends
+tests/test_coordination_adapter.py | test_codex_authoritative_withdrawal_clears_offer_and_marker_paths.drive | await asyncio.sleep(0.25) | negative: after the withdrawal, asserts no ring marker appears
+
+tests/test_coordination_dispatch_isolation.py | test_send_during_initial_hydration_waits_for_clock_history | sending.result(timeout=0.2) | negative: pytest.raises(TimeoutError): the send must still be blocked behind hydration
+tests/test_coordination_dispatch_isolation.py | test_send_during_handover_hydration_waits_for_clock_history | sending.result(timeout=0.2) | negative: pytest.raises(TimeoutError): the send must still be blocked while hydration is paused
+
+tests/test_coordination_integration.py | test_park_records_gate_wakes_over_rest.drive | await asyncio.sleep(0.05) | minimum: ring_at is already past, so the call_later(0) marker timer fires before this sleep ends
+tests/test_coordination_integration.py | test_a_plain_shim_session_is_rung_through_its_ring_path.drive | await asyncio.sleep(0.05) | minimum: ring_at is already past, so the call_later(0) marker timer fires before this sleep ends
+tests/test_coordination_integration.py | test_urgent_mail_rings_an_unparked_shim_session_once.drive.beat | await asyncio.sleep(0.05) | minimum: the ring_at=now timer fires first; the doorbell result is awaited by _settle
+
+tests/test_coordination_leases.py | test_prune_locks_a_lease_before_its_queue | threading.Event().wait(0.5) | minimum: lets prune block on the lease row first; a prune not yet waiting only weakens the case
+
+tests/test_coordination_probe.py | test_probe_timeout_records_unverified_receipt_and_closes.drive | assert await module.run_probe(probe, None, None, timeout=0.01) == 1 | product input: the patched server never answers, so the probe times out at any speed
+
+tests/test_coordination_proof.py | test_proof_failure_removes_exact_owned_bank | proof.run_disposable_proof(pg_url, timeout=0.05) | product input: the patched proof fails at once or sleeps 1 s and must time out; no real work races it
+
+tests/test_cortex_contenders.py | test_history_as_of_set_slot | _t.sleep(0.02) | minimum: separates the alpha write from the as-of time; slowness only widens the gap
+tests/test_cortex_contenders.py | test_history_as_of_set_slot | _t.sleep(0.02) | minimum: separates the as-of time from the beta write; slowness only widens the gap
+
+tests/test_dream.py | test_openai_extractor_raises_on_timeout.slow | time.sleep(0.3) | product input: the stub hangs 0.3 s against a 0.05 s client timeout; the timeout fires either way
+
+tests/test_embedded_pg.py | test_start_lock_is_mutually_exclusive.worker | time.sleep(0.3) | negative: widens the overlap window inside the start lock; asserts no two holders
+
+tests/test_episodes.py | test_list_returns_newest_first | time.sleep(0.001)  # ensure timestamp differentiation | minimum: separates two episode start times so newest-first is defined
+
+tests/test_extractor_fallback.py | test_probe_unreachable_is_down | assert probe_endpoint("http://127.0.0.1:9/v1", timeout=0.3) is False | product input: port 9 is unreachable, so the probe is down whether refused or timed out
+tests/test_extractor_fallback.py | test_fetch_served_model_failure_is_none | assert d.fetch_served_model("http://127.0.0.1:9/v1", timeout=0.3) is None | product input: port 9 is unreachable, so the fetch fails whether refused or timed out
+
+tests/test_lock_monitor.py | test_monitored_lock_is_a_working_mutex.worker | time.sleep(0.01) | negative: widens the race window inside the lock; asserts mutual exclusion
+tests/test_lock_monitor.py | test_slow_hold_warns_with_holder_name.slow_holder | time.sleep(0.08) | minimum: the hold must reach the 0.05 s slow threshold; slowness only lengthens it
+
+tests/test_memory_changes_hook.py | test_changes_are_other_sessions_status_notes_and_new_lessons | time.sleep(0.05) | minimum: separates the since timestamp from the later stores; slowness only widens the gap
+tests/test_memory_changes_hook.py | test_changes_are_other_sessions_status_notes_and_new_lessons | time.sleep(0.02) | minimum: gives two status notes distinct timestamps above the Windows clock tick
+tests/test_memory_changes_hook.py | test_a_confirmed_lesson_or_superseded_status_is_not_new | time.sleep(0.05) | minimum: puts the confirmation after the since timestamp; slowness only widens the gap
+tests/test_memory_changes_hook.py | test_a_registered_sessions_first_turn_counts_from_its_session_start | time.sleep(0.05) | minimum: puts the earlier note strictly before started_at
+tests/test_memory_changes_hook.py | test_a_registered_sessions_first_turn_counts_from_its_session_start | time.sleep(0.05) | minimum: puts the later note strictly after started_at
+
+tests/test_migrate_embeddings.py | test_daemon_reachable_treats_hung_socket_as_up | assert migrate_embeddings._daemon_reachable(hung_health_server, timeout=0.2) is True | product input: the socket accepts and never answers, so the check can only end in its timeout
+
+tests/test_pg_run_isolation.py | test_wait_for_background_dreams_joins_only_dream_threads._dream | time.sleep(0.3) | minimum: the fake dream thread's work; the test joins it with a 10 s budget
+tests/test_pg_run_isolation.py | test_wait_for_background_dreams_returns_stragglers_past_the_budget | stragglers = pg_fixtures.wait_for_background_dreams(timeout=0.05) | product input: the stuck thread never finishes, so it is a straggler at any budget
+
+tests/test_service.py | TestEpisodes.test_episode_list_returns_newest_first | time.sleep(0.02)  # Windows clock resolution — distinguish timestamps | minimum: separates two episode start times so newest-first is defined
+
+tests/test_shim_board_retry.py | test_permanent_startup_refusal_keeps_todays_behaviour.driver | await asyncio.sleep(0.2)  # several retry periods | negative: startup got a 401; asserts no retry happened in this window
+tests/test_shim_board_retry.py | test_retry_that_meets_a_permanent_refusal_stops.driver | await asyncio.sleep(0.1) | minimum: lets refused retries run before the daemon starts refusing; nothing counts them
+tests/test_shim_board_retry.py | test_retry_that_meets_a_permanent_refusal_stops.driver | await asyncio.sleep(0.2) | negative: after the retry stopped, asserts no further attempts
+tests/test_shim_board_retry.py | test_session_end_stops_a_pending_retry.driver | await asyncio.sleep(0.3) | minimum: lets an attempt get in flight against the hung daemon; asserts no registration
+tests/test_shim_board_retry.py | test_session_end_stops_a_retry_against_a_daemon_that_stays_down.driver | await asyncio.sleep(0.3) | negative: the daemon stays down; asserts nothing registers and shutdown completes
+tests/test_shim_board_retry.py | test_late_adapter_feeds_the_channel_inbox.driver | await asyncio.sleep(0.05) | negative: asserts the first call is not done while the daemon is down
+tests/test_shim_board_retry.py | test_retry_waits_out_the_attachment_its_cancelled_startup_left.driver | await asyncio.sleep(0.05) | minimum: settles before the daemon comes up; the outcome is awaited by a 5 s poll
+
+tests/test_shim_runtimes.py | test_a_real_process_in_a_real_virtualenv_holds_its_runtime | time.sleep(0.5) | minimum: the child sleeps 120 s, so a later scan still finds it; the wait only lets the venv launcher settle
+
+tests/test_suite_lock.py | test_a_waiter_whose_board_address_expired_registers_again_at_hold | err = _stderr_until(capsys, "never-printed", timeout=0.5) | negative: waits for text that never prints, then asserts the board was not skipped
+
+tests/test_wait_mail_cli.py | test_a_refused_ring_retried_after_a_restart_stays_dropped.drive | await asyncio.sleep(0.05) | minimum: yields so the call_later(0) ring timer, scheduled first, refuses its write
+tests/test_wait_mail_cli.py | test_a_refused_ring_retried_after_a_restart_stays_dropped.drive | await asyncio.sleep(0.05) | negative: then asserts the dropped ring wrote no marker
+tests/test_wait_mail_cli.py | test_a_daemon_outage_and_recovery_do_not_wake_a_waiter.drive | await asyncio.sleep(0.1) | negative: lets the waiter arm before the outage; it must sleep through it
+
+tests/test_web_hardening.py | test_config_concurrent_patches_preserve_both_updates | assert not second_read.wait(0.3), "second writer read a stale configuration" | negative: the second writer must still be blocked; slowness only makes it easier to pass
+tests/test_web_hardening.py | test_config_serializes_runtime_publication | assert not second_done.wait(0.3), "runtime publication escaped serialization" | negative: the publication must still be blocked; slowness only makes it easier to pass
+
+tests/test_wsl_suite_launcher.py | test_a_run_reopens_a_lock_file_removed_while_it_waited | time.sleep(0.3) | minimum: lets the launcher block in flock first; a late block only weakens the case

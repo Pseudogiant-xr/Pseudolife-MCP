@@ -191,6 +191,19 @@ async fn request(
     }
     Ok(value)
 }
+/// Save a reservation off the runtime. The job owns the reservation and drops
+/// it after the write, so a caller abandoned mid-write cannot release the
+/// reservation before the save has finished.
+async fn save(
+    path: &std::path::Path,
+    mut reservation: Reservation,
+    saved: &Value,
+) -> Result<(), Failure> {
+    let saved = saved.clone();
+    state::offload(path, move || reservation.save(&saved))
+        .await
+        .map_err(Failure::local)
+}
 async fn fetch_context(
     client: &Client,
     config: &Config,
@@ -300,28 +313,42 @@ impl Adapter {
             .map_err(|_| Failure::local("credential_unavailable"))?;
         let mut context = fetch_context(&client, &config, &snapshot, None, false).await?;
         current(&config.provider, &snapshot)?;
-        let loaded_identity = config
-            .state
-            .as_ref()
-            .and_then(|path| state::open(path).ok())
-            .map(|opened| opened.identity);
-        let (mut saved, mut reservation) = match &config.state {
+        // State-file steps go through `state::offload`: off the runtime, and
+        // ordered behind any save an earlier, abandoned attempt still runs.
+        let (loaded_identity, mut saved, mut reservation) = match &config.state {
             Some(path) => {
-                Reservation::load_or_reserve(path, &config.url).map_err(Failure::local)?
+                let (target, url) = (path.clone(), config.url.clone());
+                state::offload(path, move || {
+                    let loaded = state::open(&target).ok().map(|opened| opened.identity);
+                    let (saved, reservation) = Reservation::load_or_reserve(&target, &url)?;
+                    Ok((loaded, saved, reservation))
+                })
+                .await
+                .map_err(Failure::local)?
             }
-            None => (None, None),
+            None => (None, None, None),
         };
         if saved.is_none()
             && let Some(path) = &config.legacy_state
-            && state::exists(path)
         {
-            let value: Value =
-                serde_json::from_slice(&state::read(path, 16384).map_err(Failure::local)?)
-                    .map_err(|_| Failure::local("invalid_state"))?;
-            if value["bank_url"].as_str() != Some(&config.url) {
-                return Err(Failure::local("invalid_state"));
+            let legacy = path.clone();
+            let bytes = state::offload(path, move || {
+                if state::exists(&legacy) {
+                    state::read(&legacy, 16384).map(Some)
+                } else {
+                    Ok(None)
+                }
+            })
+            .await
+            .map_err(Failure::local)?;
+            if let Some(bytes) = bytes {
+                let value: Value =
+                    serde_json::from_slice(&bytes).map_err(|_| Failure::local("invalid_state"))?;
+                if value["bank_url"].as_str() != Some(&config.url) {
+                    return Err(Failure::local("invalid_state"));
+                }
+                saved = Some(value);
             }
-            saved = Some(value);
         }
         let was_saved = saved.is_some();
         let mut identity = if let Some(mut saved) = saved {
@@ -337,18 +364,21 @@ impl Adapter {
                     saved["bank_id"] = json!(context.bank_id);
                     saved["principal"] = json!(context.principal);
                     if let Some(path) = &config.state {
-                        if let Some(reservation) = &mut reservation {
-                            reservation.save(&saved).map_err(Failure::local)?;
+                        if let Some(held) = reservation.take() {
+                            // Once saved, the file is no longer reclaimable, so
+                            // releasing its stale-reclaim lock here is safe.
+                            save(path, held, &saved).await?;
                         } else {
                             let original = loaded_identity
-                                .as_ref()
+                                .clone()
                                 .ok_or(Failure::local("reservation_changed"))?;
-                            state::atomic_write(
-                                path,
-                                &serde_json::to_vec(&saved)
-                                    .map_err(|_| Failure::local("invalid_state"))?,
-                                Some(original),
-                            )
+                            let bytes = serde_json::to_vec(&saved)
+                                .map_err(|_| Failure::local("invalid_state"))?;
+                            let target = path.clone();
+                            state::offload(path, move || {
+                                state::atomic_write(&target, &bytes, Some(&original))
+                            })
+                            .await
                             .map_err(Failure::local)?;
                         }
                     }
@@ -411,8 +441,8 @@ impl Adapter {
                 return Err(Failure::local("invalid_response"));
             }
             let saved = json!({"bank_url":config.url,"agent_id":registered["agent_id"],"credential":registered["credential"],"version":2,"bank_id":context.bank_id,"principal":context.principal});
-            if let Some(reservation) = &mut reservation {
-                reservation.save(&saved).map_err(Failure::local)?;
+            if let (Some(path), Some(held)) = (&config.state, reservation.take()) {
+                save(path, held, &saved).await?;
             }
             saved
         };
@@ -466,14 +496,19 @@ impl Adapter {
             && was_saved
             && let Some(path) = &config.state
         {
-            state::open(path).map_err(Failure::local)?;
             let stale = path.with_file_name(format!(
                 "{}.stale",
                 path.file_name()
                     .ok_or(Failure::local("invalid_state"))?
                     .to_string_lossy()
             ));
-            std::fs::rename(path, stale).map_err(|_| Failure::local("state_unavailable"))?;
+            let current = path.clone();
+            state::offload(path, move || {
+                state::open(&current)?;
+                std::fs::rename(&current, stale).map_err(|_| "state_unavailable")
+            })
+            .await
+            .map_err(Failure::local)?;
             crate::stderrln!(
                 "pseudolife-mcp: the saved coordination address is no longer valid on this bank; registering a new one (old state kept with a .stale suffix)."
             );
@@ -484,6 +519,32 @@ impl Adapter {
             .get("generation")
             .and_then(Value::as_i64)
             .ok_or(Failure::local("invalid_response"))?;
+        // Read on the digest's queue, after any write an abandoned earlier
+        // attempt still has queued there.
+        let watermark = match &config.digest {
+            Some(path) => {
+                let files = [path.clone(), path.with_extension("seen")];
+                state::offload(path, move || {
+                    Ok(files
+                        .iter()
+                        .filter_map(|path| state::read(path, 16384).ok())
+                        .filter_map(|bytes| {
+                            String::from_utf8_lossy(&bytes)
+                                .lines()
+                                .next()
+                                .unwrap_or("")
+                                .trim()
+                                .parse::<u64>()
+                                .ok()
+                        })
+                        .max()
+                        .unwrap_or(0))
+                })
+                .await
+                .unwrap_or(0)
+            }
+            None => 0,
+        };
         let mailbox = Mailbox {
             identity: std::mem::take(&mut identity),
             context,
@@ -491,22 +552,7 @@ impl Adapter {
             count: None,
             preview: vec![],
             digest: String::new(),
-            watermark: config.digest.as_ref().map_or(0, |path| {
-                [path.clone(), path.with_extension("seen")]
-                    .iter()
-                    .filter_map(|path| state::read(path, 16384).ok())
-                    .filter_map(|bytes| {
-                        String::from_utf8_lossy(&bytes)
-                            .lines()
-                            .next()
-                            .unwrap_or("")
-                            .trim()
-                            .parse::<u64>()
-                            .ok()
-                    })
-                    .max()
-                    .unwrap_or(0)
-            }),
+            watermark,
             delivered: 0,
             calls_since: 0,
             turn_seen: false,
@@ -932,7 +978,30 @@ impl Adapter {
         if self.closing.load(Ordering::Acquire) {
             return;
         }
+        // Watchers hear of the update even if this call is cancelled while it
+        // waits for its file writes below.
+        struct Notify<'a>(&'a tokio::sync::watch::Sender<u64>);
+        impl Drop for Notify<'_> {
+            fn drop(&mut self) {
+                self.0.send_modify(|revision| *revision += 1);
+            }
+        }
+        let _notify = Notify(&self.changes);
+        // File writes are queued while the mailbox is locked, which fixes
+        // their order, and awaited after it is released, so tool calls that
+        // need the mailbox do not wait for the disk. The digest and its
+        // markers share the digest's queue, so hooks reading them never see
+        // a newer digest before an older marker has landed.
+        let mut digest_write = None;
+        let mut agent_write = None;
+        let mut ring_write = None;
+        let mut ring_removal = None;
         let mut mailbox = self.mailbox.lock().await;
+        // `close` may have run while this waited for the lock; its cleanup
+        // must not be followed by fresh digest files.
+        if self.closing.load(Ordering::Acquire) {
+            return;
+        }
         mailbox.count = value.get("pending_count").and_then(Value::as_u64);
         mailbox.preview = value
             .get("pending_preview")
@@ -967,26 +1036,22 @@ impl Adapter {
                         .is_none_or(|time| time.elapsed() >= Duration::from_secs(3600))
                     || !path.exists())
             {
-                if let Some(parent) = path.parent() {
-                    let _ = state::private_dir(parent);
-                }
-                let written = state::atomic_write(
-                    path,
-                    format!(
-                        "{}\n{}{}",
-                        mailbox.watermark,
-                        mailbox.digest,
-                        if mailbox.digest.is_empty() { "" } else { "\n" }
-                    )
-                    .as_bytes(),
-                    None,
+                let body = format!(
+                    "{}\n{}{}",
+                    mailbox.watermark,
+                    mailbox.digest,
+                    if mailbox.digest.is_empty() { "" } else { "\n" }
                 );
-                if written.is_ok() {
-                    mailbox.digest_written = Some(tokio::time::Instant::now());
+                let target = path.clone();
+                digest_write = Some(state::offload(path, move || {
+                    if let Some(parent) = target.parent() {
+                        let _ = state::private_dir(parent);
+                    }
+                    state::atomic_write(&target, body.as_bytes(), None)?;
                     for marker in [
-                        path.with_extension("seen"),
-                        path.with_extension("agent"),
-                        path.with_extension("reprint"),
+                        target.with_extension("seen"),
+                        target.with_extension("agent"),
+                        target.with_extension("reprint"),
                     ] {
                         if let Ok(opened) = state::open_with_write(&marker, true) {
                             let _ = opened.file.set_times(
@@ -995,7 +1060,8 @@ impl Adapter {
                             );
                         }
                     }
-                }
+                    Ok(())
+                }));
             }
         }
         if let Some(path) = &self.config.digest
@@ -1006,14 +1072,14 @@ impl Adapter {
                 .map(str::to_owned)
             && (mailbox.agent_written.as_deref() != Some(agent.as_str())
                 || !path.with_extension("agent").exists())
-            && state::atomic_write(
-                &path.with_extension("agent"),
-                format!("{agent}\n").as_bytes(),
-                None,
-            )
-            .is_ok()
         {
-            mailbox.agent_written = Some(agent);
+            let (marker, body) = (path.with_extension("agent"), format!("{agent}\n"));
+            agent_write = Some((
+                agent,
+                state::offload(path, move || {
+                    state::atomic_write(&marker, body.as_bytes(), None)
+                }),
+            ));
         }
         let wake = value.get("wake");
         let signature = wake.and_then(|wake| {
@@ -1037,7 +1103,12 @@ impl Adapter {
             mailbox.ring_unwritten = None;
             mailbox.last_wake = None;
             if let Some(path) = &self.config.digest {
-                let _ = std::fs::remove_file(path.with_extension("ring"));
+                // Behind any ring write still queued, so none lands after it.
+                let ring = path.with_extension("ring");
+                ring_removal = Some(state::offload(path, move || {
+                    let _ = std::fs::remove_file(&ring);
+                    Ok(())
+                }));
             }
         } else if signature.is_some() && signature != mailbox.last_wake {
             mailbox.ring_due = signature
@@ -1054,7 +1125,8 @@ impl Adapter {
             mailbox.wake = wake.cloned();
             mailbox.wake_watermark = Some(mailbox.watermark);
         }
-        if let Some((decision, reason, watermark)) = mailbox.ring_unwritten.clone() {
+        if let Some(unwritten) = mailbox.ring_unwritten.clone() {
+            let (decision, reason, watermark) = &unwritten;
             let seen = self
                 .config
                 .digest
@@ -1062,21 +1134,61 @@ impl Adapter {
                 .and_then(|path| state::read(&path.with_extension("seen"), 128).ok())
                 .and_then(|bytes| String::from_utf8_lossy(&bytes).trim().parse::<u64>().ok())
                 .unwrap_or(0);
-            if seen >= watermark || self.write_ring(&decision, &reason, watermark) {
+            if seen >= *watermark {
+                mailbox.ring_unwritten = None;
+            } else {
+                ring_write = Some((
+                    unwritten.clone(),
+                    self.write_ring(decision, reason, *watermark),
+                ));
+            }
+        }
+        drop(mailbox);
+        if let Some(removal) = ring_removal {
+            let _ = removal.await;
+        }
+        if let Some(written) = digest_write
+            && written.await.is_ok()
+        {
+            self.mailbox.lock().await.digest_written = Some(tokio::time::Instant::now());
+        }
+        if let Some((agent, written)) = agent_write
+            && written.await.is_ok()
+        {
+            self.mailbox.lock().await.agent_written = Some(agent);
+        }
+        if let Some((unwritten, written)) = ring_write
+            && written.await
+        {
+            let mut mailbox = self.mailbox.lock().await;
+            // A newer update may already have replaced or cleared it.
+            if mailbox.ring_unwritten.as_ref() == Some(&unwritten) {
                 mailbox.ring_unwritten = None;
             }
         }
-        self.changes.send_modify(|revision| *revision += 1);
     }
-    fn write_ring(&self, decision: &str, reason: &str, watermark: u64) -> bool {
-        self.config.digest.as_ref().is_none_or(|path| {
-            state::atomic_write(
-                &path.with_extension("ring"),
-                format!("{watermark}\n{decision} {reason}\n").as_bytes(),
-                None,
-            )
-            .is_ok()
-        })
+    /// Queue the ring marker's write now; the future reports whether it landed.
+    fn write_ring(
+        &self,
+        decision: &str,
+        reason: &str,
+        watermark: u64,
+    ) -> impl std::future::Future<Output = bool> + use<> {
+        let written = self.config.digest.as_ref().map(|path| {
+            let (ring, body) = (
+                path.with_extension("ring"),
+                format!("{watermark}\n{decision} {reason}\n"),
+            );
+            state::offload(path, move || {
+                state::atomic_write(&ring, body.as_bytes(), None)
+            })
+        });
+        async move {
+            match written {
+                Some(written) => written.await.is_ok(),
+                None => true,
+            }
+        }
     }
     async fn ring_worker(self: Arc<Self>) {
         let mut changed = self.subscribe();
@@ -1089,9 +1201,18 @@ impl Adapter {
                     continue;
                 }
                 mailbox.ring_due = None;
-                if let Some((decision, reason, _)) = mailbox.last_wake.clone() {
-                    let watermark = mailbox.watermark;
-                    if !self.write_ring(&decision, &reason, watermark) {
+                let wake = mailbox.last_wake.clone();
+                let watermark = mailbox.watermark;
+                let written = wake
+                    .as_ref()
+                    .map(|(decision, reason, _)| self.write_ring(decision, reason, watermark));
+                drop(mailbox);
+                if let (Some(written), Some((decision, reason, _))) = (written, wake.clone())
+                    && !written.await
+                {
+                    let mut mailbox = self.mailbox.lock().await;
+                    // Keep the retry only while this wake is still the latest.
+                    if mailbox.last_wake == wake {
                         mailbox.ring_unwritten = Some((decision, reason, watermark));
                     }
                 }
@@ -1146,12 +1267,25 @@ impl Adapter {
             }
             mailbox.delivered = mailbox.watermark;
             mailbox.calls_since = 0;
-            if let Some(path) = &self.config.digest {
-                let _ = state::atomic_write(
-                    &path.with_extension("seen"),
-                    format!("{}\n", mailbox.delivered).as_bytes(),
-                    None,
-                );
+            // Once `close` has begun, the marker it removes must stay removed.
+            if let Some(path) = &self.config.digest
+                && !self.closing.load(Ordering::Acquire)
+            {
+                let (seen, delivered) = (path.with_extension("seen"), mailbox.delivered);
+                // Queued on the digest's queue, not awaited: a caller
+                // cancelled here would lose the hint it has already counted
+                // as delivered. `close` removes the marker after this write.
+                // Like `wait-mail`'s mark_seen, never lower a mark a hook
+                // has already raised.
+                drop(state::offload(path, move || {
+                    let marked = state::read(&seen, 128).ok().and_then(|bytes| {
+                        String::from_utf8_lossy(&bytes).trim().parse::<u64>().ok()
+                    });
+                    if marked.is_some_and(|marked| marked >= delivered) {
+                        return Ok(());
+                    }
+                    state::atomic_write(&seen, format!("{delivered}\n").as_bytes(), None)
+                }));
             }
             return Some(mailbox.digest.clone());
         }
@@ -1211,15 +1345,21 @@ impl Adapter {
                     let _ = std::fs::remove_file(marker.path());
                 }
             }
-            for path in [
+            let targets = [
                 path.clone(),
                 path.with_extension("seen"),
                 path.with_extension("ring"),
                 path.with_extension("agent"),
                 path.with_extension("turn"),
-            ] {
-                let _ = std::fs::remove_file(path);
-            }
+            ];
+            // On the digest's queue, behind any write a cancelled task left running.
+            let _ = state::offload(path, move || {
+                for target in targets {
+                    let _ = std::fs::remove_file(target);
+                }
+                Ok(())
+            })
+            .await;
         }
     }
     #[cfg(feature = "codex-delivery")]

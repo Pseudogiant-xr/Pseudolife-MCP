@@ -159,6 +159,11 @@ class PrincipalSnapshot:
 
     # -- reads -------------------------------------------------------------
 
+    def loaded(self) -> bool:
+        """Whether a refresh has ever completed (``/health`` ``pending``)."""
+        with self._lock:
+            return self._loaded_at is not None
+
     def available(self) -> bool:
         with self._lock:
             loaded = self._loaded_at

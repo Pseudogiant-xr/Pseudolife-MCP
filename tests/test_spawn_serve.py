@@ -20,7 +20,7 @@ import pytest
 
 from tests import helpers
 
-# Serves /health the way the daemon does, after an optional delay, so the
+# Serves a ready /health the way the daemon does, after an optional delay, so the
 # helper's poll can meet a foreign server before this one has bound.
 _STAND_IN = """
 import json, os, time
@@ -30,7 +30,7 @@ time.sleep(float(os.environ.get("STAND_IN_BIND_DELAY", "0")))
 
 
 async def app(scope, receive, send):
-    body = json.dumps({"status": "ok", "stand_in": os.getpid()}).encode()
+    body = json.dumps({"status": "ok", "stand_in": os.getpid(), "ready": True}).encode()
     await send({"type": "http.response.start", "status": 200,
                 "headers": [(b"content-type", b"application/json")]})
     await send({"type": "http.response.body", "body": body})
@@ -79,7 +79,7 @@ def test_a_foreign_server_on_the_port_is_not_taken_for_the_daemon(
             pass
 
         def do_GET(self):
-            body = json.dumps({"status": "ok", "foreign": True}).encode()
+            body = json.dumps({"status": "ok", "foreign": True, "ready": True}).encode()
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))

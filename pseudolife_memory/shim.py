@@ -538,7 +538,42 @@ _STARTED_WITHOUT_DAEMON_NOTE = (
     "{served} Each tool call retries it, and the tool list refreshes when it answers.")
 
 
-def probe_health(url: str, timeout: float = 0.25) -> dict | None:
+_HOOK_PROBE_DEFAULT_MS = 250
+_HOOK_PROBE_MAX_MS = 60_000
+_HOOK_PROBE_WHITESPACE = " \t\r\n"
+
+
+def hook_probe_timeout() -> float:
+    """Seconds ``probe_health`` waits when its caller names no timeout: the
+    hooks' daemon check and the shim's loopback startup probes.
+
+    250 ms unless ``PSEUDOLIFE_HOOK_PROBE_MS`` holds a positive whole number
+    of milliseconds, clamped to 60000. It is a test-facing knob: the CLI
+    parity harness sets it to the same value in both arms, because a cold
+    hosted runner can stall one arm's first connection past 250 ms. Only
+    ASCII digits count, after stripping spaces, tabs, CR and LF; anything
+    else (empty, zero, a sign, a decimal point, an underscore) keeps 250 ms.
+    ``rust/shim/src/lifecycle.rs`` (``parse_probe_ms``) parses it the same way.
+    """
+    raw = os.environ.get("PSEUDOLIFE_HOOK_PROBE_MS")
+    if raw is None:
+        return _HOOK_PROBE_DEFAULT_MS / 1000
+    digits = raw.strip(_HOOK_PROBE_WHITESPACE)
+    if not digits or not all("0" <= c <= "9" for c in digits):
+        return _HOOK_PROBE_DEFAULT_MS / 1000
+    # Leading zeros dropped and the length checked before int(): a long digit
+    # string clamps rather than tripping int()'s digit limit.
+    significant = digits.lstrip("0")
+    if not significant:
+        return _HOOK_PROBE_DEFAULT_MS / 1000
+    if len(significant) > len(str(_HOOK_PROBE_MAX_MS)):
+        return _HOOK_PROBE_MAX_MS / 1000
+    return min(int(significant), _HOOK_PROBE_MAX_MS) / 1000
+
+
+def probe_health(url: str, timeout: float | None = None) -> dict | None:
+    if timeout is None:
+        timeout = hook_probe_timeout()
     try:
         with urllib.request.urlopen(url + "/health", timeout=timeout) as r:
             return json.loads(r.read().decode())

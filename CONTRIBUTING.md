@@ -183,9 +183,14 @@ CI's two full-suite lanes run this exact invocation
 module-scoped fixtures keep their semantics): the `test` lane with
 `PSEUDOLIFE_TEST_EMBEDDER=real`, so every test also runs on the real
 weights for each PR, and `test-lite-linux` with the default. Two more
-lanes run narrower fixed file lists: `test-lite-windows`, and
-`test-lite-macos` for the plugin hooks and installers under macOS's
-bash 3.2 and BSD tools. If you add
+lanes run narrower fixed file lists: `test-lite-windows` for the product
+paths that differ on Windows, and `test-lite-macos` for the plugin hooks
+and installers under macOS's bash 3.2 and BSD tools. The process-spawning
+Windows plumbing (installers, hooks, board, suite lock) runs in
+`test-windows-nightly`, which is not a merge gate and retries a failure
+once while keeping the first attempt on record;
+`tests/test_ci_windows_lanes.py` keeps each test in one Windows lane and
+fails when a file with a Windows-only test is in neither. If you add
 behavior, add a test; if you fix a bug, add the test that would have
 caught it.
 

@@ -125,6 +125,41 @@ pub fn spawn_disabled(raw: Option<&str>) -> bool {
         "1" | "true" | "yes" | "on"
     )
 }
+const HOOK_PROBE_DEFAULT_MS: u64 = 250;
+const HOOK_PROBE_MAX_MS: u64 = 60_000;
+/// The `/health` budget for `PSEUDOLIFE_HOOK_PROBE_MS`'s raw value, as
+/// `shim.hook_probe_timeout` reads it: 250 ms unless the value is a positive
+/// whole number of milliseconds (ASCII digits only, after stripping spaces,
+/// tabs, CR and LF), clamped to 60000. A test-facing knob: the CLI parity
+/// harness sets it in both arms, since a cold hosted runner can stall one
+/// arm's first connection past 250 ms.
+pub fn parse_probe_ms(raw: Option<&str>) -> Duration {
+    let default = Duration::from_millis(HOOK_PROBE_DEFAULT_MS);
+    let Some(raw) = raw else {
+        return default;
+    };
+    let digits = raw.trim_matches([' ', '\t', '\r', '\n']);
+    if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
+        return default;
+    }
+    let significant = digits.trim_start_matches('0');
+    if significant.is_empty() {
+        return default;
+    }
+    // Longer than the clamp's digits: clamped without parsing (no overflow).
+    if significant.len() > HOOK_PROBE_MAX_MS.to_string().len() {
+        return Duration::from_millis(HOOK_PROBE_MAX_MS);
+    }
+    significant.parse::<u64>().map_or(default, |ms| {
+        Duration::from_millis(ms.min(HOOK_PROBE_MAX_MS))
+    })
+}
+/// The budget of a `/health` probe whose caller names none: the hooks'
+/// daemon check and the shim's loopback startup probes (`probe_health`'s
+/// default in the Python port).
+pub fn hook_probe_budget() -> Duration {
+    parse_probe_ms(std::env::var("PSEUDOLIFE_HOOK_PROBE_MS").ok().as_deref())
+}
 pub fn operation_timeout_seconds(raw: Option<&str>) -> f64 {
     raw.and_then(python_float)
         .filter(|v| v.is_finite() && *v > 0.0)
@@ -356,7 +391,7 @@ pub async fn ensure_daemon<C: DaemonControl>(
             if remote {
                 REMOTE_PROBE_TIMEOUT
             } else {
-                Duration::from_millis(250)
+                hook_probe_budget()
             },
         )
         .await
@@ -418,7 +453,7 @@ pub async fn ensure_daemon<C: DaemonControl>(
             }
             control.sleep(Duration::from_millis(500)).await;
         }
-        if let Some(health) = control.probe(&url, Duration::from_millis(250)).await {
+        if let Some(health) = control.probe(&url, hook_probe_budget()).await {
             return vet_health(&url, health, control).map(Some);
         }
     }
@@ -1144,5 +1179,75 @@ pub fn launcher_command_for(launcher: &Path, found: Option<&Path>) -> String {
         format!("\"{text}\"")
     } else {
         text.into_owned()
+    }
+}
+
+#[cfg(test)]
+mod probe_budget_tests {
+    use super::{hook_probe_budget, parse_probe_ms};
+    use std::time::Duration;
+
+    #[test]
+    fn unset_keeps_the_250_ms_default() {
+        assert_eq!(parse_probe_ms(None), Duration::from_millis(250));
+    }
+
+    #[test]
+    fn a_positive_whole_number_of_milliseconds_sets_the_budget() {
+        for (raw, millis) in [
+            ("1500", 1500),
+            (" 1500\t", 1500),
+            ("\r\n800\n", 800),
+            ("0001500", 1500),
+            ("1", 1),
+            ("60000", 60_000),
+            ("60001", 60_000),
+        ] {
+            assert_eq!(
+                parse_probe_ms(Some(raw)),
+                Duration::from_millis(millis),
+                "{raw:?}"
+            );
+        }
+        assert_eq!(
+            parse_probe_ms(Some(&"9".repeat(5000))),
+            Duration::from_millis(60_000)
+        );
+    }
+
+    #[test]
+    fn invalid_zero_or_negative_values_fall_back_to_250_ms() {
+        for raw in [
+            "",
+            "   ",
+            "0",
+            "000",
+            "-5",
+            "+5",
+            "1.5",
+            "1e3",
+            "1_500",
+            "abc",
+            "1500ms",
+            "\u{661}\u{665}\u{660}\u{660}",
+            "\u{a0}1500",
+            "\u{b}1500",
+        ] {
+            assert_eq!(
+                parse_probe_ms(Some(raw)),
+                Duration::from_millis(250),
+                "{raw:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_budget_reads_the_process_environment() {
+        // Reads only: setting the variable needs unsafe code, which this
+        // crate denies, and would race other tests' threads.
+        assert_eq!(
+            hook_probe_budget(),
+            parse_probe_ms(std::env::var("PSEUDOLIFE_HOOK_PROBE_MS").ok().as_deref())
+        );
     }
 }

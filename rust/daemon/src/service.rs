@@ -34,8 +34,9 @@ pub struct Ready {
     pub cortex: crate::stores::cortex::SharedCortex,
     /// The resident world cortex (`world_tools.rs` writes it under `write`).
     pub world: crate::stores::world::SharedWorld,
-    /// The resident lesson store (read-only: only the dream writes lessons).
-    pub lessons: Arc<crate::stores::lessons::LessonStore>,
+    /// The resident lesson store (`memory_forget` retires lessons under
+    /// `write`; the dream's synthesis is not ported).
+    pub lessons: crate::stores::lessons::SharedLessons,
     /// The service hybrid logical clock (`MemoryService._hlc`).
     pub hlc: std::sync::Mutex<crate::hlc::Clock>,
 }
@@ -62,6 +63,10 @@ pub struct Snapshot {
     pub not_ready: Option<String>,
     pub storage: Option<Arc<Storage>>,
     pub embedder: Option<Value>,
+    /// The published stores' startup state, once an init has completed its
+    /// clock reseed: `/health` `ready` reads its live reseed flag
+    /// (`MemoryService.coordination_tier_ready`).
+    pub startup: Option<Arc<crate::startup::StartupState>>,
 }
 
 #[derive(Default)]
@@ -230,12 +235,15 @@ impl Service {
                 && r.startup.clock_state().hlc_reseed_pending
             {
                 inner.ready = None;
+                self.update(|s| s.startup = None);
             } else {
                 if r.startup.clock_state().hlc_reseed_pending {
                     r.startup
                         .reseed(r.storage.client())
                         .await
                         .map_err(|error| format!("{error:#}"))?;
+                    let startup = r.startup.clone();
+                    self.update(|s| s.startup = Some(startup));
                 }
                 return Ok(r.clone());
             }
@@ -299,7 +307,7 @@ impl Service {
                     startup: Arc::new(startup),
                     cortex: crate::stores::cortex::SharedCortex::new(cortex),
                     world: crate::stores::world::SharedWorld::new(world),
-                    lessons: Arc::new(lessons),
+                    lessons: crate::stores::lessons::SharedLessons::new(lessons),
                     hlc: std::sync::Mutex::new(crate::hlc::Clock::default()),
                 });
                 inner.ready = Some(ready.clone());
@@ -310,6 +318,10 @@ impl Service {
                     .reseed(ready.storage.client())
                     .await
                     .map_err(|error| format!("{error:#}"))?;
+                // Published only now, as Python's flag stays pending until
+                // the reseed: `ready` never leads the clock.
+                let startup = ready.startup.clone();
+                self.update(|s| s.startup = Some(startup));
                 Ok(ready)
             }
             Err(e) => {
@@ -1009,7 +1021,10 @@ mod tests {
             inner.ready = None;
             inner.storage = None;
         }
-        service.update(|snapshot| snapshot.storage = None);
+        service.update(|snapshot| {
+            snapshot.storage = None;
+            snapshot.startup = None;
+        });
         drop(service);
         Arc::try_unwrap(storage)
             .ok()

@@ -34,6 +34,14 @@ REFUSAL = "wsl-suite: a dispatched run"
 pytestmark = pytest.mark.skipif(BASH is None, reason="bash is not available")
 
 
+@pytest.fixture(autouse=True)
+def _not_profiled(monkeypatch):
+    """A profiled suite exports these; a launcher under test must not inherit
+    them, or it profiles itself (seen in the first profiled run, 2026-10-20)."""
+    monkeypatch.delenv("PSEUDOLIFE_SUITE_PROFILE", raising=False)
+    monkeypatch.delenv("PSEUDOLIFE_SUITE_PROFILE_DIR", raising=False)
+
+
 def _run(tmp_path: Path, *, lease_file: str | None = None, **env: str | None):
     home = tmp_path / "home"
     (home / ".pseudolife-mcp" / "locks").mkdir(parents=True, exist_ok=True)
@@ -728,3 +736,363 @@ def test_a_run_reopens_a_lock_file_removed_while_it_waited(tmp_path, which):
         if launcher is not None and launcher.poll() is None:
             launcher.kill()
             launcher.wait(timeout=10)
+
+
+# ── the default full run's xdist workers ──────────────────────────────────
+
+def _pytest_argv(tmp_path: Path, *args: str, **env: str | None):
+    """Run the launcher with pytest's stand-in recording the argv it got."""
+    venv_bin = tmp_path / "venv" / "bin"
+    stubs = tmp_path / "stubs"
+    venv_bin.mkdir(parents=True)
+    stubs.mkdir()
+    record = tmp_path / "argv"
+    (venv_bin / "python").write_text(
+        f"#!/bin/bash\nprintf '%s\n' \"$@\" > '{record}'\n", encoding="utf-8")
+    # The stand-in for uv leaves a mark: a refusal must come before it.
+    (stubs / "uv").write_text(f"#!/bin/sh\ntouch '{tmp_path}/uv-called'\nexit 0\n",
+                              encoding="utf-8")
+    for stub in (venv_bin / "python", stubs / "uv"):
+        stub.chmod(0o755)
+    base = {"HOME": str(tmp_path / "home"),
+            "PATH": f"{stubs}{os.pathsep}{os.environ['PATH']}",
+            "PSEUDOLIFE_SUITE_VENV": str(tmp_path / "venv"),
+            "PSEUDOLIFE_SUITE_COMMIT": None, "PSEUDOLIFE_SUITE_DISPATCHED": None,
+            "PSEUDOLIFE_SUITE_WORKERS": None}
+    base.update(env)
+    proc = subprocess.run([BASH, str(SCRIPT), *args], capture_output=True,
+                          text=True, timeout=120, env=hermetic_env(**base))
+    argv = (record.read_text(encoding="utf-8").splitlines()
+            if record.exists() else None)
+    return proc, argv
+
+
+_FULL = ["-m", "pytest", "tests/", "-q", "-rs"]
+
+
+@_LINUX_ONLY
+def test_the_default_full_run_takes_the_workers_asked_for(tmp_path):
+    proc, argv = _pytest_argv(tmp_path, PSEUDOLIFE_SUITE_WORKERS="3")
+    assert proc.returncode == 0, proc.stderr
+    assert argv == [*_FULL, "-n", "3", "--dist", "loadfile", "--durations=30"]
+    assert "full suite, 3 xdist workers" in proc.stdout
+
+
+@pytest.mark.parametrize("workers", ["0", "1"])
+@_LINUX_ONLY
+def test_one_worker_or_none_runs_the_suite_in_one_process(tmp_path, workers):
+    proc, argv = _pytest_argv(tmp_path, PSEUDOLIFE_SUITE_WORKERS=workers)
+    assert proc.returncode == 0, proc.stderr
+    assert argv == _FULL
+    assert "full suite, one process" in proc.stdout
+
+
+@_LINUX_ONLY
+def test_arguments_still_replace_the_default_untouched(tmp_path):
+    proc, argv = _pytest_argv(tmp_path, "tests/test_bm25.py", "-x",
+                              PSEUDOLIFE_SUITE_WORKERS="4")
+    assert proc.returncode == 0, proc.stderr
+    assert argv == ["-m", "pytest", "tests/test_bm25.py", "-x"]
+
+
+@_LINUX_ONLY
+def test_a_malformed_worker_count_is_refused_before_pytest(tmp_path):
+    proc, argv = _pytest_argv(tmp_path, PSEUDOLIFE_SUITE_WORKERS="four")
+    assert proc.returncode == 2
+    assert argv is None
+    assert "PSEUDOLIFE_SUITE_WORKERS must be a whole number" in proc.stderr
+
+
+def _expected_workers() -> int:
+    """The launcher's rule, derived here from the same sources: at most 4,
+    one per two CPUs, one per 6 GB of the smaller of RAM and the cgroup's
+    memory.max (a dispatched run's systemd scope caps it at 16 GB)."""
+    with open("/proc/meminfo", encoding="ascii") as f:
+        mem_kb = next(int(line.split()[1]) for line in f
+                      if line.startswith("MemTotal:"))
+    with open("/proc/self/cgroup", encoding="ascii") as f:
+        lines = [line.rstrip("\n").split(":", 2) for line in f]
+    v2 = next((path for _, ctl, path in lines if ctl == ""), "")
+    v1 = next((path for _, ctl, path in lines if "memory" in ctl.split(",")), "")
+    # cgroup v2's memory.max, else v1's memory controller (Codex review,
+    # 2026-10-19: the launcher reads both, so the oracle must too).
+    for limit_file in (Path(f"/sys/fs/cgroup{v2}/memory.max"),
+                       Path(f"/sys/fs/cgroup/memory{v1}/memory.limit_in_bytes")):
+        try:
+            limit = limit_file.read_text().strip()
+        except OSError:
+            continue
+        if limit.isdigit():
+            mem_kb = min(mem_kb, int(limit) // 1024)
+        break
+    cpus = len(os.sched_getaffinity(0))
+    return min(4, cpus // 2, mem_kb // (6 * 1024 * 1024))
+
+
+@_LINUX_ONLY
+def test_the_default_worker_count_follows_cpus_and_memory(tmp_path):
+    """OMP_NUM_THREADS is set on purpose, as CI's Linux lanes set it: GNU
+    nproc reports that value instead of the CPUs (Codex review,
+    2026-10-19), and the launcher must count the CPUs."""
+    proc, argv = _pytest_argv(tmp_path, OMP_NUM_THREADS="1",
+                              OMP_THREAD_LIMIT="1")
+    assert proc.returncode == 0, proc.stderr
+    workers = _expected_workers()
+    if workers >= 2:
+        assert argv == [*_FULL, "-n", str(workers), "--dist", "loadfile",
+                        "--durations=30"]
+    else:
+        assert argv == _FULL
+
+
+@_LINUX_ONLY
+def test_a_zero_padded_worker_count_is_read_as_decimal(tmp_path):
+    """bash arithmetic reads "08" as bad octal and "010" as 8 (Claude
+    review, 2026-10-19); the launcher reads the count as decimal."""
+    proc, argv = _pytest_argv(tmp_path, PSEUDOLIFE_SUITE_WORKERS="08")
+    assert proc.returncode == 0, proc.stderr
+    assert argv == [*_FULL, "-n", "8", "--dist", "loadfile", "--durations=30"]
+
+
+_PROFILE = ["-p", "tests.suite_profile_plugin"]
+
+
+@_LINUX_ONLY
+def test_profiling_adds_the_plugin_and_keeps_the_default_workers(tmp_path):
+    profile = tmp_path / "profile"
+    proc, argv = _pytest_argv(tmp_path, PSEUDOLIFE_SUITE_WORKERS="3",
+                              PSEUDOLIFE_SUITE_PROFILE="1",
+                              PSEUDOLIFE_SUITE_PROFILE_DIR=str(profile))
+    assert proc.returncode == 0, proc.stderr
+    assert argv == ["-m", "pytest", *_PROFILE, "tests/", "-q", "-rs", "-n", "3",
+                    "--dist", "loadfile", "--durations=30"]
+    assert f"wsl-suite: profiling to {profile}" in proc.stdout
+    assert profile.is_dir()
+
+
+@_LINUX_ONLY
+def test_profiling_keeps_chosen_arguments_as_they_are(tmp_path):
+    proc, argv = _pytest_argv(tmp_path, "tests/test_bm25.py", "-x",
+                              PSEUDOLIFE_SUITE_PROFILE="1",
+                              PSEUDOLIFE_SUITE_PROFILE_DIR=str(tmp_path / "p"))
+    assert proc.returncode == 0, proc.stderr
+    assert argv == ["-m", "pytest", *_PROFILE, "tests/test_bm25.py", "-x"]
+
+
+@pytest.mark.parametrize("value", ["", "0", "off", "false", "no"])
+@_LINUX_ONLY
+def test_profiling_is_off_unless_asked_for(tmp_path, value):
+    proc, argv = _pytest_argv(tmp_path, PSEUDOLIFE_SUITE_WORKERS="1",
+                              PSEUDOLIFE_SUITE_PROFILE=value)
+    assert proc.returncode == 0, proc.stderr
+    assert argv == _FULL
+    assert "profiling" not in proc.stdout
+
+
+@_LINUX_ONLY
+def test_a_failing_profiled_run_keeps_its_exit_code(tmp_path):
+    """pytest's code survives the summary step, even when the summary
+    itself fails; the summary runs only once the plugin wrote a manifest."""
+    venv_bin = tmp_path / "venv" / "bin"
+    venv_bin.mkdir(parents=True)
+    stubs = tmp_path / "stubs"
+    stubs.mkdir()
+    calls = tmp_path / "calls"
+    (venv_bin / "python").write_text(
+        "#!/bin/bash\n"
+        f"echo \"$1\" >> '{calls}'\n"
+        'if [[ "$1" == -m ]]; then\n'
+        '    echo "{}" > "$PSEUDOLIFE_SUITE_PROFILE_DIR/manifest.json"; exit 5\n'
+        "fi\n"
+        "exit 1\n", encoding="utf-8")
+    (stubs / "uv").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    for stub in (venv_bin / "python", stubs / "uv"):
+        stub.chmod(0o755)
+    env = hermetic_env(
+        HOME=str(tmp_path / "home"), PATH=f"{stubs}{os.pathsep}{os.environ['PATH']}",
+        PSEUDOLIFE_SUITE_VENV=str(tmp_path / "venv"), PSEUDOLIFE_SUITE_COMMIT=None,
+        PSEUDOLIFE_SUITE_DISPATCHED=None, PSEUDOLIFE_SUITE_WORKERS="1",
+        PSEUDOLIFE_SUITE_PROFILE="1",
+        PSEUDOLIFE_SUITE_PROFILE_DIR=str(tmp_path / "profile"))
+    proc = subprocess.run([BASH, str(SCRIPT)], capture_output=True, text=True,
+                          timeout=120, env=env)
+
+    assert proc.returncode == 5, proc.stderr
+    assert calls.read_text(encoding="utf-8").split() == [
+        "-m", "evals/suite_profile_summary.py"]
+    assert "the profile summary failed" in proc.stderr
+
+
+# The launcher's argument contract (plan_run in ops/wsl-suite.sh): display
+# options and worker choices keep the full suite; anything else, or a `--`,
+# goes to pytest unchanged; a malformed choice is refused before anything is
+# fetched or installed.
+
+_AUTO = ["-n", "3", "--dist", "loadfile", "--durations=30"]
+
+
+@pytest.mark.parametrize("args, expected", [
+    (["-q"], ["tests/", "-q", *_AUTO]),
+    (["-v", "-rs"], ["tests/", "-v", "-rs", *_AUTO]),
+    (["-vv", "-ra", "--tb=short"], ["tests/", "-vv", "-ra", "--tb=short", *_AUTO]),
+    (["--tb", "line"], ["tests/", "--tb=line", *_AUTO]),
+    (["--quiet"], ["tests/", "--quiet", *_AUTO]),
+    (["--verbose", "-qqq"], ["tests/", "--verbose", "-qqq", *_AUTO]),
+    (["-vvvv"], ["tests/", "-vvvv", *_AUTO]),
+    (["--durations-min=.5"], ["tests/", "--durations-min=.5", *_AUTO]),
+    (["--durations-min", "1e-3"], ["tests/", "--durations-min=1e-3", *_AUTO]),
+    (["--durations-min=1."], ["tests/", "--durations-min=1.", *_AUTO]),
+    # A chosen --durations replaces the default one, never adds a second.
+    (["-q", "--durations=10"], ["tests/", "-q", "--durations=10", "-n", "3",
+                                "--dist", "loadfile"]),
+    (["--durations", "5", "--durations-min=0.5"],
+     ["tests/", "--durations=5", "--durations-min=0.5", "-n", "3", "--dist", "loadfile"]),
+])
+@_LINUX_ONLY
+def test_display_options_keep_the_full_suite_and_its_workers(tmp_path, args, expected):
+    proc, argv = _pytest_argv(tmp_path, *args, PSEUDOLIFE_SUITE_WORKERS="3")
+    assert proc.returncode == 0, proc.stderr
+    assert argv == ["-m", "pytest", *expected]
+    assert "full suite, 3 xdist workers (PSEUDOLIFE_SUITE_WORKERS)" in proc.stdout
+
+
+@pytest.mark.parametrize("args", [
+    ["-n", "2"], ["-n2"], ["--numprocesses=2"], ["--numprocesses", "2"], ["-n", "02"],
+])
+@_LINUX_ONLY
+def test_a_worker_choice_wins_and_is_never_doubled(tmp_path, args):
+    proc, argv = _pytest_argv(tmp_path, *args, PSEUDOLIFE_SUITE_WORKERS="3")
+    assert proc.returncode == 0, proc.stderr
+    assert argv == ["-m", "pytest", "tests/", "-q", "-rs", "-n", "2",
+                    "--dist", "loadfile", "--durations=30"]
+    assert "full suite, 2 xdist workers (-n)" in proc.stdout
+
+
+@pytest.mark.parametrize("args, expected, note", [
+    (["-n", "0"], ["-n", "0"], "full suite, one process (-n)"),
+    (["-q", "-n", "1"], ["-n", "1", "--dist", "loadfile", "--durations=30"],
+     "full suite, 1 xdist worker (-n)"),
+    (["-n", "auto"], ["-n", "auto", "--dist", "loadfile", "--durations=30"],
+     "full suite, auto xdist workers (-n)"),
+    (["--dist", "worksteal", "-n", "4"], ["-n", "4", "--dist", "worksteal",
+                                          "--durations=30"],
+     "full suite, 4 xdist workers (-n)"),
+])
+@_LINUX_ONLY
+def test_serial_auto_and_distribution_choices_are_kept(tmp_path, args, expected, note):
+    proc, argv = _pytest_argv(tmp_path, *args, PSEUDOLIFE_SUITE_WORKERS="3")
+    assert proc.returncode == 0, proc.stderr
+    display = ["-q"] if "-q" in args else ["-q", "-rs"]
+    assert argv == ["-m", "pytest", "tests/", *display, *expected]
+    assert note in proc.stdout
+
+
+@_LINUX_ONLY
+def test_a_distribution_with_one_automatic_worker_stays_one_process(tmp_path):
+    """xdist ignores --dist without workers (checked 2026-10-20, xdist
+    3.8): the choice is passed on, and the run says it is one process."""
+    proc, argv = _pytest_argv(tmp_path, "--dist", "loadscope",
+                              PSEUDOLIFE_SUITE_WORKERS="1")
+    assert proc.returncode == 0, proc.stderr
+    assert argv == ["-m", "pytest", "tests/", "-q", "-rs", "--dist", "loadscope"]
+    assert "full suite, one process (PSEUDOLIFE_SUITE_WORKERS)" in proc.stdout
+
+
+@_LINUX_ONLY
+def test_a_chosen_distribution_replaces_loadfile_with_automatic_workers(tmp_path):
+    proc, argv = _pytest_argv(tmp_path, "-q", "--dist=loadscope",
+                              PSEUDOLIFE_SUITE_WORKERS="3")
+    assert proc.returncode == 0, proc.stderr
+    assert argv == ["-m", "pytest", "tests/", "-q", "-n", "3", "--dist", "loadscope",
+                    "--durations=30"]
+
+
+@pytest.mark.parametrize("args", [
+    ["tests/test_bm25.py"],
+    ["-q", "tests/test_bm25.py"],
+    ["-k", "a and b"],
+    ["-m", "not slow", "-n", "2"],
+    ["--collect-only", "-q"],
+    ["--help"],
+    ["-x"],
+    ["--lf"],
+    ["-rZ"],
+    ["-q", "--", "-n", "4"],
+    ["--", "tests/"],
+    ["-n", "2", "tests/x.py"],
+    ["--tb", "short", "-k", "foo"],
+    ["-n", "3", "-n", "4", "tests/x.py"],
+    ["tests/x.py", "-n", "3", "-n", "4"],
+    ["--tb=bogus", "-k", "foo"],
+    ["-n", "four", "tests/x.py"],
+    ["--durations=", "5"],
+    ["tests/test_a.py::test_b[x y]"],
+])
+@_LINUX_ONLY
+def test_selections_and_unknown_options_pass_through_unchanged(tmp_path, args):
+    proc, argv = _pytest_argv(tmp_path, *args, PSEUDOLIFE_SUITE_WORKERS="3")
+    assert proc.returncode == 0, proc.stderr
+    assert argv == ["-m", "pytest", *args]
+    assert ("chosen arguments, passed to pytest unchanged (no xdist workers added)"
+            in proc.stdout)
+
+
+@pytest.mark.parametrize("args, message", [
+    (["-n"], "-n needs a value"),
+    (["-q", "--numprocesses"], "--numprocesses needs a value"),
+    (["-n", "four"], "-n takes a whole number, auto or logical, not 'four'"),
+    (["-n", "-1"], "-n takes a whole number"),
+    (["-n", "2", "-n", "3"], "workers chosen twice"),
+    (["-n2", "--numprocesses=3"], "workers chosen twice"),
+    (["--dist", "bogus"], "--dist takes an xdist mode, not 'bogus'"),
+    (["--dist", "load", "--dist=each"], "--dist given twice"),
+    (["--dist"], "--dist needs a value"),
+    (["--durations"], "--durations needs a value"),
+    (["--durations=ten"], "--durations takes a number, not 'ten'"),
+    (["--tb", "verbose"], "--tb takes auto, long, short, line, native or no"),
+    (["--durations=", "-q"], "--durations needs a value"),
+    (["--tb=", "-q"], "--tb needs a value"),
+    (["--numprocesses=", "-v"], "--numprocesses needs a value"),
+    (["--dist=", "-v"], "--dist needs a value"),
+    (["--durations-min=fast"], "--durations-min takes a number"),
+])
+@_LINUX_ONLY
+def test_a_malformed_choice_is_refused_before_anything_is_installed(tmp_path, args, message):
+    proc, argv = _pytest_argv(tmp_path, *args)
+    assert proc.returncode == 2
+    assert argv is None
+    assert message in proc.stderr
+    assert not (tmp_path / "uv-called").exists()
+
+
+@_LINUX_ONLY
+def test_the_built_command_is_printed_and_chosen_arguments_are_not(tmp_path):
+    proc, _ = _pytest_argv(tmp_path, "-v", PSEUDOLIFE_SUITE_WORKERS="2")
+    assert ("wsl-suite: pytest tests/ -v -n 2 --dist loadfile --durations=30"
+            in proc.stdout)
+    # A chosen argument may name a local path; it is passed on, not echoed.
+    proc, argv = _pytest_argv(tmp_path / "2", "--junitxml=/srv/private/j.xml",
+                              PSEUDOLIFE_SUITE_WORKERS="2")
+    assert argv == ["-m", "pytest", "--junitxml=/srv/private/j.xml"]
+    assert "/srv/private" not in proc.stdout + proc.stderr
+    assert "wsl-suite: pytest" not in proc.stdout
+
+
+@_LINUX_ONLY
+def test_profiling_keeps_display_options_on_the_full_suite(tmp_path):
+    proc, argv = _pytest_argv(tmp_path, "-q", PSEUDOLIFE_SUITE_WORKERS="3",
+                              PSEUDOLIFE_SUITE_PROFILE="1",
+                              PSEUDOLIFE_SUITE_PROFILE_DIR=str(tmp_path / "p"))
+    assert proc.returncode == 0, proc.stderr
+    assert argv == ["-m", "pytest", *_PROFILE, "tests/", "-q", *_AUTO]
+
+
+@_LINUX_ONLY
+def test_dist_no_runs_the_full_suite_in_one_process(tmp_path):
+    """xdist turns --dist no into load whenever it has workers (xdist 3.8
+    plugin.py), so a chosen --dist no must not get automatic ones."""
+    proc, argv = _pytest_argv(tmp_path, "--dist", "no", PSEUDOLIFE_SUITE_WORKERS="3")
+    assert proc.returncode == 0, proc.stderr
+    assert argv == ["-m", "pytest", "tests/", "-q", "-rs", "--dist", "no"]
+    assert "full suite, one process (--dist no)" in proc.stdout
+

@@ -196,7 +196,10 @@ async fn lesson_search(
         .await
         .map_err(internal)?
         .map_err(internal)?;
-    let lessons = ready.lessons.clone();
+    crate::forget_tools::ensure_lessons_refreshed(ready)
+        .await
+        .map_err(internal)?;
+    let lessons = ready.lessons.snapshot();
     let hits = lessons.search(&q, top_k, floor).map_err(internal)?;
     let mut rows: Vec<Map<String, Value>> = hits
         .iter()

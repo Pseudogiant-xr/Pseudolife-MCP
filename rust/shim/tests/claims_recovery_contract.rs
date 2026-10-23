@@ -67,7 +67,16 @@ fn delayed_git(home: &board_fixture::Home) -> (PathBuf, PathBuf, String) {
 fn main() {
     let marker = std::env::var_os("CLAIMS_PREPARATION_MARKER").unwrap();
     std::fs::write(&marker, std::process::id().to_string()).unwrap();
-    std::thread::sleep(std::time::Duration::from_secs(1));
+    match std::env::var_os("CLAIMS_PREPARATION_RELEASE") {
+        // Held until the test releases it (capped so a stray child exits).
+        Some(release) => {
+            let end = std::time::Instant::now() + std::time::Duration::from_secs(30);
+            while !std::path::Path::new(&release).exists() && std::time::Instant::now() < end {
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+        }
+        None => std::thread::sleep(std::time::Duration::from_secs(1)),
+    }
     std::fs::write(std::path::PathBuf::from(marker).with_extension("finished"), b"finished").unwrap();
     let root = std::path::PathBuf::from(std::env::args_os().nth(2).unwrap());
     println!("{}\n{}\n{}", root.display(), root.join(".git").display(), root.join(".git").display());
@@ -224,29 +233,36 @@ fn test_file_claim_preparation_uses_total_deadline_and_next_call_recovers() {
     let home = board_fixture::Home::new();
     let root = checkout(&home);
     let (marker, finished, path) = delayed_git(&home);
+    // git is held until the test releases it, so the answer below can only
+    // come from the total deadline, never from git finishing: an ordering
+    // check in place of an elapsed-time bound a stalled runner could overrun.
+    let release = home.0.join("release");
     let fixture = Fixture::start();
     let mut shim = Shim::start_with_env(
         &fixture.url,
         &[
-            ("PSEUDOLIFE_MCP_PROXY_TIMEOUT_SECONDS", "0.15"),
+            // Long enough that git starts and the recovering call completes on
+            // a loaded runner (0.15 s missed git's start 7 times in 200 on the
+            // Windows dev VM under CPU load); git is held past it regardless.
+            ("PSEUDOLIFE_MCP_PROXY_TIMEOUT_SECONDS", "2"),
             ("PSEUDOLIFE_MCP_SHARED_HOST", "0"),
             ("PATH", &path),
             ("CLAIMS_PREPARATION_MARKER", marker.to_str().unwrap()),
+            ("CLAIMS_PREPARATION_RELEASE", release.to_str().unwrap()),
         ],
     );
     initialize(&mut shim);
-    let started = Instant::now();
     let failed = request(
         &mut shim,
         "claim",
         "memory_agents",
         json!({"action":"claim","worktree":root,"path":"file.py"}),
     );
-    assert!(started.elapsed() < Duration::from_millis(700));
     assert!(
         marker.exists(),
         "the timeout must occur during local preparation"
     );
+    assert!(!finished.exists(), "git cannot finish before its release");
     assert_eq!(failed["error"]["code"], -32603);
     assert_eq!(
         failed["error"]["data"],
@@ -256,6 +272,8 @@ fn test_file_claim_preparation_uses_total_deadline_and_next_call_recovers() {
         request(&mut shim, "recovered", "read", json!({}))["result"]["isError"],
         false
     );
+    // A child that survived the timeout would now finish within milliseconds.
+    std::fs::write(&release, b"release").unwrap();
     thread::sleep(Duration::from_millis(1100));
     assert!(!finished.exists(), "timed-out git child must be reaped");
     assert_eq!(arguments(&fixture).len(), 1);

@@ -42,16 +42,20 @@ STARTED = []
 
 
 def test_stop_wait_has_a_short_listener_lease_and_disarms_at_exit(tmp_path):
+    """The record advertises at most LISTENER_LEASE seconds however long the
+    wait. A 5 s wait used to end this watcher, which under load could pass
+    before the record was written or read; the digest's removal ends it."""
     _digest(tmp_path, 1, "")
     lease = tmp_path / "digests" / f"{_key()}.wake"
-    process = _start(_env(tmp_path, wait=5))
+    process = _start(_env(tmp_path, wait=3540))
     assert _wait_until(lambda: lease.exists())
     token = lease.read_text().strip()
     armed = lease.with_name(f"{_key()}.{token}.wake-armed")
     assert _wait_until(lambda: armed.exists() and len(armed.read_text().splitlines()) == 2)
     token, expiry = armed.read_text().splitlines()
     assert token == lease.read_text().strip()
-    assert token and 0 < float(expiry) - time.time() <= 61
+    assert token and 0 < float(expiry) - time.time() <= _constant("LISTENER_LEASE")
+    (tmp_path / "digests" / f"{_key()}.txt").unlink()
     code, out, err = _finish(process)
     assert (code, out, err) == (0, "", "")
     assert lease.read_text().strip() == token
@@ -410,19 +414,52 @@ def test_a_digest_that_appears_mid_wait_still_wakes(tmp_path):
     assert code == 2 and _woke(err)
 
 
-def test_a_digest_that_vanishes_ends_the_watch(tmp_path):
+def _held_at_renewal(tmp_path, renewal):
+    """Settings that pause the watcher at its ``renewal``-th listener record
+    write, which each poll makes just before it looks at the digest: the
+    first is the gap between arming and the first look, the second comes
+    after one look. Returns the settings and a ``(held, release)`` pair of
+    paths: the pause creates ``held`` and waits until ``release`` exists.
+    A non-interactive bash sources BASH_ENV first, and a function there
+    wins over PATH, which Git for Windows' bash.exe launcher rewrites."""
+    hold = tmp_path / "hold"
+    hold.mkdir()
+    (hold / "mv.sh").write_bytes(
+        b'mv() {\n'
+        b'    case "$*" in *.wake-armed)\n'
+        b'        HELD_COUNT=$((${HELD_COUNT:-0} + 1))\n'
+        b'        if [ "$HELD_COUNT" = "$HOLD_AT" ]; then\n'
+        b'            : > "$HOLD/held"\n'
+        b'            while [ ! -e "$HOLD/release" ]; do command sleep 0.05; done\n'
+        b'        fi ;;\n'
+        b'    esac\n'
+        b'    command mv "$@"\n'
+        b'}\n')
+    settings = {"BASH_ENV": (hold / "mv.sh").as_posix(),
+                "HOLD": hold.as_posix(), "HOLD_AT": str(renewal)}
+    return settings, (hold / "held", hold / "release")
+
+
+@pytest.mark.parametrize("renewal", [1, 2], ids=["before-the-first-look", "after-a-look"])
+def test_a_digest_that_vanishes_ends_the_watch(tmp_path, renewal):
     """The shim removes its digest when it exits: on Windows that is the only
     sign a watcher gets that Claude Code is gone, and a watcher that outlived
-    its session must not mark a resumed session's mail as seen."""
+    its session must not mark a resumed session's mail as seen. A digest
+    present at the Stop counts as present even when it is gone by the first
+    look: the hook used to take that look as the start of the watch, and on
+    a loaded Windows host (2 of 3 native runs, 2026-10-20) the shim's exit
+    landed in between, so the watcher waited for the digest to come back."""
     _digest(tmp_path, 3, BODY)
     _seen(tmp_path, 3)
-    process = _start(_env(tmp_path, wait=3540))
-    assert _wait_until((tmp_path / "digests" / f"{_key()}.wake").exists)
+    settings, (held, release) = _held_at_renewal(tmp_path, renewal)
+    process = _start(_env(tmp_path, wait=3540, **settings))
+    assert _wait_until(held.exists)
     (tmp_path / "digests" / f"{_key()}.txt").unlink()
-    code, out, err = _finish(process, timeout=20)
+    release.touch()
+    # With an hour left and no parent to watch, a quiet exit 0 can only be
+    # the vanish: a watcher still waiting would wake on a later digest.
+    code, out, err = _finish(process)
     assert (code, out, err) == (0, "", "")
-    _digest(tmp_path, 1, LATER)
-    assert _read_seen(tmp_path) == "3"
 
 
 def test_without_a_digest_file_it_times_out_quietly(tmp_path):
@@ -509,6 +546,30 @@ def test_an_empty_or_malformed_digest_never_fires(tmp_path, watermark, body):
     result, _ = _run(_env(tmp_path, wait=3))
     assert (result.returncode, result.stdout, result.stderr) == (0, "", "")
     assert _read_seen(tmp_path) == "3"
+
+
+def test_a_wait_already_used_up_still_looks_once(tmp_path):
+    """SECONDS counts the hook's own start-up, which costs seconds per spawn
+    on a loaded Windows runner: a short PSEUDOLIFE_AGENT_WAKE_HOOK_WAIT used
+    to expire before the first look, so mail already waiting was missed and
+    every "never wakes" test with a short wait passed without looking. The
+    first look now always happens; the wait bounds only what follows it."""
+    _digest(tmp_path, 3, BODY)
+    result, _ = _run(_env(tmp_path, wait=0))
+    assert result.returncode == 2 and _woke(result.stderr)
+    assert _read_seen(tmp_path) == "3"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Git Bash spawns make wall-clock bounds unreliable")
+def test_the_wait_ends_at_its_deadline_not_a_poll_later(tmp_path):
+    """The last sleep is cut to the time left: a 1 s wait used to sleep a
+    whole 5 s poll before noticing it was over (2026-10-19: every short-wait
+    test here took 5 or 10 s)."""
+    _digest(tmp_path, 3, BODY)
+    _seen(tmp_path, 3)
+    result, elapsed = _run(_env(tmp_path, wait=1))
+    assert (result.returncode, result.stdout, result.stderr) == (0, "", "")
+    assert elapsed < _constant("POLL") - 1, elapsed
 
 
 def test_times_out_quietly(tmp_path):
@@ -734,7 +795,7 @@ def test_a_digest_change_without_a_ring_does_not_wake(tmp_path):
     ``<key>.ring`` only for a ring the daemon decided (chatter to a parked
     session is withheld), and the hook fires only on a ring past ``.seen``."""
     _digest(tmp_path, 3, BODY, ring=False)
-    result, _ = _run(_env(tmp_path, wait=8))
+    result, _ = _run(_env(tmp_path, wait=1))
     assert (result.returncode, result.stderr) == (0, "")
     assert _read_seen(tmp_path) is None
 
@@ -753,7 +814,7 @@ def test_a_ring_for_a_digest_already_seen_holds_fire(tmp_path):
     moved ``.seen``): the ring is stale and the hook waits for the next."""
     _digest(tmp_path, 3, BODY, ring="rung anyone")
     _seen(tmp_path, 3)
-    result, _ = _run(_env(tmp_path, wait=8))
+    result, _ = _run(_env(tmp_path, wait=1))
     assert (result.returncode, result.stderr) == (0, "")
 
 
@@ -772,7 +833,7 @@ def test_a_nudged_ring_never_wakes(tmp_path):
     ``nudged`` marker (an idle session that never parked), left by a shim
     from before the change, is no ring. Only ``rung`` fires."""
     _digest(tmp_path, 3, BODY, ring="nudged no_park")
-    result, _ = _run(_env(tmp_path, wait=8))
+    result, _ = _run(_env(tmp_path, wait=1))
     assert (result.returncode, result.stderr) == (0, "")
     assert _read_seen(tmp_path) != "3"
 
@@ -791,7 +852,7 @@ def test_an_urgent_ring_wakes_a_session_that_never_parked(tmp_path):
 def test_a_malformed_ring_never_wakes(tmp_path, ring):
     _digest(tmp_path, 3, BODY, ring=False)
     (tmp_path / "digests" / f"{_key()}.ring").write_text(ring)
-    result, _ = _run(_env(tmp_path, wait=8))
+    result, _ = _run(_env(tmp_path, wait=1))
     assert (result.returncode, result.stderr) == (0, "")
 
 
@@ -894,7 +955,7 @@ def _turn(tmp_path, stamp, key=None):
 
 
 def _gate_env(tmp_path, server, **extra):
-    return _env(tmp_path, wait=8, PSEUDOLIFE_MCP_DAEMON_URL=f"http://127.0.0.1:{server.server_port}",
+    return _env(tmp_path, wait=1, PSEUDOLIFE_MCP_DAEMON_URL=f"http://127.0.0.1:{server.server_port}",
                 PSEUDOLIFE_MCP_TOKEN="fixture-token", **extra)
 
 
@@ -1006,7 +1067,7 @@ def test_a_gate_the_daemon_does_not_answer_is_open(tmp_path):
     server.server_close()
     _digest(tmp_path, 3, "", ring=False)
     _agent(tmp_path)
-    env = _env(tmp_path, wait=8, PSEUDOLIFE_MCP_DAEMON_URL=f"http://127.0.0.1:{port}",
+    env = _env(tmp_path, wait=1, PSEUDOLIFE_MCP_DAEMON_URL=f"http://127.0.0.1:{port}",
                PSEUDOLIFE_MCP_TOKEN="fixture-token")
     result, _ = _run(env)
     assert (result.returncode, result.stderr) == (0, "")
@@ -1021,7 +1082,7 @@ def test_the_gate_reads_a_private_token_file(tmp_path):
         token_file.chmod(0o600)
         _digest(tmp_path, 3, "", ring=False)
         _agent(tmp_path)
-        env = _env(tmp_path, wait=8, PSEUDOLIFE_MCP_DAEMON_URL=f"http://127.0.0.1:{server.server_port}",
+        env = _env(tmp_path, wait=1, PSEUDOLIFE_MCP_DAEMON_URL=f"http://127.0.0.1:{server.server_port}",
                    PSEUDOLIFE_MCP_TOKEN_FILE=str(token_file))
         env.pop("PSEUDOLIFE_MCP_TOKEN", None)
         result, _ = _run(env)
@@ -1254,7 +1315,7 @@ def test_a_token_file_others_can_read_is_refused(tmp_path):
         token_file.chmod(0o644)
         _digest(tmp_path, 3, "", ring=False)
         _agent(tmp_path)
-        env = _env(tmp_path, wait=8, PSEUDOLIFE_MCP_DAEMON_URL=f"http://127.0.0.1:{server.server_port}",
+        env = _env(tmp_path, wait=1, PSEUDOLIFE_MCP_DAEMON_URL=f"http://127.0.0.1:{server.server_port}",
                    PSEUDOLIFE_MCP_TOKEN_FILE=str(token_file))
         env.pop("PSEUDOLIFE_MCP_TOKEN", None)
         result, _ = _run(env)

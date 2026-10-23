@@ -25,6 +25,7 @@ listed JSON bodies) is free. References are to `pseudolife_memory/` at master
 | H3 | `db`: `"ok"` after a `SELECT 1` on a fresh connection, else `"error: <text>"` and `status` becomes `"degraded"`. | `daemon.py:~380`, `storage/postgres.py:702` |
 | H4 | 200 when `status == "ok"`, else 503 with the same body; 500 `{"status":"error","error":str}` if building the payload fails. | `web/api.py:418-427` |
 | H5 | `embedder` `{backend, device, dtype}` is present once the embedder is built; `dtype` is null for the ONNX backend. | `daemon.py` health payload |
+| H6 | Always, last, in this order: `ready` bool (`status == "ok"` and `pending` empty), then `pending`, the unfinished startup stages in this order: `"init"` until the stores are published and the clock reseeded (`coordination_tier_ready`), `"principals"` until the stored-principal view has completed a read (loaded once stays loaded, never stale-checked; never listed without Postgres). Neither changes `status` or the HTTP code. | `readiness.py`, `daemon.py` health payload |
 
 Conditional keys owned by subsystems outside this slice (`coordination`,
 `updates`, `extractor`, `stall`, `hooks_digest`, `build`, `init_refusal`,
@@ -943,6 +944,232 @@ surprise compare within the measured tolerance. The
 `mcp-reinstate-ignore-invalidations`, `mcp-reinstate-resident-stale` and
 `mcp-reinstate-no-mirror` mutants must be caught.
 
+### memory_forget over MCP (2026-10-19)
+
+`forget_tools.rs` (the tool and the four service bodies), on the resident
+bank, cortex (`CortexStore::forget`, `retire_unsupported` in
+`stores/cortex_write.rs`), world store (`WorldStore::retire`,
+`WorldRecord::audit_snapshot`) and lesson store (`stores/lessons.rs`:
+writable as `SharedLessons`, `retire`, `audit_snapshot`, the forget refresh,
+the per-slot sync with entity linking); `memory.delete_confirm_threshold`
+in `config.rs`; registered in `mcp::dispatch::registry`. Python:
+`mcp_server.py` `memory_forget` (2098-2156); `service.py`
+`_lesson_record_to_dict` (411-430), `_world_record_snapshot` (506-519),
+`_forget_entries_locked` (3264-3323), `delete` (3325-3396),
+`_save_lessons` (3774-3785), `world_forget` (4876-4897),
+`_refresh_source_retired_lessons_locked` (5173-5203), `lesson_forget`
+(5449-5474), `_record_store_decision` (5539-5551), `cortex_forget`
+(6161-6183); `service_dream.py` `_load_digest_cursor` (3197-3210);
+`memory/cms.py` `delete_entries` (2618-2707); `memory/cortex.py` `_log`
+(731-748), `retire_unsupported` (1162-1181), `forget` (1610-1636);
+`memory/world_cortex.py` `retire` (259-282); `memory/lessons.py` `retire`
+(258-282); `storage/sync.py` `_link_entity_ids` (211-222),
+`_lesson_record_to_row` and `sync_lesson_slots` (409-450);
+`storage/postgres.py` `forget_entry_ids` (1225-1314),
+`retire_lessons_for_entries` (1332-1389), `set_meta` (2733-2739),
+`record_store_decision` (3527-3543), `slots_for_entries` (4169-4187),
+`delete_slot_reads` (4403-4417).
+
+| # | Exact item | Source |
+|---|---|---|
+| FG1 | Bound arguments: `memory_forget(scope, entity=None, attribute=None, text=None, substring=None, source=None, episode=None, tag=None, confirm_bulk=False)` (`scope` a binder Literal of `memory`, `fact`, `world`, `lesson`). Not read-only; the body runs detached, under the service lock. | `mcp_server.py:2098-2121` |
+| FG2 | Scope `memory` with no truthy filter (an empty string is none) answers `{"error": "filter_required", "filters": [text, substring, source, episode, tag]}`; the other scopes without a truthy `entity` answer `{"error": "entity_required", "scope"}`. Nothing runs. | `mcp_server.py:2137-2146` |
+| FG3 | After the body: a `deleted_count` (memory) or `removed` (other scopes) of 0 with no `error` gains the note "Nothing deleted: no entry matched every filter (filters AND-combine)." or "Nothing removed: no slot matches this entity/attribute.". | `mcp_server.py:2142-2155` |
+| FG4 | `delete` matches every resident entry, bands in configured order, on every given filter (AND, an empty string included): exact text, substring, source, episode id, and the tag stripped and lowercased against the stored tags. The threshold is `memory.delete_confirm_threshold` (20; 0 or less disables it, as does `confirm_bulk`); more matches than it answer `{deleted_count: 0, error: "bulk_confirm_required", would_delete, threshold, sample_texts (the first 20), hint: "pass confirm_bulk=true to remove them"}` and nothing changes. | `service.py:3364-3385`; `cms.py:2647-2682` |
+| FG5 | The cascade (`_forget_entries_locked`), before the resident delete: each match's root episode (the parent walk over the episode log); with any non-digest match, matched digests that are retired or whose episode is such a root are retained as history, the rest are deleted. Then the deleted ids' trace slots (the largest source id names each), the surviving roots of unmatched non-digest residents, and the live resident digests of the roots (unmatched or retained). | `service.py:3264-3308` |
+| FG6 | The digest cursor (`meta.session_digest_cursor`, `_load_digest_cursor`): `ts` as a float (0.0 when absent), `retry` as an object, `regenerate` / `context_deferred` kept when present, then `regenerate` = the sorted union with the roots that survive. | `service.py:3309-3311`; `service_dream.py:3197-3210` |
+| FG7 | `forget_entry_ids`, one transaction, at one clock reading: lock the sorted deleted and digest rows (`FOR UPDATE`); FG8's lesson cascade; the trace slots of the deleted ids that no surviving live entry supports; the agent-origin live edges whose evidence no surviving live entry supports; each such slot's current facts `retired` (`superseded_by_value` names its smallest deleted source); the edges' `superseded_at`; the digests retired (`superseded_by_text` names the smallest deleted id; not exactly the expected set is an internal error); the cursor written (always); the rows deleted (not every one is an internal error). | `postgres.py:1225-1314` |
+| FG8 | `retire_lessons_for_entries`: current lessons whose provenance names a deleted id (`entry:<id>`, `?|`), locked in id order; each retires when its synthesis lineage audits (`store_decisions`: `lesson`, `lineage`, `lesson_synthesis`, `verified_dependencies`, the same lesson text and `asserted_at`, integer `source_entry_ids`) name a deleted id and no other named entry still exists; each gets a `retire` audit (`source_cascade`, `source_forgotten`, a snapshot of the row's fields plus `task`, `aspect`, `lesson`, `status: retired`, `superseded_at`, `superseded_by_value`); then one UPDATE. | `postgres.py:1332-1389` |
+| FG9 | After commit: the resident cortex retires each FG7 slot (`retire_unsupported`: every current record `retired` at the clock, `superseded_by_value` naming the FG5 source id, one audit row each with no new value and a zero delta; the slot leaves both indexes and is marked dirty, saved with the next cortex save); the resident digests are retired (`superseded_by_text` naming the first deleted id in match order); the deleted matches leave the resident bank; then, when lessons retired, they are mirrored onto the resident store by `(entity_norm, attribute_norm, value, asserted_at)`: a failure is logged, never the forget's, and the mirror stays pending, retried before the next lesson read (`memory_lesson_search`, the history chain) or lesson save, whose failure is then an internal error. The answer: `{deleted_count, deleted_texts (the first 20)}`. | `service.py:3316-3323, 3386-3396, 5173-5203`; `cortex.py:731-748, 1162-1181`; `cms.py:2684-2707` |
+| FG10 | Scope `fact` (`cortex_forget`): every record at the entity, or the one slot (normalized keys), is removed (the indexes rebuilt without healing, the slots marked dirty); if any, the cortex save (the per-slot rewrite and the supersession log; a failure counts a persistence error and is an internal error), then the slot-read counters deleted (`slot_reads`, the entity or the slot; a failure is counted, never the call's). Answer `{removed, entity, attribute}`. | `service.py:6161-6183`; `cortex.py:1610-1636`; `postgres.py:4403-4417` |
+| FG11 | Scope `world` (`world_forget`, `decided_by="agent"`, no reason): every current record at the entity or slot `retired` at the clock (kept, slot dirty, the current index rebuilt); per record an audit row in its own transaction (`world`, `retire`, the verbatim snapshot: entity, attribute, value, polarity, status, confidence to 4 places, origin `source`, citation, class, `retrieved_at`, hash, `source_doc_id`, `asserted_at`, `last_confirmed`); then the world save. Answer `{removed, retired, entity, attribute}`. | `service.py:506-519, 4876-4897, 5539-5551`; `world_cortex.py:259-282`; `postgres.py:3527-3543` |
+| FG12 | Scope `lesson` (`lesson_forget`): the same over lessons (`task` / `aspect`); the snapshot is `_lesson_record_to_dict` (confidence to 4 places, provenance sorted) plus the sorted `support`; then `_save_lessons`. Answer `{removed, retired, task, aspect}`. | `service.py:411-430, 5449-5474`; `lessons.py:258-282` |
+| FG13 | The lesson store holds every `lessons` column it rewrites (the vector, the HLC stamps, writer, session, version) and is shared like the cortex: readers take snapshots, writers mutate under the service lock. | `sync.py:474-505` |
+| FG14 | `sync_lesson_slots`: the dirty slots' records in record order, rewritten in one transaction (DELETE the slots, one INSERT each: support and provenance sorted, an empty origin as NULL, `version` at least 1), each row's subject and `about` linked to their entities (`find_entity(norm_name(...))`, looked up before the transaction); the slots are cleared after. A failure counts a persistence error and is an internal error. | `sync.py:211-222, 409-450`; `postgres.py:1846-1875` |
+| FG15 | The cortex, world and lesson saves are the existing per-slot paths, so a forget's dirty state persists exactly as Python's does: at its own save (fact, world, lesson scopes), or the next one (the cascade's cortex retirements). | `service.py:3746-3785` |
+| FG16 | Not reachable: the restore path (`memory_graph_review(action="restore_slot")`, W3-H) and file mode. | `divergences.md` |
+
+`harness/w2e.py live --only forget-memory forget-slots forget-unbounded` compares every
+answer and the full bank after each call, on templates whose entries,
+facts, world facts, graph edge and slot reads the Python daemon's own
+tools wrote (the digest, the trace rows, the lineage lessons with their
+audits, and the edge's agent origin and evidence are SQL seeds: only the
+dream writes those). Memory scope: no filter, an empty-string filter,
+nothing matched (an empty text still filters), a source and its session's
+digest together (the digest kept as retired history, the root queued for
+regeneration), the bulk refusal and its confirmation, the tag filter
+normalized, the trace cascade (one slot retired, one kept by a surviving
+source; both read back through `memory_fact_get`), the lesson cascade (one
+lesson retired with its audit, one kept; read back through
+`memory_lesson_search`), the dream edge retired, an episode filter, a source
+with its session's already retired digest (kept), two sources of one slot
+forgotten together and then a cortex save (the retired slot rewritten with
+the larger source named, and its audit log row), an existing digest cursor
+(kept keys, merged `regenerate`), a digest-only selection, and the bulk
+guard disabled (`forget-unbounded`). Other scopes: a missing and an empty entity, nothing
+removed, one fact slot with every version and its read counter, a whole
+entity, a world slot and then the entity (read back through
+`memory_world_search`, then nothing left), and lessons by slot and by task
+(the rewritten rows linked to their entities, a subject entity included,
+read back through `memory_lesson_search`). The forget clocks keep only null-or-not. The
+`mcp-forget-no-bulk-guard`, `mcp-forget-delete-digests`,
+`mcp-forget-cortex-stale`, `mcp-forget-no-lesson-cascade`,
+`mcp-forget-lessons-stale`, `mcp-forget-facts-kept`,
+`mcp-forget-edges-kept`, `mcp-forget-slot-reads-kept`,
+`mcp-forget-no-world-audit` and `mcp-forget-no-lesson-audit` mutants must be
+caught.
+
+### memory_consolidation_candidates over MCP (2026-10-19)
+
+`consolidation_tools.rs` (the tool, the candidate pool and the greedy
+clustering), on `search::rank` for the query anchor (the reranker shared
+through `read/search_route.rs`'s `LazyReranker`) and `search::entry_json`
+for members; registered in `mcp::dispatch::registry`. Python:
+`mcp_server.py` `memory_consolidation_candidates` (2499-2545);
+`service.py` `_entry_to_dict` (147-196), `consolidation_candidates`
+(7294-7460); `memory/consolidation.py` `_cosine` (81-92),
+`_cluster_cohesion` (95-110), `cluster_candidates` (113-189);
+`memory/cms.py` `retrieve` (740-).
+
+| # | Exact item | Source |
+|---|---|---|
+| CC1 | Bound arguments: `memory_consolidation_candidates(query=None, episode=None, sources=None, tags=None, top_k=20, min_cohesion=0.6, min_cluster_size=2, max_clusters=10)` (the counts lax integers of at least 1, `min_cohesion` a lax float that may be non-finite). Read-only; under the service lock. | `mcp_server.py:2499-2545` |
+| CC2 | The addressable residents: live, and their row id held by exactly one resident entry (the correction path's uniqueness rule). | `service.py:7352-7370` |
+| CC3 | A truthy `query` anchors retrieval: the query embedding through `CMS.retrieve` with `top_k`, the sources, `[episode]` when truthy, the tags (normalized), the query text, superseded entries hidden before the caps, `min_score=0.0`, and the configured BM25, recency, fusion and rerank; served entries accrue access as any retrieval does. The candidates are the addressable hits, with their scores, in served order. | `service.py:7372-7390`; `cms.py:740-` |
+| CC4 | Else a truthy `episode`: every addressable resident entry, bands in configured order (bank order within a band: the multi-band divergence), whose episode id equals it, one per text (the first), passing a non-empty `sources` (its source listed) and a non-empty `tags` (a stored tag listed, unnormalized), each scored 1.0. | `service.py:7391-7410` |
+| CC5 | Neither: `{"query": null, "episode": null, "count": 0, "clusters": []}`. | `service.py:7411-7420` |
+| CC6 | With candidates, `SELECT id FROM entries WHERE id = ANY(...)` keeps those with a row (a failed read keeps them all, logged); then the pool is cut to `top_k`. | `service.py:7422-7439` |
+| CC7 | `cluster_candidates`: candidates in descending score, ties in pool order; each unclustered one in turn (until `max_clusters` are kept) seeds a cluster of every later unclustered candidate whose cosine to it is at least `min_cohesion`; a cluster smaller than `min_cluster_size` is released, else kept with its cohesion (the mean of every distinct pairwise cosine) and seed score; kept clusters sort stably by `cohesion × size`, largest first. The cosine is float32 over the stored vectors (0.0 for a zero norm; vectors of different lengths fail). | `consolidation.py:81-189` |
+| CC8 | The answer: `{query, episode, count, clusters: [{cohesion (4 places), seed_score (4 places), size, members: [_entry_to_dict(member) without score]}]}`, the query and episode echoed as given. | `service.py:7441-7459`; `service.py:147-196` |
+| CC9 | What the differential claims: the two daemons' embeddings agree within the measured tolerance (`goldens/w2e-tolerance.json`), so scores, cohesions and seed scores compare within 1.5e-4 and cluster membership can differ for a cosine within that tolerance of `min_cohesion`, or, under the query anchor, where two candidates' scores lie within it and swap seed order (the episode anchor scores every candidate 1.0); every corpus answer agrees. A cohesion rests only on the stored vectors, which both banks hold identically, so it compares within one rounding unit. Exact agreement with the ONNX graph is a cutover question, as for the world cortex, not a porting one. | `harness/w2e.py` |
+
+`harness/w2e.py live --only consolidation-candidates` compares every answer
+and the full bank after each call, on a template whose entries
+(near-duplicates across three sessions, a retired one and its correction,
+a tagged one) the Python daemon's own tools wrote: no anchor and an empty
+query; the query anchor with the defaults, a high cohesion floor, a source
+filter with a small `top_k`, a tag filter needing normalization, singleton
+clusters under a cluster cap, a NaN floor, an episode filter, and empty
+lists with an empty episode (no filters); the episode anchor with a low
+floor (an exact twin offered once), a source filter that excludes
+everything, a tag filter, and an unnormalized tag that matches nothing; and
+a row deleted behind the daemons' backs, then the episode anchor's check
+and cut. Inside a cluster, `seed_score` compares within 1.5e-4 and
+`cohesion` within one rounding unit. The
+`mcp-consolidation-unsorted` and `mcp-consolidation-unverified` mutants
+must be caught.
+
+`memory_consolidate` needs nothing from the W3-H graph/dream engine:
+`service.consolidate` (`service.py:7462-7516`) resolves its targets with
+`_resolve_correction_targets_locked` over lists and stores the replacement
+through `_apply_correction_locked` (source `consolidation` by default, the
+caller's tags, no derived-slot report), the correction machinery that
+`memory_supersede` ports. What remains for it is the list selectors (every
+target's error reported, the first error's reason), several targets in one
+retirement, label inheritance and capacity victim over them, and the tags
+path.
+
+### The graph store's write tools over MCP (2026-10-19)
+
+`graph_write_tools.rs` (the four tools, entity resolution with the slot-key
+fold), on the ported store layer (`storage/graph.rs`: `ensure_entity` with
+its mint-only relink, `find_entity`, `add_alias`, `load_relations`,
+`upsert_relation`, `upsert_edge`, `supersede_edge`) and
+`graph_read::resolve_relation`; registered in `mcp::dispatch::registry`.
+Python: `mcp_server.py` `memory_graph_relate` (2583-2618),
+`memory_graph_unrelate` (2621-2631), `memory_alias` (2634-2644),
+`memory_relation_define` (2955-2981); `service.py`
+`_resolve_or_create_entity` (7570-7599), `graph_relate` (7659-7713),
+`graph_unrelate` (7729-7750), `graph_alias` (8146-8163), `relation_define`
+(8165-8200); `graph.py` `norm_name` (34-39), `resolve_relation` (76-88);
+`storage/postgres.py` 2743-2904, 3017-3148.
+
+| # | Exact item | Source |
+|---|---|---|
+| GW1 | Bound arguments: `memory_graph_relate(src, relation, dst, origin=None, confidence=0.8, src_type=None, dst_type=None)` (`confidence` a float in [0, 1]); `memory_graph_unrelate(src, relation, dst)`; `memory_alias(entity, alias)`; `memory_relation_define(name, description, transitive=False, inverse_of=None, src_type=None, dst_type=None)`. Each body runs under the service lock (the writer lock), detached from the request. There is no outer transaction: each store call commits on its own. | `mcp_server.py:2583-2644,2955-2981`; `service.py:7659-8200` |
+| GW2 | Entity resolution (`_resolve_or_create_entity`, without the dream's write-dedup proposals): `find_entity(norm_name(name))`, canonical first, then alias. A found node with a truthy requested type and a falsy stored one (`None` or `""`) is backfilled through `ensure_entity` (`COALESCE`, so a stored `""` stays), and the answer carries the requested type either way. | `service.py:7570-7584` |
+| GW3 | On a miss, the slot-key fold: when a current fact's `entity_norm || '-' || attribute_norm` equals the normalized name (`LIMIT 1`, no order), and that fact's entity normalizes differently, resolution restarts on the fact's entity with the same type. Otherwise `ensure_entity(n, display=name.strip(), etype=type)` mints the node (an empty display stores the canonical; an empty type stores `""`), relinking orphaned fact and lesson rows in the same commit; the answer's display is the stripped name. No junk-name guard applies on this explicit path. | `service.py:7585-7599`; `storage/postgres.py:2743-2838,2885-2894` |
+| GW4 | `memory_graph_relate`: the registry (`ORDER BY name`) and `resolve_relation`; an unknown relation answers `{"error": "unknown_relation", "relation": <as given>, "suggestions": <difflib's top 3 at cutoff 0.5>, "hint": "Define it with memory_relation_define, or use 'related-to' as the lawful fallback."}` before any node is touched. | `service.py:7679-7688`; `graph.py:76-88` |
+| GW5 | Then `src` and `dst` resolve in that order (GW2-GW3), and for each side whose relation declares a type, a node with a truthy type that differs warns `"{side} '{display}' has type '{etype}' but relation '{relation}' expects '{want}' — edge stored anyway"`. | `service.py:7689-7702` |
+| GW6 | The edge: `upsert_edge(src, relation, dst, confidence, origin)` with revival and no evidence (insert, or bump to `LEAST(0.99, GREATEST(new, old + 0.05))`, keep the higher-ranked origin of user > action > agent > other, clear `superseded_at`, restamp `asserted_at`). The answer: `{src, relation, dst, confidence: round(stored REAL, 4), warnings}` with the nodes' displays. | `service.py:7703-7713`; `storage/postgres.py:3051-3116` |
+| GW7 | `memory_graph_unrelate`: an unknown relation answers `{"error": "unknown_relation", "relation", "suggestions"}` (no hint). Both names resolve without minting; a missing one answers `{"removed": false, "reason": "unknown_entity", "entity": <src as given if src is missing, else dst as given>}`. | `service.py:7729-7747` |
+| GW8 | Else `supersede_edge` stamps a live edge's `superseded_at` (kept for audit, revived by a later relate): `{"removed": <a live edge was stamped>, "src", "relation", "dst"}` with the displays. | `service.py:7748-7750`; `storage/postgres.py:3138-3148` |
+| GW9 | `memory_alias`: an alias that normalizes to `""` answers `{"error": "empty_alias"}` first. The owner then resolves (and may mint, GW2-GW3); an alias equal to its canonical answers `{"error": "alias_is_canonical", "entity": <display>}`, with a node minted on the way kept. | `service.py:8146-8159` |
+| GW10 | Else `add_alias` binds it (`ON CONFLICT (alias)` reassigns it from another node; an alias equal to another node's canonical is stored and stays dead for resolution) and the owner is re-read: `{"entity": display, "canonical", "aliases": <ORDER BY alias>}`. | `service.py:8160-8163`; `storage/postgres.py:2896-2904` |
+| GW11 | `memory_relation_define`: a name that normalizes to `""` or a blank description answers `{"error": "name_and_description_required"}`; a builtin name `{"error": "builtin_relation", "hint": "'<name>' is a builtin and cannot be redefined."}`. A non-empty `inverse_of` normalizes; one neither registered nor equal to the name answers `{"error": "unknown_inverse", "inverse_of": <normalized>, "known": <registry names, sorted by code point>}` (an empty one is no inverse; a blank one normalizes to `""` and is refused). | `service.py:8181-8193` |
+| GW12 | Else `upsert_relation` writes the normalized name, the stripped description, the types as given, the inverse and `bool(transitive)` (a custom redefinition overwrites; `builtin` and `created_at` stay): `{"defined", "transitive", "inverse_of", "src_type", "dst_type"}`. Python keeps no resident graph, so no tool publishes anything. | `service.py:8194-8200`; `storage/postgres.py:3026-3047` |
+
+`harness/w2e.py live --only graph-writes graph-relations` compares every
+answer and the full bank (entities, aliases, edges, relations, facts) after
+each call, on templates whose facts the Python daemon's own `fact_set`
+wrote. `graph-writes`: unknown relations with and without suggestions; a
+fresh source onto an existing target; the slot-key fold; a mint that
+relinks a fact's object, then a fact save that must keep the link;
+re-assertion through the bump, the cap and the origin ranks; a 6-digit
+confidence, 1.0 and 0; a fresh typed node, a backfill, and a typed node
+keeping its type; an empty name, a self-loop and a final sigma; unrelate
+through each refusal, a live edge twice, and a revival; aliases empty,
+chained, refused as canonical (keeping a minted node), reassigned, through
+a slot key, and dead behind another canonical; relate and unrelate through
+aliases. `graph-relations`: each define refusal; a typed definition, an
+inverse, a self-inverse, an empty inverse and an overwriting redefinition;
+typed warnings on both sides; a stored empty type that a later hint answers
+but does not backfill; the new names in relate and unrelate; an inverse
+refusal whose known list sorts differently by code point and by collation.
+`graph-writes` also folds a typed slot key onto a node it backfills, and
+onto an owner whose node is gone (the fold mints it, relinking the fact).
+The stamp columns (`edges.asserted_at`, `relations.created_at`) compare as
+present or absent, so a restamp or a kept creation time is the store
+differential's to show (`harness/graph_store.py`). The
+`mcp-graph-no-etype-backfill`, `mcp-graph-no-slot-fold`,
+`mcp-graph-no-warnings`, `mcp-graph-unrelate-missing-dst`,
+`mcp-graph-alias-canonical`, `mcp-graph-redefine-builtin` and
+`mcp-graph-inverse-unchecked` mutants must be caught. The store layer's
+own differential (`harness/graph_store.py`) keeps its eight mutants.
+
+### memory_graph over MCP (2026-10-19)
+
+`graph_read_tools.rs` (the tool, the neighborhood and whole-graph
+projections, `classify_edge`), on the ported GraphStore read model
+(`storage::graph::subgraph` over `graph_read::build_subgraph` and
+`derive_edges`, `spec-w3h-graph-read.md`) and `graph_read::alias_canonical_map`;
+registered in `mcp::dispatch::registry`. Python: `mcp_server.py`
+`memory_graph` (2647-2677); `service.py` `_whole_graph` (8224-8287),
+`graph_neighborhood` (8289-8405); `memory/graph_store.py` `subgraph`
+(56-70); `graph.py` `alias_canonical_map` (42-), `derive_edges` (91-140),
+`build_subgraph` (190-231); `memory/graph_review.py` `classify_edge`
+(100-113); `storage/postgres.py` `entity_sources_map` (4262-4268),
+`load_graph` (4425-4448), `load_communities` (4471-4481).
+
+| # | Exact item | Source |
+|---|---|---|
+| GR1 | Bound arguments: `memory_graph(entity, depth=1, include_facts=True, to=None, relation_filter=None)`. Read-only; under the service lock (the writer lock), so an answer never shows half of a write. | `mcp_server.py:2647-2671` |
+| GR2 | An empty `entity` is the whole graph (`_whole_graph(scope=None, max_nodes=None)`: no scope filter, no cap). | `service.py:8308-8310` |
+| GR3 | Else the community assignment (`SELECT entity_id, community_id FROM entity_communities`), then the root through `find_entity(norm_name(entity))`; a miss answers `{"found": false, "entity": <as given>}` (a blank name normalizes to `""` and misses). | `service.py:8318-8322` |
+| GR4 | A truthy `to` resolves the same way; a miss records `to_not_found: <as given>` and asks for no path. Then the subgraph of the root at `depth` (clamped to 1..3), with the path to the target: asserted edges in id order, then the derived ones (transitive closures per relation in registry order, then inverses), the nodes within `depth` undirected hops, NetworkX's bidirectional shortest path folded in, and the edges with both ends kept, in order. | `service.py:8324-8335`; `graph.py:91-231` |
+| GR5 | With `include_facts`, the resident cortex's current records in record order, each `{attribute, value, origin, confidence (4 places)}` plus `authority` and `distortion_tolerance` when set, filed under `norm_name(entity)` resolved through the alias table (an alias that is another node's canonical is dropped). | `service.py:8338-8361`; `graph.py:42-` |
+| GR6 | Nodes by id: `{entity: display, canonical, etype, aliases: <ORDER BY alias>, facts (with include_facts), community: <assignment or null>}`. | `service.py:8363-8377` |
+| GR7 | Edges in subgraph order: `{src, relation, dst, derived}` with display names; a derived edge adds `via` (its rule provenance); an asserted one adds `confidence` (4 places), `origin` when truthy, and `tag`: `EXTRACTED` for a user or action origin, else `AMBIGUOUS` below confidence 0.5, else `INFERRED`. | `service.py:8379-8393`; `graph_review.py:100-113` |
+| GR8 | The answer: `{found: true, entity: <root display>, depth: <clamped>, nodes, edges, paths: <display names>}` and `to_not_found` when recorded. | `service.py:8395-8405` |
+| GR9 | The whole graph: the graph load (entities by id, aliases, live edges by id), the communities, then the source map (`ORDER BY entity_id, source`). Nodes in id order `{entity, canonical, etype, aliases, community, sources, created_at}` plus `facts` (without the v35 labels) with `include_facts`; every live edge `{src, relation, dst, derived: false, confidence, origin (null allowed), asserted_at, tag}`; the answer `{found: true, entity: null, scope: "all", nodes, edges, paths: [], truncated: false, total_nodes, total_edges}`. | `service.py:8224-8287`; `storage/postgres.py:4262-4268,4425-4448` |
+| GR10 | `relation_filter`, when truthy and the answer has a non-empty edge list, keeps the edges whose relation, lowercased, contains the filter lowercased (Python's `str.lower`, under the pinned Unicode 14 tables); nodes and paths are untouched. | `mcp_server.py:2672-2677` |
+
+`harness/w2e.py live --only graph-read` compares every answer and the full
+bank after each call, on a template the Python daemon's own tools wrote
+(facts with labels and one under an alias, user, action, agent and
+low-confidence edges, a transitive chain, both inverse directions, a second
+component), plus what only the dream writes (community assignments, source
+attribution) as SQL seeds: the default neighborhood, depths 2, 3, 0 and 9,
+no facts, an alias root, a leaf; paths found, to the root, to an unknown
+target, to an empty one and into another component; relation filters
+case-folded, empty, emptying and on a miss; unknown and blank roots; the
+whole graph with and without facts and filtered; then answers after an
+unrelate, a new alias and a revival. Inverse-derived edges compare as a
+multiset in their slots (the hash-order row in "Graph and review"). The
+`mcp-graph-no-relation-filter`, `mcp-graph-tag-no-ambiguous`,
+`mcp-graph-facts-no-alias` and `mcp-graph-no-labels` mutants must be
+caught.
+
 ### Board tools over MCP (2026-10-16)
 
 `board/mcp.rs`, registered in `mcp::dispatch::registry`. Python:
@@ -1048,14 +1275,15 @@ incomplete tool coverage and incorrect per-case or corpus totals before writing 
 
 ### MCP refusal cleanup (2026-10-13)
 
-MCP admission and cleanup share the SDK's 4 MiB body limit. A complete,
-in-budget refusal drain keeps the connection reusable; incomplete cleanup,
-read failure, an exhausted budget or an unread Expect body closes it. The
-shared 250 ms deadline bounds cleanup, including headers-only peers. This
-resolves the accidental use of the REST 256 KiB budget without weakening
-body admission or changing REST cleanup. `MCP-REFUSAL-CLEANUP` in
-`divergences.md` records the remaining Python connection-lifetime difference.
-The strict live comparator and committed goldens are unchanged.
+MCP admission uses the SDK's 4 MiB body limit. Since 2026-10-20 every
+refusal is answered at once; the shared cleanup then discards at most 8 MiB
+more within 250 ms, keeping the connection when the body ends, and otherwise
+closes after the answer through the listener's lingering close
+(`src/linger.rs`). An unread Expect body is never polled, and it and a
+declared length past the budget are answered with `Connection: close`.
+`MCP-REFUSAL-CLEANUP` in `divergences.md` records the change and the
+Windows measurements; the strict live comparator keeps two declared
+differences, `body_limit[4]` and `[5]` (`mcp_ci.py`).
 
 Initialization validates known client-capability object fields and the SDK's
 boolean spellings for `roots.listChanged`; unknown capability fields remain

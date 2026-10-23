@@ -327,7 +327,11 @@ impl Fixture {
             .push_back(answer);
     }
     pub async fn wait(&self, action: &str, count: usize) {
-        tokio::time::timeout(Duration::from_secs(2), async {
+        self.wait_within(action, count, Duration::from_secs(2))
+            .await;
+    }
+    pub async fn wait_within(&self, action: &str, count: usize, budget: Duration) {
+        tokio::time::timeout(budget, async {
             while self.count(action) < count {
                 tokio::time::sleep(Duration::from_millis(2)).await;
             }

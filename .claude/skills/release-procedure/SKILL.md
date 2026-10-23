@@ -105,7 +105,10 @@ them in this order (first done 2026-07-16, v0.8.0; GHCR images added
    (`VERSION_FILES`). Anything else, such as `plugin/README.md`, makes it
    return None, and parity then compares the new native shim against the old
    Python release. Put such doc fixes in a separate PR, and quote the
-   `release_cut(<base>, <head>)` result in the release PR.
+   `release_cut(<base>, <head>)` result in the release PR. Land it as a
+   batch of one (`ops/integrate.py build` batches a cut alone), because its
+   own PR runs only the fast CI lanes and a cut batched with code would
+   fail `release_cut`.
    Tag `vN.N.N` at the exact commit the artifacts build from.
 2. **Build + inspect before upload**: `python -m build`, `twine check dist/*`,
    then open the wheel — Console build present: every file

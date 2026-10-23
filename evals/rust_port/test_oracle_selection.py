@@ -34,6 +34,28 @@ def test_pull_request_uses_actual_base_and_head_not_synthetic_merge(graph):
     assert graph[0] == ("merge-base", "--all", BASE, HEAD)
 
 
+def test_merge_group_uses_its_base_and_checked_out_head(graph, monkeypatch):
+    # A queued group is checked out at its own head; its base is the oracle side.
+    selected = oracle.select("root", "merge_group", {
+        "merge_group": {"base_sha": BASE, "head_sha": HEAD}}, HEAD,
+        github_ref="refs/heads/gh-readonly-queue/master/pr-830-" + BASE)
+    assert selected["oracle_head"] == MERGE
+    assert (selected["base_head"], selected["candidate_head"]) == (BASE, HEAD)
+    assert graph[0] == ("merge-base", "--all", BASE, HEAD)
+    monkeypatch.setenv(oracle.SELECTION_ENV, json.dumps(selected))
+    assert oracle.selected_oracle("root") == selected
+    selected["oracle_head"] = HEAD
+    monkeypatch.setenv(oracle.SELECTION_ENV, json.dumps(selected))
+    with pytest.raises(ValueError, match="immutable event binding"):
+        oracle.selected_oracle("root")
+
+
+def test_merge_group_head_must_be_the_checkout(graph):
+    with pytest.raises(ValueError, match="checkout head differ"):
+        oracle.select("root", "merge_group", {
+            "merge_group": {"base_sha": BASE, "head_sha": HEAD}}, CHECKOUT)
+
+
 def test_push_uses_after_without_computing_before_merge_base(graph):
     selected = oracle.select("root", "push", {"before": BASE, "after": HEAD}, HEAD)
     assert selected["oracle_head"] == HEAD
@@ -133,6 +155,7 @@ def test_new_capture_cannot_silently_use_an_old_pin(monkeypatch):
 
 @pytest.mark.parametrize("name,event,checkout,expected", [
     ("pull_request", {"pull_request": {"base": {"sha": BASE}, "head": {"sha": HEAD}}}, CHECKOUT, MERGE),
+    ("merge_group", {"merge_group": {"base_sha": BASE, "head_sha": HEAD}}, HEAD, MERGE),
     ("push", {"after": HEAD}, HEAD, HEAD),
     ("schedule", {"schedule": "23 3 * * *"}, HEAD, HEAD),
     ("workflow_dispatch", {"inputs": {"frozen_head": HEAD}}, HEAD, HEAD),

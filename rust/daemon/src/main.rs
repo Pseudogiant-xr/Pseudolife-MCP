@@ -9,6 +9,7 @@ mod background_sessions;
 mod bank;
 mod board;
 mod config;
+mod consolidation_tools;
 mod contradiction;
 mod correction_tools;
 mod dream;
@@ -19,8 +20,11 @@ mod episode_tools;
 mod episodes;
 mod fact_resolve;
 mod fact_set;
+mod forget_tools;
 mod freshness;
 mod graph_read;
+mod graph_read_tools;
+mod graph_write_tools;
 #[cfg(feature = "harness")]
 mod harness_route;
 mod health;
@@ -30,6 +34,7 @@ mod http;
 mod junk_names;
 mod labels;
 mod lesson_tools;
+mod linger;
 mod maintenance;
 mod mcp;
 mod meta_filter;
@@ -84,6 +89,17 @@ fn moved_refusal(data_dir: Option<&str>) -> Option<String> {
 fn fail(code: i32, message: &str) -> ! {
     eprintln!("{message}");
     std::process::exit(code)
+}
+
+/// The daemon's accepted connections, as `axum::serve` sees them: no Nagle
+/// delay, and a lingering close (`linger.rs`).
+fn serving_listener(
+    listener: tokio::net::TcpListener,
+) -> impl axum::serve::Listener<
+    Io = linger::LingerStream<tokio::net::TcpStream>,
+    Addr = std::net::SocketAddr,
+> {
+    linger::LingerListener::new(nodelay_listener(listener))
 }
 
 fn nodelay_listener(
@@ -297,7 +313,7 @@ fn main() {
             }
         };
         eprintln!("daemon: listening on {host}:{port} (auth={auth_configured})");
-        let code = match axum::serve(nodelay_listener(listener), router)
+        let code = match axum::serve(serving_listener(listener), router)
             .with_graceful_shutdown(shutdown_signal())
             .await
         {

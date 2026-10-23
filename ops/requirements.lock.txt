@@ -52,8 +52,23 @@
 #   attacker-controlled model/checkpoint; model configuration is an operator
 #   boundary, not MCP input. Bump once optimum-onnx supports patched
 #   transformers 5.x.
+#   2026-10-19: CVE-2026-80047 (GHSA-x9r9-c232-4q39, Dependabot #36) affects
+#   >=4.49.0,<=5.8.1: load_custom_generate() caches a repo's
+#   custom_generate/generate.py before the trust_remote_code check. In
+#   4.57.6 it runs only from from_pretrained() on a model whose
+#   can_generate() is true, or from generate(). The daemon never calls
+#   generate(), its extractor sidecar is llama.cpp, not transformers, and
+#   its default models load as classes that cannot generate: the
+#   Qwen3-Embedding-0.6B embedder as Qwen3Model, the ms-marco-MiniLM-L-6-v2
+#   reranker and nli-deberta-v3-xsmall checker as sequence classifiers. A
+#   configured *ForCausalLM reranker, or an embedder whose config asks for
+#   text generation, would reach the path; like the CVEs above, that needs
+#   an operator-chosen model. optimum-onnx 0.1.0 is still the latest release and its
+#   main branch still caps transformers<4.58; going below 4.49 would bring
+#   back the 4.50-4.53 fixes (CVE-2025-1194, -2099, -3263, -3264, -3777,
+#   -3933, -5197, -6051, -6638, -6921). Same hold as above.
 aiohappyeyeballs==2.6.2
-aiohttp==3.14.3
+aiohttp==3.14.4
 aiosignal==1.4.0
 annotated-doc==0.0.4
 annotated-types==0.7.0
@@ -61,7 +76,7 @@ anyio==4.14.2
 attrs==26.1.0
 bcrypt==5.0.0
 build==1.5.0
-certifi==2026.6.17
+certifi==2026.10.19
 cffi==2.0.0
 charset-normalizer==3.4.7
 chromadb==1.5.9
@@ -169,4 +184,4 @@ uvloop==0.22.1
 watchfiles==1.2.0
 websocket-client==1.9.0
 websockets==16.0
-yarl==1.24.2
+yarl==1.25.1

@@ -945,6 +945,18 @@ def test_real_programs_allows_the_named_program_only(tmp_path):
         _preflight(tmp_path, ("plcfake-a", "plcfake-b"), ("plcfake-a",), env=env)
 
 
+def test_both_arms_get_the_same_hook_probe_budget(tmp_path, monkeypatch):
+    # The caller's value never leaks in; a case can unset it to test the
+    # product's 250 ms default.
+    monkeypatch.setenv(core.HOOK_PROBE_ENV, "1")
+    arm = core.Arm("python", tmp_path, tmp_path)
+    seen = {name: core._environment(core.Case("c", []), arm, core.Target(name, [])).get(
+        core.HOOK_PROBE_ENV) for name in ("python", "rust")}
+    assert seen == {"python": core.HOOK_PROBE_MS, "rust": core.HOOK_PROBE_MS}
+    pinned = core.Case("c", [], env={core.HOOK_PROBE_ENV: None})
+    assert core.HOOK_PROBE_ENV not in core._environment(pinned, arm, core.Target("rust", []))
+
+
 def test_one_child_per_environment_shape(tmp_path, monkeypatch):
     env = {"PATH": "{HOME}" + os.sep + "bin"}
     first = _preflight(tmp_path, ("plcfake",), env=env)
@@ -1743,3 +1755,114 @@ def test_mutant_source_copy_drops_files_the_checkout_no_longer_has(tmp_path, mon
     assert all(p.read_text(encoding="utf-8") == "keep" for p in ignored)
     # Cargo must see the mutated file as newer than any earlier build.
     assert (copy / "shim" / "src" / "main.rs").stat().st_mtime > old + 1800
+
+
+# ---- RealDaemon start: the readiness contract, and an oracle older than it --
+
+def _health_stub(answers):
+    """A /health server replaying ``answers`` (the last repeats); returns
+    (server, url, hits)."""
+    import json
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    hits = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+        def do_GET(self):
+            status, body = answers[min(len(hits), len(answers) - 1)]
+            hits.append(status)
+            raw = json.dumps(body).encode()
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(raw)))
+            self.end_headers()
+            self.wfile.write(raw)
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server, f"http://127.0.0.1:{server.server_port}", hits
+
+
+def _started(url):
+    from types import SimpleNamespace
+    from cli_harness.rows import _daemon
+    fake = SimpleNamespace(url=url, proc=SimpleNamespace(poll=lambda: None), tail=lambda size=3000: "")
+    _daemon.RealDaemon._await_health(fake)
+
+
+def test_real_daemon_waits_for_the_principals_stage():
+    server, url, hits = _health_stub([
+        (503, {"status": "degraded", "ready": False, "pending": ["init", "principals"]}),
+        (200, {"status": "ok", "ready": False, "pending": ["principals"]}),
+        (200, {"status": "ok", "ready": False, "pending": ["init"]})])
+    try:
+        _started(url)
+        assert hits == [503, 200, 200]
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_real_daemon_accepts_an_oracle_older_than_the_contract():
+    # `--oracle-source` may name a checkout whose /health has no ready or
+    # pending key: its own protocol, status ok, starts it.
+    server, url, hits = _health_stub([(200, {"status": "ok"})])
+    try:
+        _started(url)
+        assert hits == [200]
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_real_daemon_start_never_imports_the_oracle_package(monkeypatch):
+    # producers.use_oracle puts the oracle checkout first on sys.path; one
+    # that predates pseudolife_memory/readiness.py must not break the start.
+    import types
+    stub = types.ModuleType("pseudolife_memory")
+    stub.__path__ = []
+    monkeypatch.setitem(sys.modules, "pseudolife_memory", stub)
+    monkeypatch.delitem(sys.modules, "pseudolife_memory.readiness", raising=False)
+    server, url, _hits = _health_stub([(200, {"status": "ok", "ready": True, "pending": []})])
+    try:
+        _started(url)
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_real_daemon_retries_a_503_whose_body_is_cut_off():
+    # A daemon dying mid-answer: the 503's body ends early (IncompleteRead
+    # while reading the HTTPError). That is "not up yet", never a crash.
+    import socket
+    import threading
+    listener = socket.socket()
+    listener.bind(("127.0.0.1", 0))
+    listener.listen()
+    seen = []
+
+    def serve():
+        while True:
+            try:
+                conn, _ = listener.accept()
+            except OSError:
+                return
+            with conn:
+                conn.recv(65536)
+                seen.append(1)
+                if len(seen) == 1:
+                    conn.sendall(b"HTTP/1.1 503 Service Unavailable\r\nContent-Type: application/json\r\n"
+                                 b"Content-Length: 100\r\nConnection: close\r\n\r\n{\"st")
+                else:
+                    body = b'{"status": "ok", "ready": true, "pending": []}'
+                    conn.sendall(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: "
+                                 + str(len(body)).encode() + b"\r\nConnection: close\r\n\r\n" + body)
+    threading.Thread(target=serve, daemon=True).start()
+    try:
+        _started(f"http://127.0.0.1:{listener.getsockname()[1]}")
+        assert len(seen) >= 2
+    finally:
+        listener.close()

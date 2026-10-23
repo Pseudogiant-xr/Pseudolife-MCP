@@ -193,7 +193,7 @@ async fn world_write(
 
 /// `_save_world`: the dirty slots' rows; a failure counts a persistence
 /// error and raises (`PersistenceError`), as `save_cortex` does.
-async fn save_world(svc: &Service, ready: &Ready) -> Result<(), ToolError> {
+pub(crate) async fn save_world(svc: &Service, ready: &Ready) -> Result<(), ToolError> {
     let snap = ready.world.snapshot();
     let synced = crate::stores::world::sync_slot_rows(ready.storage.client(), &snap).await;
     drop(snap);

@@ -31,6 +31,12 @@ pub fn norm_name(raw: &str) -> String {
     out.trim_matches('-').to_owned()
 }
 
+/// Python's `str.lower()` under the pinned Unicode 14 tables (final sigma
+/// in context), as the graph's names use it.
+pub(crate) fn py_lower(raw: &str) -> String {
+    unicode14::lower(raw)
+}
+
 fn entity(row: &Row) -> Value {
     json!({"id": row.get::<_, i64>(0), "canonical": row.get::<_, String>(1),
         "display": row.get::<_, String>(2), "etype": row.get::<_, Option<String>>(3),
