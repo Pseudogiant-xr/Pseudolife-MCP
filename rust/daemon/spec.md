@@ -1059,15 +1059,54 @@ and cut. Inside a cluster, `seed_score` compares within 1.5e-4 and
 `mcp-consolidation-unsorted` and `mcp-consolidation-unverified` mutants
 must be caught.
 
-`memory_consolidate` needs nothing from the W3-H graph/dream engine:
-`service.consolidate` (`service.py:7462-7516`) resolves its targets with
-`_resolve_correction_targets_locked` over lists and stores the replacement
-through `_apply_correction_locked` (source `consolidation` by default, the
-caller's tags, no derived-slot report), the correction machinery that
-`memory_supersede` ports. What remains for it is the list selectors (every
-target's error reported, the first error's reason), several targets in one
-retirement, label inheritance and capacity victim over them, and the tags
-path.
+### memory_consolidate over MCP (2026-10-19)
+
+`correction_tools.rs`: `resolve_targets` and `apply_correction` are the
+correction body `memory_supersede` runs (CO1-CO10), generalized to lists of
+targets; `memory_supersede` calls them with one selector, `memory_consolidate`
+with the caller's lists. Registered in `mcp::dispatch::registry`. It needs
+nothing from the W3-H graph/dream engine. Python: `mcp_server.py`
+`_correction_noted` (753-760), `memory_consolidate` (2547-2572);
+`service.py` `_inherited_labels` (682-692), `_correction_noop`
+(2250-2263), `_stage_correction_locked` (2809-2850),
+`_apply_correction_under_mutation_lock_locked` (2927-3102),
+`_resolve_correction_targets_locked` (3104-3199), `_retire_entries_locked`
+(3231-3262), `consolidate` (7462-7519); `storage/postgres.py`
+`supersede_entries` (962-1029), `existing_entry_ids` (4359-4368);
+`memory/cms.py` `store` and `_store` (411-611); `memory/episodes.py`
+`normalize_tags` (41-61).
+
+| # | Exact item | Source |
+|---|---|---|
+| CN1 | Bound arguments: `memory_consolidate(replaces=None, *, new_text, source=None, tags=None, entry_ids=None)` (`replaces` and `tags` lists of strings, `entry_ids` a list of strict ints of any size). Not read-only (an internal failure carries `mutation: "unknown"`); the body runs detached from the request, under the service lock (Rust: `Ready.write`). The answer goes through `_correction_noted`. | `mcp_server.py:753-760, 2547-2572` |
+| CN2 | `new_text` stripped empty answers the no-op `empty_input` ("Replacement text must be non-empty.") before any selector check. Every no-op has CO2's shape, the `derived_flagged` keys included. | `service.py:2250-2263, 7504-7506` |
+| CN3 | Selector checks, in order, each over the whole list before any lookup: both or neither of `replaces` / `entry_ids` is `invalid_selector` ("Supply exactly one of entry IDs or exact texts."); a selector that is not a list is `invalid_selector` ("Correction targets must be a list."; the binding admits only lists); an empty list is `empty_input` ("No correction targets supplied."); any id not positive is `invalid_selector` (CO3's sentence); any text not a string is `invalid_selector` ("Exact-text targets must be strings."; unreachable through the binding); any text stripped empty is `empty_input` (CO3's sentence). | `service.py:3114-3135` |
+| CN4 | The list deduplicated in first-seen order (`dict.fromkeys`), then each distinct selector resolved as CO4. Every selector's error is collected in that order; with any error the no-op carries them all as `target_errors` and takes the first one's `reason`, and a selector that did resolve changes nothing. Then, over every selected target, CO4's held-by-one check and CO5's existence check; the missing rows are reported in selection order. | `service.py:3137-3198` |
+| CN5 | Labels (`_inherited_labels`): the new text's own label wins its axis, else the strictest across every target in selection order, the first of equals. The replacement's source is the caller's when truthy (unstripped), else `consolidation`; its tags are `normalize_tags(tags)` (stripped, lowercased, empties and repeats dropped, first-seen order); the meta filter judges it with that source as the role. | `service.py:682-692, 7513-7518`; `cms.py:498, 568`; `episodes.py:41-61` |
+| CN6 | One transaction, as CO7 and CO9 over every target: `supersede_entries` locks the sorted distinct rows, refuses with sorted distinct `missing` / `already_retired` lists, retires them all at one `stamp` and invalidates every target's traces; no derived slots are read (`report_derivations=False`); the capacity victim is chosen with every target already retired. The meta filter refusing the replacement rolls the whole transaction back (`replacement_rejected`). | `service.py:2809-2850, 3231-3262`; `postgres.py:962-1029` |
+| CN7 | After commit, CO10's publication with every target retired. The answer: `{superseded_count, superseded_texts, superseded_ids, new_memory_stored: true, new_memory_surprise (4 places)}`, the texts and ids in selection order, with no `derived_flagged` keys. | `service.py:3043-3102` |
+
+`harness/w2e.py live --only consolidate-branches consolidate-capacity
+consolidate-meta-filter` compares every answer and the full bank after each
+call, on templates the Python daemon's own tools wrote (the twin row and the
+trace rows are SQL seeds, as for `memory_supersede`): three targets by id
+with a session header and tags to normalize (one stamp, every target's
+invalidations, the third target's quoted label inherited); repeated exact
+texts with the caller's source (the second target's constraint inherited);
+a repeated id with an empty source; refusals for both and neither selector,
+empty lists, ids not positive, a blank text and a blank replacement; every
+error reported over lists that mix good, missing, retired, ambiguous and
+out-of-range targets; rows deleted behind the daemons' backs; one target
+retired behind their backs (`supersede_entries` refuses the whole list);
+two targets retired behind them, listed against id order (the refusal's
+sorted ids); a blank replacement with no selector; a full band whose cheapest
+entry is a target only when every target counts as retired; and a
+replacement the meta filter refuses under the default source and stores
+under the caller's `user` source. The
+`mcp-consolidate-no-dedupe`, `-first-error-only`, `-labels-first-only`,
+`-victim-first-only`, `-derived-keys` and `-default-source` mutants must be
+caught, and the `supersede-*` scenarios still agree after the
+generalization.
 
 ### The graph store's write tools over MCP (2026-10-19)
 

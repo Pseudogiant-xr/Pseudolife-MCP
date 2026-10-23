@@ -41,7 +41,7 @@ FREE_PREFIXES = ("Parse error: ", "Validation error: ")
 UNSERVED = {
     "document_search": "W2-D",
     "document_ingest": "W2-E",
-    "memory_dream": "W3-H", "memory_consolidate": "W3-H",
+    "memory_dream": "W3-H",
 }
 
 
@@ -755,7 +755,7 @@ def recording_errors(data, cases=None):
                  for response in stubs.values()):
             errors.append('stub_tools: oracle call failed')
     total = sum(len(value) for value in data.values() if isinstance(value, (list, dict)))
-    expected_total = 10 if names == {'config_lists'} else 30 if side_config else 318
+    expected_total = 10 if names == {'config_lists'} else 30 if side_config else 317
     if total != expected_total:
         errors.append(f'corpus: {total} responses, expected {expected_total}')
     if not errors:
