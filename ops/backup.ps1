@@ -272,7 +272,7 @@ try {
     }
     Write-Host "State volume -> $stateOut"
 } catch {
-    Write-Warning "STATE VOLUME NOT BACKED UP (ingested documents + cortex/graph snapshots live there; is the daemon running?): $_"
+    Write-Warning "STATE VOLUME NOT BACKED UP (cortex/graph snapshots and pre-v57 documents live there; is the daemon running?): $_"
 }
 
 # Rotation. Rejected .part artifacts age out on the same window: they are

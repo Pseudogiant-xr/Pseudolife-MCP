@@ -71,7 +71,7 @@ def _remove_scratch(scratch: Path) -> None:
     if scratch.exists():
         logger.warning(
             "could not remove the chromadb import's scratch copy at %s; a "
-            "later import attempt removes it, or delete it by hand", scratch)
+            "later start removes it, or delete it by hand", scratch)
 
 
 def _tree_bytes(root: Path) -> int:
