@@ -139,7 +139,7 @@ def check(workflow):
     parity = jobs["parity-checks"]
     ordinary_ci = "github.event_name != 'workflow_dispatch' || inputs.mode == 'ci'"
     assert parity['if'] == (f"${{{{ !cancelled() && ({ordinary_ci}) && needs.candidate.result == 'success' "
-                            "&& needs.rust.result == 'success' }}"), 'H5 PR event selection changed'
+                            "&& needs.fixtures.result == 'success' }}"), 'H5 PR event selection changed'
     matrix = parity["strategy"]["matrix"]
     assert matrix["os"] == SYSTEMS
     # Only hosted Windows' live comparisons leave the required matrix; they
