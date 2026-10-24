@@ -45,7 +45,34 @@ class StartupParts(unittest.TestCase):
     def test_the_parts_partition_the_cases(self):
         first, second = startup_cases.part_cases(1), startup_cases.part_cases(2)
         self.assertTrue(first and second)
-        self.assertEqual(first + second, startup_cases.CASES)
+        self.assertEqual(sorted(first + second), sorted(startup_cases.CASES))
+        self.assertFalse(set(first) & set(second))
+
+    def test_every_mutant_control_runs_in_the_mutant_part(self):
+        # Part 2 runs the mutants only once its own cells passed.
+        controls = {case for case, _ in startup_cases.MUTANTS.values()}
+        self.assertLessEqual(controls, set(startup_cases.part_cases(2)))
+
+    def test_startup_cases_runs_exactly_the_selected_part(self):
+        for part in (1, 2):
+            ran = []
+
+            def fake_cell(binary, number, case, result, mutant=None):
+                ran.append((case, mutant))
+                result["stages"] = []
+
+            with self.subTest(part=part), tempfile.TemporaryDirectory() as tmp,                     patch.object(startup_cases.pg, "SLICE", "pgs"),                     patch.object(startup_cases, "cell", side_effect=fake_cell):
+                binary = Path(tmp) / "daemon-test"
+                binary.write_bytes(b"")
+                code = startup_cases.main(["--rust-test-bin", str(binary), "--part", str(part),
+                                           *(["--mutants"] if part == 2 else []),
+                                           "--out", str(Path(tmp) / "startup.json")])
+                # A stage-less fake cell catches no mutant, so part 2 fails its verdict.
+                self.assertEqual(code, 0 if part == 1 else 1)
+                self.assertEqual(tuple(case for case, mutant in ran if mutant is None),
+                                 startup_cases.part_cases(part))
+                self.assertEqual({mutant for _, mutant in ran if mutant},
+                                 set(startup_cases.MUTANTS) if part == 2 else set())
 
     def test_part_one_runs_its_cases_without_the_controls(self):
         cells, retries, guarded = self.run_part("--part", "1")

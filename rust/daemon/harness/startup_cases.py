@@ -70,16 +70,19 @@ CASES = (
 )
 # CI runs the matrix as two parity shards (rust.yml's cli-daemon and
 # cli-daemon-2): serial cells cost about 29 s each on hosted Windows, 31 cells
-# and 16 minutes in one shard (batch run 40047950017, 2026-10-24). Part 1 is
-# the first FIRST_PART cases, beside schema parity's 4.7 minutes; part 2 the
-# rest, with every mutant, the clock retry and the writer guard
-# (startup_ci.py --part).
+# and 16 minutes in one shard (batch run 40047950017, 2026-10-24). Part 2 runs
+# every mutant, the clock retry and the writer guard (startup_ci.py --part),
+# so it also holds each case a mutant reruns (its control, which must pass in
+# the same shard first) and the cases from FIRST_PART on: 11 cases each, part
+# 1 beside schema parity's 4.7 minutes.
 FIRST_PART = 12
 
 
 def part_cases(part):
-    """The cases one CI part runs; together the parts are CASES."""
-    return CASES[:FIRST_PART] if part == 1 else CASES[FIRST_PART:]
+    """The cases one CI part runs, in CASES order; together they are CASES."""
+    controls = {case for case, _ in MUTANTS.values()}
+    second = tuple(case for index, case in enumerate(CASES) if case in controls or index >= FIRST_PART)
+    return second if part == 2 else tuple(case for case in CASES if case not in second)
 EPISODES = tuple(f"{index + 1:032x}" for index in range(3))
 REQUIRED_FAILURES = {
     "required-loader-failure": ("lessons", "about", "lesson", "lesson-loader-about"),

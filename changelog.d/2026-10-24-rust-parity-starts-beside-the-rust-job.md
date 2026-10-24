@@ -14,10 +14,15 @@
 - The three longest Windows shards (23-26 minutes) are split in two, so no
   Windows shard is planned past about 15 minutes: `cli` into `cli` and
   `cli-store` (dream cursor, static, graph store, background and principal
-  steps); `cli-daemon` into `cli-daemon` (schema parity and the first 12
-  resident startup cases) and `cli-daemon-2` (the other cases, the startup
-  mutants, the clock retry and the writer guard;
+  steps); `cli-daemon` into `cli-daemon` (schema parity and 11 resident
+  startup cases) and `cli-daemon-2` (the other 11 cases, among them every
+  mutant's control, the startup mutants, the clock retry and the writer guard;
   `rust/daemon/harness/startup_ci.py --part`); `w1c-connection` into
   `w1c-connection` (test_login, move, tunnel) and `w1c-connect` (connect,
-  maintainer). Every step still runs once per OS, and both new suites join
-  the pull-request floor, so every pull request runs what it ran before.
+  maintainer). Every parity check still runs once per OS (the cheap
+  self-checks and PostgreSQL preparation run in each shard that needs them),
+  and both new suites join the pull-request floor, so every pull request runs
+  what it ran before.
+- A run whose `Rust` job fails early now runs its parity shards to the end
+  (up to 33 jobs on a full matrix) before the gate fails, where before they
+  were skipped.

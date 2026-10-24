@@ -55,11 +55,12 @@ SHARDS = [
     # cli-store: dream cursor, static, graph store, background and
     # principal steps, 9.6 min.
     {"suite": "cli-store", "job_timeout": 35},
-    # Schema startup 4.7 min, then the first 12 resident startup cases at
-    # about 29 s each, on the storage test binary the fixtures job built.
+    # Schema startup 4.7 min, then 11 resident startup cases at about 29 s
+    # each, on the storage test binary the fixtures job built.
     {"suite": "cli-daemon", "startup_part": 1, "job_timeout": 40},
-    # The other 10 cases, 9 startup mutants, the clock retry and the
-    # writer guard, about 10 min.
+    # The other 11 cases (every mutant's control among them), 9 startup
+    # mutants, the clock retry and the writer guard, about 10.6 min
+    # (startup_cases.part_cases).
     {"suite": "cli-daemon-2", "startup_part": 2, "job_timeout": 40},
     # Same runs, the four live steps: Windows 22.4 min (body 2.5, security
     # 8.6, MCP 8.9, CLI live arms about 2.5) plus about 4 min setup; Linux

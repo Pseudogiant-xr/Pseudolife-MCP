@@ -1613,7 +1613,10 @@ def test_every_rust_cache_is_saved_on_failure_and_keeps_the_lockfile_hash():
     for name, job in jobs.items():
         cache = next(step for step in job["steps"] if step.get("uses") == "Swatinem/rust-cache@v2")
         # The fixtures job only reads the Rust job's cache and never saves.
-        assert cache["with"].get("cache-on-failure") is True or cache["with"].get("save-if") is False, name
+        if name == "fixtures":
+            assert cache["with"]["save-if"] is False
+            continue
+        assert cache["with"]["cache-on-failure"] is True, name
         # Turning the environment hash off also drops the Cargo.lock hash:
         # the key would never change, and rust-cache skips the save on an
         # exact hit, so the cache would freeze at its first save.
