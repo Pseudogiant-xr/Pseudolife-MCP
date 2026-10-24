@@ -506,6 +506,8 @@ def _contents(path: str, sha: str) -> str:
 # rust/ci/parity_scope.py fills these jobs' matrices (suites, rows, parts
 # and budgets per shard), so a run with another parity_scope ran other jobs.
 SCOPE_RESOLVED = "needs.scope.outputs.parity"
+# A job's definition at a commit that cannot be settled from what is read.
+UNRESOLVED = "<unresolved>"
 
 
 def definitions_at(name: str, sha: str) -> dict[str, str]:
@@ -513,7 +515,7 @@ def definitions_at(name: str, sha: str) -> dict[str, str]:
     as it stood at ``sha``. Nothing fetched is run: the YAML is parsed, and
     rust.yml is resolved with this checkout's parity_scope. Where that
     commit's parity_scope.py differs from this one, the jobs whose matrix it
-    fills are left out, since their shards may have run other rows."""
+    fills are UNRESOLVED, since their shards may have run other rows."""
     import yaml
     raw = yaml.safe_load(_contents(f".github/workflows/{name}", sha))
     if name != "rust.yml":
@@ -523,7 +525,8 @@ def definitions_at(name: str, sha: str) -> dict[str, str]:
     found = fingerprints(resolve(json.loads(json.dumps(raw))))
     local = (ROOT / "rust/ci/parity_scope.py").read_text(encoding="utf-8")
     if _contents("rust/ci/parity_scope.py", sha).replace("\r\n", "\n") != local.replace("\r\n", "\n"):
-        found = {job: value for job, value in found.items() if SCOPE_RESOLVED not in json.dumps(raw["jobs"][job])}
+        found = {job: UNRESOLVED if SCOPE_RESOLVED in json.dumps(raw["jobs"][job]) else value
+                 for job, value in found.items()}
     return found
 
 
@@ -640,7 +643,10 @@ def executed_definitions(name: str, run: dict) -> dict[str, str]:
     common = definitions_at(name, merge_base(base_sha, run["head_sha"]))
     merged = {job: head.get(job) if head.get(job) != common.get(job) else base.get(job)
               for job in set(head) | set(base)}
-    return {job: value for job, value in head.items() if merged.get(job) == value}
+    # A job unresolved at any of the three commits is never credited: its
+    # merge cannot be settled (Codex review of 7db7ce41).
+    return {job: value for job, value in head.items() if merged.get(job) == value
+            and UNRESOLVED not in (value, base.get(job), common.get(job))}
 
 
 def stale_definitions(name: str, run_ids: list[str], current: dict[str, str]) -> dict[str, list[str]]:

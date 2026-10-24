@@ -538,7 +538,7 @@ def test_a_run_with_another_parity_scope_ran_other_shards(monkeypatch):
     assert ci_budget.definitions_at("rust.yml", "same") == current
     files["rust/ci/parity_scope.py"] = scope_text.replace("'connect', 'maintainer'", "'connect'")
     moved = ci_budget.definitions_at("rust.yml", "moved")
-    assert "parity-checks" not in moved and moved["candidate"] == current["candidate"]
+    assert moved["parity-checks"] == ci_budget.UNRESOLVED and moved["candidate"] == current["candidate"]
 
 
 def test_a_closed_pull_requests_run_counts_only_once_master_has_it(monkeypatch):
@@ -548,3 +548,18 @@ def test_a_closed_pull_requests_run_counts_only_once_master_has_it(monkeypatch):
     assert ci_budget.executed_definitions("rust.yml", run) == {"a": "head-a"}
     monkeypatch.setattr(ci_budget, "on_master", lambda sha: False)
     assert ci_budget.executed_definitions("rust.yml", run) == {}
+
+
+
+def test_a_job_unresolved_at_the_merge_base_is_never_credited(monkeypatch):
+    # Codex review of 7db7ce41: the branch changed parity_scope.py (so its
+    # parity jobs are unresolved there) while master changed parity-checks'
+    # steps; the merge ran master's steps, so the head's must not be credited.
+    unresolved = ci_budget.UNRESOLVED
+    definitions = {"head": {"parity-checks": "branch-steps", "rust": "r"},
+                   "base": {"parity-checks": "master-steps", "rust": "r"},
+                   "fork-point": {"parity-checks": unresolved, "rust": "r"}}
+    monkeypatch.setattr(ci_budget, "definitions_at", lambda name, sha: definitions[sha])
+    monkeypatch.setattr(ci_budget, "merge_base", lambda base, head: "fork-point")
+    run = {"event": "pull_request", "head_sha": "head", "pull_requests": [{"base": {"sha": "base"}}]}
+    assert ci_budget.executed_definitions("rust.yml", run) == {"rust": "r"}
