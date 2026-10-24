@@ -1,0 +1,202 @@
+{
+  "rust.yml": {
+    "limits": {
+      "jobs": 43,
+      "runner_minutes": 400,
+      "longest_job_minutes": 25,
+      "critical_path_minutes": 30,
+      "why": "2026-10-24 Rust CI speed pass (#922, #924): measured on the runs below; limits about 10% above them (critical path 25.2, about 20% above, since Windows shards vary most) so ordinary runner noise passes"
+    },
+    "pip_no_compile": true,
+    "needs_without_data": {
+      "parity": {
+        "*": "the required Parity gate reads every gated job's result"
+      },
+      "source-mutants": {
+        "candidate": "nightly only: its 74 jobs start only once the candidate compiles, so a broken build spends no runners on them"
+      },
+      "stress-report": {
+        "stress-plan": "reports only a loop that was planned"
+      }
+    },
+    "measured_on": [
+      40068731850,
+      40071746653
+    ],
+    "jobs": {
+      "Scope": {
+        "minutes": 0.3
+      },
+      "Rust / ubuntu-latest": {
+        "minutes": 10.1
+      },
+      "Rust / windows-latest": {
+        "minutes": 19.6
+      },
+      "Fixtures / ubuntu-latest": {
+        "minutes": 2.0
+      },
+      "Fixtures / windows-latest": {
+        "minutes": 3.5
+      },
+      "Candidate / ubuntu-latest": {
+        "minutes": 2.9
+      },
+      "Candidate / windows-latest": {
+        "minutes": 6.5
+      },
+      "Candidate harness / ubuntu-latest": {
+        "minutes": 3.1
+      },
+      "Candidate harness / windows-latest": {
+        "minutes": 6.5
+      },
+      "Parity checks / ubuntu-latest / eval": {
+        "minutes": 8.7
+      },
+      "Parity checks / ubuntu-latest / cli": {
+        "minutes": 7.1
+      },
+      "Parity checks / ubuntu-latest / cli-store": {
+        "minutes": 5.8
+      },
+      "Parity checks / ubuntu-latest / cli-daemon": {
+        "minutes": 4.9
+      },
+      "Parity checks / ubuntu-latest / cli-daemon-2": {
+        "minutes": 7.6
+      },
+      "Parity checks / ubuntu-latest / cli-live": {
+        "minutes": 12.8
+      },
+      "Parity checks / ubuntu-latest / judges": {
+        "minutes": 6.8
+      },
+      "Parity checks / ubuntu-latest / w1c-doctor": {
+        "minutes": 10.6
+      },
+      "Parity checks / ubuntu-latest / w1c-pairing": {
+        "minutes": 10.6
+      },
+      "Parity checks / ubuntu-latest / w1c-connection": {
+        "minutes": 5.8
+      },
+      "Parity checks / ubuntu-latest / w1c-connect": {
+        "minutes": 7.4
+      },
+      "Parity checks / ubuntu-latest / h5-w1a": {
+        "minutes": 8.5
+      },
+      "Parity checks / ubuntu-latest / h5-daemon-mutants": {
+        "minutes": 4.5
+      },
+      "Parity checks / ubuntu-latest / h5-graph-mutants": {
+        "minutes": 9.6
+      },
+      "Parity checks / ubuntu-latest / h5-light": {
+        "minutes": 8.3
+      },
+      "Parity checks / windows-latest / eval": {
+        "minutes": 13.2
+      },
+      "Parity checks / windows-latest / cli": {
+        "minutes": 11.8
+      },
+      "Parity checks / windows-latest / cli-store": {
+        "minutes": 13.3
+      },
+      "Parity checks / windows-latest / cli-daemon": {
+        "minutes": 12.1
+      },
+      "Parity checks / windows-latest / cli-daemon-2": {
+        "minutes": 12.7
+      },
+      "Parity checks / windows-latest / judges": {
+        "minutes": 11.6
+      },
+      "Parity checks / windows-latest / w1c-doctor": {
+        "minutes": 13.9
+      },
+      "Parity checks / windows-latest / w1c-pairing": {
+        "minutes": 17.1
+      },
+      "Parity checks / windows-latest / w1c-connection": {
+        "minutes": 11.6
+      },
+      "Parity checks / windows-latest / w1c-connect": {
+        "minutes": 12.1
+      },
+      "Parity checks / windows-latest / h5-audit": {
+        "minutes": 8.1
+      },
+      "Parity checks / windows-latest / h5-backup": {
+        "minutes": 3.7
+      },
+      "Parity checks / windows-latest / h5-w1a": {
+        "minutes": 11.9
+      },
+      "Parity checks / windows-latest / h5-background": {
+        "minutes": 4.8
+      },
+      "Parity checks / windows-latest / h5-daemon-mutants": {
+        "minutes": 15.6
+      },
+      "Parity checks / windows-latest / h5-graph-mutants": {
+        "minutes": 18.3
+      },
+      "Rust daemon / disposable image": {
+        "minutes": 4.8
+      },
+      "Parity / ubuntu-latest": {
+        "minutes": 0.1
+      },
+      "Parity / windows-latest": {
+        "minutes": 0.1
+      }
+    }
+  },
+  "ci.yml": {
+    "limits": {
+      "jobs": 8,
+      "runner_minutes": 78,
+      "longest_job_minutes": 35,
+      "critical_path_minutes": 36,
+      "why": "2026-10-24: measured on the runs below (guards runs instead of the four test lanes when scope skips them, so the sum overstates a run); limits about 10% above"
+    },
+    "pip_no_compile": false,
+    "needs_without_data": {},
+    "measured_on": [
+      40068731867,
+      40064033570,
+      40060958459,
+      39989124855,
+      39988057818
+    ],
+    "jobs": {
+      "scope": {
+        "minutes": 0.2
+      },
+      "guards": {
+        "minutes": 1.9
+      },
+      "lock-resolve": {
+        "minutes": 0.5
+      },
+      "test": {
+        "minutes": 31.8
+      },
+      "test-lite-linux": {
+        "minutes": 21.9
+      },
+      "test-lite-windows": {
+        "minutes": 5.0
+      },
+      "test-lite-macos": {
+        "minutes": 8.8
+      },
+      "frontend": {
+        "minutes": 0.4
+      }
+    }
+  }
+}
