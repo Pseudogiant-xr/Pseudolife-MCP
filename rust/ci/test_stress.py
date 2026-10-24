@@ -568,9 +568,10 @@ def test_stress_jobs_run_only_in_stress_mode_and_reuse_the_candidate():
     assert plan["if"] == "github.event_name == 'workflow_dispatch' && inputs.mode == 'stress'"
     assert plan["outputs"] == {"iterations": "${{ steps.plan.outputs.iterations }}",
                                "kind": "${{ steps.plan.outputs.kind }}"}
-    assert loop["needs"] == ["stress-plan", "candidate", "stress-build"]
+    assert loop["needs"] == ["stress-plan", "candidate", "candidate-harness", "stress-build"]
     assert loop["if"] == ("${{ !cancelled() && needs.stress-plan.result == 'success' "
                           "&& needs.candidate.result == 'success' "
+                          "&& needs.candidate-harness.result == 'success' "
                           "&& (needs.stress-plan.outputs.kind != 'cargo' || needs.stress-build.result == 'success') }}")
     assert loop["strategy"] == {"fail-fast": False, "max-parallel": 10,
                                 "matrix": {"iteration": "${{ fromJSON(needs.stress-plan.outputs.iterations) }}"}}
@@ -579,6 +580,8 @@ def test_stress_jobs_run_only_in_stress_mode_and_reuse_the_candidate():
     download = next(step for step in loop["steps"] if step.get("uses") == "actions/download-artifact@v4"
                     and step["with"]["name"].startswith("rust-shim-"))
     assert download["with"] == {"name": "rust-shim-${{ runner.os }}", "path": "rust/target/release"}
+    harness = next(step for step in loop["steps"] if step.get("name") == "Download harness candidate")
+    assert harness["with"] == {"name": "rust-shim-harness-${{ runner.os }}", "path": "rust/target/release"}
     # An iteration never compiles: a cargo selection runs stress-build's archive.
     for step in loop["steps"]:
         assert not re.search(r"\bcargo (build|test|nextest (archive|run))\b|\bcargo \+", step.get("run", "")), \

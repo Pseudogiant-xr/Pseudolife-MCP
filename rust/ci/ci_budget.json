@@ -1,0 +1,222 @@
+{
+  "rust.yml": {
+    "limits": {
+      "jobs": 43,
+      "runner_minutes": 410,
+      "longest_job_minutes": 25,
+      "critical_path_minutes": 33,
+      "why": "2026-10-24 Rust CI speed pass (#922, #924), measured on the runs below: job count at its measured 43; runner minutes (374.2) and longest job (19.7) about 10% above; critical path 28.1 with the harness build's cache cold on pull-request refs (about 22 once master has saved it), so 33, which still refuses parity waiting on the Rust job (38 or more)"
+    },
+    "pip_no_compile": true,
+    "needs_without_data": {
+      "parity": {
+        "*": "the required Parity gate reads every gated job's result"
+      },
+      "source-mutants": {
+        "candidate": "nightly only: its 74 jobs start only once the candidate compiles, so a broken build spends no runners on them"
+      },
+      "stress-report": {
+        "stress-plan": "reports only a loop that was planned"
+      }
+    },
+    "measured_on": [
+      40071746653,
+      40074592535
+    ],
+    "jobs": {
+      "Scope": {
+        "minutes": 0.4
+      },
+      "Rust / ubuntu-latest": {
+        "minutes": 10.9
+      },
+      "Rust / windows-latest": {
+        "minutes": 19.7
+      },
+      "Fixtures / ubuntu-latest": {
+        "minutes": 1.9
+      },
+      "Fixtures / windows-latest": {
+        "minutes": 3.5
+      },
+      "Candidate / ubuntu-latest": {
+        "minutes": 2.8
+      },
+      "Candidate / windows-latest": {
+        "minutes": 6.4
+      },
+      "Candidate harness / ubuntu-latest": {
+        "minutes": 3.5
+      },
+      "Candidate harness / windows-latest": {
+        "minutes": 9.0
+      },
+      "Parity checks / ubuntu-latest / eval": {
+        "minutes": 9.4
+      },
+      "Parity checks / ubuntu-latest / cli": {
+        "minutes": 7.2
+      },
+      "Parity checks / ubuntu-latest / cli-store": {
+        "minutes": 7.0
+      },
+      "Parity checks / ubuntu-latest / cli-daemon": {
+        "minutes": 4.5
+      },
+      "Parity checks / ubuntu-latest / cli-daemon-2": {
+        "minutes": 7.7
+      },
+      "Parity checks / ubuntu-latest / cli-live": {
+        "minutes": 12.9
+      },
+      "Parity checks / ubuntu-latest / judges": {
+        "minutes": 6.3
+      },
+      "Parity checks / ubuntu-latest / w1c-doctor": {
+        "minutes": 9.6
+      },
+      "Parity checks / ubuntu-latest / w1c-pairing": {
+        "minutes": 11.3
+      },
+      "Parity checks / ubuntu-latest / w1c-connection": {
+        "minutes": 5.9
+      },
+      "Parity checks / ubuntu-latest / w1c-connect": {
+        "minutes": 7.1
+      },
+      "Parity checks / ubuntu-latest / h5-w1a": {
+        "minutes": 9.1
+      },
+      "Parity checks / ubuntu-latest / h5-daemon-mutants": {
+        "minutes": 4.6
+      },
+      "Parity checks / ubuntu-latest / h5-graph-mutants": {
+        "minutes": 9.7
+      },
+      "Parity checks / ubuntu-latest / h5-light": {
+        "minutes": 8.2
+      },
+      "Parity checks / windows-latest / eval": {
+        "minutes": 13.3
+      },
+      "Parity checks / windows-latest / cli": {
+        "minutes": 12.5
+      },
+      "Parity checks / windows-latest / cli-store": {
+        "minutes": 12.4
+      },
+      "Parity checks / windows-latest / cli-daemon": {
+        "minutes": 11.9
+      },
+      "Parity checks / windows-latest / cli-daemon-2": {
+        "minutes": 12.6
+      },
+      "Parity checks / windows-latest / judges": {
+        "minutes": 11.4
+      },
+      "Parity checks / windows-latest / w1c-doctor": {
+        "minutes": 14.7
+      },
+      "Parity checks / windows-latest / w1c-pairing": {
+        "minutes": 17.6
+      },
+      "Parity checks / windows-latest / w1c-connection": {
+        "minutes": 11.7
+      },
+      "Parity checks / windows-latest / w1c-connect": {
+        "minutes": 10.8
+      },
+      "Parity checks / windows-latest / h5-audit": {
+        "minutes": 6.9
+      },
+      "Parity checks / windows-latest / h5-backup": {
+        "minutes": 3.6
+      },
+      "Parity checks / windows-latest / h5-w1a": {
+        "minutes": 12.5
+      },
+      "Parity checks / windows-latest / h5-background": {
+        "minutes": 5.2
+      },
+      "Parity checks / windows-latest / h5-daemon-mutants": {
+        "minutes": 15.2
+      },
+      "Parity checks / windows-latest / h5-graph-mutants": {
+        "minutes": 18.6
+      },
+      "Rust daemon / disposable image": {
+        "minutes": 4.5
+      },
+      "Parity / ubuntu-latest": {
+        "minutes": 0.1
+      },
+      "Parity / windows-latest": {
+        "minutes": 0.1
+      }
+    },
+    "fingerprints": {
+      "scope": "962fa4e9cfc14128",
+      "rust": "0c74b084f529d07c",
+      "fixtures": "defc5e07c5ac3f94",
+      "candidate": "77b0c5fa6b2afcbf",
+      "candidate-harness": "ab479a8fc85283e7",
+      "parity-checks": "dc6efde1c2658559",
+      "daemon-image": "cf93a3a209618bdc",
+      "parity": "4c39a489bf4b1642"
+    }
+  },
+  "ci.yml": {
+    "limits": {
+      "jobs": 8,
+      "runner_minutes": 67,
+      "longest_job_minutes": 25,
+      "critical_path_minutes": 27,
+      "why": "2026-10-24: measured on the runs below, each job only on runs of its current definition (guards runs instead of the four test lanes when scope skips them, so the sum overstates a run); limits about 10% above"
+    },
+    "pip_no_compile": false,
+    "needs_without_data": {},
+    "measured_on": [
+      40074592538,
+      40071746672,
+      40068731867,
+      39989124855,
+      39988057818
+    ],
+    "jobs": {
+      "scope": {
+        "minutes": 0.2
+      },
+      "guards": {
+        "minutes": 1.9
+      },
+      "lock-resolve": {
+        "minutes": 0.6
+      },
+      "test": {
+        "minutes": 22.4
+      },
+      "test-lite-linux": {
+        "minutes": 21.7
+      },
+      "test-lite-windows": {
+        "minutes": 5.0
+      },
+      "test-lite-macos": {
+        "minutes": 8.8
+      },
+      "frontend": {
+        "minutes": 0.3
+      }
+    },
+    "fingerprints": {
+      "scope": "3ba3c75b87d879b7",
+      "guards": "92b7929dcce188df",
+      "lock-resolve": "83bcc6b654896c6d",
+      "test": "ac414107d3d9c71d",
+      "test-lite-linux": "44e2a8f2c01baeab",
+      "test-lite-windows": "c02e5b0ebea51aa2",
+      "test-lite-macos": "dc361f58439e1e1e",
+      "frontend": "b1b6a1a1278f2e60"
+    }
+  }
+}
