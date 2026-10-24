@@ -30,8 +30,30 @@ Each change waits for hosted CI once, on its batch:
 - **A batch pull request** (from `integrate/*`) runs everything its diff
   needs, exactly as every pull request did before 2026-10-21 (the
   Rust-only and documentation-only scope skips still apply).
-- **Master pushes, the nightly and manual runs** run everything, as
-  before.
+- **A master push** skips what its batch already passed on the same code.
+  `ops/integrate.py merge` merges a batch with a merge commit only while
+  master is its base or an ancestor of its head, so the commit pushed to
+  master has the batch head's tree. Each scope job runs
+  `ops/ci_batch_passed.py`, which lists the jobs that passed on the batch
+  pull request's latest run of the same workflow on that head. Only a job
+  whose own conclusion there was `success` is skipped; a skipped, failed or
+  cancelled one runs. A Rust-only batch skipped the Python suite lanes, so
+  its master push still runs them. Anything doubtful skips nothing and logs
+  one line saying why: not exactly one merged `integrate/*` pull request
+  into master with this commit as its merge commit, a different tree, the
+  newest batch run not completed, or an API error. In `ci.yml` that covers
+  `lock-resolve`, `test`, the lite OS lanes and `frontend`. In `rust.yml` it
+  covers the disposable-image check and each parity pair (OS and suite).
+  The `Rust` job, the candidate build, `parity-live` (which a pull request
+  never runs) and the `eval` and `judges` suites always run. They compare
+  against the event-selected Python oracle (or, for `Rust`, its package
+  metadata), which is the merge base on a pull request and the pushed head
+  on a push, so the batch's pass is not the push's result. A merge made
+  under the `merge-forward` skill's exceptions skips only what passed on
+  the forwarded head itself; with no completed run there, its master push
+  runs everything, which is the backstop that skill relies on.
+- **The nightly and manual runs** run everything, as before. The nightly
+  is the full backstop for everything a master push skipped.
 
 ## Joining a batch
 

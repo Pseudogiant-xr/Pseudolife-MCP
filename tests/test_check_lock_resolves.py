@@ -155,7 +155,11 @@ def test_a_dockerfile_whose_install_moved_fails_loudly(tmp_path):
 def test_ci_runs_it_unscoped_on_the_images_python():
     jobs = yaml.safe_load((ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8"))["jobs"]
     job = jobs["lock-resolve"]
-    assert "if" not in job and "needs" not in job, "a scoped or dependent job can be skipped"
+    # Never scoped by the diff: the only skip is a master push whose merged
+    # batch passed this job on the same tree, and a failed scope still runs it.
+    assert job["needs"] == "scope"
+    assert job["if"] == ("${{ !cancelled() && "
+                         "!contains(fromJSON(needs.scope.outputs.batch_passed || '[]'), 'lock-resolve') }}")
     assert not job.get("continue-on-error") and not any(s.get("continue-on-error") for s in job["steps"])
     assert job["runs-on"] == "ubuntu-latest"
     setup = next(s for s in job["steps"] if str(s.get("uses", "")).startswith("actions/setup-python"))

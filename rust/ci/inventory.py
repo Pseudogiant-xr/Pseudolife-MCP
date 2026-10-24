@@ -107,7 +107,8 @@ def check(workflow):
     from rust.cli_harness import core
 
     from parity_scope import resolve
-    # The full matrix, as master pushes and the nightly run it.
+    # The full matrix, as the nightly runs it (a master push leaves out the
+    # pairs its merged batch passed; parity_scope.pruned).
     workflow = resolve(workflow)
     declared = cli_controls()
     selected = json.loads((ROOT / "rust/ci/source_mutants.json").read_text(encoding="utf-8"))
