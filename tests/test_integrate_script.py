@@ -198,6 +198,7 @@ def world(tmp_path, monkeypatch):
         _git(seed, "fetch", "-q", "origin")
         _git(seed, "switch", "-q", "-C", f"pr-{number}", base)
         for name, text in files.items():
+            (seed / name).parent.mkdir(parents=True, exist_ok=True)
             (seed / name).write_text(text, encoding="utf-8")
         _git(seed, "add", "-A")
         _git(seed, "commit", "-q", "-m", f"change {number}")
@@ -208,6 +209,7 @@ def world(tmp_path, monkeypatch):
         _git(seed, "fetch", "-q", "origin")
         _git(seed, "switch", "-q", "-C", "master", "origin/master")
         for name, text in files.items():
+            (seed / name).parent.mkdir(parents=True, exist_ok=True)
             (seed / name).write_text(text, encoding="utf-8")
         _git(seed, "add", "-A")
         _git(seed, "commit", "-q", "-m", "master moves")
@@ -995,12 +997,12 @@ def test_the_rust_harness_run_mirrors_ci_and_what_the_suite_skips():
     assert f"def {name}(" in (ROOT / module).read_text(encoding="utf-8")
 
 
-# The real census module with only its snapshot faked (a hash of each
-# scanned `ops/*.sh`), so the gate under test is the real `--ci-check`
-# decision: drift is fatal only when the diff from the event's base touches
-# CURRENCY_INPUTS.
+# The real census module with only its snapshot cut down to its input
+# hashes (the real SCOPES, EXTENSIONS and producer_paths, with no contract
+# sources), so the gate under test is the real `--ci-check` decision: drift
+# is fatal only when the diff from the event's base touches CURRENCY_INPUTS.
 _CENSUS_STUB = """\
-import functools, hashlib, importlib.util, os
+import functools, importlib.util, os
 from pathlib import Path
 
 if __name__ == "__main__" and "GH_TOKEN" in os.environ:
@@ -1010,10 +1012,11 @@ census = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(census)
 ROOT = Path(__file__).resolve().parents[1]
 CURRENCY_INPUTS = census.CURRENCY_INPUTS
+census.CONTRACT_SOURCES = CONTRACT_SOURCES = ()
+producer_paths = census.producer_paths
 census.OUTPUT = ROOT / "rust/producer-census.json"
 census.snapshot = lambda: {{
-    "scanned": {{p.name: hashlib.sha256(p.read_text(encoding="utf-8").encode()).hexdigest()
-                for p in sorted((ROOT / "ops").glob("*.sh"))}},
+    "input_sha256": census.input_hashes(ROOT, census.producer_paths(ROOT)),
     "surface": [], "inventory_gaps": [], "no_observed_producer": [], "unresolved": []}}
 census.ci_currency_required = functools.partial(census.ci_currency_required, ROOT)
 
@@ -1023,11 +1026,13 @@ if __name__ == "__main__":
 
 
 def _census(**scanned: str) -> str:
-    """The census `rust/producer_census.py` would write for these `ops/*.sh`."""
+    """The census `rust/producer_census.py` would write for these `ops/*.sh`
+    (a name with a slash is a path as it stands)."""
     import hashlib
-    hashes = {f"{name}.sh": hashlib.sha256(text.encode()).hexdigest()
+    hashes = {(name if "/" in name else f"ops/{name}.sh"):
+              hashlib.sha256(text.encode()).hexdigest()
               for name, text in sorted(scanned.items())}
-    return json.dumps({"scanned": hashes, "surface": [], "inventory_gaps": [],
+    return json.dumps({"input_sha256": hashes, "surface": [], "inventory_gaps": [],
                        "no_observed_producer": [], "unresolved": []}, indent=2) + "\n"
 
 
@@ -1193,6 +1198,223 @@ def test_census_inputs_come_from_masters_census_module(world):
 
     assert integrate._census_inputs(base) == set(census.CURRENCY_INPUTS)
     assert integrate._census_inputs(first) is None
+
+
+WAITING = "## Waiting (no action needed)"
+
+
+def _waiting(body: str) -> dict[str, str]:
+    """The waiting members' lines of a batch body, by member number."""
+    lines = body.split(WAITING, 1)[1].split("\n## ", 1)[0].splitlines()
+    return {line.split(":", 1)[0].removeprefix("- #"): line for line in lines
+            if line.startswith("- #")}
+
+
+def test_members_that_stale_a_current_census_wait_and_the_changer_lands(world, capsys):
+    # #873 and #881 on 2026-10-23/24: each regenerated its census on master,
+    # and other members' scanned files staled it on the batch head. Those
+    # others wait one batch with their label; the census changer stays.
+    _with_census(world)
+    sha10 = world.pr(10, {"ops/ten.sh": "10\n",   # a changer touching a hashed path too
+                          "rust/producer-census.json": _census(tool="t\n", ten="10\n")})
+    sha11 = world.pr(11, {"ops/eleven.sh": "11\n"})       # adds a hashed file
+    sha12 = world.pr(12, {"ops/tool.sh": "t2\n"})         # changes a hashed file
+    sha13 = world.pr(13, {"ops/tool.sh.bak": "x\n",       # the near miss: not hashed
+                          "b.txt": "b\n"})                # outside the census scopes
+    for n, sha, at in ((11, sha11, "08"), (10, sha10, "09"), (12, sha12, "10"),
+                       (13, sha13, "11")):
+        world.gh.add(n, sha, labeled_at=f"2026-10-19T{at}:00:00Z")
+
+    assert _publish(world) == 0, capsys.readouterr()
+    out = capsys.readouterr().out
+
+    assert _second_parents(world.origin, f"integrate/{DATE}-batch-1") == [sha10, sha13]
+    assert "merging again without #11, #12" in out
+    assert world.gh.bodies("comment") == [] and world.gh.bodies("edit") == []
+    (_, body), = world.gh.bodies("create")
+    assert "## Dropped" not in body           # they wait; nothing was dropped
+    dropped = _waiting(body)
+    assert set(dropped) == {"11", "12"}
+    assert "ops/eleven.sh" in dropped["11"] and "ops/tool.sh" in dropped["12"]
+    for line in dropped.values():
+        assert "#10" in line and "needs no action" in line and "next batch" in line
+        assert "keeps" in line and LABEL in line
+        assert "regenerate" not in line and "merge master forward" not in line
+
+
+def test_several_census_changers_stay_while_the_rest_waits(world, capsys):
+    _with_census(world)
+    sha10 = world.pr(10, {"ops/ten.sh": "10\n",
+                          "rust/producer-census.json": _census(tool="t\n", ten="10\n")})
+    sha11 = world.pr(11, {"ops/eleven.sh": "11\n"})
+    sha14 = world.pr(14, {"rust/contract-inventory.json": '{"tools": []}\n'})
+    for n, sha in ((10, sha10), (11, sha11), (14, sha14)):
+        world.gh.add(n, sha)
+
+    assert _publish(world) == 0, capsys.readouterr()
+
+    assert _second_parents(world.origin, f"integrate/{DATE}-batch-1") == [sha10, sha14]
+    assert world.gh.bodies("comment") == [] and world.gh.bodies("edit") == []
+    (_, body), = world.gh.bodies("create")
+    assert set(_waiting(body)) == {"11"} and "#10 and #14" in _waiting(body)["11"]
+
+
+def test_a_member_colliding_with_a_waiter_waits_too(world, capsys):
+    # #13 conflicts with #11, so the full head never shows that #13 stales
+    # the census; without #11 it merges, and it must wait as well.
+    _with_census(world)
+    sha10 = world.pr(10, {"ops/ten.sh": "10\n",
+                          "rust/producer-census.json": _census(tool="t\n", ten="10\n")})
+    sha11 = world.pr(11, {"docs/foo.md": "w\n"})
+    sha13 = world.pr(13, {"docs/foo.md": "c\n"})
+    for n, sha in ((10, sha10), (11, sha11), (13, sha13)):
+        world.gh.add(n, sha)
+
+    assert _publish(world) == 0, capsys.readouterr()
+
+    assert _second_parents(world.origin, f"integrate/{DATE}-batch-1") == [sha10]
+    assert world.gh.bodies("comment") == [] and world.gh.bodies("edit") == []
+    (_, body), = world.gh.bodies("create")
+    waiting = _waiting(body)
+    assert set(waiting) == {"11", "13"}
+    assert all("docs/foo.md" in line for line in waiting.values())
+    assert "## Dropped" not in body
+
+
+def test_a_census_changer_a_waiters_conflict_hid_never_waits(world, capsys):
+    # #13 conflicts with #11, so the full head never shows that it changes
+    # the census inputs; once it merges in a trial it is a census changer,
+    # whose census currency is mandatory, never a no-action waiter.
+    _with_census(world)
+    sha10 = world.pr(10, {"ops/ten.sh": "10\n",
+                          "rust/producer-census.json": _census(tool="t\n", ten="10\n")})
+    sha11 = world.pr(11, {"docs/foo.md": "w\n"})
+    sha13 = world.pr(13, {"docs/foo.md": "c\n",
+                          "rust/contract-inventory.json": '{"tools": []}\n'})
+    for n, sha in ((10, sha10), (11, sha11), (13, sha13)):
+        world.gh.add(n, sha)
+
+    assert _publish(world) == 0, capsys.readouterr()
+
+    (_, body), = world.gh.bodies("create")
+    assert WAITING not in body
+    assert _second_parents(world.origin, f"integrate/{DATE}-batch-1") == [sha11]
+    comments = {args[2]: text for args, text in world.gh.bodies("comment")}
+    assert set(comments) == {"10", "13"}
+    assert all("regenerate the census" in text for text in comments.values())
+    assert "rust/contract-inventory.json" in comments["13"] and "#10" in comments["13"]
+    assert {args[2] for args, _ in world.gh.bodies("edit")} == {"10", "13"}
+
+
+def test_a_census_too_deep_to_parse_lists_no_paths(world):
+    world.advance_master({"rust/producer-census.json": "[" * 200000})
+    assert integrate._census_keys(_git(world.work, "rev-parse", "origin/master")) == set()
+
+
+def test_changers_stale_against_master_itself_leave_and_the_rest_stays(world, capsys):
+    # The changers' own census fails without the others, so waiting would
+    # not help: today's rule, the changers leave and the others merge.
+    _with_census(world)
+    sha10 = world.pr(10, {"ops/ten.sh": "10\n",
+                          "rust/producer-census.json": _census(tool="t\n", ten="10\n")})
+    world.advance_master({"ops/other.sh": "o\n"})        # census now stale on master
+    sha11 = world.pr(11, {"ops/eleven.sh": "11\n"})
+    world.gh.add(10, sha10)
+    world.gh.add(11, sha11)
+
+    assert _publish(world) == 0, capsys.readouterr()
+
+    assert "fails without them too" in capsys.readouterr().out
+    assert _second_parents(world.origin, f"integrate/{DATE}-batch-1") == [sha11]
+    (args, body), = world.gh.bodies("comment")
+    assert args[2] == "10" and "once master holds the rest of the batch" in body
+    (edit_args, _), = world.gh.bodies("edit")
+    assert edit_args[2] == "10"
+
+
+def test_when_waiting_does_not_cure_the_census_the_changers_leave(world, capsys,
+                                                                  monkeypatch):
+    # A drift the hashed paths miss (here, the path set is cut short): the
+    # changers' census passes alone, but dropping the members that touch the
+    # listed paths still leaves it stale, so the batch falls back to today.
+    monkeypatch.setattr(integrate, "_census_hashed",
+                        lambda root, base_sha, changers: {"ops/eleven.sh"})
+    _with_census(world)
+    sha10 = world.pr(10, {"ops/ten.sh": "10\n",
+                          "rust/producer-census.json": _census(tool="t\n", ten="10\n")})
+    sha11 = world.pr(11, {"ops/eleven.sh": "11\n"})
+    sha12 = world.pr(12, {"ops/twelve.sh": "12\n"})
+    for n, sha in ((10, sha10), (11, sha11), (12, sha12)):
+        world.gh.add(n, sha)
+
+    assert _publish(world) == 0, capsys.readouterr()
+
+    assert "still fails without them" in capsys.readouterr().out
+    assert _second_parents(world.origin, f"integrate/{DATE}-batch-1") == [sha11, sha12]
+    (args, body), = world.gh.bodies("comment")
+    assert args[2] == "10" and "regenerate the census" in body
+
+
+def test_a_batch_of_census_changers_only_drops_them_as_today(world, capsys):
+    _with_census(world)
+    sha10 = world.pr(10, {"ops/ten.sh": "10\n",
+                          "rust/producer-census.json": _census(tool="t\n", ten="10\n")})
+    sha11 = world.pr(11, {"rust/contract-inventory.json": '{"tools": []}\n'})
+    world.advance_master({"ops/other.sh": "o\n"})
+    world.gh.add(10, sha10)
+    world.gh.add(11, sha11)
+
+    assert _build() == 0
+    out = capsys.readouterr().out
+
+    assert "no batch built" in out and world.remote_branches() == []
+    comments = {args[2]: body for args, body in world.gh.bodies("comment")}
+    assert set(comments) == {"10", "11"}
+    assert all("regenerate the census" in body for body in comments.values())
+
+
+def test_without_a_census_on_master_no_member_waits(world, capsys):
+    stub = _CENSUS_STUB.format(real=str(ROOT / "rust" / "producer_census.py"))
+    sha10 = world.pr(10, {"rust/producer_census.py": stub, "ops/tool.sh": "t\n",
+                          "rust/producer-census.json": _census(tool="t\n"),
+                          "rust/contract-inventory.json": "{}\n"})
+    sha11 = world.pr(11, {"ops/eleven.sh": "11\n"})
+    world.gh.add(10, sha10)
+    world.gh.add(11, sha11)
+
+    assert _publish(world) == 0, capsys.readouterr()
+
+    assert _second_parents(world.origin, f"integrate/{DATE}-batch-1") == [sha10, sha11]
+    assert world.gh.bodies("comment") == []
+
+
+def test_census_hashed_paths_join_masters_rules_and_every_census(world):
+    _with_census(world)
+    # Master's census once hashed a file the head has deleted; a changer's
+    # census hashes a path master's rules do not reach; the head adds one
+    # master's rules do reach, and two near misses they do not. Master's
+    # module names one contract source.
+    stub = (world.seed / "rust" / "producer_census.py").read_text(encoding="utf-8")
+    world.advance_master({
+        "rust/producer-census.json": _census(tool="t\n", gone="g\n"),
+        "rust/producer_census.py": stub.replace(
+            "CONTRACT_SOURCES = ()", 'CONTRACT_SOURCES = ("contract/source.py",)')})
+    base = _git(world.work, "rev-parse", "origin/master")
+    sha10 = world.pr(10, {"rust/producer-census.json":
+                          _census(tool="t\n", **{"wider/scope.txt": "w\n"})})
+    for name, text in (("ops/new.sh", "n\n"), ("ops/tool.sh.bak", "x\n"),
+                       ("b.txt", "b\n")):
+        (world.work / name).write_text(text, encoding="utf-8")
+    _git(world.work, "add", "-A")
+    _git(world.work, "commit", "-q", "-m", "the batch head")
+    member = integrate.Member(10, "changer", sha10, "", "APPROVED", "green")
+    _git(world.work, "fetch", "-q", "origin", "pull/10/head")
+
+    hashed = integrate._census_hashed(world.work, base, [member])
+
+    assert {"ops/tool.sh", "ops/gone.sh", "wider/scope.txt", "ops/new.sh",
+            "contract/source.py"} <= hashed
+    assert "ops/tool.sh.bak" not in hashed and "b.txt" not in hashed
 
 
 @pytest.mark.parametrize("rollup, expected", [
