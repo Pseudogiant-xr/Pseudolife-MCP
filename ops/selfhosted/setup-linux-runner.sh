@@ -63,16 +63,20 @@ if [[ ! "$runners" =~ ^[1-9]$ ]]; then echo "--runners must be 1-9" >&2; exit 2;
 if [[ ! "$prefix" =~ ^[a-z0-9][a-z0-9-]{0,30}$ ]]; then echo "--name-prefix must be lowercase letters, digits and hyphens" >&2; exit 2; fi
 if [[ ! "$runner_user" =~ ^[a-z][a-z0-9-]{0,30}$ ]]; then echo "--runner-user must be a plain account name" >&2; exit 2; fi
 id "$suite_user" >/dev/null 2>&1 || { echo "--suite-user $suite_user is not an account on this machine" >&2; exit 2; }
+[ "$runner_user" != "$suite_user" ] || { echo "--runner-user must be an account of its own, not the suite user" >&2; exit 2; }
+[[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "--version must look like 2.338.1" >&2; exit 2; }
+[[ "$sha256" =~ ^[0-9a-f]{64}$ ]] || { echo "--sha256 must be 64 lowercase hex digits" >&2; exit 2; }
 if [ "$(id -u)" -ne 0 ]; then echo "run as root" >&2; exit 1; fi
 command -v pwsh >/dev/null || { echo "install PowerShell 7 first (the shards' steps use shell: pwsh)" >&2; exit 1; }
 for tool in docker dockerd-rootless-setuptool.sh; do
   command -v "$tool" >/dev/null || { echo "install Docker Engine with its rootless extras first ($tool is missing)" >&2; exit 1; }
 done
 
-# Programs run as the account may be ones a job replaced, so the
-# registration token is removed from their environment.
-run_as() { runuser -u "$runner_user" -- env -u RUNNER_TOKEN -u ACTIONS_RUNNER_INPUT_TOKEN -C "$runner_home" \
-  HOME="$runner_home" XDG_RUNTIME_DIR="/run/user/$runner_uid" \
+# Programs run as the account may be ones a job replaced, so they get only
+# the variables named here: root's environment (a registration token
+# included) is dropped while still root, before runuser starts anything.
+run_as() { env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin LANG=C.UTF-8 runuser -u "$runner_user" -- env -C "$runner_home" \
+  HOME="$runner_home" XDG_RUNTIME_DIR="/run/user/$runner_uid" LANG=C.UTF-8 \
   DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$runner_uid/bus" PATH="$runner_home/.local/bin:/usr/local/bin:/usr/bin:/bin" "$@"; }
 
 echo "== packages"
@@ -87,10 +91,19 @@ if ! id "$runner_user" >/dev/null 2>&1; then
 fi
 runner_uid=$(id -u "$runner_user")
 runner_home=$(getent passwd "$runner_user" | cut -d: -f6)
-chmod 0700 "$runner_home"
-if id -nG "$runner_user" | grep -qwE 'sudo|docker|adm'; then
-  echo "$runner_user is in a privileged group; remove it first" >&2; exit 1
+uid_min=$(awk '$1 == "UID_MIN" {print $2}' /etc/login.defs 2>/dev/null)
+if [ "$runner_uid" -lt "${uid_min:-1000}" ] || [ "$(passwd -S "$runner_user" | awk '{print $2}')" != L ] \
+   || [ "$(id -nG "$runner_user")" != "$runner_user" ] || [ "$(id -g "$runner_user")" -lt "${uid_min:-1000}" ]; then
+  echo "$runner_user must be an ordinary account with a locked password and only its own group;" \
+    "pick a new name and the script creates it" >&2
+  exit 1
 fi
+chmod 0700 "$runner_home"
+# Nothing of the account's runs outside the runner units and its user
+# manager, both of which wait for the egress table.
+for deny in /etc/cron.deny /etc/at.deny; do
+  grep -qx "$runner_user" "$deny" 2>/dev/null || echo "$runner_user" >> "$deny"
+done
 if awk -F: -v s=$SUBID_START -v e=$((SUBID_START + SUBID_COUNT)) '$3>=s && $3<e {found=1} END {exit !found}' /etc/passwd; then
   echo "an account's UID falls in the subordinate range $SUBID_START+$SUBID_COUNT" >&2; exit 1
 fi
@@ -111,6 +124,7 @@ for _ in $(seq 30); do [ -S "/run/user/$runner_uid/bus" ] && break; sleep 1; don
 
 echo "== suite lock directory"
 suite_home=$(getent passwd "$suite_user" | cut -d: -f6)
+[[ "$suite_home" =~ ^/[A-Za-z0-9/._-]+$ ]] || { echo "the suite user's home path has characters this script does not quote" >&2; exit 1; }
 locks="$suite_home/.pseudolife-mcp/locks"
 runuser -u "$suite_user" -- mkdir -p "$locks"
 [ -s "$locks/full-suite.lease" ] || runuser -u "$suite_user" -- sh -c "echo '$lease' > '$locks/full-suite.lease'"
@@ -146,11 +160,11 @@ systemctl start pseudolife-parity-locks.service
 [ -e "$runner_locks/full-suite.lock" ] || { echo "the lock directory bind mount failed" >&2; exit 1; }
 
 echo "== egress: no LAN for $runner_user"
-while read -r keyword server _; do
+while read -r keyword server _ || [ -n "${keyword:-}" ]; do
   [ "$keyword" = nameserver ] || continue
-  if [[ "$server" =~ ^(127\.|::1$|10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.|169\.254\.|100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.|[fF][cCdD]|[fF][eE]80) ]]; then
-    echo "resolver $server is local, private or on the tailnet, which the runner account may not reach;" \
-      "point /etc/resolv.conf at a public resolver first" >&2
+  if [[ "$server" == *:* || "$server" =~ ^(127\.|10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.|169\.254\.|100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.) ]]; then
+    echo "resolver $server is IPv6, local, private or on the tailnet, which the runner account may not reach;" \
+      "point /etc/resolv.conf at a public IPv4 resolver first" >&2
     exit 1
   fi
 done < /etc/resolv.conf
@@ -160,13 +174,13 @@ ids="$runner_uid, $SUBID_START-$((SUBID_START + SUBID_COUNT - 1))"
 # This box's own services (any socket listening now that another account
 # owns) are refused on every local address. A port in use cannot be one a
 # job's own server binds; rerun this script after adding a service.
-read -r ephemeral_low ephemeral_high < /proc/sys/net/ipv4/ip_local_port_range
 # Prints "any <port>" for a wildcard listener, "4 <address> <port>" or
 # "6 <address> <port>" for one bound to a loopback address. Listeners on
-# other addresses are already covered by the ranges above.
+# other addresses are already covered by the ranges above. A listener bound
+# to one address is refused on that address only, so a job's own server on
+# another loopback address and the same port still works.
 listening() {
-  ss "-Hl${1}ne" | awk -v me="$runner_uid" -v sub_low="$SUBID_START" -v sub_high="$((SUBID_START + SUBID_COUNT - 1))" \
-      -v low="$ephemeral_low" -v high="$ephemeral_high" '{
+  ss "-Hl${1}ne" | awk -v me="$runner_uid" -v sub_low="$SUBID_START" -v sub_high="$((SUBID_START + SUBID_COUNT - 1))" '{
     owner = 0
     for (i = 1; i <= NF; i++) if ($i ~ /^uid:/) owner = substr($i, 5) + 0
     if (owner == me || (owner >= sub_low && owner <= sub_high)) next
@@ -174,7 +188,6 @@ listening() {
     sub(/%.*/, "", address); gsub(/[][]/, "", address)
     if (port !~ /^[0-9]+$/) next
     if (address == "*" || address == "0.0.0.0" || address == "::") { print "any", port; next }
-    if (port + 0 >= low && port + 0 <= high) next
     if (address ~ /^127\./) print 4, address, port
     else if (address == "::1") print 6, address, port
   }' | sort -u
@@ -218,6 +231,7 @@ Before=network-pre.target
 Wants=network-pre.target
 After=nftables.service
 ReloadPropagatedFrom=nftables.service
+PartOf=nftables.service
 
 [Service]
 Type=oneshot
@@ -370,6 +384,8 @@ BindsTo=pseudolife-runner-egress.service
 Requires=pseudolife-parity-locks.service
 
 [Service]
+# Refuse to start unless the egress table is loaded.
+ExecStartPre=+/usr/sbin/nft list table inet pseudolife_runner_egress
 ExecStart=$dir/bin/runsvc.sh
 User=$runner_user
 WorkingDirectory=$dir

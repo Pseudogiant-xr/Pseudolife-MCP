@@ -250,20 +250,23 @@ What it adds to the manual procedure:
   - The rules match the account's subordinate IDs as well as its own: a
     job can map itself onto one in a user namespace that keeps the box's
     network namespace.
-  - The box's own services are refused too: every port another account
+  - The box's own services are refused too: every socket another account
     listens on when the script runs (an SSH server, a test PostgreSQL, a
-    mail relay), on every local address. A port in use is never one a
-    job's own server binds. Rerun the script after adding a service.
+    mail relay). A wildcard listener is refused on every local address,
+    one bound to a loopback address on that address only. Rerun the
+    script after adding a service.
   - The table outlives its unit: the unit has no stop action, because the
     account's rootless Docker and its containers run outside the runner
     units and would lose the filter. A rerun reloads the table in one
     transaction. The runner units are bound to the rule's unit
-    (`BindsTo=`), and the account's user manager, which starts its
-    rootless Docker, requires it at boot, so nothing of the account's
-    starts before the table is in place.
-  - DNS works because the box resolves through a public resolver. A box
-    whose resolver is on the LAN or Tailscale would need that address
-    allowed.
+    (`BindsTo=`) and check the table is loaded before they start; the
+    account's user manager, which starts its rootless Docker, requires it
+    at boot; cron and `at` are denied to the account. Stopping
+    `nftables.service`, whose stock configuration flushes every table,
+    stops all of them; a restart of it needs a rerun of the script.
+  - DNS goes to a public resolver. A box whose resolver is on the LAN or
+    Tailscale would need that address allowed; the script refuses until
+    then.
 - **Root never runs or writes a file a job could have replaced.** The
   runner release is downloaded and checked by root into
   `/usr/local/lib/pseudolife-parity-runner/`. A runner is registered from a
@@ -286,7 +289,11 @@ What it adds to the manual procedure:
   tools, tool cache, `.env` files and rootless Docker). The lane runs only
   master's code and dispatches by someone with write access, and the
   account can reach nothing on the network that matters, so that is
-  accepted; ephemeral runners would remove it (decision 7).
+  accepted; ephemeral runners would remove it (decision 7). Two more
+  residuals of the same kind: services reached through a Unix socket
+  (rather than TCP or UDP) are outside the egress table, and a job can
+  hold a lock on the read-only suite lock file, which would hold off that
+  box's full suites until the job ends.
 - **Reruns leave running jobs alone.** A runner restarts only when its
   `.env`, `.path` or unit changed, or it is down.
 - **Several runners per machine, each with its own `HOME`**
@@ -335,7 +342,10 @@ nightly's next run still cancels them ("Switching the lane on").
 ## Commands for the maintainer
 
 These are the manual steps behind the script above, and still the procedure
-for the Windows dev VM. Use the runner release currently listed at
+for the Windows dev VM. On Linux, use the script: these steps lack its
+hardening (the egress table, the lock directory mount in place of the
+search ACL on the suite user's home, and units that root writes itself
+rather than running `svc.sh` from the account's directory). Use the runner release currently listed at
 `https://github.com/actions/runner/releases`, and check its SHA-256 against
 that page.
 
