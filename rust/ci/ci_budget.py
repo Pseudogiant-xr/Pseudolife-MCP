@@ -503,19 +503,28 @@ def _contents(path: str, sha: str) -> str:
     return base64.b64decode(listing["content"]).decode("utf-8")
 
 
+# rust/ci/parity_scope.py fills these jobs' matrices (suites, rows, parts
+# and budgets per shard), so a run with another parity_scope ran other jobs.
+SCOPE_RESOLVED = "needs.scope.outputs.parity"
+
+
 def definitions_at(name: str, sha: str) -> dict[str, str]:
     """The fingerprints of the jobs a pull request starts in this workflow
-    as it stood at ``sha``. The YAML is only parsed, never run, and rust.yml
-    is resolved with this checkout's parity_scope: a run may come from any
-    branch or fork. A shard that commit's parity_scope split differently
-    shows up as job names these runs lack, which measure refuses."""
+    as it stood at ``sha``. Nothing fetched is run: the YAML is parsed, and
+    rust.yml is resolved with this checkout's parity_scope. Where that
+    commit's parity_scope.py differs from this one, the jobs whose matrix it
+    fills are left out, since their shards may have run other rows."""
     import yaml
-    workflow = yaml.safe_load(_contents(f".github/workflows/{name}", sha))
-    if name == "rust.yml":
-        sys.path.insert(0, str(ROOT / "rust/ci"))
-        from parity_scope import resolve
-        workflow = resolve(workflow)
-    return fingerprints(workflow)
+    raw = yaml.safe_load(_contents(f".github/workflows/{name}", sha))
+    if name != "rust.yml":
+        return fingerprints(raw)
+    sys.path.insert(0, str(ROOT / "rust/ci"))
+    from parity_scope import resolve
+    found = fingerprints(resolve(json.loads(json.dumps(raw))))
+    local = (ROOT / "rust/ci/parity_scope.py").read_text(encoding="utf-8")
+    if _contents("rust/ci/parity_scope.py", sha).replace("\r\n", "\n") != local.replace("\r\n", "\n"):
+        found = {job: value for job, value in found.items() if SCOPE_RESOLVED not in json.dumps(raw["jobs"][job])}
+    return found
 
 
 def estimates(entry: dict) -> list[str]:
@@ -597,6 +606,13 @@ def fetch_run(run_id: str) -> dict:
                                      check=True, capture_output=True, text=True).stdout)
 
 
+def on_master(sha: str) -> bool:
+    """Whether ``sha`` is master or one of its ancestors."""
+    compared = json.loads(subprocess.run(["gh", "api", f"repos/{REPOSITORY}/compare/{sha}...master"],
+                                         check=True, capture_output=True, text=True).stdout)
+    return compared["behind_by"] == 0
+
+
 def merge_base(base: str, head: str) -> str:
     compared = json.loads(subprocess.run(["gh", "api", f"repos/{REPOSITORY}/compare/{base}...{head}"],
                                          check=True, capture_output=True, text=True).stdout)
@@ -613,8 +629,12 @@ def executed_definitions(name: str, run: dict) -> dict[str, str]:
     or a moved base may have changed since the run."""
     head = definitions_at(name, run["head_sha"])
     requests = run.get("pull_requests") or []
-    if run.get("event") != "pull_request" or not requests:
+    if run.get("event") != "pull_request":
         return head
+    if not requests:
+        # A closed pull request's run lists none. A head master contains
+        # (a merged batch's) ran as itself; any other is unsettled.
+        return head if on_master(run["head_sha"]) else {}
     base_sha = requests[0]["base"]["sha"]
     base = definitions_at(name, base_sha)
     common = definitions_at(name, merge_base(base_sha, run["head_sha"]))

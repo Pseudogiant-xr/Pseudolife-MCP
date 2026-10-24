@@ -524,3 +524,27 @@ def test_a_pull_request_run_executed_its_merge_with_the_base(monkeypatch):
     run = {"event": "pull_request", "head_sha": "head", "pull_requests": [{"base": {"sha": "base"}}]}
     assert ci_budget.executed_definitions("rust.yml", run) == {"a": "branch-a", "d": "new-d"}
     assert ci_budget.executed_definitions("rust.yml", dict(run, event="push")) == definitions["head"]
+
+
+
+def test_a_run_with_another_parity_scope_ran_other_shards(monkeypatch):
+    # Opus review of 127464a9: shards' rows and parts live in
+    # parity_scope.py, so old runs resolved with today's file looked current.
+    raw_text = (ci_budget.WORKFLOWS / "rust.yml").read_text(encoding="utf-8")
+    scope_text = (ci_budget.ROOT / "rust/ci/parity_scope.py").read_text(encoding="utf-8")
+    files = {".github/workflows/rust.yml": raw_text, "rust/ci/parity_scope.py": scope_text}
+    monkeypatch.setattr(ci_budget, "_contents", lambda path, sha: files[path])
+    current = ci_budget.fingerprints(load("rust.yml"))
+    assert ci_budget.definitions_at("rust.yml", "same") == current
+    files["rust/ci/parity_scope.py"] = scope_text.replace("'connect', 'maintainer'", "'connect'")
+    moved = ci_budget.definitions_at("rust.yml", "moved")
+    assert "parity-checks" not in moved and moved["candidate"] == current["candidate"]
+
+
+def test_a_closed_pull_requests_run_counts_only_once_master_has_it(monkeypatch):
+    monkeypatch.setattr(ci_budget, "definitions_at", lambda name, sha: {"a": "head-a"})
+    run = {"event": "pull_request", "head_sha": "h", "pull_requests": []}
+    monkeypatch.setattr(ci_budget, "on_master", lambda sha: True)
+    assert ci_budget.executed_definitions("rust.yml", run) == {"a": "head-a"}
+    monkeypatch.setattr(ci_budget, "on_master", lambda sha: False)
+    assert ci_budget.executed_definitions("rust.yml", run) == {}
