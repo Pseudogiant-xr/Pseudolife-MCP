@@ -59,8 +59,11 @@ keeps a job out of the budget.
    request, and a manual dispatch on a branch cannot bind the Python
    oracle. Enter each new job with `ci_budget.py estimate --workflow rust.yml
    --job "Parity checks / <os> / <suite>" --minutes <n> --reason "<the same
-   steps' times on a named run>"`. `ci_budget.py check` lists every
-   estimate, and measuring the batch run replaces it.
+   steps' times on a named run>"`. The suite also changed the existing
+   `parity-checks` job, so `accept` it with a reason a reviewer can check
+   ("adds suite X; no other shard's steps changed"): an estimate never
+   vouches for the other shards. `ci_budget.py check` lists every estimate,
+   and measuring the batch run replaces it.
 3. If a limit no longer holds, raise it in the same change and say why in
    its `why` field and in the pull request: what the extra slots or minutes
    buy, and what was measured. A reviewer then decides with the cost in

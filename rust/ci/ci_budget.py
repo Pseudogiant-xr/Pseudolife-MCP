@@ -166,6 +166,8 @@ class Evaluator:
         return self.index < len(self.items) and self.items[self.index][1] in values
 
     def take(self):
+        if self.index >= len(self.items):
+            raise ValueError("the expression ends early")
         self.index += 1
         return self.items[self.index - 1]
 
@@ -283,7 +285,7 @@ def can_start(job: dict, skipped: set[str], event: str) -> bool:
     if not re.search(r"\b(" + "|".join(STATUS) + r")\s*\(", text):
         text = f"success() && ({text})" if text else "success()"
     try:
-        return Evaluator(event, needs_of(job), skipped).run(text) is not False
+        return truthy(Evaluator(event, needs_of(job), skipped).run(text)) is not False
     except ValueError:
         # A condition this reader cannot follow might hold: it counts.
         return True
@@ -435,7 +437,7 @@ def cache_savers(workflow: dict) -> dict[tuple[str, str], list[str]]:
                 conditions = [condition_text(step.get("if", "true")), condition_text(options.get("save-if", "true"))]
                 def may_hold(text, event):
                     try:
-                        return Evaluator(event, needs_of(job), set(), combo).run(text) is not False
+                        return truthy(Evaluator(event, needs_of(job), set(), combo).run(text)) is not False
                     except ValueError:
                         return True
                 if not any(all(may_hold(text, event) for text in conditions if text)
@@ -595,17 +597,48 @@ def fetch_run(run_id: str) -> dict:
                                      check=True, capture_output=True, text=True).stdout)
 
 
+def merge_base(base: str, head: str) -> str:
+    compared = json.loads(subprocess.run(["gh", "api", f"repos/{REPOSITORY}/compare/{base}...{head}"],
+                                         check=True, capture_output=True, text=True).stdout)
+    return compared["merge_base_commit"]["sha"]
+
+
+def executed_definitions(name: str, run: dict) -> dict[str, str]:
+    """The job definitions a run executed, where its head settles them. A
+    push or merge group runs its head. A pull request runs the merge of its
+    head into its base: each job is the head's where the branch changed it
+    since the merge base, and the base's where it did not. A job whose merge
+    differs from the head is left out (so measure counts its times stale):
+    the API reports the pull request's base as it is now, which a retarget
+    or a moved base may have changed since the run."""
+    head = definitions_at(name, run["head_sha"])
+    requests = run.get("pull_requests") or []
+    if run.get("event") != "pull_request" or not requests:
+        return head
+    base_sha = requests[0]["base"]["sha"]
+    base = definitions_at(name, base_sha)
+    common = definitions_at(name, merge_base(base_sha, run["head_sha"]))
+    merged = {job: head.get(job) if head.get(job) != common.get(job) else base.get(job)
+              for job in set(head) | set(base)}
+    return {job: value for job, value in head.items() if merged.get(job) == value}
+
+
 def stale_definitions(name: str, run_ids: list[str], current: dict[str, str]) -> dict[str, list[str]]:
-    """For each job whose definition differs from ``current`` at the head
-    of one of these runs: those runs. Their minutes measured another job."""
+    """For each job whose definition differs from ``current`` in what one
+    of these runs executed: those runs. Their minutes measured another job.
+    A run whose workflow cannot be read (a fork's, or one older than these
+    files) counts as stale for every job."""
     stale: dict[str, list[str]] = {}
-    seen: dict[str, dict[str, str]] = {}
     for run_id in run_ids:
-        sha = fetch_run(run_id)["head_sha"]
-        if sha not in seen:
-            seen[sha] = definitions_at(name, sha)
+        run = fetch_run(run_id)
+        try:
+            executed = executed_definitions(name, run)
+        except (subprocess.CalledProcessError, KeyError, ValueError) as error:
+            print(f"run {run_id}: its workflow at {run['head_sha'][:12]} cannot be read "
+                  f"({type(error).__name__}); its times are left out", file=sys.stderr)
+            executed = {}
         for job_id, value in current.items():
-            if seen[sha].get(job_id) != value:
+            if executed.get(job_id) != value:
                 stale.setdefault(job_id, []).append(run_id)
     return stale
 
@@ -695,15 +728,14 @@ def main(argv: list[str] | None = None) -> int:
         if not templates:
             parser.error(f"no job a pull request starts in {options.workflow} is named {options.job!r}")
         entry = budget[options.workflow]
+        if options.job in entry["jobs"] and "estimate" not in entry["jobs"][options.job]:
+            parser.error(f"{options.job} already has measured minutes; an estimate is for a job no run has "
+                         "measured (use accept for a changed job whose cost holds)")
         entry["jobs"][options.job] = {"minutes": options.minutes, "estimate": options.reason.strip()}
-        current = fingerprints(workflow)
-        entry.setdefault("fingerprints", {})[templates[0]] = current[templates[0]]
-        entry.setdefault("accepted", []).append(
-            {"job": templates[0], "fingerprint": current[templates[0]],
-             "reason": f"estimated {options.job}: {options.reason.strip()}"})
         BUDGET.write_text(json.dumps(budget, indent=2) + "\n", encoding="utf-8")
-        print(f"{options.workflow}: {options.job} estimated at {options.minutes} minutes; "
-              "re-measure it from the batch run")
+        print(f"{options.workflow}: {options.job} estimated at {options.minutes} minutes; re-measure it "
+              f"from the batch run. Its job {templates[0]} changed, so the check also needs that job "
+              "re-measured, or accepted with a reason saying why its other runs cost what they did")
         return 0
     if options.command == "accept":
         if not options.reason.strip():

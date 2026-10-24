@@ -447,6 +447,14 @@ def test_the_estimate_route_records_the_new_job_and_its_template(tmp_path, monke
     entry = json.loads(budget_file.read_text(encoding="utf-8"))
     entry["rust.yml"]["limits"]["jobs"] += 2
     entry["rust.yml"]["limits"]["runner_minutes"] += 20
+    # Estimating never vouches for the other shards (Codex review of
+    # 4c68714a): the changed parity-checks job needs its own reason.
+    assert [problem for problem in problems("rust.yml", workflow, entry, raw)
+            if "job parity-checks changed" in problem]
+    budget_file.write_text(json.dumps(entry), encoding="utf-8")
+    assert ci_budget.main(["accept", "--workflow", "rust.yml", "--job", "parity-checks", "--reason",
+                           "adds the cli-extra suite (estimated); no other shard's steps changed"]) == 0
+    entry = json.loads(budget_file.read_text(encoding="utf-8"))
     assert problems("rust.yml", workflow, entry, raw) == []
     assert ci_budget.estimates(entry["rust.yml"]) == ["Parity checks / ubuntu-latest / cli-extra",
                                                       "Parity checks / windows-latest / cli-extra"]
@@ -460,3 +468,59 @@ def test_an_entry_without_minutes_is_named():
     entry["rust.yml"]["jobs"]["Scope"] = {"estimate": "forgot the minutes"}
     workflow, raw = rust()
     assert check(workflow, raw, entry) == ["rust.yml: budget entries without numeric minutes: ['Scope']"]
+
+
+
+@pytest.mark.parametrize("condition", ["${{ github.event_name == }}", "${{ (github.event_name == 'push' }}",
+                                       "${{ contains(github.event_name, 'p' }}"])
+def test_a_truncated_condition_counts_rather_than_crashing(condition):
+    workflow, raw = rust()
+    add_job(workflow, raw, "extra", dict(UNNEEDED, **{"if": condition}))
+    assert any("Extra / ubuntu-latest" in problem for problem in check(workflow, raw))
+
+
+def test_an_estimate_never_replaces_a_measurement(tmp_path, monkeypatch):
+    budget_file = tmp_path / "ci_budget.json"
+    budget_file.write_text(BUDGET.read_text(encoding="utf-8"), encoding="utf-8")
+    monkeypatch.setattr(ci_budget, "BUDGET", budget_file)
+    with pytest.raises(SystemExit):
+        ci_budget.main(["estimate", "--workflow", "rust.yml", "--job", "Parity checks / ubuntu-latest / eval",
+                        "--minutes", "1", "--reason", "cheaper, surely"])
+    assert budget_file.read_text(encoding="utf-8") == BUDGET.read_text(encoding="utf-8")
+
+
+def test_an_unreadable_run_is_left_out_not_fatal(monkeypatch, capsys):
+    import subprocess
+    monkeypatch.setattr(ci_budget, "fetch_run", lambda run_id: {"head_sha": "f" * 40})
+
+    def missing(name, sha):
+        raise subprocess.CalledProcessError(1, ["gh"])
+    monkeypatch.setattr(ci_budget, "definitions_at", missing)
+    stale = ci_budget.stale_definitions("rust.yml", ["7"], {"scope": "x", "rust": "y"})
+    assert stale == {"scope": ["7"], "rust": ["7"]}
+    assert "run 7: its workflow at ffffffffffff cannot be read" in capsys.readouterr().err
+
+
+
+def test_a_condition_that_ends_falsy_keeps_the_job_out():
+    # Codex review of 4c68714a: && returns an operand, here None on a pull
+    # request, which is falsy though not False.
+    workflow, raw = rust()
+    add_job(workflow, raw, "extra", dict(UNNEEDED, **{"if": "${{ inputs.mode && inputs.mode == 'stress' }}"}))
+    assert check(workflow, raw) == []
+
+
+def test_a_pull_request_run_executed_its_merge_with_the_base(monkeypatch):
+    # Codex review of 4c68714a: jobs the branch left alone run as the base
+    # has them, jobs it changed as the branch has them.
+    # Only what the head settles is credited: b ran as master-b, not as the
+    # head's old-b, so its times count for neither (a job only the base has,
+    # c, and one only the head has, d, are handled too).
+    definitions = {"head": {"a": "branch-a", "b": "old-b", "d": "new-d"},
+                   "base": {"a": "old-a", "b": "master-b", "c": "base-c"},
+                   "fork-point": {"a": "old-a", "b": "old-b", "c": "base-c"}}
+    monkeypatch.setattr(ci_budget, "definitions_at", lambda name, sha: definitions[sha])
+    monkeypatch.setattr(ci_budget, "merge_base", lambda base, head: "fork-point")
+    run = {"event": "pull_request", "head_sha": "head", "pull_requests": [{"base": {"sha": "base"}}]}
+    assert ci_budget.executed_definitions("rust.yml", run) == {"a": "branch-a", "d": "new-d"}
+    assert ci_budget.executed_definitions("rust.yml", dict(run, event="push")) == definitions["head"]
