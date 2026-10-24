@@ -39,6 +39,7 @@ if [ "${1:-}" = "--token" ]; then
     journalctl -u pseudolife-runner-watch.service -n 6 --no-pager >&2 || true
     exit 1
   fi
+  exit 0
 fi
 
 here=$(cd "$(dirname "$0")" && pwd)

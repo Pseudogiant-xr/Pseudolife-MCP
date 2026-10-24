@@ -35,6 +35,10 @@ LABEL=pseudolife-parity-linux
 SUBID_START=30000
 SUBID_COUNT=35000
 LIB=/usr/local/lib/pseudolife-parity-runner
+# Each runner's directory sits in a root-owned parent, so a job can change a
+# runner directory's contents but never swap the directory itself for a
+# link before root works on it.
+RUNNERS=/srv/pseudolife-parity-runners
 
 runner_user= suite_user= lease= runners= version= sha256= prefix=parity-linux
 while [ $# -gt 0 ]; do
@@ -56,13 +60,19 @@ if [[ ! "$lease" =~ ^full-suite@[A-Za-z0-9._-]{1,40}$ ]]; then
   echo "--lease must be full-suite@<machine>" >&2; exit 2
 fi
 if [[ ! "$runners" =~ ^[1-9]$ ]]; then echo "--runners must be 1-9" >&2; exit 2; fi
+if [[ ! "$prefix" =~ ^[a-z0-9][a-z0-9-]{0,30}$ ]]; then echo "--name-prefix must be lowercase letters, digits and hyphens" >&2; exit 2; fi
+if [[ ! "$runner_user" =~ ^[a-z][a-z0-9-]{0,30}$ ]]; then echo "--runner-user must be a plain account name" >&2; exit 2; fi
+id "$suite_user" >/dev/null 2>&1 || { echo "--suite-user $suite_user is not an account on this machine" >&2; exit 2; }
 if [ "$(id -u)" -ne 0 ]; then echo "run as root" >&2; exit 1; fi
 command -v pwsh >/dev/null || { echo "install PowerShell 7 first (the shards' steps use shell: pwsh)" >&2; exit 1; }
 for tool in docker dockerd-rootless-setuptool.sh; do
   command -v "$tool" >/dev/null || { echo "install Docker Engine with its rootless extras first ($tool is missing)" >&2; exit 1; }
 done
 
-run_as() { runuser -u "$runner_user" -- env -C "$runner_home" HOME="$runner_home" XDG_RUNTIME_DIR="/run/user/$runner_uid" \
+# Programs run as the account may be ones a job replaced, so the
+# registration token is removed from their environment.
+run_as() { runuser -u "$runner_user" -- env -u RUNNER_TOKEN -u ACTIONS_RUNNER_INPUT_TOKEN -C "$runner_home" \
+  HOME="$runner_home" XDG_RUNTIME_DIR="/run/user/$runner_uid" \
   DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$runner_uid/bus" PATH="$runner_home/.local/bin:/usr/local/bin:/usr/bin:/bin" "$@"; }
 
 echo "== packages"
@@ -107,33 +117,79 @@ runuser -u "$suite_user" -- mkdir -p "$locks"
 named=$(head -n 1 "$locks/full-suite.lease")
 [ "$named" = "$lease" ] || echo "note: $locks/full-suite.lease names $named, not $lease; the runners use $lease"
 [ -e "$locks/full-suite.lock" ] || runuser -u "$suite_user" -- touch "$locks/full-suite.lock"
-setfacl -m "u:$runner_user:x" "$suite_home" "$suite_home/.pseudolife-mcp"
+# The account reads the lock directory through a read-only bind mount, so it
+# needs no search right on the suite user's home, where it could otherwise
+# read any file whose path it guessed.
+setfacl -x "u:$runner_user" "$suite_home" "$suite_home/.pseudolife-mcp" 2>/dev/null || true
 setfacl -m "u:$runner_user:rx" "$locks"
 setfacl -d -m "u:$runner_user:r" "$locks"
 find "$locks" -maxdepth 1 -type f -exec setfacl -m "u:$runner_user:r" {} +
+runner_locks=$LIB/locks
+install -d -m 0755 "$LIB"
+mountpoint -q "$runner_locks" || install -d -m 0755 "$runner_locks"
+cat > /etc/systemd/system/pseudolife-parity-locks.service <<UNIT
+[Unit]
+Description=The suite lock directory, read-only, for the parity runners
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/sh -c 'mountpoint -q $runner_locks || { mount --bind $locks $runner_locks && mount -o remount,bind,ro $runner_locks; }'
+ExecStop=/bin/umount $runner_locks
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+systemctl daemon-reload
+systemctl enable pseudolife-parity-locks.service >/dev/null 2>&1
+systemctl start pseudolife-parity-locks.service
+[ -e "$runner_locks/full-suite.lock" ] || { echo "the lock directory bind mount failed" >&2; exit 1; }
 
 echo "== egress: no LAN for $runner_user"
+while read -r keyword server _; do
+  [ "$keyword" = nameserver ] || continue
+  if [[ "$server" =~ ^(127\.|::1$|10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.|169\.254\.|100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.|[fF][cCdD]|[fF][eE]80) ]]; then
+    echo "resolver $server is local, private or on the tailnet, which the runner account may not reach;" \
+      "point /etc/resolv.conf at a public resolver first" >&2
+    exit 1
+  fi
+done < /etc/resolv.conf
 # The account's subordinate IDs count too: a job can map itself onto one in
 # a user namespace that keeps this network namespace.
 ids="$runner_uid, $SUBID_START-$((SUBID_START + SUBID_COUNT - 1))"
 # This box's own services (any socket listening now that another account
 # owns) are refused on every local address. A port in use cannot be one a
 # job's own server binds; rerun this script after adding a service.
+read -r ephemeral_low ephemeral_high < /proc/sys/net/ipv4/ip_local_port_range
+# Prints "any <port>" for a wildcard listener, "4 <address> <port>" or
+# "6 <address> <port>" for one bound to a loopback address. Listeners on
+# other addresses are already covered by the ranges above.
 listening() {
-  ss "-Hl${1}ne" | awk -v me="$runner_uid" '{
+  ss "-Hl${1}ne" | awk -v me="$runner_uid" -v sub_low="$SUBID_START" -v sub_high="$((SUBID_START + SUBID_COUNT - 1))" \
+      -v low="$ephemeral_low" -v high="$ephemeral_high" '{
     owner = 0
-    for (i = 1; i <= NF; i++) if ($i ~ /^uid:/) owner = substr($i, 5)
-    if (owner == me) next
-    port = $4; sub(/.*:/, "", port)
-    if (port ~ /^[0-9]+$/) print port
-  }' | sort -nu | paste -sd, -
+    for (i = 1; i <= NF; i++) if ($i ~ /^uid:/) owner = substr($i, 5) + 0
+    if (owner == me || (owner >= sub_low && owner <= sub_high)) next
+    local = $4; port = local; sub(/.*:/, "", port); address = substr(local, 1, length(local) - length(port) - 1)
+    sub(/%.*/, "", address); gsub(/[][]/, "", address)
+    if (port !~ /^[0-9]+$/) next
+    if (address == "*" || address == "0.0.0.0" || address == "::") { print "any", port; next }
+    if (port + 0 >= low && port + 0 <= high) next
+    if (address ~ /^127\./) print 4, address, port
+    else if (address == "::1") print 6, address, port
+  }' | sort -u
 }
 local_rules=""
 for proto in t u; do
-  ports=$(listening "$proto")
   name=$([ "$proto" = t ] && echo tcp || echo udp)
-  [ -z "$ports" ] || local_rules+="    meta skuid { $ids } fib daddr type local $name dport { $ports } counter reject
+  any=$(listening "$proto" | awk '$1 == "any" {print $2}' | sort -nu | paste -sd, -)
+  [ -z "$any" ] || local_rules+="    meta skuid { $ids } fib daddr type local $name dport { $any } counter reject
 "
+  while read -r family address port; do
+    match=$([ "$family" = 4 ] && echo "ip daddr $address" || echo "ip6 daddr $address")
+    local_rules+="    meta skuid { $ids } $match $name dport $port counter reject
+"
+  done < <(listening "$proto" | awk '$1 != "any"')
 done
 # The private ranges, each written in two parts: the tree's identifier
 # guard (tests/test_release_ux.py) flags private addresses, and these
@@ -154,19 +210,36 @@ nft -c -f /etc/pseudolife-runner-egress.nft
 cat > /etc/systemd/system/pseudolife-runner-egress.service <<UNIT
 [Unit]
 Description=Keep the parity runner account off the local network
-Before=network-online.target
+# Loaded before any network comes up. A reload of nftables.service (whose
+# stock configuration flushes every table) reloads this table after it; a
+# restart of nftables.service does not, so rerun this script after one.
+DefaultDependencies=no
+Before=network-pre.target
+Wants=network-pre.target
+After=nftables.service
+ReloadPropagatedFrom=nftables.service
 
 [Service]
 Type=oneshot
 RemainAfterExit=yes
 ExecStart=/usr/sbin/nft -f /etc/pseudolife-runner-egress.nft
 # The file replaces the table in one transaction, so a reload never leaves
-# the account unfiltered; the runners are bound to this unit and stop with it.
+# the account unfiltered. There is no ExecStop: stopping the unit leaves the
+# table in place, because processes outside the runner units (the account's
+# rootless Docker and its containers) would otherwise lose the filter.
+# Removing it is a deliberate `nft delete table inet pseudolife_runner_egress`.
 ExecReload=/usr/sbin/nft -f /etc/pseudolife-runner-egress.nft
-ExecStop=/usr/sbin/nft delete table inet pseudolife_runner_egress
 
 [Install]
 WantedBy=multi-user.target
+UNIT
+# The account's user manager starts its rootless Docker; at boot it waits
+# for the table, and does not start if the table fails to load.
+install -d -m 0755 "/etc/systemd/system/user@$runner_uid.service.d"
+cat > "/etc/systemd/system/user@$runner_uid.service.d/pseudolife-runner-egress.conf" <<UNIT
+[Unit]
+Requires=pseudolife-runner-egress.service
+After=pseudolife-runner-egress.service
 UNIT
 systemctl daemon-reload
 systemctl enable pseudolife-runner-egress.service >/dev/null 2>&1
@@ -203,17 +276,18 @@ for bin in "$toolcache"/Python/3.11.*/x64/bin; do
 done
 
 echo "== runners"
-tarball="$runner_home/actions-runner-linux-x64-$version.tar.gz"
+# Root never runs, or writes into, a file a job could have replaced: the
+# release is root's, registration runs from a fresh root-owned extraction,
+# the hook and the service units are root's, and .env and .path are written
+# as the account.
+tarball="$LIB/actions-runner-linux-x64-$version.tar.gz"
 if [ ! -f "$tarball" ]; then
-  run_as curl -fsSL -o "$tarball.part" "https://github.com/actions/runner/releases/download/v$version/actions-runner-linux-x64-$version.tar.gz"
-  run_as sh -c 'echo "$1  $2" | sha256sum -c --quiet - && mv "$2" "$3"' sh "$sha256" "$tarball.part" "$tarball" \
-    || { run_as rm -f "$tarball.part"; echo "runner checksum mismatch" >&2; exit 1; }
+  curl -fsSL -o "$tarball.part" "https://github.com/actions/runner/releases/download/v$version/actions-runner-linux-x64-$version.tar.gz"
+  echo "$sha256  $tarball.part" | sha256sum -c --quiet - || { rm -f "$tarball.part"; echo "runner checksum mismatch" >&2; exit 1; }
+  mv "$tarball.part" "$tarball"
 fi
-# Root never runs or writes a file in the account's home from here on: a
-# job may have replaced any of them. The hook and the service units are
-# root's; .env and .path are written as the account.
 hook=$LIB/job-started.sh
-install -d -m 0755 "$LIB"
+install -d -m 0755 -o root -g root "$RUNNERS"
 cat > "$hook.part" <<'HOOK'
 #!/usr/bin/env bash
 # Remove the previous job's PostgreSQL data directories under this runner's
@@ -242,27 +316,35 @@ chmod 0755 "$hook.part"
 mv "$hook.part" "$hook"
 missing=()
 for index in $(seq "$runners"); do
-  dir="$runner_home/runners/$index"
-  run_as mkdir -p "$dir/home"
+  dir="$RUNNERS/$index"
+  home="$runner_home/homes/$index"
+  service="pseudolife-$prefix-$index.service"
   if [ ! -f "$dir/.runner" ]; then
-    [ -x "$dir/config.sh" ] || run_as tar xzf "$tarball" -C "$dir"
     if [ -z "${RUNNER_TOKEN:-}" ]; then missing+=("$prefix-$index"); continue; fi
-    # config.sh reads the token from its environment; exported here and
-    # inherited through runuser, it never appears on a command line.
+    # A fresh extraction, owned by root until registration is done, so no
+    # file a job wrote ever sees the token. config.sh reads the token from
+    # its environment, keeping it off every command line.
+    systemctl stop "$service" 2>/dev/null || true
+    rm -rf -- "$dir"
+    install -d -m 0700 "$dir"
+    tar xzf "$tarball" -C "$dir"
     (
-      export ACTIONS_RUNNER_INPUT_TOKEN="$RUNNER_TOKEN"
-      run_as sh -c "cd '$dir' && ./config.sh --unattended --replace \
-        --url '$REPO_URL' --name '$prefix-$index' --labels '$LABEL' --work _work" </dev/null
+      cd "$dir"
+      export ACTIONS_RUNNER_INPUT_TOKEN="$RUNNER_TOKEN" RUNNER_ALLOW_RUNASROOT=1
+      ./config.sh --unattended --replace --url "$REPO_URL" --name "$prefix-$index" \
+        --labels "$LABEL" --work _work </dev/null
     )
+    chown -R "$runner_user:" "$dir"
   fi
+  run_as mkdir -p "$home"
   # The job's HOME is the runner's own, so lease_ci.py's data directories
   # and the start hook stay per runner.
   before=$(run_as sh -c 'cat "$1/.env" "$1/.path" 2>/dev/null' sh "$dir" ; cat "/etc/systemd/system/pseudolife-$prefix-$index.service" 2>/dev/null || true)
   run_as tee "$dir/.env" >/dev/null <<ENV
 LANG=en_US.UTF-8
-HOME=$dir/home
+HOME=$home
 PSEUDOLIFE_PARITY_LEASE=$lease
-PSEUDOLIFE_PARITY_LOCK_DIR=$locks
+PSEUDOLIFE_PARITY_LOCK_DIR=$runner_locks
 ACTIONS_RUNNER_HOOK_JOB_STARTED=$hook
 AGENT_TOOLSDIRECTORY=$toolcache
 RUNNER_TOOL_CACHE=$toolcache
@@ -279,13 +361,13 @@ ENV
     systemctl disable --now "$legacy" >/dev/null 2>&1 || true
     rm -f "/etc/systemd/system/$legacy"
   fi
-  service="pseudolife-$prefix-$index.service"
   cat > "/etc/systemd/system/$service" <<UNIT
 [Unit]
 Description=GitHub Actions parity runner $prefix-$index
-After=network-online.target pseudolife-runner-egress.service
+After=network-online.target pseudolife-runner-egress.service pseudolife-parity-locks.service
 Wants=network-online.target
 BindsTo=pseudolife-runner-egress.service
+Requires=pseudolife-parity-locks.service
 
 [Service]
 ExecStart=$dir/bin/runsvc.sh

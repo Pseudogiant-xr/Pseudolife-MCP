@@ -254,18 +254,34 @@ What it adds to the manual procedure:
     listens on when the script runs (an SSH server, a test PostgreSQL, a
     mail relay), on every local address. A port in use is never one a
     job's own server binds. Rerun the script after adding a service.
-  - The runner units are bound to the rule's unit (`BindsTo=`), so they
-    do not start without it and stop when it stops. A rerun reloads the
-    table in one transaction, never leaving the account unfiltered.
+  - The table outlives its unit: the unit has no stop action, because the
+    account's rootless Docker and its containers run outside the runner
+    units and would lose the filter. A rerun reloads the table in one
+    transaction. The runner units are bound to the rule's unit
+    (`BindsTo=`), and the account's user manager, which starts its
+    rootless Docker, requires it at boot, so nothing of the account's
+    starts before the table is in place.
   - DNS works because the box resolves through a public resolver. A box
     whose resolver is on the LAN or Tailscale would need that address
     allowed.
-- **Root never runs or writes the account's files after creating them.**
-  A job may have replaced any file in the account's home, so the service
-  units are written by the script, not by the runner's `svc.sh` (which
-  root would run from that directory), the job-started hook is root's
-  (`/usr/local/lib/pseudolife-parity-runner/`), and `.env` and `.path` are
-  written as the account. What this does not give: every job runs as the
+- **Root never runs or writes a file a job could have replaced.** The
+  runner release is downloaded and checked by root into
+  `/usr/local/lib/pseudolife-parity-runner/`. A runner is registered from a
+  fresh extraction that root owns until `config.sh` (run as root, with the
+  token in its environment, never on a command line) has finished, and is
+  then handed to the account. Runner directories live in a root-owned
+  parent (`/srv/pseudolife-parity-runners/<n>`), so a job can change a
+  runner directory's contents but cannot swap the directory for a link
+  before root removes or re-creates it. The service units are written by the script,
+  not by the runner's `svc.sh`, which root would otherwise run from the
+  account's directory. The job-started hook is root's, and `.env` and
+  `.path` are written as the account.
+- **The suite lock directory through a read-only bind mount**
+  (`/usr/local/lib/pseudolife-parity-runner/locks`), which
+  `PSEUDOLIFE_PARITY_LOCK_DIR` names. The account then needs no search
+  right on the suite user's home, where it could read any file whose path
+  it guessed; the manual procedure's `setfacl ... :x` on that home is
+  removed. The runner units require the mount's unit. What this does not give: every job runs as the
   one account, so a job can change what later jobs run (the account's
   tools, tool cache, `.env` files and rootless Docker). The lane runs only
   master's code and dispatches by someone with write access, and the
@@ -274,7 +290,7 @@ What it adds to the manual procedure:
 - **Reruns leave running jobs alone.** A runner restarts only when its
   `.env`, `.path` or unit changed, or it is down.
 - **Several runners per machine, each with its own `HOME`**
-  (`runners/<n>/home`, set in the runner's `.env`). The job-started hook
+  (`~<runner-user>/homes/<n>`, set in the runner's `.env`). The job-started hook
   deletes `$HOME/pl-cli-lease-postgres-*`; with one shared `HOME`, one
   runner's hook would delete another's running job's clusters. The hook
   stops a postgres only when its working directory is that cluster's data
