@@ -4,8 +4,8 @@
       "jobs": 43,
       "runner_minutes": 410,
       "longest_job_minutes": 25,
-      "critical_path_minutes": 30,
-      "why": "2026-10-24 Rust CI speed pass (#922, #924): measured on the runs below; job count at its measured 43, runner minutes and longest job about 10% above the measurements and the critical path (25.2) about 20% above, since Windows shards vary most, so a re-measure on a slow day does not force a raise"
+      "critical_path_minutes": 33,
+      "why": "2026-10-24 Rust CI speed pass (#922, #924), measured on the runs below: job count at its measured 43; runner minutes (374.2) and longest job (19.7) about 10% above; critical path 28.1 with the harness build's cache cold on pull-request refs (about 22 once master has saved it), so 33, which still refuses parity waiting on the Rust job (38 or more)"
     },
     "pip_no_compile": true,
     "needs_without_data": {
@@ -20,132 +20,132 @@
       }
     },
     "measured_on": [
-      40068731850,
-      40071746653
+      40071746653,
+      40074592535
     ],
     "jobs": {
       "Scope": {
-        "minutes": 0.3
+        "minutes": 0.4
       },
       "Rust / ubuntu-latest": {
-        "minutes": 10.1
+        "minutes": 10.9
       },
       "Rust / windows-latest": {
-        "minutes": 19.6
+        "minutes": 19.7
       },
       "Fixtures / ubuntu-latest": {
-        "minutes": 2.0
+        "minutes": 1.9
       },
       "Fixtures / windows-latest": {
         "minutes": 3.5
       },
       "Candidate / ubuntu-latest": {
-        "minutes": 2.9
+        "minutes": 2.8
       },
       "Candidate / windows-latest": {
-        "minutes": 6.5
+        "minutes": 6.4
       },
       "Candidate harness / ubuntu-latest": {
-        "minutes": 3.1
+        "minutes": 3.5
       },
       "Candidate harness / windows-latest": {
-        "minutes": 6.5
+        "minutes": 9.0
       },
       "Parity checks / ubuntu-latest / eval": {
-        "minutes": 8.7
+        "minutes": 9.4
       },
       "Parity checks / ubuntu-latest / cli": {
-        "minutes": 7.1
+        "minutes": 7.2
       },
       "Parity checks / ubuntu-latest / cli-store": {
-        "minutes": 5.8
+        "minutes": 7.0
       },
       "Parity checks / ubuntu-latest / cli-daemon": {
-        "minutes": 4.9
-      },
-      "Parity checks / ubuntu-latest / cli-daemon-2": {
-        "minutes": 7.6
-      },
-      "Parity checks / ubuntu-latest / cli-live": {
-        "minutes": 12.8
-      },
-      "Parity checks / ubuntu-latest / judges": {
-        "minutes": 6.8
-      },
-      "Parity checks / ubuntu-latest / w1c-doctor": {
-        "minutes": 10.6
-      },
-      "Parity checks / ubuntu-latest / w1c-pairing": {
-        "minutes": 10.6
-      },
-      "Parity checks / ubuntu-latest / w1c-connection": {
-        "minutes": 5.8
-      },
-      "Parity checks / ubuntu-latest / w1c-connect": {
-        "minutes": 7.4
-      },
-      "Parity checks / ubuntu-latest / h5-w1a": {
-        "minutes": 8.5
-      },
-      "Parity checks / ubuntu-latest / h5-daemon-mutants": {
         "minutes": 4.5
       },
-      "Parity checks / ubuntu-latest / h5-graph-mutants": {
+      "Parity checks / ubuntu-latest / cli-daemon-2": {
+        "minutes": 7.7
+      },
+      "Parity checks / ubuntu-latest / cli-live": {
+        "minutes": 12.9
+      },
+      "Parity checks / ubuntu-latest / judges": {
+        "minutes": 6.3
+      },
+      "Parity checks / ubuntu-latest / w1c-doctor": {
         "minutes": 9.6
       },
+      "Parity checks / ubuntu-latest / w1c-pairing": {
+        "minutes": 11.3
+      },
+      "Parity checks / ubuntu-latest / w1c-connection": {
+        "minutes": 5.9
+      },
+      "Parity checks / ubuntu-latest / w1c-connect": {
+        "minutes": 7.1
+      },
+      "Parity checks / ubuntu-latest / h5-w1a": {
+        "minutes": 9.1
+      },
+      "Parity checks / ubuntu-latest / h5-daemon-mutants": {
+        "minutes": 4.6
+      },
+      "Parity checks / ubuntu-latest / h5-graph-mutants": {
+        "minutes": 9.7
+      },
       "Parity checks / ubuntu-latest / h5-light": {
-        "minutes": 8.3
+        "minutes": 8.2
       },
       "Parity checks / windows-latest / eval": {
-        "minutes": 13.2
-      },
-      "Parity checks / windows-latest / cli": {
-        "minutes": 11.8
-      },
-      "Parity checks / windows-latest / cli-store": {
         "minutes": 13.3
       },
+      "Parity checks / windows-latest / cli": {
+        "minutes": 12.5
+      },
+      "Parity checks / windows-latest / cli-store": {
+        "minutes": 12.4
+      },
       "Parity checks / windows-latest / cli-daemon": {
-        "minutes": 12.1
-      },
-      "Parity checks / windows-latest / cli-daemon-2": {
-        "minutes": 12.7
-      },
-      "Parity checks / windows-latest / judges": {
-        "minutes": 11.6
-      },
-      "Parity checks / windows-latest / w1c-doctor": {
-        "minutes": 13.9
-      },
-      "Parity checks / windows-latest / w1c-pairing": {
-        "minutes": 17.1
-      },
-      "Parity checks / windows-latest / w1c-connection": {
-        "minutes": 11.6
-      },
-      "Parity checks / windows-latest / w1c-connect": {
-        "minutes": 12.1
-      },
-      "Parity checks / windows-latest / h5-audit": {
-        "minutes": 8.1
-      },
-      "Parity checks / windows-latest / h5-backup": {
-        "minutes": 3.7
-      },
-      "Parity checks / windows-latest / h5-w1a": {
         "minutes": 11.9
       },
+      "Parity checks / windows-latest / cli-daemon-2": {
+        "minutes": 12.6
+      },
+      "Parity checks / windows-latest / judges": {
+        "minutes": 11.4
+      },
+      "Parity checks / windows-latest / w1c-doctor": {
+        "minutes": 14.7
+      },
+      "Parity checks / windows-latest / w1c-pairing": {
+        "minutes": 17.6
+      },
+      "Parity checks / windows-latest / w1c-connection": {
+        "minutes": 11.7
+      },
+      "Parity checks / windows-latest / w1c-connect": {
+        "minutes": 10.8
+      },
+      "Parity checks / windows-latest / h5-audit": {
+        "minutes": 6.9
+      },
+      "Parity checks / windows-latest / h5-backup": {
+        "minutes": 3.6
+      },
+      "Parity checks / windows-latest / h5-w1a": {
+        "minutes": 12.5
+      },
       "Parity checks / windows-latest / h5-background": {
-        "minutes": 4.8
+        "minutes": 5.2
       },
       "Parity checks / windows-latest / h5-daemon-mutants": {
-        "minutes": 15.6
+        "minutes": 15.2
       },
       "Parity checks / windows-latest / h5-graph-mutants": {
-        "minutes": 18.3
+        "minutes": 18.6
       },
       "Rust daemon / disposable image": {
-        "minutes": 4.8
+        "minutes": 4.5
       },
       "Parity / ubuntu-latest": {
         "minutes": 0.1
@@ -168,17 +168,17 @@
   "ci.yml": {
     "limits": {
       "jobs": 8,
-      "runner_minutes": 78,
-      "longest_job_minutes": 35,
-      "critical_path_minutes": 36,
-      "why": "2026-10-24: measured on the runs below (guards runs instead of the four test lanes when scope skips them, so the sum overstates a run); limits about 10% above"
+      "runner_minutes": 67,
+      "longest_job_minutes": 25,
+      "critical_path_minutes": 27,
+      "why": "2026-10-24: measured on the runs below, each job only on runs of its current definition (guards runs instead of the four test lanes when scope skips them, so the sum overstates a run); limits about 10% above"
     },
     "pip_no_compile": false,
     "needs_without_data": {},
     "measured_on": [
+      40074592538,
+      40071746672,
       40068731867,
-      40064033570,
-      40060958459,
       39989124855,
       39988057818
     ],
@@ -190,13 +190,13 @@
         "minutes": 1.9
       },
       "lock-resolve": {
-        "minutes": 0.5
+        "minutes": 0.6
       },
       "test": {
-        "minutes": 31.8
+        "minutes": 22.4
       },
       "test-lite-linux": {
-        "minutes": 21.9
+        "minutes": 21.7
       },
       "test-lite-windows": {
         "minutes": 5.0
@@ -205,7 +205,7 @@
         "minutes": 8.8
       },
       "frontend": {
-        "minutes": 0.4
+        "minutes": 0.3
       }
     },
     "fingerprints": {

@@ -203,7 +203,7 @@ def test_a_cache_key_has_one_saver():
                     if str(s.get("uses", "")).startswith("Swatinem/rust-cache"))
         step["with"].pop("save-if")
     found = check(workflow, raw)
-    assert any("rust-cache key v0-rust-rust on windows-latest is saved by 2 runs" in problem for problem in found)
+    assert any("rust-cache key v0-rust-rust on Windows is saved by 2 runs" in problem for problem in found)
 
 
 def test_one_matrix_job_saving_one_key_from_many_runs_is_refused():
@@ -213,7 +213,7 @@ def test_one_matrix_job_saving_one_key_from_many_runs_is_refused():
         step = next(s for s in target["jobs"]["source-mutants"]["steps"]
                     if str(s.get("uses", "")).startswith("Swatinem/rust-cache"))
         step["with"].pop("save-if")
-    assert any("v0-rust-cli-source-mutants-source-mutants on ubuntu-latest is saved by 37 runs" in problem
+    assert any("v0-rust-cli-source-mutants-source-mutants on Linux is saved by 37 runs" in problem
                for problem in check(workflow, raw))
 
 
@@ -227,9 +227,9 @@ def test_one_key_saved_on_two_systems_is_two_caches():
         "c": {"runs-on": "ubuntu-latest", "steps": [{"uses": cache, "with": {"key": "k", "add-job-id-key": False}}]},
         "d": {"runs-on": "ubuntu-latest", "steps": [{"uses": cache, "with": {"key": "k"}}]}}}
     savers = ci_budget.cache_savers(workflow)
-    assert savers[("v0-rust-k", "ubuntu-latest")] == ["a", "c"]
-    assert savers[("v0-rust-k", "windows-latest")] == ["b"]
-    assert savers[("v0-rust-k-d", "ubuntu-latest")] == ["d"]
+    assert savers[("v0-rust-k", "Linux")] == ["a", "c"]
+    assert savers[("v0-rust-k", "Windows")] == ["b"]
+    assert savers[("v0-rust-k-d", "Linux")] == ["d"]
 
 
 def test_a_heavy_install_must_skip_byte_compiling():
@@ -344,3 +344,119 @@ def test_a_nightly_branch_does_not_hide_a_pull_request_branch():
     add_job(workflow, raw, "extra", dict(EXTRA, **{
         "if": "${{ github.event_name == 'schedule' || needs.scope.outputs.rust == 'true' }}"}))
     assert any("Extra / ubuntu-latest" in problem for problem in check(workflow, raw))
+
+
+
+@pytest.mark.parametrize("condition", [
+    # The second Opus and Codex reviews of the budget (897ba3aa): GitHub's
+    # && and || return an operand, and unlike types compare as numbers.
+    "${{ (github.event_name == 'schedule' && 'nightly' || 'pr') == 'pr' }}",
+    "${{ (github.event_name == 'pull_request' && 'yes' || 'no') == 'yes' }}",
+    "${{ (inputs.os || 'ubuntu-latest') == 'ubuntu-latest' }}",
+    "${{ inputs.mode == '' || inputs.mode == 'ci' }}",
+    "${{ inputs.skip == false }}",
+    "${{ github.run_number > -1 }}",
+    "${{ github.run_number > 1e3 || github.run_number < 0x10 }}",
+    # A condition this reader cannot follow counts rather than failing.
+    "${{ github.event.pull_request.labels.*.name }} weird ~ syntax",
+])
+def test_conditions_that_hold_on_a_pull_request_count(condition):
+    workflow, raw = rust()
+    add_job(workflow, raw, "extra", dict(UNNEEDED, **{"if": condition}))
+    found = check(workflow, raw)
+    assert any("no measured minutes" in problem and "Extra / ubuntu-latest" in problem for problem in found), found
+
+
+@pytest.mark.parametrize("left, right, same", [(None, "", True), (None, False, True), ("", 0, True),
+                                               ("1", 1, True), ("CI", "ci", True), ("ci", None, False),
+                                               ("x", 0, False), (True, "1", True)])
+def test_equality_follows_githubs_coercion(left, right, same):
+    assert ci_budget.equal(left, right) is same
+
+
+def write_workflow(directory, name, text):
+    (directory / name).write_text(text, encoding="utf-8")
+
+
+def test_every_pull_request_workflow_is_found_however_it_is_written(tmp_path, monkeypatch):
+    monkeypatch.setattr(ci_budget, "WORKFLOWS", tmp_path)
+    write_workflow(tmp_path, "a.yml", "on: [pull_request]\njobs: {}\n")
+    write_workflow(tmp_path, "b.yaml", "on:\n  merge_group:\njobs: {}\n")
+    write_workflow(tmp_path, "c.yml", "'on': pull_request\njobs: {}\n")
+    write_workflow(tmp_path, "d.yml", "on:\n  schedule:\n    - cron: '0 0 * * *'\njobs: {}\n")
+    assert ci_budget.pull_request_workflows() == ["a.yml", "b.yaml", "c.yml"]
+
+
+def test_one_key_on_two_labels_of_one_system_collides():
+    # rust-cache keys on the OS and architecture, not the runs-on label.
+    cache = "Swatinem/rust-cache@v2"
+    workflow = {"jobs": {
+        "a": {"runs-on": "ubuntu-latest", "steps": [{"uses": cache, "with": {"shared-key": "k"}}]},
+        "b": {"runs-on": "ubuntu-24.04", "steps": [{"uses": cache, "with": {"shared-key": "k"}}]},
+        "c": {"runs-on": "ubuntu-24.04-arm", "steps": [{"uses": cache, "with": {"shared-key": "k"}}]}}}
+    savers = ci_budget.cache_savers(workflow)
+    assert savers[("v0-rust-k", "Linux")] == ["a", "b"]
+    assert savers[("v0-rust-k", "Linux-ARM64")] == ["c"]
+
+
+def test_a_save_that_only_a_manual_run_makes_still_saves():
+    cache = "Swatinem/rust-cache@v2"
+    workflow = {"jobs": {"a": {"runs-on": "ubuntu-latest", "steps": [
+        {"uses": cache, "if": "inputs.mode == 'stress'", "with": {"shared-key": "k"}}]}}}
+    assert ci_budget.cache_savers(workflow) == {("v0-rust-k", "Linux"): ["a"]}
+
+
+def test_remeasure_uses_only_runs_of_the_current_definition():
+    workflow, _ = rust()
+    entry = copy.deepcopy(budget()["rust.yml"])
+    names = reachable_names(workflow)
+    samples = {name: {"new": 2.0, "old": 50.0} for name in names}
+    stale = {"fixtures": ["old"]}
+    assert ci_budget.remeasure(entry, workflow, samples, stale) == []
+    assert entry["jobs"]["Fixtures / windows-latest"] == {"minutes": 2.0}
+    assert entry["jobs"]["Scope"] == {"minutes": 26.0}
+
+
+def test_remeasure_refuses_a_changed_job_it_has_no_current_run_of():
+    # Codex review of 897ba3aa: a changed job the runs did not measure kept
+    # its old minutes and took the new fingerprint.
+    workflow, _ = rust()
+    workflow["jobs"]["fixtures"]["steps"].append({"run": "sleep 3600"})
+    entry = copy.deepcopy(budget()["rust.yml"])
+    before = copy.deepcopy(entry)
+    samples = {"Scope": {"new": 0.3}}
+    missing = ci_budget.remeasure(entry, workflow, samples, {})
+    assert "Fixtures / windows-latest" in missing and "Scope" not in missing
+    assert entry == before
+    # An unchanged job the runs did not run keeps its measurement.
+    workflow, _ = rust()
+    assert ci_budget.remeasure(entry, workflow, samples, {}) == []
+
+
+def test_the_estimate_route_records_the_new_job_and_its_template(tmp_path, monkeypatch):
+    budget_file = tmp_path / "ci_budget.json"
+    budget_file.write_text(BUDGET.read_text(encoding="utf-8"), encoding="utf-8")
+    monkeypatch.setattr(ci_budget, "BUDGET", budget_file)
+    workflow, raw = rust()
+    workflow["jobs"]["parity-checks"]["strategy"]["matrix"]["suite"].append("cli-extra")
+    monkeypatch.setattr(ci_budget, "load", lambda name, resolved=True: copy.deepcopy(workflow if resolved else raw))
+    for os_name in ("ubuntu-latest", "windows-latest"):
+        assert ci_budget.main(["estimate", "--workflow", "rust.yml",
+                               "--job", f"Parity checks / {os_name} / cli-extra", "--minutes", "8",
+                               "--reason", "cli's step times on run 40074592535"]) == 0
+    entry = json.loads(budget_file.read_text(encoding="utf-8"))
+    entry["rust.yml"]["limits"]["jobs"] += 2
+    entry["rust.yml"]["limits"]["runner_minutes"] += 20
+    assert problems("rust.yml", workflow, entry, raw) == []
+    assert ci_budget.estimates(entry["rust.yml"]) == ["Parity checks / ubuntu-latest / cli-extra",
+                                                      "Parity checks / windows-latest / cli-extra"]
+    with pytest.raises(SystemExit):
+        ci_budget.main(["estimate", "--workflow", "rust.yml", "--job", "Not a job", "--minutes", "1",
+                        "--reason", "x"])
+
+
+def test_an_entry_without_minutes_is_named():
+    entry = budget()
+    entry["rust.yml"]["jobs"]["Scope"] = {"estimate": "forgot the minutes"}
+    workflow, raw = rust()
+    assert check(workflow, raw, entry) == ["rust.yml: budget entries without numeric minutes: ['Scope']"]

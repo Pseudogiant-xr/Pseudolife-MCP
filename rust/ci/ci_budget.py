@@ -20,14 +20,17 @@ it.
 from __future__ import annotations
 
 import argparse
+import base64
 import fnmatch
 import hashlib
 import itertools
 import json
+import math
 import re
 import statistics
 import subprocess
 import sys
+import types
 from datetime import datetime
 from pathlib import Path
 
@@ -57,8 +60,10 @@ def pull_request_workflows() -> list[str]:
     """The workflow files a pull request or merge group starts."""
     import yaml
     found = []
-    for path in sorted(WORKFLOWS.glob("*.yml")):
-        triggers = yaml.safe_load(path.read_text(encoding="utf-8")).get(True) or {}
+    for path in sorted([*WORKFLOWS.glob("*.yml"), *WORKFLOWS.glob("*.yaml")]):
+        loaded = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        # PyYAML reads an unquoted on: as True; a quoted 'on': stays a string.
+        triggers = loaded.get(True) or loaded.get("on") or {}
         triggers = [triggers] if isinstance(triggers, str) else list(triggers)
         if {"pull_request", "pull_request_target", "merge_group"} & set(triggers):
             found.append(path.name)
@@ -76,7 +81,7 @@ def needs_of(job: dict) -> list[str]:
 # job counts unless its condition is False for every budgeted event.
 
 UNKNOWN = type("Unknown", (), {"__repr__": lambda self: "UNKNOWN"})()
-TOKENS = re.compile(r"\s*(?:(?P<string>'(?:[^']|'')*')|(?P<number>\d+(?:\.\d+)?)"
+TOKENS = re.compile(r"\s*(?:(?P<string>'(?:[^']|'')*')|(?P<number>-?(?:0x[0-9a-fA-F]+|\d+(?:\.\d+)?(?:[eE][+-]?\d+)?))"
                     r"|(?P<op>&&|\|\||==|!=|<=|>=|[!()<>,\[\].*])|(?P<name>[A-Za-z_][\w-]*))")
 STATUS = ("success", "failure", "always", "cancelled")
 
@@ -101,25 +106,47 @@ def truthy(value):
 
 
 def both(left, right):
-    left, right = truthy(left), truthy(right)
-    if left is False or right is False:
-        return False
-    return True if left is True and right is True else UNKNOWN
+    """GitHub's &&: the left operand if it is falsy, else the right one."""
+    known = truthy(left)
+    if known is not UNKNOWN:
+        return right if known else left
+    return False if truthy(right) is False else UNKNOWN
 
 
 def either(left, right):
-    left, right = truthy(left), truthy(right)
-    if left is True or right is True:
-        return True
-    return False if left is False and right is False else UNKNOWN
+    """GitHub's ||: the left operand if it is truthy, else the right one."""
+    known = truthy(left)
+    if known is not UNKNOWN:
+        return left if known else right
+    return UNKNOWN
+
+
+def number(value) -> float:
+    """GitHub's coercion to a number for a comparison of unlike types."""
+    if value is None:
+        return 0.0
+    if isinstance(value, bool):
+        return float(value)
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value.strip() or 0)
+        except ValueError:
+            return math.nan
+    return math.nan
 
 
 def equal(left, right):
+    """GitHub's ==: strings compare ignoring case; unlike types compare as
+    numbers (null, false and '' are all 0)."""
     if left is UNKNOWN or right is UNKNOWN:
         return UNKNOWN
     if isinstance(left, str) and isinstance(right, str):
         return left.lower() == right.lower()
-    return left == right
+    if type(left) is type(right):
+        return left == right
+    return number(left) == number(right)
 
 
 class Evaluator:
@@ -185,7 +212,7 @@ class Evaluator:
         if kind == "string":
             return text[1:-1].replace("''", "'")
         if kind == "number":
-            return float(text)
+            return float(int(text, 16)) if "0x" in text.lower() else float(text)
         if text in ("true", "false", "null"):
             return {"true": True, "false": False, "null": None}[text]
         if self.peek("("):
@@ -256,8 +283,11 @@ def can_start(job: dict, skipped: set[str], event: str) -> bool:
     text = condition_text(job.get("if", ""))
     if not re.search(r"\b(" + "|".join(STATUS) + r")\s*\(", text):
         text = f"success() && ({text})" if text else "success()"
-    evaluator = Evaluator(event, needs_of(job), skipped)
-    return evaluator.run(text) is not False
+    try:
+        return Evaluator(event, needs_of(job), skipped).run(text) is not False
+    except ValueError:
+        # A condition this reader cannot follow might hold: it counts.
+        return True
 
 
 def pull_request_reachable(workflow: dict) -> list[str]:
@@ -380,6 +410,14 @@ def data_needs(workflow: dict, job_id: str) -> dict[str, bool]:
     return result
 
 
+def runner_os(label: str) -> str:
+    """The OS and architecture rust-cache keys on, from a runs-on label."""
+    text = label.lower()
+    family = ("Windows" if "windows" in text else "Linux" if "ubuntu" in text or "linux" in text
+              else "macOS" if "macos" in text else label)
+    return family + ("-ARM64" if "arm" in text else "")
+
+
 def cache_savers(workflow: dict) -> dict[tuple[str, str], list[str]]:
     """Each rust-cache key a run can save, with the runner it saves from,
     and the job runs that may save it. Swatinem/rust-cache v2 builds the
@@ -396,8 +434,13 @@ def cache_savers(workflow: dict) -> dict[tuple[str, str], list[str]]:
                     continue
                 options = step.get("with", {})
                 conditions = [condition_text(step.get("if", "true")), condition_text(options.get("save-if", "true"))]
-                if any(Evaluator("pull_request", needs_of(job), set(), combo).run(text) is False
-                       for text in conditions if text):
+                def may_hold(text, event):
+                    try:
+                        return Evaluator(event, needs_of(job), set(), combo).run(text) is not False
+                    except ValueError:
+                        return True
+                if not any(all(may_hold(text, event) for text in conditions if text)
+                           for event in (*BUDGET_EVENTS, "schedule", "workflow_dispatch")):
                     continue
                 parts = [str(options.get("prefix-key") or "v0-rust")]
                 if options.get("shared-key"):
@@ -409,7 +452,7 @@ def cache_savers(workflow: dict) -> dict[tuple[str, str], list[str]]:
                 key = EXPRESSION.sub(lambda m: str(combo.get(m.group(1).removeprefix("matrix."), "?"))
                                      if m.group(1).startswith("matrix.") else "?", "-".join(filter(None, parts)))
                 label = f"{job_id} {combo}" if combo else job_id
-                savers.setdefault((key, runs_on), []).append(label)
+                savers.setdefault((key, runner_os(runs_on)), []).append(label)
     return savers
 
 
@@ -453,6 +496,26 @@ def unexplained_raises(base: dict, current: dict) -> list[str]:
     return found
 
 
+def _contents(path: str, sha: str) -> str:
+    listing = json.loads(subprocess.run(["gh", "api", f"repos/{REPOSITORY}/contents/{path}?ref={sha}"],
+                                        check=True, capture_output=True, text=True).stdout)
+    return base64.b64decode(listing["content"]).decode("utf-8")
+
+
+def definitions_at(name: str, sha: str) -> dict[str, str]:
+    """The fingerprints of the jobs a pull request starts in this workflow
+    as it stood at ``sha`` (rust.yml resolved with that commit's
+    parity_scope.py)."""
+    import yaml
+    workflow = yaml.safe_load(_contents(f".github/workflows/{name}", sha))
+    if name == "rust.yml":
+        scope = types.ModuleType("parity_scope_at")
+        scope.__file__ = str(ROOT / "rust/ci/parity_scope.py")
+        exec(compile(_contents("rust/ci/parity_scope.py", sha), f"parity_scope.py@{sha}", "exec"), scope.__dict__)
+        workflow = scope.resolve(workflow)
+    return fingerprints(workflow)
+
+
 def estimates(entry: dict) -> list[str]:
     return sorted(name for name, job in entry["jobs"].items() if "estimate" in job)
 
@@ -463,8 +526,12 @@ def problems(name: str, workflow: dict, budget: dict, raw: dict | None = None) -
     the outputs a job reads; it defaults to ``workflow``."""
     entry = budget[name]
     raw = raw or workflow
-    found = []
     reachable = reachable_names(workflow)
+    malformed = sorted(job for job, value in entry["jobs"].items()
+                       if not isinstance(value.get("minutes"), (int, float)) or isinstance(value.get("minutes"), bool))
+    if malformed:
+        return [f"{name}: budget entries without numeric minutes: {malformed}"]
+    found = []
     duplicates = sorted({job for job in reachable if reachable.count(job) > 1})
     if duplicates:
         found.append(f"{name}: job names repeat: {duplicates}")
@@ -523,14 +590,33 @@ def problems(name: str, workflow: dict, budget: dict, raw: dict | None = None) -
     return found
 
 
-def measure(run_ids: list[str]) -> dict[str, float]:
-    """Each job's median minutes over these completed runs: successful jobs
+def fetch_run(run_id: str) -> dict:
+    return json.loads(subprocess.run(["gh", "api", f"repos/{REPOSITORY}/actions/runs/{run_id}"],
+                                     check=True, capture_output=True, text=True).stdout)
+
+
+def stale_definitions(name: str, run_ids: list[str], current: dict[str, str]) -> dict[str, list[str]]:
+    """For each job whose definition differs from ``current`` at the head
+    of one of these runs: those runs. Their minutes measured another job."""
+    stale: dict[str, list[str]] = {}
+    seen: dict[str, dict[str, str]] = {}
+    for run_id in run_ids:
+        sha = fetch_run(run_id)["head_sha"]
+        if sha not in seen:
+            seen[sha] = definitions_at(name, sha)
+        for job_id, value in current.items():
+            if seen[sha].get(job_id) != value:
+                stale.setdefault(job_id, []).append(run_id)
+    return stale
+
+
+def measure(run_ids: list[str]) -> dict[str, dict[str, float]]:
+    """Each job's minutes in each of these completed runs: successful jobs
     of each run's latest attempt only (a failed or cancelled job's time says
     nothing about its cost)."""
-    durations: dict[str, list[float]] = {}
+    durations: dict[str, dict[str, float]] = {}
     for run_id in run_ids:
-        run = json.loads(subprocess.run(["gh", "api", f"repos/{REPOSITORY}/actions/runs/{run_id}"],
-                                        check=True, capture_output=True, text=True).stdout)
+        run = fetch_run(run_id)
         if run["status"] != "completed":
             raise ValueError(f"run {run_id} is {run['status']}; measure completed runs only")
         listing = subprocess.run(
@@ -542,8 +628,33 @@ def measure(run_ids: list[str]) -> dict[str, float]:
                 continue
             start = datetime.fromisoformat(job["started_at"].replace("Z", "+00:00"))
             end = datetime.fromisoformat(job["completed_at"].replace("Z", "+00:00"))
-            durations.setdefault(job["name"], []).append((end - start).total_seconds() / 60)
-    return {name: round(statistics.median(values), 1) for name, values in durations.items()}
+            durations.setdefault(job["name"], {})[run_id] = (end - start).total_seconds() / 60
+    return durations
+
+
+def remeasure(entry: dict, workflow: dict, samples: dict[str, dict[str, float]],
+              stale: dict[str, list[str]]) -> list[str]:
+    """Rewrite ``entry``'s minutes from ``samples``: each job's median over
+    the runs that ran its current definition. A job with no such sample
+    keeps its earlier minutes only if its definition is unchanged since
+    they were taken. Returns the jobs left with neither (nothing changes
+    then)."""
+    current = fingerprints(workflow)
+    jobs, missing = {}, []
+    for job_id in pull_request_reachable(workflow):
+        for name in expand(job_id, workflow["jobs"][job_id]):
+            fresh = [minutes for run, minutes in samples.get(name, {}).items() if run not in stale.get(job_id, [])]
+            if fresh:
+                jobs[name] = {"minutes": round(statistics.median(fresh), 1)}
+            elif name in entry["jobs"] and entry.get("fingerprints", {}).get(job_id) == current[job_id]:
+                jobs[name] = entry["jobs"][name]
+            else:
+                missing.append(name)
+    if not missing:
+        entry["jobs"] = jobs
+        entry["fingerprints"] = current
+        entry.pop("accepted", None)
+    return missing
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -554,6 +665,11 @@ def main(argv: list[str] | None = None) -> int:
     update = commands.add_parser("measure", help="rewrite a workflow's measured minutes from hosted runs")
     update.add_argument("--workflow", required=True)
     update.add_argument("runs", nargs="+")
+    estimate = commands.add_parser("estimate", help="enter a job no hosted run can measure yet")
+    estimate.add_argument("--workflow", required=True)
+    estimate.add_argument("--job", required=True, help="the job name GitHub reports, e.g. 'Parity checks / ubuntu-latest / x'")
+    estimate.add_argument("--minutes", required=True, type=float)
+    estimate.add_argument("--reason", required=True, help="how the minutes were derived (steps' times on a named run)")
     accept = commands.add_parser("accept", help="record that a changed job's measured cost still holds")
     accept.add_argument("--workflow", required=True)
     accept.add_argument("--job", required=True)
@@ -570,6 +686,25 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"{name}: estimated, not measured: {estimates(budget[name])}")
         print("\n".join(found) or "ci budget: every workflow within its budget")
         return int(bool(found))
+    if options.command == "estimate":
+        if not options.reason.strip() or options.minutes <= 0:
+            parser.error("--reason must say how the minutes were derived, and --minutes must be positive")
+        workflow = load(options.workflow)
+        templates = [job_id for job_id in pull_request_reachable(workflow)
+                     if options.job in expand(job_id, workflow["jobs"][job_id])]
+        if not templates:
+            parser.error(f"no job a pull request starts in {options.workflow} is named {options.job!r}")
+        entry = budget[options.workflow]
+        entry["jobs"][options.job] = {"minutes": options.minutes, "estimate": options.reason.strip()}
+        current = fingerprints(workflow)
+        entry.setdefault("fingerprints", {})[templates[0]] = current[templates[0]]
+        entry.setdefault("accepted", []).append(
+            {"job": templates[0], "fingerprint": current[templates[0]],
+             "reason": f"estimated {options.job}: {options.reason.strip()}"})
+        BUDGET.write_text(json.dumps(budget, indent=2) + "\n", encoding="utf-8")
+        print(f"{options.workflow}: {options.job} estimated at {options.minutes} minutes; "
+              "re-measure it from the batch run")
+        return 0
     if options.command == "accept":
         if not options.reason.strip():
             parser.error("--reason must say why the job's cost is unchanged")
@@ -587,18 +722,16 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("measure takes two or more runs: one hosted run is too noisy to budget on")
     workflow = load(options.workflow)
     reachable = reachable_names(workflow)
-    measured = measure(options.runs)
+    stale = stale_definitions(options.workflow, options.runs, fingerprints(workflow))
+    for job_id, runs in sorted(stale.items()):
+        print(f"{job_id}: runs {runs} ran an older definition; their times for it are left out")
     entry = budget[options.workflow]
-    missing = [name for name in reachable if name not in measured and name not in entry["jobs"]]
+    missing = remeasure(entry, workflow, measure(options.runs), stale)
     if missing:
-        print(f"no successful run of {missing} in these runs; add a run that has them", file=sys.stderr)
+        print(f"no successful run of the current definition of {missing} in these runs, and no earlier "
+              "measurement of it holds; add a run that has one", file=sys.stderr)
         return 1
-    # A job these runs did not run successfully keeps its earlier entry.
-    entry["jobs"] = {name: {"minutes": measured[name]} if name in measured else entry["jobs"][name]
-                     for name in reachable}
     entry["measured_on"] = [int(run) for run in options.runs]
-    entry["fingerprints"] = fingerprints(workflow)
-    entry.pop("accepted", None)
     BUDGET.write_text(json.dumps(budget, indent=2) + "\n", encoding="utf-8")
     total = sum(job["minutes"] for job in entry["jobs"].values())
     print(f"{options.workflow}: {len(reachable)} jobs, {total:.1f} runner-minutes, limits {entry['limits']}")
