@@ -12,6 +12,7 @@ from parity_scope import ALL, FLOOR, ROW_SUITES, SHARDS, SHIM_COMMANDS, SUITES, 
 from test_workflow import CODE_CHANGES, DOCS_ONLY_CHANGES, W1C_SUITES
 
 ROOT = Path(__file__).resolve().parents[2]
+WINDOWS_LIVE = [{"os": "windows-latest", "suite": "cli-live"}]
 
 
 def raw_workflow():
@@ -259,7 +260,7 @@ def test_the_output_names_every_suite_when_it_runs_them_all(tmp_path, monkeypatc
     monkeypatch.setattr(parity_scope, "changed_files", lambda: files)
     assert parity_scope.main(["--event", event, "--github-output", str(output)]) == 0
     values = json.loads(output.read_text(encoding="utf-8").removeprefix("parity="))
-    assert values == {"suite": SUITES, "include": SHARDS}
+    assert values == {"suite": SUITES, "include": SHARDS, "exclude": WINDOWS_LIVE}
 
 
 def test_the_scope_job_publishes_the_matrix_and_both_parity_lanes_use_it():
@@ -267,16 +268,23 @@ def test_the_scope_job_publishes_the_matrix_and_both_parity_lanes_use_it():
     scope = jobs["scope"]
     assert scope["outputs"]["parity"] == "${{ steps.parity.outputs.parity }}"
     step = next(s for s in scope["steps"] if s.get("id") == "parity")
-    assert step["env"] == {"EVENT_NAME": "${{ github.event_name }}"}
+    assert step["env"] == {"EVENT_NAME": "${{ github.event_name }}",
+                           "BATCH_PASSED": "${{ steps.batch.outputs.passed }}"}
     assert step["run"].split() == ["python3", "rust/ci/parity_scope.py", "--event", '"$EVENT_NAME"',
+                                   "--batch-passed", '"$BATCH_PASSED"',
                                    "--github-output", '"$GITHUB_OUTPUT"']
     assert "shell" not in step  # bash on ubuntu-latest
+    batch = next(s for s in scope["steps"] if s.get("id") == "batch")
+    assert scope["steps"].index(batch) < scope["steps"].index(step)
     for name in ("parity-checks", "parity-selfhosted"):
         job = jobs[name]
         assert "scope" in job["needs"], name
         values = job["strategy"]["matrix"]
         assert values["suite"] == parity_scope.SUITE_EXPRESSION, name
         assert values["include"] == parity_scope.INCLUDE_EXPRESSION, name
+    # Only the hosted matrix has an os axis to exclude pairs from.
+    assert jobs["parity-checks"]["strategy"]["matrix"]["exclude"] == parity_scope.EXCLUDE_EXPRESSION
+    assert "exclude" not in jobs["parity-selfhosted"]["strategy"]["matrix"]
     # The Windows live job is one fixed shard, not chosen per diff.
     assert jobs["parity-live"]["strategy"]["matrix"]["suite"] == ["cli-live"]
 
@@ -285,6 +293,139 @@ def test_resolve_expands_the_full_matrix_once():
     workflow = parity_scope.resolve(raw_workflow())
     hosted = workflow["jobs"]["parity-checks"]["strategy"]["matrix"]
     assert hosted["suite"] == SUITES and hosted["include"] == SHARDS
+    assert hosted["exclude"] == WINDOWS_LIVE
     hosted["suite"].remove("eval")
     # Idempotent: an already-expanded (or mutated) matrix stays as it is.
     assert parity_scope.resolve(workflow)["jobs"]["parity-checks"]["strategy"]["matrix"]["suite"] == SUITES[1:]
+
+
+# A master push whose merged batch passed some (os, suite) pairs on the same
+# tree (ops/ci_batch_passed.py) leaves them out of its matrix. eval and judges
+# never leave: they compare against the event-selected oracle, the merge base
+# on a pull request and the pushed head on a push, so the batch's pass is not
+# the push's result.
+
+def checks(*pairs):
+    return [f"Parity checks / {os_name} / {suite}" for os_name, suite in pairs]
+
+
+def expand(values, systems=("ubuntu-latest", "windows-latest")):
+    """GitHub's matrix expansion: os x suite, minus excludes, then includes
+    (an include matching no remaining combination adds a job of its own)."""
+    combos = [{"os": os_name, "suite": suite} for os_name in systems for suite in values["suite"]]
+    combos = [combo for combo in combos
+              if not any(all(combo.get(k) == v for k, v in rule.items()) for rule in values["exclude"])]
+    for entry in values["include"]:
+        matched = [combo for combo in combos
+                   if all(combo.get(k, v) == v for k, v in entry.items() if k in ("os", "suite"))]
+        if matched:
+            for combo in matched:
+                combo.update(entry)
+        else:
+            combos.append(dict(entry))
+    return combos
+
+
+def pairs_of(combos):
+    return {(combo.get("os"), combo["suite"]) for combo in combos}
+
+
+FULL_PAIRS = {(os_name, suite) for os_name in ("ubuntu-latest", "windows-latest") for suite in SUITES} \
+    - {("windows-latest", "cli-live")}
+
+
+def test_a_push_with_nothing_passed_runs_the_full_matrix():
+    values = parity_scope.pruned(SUITES, [], "push")
+    assert values == {"suite": SUITES, "include": SHARDS, "exclude": WINDOWS_LIVE}
+    assert pairs_of(expand(values)) == FULL_PAIRS
+
+
+def test_a_push_leaves_out_exactly_the_pairs_its_batch_passed():
+    passed = checks(("windows-latest", "h5-audit"), ("ubuntu-latest", "w1c-doctor"),
+                    ("windows-latest", "w1c-doctor"))
+    values = parity_scope.pruned(SUITES, passed, "push")
+    combos = expand(values)
+    assert pairs_of(combos) == FULL_PAIRS - {("windows-latest", "h5-audit"), ("ubuntu-latest", "w1c-doctor"),
+                                             ("windows-latest", "w1c-doctor")}
+    # A suite passed on both systems leaves the suite list and its include
+    # entry, or GitHub would add an os-less job for the entry.
+    assert "w1c-doctor" not in values["suite"]
+    assert "w1c-doctor" not in {entry["suite"] for entry in values["include"]}
+    # A suite passed on one system keeps its include for the other.
+    assert {"os": "windows-latest", "suite": "h5-audit"} in values["exclude"]
+    ubuntu_audit = next(c for c in combos if c["suite"] == "h5-audit")
+    assert ubuntu_audit["os"] == "ubuntu-latest" and ubuntu_audit["job_timeout"] == 36
+    assert all("os" in combo for combo in combos)
+
+
+def test_cli_live_passed_on_linux_leaves_the_matrix_entirely():
+    # Hosted Windows' cli-live is always excluded (parity-live runs it), so
+    # a Linux pass removes the last pair, and with it the include entry.
+    values = parity_scope.pruned(SUITES, checks(("ubuntu-latest", "cli-live")), "push")
+    assert "cli-live" not in values["suite"]
+    assert "cli-live" not in {entry["suite"] for entry in values["include"]}
+    assert ("ubuntu-latest", "cli-live") not in pairs_of(expand(values))
+    assert all("os" in combo for combo in expand(values))
+
+
+def test_eval_and_judges_always_run_on_a_push():
+    everything = checks(*FULL_PAIRS)
+    values = parity_scope.pruned(SUITES, everything, "push")
+    assert values["suite"] == ["eval", "judges"]
+    assert pairs_of(expand(values)) == {(os_name, suite) for os_name in ("ubuntu-latest", "windows-latest")
+                                        for suite in ("eval", "judges")}
+    assert parity_scope.EVENT_BOUND == ("eval", "judges")
+
+
+@pytest.mark.parametrize("name", [
+    # Near misses: a similar name never stands for another pair.
+    "Parity checks / ubuntu-latest / cli-live", "Parity checks / ubuntu-latest / cli-daemon",
+    "Parity checks / ubuntu-latest / cli ", "parity checks / ubuntu-latest / cli",
+    "Parity checks / ubuntu-latest", "Parity checks / ubuntu-latest / cli / extra",
+    "Parity live (non-gating) / ubuntu-latest / cli", "Parity self-hosted / ubuntu-latest / cli",
+    "Parity / ubuntu-latest", "Rust / ubuntu-latest", "Parity checks / macos-latest / cli",
+    "Parity checks / ubuntu-latest / not-a-suite",
+    "Parity checks / ${{ matrix.os }} / ${{ matrix.suite }}",
+])
+def test_only_the_exact_job_name_leaves_out_ubuntu_cli(name):
+    values = parity_scope.pruned(SUITES, [name], "push")
+    assert ("ubuntu-latest", "cli") in pairs_of(expand(values))
+
+
+@pytest.mark.parametrize("event", ["pull_request", "merge_group", "schedule", "workflow_dispatch"])
+def test_only_a_push_reads_the_batch(event):
+    passed = checks(("ubuntu-latest", "cli"), ("windows-latest", "cli"))
+    assert parity_scope.pruned(SUITES, passed, event) == matrix(SUITES)
+
+
+def test_a_pull_request_selection_is_never_pruned():
+    suites, _ = select("pull_request", ["rust/cli_harness/rows/doctor.py"])
+    assert parity_scope.pruned(suites, checks(("ubuntu-latest", "cli")), "pull_request") == matrix(suites)
+
+
+def run_main(tmp_path, *arguments):
+    output = tmp_path / "github_output"
+    assert parity_scope.main([*arguments, "--github-output", str(output)]) == 0
+    lines = output.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 1 and lines[0].startswith("parity=")
+    return json.loads(lines[0].removeprefix("parity="))
+
+
+def test_main_takes_the_batch_list_on_a_push(tmp_path, capsys):
+    passed = json.dumps(checks(("ubuntu-latest", "h5-backup"), ("windows-latest", "h5-backup"),
+                               ("windows-latest", "cli")))
+    values = run_main(tmp_path, "--event", "push", "--batch-passed", passed)
+    assert "h5-backup" not in values["suite"]
+    assert {"os": "windows-latest", "suite": "cli"} in values["exclude"]
+    printed = capsys.readouterr().out
+    assert ("parity: the merged batch passed these on the same tree, so they are left out: "
+            "ubuntu-latest/h5-backup, windows-latest/cli, windows-latest/h5-backup") in printed
+
+
+@pytest.mark.parametrize("raw", ["", "[]", "not json", '{"a": 1}', "[1, 2]", '"text"'])
+def test_main_runs_the_full_matrix_on_an_empty_or_malformed_list(tmp_path, raw):
+    assert run_main(tmp_path, "--event", "push", "--batch-passed", raw) == matrix(SUITES)
+
+
+def test_main_without_the_batch_list_is_unchanged(tmp_path):
+    assert run_main(tmp_path, "--event", "push") == matrix(SUITES)

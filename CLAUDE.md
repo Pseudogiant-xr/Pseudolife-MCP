@@ -57,8 +57,9 @@ the memory bank; procedures belong in a skill or doc this file points to.
    are under `rust/` plus only `.github/workflows/rust.yml`, `CHANGELOG.md`
    or `changelog.d/` fragments is gated by the Rust workflow (Rust, the
    parity shards its diff reaches and the Parity gate, both OSes) plus
-   `guards`, with `test` and the lite lanes skipped, because the full suite
-   still runs on every master push and nightly (anything else,
+   `guards`, with `test` and the lite lanes skipped, because the master
+   push that merges it still runs them (a master push skips only jobs its
+   batch passed on the same tree) and so does the nightly (anything else,
    `evals/rust_port/` included, runs the full suite).
 6. **Deploy only via `pseudolife-mcp update`** (backup → rollback tag →
    daemon-only `--no-deps` recreate → health → clients):

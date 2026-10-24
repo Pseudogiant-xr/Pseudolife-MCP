@@ -36,7 +36,8 @@
 # tree-wide and release-doc guards
 # instead (tracked-tree identifiers and control bytes, CHANGELOG and release
 # pins, committed eval evidence). The Rust workflow is that PR's gate. The
-# full suite still runs on every master push and nightly.
+# full suite still runs on the master push that merges it (its batch skipped
+# the suite, so the push cannot skip it) and nightly.
 #
 # Ordinary pull requests (2026-10-21): a PR merges through
 # an integration batch (docs/dev/merge-batches.md), whose own PR from an
@@ -44,8 +45,16 @@
 # only the fast lanes: scope, guards, lock-resolve and frontend, unless it
 # changes CI or dependency inputs (workflows, pyproject.toml, a lock file,
 # the Rust toolchain pin), which run as before. The `test` job is skipped
-# there, which reports success to its required check. Master pushes, the
-# nightly and manual runs are unchanged.
+# there, which reports success to its required check. The nightly and
+# manual runs are unchanged.
+#
+# Master pushes (2026-10-24): a batch merges with a merge commit whose tree
+# is its head's (ops/integrate.py merge refuses otherwise), so on a push of
+# that merge each lane below that PASSED on the batch pull request's latest
+# run of this workflow, on that head, is skipped (ops/ci_batch_passed.py;
+# its docstring lists every check, and any failed check or API error skips
+# nothing). A lane the batch skipped (a Rust-only batch's Python lanes) runs.
+# The nightly stays the full backstop; no required check reads a push run.
 #
 # Merge queue (docs/specs/2026-10-19-merge-queue.md): `merge_group` runs the
 # same jobs under the same check names, so the ruleset's required `test` check
@@ -89,14 +98,31 @@ jobs:
     # skips them; an empty or unreadable diff runs everything. A pull
     # request's change is its merge commit vs its base parent; a merge
     # group's is master's current tip (fetched here) to the group head.
+    # On a master push it also lists the jobs the merged batch passed on the
+    # same tree (batch_passed, a JSON list of job names; empty or absent
+    # runs everything), which needs read access to Actions and pull requests.
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
     outputs:
       python: ${{ steps.scope.outputs.python }}
+      batch_passed: ${{ steps.batch.outputs.passed }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 2
+
+      - name: List the jobs the merged batch passed on this tree
+        id: batch
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        # A crash leaves the output empty, which runs everything.
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 ops/ci_batch_passed.py --workflow .github/workflows/ci.yml --github-output "$GITHUB_OUTPUT"
 
       - name: Classify the change
         id: scope
@@ -197,12 +223,16 @@ jobs:
     # job resolves ops/requirements.lock.txt (the tests that read it match
     # single pins): Dependabot's #875 (aiohttp 3.14.4, which needs
     # yarl>=1.25.1, against a lock pinning yarl 1.24.2) was green everywhere
-    # else. Runs on every event, unscoped, since it is cheap (the resolve
-    # step took 74 s on a hosted runner, run 39450066156 on 2026-10-21) and
-    # a path filter would be one more way to skip it. It gates a merge only
+    # else. Runs on every event, never scoped by the diff, since it is cheap
+    # (the resolve step took 74 s on a hosted runner, run 39450066156 on
+    # 2026-10-21) and a path filter would be one more way to skip it. Its one
+    # skip is a master push whose merged batch passed it on the same tree;
+    # a failed scope still runs it. It gates a merge only
     # once the ruleset requires it (docs/specs/2026-10-19-merge-queue.md).
     # The Python must be the image's (tests/test_check_lock_resolves.py pins
     # it to the FROM line).
+    needs: scope
+    if: ${{ !cancelled() && !contains(fromJSON(needs.scope.outputs.batch_passed || '[]'), 'lock-resolve') }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -219,7 +249,7 @@ jobs:
     needs: scope
     # Fail-safe: run unless scope affirmatively says skip, so a failed or
     # empty scope runs the suite instead of skipping it.
-    if: ${{ !cancelled() && needs.scope.outputs.python != 'false' }}
+    if: ${{ !cancelled() && needs.scope.outputs.python != 'false' && !contains(fromJSON(needs.scope.outputs.batch_passed || '[]'), 'test') }}
     runs-on: ubuntu-latest
     # v25 roughly doubled suite wall time (real Qwen3-0.6B CPU embeds
     # replaced MiniLM's ONNX path: 238s -> ~437s locally), and a cold
@@ -352,7 +382,7 @@ jobs:
     needs: scope
     # Fail-safe: run unless scope affirmatively says skip, so a failed or
     # empty scope runs the suite instead of skipping it.
-    if: ${{ !cancelled() && needs.scope.outputs.python != 'false' }}
+    if: ${{ !cancelled() && needs.scope.outputs.python != 'false' && !contains(fromJSON(needs.scope.outputs.batch_passed || '[]'), 'test-lite-linux') }}
     runs-on: ubuntu-latest
     timeout-minutes: 50
 
@@ -444,7 +474,7 @@ jobs:
     needs: scope
     # Fail-safe: run unless scope affirmatively says skip, so a failed or
     # empty scope runs the suite instead of skipping it.
-    if: ${{ !cancelled() && needs.scope.outputs.python != 'false' }}
+    if: ${{ !cancelled() && needs.scope.outputs.python != 'false' && !contains(fromJSON(needs.scope.outputs.batch_passed || '[]'), 'test-lite-windows') }}
     runs-on: windows-latest
     # Needs no embedding model (torch installs as a core dep but never loads
     # weights here). Measured 2026-10-20 on the maintainer's Windows host,
@@ -592,7 +622,7 @@ jobs:
     needs: scope
     # Fail-safe: run unless scope affirmatively says skip, so a failed or
     # empty scope runs the suite instead of skipping it.
-    if: ${{ !cancelled() && needs.scope.outputs.python != 'false' }}
+    if: ${{ !cancelled() && needs.scope.outputs.python != 'false' && !contains(fromJSON(needs.scope.outputs.batch_passed || '[]'), 'test-lite-macos') }}
     runs-on: macos-latest
     # Curated like the Windows lane: the hook and installer surface needs no
     # embedding model, so this is minutes, not the full suite.
@@ -778,6 +808,10 @@ jobs:
           if-no-files-found: warn
 
   frontend:
+    # Never scoped by the diff; skipped only on a master push whose merged
+    # batch passed it on the same tree, and run when scope fails.
+    needs: scope
+    if: ${{ !cancelled() && !contains(fromJSON(needs.scope.outputs.batch_passed || '[]'), 'frontend') }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
 

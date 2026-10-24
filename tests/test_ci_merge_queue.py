@@ -253,12 +253,19 @@ def test_only_pull_requests_read_the_head_ref(tmp_path, event):
     assert run_scope(tmp_path, event, PYTHON_CHANGE, head_ref="claude/some-change") == ["python=true"]
 
 
+BATCH_PASSED = "fromJSON(needs.scope.outputs.batch_passed || '[]')"
+
+
 def test_the_fast_lanes_skip_every_suite_lane_and_keep_guards():
     jobs = load("ci.yml")["jobs"]
     for name in ("test", "test-lite-linux", "test-lite-windows", "test-lite-macos"):
         assert jobs[name]["needs"] == "scope", name
-        assert jobs[name]["if"] == "${{ !cancelled() && needs.scope.outputs.python != 'false' }}", name
+        assert jobs[name]["if"] == ("${{ !cancelled() && needs.scope.outputs.python != 'false' "
+                                    f"&& !contains({BATCH_PASSED}, '{name}') }}}}"), name
     assert jobs["guards"]["if"] == "needs.scope.outputs.python == 'false'"
-    # Cheap lanes stay unscoped on every event.
+    # Cheap lanes are never scoped by the diff: only a master push whose
+    # merged batch passed them on the same tree skips them, and a failed
+    # scope still runs them (ops/ci_batch_passed.py).
     for name in ("lock-resolve", "frontend"):
-        assert "if" not in jobs[name] and "needs" not in jobs[name], name
+        assert jobs[name]["needs"] == "scope", name
+        assert jobs[name]["if"] == f"${{{{ !cancelled() && !contains({BATCH_PASSED}, '{name}') }}}}", name

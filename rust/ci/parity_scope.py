@@ -2,10 +2,16 @@
 
 rust.yml's parity-checks and parity-selfhosted jobs take their suite list and
 include entries from this module, through the scope job's ``parity`` output.
-Master pushes, the nightly, manual CI and merge groups run every suite. A pull
-request runs the suites its diff reaches, never fewer than FLOOR; anything
-this module cannot place runs everything. A divergence in a suite a pull
-request skipped surfaces on the master push that merges it.
+The nightly, manual CI and merge groups run every suite, and so does a master
+push, less what its merged batch passed (below). A pull request runs the
+suites its diff reaches, never fewer than FLOOR; anything this module cannot
+place runs everything. A divergence in a suite a pull request skipped
+surfaces on the master push that merges it, since that suite never passed on
+the batch.
+
+A master push leaves out each (os, suite) pair its merged batch already
+passed on the same tree (ops/ci_batch_passed.py names them), except the
+EVENT_BOUND suites, whose result depends on the event's oracle.
 
 Before 2026-10-20 every pull request push queued 24 parity jobs behind the
 account's 20-job cap (32 Rust jobs in all), and cancel-on-push threw away most
@@ -79,6 +85,16 @@ SHARDS = [
     {"suite": "h5-daemon-mutants", "h5_timeout": 22, "h5_windows_timeout": 20, "job_timeout": 37},
     {"suite": "h5-graph-mutants", "h5_timeout": 50, "h5_windows_timeout": 30, "job_timeout": 65},
 ]
+
+# The hosted matrix's systems, and the pair it always leaves out: hosted
+# Windows' live comparisons run in the non-gating parity-live job instead.
+SYSTEMS = ("ubuntu-latest", "windows-latest")
+STATIC_EXCLUDE = ({"os": "windows-latest", "suite": "cli-live"},)
+# Suites that compare against the event-selected Python oracle
+# (evals/rust_port/oracle_selection.py): the merge base on a pull request,
+# the pushed head on a push. A batch's pass compared the base, so a master
+# push always runs them, whatever the batch passed.
+EVENT_BOUND = ("eval", "judges")
 
 # Every pull request that runs parity at all runs these: the CLI rows most
 # changes touch (mail, hook, episode, lease), the daemon startup, live and
@@ -264,27 +280,85 @@ def select(event: str, files: list[str] | None) -> tuple[list[str], dict[str, tu
 
 SUITE_EXPRESSION = "${{ fromJSON(needs.scope.outputs.parity).suite }}"
 INCLUDE_EXPRESSION = "${{ fromJSON(needs.scope.outputs.parity).include }}"
+EXCLUDE_EXPRESSION = "${{ fromJSON(needs.scope.outputs.parity).exclude }}"
 
 
 def resolve(workflow: dict) -> dict:
     """The workflow with every scope-chosen parity matrix expanded to the full
-    matrix, as a master push runs it; for the checks that read the YAML."""
+    matrix, as the nightly (and a master push with nothing to leave out) runs
+    it; for the checks that read the YAML."""
     for name in ("parity-checks", "parity-selfhosted"):
         values = workflow["jobs"][name]["strategy"]["matrix"]
         if values.get("suite") == SUITE_EXPRESSION:
             values["suite"] = list(SUITES)
         if values.get("include") == INCLUDE_EXPRESSION:
             values["include"] = [dict(shard) for shard in SHARDS]
+        if values.get("exclude") == EXCLUDE_EXPRESSION:
+            values["exclude"] = [dict(pair) for pair in STATIC_EXCLUDE]
     return workflow
 
 
-def matrix(suites: list[str]) -> dict:
-    """The parity matrix's suite and include values for these suites.
+def matrix(suites: list[str], exclude: list[dict] | None = None) -> dict:
+    """The parity matrix's suite, include and exclude values for these suites.
 
     An include entry for a suite the run does not select would add a job of
     its own, with no os, so only the selected suites' entries go in.
+    parity-selfhosted reads suite and include only (it has no os axis).
     """
-    return {"suite": list(suites), "include": [dict(shard) for shard in SHARDS if shard["suite"] in suites]}
+    return {"suite": list(suites), "include": [dict(shard) for shard in SHARDS if shard["suite"] in suites],
+            "exclude": [dict(pair) for pair in STATIC_EXCLUDE] if exclude is None else exclude}
+
+
+def check_name(os_name: str, suite: str) -> str:
+    """The job name GitHub reports for one parity-checks pair."""
+    return f"Parity checks / {os_name} / {suite}"
+
+
+def pruned(suites: list[str], passed: list[str], event: str) -> dict:
+    """The matrix for these suites, less the pairs a master push's merged
+    batch passed (``passed``: exact job names from ops/ci_batch_passed.py).
+
+    Only a push reads ``passed``, and never for an EVENT_BOUND suite. A pair
+    leaves through an exclude entry; a suite with no pair left leaves the
+    suite list and takes its include entry with it, since an include matching
+    no combination would add an os-less job. EVENT_BOUND keeps the push's
+    matrix from ever being empty.
+    """
+    if event != "push":
+        return matrix(suites)
+    names = set(passed)
+    static = {(pair["os"], pair["suite"]) for pair in STATIC_EXCLUDE}
+    kept, exclude = [], [dict(pair) for pair in STATIC_EXCLUDE]
+    for suite in suites:
+        remaining = [os_name for os_name in SYSTEMS if (os_name, suite) not in static]
+        left_out = [] if suite in EVENT_BOUND else [
+            os_name for os_name in remaining if check_name(os_name, suite) in names]
+        if len(left_out) == len(remaining):
+            continue
+        kept.append(suite)
+        exclude.extend({"os": os_name, "suite": suite} for os_name in left_out)
+    return matrix(kept, exclude)
+
+
+def left_out(suites: list[str], values: dict) -> list[str]:
+    """The os/suite pairs ``values`` leaves out of these suites' full matrix."""
+    static = {(pair["os"], pair["suite"]) for pair in STATIC_EXCLUDE}
+    excluded = {(pair["os"], pair["suite"]) for pair in values["exclude"]}
+    return sorted(f"{os_name}/{suite}" for suite in suites for os_name in SYSTEMS
+                  if (os_name, suite) not in static
+                  and (suite not in values["suite"] or (os_name, suite) in excluded))
+
+
+def batch_passed(raw: str | None) -> list[str] | None:
+    """The job names in --batch-passed, or None when it is not a JSON list of
+    strings (then nothing is left out)."""
+    try:
+        value = json.loads(raw) if raw else []
+    except ValueError:
+        return None
+    if not isinstance(value, list) or not all(isinstance(name, str) for name in value):
+        return None
+    return value
 
 
 def changed_files() -> list[str] | None:
@@ -303,18 +377,28 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--event", required=True)
     parser.add_argument("--github-output", required=True)
+    parser.add_argument("--batch-passed", default="",
+                        help="push only: a JSON list of the job names the merged batch passed")
     options = parser.parse_args(argv)
     files = changed_files() if options.event == "pull_request" else None
     suites, reasons = select(options.event, files)
+    passed = batch_passed(options.batch_passed)
+    if passed is None:
+        print("parity: the batch's passed jobs could not be read; leaving nothing out")
+        passed = []
+    values = pruned(suites, passed, options.event)
     if options.event == "pull_request" and files is None:
         print("parity: the diff could not be read; running every suite")
     elif options.event == "pull_request":
         print(f"parity: floor {', '.join(FLOOR)}")
         for path, widened in reasons.items():
             print(f"parity: {path} -> {'every suite' if widened == ALL else ', '.join(widened)}")
-    print(f"parity: running {len(suites)} of {len(SUITES)} suites: {', '.join(suites)}")
+    if left_out(suites, values):
+        print("parity: the merged batch passed these on the same tree, so they are left out: "
+              + ", ".join(left_out(suites, values)))
+    print(f"parity: running {len(values['suite'])} of {len(SUITES)} suites: {', '.join(values['suite'])}")
     with open(options.github_output, "a", encoding="utf-8") as output:
-        output.write(f"parity={json.dumps(matrix(suites), separators=(',', ':'))}\n")
+        output.write(f"parity={json.dumps(values, separators=(',', ':'))}\n")
     return 0
 
 

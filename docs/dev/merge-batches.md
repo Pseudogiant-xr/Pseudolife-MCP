@@ -30,8 +30,30 @@ Each change waits for hosted CI once, on its batch:
 - **A batch pull request** (from `integrate/*`) runs everything its diff
   needs, exactly as every pull request did before 2026-10-21 (the
   Rust-only and documentation-only scope skips still apply).
-- **Master pushes, the nightly and manual runs** run everything, as
-  before.
+- **A master push** skips what its batch already passed on the same code.
+  `ops/integrate.py merge` merges a batch with a merge commit only while
+  master is its base or an ancestor of its head, so the commit pushed to
+  master has the batch head's tree. Each scope job runs
+  `ops/ci_batch_passed.py`, which lists the jobs that passed on the batch
+  pull request's latest run of the same workflow on that head. Only a job
+  whose own conclusion there was `success` is skipped; a skipped, failed or
+  cancelled one runs. A Rust-only batch skipped the Python suite lanes, so
+  its master push still runs them. Anything doubtful skips nothing and logs
+  one line saying why: not exactly one merged `integrate/*` pull request
+  into master with this commit as its merge commit, a different tree, the
+  newest batch run not completed, or an API error. In `ci.yml` that covers
+  `lock-resolve`, `test`, the lite OS lanes and `frontend`. In `rust.yml` it
+  covers the disposable-image check and each parity pair (OS and suite).
+  The `Rust` job, the candidate build, `parity-live` (which a pull request
+  never runs) and the `eval` and `judges` suites always run. They compare
+  against the event-selected Python oracle (or, for `Rust`, its package
+  metadata), which is the merge base on a pull request and the pushed head
+  on a push, so the batch's pass is not the push's result. A merge made
+  under the `merge-forward` skill's exceptions skips only what passed on
+  the forwarded head itself; with no completed run there, its master push
+  runs everything, which is the backstop that skill relies on.
+- **The nightly and manual runs** run everything, as before. The nightly
+  is the full backstop for everything a master push skipped.
 
 ## Joining a batch
 
@@ -145,21 +167,45 @@ stale *and* the diff from master touches the census inputs (the census
 module's `CURRENCY_INPUTS`: the census, its script and the port inventory).
 Elsewhere, drift is only reported. After merging, `build` runs that check on
 the batch head with a pull request event naming the batch's base. If the
-check would fail, `build` drops every member whose own diff changes those
-inputs, naming the other members that change them too, and merges the rest
-again from master. `open` comments on and unlabels each dropped member, as
-it does after a conflict. Its author merges master forward once master
-holds the rest of the batch, regenerates the census with `python rust/producer_census.py`, reruns
-its targeted tests and re-applies the label. A census that is stale while no member
-touches its inputs is printed as report-only and left alone, as CI leaves
-it. Before the push, `open` runs the same check and refuses if it would
-fail, so a plan built without it cannot reach CI.
+check would fail, the members whose own diff changes those inputs (the
+census changers) usually carry a census regenerated on master, which the
+other members' changes staled. So `build` first merges the census changers
+alone and runs the check. If it passes, it merges the batch again without
+the other members whose own diff touches a path the census hashes, and
+runs the check once more. Those paths are what master's census module
+lists in the batch tree (so an added file counts), what master's census
+hashes (so a deleted one counts) and what each changer's census hashes
+(since a changer may widen the scopes). A member that conflicted with one
+of those merges once it is left out, so each trial head is searched again
+and its own such members are left out too, until the check passes or a
+trial finds none; one that changes the census inputs itself counts as a
+census changer, never a waiter, and leaves with them if the check fails. If the check passes, that head is the batch: the members
+left out are listed in the batch pull request under `## Waiting (no action
+needed)`, get no comment, keep their label and join the next batch, where
+CI only reports the census because their diffs leave its inputs alone. A
+member touching only paths the census does not hash, such as
+`ops/tool.sh.bak` beside a hashed `ops/tool.sh`, stays in. Nothing bounds
+the wait: while census changers keep arriving, a member can wait batch
+after batch, and the operator then builds one batch without the changer
+(for example by removing the changer's label for that one build).
+
+If either check fails, `build` drops the census changers instead, naming
+the others that change the inputs too, and merges the rest again from
+master. `open` comments on and unlabels each dropped changer, as it does
+after a conflict. Its author merges master forward once master holds the
+rest of the batch, regenerates the census with `python
+rust/producer_census.py`, reruns its targeted tests and re-applies the
+label. A census that is stale while no member touches its inputs is printed
+as report-only and left alone, as CI leaves it. Before the push, `open`
+runs the same check and refuses if it would fail, so a plan built without
+it cannot reach CI.
 
 That check runs the batch head's census script, which is member code, so
 `build` (including `--dry-run`) executes it on this machine, as the full
 suite will. It runs with only the environment Python and git need to start,
-without tokens such as `GH_TOKEN`. The list of inputs is read from master's
-copy of the script, so no member code runs inside `ops/integrate.py`
+without tokens such as `GH_TOKEN`. The list of inputs and of hashed paths
+is read from master's copy of the script and from the committed census
+files, parsed as data, so no member code runs inside `ops/integrate.py`
 itself. A member that changes the script changes one of the inputs, so it
 is caught either way. With no census on master there is no check.
 
