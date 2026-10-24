@@ -249,7 +249,7 @@ def test_the_output_is_one_line_of_json(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(parity_scope, "changed_files", lambda: ["rust/cli_harness/rows/doctor.py"])
     assert parity_scope.main(["--event", "pull_request", "--github-output", str(output)]) == 0
     lines = output.read_text(encoding="utf-8").splitlines()
-    assert len(lines) == 1 and lines[0].startswith("parity=")
+    assert len(lines) == 2 and lines[0].startswith("parity=") and lines[1].startswith("selfhosted=")
     values = json.loads(lines[0].removeprefix("parity="))
     assert values["suite"] == ["eval", "cli", "cli-store", "cli-daemon", "cli-daemon-2", "cli-live",
                                "w1c-doctor", "h5-w1a"]
@@ -264,7 +264,7 @@ def test_the_output_names_every_suite_when_it_runs_them_all(tmp_path, monkeypatc
     output = tmp_path / "github_output"
     monkeypatch.setattr(parity_scope, "changed_files", lambda: files)
     assert parity_scope.main(["--event", event, "--github-output", str(output)]) == 0
-    values = json.loads(output.read_text(encoding="utf-8").removeprefix("parity="))
+    values = json.loads(output.read_text(encoding="utf-8").splitlines()[0].removeprefix("parity="))
     assert values == {"suite": SUITES, "include": SHARDS, "exclude": STATIC}
 
 
@@ -281,18 +281,46 @@ def test_the_scope_job_publishes_the_matrix_and_both_parity_lanes_use_it():
     assert "shell" not in step  # bash on ubuntu-latest
     batch = next(s for s in scope["steps"] if s.get("id") == "batch")
     assert scope["steps"].index(batch) < scope["steps"].index(step)
-    for name in ("parity-checks", "parity-selfhosted"):
+    assert scope["outputs"]["parity_selfhosted"] == "${{ steps.parity.outputs.selfhosted }}"
+    for name, suite, include in (
+            ("parity-checks", parity_scope.SUITE_EXPRESSION, parity_scope.INCLUDE_EXPRESSION),
+            ("parity-selfhosted", parity_scope.SELFHOSTED_SUITE_EXPRESSION,
+             parity_scope.SELFHOSTED_INCLUDE_EXPRESSION)):
         job = jobs[name]
         assert "scope" in job["needs"], name
         values = job["strategy"]["matrix"]
-        assert values["suite"] == parity_scope.SUITE_EXPRESSION, name
-        assert values["include"] == parity_scope.INCLUDE_EXPRESSION, name
+        assert values["suite"] == suite, name
+        assert values["include"] == include, name
     # Only the hosted matrix has an os axis to exclude pairs from.
     assert jobs["parity-checks"]["strategy"]["matrix"]["exclude"] == parity_scope.EXCLUDE_EXPRESSION
-    # Each self-hosted runner runs h5-light's three suites as their own shards.
-    assert jobs["parity-selfhosted"]["strategy"]["matrix"]["exclude"] == [{"suite": "h5-light"}]
+    assert "exclude" not in jobs["parity-selfhosted"]["strategy"]["matrix"]
     # The Windows live job is one fixed shard, not chosen per diff.
     assert jobs["parity-live"]["strategy"]["matrix"]["suite"] == ["cli-live"]
+
+
+@pytest.mark.parametrize("event, files", [("schedule", None), ("workflow_dispatch", None),
+                                          ("pull_request", ["rust/cli_harness/rows/audit.py"])])
+def test_every_selfhosted_job_has_a_runner(tmp_path, monkeypatch, event, files):
+    # An include entry matching no runner x suite combination becomes a job
+    # with no runner, routed to an unserved label and queued for a day (Opus
+    # review of 53fd499d: h5-light, which the hosted matrix runs on Linux only).
+    monkeypatch.setattr(parity_scope, "changed_files", lambda: files)
+    output = tmp_path / "github_output"
+    assert parity_scope.main(["--event", event, "--github-output", str(output)]) == 0
+    lane = json.loads(output.read_text(encoding="utf-8").splitlines()[1].removeprefix("selfhosted="))
+    combos = [{"runner": runner, "suite": suite} for runner in ("linux", "windows") for suite in lane["suite"]]
+    for entry in lane["include"]:
+        matched = [combo for combo in combos if combo["suite"] == entry["suite"]]
+        assert matched, entry
+    assert not set(lane["suite"]) & set(parity_scope.HOSTED_ONLY)
+    # Every selected suite but the hosted-only composites, whose parts the
+    # composite's selection always carries (select, LINUX_LIGHT).
+    from coverage_plan import COMPOSITES
+    hosted = json.loads(output.read_text(encoding="utf-8").splitlines()[0].removeprefix("parity="))
+    assert lane["suite"] == [suite for suite in hosted["suite"] if suite not in parity_scope.HOSTED_ONLY]
+    for name in parity_scope.HOSTED_ONLY:
+        if name in hosted["suite"]:
+            assert set(COMPOSITES[name]) & set(lane["suite"])
 
 
 def test_resolve_expands_the_full_matrix_once():
@@ -413,8 +441,10 @@ def run_main(tmp_path, *arguments):
     output = tmp_path / "github_output"
     assert parity_scope.main([*arguments, "--github-output", str(output)]) == 0
     lines = output.read_text(encoding="utf-8").splitlines()
-    assert len(lines) == 1 and lines[0].startswith("parity=")
-    return json.loads(lines[0].removeprefix("parity="))
+    assert len(lines) == 2 and lines[0].startswith("parity=") and lines[1].startswith("selfhosted=")
+    values = json.loads(lines[0].removeprefix("parity="))
+    assert json.loads(lines[1].removeprefix("selfhosted=")) == parity_scope.selfhosted(values)
+    return values
 
 
 def test_main_takes_the_batch_list_on_a_push(tmp_path, capsys):

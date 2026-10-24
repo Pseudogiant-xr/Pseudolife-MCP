@@ -955,6 +955,7 @@ def test_scope_gates_every_heavy_job_and_fails_safe():
     assert scope["outputs"] == {"rust": "${{ steps.scope.outputs.rust }}",
                                 "full": "${{ steps.scope.outputs.full }}",
                                 "parity": "${{ steps.parity.outputs.parity }}",
+                                "parity_selfhosted": "${{ steps.parity.outputs.selfhosted }}",
                                 "batch_passed": "${{ steps.batch.outputs.passed }}"}
     checkout = next(s for s in scope["steps"] if s.get("uses") == "actions/checkout@v4")
     assert checkout["with"]["fetch-depth"] == 2
@@ -1432,8 +1433,13 @@ def test_selfhosted_lane_runs_the_hosted_shards_unchanged():
     jobs = workflow()["jobs"]
     hosted, lane = jobs["parity-checks"], jobs["parity-selfhosted"]
     assert lane["steps"] == hosted["steps"]
-    assert lane["strategy"]["matrix"]["suite"] == hosted["strategy"]["matrix"]["suite"]
-    assert lane["strategy"]["matrix"]["include"] == hosted["strategy"]["matrix"]["include"]
+    # The same suites less the hosted-only composites (h5-light), whose
+    # parts each runner runs as their own shards.
+    from parity_scope import HOSTED_ONLY
+    assert lane["strategy"]["matrix"]["suite"] == [
+        suite for suite in hosted["strategy"]["matrix"]["suite"] if suite not in HOSTED_ONLY]
+    assert lane["strategy"]["matrix"]["include"] == [
+        entry for entry in hosted["strategy"]["matrix"]["include"] if entry["suite"] not in HOSTED_ONLY]
     assert lane["strategy"]["matrix"]["runner"] == (
         "${{ fromJSON(vars.PARITY_SELFHOSTED_RUNNERS || '[\"off\"]') }}")
     assert lane["strategy"]["fail-fast"] is False
@@ -1634,9 +1640,8 @@ def test_every_rust_cache_is_saved_on_failure_and_keeps_the_lockfile_hash():
     assert set(jobs) >= {"rust", "fixtures", "candidate", "candidate-harness", "parity-checks", "source-mutants"}
     for name, job in jobs.items():
         cache = next(step for step in job["steps"] if step.get("uses") == "Swatinem/rust-cache@v2")
-        # These only read another job's cache (the Rust job's, the
-        # candidate's) and never save.
-        if name in ("fixtures", "candidate-harness"):
+        # The fixtures job only reads the Rust job's cache and never saves.
+        if name == "fixtures":
             assert cache["with"]["save-if"] is False
             continue
         assert cache["with"]["cache-on-failure"] is True, name

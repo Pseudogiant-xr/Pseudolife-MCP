@@ -111,6 +111,7 @@ jobs:
       rust: ${{ steps.scope.outputs.rust }}
       full: ${{ steps.scope.outputs.full }}
       parity: ${{ steps.parity.outputs.parity }}
+      parity_selfhosted: ${{ steps.parity.outputs.selfhosted }}
       batch_passed: ${{ steps.batch.outputs.passed }}
     steps:
       - uses: actions/checkout@v4
@@ -532,12 +533,13 @@ jobs:
   candidate-harness:
     # The candidate job's second build, run beside it: the daemon with its
     # mutant and harness features, and the graph and dream contract
-    # binaries. The daemon crate has no workspace dependency, so this build
-    # reuses only the candidate's cached dependencies, which it restores
-    # read-only (shared-key shim-release is the candidate's key; saving
-    # nothing adds no cache). In the candidate job it ran after the default
-    # build, 2.7 of hosted Windows' 8.1 minutes (run 40058307040), so every
-    # parity shard waited for both.
+    # binaries. In the candidate job it ran after the default build, 2.7 of
+    # hosted Windows' 8.1 minutes (run 40058307040), so every parity shard
+    # waited for both. Built alone, -p pseudolife-daemon resolves other
+    # dependency features than the two-binary candidate build (serde,
+    # serde_json, syn, chrono, indexmap, windows-sys), so it keeps a cache of
+    # its own; the cli-daemon parity cache this workflow stopped using frees
+    # about as much.
     needs: scope
     if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || inputs.mode != 'wait-mail') && needs.scope.outputs.rust != 'false' && needs.scope.outputs.full != 'false' }}
     name: Candidate harness / ${{ matrix.os }}
@@ -575,8 +577,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: rust
-          shared-key: shim-release
-          save-if: false
+          shared-key: shim-harness
+          cache-on-failure: true
       - name: Build embedding candidate
         run: cargo build --locked --release -p pseudolife-daemon --bins --features mutants,graph-harness,contract-harness,principal-harness -j 3
       - uses: actions/upload-artifact@v4
@@ -1454,11 +1456,11 @@ jobs:
       fail-fast: false
       matrix:
         runner: ${{ fromJSON(vars.PARITY_SELFHOSTED_RUNNERS || '["off"]') }}
-        # Every suite: the nightly and manual CI select them all. h5-light is
-        # hosted Linux's bundle of three suites each runner runs on its own.
-        suite: ${{ fromJSON(needs.scope.outputs.parity).suite }}
-        include: ${{ fromJSON(needs.scope.outputs.parity).include }}
-        exclude: [{suite: h5-light}]
+        # Every suite the nightly and manual CI select, less the hosted-only
+        # composites (h5-light), whose parts each runner runs on its own:
+        # rust/ci/parity_scope.py's selfhosted output.
+        suite: ${{ fromJSON(needs.scope.outputs.parity_selfhosted).suite }}
+        include: ${{ fromJSON(needs.scope.outputs.parity_selfhosted).include }}
     runs-on: [self-hosted, "pseudolife-parity-${{ matrix.runner }}"]
     # The slowest hosted shard budget (210m) plus the hour a shard may wait
     # for this machine's full suite before it yields.

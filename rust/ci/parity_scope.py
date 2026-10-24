@@ -314,6 +314,13 @@ def select(event: str, files: list[str] | None) -> tuple[list[str], dict[str, tu
 SUITE_EXPRESSION = "${{ fromJSON(needs.scope.outputs.parity).suite }}"
 INCLUDE_EXPRESSION = "${{ fromJSON(needs.scope.outputs.parity).include }}"
 EXCLUDE_EXPRESSION = "${{ fromJSON(needs.scope.outputs.parity).exclude }}"
+# The self-hosted lane has no os axis to exclude a composite from, and an
+# include entry for a suite its matrix lacks would become a job with no
+# runner, queued for a day. It takes the same values less the hosted-only
+# composites; each runner runs their parts as their own shards.
+HOSTED_ONLY = ("h5-light",)
+SELFHOSTED_SUITE_EXPRESSION = "${{ fromJSON(needs.scope.outputs.parity_selfhosted).suite }}"
+SELFHOSTED_INCLUDE_EXPRESSION = "${{ fromJSON(needs.scope.outputs.parity_selfhosted).include }}"
 
 
 def resolve(workflow: dict) -> dict:
@@ -328,7 +335,19 @@ def resolve(workflow: dict) -> dict:
             values["include"] = [dict(shard) for shard in SHARDS]
         if values.get("exclude") == EXCLUDE_EXPRESSION:
             values["exclude"] = [dict(pair) for pair in STATIC_EXCLUDE]
+        full = selfhosted(matrix(list(SUITES)))
+        if values.get("suite") == SELFHOSTED_SUITE_EXPRESSION:
+            values["suite"] = full["suite"]
+        if values.get("include") == SELFHOSTED_INCLUDE_EXPRESSION:
+            values["include"] = full["include"]
     return workflow
+
+
+def selfhosted(values: dict) -> dict:
+    """The self-hosted lane's suite and include values: ``values`` less the
+    hosted-only composites, so every include entry has a combination."""
+    return {"suite": [suite for suite in values["suite"] if suite not in HOSTED_ONLY],
+            "include": [dict(entry) for entry in values["include"] if entry["suite"] not in HOSTED_ONLY]}
 
 
 def matrix(suites: list[str], exclude: list[dict] | None = None) -> dict:
@@ -432,6 +451,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"parity: running {len(values['suite'])} of {len(SUITES)} suites: {', '.join(values['suite'])}")
     with open(options.github_output, "a", encoding="utf-8") as output:
         output.write(f"parity={json.dumps(values, separators=(',', ':'))}\n")
+        output.write(f"selfhosted={json.dumps(selfhosted(values), separators=(',', ':'))}\n")
     return 0
 
 
