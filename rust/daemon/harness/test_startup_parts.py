@@ -61,7 +61,9 @@ class StartupParts(unittest.TestCase):
                 ran.append((case, mutant))
                 result["stages"] = []
 
-            with self.subTest(part=part), tempfile.TemporaryDirectory() as tmp,                     patch.object(startup_cases.pg, "SLICE", "pgs"),                     patch.object(startup_cases, "cell", side_effect=fake_cell):
+            with self.subTest(part=part), tempfile.TemporaryDirectory() as tmp, \
+                    patch.object(startup_cases.pg, "SLICE", "pgs"), \
+                    patch.object(startup_cases, "cell", side_effect=fake_cell):
                 binary = Path(tmp) / "daemon-test"
                 binary.write_bytes(b"")
                 code = startup_cases.main(["--rust-test-bin", str(binary), "--part", str(part),
