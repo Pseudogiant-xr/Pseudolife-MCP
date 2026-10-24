@@ -2,10 +2,10 @@
   "rust.yml": {
     "limits": {
       "jobs": 43,
-      "runner_minutes": 400,
+      "runner_minutes": 410,
       "longest_job_minutes": 25,
       "critical_path_minutes": 30,
-      "why": "2026-10-24 Rust CI speed pass (#922, #924): measured on the runs below; limits about 10% above them (critical path 25.2, about 20% above, since Windows shards vary most) so ordinary runner noise passes"
+      "why": "2026-10-24 Rust CI speed pass (#922, #924): measured on the runs below; job count at its measured 43, runner minutes and longest job about 10% above the measurements and the critical path (25.2) about 20% above, since Windows shards vary most, so a re-measure on a slow day does not force a raise"
     },
     "pip_no_compile": true,
     "needs_without_data": {
@@ -153,6 +153,16 @@
       "Parity / windows-latest": {
         "minutes": 0.1
       }
+    },
+    "fingerprints": {
+      "scope": "962fa4e9cfc14128",
+      "rust": "0c74b084f529d07c",
+      "fixtures": "defc5e07c5ac3f94",
+      "candidate": "77b0c5fa6b2afcbf",
+      "candidate-harness": "ab479a8fc85283e7",
+      "parity-checks": "dc6efde1c2658559",
+      "daemon-image": "cf93a3a209618bdc",
+      "parity": "4c39a489bf4b1642"
     }
   },
   "ci.yml": {
@@ -197,6 +207,16 @@
       "frontend": {
         "minutes": 0.4
       }
+    },
+    "fingerprints": {
+      "scope": "3ba3c75b87d879b7",
+      "guards": "92b7929dcce188df",
+      "lock-resolve": "83bcc6b654896c6d",
+      "test": "ac414107d3d9c71d",
+      "test-lite-linux": "44e2a8f2c01baeab",
+      "test-lite-windows": "c02e5b0ebea51aa2",
+      "test-lite-macos": "dc361f58439e1e1e",
+      "frontend": "b1b6a1a1278f2e60"
     }
   }
 }

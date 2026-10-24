@@ -24,22 +24,38 @@ batch's Rust harness run. It fails when:
   chain from scope through the Rust job to the parity shards);
 - a job `needs` another whose outputs and artifacts it never reads, unless
   `needs_without_data` gives the reason (the Parity gate reads results);
-- two jobs save under one rust-cache key;
+- two job runs save under one rust-cache key on one runner OS (the key as
+  Swatinem/rust-cache builds it: prefix, shared-key or key and job id, OS;
+  one save per matrix combination whose conditions can hold);
 - a `rust.yml` install of the checkout or torch byte-compiles at install
-  time (`pip install --no-compile` installs the same packages).
+  time (`pip install --no-compile` installs the same packages);
+- a workflow a pull request starts has no budget entry.
 
-Which jobs a pull request can start is worked out from each job's
-condition and needs, not declared: a job counts unless its condition
-compares the event only with `schedule` or `workflow_dispatch`, or it needs
-the success of a job that does.
+Which jobs a pull request can start is worked out, not declared:
+`ci_budget.py` evaluates each job's condition in GitHub's expression
+language for a pull request, a merge group and a push, with every value it
+cannot know (another job's outputs, labels, refs, variables) left unknown.
+A job counts unless its condition is false for all three, so only a
+condition that really excludes those events (`github.event_name ==
+'schedule'`, `inputs.mode == 'ci'`, the success of a job that never runs)
+keeps a job out of the budget.
 
 ## Changing the shape of CI
 
-1. Make the change and push it; its hosted run measures it.
-2. `python rust/ci/ci_budget.py measure --workflow rust.yml <run id> [...]`
-   rewrites that workflow's measured minutes (each job's median over the
-   runs, latest attempt only; give two or more runs). It never changes a
-   limit.
+1. Make the change and push it. A pull request that edits a workflow runs
+   the whole matrix, so its hosted runs measure it.
+2. `python rust/ci/ci_budget.py measure --workflow rust.yml <run> <run> [...]`
+   rewrites that workflow's measured minutes: each job's median over two or
+   more completed runs, successful jobs of the latest attempt only. It never
+   changes a limit.
+
+   A change that adds a parity shard without editing a workflow (a new
+   suite in `rust/ci/parity_scope.py`) starts no parity job on its own pull
+   request, and a manual dispatch on a branch cannot bind the Python
+   oracle. Enter the new jobs by hand with an `"estimate"` saying how the
+   minutes were derived (the same steps' times on a named run).
+   `ci_budget.py check` lists every estimate, and the batch run's
+   measurement replaces it.
 3. If a limit no longer holds, raise it in the same change and say why in
    its `why` field and in the pull request: what the extra slots or minutes
    buy, and what was measured. A reviewer then decides with the cost in

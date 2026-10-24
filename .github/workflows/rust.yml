@@ -1524,11 +1524,15 @@ jobs:
           }
           rustup toolchain list
           exit $LASTEXITCODE
+      # One shard per OS saves the shared mutant target's dependencies; all
+      # 37 restore it. Every shard saved under this one key until 2026-10-24,
+      # so each nightly that changed it raced 37 uploads for one entry.
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: rust -> ${{ runner.temp }}/source-mutants-target/mutant
           key: cli-source-mutants
           cache-on-failure: true
+          save-if: ${{ matrix.shard == 'audit-0' }}
       - name: Install source harness dependencies
         # Network-bound setup keeps the existing ten-minute dependency floor.
         timeout-minutes: 10

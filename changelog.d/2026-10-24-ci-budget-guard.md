@@ -13,3 +13,5 @@
   `docs/dev/ci-budget.md` explains the rules and how to change a limit.
 - The nightly source-mutant matrix, stress loops and the wait-mail capture
   now install with `pip install --no-compile` too, as the parity shards do.
+- Only the `audit-0` source-mutant shard saves the shared mutant build's
+  rust-cache; all 37 shards per OS used to race to save one key.
