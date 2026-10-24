@@ -112,6 +112,13 @@ SUITES = {
                           for name, scenarios in DAEMON_CONTROLS.items()],
     'h5-graph-mutants': [dict(kind='graph', mode='mutants', row=row) for row in GRAPH_CONTROLS],
 }
+# Suites one hosted job runs one after another, each with its own receipts
+# (run_coverage.py --suite): on Linux the three short H5 suites, 2.8-3.7
+# minutes each with about 1.5 minutes of setup apiece (run 40064033581,
+# 2026-10-24), share one job of the account's 20 (rust/ci/parity_scope.py).
+COMPOSITES = {
+    'h5-light': ('h5-audit', 'h5-backup', 'h5-background'),
+}
 
 
 # Platform-specific declarations are pinned separately from observed failures.
