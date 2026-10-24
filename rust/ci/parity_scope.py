@@ -36,7 +36,8 @@ ROOT = Path(__file__).resolve().parents[2]
 # 14 successful runs (eval, cli, judges): 317s/476s/552.5s.
 SUITES = ["eval", "cli", "cli-store", "cli-daemon", "cli-daemon-2", "cli-live", "judges",
           "w1c-doctor", "w1c-pairing", "w1c-connection", "w1c-connect",
-          "h5-audit", "h5-backup", "h5-w1a", "h5-background", "h5-daemon-mutants", "h5-graph-mutants"]
+          "h5-audit", "h5-backup", "h5-w1a", "h5-background", "h5-daemon-mutants", "h5-graph-mutants",
+          "h5-light"]
 
 # Per-suite matrix values (the include list). eval and judges have none and
 # keep the job's 210-minute fallback.
@@ -101,12 +102,23 @@ SHARDS = [
     {"suite": "h5-background", "h5_timeout": 10, "h5_windows_timeout": 20, "job_timeout": 30},
     {"suite": "h5-daemon-mutants", "h5_timeout": 22, "h5_windows_timeout": 20, "job_timeout": 37},
     {"suite": "h5-graph-mutants", "h5_timeout": 50, "h5_windows_timeout": 30, "job_timeout": 65},
+    # Linux only: h5-audit, h5-backup and h5-background in one job
+    # (coverage_plan.COMPOSITES), with the sum of their Linux step budgets.
+    # Windows runs the three as their own shards and never this one.
+    {"suite": "h5-light", "h5_timeout": 40, "h5_windows_timeout": 40, "job_timeout": 55},
 ]
 
 # The hosted matrix's systems, and the pair it always leaves out: hosted
 # Windows' live comparisons run in the non-gating parity-live job instead.
 SYSTEMS = ("ubuntu-latest", "windows-latest")
 STATIC_EXCLUDE = ({"os": "windows-latest", "suite": "cli-live"},)
+# The H5 suites Linux runs inside h5-light (maintainer decision 2026-10-24:
+# two fewer short jobs per run under the 20-job cap). Every pair below is
+# left out of the matrix, and selecting any of these suites selects
+# h5-light, so Linux still runs each of them wherever it did before.
+LINUX_LIGHT = ("h5-audit", "h5-backup", "h5-background")
+STATIC_EXCLUDE += ({"os": "windows-latest", "suite": "h5-light"},) + tuple(
+    {"os": "ubuntu-latest", "suite": suite} for suite in LINUX_LIGHT)
 # Suites that compare against the event-selected Python oracle
 # (evals/rust_port/oracle_selection.py): the merge base on a pull request,
 # the pushed head on a push. A batch's pass compared the base, so a master
@@ -294,6 +306,8 @@ def select(event: str, files: list[str] | None) -> tuple[list[str], dict[str, tu
         if set(suites) - chosen:
             reasons[path] = suites
         chosen.update(suites)
+    if chosen & set(LINUX_LIGHT):
+        chosen.add("h5-light")
     return [suite for suite in SUITES if suite in chosen], reasons
 
 

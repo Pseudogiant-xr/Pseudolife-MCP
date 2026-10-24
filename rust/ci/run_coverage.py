@@ -8,7 +8,7 @@ import subprocess
 import sys
 import time
 
-from coverage_plan import EXCEPTIONS, PLATFORM_EXCLUSIONS, SOURCE_SHARDS, SUITES, UNOBSERVED_CONTROLS
+from coverage_plan import COMPOSITES, EXCEPTIONS, PLATFORM_EXCLUSIONS, SOURCE_SHARDS, SUITES, UNOBSERVED_CONTROLS
 from control_selection import select_controls
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -77,7 +77,7 @@ def suite_actions(suite, platform):
 def main():
     parser = argparse.ArgumentParser()
     selector = parser.add_mutually_exclusive_group(required=True)
-    selector.add_argument('--suite', choices=SUITES)
+    selector.add_argument('--suite', choices=[*SUITES, *COMPOSITES])
     selector.add_argument('--source-shard', choices=SOURCE_SHARDS)
     parser.add_argument('--out-dir', type=Path, required=True)
     parser.add_argument('--candidate-dir', type=Path, default=ROOT / 'rust/target/release')
@@ -87,19 +87,29 @@ def main():
     args.out_dir.mkdir(parents=True, exist_ok=True)
     os.environ['PL_HARNESS_SCRATCH'] = str(args.out_dir.resolve() / 'scratch')
     platform = 'windows' if os.name == 'nt' else 'linux'
-    omitted_scenarios = {}
-    omitted_selections = {}
     if args.source_shard:
         row, selected = SOURCE_SHARDS[args.source_shard]
         ids = select_controls(row, selected, platform)
         assert ids, 'no source mutants selected'
         actions = [dict(kind='cli', mode='mutants', row=row, mutants=ids)]
-        selection = 'source-' + args.source_shard
         environment = source_environment(row, platform, Path.home(), os.environ)
-    else:
-        selection = args.suite
-        actions, omitted_scenarios, omitted_selections = suite_actions(selection, platform)
-        environment = dict(os.environ)
+        omitted = {name: (EXCEPTIONS['cli_mutants'][platform].get(name) or PLATFORM_EXCLUSIONS[platform][name])
+                   for name in selected if name not in ids}
+        return run_selection(args, platform, 'source-' + args.source_shard, actions, environment, omitted, {}, {})
+    # A composite runs its suites in order, each as if alone.
+    code = 0
+    for suite in COMPOSITES.get(args.suite, (args.suite,)):
+        actions, omitted_scenarios, omitted_selections = suite_actions(suite, platform)
+        code = run_selection(args, platform, suite, actions, dict(os.environ), {},
+                             omitted_scenarios, omitted_selections) or code
+        if code and not args.keep_going:
+            return code
+    return code
+
+
+def run_selection(args, platform, selection, actions, environment, omitted,
+                  omitted_scenarios, omitted_selections):
+    """Run one selection's actions, writing its receipts after each."""
     receipts = []
     for index, action in enumerate(actions):
         name = action.get('mutant') or action.get('scenario') or action['row']
@@ -113,9 +123,6 @@ def main():
         if not code and action['mode'] == 'golden' and action.get('scenario') in EXCEPTIONS['w1a_golden']:
             receipt.update(status='skip', skip_reason=EXCEPTIONS['w1a_golden'][action['scenario']])
         receipts.append(receipt)
-        omitted = ({name: (EXCEPTIONS['cli_mutants'][platform].get(name)
-                          or PLATFORM_EXCLUSIONS[platform][name])
-                    for name in selected if name not in ids} if args.source_shard else {})
         (args.out_dir / f'{selection}-timings.json').write_text(
             json.dumps(dict(platform=platform, receipts=receipts, exceptions=EXCEPTIONS,
                             omitted_controls=omitted, omitted_scenarios=omitted_scenarios,

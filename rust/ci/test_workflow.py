@@ -107,7 +107,8 @@ def row_commands(invocations, required_rows, golden):
 W1C_SUITES = ("w1c-doctor", "w1c-pairing", "w1c-connection", "w1c-connect")
 H5_SUITES = ("h5-audit", "h5-backup", "h5-w1a", "h5-background", "h5-daemon-mutants", "h5-graph-mutants")
 CLI_SUITES = ("cli", "cli-store", "cli-daemon", "cli-daemon-2", "cli-live")
-PARITY_SUITES = ["eval", *CLI_SUITES, "judges", *W1C_SUITES, *H5_SUITES]
+# h5-light: Linux runs h5-audit, h5-backup and h5-background in one job.
+PARITY_SUITES = ["eval", *CLI_SUITES, "judges", *W1C_SUITES, *H5_SUITES, "h5-light"]
 # The live Python-versus-Rust comparisons hosted Windows cannot run
 # deterministically (docs/specs/2026-10-19-merge-queue.md, "The required
 # Parity gate"): required on Linux, reported by parity-live on Windows.
@@ -115,6 +116,9 @@ LIVE_SUITE = "cli-live"
 LIVE_CHECKS = ("CLI differential harness live arms", "Daemon body admission parity",
                "Daemon security admission parity", "Daemon MCP live parity and controls")
 WINDOWS_LIVE_EXCLUDE = [{"os": "windows-latest", "suite": LIVE_SUITE}]
+# The full static exclude list: the live pair and the h5-light composite's pairs.
+STATIC_EXCLUDE = WINDOWS_LIVE_EXCLUDE + [{"os": "windows-latest", "suite": "h5-light"}] + [
+    {"os": "ubuntu-latest", "suite": suite} for suite in ("h5-audit", "h5-backup", "h5-background")]
 
 
 # The W1-C step passes its rows through PowerShell arrays (@live, @golden), so
@@ -151,7 +155,7 @@ def check_w1c_shards(jobs):
     matrix = job["strategy"]["matrix"]
     assert matrix["os"] == SYSTEMS
     assert matrix["suite"] == PARITY_SUITES
-    assert matrix["exclude"] == WINDOWS_LIVE_EXCLUDE
+    assert matrix["exclude"] == STATIC_EXCLUDE
     shards = [shard for shard in matrix["include"] if shard["suite"] in W1C_SUITES]
     assert len(shards) == len(W1C_SUITES)
     assert Counter(shard["suite"] for shard in shards) == Counter(W1C_SUITES)
@@ -205,8 +209,9 @@ def check_w1c_shards(jobs):
             if words[:2] == ["python", "rust/cli_harness"]:
                 assert not any(word in W1C_ROWS for word in words)
     for step in job["steps"]:
+        # The toolchain only where cargo or rustc runs: the suites that cache.
         if step.get("uses") == "dtolnay/rust-toolchain@stable":
-            assert step["if"] == "!startsWith(matrix.suite, 'w1c-')"
+            assert step["if"] == "matrix.suite == 'eval' || matrix.suite == 'cli'" == CACHED_IF
         if step.get("uses") == "Swatinem/rust-cache@v2":
             assert "w1c-" not in step["if"] and CACHED_SUITES == {"eval", "cli"}
 
@@ -371,7 +376,7 @@ def check_executable_coverage(jobs):
     assert download["with"] == {"name": "rust-shim-${{ runner.os }}", "path": "rust/target/release"}
     assert parity_steps.index(download) < parity_steps.index(principal)
     assert not any(words[:2] == ["cargo", "build"] for words in invocations)
-    daemon_build = next(step for step in jobs["candidate"]["steps"]
+    daemon_build = next(step for step in jobs["candidate-harness"]["steps"]
                         if step.get("name") == "Build embedding candidate")
     invocation = next(words for words in commands(daemon_build["run"])
                       if words[:2] == ["cargo", "build"])
@@ -464,7 +469,7 @@ def test_shards_cover_both_systems_and_build_once():
         assert not jobs[name].get("continue-on-error", False)
     assert jobs["rust"]["name"] == "Rust / ${{ matrix.os }}"
     assert jobs["parity"]["name"] == "Parity / ${{ matrix.os }}"
-    assert jobs["parity-checks"]["needs"] == ["scope", "candidate", "fixtures"]
+    assert jobs["parity-checks"]["needs"] == ["scope", "candidate", "candidate-harness", "fixtures"]
     rust_steps = jobs["rust"]["steps"]
     override = commands(next(step["run"] for step in rust_steps
                              if step.get("name") == "Daemon override build configurations"))
@@ -546,17 +551,27 @@ def test_artifact_is_from_this_run_and_executable_on_linux():
         "rust/target/release/pseudolife-stdio", "rust/target/release/pseudolife-daemon",
         "rust/target/release/pseudolife-daemon-static"]
     candidate = workflow()["jobs"]["candidate"]
-    build = next(s for s in candidate["steps"] if s.get("name") == "Build embedding candidate")
+    harness = workflow()["jobs"]["candidate-harness"]
+    fetched = next(s for s in job["steps"] if s.get("name") == "Download harness candidate")
+    assert fetched["with"] == {"name": "rust-shim-harness-${{ runner.os }}", "path": "rust/target/release"}
+    assert job["steps"].index(download) < job["steps"].index(fetched) < job["steps"].index(permission)
+    build = next(s for s in harness["steps"] if s.get("name") == "Build embedding candidate")
     require_command(commands(build["run"]), ("cargo", "build"),
                     ("--locked", "--release", "-p", "pseudolife-daemon", "--bins", "--features"))
     invocation = next(words for words in commands(build["run"]) if words[:2] == ["cargo", "build"])
     assert "mutants" in invocation[invocation.index("--features") + 1].split(",")
+    harness_upload = next(s for s in harness["steps"] if s.get("uses") == "actions/upload-artifact@v4")
+    assert harness_upload["with"]["name"] == fetched["with"]["name"]
+    assert {"rust/target/release/pseudolife-daemon", "rust/target/release/pseudolife-daemon.exe"} <= set(harness_upload["with"]["path"].splitlines())
     upload = next(s for s in candidate["steps"] if s.get("uses") == "actions/upload-artifact@v4")
-    assert {"rust/target/release/pseudolife-daemon", "rust/target/release/pseudolife-daemon.exe"} <= set(upload["with"]["path"].splitlines())
+    # Both artifacts download into one directory: the default daemon ships
+    # only as -static, so the mutants build is the one pseudolife-daemon.
+    assert not {"rust/target/release/pseudolife-daemon", "rust/target/release/pseudolife-daemon.exe"} & set(upload["with"]["path"].splitlines())
     preserved = next(s for s in candidate["steps"] if s.get("name") == "Retain default static candidate")
     assert preserved.get("working-directory") == "${{ github.workspace }}"
     names = [s.get("name") for s in candidate["steps"]]
-    assert names.index("Build candidate") < names.index("Retain default static candidate") < names.index("Build embedding candidate")
+    assert names.index("Build candidate") < names.index("Retain default static candidate")
+    assert "Build embedding candidate" not in names
     assert {"rust/target/release/pseudolife-daemon-static", "rust/target/release/pseudolife-daemon-static.exe"} <= set(upload["with"]["path"].splitlines())
     assert "Copy-Item -LiteralPath" in preserved["run"]
     static = next(s for s in job["steps"] if s.get("name") == "Daemon static HTTP parity")
@@ -572,12 +587,12 @@ def test_daemon_artifact_is_built_once_and_shared_with_graph():
               if "cargo build" in step.get("run", "") and
               "-p pseudolife-daemon" in step["run"]]
     assert len(builds) == 1
-    assert builds[0] in jobs["candidate"]["steps"]
+    assert builds[0] in jobs["candidate-harness"]["steps"]
     words = commands(builds[0]["run"])[0]
     assert {"--locked", "--release", "--bins"} <= set(words)
     assert {"graph-harness", "mutants"} <= set(words[words.index("--features") + 1].split(","))
-    upload = next(s for s in jobs["candidate"]["steps"]
-                  if s.get("with", {}).get("name") == "rust-shim-${{ runner.os }}")
+    upload = next(s for s in jobs["candidate-harness"]["steps"]
+                  if s.get("with", {}).get("name") == "rust-shim-harness-${{ runner.os }}")
     for binary in ("pseudolife-daemon", "graph-contract"):
         for suffix in ("", ".exe"):
             assert f"rust/target/release/{binary}{suffix}" in upload["with"]["path"].splitlines()
@@ -963,11 +978,14 @@ def test_scope_gates_every_heavy_job_and_fails_safe():
     # would also cover scope. Parity checks need scope for their matrix, so a
     # failed scope fails them (and the gate) instead of skipping them.
     # The shards read nothing from the Rust job; the gate still needs it.
-    assert jobs["parity-checks"]["needs"] == ["scope", "candidate", "fixtures"]
+    assert jobs["parity-checks"]["needs"] == ["scope", "candidate", "candidate-harness", "fixtures"]
     assert jobs["parity-checks"]["if"].startswith("${{ !cancelled() && ")
     assert jobs["parity-checks"]["if"].endswith(
-        "&& needs.candidate.result == 'success' && needs.fixtures.result == 'success' }}")
+        "&& needs.candidate.result == 'success' && needs.candidate-harness.result == 'success' "
+        "&& needs.fixtures.result == 'success' }}")
     assert jobs["fixtures"]["needs"] == "scope"
+    assert jobs["candidate-harness"]["needs"] == "scope"
+    assert jobs["candidate-harness"]["if"] == jobs["candidate"]["if"]
     assert jobs["fixtures"]["if"] == gated % ("== 'ci'", " && needs.scope.outputs.full != 'false'")
     assert "rust" in jobs["parity"]["needs"]
     assert jobs["source-mutants"]["needs"] == ["candidate"]
@@ -1049,7 +1067,7 @@ def test_graph_postgres_initialization_pins_linux_locale():
 @pytest.mark.parametrize("features", ["mutants", "principal-harness", ""])
 def test_daemon_artifact_retains_both_harness_features(monkeypatch, features):
     changed = copy.deepcopy(workflow())
-    step = next(s for s in changed["jobs"]["candidate"]["steps"]
+    step = next(s for s in changed["jobs"]["candidate-harness"]["steps"]
                 if s.get("name") == "Build embedding candidate")
     invocation = commands(step["run"])[0]
     original = invocation[invocation.index("--features") + 1]
@@ -1150,10 +1168,10 @@ def test_dream_reuses_candidate_and_checks_cancel_control():
     # log; label it, or it reads as a failure (runs 39033993990, 39088038765).
     label = step["run"].index("the test below MUST fail (expected)")
     assert label < step["run"].index("Get-Content -Tail 20 $cancelLog")
-    build = next(s for s in jobs["candidate"]["steps"] if s.get("name") == "Build embedding candidate")
+    build = next(s for s in jobs["candidate-harness"]["steps"] if s.get("name") == "Build embedding candidate")
     words = commands(build["run"])[0]
     assert "contract-harness" in words[words.index("--features") + 1].split(",")
-    upload = next(s for s in jobs["candidate"]["steps"] if s.get("uses") == "actions/upload-artifact@v4")
+    upload = next(s for s in jobs["candidate-harness"]["steps"] if s.get("uses") == "actions/upload-artifact@v4")
     assert {"rust/target/release/dream-contract", "rust/target/release/dream-contract.exe"} <= set(upload["with"]["path"].splitlines())
 
 
@@ -1419,7 +1437,7 @@ def test_selfhosted_lane_runs_the_hosted_shards_unchanged():
     assert lane["strategy"]["matrix"]["runner"] == (
         "${{ fromJSON(vars.PARITY_SELFHOSTED_RUNNERS || '[\"off\"]') }}")
     assert lane["strategy"]["fail-fast"] is False
-    assert lane["needs"] == hosted["needs"] == ["scope", "candidate", "fixtures"]
+    assert lane["needs"] == hosted["needs"] == ["scope", "candidate", "candidate-harness", "fixtures"]
     # Only the maintainer's registered runners: one label per machine.
     assert lane["runs-on"] == ["self-hosted", "pseudolife-parity-${{ matrix.runner }}"]
     assert lane["timeout-minutes"] >= 210 + int(lane["env"]["PARITY_YIELD_MINUTES"])
@@ -1441,7 +1459,8 @@ def test_selfhosted_lane_never_touches_a_required_check():
         "${{ !cancelled() && (github.event_name == 'schedule' || "
         "(github.event_name == 'workflow_dispatch' && inputs.mode == 'ci')) "
         "&& vars.PARITY_SELFHOSTED_RUNNERS != '' "
-        "&& needs.candidate.result == 'success' && needs.fixtures.result == 'success' }}")
+        "&& needs.candidate.result == 'success' && needs.candidate-harness.result == 'success' "
+        "&& needs.fixtures.result == 'success' }}")
     assert "pull_request" not in lane["if"] and "'push'" not in lane["if"]
 
 
@@ -1535,9 +1554,12 @@ def test_selfhosted_gate_runs_only_on_a_free_lease(tmp_path, case, sequence, ove
 
 # --- the required gate holds only deterministic Windows work ---
 
-LIVE_EVENTS = ("${{ !cancelled() && (github.event_name == 'push' || github.event_name == 'schedule' || "
+# The nightly and manual CI only: since 2026-10-24 (maintainer decision) a
+# master push no longer spends a Windows runner on this non-gating job.
+LIVE_EVENTS = ("${{ !cancelled() && (github.event_name == 'schedule' || "
                "(github.event_name == 'workflow_dispatch' && inputs.mode == 'ci')) "
-               "&& needs.candidate.result == 'success' && needs.fixtures.result == 'success' }}")
+               "&& needs.candidate.result == 'success' && needs.candidate-harness.result == 'success' "
+               "&& needs.fixtures.result == 'success' }}")
 
 
 def test_live_comparisons_run_in_their_own_suite():
@@ -1559,12 +1581,12 @@ def test_linux_requires_the_live_comparisons_and_windows_reports_them():
     jobs = workflow()["jobs"]
     matrix = jobs["parity-checks"]["strategy"]["matrix"]
     assert LIVE_SUITE in matrix["suite"] and "ubuntu-latest" in matrix["os"]
-    assert matrix["exclude"] == WINDOWS_LIVE_EXCLUDE
+    assert matrix["exclude"] == STATIC_EXCLUDE
     live = jobs["parity-live"]
     assert live["strategy"]["matrix"] == {"os": ["windows-latest"], "suite": [LIVE_SUITE]}
     assert live["strategy"]["fail-fast"] is False
     assert live["steps"] == jobs["parity-checks"]["steps"]
-    assert live["needs"] == ["candidate", "fixtures"]
+    assert live["needs"] == ["candidate", "candidate-harness", "fixtures"]
     assert live["runs-on"] == "${{ matrix.os }}"
     assert 0 < live["timeout-minutes"] <= 60
 
@@ -1609,11 +1631,12 @@ def cached_jobs():
 
 def test_every_rust_cache_is_saved_on_failure_and_keeps_the_lockfile_hash():
     jobs = cached_jobs()
-    assert set(jobs) >= {"rust", "fixtures", "candidate", "parity-checks", "source-mutants"}
+    assert set(jobs) >= {"rust", "fixtures", "candidate", "candidate-harness", "parity-checks", "source-mutants"}
     for name, job in jobs.items():
         cache = next(step for step in job["steps"] if step.get("uses") == "Swatinem/rust-cache@v2")
-        # The fixtures job only reads the Rust job's cache and never saves.
-        if name == "fixtures":
+        # These only read another job's cache (the Rust job's, the
+        # candidate's) and never save.
+        if name in ("fixtures", "candidate-harness"):
             assert cache["with"]["save-if"] is False
             continue
         assert cache["with"]["cache-on-failure"] is True, name

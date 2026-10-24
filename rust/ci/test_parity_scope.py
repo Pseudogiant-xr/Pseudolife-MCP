@@ -12,7 +12,9 @@ from parity_scope import ALL, FLOOR, ROW_SUITES, SHARDS, SHIM_COMMANDS, SUITES, 
 from test_workflow import CODE_CHANGES, DOCS_ONLY_CHANGES, W1C_SUITES
 
 ROOT = Path(__file__).resolve().parents[2]
-WINDOWS_LIVE = [{"os": "windows-latest", "suite": "cli-live"}]
+# Windows' live comparisons, and the H5 suites each OS runs in or around
+# the Linux h5-light composite.
+STATIC = [dict(pair) for pair in parity_scope.STATIC_EXCLUDE]
 
 
 def raw_workflow():
@@ -57,7 +59,9 @@ def test_an_unreadable_or_empty_pull_request_diff_runs_every_suite(files):
 ])
 def test_a_pull_request_runs_the_floor_and_what_it_reaches(files, extra):
     suites, _ = select("pull_request", files)
-    assert set(suites) == set(FLOOR) | extra
+    # Linux runs h5-audit, h5-backup and h5-background inside h5-light.
+    light = {"h5-light"} if extra & set(parity_scope.LINUX_LIGHT) else set()
+    assert set(suites) == set(FLOOR) | extra | light
     assert suites == [suite for suite in SUITES if suite in suites]
 
 
@@ -251,7 +255,7 @@ def test_the_output_is_one_line_of_json(tmp_path, monkeypatch, capsys):
                                "w1c-doctor", "h5-w1a"]
     printed = capsys.readouterr().out
     assert "rust/cli_harness/rows/doctor.py -> w1c-doctor" in printed
-    assert "running 8 of 17 suites" in printed
+    assert "running 8 of 18 suites" in printed
 
 
 @pytest.mark.parametrize("event, files", [("push", ["rust/cli_harness/rows/doctor.py"]),
@@ -261,7 +265,7 @@ def test_the_output_names_every_suite_when_it_runs_them_all(tmp_path, monkeypatc
     monkeypatch.setattr(parity_scope, "changed_files", lambda: files)
     assert parity_scope.main(["--event", event, "--github-output", str(output)]) == 0
     values = json.loads(output.read_text(encoding="utf-8").removeprefix("parity="))
-    assert values == {"suite": SUITES, "include": SHARDS, "exclude": WINDOWS_LIVE}
+    assert values == {"suite": SUITES, "include": SHARDS, "exclude": STATIC}
 
 
 def test_the_scope_job_publishes_the_matrix_and_both_parity_lanes_use_it():
@@ -285,7 +289,8 @@ def test_the_scope_job_publishes_the_matrix_and_both_parity_lanes_use_it():
         assert values["include"] == parity_scope.INCLUDE_EXPRESSION, name
     # Only the hosted matrix has an os axis to exclude pairs from.
     assert jobs["parity-checks"]["strategy"]["matrix"]["exclude"] == parity_scope.EXCLUDE_EXPRESSION
-    assert "exclude" not in jobs["parity-selfhosted"]["strategy"]["matrix"]
+    # Each self-hosted runner runs h5-light's three suites as their own shards.
+    assert jobs["parity-selfhosted"]["strategy"]["matrix"]["exclude"] == [{"suite": "h5-light"}]
     # The Windows live job is one fixed shard, not chosen per diff.
     assert jobs["parity-live"]["strategy"]["matrix"]["suite"] == ["cli-live"]
 
@@ -294,7 +299,7 @@ def test_resolve_expands_the_full_matrix_once():
     workflow = parity_scope.resolve(raw_workflow())
     hosted = workflow["jobs"]["parity-checks"]["strategy"]["matrix"]
     assert hosted["suite"] == SUITES and hosted["include"] == SHARDS
-    assert hosted["exclude"] == WINDOWS_LIVE
+    assert hosted["exclude"] == STATIC
     hosted["suite"].remove("eval")
     # Idempotent: an already-expanded (or mutated) matrix stays as it is.
     assert parity_scope.resolve(workflow)["jobs"]["parity-checks"]["strategy"]["matrix"]["suite"] == SUITES[1:]
@@ -332,30 +337,30 @@ def pairs_of(combos):
 
 
 FULL_PAIRS = {(os_name, suite) for os_name in ("ubuntu-latest", "windows-latest") for suite in SUITES} \
-    - {("windows-latest", "cli-live")}
+    - {(pair["os"], pair["suite"]) for pair in STATIC}
 
 
 def test_a_push_with_nothing_passed_runs_the_full_matrix():
     values = parity_scope.pruned(SUITES, [], "push")
-    assert values == {"suite": SUITES, "include": SHARDS, "exclude": WINDOWS_LIVE}
+    assert values == {"suite": SUITES, "include": SHARDS, "exclude": STATIC}
     assert pairs_of(expand(values)) == FULL_PAIRS
 
 
 def test_a_push_leaves_out_exactly_the_pairs_its_batch_passed():
-    passed = checks(("windows-latest", "h5-audit"), ("ubuntu-latest", "w1c-doctor"),
+    passed = checks(("windows-latest", "h5-w1a"), ("ubuntu-latest", "w1c-doctor"),
                     ("windows-latest", "w1c-doctor"))
     values = parity_scope.pruned(SUITES, passed, "push")
     combos = expand(values)
-    assert pairs_of(combos) == FULL_PAIRS - {("windows-latest", "h5-audit"), ("ubuntu-latest", "w1c-doctor"),
+    assert pairs_of(combos) == FULL_PAIRS - {("windows-latest", "h5-w1a"), ("ubuntu-latest", "w1c-doctor"),
                                              ("windows-latest", "w1c-doctor")}
     # A suite passed on both systems leaves the suite list and its include
     # entry, or GitHub would add an os-less job for the entry.
     assert "w1c-doctor" not in values["suite"]
     assert "w1c-doctor" not in {entry["suite"] for entry in values["include"]}
     # A suite passed on one system keeps its include for the other.
-    assert {"os": "windows-latest", "suite": "h5-audit"} in values["exclude"]
-    ubuntu_audit = next(c for c in combos if c["suite"] == "h5-audit")
-    assert ubuntu_audit["os"] == "ubuntu-latest" and ubuntu_audit["job_timeout"] == 36
+    assert {"os": "windows-latest", "suite": "h5-w1a"} in values["exclude"]
+    ubuntu_w1a = next(c for c in combos if c["suite"] == "h5-w1a")
+    assert ubuntu_w1a["os"] == "ubuntu-latest" and ubuntu_w1a["job_timeout"] == 56
     assert all("os" in combo for combo in combos)
 
 
@@ -413,14 +418,34 @@ def run_main(tmp_path, *arguments):
 
 
 def test_main_takes_the_batch_list_on_a_push(tmp_path, capsys):
-    passed = json.dumps(checks(("ubuntu-latest", "h5-backup"), ("windows-latest", "h5-backup"),
+    passed = json.dumps(checks(("ubuntu-latest", "h5-light"), ("windows-latest", "h5-backup"),
                                ("windows-latest", "cli")))
     values = run_main(tmp_path, "--event", "push", "--batch-passed", passed)
-    assert "h5-backup" not in values["suite"]
+    assert "h5-backup" not in values["suite"] and "h5-light" not in values["suite"]
     assert {"os": "windows-latest", "suite": "cli"} in values["exclude"]
     printed = capsys.readouterr().out
     assert ("parity: the merged batch passed these on the same tree, so they are left out: "
-            "ubuntu-latest/h5-backup, windows-latest/cli, windows-latest/h5-backup") in printed
+            "ubuntu-latest/h5-light, windows-latest/cli, windows-latest/h5-backup") in printed
+
+
+def test_linux_runs_the_short_h5_suites_inside_h5_light():
+    from coverage_plan import COMPOSITES
+    assert COMPOSITES["h5-light"] == parity_scope.LINUX_LIGHT
+    pairs = pairs_of(expand(parity_scope.pruned(SUITES, [], "push")))
+    assert ("ubuntu-latest", "h5-light") in pairs and ("windows-latest", "h5-light") not in pairs
+    for suite in parity_scope.LINUX_LIGHT:
+        assert ("windows-latest", suite) in pairs and ("ubuntu-latest", suite) not in pairs
+    shard = next(entry for entry in SHARDS if entry["suite"] == "h5-light")
+    budgets = {entry["suite"]: entry["h5_timeout"] for entry in SHARDS if entry["suite"] in parity_scope.LINUX_LIGHT}
+    assert shard["h5_timeout"] >= sum(budgets.values())
+
+
+@pytest.mark.parametrize("suite", ["h5-audit", "h5-backup", "h5-background"])
+def test_a_pull_request_reaching_a_short_h5_suite_runs_h5_light(suite):
+    row = {"h5-audit": "rust/cli_harness/rows/audit.py", "h5-backup": "rust/cli_harness/rows/backup.py"}.get(suite)
+    files = [row] if row else ["rust/daemon/src/server.rs"]
+    suites, _ = select("pull_request", files)
+    assert suite in suites and "h5-light" in suites
 
 
 @pytest.mark.parametrize("raw", ["", "[]", "not json", '{"a": 1}', "[1, 2]", '"text"'])
