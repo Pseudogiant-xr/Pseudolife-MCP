@@ -68,6 +68,18 @@ CASES = (
     "stale-entry-dims", "stale-cortex-dims", "stale-combined-dims",
     "world-lesson-dims-accepted", *FIDELITY_CASES,
 )
+# CI runs the matrix as two parity shards (rust.yml's cli-daemon and
+# cli-daemon-2): serial cells cost about 29 s each on hosted Windows, 31 cells
+# and 16 minutes in one shard (batch run 40047950017, 2026-10-24). Part 1 is
+# the first FIRST_PART cases, beside schema parity's 4.7 minutes; part 2 the
+# rest, with every mutant, the clock retry and the writer guard
+# (startup_ci.py --part).
+FIRST_PART = 12
+
+
+def part_cases(part):
+    """The cases one CI part runs; together the parts are CASES."""
+    return CASES[:FIRST_PART] if part == 1 else CASES[FIRST_PART:]
 EPISODES = tuple(f"{index + 1:032x}" for index in range(3))
 REQUIRED_FAILURES = {
     "required-loader-failure": ("lessons", "about", "lesson", "lesson-loader-about"),
@@ -610,6 +622,7 @@ def main(argv=None):
     parser.add_argument("--rust-test-bin", type=Path)
     parser.add_argument("--out", type=Path)
     parser.add_argument("--only", nargs="+", choices=CASES)
+    parser.add_argument("--part", type=int, choices=(1, 2), help="one CI part's cases (part_cases)")
     parser.add_argument("--mutants", action="store_true")
     golden_mode = parser.add_mutually_exclusive_group()
     golden_mode.add_argument("--record-goldens", action="store_true")
@@ -624,8 +637,10 @@ def main(argv=None):
         return 0
     if args.rust_test_bin is None or args.out is None:
         parser.error("--rust-test-bin and --out are required")
-    if args.record_goldens and args.only:
+    if args.record_goldens and (args.only or args.part):
         parser.error("--record-goldens requires the complete startup matrix")
+    if args.only and args.part:
+        parser.error("--only and --part select cases differently; give one")
     binary = args.rust_test_bin.resolve()
     if not binary.is_file():
         parser.error("--rust-test-bin must name the built daemon Cargo test executable")
@@ -635,7 +650,7 @@ def main(argv=None):
     number = time.time_ns()
     golden_path = HERE / "goldens" / "startup-hydration.json"
     goldens = json.loads(golden_path.read_text()) if args.check_goldens else None
-    for index, case in enumerate(args.only or CASES):
+    for index, case in enumerate(args.only or (part_cases(args.part) if args.part else CASES)):
         result = {"case": case}
         payload["cells"].append(result)
         try:

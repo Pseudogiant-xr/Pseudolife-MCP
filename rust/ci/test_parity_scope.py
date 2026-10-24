@@ -118,8 +118,8 @@ def test_the_import_scan_follows_test_helpers_transitively(tmp_path, monkeypatch
 
 def test_the_floor_is_cli_w1a_and_eval():
     # The brief from the 2026-10-20 root-cause report: cli, h5-w1a and eval
-    # on every Rust pull request; cli is now three shards.
-    assert set(FLOOR) == {"eval", "cli", "cli-daemon", "cli-live", "h5-w1a"}
+    # on every Rust pull request; cli is now five shards (2026-10-24).
+    assert set(FLOOR) == {"eval", "cli", "cli-store", "cli-daemon", "cli-daemon-2", "cli-live", "h5-w1a"}
     assert set(FLOOR) <= set(SUITES)
 
 
@@ -247,10 +247,11 @@ def test_the_output_is_one_line_of_json(tmp_path, monkeypatch, capsys):
     lines = output.read_text(encoding="utf-8").splitlines()
     assert len(lines) == 1 and lines[0].startswith("parity=")
     values = json.loads(lines[0].removeprefix("parity="))
-    assert values["suite"] == ["eval", "cli", "cli-daemon", "cli-live", "w1c-doctor", "h5-w1a"]
+    assert values["suite"] == ["eval", "cli", "cli-store", "cli-daemon", "cli-daemon-2", "cli-live",
+                               "w1c-doctor", "h5-w1a"]
     printed = capsys.readouterr().out
     assert "rust/cli_harness/rows/doctor.py -> w1c-doctor" in printed
-    assert "running 6 of 14 suites" in printed
+    assert "running 8 of 17 suites" in printed
 
 
 @pytest.mark.parametrize("event, files", [("push", ["rust/cli_harness/rows/doctor.py"]),

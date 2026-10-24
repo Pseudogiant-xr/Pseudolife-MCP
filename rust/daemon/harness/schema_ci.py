@@ -2,6 +2,9 @@
 
 The caller supplies the test-login environment from ``lease_ci.py`` and may
 set ``CARGO_TARGET_DIR``. No PostgreSQL service is provisioned here.
+``--build-only`` builds the daemon test executable and writes its path to
+``--test-bin-out`` without running anything: CI builds it once per OS in the
+fixtures job, and the parity shards run it with ``--no-build``.
 """
 from __future__ import annotations
 
@@ -45,7 +48,9 @@ def test_artifact(output: str) -> Path:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--out", required=True, type=Path, help="schema evidence JSON path")
+    parser.add_argument("--out", type=Path, help="schema evidence JSON path (required unless --build-only)")
+    parser.add_argument("--build-only", action="store_true",
+                        help="build the daemon test executable and write its path to --test-bin-out")
     parser.add_argument("--no-build", action="store_true", help="use an existing daemon test executable")
     parser.add_argument("--rust-test-bin", type=Path, help="test executable required with --no-build")
     parser.add_argument("--test-bin-out", type=Path, help="write the selected executable path for another parity step")
@@ -53,11 +58,15 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.no_build != (args.rust_test_bin is not None):
         parser.error("--no-build and --rust-test-bin must be supplied together")
+    if args.build_only and (args.no_build or args.out or args.record_goldens or not args.test_bin_out):
+        parser.error("--build-only takes only --test-bin-out")
+    if not args.build_only and args.out is None:
+        parser.error("--out is required")
 
     env = dict(os.environ, PL_HARNESS_SLICE="pgs")
     env["PYTHONPATH"] = str(REPO) + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
     try:
-        checks = [
+        checks = [] if args.build_only else [
             [sys.executable, str(HERE / "gen_schema_sql.py"), "--check"],
             [sys.executable, "-m", "unittest", "discover", "-s", str(HERE),
              "-p", "test_schema_*.py"],
@@ -93,6 +102,8 @@ def main(argv: list[str] | None = None) -> int:
             handoff = args.test_bin_out.resolve()
             handoff.parent.mkdir(parents=True, exist_ok=True)
             handoff.write_text(str(binary) + "\n", encoding="utf-8")
+        if args.build_only:
+            return 0
 
         output = args.out.resolve()
         output.parent.mkdir(parents=True, exist_ok=True)
