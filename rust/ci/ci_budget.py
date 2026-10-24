@@ -30,7 +30,6 @@ import re
 import statistics
 import subprocess
 import sys
-import types
 from datetime import datetime
 from pathlib import Path
 
@@ -504,15 +503,16 @@ def _contents(path: str, sha: str) -> str:
 
 def definitions_at(name: str, sha: str) -> dict[str, str]:
     """The fingerprints of the jobs a pull request starts in this workflow
-    as it stood at ``sha`` (rust.yml resolved with that commit's
-    parity_scope.py)."""
+    as it stood at ``sha``. The YAML is only parsed, never run, and rust.yml
+    is resolved with this checkout's parity_scope: a run may come from any
+    branch or fork. A shard that commit's parity_scope split differently
+    shows up as job names these runs lack, which measure refuses."""
     import yaml
     workflow = yaml.safe_load(_contents(f".github/workflows/{name}", sha))
     if name == "rust.yml":
-        scope = types.ModuleType("parity_scope_at")
-        scope.__file__ = str(ROOT / "rust/ci/parity_scope.py")
-        exec(compile(_contents("rust/ci/parity_scope.py", sha), f"parity_scope.py@{sha}", "exec"), scope.__dict__)
-        workflow = scope.resolve(workflow)
+        sys.path.insert(0, str(ROOT / "rust/ci"))
+        from parity_scope import resolve
+        workflow = resolve(workflow)
     return fingerprints(workflow)
 
 
