@@ -410,31 +410,67 @@ def test_nothing_is_probed_without_a_rewritten_loopback_url(bash, tmp_path, mode
 # the host, the install said Healthy and Done, and dreams paused for good
 # (CachyOS with ufw enabled, 2026-10-25).
 
+# A synthetic compose subnet (the tree guard admits 10.0.0.x).
+SUBNET = "10.0.0.0/24"
+UFW_RULE = ("sudo ufw allow from 10.0.0.0/24 to 172.17.0.1 port 8082 proto tcp "
+            "comment 'pseudolife dream shim'")
+
+
+def _ufw_files(shell: _Shell, *, enabled: str | None = "yes",
+               policy: str | None = "DROP") -> str:
+    """ufw.conf and /etc/default/ufw as the block reads them; None leaves
+    a file missing."""
+    conf, defaults = shell.tmp / "ufw.conf", shell.tmp / "ufw-defaults"
+    if enabled is not None:
+        conf.write_text(f"# ufw.conf\nENABLED={enabled}\nLOGLEVEL=low\n", encoding="utf-8")
+    if policy is not None:
+        defaults.write_text(f'IPV6=yes\nDEFAULT_INPUT_POLICY="{policy}"\n'
+                            'DEFAULT_OUTPUT_POLICY="ACCEPT"\n', encoding="utf-8")
+    return f"UFW_CONF='{shell.path(conf)}'\nUFW_DEFAULTS='{shell.path(defaults)}'\n"
+
+
 def _shim_probe(shell: _Shell, *, mode: str = "claude-only", port: str = "8082",
-                container: int = 1, host_up: bool = True, ufw: bool = False,
-                uname: str = "Linux"):
+                container: int = 1, host_up: bool = True, ufw: str = "drop",
+                uname: str = "Linux", subnet: str = SUBNET, rule: str = "ask",
+                sudo_exit: int = 0, ip_ok: bool = True):
+    """The probe block with stub docker, curl, ip, sudo and uname, under the
+    installer's own `set -euo pipefail`. The container's request fails
+    (``container``) until the stub sudo has added a rule."""
     _stub(shell.bin / "docker",
-          "printf 'docker|%s\\n' \"$*\" >>\"$CALL_LOG\"\nexit \"$FAKE_DOCKER_EXIT\"\n")
+          "printf 'docker|%s\\n' \"$*\" >>\"$CALL_LOG\"\n"
+          "case \"$1\" in\n"
+          "  inspect) printf 'pseudolife-mcp_default \\n' ;;\n"
+          "  network) [ -z \"$FAKE_SUBNET\" ] || printf '%s \\n' \"$FAKE_SUBNET\" ;;\n"
+          "  exec) [ -e \"$CALL_LOG.ruled\" ] && exit 0; exit \"$FAKE_DOCKER_EXIT\" ;;\n"
+          "esac\nexit 0\n")
+    _stub(shell.bin / "sudo",
+          "printf 'sudo|%s\\n' \"$*\" >>\"$CALL_LOG\"\n"
+          "[ \"$FAKE_SUDO_EXIT\" = 0 ] || exit \"$FAKE_SUDO_EXIT\"\n"
+          ": >\"$CALL_LOG.ruled\"\n")
     _stub(shell.bin / "uname", "printf '%s\\n' \"$FAKE_UNAME\"\n")
+    _stub(shell.bin / "ip",
+          "[ \"$FAKE_IP_OK\" = 1 ] || exit 1\n"
+          "printf '    inet 172.17.0.1/16 scope global docker0\\n'\n")
+    files = _ufw_files(shell, **{"drop": {}, "accept": {"policy": "ACCEPT"},
+                                 "off": {"enabled": None, "policy": None}}[ufw])
     claude = "1" if mode.startswith("claude") else ""
     codex = "1" if mode.startswith("openai") else ""
     return shell.run(
-        f"EXTRACTOR='{mode}'\nSHIM_PORT={port}\n"
+        f"EXTRACTOR='{mode}'\nSHIM_PORT={port}\nFIREWALL_RULE={rule}\n"
         f"claude_shim_mode='{claude}'\ncodex_shim_mode='{codex}'\n"
-        + _block("endpoint container probe")
-        # The host's own answers, which the block reads through these.
-        + "docker_bridge_address() { printf '172.17.0.1\\n'; }\n"
-        + f"ufw_enabled() {{ return {0 if ufw else 1}; }}\n"
+        + _block("endpoint container probe") + files
         + "sleep() { :; }\n"
         + "shim_container_probe\nprintf 'STATE=%s\\n' \"$ENDPOINT_CONTAINER\"\n"
         + "describe_endpoint_container\n",
+        strict="set -euo pipefail",
         extra_env={"FAKE_DOCKER_EXIT": str(container), "FAKE_UNAME": uname,
                    "FAKE_CURL_EXIT": "0" if host_up else "7",
-                   "FAKE_HEALTH": '{"status": "ok"}'})
+                   "FAKE_HEALTH": '{"status": "ok"}', "FAKE_SUBNET": subnet,
+                   "FAKE_SUDO_EXIT": str(sudo_exit), "FAKE_IP_OK": "1" if ip_ok else "0"})
 
 
-def _docker_calls(shell: _Shell) -> list[str]:
-    return [line for line in shell.logged() if line.startswith("docker|")]
+def _calls(shell: _Shell, tool: str, sub: str = "") -> list[str]:
+    return [line for line in shell.logged() if line.startswith(f"{tool}|{sub}")]
 
 
 @BASH
@@ -442,46 +478,135 @@ def test_a_shim_the_container_reaches_passes(bash, tmp_path):
     shell = _Shell(bash, tmp_path)
     proc = _shim_probe(shell, container=0)
     assert proc.returncode == 0, proc.stderr
-    log = shell.calls.read_text(encoding="utf-8")
-    assert log.startswith("docker|exec pseudolife-mcp-daemon python")
-    assert "http://host.docker.internal:8082/v1" in log
-    assert len(_docker_calls(shell)) == 1
+    [call] = _calls(shell, "docker", "exec")
+    assert call.startswith("docker|exec pseudolife-mcp-daemon python")
+    assert "http://host.docker.internal:8082/v1" in shell.calls.read_text(encoding="utf-8")
     assert "STATE=reachable" in proc.stdout
     assert "WARNING" not in proc.stderr
+    assert not _calls(shell, "sudo")
     assert re.search(r"\[x\] Extractor shim", proc.stdout)
 
 
 @BASH
-def test_ufw_dropping_the_container_names_the_rule_that_lets_it_through(bash, tmp_path):
+def test_ufw_names_the_rule_for_the_daemons_network_only(bash, tmp_path):
+    """The rule names the daemon's own compose subnet, one address and one
+    port: never Docker's whole pool, for hosts kept locked down on purpose."""
     shell = _Shell(bash, tmp_path)
-    proc = _shim_probe(shell, ufw=True)
+    proc = _shim_probe(shell)
     assert proc.returncode == 0, proc.stderr
     # The autostart unit started moments ago: a few tries before warning.
-    assert len(_docker_calls(shell)) == 3
+    assert len(_calls(shell, "docker", "exec")) == 3
     assert "STATE=unreachable" in proc.stdout
-    assert ("sudo ufw allow from 172.16.0.0/12 to 172.17.0.1 port 8082 proto tcp"
-            in proc.stderr)
+    assert UFW_RULE in proc.stderr
+    assert "/12" not in proc.stderr
     assert "dreams pause" in proc.stderr
     assert re.search(r"\[!\] Extractor shim", proc.stdout)
 
 
 @BASH
-def test_another_firewall_is_named_without_a_ufw_rule(bash, tmp_path):
-    proc = _shim_probe(_Shell(bash, tmp_path), mode="claude-fallback")
+def test_an_unattended_run_skips_the_rule_and_says_how_to_add_it(bash, tmp_path):
+    shell = _Shell(bash, tmp_path)
+    proc = _shim_probe(shell, rule="ask")
+    assert proc.returncode == 0, proc.stderr
+    assert not _calls(shell, "sudo")
+    assert "no terminal to ask on" in proc.stdout and "--firewall-rule yes" in proc.stdout
+
+
+@BASH
+def test_firewall_rule_no_never_runs_sudo(bash, tmp_path):
+    shell = _Shell(bash, tmp_path)
+    proc = _shim_probe(shell, rule="no")
+    assert proc.returncode == 0, proc.stderr
+    assert not _calls(shell, "sudo")
+    assert "Not added (--firewall-rule no)" in proc.stdout
+    assert "STATE=unreachable" in proc.stdout
+
+
+@BASH
+def test_firewall_rule_yes_adds_the_rule_and_checks_it_worked(bash, tmp_path):
+    shell = _Shell(bash, tmp_path)
+    proc = _shim_probe(shell, rule="yes")
+    assert proc.returncode == 0, proc.stderr
+    [sudo] = _calls(shell, "sudo")
+    assert sudo == ("sudo|ufw allow from 10.0.0.0/24 to 172.17.0.1 port 8082 proto tcp "
+                    "comment pseudolife dream shim")
+    # The probe after the rule is what says it happened.
+    assert len(_calls(shell, "docker", "exec")) == 4
+    assert "STATE=reachable" in proc.stdout
+    assert "Added the ufw rule" in proc.stdout
+    assert re.search(r"\[x\] Extractor shim", proc.stdout)
+
+
+@BASH
+def test_a_refused_sudo_leaves_the_command_to_run(bash, tmp_path):
+    shell = _Shell(bash, tmp_path)
+    proc = _shim_probe(shell, rule="yes", sudo_exit=1)
+    assert proc.returncode == 0, proc.stderr
+    assert "STATE=unreachable" in proc.stdout
+    assert "the ufw rule was not added" in proc.stderr
+    assert UFW_RULE in proc.stderr
+
+
+@BASH
+def test_an_unreadable_subnet_never_falls_back_to_a_broad_rule(bash, tmp_path):
+    shell = _Shell(bash, tmp_path)
+    proc = _shim_probe(shell, subnet="", rule="yes")
+    assert proc.returncode == 0, proc.stderr
+    assert not _calls(shell, "sudo")
+    assert "docker network inspect pseudolife-mcp_default" in proc.stderr
+    assert "from <subnet> to 172.17.0.1 port 8082" in proc.stderr
+
+
+@pytest.mark.parametrize("ufw", ["accept", "off"])
+@BASH
+def test_a_ufw_that_lets_the_traffic_through_is_not_blamed(bash, tmp_path, ufw):
+    """Near miss: ufw enabled with an ACCEPT input policy, or not enabled,
+    drops nothing, so the cause is another firewall and no rule is offered."""
+    shell = _Shell(bash, tmp_path)
+    proc = _shim_probe(shell, mode="claude-fallback", ufw=ufw, rule="yes")
     assert proc.returncode == 0, proc.stderr
     assert "firewall" in proc.stderr and "172.17.0.1 port 8082/tcp" in proc.stderr
-    assert "ufw allow" not in proc.stderr
+    assert "ufw" not in proc.stderr
+    assert not _calls(shell, "sudo")
     assert "dreams fall back to the sidecar" in proc.stderr
 
 
 @BASH
 def test_a_shim_that_is_down_on_the_host_points_at_its_unit_not_the_firewall(bash, tmp_path):
-    proc = _shim_probe(_Shell(bash, tmp_path), mode="openai-only", port="8086",
-                       host_up=False, ufw=True)
+    shell = _Shell(bash, tmp_path)
+    proc = _shim_probe(shell, mode="openai-only", port="8086", host_up=False, rule="yes")
     assert proc.returncode == 0, proc.stderr
     assert "Codex shim" in proc.stderr
     assert "systemctl --user status pseudolife-codex-shim.service" in proc.stderr
     assert "ufw" not in proc.stderr
+    assert not _calls(shell, "sudo")
+
+
+@BASH
+def test_a_host_without_docker0_falls_back_instead_of_aborting(bash, tmp_path):
+    """`ip` failing (no docker0, no iproute2) under the installer's pipefail
+    once aborted the install silently, before the warning and summary."""
+    shell = _Shell(bash, tmp_path)
+    proc = _shim_probe(shell, ip_ok=False)
+    assert proc.returncode == 0, proc.stderr
+    assert UFW_RULE in proc.stderr
+    assert re.search(r"\[!\] Extractor shim", proc.stdout)
+
+
+@pytest.mark.parametrize("enabled,policy,drops", [
+    ("yes", "DROP", True), ("yes", "REJECT", True), ("yes", None, True),
+    ("yes", "ACCEPT", False), ("no", "DROP", False), (None, "DROP", False)])
+@BASH
+def test_ufw_drops_input_reads_the_switch_and_the_policy(bash, tmp_path, enabled, policy, drops):
+    """Unprivileged: ufw.conf's ENABLED and /etc/default/ufw's input policy.
+    A defaults file this user cannot read keeps ufw's default, DROP."""
+    shell = _Shell(bash, tmp_path)
+    proc = shell.run(_block("endpoint container probe")
+                     + _ufw_files(shell, enabled=enabled, policy=policy)
+                     + "if ufw_drops_input; then echo DROPS; else echo PASSES; fi\n",
+                     strict="set -euo pipefail")
+    assert proc.returncode == 0, proc.stderr
+    assert ("DROPS" if drops else "PASSES") in proc.stdout
 
 
 @pytest.mark.parametrize("mode,uname", [("sidecar", "Linux"), ("endpoint", "Linux"),
@@ -491,10 +616,25 @@ def test_the_shim_probe_runs_only_for_a_shim_mode_on_linux(bash, tmp_path, mode,
     """Docker Desktop routes host.docker.internal to this machine's loopback,
     where no bridge firewall stands between the container and the shim."""
     shell = _Shell(bash, tmp_path)
-    proc = _shim_probe(shell, mode=mode, uname=uname)
+    proc = _shim_probe(shell, mode=mode, uname=uname, rule="yes")
     assert proc.returncode == 0, proc.stderr
-    assert not _docker_calls(shell)
+    assert not _calls(shell, "docker")
     assert "Extractor shim" not in proc.stdout
+
+
+def test_the_installer_probes_the_shim_once_the_daemon_is_healthy():
+    text = (ROOT / "ops" / "install.sh").read_text(encoding="utf-8")
+    flow = text.split('step "Healthy: http://127.0.0.1:8765/health', 1)[1]
+    flow = flow.split("\nfi\n", 1)[0]
+    assert "\n    endpoint_container_probe\n    shim_container_probe\n" in flow
+
+
+def test_firewall_rule_is_a_documented_validated_flag():
+    text = (ROOT / "ops" / "install.sh").read_text(encoding="utf-8")
+    usage = text.split("# >>> usage >>>", 1)[1].split("# <<< usage <<<", 1)[0]
+    assert "--firewall-rule ask|yes|no" in usage
+    assert '--firewall-rule) FIREWALL_RULE="$2"; shift 2 ;;' in text
+    assert "invalid --firewall-rule '$FIREWALL_RULE' (ask|yes|no)" in text
 
 
 # -- the compose override the installer owns ------------------------------------

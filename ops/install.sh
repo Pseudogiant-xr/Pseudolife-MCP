@@ -36,6 +36,12 @@
 #                                    hooks an earlier install wrote to
 #                                    ~/.claude/settings.json (default: ask -
 #                                    prompts; unattended runs keep them)
+#   --firewall-rule ask|yes|no       CLI shim modes on Linux, when ufw drops the
+#                                    daemon container's traffic to the shim: add
+#                                    the one ufw rule that lets only the
+#                                    daemon's network reach the shim's port
+#                                    (default: ask - prompts, no by default;
+#                                    unattended runs skip it and print it)
 #   --instructions append|skip|auto  standing memory block (default: auto -
 #                                    prompts only where no briefing hook exists)
 #   --claude-md append|skip          compatibility alias for --instructions
@@ -119,6 +125,7 @@ CODEX_HOOKS=auto
 CODEX_HOOK_TRUST=ask
 CLAUDE_PLUGIN=auto
 CLAUDE_LEGACY_HOOKS=ask
+FIREWALL_RULE=ask
 CLAUDE_MD=""
 INSTRUCTIONS=""
 AGENTS_FILE=""
@@ -151,6 +158,7 @@ while [ $# -gt 0 ]; do
         --codex-hook-trust) CODEX_HOOK_TRUST="$2"; shift 2 ;;
         --claude-plugin) CLAUDE_PLUGIN="$2"; shift 2 ;;
         --claude-legacy-hooks) CLAUDE_LEGACY_HOOKS="$2"; shift 2 ;;
+        --firewall-rule) FIREWALL_RULE="$2"; shift 2 ;;
         --claude-md) CLAUDE_MD="$2"; shift 2 ;;
         --instructions) INSTRUCTIONS="$2"; shift 2 ;;
         --agents-file) AGENTS_FILE="$2"; shift 2 ;;
@@ -292,6 +300,9 @@ case "$CLAUDE_PLUGIN" in auto|skip) ;; *)
 esac
 case "$CLAUDE_LEGACY_HOOKS" in ask|remove|keep) ;; *)
     echo "invalid --claude-legacy-hooks '$CLAUDE_LEGACY_HOOKS' (ask|remove|keep)" >&2; exit 2 ;;
+esac
+case "$FIREWALL_RULE" in ask|yes|no) ;; *)
+    echo "invalid --firewall-rule '$FIREWALL_RULE' (ask|yes|no)" >&2; exit 2 ;;
 esac
 
 # Both are needed from here on: the client-only mode block asks this
@@ -2952,12 +2963,55 @@ except urllib.error.HTTPError:
 # to this machine's loopback, with no bridge firewall in between, so the
 # shim is probed on Linux only.
 ENDPOINT_WHAT="Extractor endpoint"
+# ufw's own switch and policy, readable without root, unlike `ufw status`.
+UFW_CONF=/etc/ufw/ufw.conf
+UFW_DEFAULTS=/etc/default/ufw
 docker_bridge_address() {
-    ip -4 addr show docker0 2>/dev/null | sed -n 's/.*inet \([0-9.]*\).*/\1/p' | head -1
+    ip -4 addr show docker0 2>/dev/null | sed -n 's/.*inet \([0-9.]*\).*/\1/p' | head -1 || true
 }
-# ufw's own switch; readable without root, unlike `ufw status`.
-ufw_enabled() {
-    grep -qs '^ENABLED=yes' /etc/ufw/ufw.conf
+# The subnet of the compose network the daemon sits on: the narrowest
+# source a rule can name that outlives the daemon's recreation on update
+# (only `down` drops the network, and `up` may then give it another one).
+daemon_subnet() {
+    docker inspect -f '{{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}' pseudolife-mcp-daemon 2>/dev/null \
+        | tr ' ' '\n' | while IFS= read -r net; do
+            [ -n "$net" ] || continue
+            docker network inspect -f '{{range .IPAM.Config}}{{.Subnet}} {{end}}' "$net" 2>/dev/null || true
+        done | tr ' ' '\n' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/[0-9]+$' | head -1 || true
+}
+ufw_drops_input() {  # status 0 when ufw is on and drops what no rule allows
+    grep -qs '^ENABLED=yes' "$UFW_CONF" || return 1
+    ufw_policy="$(sed -n 's/^DEFAULT_INPUT_POLICY="\{0,1\}\([A-Z]*\).*/\1/p' "$UFW_DEFAULTS" 2>/dev/null | head -1 || true)"
+    # DROP, REJECT, or a defaults file this user cannot read: ufw's default.
+    [ "$ufw_policy" != ACCEPT ]
+}
+container_reaches_shim() {  # any HTTP answer counts, as for the endpoint
+    docker exec pseudolife-mcp-daemon python -c 'import sys, urllib.error, urllib.request
+try:
+    urllib.request.urlopen(sys.argv[1] + "/models", timeout=10)
+except urllib.error.HTTPError:
+    pass' "$1" >/dev/null 2>&1
+}
+# A firewall rule is a persistent change the user did not choose by running
+# the installer: asked once at a terminal, no by default, and never applied
+# unattended unless --firewall-rule yes says so.
+firewall_rule_wanted() {
+    case "${FIREWALL_RULE:-ask}" in
+        yes) return 0 ;;
+        no) echo "  Not added (--firewall-rule no): run the command above when you want dreams to reach the shim."; return 1 ;;
+    esac
+    if [ ! -t 0 ]; then
+        echo "  Not added (no terminal to ask on): run the command above, or re-run with --firewall-rule yes."
+        return 1
+    fi
+    printf "Add this ufw rule now? It runs sudo and opens only port %s on %s to the daemon's network [y/N]: " "$SHIM_PORT" "$bridge"
+    firewall_reply=""
+    IFS= read -r firewall_reply || firewall_reply=""
+    case "$firewall_reply" in
+        y|Y|yes|Yes|YES) return 0 ;;
+    esac
+    echo "  Not added: run the command above when you are ready."
+    return 1
 }
 shim_container_probe() {
     [ -n "${claude_shim_mode:-}${codex_shim_mode:-}" ] || return 0
@@ -2971,11 +3025,7 @@ shim_container_probe() {
     probe_url="http://host.docker.internal:$SHIM_PORT/v1"
     # The autostart unit started moments ago: give it a few tries.
     for attempt in 1 2 3; do
-        if docker exec pseudolife-mcp-daemon python -c 'import sys, urllib.error, urllib.request
-try:
-    urllib.request.urlopen(sys.argv[1] + "/models", timeout=10)
-except urllib.error.HTTPError:
-    pass' "$probe_url" >/dev/null 2>&1; then
+        if container_reaches_shim "$probe_url"; then
             ENDPOINT_CONTAINER=reachable
             step "The daemon's container reaches the $shim_name at $probe_url."
             return 0
@@ -2987,13 +3037,31 @@ except urllib.error.HTTPError:
     bridge="$(docker_bridge_address)"; bridge="${bridge:-172.17.0.1}"
     if ! curl -fsS --max-time 5 "http://$bridge:$SHIM_PORT/health" >/dev/null 2>&1; then
         echo "WARNING: the $shim_name is not answering at $bridge:$SHIM_PORT, so the daemon's container cannot reach it either. Check it: systemctl --user status $shim_unit (log: journalctl --user -u $shim_unit). The daemon retries every sweep, and until then $shim_until." >&2
-    elif ufw_enabled; then
-        # 172.16.0.0/12 is Docker's default pool for bridge networks, so the
-        # rule outlives a recreated compose network with a new subnet.
-        echo "WARNING: the $shim_name answers on this host at $bridge:$SHIM_PORT, but ufw drops the daemon container's traffic to it. Let the docker networks through once: sudo ufw allow from 172.16.0.0/12 to $bridge port $SHIM_PORT proto tcp comment 'pseudolife dream shim'. The daemon retries every sweep, and until then $shim_until." >&2
-    else
-        echo "WARNING: the $shim_name answers on this host at $bridge:$SHIM_PORT, but the daemon's container cannot reach it: a host firewall (nftables, firewalld or iptables rules) drops traffic from the docker networks to $bridge port $SHIM_PORT/tcp. Allow it; the daemon retries every sweep, and until then $shim_until." >&2
+        return 0
     fi
+    if ! ufw_drops_input; then
+        echo "WARNING: the $shim_name answers on this host at $bridge:$SHIM_PORT, but the daemon's container cannot reach it: a host firewall (nftables, firewalld or iptables rules) drops traffic from the docker networks to $bridge port $SHIM_PORT/tcp. Allow it; the daemon retries every sweep, and until then $shim_until." >&2
+        return 0
+    fi
+    subnet="$(daemon_subnet)"
+    if [ -z "$subnet" ]; then
+        echo "WARNING: the $shim_name answers on this host at $bridge:$SHIM_PORT, but ufw drops the daemon container's traffic to it, and the daemon's network subnet could not be read. Find it with docker network inspect pseudolife-mcp_default, then allow only that network: sudo ufw allow from <subnet> to $bridge port $SHIM_PORT proto tcp comment 'pseudolife dream shim'. The daemon retries every sweep, and until then $shim_until." >&2
+        return 0
+    fi
+    echo "WARNING: the $shim_name answers on this host at $bridge:$SHIM_PORT, but ufw drops the daemon container's traffic to it. This rule lets only the daemon's network through, to that one port: sudo ufw allow from $subnet to $bridge port $SHIM_PORT proto tcp comment 'pseudolife dream shim'. If a later docker compose down gives the network another subnet, the installer's next run names the new rule." >&2
+    if firewall_rule_wanted; then
+        if sudo ufw allow from "$subnet" to "$bridge" port "$SHIM_PORT" proto tcp comment 'pseudolife dream shim'; then
+            if container_reaches_shim "$probe_url"; then
+                ENDPOINT_CONTAINER=reachable
+                step "Added the ufw rule: the daemon's container now reaches the $shim_name at $probe_url."
+                return 0
+            fi
+            echo "WARNING: the ufw rule was added, but the daemon's container still cannot reach the $shim_name: another firewall rule may drop it (sudo ufw status numbered)." >&2
+        else
+            echo "WARNING: the ufw rule was not added (see above): run the command above yourself." >&2
+        fi
+    fi
+    echo "  The daemon retries every sweep, and until then $shim_until." >&2
 }
 describe_endpoint_container() {
     case "${ENDPOINT_CONTAINER:-}" in
