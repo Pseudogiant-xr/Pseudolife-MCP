@@ -561,6 +561,9 @@ pub struct DreamConfig {
     pub digest_target_chars: i64,
     /// The consolidation pass (`service_dream.py:_dream_run_locked`).
     pub stall_notice: bool,
+    /// `stall_repeat_hours` (6): how often an ongoing stall is announced
+    /// again (validated greater than 0 at load).
+    pub stall_repeat_hours: f64,
     pub quarantine_low_trust: bool,
     pub trusted_sources: Vec<String>,
     pub assistant_claims: String,
@@ -906,6 +909,7 @@ impl Default for DreamConfig {
             digest_context_chars: 24000,
             digest_target_chars: 1200,
             stall_notice: true,
+            stall_repeat_hours: 6.0,
             quarantine_low_trust: false,
             trusted_sources: Vec::new(),
             assistant_claims: "contender".into(),
@@ -2356,6 +2360,10 @@ fn read_dream(d: &[(Node, Node)]) -> Result<DreamConfig, ConfigError> {
         digest_context_chars: want_int(d, "digest_context_chars", p, def.digest_context_chars)?,
         digest_target_chars: want_int(d, "digest_target_chars", p, def.digest_target_chars)?,
         stall_notice: want_bool(d, "stall_notice", p, def.stall_notice)?,
+        // Validated below with `__post_init__`'s own message.
+        stall_repeat_hours: lookup(d, "stall_repeat_hours")
+            .and_then(node_f64)
+            .unwrap_or(def.stall_repeat_hours),
         quarantine_low_trust: want_bool(d, "quarantine_low_trust", p, def.quarantine_low_trust)?,
         trusted_sources: match lookup(d, "trusted_sources") {
             None | Some(Node::Null) => Vec::new(),

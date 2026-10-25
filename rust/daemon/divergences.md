@@ -10,9 +10,8 @@ side must answer exactly `501 {"error": "not_implemented", "path": P}`.
 
 | Surface | Python behaviour | Owner |
 |---|---|---|
-| Every Console route in `harness/goldens/routes.json` other than `GET /api/search`, the coordination view of `GET /api/agents` and `POST /api/daemon-notice`, after all gates | the handler's answer | W2-D (reads), W2-E (writes), W2-F (board, maintainer) |
+| Every Console route in `harness/goldens/routes.json` other than `GET /api/search`, the coordination view of `GET /api/agents`, `POST /api/daemon-notice` and `POST /api/episodes/rename`, `/merge` and `/prune`, after all gates | the handler's answer | W2-D (reads), W2-E (writes), W2-F (board, maintainer) |
 | Tokenless MCP Host/Origin rebinding policy | SDK transport policy before tool dispatch | **CUTOVER BLOCKER — W2-G**; tokenless MCP stays unmounted (501) until this gate is accepted. Authenticated bound-identity checks are served (spec.md M18) |
-| Credential-bearing extractor/recall redirect refusal | `utils/no_redirect.py`, extractor and recall transports | W3-H / W2-D; outbound transports are not implemented in this slice |
 | `/api/hook/session-start`, `memory-policy` (any caller) | briefing and memory-policy text | W2-D |
 | Authorized `memory-changes` and `session-end` after its gates | change note and episode close | W2-E |
 | `POST /api/pair` after a valid body on an authenticated install | the 2-slot redemption gate (`RedemptionGate`, 429 `rate_limited`), invocation of the implemented `principals::redeem` store transaction plus immediate `PrincipalStore::add`, the failure-budget refund on success, and 503 `pairing_unavailable` on a store error | HTTP-SECURITY / CLI-PAIRING (the gate wraps only `principal_store.redeem`, `web/api.py:378-393`) |
@@ -162,7 +161,8 @@ binding"). What it cannot or does not reproduce:
 | Session reaper integration | closes idle sessions, derives generic titles and preserves resumable roots | reaping, cascade close, deferred-empty sweep, tombstone hydration and store/resume integration implemented; generic auto-title pending | W2-E (episodes) / W3-I |
 | Autosave and exit persistence | changed-state save through resident writer stores | owned scheduling and exit callback implemented; admitted stores drain before exit, but counters and tensor weights are not saved | W2-E (durability) |
 | Canonical-store compaction | removes selected resident records, marks slots dirty and rewrites their rows | selection policy implemented and checked against Python goldens; resident-store mutation and slot sync await the writer | W2-E / W3-I |
-| Automatic dream and graph sweep stages | backlog/quiescence gate, extraction, analyzer and graph review ticks | session-end trigger interface is a declared no-op; sweep currently runs maintenance only | W3-H |
+| Automatic dream and graph sweep stages | backlog/quiescence gate, extraction, analyzer and graph review ticks | served (spec SW1-SW6) except the link, junk, curation and candidate judges | task P3b (the judges) |
+| The SessionEnd hook's close firing the session-end dream | the hook closes the session and fires the dream | the entry point is served (`Service::fire_session_dream`, as the reaper's idle close uses it); the hook's close answers 501 until the hook batch serves it | the hook batch (B3) |
 | `application_name` fallback | derived from argv | `pseudolife-mcp pid=<pid> pseudolife-daemon serve` | free (not persisted) |
 
 ## Request parsing edges (canonical shapes rule)
@@ -374,7 +374,7 @@ of its own.
 
 | Item | Python | Rust | Owner / why |
 |---|---|---|---|
-| `memory.recall.driver: llm` (or `PSEUDOLIFE_RECALL_DRIVER=llm`): seeds named by the dream's extraction model | served through an outbound model call | refused as `not_implemented` for a non-blank query | the model call joins the dream's extractor (task P); the default mechanical driver is served |
+| `memory.recall.driver: llm` (or `PSEUDOLIFE_RECALL_DRIVER=llm`): seeds named by the dream's extraction model, two corners | `simple_complete` decodes the reply with `json.loads(bytes)` (`surrogatepass`), and `_parse_name_list` keeps a lone-surrogate escape in a name as the surrogate | the same request bytes and vocabulary filter (spec RC17); a reply whose bytes encode a surrogate is no reply (no seeds), and a lone-surrogate escape becomes a private-use stand-in (`py_loads::loads_reply`), which equals a vocabulary name only if that name holds the stand-in code point, where Python's surrogate equals none | a Rust string holds no surrogate; neither corner is reachable from a model that answers UTF-8 text without surrogate escapes. The call's 30 s timeout differs as the extractor's does (per socket operation in Python, for the whole request in Rust: "The extractor timeout" row below); the rest is served alike, a truthy non-string `content` included (an internal error on both) |
 | Locking across the walk | none of its own: each search and each graph read takes the service lock, so writes can land between them; the vocabulary and the degrees are two locked graph loads | each graph read takes the writer lock, but a search takes only the search guard, which does not exclude writes (as for `memory_search`); one graph load serves the vocabulary and the degrees | a write landing mid-walk is visible to the later steps on both; only a write racing one search, or landing between Python's two loads, can tell them apart |
 | A wrong-type `memory.recall` setting (`max_searches_per_hop: 2.5`, `hub_gate: "false"`, `driver: null`) | taken untyped (`int()` truncates, a non-empty string is truthy, `None` falls to mechanical) | refused at config load, like every other typed key | the existing config-type substitution |
 | `time_budget_seconds` (20 s) | wall clock (`time.monotonic`) | wall clock (`Instant`) | a walk near the budget can stop at a different step; the harness's walks finish in well under a second |
@@ -394,7 +394,7 @@ of its own.
 | A merge-group tie between keys of different types (merge rows with a NULL target) | `TypeError: '<' not supported between instances of …` | `invalid_argument` with Rust's own wording | merge rows always carry a target |
 | A corrupt automatic-decision index (`next_seq` not an integer, `cursors`/`active` not mappings) | `int()` / `dict()` raise | read leniently in `list` | corrupt persisted data only; the judges write the index |
 | A NaN in a REAL proposal or decision column | serialized as `NaN` | `null` | NaN is not a stored score |
-| The link, junk, curation and candidate judges, their freshness, and the sweep steps around the merge judge (the analyzer and deep ticks, the stall tick, the automatic dream) | served by the background sweep | not run (the merge judge is served: see "The merge judge and its tiebreak" below) | tasks P3b (the judges) and P4 (the ticks) |
+| The link, junk, curation and candidate judges and their freshness | served by the background sweep | not run (the merge judge and the other sweep steps are served: see "The merge judge and its tiebreak" and spec SW1-SW6) | task P3b |
 | Wrong-type `memory.deep_dream.judges_enabled` / `analyzer_file_duplicates` | taken by truthiness | refused at config load | the existing config-type substitution |
 
 ### memory_dream: status, pull, commit, runs and the consolidation pass (2026-10-20)
@@ -404,7 +404,8 @@ of its own.
 | `rollback` | served | refused | the rollback increment (`deep` is served since 2026-10-20) |
 | When dream tracking initializes (rows with no dream state classified) | at hydration | at the first `memory_dream` call | a Rust boot must not change the bank (the W1 boot comparison); every answer is the same once the call runs |
 | A pending entry whose row is missing at a write failure | re-flushed (`cms.reflush_entries`) | detected, not re-inserted | the store slice's persistence follow-up; the answer (a write hold) is the same |
-| The stall record's board notice and the overdue rule | posted by the sweep | logged; the overdue rule is never armed | the sweep (task P4) |
+| The stall notice's board identity on a daemon whose board pruned it | registered again on the next notice | the same, through the board's daemon notice (W2-F) | |
+| One notifier at a time | a non-blocking `threading.Lock` | a non-blocking async mutex | a second notifier skips in both |
 | The date mask, `isdigit` and NFC/NFKC in the gates | Python's `re` and `unicodedata` (Unicode 14) | the regex crate's Unicode `\b`/`\d`/`\s` and case folding, an approximated `isdigit`, the normalization crate's tables | rare characters only; `\w` and category M use CPython's exact tables |
 | Cosine ranking of slots, facts, slot matches and alias candidates | torch float32 matmul | f32 dot products | a near-tie can reorder the vocabulary hint and so the request bytes; the embeddings themselves differ within the measured tolerance |
 | A reply character in U+10F800–U+10FFFF | written | taken as a lone-surrogate stand-in: the write fails | the reply parser keeps lone surrogates as private code points so a write fails where Python's encoding fails |
@@ -482,7 +483,10 @@ goldens.
 
 | Item | Python | Rust | Owner / why |
 |---|---|---|---|
-| The sweep steps around the merge judge: the analyzer filing tick (and its analyzer-pair reconciliation) and the deep tick before it; the link, junk, curation and candidate judges after it; `dream_status`, the stall tick and the automatic dream | run on every tick while dreaming is enabled | not run (the judge runs after the reapers) | tasks P3b (the review-queue judges) and P4 (the ticks and the automatic dream); the `judge-merge-*` scenarios switch each off on the Python side |
+| The link, junk, curation and candidate judges after the merge judge | run on every tick while dreaming is enabled | not run (the analyzer and deep ticks, `dream_status`, the stall tick and the automatic dream are: spec SW1-SW6) | task P3b; the `judge-merge-*` scenarios switch them off on the Python side |
+| Shutdown during a sweep tick | the sweep's daemon thread dies with the process | the tick stops after the merge judge when shutdown has begun, before `dream_status` and the automatic dream; an automatic dream already in flight is dropped when the stop signal comes, so shutdown does not wait out a model's timeout |
+| Shutdown during a session-end dream | its daemon thread dies with the process | it runs as an admitted write task, like a manual `run`, which shutdown drains: shutdown waits for it (at most the extractor's timeout per model call) | a dream that began finishes instead of being cut off; the same holds today for a manual `run` | no committed state differs from a Python process killed at the same point (an open transaction rolls back with its connection) |
+| A sweep tick before the handles are installed (`Service::install`, right after the board is built at startup) | not applicable | the automatic dream is skipped with a log line | the sweep sleeps one interval before its first tick |
 | `/api/graph/rejudge` (`review_rejudge`, `review_judgments.requeue`) | served | not served: the daemon serves no `/api/graph/*` route | the web API slice; `requeue` also reads the curation and candidate queues (task P3b) |
 | `deep_dream_judge`'s `extractor`, `limit`, `second_extractor` and `third_extractor` arguments | test hooks | absent: the sweep passes none | no production caller passes them |
 | A judge memo, decision index or response identity meta value that is not an object, or a decision record missing a key | `.items()` / `.get()` / `int()` raise, and the tick answers `error` | read as empty, or the key as absent | corrupt persisted data only; the judge writes these values |
@@ -493,6 +497,14 @@ goldens.
 | The sweep tick's log line (`deep-dream judge: …`) | the answer as a Python dict repr | the answer as JSON | log-only; no caller parses it |
 | Shutdown while a judge tick is running | the sweep's daemon thread dies with the process, wherever it is (an open transaction rolls back with the connection) | the tick stops at the next lock-free phase: an endpoint construction, alias probe, model call or signing in flight is abandoned, no new phase starts, and a verdict transaction already begun runs to its end; the tick answers `skipped: "stopping"` | so `Background::shutdown` does not wait out a model's timeout (240 s by default); no committed state differs from a Python process killed between the same two transactions |
 | A reply's served model holding a lone surrogate | PostgreSQL refuses the response identity's JSON (`invalid input syntax for type json`, with its DETAIL and CONTEXT) | the same statement fails on the same server, its text laid out as psycopg's (message, DETAIL, CONTEXT) without psycopg's closing parameter line | log-only, as the tick's `error` text for a database failure (above) |
+
+### Episode curation routes (2026-10-25)
+
+`POST /api/episodes/rename`, `/merge` and `/prune` (`routes/episodes.rs`).
+
+| Item | Python | Rust | Owner / why |
+|---|---|---|---|
+| A new merge rollup's `hint` that is not a string or null | kept in memory as sent; the episode write-through then stores PostgreSQL's text form of a value psycopg can adapt, or fails on one it cannot (a dict), and that failure leaves the merged entries and outcome signals pointing at an episode row never written (until a later write-through) | refused before any change: 500 `hint must be a string, not '<type>'` | Python's answer is a bank inconsistency, not a contract; every documented caller sends a string. Behaviour with no caller (D7) |
 
 ## Coordination board completion (W2-F)
 

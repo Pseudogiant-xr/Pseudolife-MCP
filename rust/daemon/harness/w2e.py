@@ -187,7 +187,9 @@ with ``"extractor_keys": {"primary": ..., "fallback": ...}`` (passed as
 ``PSEUDOLIFE_DREAM_API_KEY`` and ``PSEUDOLIFE_DREAM_FALLBACK_API_KEY``)
 each side's chat requests must also carry their own endpoint's key and its
 GETs none (``extractor_key_diffs``); each side's stub origin in its
-responses becomes ``http://stub``. The claim: given identical model replies, both
+responses becomes ``http://stub``. With ``"extractor_all_used": true`` every
+reply carrying ``times`` must be used up on each side by the scenario's end
+(``unused_reply_diffs``). The claim: given identical model replies, both
 daemons send byte-identical requests and write identical banks; it claims
 nothing about model behaviour.
 
@@ -217,6 +219,7 @@ import dbstate  # noqa: E402
 import pgdisposable as pg  # noqa: E402
 import run as w1a  # noqa: E402
 from stub_extractor import StubExtractor  # noqa: E402
+import w2e_recall_llm  # noqa: E402
 
 pg.DISPOSABLE_NAME = re.compile(r"pl_cf_w2e_[a-z0-9_]{1,40}")
 GOLDENS = HERE / "goldens" / "w2e"
@@ -376,9 +379,11 @@ MUTANTS = ["store-tags-raw", "store-skip-session-episode", "store-no-hint", "sto
            # memory_graph (spec GR1-GR10): caught by graph-read.
            "mcp-graph-no-relation-filter", "mcp-graph-tag-no-ambiguous",
            "mcp-graph-facts-no-alias", "mcp-graph-no-labels",
-           # memory_recall (spec RC1-RC16): caught by the recall-* scenarios.
+           # memory_recall (spec RC1-RC17): caught by the recall-* scenarios.
            "mcp-recall-seed-any", "mcp-recall-no-hub-gate", "mcp-recall-no-requery",
            "mcp-recall-no-pin", "mcp-recall-no-annotate", "mcp-recall-flat-caps",
+           # memory.recall.driver: llm: caught by recall-llm (w2e_recall_llm.py).
+           *w2e_recall_llm.MUTANTS,
            # memory_graph_review's list (spec RV2-RV5): caught by the
            # review-list scenarios.
            "mcp-review-dup-threshold", "mcp-review-no-merge-veto", "mcp-review-no-fold-swap",
@@ -2482,6 +2487,9 @@ SCENARIOS.update({
         ],
     },
 })
+
+# memory.recall.driver: llm against the stub extractor (w2e_recall_llm.py).
+SCENARIOS.update(w2e_recall_llm.scenarios(RECALL_SEED))
 
 
 def review(action="list", **kw) -> dict:
@@ -5521,6 +5529,17 @@ def scenario_config(scn: dict, stub: StubExtractor | None) -> str | None:
     return config
 
 
+def unused_reply_diffs(scn: dict, stubs: dict[str, StubExtractor]) -> list[str]:
+    """With ``"extractor_all_used": true``, every reply carrying ``times``
+    must have answered that many requests on each side by the scenario's
+    end, so a run in which a daemon never called the model fails."""
+    if not scn.get("extractor_all_used"):
+        return []
+    return [f"extractor {side}: reply never used {json.dumps(entry)[:160]}"
+            for side in ("python", "rust")
+            for entry in stubs[side].unused(side_auth(side) if scn.get("shared_stub") else None)]
+
+
 def drain_side(stubs: dict[str, StubExtractor], scn: dict, side: str) -> list[dict]:
     if scn.get("shared_stub"):
         return stubs[side].drain(auth=side_auth(side))
@@ -5528,6 +5547,13 @@ def drain_side(stubs: dict[str, StubExtractor], scn: dict, side: str) -> list[di
 
 
 # The tables the merge judge writes: settled when none of them changes.
+# The dream sweep's steps (P4): their scenarios live in their own module.
+import w2e_sweep  # noqa: E402
+
+SCENARIOS.update(w2e_sweep.scenarios(sys.modules[__name__]))
+MUTANTS += w2e_sweep.MUTANTS
+
+
 JUDGE_TABLES = ("entity_proposals", "merge_decisions", "dismissed_pairs", "edge_proposals",
                 "entities", "edges", "meta")
 
@@ -5701,6 +5727,8 @@ def run_op(op: dict, port: int, mcp: Mcp, dsn: str) -> dict | None:
         with psycopg.connect(dsn, autocommit=True) as conn:
             conn.execute(op["sql"])
         return {"isError": False, "value": None}
+    if op["op"] in w2e_episodes.OPS:
+        return w2e_episodes.run(op, port, dsn, sys.modules[__name__])
     if op["op"] == "http":
         body = json.dumps(op["body"]).encode() if "body" in op else None
         hdrs = [AUTH] + ([("Content-Type", "application/json")] if body else [])
@@ -5877,7 +5905,10 @@ def prepare_template(scn: dict, tag: str, root: Path, owned: list[str],
     template = pg.name(f"pl_cf_w2e_{tag}_t")
     owned.append(template)
     dsn = pg.create(template)
-    home = daemons.make_home(root, f"{tag}-seed", scenario_config(scn, stub))
+    # ``seed_config``: the seeding daemon's own config, for scenarios whose
+    # measured config runs background work the template must not carry.
+    seed_scn = {**scn, "config": scn["seed_config"]} if "seed_config" in scn else scn
+    home = daemons.make_home(root, f"{tag}-seed", scenario_config(seed_scn, stub))
     extra = {**extractor_env(scn, stub, "seed"), **(scn.get("seed_env") or {})}
     d = daemons.python_daemon(home, daemons.free_port(),
                               daemons.base_env(home, side_env(scn, dsn, extra)))
@@ -5959,6 +5990,11 @@ def _run_live(name: str, scn: dict, tag: str, binary: Path, root: Path, record: 
         max_wall = 0.0
         for i, op in enumerate([{"op": "init"}] + scn["ops"]):
             row = {"step": i, "op": op, "diffs": [] if i else list(warmup_diffs)}
+            if op["op"] == "init" and scn.get("init_settle"):
+                # Background work that starts with the daemons settles
+                # before the first comparison.
+                settle_sides(scn["init_settle"], dsns, stubs, scn)
+                row["diffs"] += expect_diffs(scn["init_settle"], dsns)
             if op["op"] != "init":
                 started = time.monotonic()
                 if op["op"] in HOME_OPS:
@@ -6017,6 +6053,8 @@ def _run_live(name: str, scn: dict, tag: str, binary: Path, root: Path, record: 
             steps.append(row)
             if record:
                 row["_python_state"], row["_python_numeric"] = sp, np_
+        if stubs and steps:
+            steps[-1]["diffs"] += unused_reply_diffs(scn, stubs)
     finally:
         for d in procs.values():
             d.stop()
@@ -6133,6 +6171,12 @@ def run_golden(name: str, binary: Path, root: Path, tol: dict, owned: list[str])
         d.stop()
         close_stubs(stubs)
     return {"scenario": name, "steps": steps, "stats": stats}
+
+
+import w2e_episodes  # noqa: E402
+
+SCENARIOS.update(w2e_episodes.register(sys.modules[__name__]))
+MUTANTS += w2e_episodes.MUTANTS
 
 
 def main() -> int:

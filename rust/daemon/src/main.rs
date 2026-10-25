@@ -306,6 +306,7 @@ fn main() {
             service.clone(),
             store.clone(),
         ));
+        service.install(&board);
         let app = Arc::new(http::App::new(
             service.clone(),
             tokens,
