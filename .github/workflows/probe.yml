@@ -1,0 +1,30 @@
+name: probe rerun vars
+on:
+  push:
+    branches: [probe/rerun-vars]
+permissions:
+  contents: read
+jobs:
+  scope:
+    runs-on: ubuntu-latest
+    outputs:
+      label: ${{ steps.p.outputs.label }}
+      labels: ${{ steps.p.outputs.labels }}
+    steps:
+      - id: p
+        env:
+          PROBE: ${{ vars.PROBE_RERUN_VARS }}
+        run: |
+          echo "PROBE=$PROBE attempt=$GITHUB_RUN_ATTEMPT"
+          echo "label=ubuntu-latest" >> "$GITHUB_OUTPUT"
+          echo 'labels=["ubuntu-latest"]' >> "$GITHUB_OUTPUT"
+  single:
+    needs: scope
+    runs-on: ${{ needs.scope.outputs.label }}
+    steps:
+      - run: echo "single-string runs-on ok on $RUNNER_NAME"
+  array:
+    needs: scope
+    runs-on: ${{ fromJSON(needs.scope.outputs.labels) }}
+    steps:
+      - run: echo "fromJSON array runs-on ok on $RUNNER_NAME"
