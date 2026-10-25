@@ -1647,7 +1647,7 @@ Python sources: `memory/dream.py` `run_sweep_once` (2398-2547);
 
 | # | Exact item | Source |
 |---|---|---|
-| SW1 | Order after the reapers, while `memory.dream.enabled`: the analyzer tick, the deep tick, the merge judge, the junk judge (JJ1-JJ5; the link, curation and candidate judges not run, P3b), `dream_status`, the stall tick, then the automatic dream when `would_fire`. The analyzer tick and `dream_status` failing end the tick; the deep tick, the judge and the stall tick never fail it. | `dream.py:2453-2547` |
+| SW1 | Order after the reapers, while `memory.dream.enabled`: the analyzer tick, the deep tick, the merge judge, the link judge (LJ1-LJ6), the junk judge (JJ1-JJ5; the curation and candidate judges not run, P3b), `dream_status`, the stall tick, then the automatic dream when `would_fire`. The analyzer tick and `dream_status` failing end the tick; the deep tick, the judge and the stall tick never fail it. | `dream.py:2453-2547` |
 | SW2 | Analyzer tick: `judges_disabled` when `judges_enabled` is off; under the writer lock, `reconcile_analyzer_proposals(judge_batch)` (decided `analyzer` link proposals, then rejected `analyzer-duplicate` merges, each half behind its own `{at, id}` cursor and transaction, sharing the budget, closing each pair into `dismissed_pairs` at its decision time); `disabled` (with `reconciled`) when `analyzer_file_duplicates` is off; otherwise up to `judge_batch` anchors after `meta.analyzer_duplicate_cursor` (wrapping to the start), every pair touching an anchor in `duplicate_candidates`' order, filing at most `judge_batch` proposals as the deep apply does, then the cursor at the last anchor. | `service_dream.py:6043-6156`; `postgres.py:3772-3853` |
 | SW3 | Deep tick: `disabled` when `auto_tick` is off; `below_threshold` (with the need) unless `deep_dream_need` recommends; otherwise the deep dream's apply without snippets, answered as `{fired, reason, ...}` with the apply's `applied`, `error`, `rescored`, `superseded`, `merged`, `merge_proposed`, `junk_proposed`, `junk_deleted`, `scoped`, `analyzer_filed`, `orphans_deleted` and `snapshot`; a failure answers `fired: false` with `error: <text>`. | `service_dream.py:3824-3845` |
 | SW4 | Stall tick: the sweep's interval set on the tracker, then `check_overdue(backlog, min_batch, would_fire, interval)` (a due backlog no dream serves for three intervals opens a stall, `extractor_unreachable`), then the notice. `dream_status` applies the same rule once the interval is set. | `service_dream.py:2958-2971,3080-3092` |
@@ -1703,6 +1703,53 @@ the reply validation and the pack against Python's own output
 judges' prompts by length and SHA-256. The `mcp-dream-junk-*` mutants are
 caught by `junk-auto`. The merge judge's queue is now a `Queue` value
 (`review_judgments.rs`); the 18 `judge-merge-*` scenarios are unchanged.
+
+### The link judge (2026-10-25)
+
+Python sources: `service_dream.py` `deep_dream_judge_links` (5003-5240),
+`_link_evidence_locked` / `_enrich_link_proposals_from` (4936-5001),
+`_TWO_VOTE_REFUSAL`, `_link_two_vote_action`, `_stored_second_distinct`,
+`_link_two_vote_replay` (4176-4239), `_second_opinion_distinct`
+(3976-3991), `_stamp_skipped` (4424-4438);
+`memory/review_judgments.py` `ReviewJudgments(kind="link")` (214-521);
+`memory/review_decisions.py` (the `link` branches: `_canonical_pair` for an
+analyzer row, `_proposal_projection`, `_reopen_proposal`);
+`memory/graph_consolidation.py` `shared_mention_entries` (145-168);
+`memory/dream.py` `_LINK_JUDGE_SYSTEM_PROMPT`, `format_link_proposal`
+(567-582), `judge_links` (1848-1873); `storage/postgres.py`
+`pending_proposals` (3571-3597), `set_proposal_judgment` (3599-3613),
+`set_proposal_second_judgment` (3615-3638), `get_proposal` (3733-3741),
+`set_proposal_status` (3743-3767); `service.py`
+`_graph_accept_proposal_locked` without a retype and
+`_graph_reject_proposal_locked` (8979-9058).
+
+| # | Exact item | Source |
+|---|---|---|
+| LJ1 | Gates: `judges_disabled` when `judges_enabled` is off, `disabled` unless `link_judge_mode` is shadow or auto; no pending link row and no active link decision answers `{judged: 0}`; no judge endpoint answers `no_judge_extractor`; any failure answers `{judged: 0, error}`. | `service_dream.py:5003-5045` |
+| LJ2 | One tick: the active automatic link rejects reconsidered (`refresh_proposal_terminals` over the `link` queue: the projection carries the live row and the endpoints' displays as `src` / `dst`, a reopen resets the row to pending with every judge column, `judge_relation` and `judge2_relation` included, and reopens an analyzer row's pair), the pending rows re-read (`pending_proposals`: the 23 columns and the displays, by proposal confidence descending then id), the evidence prepared, signed with the lock released, and stale verdicts cleared with every link judge column (`refresh`); a later vote whose endpoint has since served another model is cleared alone, its note tail cut (`_clear_moved_votes`, no third vote on this queue). | `service_dream.py:5046-5060`; `review_judgments.py:214-421`; `review_decisions.py:111-130,368-440` |
+| LJ3 | The pack per row: the endpoints' displays and relation, the detector rationale, each endpoint's first eight live edges (outgoing `relation>dst` then incoming `src>relation`, `?` for a missing display), the sorted scopes, up to three notes naming both endpoints (`text[:snippet_max_chars]`, unstamped), and only when there are none up to two notes per endpoint (`[source] text[:snippet_max_chars]`). The fingerprint signs the proposal and the pack without `n`, ids and judge fields, with the judging policy over `_LINK_JUDGE_SYSTEM_PROMPT`. | `service_dream.py:4936-5001`; `graph_consolidation.py:145-168` |
+| LJ4 | The request is the shared judge request (label `judge_links`) over the rows `format_link_proposal` renders; a reply row keeps an `id` the batch knows, a verdict of accept, retype, reject or leave, a clamped confidence, a note (`str()[:400]`) and, on a retype only, a relation (`str()[:64]`); a retype naming no relation becomes a leave; a skipped row becomes a zero-confidence leave. | `dream.py:567-582,1825-1873`; `service_dream.py:4424-4438` |
+| LJ5 | Second opinions (while `judge_second_opinion` is on and `link_judge_two_vote` is shadow or auto): a row whose first accept or reject sat below its single-vote gate is judged again by the second endpoint, before first opinions and on at most `judge_batch - min(first opinions, judge_batch // 2)` rows; a configuration that makes the second opinion the first model again asks nothing (`second_opinion_skipped_same_model`); a second endpoint's failure ends the tick only when it is the first's endpoint. Each vote, rejects first, is recorded (`judge2_*`, its served model and policy, the note `<first note[:160]> \| 2nd (<model>): <verdict or retype:rel> <c:.2f> [agree\|split]`); in auto with two-vote auto, two agreeing accepts or rejects at mean `link_two_vote_min_confidence` or more apply when the votes came from distinct models, else the note gains `\| two-vote apply needs a distinct second model`. Recorded agreeing votes are replayed with no model call when the two-vote mode was promoted after they were taken (not a refused row, not a moved second endpoint). | `service_dream.py:4176-4239,5061-5190` |
+| LJ6 | First opinions, rejects first, each in its own transaction while the row is pending and its evidence unchanged: the judgment recorded (`judge_*`, `judge_relation`, the memo). In auto, an accept at `link_accept_min_confidence` or more promotes the edge (confidence floored to 0.7, origin `action`) and accepts the row (`decided_by="dream-judge"`), after which the batch rows sharing one of its endpoints wait for the next tick; a reject at `link_reject_min_confidence` or more rejects the row (an analyzer row's pair closed) and records an automatic reject decision; a retype is recorded and never applied. | `service_dream.py:5191-5240`; `service.py:8979-9058`; `review_judgments.py:497-521`; `review_decisions.py:142-200` |
+
+`harness/w2e.py live --only link-shadow link-auto link-two-vote
+link-two-vote-same-model link-auto-reopen` runs both daemons with dreaming
+on, a 0.25 s sweep and every other judge and sweep step off, against one
+stub answering `judge_links` by `SRC|DST` on the first and second endpoints
+(`shared_stub`), inserts the pending link proposals out of band, and compares
+the banks and the request sequences once both judges have settled: shadow
+first and second opinions; auto accept (with the shared-endpoint row left to
+the next tick), analyzer and plain rejects with their decisions, a retype
+recorded only, a below-gate accept and a skipped row; two agreeing votes from
+distinct models applied and a split left pending; agreeing votes refused when
+the second endpoint served the first model; and an automatic reject reopened
+when its source's evidence moves and judged again. The replay of recorded
+votes after a mode promotion has no scenario (it needs a config change
+mid-run); `src/dream/queue_judges_tests.rs` checks its gate, the prompt
+rows, the reply validation and the pack against Python's own output
+(`gen_queue_judge_goldens.py`). `mcp-dream-link-retype-applied` is caught by
+`link-auto` and `mcp-dream-link-two-vote-same-model` by
+`link-two-vote-same-model`.
 
 ### Board tools over MCP (2026-10-16)
 
