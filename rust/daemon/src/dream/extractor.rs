@@ -216,7 +216,7 @@ pub fn py_str(v: &Value) -> String {
 }
 
 /// Python truthiness of a JSON value.
-pub(super) fn truthy(v: &Value) -> bool {
+pub(crate) fn truthy(v: &Value) -> bool {
     match v {
         Value::Null => false,
         Value::Bool(b) => *b,
@@ -1512,6 +1512,22 @@ impl Compat {
 
     /// POST the body and `json.loads` the reply (`data`).
     pub(super) async fn post_json(&self, body: String) -> Result<Value, Raised> {
+        let bytes = self.post(body).await?;
+        let text = std::str::from_utf8(&bytes)
+            .map_err(|_| Raised::other("UnicodeDecodeError", "'utf-8' codec can't decode"))?;
+        loads(text)
+    }
+
+    /// The raw bytes of a 2xx reply to the body, None on any failure: for
+    /// `memory/recall.py` `simple_complete`, which maps every failure to ""
+    /// and `json.loads` the bytes itself.
+    pub(crate) async fn post_reply_bytes(&self, body: String) -> Option<Vec<u8>> {
+        self.post(body).await.ok()
+    }
+
+    /// POST the body as `no_redirect.urlopen` sends it and read a 2xx
+    /// reply's bytes.
+    async fn post(&self, body: String) -> Result<Vec<u8>, Raised> {
         let timeout = Duration::try_from_secs_f64(self.timeout)
             .map_err(|_| Raised::other("ValueError", "Timeout value must be positive"))?;
         let url = format!("{}/chat/completions", self.base_url);
@@ -1547,9 +1563,7 @@ impl Compat {
             .bytes()
             .await
             .map_err(|e| transport_failure(&e, Phase::Body))?;
-        let text = std::str::from_utf8(&bytes)
-            .map_err(|_| Raised::other("UnicodeDecodeError", "'utf-8' codec can't decode"))?;
-        loads(text)
+        Ok(bytes.to_vec())
     }
 
     /// The judge request body (`_judge_request`, `memory/dream.py:1752-1800`):
@@ -1750,6 +1764,11 @@ fn envelope_content(data: &Value) -> Result<&Value, Raised> {
         Value::Object(m) if m.contains_key("content") => Ok(&m["content"]),
         other => Err(key(other, "content")),
     }
+}
+
+/// `data["choices"][0]["message"]["content"]`, None where Python raises.
+pub(crate) fn reply_content(data: &Value) -> Option<&Value> {
+    envelope_content(data).ok()
 }
 
 /// `data["choices"][0]["message"]["content"] or ""`, which must then be a

@@ -1,12 +1,16 @@
-//! `memory_recall` (spec RC1-RC16): the multi-hop walk search → graph
+//! `memory_recall` (spec RC1-RC17): the multi-hop walk search → graph
 //! expansion → re-query. `mcp_server.memory_recall` (2872-2951, with its
 //! caps 2729-2869) → `service.recall` (`service.py:9085-9294`) →
 //! `memory/recall.py` `run_recall` (226-382) and `recall_state_to_dict`
-//! (385-418).
+//! (385-418). Seeds come from the mechanical driver, or under
+//! `memory.recall.driver: llm` from the dream's extraction model
+//! (`LLMController`, `simple_complete`: `memory/recall.py:421-492`) over the
+//! dream extractor's no-redirect client.
 //!
 //! Like Python's, the walk holds no lock of its own: each search takes the
 //! search guard and each graph read the writer lock, as Python's `search`
-//! and `graph_neighborhood` each take the service lock.
+//! and `graph_neighborhood` each take the service lock; the model call
+//! holds neither.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
@@ -465,6 +469,230 @@ fn seed_entities(query: &str, hits: &[String], vocab: &[String]) -> Vec<String> 
         .collect()
 }
 
+// ── the llm driver (memory/recall.py:421-492) ──────────────────────────────
+
+/// `simple_complete`'s timeout (`no_redirect.urlopen(req, timeout=30.0)`).
+const LLM_TIMEOUT_S: f64 = 30.0;
+
+/// Where `simple_complete` sends the seed prompt.
+struct LlmEndpoint {
+    base: String,
+    model: String,
+    key: Option<String>,
+}
+
+/// Which controller names the seeds (`service.recall`): `LLMController`
+/// for the driver "llm", with its endpoint (None when unconfigured), else
+/// `MechanicalController`. Both re-query with the mechanical rule.
+enum Driver {
+    Mechanical,
+    Llm(Option<LlmEndpoint>),
+}
+
+/// `simple_complete`'s endpoint: `os.environ.get(name) or
+/// memory.dream.<key>` for the base URL, the model and the API key (neither
+/// `extractor_source` nor `extractor_model_override` applies, unlike the
+/// dream's `resolve_endpoints`); None when the base or the model is empty.
+/// An empty key sends no `Authorization` header (`Compat::new`).
+fn llm_endpoint(
+    dream: &crate::config::DreamConfig,
+    env: &dyn Fn(&str) -> Option<String>,
+) -> Option<LlmEndpoint> {
+    let pick = |name: &str, cfg: &Option<String>| {
+        env(name)
+            .filter(|v| !v.is_empty())
+            .or_else(|| cfg.clone())
+            .filter(|v| !v.is_empty())
+    };
+    Some(LlmEndpoint {
+        base: pick("PSEUDOLIFE_DREAM_BASE_URL", &dream.extractor_base_url)?,
+        model: pick("PSEUDOLIFE_DREAM_MODEL", &dream.extractor_model)?,
+        key: pick("PSEUDOLIFE_DREAM_API_KEY", &dream.extractor_api_key),
+    })
+}
+
+/// `_seed_prompt`: the first 200 vocabulary names and the first 5 seed
+/// hits (empty ones included).
+fn seed_prompt(query: &str, hits: &[String], vocab: &[String]) -> String {
+    let allowed = vocab
+        .iter()
+        .take(200)
+        .map(String::as_str)
+        .collect::<Vec<_>>()
+        .join(", ");
+    let context = hits
+        .iter()
+        .take(5)
+        .map(String::as_str)
+        .collect::<Vec<_>>()
+        .join(" ");
+    format!(
+        "You resolve which known entities a question is about. From the ALLOWED list only, \
+         return a JSON array of the entity names the question/context refers to (the subjects \
+         to look up). Return [] if none.\n\nALLOWED: {allowed}\n\nQUESTION: {query}\n\n\
+         CONTEXT: {context}\n\nJSON array:"
+    )
+}
+
+/// `_parse_name_list`: the text from the first `[` to the last `]` as
+/// `json.loads` reads it, its strings kept in order. A lone surrogate
+/// escape parses to a stand-in (`py_loads::loads_reply`) where Python keeps
+/// the surrogate; neither can equal a vocabulary name read from the bank.
+fn parse_name_list(raw: &str) -> Vec<String> {
+    let (Some(start), Some(end)) = (raw.find('['), raw.rfind(']')) else {
+        return Vec::new();
+    };
+    if end <= start {
+        return Vec::new();
+    }
+    match crate::mcp::py_loads::loads_reply(&raw[start..=end]) {
+        Some(Value::Array(items)) => items
+            .into_iter()
+            .filter_map(|v| match v {
+                Value::String(s) => Some(s),
+                _ => None,
+            })
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// `simple_complete`'s body, `json.dumps` byte for byte.
+fn completion_body(model: &str, prompt: &str) -> String {
+    crate::pyjson::dumps(&json!({
+        "model": model,
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0.0,
+        "max_tokens": 256,
+        "stream": false,
+    }))
+}
+
+/// The text `json.loads(bytes)` decodes: `json.detect_encoding`'s choice
+/// of UTF-8 (a BOM skipped), UTF-16 or UTF-32. None where Python's decode
+/// fails, and where it would keep a surrogate (`surrogatepass`), which no
+/// Rust string holds: either way an empty reply.
+fn json_bytes_text(b: &[u8]) -> Option<String> {
+    fn utf16(b: &[u8], be: bool) -> Option<String> {
+        if !b.len().is_multiple_of(2) {
+            return None;
+        }
+        let units: Vec<u16> = b
+            .chunks(2)
+            .map(|c| {
+                let pair = [c[0], c[1]];
+                if be {
+                    u16::from_be_bytes(pair)
+                } else {
+                    u16::from_le_bytes(pair)
+                }
+            })
+            .collect();
+        String::from_utf16(&units).ok()
+    }
+    fn utf32(b: &[u8], be: bool) -> Option<String> {
+        if !b.len().is_multiple_of(4) {
+            return None;
+        }
+        b.chunks(4)
+            .map(|c| {
+                let quad = [c[0], c[1], c[2], c[3]];
+                char::from_u32(if be {
+                    u32::from_be_bytes(quad)
+                } else {
+                    u32::from_le_bytes(quad)
+                })
+            })
+            .collect()
+    }
+    let utf8 = |b: &[u8]| std::str::from_utf8(b).ok().map(str::to_string);
+    if let Some(rest) = b.strip_prefix(&[0x00, 0x00, 0xFE, 0xFF]) {
+        return utf32(rest, true);
+    }
+    if let Some(rest) = b.strip_prefix(&[0xFF, 0xFE, 0x00, 0x00]) {
+        return utf32(rest, false);
+    }
+    if let Some(rest) = b.strip_prefix(&[0xFE, 0xFF]) {
+        return utf16(rest, true);
+    }
+    if let Some(rest) = b.strip_prefix(&[0xFF, 0xFE]) {
+        return utf16(rest, false);
+    }
+    if let Some(rest) = b.strip_prefix(&[0xEF, 0xBB, 0xBF]) {
+        return utf8(rest);
+    }
+    match b {
+        [0, 0, _, _, ..] => utf32(b, true),
+        [0, _, _, _, ..] => utf16(b, true),
+        [_, 0, 0, 0, ..] => utf32(b, false),
+        [_, 0, _, _, ..] => utf16(b, false),
+        [0, _] => utf16(b, true),
+        [_, 0] => utf16(b, false),
+        _ => utf8(b),
+    }
+}
+
+/// `simple_complete`: POST the prompt to `<base>/chat/completions` through
+/// the dream extractor's no-redirect client (a redirect is refused, never
+/// followed, so the key reaches no other host; a URL with userinfo is
+/// refused before connecting), the key only in `Authorization: Bearer`.
+/// Answers `data["choices"][0]["message"]["content"] or ""`, and "" on any
+/// failure.
+async fn simple_complete(at: &LlmEndpoint, prompt: &str, timeout: f64) -> Value {
+    let client = crate::dream::extractor::Compat::new(
+        &at.base,
+        &at.model,
+        at.key.clone(),
+        256,
+        timeout,
+        None,
+    );
+    let Some(bytes) = client
+        .post_reply_bytes(completion_body(&at.model, prompt))
+        .await
+    else {
+        return json!("");
+    };
+    let data = json_bytes_text(&bytes).and_then(|t| crate::mcp::py_loads::loads_reply(&t));
+    match data
+        .as_ref()
+        .and_then(crate::dream::extractor::reply_content)
+    {
+        Some(c) if crate::dream::extractor::truthy(c) => c.clone(),
+        _ => json!(""),
+    }
+}
+
+/// `LLMController.seed_entities`: the names the model returns that are in
+/// the vocabulary, in the model's order, duplicates kept (the walk drops
+/// them). The call holds no lock. `_parse_name_list` runs outside
+/// `simple_complete`'s `try`, so a truthy content that is no string escapes
+/// as Python's AttributeError (`.find`): an internal error.
+async fn llm_seed_entities(
+    at: Option<&LlmEndpoint>,
+    timeout: f64,
+    query: &str,
+    hits: &[String],
+    vocab: &[String],
+) -> Result<Vec<String>, ToolError> {
+    let raw = match at {
+        Some(at) => simple_complete(at, &seed_prompt(query, hits, vocab), timeout).await,
+        None => json!(""),
+    };
+    let Value::String(raw) = raw else {
+        return Err(internal(format!(
+            "AttributeError: a non-string recall seed reply has no attribute 'find': {raw}"
+        )));
+    };
+    let known: HashSet<&str> = vocab.iter().map(String::as_str).collect();
+    Ok(parse_name_list(&raw)
+        .into_iter()
+        .filter(|n| {
+            known.contains(n.as_str()) || crate::mutants::active("mcp-recall-llm-no-vocab-filter")
+        })
+        .collect())
+}
+
 /// `_select_frontier`: seeds always expand; other names under the hub
 /// threshold, by ascending degree then name, cut to the budget.
 fn select_frontier(frontier: &[String], seed_set: &HashSet<String>, k: &Knobs) -> Vec<String> {
@@ -551,12 +779,14 @@ async fn search(
         .collect())
 }
 
-/// `run_recall` (`memory/recall.py:226-382`) with the mechanical controller.
+/// `run_recall` (`memory/recall.py:226-382`): the driver names the seeds;
+/// the expansion and the re-queries are the same for both.
 async fn run_recall(
     svc: &Arc<Service>,
     ready: &Arc<Ready>,
     vocab: &[String],
     query: &str,
+    driver: &Driver,
     k: &Knobs,
     ident: &Ident,
 ) -> Result<State, ToolError> {
@@ -575,7 +805,12 @@ async fn run_recall(
         }
     }
     st.seed_text_count = st.texts.len();
-    let seeds = seed_entities(query, &hits, vocab);
+    let seeds = match driver {
+        Driver::Mechanical => seed_entities(query, &hits, vocab),
+        Driver::Llm(at) => {
+            llm_seed_entities(at.as_ref(), LLM_TIMEOUT_S, query, &hits, vocab).await?
+        }
+    };
     if seeds.is_empty() {
         st.low_confidence = true;
         return Ok(st);
@@ -920,14 +1155,14 @@ async fn recall(
         return Ok(m);
     }
     let (vocab, degrees) = vocab_and_degrees(ready, rc.hub_gate).await?;
-    if driver == "llm" {
-        return Err(ToolError::refused(
-            "not_implemented",
-            Some(
-                "memory.recall.driver \"llm\" (model-named seeds) is not yet served by the Rust daemon",
-            ),
-        ));
-    }
+    let driver = if driver == "llm" {
+        Driver::Llm(llm_endpoint(
+            &svc.config.dream,
+            &crate::dream::extractor::process_env,
+        ))
+    } else {
+        Driver::Mechanical
+    };
     let threshold = if rc.hub_gate {
         Some(
             hub_threshold(&degrees, rc.hub_percentile, rc.hub_floor).map_err(|e| {
@@ -956,7 +1191,7 @@ async fn recall(
         time_budget: (rc.time_budget_seconds > 0.0).then_some(rc.time_budget_seconds),
         skip_part_of: rc.skip_part_of_expansion,
     };
-    let mut st = run_recall(svc, ready, &vocab, query, &knobs, ident).await?;
+    let mut st = run_recall(svc, ready, &vocab, query, &driver, &knobs, ident).await?;
     if cfg.cortex.pin_constraints && !crate::mutants::active("mcp-recall-no-pin") {
         pin_constraints(&mut st);
     }
@@ -990,4 +1225,315 @@ async fn recall(
         out.insert("searches_issued".into(), json!(st.searches_issued));
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::{Read, Write};
+    use std::sync::Mutex;
+
+    // Expected values below come from running CPython 3.11 on
+    // `memory/recall.py` (`_seed_prompt`, `_parse_name_list`) and on the
+    // body `simple_complete` builds (`json.dumps`), 2026-10-25.
+
+    /// The prompt for `_seed_prompt("q é", ["a", "b"], ["Web App", "pg"])`.
+    const PY_SMALL_PROMPT: &str = "You resolve which known entities a question is about. From the ALLOWED list only, return a JSON array of the entity names the question/context refers to (the subjects to look up). Return [] if none.\n\nALLOWED: Web App, pg\n\nQUESTION: q \u{e9}\n\nCONTEXT: a b\n\nJSON array:";
+
+    /// `simple_complete`'s body for model "m" and the prompt above.
+    const PY_SMALL_BODY: &str = r#"{"model": "m", "messages": [{"role": "user", "content": "You resolve which known entities a question is about. From the ALLOWED list only, return a JSON array of the entity names the question/context refers to (the subjects to look up). Return [] if none.\n\nALLOWED: Web App, pg\n\nQUESTION: q \u00e9\n\nCONTEXT: a b\n\nJSON array:"}], "temperature": 0.0, "max_tokens": 256, "stream": false}"#;
+
+    fn strings(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn seed_prompt_matches_python() {
+        assert_eq!(
+            seed_prompt("q é", &strings(&["a", "b"]), &strings(&["Web App", "pg"])),
+            PY_SMALL_PROMPT
+        );
+        // The caps: 200 vocabulary names, 5 hits (an empty hit kept).
+        let mut vocab: Vec<String> = (0..205).map(|i| format!("E{i}")).collect();
+        vocab.push("Ünïcode".into());
+        let hits = strings(&["h1", "", "h3 with \"quotes\"", "h4", "h5", "h6 dropped"]);
+        let p = seed_prompt("What runs on host-1?", &hits, &vocab);
+        assert_eq!(p.chars().count(), 1379);
+        assert!(p.contains(", E198, E199\n\nQUESTION: What runs on host-1?\n\n"));
+        assert!(!p.contains("E200"));
+        assert!(p.ends_with("\n\nCONTEXT: h1  h3 with \"quotes\" h4 h5\n\nJSON array:"));
+    }
+
+    #[test]
+    fn name_lists_parse_as_python() {
+        let cases: [(&str, &[&str]); 11] = [
+            ("", &[]),
+            ("no brackets", &[]),
+            ("]x[", &[]),
+            ("[bad json", &[]),
+            (
+                r#"Sure: ["Web App", 42, null, "pg", ["x"], {"a": 1}, "Web App"] ok"#,
+                &["Web App", "pg", "Web App"],
+            ),
+            ("[1] and [2]", &[]),
+            (r#"["a"] tail ["b"]"#, &[]),
+            (r#"[NaN, "x", Infinity]"#, &["x"]),
+            // Python keeps the lone surrogate; its stand-in is dropped by
+            // the vocabulary filter on both sides, and "y" survives on both.
+            (r#"["\ud800", "y"]"#, &["\u{10f800}", "y"]),
+            ("[]", &[]),
+            (r#"  ["é", "\u00e9"]"#, &["é", "é"]),
+        ];
+        for (raw, want) in cases {
+            assert_eq!(parse_name_list(raw), strings(want), "{raw:?}");
+        }
+    }
+
+    #[test]
+    fn request_body_matches_python_json_dumps() {
+        assert_eq!(completion_body("m", PY_SMALL_PROMPT), PY_SMALL_BODY);
+    }
+
+    #[test]
+    fn endpoint_resolves_env_or_config() {
+        let mut d = crate::config::DreamConfig {
+            extractor_base_url: Some("http://cfg/v1/".into()),
+            extractor_model: Some("cfg-model".into()),
+            extractor_api_key: Some("cfg-key".into()),
+            // Neither applies to simple_complete.
+            extractor_source: "config".into(),
+            extractor_model_override: Some("override".into()),
+            ..Default::default()
+        };
+        let none = |_: &str| None;
+        let at = llm_endpoint(&d, &none).unwrap();
+        assert_eq!(
+            (at.base.as_str(), at.model.as_str(), at.key.as_deref()),
+            ("http://cfg/v1/", "cfg-model", Some("cfg-key"))
+        );
+        let env = |n: &str| match n {
+            "PSEUDOLIFE_DREAM_BASE_URL" => Some("http://env/v1".to_string()),
+            "PSEUDOLIFE_DREAM_MODEL" => Some(String::new()),
+            "PSEUDOLIFE_DREAM_API_KEY" => Some("env-key".to_string()),
+            _ => None,
+        };
+        let at = llm_endpoint(&d, &env).unwrap();
+        assert_eq!(
+            (at.base.as_str(), at.model.as_str(), at.key.as_deref()),
+            ("http://env/v1", "cfg-model", Some("env-key"))
+        );
+        // `if not base or not model: return ""`; an empty key sends none.
+        d.extractor_model = Some(String::new());
+        assert!(llm_endpoint(&d, &none).is_none());
+        d.extractor_model = Some("m".into());
+        d.extractor_base_url = None;
+        assert!(llm_endpoint(&d, &none).is_none());
+        d.extractor_base_url = Some("http://cfg".into());
+        d.extractor_api_key = Some(String::new());
+        assert_eq!(llm_endpoint(&d, &none).unwrap().key, None);
+    }
+
+    #[test]
+    fn reply_bytes_decode_as_json_loads_bytes() {
+        let text = r#"{"a": "é"}"#;
+        assert_eq!(json_bytes_text(text.as_bytes()).as_deref(), Some(text));
+        let mut bom = vec![0xEF, 0xBB, 0xBF];
+        bom.extend_from_slice(text.as_bytes());
+        assert_eq!(json_bytes_text(&bom).as_deref(), Some(text));
+        let le: Vec<u8> = text.encode_utf16().flat_map(u16::to_le_bytes).collect();
+        let be: Vec<u8> = text.encode_utf16().flat_map(u16::to_be_bytes).collect();
+        assert_eq!(json_bytes_text(&le).as_deref(), Some(text));
+        assert_eq!(json_bytes_text(&be).as_deref(), Some(text));
+        let mut le_bom = vec![0xFF, 0xFE];
+        le_bom.extend_from_slice(&le);
+        assert_eq!(json_bytes_text(&le_bom).as_deref(), Some(text));
+        let le32: Vec<u8> = text
+            .chars()
+            .flat_map(|c| (c as u32).to_le_bytes())
+            .collect();
+        assert_eq!(json_bytes_text(&le32).as_deref(), Some(text));
+        assert_eq!(json_bytes_text(b"\xff\x00\x00"), None);
+    }
+
+    /// A one-endpoint server: records each request (head and body, as
+    /// text) and answers it with `raw`, or holds the connection unanswered
+    /// for a while when `raw` is empty.
+    fn serve(raw: Vec<u8>) -> (String, Arc<Mutex<Vec<String>>>) {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let log = seen.clone();
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(mut s) = stream else { return };
+                let mut buf = Vec::new();
+                let mut chunk = [0u8; 65536];
+                loop {
+                    let n = s.read(&mut chunk).unwrap_or(0);
+                    if n == 0 {
+                        break;
+                    }
+                    buf.extend_from_slice(&chunk[..n]);
+                    if let Some(end) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
+                        let head = String::from_utf8_lossy(&buf[..end]).to_ascii_lowercase();
+                        let len = head
+                            .lines()
+                            .find_map(|l| l.strip_prefix("content-length:"))
+                            .map_or(0, |v| v.trim().parse().unwrap_or(0));
+                        if buf.len() >= end + 4 + len {
+                            break;
+                        }
+                    }
+                }
+                log.lock()
+                    .unwrap()
+                    .push(String::from_utf8_lossy(&buf).into_owned());
+                if raw.is_empty() {
+                    std::thread::sleep(std::time::Duration::from_secs(5));
+                } else {
+                    let _ = s.write_all(&raw);
+                }
+            }
+        });
+        (format!("http://127.0.0.1:{port}"), seen)
+    }
+
+    fn answer(status_line: &str, body: &[u8], headers: &[(&str, &str)]) -> Vec<u8> {
+        let mut head = format!(
+            "HTTP/1.1 {status_line}\r\nContent-Length: {}\r\nConnection: close\r\n",
+            body.len()
+        );
+        for (k, v) in headers {
+            head.push_str(&format!("{k}: {v}\r\n"));
+        }
+        head.push_str("\r\n");
+        let mut out = head.into_bytes();
+        out.extend_from_slice(body);
+        out
+    }
+
+    fn envelope(content: Value) -> Vec<u8> {
+        crate::pyjson::dumps(&json!({"choices": [{"message": {"content": content}}]})).into_bytes()
+    }
+
+    fn at(base: &str, key: Option<&str>) -> LlmEndpoint {
+        LlmEndpoint {
+            base: base.into(),
+            model: "m".into(),
+            key: key.map(str::to_string),
+        }
+    }
+
+    #[tokio::test]
+    async fn the_seed_call_posts_python_bytes_with_the_key_only_when_set() {
+        let (origin, seen) = serve(answer("200 OK", &envelope(json!("[\"pg\"]")), &[]));
+        let base = format!("{origin}/v1/");
+        let got = simple_complete(&at(&base, Some("k-1")), PY_SMALL_PROMPT, 5.0).await;
+        assert_eq!(got, json!("[\"pg\"]"));
+        let got = simple_complete(&at(&base, None), PY_SMALL_PROMPT, 5.0).await;
+        assert_eq!(got, json!("[\"pg\"]"));
+        let seen = seen.lock().unwrap().clone();
+        assert_eq!(seen.len(), 2);
+        for (i, req) in seen.iter().enumerate() {
+            assert!(
+                req.starts_with("POST /v1/chat/completions HTTP/1.1\r\n"),
+                "{req}"
+            );
+            assert!(req.ends_with(&format!("\r\n\r\n{PY_SMALL_BODY}")), "{req}");
+            let auth = req
+                .lines()
+                .filter(|l| l.to_ascii_lowercase().starts_with("authorization:"))
+                .collect::<Vec<_>>();
+            if i == 0 {
+                assert_eq!(auth, ["authorization: Bearer k-1"]);
+            } else {
+                assert!(auth.is_empty(), "{req}");
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn a_redirect_is_refused_and_its_target_gets_nothing() {
+        let (target, target_seen) = serve(answer("200 OK", &envelope(json!("[\"pg\"]")), &[]));
+        let location = format!("{target}/v1/chat/completions");
+        let (origin, seen) = serve(answer("302 Found", b"", &[("Location", &location)]));
+        let got = simple_complete(&at(&format!("{origin}/v1"), Some("k-1")), "p", 5.0).await;
+        assert_eq!(got, json!(""));
+        assert_eq!(seen.lock().unwrap().len(), 1);
+        assert!(target_seen.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn every_failure_is_an_empty_reply() {
+        // A refused connection, a timeout, a non-2xx answer, a body that is
+        // no JSON, an envelope without content, a falsy content.
+        let dead = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let dead_base = format!("http://{}/v1", dead.local_addr().unwrap());
+        drop(dead);
+        assert_eq!(
+            simple_complete(&at(&dead_base, None), "p", 5.0).await,
+            json!("")
+        );
+        let (hold, hold_seen) = serve(Vec::new());
+        let t = Instant::now();
+        assert_eq!(
+            simple_complete(&at(&format!("{hold}/v1"), None), "p", 0.5).await,
+            json!("")
+        );
+        assert!(t.elapsed().as_secs_f64() < 4.0);
+        assert_eq!(hold_seen.lock().unwrap().len(), 1);
+        for raw in [
+            answer(
+                "500 Internal Server Error",
+                &envelope(json!("[\"pg\"]")),
+                &[],
+            ),
+            answer("200 OK", b"not json", &[]),
+            answer("200 OK", br#"{"choices": []}"#, &[]),
+            answer("200 OK", br#"{"choices": [{"message": {}}]}"#, &[]),
+            answer("200 OK", &envelope(json!(null)), &[]),
+            answer("200 OK", &envelope(json!(0)), &[]),
+            answer("200 OK", &envelope(json!([])), &[]),
+        ] {
+            let (origin, _) = serve(raw.clone());
+            let got = simple_complete(&at(&format!("{origin}/v1"), None), "p", 5.0).await;
+            assert_eq!(got, json!(""), "{}", String::from_utf8_lossy(&raw));
+        }
+        // A UTF-8 BOM is no failure: json.loads(bytes) skips it.
+        let mut bom = vec![0xEF, 0xBB, 0xBF];
+        bom.extend_from_slice(&envelope(json!("[\"pg\"]")));
+        let (origin, _) = serve(answer("200 OK", &bom, &[]));
+        let got = simple_complete(&at(&format!("{origin}/v1"), None), "p", 5.0).await;
+        assert_eq!(got, json!("[\"pg\"]"));
+        // userinfo in the base URL: refused before connecting.
+        let (origin, seen) = serve(answer("200 OK", &envelope(json!("[\"pg\"]")), &[]));
+        let base = origin.replace("http://", "http://user:pw@") + "/v1";
+        assert_eq!(
+            simple_complete(&at(&base, Some("k")), "p", 5.0).await,
+            json!("")
+        );
+        assert!(seen.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn llm_seeds_keep_vocabulary_names_in_model_order() {
+        let vocab = strings(&["Web App", "pg", "Redis"]);
+        let reply = r#"Sure: ["Redis", "Nobody", 42, "pg", "Redis"] ok"#;
+        let (origin, seen) = serve(answer("200 OK", &envelope(json!(reply)), &[]));
+        let ep = at(&format!("{origin}/v1"), None);
+        let got = llm_seed_entities(Some(&ep), 5.0, "q", &strings(&["hit"]), &vocab).await;
+        assert_eq!(got.ok(), Some(strings(&["Redis", "pg", "Redis"])));
+        let req = seen.lock().unwrap()[0].clone();
+        let body = completion_body("m", &seed_prompt("q", &strings(&["hit"]), &vocab));
+        assert!(req.ends_with(&body), "{req}");
+        // No endpoint configured: no seeds, no request.
+        let got = llm_seed_entities(None, 5.0, "q", &[], &vocab).await;
+        assert_eq!(got.ok(), Some(Vec::new()));
+        // A truthy non-string content escapes `_parse_name_list` as
+        // Python's AttributeError does: an internal error.
+        let (origin, _) = serve(answer("200 OK", &envelope(json!(5)), &[]));
+        let ep = at(&format!("{origin}/v1"), None);
+        let got = llm_seed_entities(Some(&ep), 5.0, "q", &[], &vocab).await;
+        assert!(matches!(got, Err(ToolError::Internal(_))));
+    }
 }

@@ -217,6 +217,7 @@ import dbstate  # noqa: E402
 import pgdisposable as pg  # noqa: E402
 import run as w1a  # noqa: E402
 from stub_extractor import StubExtractor  # noqa: E402
+import w2e_recall_llm  # noqa: E402
 
 pg.DISPOSABLE_NAME = re.compile(r"pl_cf_w2e_[a-z0-9_]{1,40}")
 GOLDENS = HERE / "goldens" / "w2e"
@@ -376,9 +377,11 @@ MUTANTS = ["store-tags-raw", "store-skip-session-episode", "store-no-hint", "sto
            # memory_graph (spec GR1-GR10): caught by graph-read.
            "mcp-graph-no-relation-filter", "mcp-graph-tag-no-ambiguous",
            "mcp-graph-facts-no-alias", "mcp-graph-no-labels",
-           # memory_recall (spec RC1-RC16): caught by the recall-* scenarios.
+           # memory_recall (spec RC1-RC17): caught by the recall-* scenarios.
            "mcp-recall-seed-any", "mcp-recall-no-hub-gate", "mcp-recall-no-requery",
            "mcp-recall-no-pin", "mcp-recall-no-annotate", "mcp-recall-flat-caps",
+           # memory.recall.driver: llm: caught by recall-llm (w2e_recall_llm.py).
+           *w2e_recall_llm.MUTANTS,
            # memory_graph_review's list (spec RV2-RV5): caught by the
            # review-list scenarios.
            "mcp-review-dup-threshold", "mcp-review-no-merge-veto", "mcp-review-no-fold-swap",
@@ -2482,6 +2485,9 @@ SCENARIOS.update({
         ],
     },
 })
+
+# memory.recall.driver: llm against the stub extractor (w2e_recall_llm.py).
+SCENARIOS.update(w2e_recall_llm.scenarios(RECALL_SEED))
 
 
 def review(action="list", **kw) -> dict:
