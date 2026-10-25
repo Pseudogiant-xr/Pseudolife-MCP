@@ -567,7 +567,7 @@ overlaps the oracle's byte-0 `msvcrt.locking` range, so each side excludes
 the other. The bank's superuser secret is read and created through the
 shim's existing credential code (`pg/embedded_secret.rs` uses
 `credentials::windows_security`, already an exception above); its SCRAM
-verifier is computed with the safe `hmac` and `sha2` crates. One deliberate difference from the oracle: a live postgres at the recorded pid that does not serve the bank's pgdata is refused (naming the stale `postmaster.pid`), where the oracle compares its start time and starts over a much younger one; refusing is the safe direction. An unreadable `postmaster.pid`, or a single-user backend's negated pid, is likewise refused, never treated as stale. Real-runtime
+verifier is computed with the safe `hmac` and `sha2` crates. One deliberate difference from the oracle: a live postgres at the recorded pid that does not serve the bank's pgdata is refused (naming the stale `postmaster.pid`), where the oracle compares its start time and starts over a much younger one; refusing is the safe direction. An unreadable `postmaster.pid`, or a single-user backend's negated pid, is likewise refused, never treated as stale. A second: the server starts with no Unix socket (`unix_socket_directories` empty), since every client connects over TCP and another account's socket lock for the same port number would otherwise fail the start. Real-runtime
 cases need `PSEUDOLIFE_TEST_PG_RUNTIME` (and `PSEUDOLIFE_TEST_PG0_PYTHON`
 for the cross-side case); targeted Windows and Linux validation and
 independent review remain required before acceptance.
