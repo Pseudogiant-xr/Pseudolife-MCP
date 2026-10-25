@@ -16,6 +16,8 @@ CLAIMS_SYSTEM = "You consolidate numbered notes into claims. Answer JSON."
 EVENTS_SYSTEM = "You extract EVENTS from the notes."
 
 
+NL = chr(10) * 2
+
 def chat_body(system: str, user: str, model: str = "stub-model") -> bytes:
     return json.dumps({"model": model, "messages": [
         {"role": "system", "content": system}, {"role": "user", "content": user}],
@@ -347,6 +349,35 @@ def test_link_head_reads_hostile_lines_in_linear_time():
     assert stub_extractor.link_head(
         "[3] SRC 'A b' (scopes ['x']) --uses--> DST 'C' (scopes [])\n    detector: ?") == (
         3, "A b", "C")
+
+
+def test_candidate_verdicts_answer_by_their_two_names():
+    import stub_extractor
+    sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+    from pseudolife_memory.memory import dream as d
+    rows = [{"n": 1, "src": "Warehouse", "dst": "Tide Gauge", "similarity": 0.8339},
+            {"n": 2, "src": "postgres", "dst": "Kafka Broker", "similarity": 0.5647,
+             "src_snippets": ["a"]},
+            {"n": 3, "src": "Nobody", "dst": "Nothing", "similarity": 0.5}]
+    body = json.dumps({"messages": [
+        {"role": "system", "content": d._CANDIDATE_JUDGE_SYSTEM_PROMPT},
+        {"role": "user", "content": NL.join(d.format_candidate(r) for r in rows)}]}).encode()
+    reply = json.loads(stub_extractor.judge_reply(
+        {"Tide Gauge|Warehouse": {"verdict": "propose", "relation": "uses"},
+         "postgres|Kafka Broker": {"verdict": "dismiss", "confidence": 0.9}}, body))
+    assert reply == {"verdicts": [{"id": 1, "verdict": "propose", "relation": "uses"},
+                                  {"id": 2, "verdict": "dismiss", "confidence": 0.9}]}
+
+
+def test_candidate_head_reads_hostile_lines_in_linear_time():
+    import time
+    import stub_extractor
+    hostile = "[0] '' vs '' (cosine " * 20000 + "'"
+    start = time.perf_counter()
+    stub_extractor.judge_reply({"a|b": {"verdict": "leave"}}, json.dumps({
+        "messages": [{"role": "system", "content": "You judge LINK CANDIDATES"},
+                     {"role": "user", "content": hostile}]}).encode())
+    assert time.perf_counter() - start < 2.0
 
 
 def test_judge_verdicts_answer_by_pair_on_each_endpoint(stub_factory):

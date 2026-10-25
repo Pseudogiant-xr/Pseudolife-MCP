@@ -1643,6 +1643,514 @@
    ]
   }
  ],
+ "candidate_format": [
+  {
+   "row": {
+    "n": 1,
+    "src": "Alpha",
+    "dst": "Beta",
+    "similarity": 0.8123,
+    "src_snippets": [
+     "[conversation] ssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssss",
+     "two",
+     "three",
+     "four"
+    ],
+    "dst_snippets": []
+   },
+   "text": "[1] 'Alpha' vs 'Beta' (cosine 0.8123)\n    src notes: [conversation] sssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssss; two; three\n    dst notes: none"
+  },
+  {
+   "row": {
+    "n": 2,
+    "src": "élan",
+    "dst": "🙂",
+    "similarity": 1.0,
+    "src_snippets": null,
+    "dst_snippets": [
+     "x"
+    ]
+   },
+   "text": "[2] 'élan' vs '🙂' (cosine 1.0)\n    src notes: none\n    dst notes: x"
+  },
+  {
+   "row": {
+    "n": 3,
+    "src": null,
+    "similarity": null
+   },
+   "text": "[3] 'None' vs '?' (cosine None)\n    src notes: none\n    dst notes: none"
+  },
+  {
+   "row": {
+    "n": 4
+   },
+   "text": "[4] '?' vs '?' (cosine None)\n    src notes: none\n    dst notes: none"
+  }
+ ],
+ "candidate_parse": [
+  {
+   "raw": [
+    {
+     "id": 1,
+     "verdict": "propose",
+     "confidence": 0.9,
+     "relation": "uses",
+     "rationale": "both run it"
+    },
+    {
+     "id": 2,
+     "verdict": " PROPOSE ",
+     "confidence": "0.7",
+     "relation": "depends-on",
+     "src": "Gamma",
+     "dst": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    },
+    {
+     "id": 3,
+     "verdict": "propose",
+     "confidence": 0.9,
+     "relation": ""
+    },
+    {
+     "id": 1,
+     "verdict": "propose",
+     "relation": "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
+     "rationale": "nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn"
+    },
+    {
+     "id": 2,
+     "verdict": "dismiss",
+     "confidence": 2,
+     "relation": "ignored",
+     "src": "s"
+    },
+    {
+     "id": 3,
+     "verdict": "leave",
+     "confidence": null
+    },
+    {
+     "id": 9,
+     "verdict": "propose",
+     "relation": "uses"
+    },
+    {
+     "id": 1,
+     "verdict": "accept"
+    },
+    {
+     "id": 2.5,
+     "verdict": "propose",
+     "relation": 7,
+     "src": 0,
+     "dst": ""
+    },
+    "nope"
+   ],
+   "rows": [
+    {
+     "n": 1,
+     "src": "Alpha",
+     "dst": "Beta"
+    },
+    {
+     "n": 2,
+     "src": "Gamma",
+     "dst": "Delta"
+    },
+    {
+     "n": 3,
+     "src": "Eps",
+     "dst": "Zeta"
+    }
+   ],
+   "verdicts": [
+    {
+     "n": 1,
+     "verdict": "propose",
+     "confidence": 0.9,
+     "relation": "uses",
+     "src": "Alpha",
+     "dst": "Beta",
+     "rationale": "both run it"
+    },
+    {
+     "n": 2,
+     "verdict": "propose",
+     "confidence": 0.7,
+     "relation": "depends-on",
+     "src": "Gamma",
+     "dst": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+     "rationale": null
+    },
+    {
+     "n": 3,
+     "verdict": "leave",
+     "confidence": 0.9,
+     "relation": null,
+     "src": null,
+     "dst": null,
+     "rationale": null
+    },
+    {
+     "n": 1,
+     "verdict": "propose",
+     "confidence": 0.5,
+     "relation": "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
+     "src": "Alpha",
+     "dst": "Beta",
+     "rationale": "nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn"
+    },
+    {
+     "n": 2,
+     "verdict": "dismiss",
+     "confidence": 1.0,
+     "relation": null,
+     "src": null,
+     "dst": null,
+     "rationale": null
+    },
+    {
+     "n": 3,
+     "verdict": "leave",
+     "confidence": 0.5,
+     "relation": null,
+     "src": null,
+     "dst": null,
+     "rationale": null
+    },
+    {
+     "n": 2,
+     "verdict": "propose",
+     "confidence": 0.5,
+     "relation": "7",
+     "src": "0",
+     "dst": "Delta",
+     "rationale": null
+    }
+   ]
+  },
+  {
+   "raw": [],
+   "rows": [
+    {
+     "n": 1,
+     "src": "Alpha",
+     "dst": "Beta"
+    },
+    {
+     "n": 2,
+     "src": "Gamma",
+     "dst": "Delta"
+    },
+    {
+     "n": 3,
+     "src": "Eps",
+     "dst": "Zeta"
+    }
+   ],
+   "verdicts": []
+  }
+ ],
+ "candidate_fingerprints": {
+  "inputs": {
+   "entities": [
+    {
+     "id": 1,
+     "canonical": "alpha",
+     "display": "Alpha",
+     "etype": null,
+     "created_at": 1700000000.123456
+    },
+    {
+     "id": 2,
+     "canonical": "beta-node",
+     "display": "Beta Node",
+     "etype": "service",
+     "created_at": 1700000001.5
+    },
+    {
+     "id": 10,
+     "canonical": "élan",
+     "display": "Élan",
+     "etype": "",
+     "created_at": 3.0
+    },
+    {
+     "id": 11,
+     "canonical": "orphan",
+     "display": null,
+     "created_at": 4.25,
+     "etype": null
+    },
+    {
+     "id": 12,
+     "canonical": "bang",
+     "display": "!!!",
+     "etype": null,
+     "created_at": 6.0
+    }
+   ],
+   "aliases": [
+    [
+     10,
+     [
+      "elan"
+     ]
+    ],
+    [
+     2,
+     [
+      "beta",
+      "bn"
+     ]
+    ]
+   ],
+   "edges": [
+    {
+     "id": 7,
+     "src_id": 1,
+     "relation": "uses",
+     "dst_id": 2,
+     "confidence": 0.7,
+     "origin": "agent",
+     "asserted_at": 1700000002.0
+    },
+    {
+     "id": 3,
+     "src_id": 10,
+     "relation": "related-to",
+     "dst_id": 1,
+     "confidence": 0.45,
+     "origin": null,
+     "asserted_at": null
+    },
+    {
+     "id": 12,
+     "src_id": 2,
+     "relation": "related-to",
+     "dst_id": 2,
+     "confidence": 1.0,
+     "origin": "action",
+     "asserted_at": 5.5
+    }
+   ],
+   "entries": [
+    {
+     "id": 1,
+     "text": "Alpha uses Beta Node daily",
+     "embedding": [
+      0.10000000149011612,
+      -0.25,
+      3.0
+     ]
+    },
+    {
+     "id": 2,
+     "text": "Élan was here 🙂",
+     "embedding": [
+      0.5,
+      0.5,
+      0.5
+     ]
+    },
+    {
+     "id": 5,
+     "text": "alpha alone",
+     "embedding": null
+    },
+    {
+     "id": 9,
+     "text": "beta node notes",
+     "embedding": [
+      9.99999993922529e-09,
+      24999999488.0,
+      -0.0
+     ]
+    }
+   ],
+   "scopes": [
+    [
+     10,
+     [
+      "proj-b",
+      "Proj-A"
+     ]
+    ],
+    [
+     2,
+     [
+      "zeta",
+      "alpha"
+     ]
+    ]
+   ],
+   "traces": [
+    [
+     "beta-node",
+     [
+      9,
+      1,
+      9
+     ]
+    ],
+    [
+     "orphan",
+     [
+      42
+     ]
+    ]
+   ],
+   "facts": [
+    [
+     10,
+     2
+    ],
+    [
+     2,
+     1
+    ]
+   ],
+   "fact_texts": [
+    [
+     "Alpha",
+     1
+    ],
+    [
+     "None",
+     3
+    ],
+    [
+     "2024",
+     2
+    ]
+   ],
+   "pending_entities": [
+    {
+     "id": 30,
+     "kind": "merge",
+     "entity_id": 1,
+     "into_id": 10,
+     "score": 0.91,
+     "reason": "write-dedup",
+     "status": "pending",
+     "created_at": 9.0,
+     "judge_verdict": "reject",
+     "judge_confidence": 0.8,
+     "judged_at": 10.0,
+     "judge2_policy": "x",
+     "entity": "Alpha",
+     "into": "Élan"
+    },
+    {
+     "id": 31,
+     "kind": "junk",
+     "entity_id": 11,
+     "into_id": null,
+     "score": null,
+     "reason": "list-artifact",
+     "status": "pending",
+     "created_at": 11.0,
+     "judge_verdict": null,
+     "entity": null,
+     "into": null
+    }
+   ],
+   "lesson_refs": [
+    10,
+    2,
+    3
+   ],
+   "pending_links": [
+    {
+     "id": 40,
+     "src_id": 2,
+     "relation": "uses",
+     "dst_id": 10,
+     "confidence": 0.5,
+     "similarity": null,
+     "rationale": "co-mention",
+     "source": "analyzer",
+     "created_at": 12.0,
+     "status": "pending",
+     "judge_verdict": "accept",
+     "judged_at": 13.0,
+     "src": "Beta Node",
+     "dst": "Élan"
+    },
+    {
+     "id": 41,
+     "src_id": 1,
+     "relation": "related-to",
+     "dst_id": 1,
+     "confidence": 0.3,
+     "similarity": 0.66,
+     "rationale": null,
+     "source": "deep-dream",
+     "created_at": 14.0,
+     "status": "pending",
+     "src": "Alpha",
+     "dst": "Alpha"
+    }
+   ],
+   "dismissed": [
+    [
+     "a",
+     "b"
+    ],
+    [
+     "a",
+     "z"
+    ],
+    [
+     "b",
+     "c"
+    ]
+   ]
+  },
+  "candidates": [
+   {
+    "src_id": 1,
+    "dst_id": 10,
+    "src": "Alpha",
+    "dst": "Élan",
+    "similarity": 0.8123,
+    "src_snippets": [
+     "a"
+    ],
+    "dst_snippets": []
+   },
+   {
+    "src": "beta node",
+    "dst": "Ghost",
+    "similarity": 0.6
+   },
+   {
+    "src_id": 99,
+    "dst_id": 11,
+    "src": "Alpha",
+    "dst": "Orphan"
+   },
+   {
+    "src_id": 12,
+    "dst_id": 1,
+    "src": "!!!",
+    "dst": "Alpha",
+    "similarity": 0.55
+   },
+   {}
+  ],
+  "generation": "cb8f7257287951e95bb2a3a039630b76d4032631c740b99fe589062025153181",
+  "decision_generation": "1c6a0d7c1b07c288a10cfd471e61013b701f05c3a354282ea641acd337fe4a93",
+  "evidence": [
+   "5f5e4174a3a7dba536235051805c728432ceab0f9f09a47bb39caf24d173ddb2",
+   "dca4644bd5aae398d317b985088dd072b691ae2594e87ce31d1c7dc07340de4a",
+   "209aaef862ee10f31ee067f382359c8bbac5dcb8a71ea850b740e7f8169e70f2",
+   "f83b90f8624b18b4f36335feb7d99066ca8eb863273b19f55b6f14559f1e02bb",
+   "43092ad160d2039f2d967edba00402984509d0843470566d5df4d0a1af6f6426"
+  ]
+ },
  "link_distinct": [
   {
    "row": {

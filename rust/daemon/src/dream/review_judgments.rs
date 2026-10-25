@@ -241,6 +241,16 @@ const LINK_PENDING_COLS: [(&str, Col); 25] = [
     ("dst", Col::S),
 ];
 
+/// `pending_entity_proposals()`: every kind, in its order.
+pub(crate) async fn pending_entity_rows(c: &Client) -> Result<Vec<Row>, ToolError> {
+    Ok(c.query(PENDING_SQL, &[])
+        .await
+        .map_err(internal)?
+        .iter()
+        .map(|r| decode(r, &PENDING_COLS))
+        .collect())
+}
+
 /// The queue's pending rows: `pending_proposals()` for links, the
 /// `pending_entity_proposals()` rows of the queue's kind otherwise.
 pub(crate) async fn pending_rows(c: &Client, queue: Queue) -> Result<Vec<Row>, ToolError> {
@@ -1405,17 +1415,17 @@ pub(crate) async fn record_proposal_terminal(
 }
 
 /// `_batch(index, kind, limit)`.
-fn batch(index: &DIndex, queue: Queue, limit: i64) -> Vec<(String, Value)> {
+fn batch(index: &DIndex, kind: &str, limit: i64) -> Vec<(String, Value)> {
     let mut rows: Vec<(String, Value)> = index
         .active
         .iter()
-        .filter(|(_, s)| s.get("queue").and_then(Value::as_str) == Some(queue.kind()))
+        .filter(|(_, s)| s.get("queue").and_then(Value::as_str) == Some(kind))
         .map(|(t, s)| (t.clone(), s.clone()))
         .collect();
     rows.sort_by_key(|(_, s)| seq_of(s));
     let cursor = index
         .cursors
-        .get(queue.kind())
+        .get(kind)
         .and_then(|v| v.as_i64().or_else(|| v.as_f64().map(|x| x as i64)))
         .unwrap_or(0);
     let (after, before): (Vec<_>, Vec<_>) = rows.into_iter().partition(|(_, s)| seq_of(s) > cursor);
@@ -1596,7 +1606,7 @@ pub(crate) async fn refresh_proposal_terminals(
     use crate::graph_review_tools::actions::{in_txn, reads};
     let index = reads(client, |c| async move { DIndex::load(c).await }).await?;
     let kind = review.queue.kind();
-    let selected = batch(&index, review.queue, limit);
+    let selected = batch(&index, review.queue.kind(), limit);
     if selected.is_empty() {
         return Ok(json!({"considered": 0, "reopened": 0, "superseded": 0, "remaining": 0}));
     }
@@ -1770,6 +1780,251 @@ pub(crate) async fn refresh_proposal_terminals(
             .active
             .values()
             .filter(|r| r.get("queue").and_then(Value::as_str) == Some(kind))
+            .count())
+    })
+    .await?;
+    Ok(json!({"considered": selected.len(), "reopened": reopened,
+              "superseded": superseded, "remaining": remaining}))
+}
+
+/// `record_candidate_dismissal(service, candidate, ...)` in the caller's
+/// transaction, after the pair was closed.
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn record_candidate_dismissal(
+    c: &Client,
+    candidate: &Row,
+    decision_fingerprint: &str,
+    policy_fingerprint: &str,
+    generation_fingerprint: Option<&str>,
+    served_model: Option<&str>,
+    evidence_fingerprint: Option<&str>,
+) -> Result<(), ToolError> {
+    let Some(served) = served_model.filter(|m| !m.is_empty()) else {
+        return Ok(());
+    };
+    let g = crate::storage::graph::load_graph_body(c)
+        .await
+        .map_err(internal)?;
+    let mut canon: HashMap<i64, String> = HashMap::new();
+    let mut canon_by_norm: HashMap<String, String> = HashMap::new();
+    for e in g["entities"].as_array().into_iter().flatten() {
+        let canonical = e["canonical"].as_str().unwrap_or("").to_string();
+        canon.insert(e["id"].as_i64().unwrap_or(0), canonical.clone());
+        canon_by_norm
+            .entry(canonical.clone())
+            .or_insert_with(|| canonical.clone());
+        canon_by_norm
+            .entry(crate::storage::graph::norm_name(
+                e["display"].as_str().unwrap_or(""),
+            ))
+            .or_insert(canonical);
+    }
+    let resolve = |field: &str| -> String {
+        if let Some(c) = vi(candidate, &format!("{field}_id")).and_then(|i| canon.get(&i)) {
+            return c.clone();
+        }
+        let n = crate::storage::graph::norm_name(vs(candidate, field).unwrap_or(""));
+        canon_by_norm.get(&n).cloned().unwrap_or(n)
+    };
+    let mut pair = [resolve("src"), resolve("dst")];
+    pair.sort();
+    if pair[0].is_empty() || pair[1].is_empty() || pair[0] == pair[1] {
+        return Ok(());
+    }
+    let Some(pair_at) = dismissed_at(c, Some(&pair)).await? else {
+        return Ok(());
+    };
+    let evidence = match evidence_fingerprint {
+        Some(e) => e.to_string(),
+        None => {
+            let inputs = crate::dream::candidates::load_inputs(c).await?;
+            crate::dream::candidates::evidence_fingerprints(
+                &inputs,
+                std::slice::from_ref(candidate),
+            )
+            .remove(0)
+        }
+    };
+    let mut marker = Map::new();
+    marker.insert("queue".into(), json!("candidate"));
+    marker.insert("target_type".into(), json!("candidate"));
+    marker.insert("action".into(), json!("dismiss"));
+    marker.insert("candidate".into(), Value::Object(candidate.clone()));
+    marker.insert("fingerprint".into(), json!(decision_fingerprint));
+    marker.insert("policy_fingerprint".into(), json!(policy_fingerprint));
+    marker.insert(
+        "generation_fingerprint".into(),
+        json!(generation_fingerprint),
+    );
+    marker.insert("evidence_fingerprint".into(), json!(evidence));
+    marker.insert("served_model".into(), json!(served));
+    marker.insert("pair".into(), json!(pair));
+    marker.insert("dismissed_at".into(), fnum(Some(pair_at)));
+    write_new(c, &format!("candidate:{}|{}", pair[0], pair[1]), marker).await
+}
+
+/// `refresh_candidate_dismissals(service, policy_fingerprint=...,
+/// served_model=..., last_response_model=..., limit=...)`: reconsider one
+/// bounded batch of automatic candidate dismissals. Each Python
+/// transaction is its own; the caller holds the writer lock.
+pub(crate) async fn refresh_candidate_dismissals(
+    client: &Client,
+    policy_fingerprint: &str,
+    served_model: Option<&str>,
+    last_response_model: Option<&str>,
+    limit: i64,
+) -> Result<Value, ToolError> {
+    use crate::graph_review_tools::actions::{in_txn, reads};
+    let index = reads(client, |c| async move { DIndex::load(c).await }).await?;
+    let count = |index: &DIndex| {
+        index
+            .active
+            .values()
+            .filter(|r| r.get("queue").and_then(Value::as_str) == Some("candidate"))
+            .count()
+    };
+    let selected = batch(&index, "candidate", limit);
+    if served_model.is_none() && last_response_model.is_none() {
+        return Ok(json!({"considered": 0, "reopened": 0, "superseded": 0,
+                         "remaining": count(&index)}));
+    }
+    let mut markers: Vec<(String, Value, Map<String, Value>)> = Vec::new();
+    for (target, summary) in &selected {
+        let did = summary
+            .get("decision_id")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        let marker = reads(client, |c| async move { decision_record(c, &did).await })
+            .await?
+            .unwrap_or_default();
+        markers.push((target.clone(), summary.clone(), marker));
+    }
+    let cands: Vec<Row> = markers
+        .iter()
+        .map(|(_, _, m)| match m.get("candidate") {
+            Some(Value::Object(c)) if !c.is_empty() => c.clone(),
+            _ => Map::new(),
+        })
+        .collect();
+    let evidence = if cands.is_empty() {
+        Vec::new()
+    } else {
+        let inputs = reads(client, |c| async move {
+            crate::dream::candidates::load_inputs(c).await
+        })
+        .await?;
+        crate::dream::candidates::evidence_fingerprints(&inputs, &cands)
+    };
+    let (mut reopened, mut superseded) = (0i64, 0i64);
+    for ((target, summary, marker), current_evidence) in markers.iter().zip(&evidence) {
+        let did = summary
+            .get("decision_id")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        let pair = marker_pair(marker);
+        let owned = match &pair {
+            Some(p) => {
+                let p = p.clone();
+                let at = reads(client, |c| async move { dismissed_at(c, Some(&p)).await }).await?;
+                py_eq(Some(&fnum(at)), marker.get("dismissed_at"))
+            }
+            None => false,
+        };
+        if !owned {
+            let (t, d) = (target.clone(), did.clone());
+            let retired = in_txn(client, |c| async move {
+                let mut live = DIndex::load(c).await?;
+                let Some(s) = live.active.get(&t).cloned() else {
+                    return Ok(false);
+                };
+                if s.get("decision_id").and_then(Value::as_str) != Some(d.as_str()) {
+                    return Ok(false);
+                }
+                retire(
+                    c,
+                    &mut live,
+                    &t,
+                    &s,
+                    "externally_superseded",
+                    "candidate dismissal ownership changed",
+                )
+                .await?;
+                set_meta(c, INDEX_KEY, &live.value()).await?;
+                Ok(true)
+            })
+            .await?;
+            superseded += i64::from(retired);
+            continue;
+        }
+        let model_moved = [served_model, last_response_model]
+            .iter()
+            .flatten()
+            .any(|m| {
+                !m.is_empty() && marker.get("served_model").and_then(Value::as_str) != Some(m)
+            });
+        let changed = marker.get("policy_fingerprint").and_then(Value::as_str)
+            != Some(policy_fingerprint)
+            || marker.get("evidence_fingerprint").and_then(Value::as_str)
+                != Some(current_evidence.as_str())
+            || model_moved;
+        if !changed {
+            continue;
+        }
+        let (t, m, p) = (
+            target.clone(),
+            marker.clone(),
+            pair.clone().unwrap_or_default(),
+        );
+        let done = in_txn(client, |c| async move {
+            let mut live = DIndex::load(c).await?;
+            let Some(s) = live.active.get(&t).cloned() else {
+                return Ok(false);
+            };
+            if s.get("decision_id").and_then(Value::as_str) != Some(did.as_str()) {
+                return Ok(false);
+            }
+            let at = dismissed_at(c, Some(&p)).await?;
+            if !py_eq(Some(&fnum(at)), m.get("dismissed_at")) {
+                return Ok(false);
+            }
+            let removed = c
+                .execute(
+                    "DELETE FROM dismissed_pairs WHERE a_norm=$1 AND b_norm=$2 AND dismissed_at=$3",
+                    &[&p[0], &p[1], &m.get("dismissed_at").and_then(Value::as_f64)],
+                )
+                .await
+                .map_err(internal)?;
+            if removed != 1 {
+                return Ok(false);
+            }
+            retire(
+                c,
+                &mut live,
+                &t,
+                &s,
+                "reopened",
+                "evidence, policy, or observed model changed",
+            )
+            .await?;
+            set_meta(c, INDEX_KEY, &live.value()).await?;
+            Ok(true)
+        })
+        .await?;
+        reopened += i64::from(done);
+    }
+    let last_seq = selected.last().map(|(_, s)| seq_of(s));
+    let remaining = in_txn(client, |c| async move {
+        let mut live = DIndex::load(c).await?;
+        if let Some(seq) = last_seq {
+            live.cursors.insert("candidate".into(), json!(seq));
+        }
+        set_meta(c, INDEX_KEY, &live.value()).await?;
+        Ok(live
+            .active
+            .values()
+            .filter(|r| r.get("queue").and_then(Value::as_str) == Some("candidate"))
             .count())
     })
     .await?;

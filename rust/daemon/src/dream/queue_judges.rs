@@ -90,7 +90,7 @@ pub(crate) fn text_field(v: &Value, key: &str, cap: usize) -> Option<String> {
 }
 
 /// `_snips(items, k, chars)`: `"; ".join(str(x)[:chars] for x in items[:k])`.
-fn snips(items: Option<&Value>, k: usize, cap: usize) -> String {
+pub(crate) fn snips(items: Option<&Value>, k: usize, cap: usize) -> String {
     match items {
         Some(Value::Array(items)) => items
             .iter()
