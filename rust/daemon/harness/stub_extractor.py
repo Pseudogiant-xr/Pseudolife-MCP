@@ -84,8 +84,22 @@ JUDGE_ENDPOINTS = ("second", "third")
 PROPOSAL_HEAD = re.compile(r"^\[(\d+)\] FROM '(.*?)' \(degree ", re.M)
 PROPOSAL_INTO = re.compile(r"^    INTO '(.*?)' \(degree ", re.M)
 JUNK_HEAD = re.compile(r"^\[(\d+)\] '(.*?)' \u2014 detector: ", re.M)
-LINK_HEAD = re.compile(r"^\[(\d+)\] SRC '(.*?)' \(scopes .*?\) --.*?--> DST '(.*?)' \(scopes ",
-                       re.M)
+# A link proposal's first line, read in two linear pieces: no pattern
+# holds more than one unbounded run, and each run stops at a quote or a
+# newline (CodeQL py/polynomial-redos on the single pattern it replaced).
+LINK_SRC = re.compile(r"\[(\d+)\] SRC '([^'\n]*)' \(scopes ")
+LINK_DST = re.compile(r"--> DST '([^'\n]*)' \(scopes ")
+
+
+def link_head(block: str) -> tuple[int, str, str] | None:
+    """``(n, src, dst)`` from a ``format_link_proposal`` block's first line."""
+    line = block.split("\n", 1)[0]
+    src, dst = LINK_SRC.match(line), LINK_DST.search(line)
+    if not src or not dst:
+        return None
+    return int(src.group(1)), src.group(2), dst.group(1)
+
+
 HEALTH_PATHS = {"/health": "primary", "/fallback/health": "fallback"}
 
 
@@ -369,13 +383,13 @@ def judge_reply(verdicts: dict, body: bytes) -> str:
         return json.dumps({"verdicts": out})
     if parsed and parsed[0] == "judge_links":
         for block in re.split(r"\n\n(?=\[\d+\] SRC ')", user):
-            head = LINK_HEAD.search(block)
+            head = link_head(block)
             if not head:
                 continue
-            a, b = head.group(2), head.group(3)
+            n, a, b = head
             v = verdicts.get(f"{a}|{b}") or verdicts.get(f"{b}|{a}")
             for one in (v if isinstance(v, list) else [] if v is None else [v]):
-                out.append({"id": int(head.group(1)), **one})
+                out.append({"id": n, **one})
         return json.dumps({"verdicts": out})
     for block in re.split(r"\n\n(?=\[\d+\] FROM )", user):
         head = PROPOSAL_HEAD.search(block)

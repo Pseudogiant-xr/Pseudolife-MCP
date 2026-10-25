@@ -332,6 +332,23 @@ def test_link_verdicts_answer_by_src_and_dst():
                                   {"id": 2, "verdict": "leave", "confidence": 0.1}]}
 
 
+def test_link_head_reads_hostile_lines_in_linear_time():
+    import time
+    import stub_extractor
+    # The shape CodeQL flagged (py/polynomial-redos): the old single pattern
+    # backtracked polynomially on many repetitions of this prefix.
+    hostile = "[0] SRC '' (scopes " * 20000
+    start = time.perf_counter()
+    assert stub_extractor.link_head(hostile) is None
+    assert stub_extractor.judge_reply({"a|b": {"verdict": "accept"}}, json.dumps({
+        "messages": [{"role": "system", "content": "You judge LINK PROPOSALS"},
+                     {"role": "user", "content": hostile}]}).encode()) == '{"verdicts": []}'
+    assert time.perf_counter() - start < 2.0
+    assert stub_extractor.link_head(
+        "[3] SRC 'A b' (scopes ['x']) --uses--> DST 'C' (scopes [])\n    detector: ?") == (
+        3, "A b", "C")
+
+
 def test_judge_verdicts_answer_by_pair_on_each_endpoint(stub_factory):
     s = stub_factory({"reply_model": "one", "second_reply_model": "two",
                       "third_reply_model": None, "replies": [
