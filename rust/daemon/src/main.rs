@@ -42,6 +42,7 @@ mod lesson_write;
 mod linger;
 mod maintenance;
 mod mcp;
+mod memory_changes;
 mod meta_filter;
 mod mutants;
 mod onnx_artifacts;

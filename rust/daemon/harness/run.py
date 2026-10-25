@@ -354,6 +354,11 @@ def normalize_response(resp: dict, path: str, declared: list[str], *, golden: bo
         resp["json"] = normalize_health(resp["json"], declared, golden=golden)
     if urllib.parse.unquote(path.split("?")[0]) == "/api/search" and isinstance(resp.get("json"), dict):
         resp["json"] = normalize_search(resp["json"])
+    # The memory-change note's line 1 is the daemon's clock as a cursor
+    # (`w2e_hooks.py` checks it against the call's window).
+    if urllib.parse.unquote(path.split("?")[0]) == "/api/hook/memory-changes" \
+            and isinstance(resp.get("bytes"), str):
+        resp["bytes"] = re.sub(r"\A[0-9]{1,12}\.[0-9]{6}\n", "<cursor>\n", resp["bytes"])
     if "json" in resp and isinstance(resp["json"], dict) and resp["status"] in (400, 500):
         err = resp["json"].get("error")
         if isinstance(err, str) and err.startswith("memory bank not ready: "):
@@ -674,7 +679,7 @@ class Tokens(Scenario):
             case("hook session-end unauthorized", "POST", "/api/hook/session-end"),
             case("hook session-end over 16K", "POST", "/api/hook/session-end", [auth, ("Content-Type", "application/json")], b"{\"x\":\"" + b"a" * 17000 + b"\"}"),
             case("hook session-start", "GET", "/api/hook/session-start", declared="W2-D/W1-B: briefing text"),
-            case("hook memory-changes authorized", "GET", "/api/hook/memory-changes", [auth], declared="W2-E: memory change note"),
+            case("hook memory-changes authorized", "GET", "/api/hook/memory-changes", [auth]),
             case("pair valid shape, unknown code", "POST", "/api/pair", [("Content-Type", "application/json")],
                  json.dumps({"code": "ABCD-EFGH-JKMN", "token_sha256": "b" * 64}).encode(),
                  declared="W2-F: pairing redemption"),
