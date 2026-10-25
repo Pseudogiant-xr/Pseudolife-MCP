@@ -22,6 +22,123 @@ use crate::stores::cortex::py_isspace;
 /// `INGEST_ENCODE_BATCH`: chunks per encode call while ingesting.
 const INGEST_ENCODE_BATCH: usize = 8;
 
+/// `MAX_DOCUMENT_BYTES` (64 MiB, `memory/document_parser.py`, where the
+/// reasoning is: an estimate from a 1,000-page manual as a PDF with
+/// figures); the two daemons pin the same value.
+pub(crate) const MAX_DOCUMENT_BYTES: u64 = 64 * 1024 * 1024;
+
+/// `file_problem`: why a file with this metadata cannot be ingested, as
+/// Python's `code: detail` text, or `None`. Only a regular file of at most
+/// `cap` bytes is read; a directory, FIFO, socket or device would fail,
+/// block or never end.
+fn file_problem(path: &str, meta: &std::fs::Metadata, cap: u64) -> Option<String> {
+    let ft = meta.file_type();
+    // The mutant lets a directory through to the read (never a FIFO, whose
+    // read would block the harness).
+    let let_dir_through = ft.is_dir() && crate::mutants::active("document-directory-allowed");
+    if !ft.is_file() && !let_dir_through {
+        #[cfg(unix)]
+        let kind = {
+            use std::os::unix::fs::FileTypeExt;
+            if ft.is_dir() {
+                "a directory"
+            } else if ft.is_fifo() {
+                "a FIFO"
+            } else if ft.is_socket() {
+                "a socket"
+            } else if ft.is_char_device() {
+                "a character device"
+            } else if ft.is_block_device() {
+                "a block device"
+            } else {
+                "not a regular file"
+            }
+        };
+        #[cfg(not(unix))]
+        let kind = if ft.is_dir() {
+            "a directory"
+        } else {
+            "not a regular file"
+        };
+        return Some(format!(
+            "not_a_regular_file: {path} is {kind}; document_ingest reads one regular file, \
+             not a directory, FIFO, socket or device"
+        ));
+    }
+    if ft.is_file() && meta.len() > cap {
+        return Some(format!(
+            "document_too_large: {path} is {} bytes; document_ingest reads files of at most \
+             {cap} bytes: split the document or ingest the part you need",
+            meta.len()
+        ));
+    }
+    None
+}
+
+/// The service's check before anything is read (`file_problem(path,
+/// path.stat())`): `stat` follows symlinks, as `exists` does, and a file
+/// removed since `exists()` is FileNotFoundError.
+#[allow(clippy::result_large_err)]
+pub(crate) fn document_file_problem(path: &str, cap: u64) -> Result<(), ToolError> {
+    let meta = std::fs::metadata(path).map_err(|e| match e.kind() {
+        std::io::ErrorKind::NotFound => ToolError::FileNotFound(py_oserror(&e, path)),
+        _ => internal(e),
+    })?;
+    match file_problem(path, &meta, cap) {
+        Some(problem) => Err(ToolError::Invalid(problem)),
+        None => Ok(()),
+    }
+}
+
+/// How `read_document_bytes` fails: a refusal of the file itself
+/// (`DocumentRefused`, never wrapped) or the OSError of the open or read.
+#[derive(Debug)]
+pub(crate) enum ReadError {
+    Refused(String),
+    Io(std::io::Error),
+}
+
+/// `read_document_bytes`: the file read once through a bound. Opened
+/// without blocking (a FIFO put in its place after the check cannot hold
+/// the call), checked again on the open handle, then read at most one byte
+/// past the cap, so a file that grows or reports no size (a `/proc` entry)
+/// is refused rather than read without end.
+pub(crate) fn read_document_bytes(path: &str, cap: u64) -> Result<Vec<u8>, ReadError> {
+    use std::io::Read;
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NONBLOCK);
+    }
+    let file = options.open(path).map_err(ReadError::Io)?;
+    let meta = file.metadata().map_err(ReadError::Io)?;
+    if let Some(problem) = file_problem(path, &meta, cap) {
+        return Err(ReadError::Refused(problem));
+    }
+    // Whole blocks, as Python's buffered read issues them: `/proc` entries
+    // such as pagemap refuse a read of any other size.
+    let mut file = file;
+    let mut bytes = Vec::new();
+    let mut block = vec![0u8; 64 * 1024];
+    while bytes.len() as u64 <= cap {
+        match file.read(&mut block) {
+            Ok(0) => break,
+            Ok(n) => bytes.extend_from_slice(&block[..n]),
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(e) => return Err(ReadError::Io(e)),
+        }
+    }
+    if bytes.len() as u64 > cap {
+        return Err(ReadError::Refused(format!(
+            "document_too_large: {path} holds more than {cap} bytes; document_ingest reads \
+             files of at most {cap} bytes: split the document or ingest the part you need"
+        )));
+    }
+    Ok(bytes)
+}
+
 /// `extract_text`'s plain-text suffixes, read without a wrapping `try`.
 const TEXT_SUFFIXES: &[&str] = &[
     ".txt",
@@ -336,11 +453,15 @@ fn extract_text(path: &str, name: &str) -> Result<String, ToolError> {
         ));
     }
     // Unwrapped reads raise the OSError itself: a file removed since the
-    // `exists()` check is FileNotFoundError, anything else internal.
+    // `exists()` check is FileNotFoundError, anything else internal; a
+    // refusal of the file is raised as it is.
     let read = || {
-        std::fs::read(path).map_err(|e| match e.kind() {
-            std::io::ErrorKind::NotFound => ToolError::FileNotFound(py_oserror(&e, path)),
-            _ => internal(e),
+        read_document_bytes(path, MAX_DOCUMENT_BYTES).map_err(|e| match e {
+            ReadError::Refused(problem) => ToolError::Invalid(problem),
+            ReadError::Io(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                ToolError::FileNotFound(py_oserror(&e, path))
+            }
+            ReadError::Io(e) => internal(e),
         })
     };
     if suffix == ".html" || suffix == ".htm" {
@@ -350,9 +471,10 @@ fn extract_text(path: &str, name: &str) -> Result<String, ToolError> {
     if TEXT_SUFFIXES.contains(&suffix.as_str()) {
         return Ok(decode_text(&read()?));
     }
-    match std::fs::read(path) {
+    match read_document_bytes(path, MAX_DOCUMENT_BYTES) {
         Ok(bytes) => Ok(decode_text(&bytes)),
-        Err(e) => Err(ToolError::Invalid(format!(
+        Err(ReadError::Refused(problem)) => Err(ToolError::Invalid(problem)),
+        Err(ReadError::Io(e)) => Err(ToolError::Invalid(format!(
             "Cannot read file {name}: {}",
             py_oserror(&e, path)
         ))),
@@ -555,6 +677,7 @@ fn mcp_document_ingest<'a>(app: &'a crate::http::App, call: ToolCall<'a>) -> Too
                 let embedder = r2.embedder.clone();
                 #[allow(clippy::result_large_err)]
                 let read_and_embed = move || {
+                    document_file_problem(&shown, MAX_DOCUMENT_BYTES)?;
                     let text = extract_text(&shown, &name)?;
                     let chunks = chunk_text(&text, reference.chunk_size, reference.chunk_overlap);
                     let mut embeddings = Vec::with_capacity(chunks.len());
