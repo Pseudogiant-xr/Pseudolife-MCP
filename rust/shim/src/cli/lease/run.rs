@@ -429,23 +429,9 @@ fn stopped(signal: i32) -> &'static str {
 /// own exit status. Held is 75 and a failed check 70, neither of which runs
 /// it, so a refusal is never read as the command's own exit 1. Nothing is
 /// held while it runs (lease run holds the lease instead).
-pub async fn gated(args: Args) -> i32 {
+async fn gated_work(args: &Args, child: &mut Option<Child>) -> i32 {
     let name = args.name.as_deref().unwrap_or("");
-    let mut stops = match Stops::new() {
-        Ok(s) => s,
-        Err(_) => {
-            say("lease: cannot install stop handlers");
-            return 71;
-        }
-    };
-    let verdict = tokio::select! {
-        verdict = view::verdict(&args, true) => verdict,
-        signal = stops.wait() => {
-            say(&format!("lease: {}; the command did not run", stopped(signal)));
-            return 128 + signal;
-        }
-    };
-    match verdict {
+    match view::verdict(args, true).await {
         view::Verdict::Free => {}
         view::Verdict::Held => {
             say(&format!(
@@ -463,25 +449,43 @@ pub async fn gated(args: Args) -> i32 {
             return 70;
         }
     }
-    let mut child = match start(&args.command, None) {
-        Ok(child) => child,
+    match start(&args.command, None) {
+        Ok(started) => *child = Some(started),
         Err(RunError::CannotRun(code, message)) => {
             say(&message);
             return code;
         }
         Err(_) => unreachable!("starting a command fails only as CannotRun"),
+    }
+    match child.as_mut().expect("started child").wait().await {
+        Ok(status) => exit_status(status),
+        Err(e) => {
+            say(&format!("lease: cannot run {}: {e}", args.command[0]));
+            126
+        }
+    }
+}
+pub async fn gated(args: Args) -> i32 {
+    let mut stops = match Stops::new() {
+        Ok(s) => s,
+        Err(_) => {
+            say("lease: cannot install stop handlers");
+            return 71;
+        }
     };
+    // One select over the check, the start and the wait, as run() does: a
+    // stop is heard throughout, with no gap before the command starts.
+    let mut child = None;
     tokio::select! {
-        status = child.wait() => match status {
-            Ok(status) => exit_status(status),
-            Err(e) => {
-                say(&format!("lease: cannot run {}: {e}", args.command[0]));
-                126
-            }
-        },
+        code = gated_work(&args, &mut child) => code,
         signal = stops.wait() => {
-            stop_child(&mut child, signal, &mut stops).await;
-            say(&format!("lease: {}; the command was stopped", stopped(signal)));
+            let what = if let Some(child) = &mut child {
+                stop_child(child, signal, &mut stops).await;
+                "the command was stopped"
+            } else {
+                "the command did not run"
+            };
+            say(&format!("lease: {}; {what}", stopped(signal)));
             128 + signal
         }
     }

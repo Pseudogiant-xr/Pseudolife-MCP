@@ -291,9 +291,10 @@ current merge ref, except as the `merge-forward` skill allows):
   it causes timing flakes and os error 1455. Gate it on the lease of the
   machine it runs on by letting the check run it (`lease check full-suite --
   <command>` on the Windows host, `lease check full-suite@<name> -- <command>`
-  on a dev machine, one command per sequence, since a `;` after a bare check
-  runs the work whatever it said) and on `lease check gpu` (0 free, 1 held,
-  75 a gated command refused, anything else a failed check), also look for `suite=running` in
+  on a dev machine, one command per sequence, nested for `gpu` too: `lease
+  check full-suite -- pseudolife-mcp lease check gpu -- <command>`), since a
+  `;` after a bare check runs the work whatever it said (75 held, 70 a failed
+  check, else the command's own exit), also look for `suite=running` in
   `memory_agents` list, announce the window with a fixed duration and a
   stop switch (a sentinel file), and stop at once if a suite starts.
 - **Broadcast a host-shaped symptom to every active peer before debugging

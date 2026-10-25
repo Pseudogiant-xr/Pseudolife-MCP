@@ -10,7 +10,7 @@ The row admits `lease check NAME [--json] [-- COMMAND...]`, `lease list
 help.
 `hold` and the offline operator actions are the separate CLI-LEASE remainder.
 
-The 77 cases exercise absent/free/held OS locks, eight-slot suite lock
+The 77 cases (75 of them recorded in goldens) exercise absent/free/held OS locks, eight-slot suite lock
 selection and another machine's suite name, the board's independent session
 claim, same-instance stale mirror and another instance's mirror, FIFO
 acquisition behind an earlier waiter, transient retry, registration refusal,
@@ -31,6 +31,11 @@ malformed board queue fails only the native arm), so the unit tests in
 `tests/test_lease_cli.py` and `shim/tests/lease_cli.rs` cover it. Nor has a
 gated check under a closed stdout: neither arm runs the command, but CPython's
 shutdown flush turns its exit 70 into 120, where the native arm exits 70.
+A bearer the native client refuses to send (a control character, the
+declared reduced-input refusal) fails the native check: plain `check`
+reports it and exits 1, as before, and the gated form refuses with 70
+without running the command, where Python reads the board as unavailable
+and decides by the local lock.
 
 Each arm receives a disposable home and a loopback fixture daemon. PostgreSQL
 databases have unique `pl_cf_lease_<n>` names and use only the test login.

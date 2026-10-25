@@ -14,6 +14,7 @@ $env:CARGO_TARGET_DIR = 'E:\rust-target\port-dev'
 # The check runs the build only while the lease is free; 75 means it is held.
 python -m pseudolife_memory.cli lease check full-suite -- pwsh -NoProfile -Command 'Set-Location rust; cargo build --locked --bin pseudolife-stdio -j 3; exit $LASTEXITCODE'
 if ($LASTEXITCODE -eq 75) { throw 'Wait for the full-suite lease before building' }
+if ($LASTEXITCODE -eq 70) { throw 'The lease check itself failed; the build did not run' }
 if ($LASTEXITCODE -ne 0) { throw 'Cargo build failed' }
 $candidate = Join-Path $env:CARGO_TARGET_DIR 'debug/pseudolife-stdio.exe'
 ```

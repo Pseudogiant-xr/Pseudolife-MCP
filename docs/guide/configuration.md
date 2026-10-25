@@ -624,7 +624,8 @@ is easy to defeat: in `lease check full-suite; cargo build` the `;` starts the
 build whatever the check said. When the lease is held, the command does not
 run, one stderr line says so and names the next step, and the exit is `75`,
 so a refusal is never read as the command's own `1`. A failed check runs
-nothing and exits `70`. Put a sequence in one command, so that every step is
+nothing and exits `70`. A command's own `70` or `75` passes through unchanged;
+the stderr line is what tells a refusal apart. Put a sequence in one command, so that every step is
 gated:
 
 ```sh

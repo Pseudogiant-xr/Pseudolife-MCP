@@ -1417,6 +1417,18 @@ def test_a_stop_signal_stops_the_gated_command_and_exits_128_plus_n(
     assert children and not orphaned
 
 
+def test_an_interrupt_during_the_gated_check_runs_nothing_and_exits_130(
+        lease_env, tmp_path, monkeypatch, capsys):
+    def interrupted(args, transport, *, flush=False):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(lease_cli, "_check", interrupted)
+    command, marker = _command(tmp_path)
+    assert _run(["check", "gpu", "--", *command], FakeDaemon()) == 130
+    assert not marker.exists()
+    assert "interrupted; the command did not run" in capsys.readouterr().err
+
+
 def test_check_help_names_the_gated_form_and_its_exit_codes(lease_env, capsys):
     assert _run(["check", "--help"], FakeDaemon()) == 0
     text = capsys.readouterr().out
