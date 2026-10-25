@@ -130,19 +130,38 @@ fn hashable(v: &Value) -> Result<(), Failure> {
     }
 }
 
-/// A bool or number as Python compares it.
-fn py_number(v: &Value) -> Option<f64> {
+/// A bool or number as Python holds it: an exact integer's digits, or a
+/// float.
+enum PyNumber {
+    Int(String),
+    Float(f64),
+}
+
+fn py_number(v: &Value) -> Option<PyNumber> {
     match v {
-        Value::Bool(b) => Some(f64::from(u8::from(*b))),
-        Value::Number(n) => n.to_string().parse().ok(),
+        Value::Bool(b) => Some(PyNumber::Int(u8::from(*b).to_string())),
+        Value::Number(n) => {
+            let text = crate::pyjson::number_text(n);
+            Some(if n.to_string().contains(['.', 'e', 'E']) {
+                PyNumber::Float(n.to_string().parse().unwrap_or(f64::NAN))
+            } else {
+                PyNumber::Int(text)
+            })
+        }
         _ => None,
     }
 }
 
-/// `a == b` for hashable values loaded from JSON: `1 == 1.0 == True`.
+/// `a == b` for hashable values loaded from JSON: `1 == 1.0 == True`, with
+/// an int compared to an int or a float exactly, as Python compares them.
 fn py_eq(a: &Value, b: &Value) -> bool {
+    use PyNumber::{Float, Int};
+    let exact =
+        |int: &str, x: f64| x.is_finite() && x.fract() == 0.0 && format!("{:.0}", x + 0.0) == int;
     match (py_number(a), py_number(b)) {
-        (Some(x), Some(y)) => x == y,
+        (Some(Int(x)), Some(Int(y))) => x == y,
+        (Some(Float(x)), Some(Float(y))) => x == y,
+        (Some(Int(i)), Some(Float(x))) | (Some(Float(x)), Some(Int(i))) => exact(&i, x),
         (None, None) => a == b,
         _ => false,
     }
@@ -341,8 +360,10 @@ async fn merge(ready: &Arc<Ready>, body: Map<String, Value>) -> Result<Value, Fa
             .iter_mut()
             .filter(|e| e.episode_id.as_ref().is_some_and(|id| src_ids.contains(id)))
             .map(|e| {
-                e.episode_id = Some(target_id.clone());
-                e.episode_title = Some(target_title.clone());
+                if !crate::mutants::active("episodes-merge-rows-only") {
+                    e.episode_id = Some(target_id.clone());
+                    e.episode_title = Some(target_title.clone());
+                }
                 e.id
             })
             .collect()
@@ -394,7 +415,9 @@ async fn merge(ready: &Arc<Ready>, body: Map<String, Value>) -> Result<Value, Fa
     for s in &sources {
         target.started_at = target.started_at.min(s.started_at);
     }
-    if let Some(ended) = target.ended_at {
+    if let Some(ended) = target.ended_at
+        && !crate::mutants::active("episodes-merge-keeps-span")
+    {
         // `max([ended_at] + [s.ended_at for s in sources if s.ended_at])`.
         target.ended_at = Some(
             sources
@@ -442,6 +465,12 @@ mod tests {
             ids(json!([1, 1.0, true, "1", 0, false])).unwrap(),
             vec![json!(1), json!("1"), json!(0)]
         );
+        // Ints compare exactly, beyond f64's 2**53, also against a float.
+        let big: Value = serde_json::from_str(
+            "[9007199254740993, 9007199254740992, 9007199254740992.0, -0, -0.0]",
+        )
+        .unwrap();
+        assert_eq!(ids(big).unwrap().len(), 3);
         assert_eq!(ids(json!(5)).unwrap_err(), "'int' object is not iterable");
         assert_eq!(
             ids(json!(true)).unwrap_err(),

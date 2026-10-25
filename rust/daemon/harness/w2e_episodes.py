@@ -2,9 +2,11 @@
 ``POST /api/episodes/rename``, ``/merge`` and ``/prune`` (CUTOVER B2e).
 
 ``w2e.py`` registers ``register(sys.modules[__name__])`` and dispatches the
-``rest`` op here. A ``rest`` op is the ``http`` op plus the status: its
-answer is ``{"isError", "status", "value"}``, so a refusal is compared by
-status as well as body. Body values ``"@ep:<title>"`` name an episode by
+``rest`` and ``probe`` ops here. A ``rest`` op is the ``http`` op plus the
+status: its answer is ``{"isError", "status", "value"}``, so a refusal is
+compared by status as well as body. A ``probe`` op answers the rows of a
+read-only query on the side's bank, keyless, so values the bank comparison
+normalizes (the episode clocks, which merge widens) compare exactly. Body values ``"@ep:<title>"`` name an episode by
 title on each side, top-level or inside a list. Episode ids in the answer
 are renamed ``<before#i>`` from the side's episode table before the call,
 in ``started_at`` order, because merge and prune answer with ids they have
@@ -16,9 +18,11 @@ import json
 
 
 # Deliberate breaks (``--features mutants``) the ``episode-curation`` scenario
-# must catch: merge leaving outcome signals on the deleted source, and prune
-# counting digest entries.
-MUTANTS = ["episodes-merge-keeps-signals", "episodes-prune-counts-digests"]
+# must catch: merge leaving outcome signals on the deleted source, merge into
+# an existing episode not widening its end, merge moving only the rows (not
+# the resident entries), and prune counting digest entries.
+MUTANTS = ["episodes-merge-keeps-signals", "episodes-merge-keeps-span",
+           "episodes-merge-rows-only", "episodes-prune-counts-digests"]
 
 
 def _before_map(dsn: str) -> dict[str, str]:
@@ -56,6 +60,29 @@ def run_rest(op: dict, port: int, dsn: str, harness) -> dict:
     r = harness.w1a.call(port, op["method"], op["path"], hdrs, body)
     value = r.get("json", r.get("bytes"))
     return {"isError": r["status"] != 200, "status": r["status"], "value": _rename(value, emap)}
+
+
+def run_probe(op: dict, dsn: str) -> dict:
+    import psycopg
+    with psycopg.connect(dsn) as c:
+        rows = c.execute(op["sql"]).fetchall()
+    return {"isError": False, "value": [list(r) for r in rows]}
+
+
+OPS = ("rest", "probe")
+
+
+def run(op: dict, port: int, dsn: str, harness) -> dict:
+    if op["op"] == "probe":
+        return run_probe(op, dsn)
+    return run_rest(op, port, dsn, harness)
+
+
+# The seeded spans (``after_stop``, so no later write-through replaces them)
+# and the probe that reads them back exactly.
+SPANS = {"Alpha": (1000.0, 1100.0), "Beta": (2000.0, 2100.0), "Gamma": (3000.0, 3300.0)}
+SPAN_PROBE = {"op": "probe", "sql": "SELECT title, started_at, ended_at FROM episodes WHERE title IN "
+                                    "('Alpha', 'Alpha renamed', 'Beta', 'Gamma', 'Rollup') ORDER BY title"}
 
 
 def rest(path: str, body: dict | None = None) -> dict:
@@ -96,6 +123,8 @@ def register(h) -> dict[str, dict]:
                 h.ep_start("Delta sub", [h.sess("cur-d")]),
                 h.ep_end([h.sess("cur-d")]),
                 h.ep_start("Delta open sub", [h.sess("cur-d")]),
+                *[h.sql(f"UPDATE episodes SET started_at = {a}, ended_at = {b} WHERE title = '{t}'",
+                        after_stop=True) for t, (a, b) in SPANS.items()],
             ],
             "ops": [
                 # rename: the route lambda's KeyError, the empty-title answer
@@ -110,6 +139,8 @@ def register(h) -> dict[str, dict]:
                 rest(rename, {"id": 1.5, "title": "X"}),
                 rest(rename, {"id": ["x"], "title": "X"}),
                 rest(rename, {"id": "@ep:Alpha", "title": "  Alpha renamed  "}),
+                # The resident entries carry the new title.
+                h.ep_summary("@ep:Alpha renamed"),
                 # merge: refusals first (each leaves the bank unchanged).
                 rest(merge),
                 rest(merge, {"sources": 5, "title": "R"}),
@@ -126,12 +157,21 @@ def register(h) -> dict[str, dict]:
                 rest(merge, {"sources": ["@ep:Beta", "@ep:Delta", "no-such-source", 3, 3.0,
                                          "@ep:Beta"],
                              "title": "  Rollup  ", "hint": "beta folded in"}),
-                # Into an existing closed episode: its span widens.
+                # The rollup holds the resident entry, and its span is Beta's.
+                h.ep_summary("@ep:Rollup"),
+                SPAN_PROBE,
+                # Into an existing closed episode: its span widens to Gamma's end.
                 rest(merge, {"sources": ["@ep:Gamma"], "into": "@ep:Alpha renamed"}),
+                h.ep_summary("@ep:Alpha renamed"),
+                SPAN_PROBE,
                 # prune: closed empty episodes, a digest-only one included;
                 # then the open empty one too.
                 rest(prune, {"include_open": 0}),
                 rest(prune, {"include_open": [1]}),
+                # The pruned open sub-episode was current: an unkeyed episode
+                # start nests under the current episode, so it shows where
+                # current points now (no embedding involved).
+                h.ep_start("Started after the prune"),
             ],
         },
     }

@@ -5690,8 +5690,8 @@ def run_op(op: dict, port: int, mcp: Mcp, dsn: str) -> dict | None:
         with psycopg.connect(dsn, autocommit=True) as conn:
             conn.execute(op["sql"])
         return {"isError": False, "value": None}
-    if op["op"] == "rest":
-        return w2e_episodes.run_rest(op, port, dsn, sys.modules[__name__])
+    if op["op"] in w2e_episodes.OPS:
+        return w2e_episodes.run(op, port, dsn, sys.modules[__name__])
     if op["op"] == "http":
         body = json.dumps(op["body"]).encode() if "body" in op else None
         hdrs = [AUTH] + ([("Content-Type", "application/json")] if body else [])
