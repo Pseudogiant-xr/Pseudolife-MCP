@@ -7,10 +7,13 @@ the test runs offline and exercises whichever extractor is installed.
 from __future__ import annotations
 
 import builtins
+from pathlib import Path
 
 import pytest
 
 from pseudolife_memory.memory.document_parser import extract_text
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def _make_minimal_pdf(path, text: str) -> None:
@@ -68,3 +71,52 @@ def test_extract_pdf_pypdf_fallback(tmp_path, monkeypatch):
 
     monkeypatch.setattr(builtins, "__import__", no_pdfium)
     assert "fallback path test" in extract_text(p)
+
+
+def _name(requirement: str) -> str:
+    head = requirement.split(">")[0].split("<")[0].split("=")[0].split("[")[0]
+    return head.strip().lower().replace("_", "-")
+
+
+def test_pypdfium2_is_a_core_dependency_locked_to_the_rust_pin():
+    """The default install extracts PDF text with PDFium (2026-10-26), at
+    the build the Rust daemon pins (rust/daemon/pdfium-pin.json), so both
+    daemons store the same text; ``pdf`` stays as an accepted no-op extra."""
+    tomllib = pytest.importorskip("tomllib", reason="needs Python 3.11")
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]
+    core = [r for r in project["dependencies"] if _name(r) == "pypdfium2"]
+    assert core == ["pypdfium2>=5.14.0,<6"]
+    assert project["optional-dependencies"]["pdf"] == []
+    lock = {}
+    for line in (ROOT / "ops" / "requirements.lock.txt").read_text(encoding="utf-8").splitlines():
+        if "==" in line and not line.startswith("#"):
+            name, version = line.split("==", 1)
+            lock[_name(name)] = version.strip()
+    assert lock.get("pypdfium2") == "5.14.0"
+
+
+def test_the_default_install_extracts_pdfs_with_pdfium(tmp_path, monkeypatch):
+    """With the core dependencies alone, PDF text comes from pypdfium2:
+    pypdf is blocked and extraction still succeeds, through PdfDocument."""
+    import pypdfium2  # a core dependency: no importorskip
+
+    p = tmp_path / "doc.pdf"
+    _make_minimal_pdf(p, "default path test")
+    opened = []
+    real_document = pypdfium2.PdfDocument
+
+    def spy(*args, **kwargs):
+        opened.append(args)
+        return real_document(*args, **kwargs)
+
+    monkeypatch.setattr(pypdfium2, "PdfDocument", spy)
+    real_import = builtins.__import__
+
+    def no_pypdf(name, *args, **kwargs):
+        if name == "pypdf" or name.startswith("pypdf."):
+            raise ImportError("blocked for test")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", no_pypdf)
+    assert extract_text(p) == "default path test"
+    assert len(opened) == 1

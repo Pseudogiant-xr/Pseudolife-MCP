@@ -48,6 +48,12 @@ dependencies = [
     # floor matches what the mcp SDK already requires.
     "pydantic>=2.12,<3",
     "pypdf>=4.0",
+    # PDF text comes from PDFium by default (2026-10-26), so the Python and
+    # Rust daemons store the same text: the lock pins the release that
+    # bundles the PDFium build rust/daemon/pdfium-pin.json pins, and a bump
+    # moves both together (rust/daemon/pin_pdfium.py). pypdf stays the
+    # fallback document_parser uses when this cannot be imported.
+    "pypdfium2>=5.14.0,<6",
     # 3.2.4+: every binary wheel ships libpq 16 or newer, which the lite tier
     # needs (require_auth keeps its password off the wire, 2026-10-25).
     "psycopg[binary]>=3.2.4",
@@ -85,11 +91,9 @@ nli = [
 rerank = [
     "sentence-transformers>=2.5",
 ]
-# Optional higher-quality PDF text extraction (Chromium PDFium bindings,
-# Apache-2.0/BSD-3). The core pypdf path works without it.
-pdf = [
-    "pypdfium2>=4",
-]
+# Kept so `pip install pseudolife-mcp[pdf]` still works: pypdfium2 is a core
+# dependency since 2026-10-26, so this extra adds nothing.
+pdf = []
 # Zero-config lite tier — embedded PostgreSQL (PG 18 + pgvector 0.8.5)
 # via pg0-embedded; the daemon starts/attaches it when no
 # PSEUDOLIFE_MCP_DATABASE_URL is set. Upper-bounded deliberately: the
