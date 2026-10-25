@@ -246,6 +246,10 @@ fn sizes_distance(a: &[i64], b: &[i64]) -> f64 {
 /// Louvain's answer depends on visiting order in Python too.
 #[test]
 fn every_case_agrees_with_seeded_networkx_within_its_own_seed_envelope() {
+    // Measured 2026-10-25 on the golden corpus: the lowest planted-structure
+    // agreement is 0.984 (planted-6x25), which is also Python's own lowest
+    // across seeds 1..20 on that graph; 0.95 leaves room for a regenerated
+    // corpus without admitting a broken partition.
     const PLANTED_ARI_FLOOR: f64 = 0.95;
     let mut failures = Vec::new();
     for case in cases() {
@@ -385,5 +389,61 @@ fn remap_keeps_old_ids_by_overlap_and_fills_gaps_for_new_communities() {
     assert_eq!(
         got,
         BTreeMap::from([(7, vec![1, 2, 3]), (0, vec![4, 5]), (1, vec![6])])
+    );
+}
+
+/// The cost of the exact betweenness Option B chose over sampling, at bank
+/// scale: `cargo test --release -p pseudolife-daemon graph_insight_bank_scale
+/// -- --ignored --nocapture` (preferential attachment, 5,000 entities,
+/// 10,000 edges, deterministic).
+#[test]
+#[ignore]
+fn graph_insight_bank_scale_timing() {
+    let n: i64 = 5000;
+    let mut edges = Vec::new();
+    let mut degree_list: Vec<i64> = vec![0, 1];
+    edges.push(e(0, 1));
+    let mut state: u64 = 42;
+    let mut next = || {
+        state = state
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        (state >> 33) as usize
+    };
+    for v in 2..n {
+        for _ in 0..2 {
+            let u = degree_list[next() % degree_list.len()];
+            edges.push(e(u, v));
+            degree_list.push(u);
+            degree_list.push(v);
+        }
+    }
+    let entities: Vec<InsightEntity> = (0..n)
+        .map(|id| InsightEntity {
+            id,
+            display: format!("node-{id}"),
+        })
+        .collect();
+    let t = std::time::Instant::now();
+    let parts = detect_communities(&edges, 1.0, 0.25);
+    eprintln!("detect_communities: {} in {:?}", parts.len(), t.elapsed());
+    let t = std::time::Instant::now();
+    let bc = betweenness(&undirected(&edges).g);
+    eprintln!("betweenness: {} nodes in {:?}", bc.len(), t.elapsed());
+    let started = std::time::Instant::now();
+    let got = compute(
+        &GraphInsightConfig::default(),
+        &entities,
+        &edges,
+        &BTreeMap::new(),
+        &[],
+        COMPUTED_AT,
+    );
+    eprintln!(
+        "{} entities, {} edges: {} communities in {:?}",
+        entities.len(),
+        edges.len(),
+        got.summaries.len(),
+        started.elapsed()
     );
 }

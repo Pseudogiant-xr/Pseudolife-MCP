@@ -183,7 +183,7 @@ binding"). What it cannot or does not reproduce:
 |---|---|---|---|
 | Graph identity Unicode version | runtime Unicode tables (3.11 uses Unicode 14; newer Python images may differ) | pinned Python 3.11 Unicode 14 lowercase and final-sigma context, verified exhaustively | W3-H; revisit when the oracle runtime changes |
 | Colliding inverse provenance | base-set iteration can select different source relation names for the same inverse triple depending on hash seed | choose the lexicographically smallest asserted source relation; exact triple and valid provenance membership are checked, with smallest-source choice pinned | W3-H; declared deterministic choice; all other provenance exact |
-| Whole graph caps and the link, junk, curation and candidate judges | served graph and review behavior | not served (the graph store, `memory_graph`, `memory_recall`, `memory_graph_review`, the deep dream, the merge judge and the communities a dream run refreshes are: see their sections below) | the Console REST rows (`GET /api/graph`) and task P3b (the judges) |
+| Whole graph caps, fact projection and the link, junk, curation and candidate judges | served graph and review behavior | not served (the graph store, `memory_graph`, `memory_recall`, `memory_graph_review` with its proposals, the deep dream, the merge judge and the communities a dream run refreshes are: see their sections below) | the Console REST rows (`GET /api/graph`), later graph increments, and task P3b (the judges) |
 
 ## W2-D: GET /api/search
 
@@ -462,16 +462,19 @@ distribution, god-node set and surprise set each inside the envelope Python
 itself spans across seeds 1..20 against seed 42 (and an adjusted Rand index
 of at least 0.95 on the planted-structure graphs). The `dream-insight-*`
 w2e scenarios compare whole banks on graphs whose partition is the same in
-both orders.
+both orders. The oracle is NetworkX 3.6.1, the version
+`ops/requirements.lock.txt` pins for the daemon image (`pyproject.toml`
+allows any 3.x); a NetworkX that changes Louvain or Brandes moves the
+goldens.
 
 | Item | Python | Rust | Owner / why |
 |---|---|---|---|
 | Louvain's visiting order | `seed.shuffle` (`random.Random(42)`) at every level | graph order (first appearance), ties to the first community in adjacency order | Option B; on a graph whose structure fixes the partition the two agree, otherwise the partition can differ within Louvain's own seed-to-seed spread (measured above) |
 | The oversized-community split's subgraph order | NetworkX's subgraph view: the member set's hash order when the community is under half the graph, the parent's order otherwise | the parent's node and adjacency order | the second partition pass only; the same structural comparison covers it (`planted-5x40-split`) |
-| Betweenness above `betweenness_sample` nodes (200) | 200 sources sampled with seed 42, rescaled | exact at every size (`betweenness_sample` read, not used) | Option B's betweenness choice: exact Brandes is O(V·E), well under a second at bank sizes, and agrees bit for bit with Python wherever Python is exact; above the sample the god nodes and bridges can differ by Python's sampling error (god-node sets inside the seed envelope above) |
+| Betweenness above `betweenness_sample` nodes (200) | 200 sources sampled with seed 42, rescaled | exact at every size (`betweenness_sample` read, not used) | Option B's betweenness choice: exact Brandes is O(V·E), measured at 0.6 s for 5,000 entities and 10,000 edges (release build, 2026-10-25, `graph_insight_bank_scale_timing`), run outside the writer lock, and it agrees bit for bit with Python wherever Python is exact; above the sample the god nodes and bridges can differ by Python's sampling error (god-node sets inside the seed envelope above) |
 | `algorithm: leiden` | graspologic's Leiden when importable, else Louvain | Louvain | no install ships graspologic, so Python runs Louvain too |
 | The modularity sum behind Louvain's stopping test | `sum()` (CPython 3.12 compensates; 3.11 does not) | left to right | the value only meets the 1e-7 threshold between levels |
-| A NaN `max_community_fraction` | `int(nan)` raises: the refresh answers `error` | the split size is 10 | no producer writes one |
+| A NaN or infinite `max_community_fraction` | `int()` raises (`ValueError`, `OverflowError`): the refresh answers `error` | NaN gives a split size of 10, infinity one no community exceeds | no producer writes one |
 | A refresh failure's `error` text | `str(exc)` | the Rust error's text | failure path only |
 | Wrong-type `memory.graph_insight` knobs (`resolution: "1"`, `god_nodes_top_n: 2.5`) | taken as given | refused at config load | the existing config-type substitution |
 

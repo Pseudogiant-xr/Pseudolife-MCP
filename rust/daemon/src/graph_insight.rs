@@ -429,21 +429,35 @@ fn betweenness(g: &WGraph) -> Vec<f64> {
     if g.number_of_edges() == 0 {
         return Vec::new();
     }
+    // Adjacency as plain lists (same order), and per-source buffers reused
+    // across sources: allocation, not arithmetic, dominated (measured
+    // 2026-10-25, 5,000 entities / 10,000 edges: 4.7 s fresh, see
+    // `graph_insight_bank_scale_timing`). Reuse keeps every sum's order.
+    let adj: Vec<Vec<usize>> = g.adj.iter().map(|a| a.keys().copied().collect()).collect();
     let mut bc = vec![0.0f64; n];
+    let mut stack: Vec<usize> = Vec::with_capacity(n);
+    let mut pred: Vec<Vec<usize>> = vec![Vec::new(); n];
+    let mut sigma = vec![0.0f64; n];
+    let mut dist = vec![-1i64; n];
+    let mut delta = vec![0.0f64; n];
+    let mut queue: VecDeque<usize> = VecDeque::with_capacity(n);
     for s in 0..n {
         // `_single_source_shortest_path_basic`.
-        let mut stack = Vec::with_capacity(n);
-        let mut pred: Vec<Vec<usize>> = vec![Vec::new(); n];
-        let mut sigma = vec![0.0f64; n];
-        let mut dist = vec![-1i64; n];
+        for &v in &stack {
+            pred[v].clear();
+            sigma[v] = 0.0;
+            dist[v] = -1;
+            delta[v] = 0.0;
+        }
+        stack.clear();
         sigma[s] = 1.0;
         dist[s] = 0;
-        let mut queue = VecDeque::from([s]);
+        queue.push_back(s);
         while let Some(v) = queue.pop_front() {
             stack.push(v);
             let dv = dist[v];
             let sigmav = sigma[v];
-            for &w in g.adj[v].keys() {
+            for &w in &adj[v] {
                 if dist[w] < 0 {
                     queue.push_back(w);
                     dist[w] = dv + 1;
@@ -454,9 +468,9 @@ fn betweenness(g: &WGraph) -> Vec<f64> {
                 }
             }
         }
-        // `_accumulate_basic`.
-        let mut delta = vec![0.0f64; n];
-        while let Some(w) = stack.pop() {
+        // `_accumulate_basic`, walking the stack from its top; the reset at
+        // the next source reads the same stack.
+        for &w in stack.iter().rev() {
             let coeff = (1.0 + delta[w]) / sigma[w];
             for &v in &pred[w] {
                 delta[v] += sigma[v] * coeff;
