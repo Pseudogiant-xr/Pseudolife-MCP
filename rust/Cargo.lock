@@ -1726,6 +1726,7 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "fancy-regex",
+ "flate2",
  "form_urlencoded",
  "futures",
  "getrandom 0.3.4",
@@ -1744,6 +1745,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.9",
+ "tar",
  "tokenizers",
  "tokio",
  "tokio-postgres",
@@ -1753,6 +1755,7 @@ dependencies = [
  "uuid",
  "windows-sys 0.61.2",
  "yaml-rust2",
+ "zip",
 ]
 
 [[package]]
