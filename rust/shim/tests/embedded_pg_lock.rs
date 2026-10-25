@@ -2,7 +2,7 @@
 //! test binary so the hosted stress loop can select it (it rests on file
 //! locks, which `windows-latest` runs differently from a dev machine).
 #![forbid(unsafe_code)]
-use pseudolife_stdio::pg::embedded::{Error, START_LOCK_TIMEOUT, StartLock};
+use pseudolife_stdio::pg::embedded::{START_LOCK_TIMEOUT, StartLock};
 use std::{fs, path::PathBuf, sync::mpsc, time::Duration};
 
 fn scratch(label: &str) -> PathBuf {
@@ -44,7 +44,10 @@ fn the_windows_start_lock_gives_up_at_its_deadline() {
     let pgdata = dir.join("embedded_pg");
     let held = StartLock::acquire(&pgdata, START_LOCK_TIMEOUT).unwrap();
     let error = StartLock::acquire(&pgdata, Duration::ZERO).err().unwrap();
-    assert!(matches!(error, Error::LockTimeout(_)));
+    assert!(matches!(
+        error,
+        pseudolife_stdio::pg::embedded::Error::LockTimeout(_)
+    ));
     assert!(
         error
             .to_string()

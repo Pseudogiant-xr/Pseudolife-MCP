@@ -448,7 +448,59 @@ fn stop_leaves_a_server_another_caller_restarted() {
         )),
     };
     handle.stop().unwrap();
+    // A launched server that could not be identified is refused, never
+    // risked: a running one may be another caller's by now.
+    fs::write(pgdata.join("postmaster.pid"), "2222\nd\n1\n5999\n").unwrap();
+    let handle = Embedded {
+        pgdata: pgdata.clone(),
+        port: 5999,
+        password: "5e".repeat(32),
+        owned: Some((
+            Runtime {
+                root: dir.join("no-runtime"),
+            },
+            None,
+        )),
+    };
+    assert!(
+        handle
+            .stop()
+            .unwrap_err()
+            .to_string()
+            .contains("left running")
+    );
     fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn the_method_is_found_by_the_rule_layout_not_by_matching_words() {
+    let text = "host    all   all   password                  password\n\
+                host    all   all   10.0.0.1 255.255.255.255  md5\n\
+                hostssl all   all   trust.example.com         scram-sha-256\n\
+                local   all   md5                             password\n";
+    let out = rewrite_hba(text, "scram-sha-256", false);
+    let lines: Vec<&str> = out.lines().collect();
+    assert_eq!(
+        lines[0],
+        "host    all   all   password                  scram-sha-256"
+    );
+    assert_eq!(
+        lines[1],
+        "host    all   all   10.0.0.1 255.255.255.255  scram-sha-256"
+    );
+    assert_eq!(lines[2], text.lines().nth(2).unwrap());
+    assert_eq!(
+        lines[3],
+        "local   all   md5                             scram-sha-256"
+    );
+    assert_eq!(
+        managed_methods(text),
+        BTreeSet::from([
+            "password".to_owned(),
+            "md5".to_owned(),
+            "scram-sha-256".to_owned()
+        ])
+    );
 }
 
 #[test]

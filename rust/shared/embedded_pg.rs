@@ -336,11 +336,25 @@ const RULE_TYPES: [&str; 6] = [
 ];
 
 /// `_rule_method`: index of the managed method in a rule line's fields.
+/// By the rule's layout (`local DB USER METHOD`, `host DB USER ADDRESS
+/// METHOD` or `host DB USER IP MASK METHOD`), never by matching words: a
+/// host named `password` is an address, not a method.
 fn rule_method(fields: &[&str]) -> Option<usize> {
     if !fields.first().is_some_and(|kind| RULE_TYPES.contains(kind)) {
         return None;
     }
-    (3..fields.len()).find(|&i| MANAGED_METHODS.contains(&fields[i]))
+    let ip = |text: &str| text.parse::<std::net::IpAddr>().is_ok();
+    let index = if fields[0] == "local" {
+        3
+    } else if fields.len() > 5 && !fields[3].contains('/') && ip(fields[3]) && ip(fields[4]) {
+        5
+    } else {
+        4
+    };
+    fields
+        .get(index)
+        .filter(|method| MANAGED_METHODS.contains(method))
+        .map(|_| index)
 }
 
 /// `_is_loopback_rule`: a `local` rule, or a `host*` rule for the loopback
@@ -785,16 +799,34 @@ impl Embedded {
     /// still that server: one that exited and was started again by another
     /// caller is theirs.
     pub fn stop(self) -> Result<(), Error> {
+        if self.owned.is_none() {
+            return Ok(());
+        }
+        // Under the start lock, so no other caller can restart the bank
+        // between the identity check and the stop.
+        let _lock = StartLock::acquire(&self.pgdata, START_LOCK_TIMEOUT)?;
+        self.stop_locked()
+    }
+
+    /// `stop` for a caller already holding the start lock. Only a server
+    /// verified to be the one this process launched is stopped; one that
+    /// cannot be identified is left running (refused), never risked.
+    fn stop_locked(&self) -> Result<(), Error> {
         let Some((runtime, launched)) = &self.owned else {
             return Ok(());
         };
-        if let (Some(launched), Ok(current)) = (launched, PidFile::read(&self.pgdata)) {
-            // A read error cannot show the server is someone else's, so the
-            // stop goes ahead rather than leave this call's server running.
-            let current = current.and_then(|(_, record)| record);
-            if current.map(|record| record.pid.unsigned_abs() as u32) != Some(*launched) {
-                return Ok(());
-            }
+        let Some(launched) = launched else {
+            return Err(Error::Command {
+                program: "pg_ctl stop",
+                detail: "the server this process launched could not be identified (its \
+                         postmaster.pid was unreadable after start), so it is left running"
+                    .into(),
+            });
+        };
+        let current = PidFile::read(&self.pgdata)?.and_then(|(_, record)| record);
+        if current.map(|record| record.pid.unsigned_abs() as u32) != Some(*launched) {
+            // Gone, or another caller's server since: nothing of ours to stop.
+            return Ok(());
         }
         let mut command = runtime.command("pg_ctl");
         command
@@ -1008,7 +1040,7 @@ fn attach_or_start_locked(
     if let Err(error) = finished {
         // Never leave a server this call started running unowned (and
         // possibly on trust): stop it; the next start finishes the move.
-        let _ = embedded.stop();
+        let _ = embedded.stop_locked();
         return Err(error);
     }
     Ok(embedded)
