@@ -68,6 +68,8 @@ FIXTURES: dict[str, bytes] = {
                   + b"\xff invalid byte\n",
     "blank.txt": b"   \r\n\t\r\n",
     "separators.txt": b"\x1c\x1d Information separators pad this lone chunk. \x1f\x1e\n",
+    # PostgreSQL refuses NUL: it is stored as U+FFFD, the id hashes the original.
+    "nul.txt": b"A PDF's extracted text can carry NUL\x00characters\x00like these.\n",
 }
 
 MISSING = "/nonexistent-pl-w2e-documents/missing.txt"
@@ -167,6 +169,7 @@ SCENARIOS: dict[str, dict] = {
             ingest("@DOCS@/page.html", source=""),
             ingest("@DOCS@/notes.data", source="astronomy"),
             ingest("@DOCS@/blank.txt"),
+            ingest("@DOCS@/nul.txt", source="nul\x00source"),
             ingest("@DOCS@//./page.html/"),
             ingest(MISSING),
             ingest("@DOCS@/folder.data"),
