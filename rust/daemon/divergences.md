@@ -14,7 +14,6 @@ side must answer exactly `501 {"error": "not_implemented", "path": P}`.
 | Tokenless MCP Host/Origin rebinding policy | SDK transport policy before tool dispatch | **CUTOVER BLOCKER — W2-G**; tokenless MCP stays unmounted (501) until this gate is accepted. Authenticated bound-identity checks are served (spec.md M18) |
 | `/api/hook/session-start` (any caller) | briefing text | W2-D (B3) |
 | Authorized `memory-changes` | change note | W2-E (B3) |
-| The session-end dream trigger (`SessionDream`), fired by an explicit SessionEnd with entries and by the idle reaper | `_fire_and_forget_dream`: a background `dream_run_auto` (consolidation, outcome inference, lessons) | `DeferredSessionDream` logs one line; no dream runs | B1 (the automatic dream ticks) |
 | `POST /api/pair` after a valid body on an authenticated install | the 2-slot redemption gate (`RedemptionGate`, 429 `rate_limited`), invocation of the implemented `principals::redeem` store transaction plus immediate `PrincipalStore::add`, the failure-budget refund on success, and 503 `pairing_unavailable` on a store error | HTTP-SECURITY / CLI-PAIRING (the gate wraps only `principal_store.redeem`, `web/api.py:378-393`) |
 | Stored callers' POST `/api/config` and `/api/daemon-notice` gate | HTTP already returns 403 `operator_principal_required` by stored-name inference; method-aware source policy is implemented for HTTP-SECURITY to consume with `resolve_detailed` | HTTP-SECURITY |
 
@@ -163,7 +162,6 @@ binding"). What it cannot or does not reproduce:
 | Autosave and exit persistence | changed-state save through resident writer stores | owned scheduling and exit callback implemented; admitted stores drain before exit, but counters and tensor weights are not saved | W2-E (durability) |
 | Canonical-store compaction | removes selected resident records, marks slots dirty and rewrites their rows | selection policy implemented and checked against Python goldens; resident-store mutation and slot sync await the writer | W2-E / W3-I |
 | Automatic dream and graph sweep stages | backlog/quiescence gate, extraction, analyzer and graph review ticks | served (spec SW1-SW6) except the link, junk, curation and candidate judges | task P3b (the judges) |
-| The SessionEnd hook's close firing the session-end dream | the hook closes the session and fires the dream | the entry point is served (`Service::fire_session_dream`, as the reaper's idle close uses it); the hook's close answers 501 until the hook batch serves it | the hook batch (B3) |
 | `application_name` fallback | derived from argv | `pseudolife-mcp pid=<pid> pseudolife-daemon serve` | free (not persisted) |
 
 ## Request parsing edges (canonical shapes rule)

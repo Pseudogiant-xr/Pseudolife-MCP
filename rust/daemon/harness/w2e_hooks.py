@@ -61,10 +61,10 @@ def register(h) -> dict[str, dict]:
         # sub-episode, one already ended, one whose registered root was
         # pruned, one with a signal source, one titled by its agent), the
         # active-session pointer on the last.
-        # The session-end dream trigger fires on both sides; extractor_mode
-        # fallback with no fallback endpoint makes Python's dream refuse
-        # before it writes (its NoOp extractor would acknowledge every
-        # pending entry), because Rust's trigger is still B1's deferred stub.
+        # A close with entries fires the session-end dream on both sides;
+        # extractor_mode fallback with no fallback endpoint makes both
+        # dreams refuse before they write (a NoOp extractor would
+        # acknowledge every pending entry), so the close itself is compared.
         "hook-session-end": {
             "config": "memory:\n  dream:\n    enabled: false\n    extractor_mode: fallback\n",
             "seed": [

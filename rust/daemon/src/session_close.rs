@@ -220,7 +220,7 @@ pub async fn hook_session_end(app: &crate::http::App, session_id: &Value) {
     let Some(key) = session_id.as_str().map(str::to_string) else {
         return;
     };
-    let dream = app.service.session_dream.clone();
+    let service = app.service.clone();
     let band_order: Vec<String> = app
         .service
         .config
@@ -236,7 +236,7 @@ pub async fn hook_session_end(app: &crate::http::App, session_id: &Value) {
         let close =
             tokio::spawn(async move { episode_end_session(&r3, &k2, true, &band_order).await });
         match close.await {
-            Ok((_, true)) => dream.fire(),
+            Ok((_, true)) => service.fire_session_dream(),
             Ok(_) => {}
             Err(e) => eprintln!("session-end episode close failed: {e}"),
         }
