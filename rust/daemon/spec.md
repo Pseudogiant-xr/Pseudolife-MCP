@@ -1234,7 +1234,7 @@ the maintainer's 2026-10-19 decision returned it to scope.
 | RC3 | A query blank after `strip()` answers `{query: "", seeds: [], entities: [], edges: [], paths: [], texts: [], iterations: 0, hops, low_confidence: true}` (plus the bookkeeping RC15 drops) with no search. | `service.py:9127-9132` |
 | RC4 | The vocabulary: entity display names by id, then each entity's aliases (grouped by first alias, `ORDER BY alias`), empty names dropped, first occurrence kept. With the hub gate, the asserted undirected degree by display name, and the threshold `max(floor, sorted(degrees)[min(len - 1, int(len × percentile / 100))])` (the floor alone for no edges). | `service.py:9085-9107,9139-9141`; `recall.py:200-206` |
 | RC5 | The seed search: `search(query, top_k)` as `memory_search`'s service body runs it (access accrual and the retrieval event included); its non-empty hit texts open `texts`, first occurrence kept, and their count is `seed_text_count`. | `recall.py:271-278` |
-| RC6 | Seeds (the mechanical driver): the vocabulary names the query mentions, else those the joined seed hits mention; none sets `low_confidence` and ends the walk with the seed texts. Seeds are deduplicated in order and cut to `max_entities`, each at hop 0. | `recall.py:144-161,279-290` |
+| RC6 | Seeds (the mechanical driver; the llm driver's are RC17): the vocabulary names the query mentions, else those the joined seed hits mention; none sets `low_confidence` and ends the walk with the seed texts. Seeds are deduplicated in order and cut to `max_entities`, each at hop 0. | `recall.py:144-161,279-290` |
 | RC7 | Mentions (`_mentions`): word-bounded and case-insensitive under Python 3.11's `re` (Unicode 14 `\w`, `\s` and `IGNORECASE` folding), the name's separator runs (`[\s_\-/]+`) matching any such run, a dot after the name bounding only when no word character follows, a dot before never, an apostrophe inside a word bounding only a possessive `s`, and a combining mark just outside a match counting as a word character. | `recall.py:20-103` |
 | RC8 | Each hop while the frontier is non-empty, fewer than `hops` hops have run and fewer than `max_entities` names are seen: the frontier selection (seeds always; other names below the hub threshold, by ascending degree then name, cut to a non-zero `expand_budget` as Python slices; unchanged with the gate off). | `recall.py:174-197,291-306` |
 | RC9 | Each selected name: its depth-1 neighborhood (`memory_graph`'s body with facts); a miss is skipped. Each node's display joins `entities` at this hop the first time it is seen, its facts kept from the first sight; each edge joins once per `(src, relation, dst)` as `{src, relation, dst, derived}` with its hop; paths join once. The hop stops once `max_entities` names are seen. | `recall.py:307-349`; `recall.py:164-171` |
@@ -1245,12 +1245,13 @@ the maintainer's 2026-10-19 decision returned it to scope.
 | RC14 | The caps: entities to 10 and edges to 15, each by the per-hop quota (`cap // H` per hop, the remainder to the latest hops, unused slots granted latest-first, earliest items within a hop), edges between surviving entities first; each entity's facts to 5; texts to 6 with up to `min(3, top_k)` from the seed search and a short hop pool backfilled from the seed texts. | `mcp_server.py:2754-2833,2911-2928` |
 | RC15 | `entity_hop`, `edge_hop` and `seed_text_count` are dropped; `truncated` and `searches_issued` stay. | `mcp_server.py:2929-2938` |
 | RC16 | Without `verbose`: facts as `{attribute, value}` plus `re_verify`/`re_verify_reason` when set and `authority`, `distortion_tolerance`, `pinned` when truthy; edges as `{src, relation, dst}`; texts cut to 200 characters plus `…`. | `mcp_server.py:2836-2869,2939-2950` |
+| RC17 | Seeds under the llm driver (`driver` "llm"), after the seed search and with no lock held: `_seed_prompt` (the first 200 vocabulary names joined by ", ", the question, the first 5 seed hits, empty ones included, joined by " ") sent as one `POST <base>/chat/completions` carrying `json.dumps({model, messages: [{role: "user", content: prompt}], temperature: 0.0, max_tokens: 256, stream: false})`. Base, model and key are each `os.environ.get(PSEUDOLIFE_DREAM_BASE_URL / _MODEL / _API_KEY) or memory.dream.extractor_base_url / extractor_model / extractor_api_key` (not `extractor_source` or the model override); nothing is sent when the base or the model is empty. `Authorization: Bearer <key>` goes only with a non-empty key; the timeout is 30 s; a redirect is refused, never followed, and a URL with userinfo is refused before connecting. The answer is `choices[0].message.content or ""`, and "" on any failure. `_parse_name_list` (first `[` to last `]`, `json.loads`, its strings in order), filtered to the vocabulary in the model's order, gives the seeds, then RC6's dedup and cut; none sets `low_confidence`. A truthy non-string `content` is an internal error. Re-queries stay RC10's. | `service.py:9238,9246-9250`; `recall.py:421-492` |
 
 `recall_mentions.rs` is checked against Python's `_mentions` over a
 generated corpus (`harness/goldens/recall-mentions.json`, written by
 `harness/gen_recall_mentions_goldens.py`), and its tables against their
 generator (`harness/gen_recall_unicode.py`). `harness/w2e.py live --only
-recall recall-wide recall-caps recall-ceiling recall-ungated` compares every answer and the full bank
+recall recall-wide recall-caps recall-ceiling recall-ungated recall-llm` compares every answer and the full bank
 (retrieval events and access counts included) after each call, on templates
 the Python daemon's own tools wrote (memories, facts with a constraint, a
 graph with a part-of chain, an alias, a fact whose source memory a
@@ -1261,10 +1262,20 @@ a write; under tight settings the hub gate, the expansion budget, the per-hop
 ceiling, part-of arrivals and the entity ceiling; the total-search ceiling alone (`truncated`, `searches_issued`);
 with the gate, the ceilings, pinning and trace annotation off; and a hub of
 twelve leaves with one deeper node, where the entity cap keeps the deepest
-hop. The
+hop. `recall-llm` (`harness/w2e_recall_llm.py`) runs the llm driver against each
+side's stub extractor with a bearer key, comparing the two daemons' request
+bytes and `Authorization` digests after every call, and failing unless each
+side used every stub reply (`extractor_all_used`): model-named seeds in
+reverse vocabulary order (an alias among them, unknown names, a number and a
+repeat dropped), replies
+naming no array or only unknown names, a refused redirect, a 500, a
+non-string content, and a walk after a write. The
 `mcp-recall-seed-any`, `mcp-recall-no-hub-gate`, `mcp-recall-no-requery`,
-`mcp-recall-no-pin`, `mcp-recall-no-annotate` and `mcp-recall-flat-caps`
-mutants must be caught.
+`mcp-recall-no-pin`, `mcp-recall-no-annotate`, `mcp-recall-flat-caps` and
+`mcp-recall-llm-no-vocab-filter` mutants must be caught. `recall.rs`'s unit
+tests pin the prompt, the body bytes, `_parse_name_list` and the reply decoding
+against CPython's output, and the request against a local server (the key only
+when set, a redirect's target receiving nothing, every failure an empty reply).
 
 ### memory_graph_review over MCP: list and the decision actions (2026-10-19)
 
