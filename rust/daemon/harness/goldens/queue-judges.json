@@ -1,0 +1,812 @@
+{
+ "format": [
+  {
+   "row": {
+    "n": 1,
+    "display": "a, b, c",
+    "reason": "list-artifact",
+    "degree": 0,
+    "edges": [],
+    "facts": 0,
+    "fact_text": [],
+    "lesson_object": false,
+    "scopes": [],
+    "mentions": []
+   },
+   "text": "[1] 'a, b, c' — detector: list-artifact; degree 0; facts 0; lesson-minted object: no; scopes []\n    edges: none\n    facts: none\n    notes: none"
+  },
+  {
+   "row": {
+    "n": 2,
+    "display": "origin/master",
+    "reason": "compound",
+    "degree": 3,
+    "edges": [
+     "x0 -uses-> origin/master [agent]yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+     "x1 -uses-> origin/master [agent]yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+     "x2 -uses-> origin/master [agent]yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+     "x3 -uses-> origin/master [agent]yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+     "x4 -uses-> origin/master [agent]yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+     "x5 -uses-> origin/master [agent]yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+     "x6 -uses-> origin/master [agent]yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+     "x7 -uses-> origin/master [agent]yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+     "x8 -uses-> origin/master [agent]yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+     "x9 -uses-> origin/master [agent]yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"
+    ],
+    "facts": 2,
+    "fact_text": [
+     "role=zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+     "owner=me",
+     "x=1",
+     "y=2"
+    ],
+    "lesson_object": true,
+    "scopes": [
+     "homelab",
+     "pseudolife"
+    ],
+    "mentions": [
+     "[conversation] mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm",
+     "two",
+     "three",
+     "four"
+    ]
+   },
+   "text": "[2] 'origin/master' — detector: compound; degree 3; facts 2; lesson-minted object: yes; scopes ['homelab', 'pseudolife']\n    edges: x0 -uses-> origin/master [agent]yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy; x1 -uses-> origin/master [agent]yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy; x2 -uses-> origin/master [agent]yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy; x3 -uses-> origin/master [agent]yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy; x4 -uses-> origin/master [agent]yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy; x5 -uses-> origin/master [agent]yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy; x6 -uses-> origin/master [agent]yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy; x7 -uses-> origin/master [agent]yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy\n    facts: role=zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz; owner=me; x=1\n    notes: [conversation] mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm; two; three"
+  },
+  {
+   "row": {
+    "n": 3,
+    "display": "élan — 🙂",
+    "reason": null,
+    "degree": 1,
+    "edges": [
+     "e"
+    ],
+    "facts": 1,
+    "fact_text": [
+     "k=v"
+    ],
+    "lesson_object": false,
+    "scopes": [
+     "Ünicode"
+    ],
+    "mentions": []
+   },
+   "text": "[3] 'élan — 🙂' — detector: ?; degree 1; facts 1; lesson-minted object: no; scopes ['Ünicode']\n    edges: e\n    facts: k=v\n    notes: none"
+  },
+  {
+   "row": {
+    "n": 4
+   },
+   "text": "[4] '?' — detector: ?; degree 0; facts 0; lesson-minted object: no; scopes []\n    edges: none\n    facts: none\n    notes: none"
+  }
+ ],
+ "parse": [
+  {
+   "raw": [
+    {
+     "id": 1,
+     "verdict": "delete",
+     "confidence": 0.93,
+     "note": "a list"
+    },
+    {
+     "id": 2,
+     "verdict": " KEEP ",
+     "confidence": "0.81",
+     "note": ""
+    },
+    {
+     "id": 3,
+     "verdict": "leave"
+    },
+    {
+     "id": 9,
+     "verdict": "delete",
+     "confidence": 1
+    },
+    {
+     "id": "2",
+     "verdict": "accept",
+     "confidence": 0.5
+    },
+    {
+     "id": null,
+     "verdict": "keep"
+    },
+    "not a dict",
+    {
+     "id": 1.9,
+     "verdict": "keep",
+     "confidence": 7,
+     "note": 12345
+    },
+    {
+     "id": true,
+     "verdict": "delete",
+     "confidence": [
+      1
+     ],
+     "note": [
+      "x",
+      "x",
+      "x"
+     ]
+    },
+    {
+     "id": 3,
+     "verdict": "keep",
+     "confidence": -2,
+     "note": "nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn"
+    }
+   ],
+   "rows": [
+    {
+     "n": 1
+    },
+    {
+     "n": 2
+    },
+    {
+     "n": 3
+    }
+   ],
+   "verdicts": [
+    {
+     "n": 1,
+     "verdict": "delete",
+     "confidence": 0.93,
+     "note": "a list"
+    },
+    {
+     "n": 2,
+     "verdict": "keep",
+     "confidence": 0.81,
+     "note": null
+    },
+    {
+     "n": 3,
+     "verdict": "leave",
+     "confidence": 0.5,
+     "note": null
+    },
+    {
+     "n": 1,
+     "verdict": "keep",
+     "confidence": 1.0,
+     "note": "12345"
+    },
+    {
+     "n": 1,
+     "verdict": "delete",
+     "confidence": 0.5,
+     "note": "['x', 'x', 'x']"
+    },
+    {
+     "n": 3,
+     "verdict": "keep",
+     "confidence": 0.0,
+     "note": "nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn"
+    }
+   ]
+  },
+  {
+   "raw": [],
+   "rows": [
+    {
+     "n": 1
+    },
+    {
+     "n": 2
+    },
+    {
+     "n": 3
+    }
+   ],
+   "verdicts": []
+  }
+ ],
+ "pack": [
+  {
+   "cap": 240,
+   "pending": [
+    {
+     "id": 10,
+     "kind": "junk",
+     "entity_id": 1,
+     "reason": "list-artifact"
+    },
+    {
+     "id": 11,
+     "kind": "junk",
+     "entity_id": 2,
+     "reason": "compound"
+    },
+    {
+     "id": 12,
+     "kind": "junk",
+     "entity_id": 4,
+     "reason": "slot-key"
+    },
+    {
+     "id": 13,
+     "kind": "junk",
+     "entity_id": 6,
+     "reason": null
+    },
+    {
+     "id": 14,
+     "kind": "junk",
+     "entity_id": 99,
+     "entity": "Gone",
+     "reason": "x"
+    }
+   ],
+   "evidence": {
+    "graph": {
+     "entities": [
+      {
+       "id": 1,
+       "canonical": "a, b, c",
+       "display": "a, b, c"
+      },
+      {
+       "id": 2,
+       "canonical": "origin/master",
+       "display": "origin/master"
+      },
+      {
+       "id": 3,
+       "canonical": "bob",
+       "display": "Bob"
+      },
+      {
+       "id": 4,
+       "canonical": "lesson object",
+       "display": "Lesson Object"
+      },
+      {
+       "id": 5,
+       "canonical": "shell lesson",
+       "display": "Shell Lesson"
+      },
+      {
+       "id": 6,
+       "canonical": "orphan",
+       "display": "Orphan"
+      }
+     ],
+     "edges": [
+      {
+       "src_id": 3,
+       "relation": "uses",
+       "dst_id": 2,
+       "origin": "agent"
+      },
+      {
+       "src_id": 2,
+       "relation": "related-to",
+       "dst_id": 2,
+       "origin": null
+      },
+      {
+       "src_id": 5,
+       "relation": "prefers",
+       "dst_id": 4,
+       "origin": "action"
+      },
+      {
+       "src_id": 5,
+       "relation": "avoids",
+       "dst_id": 4,
+       "origin": "action"
+      },
+      {
+       "src_id": 3,
+       "relation": "prefers",
+       "dst_id": 1,
+       "origin": "agent"
+      },
+      {
+       "src_id": 3,
+       "relation": "uses",
+       "dst_id": 2,
+       "origin": ""
+      },
+      {
+       "src_id": 3,
+       "relation": "uses",
+       "dst_id": 2,
+       "origin": ""
+      },
+      {
+       "src_id": 3,
+       "relation": "uses",
+       "dst_id": 2,
+       "origin": ""
+      },
+      {
+       "src_id": 3,
+       "relation": "uses",
+       "dst_id": 2,
+       "origin": ""
+      },
+      {
+       "src_id": 3,
+       "relation": "uses",
+       "dst_id": 2,
+       "origin": ""
+      },
+      {
+       "src_id": 3,
+       "relation": "uses",
+       "dst_id": 2,
+       "origin": ""
+      },
+      {
+       "src_id": 3,
+       "relation": "uses",
+       "dst_id": 2,
+       "origin": ""
+      },
+      {
+       "src_id": 3,
+       "relation": "uses",
+       "dst_id": 2,
+       "origin": ""
+      }
+     ]
+    },
+    "scopes": {
+     "2": [
+      "zeta",
+      "alpha"
+     ],
+     "4": [
+      "pseudolife"
+     ]
+    },
+    "entries": [
+     {
+      "id": 1,
+      "text": "Bob pushed origin/master today",
+      "source": "conversation"
+     },
+     {
+      "id": 2,
+      "text": "origin master is behind",
+      "source": ""
+     },
+     {
+      "id": 3,
+      "text": "The orphan oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo",
+      "source": null
+     },
+     {
+      "id": 4,
+      "text": "origin/master again",
+      "source": "claude"
+     },
+     {
+      "id": 5,
+      "text": "and origin/master once more",
+      "source": "x"
+     }
+    ],
+    "facts": {
+     "2": 1,
+     "3": 2
+    },
+    "fact_texts": {
+     "Origin/Master": 2,
+     "lesson object": 3,
+     "": 4
+    },
+    "fact_rows": {
+     "2": [
+      [
+       "role",
+       "the main branch"
+      ],
+      [
+       "note",
+       "nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn"
+      ]
+     ],
+     "6": []
+    }
+   },
+   "rows": [
+    {
+     "n": 1,
+     "display": "a, b, c",
+     "reason": "list-artifact",
+     "degree": 1,
+     "edges": [
+      "Bob -prefers-> a, b, c [agent]"
+     ],
+     "facts": 0,
+     "fact_text": [],
+     "lesson_object": false,
+     "scopes": [],
+     "mentions": []
+    },
+    {
+     "n": 2,
+     "display": "origin/master",
+     "reason": "compound",
+     "degree": 11,
+     "edges": [
+      "Bob -uses-> origin/master [agent]",
+      "origin/master -related-to-> origin/master [?]",
+      "origin/master -related-to-> origin/master [?]",
+      "Bob -uses-> origin/master [?]",
+      "Bob -uses-> origin/master [?]",
+      "Bob -uses-> origin/master [?]",
+      "Bob -uses-> origin/master [?]",
+      "Bob -uses-> origin/master [?]"
+     ],
+     "facts": 2,
+     "fact_text": [
+      "role=the main branch",
+      "note=nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn"
+     ],
+     "lesson_object": false,
+     "scopes": [
+      "alpha",
+      "zeta"
+     ],
+     "mentions": [
+      "[conversation] Bob pushed origin/master today",
+      "origin master is behind",
+      "[claude] origin/master again"
+     ]
+    },
+    {
+     "n": 3,
+     "display": "Lesson Object",
+     "reason": "slot-key",
+     "degree": 2,
+     "edges": [
+      "Shell Lesson -prefers-> Lesson Object [action]",
+      "Shell Lesson -avoids-> Lesson Object [action]"
+     ],
+     "facts": 3,
+     "fact_text": [],
+     "lesson_object": true,
+     "scopes": [
+      "pseudolife"
+     ],
+     "mentions": []
+    },
+    {
+     "n": 4,
+     "display": "Orphan",
+     "reason": null,
+     "degree": 0,
+     "edges": [],
+     "facts": 0,
+     "fact_text": [],
+     "lesson_object": false,
+     "scopes": [],
+     "mentions": [
+      "The orphan ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo"
+     ]
+    },
+    {
+     "n": 5,
+     "display": "Gone",
+     "reason": "x",
+     "degree": 0,
+     "edges": [],
+     "facts": 0,
+     "fact_text": [],
+     "lesson_object": false,
+     "scopes": [],
+     "mentions": []
+    }
+   ]
+  },
+  {
+   "cap": 12,
+   "pending": [
+    {
+     "id": 10,
+     "kind": "junk",
+     "entity_id": 1,
+     "reason": "list-artifact"
+    },
+    {
+     "id": 11,
+     "kind": "junk",
+     "entity_id": 2,
+     "reason": "compound"
+    },
+    {
+     "id": 12,
+     "kind": "junk",
+     "entity_id": 4,
+     "reason": "slot-key"
+    },
+    {
+     "id": 13,
+     "kind": "junk",
+     "entity_id": 6,
+     "reason": null
+    },
+    {
+     "id": 14,
+     "kind": "junk",
+     "entity_id": 99,
+     "entity": "Gone",
+     "reason": "x"
+    }
+   ],
+   "evidence": {
+    "graph": {
+     "entities": [
+      {
+       "id": 1,
+       "canonical": "a, b, c",
+       "display": "a, b, c"
+      },
+      {
+       "id": 2,
+       "canonical": "origin/master",
+       "display": "origin/master"
+      },
+      {
+       "id": 3,
+       "canonical": "bob",
+       "display": "Bob"
+      },
+      {
+       "id": 4,
+       "canonical": "lesson object",
+       "display": "Lesson Object"
+      },
+      {
+       "id": 5,
+       "canonical": "shell lesson",
+       "display": "Shell Lesson"
+      },
+      {
+       "id": 6,
+       "canonical": "orphan",
+       "display": "Orphan"
+      }
+     ],
+     "edges": [
+      {
+       "src_id": 3,
+       "relation": "uses",
+       "dst_id": 2,
+       "origin": "agent"
+      },
+      {
+       "src_id": 2,
+       "relation": "related-to",
+       "dst_id": 2,
+       "origin": null
+      },
+      {
+       "src_id": 5,
+       "relation": "prefers",
+       "dst_id": 4,
+       "origin": "action"
+      },
+      {
+       "src_id": 5,
+       "relation": "avoids",
+       "dst_id": 4,
+       "origin": "action"
+      },
+      {
+       "src_id": 3,
+       "relation": "prefers",
+       "dst_id": 1,
+       "origin": "agent"
+      },
+      {
+       "src_id": 3,
+       "relation": "uses",
+       "dst_id": 2,
+       "origin": ""
+      },
+      {
+       "src_id": 3,
+       "relation": "uses",
+       "dst_id": 2,
+       "origin": ""
+      },
+      {
+       "src_id": 3,
+       "relation": "uses",
+       "dst_id": 2,
+       "origin": ""
+      },
+      {
+       "src_id": 3,
+       "relation": "uses",
+       "dst_id": 2,
+       "origin": ""
+      },
+      {
+       "src_id": 3,
+       "relation": "uses",
+       "dst_id": 2,
+       "origin": ""
+      },
+      {
+       "src_id": 3,
+       "relation": "uses",
+       "dst_id": 2,
+       "origin": ""
+      },
+      {
+       "src_id": 3,
+       "relation": "uses",
+       "dst_id": 2,
+       "origin": ""
+      },
+      {
+       "src_id": 3,
+       "relation": "uses",
+       "dst_id": 2,
+       "origin": ""
+      }
+     ]
+    },
+    "scopes": {
+     "2": [
+      "zeta",
+      "alpha"
+     ],
+     "4": [
+      "pseudolife"
+     ]
+    },
+    "entries": [
+     {
+      "id": 1,
+      "text": "Bob pushed origin/master today",
+      "source": "conversation"
+     },
+     {
+      "id": 2,
+      "text": "origin master is behind",
+      "source": ""
+     },
+     {
+      "id": 3,
+      "text": "The orphan oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo",
+      "source": null
+     },
+     {
+      "id": 4,
+      "text": "origin/master again",
+      "source": "claude"
+     },
+     {
+      "id": 5,
+      "text": "and origin/master once more",
+      "source": "x"
+     }
+    ],
+    "facts": {
+     "2": 1,
+     "3": 2
+    },
+    "fact_texts": {
+     "Origin/Master": 2,
+     "lesson object": 3,
+     "": 4
+    },
+    "fact_rows": {
+     "2": [
+      [
+       "role",
+       "the main branch"
+      ],
+      [
+       "note",
+       "nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn"
+      ]
+     ],
+     "6": []
+    }
+   },
+   "rows": [
+    {
+     "n": 1,
+     "display": "a, b, c",
+     "reason": "list-artifact",
+     "degree": 1,
+     "edges": [
+      "Bob -prefers-> a, b, c [agent]"
+     ],
+     "facts": 0,
+     "fact_text": [],
+     "lesson_object": false,
+     "scopes": [],
+     "mentions": []
+    },
+    {
+     "n": 2,
+     "display": "origin/master",
+     "reason": "compound",
+     "degree": 11,
+     "edges": [
+      "Bob -uses-> origin/master [agent]",
+      "origin/master -related-to-> origin/master [?]",
+      "origin/master -related-to-> origin/master [?]",
+      "Bob -uses-> origin/master [?]",
+      "Bob -uses-> origin/master [?]",
+      "Bob -uses-> origin/master [?]",
+      "Bob -uses-> origin/master [?]",
+      "Bob -uses-> origin/master [?]"
+     ],
+     "facts": 2,
+     "fact_text": [
+      "role=the main branch",
+      "note=nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn"
+     ],
+     "lesson_object": false,
+     "scopes": [
+      "alpha",
+      "zeta"
+     ],
+     "mentions": [
+      "[conversation] Bob pushed o",
+      "origin maste",
+      "[claude] origin/maste"
+     ]
+    },
+    {
+     "n": 3,
+     "display": "Lesson Object",
+     "reason": "slot-key",
+     "degree": 2,
+     "edges": [
+      "Shell Lesson -prefers-> Lesson Object [action]",
+      "Shell Lesson -avoids-> Lesson Object [action]"
+     ],
+     "facts": 3,
+     "fact_text": [],
+     "lesson_object": true,
+     "scopes": [
+      "pseudolife"
+     ],
+     "mentions": []
+    },
+    {
+     "n": 4,
+     "display": "Orphan",
+     "reason": null,
+     "degree": 0,
+     "edges": [],
+     "facts": 0,
+     "fact_text": [],
+     "lesson_object": false,
+     "scopes": [],
+     "mentions": [
+      "The orphan o"
+     ]
+    },
+    {
+     "n": 5,
+     "display": "Gone",
+     "reason": "x",
+     "degree": 0,
+     "edges": [],
+     "facts": 0,
+     "fact_text": [],
+     "lesson_object": false,
+     "scopes": [],
+     "mentions": []
+    }
+   ]
+  }
+ ]
+}

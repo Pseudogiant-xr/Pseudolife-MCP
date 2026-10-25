@@ -30,8 +30,48 @@ use crate::mcp::dispatch::ToolError;
 /// A pending merge row (`pending_entity_proposals`' dict).
 pub(crate) type Row = Map<String, Value>;
 
-pub(crate) const KIND: &str = "merge";
-const MEMO_KEY: &str = "review_judgments_v1_merge";
+/// The review queue one `ReviewJudgments` serves (its `kind`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Queue {
+    Merge,
+    Junk,
+}
+
+impl Queue {
+    /// `kind`: the queue's name in memo keys, response identities and
+    /// decision records.
+    pub(crate) fn kind(self) -> &'static str {
+        match self {
+            Queue::Merge => "merge",
+            Queue::Junk => "junk",
+        }
+    }
+
+    /// `"review_judgments_v1_" + kind`.
+    fn memo_key(self) -> &'static str {
+        match self {
+            Queue::Merge => "review_judgments_v1_merge",
+            Queue::Junk => "review_judgments_v1_junk",
+        }
+    }
+
+    /// `_PROMPT[kind]`: the system prompt the judging policy signs.
+    pub(crate) fn prompt(self) -> &'static str {
+        match self {
+            Queue::Merge => crate::dream::prompts::JUDGE_SYSTEM_PROMPT,
+            Queue::Junk => crate::dream::prompts::JUNK_JUDGE_SYSTEM_PROMPT,
+        }
+    }
+
+    /// `_ALLOWED[queue]`: the one terminal action an automatic decision
+    /// record may hold.
+    fn terminal_action(self) -> &'static str {
+        match self {
+            Queue::Merge => "reject",
+            Queue::Junk => "keep",
+        }
+    }
+}
 const IDENTITY_PREFIX: &str = "review_response_identity_v1_";
 const INDEX_KEY: &str = "automatic_review_decisions_v1";
 const RECORD_PREFIX: &str = "automatic_review_decision_v1:";
@@ -156,13 +196,13 @@ const PENDING_COLS: [(&str, Col); 27] = [
 ];
 
 /// The pending merge rows.
-pub(crate) async fn pending_rows(c: &Client) -> Result<Vec<Row>, ToolError> {
+pub(crate) async fn pending_rows(c: &Client, queue: Queue) -> Result<Vec<Row>, ToolError> {
     Ok(c.query(PENDING_SQL, &[])
         .await
         .map_err(internal)?
         .iter()
         .map(|r| decode(r, &PENDING_COLS))
-        .filter(|row| vs(row, "kind") == Some(KIND))
+        .filter(|row| vs(row, "kind") == Some(queue.kind()))
         .collect())
 }
 
@@ -444,9 +484,10 @@ pub(crate) async fn last_response_identity(
     )
 }
 
-/// `vote_endpoint_moved(service, "merge", row, opinion, cache)`.
+/// `vote_endpoint_moved(service, kind, row, opinion, cache)`.
 pub(crate) async fn vote_endpoint_moved(
     c: &Client,
+    queue: Queue,
     row: &Row,
     opinion: &str,
     cache: Option<&mut HashMap<(String, String), Option<String>>>,
@@ -456,7 +497,7 @@ pub(crate) async fn vote_endpoint_moved(
         return Ok(false);
     };
     let key = (opinion.to_string(), policy.to_string());
-    let queue = format!("{KIND}_{opinion}");
+    let queue = format!("{}_{opinion}", queue.kind());
     let now = match cache {
         Some(cache) => {
             if let Some(v) = cache.get(&key) {
@@ -484,23 +525,50 @@ fn without_tail(note: Option<&str>, marker: &str) -> String {
 
 // ── signing ──────────────────────────────────────────────────────────────
 
+/// `evidence(pending)`: the storage reads signing a queue's rows needs
+/// (`_ENRICH[kind][0]`).
+pub(crate) enum QEvidence {
+    Merge(JudgeEvidence),
+    Junk(crate::dream::queue_judges::JunkEvidence),
+}
+
+/// Caller holds the lock.
+pub(crate) async fn load_evidence(
+    c: &Client,
+    queue: Queue,
+    rows: &[Row],
+) -> Result<QEvidence, ToolError> {
+    Ok(match queue {
+        Queue::Merge => QEvidence::Merge(deep::judge_evidence_body(c).await.map_err(internal)?),
+        Queue::Junk => {
+            QEvidence::Junk(crate::dream::queue_judges::junk_evidence_body(c, rows).await?)
+        }
+    })
+}
+
 /// `_sign` (pure): `(fingerprints, packs)` by proposal id.
 #[allow(clippy::type_complexity, clippy::result_large_err)]
 pub(crate) fn sign_rows(
     rows: &[Row],
-    ev: &JudgeEvidence,
+    ev: &QEvidence,
     cfg: &DeepDreamConfig,
     policy: &Value,
 ) -> Result<(HashMap<String, String>, HashMap<String, Row>), ToolError> {
-    let props: Vec<EntityProposal> = rows.iter().map(entity_proposal).collect();
-    let enriched = deep::judge_enrich_from(&props, ev, cfg)?;
+    let enriched = match ev {
+        QEvidence::Merge(ev) => {
+            let props: Vec<EntityProposal> = rows.iter().map(entity_proposal).collect();
+            deep::judge_enrich_from(&props, ev, cfg)?
+        }
+        QEvidence::Junk(ev) => crate::dream::queue_judges::enrich_junk_from(rows, ev, cfg),
+    };
     let mut sigs = HashMap::new();
     let mut packs = HashMap::new();
     for (p, row) in rows.iter().zip(enriched) {
         let Value::Object(pack) = row else { continue };
         let key = id_of(p).to_string();
+        // `_CROSS_ROW`: the merge `group` is signed as None.
         let mut signed = pack.clone();
-        if signed.contains_key("group") {
+        if matches!(ev, QEvidence::Merge(_)) && signed.contains_key("group") {
             signed.insert("group".into(), Value::Null);
         }
         let sig = fingerprint(&json!({
@@ -514,9 +582,10 @@ pub(crate) fn sign_rows(
     Ok((sigs, packs))
 }
 
-/// `ReviewJudgments(service, "merge", extractor, pending, current_model)`:
+/// `ReviewJudgments(service, kind, extractor, pending, current_model)`:
 /// one judge tick's state.
 pub(crate) struct Review {
+    pub queue: Queue,
     pub cfg: DeepDreamConfig,
     pub pending: Vec<Row>,
     pub current_model: Option<String>,
@@ -525,7 +594,7 @@ pub(crate) struct Review {
     pub expected: HashMap<String, String>,
     pub enriched: HashMap<String, Row>,
     to_sign: Vec<Row>,
-    evidence: Option<JudgeEvidence>,
+    evidence: Option<QEvidence>,
     pub valid: HashSet<i64>,
     pub second_policy: Option<String>,
     pub second_model: Option<String>,
@@ -537,11 +606,13 @@ impl Review {
     pub(crate) fn new(
         config: &Config,
         ex: &Compat,
+        queue: Queue,
         pending: Vec<Row>,
         current_model: Option<String>,
     ) -> Self {
-        let policy = judging_policy(config, ex, crate::dream::prompts::JUDGE_SYSTEM_PROMPT);
+        let policy = judging_policy(config, ex, queue.prompt());
         Review {
+            queue,
             cfg: config.memory.deep_dream.clone(),
             pending,
             current_model,
@@ -565,7 +636,7 @@ impl Review {
         c: &Client,
         row: &Row,
     ) -> Result<Option<String>, ToolError> {
-        let memo = get_meta_map(c, MEMO_KEY).await?;
+        let memo = get_meta_map(c, self.queue.memo_key()).await?;
         Ok(match memo.get(&id_of(row).to_string()) {
             Some(Value::Object(saved)) => saved
                 .get("served_model")
@@ -585,7 +656,7 @@ impl Review {
         if rows.is_empty() {
             return Ok(HashMap::new());
         }
-        let ev = deep::judge_evidence_body(c).await.map_err(internal)?;
+        let ev = load_evidence(c, self.queue, rows).await?;
         Ok(sign_rows(rows, &ev, &self.cfg, &self.policy)?.0)
     }
 
@@ -609,7 +680,7 @@ impl Review {
         self.evidence = if self.to_sign.is_empty() {
             None
         } else {
-            Some(deep::judge_evidence_body(c).await.map_err(internal)?)
+            Some(load_evidence(c, self.queue, &self.to_sign).await?)
         };
         Ok(())
     }
@@ -663,13 +734,13 @@ impl Review {
         c: &Client,
         ex_served: Option<&str>,
     ) -> Result<(), ToolError> {
-        let mut memo = get_meta_map(c, MEMO_KEY).await?;
+        let mut memo = get_meta_map(c, self.queue.memo_key()).await?;
         let live: HashSet<String> = self.pending.iter().map(|p| id_of(p).to_string()).collect();
         memo.retain(|k, _| live.contains(k));
         let observations = [
             self.current_model.clone(),
             ex_served.map(str::to_string),
-            last_response_identity(c, KIND, &self.request_policy).await?,
+            last_response_identity(c, self.queue.kind(), &self.request_policy).await?,
         ];
         let no_clear = crate::mutants::active("mcp-dream-judge-no-stale-clear");
         for p in self.pending.iter_mut() {
@@ -712,7 +783,7 @@ impl Review {
             }
             memo.shift_remove(&key);
         }
-        set_meta(c, MEMO_KEY, &Value::Object(memo)).await?;
+        set_meta(c, self.queue.memo_key(), &Value::Object(memo)).await?;
         self.clear_moved_votes(c).await
     }
 
@@ -726,7 +797,7 @@ impl Review {
             if crate::mutants::active("mcp-dream-judge-moved-not-cleared") {
                 continue;
             }
-            if vote_endpoint_moved(c, p, "second", Some(&mut cache)).await? {
+            if vote_endpoint_moved(c, self.queue, p, "second", Some(&mut cache)).await? {
                 let note = without_tail(vs(p, "judge_note"), "| 2nd (");
                 c.execute(
                     "UPDATE entity_proposals SET judge2_verdict=NULL, \
@@ -750,7 +821,7 @@ impl Review {
                 }
                 p.insert("judge_note".into(), json!(note));
             } else if truthy(p, "judge3_verdict")
-                && vote_endpoint_moved(c, p, "third", Some(&mut cache)).await?
+                && vote_endpoint_moved(c, self.queue, p, "third", Some(&mut cache)).await?
             {
                 let note = without_tail(vs(p, "judge_note"), "| 3rd (");
                 c.execute(
@@ -788,16 +859,12 @@ impl Review {
         opinion: &str,
     ) -> Result<(), ToolError> {
         let response_policy = match response {
-            Some(r) => fingerprint(&judging_policy(
-                config,
-                r,
-                crate::dream::prompts::JUDGE_SYSTEM_PROMPT,
-            )),
+            Some(r) => fingerprint(&judging_policy(config, r, self.queue.prompt())),
             None => self.request_policy.clone(),
         };
         let queue = match response {
-            Some(_) => format!("{KIND}_{opinion}"),
-            None => KIND.to_string(),
+            Some(_) => format!("{}_{opinion}", self.queue.kind()),
+            None => self.queue.kind().to_string(),
         };
         record_response_identity(c, &queue, &response_policy, served).await?;
         self.second_policy = None;
@@ -841,7 +908,7 @@ impl Review {
 
     async fn revalidate(&mut self, c: &Client, batch: &[Row]) -> Result<(), ToolError> {
         let ids: HashSet<i64> = batch.iter().map(id_of).collect();
-        let live: Vec<Row> = pending_rows(c)
+        let live: Vec<Row> = pending_rows(c, self.queue)
             .await?
             .into_iter()
             .filter(|p| ids.contains(&id_of(p)))
@@ -892,20 +959,20 @@ impl Review {
         row: &Row,
         served: Option<&str>,
     ) -> Result<(), ToolError> {
-        let mut memo = get_meta_map(c, MEMO_KEY).await?;
+        let mut memo = get_meta_map(c, self.queue.memo_key()).await?;
         let key = id_of(row).to_string();
         memo.insert(
             key.clone(),
             json!({"fingerprint": self.expected.get(&key), "served_model": served}),
         );
-        set_meta(c, MEMO_KEY, &Value::Object(memo)).await
+        set_meta(c, self.queue.memo_key(), &Value::Object(memo)).await
     }
 
     /// `retry(proposal)`.
     pub(crate) async fn retry(&self, c: &Client, row: &Row) -> Result<(), ToolError> {
-        let mut memo = get_meta_map(c, MEMO_KEY).await?;
+        let mut memo = get_meta_map(c, self.queue.memo_key()).await?;
         memo.shift_remove(&id_of(row).to_string());
-        set_meta(c, MEMO_KEY, &Value::Object(memo)).await
+        set_meta(c, self.queue.memo_key(), &Value::Object(memo)).await
     }
 }
 
@@ -1018,17 +1085,21 @@ async fn retire(
     Ok(())
 }
 
-/// `has_active_decisions(storage, "merge")`.
-pub(crate) async fn has_active_decisions(c: &Client) -> Result<bool, ToolError> {
+/// `has_active_decisions(storage, kind)`.
+pub(crate) async fn has_active_decisions(c: &Client, queue: Queue) -> Result<bool, ToolError> {
     let index = DIndex::load(c).await?;
     Ok(index
         .active
         .values()
-        .any(|row| row.get("queue").and_then(Value::as_str) == Some(KIND)))
+        .any(|row| row.get("queue").and_then(Value::as_str) == Some(queue.kind())))
 }
 
-/// `_canonical_pair(storage, "merge", proposal)`.
-async fn canonical_pair(c: &Client, row: &Row) -> Result<Option<[String; 2]>, ToolError> {
+/// `_canonical_pair(storage, kind, proposal)`.
+async fn canonical_pair(
+    c: &Client,
+    queue: Queue,
+    row: &Row,
+) -> Result<Option<[String; 2]>, ToolError> {
     let g = crate::storage::graph::load_graph_body(c)
         .await
         .map_err(internal)?;
@@ -1041,7 +1112,17 @@ async fn canonical_pair(c: &Client, row: &Row) -> Result<Option<[String; 2]>, To
             .and_then(|e| e["canonical"].as_str())
             .map(str::to_string)
     };
-    let (left, right) = (canon(vi(row, "entity_id")), canon(vi(row, "into_id")));
+    let (left, right) = match queue {
+        Queue::Merge => (canon(vi(row, "entity_id")), canon(vi(row, "into_id"))),
+        Queue::Junk => {
+            // `(_junk_keep_key(c), _junk_keep_key(c))`: the keep closes the
+            // name against a re-proposal.
+            let key = canon(vi(row, "entity_id"))
+                .filter(|c| !c.is_empty())
+                .map(|c| format!("junk:{c}"));
+            return Ok(key.map(|k| [k.clone(), k]));
+        }
+    };
     Ok(match (left, right) {
         (Some(l), Some(r)) if !l.is_empty() && !r.is_empty() && l != r => {
             let mut pair = [l, r];
@@ -1072,8 +1153,12 @@ pub(crate) struct PriorPair {
     dismissed_at: Option<f64>,
 }
 
-pub(crate) async fn capture_proposal_pair(c: &Client, row: &Row) -> Result<PriorPair, ToolError> {
-    let pair = canonical_pair(c, row).await?;
+pub(crate) async fn capture_proposal_pair(
+    c: &Client,
+    queue: Queue,
+    row: &Row,
+) -> Result<PriorPair, ToolError> {
+    let pair = canonical_pair(c, queue, row).await?;
     let at = dismissed_at(c, pair.as_ref()).await?;
     Ok(PriorPair {
         pair,
@@ -1116,8 +1201,9 @@ async fn write_new(c: &Client, target: &str, marker: Map<String, Value>) -> Resu
     set_meta(c, INDEX_KEY, &index.value()).await
 }
 
-/// `record_proposal_terminal(review, proposal, action="reject",
-/// prior_pair=...)`: record one successful dream-judge merge reject.
+/// `record_proposal_terminal(review, proposal, action=_ALLOWED[kind],
+/// prior_pair=...)`: record one successful dream-judge nondestructive
+/// terminal action (a merge reject, a junk keep).
 pub(crate) async fn record_proposal_terminal(
     c: &Client,
     review: &Review,
@@ -1141,7 +1227,7 @@ pub(crate) async fn record_proposal_terminal(
     else {
         return Ok(());
     };
-    let pair = canonical_pair(c, row).await?;
+    let pair = canonical_pair(c, review.queue, row).await?;
     if prior.pair != pair || prior.dismissed_at.is_some() {
         return Ok(());
     }
@@ -1156,10 +1242,10 @@ pub(crate) async fn record_proposal_terminal(
         .or_else(|| review.current_model.clone().filter(|s| !s.is_empty()))
         .or_else(|| extractor_served.map(str::to_string));
     let mut marker = Map::new();
-    marker.insert("queue".into(), json!(KIND));
+    marker.insert("queue".into(), json!(review.queue.kind()));
     marker.insert("target_type".into(), json!("proposal"));
     marker.insert("proposal_id".into(), json!(id));
-    marker.insert("action".into(), json!("reject"));
+    marker.insert("action".into(), json!(review.queue.terminal_action()));
     marker.insert("proposal".into(), Value::Object(row.clone()));
     marker.insert("fingerprint".into(), json!(signature));
     marker.insert("served_model".into(), json!(served));
@@ -1172,21 +1258,21 @@ pub(crate) async fn record_proposal_terminal(
     marker.insert("terminal_status".into(), current["status"].clone());
     marker.insert("pair".into(), json!(pair));
     marker.insert("dismissed_at".into(), fnum(pair_at));
-    write_new(c, &format!("{KIND}:{id}"), marker).await
+    write_new(c, &format!("{}:{id}", review.queue.kind()), marker).await
 }
 
-/// `_batch(index, "merge", limit)`.
-fn batch(index: &DIndex, limit: i64) -> Vec<(String, Value)> {
+/// `_batch(index, kind, limit)`.
+fn batch(index: &DIndex, queue: Queue, limit: i64) -> Vec<(String, Value)> {
     let mut rows: Vec<(String, Value)> = index
         .active
         .iter()
-        .filter(|(_, s)| s.get("queue").and_then(Value::as_str) == Some(KIND))
+        .filter(|(_, s)| s.get("queue").and_then(Value::as_str) == Some(queue.kind()))
         .map(|(t, s)| (t.clone(), s.clone()))
         .collect();
     rows.sort_by_key(|(_, s)| seq_of(s));
     let cursor = index
         .cursors
-        .get(KIND)
+        .get(queue.kind())
         .and_then(|v| v.as_i64().or_else(|| v.as_f64().map(|x| x as i64)))
         .unwrap_or(0);
     let (after, before): (Vec<_>, Vec<_>) = rows.into_iter().partition(|(_, s)| seq_of(s) > cursor);
@@ -1329,7 +1415,7 @@ async fn reopen_proposal(c: &Client, marker: &Map<String, Value>) -> Result<bool
 }
 
 /// `refresh_proposal_terminals(review, limit=cap)`: reconsider one fair,
-/// bounded batch of automatic merge rejects. Each Python transaction is
+/// bounded batch of the queue's automatic terminal decisions. Each Python transaction is
 /// its own `txn::run`; the caller holds the writer lock.
 pub(crate) async fn refresh_proposal_terminals(
     client: &Client,
@@ -1339,7 +1425,8 @@ pub(crate) async fn refresh_proposal_terminals(
 ) -> Result<Value, ToolError> {
     use crate::graph_review_tools::actions::{in_txn, reads};
     let index = reads(client, |c| async move { DIndex::load(c).await }).await?;
-    let selected = batch(&index, limit);
+    let kind = review.queue.kind();
+    let selected = batch(&index, review.queue, limit);
     if selected.is_empty() {
         return Ok(json!({"considered": 0, "reopened": 0, "superseded": 0, "remaining": 0}));
     }
@@ -1368,7 +1455,7 @@ pub(crate) async fn refresh_proposal_terminals(
             reads(client, |c| async move { decision_record(c, &did).await }).await?
         };
         let reason = match &marker {
-            Some(m) if m.get("queue").and_then(Value::as_str) == Some(KIND) => {
+            Some(m) if m.get("queue").and_then(Value::as_str) == Some(kind) => {
                 let (current, projection) = {
                     let (m, d) = (m.clone(), &display);
                     reads(
@@ -1426,7 +1513,7 @@ pub(crate) async fn refresh_proposal_terminals(
         review.current_model.clone(),
         ex_served.map(str::to_string),
         reads(client, |c| async move {
-            last_response_identity(c, KIND, &review.request_policy).await
+            last_response_identity(c, kind, &review.request_policy).await
         })
         .await?,
     ];
@@ -1452,7 +1539,7 @@ pub(crate) async fn refresh_proposal_terminals(
             else {
                 continue;
             };
-            let queue = format!("{KIND}_{opinion}");
+            let queue = format!("{kind}_{opinion}");
             let model = {
                 let (q, p) = (queue.clone(), policy.to_string());
                 reads(client, |c| async move {
@@ -1507,12 +1594,12 @@ pub(crate) async fn refresh_proposal_terminals(
     let last_seq = selected.last().map(|(_, s)| seq_of(s)).unwrap_or(0);
     let remaining = in_txn(client, |c| async move {
         let mut live = DIndex::load(c).await?;
-        live.cursors.insert(KIND.into(), json!(last_seq));
+        live.cursors.insert(kind.into(), json!(last_seq));
         set_meta(c, INDEX_KEY, &live.value()).await?;
         Ok(live
             .active
             .values()
-            .filter(|r| r.get("queue").and_then(Value::as_str) == Some(KIND))
+            .filter(|r| r.get("queue").and_then(Value::as_str) == Some(kind))
             .count())
     })
     .await?;

@@ -287,6 +287,29 @@ def test_judge_prompt_has_its_own_kind():
     sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
     from pseudolife_memory.memory import dream as d
     assert stub_extractor.request_kind(d._JUDGE_SYSTEM_PROMPT) == "judge_merges"
+    assert stub_extractor.request_kind(d._LINK_JUDGE_SYSTEM_PROMPT) == "judge_links"
+    assert stub_extractor.request_kind(d._JUNK_JUDGE_SYSTEM_PROMPT) == "judge_junk"
+    assert stub_extractor.request_kind(d._CANDIDATE_JUDGE_SYSTEM_PROMPT) == "judge_candidates"
+    assert stub_extractor.request_kind(d._SLOT_JUDGE_SYSTEM_PROMPT) == "judge_slot_pairs"
+
+
+def test_junk_verdicts_answer_by_display():
+    import stub_extractor
+    sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+    from pseudolife_memory.memory import dream as d
+    rows = [{"n": 1, "display": "a, b, c", "reason": "list-artifact"},
+            {"n": 2, "display": "origin/master", "reason": "compound"},
+            {"n": 3, "display": "x' \u2014 detector: y", "reason": "slot-key"}]
+    body = json.dumps({"messages": [
+        {"role": "system", "content": d._JUNK_JUDGE_SYSTEM_PROMPT},
+        {"role": "user", "content": "\n\n".join(d.format_junk_proposal(r) for r in rows)}]}).encode()
+    reply = json.loads(stub_extractor.judge_reply(
+        {"a, b, c": {"verdict": "delete", "confidence": 0.95},
+         "origin/master": [{"verdict": "keep", "confidence": 0.9},
+                           {"verdict": "leave", "confidence": 0.1}]}, body))
+    assert reply == {"verdicts": [{"id": 1, "verdict": "delete", "confidence": 0.95},
+                                  {"id": 2, "verdict": "keep", "confidence": 0.9},
+                                  {"id": 2, "verdict": "leave", "confidence": 0.1}]}
 
 
 def test_judge_verdicts_answer_by_pair_on_each_endpoint(stub_factory):

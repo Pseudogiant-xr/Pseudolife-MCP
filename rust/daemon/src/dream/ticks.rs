@@ -9,9 +9,9 @@
 //! shape), and one Python lets propagate (the analyzer tick, `dream_status`)
 //! ends the tick, as an exception ends Python's.
 //!
-//! The review-queue judges between the merge judge and `dream_status`
-//! (links, junk, curation, candidates) are not run yet (task P3b,
-//! `divergences.md`).
+//! Of the review-queue judges between the merge judge and `dream_status`,
+//! the junk judge runs (`queue_judges.rs`); the link, curation and
+//! candidate judges are not run yet (task P3b, `divergences.md`).
 
 use std::sync::Arc;
 
@@ -122,6 +122,13 @@ pub async fn sweep(
     let judged = super::judge::deep_dream_judge(svc, stop).await;
     if super::judge::worth_logging(&judged) {
         log_value("deep-dream judge", &Value::Object(judged));
+    }
+    // The review-queue judges, each a bounded, mode-gated batch that never
+    // fails the tick. Links, curation and candidates are not run yet
+    // (task P3b).
+    let junk = super::queue_judges::deep_dream_judge_junk(svc, stop).await;
+    if super::queue_judges::worth_logging(&junk) {
+        log_value("deep-dream judge_junk", &Value::Object(junk));
     }
     if *stop.borrow() {
         return Ok(());

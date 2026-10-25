@@ -36,7 +36,7 @@ const JUDGE_ALIASES: [&str; 3] = ["judge", "extractor", "bench"];
 const REFUSE_UNKNOWN_SECOND: &str = "tiebreak needs the second vote's served model";
 const REFUSE_SAME_MODEL: &str = "tiebreak needs a distinct third model";
 
-fn err_text(e: &ToolError) -> String {
+pub(crate) fn err_text(e: &ToolError) -> String {
     match e {
         ToolError::Refused { code, detail, .. } => match detail {
             Some(d) => format!("{code}: {d}"),
@@ -149,7 +149,7 @@ fn env_key(name: &str) -> Option<String> {
 /// `_judge_extractor(None, model=model)`: `judge_url`'s own endpoint, else
 /// the dream extractor (`build_extractor_with_fallback`), with `model`
 /// swapped onto it.
-async fn judge_extractor(service: &Service, model: Option<&str>) -> Option<JudgeEx> {
+pub(crate) async fn judge_extractor(service: &Service, model: Option<&str>) -> Option<JudgeEx> {
     let cfg = &service.config.memory.deep_dream;
     let dream = &service.config.dream;
     let model = model.filter(|m| !m.is_empty());
@@ -477,7 +477,7 @@ fn report_served_model(out: &mut Map<String, Value>, opinion: &str, ex: &JudgeEx
 }
 
 /// `_model_name(ex, fallback)`.
-fn model_name(ex: &JudgeEx, fallback: Option<&str>) -> String {
+pub(crate) fn model_name(ex: &JudgeEx, fallback: Option<&str>) -> String {
     ex.served
         .clone()
         .filter(|s| !s.is_empty())
@@ -671,7 +671,7 @@ fn encodable(params: &[Option<&str>]) -> Result<(), ToolError> {
 
 /// `set_entity_proposal_judgment` (3895-3910).
 #[allow(clippy::too_many_arguments)]
-async fn set_first_judgment(
+pub(crate) async fn set_first_judgment(
     c: &Client,
     id: i64,
     verdict: &str,
@@ -793,7 +793,12 @@ async fn dismissed_pairs(c: &Client) -> Result<HashSet<(String, String)>, ToolEr
 /// `_graph_reject_entity_proposal_locked(id, decided_by="dream-judge",
 /// _review_guard=...)` in the caller's transaction (`service.py:9039-9083`;
 /// a dream-judge reject retires no automatic decision).
-async fn reject_locked(c: &Client, review: &Review, row: &Row, id: i64) -> Result<bool, ToolError> {
+pub(crate) async fn reject_locked(
+    c: &Client,
+    review: &Review,
+    row: &Row,
+    id: i64,
+) -> Result<bool, ToolError> {
     if !review.current(c, row, false, false).await? {
         return Ok(false);
     }
@@ -847,6 +852,41 @@ async fn reject_locked(c: &Client, review: &Review, row: &Row, id: i64) -> Resul
                 "INSERT INTO dismissed_pairs (a_norm, b_norm, dismissed_at) \
                  VALUES ($1, $2, $3) ON CONFLICT DO NOTHING",
                 &[&pair[0], &pair[1], &now()],
+            )
+            .await
+            .map_err(internal)?;
+        }
+    } else if vs(&prop, "kind") == Some("junk") {
+        // The keep: its audit (`into_display` NULL marks junk) and the
+        // keep pair that closes the name against a re-proposal.
+        let entity = vi(&prop, "entity_id");
+        let reason = format!(
+            "junk keep: {}",
+            prop.get("reason")
+                .map_or_else(|| "None".to_string(), py_str)
+        );
+        crate::graph_review_tools::actions::record_merge_decision_by(
+            c,
+            id,
+            &g.disp_or_unknown(entity),
+            None,
+            "rejected",
+            vf(&prop, "score").map(|x| x as f32),
+            Some(&reason),
+            "dream-judge",
+            decided_at,
+            votes,
+        )
+        .await?;
+        if let Some(canon) = entity
+            .and_then(|i| g.canonical.get(&i).cloned())
+            .filter(|s| !s.is_empty())
+        {
+            let key = format!("junk:{canon}");
+            c.execute(
+                "INSERT INTO dismissed_pairs (a_norm, b_norm, dismissed_at) \
+                 VALUES ($1, $2, $3) ON CONFLICT DO NOTHING",
+                &[&key, &key, &now()],
             )
             .await
             .map_err(internal)?;
@@ -932,7 +972,7 @@ async fn apply_reject(
     id: i64,
     ex_served: Option<&str>,
 ) -> Result<bool, ToolError> {
-    let prior = rj::capture_proposal_pair(c, row).await?;
+    let prior = rj::capture_proposal_pair(c, rj::Queue::Merge, row).await?;
     let rejected = reject_locked(c, review, row, id).await?;
     if rejected {
         rj::record_proposal_terminal(c, review, row, &prior, ex_served).await?;
@@ -1234,7 +1274,7 @@ async fn tiebreak_apply(
         return Ok(());
     };
     for opinion in ["second", "third"] {
-        if rj::vote_endpoint_moved(c, row, opinion, None).await?
+        if rj::vote_endpoint_moved(c, rj::Queue::Merge, row, opinion, None).await?
             && !crate::mutants::active("mcp-dream-judge-moved-applies")
         {
             return Ok(());
@@ -1393,7 +1433,7 @@ pub(crate) fn worth_logging(judged: &Map<String, Value>) -> bool {
 }
 
 /// The tick's answer when the daemon began shutting down mid-tick.
-const STOPPED: &str = "stopped: the daemon is shutting down";
+pub(crate) const STOPPED: &str = "stopped: the daemon is shutting down";
 
 /// `fut`, unless the background stop signal fires first: the lock-free
 /// phases (endpoint construction, the alias probes, the model calls, the
@@ -1478,8 +1518,8 @@ async fn judge_tick(
         let _lock = ready.write.lock().await;
         reads(client, |c| async move {
             Ok((
-                rj::pending_rows(c).await?,
-                rj::has_active_decisions(c).await?,
+                rj::pending_rows(c, rj::Queue::Merge).await?,
+                rj::has_active_decisions(c, rj::Queue::Merge).await?,
             ))
         })
         .await
@@ -1497,7 +1537,13 @@ async fn judge_tick(
         return Ok(m);
     };
     let current_model = or_stop(stop, rj::observed_model(&ex.compat, ex.served.as_deref())).await?;
-    let mut review = Review::new(&service.config, &ex.compat, pending, current_model);
+    let mut review = Review::new(
+        &service.config,
+        &ex.compat,
+        rj::Queue::Merge,
+        pending,
+        current_model,
+    );
     let reconsidered = {
         let _lock = ready.write.lock().await;
         let reconsidered =
@@ -1506,7 +1552,7 @@ async fn judge_tick(
                 .map_err(e2s)?;
         let r = &mut review;
         reads(client, |c| async move {
-            r.pending = rj::pending_rows(c).await?;
+            r.pending = rj::pending_rows(c, rj::Queue::Merge).await?;
             r.prepare(c, cap).await
         })
         .await

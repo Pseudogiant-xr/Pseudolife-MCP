@@ -161,7 +161,7 @@ binding"). What it cannot or does not reproduce:
 | Session reaper integration | closes idle sessions, derives generic titles and preserves resumable roots | reaping, cascade close, deferred-empty sweep, tombstone hydration and store/resume integration implemented; generic auto-title pending | W2-E (episodes) / W3-I |
 | Autosave and exit persistence | changed-state save through resident writer stores | owned scheduling and exit callback implemented; admitted stores drain before exit, but counters and tensor weights are not saved | W2-E (durability) |
 | Canonical-store compaction | removes selected resident records, marks slots dirty and rewrites their rows | selection policy implemented and checked against Python goldens; resident-store mutation and slot sync await the writer | W2-E / W3-I |
-| Automatic dream and graph sweep stages | backlog/quiescence gate, extraction, analyzer and graph review ticks | served (spec SW1-SW6) except the link, junk, curation and candidate judges | task P3b (the judges) |
+| Automatic dream and graph sweep stages | backlog/quiescence gate, extraction, analyzer and graph review ticks | served (spec SW1-SW6) except the link, curation and candidate judges | task P3b (the judges) |
 | The SessionEnd hook's close firing the session-end dream | the hook closes the session and fires the dream | the entry point is served (`Service::fire_session_dream`, as the reaper's idle close uses it); the hook's close answers 501 until the hook batch serves it | the hook batch (B3) |
 | `application_name` fallback | derived from argv | `pseudolife-mcp pid=<pid> pseudolife-daemon serve` | free (not persisted) |
 
@@ -183,7 +183,7 @@ binding"). What it cannot or does not reproduce:
 |---|---|---|---|
 | Graph identity Unicode version | runtime Unicode tables (3.11 uses Unicode 14; newer Python images may differ) | pinned Python 3.11 Unicode 14 lowercase and final-sigma context, verified exhaustively | W3-H; revisit when the oracle runtime changes |
 | Colliding inverse provenance | base-set iteration can select different source relation names for the same inverse triple depending on hash seed | choose the lexicographically smallest asserted source relation; exact triple and valid provenance membership are checked, with smallest-source choice pinned | W3-H; declared deterministic choice; all other provenance exact |
-| Whole graph caps, fact projection and the link, junk, curation and candidate judges | served graph and review behavior | not served (the graph store, `memory_graph`, `memory_recall`, `memory_graph_review` with its proposals, the deep dream, the merge judge and the communities a dream run refreshes are: see their sections below) | the Console REST rows (`GET /api/graph`), later graph increments, and task P3b (the judges) |
+| Whole graph caps, fact projection and the link, curation and candidate judges | served graph and review behavior | not served (the graph store, `memory_graph`, `memory_recall`, `memory_graph_review` with its proposals, the deep dream, the merge judge and the communities a dream run refreshes are: see their sections below) | the Console REST rows (`GET /api/graph`), later graph increments, and task P3b (the judges) |
 
 ## W2-D: GET /api/search
 
@@ -394,7 +394,7 @@ of its own.
 | A merge-group tie between keys of different types (merge rows with a NULL target) | `TypeError: '<' not supported between instances of …` | `invalid_argument` with Rust's own wording | merge rows always carry a target |
 | A corrupt automatic-decision index (`next_seq` not an integer, `cursors`/`active` not mappings) | `int()` / `dict()` raise | read leniently in `list` | corrupt persisted data only; the judges write the index |
 | A NaN in a REAL proposal or decision column | serialized as `NaN` | `null` | NaN is not a stored score |
-| The link, junk, curation and candidate judges and their freshness | served by the background sweep | not run (the merge judge and the other sweep steps are served: see "The merge judge and its tiebreak" and spec SW1-SW6) | task P3b |
+| The link, curation and candidate judges and their freshness | served by the background sweep | not run (the merge and junk judges and the other sweep steps are served: see "The merge judge and its tiebreak" and spec SW1-SW6) | task P3b |
 | Wrong-type `memory.deep_dream.judges_enabled` / `analyzer_file_duplicates` | taken by truthiness | refused at config load | the existing config-type substitution |
 
 ### memory_dream: status, pull, commit, runs and the consolidation pass (2026-10-20)
@@ -483,8 +483,8 @@ goldens.
 
 | Item | Python | Rust | Owner / why |
 |---|---|---|---|
-| The link, junk, curation and candidate judges after the merge judge | run on every tick while dreaming is enabled | not run (the analyzer and deep ticks, `dream_status`, the stall tick and the automatic dream are: spec SW1-SW6) | task P3b; the `judge-merge-*` scenarios switch them off on the Python side |
-| Shutdown during a sweep tick | the sweep's daemon thread dies with the process | the tick stops after the merge judge when shutdown has begun, before `dream_status` and the automatic dream; an automatic dream already in flight is dropped when the stop signal comes, so shutdown does not wait out a model's timeout |
+| The link, curation and candidate judges after the merge and junk judges | run on every tick while dreaming is enabled | not run (the analyzer and deep ticks, `dream_status`, the stall tick and the automatic dream are: spec SW1-SW6) | task P3b; the `judge-merge-*` scenarios switch them off on the Python side |
+| Shutdown during a sweep tick | the sweep's daemon thread dies with the process | the tick stops after the merge and junk judges when shutdown has begun, before `dream_status` and the automatic dream; an automatic dream already in flight is dropped when the stop signal comes, so shutdown does not wait out a model's timeout |
 | Shutdown during a session-end dream | its daemon thread dies with the process | it runs as an admitted write task, like a manual `run`, which shutdown drains: shutdown waits for it (at most the extractor's timeout per model call) | a dream that began finishes instead of being cut off; the same holds today for a manual `run` | no committed state differs from a Python process killed at the same point (an open transaction rolls back with its connection) |
 | A sweep tick before the handles are installed (`Service::install`, right after the board is built at startup) | not applicable | the automatic dream is skipped with a log line | the sweep sleeps one interval before its first tick |
 | `/api/graph/rejudge` (`review_rejudge`, `review_judgments.requeue`) | served | not served: the daemon serves no `/api/graph/*` route | the web API slice; `requeue` also reads the curation and candidate queues (task P3b) |
