@@ -13,7 +13,17 @@ use std::{
 };
 use tar::{Builder, EntryType, Header};
 
-const EXCLUDE: [&str; 2] = ["embedded_pg", "backups"];
+/// `backup_cli._STATE_EXCLUDE`: the bank (the dump covers it), its
+/// password file, the backups dir, and installed software (the shim's
+/// runtimes and launcher, pinned native runtimes).
+const EXCLUDE: [&str; 6] = [
+    "embedded_pg",
+    "embedded_pg.secret",
+    "backups",
+    "native",
+    "runtimes",
+    "bin",
+];
 
 /// Preserve Python's filesystem surrogateescape bytes in PAX names.
 #[cfg(unix)]
@@ -925,6 +935,22 @@ pub(super) fn write(data_dir: &Path, bdir: &Path, ts: &str) -> io::Result<PathBu
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn state_archives_leave_out_the_bank_password_and_installed_runtimes() {
+        for name in [
+            "embedded_pg",
+            "embedded_pg.secret",
+            "backups",
+            "native",
+            "runtimes",
+            "bin",
+        ] {
+            assert!(is_excluded(OsStr::new(name)), "{name}");
+        }
+        assert!(!is_excluded(OsStr::new("config.yaml")));
+        assert!(!is_excluded(OsStr::new("memory_state")));
+    }
 
     #[cfg(unix)]
     #[test]

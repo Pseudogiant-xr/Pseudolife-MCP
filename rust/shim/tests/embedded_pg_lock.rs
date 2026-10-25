@@ -11,7 +11,7 @@ use std::{
     io::Write,
     path::{Path, PathBuf},
     sync::{
-        Barrier, Mutex,
+        Barrier, Condvar, Mutex,
         atomic::{AtomicUsize, Ordering},
         mpsc,
     },
@@ -82,14 +82,29 @@ impl Pinned for Payload {
     }
 }
 
-/// Serves the payload slowly, so two provisioners overlap.
-struct SlowFetch {
+const WAITING: &str = "waiting for another process";
+
+/// Holds the lock holder's download until the other provisioner has said
+/// it is waiting for the lock, so the two contend whatever the scheduling;
+/// without the lock nobody waits and the download fails after the bound.
+struct GatedFetch<'a> {
     calls: AtomicUsize,
+    logs: &'a Mutex<Vec<String>>,
+    logged: &'a Condvar,
 }
-impl Fetch for SlowFetch {
+impl Fetch for GatedFetch<'_> {
     fn fetch(&self, _url: &str, sink: &mut dyn Write) -> Result<(), String> {
         self.calls.fetch_add(1, Ordering::SeqCst);
-        std::thread::sleep(Duration::from_millis(400));
+        let logs = self.logs.lock().unwrap();
+        let (_logs, wait) = self
+            .logged
+            .wait_timeout_while(logs, Duration::from_secs(30), |logs| {
+                !logs.iter().any(|line| line.starts_with(WAITING))
+            })
+            .unwrap();
+        if wait.timed_out() {
+            return Err("the other provisioner never waited for the install lock".into());
+        }
         sink.write_all(b"payload").map_err(|e| e.to_string())
     }
 }
@@ -107,13 +122,14 @@ fn two_provisioners_on_one_root_install_once() {
         artifacts: &pins,
         record: serde_json::Map::new(),
     };
-    let fetch = SlowFetch {
+    let logs = Mutex::new(Vec::<String>::new());
+    let logged = Condvar::new();
+    let fetch = GatedFetch {
         calls: AtomicUsize::new(0),
+        logs: &logs,
+        logged: &logged,
     };
     let unpacks = Mutex::new(0);
-    let logs = Mutex::new(Vec::<String>::new());
-    // Both start together, so neither can find the other's finished install
-    // without the lock having made it wait.
     let start = Barrier::new(2);
     let outcomes: Vec<bool> = std::thread::scope(|scope| {
         let run = || {
@@ -130,7 +146,10 @@ fn two_provisioners_on_one_root_install_once() {
                     .then_some(())
                     .ok_or_else(|| "payload is missing".to_owned())
             };
-            let mut log = |line: &str| logs.lock().unwrap().push(line.to_owned());
+            let mut log = |line: &str| {
+                logs.lock().unwrap().push(line.to_owned());
+                logged.notify_all();
+            };
             native::provision(&root, &manifest, &fetch, &mut log, &mut unpack, &validate)
                 .unwrap()
                 .1
@@ -144,10 +163,7 @@ fn two_provisioners_on_one_root_install_once() {
     assert_eq!(fetch.calls.load(Ordering::SeqCst), 1);
     assert_eq!(*unpacks.lock().unwrap(), 1);
     let logs = logs.into_inner().unwrap();
-    let waited = logs
-        .iter()
-        .filter(|line| line.starts_with("waiting for another process"))
-        .count();
+    let waited = logs.iter().filter(|line| line.starts_with(WAITING)).count();
     assert_eq!(waited, 1, "{logs:?}");
     let dir = manifest.install_dir(&root);
     assert_eq!(fs::read(dir.join("payload")).unwrap(), b"payload");
