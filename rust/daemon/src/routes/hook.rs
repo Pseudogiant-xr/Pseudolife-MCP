@@ -125,3 +125,27 @@ pub(crate) async fn route(
         _ => not_implemented(path),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::http::tests::{assert_declared_501, authed_request, mcp_refusal_app};
+
+    /// The hook answers still owned by later slices.
+    #[tokio::test]
+    async fn unserved_hooks_answer_the_declared_501() {
+        let app = mcp_refusal_app();
+        for path in [
+            "/api/hook/session-start",
+            "/api/hook/memory-policy",
+            "/api/hook/memory-changes",
+        ] {
+            assert_declared_501(&app, authed_request("GET", path, None)).await;
+        }
+        let close = authed_request(
+            "POST",
+            "/api/hook/session-end",
+            Some(r#"{"session_id": "s"}"#),
+        );
+        assert_declared_501(&app, close).await;
+    }
+}

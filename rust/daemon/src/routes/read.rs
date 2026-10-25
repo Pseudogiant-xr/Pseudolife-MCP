@@ -3,6 +3,10 @@
 use super::console::Request;
 use axum::response::Response;
 
+/// The Console registrations this family serves in full.
+#[cfg(test)]
+pub(super) const SERVED: &[(&str, &str)] = &[("GET", "/api/search")];
+
 pub(super) async fn route(req: &mut Request<'_>) -> Option<Response> {
     match (req.method, req.path) {
         ("GET", "/api/search") => {

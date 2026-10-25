@@ -110,6 +110,16 @@ pub(crate) async fn route(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::http::tests::{assert_declared_501, authed_request, mcp_refusal_app};
+
+    /// A well-formed request on an authenticated daemon reaches redemption,
+    /// which a later slice owns.
+    #[tokio::test]
+    async fn redemption_answers_the_declared_501() {
+        let pairing = json!({"code": "ABCD-EFGH-JKMN", "token_sha256": "b".repeat(64)});
+        let request = authed_request("POST", "/api/pair", Some(&pairing.to_string()));
+        assert_declared_501(&mcp_refusal_app(), request).await;
+    }
 
     #[test]
     fn pairing_code_normalization() {

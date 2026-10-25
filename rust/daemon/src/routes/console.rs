@@ -61,3 +61,63 @@ pub(crate) async fn route(mut req: Request<'_>, maintainer_path: bool) -> Respon
     }
     not_implemented(path)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::http::tests::{assert_declared_501, authed_request, mcp_refusal_app};
+
+    /// Every family's fully served registrations.
+    const SERVED: [&[(&str, &str)]; 7] = [
+        read::SERVED,
+        board::SERVED,
+        writes::SERVED,
+        graph::SERVED,
+        maintainer::SERVED,
+        episodes::SERVED,
+        cli::SERVED,
+    ];
+
+    /// The declared 501s: every `routes.json` registration that no family
+    /// declares served. Each is probed with no query and no body, so a
+    /// partly served route (`GET /api/agents`, whose coordination view is
+    /// served) is checked for its unserved default. Serving a route means
+    /// adding it to its family's `SERVED`.
+    #[tokio::test]
+    async fn unserved_routes_answer_the_declared_501() {
+        let table = RouteTable::get();
+        let served: Vec<(&str, &str)> = SERVED.iter().flat_map(|f| f.iter().copied()).collect();
+        for (i, pair) in served.iter().enumerate() {
+            assert!(table.handles(pair.0, pair.1), "{pair:?} is not registered");
+            assert!(!served[..i].contains(pair), "{pair:?} is served twice");
+        }
+        let golden: Value =
+            serde_json::from_str(include_str!("../../harness/goldens/routes.json")).unwrap();
+        let app = mcp_refusal_app();
+        let mut unserved = 0;
+        for method in ["GET", "POST"] {
+            for path in golden[method].as_array().unwrap() {
+                let path = path.as_str().unwrap();
+                if served.contains(&(method, path)) {
+                    continue;
+                }
+                unserved += 1;
+                assert_declared_501(&app, authed_request(method, path, None)).await;
+            }
+        }
+        assert_eq!(unserved + served.len(), 72);
+        // A declared route is answered by its family, not the fall-through.
+        for &(method, path) in &served {
+            let response = tokio::time::timeout(
+                std::time::Duration::from_secs(30),
+                crate::http::handle(
+                    axum::extract::State(app.clone()),
+                    authed_request(method, path, None),
+                ),
+            )
+            .await
+            .unwrap();
+            assert_ne!(response.status().as_u16(), 501, "{method} {path}");
+        }
+    }
+}

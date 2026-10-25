@@ -721,11 +721,12 @@ pub fn py_strip(s: &str) -> &str {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use std::time::Instant;
 
-    fn mcp_refusal_app() -> Arc<App> {
+    /// An App with a configured bearer (`fixture-token`) and no reachable bank.
+    pub(crate) fn mcp_refusal_app() -> Arc<App> {
         let env = crate::config::DaemonEnv::from_env(&|_| None).unwrap();
         let service = Arc::new(Service::new(
             crate::config::Config::default(),
@@ -1024,7 +1025,24 @@ mod tests {
         );
     }
 
-    async fn assert_declared_501(app: &Arc<App>, request: Request<Body>) {
+    /// A request carrying the fixture bearer, with a JSON body when given.
+    pub(crate) fn authed_request(method: &str, path: &str, body: Option<&str>) -> Request<Body> {
+        let request = Request::builder()
+            .method(method)
+            .uri(path)
+            .header("authorization", "Bearer fixture-token");
+        match body {
+            Some(body) => request
+                .header("content-type", "application/json")
+                .body(Body::from(body.to_string())),
+            None => request.body(Body::empty()),
+        }
+        .unwrap()
+    }
+
+    /// The answer is exactly `501 not_implemented` for the request's path,
+    /// with the JSON transport headers.
+    pub(crate) async fn assert_declared_501(app: &Arc<App>, request: Request<Body>) {
         let (method, path) = (request.method().clone(), request.uri().path().to_string());
         let response = handle(State(app.clone()), request).await;
         assert_eq!(
@@ -1055,67 +1073,6 @@ mod tests {
             json!({"error": "not_implemented", "path": path}),
             "{method} {path}"
         );
-    }
-
-    /// The declared 501s: every registered Console route but the served
-    /// ones, plus the hook, pairing and session-end answers still owned by
-    /// later slices. Each route is probed with no query and no body, so a
-    /// partly served route (`GET /api/agents`, whose coordination view is
-    /// served) is checked for its unserved default. Serving a route means
-    /// removing it here.
-    #[tokio::test]
-    async fn unserved_routes_answer_the_declared_501() {
-        const SERVED: [(&str, &str); 2] = [("GET", "/api/search"), ("POST", "/api/daemon-notice")];
-        let table: Value =
-            serde_json::from_str(include_str!("../harness/goldens/routes.json")).unwrap();
-        let app = mcp_refusal_app();
-        let auth = "Bearer fixture-token";
-        let mut unserved = 0;
-        for method in ["GET", "POST"] {
-            for path in table[method].as_array().unwrap() {
-                let path = path.as_str().unwrap();
-                if SERVED.contains(&(method, path)) {
-                    continue;
-                }
-                unserved += 1;
-                let request = Request::builder()
-                    .method(method)
-                    .uri(path)
-                    .header("authorization", auth)
-                    .body(Body::empty())
-                    .unwrap();
-                assert_declared_501(&app, request).await;
-            }
-        }
-        assert_eq!(unserved, 70);
-        let json_post = |path: &str, body: &str| {
-            Request::builder()
-                .method("POST")
-                .uri(path)
-                .header("authorization", auth)
-                .header("content-type", "application/json")
-                .body(Body::from(body.to_string()))
-                .unwrap()
-        };
-        for path in [
-            "/api/hook/session-start",
-            "/api/hook/memory-policy",
-            "/api/hook/memory-changes",
-        ] {
-            let request = Request::builder()
-                .uri(path)
-                .header("authorization", auth)
-                .body(Body::empty())
-                .unwrap();
-            assert_declared_501(&app, request).await;
-        }
-        assert_declared_501(
-            &app,
-            json_post("/api/hook/session-end", r#"{"session_id": "s"}"#),
-        )
-        .await;
-        let pairing = json!({"code": "ABCD-EFGH-JKMN", "token_sha256": "b".repeat(64)});
-        assert_declared_501(&app, json_post("/api/pair", &pairing.to_string())).await;
     }
 
     #[tokio::test]

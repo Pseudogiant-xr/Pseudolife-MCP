@@ -4,6 +4,11 @@
 use super::console::Request;
 use axum::response::Response;
 
+/// The Console registrations this family serves in full; `GET /api/agents`
+/// is only partly served (its default view still answers 501).
+#[cfg(test)]
+pub(super) const SERVED: &[(&str, &str)] = &[("POST", "/api/daemon-notice")];
+
 pub(super) async fn route(req: &mut Request<'_>) -> Option<Response> {
     match (req.method, req.path) {
         ("GET", "/api/agents")
