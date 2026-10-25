@@ -36,7 +36,7 @@ pub async fn memory_changes_since(
     ready: &Arc<Ready>,
     since: Option<f64>,
     key: Option<&str>,
-) -> Changes {
+) -> Result<Changes, String> {
     let ws = ready.write.lock().await;
     let mut out = Changes {
         now: crate::episodes::now(),
@@ -50,7 +50,8 @@ pub async fn memory_changes_since(
         // The open leaf, then up its parents to the root.
         let mut ep = log.open_leaf_for(Some(key)).map(|i| &log.episodes[i]);
         let mut seen = std::collections::HashSet::new();
-        while let Some(e) = ep
+        while !crate::mutants::active("changes-from-open-leaf")
+            && let Some(e) = ep
             && let Some(parent) = e.parent_id.as_deref().and_then(|p| log.get(p))
             && seen.insert(e.id.clone())
         {
@@ -59,7 +60,7 @@ pub async fn memory_changes_since(
         out.since = ep.map(|e| e.started_at);
     }
     let Some(since) = out.since else {
-        return out;
+        return Ok(out);
     };
     let mut status: Vec<(f64, u64, String)> = {
         let bank = ready.bank.read().expect("bank lock");
@@ -79,6 +80,9 @@ pub async fn memory_changes_since(
             .map(|e| (e.ts, e.seq, e.text.clone()))
             .collect()
     };
+    // The barrier every lesson read passes: mirror a forget's pending
+    // retirements first.
+    crate::forget_tools::ensure_lessons_refreshed(ready).await?;
     let lessons = ready.lessons.snapshot();
     let mut fresh: Vec<(f64, String, String)> = lessons
         .current_records()
@@ -99,7 +103,7 @@ pub async fn memory_changes_since(
     out.newest_status = status.into_iter().next().map(|s| s.2);
     out.lesson_count = fresh.len();
     out.newest_lesson = fresh.into_iter().next().map(|l| (l.1, l.2));
-    out
+    Ok(out)
 }
 
 /// Python's `str.isspace`, as `str.split()` uses it.
@@ -209,9 +213,19 @@ pub async fn hook_memory_changes(
         }
     };
     let key = session_id.filter(|k| !k.is_empty());
-    let changes = memory_changes_since(&ready, start, key).await;
+    let changes = match memory_changes_since(&ready, start, key).await {
+        Ok(changes) => changes,
+        Err(e) => {
+            eprintln!("memory-change note failed for session_id={session_id:?}: {e}");
+            return String::new();
+        }
+    };
     // `math.floor(now * 1_000_000) / 1_000_000`, printed with six decimals.
-    let cursor = format!("{:.6}\n", (changes.now * 1_000_000.0).floor() / 1_000_000.0);
+    let now = match (crate::mutants::active("changes-cursor-echoes-since"), start) {
+        (true, Some(start)) => start,
+        _ => changes.now,
+    };
+    let cursor = format!("{:.6}\n", (now * 1_000_000.0).floor() / 1_000_000.0);
     match changes.since {
         Some(scanned) if scanned <= changes.now => {
             let note = render(&changes, start.is_none());
@@ -278,5 +292,13 @@ mod tests {
         );
         assert_eq!(lines[3], MEMORY_CHANGES_TAIL);
         assert_eq!(render(&Changes::default(), true), "");
+        let prefer = Changes {
+            lesson_count: 3,
+            newest_lesson: Some(("Do this.".into(), "+".into())),
+            ..Default::default()
+        };
+        assert!(render(&prefer, true).starts_with(
+            "Memory changed since this session started:\n- 3 new lessons; newest: prefer: Do this.."
+        ));
     }
 }

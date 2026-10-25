@@ -17,7 +17,8 @@ import time
 
 # Deliberate breaks (``--features mutants``) these scenarios must catch.
 MUTANTS = ["session-end-no-client-stamp", "session-end-keeps-empty",
-           "session-end-clears-foreign", "policy-arm-shifted", "changes-counts-own-session"]
+           "session-end-clears-foreign", "policy-arm-shifted", "changes-counts-own-session",
+           "changes-from-open-leaf", "changes-cursor-echoes-since"]
 
 OPS = ("hook",)
 
@@ -37,10 +38,12 @@ def _cursor(value, port: int, before: float, after: float) -> str:
     if not isinstance(value, str) or not value:
         return value
     line, _, rest = value.partition("\n")
-    # Python 3.11's time.time() on Windows is the coarse system clock (it
-    # can trail the precise clock a native daemon reads by a tick, ~16 ms).
-    slack = 0.1
-    if not _CURSOR_LINE.fullmatch(line) or not before - slack <= float(line) <= after + slack:
+    # Python 3.11's time.time() on Windows is the coarse system clock: it
+    # trails the precise clock a native daemon reads by up to a tick
+    # (~16 ms), so only the upper bound needs room; the Python daemon reads
+    # the same coarse clock as this harness.
+    if not _CURSOR_LINE.fullmatch(line) or not before - 1e-3 <= float(line) <= after + 0.05:
+        _LAST_CURSOR.pop(port, None)
         return f"<bad cursor {line!r}>" + "\n" + rest
     _LAST_CURSOR[port] = line
     return "<cursor>\n" + rest
@@ -207,6 +210,9 @@ def register(h) -> dict[str, dict]:
                 h.store("A plain note, not a status.", [h.sess("mc-b")]),
                 h.store("Status from another session, newer:   the deploy\n is done.",
                         [h.sess("mc-b")], source="status"),
+                # mc-a's open sub-episode starts after those notes: a first
+                # turn counts from the session's root, not this leaf.
+                h.ep_start("mc-a sub-task", [h.sess("mc-a")]),
                 *[h.sql(
                     "INSERT INTO lessons (entity, attribute, entity_norm, attribute_norm, value, "
                     "polarity, outcome, status, confidence, origin, support, provenance, "
@@ -230,8 +236,8 @@ def register(h) -> dict[str, dict]:
                 changes("session_id=mc-b"),
                 # No session: everything since the given cursor.
                 changes("since=1"),
-                # A cursor ahead of this daemon's clock, a malformed one, an
-                # unknown session: baselines (a cursor, no note).
+                # A cursor ahead of this daemon's clock, a malformed one with
+                # no session, an unknown session: baselines (a cursor, no note).
                 changes("since=99999999999.5"),
                 changes("since=not-a-cursor"),
                 changes("session_id=no-such-session"),
