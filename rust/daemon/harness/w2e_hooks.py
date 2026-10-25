@@ -37,7 +37,10 @@ def _cursor(value, port: int, before: float, after: float) -> str:
     if not isinstance(value, str) or not value:
         return value
     line, _, rest = value.partition("\n")
-    if not _CURSOR_LINE.fullmatch(line) or not before - 1e-6 <= float(line) <= after + 1e-6:
+    # Python 3.11's time.time() on Windows is the coarse system clock (it
+    # can trail the precise clock a native daemon reads by a tick, ~16 ms).
+    slack = 0.1
+    if not _CURSOR_LINE.fullmatch(line) or not before - slack <= float(line) <= after + slack:
         return f"<bad cursor {line!r}>" + "\n" + rest
     _LAST_CURSOR[port] = line
     return "<cursor>\n" + rest

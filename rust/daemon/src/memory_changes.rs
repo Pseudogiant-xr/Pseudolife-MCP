@@ -32,7 +32,11 @@ pub struct Changes {
 /// entries written outside the key's own episodes and current lessons
 /// asserted after `since`. With no `since`, the scan starts where the key's
 /// open root started; a key with no open episode answers a baseline.
-pub async fn memory_changes_since(ready: &Arc<Ready>, since: Option<f64>, key: Option<&str>) -> Changes {
+pub async fn memory_changes_since(
+    ready: &Arc<Ready>,
+    since: Option<f64>,
+    key: Option<&str>,
+) -> Changes {
     let ws = ready.write.lock().await;
     let mut out = Changes {
         now: crate::episodes::now(),
@@ -105,7 +109,11 @@ fn py_space(c: char) -> bool {
 
 /// `_excerpt`: one line, at most 160 characters.
 fn excerpt(text: &str) -> String {
-    let line = text.split(py_space).filter(|w| !w.is_empty()).collect::<Vec<_>>().join(" ");
+    let line = text
+        .split(py_space)
+        .filter(|w| !w.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
     if line.chars().count() <= EXCERPT_CHARS {
         return line;
     }
@@ -178,7 +186,8 @@ fn cursor_shape(s: &str) -> bool {
         Some((i, f)) => (i, Some(f)),
         None => (s, None),
     };
-    let digits = |p: &str, max: usize| (1..=max).contains(&p.len()) && p.bytes().all(|b| b.is_ascii_digit());
+    let digits =
+        |p: &str, max: usize| (1..=max).contains(&p.len()) && p.bytes().all(|b| b.is_ascii_digit());
     digits(int, 12) && frac.is_none_or(|f| digits(f, 9))
 }
 
@@ -225,7 +234,17 @@ mod tests {
         for ok in ["1", "1792900000.123456", "123456789012.123456789"] {
             assert!(cursor_shape(ok), "{ok}");
         }
-        for bad in ["", ".5", "1.", "1234567890123", "1.1234567890", "-1", "1e5", " 1", "١"] {
+        for bad in [
+            "",
+            ".5",
+            "1.",
+            "1234567890123",
+            "1.1234567890",
+            "-1",
+            "1e5",
+            " 1",
+            "١",
+        ] {
             assert!(!cursor_shape(bad), "{bad}");
         }
     }
@@ -253,7 +272,10 @@ mod tests {
         assert_eq!(lines[0], "Memory changed since your last turn:");
         assert!(lines[1].starts_with("- 2 new status notes from other sessions"));
         assert!(lines[1].contains("newest: \"Status \\\"quoted\\\"\"."));
-        assert_eq!(lines[2], "- 1 new lesson; newest: avoid: Avoid this.. More: `memory_lesson_search`.");
+        assert_eq!(
+            lines[2],
+            "- 1 new lesson; newest: avoid: Avoid this.. More: `memory_lesson_search`."
+        );
         assert_eq!(lines[3], MEMORY_CHANGES_TAIL);
         assert_eq!(render(&Changes::default(), true), "");
     }
