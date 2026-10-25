@@ -36,7 +36,10 @@ displays (either order) name a key, and none for the rest; a key naming a
 list of verdicts lists each of them under that proposal's number (a reply
 repeating an id). A ``judge_junk`` entry keys its verdicts by the flagged
 entity's display alone (``"verdicts": {"a, b, c": {...}}``), and a
-``judge_links`` entry by the proposal's ``SRC|DST`` displays (either order).
+``judge_links`` entry by the proposal's ``SRC|DST`` displays (either order),
+a ``judge_candidates`` entry by the candidate's two names (either order),
+and a ``judge_slot_pairs`` entry by ``Entity.attribute|Entity.attribute``
+of its two sides (either order).
 An entry with
 ``"times": N`` answers N requests per caller (the request's
 ``Authorization`` digest), then lets the next matching entry answer, so an
@@ -84,6 +87,11 @@ JUDGE_ENDPOINTS = ("second", "third")
 PROPOSAL_HEAD = re.compile(r"^\[(\d+)\] FROM '(.*?)' \(degree ", re.M)
 PROPOSAL_INTO = re.compile(r"^    INTO '(.*?)' \(degree ", re.M)
 JUNK_HEAD = re.compile(r"^\[(\d+)\] '(.*?)' \u2014 detector: ", re.M)
+# A candidate's first line: one quote-or-newline-bounded run per name, so
+# the read stays linear (see LINK_SRC).
+# A slot pair's side line: one quote-or-newline-bounded run per name.
+SLOT_SIDE = re.compile(r"    ([AB]) '([^'\n]*)' \| '([^'\n]*)'")
+CANDIDATE_HEAD = re.compile(r"\[(\d+)\] '([^'\n]*)' vs '([^'\n]*)' \(cosine ")
 # A link proposal's first line, read in two linear pieces: no pattern
 # holds more than one unbounded run, and each run stops at a quote or a
 # newline (CodeQL py/polynomial-redos on the single pattern it replaced).
@@ -378,6 +386,28 @@ def judge_reply(verdicts: dict, body: bytes) -> str:
             if not head:
                 continue
             v = verdicts.get(head.group(2))
+            for one in (v if isinstance(v, list) else [] if v is None else [v]):
+                out.append({"id": int(head.group(1)), **one})
+        return json.dumps({"verdicts": out})
+    if parsed and parsed[0] == "judge_slot_pairs":
+        for block in re.split(r"\n\n(?=\[\d+\] store=)", user):
+            lines = block.split("\n")
+            head = re.match(r"\[(\d+)\] store=", lines[0])
+            sides = [SLOT_SIDE.match(line) for line in lines[1:3]]
+            if not head or not all(sides):
+                continue
+            a, b = (f"{m.group(2)}.{m.group(3)}" for m in sides)
+            v = verdicts.get(f"{a}|{b}") or verdicts.get(f"{b}|{a}")
+            for one in (v if isinstance(v, list) else [] if v is None else [v]):
+                out.append({"id": int(head.group(1)), **one})
+        return json.dumps({"verdicts": out})
+    if parsed and parsed[0] == "judge_candidates":
+        for block in re.split(r"\n\n(?=\[\d+\] ')", user):
+            head = CANDIDATE_HEAD.match(block.split("\n", 1)[0])
+            if not head:
+                continue
+            a, b = head.group(2), head.group(3)
+            v = verdicts.get(f"{a}|{b}") or verdicts.get(f"{b}|{a}")
             for one in (v if isinstance(v, list) else [] if v is None else [v]):
                 out.append({"id": int(head.group(1)), **one})
         return json.dumps({"verdicts": out})

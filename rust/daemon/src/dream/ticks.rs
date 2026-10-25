@@ -10,8 +10,8 @@
 //! ends the tick, as an exception ends Python's.
 //!
 //! Of the review-queue judges between the merge judge and `dream_status`,
-//! the link and junk judges run (`queue_judges.rs`); the curation and
-//! candidate judges are not run yet (task P3b, `divergences.md`).
+//! the link, junk, curation and candidate judges run (`queue_judges.rs`,
+//! `curation_judge.rs`, `candidates.rs`).
 
 use std::sync::Arc;
 
@@ -124,7 +124,7 @@ pub async fn sweep(
         log_value("deep-dream judge", &Value::Object(judged));
     }
     // The review-queue judges, each a bounded, mode-gated batch that never
-    // fails the tick. Curation and candidates are not run yet (task P3b).
+    // fails the tick.
     let links = super::queue_judges::deep_dream_judge_links(svc, stop).await;
     if super::queue_judges::worth_logging(&links) {
         log_value("deep-dream judge_links", &Value::Object(links));
@@ -132,6 +132,14 @@ pub async fn sweep(
     let junk = super::queue_judges::deep_dream_judge_junk(svc, stop).await;
     if super::queue_judges::worth_logging(&junk) {
         log_value("deep-dream judge_junk", &Value::Object(junk));
+    }
+    let curation = super::curation_judge::deep_dream_judge_curation(svc, stop).await;
+    if super::queue_judges::worth_logging(&curation) {
+        log_value("deep-dream judge_curation", &Value::Object(curation));
+    }
+    let candidates = super::candidates::deep_dream_judge_candidates(svc, stop).await;
+    if super::queue_judges::worth_logging(&candidates) {
+        log_value("deep-dream judge_candidates", &Value::Object(candidates));
     }
     if *stop.borrow() {
         return Ok(());

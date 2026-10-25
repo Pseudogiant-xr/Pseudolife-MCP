@@ -100,7 +100,7 @@ const WORLD_FIELDS: [&str; 6] = [
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum Store {
+pub(crate) enum Store {
     Lesson,
     World,
 }
@@ -114,7 +114,7 @@ impl Store {
         }
     }
 
-    fn name(self) -> &'static str {
+    pub(crate) fn name(self) -> &'static str {
         match self {
             Store::Lesson => "lesson",
             Store::World => "world",
@@ -331,12 +331,12 @@ fn marker_pair_is(m: &Map<String, Value>, target: &[&str; 2]) -> Result<bool, To
 
 /// One `store_decisions` row as `retired_slots` returns it.
 #[derive(Debug, Clone)]
-struct Decision {
+pub(crate) struct Decision {
     id: i64,
     entity_norm: String,
     attribute_norm: String,
-    action: String,
-    record: Option<Value>,
+    pub(crate) action: String,
+    pub(crate) record: Option<Value>,
     decided_at: f64,
 }
 
@@ -987,10 +987,15 @@ fn canonical_str(out: &mut String, s: &str) {
 }
 
 /// `evidence_fingerprint`: the SHA-256 of the canonical JSON.
-pub(super) fn fingerprint(record: &Map<String, Value>) -> String {
+pub(crate) fn fingerprint(record: &Map<String, Value>) -> String {
     let mut text = String::new();
     canonical_json(&mut text, &Value::Object(record.clone()));
     hex::encode(Sha256::digest(text.as_bytes()))
+}
+
+/// `evidence_fingerprint(record)`, by its Python name.
+pub(crate) fn evidence_fingerprint(record: &Map<String, Value>) -> String {
+    fingerprint(record)
 }
 
 /// `_embedding_snapshot` of a float32 vector.
@@ -1019,7 +1024,7 @@ fn finite(x: f64) -> Result<Value, ToolError> {
 /// `snapshot_record(store, record)` over the record as `_get` sees it: `d`
 /// holds every attribute (or column) the record has, an absent one taking
 /// the default; the embedding is passed apart.
-pub(super) fn snapshot_record(
+pub(crate) fn snapshot_record(
     store: Store,
     d: &Map<String, Value>,
     embedding: Option<&[f32]>,
@@ -1103,7 +1108,7 @@ fn round6(x: f64) -> f64 {
 
 /// A resident lesson as `_get` reads the dataclass (hydration's
 /// `version or 1` applied, as Python's resident record holds it).
-fn lesson_dict(r: &LessonRecord) -> Map<String, Value> {
+pub(crate) fn lesson_dict(r: &LessonRecord) -> Map<String, Value> {
     let mut d = Map::new();
     d.insert("entity".into(), json!(r.entity));
     d.insert("attribute".into(), json!(r.attribute));
@@ -1136,7 +1141,7 @@ fn lesson_dict(r: &LessonRecord) -> Map<String, Value> {
 
 /// A resident world fact as `_get` reads the dataclass: no `support` or
 /// `provenance` attribute (the defaults apply), `origin` the constant.
-fn world_dict(r: &WorldRecord) -> Map<String, Value> {
+pub(crate) fn world_dict(r: &WorldRecord) -> Map<String, Value> {
     let mut d = Map::new();
     d.insert("entity".into(), json!(r.entity));
     d.insert("attribute".into(), json!(r.attribute));
@@ -1240,13 +1245,13 @@ fn snap_slot(snap: &Map<String, Value>) -> Result<SlotKey, ToolError> {
 
 /// A staged copy of the resident store the curation restore works on.
 #[derive(Clone)]
-enum Staged {
+pub(crate) enum Staged {
     Lesson(LessonStore),
     World(WorldStore),
 }
 
 impl Staged {
-    fn of(ready: &Ready, store: Store) -> Self {
+    pub(crate) fn of(ready: &Ready, store: Store) -> Self {
         match store {
             Store::Lesson => Staged::Lesson((*ready.lessons.snapshot()).clone()),
             Store::World => Staged::World((*ready.world.snapshot()).clone()),
@@ -1261,7 +1266,7 @@ impl Staged {
     }
 
     /// `_resident_records`: slot to current record index, the last wins.
-    fn current_index(&self) -> HashMap<SlotKey, usize> {
+    pub(crate) fn current_index(&self) -> HashMap<SlotKey, usize> {
         let mut out = HashMap::new();
         match self {
             Staged::Lesson(s) => {
@@ -1282,8 +1287,49 @@ impl Staged {
         out
     }
 
+    /// `_hydrate_store(service, store)`: the store as the bank holds it.
+    pub(crate) async fn hydrate(client: &Client, store: Store) -> anyhow::Result<Self> {
+        Ok(match store {
+            Store::Lesson => Staged::Lesson(crate::stores::lessons::hydrate(client).await?),
+            Store::World => Staged::World(crate::stores::world::hydrate(client).await?),
+        })
+    }
+
+    /// `dirty_slots |= {key}`.
+    pub(crate) fn mark_dirty(&mut self, key: &SlotKey) {
+        match self {
+            Staged::Lesson(s) => s.dirty_slots.insert(key.clone()),
+            Staged::World(s) => s.dirty_slots.insert(key.clone()),
+        };
+    }
+
+    /// `dirty_slots = {key}`.
+    pub(crate) fn only_dirty(&mut self, key: &SlotKey) {
+        let one: std::collections::BTreeSet<SlotKey> = [key.clone()].into();
+        match self {
+            Staged::Lesson(s) => s.dirty_slots = one,
+            Staged::World(s) => s.dirty_slots = one,
+        }
+    }
+
+    /// `retire(entity, attribute, now=now)`: the retired record indexes.
+    pub(crate) fn retire(&mut self, entity: &str, attribute: &str, now: f64) -> Vec<usize> {
+        match self {
+            Staged::Lesson(s) => s.retire(entity, Some(attribute), now),
+            Staged::World(s) => s.retire(entity, Some(attribute), now),
+        }
+    }
+
+    /// Record `i`'s embedding.
+    pub(crate) fn embedding(&self, i: usize) -> Option<Vec<f32>> {
+        match self {
+            Staged::Lesson(s) => s.records[i].embedding.as_deref().map(<[f32]>::to_vec),
+            Staged::World(s) => s.records[i].embedding.as_deref().map(<[f32]>::to_vec),
+        }
+    }
+
     /// `snapshot_record(store, record)` of record `i`.
-    fn snapshot(&self, i: usize) -> Result<Map<String, Value>, ToolError> {
+    pub(crate) fn snapshot(&self, i: usize) -> Result<Map<String, Value>, ToolError> {
         match self {
             Staged::Lesson(s) => {
                 let r = &s.records[i];
@@ -1456,7 +1502,7 @@ impl Staged {
 
     /// `sync_lesson_slots` / `sync_world_slots` inside the caller's
     /// transaction.
-    async fn sync_in(&self, c: &Client) -> anyhow::Result<()> {
+    pub(crate) async fn sync_in(&self, c: &Client) -> anyhow::Result<()> {
         match self {
             Staged::Lesson(s) => crate::stores::lessons::sync_slot_rows_in(c, s)
                 .await
@@ -1468,7 +1514,7 @@ impl Staged {
     }
 
     /// `staged.dirty_slots.clear()`, then `_publish_store`.
-    fn publish(self, ready: &Ready) {
+    pub(crate) fn publish(self, ready: &Ready) {
         match self {
             Staged::Lesson(mut s) => {
                 s.dirty_slots.clear();
@@ -1505,7 +1551,7 @@ fn restore_decision_snapshot(
 
 /// The two slots' rows of any status, locked (`_targeted_all_rows`), each
 /// as its evidence snapshot.
-async fn targeted_snapshots(
+pub(crate) async fn targeted_snapshots(
     c: &Client,
     store: Store,
     a: &SlotKey,
@@ -1755,7 +1801,7 @@ fn py_eq_int(v: &Value, n: i64) -> bool {
 
 /// `store_decisions(store, entity_norm, attribute_norm, limit=1)`: the
 /// slot's newest decision.
-async fn latest_decision(
+pub(crate) async fn latest_decision(
     client: &Client,
     store: Store,
     slot: &SlotKey,

@@ -558,8 +558,8 @@ All rows share `pseudolife_memory/mcp_server.py` and the `test_mcp_server.py`/`t
 | memory_graph | core | 3 | ported |
 | memory_recall | core | 3 | ported |
 | memory_relation_define | full | 4 | ported |
-| document_ingest | core | 4 | deferred |
-| document_search | core | 3 | deferred |
+| document_ingest | core | 4 | ported |
+| document_search | core | 3 | ported |
 | memory_toolset | minimal | 1/3 | ported |
 
 
@@ -590,7 +590,7 @@ The Rust column, after Status, says what the Rust daemon answers on master after
 | POST | /api/episodes/rename | 4 | deferred | served | `routes/episodes.rs`; the `episode-curation` scenario, as above, including the missing-`id` 405, the empty-title answer and Python's exception texts for non-string fields; `memory_episode_summary` reads back the restamped resident entries |
 | POST | /api/episodes/merge | 4 | deferred | served | `routes/episodes.rs`; the `episode-curation` scenario, as above: a new rollup, a merge into an existing episode, the outcome-signal and entry retarget, open and unknown sources, and the refusals; a probe compares the exact spans of seeded episodes (the bank comparison normalizes episode clocks) and `memory_episode_summary` reads back the resident entries. Declared: a non-string `hint` on a new rollup (`daemon/divergences.md`) |
 | GET | /api/recent | 3 | deferred | 501 | 501 (`w2d-console-projections`, W2-D) |
-| GET | /api/search | 3 | ported | served | `read/search_route.rs`; `daemon/harness/w2d_search.py live`: recorded Linux run, 11 scenarios, 118 cases, zero response and bank-state differences ([W2-D evidence](daemon/FORWARD-w2d.md)); hosted CI runs only the offline controls. Declared: no reference pool (cutover blocker), `explain` refused (MCP-SEARCH-EXPLAIN), resident-only access counts |
+| GET | /api/search | 3 | ported | served | `read/search_route.rs`; `daemon/harness/w2d_search.py live`: recorded Linux run, 11 scenarios, 118 cases, zero response and bank-state differences ([W2-D evidence](daemon/FORWARD-w2d.md)); hosted CI runs only the offline controls. The reference pool since B7's second Rust PR: `daemon/harness/w2e.py live` `documents-search-*` scenarios (recorded Linux run cited in that PR). Declared: `explain` refused (MCP-SEARCH-EXPLAIN), resident-only access counts |
 | GET | /api/trace | 3 | deferred | 501 | 501 (`w2d-console-projections`, W2-D) |
 | GET | /api/recall | 3 | deferred | 501 | 501 (`w2d-recall-graph`, W3-H) |
 | GET | /api/chain | 3 | deferred | 501 | 501 (`w2d-console-projections`, W2-D) |
@@ -2042,8 +2042,8 @@ selection and update-offer formatter use live Python policy goldens.
 Writer durability and canonical-store slot synchronization require W2-E;
 session write/resume routes and generic close-time titles are not integrated;
 automatic dreams and the graph sweep ticks are served (`rust/daemon/spec.md`
-SW1-SW6), with the merge, link and junk judges (LJ1-LJ6, JJ1-JJ5) but not
-the curation and candidate review-queue judges (task P3b), and the reaper's
+SW1-SW6), with the merge, link, junk, curation and candidate judges
+(LJ1-LJ6, JJ1-JJ5, CU1-CU6, CJ1-CJ5), and the reaper's
 session trigger fires the automatic dream. File-mode tensors and embedded bank lifecycle
 remain separately deferred. Source preparation and unit tests do not establish
 those missing process-boundary contracts.

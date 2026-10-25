@@ -8,7 +8,7 @@ import subprocess
 import sys
 import time
 
-from mcp_compare import UNSERVED
+from mcp_compare import CORPUS_RESPONSES, UNSERVED
 from mcp_run import mutant_caught
 from mcp_validation_sweep import EXPECTED_COERCION_CASES
 
@@ -35,7 +35,8 @@ def _expected_pair(name):
 def check_baseline(report):
     """Accept exactly the declared differences; the strict report stays red."""
     summary = report["summary"]
-    assert (summary["responses"], summary["cases"], summary["diffs"]) == (316, 18, len(REFUSAL_CLOSE))
+    assert (summary["responses"], summary["cases"], summary["diffs"]) == (
+        CORPUS_RESPONSES, 18, len(REFUSAL_CLOSE))
     assert set(summary["unserved_checked"]) == set(UNSERVED)
     seen = set()
     for diff in report["diffs"]:

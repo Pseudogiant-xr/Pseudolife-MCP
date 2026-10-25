@@ -219,6 +219,7 @@ import daemons  # noqa: E402
 import dbstate  # noqa: E402
 import pgdisposable as pg  # noqa: E402
 import run as w1a  # noqa: E402
+import w2e_documents  # noqa: E402
 from stub_extractor import StubExtractor  # noqa: E402
 import w2e_recall_llm  # noqa: E402
 
@@ -259,7 +260,8 @@ CLOCK = {("entries", "ts"), ("entries", "superseded_at"), ("episodes", "started_
          # the merge and link judges' verdict clocks
          ("entity_proposals", "judged_at"), ("entity_proposals", "judged2_at"),
          ("entity_proposals", "judged3_at"),
-         ("edge_proposals", "judged_at"), ("edge_proposals", "judged2_at")}
+         ("edge_proposals", "judged_at"), ("edge_proposals", "judged2_at"),
+         ("curation_judgments", "judged_at")}
 # dream_runs cursor columns: an entry's ts becomes its <ts:ID> token.
 DREAM_RUN_CURSORS = ("cursor_before", "cursor_after")
 # memory_dream answer keys holding wall-clock seconds (the stall record and
@@ -285,14 +287,16 @@ RECENT_CLOCK = {("world_facts", "retrieved_at")}
 # null-or-not; in any other, it compares exactly.
 ORDERED_CLOCK = {("lessons", "asserted_at"), ("lessons", "last_confirmed"),
                  ("lessons", "tx_time"), ("lessons", "valid_time"),
-                 ("outcome_signals", "created_at")}
+                 ("outcome_signals", "created_at"),
+                 ("reference_chunks", "ingested_at"), ("reference_chunks", "created_at")}
 # The same in wall-clock milliseconds (the HLC's physical part).
 RECENT_CLOCK_MS = {("lessons", "hlc_phys")}
 RECENT_S = 86400.0
 # Record keys in tool answers holding wall-clock seconds.
 RESPONSE_CLOCK = {"asserted_at", "last_confirmed", "superseded_at", "tx_time", "valid_time",
                   "started_at", "ended_at"}
-RESPONSE_RECENT_CLOCK = {"retrieved_at", "decided_at"}
+# ``last_event_at``: memory_stats' retrieval-log health names its newest event's clock.
+RESPONSE_RECENT_CLOCK = {"retrieved_at", "decided_at", "last_event_at"}
 # memory_graph_review's ``automatic_decisions`` listing: each decision's
 # ``recorded_at`` is the merge judge's clock (its ``ended_at`` is already a
 # RESPONSE_CLOCK key).
@@ -313,13 +317,17 @@ META_CLOCK = {"capacity_true_drops": {"last_at"}, "active_session_pointer": {"ts
               "deep_last_apply": {"ts"},
               # the sweep's analyzer-pair reconcile cursor (a link judge
               # deciding an analyzer row moves it)
-              "analyzer_pair_reconcile_cursor": {"at"}}
+              "analyzer_pair_reconcile_cursor": {"at"},
+}
 # An automatic review decision record (``automatic_review_decision_v1:<n>``,
 # written by the merge judge): its clocks, and the verdict clocks of the
 # proposal snapshot it carries.
 DECISION_RECORD_PREFIX = "automatic_review_decision_v1:"
 DECISION_RECORD_CLOCK = {"recorded_at", "ended_at", "decided_at", "dismissed_at"}
 DECISION_PROPOSAL_CLOCK = {"judged_at", "judged2_at", "judged3_at"}
+# A candidate dismissal's fingerprints signed over bank rows (its policy
+# fingerprint signs no bank row and compares as it is).
+CANDIDATE_RECORD_HASHES = ("fingerprint", "evidence_fingerprint", "generation_fingerprint")
 EP_ID = re.compile(r"^[0-9a-f]{32}$")
 GENERIC = re.compile(r"^session - \d{4}-\d{2}-\d{2} \d{2}:\d{2}$")
 # store-cancellable is w2e_shutdown.py's control: over MCP every call runs
@@ -4668,6 +4676,7 @@ def resolve_args(args: dict, dsn: str) -> dict:
     out = {}
     import psycopg
     for k, v in args.items():
+        v = w2e_documents.resolve(v)
         if isinstance(v, list) and any(isinstance(x, str) and x.startswith(("@id:", "@idn:"))
                                        for x in v):
             # a list of row ids: each element resolved as a value of its own
@@ -4853,10 +4862,23 @@ def compare_fact_numeric(py: dict, rs: dict, tol: dict, stats: dict,
     return diffs
 
 
+def _bank_hash(value):
+    """A candidate-judge fingerprint signed over bank rows that carry each
+    side's own clocks (an apply's edge times, a filed proposal's
+    created_at): only its presence compares. The byte-exact rule is checked
+    by ``src/dream/candidates_tests.rs`` over a snapshot both sides share."""
+    return "<bank-hash>" if isinstance(value, str) and value else value
+
+
 def decision_record_clocks(value: dict) -> dict:
     """A decision record with its clocks (and its proposal snapshot's
-    verdict clocks) reduced to null-or-not."""
+    verdict clocks) reduced to null-or-not; a candidate dismissal's
+    bank-signed fingerprints to presence."""
     out = {k: (_clock(x) if k in DECISION_RECORD_CLOCK else x) for k, x in value.items()}
+    if out.get("queue") == "candidate":
+        for k in CANDIDATE_RECORD_HASHES:
+            if k in out:
+                out[k] = _bank_hash(out[k])
     if isinstance(out.get("proposal"), dict):
         out["proposal"] = {k: (_clock(x) if k in DECISION_PROPOSAL_CLOCK else x)
                            for k, x in out["proposal"].items()}
@@ -5154,6 +5176,7 @@ def normalize_state(state: dict, before: dict,
     numeric["facts"] = extract_fact_numeric(state)
     numeric["world_facts"] = extract_fact_numeric(state, "world_facts")
     numeric["lessons"] = extract_fact_numeric(state, "lessons")
+    numeric["reference_chunks"] = extract_fact_numeric(state, "reference_chunks")
     numeric["lesson_scores"] = extract_lesson_scores(state)
     emap = episode_map(state)
     ranks = clock_ranks(state)
@@ -5179,6 +5202,19 @@ def normalize_state(state: dict, before: dict,
                     row[1] = {k: (_clock(x) if k in META_CLOCK[key] else x) for k, x in value.items()}
                 elif key.startswith(DECISION_RECORD_PREFIX) and isinstance(value, dict):
                     row[1] = decision_record_clocks(value)
+                elif key == "deep_candidate_verdicts" and isinstance(value, dict):
+                    # each judged pair's memo carries its judging time and a
+                    # fingerprint signed over the bank
+                    pairs = value.get("pairs")
+                    if isinstance(pairs, dict):
+                        row[1] = {**value, "pairs": {
+                            k: {**x, "ts": _clock(x.get("ts")),
+                                "fingerprint": _bank_hash(x.get("fingerprint"))}
+                            if isinstance(x, dict) else x
+                            for k, x in pairs.items()}}
+                elif key == "deep_candidates_judged" and isinstance(value, dict):
+                    row[1] = {**value, "ts": _clock(value.get("ts")),
+                              "generation": _bank_hash(value.get("generation"))}
                 elif key == "episode_tombstones" and isinstance(value, dict):
                     row[1] = {k: {**x, "ended_at": _clock(x.get("ended_at"))} if isinstance(x, dict) else x
                               for k, x in value.items()}
@@ -5200,11 +5236,18 @@ def normalize_state(state: dict, before: dict,
                         if isinstance(v, (int, float)) and not isinstance(v, bool) \
                                 and float(v) in ts_map:
                             row[ci] = ts_map[float(v)]
+        if name == "reference_chunks":
+            w2e_documents.metadata_clocks(t, ranks, _ordered_clock)
         if name == "store_decisions" and "record" in t["columns"]:
             ri = t["columns"].index("record")
             for row in t["rows"]:
                 if isinstance(row[ri], dict) and "superseded_at" in row[ri]:
                     row[ri] = {**row[ri], "superseded_at": _clock(row[ri]["superseded_at"])}
+                # a curated retirement signs the retired record, its
+                # superseded_at included
+                if isinstance(row[ri], dict) and "_curation_retired_fingerprint" in row[ri]:
+                    row[ri] = {**row[ri], "_curation_retired_fingerprint": _bank_hash(
+                        row[ri]["_curation_retired_fingerprint"])}
                 # a synthesis lineage audit names its lesson by asserted_at
                 if isinstance(row[ri], dict) and "asserted_at" in row[ri]:
                     row[ri] = {**row[ri], "asserted_at": _ordered_clock(
@@ -5242,7 +5285,9 @@ def compare_numeric(py: dict, rs: dict, tol: dict, stats: dict) -> list[str]:
                                   "lessons")
     diffs += compare_lesson_scores(py.get("lesson_scores", {}), rs.get("lesson_scores", {}),
                                    stats)
-    skip = ("facts", "world_facts", "lessons", "lesson_scores")
+    diffs += compare_fact_numeric(py.get("reference_chunks", {}), rs.get("reference_chunks", {}),
+                                  tol, stats, "reference_chunks")
+    skip = ("facts", "world_facts", "lessons", "lesson_scores", "reference_chunks")
     py = {k: v for k, v in py.items() if k not in skip}
     rs = {k: v for k, v in rs.items() if k not in skip}
     for eid in sorted(set(py) | set(rs)):
@@ -5568,7 +5613,7 @@ MUTANTS += w2e_sweep.MUTANTS
 
 
 JUDGE_TABLES = ("entity_proposals", "merge_decisions", "dismissed_pairs", "edge_proposals",
-                "entities", "edges", "meta")
+                "entities", "edges", "meta", "curation_judgments")
 
 
 def judge_digest(dsn: str) -> str:
@@ -5821,6 +5866,8 @@ def expect_diffs(op: dict, dsns: dict) -> list[str]:
                 row = conn.execute(query).fetchone()
             if not (row and row[0]):
                 out.append(f"expect {side}: {query}")
+    if op.get("candidate_fingerprints"):
+        out += w2e_queue_judges.fingerprint_diffs(dsns, op["candidate_fingerprints"])
     return out
 
 
@@ -5970,6 +6017,8 @@ def _run_scenario(name: str, binary: Path, root: Path, mode: str, record: bool,
 def _run_live(name: str, scn: dict, tag: str, binary: Path, root: Path, record: bool,
               tol: dict, mutant: str | None, owned: list[str],
               stubs: dict[str, StubExtractor]) -> dict:
+    if name in w2e_documents.SCENARIOS:
+        w2e_documents.require_oracle_without_bs4()
     template = prepare_template(scn, tag, root, owned, stubs.get("seed"))
     dbs = {side: pg.name(f"pl_cf_w2e_{tag}_{suffix}")
            for side, suffix in (("python", "py"), ("rust", "rs"))}
@@ -6032,6 +6081,7 @@ def _run_live(name: str, scn: dict, tag: str, binary: Path, root: Path, record: 
                 if stubs:
                     py = replace_origin(py, stubs["python"].origin)
                     rs = replace_origin(rs, stubs["rust"].origin)
+                py, rs = w2e_documents.scrub(py), w2e_documents.scrub(rs)
                 row["python"], row["rust"] = py, rs
             if stubs:
                 sent = {side: drain_side(stubs, scn, side) for side in ("python", "rust")}
@@ -6058,6 +6108,9 @@ def _run_live(name: str, scn: dict, tag: str, binary: Path, root: Path, record: 
                     row["diffs"] += orphan_age_diffs(row["python"], row["rust"])
                     row["python"] = dream_tokens(row["python"], tsm_py)
                     row["rust"] = dream_tokens(row["rust"], tsm_rs)
+                if w2e_documents.is_search(op):
+                    row["python"] = w2e_documents.answer_tokens(row["python"], clock_ranks(raw_py))
+                    row["rust"] = w2e_documents.answer_tokens(row["rust"], clock_ranks(raw_rs))
                 row["python"] = rename_prefixes(row["python"], ep)
                 row["rust"] = rename_prefixes(row["rust"], er)
                 row["diffs"] += compare_response(row["python"], row["rust"], tol, stats)
@@ -6087,11 +6140,15 @@ def _run_live(name: str, scn: dict, tag: str, binary: Path, root: Path, record: 
     return result
 
 
+SCENARIOS.update(w2e_documents.SCENARIOS)
+MUTANTS += w2e_documents.MUTANTS
+
+
 # Tables the write path touches: recorded every step (the rest only at init).
 WRITE_TABLES = ("entries", "episodes", "meta", "client_sessions", "facts", "entities",
                 "outcome_signals", "world_facts", "memory_trace_invalidations",
                 "entry_reinstatement_decisions", "lessons", "edges", "store_decisions",
-                "slot_reads", "entity_aliases", "relations")
+                "slot_reads", "entity_aliases", "relations", "reference_chunks")
 
 
 def pack(state: dict, full: bool) -> dict:
@@ -6108,7 +6165,8 @@ def pack_numeric(numeric: dict, seen: set) -> dict:
     import struct
     out = {}
     for eid, v in numeric.items():
-        if eid in ("facts", "world_facts", "lessons", "lesson_scores") or eid in seen:
+        if eid in ("facts", "world_facts", "lessons", "lesson_scores",
+                   "reference_chunks") or eid in seen:
             continue  # fact embeddings are compared live only (declared)
         seen.add(eid)
         emb = v["embedding"]
@@ -6135,6 +6193,8 @@ def run_golden(name: str, binary: Path, root: Path, tol: dict, owned: list[str])
     if scn["seed"]:
         return {"scenario": name, "skipped": "seeded through the Python daemon", "steps": [],
                 "stats": {}}
+    if scn.get("live_only"):
+        return {"scenario": name, "skipped": scn["live_only"], "steps": [], "stats": {}}
     golden = json.loads((GOLDENS / f"{name}.json").read_text(encoding="utf-8"))
     tag = name.replace("-", "_")
     db = pg.name(f"pl_cf_w2e_{tag}_rs")
@@ -6160,6 +6220,7 @@ def run_golden(name: str, binary: Path, root: Path, tol: dict, owned: list[str])
             op = rec["op"]
             row = {"step": i, "op": op, "diffs": []}
             rs = run_op(op, d.port, client, dsn) if op["op"] != "init" else None
+            rs = w2e_documents.scrub(rs)
             if stubs:
                 if rs is not None:
                     rs = replace_origin(rs, stubs["rust"].origin)
@@ -6168,7 +6229,10 @@ def run_golden(name: str, binary: Path, root: Path, tol: dict, owned: list[str])
                 sent = stubs["rust"].drain()
                 row["extractor"] = {"rust": extractor_summary(sent)}
                 row["diffs"] += extractor_unanswered("rust", sent)
-            sr, nr, er = normalize_state(dbstate.dump(dsn), before)
+            raw = dbstate.dump(dsn)
+            sr, nr, er = normalize_state(raw, before)
+            if rs is not None and w2e_documents.is_search(op):
+                rs = w2e_documents.answer_tokens(rs, clock_ranks(raw))
             if rs is not None:
                 row["rust"] = rename_prefixes(rs, er)
                 row["diffs"] += compare_response(rec["python"], row["rust"], tol, stats)
