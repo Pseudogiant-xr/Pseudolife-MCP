@@ -909,9 +909,6 @@ fn mcp_memory_dream<'a>(app: &'a crate::http::App, call: ToolCall<'a>) -> ToolFu
         };
         let writer = call.ident.writer.clone();
         return Box::pin(async move {
-            if let Some(refused) = super::run::refusal(&service.config) {
-                return Err(refused);
-            }
             let ready = service.ensure_init().await.map_err(internal)?;
             let r2 = ready.clone();
             let svc = service.clone();
