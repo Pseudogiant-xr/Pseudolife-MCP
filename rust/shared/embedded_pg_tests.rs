@@ -583,6 +583,12 @@ fn a_fresh_bank_starts_owned_then_a_second_caller_attaches() {
     assert_eq!(psql_in(&runtime, &first, "SHOW timezone"), "UTC");
     // fsync stays on (decision 7), unlike pg0's -F.
     assert_eq!(psql_in(&runtime, &first, "SHOW fsync"), "on");
+    // No Unix socket: every client connects over TCP, and another account's
+    // server holding `/tmp/.s.PGSQL.<port>.lock` must not fail this start.
+    assert_eq!(
+        psql_in(&runtime, &first, "SHOW unix_socket_directories"),
+        ""
+    );
     let second = attach_or_start(&dir, &runtime, &PlainSecrets).unwrap();
     assert!(!second.owned());
     assert_eq!(second.port, first.port);

@@ -48,8 +48,14 @@ const PG_CTL_TIMEOUT_SECS: &str = "600";
 /// The server settings pg0 0.15 passes on every start (`src/main.rs`,
 /// `start`), so a bank behaves the same whichever side started it. pg0
 /// also passes `-F` (fsync off); this module does not (maintainer
-/// decision 7, 2026-10-25: fsync on).
+/// decision 7, 2026-10-25: fsync on). It also starts the server with no
+/// Unix socket, where pg0 keeps the default `/tmp`: every client of the
+/// bank connects over TCP to 127.0.0.1, and a socket lock another account's
+/// server holds for the same port number (`/tmp/.s.PGSQL.5432.lock`, whose
+/// TCP port the free-port check cannot see from here) would otherwise fail
+/// every start (seen on a Linux dev box, 2026-10-26).
 const SERVER_SETTINGS: &[(&str, &str)] = &[
+    ("unix_socket_directories", ""),
     ("shared_buffers", "256MB"),
     ("maintenance_work_mem", "512MB"),
     ("effective_cache_size", "1GB"),
