@@ -162,7 +162,8 @@ binding"). What it cannot or does not reproduce:
 | Session reaper integration | closes idle sessions, derives generic titles and preserves resumable roots | reaping, cascade close, deferred-empty sweep, tombstone hydration and store/resume integration implemented; generic auto-title pending | W2-E (episodes) / W3-I |
 | Autosave and exit persistence | changed-state save through resident writer stores | owned scheduling and exit callback implemented; admitted stores drain before exit, but counters and tensor weights are not saved | W2-E (durability) |
 | Canonical-store compaction | removes selected resident records, marks slots dirty and rewrites their rows | selection policy implemented and checked against Python goldens; resident-store mutation and slot sync await the writer | W2-E / W3-I |
-| Automatic dream and graph sweep stages | backlog/quiescence gate, extraction, analyzer and graph review ticks | session-end trigger interface is a declared no-op; sweep currently runs maintenance only | W3-H |
+| Automatic dream and graph sweep stages | backlog/quiescence gate, extraction, analyzer and graph review ticks | served (spec SW1-SW6) except the link, junk, curation and candidate judges | task P3b (the judges) |
+| The SessionEnd hook's close firing the session-end dream | the hook closes the session and fires the dream | the entry point is served (`Service::fire_session_dream`, as the reaper's idle close uses it); the hook's close answers 501 until the hook batch serves it | the hook batch (B3) |
 | `application_name` fallback | derived from argv | `pseudolife-mcp pid=<pid> pseudolife-daemon serve` | free (not persisted) |
 
 ## Request parsing edges (canonical shapes rule)
@@ -394,7 +395,7 @@ of its own.
 | A merge-group tie between keys of different types (merge rows with a NULL target) | `TypeError: '<' not supported between instances of …` | `invalid_argument` with Rust's own wording | merge rows always carry a target |
 | A corrupt automatic-decision index (`next_seq` not an integer, `cursors`/`active` not mappings) | `int()` / `dict()` raise | read leniently in `list` | corrupt persisted data only; the judges write the index |
 | A NaN in a REAL proposal or decision column | serialized as `NaN` | `null` | NaN is not a stored score |
-| The link, junk, curation and candidate judges, their freshness, and the sweep steps around the merge judge (the analyzer and deep ticks, the stall tick, the automatic dream) | served by the background sweep | not run (the merge judge is served: see "The merge judge and its tiebreak" below) | tasks P3b (the judges) and P4 (the ticks) |
+| The link, junk, curation and candidate judges and their freshness | served by the background sweep | not run (the merge judge and the other sweep steps are served: see "The merge judge and its tiebreak" and spec SW1-SW6) | task P3b |
 | Wrong-type `memory.deep_dream.judges_enabled` / `analyzer_file_duplicates` | taken by truthiness | refused at config load | the existing config-type substitution |
 
 ### memory_dream: status, pull, commit, runs and the consolidation pass (2026-10-20)
@@ -404,7 +405,8 @@ of its own.
 | `rollback` | served | refused | the rollback increment (`deep` is served since 2026-10-20) |
 | When dream tracking initializes (rows with no dream state classified) | at hydration | at the first `memory_dream` call | a Rust boot must not change the bank (the W1 boot comparison); every answer is the same once the call runs |
 | A pending entry whose row is missing at a write failure | re-flushed (`cms.reflush_entries`) | detected, not re-inserted | the store slice's persistence follow-up; the answer (a write hold) is the same |
-| The stall record's board notice and the overdue rule | posted by the sweep | logged; the overdue rule is never armed | the sweep (task P4) |
+| The stall notice's board identity on a daemon whose board pruned it | registered again on the next notice | the same, through the board's daemon notice (W2-F) | |
+| One notifier at a time | a non-blocking `threading.Lock` | a non-blocking async mutex | a second notifier skips in both |
 | The date mask, `isdigit` and NFC/NFKC in the gates | Python's `re` and `unicodedata` (Unicode 14) | the regex crate's Unicode `\b`/`\d`/`\s` and case folding, an approximated `isdigit`, the normalization crate's tables | rare characters only; `\w` and category M use CPython's exact tables |
 | Cosine ranking of slots, facts, slot matches and alias candidates | torch float32 matmul | f32 dot products | a near-tie can reorder the vocabulary hint and so the request bytes; the embeddings themselves differ within the measured tolerance |
 | A reply character in U+10F800–U+10FFFF | written | taken as a lone-surrogate stand-in: the write fails | the reply parser keeps lone surrogates as private code points so a write fails where Python's encoding fails |
@@ -482,7 +484,9 @@ goldens.
 
 | Item | Python | Rust | Owner / why |
 |---|---|---|---|
-| The sweep steps around the merge judge: the analyzer filing tick (and its analyzer-pair reconciliation) and the deep tick before it; the link, junk, curation and candidate judges after it; `dream_status`, the stall tick and the automatic dream | run on every tick while dreaming is enabled | not run (the judge runs after the reapers) | tasks P3b (the review-queue judges) and P4 (the ticks and the automatic dream); the `judge-merge-*` scenarios switch each off on the Python side |
+| The link, junk, curation and candidate judges after the merge judge | run on every tick while dreaming is enabled | not run (the analyzer and deep ticks, `dream_status`, the stall tick and the automatic dream are: spec SW1-SW6) | task P3b; the `judge-merge-*` scenarios switch them off on the Python side |
+| Shutdown during a sweep tick | the sweep's daemon thread dies with the process | the tick stops after the merge judge when shutdown has begun, before `dream_status` and the automatic dream | no committed state differs from a Python process killed between the same two steps |
+| A sweep tick before the handles are installed (`Service::install`, right after the board is built at startup) | not applicable | the automatic dream is skipped with a log line | the sweep sleeps one interval before its first tick |
 | `/api/graph/rejudge` (`review_rejudge`, `review_judgments.requeue`) | served | not served: the daemon serves no `/api/graph/*` route | the web API slice; `requeue` also reads the curation and candidate queues (task P3b) |
 | `deep_dream_judge`'s `extractor`, `limit`, `second_extractor` and `third_extractor` arguments | test hooks | absent: the sweep passes none | no production caller passes them |
 | A judge memo, decision index or response identity meta value that is not an object, or a decision record missing a key | `.items()` / `.get()` / `int()` raise, and the tick answers `error` | read as empty, or the key as absent | corrupt persisted data only; the judge writes these values |

@@ -153,8 +153,10 @@ def scenarios(w) -> dict:
             "seed": [w.fact("Audit Exporter", "bucket", "audit-6")],
             "ops": [
                 {**w.store(STALL_NOTES[0], source="conversation"),
-                 "settle": {**SETTLE, "until": "SELECT EXISTS (SELECT 1 FROM dream_runs "
-                                               "WHERE status <> 'running')"}},
+                 # An outage writes no run row; the quarantined memory is
+                 # acknowledged (the cursor moves past it).
+                 "settle": {**SETTLE, "until": "SELECT EXISTS (SELECT 1 FROM entries "
+                                               "WHERE dream_state = 'acknowledged')"}},
                 w.dream("status"),
                 w.dream("runs"),
             ],

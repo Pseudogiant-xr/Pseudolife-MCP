@@ -346,6 +346,28 @@ def test_dream_run_scenarios_switch_off_unported_stages_and_answer_every_request
     assert all(f'"{m}"' in text for m in extractor_mutants)
 
 
+def test_sweep_scenarios_settle_without_timing_on_their_mutants(harness):
+    """Each sweep scenario's ``until`` must hold under its mutant too (a
+    settle that times out crashes the mutants run instead of counting a
+    diff), so what a mutant breaks is asserted by ``expect``."""
+    import w2e_sweep as sw
+    names = sorted(n for n in harness.SCENARIOS if n.startswith("sweep-"))
+    assert names == ["sweep-analyzer-tick", "sweep-deep-tick", "sweep-dream-auto",
+                     "sweep-stall"]
+    for n in names:
+        config = harness.SCENARIOS[n]["config"]
+        assert "  dream:\n    enabled: true\n" in config, n
+        for op in harness.SCENARIOS[n]["ops"]:
+            until = (op.get("settle") or {}).get("until") or ""
+            for broken in ("deep_last_apply", "analyzer_duplicate_cursor",
+                           "status = 'committed'"):
+                assert broken not in until, (n, until)
+    assert set(sw.MUTANTS) <= set(harness.MUTANTS)
+    src = Path(__file__).resolve().parents[1] / "src" / "dream"
+    text = "".join((src / f).read_text(encoding="utf-8") for f in ("ticks.rs", "deep.rs"))
+    assert all(f'"{m}"' in text for m in sw.MUTANTS)
+
+
 def test_graph_insight_scenarios_register_their_clocks_and_mutants(harness):
     import w2e_graph_insight as gi
     names = sorted(n for n in harness.SCENARIOS if n.startswith("dream-insight-"))

@@ -2041,8 +2041,9 @@ selection and update-offer formatter use live Python policy goldens.
 `BACKGROUND-SESSIONS`, `BACKGROUND`, and `BACKGROUND-SWEEP` remain deferred.
 Writer durability and canonical-store slot synchronization require W2-E;
 session write/resume routes and generic close-time titles are not integrated;
-automatic dreams and graph sweep ticks require W3-H. The session trigger is
-an explicit no-op interface. File-mode tensors and embedded bank lifecycle
+automatic dreams and the graph sweep ticks are served (`rust/daemon/spec.md`
+SW1-SW6), except the review-queue judges (task P3b), and the reaper's
+session trigger fires the automatic dream. File-mode tensors and embedded bank lifecycle
 remain separately deferred. Source preparation and unit tests do not establish
 those missing process-boundary contracts.
 
