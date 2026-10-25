@@ -324,7 +324,7 @@ def test_dream_run_scenarios_switch_off_unported_stages_and_answer_every_request
     for n in names:
         scn = harness.SCENARIOS[n]
         config = scn["config"]
-        # The Rust daemon refuses `run` while an unported stage is on.
+        # Lessons and the graph insight have their own scenarios.
         for switch in ("lessons:\n    enabled: false", "graph_insight:\n    enabled: false",
                        "stall_notice: false"):
             assert switch in config, (n, switch)
@@ -346,13 +346,48 @@ def test_dream_run_scenarios_switch_off_unported_stages_and_answer_every_request
     assert all(f'"{m}"' in text for m in extractor_mutants)
 
 
+def test_graph_insight_scenarios_partition_independently_of_order(harness):
+    """Each dream-insight scenario's graph, at every refresh, gets the same
+    communities and digest from ``memory/graph_insight.py`` with NetworkX's
+    seed-42 shuffle as without it (the Rust daemon's order), so the banks
+    compare exactly; graphs where the order matters are compared
+    structurally in ``src/graph_insight_tests.rs``."""
+    import gen_graph_insight_goldens as gen
+    import w2e_graph_insight as gi
+    names = sorted(n for n in harness.SCENARIOS if n.startswith("dream-insight-"))
+    assert names == ["dream-insight-empty", "dream-insight-planted"]
+    for n in names:
+        assert "graph_insight:" not in harness.SCENARIOS[n]["config"].split("restart")[0]
+    assert harness.CLOCK >= gi.CLOCK
+    assert harness.META_CLOCK["graph_digest"] == {"computed_at"}
+    for name, refreshes in gi.graphs().items():
+        # Entity ids in mint order: the seed's fact subjects, then each
+        # relate's endpoints as they first appear.
+        ids: dict[str, int] = {}
+        for subject in ("Ledger API", "Orphan Host"):
+            ids.setdefault(subject, len(ids) + 1)
+        for edges in refreshes:
+            for a, _, b, _ in edges:
+                ids.setdefault(a, len(ids) + 1)
+                ids.setdefault(b, len(ids) + 1)
+        for edges in refreshes:
+            case = {
+                "entities": [{"id": i, "display": d} for d, i in ids.items()],
+                "edges": [gen.edge(ids[a], ids[b], r, kw.get("confidence", 0.8),
+                                   kw.get("origin")) for a, r, b, kw in edges],
+            }
+            exact = gen.run(case, gen._partition_exact, gen._betweenness_exact)
+            real = gen.run(case, gen._partition_seeded(42), gen._betweenness_seeded(42))
+            assert exact == real, name
+
+
 def test_dream_stage_scenarios_key_their_replies_and_register_their_mutants(harness):
     names = sorted(n for n in harness.SCENARIOS if n.startswith("dream-stages-"))
     assert names == ["dream-stages-digests", "dream-stages-infer", "dream-stages-inferred",
                      "dream-stages-lessons", "dream-stages-rules"]
     for n in names:
         scn = harness.SCENARIOS[n]
-        # The graph-insight refresh is the one stage still refused.
+        # The graph insight has its own scenarios (dream-insight-*).
         assert "graph_insight:\n    enabled: false" in scn["config"], n
         for reply in scn["extractor"]["replies"]:
             assert "sha256" not in reply
