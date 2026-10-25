@@ -243,9 +243,12 @@ What it adds to the manual procedure:
   container needs `lxc.idmap: u 0 100000 231072` and the same for `g`, with
   root's range in the hypervisor's `/etc/subuid` and `/etc/subgid` widened
   to `root:100000:231072`, and one restart. The script checks the map
-  first and refuses with that fix. On a rerun that changes the range, it
-  removes the account's old rootless Docker storage, whose files belong to
-  IDs the account no longer maps.
+  first and refuses with that fix. A rerun that changes the range first
+  stops the runners and the account's user manager (ending its rootless
+  Docker and containers), removes the old Docker storage as the account
+  inside its own user namespace while the old range is still mapped, and
+  refuses to go on while any process of the account or of its old range
+  remains, so no process outlives the range the egress table names.
 - **No local network.** An nftables table, loaded by its own systemd unit,
   rejects `<runner-user>`'s IPv4 traffic to private, link-local, CGNAT
   (Tailscale), multicast and broadcast addresses, and all its IPv6 traffic
@@ -256,9 +259,12 @@ What it adds to the manual procedure:
   guests. The box's `/etc/nftables.conf`, whose stock configuration starts
   by flushing every table, includes the table's file (the script adds the
   `include` line, keeping the original beside it as
-  `nftables.conf.before-parity-runner`), so a reload of `nftables.service`
-  replaces the table in the same transaction as the flush and never leaves
-  the account unfiltered.
+  `nftables.conf.before-parity-runner`), so a reload or restart of
+  `nftables.service` replaces the table in the same transaction as the
+  flush and never leaves the account unfiltered. The include names the
+  file as a pattern (`pseudolife-runner-egress.n[f]t`), because `nft`
+  refuses a plain include of a missing file and would then load none of
+  the box's rules.
   - The rules match the account's subordinate IDs as well as its own: a
     job can map itself onto one in a user namespace that keeps the box's
     network namespace.
@@ -275,7 +281,7 @@ What it adds to the manual procedure:
     account's user manager, which starts its rootless Docker, requires it
     at boot; cron and `at` are denied to the account. Stopping
     `nftables.service`, whose stock configuration flushes every table,
-    stops all of them; a restart of it needs a rerun of the script.
+    stops all of them; a restart of it restarts them with the table loaded.
   - DNS goes to a public resolver. A box whose resolver is on the LAN or
     Tailscale would need that address allowed; the script refuses until
     then.

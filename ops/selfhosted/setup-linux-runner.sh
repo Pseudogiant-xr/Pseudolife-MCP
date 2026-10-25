@@ -118,21 +118,55 @@ if awk -F: -v s=$SUBID_START -v e=$((SUBID_START + SUBID_COUNT)) '$3>=s && $3<e 
   echo "an account's UID falls in the subordinate range $SUBID_START+$SUBID_COUNT" >&2; exit 1
 fi
 # useradd's default range may not be this one, so the account's range is
-# replaced rather than kept. A changed range leaves the rootless Docker
-# storage owned by IDs the account no longer maps; it is rebuilt below.
-old_subids=$(grep "^$runner_user:" /etc/subuid /etc/subgid 2>/dev/null | cut -d: -f2- | sort | paste -sd' ' -)
+# replaced rather than kept.
 for file in /etc/subuid /etc/subgid; do
   if awk -F: -v me="$runner_user" -v s=$SUBID_START -v e=$((SUBID_START + SUBID_COUNT)) \
        '$1 != me && $2 < e && $2 + $3 > s {found=1} END {exit !found}' "$file"; then
     echo "another account's range in $file overlaps $SUBID_START+$SUBID_COUNT" >&2; exit 1
   fi
 done
+# Changing an existing range first ends everything of the account's: a
+# process left on an old ID would be outside the egress table once it names
+# the new range, and the rootless Docker storage belongs to the old IDs.
+want="$runner_user:$SUBID_START:$SUBID_COUNT"
+old_lines=$({ grep -h "^$runner_user:" /etc/subuid /etc/subgid 2>/dev/null || true; } | paste -sd' ' -)
+if [ -n "$old_lines" ] && [ "$old_lines" != "$want $want" ]; then
+  echo "the account's subordinate IDs change ($old_lines); stopping its runners and processes first"
+  systemctl stop "pseudolife-$prefix-*.service"
+  docker_data="$runner_home/.local/share/docker"
+  if [ -e "$docker_data" ] || [ -L "$docker_data" ]; then
+    systemctl start "user@$runner_uid.service"
+    run_as systemctl --user stop docker.service
+    # Removed as the account, inside its own user namespace while the old
+    # range is still mapped, so root never deletes in a directory the
+    # account controls.
+    run_as rootlesskit rm -rf "$docker_data"
+  fi
+  systemctl stop "user@$runner_uid.service"
+  old_range=$(awk -F: -v me="$runner_user" '$1 == me {print $2, $3}' /etc/subuid /etc/subgid | sort -u)
+  for _ in $(seq 10); do
+    left=$(ps -eo uid=,gid= | awk -v me="$runner_uid" -v ranges="$old_range" '
+      BEGIN { n = split(ranges, r, "[ \n]+") }
+      { for (f = 1; f <= 2; f++) { id = $f + 0; if (f == 1 && id == me) { print; next }
+          for (i = 1; i + 1 <= n; i += 2) if (id >= r[i] && id < r[i] + r[i + 1]) { print; next } } }')
+    [ -z "$left" ] && break
+    sleep 1
+  done
+  if [ -n "$left" ]; then
+    echo "processes of $runner_user or of its old subordinate IDs are still running; stop them and rerun (the subordinate ID range is unchanged)" >&2
+    exit 1
+  fi
+  if [ -e "$docker_data" ] || [ -L "$docker_data" ]; then
+    echo "$docker_data could not be removed as $runner_user; remove it and rerun (the subordinate ID range is unchanged)" >&2
+    exit 1
+  fi
+fi
 for file in /etc/subuid /etc/subgid; do
   sed -i "/^$runner_user:/d" "$file"
-  echo "$runner_user:$SUBID_START:$SUBID_COUNT" >> "$file"
+  echo "$want" >> "$file"
 done
-new_subids=$(grep "^$runner_user:" /etc/subuid /etc/subgid | cut -d: -f2- | sort | paste -sd' ' -)
 loginctl enable-linger "$runner_user"
+systemctl start "user@$runner_uid.service"
 for _ in $(seq 30); do [ -S "/run/user/$runner_uid/bus" ] && break; sleep 1; done
 
 echo "== suite lock directory"
@@ -236,11 +270,14 @@ nft -c -f /etc/pseudolife-runner-egress.nft
 # The stock /etc/nftables.conf starts with "flush ruleset", so a reload of
 # nftables.service would drop the table until this unit reloaded it after.
 # Including the table there loads it in the same transaction as the flush,
-# so the account is never unfiltered.
+# so the account is never unfiltered. The name is written as a pattern
+# because nft refuses a plain include of a missing file, which would leave
+# the box's whole ruleset unloaded if the table's file were ever removed;
+# a pattern matching no file is allowed.
 nft_conf=/etc/nftables.conf
-include_line='include "/etc/pseudolife-runner-egress.nft"'
+include_line='include "/etc/pseudolife-runner-egress.n[f]t"'
 if [ -f "$nft_conf" ] && ! grep -qxF "$include_line" "$nft_conf"; then
-  cp -p "$nft_conf" "$nft_conf.before-parity-runner"
+  [ -e "$nft_conf.before-parity-runner" ] || cp -p "$nft_conf" "$nft_conf.before-parity-runner"
   printf '\n# The parity runner account'\''s egress table (ops/selfhosted/setup-linux-runner.sh).\n%s\n' \
     "$include_line" >> "$nft_conf"
   if ! nft -c -f "$nft_conf"; then
@@ -254,8 +291,9 @@ cat > /etc/systemd/system/pseudolife-runner-egress.service <<UNIT
 Description=Keep the parity runner account off the local network
 # Loaded before any network comes up. /etc/nftables.conf includes the table
 # (above), so a reload or restart of nftables.service reloads it with the
-# rest of the ruleset; a restart stops the runners (PartOf=), so rerun this
-# script after one.
+# rest of the ruleset. A restart propagates (PartOf=) to this unit, and from
+# it to the runners and the account's user manager, which start again with
+# the table loaded; a stop of nftables.service stops them all.
 DefaultDependencies=no
 Before=network-pre.target
 Wants=network-pre.target
@@ -297,14 +335,6 @@ run_as uv tool install --quiet --upgrade pseudolife-mcp >/dev/null
 run_as pseudolife-mcp lease check --help >/dev/null
 
 echo "== rootless Docker"
-docker_data="$runner_home/.local/share/docker"
-if [ -n "$old_subids" ] && [ "$old_subids" != "$new_subids" ] && [ -e "$docker_data" ]; then
-  echo "the account's subordinate IDs changed; rebuilding its rootless Docker storage (images and build cache)"
-  run_as systemctl --user stop docker.service || true
-  # Its files belong to IDs the account no longer maps, so only root can
-  # remove them; rm does not follow symbolic links inside the tree.
-  rm -rf --one-file-system "$docker_data"
-fi
 if ! run_as systemctl --user is-active --quiet docker; then
   run_as dockerd-rootless-setuptool.sh install
 fi
