@@ -91,7 +91,7 @@ run_as() { env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin LANG=C.UTF-8 runuser -u "$r
 
 echo "== packages"
 apt-get update -qq
-DEBIAN_FRONTEND=noninteractive apt-get install -y -qq uidmap slirp4netns dbus-user-session acl nftables curl >/dev/null
+DEBIAN_FRONTEND=noninteractive apt-get install -y -qq uidmap slirp4netns dbus-user-session acl nftables curl locales >/dev/null
 locales=$(locale -a)
 grep -qi '^en_US.utf8$' <<<"$locales" || { sed -i 's/^# *en_US.UTF-8/en_US.UTF-8/' /etc/locale.gen; locale-gen; }
 
@@ -116,13 +116,14 @@ for deny in /etc/cron.deny /etc/at.deny; do
 done
 # A locked password does not stop a key login under PAM, and a job can
 # write the account's authorized_keys, so sshd refuses the account outright.
-if [ -d /etc/ssh/sshd_config.d ]; then
+if command -v sshd >/dev/null && [ -d /etc/ssh/sshd_config.d ]; then
   sshd_conf=/etc/ssh/sshd_config.d/pseudolife-parity-runner.conf
+  # sshd -t and -T need the privilege separation directory, which exists
+  # only while the service runs.
+  install -d -m 0755 /run/sshd
   if [ "$(cat "$sshd_conf" 2>/dev/null)" != "DenyUsers $runner_user" ]; then
+    sshd -t || { echo "sshd's configuration does not check before this script changes it; fix it (sshd -t) and rerun" >&2; exit 1; }
     echo "DenyUsers $runner_user" > "$sshd_conf"
-    # sshd -t needs its privilege separation directory, which exists only
-    # while the service runs.
-    install -d -m 0755 /run/sshd
     if ! sshd -t; then
       rm -f "$sshd_conf"
       echo "sshd's configuration does not check with $sshd_conf added; it is removed again" >&2
@@ -133,8 +134,14 @@ if [ -d /etc/ssh/sshd_config.d ]; then
     # sessions are separate processes and survive the restart; a service the
     # socket has not started yet reads the file when it does.
     for unit in ssh.service sshd.service; do
-      systemctl try-restart "$unit" 2>/dev/null || true
+      if systemctl cat "$unit" >/dev/null 2>&1; then systemctl try-restart "$unit"; break; fi
     done
+  fi
+  effective=$(sshd -T -C "user=$runner_user,host=localhost,addr=192.0.2.1")
+  if ! grep -qiE "^denyusers( [^ ]+)* $runner_user( |\$)" <<<"$effective"; then
+    echo "sshd does not apply $sshd_conf (its sshd_config may not include sshd_config.d/*.conf);" \
+      "deny $runner_user in sshd_config and rerun" >&2
+    exit 1
   fi
 fi
 if awk -F: -v s=$SUBID_START -v e=$((SUBID_START + SUBID_COUNT)) '$3>=s && $3<e {found=1} END {exit !found}' /etc/passwd; then
@@ -162,12 +169,11 @@ if [ -n "$old_lines" ] && [ "$old_lines" != "$want $want" ]; then
   echo "the account's subordinate IDs change ($old_lines); stopping its runners and processes first"
   old_range=$(awk -F: -v me="$runner_user" -v uid="$runner_uid" '$1 == me || $1 == uid {print $2, $3}' /etc/subuid /etc/subgid | sort -u)
   docker_data="$runner_home/.local/share/docker"
-  # A range nothing ran under (useradd's default, on a first install) is
-  # not kept, so a later account given it is not filtered too.
-  if [ -e "$docker_data" ] || [ -L "$docker_data" ] || compgen -G "$RUNNERS/*/.runner" >/dev/null; then
-    printf '%s\n' "$old_range" >> "$retired"
-    sort -u -o "$retired" "$retired"
-  fi
+  # Kept even if nothing seems to have run under it, since every sign of use
+  # is a file a job can delete; a later account given the same range is
+  # then filtered too, which refuses traffic rather than allowing it.
+  printf '%s\n' "$old_range" >> "$retired"
+  sort -u -o "$retired" "$retired"
   systemctl stop "pseudolife-$prefix-*.service"
   if [ -e "$docker_data" ] || [ -L "$docker_data" ]; then
     systemctl start "user@$runner_uid.service"
@@ -348,7 +354,10 @@ named=$(head -n 1 "$locks/full-suite.lease")
 # The account reads the lock directory through a read-only bind mount, so it
 # needs no search right on the suite user's home, where it could otherwise
 # read any file whose path it guessed.
-setfacl -x "u:$runner_user" "$suite_home" "$suite_home/.pseudolife-mcp" 2>/dev/null || true
+setfacl -x "u:$runner_user" "$suite_home/.pseudolife-mcp" 2>/dev/null || true
+# An entry with no rights, so a home that others may search (0755) is still
+# closed to the account.
+setfacl -m "u:$runner_user:---" "$suite_home"
 setfacl -m "u:$runner_user:rx" "$locks"
 setfacl -d -m "u:$runner_user:r" "$locks"
 find "$locks" -maxdepth 1 -type f -exec setfacl -m "u:$runner_user:r" {} +

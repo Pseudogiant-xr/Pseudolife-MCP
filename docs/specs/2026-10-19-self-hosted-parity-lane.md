@@ -248,8 +248,8 @@ What it adds to the manual procedure:
   Docker and containers), removes the old Docker storage as the account
   inside its own user namespace while the old range is still mapped, and
   refuses to go on while any process of the account or of its old range
-  remains. Every range the account has run anything under since this
-  version stays in the egress table (recorded in
+  remains. Every range the account has had since this version stays in
+  the egress table (recorded in
   `/usr/local/lib/pseudolife-parity-runner/retired-subids`), because a file
   a job left owned by an old ID, such as a setuid program, would still run
   as that ID. The table naming the new range is loaded before the account's
@@ -285,9 +285,10 @@ What it adds to the manual procedure:
     transaction. The runner units are bound to the rule's unit
     (`BindsTo=`) and check the table is loaded before they start; the
     account's user manager, which starts its rootless Docker, requires it
-    at boot; cron and `at` are denied to the account, and sshd refuses
-    it (a locked password does not stop a key login under PAM, and a job
-    can write the account's `authorized_keys`). Stopping
+    at boot; cron and `at` are denied to the account, and an installed
+    sshd refuses it, which the script confirms with `sshd -T` (a locked
+    password does not stop a key login under PAM, and a job can write the
+    account's `authorized_keys`). Stopping
     `nftables.service`, whose stock configuration flushes every table,
     stops all of them; a restart of it restarts them with the table loaded.
   - DNS goes to a public resolver. A box whose resolver is on the LAN or
@@ -309,8 +310,9 @@ What it adds to the manual procedure:
   (`/usr/local/lib/pseudolife-parity-runner/locks`), which
   `PSEUDOLIFE_PARITY_LOCK_DIR` names. The account then needs no search
   right on the suite user's home, where it could read any file whose path
-  it guessed; the manual procedure's `setfacl ... :x` on that home is
-  removed. The runner units require the mount's unit. What this does not give: every job runs as the
+  it guessed. The manual procedure's `setfacl ... :x` on that home is
+  replaced by an entry with no rights (`u:<runner-user>:---`), so a home
+  that others may search (0755) is closed to the account too. The runner units require the mount's unit. What this does not give: every job runs as the
   one account, so a job can change what later jobs run (the account's
   tools, tool cache, `.env` files and rootless Docker). The lane runs only
   master's code and dispatches by someone with write access, and the
