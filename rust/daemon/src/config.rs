@@ -105,8 +105,11 @@ pub struct MemoryConfig {
     /// the daemon reads.
     pub deep_dream: DeepDreamConfig,
     /// `memory.reference` (`utils/config.py` `ReferenceConfig`): the
-    /// document store's chunking.
+    /// document store's chunking and the reference pool's fallback size.
     pub reference: ReferenceConfig,
+    /// `memory.ref_top_k` (3): reference chunks a memory search appends;
+    /// `None` is a YAML null (`ref_pool[:None]`: no cap).
+    pub ref_top_k: Option<i64>,
 }
 
 /// `ReferenceConfig` (`utils/config.py:131-139`): the keys the daemon reads
@@ -116,6 +119,9 @@ pub struct MemoryConfig {
 pub struct ReferenceConfig {
     pub chunk_size: i64,
     pub chunk_overlap: i64,
+    /// The pool read's LIMIT when `ref_top_k` is 0 or null (`top_k or
+    /// max_results`); `None` is a YAML null, which fails that read.
+    pub max_results: Option<i64>,
 }
 
 impl Default for ReferenceConfig {
@@ -123,6 +129,7 @@ impl Default for ReferenceConfig {
         ReferenceConfig {
             chunk_size: 512,
             chunk_overlap: 64,
+            max_results: Some(5),
         }
     }
 }
@@ -863,6 +870,7 @@ impl Default for MemoryConfig {
             recall: RecallConfig::default(),
             deep_dream: DeepDreamConfig::default(),
             reference: ReferenceConfig::default(),
+            ref_top_k: Some(3),
         }
     }
 }
@@ -1579,6 +1587,40 @@ fn want_int(
     }
 }
 
+/// An untyped knob Python uses as a slice end (`xs[:k]`): an integer, a
+/// boolean (an int subclass) or a null (`None`); anything else fails
+/// Python's first use and refuses here.
+fn want_py_limit(
+    entries: &[(Node, Node)],
+    key: &str,
+    path: &str,
+    default: Option<i64>,
+) -> Result<Option<i64>, ConfigError> {
+    match lookup(entries, key) {
+        None => Ok(default),
+        Some(Node::Null) => Ok(None),
+        Some(Node::Int(i)) => Ok(Some(*i)),
+        Some(Node::Bool(b)) => Ok(Some(i64::from(*b))),
+        Some(other) => Err(wrong_type(&format!("{path}.{key}"), "an integer", other)),
+    }
+}
+
+/// An untyped knob Python only passes through `int()` inside a lenient read
+/// (`memory.reference.max_results`, the pool's fallback LIMIT): what `int()`
+/// takes is the LIMIT (a float truncates, a numeric string parses), and
+/// anything else is `None`, a read that fails and serves nothing. It never
+/// refuses the start.
+fn py_lenient_limit(entries: &[(Node, Node)], key: &str, default: Option<i64>) -> Option<i64> {
+    match lookup(entries, key) {
+        None => default,
+        Some(Node::Int(i)) => Some(*i),
+        Some(Node::Bool(b)) => Some(i64::from(*b)),
+        Some(Node::Float(f)) if f.is_finite() && f.abs() < 9.2e18 => Some(f.trunc() as i64),
+        Some(Node::Str(s)) => crate::read::search_route::py_int(s),
+        Some(_) => None,
+    }
+}
+
 fn node_f64(node: &Node) -> Option<f64> {
     match node {
         Node::Int(i) => Some(*i as f64),
@@ -1813,8 +1855,13 @@ fn load_str(text: &str) -> Result<Config, ConfigError> {
             memory.reference = ReferenceConfig {
                 chunk_size: want_int(r, "chunk_size", p, d.chunk_size)?,
                 chunk_overlap: want_int(r, "chunk_overlap", p, d.chunk_overlap)?,
+                max_results: py_lenient_limit(r, "max_results", d.max_results),
             };
         }
+        // `mem_raw.get("ref_top_k", 3)`, untyped too: it slices the pool
+        // (`ref_pool[:ref_k]`), so a float or string fails Python's first
+        // search and refuses here; a null or a boolean slices as Python does.
+        memory.ref_top_k = want_py_limit(m, "ref_top_k", p, memory.ref_top_k)?;
         if let Some(s) = section(m, "search", "memory.")? {
             memory.search = read_search(s)?;
         }
@@ -3159,6 +3206,28 @@ mod tests {
         // A top-level dotted key is a leaf of that spelling, so the overlay
         // stays off and the library default stands.
         assert_eq!(half_life("memory.recency_base_half_life_s: 5\n"), 3600.0);
+    }
+
+    // `ref_top_k` slices the pool and `max_results` is its fallback LIMIT,
+    // both untyped in Python: a null and a boolean slice; the LIMIT is
+    // whatever `int()` takes, and anything else fails the lenient read.
+    #[test]
+    fn reference_pool_knobs_take_what_python_uses() {
+        let cfg = |text: &str| load_str(text).expect("loads").memory;
+        let m = cfg("memory:\n  ref_top_k: null\n  reference:\n    max_results: 5.9\n");
+        assert_eq!((m.ref_top_k, m.reference.max_results), (None, Some(5)));
+        let m = cfg("memory:\n  ref_top_k: true\n  reference:\n    max_results: null\n");
+        assert_eq!((m.ref_top_k, m.reference.max_results), (Some(1), None));
+        let m = cfg("memory:\n  ref_top_k: -2\n");
+        assert_eq!((m.ref_top_k, m.reference.max_results), (Some(-2), Some(5)));
+        assert!(refused("memory:\n  ref_top_k: 3.0\n"));
+        assert!(refused("memory:\n  ref_top_k: '3'\n"));
+        let m = cfg("memory:\n  reference:\n    max_results: ' 1_0 '\n");
+        assert_eq!(m.reference.max_results, Some(10));
+        let m = cfg("memory:\n  reference:\n    max_results: .nan\n");
+        assert_eq!(m.reference.max_results, None);
+        let m = cfg("memory:\n  reference:\n    max_results: five\n");
+        assert_eq!(m.reference.max_results, None);
     }
 
     #[test]

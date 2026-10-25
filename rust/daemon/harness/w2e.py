@@ -294,7 +294,8 @@ RECENT_S = 86400.0
 # Record keys in tool answers holding wall-clock seconds.
 RESPONSE_CLOCK = {"asserted_at", "last_confirmed", "superseded_at", "tx_time", "valid_time",
                   "started_at", "ended_at"}
-RESPONSE_RECENT_CLOCK = {"retrieved_at", "decided_at"}
+# ``last_event_at``: memory_stats' retrieval-log health names its newest event's clock.
+RESPONSE_RECENT_CLOCK = {"retrieved_at", "decided_at", "last_event_at"}
 # memory_graph_review's ``automatic_decisions`` listing: each decision's
 # ``recorded_at`` is the merge judge's clock (its ``ended_at`` is already a
 # RESPONSE_CLOCK key).
@@ -6069,7 +6070,7 @@ def _run_live(name: str, scn: dict, tag: str, binary: Path, root: Path, record: 
                     row["diffs"] += orphan_age_diffs(row["python"], row["rust"])
                     row["python"] = dream_tokens(row["python"], tsm_py)
                     row["rust"] = dream_tokens(row["rust"], tsm_rs)
-                if op.get("name") == "document_search":
+                if w2e_documents.is_search(op):
                     row["python"] = w2e_documents.answer_tokens(row["python"], clock_ranks(raw_py))
                     row["rust"] = w2e_documents.answer_tokens(row["rust"], clock_ranks(raw_rs))
                 row["python"] = rename_prefixes(row["python"], ep)
@@ -6192,7 +6193,7 @@ def run_golden(name: str, binary: Path, root: Path, tol: dict, owned: list[str])
                 row["diffs"] += extractor_unanswered("rust", sent)
             raw = dbstate.dump(dsn)
             sr, nr, er = normalize_state(raw, before)
-            if rs is not None and op.get("name") == "document_search":
+            if rs is not None and w2e_documents.is_search(op):
                 rs = w2e_documents.answer_tokens(rs, clock_ranks(raw))
             if rs is not None:
                 row["rust"] = rename_prefixes(rs, er)

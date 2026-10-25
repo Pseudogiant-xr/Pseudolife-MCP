@@ -80,12 +80,37 @@ pub struct Params {
     pub filters_json: Value,
 }
 
-/// One served hit: entry index, score, channel marker and the fusion inputs
+/// A reference chunk the pool may serve (`reference.retrieve`): the row and
+/// its similarity (`max(0, 1 - distance)`).
+pub struct RefHit {
+    pub nearest: crate::documents::Nearest,
+    pub score: f64,
+}
+
+/// What a served hit is: a resident entry (its index in the bank) or a
+/// reference chunk (its index in the `refs` passed to [`rank`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Item {
+    Entry(usize),
+    Reference(usize),
+}
+
+/// One served hit: what it is, score, channel marker and the fusion inputs
 /// logged with the retrieval event (S8a).
 pub struct Hit {
-    pub idx: usize,
+    pub item: Item,
     pub score: f64,
     pub via: Option<&'static str>,
+}
+
+impl Hit {
+    /// The bank index of an entry hit; `None` for a reference chunk.
+    pub fn entry(&self) -> Option<usize> {
+        match self.item {
+            Item::Entry(i) => Some(i),
+            Item::Reference(_) => None,
+        }
+    }
 }
 
 pub struct Ranked {
@@ -129,7 +154,17 @@ fn top_k(mut cand: Vec<(usize, f32)>, k: usize) -> Vec<(usize, f32)> {
     cand
 }
 
-pub fn rank(bank: &Bank, q: &[f32], p: &Params, ce: Option<&dyn CrossEncoder>) -> Ranked {
+/// `retrieve` over the resident bank plus `refs`, the reference pool's rows
+/// already read (`ref_k` is `memory.ref_top_k`; `None`, a YAML null, caps
+/// nothing).
+pub fn rank(
+    bank: &Bank,
+    q: &[f32],
+    p: &Params,
+    ce: Option<&dyn CrossEncoder>,
+    refs: &[RefHit],
+    ref_k: Option<i64>,
+) -> Ranked {
     let explicit_floor = p.min_score.is_some();
     let floor = p.min_score.unwrap_or(p.default_floor);
     let k = p.k;
@@ -426,8 +461,42 @@ pub fn rank(bank: &Bank, q: &[f32], p: &Params, ce: Option<&dyn CrossEncoder>) -
     if !rerank_before_cut {
         neural.truncate(k);
     }
-    // Pool 2 (reference documents) is a declared divergence: none here.
-    let mut combined = neural;
+
+    // ── Pool 2: reference documents (cms.py:1440-1464), kept apart so they
+    // never displace a memory: a text already seen is skipped, and so is a
+    // chunk under the floor; then `ref_pool[:ref_k]`. ──
+    let mut ref_pool: Vec<(usize, f64)> = Vec::new();
+    for (i, r) in refs.iter().enumerate() {
+        let text = r.nearest.text.as_str();
+        let dup = seen.contains(text) && !crate::mutants::active("search-reference-no-dedup");
+        // `score >= MIN_SCORE` keeps a chunk, so a NaN floor keeps none.
+        let kept = r.score.partial_cmp(&floor).is_some_and(|o| o.is_ge());
+        let low = !kept && !crate::mutants::active("search-reference-no-floor");
+        if dup || low {
+            continue;
+        }
+        ref_pool.push((i, r.score));
+        seen.insert(text);
+        comps.insert(
+            r.nearest.text.clone(),
+            obj(
+                json!({"channel": "reference", "dense": r.score, "surprise": 0.0,
+                       "band": "reference"}),
+            ),
+        );
+    }
+    ref_pool.truncate(py_slice_stop(ref_pool.len(), ref_k));
+    let text_of = |item: Item| -> &str {
+        match item {
+            Item::Entry(i) => bank.entries[i].text.as_str(),
+            Item::Reference(i) => refs[i].nearest.text.as_str(),
+        }
+    };
+    let mut combined: Vec<(Item, f64)> = neural
+        .into_iter()
+        .map(|(i, s)| (Item::Entry(i), s))
+        .chain(ref_pool.iter().map(|&(i, s)| (Item::Reference(i), s)))
+        .collect();
 
     // ── Pool 3: cross-encoder rerank (cms.py:1466-1600) ──
     let top_n = p.rerank.top_n;
@@ -443,10 +512,7 @@ pub fn rank(bank: &Bank, q: &[f32], p: &Params, ce: Option<&dyn CrossEncoder>) -
         && !combined.is_empty()
         && combined.len() as i64 <= top_n
     {
-        let texts: Vec<&str> = combined
-            .iter()
-            .map(|(i, _)| bank.entries[*i].text.as_str())
-            .collect();
+        let texts: Vec<&str> = combined.iter().map(|(i, _)| text_of(*i)).collect();
         let orig: Vec<f64> = combined.iter().map(|(_, s)| *s).collect();
         rerank_log.insert("top_n".into(), json!(top_n));
         rerank_log.insert("skip_margin".into(), json!(p.rerank.skip_margin));
@@ -491,7 +557,7 @@ pub fn rank(bank: &Bank, q: &[f32], p: &Params, ce: Option<&dyn CrossEncoder>) -
                 p.rerank.fusion_weight
             };
             let fused = crate::read::rerank::fuse(w, &orig, &scores);
-            let mut reranked: Vec<(usize, f64)> = combined
+            let mut reranked: Vec<(Item, f64)> = combined
                 .iter()
                 .zip(fused)
                 .map(|(&(i, _), f)| (i, f))
@@ -511,8 +577,16 @@ pub fn rank(bank: &Bank, q: &[f32], p: &Params, ce: Option<&dyn CrossEncoder>) -
         rerank_log.insert("skip_reason".into(), json!(reason));
     }
     if rerank_before_cut {
-        // No reference documents: the deferred cut keeps the first k memories.
-        combined.truncate(k);
+        // The deferred cut keeps every reference chunk (their slots are
+        // reserved, not raced for) and the first k memories, in order.
+        let mut n_mem = 0;
+        combined.retain(|(item, _)| match item {
+            Item::Reference(_) => true,
+            Item::Entry(_) => {
+                n_mem += 1;
+                n_mem <= k
+            }
+        });
     }
 
     let mut bm25_params = obj(json!({"enabled": p.bm25_enabled}));
@@ -544,34 +618,58 @@ pub fn rank(bank: &Bank, q: &[f32], p: &Params, ce: Option<&dyn CrossEncoder>) -
         "filters": p.filters_json,
     });
 
-    // Timeline presentation: the memory part in stream order (timestamp, seq).
+    // Timeline presentation: the memory part in stream order (timestamp, seq);
+    // reference documents keep their trailing place.
     if timeline_fired && !crate::mutants::active("search-timeline-unsorted") {
-        combined.sort_by(|a, b| {
-            bank.entries[a.0]
-                .ts
-                .total_cmp(&bank.entries[b.0].ts)
-                .then(bank.entries[a.0].id.cmp(&bank.entries[b.0].id))
+        let (mut mem, refs_part): (Vec<_>, Vec<_>) = combined
+            .into_iter()
+            .partition(|(item, _)| matches!(item, Item::Entry(_)));
+        let key = |item: &Item| match item {
+            Item::Entry(i) => (bank.entries[*i].ts, bank.entries[*i].id),
+            Item::Reference(_) => unreachable!("partitioned out"),
+        };
+        mem.sort_by(|a, b| {
+            let (x, y) = (key(&a.0), key(&b.0));
+            x.0.total_cmp(&y.0).then(x.1.cmp(&y.1))
         });
+        combined = mem.into_iter().chain(refs_part).collect();
     }
     if p.count_access && !crate::mutants::active("search-no-access-bump") {
-        for (i, _) in &combined {
-            bank.entries[*i]
-                .access_count
-                .fetch_add(1, Ordering::Relaxed);
+        for (item, _) in &combined {
+            if let Item::Entry(i) = item {
+                bank.entries[*i]
+                    .access_count
+                    .fetch_add(1, Ordering::Relaxed);
+            }
         }
     }
     let hits = combined
         .into_iter()
-        .map(|(idx, score)| Hit {
-            idx,
+        .map(|(item, score)| Hit {
+            item,
             score,
-            via: via_map.get(bank.entries[idx].text.as_str()).copied(),
+            via: match item {
+                Item::Entry(i) => via_map.get(bank.entries[i].text.as_str()).copied(),
+                Item::Reference(_) => None,
+            },
         })
         .collect();
     Ranked {
         hits,
         comps,
         params,
+    }
+}
+
+/// The end of Python's `xs[:stop]` for a list of `len` items.
+fn py_slice_stop(len: usize, stop: Option<i64>) -> usize {
+    let Some(stop) = stop else {
+        return len;
+    };
+    if stop < 0 {
+        len.saturating_sub(stop.unsigned_abs() as usize)
+    } else {
+        (stop as usize).min(len)
     }
 }
 
@@ -827,11 +925,37 @@ pub fn temporal_neighbors(
     n_each: usize,
     hide_superseded: bool,
 ) -> (Vec<usize>, Vec<usize>) {
+    let e = &bank.entries[idx];
+    let anchor = Anchor {
+        text: &e.text,
+        episode_id: e.episode_id.as_deref(),
+        source: &e.source,
+        key: (e.ts, e.id),
+    };
+    temporal_neighbors_at(bank, &anchor, n_each, hide_superseded)
+}
+
+/// The hit `temporal_neighbors` places its neighbours around. A reference
+/// chunk is an episode-less hit of its source, stamped with its latest
+/// ingest and a sequence newer than every resident entry's (its
+/// `MemoryEntry` is built per search, after them).
+pub struct Anchor<'a> {
+    pub text: &'a str,
+    pub episode_id: Option<&'a str>,
+    pub source: &'a str,
+    pub key: (f64, i64),
+}
+
+pub fn temporal_neighbors_at(
+    bank: &Bank,
+    anchor: &Anchor,
+    n_each: usize,
+    hide_superseded: bool,
+) -> (Vec<usize>, Vec<usize>) {
     if n_each == 0 {
         return (Vec::new(), Vec::new());
     }
-    let anchor = &bank.entries[idx];
-    let mut seen: HashSet<&str> = HashSet::from([anchor.text.as_str()]);
+    let mut seen: HashSet<&str> = HashSet::from([anchor.text]);
     let mut pool: Vec<usize> = Vec::new();
     for (i, e) in bank.entries.iter().enumerate() {
         if seen.contains(e.text.as_str()) {
@@ -840,9 +964,9 @@ pub fn temporal_neighbors(
         if !not_superseded_digest(e) || (hide_superseded && e.superseded_at.is_some()) {
             continue;
         }
-        match &anchor.episode_id {
+        match anchor.episode_id {
             Some(ep) if !ep.is_empty() => {
-                if e.episode_id.as_deref() != Some(ep.as_str()) {
+                if e.episode_id.as_deref() != Some(ep) {
                     continue;
                 }
             }
@@ -858,7 +982,7 @@ pub fn temporal_neighbors(
         seen.insert(&e.text);
     }
     let key = |i: usize| (bank.entries[i].ts, bank.entries[i].id);
-    let a = key(idx);
+    let a = anchor.key;
     let le = |x: (f64, i64)| x.0 < a.0 || (x.0 == a.0 && x.1 <= a.1);
     let mut before: Vec<usize> = pool.iter().copied().filter(|&i| le(key(i))).collect();
     let mut after: Vec<usize> = pool.iter().copied().filter(|&i| !le(key(i))).collect();
@@ -963,7 +1087,10 @@ mod tests {
     }
 
     fn ids(bank: &Bank, r: &Ranked) -> Vec<i64> {
-        r.hits.iter().map(|h| bank.entries[h.idx].id).collect()
+        r.hits
+            .iter()
+            .map(|h| bank.entries[h.entry().unwrap()].id)
+            .collect()
     }
 
     #[test]
@@ -980,7 +1107,7 @@ mod tests {
         let mut p = params("", usize::MAX / 3 + 1);
         p.pool_multiplier = 3;
         assert_eq!(
-            ids(&bank, &rank(&bank, &unit(1.0), &p, None)),
+            ids(&bank, &rank(&bank, &unit(1.0), &p, None, &[], Some(3))),
             vec![1, 2, 3]
         );
     }
@@ -1006,7 +1133,7 @@ mod tests {
             entries,
             matrix,
         };
-        let r = rank(&bank, &unit(1.0), &params("", 6), None);
+        let r = rank(&bank, &unit(1.0), &params("", 6), None, &[], Some(3));
         // 6 (superseded digest) never surfaces; 2 duplicates 1; 5 is under the floor;
         // 3 ranks 0.765, 4 ranks 0.5225.
         assert_eq!(ids(&bank, &r), vec![1, 3, 4]);
@@ -1015,10 +1142,13 @@ mod tests {
         assert_eq!(bank.entries[1].access_count.load(Ordering::Relaxed), 0);
         let mut p = params("", 6);
         p.sources = Some(["assistant".to_string()].into());
-        assert_eq!(rank(&bank, &unit(1.0), &p, None).hits.len(), 1);
+        assert_eq!(
+            rank(&bank, &unit(1.0), &p, None, &[], Some(3)).hits.len(),
+            1
+        );
         let mut p = params("", 6);
         p.count_access = false;
-        rank(&bank, &unit(1.0), &p, None);
+        rank(&bank, &unit(1.0), &p, None, &[], Some(3));
         // The warmup-style call serves entry 1 again without counting it.
         assert_eq!(bank.entries[0].access_count.load(Ordering::Relaxed), 1);
     }
@@ -1043,14 +1173,25 @@ mod tests {
                 .map(String::from)
                 .into()
         );
-        let r = rank(&bank, &unit(1.0), &params("deploy a new version", 8), None);
+        let r = rank(
+            &bank,
+            &unit(1.0),
+            &params("deploy a new version", 8),
+            None,
+            &[],
+            Some(3),
+        );
         // slot tokens {new, removed, membership, analogue}: overlap 1/4 -> 0.55 + 0.35 * 0.25
         assert_eq!(r.hits.len(), 1);
         assert!((r.hits[0].score - 0.6375).abs() < 1e-9);
         assert_eq!(r.comps["slotted"]["channel"], "slot");
         let mut p = params("deploy a new version", 8);
         p.min_score = Some(0.7);
-        assert!(rank(&bank, &unit(1.0), &p, None).hits.is_empty());
+        assert!(
+            rank(&bank, &unit(1.0), &p, None, &[], Some(3))
+                .hits
+                .is_empty()
+        );
     }
 
     #[test]
@@ -1119,11 +1260,11 @@ mod tests {
         };
         let mut p = params("zeta_token", 8);
         p.bm25_enabled = true;
-        let r = rank(&bank, &unit(1.0), &p, None);
+        let r = rank(&bank, &unit(1.0), &p, None, &[], Some(3));
         let got: Vec<(i64, f64)> = r
             .hits
             .iter()
-            .map(|h| (bank.entries[h.idx].id, h.score))
+            .map(|h| (bank.entries[h.entry().unwrap()].id, h.score))
             .collect();
         // entry 1 dense 0.9 (no lexical match); entry 2 injected at 0.3 * 1.0
         assert_eq!(got.len(), 2);
@@ -1149,7 +1290,7 @@ mod tests {
         let mut p = params("when did deploy happen", 2);
         p.band_order.push("slow".into());
         p.timeline_enabled = true;
-        let ranked = rank(&bank, &unit(1.0), &p, None);
+        let ranked = rank(&bank, &unit(1.0), &p, None, &[], Some(3));
         assert_eq!(ranked.params["timeline"]["fired"], true);
         assert_eq!(ids(&bank, &ranked), vec![1, 2]);
     }
@@ -1190,7 +1331,7 @@ mod tests {
         };
         let mut p = params("when did the deploy happen", 8);
         p.timeline_enabled = true;
-        let r = rank(&bank, &unit(1.0), &p, None);
+        let r = rank(&bank, &unit(1.0), &p, None, &[], Some(3));
         assert_eq!(ids(&bank, &r), vec![1, 2]);
         assert_eq!(r.params["timeline"]["fired"], true);
     }
@@ -1207,7 +1348,7 @@ mod tests {
         };
         let mut p = params("", 8);
         p.fusion_rrf = true;
-        let r = rank(&bank, &unit(1.0), &p, None);
+        let r = rank(&bank, &unit(1.0), &p, None, &[], Some(3));
         assert!((r.hits[0].score - 1.0 / 61.0).abs() < 1e-12);
         assert!((r.hits[1].score - 0.85 / 62.0).abs() < 1e-12);
     }
@@ -1235,12 +1376,12 @@ mod tests {
         let mut p = params("q", 8);
         p.rerank_enabled = true;
         let ce = Fixed(vec![0.0, 1.0]);
-        let r = rank(&bank, &unit(1.0), &p, Some(&ce));
+        let r = rank(&bank, &unit(1.0), &p, Some(&ce), &[], Some(3));
         assert_eq!(ids(&bank, &r), vec![2, 1]);
         assert_eq!(r.params["reranker"]["fired"], true);
         assert_eq!(r.comps["a"]["ce"], 0.0);
         p.rerank.top_n = 1;
-        let r = rank(&bank, &unit(1.0), &p, Some(&ce));
+        let r = rank(&bank, &unit(1.0), &p, Some(&ce), &[], Some(3));
         assert_eq!(
             r.params["reranker"]["skip_reason"],
             "candidate_budget_exceeded"
@@ -1275,7 +1416,7 @@ mod tests {
         min_norm: 0.1,
     };
     fn rank_compat(bank: &Bank, q: &[f32], p: &Params) -> Vec<Hit> {
-        rank(bank, q, p, None).hits
+        rank(bank, q, p, None, &[], Some(3)).hits
     }
     fn entry_json_compat(bank: &Bank, e: &Entry, score: f64) -> Value {
         let idx = bank
@@ -1354,7 +1495,7 @@ mod tests {
                 let hits = rank_compat(&bank, &[1.0, 0.0], &p);
                 assert_eq!(
                     hits.iter()
-                        .map(|h| bank.entries[h.idx].id)
+                        .map(|h| bank.entries[h.entry().unwrap()].id)
                         .collect::<Vec<_>>(),
                     [2],
                     "channel {channel}, filter {filter}"
@@ -1378,7 +1519,10 @@ mod tests {
             ..mutation_params()
         };
         let hits = rank_compat(&bank, &[1.0, 0.0], &p);
-        assert_eq!(hits.iter().map(|h| h.idx).collect::<Vec<_>>(), [0, 1]);
+        assert_eq!(
+            hits.iter().map(|h| h.entry().unwrap()).collect::<Vec<_>>(),
+            [0, 1]
+        );
         assert_eq!(hits[0].score, 0.425);
         assert_eq!(hits[1].score, 0.275);
         let hidden = Params {
@@ -1387,7 +1531,7 @@ mod tests {
             ..p
         };
         let bank = mutation_bank(bank.entries, &[0.5, 1.0]);
-        assert_eq!(rank_compat(&bank, &[1.0, 0.0], &hidden)[0].idx, 0);
+        assert_eq!(rank_compat(&bank, &[1.0, 0.0], &hidden)[0].entry(), Some(0));
         let above = Params {
             min_score: Some(0.500001),
             ..hidden
@@ -1411,7 +1555,7 @@ mod tests {
         };
         let hits = rank_compat(&bank, &[1.0, 0.0], &p);
         assert_eq!(hits.len(), 1);
-        assert_eq!(hits[0].idx, 0);
+        assert_eq!(hits[0].entry(), Some(0));
         assert!((hits[0].score - 0.495).abs() < 1e-12);
         let equal_floor = Params {
             query: "needle".into(),
@@ -1494,7 +1638,7 @@ mod tests {
             let hits = rank_compat(&bank, &[1.0, 0.0], &p);
             assert_eq!(
                 hits.iter()
-                    .map(|h| bank.entries[h.idx].id)
+                    .map(|h| bank.entries[h.entry().unwrap()].id)
                     .collect::<Vec<_>>(),
                 [1, 2, 3]
             );
@@ -1508,7 +1652,7 @@ mod tests {
             let boosted_bank = mutation_bank(bank.entries, &[0.0, 0.5, 0.0, 0.0, 0.0]);
             let boosted = rank_compat(&boosted_bank, &[1.0, 0.0], &p);
             assert_eq!(boosted.len(), 3);
-            assert_eq!(boosted[0].idx, 1);
+            assert_eq!(boosted[0].entry(), Some(1));
             assert!((boosted[0].score - (0.5 + 0.3 * middle)).abs() < 1e-12);
         }
     }
@@ -1534,7 +1678,7 @@ mod tests {
         };
         let hits = rank_compat(&bank, &[1.0, 0.0], &p);
         assert_eq!(hits.len(), 1);
-        assert_eq!(hits[0].idx, 0);
+        assert_eq!(hits[0].entry(), Some(0));
         assert_eq!(hits[0].score, 0.8);
         let bank = mutation_bank(vec![entry(1, "needle", "agent", false)], &[0.0]);
         let p = Params {
@@ -1672,6 +1816,123 @@ mod tests {
         assert_eq!(
             entry_json_compat(&bank, &bank.entries[0], 0.0)["superseded_by_id"],
             json!(null)
+        );
+    }
+
+    fn reference(text: &str, score: f64) -> RefHit {
+        RefHit {
+            nearest: crate::documents::Nearest {
+                text: text.into(),
+                source: "doc.md".into(),
+                ingested_at: 5.0,
+                distance: 1.0 - score,
+            },
+            score,
+        }
+    }
+
+    fn two_entries() -> Bank {
+        Bank {
+            dim: DIM,
+            entries: vec![entry(1, "a", "x", false), entry(2, "b", "x", false)],
+            matrix: [unit(0.9), unit(0.8)].concat(),
+        }
+    }
+
+    fn served(r: &Ranked) -> Vec<Item> {
+        r.hits.iter().map(|h| h.item).collect()
+    }
+
+    // cms.py:1440-1464: the pool trails the memories, skips a text already
+    // seen and a chunk under the floor, then keeps `ref_pool[:ref_k]`.
+    #[test]
+    fn reference_pool_trails_memories_skips_seen_and_low_chunks_then_slices() {
+        let bank = two_entries();
+        let refs = [
+            reference("a", 0.95),
+            reference("doc1", 0.7),
+            reference("doc2", 0.1),
+            reference("doc3", 0.6),
+            reference("doc4", 0.5),
+        ];
+        let p = params("", 8);
+        let r = rank(&bank, &unit(1.0), &p, None, &refs, Some(2));
+        assert_eq!(
+            served(&r),
+            [
+                Item::Entry(0),
+                Item::Entry(1),
+                Item::Reference(1),
+                Item::Reference(3)
+            ]
+        );
+        assert_eq!(r.hits[2].score, 0.7);
+        assert_eq!(r.hits[2].via, None);
+        assert_eq!(
+            Value::Object(r.comps["doc1"].clone()),
+            json!({"channel": "reference", "dense": 0.7, "surprise": 0.0, "band": "reference"})
+        );
+        // `xs[:-1]` drops the last chunk; `xs[:0]` keeps none.
+        let r = rank(&bank, &unit(1.0), &p, None, &refs, Some(-1));
+        assert_eq!(&served(&r)[2..], [Item::Reference(1), Item::Reference(3)]);
+        let r = rank(&bank, &unit(1.0), &p, None, &refs, Some(0));
+        assert_eq!(served(&r), [Item::Entry(0), Item::Entry(1)]);
+        // `xs[:None]` (a null ref_top_k) keeps them all.
+        let r = rank(&bank, &unit(1.0), &p, None, &refs, None);
+        assert_eq!(r.hits.len(), 5);
+        // A NaN floor keeps no chunk (`score >= nan` is false) and no memory.
+        let mut nan = params("", 8);
+        nan.min_score = Some(f64::NAN);
+        assert!(
+            rank(&bank, &unit(1.0), &nan, None, &refs, Some(3))
+                .hits
+                .is_empty()
+        );
+        // A reference chunk accrues no access (it has no resident row).
+        assert_eq!(bank.entries[0].access_count.load(Ordering::Relaxed), 4);
+    }
+
+    // The reranker's budget counts the reference chunks, and the deferred
+    // cut keeps every one of them beside the first k memories.
+    #[test]
+    fn rerank_budget_counts_reference_chunks_and_the_deferred_cut_keeps_them() {
+        let bank = two_entries();
+        let refs = [reference("doc1", 0.7)];
+        let mut p = params("q", 8);
+        p.rerank_enabled = true;
+        p.rerank.top_n = 2;
+        let ce = Fixed(vec![0.0, 1.0, 0.5]);
+        let r = rank(&bank, &unit(1.0), &p, Some(&ce), &refs, Some(3));
+        assert_eq!(
+            r.params["reranker"]["skip_reason"],
+            "candidate_budget_exceeded"
+        );
+        assert_eq!(r.params["reranker"]["candidate_count"], 3);
+        let mut p = params("q", 1);
+        p.rerank_enabled = true;
+        p.pool_multiplier = 2;
+        let r = rank(&bank, &unit(1.0), &p, Some(&ce), &refs, Some(3));
+        assert_eq!(r.params["reranker"]["fired"], true);
+        assert_eq!(r.comps["doc1"]["ce"], 0.5);
+        // Fused: b first (ce 1.0), then the chunk, then a, which the cut drops.
+        assert_eq!(served(&r), [Item::Entry(1), Item::Reference(0)]);
+    }
+
+    // Timeline presentation orders the memories by stream position and
+    // leaves the reference chunks trailing.
+    #[test]
+    fn timeline_order_leaves_reference_chunks_last() {
+        let mut bank = two_entries();
+        bank.entries[0].ts = 20.0;
+        bank.entries[1].ts = 10.0;
+        let mut p = params("what happened before", 8);
+        p.timeline_enabled = true;
+        p.min_score = Some(0.0);
+        let refs = [reference("doc1", 0.99)];
+        let r = rank(&bank, &unit(1.0), &p, None, &refs, Some(3));
+        assert_eq!(
+            served(&r),
+            [Item::Entry(1), Item::Entry(0), Item::Reference(0)]
         );
     }
 }
