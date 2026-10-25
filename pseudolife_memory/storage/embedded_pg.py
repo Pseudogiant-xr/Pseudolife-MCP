@@ -32,7 +32,9 @@ Safety invariants:
 from __future__ import annotations
 
 import atexit
+import base64
 import hashlib
+import hmac
 import logging
 import os
 import re
@@ -163,25 +165,28 @@ def attach_or_start(data_dir: Path) -> tuple[str, Any | None]:
     # state. Holding it also proves no other process is mid-migration.
     with _start_lock(pgdata):
         secret, created = _cluster_secret(pgdata)
+        progress = {"altered": False}
         try:
-            return _attach_or_start_locked(pg0, pgdata, secret, created)
+            return _attach_or_start_locked(pg0, pgdata, secret, created, progress)
         except BaseException:
-            # A secret this call created is unused until the role has it,
-            # and the trust marker lets the next start re-key regardless,
-            # so a failed attempt drops it rather than strand the bank.
-            if created:
+            # A secret this call created is unused until a role change may
+            # have given it to the role; before that a failed attempt drops
+            # it (the trust marker lets the next start re-key regardless),
+            # after that it is kept, since the server may already require it.
+            if created and not progress["altered"]:
                 _secret_path(pgdata).unlink(missing_ok=True)
             raise
 
 
-def _attach_or_start_locked(pg0, pgdata: Path, secret: str, created: bool):
+def _attach_or_start_locked(pg0, pgdata: Path, secret: str, created: bool,
+                            progress: dict):
     # A running server is found through its own postmaster.pid, not pg0's
     # record (pg0's `info` can report a live server stopped, and it checks
     # with the password pg0 was given, which is never the secret).
     port = _running_port(pgdata)
     matched = _probe(port, pgdata, (secret, _LEGACY_PASSWORD)) if port else None
     if matched is not None:
-        _settle_running(matched, port, pgdata, secret)
+        _settle_running(matched, port, pgdata, secret, progress)
         # A starter killed after the move but before creating the bank's
         # database leaves it missing; create it here too.
         _ensure_database(port, secret)
@@ -200,6 +205,11 @@ def _attach_or_start_locked(pg0, pgdata: Path, secret: str, created: bool):
     marked = found_hba is not None and (
         bool(_managed_methods(found_hba) - {"scram-sha-256"}) or created
     )
+    if marked and port and _port_open(port):
+        # A server answers but took neither password (a lost secret, or one
+        # still starting up): the marker would open it to every local
+        # account at once on Windows, so refuse instead.
+        raise RuntimeError(_running_refusal(pgdata, port))
     if marked:
         _write_hba(pgdata, _rewrite_hba(found_hba, "trust", loopback_only=True))
     inst = pg0.Pg0(name=_instance_name(pgdata), data_dir=str(pgdata))
@@ -212,15 +222,7 @@ def _attach_or_start_locked(pg0, pgdata: Path, secret: str, created: bool):
         if marked:
             _write_hba(pgdata, found_hba)
         if isinstance(exc, pg0.Pg0AlreadyRunningError):
-            name = _instance_name(pgdata)
-            raise RuntimeError(
-                f"embedded postgres for {pgdata} answers to neither this "
-                "bank's password nor the old fixed one, but pg0 reports it "
-                f"running. Stop it with: python -c \"import pg0; "
-                f"pg0.stop('{name}')\" and start again. If no server is "
-                "running (pg0-embedded 0.15.1 can misread its own record "
-                "after a reboot), upgrade pg0-embedded to 0.15.2 or later."
-            ) from exc
+            raise RuntimeError(_running_refusal(pgdata, None)) from exc
         raise
     logger.info("storage: embedded postgres started (pgdata=%s)", pgdata)
     try:
@@ -232,9 +234,22 @@ def _attach_or_start_locked(pg0, pgdata: Path, secret: str, created: bool):
             )
         if found_hba is None:
             # pg0's initdb gave the role its default password.
-            _move_over_scram(port, pgdata, secret)
+            _move_over_scram(port, pgdata, secret, progress)
         elif marked:
-            _move_under_trust(port, pgdata, secret)
+            _move_under_trust(port, pgdata, secret, progress)
+        else:
+            # The rules say SCRAM, but a move interrupted between its rewrite
+            # and its role change, with the server stopped since, leaves the
+            # role on the public password: ask the server which it takes.
+            matched = _probe(port, pgdata, (secret, _LEGACY_PASSWORD))
+            if matched is None:
+                raise RuntimeError(
+                    f"embedded postgres for {pgdata} does not accept the "
+                    f"password in {_secret_path(pgdata)}. Move that file "
+                    "aside and start again: the next start gives the bank's "
+                    "superuser a new password."
+                )
+            _settle_running(matched, port, pgdata, secret, progress)
         _ensure_database(port, secret)
     except BaseException:
         # Never leave a server this call started running unowned (and
@@ -430,7 +445,29 @@ def _probe(port: int, pgdata: Path, passwords) -> str | None:
     return None
 
 
-def _settle_running(matched: str, port: int, pgdata: Path, secret: str) -> None:
+def _port_open(port: int) -> bool:
+    """Whether anything accepts TCP connections on loopback ``port``."""
+    import socket
+
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=1):
+            return True
+    except OSError:
+        return False
+
+
+def _running_refusal(pgdata: Path, port: int | None) -> str:
+    where = f" on port {port}" if port else ""
+    return (
+        f"embedded postgres for {pgdata} is running{where} but accepts "
+        "neither this bank's password nor the old fixed one. Stop it with: "
+        f"python -c \"import pg0; pg0.stop('{_instance_name(pgdata)}')\" "
+        "and start again."
+    )
+
+
+def _settle_running(matched: str, port: int, pgdata: Path, secret: str,
+                    progress: dict) -> None:
     """Finish what a dead starter left on a running server.
 
     Under the start lock nobody else is migrating. This module's own trust
@@ -440,9 +477,9 @@ def _settle_running(matched: str, port: int, pgdata: Path, secret: str) -> None:
     server, or trust still loaded behind a SCRAM file) is moved the SCRAM
     way. A server that took the secret over SCRAM is already moved."""
     if _is_marked((pgdata / "pg_hba.conf").read_text(encoding="utf-8")):
-        _move_under_trust(port, pgdata, secret)
+        _move_under_trust(port, pgdata, secret, progress)
     elif matched == _LEGACY_PASSWORD:
-        _move_over_scram(port, pgdata, secret)
+        _move_over_scram(port, pgdata, secret, progress)
 
 
 # pg_hba.conf methods this module manages, on its rule lines. A rule with
@@ -558,51 +595,101 @@ def _run_sql(dsn: str, statements: list[str]) -> list:
     return rows
 
 
-def _move_under_trust(port: int, pgdata: Path, secret: str) -> None:
+def _move_under_trust(port: int, pgdata: Path, secret: str, progress: dict) -> None:
     """Move a server running on the trust marker: the role gets the secret
     (idempotent; trust accepts the connection whatever the role's password
     was, so a lost secret re-keys too), then the methods move to SCRAM and
     the server reloads. Every interruption leaves the trust marker."""
+    progress["altered"] = True
     _alter_role(_dsn(_LEGACY_PASSWORD, port, "postgres"), secret)
     _switch_to_scram(port, pgdata, secret)
+    _wait_for_scram(port, secret)
 
 
-def _move_over_scram(port: int, pgdata: Path, secret: str) -> None:
+def _move_over_scram(port: int, pgdata: Path, secret: str, progress: dict) -> None:
     """Move a server whose role still takes the public old password: the
     methods move to SCRAM and the server reloads first, then the role gets
     the secret over SCRAM. No state has the role on the secret while the
     server still asks for a cleartext password, so a later probe, which
     offers the secret over SCRAM only, always recognizes the result."""
-    legacy = _dsn(_LEGACY_PASSWORD, port, "postgres")
-    _switch_to_scram(port, pgdata, legacy_dsn=legacy)
-    try:
-        _alter_role(legacy, secret)
-    except Exception:
-        # The role already has the secret (trust was still loaded behind a
-        # SCRAM file when an earlier move was interrupted): confirm it.
-        _run_sql(_dsn(secret, port, "postgres", scram=True), ["SELECT 1"])
+    _switch_to_scram(port, pgdata, secret)
+    if not _takes_secret(port, secret):
+        # The role is still on the public password (not already moved by an
+        # interrupted earlier move): give it the secret over SCRAM.
+        progress["altered"] = True
+        _alter_role(_dsn(_LEGACY_PASSWORD, port, "postgres"), secret)
+        _wait_for_scram(port, secret)
     logger.info(
         "storage: embedded postgres uses its own password (%s) and SCRAM "
         "authentication", _secret_path(pgdata),
     )
 
 
+def _takes_secret(port: int, secret: str) -> bool:
+    """Whether the server takes the secret over SCRAM now."""
+    try:
+        _run_sql(_dsn(secret, port, "postgres", scram=True), ["SELECT 1"])
+    except Exception:  # noqa: BLE001 - any refusal means "not yet"
+        return False
+    return True
+
+
+def _wait_for_scram(port: int, secret: str, timeout_s: float = 10.0) -> None:
+    """Wait until the server takes the secret over SCRAM: off Windows,
+    pg_reload_conf() returns before the server applies the new rules."""
+    deadline = time.monotonic() + timeout_s
+    while not _takes_secret(port, secret):
+        if time.monotonic() >= deadline:
+            raise RuntimeError(
+                "embedded postgres did not accept the bank's password over "
+                f"SCRAM within {timeout_s:.0f}s of reloading its rules; start "
+                "again (the move resumes where it stopped)."
+            )
+        time.sleep(0.1)
+
+
 def _alter_role(dsn: str, secret: str) -> None:
-    _run_sql(dsn, [
-        "SET password_encryption = 'scram-sha-256'",
-        f"ALTER ROLE \"postgres\" PASSWORD '{secret}'",
-    ])
+    """Give the role the secret as a SCRAM verifier computed here, so the
+    secret itself never reaches the server (or anything posing as it)."""
+    _run_sql(dsn, [f"ALTER ROLE \"postgres\" PASSWORD '{_scram_verifier(secret)}'"])
 
 
-def _switch_to_scram(port: int, pgdata: Path, secret: str | None = None, *,
-                     legacy_dsn: str | None = None) -> None:
-    """Rewrite the managed methods to SCRAM, then reload. The server still
-    runs the rules it loaded (trust, or a password method) until the
-    reload, so SCRAM cannot be required for it; it is this call's own
-    server, or one the probe verified."""
+def _scram_verifier(secret: str, salt: bytes | None = None,
+                    iterations: int = 4096) -> str:
+    """PostgreSQL's stored SCRAM-SHA-256 verifier for ``secret`` (RFC 5802
+    and 7677; the secret is ASCII hex, so SASLprep leaves it unchanged)."""
+    salt = os.urandom(16) if salt is None else salt
+    salted = hashlib.pbkdf2_hmac("sha256", secret.encode("ascii"), salt, iterations)
+    client_key = hmac.new(salted, b"Client Key", hashlib.sha256).digest()
+    stored_key = hashlib.sha256(client_key).digest()
+    server_key = hmac.new(salted, b"Server Key", hashlib.sha256).digest()
+
+    def b64(data: bytes) -> str:
+        return base64.b64encode(data).decode("ascii")
+
+    return f"SCRAM-SHA-256${iterations}:{b64(salt)}${b64(stored_key)}:{b64(server_key)}"
+
+
+def _switch_to_scram(port: int, pgdata: Path, secret: str) -> None:
+    """Rewrite the managed methods to SCRAM, then reload.
+
+    Which rules a new connection meets before the reload differs by OS: on
+    Windows a changed pg_hba.conf applies to new connections at once, so
+    SCRAM is already in force; elsewhere the loaded rules (trust, or a
+    password method with the role on the public password) still apply. So
+    the reload tries the secret with SCRAM required (nothing is sent if the
+    server asks for anything else), then the public password."""
     hba = (pgdata / "pg_hba.conf").read_text(encoding="utf-8")
     _write_hba(pgdata, _rewrite_hba(hba, "scram-sha-256"))
-    _run_sql(legacy_dsn or _dsn(secret, port, "postgres"), ["SELECT pg_reload_conf()"])
+    error: Exception | None = None
+    for dsn in (_dsn(secret, port, "postgres", scram=True),
+                _dsn(_LEGACY_PASSWORD, port, "postgres")):
+        try:
+            _run_sql(dsn, ["SELECT pg_reload_conf()"])
+            return
+        except Exception as exc:  # noqa: BLE001 - the next password may work
+            error = exc
+    raise error
 
 
 def _ensure_database(port: int, secret: str) -> None:
