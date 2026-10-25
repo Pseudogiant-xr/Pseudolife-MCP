@@ -10,7 +10,7 @@ side must answer exactly `501 {"error": "not_implemented", "path": P}`.
 
 | Surface | Python behaviour | Owner |
 |---|---|---|
-| Every Console route in `harness/goldens/routes.json` other than `GET /api/search`, the coordination view of `GET /api/agents` and `POST /api/daemon-notice`, after all gates | the handler's answer | W2-D (reads), W2-E (writes), W2-F (board, maintainer) |
+| Every Console route in `harness/goldens/routes.json` other than `GET /api/search`, the coordination view of `GET /api/agents`, `POST /api/daemon-notice` and `POST /api/episodes/rename`, `/merge` and `/prune`, after all gates | the handler's answer | W2-D (reads), W2-E (writes), W2-F (board, maintainer) |
 | Tokenless MCP Host/Origin rebinding policy | SDK transport policy before tool dispatch | **CUTOVER BLOCKER — W2-G**; tokenless MCP stays unmounted (501) until this gate is accepted. Authenticated bound-identity checks are served (spec.md M18) |
 | Credential-bearing extractor/recall redirect refusal | `utils/no_redirect.py`, extractor and recall transports | W3-H / W2-D; outbound transports are not implemented in this slice |
 | `/api/hook/session-start`, `memory-policy` (any caller) | briefing and memory-policy text | W2-D |
@@ -465,6 +465,14 @@ of its own.
 | The sweep tick's log line (`deep-dream judge: …`) | the answer as a Python dict repr | the answer as JSON | log-only; no caller parses it |
 | Shutdown while a judge tick is running | the sweep's daemon thread dies with the process, wherever it is (an open transaction rolls back with the connection) | the tick stops at the next lock-free phase: an endpoint construction, alias probe, model call or signing in flight is abandoned, no new phase starts, and a verdict transaction already begun runs to its end; the tick answers `skipped: "stopping"` | so `Background::shutdown` does not wait out a model's timeout (240 s by default); no committed state differs from a Python process killed between the same two transactions |
 | A reply's served model holding a lone surrogate | PostgreSQL refuses the response identity's JSON (`invalid input syntax for type json`, with its DETAIL and CONTEXT) | the same statement fails on the same server, its text laid out as psycopg's (message, DETAIL, CONTEXT) without psycopg's closing parameter line | log-only, as the tick's `error` text for a database failure (above) |
+
+### Episode curation routes (2026-10-25)
+
+`POST /api/episodes/rename`, `/merge` and `/prune` (`routes/episodes.rs`).
+
+| Item | Python | Rust | Owner / why |
+|---|---|---|---|
+| A new merge rollup's `hint` that is not a string or null | kept in memory as sent; the episode write-through stores PostgreSQL's text form of a scalar, or fails on a list or dict, so the merged entries and outcome signals point at an episode row never written (until a later write-through) | refused before any change: 500 `hint must be a string, not '<type>'` | Python's answer is a bank inconsistency, not a contract; every documented caller sends a string. Behaviour with no caller (D7) |
 
 ## Coordination board completion (W2-F)
 

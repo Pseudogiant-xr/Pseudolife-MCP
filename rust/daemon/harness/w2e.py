@@ -5690,6 +5690,8 @@ def run_op(op: dict, port: int, mcp: Mcp, dsn: str) -> dict | None:
         with psycopg.connect(dsn, autocommit=True) as conn:
             conn.execute(op["sql"])
         return {"isError": False, "value": None}
+    if op["op"] == "rest":
+        return w2e_episodes.run_rest(op, port, dsn, sys.modules[__name__])
     if op["op"] == "http":
         body = json.dumps(op["body"]).encode() if "body" in op else None
         hdrs = [AUTH] + ([("Content-Type", "application/json")] if body else [])
@@ -6122,6 +6124,12 @@ def run_golden(name: str, binary: Path, root: Path, tol: dict, owned: list[str])
         d.stop()
         close_stubs(stubs)
     return {"scenario": name, "steps": steps, "stats": stats}
+
+
+import w2e_episodes  # noqa: E402
+
+SCENARIOS.update(w2e_episodes.register(sys.modules[__name__]))
+MUTANTS += w2e_episodes.MUTANTS
 
 
 def main() -> int:

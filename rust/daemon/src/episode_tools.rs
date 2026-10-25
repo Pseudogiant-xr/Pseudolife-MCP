@@ -281,7 +281,7 @@ async fn retitle_session(
 /// `_retitle_locked`: the episode's title, and the `episode_title` stamp of
 /// each resident entry attributed to it that differs, in memory and in its
 /// row (one transaction each; a failure is logged and skips that row).
-async fn retitle(ready: &Arc<Ready>, ws: &mut WriteState, i: usize, title: &str) {
+pub(crate) async fn retitle(ready: &Arc<Ready>, ws: &mut WriteState, i: usize, title: &str) {
     ws.log.episodes[i].title = title.to_string();
     if crate::mutants::active("mcp-session-title-no-entry-stamp") {
         return;
