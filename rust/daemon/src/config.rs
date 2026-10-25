@@ -86,9 +86,9 @@ pub struct MemoryConfig {
     pub lessons_synthesis_max_signals: i64,
     /// `memory.lessons.rule_mode` (off): every signal under the rule contract.
     pub lessons_rule_mode: bool,
-    /// `memory.graph_insight.enabled` (on): the dream's graph-insight
-    /// refresh (not ported: `memory_dream run` refuses while it is on).
-    pub graph_insight_enabled: bool,
+    /// `memory.graph_insight` (`GraphInsightConfig`): the dream's
+    /// graph-insight refresh (`graph_insight.rs`).
+    pub graph_insight: GraphInsightConfig,
     /// `memory.scopes` (`ScopesConfig`): source tags that never become
     /// projects, and fine-grained sources rolled up to an umbrella.
     pub scopes_exclude: Vec<String>,
@@ -104,6 +104,39 @@ pub struct MemoryConfig {
     /// `memory.deep_dream` (`utils/config.py` `DeepDreamConfig`): the keys
     /// the daemon reads.
     pub deep_dream: DeepDreamConfig,
+}
+
+/// `GraphInsightConfig` (`utils/config.py:914-925`): the communities and
+/// digest every dream run refreshes. `algorithm` is read and kept; Python
+/// takes `leiden` only when graspologic is importable, which no install
+/// provides, and this daemon always runs its Louvain (`graph_insight.rs`).
+/// `betweenness_sample` is read and kept; this daemon's betweenness is exact
+/// at every size (Option B).
+#[derive(Debug, Clone, PartialEq)]
+pub struct GraphInsightConfig {
+    pub enabled: bool,
+    pub algorithm: String,
+    pub resolution: f64,
+    pub max_community_fraction: f64,
+    pub god_nodes_top_n: i64,
+    pub surprises_top_n: i64,
+    pub questions_top_n: i64,
+    pub betweenness_sample: i64,
+}
+
+impl Default for GraphInsightConfig {
+    fn default() -> Self {
+        GraphInsightConfig {
+            enabled: true,
+            algorithm: "louvain".into(),
+            resolution: 1.0,
+            max_community_fraction: 0.25,
+            god_nodes_top_n: 10,
+            surprises_top_n: 10,
+            questions_top_n: 7,
+            betweenness_sample: 200,
+        }
+    }
 }
 
 /// `DeepDreamConfig` (`utils/config.py:513-720`): the switches
@@ -771,7 +804,7 @@ impl Default for MemoryConfig {
             lessons_synthesis_dedup_min_similarity: 0.88,
             lessons_synthesis_max_signals: 200,
             lessons_rule_mode: false,
-            graph_insight_enabled: true,
+            graph_insight: GraphInsightConfig::default(),
             scopes_exclude: ["status", "claude", "agent", "correction"]
                 .map(String::from)
                 .to_vec(),
@@ -1765,7 +1798,23 @@ fn load_str(text: &str) -> Result<Config, ConfigError> {
             memory.lessons_rule_mode = want_bool(l, "rule_mode", "memory.lessons", false)?;
         }
         if let Some(g) = section(m, "graph_insight", "memory.")? {
-            memory.graph_insight_enabled = want_bool(g, "enabled", "memory.graph_insight", true)?;
+            let path = "memory.graph_insight";
+            let d = GraphInsightConfig::default();
+            memory.graph_insight = GraphInsightConfig {
+                enabled: want_bool(g, "enabled", path, d.enabled)?,
+                algorithm: want_str(g, "algorithm", path, &d.algorithm)?,
+                resolution: want_float(g, "resolution", path, d.resolution)?,
+                max_community_fraction: want_float(
+                    g,
+                    "max_community_fraction",
+                    path,
+                    d.max_community_fraction,
+                )?,
+                god_nodes_top_n: want_int(g, "god_nodes_top_n", path, d.god_nodes_top_n)?,
+                surprises_top_n: want_int(g, "surprises_top_n", path, d.surprises_top_n)?,
+                questions_top_n: want_int(g, "questions_top_n", path, d.questions_top_n)?,
+                betweenness_sample: want_int(g, "betweenness_sample", path, d.betweenness_sample)?,
+            };
         }
         if let Some(sc) = section(m, "scopes", "memory.")? {
             if let Some(node) = lookup(sc, "exclude") {
