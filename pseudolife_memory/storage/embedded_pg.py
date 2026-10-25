@@ -140,6 +140,12 @@ def attach_or_start(data_dir: Path) -> tuple[str, Any | None]:
     daemon's instance must never shut it down mid-flight). The pgdata
     lives at ``<data_dir>/embedded_pg``; the pg0 registry name derives
     from that path, so distinct banks never collide.
+
+    pg0 is never given the bank's secret: it runs with its defaults (role,
+    password and database all ``postgres``), so it makes no connection of
+    its own and the secret appears on no command line and in no pg0
+    record. This module connects, creates the bank's database and builds
+    the DSN itself.
     """
     pgdata = Path(data_dir) / "embedded_pg"
     _preflight_path(pgdata)
@@ -152,55 +158,80 @@ def attach_or_start(data_dir: Path) -> tuple[str, Any | None]:
     # first boot (two shims spawning `serve` at logon) must not run
     # initdb concurrently on the same fresh pgdata — pg0's own locking
     # across that window is unverified, and a corrupted first bank is not
-    # a recoverable failure mode. The loser waits, then lands in the
-    # AlreadyRunning→attach path. The OS releases the lock if the holder
-    # dies, so there is no stale-lock state.
+    # a recoverable failure mode. The loser waits, then attaches. The OS
+    # releases the lock if the holder dies, so there is no stale-lock
+    # state. Holding it also proves no other process is mid-migration.
     with _start_lock(pgdata):
-        secret = _cluster_secret(pgdata)
-        hba_path = pgdata / "pg_hba.conf"
-        found_hba = hba_path.read_text(encoding="utf-8") if hba_path.exists() else None
-        # A bank not yet on SCRAM starts with loopback trust, which is also
-        # the migration's progress marker: pg0's own check then passes
-        # whether the role still has the old password or already has the
-        # secret, and a crash anywhere before the SCRAM rewrite leaves
-        # trust behind for the next start to finish from.
-        marked = found_hba is not None and _hba_methods(found_hba) != {"scram-sha-256"}
-        if marked:
-            _write_hba(pgdata, _rewrite_hba(found_hba, "trust"))
-        inst = pg0.Pg0(
-            name=_instance_name(pgdata),
-            database=_DB_NAME,
-            data_dir=str(pgdata),
-            password=secret,
-        )
+        secret, created = _cluster_secret(pgdata)
         try:
-            info = inst.start()
-        except pg0.Pg0AlreadyRunningError:
-            # Not ours to migrate: put a running server's file back as it
-            # was, so a configuration reload cannot open it to trust.
-            if marked:
-                _write_hba(pgdata, found_hba)
-            info = inst.info()
-            logger.info(
-                "storage: embedded postgres already running — attached "
-                "(pgdata=%s)", pgdata,
-            )
-            started = None
-        else:
-            logger.info(
-                "storage: embedded postgres started (pgdata=%s)", pgdata,
-            )
-            started = inst
+            return _attach_or_start_locked(pg0, pgdata, secret, created)
+        except BaseException:
+            # A secret this call created is unused until the role has it,
+            # and the trust marker lets the next start re-key regardless,
+            # so a failed attempt drops it rather than strand the bank.
+            if created:
+                _secret_path(pgdata).unlink(missing_ok=True)
+            raise
 
-        uri = getattr(info, "uri", None)
-        if not uri:
+
+def _attach_or_start_locked(pg0, pgdata: Path, secret: str, created: bool):
+    # A running server is found through its own postmaster.pid, not pg0's
+    # record (pg0's `info` can report a live server stopped, and it checks
+    # with the password pg0 was given, which is never the secret).
+    port = _running_port(pgdata)
+    dsn = _probe(port, pgdata, (secret, _LEGACY_PASSWORD)) if port else None
+    if dsn is not None:
+        dsn = _settle_running(dsn, port, pgdata, secret)
+        logger.info(
+            "storage: embedded postgres already running — attached "
+            "(pgdata=%s)", pgdata,
+        )
+        return dsn, None
+
+    hba_path = pgdata / "pg_hba.conf"
+    found_hba = hba_path.read_text(encoding="utf-8") if hba_path.exists() else None
+    # A bank not yet on SCRAM (or whose secret file was just recreated)
+    # starts with loopback trust, which is also the migration's progress
+    # marker: a crash anywhere before the SCRAM rewrite leaves trust behind,
+    # and the next start under the lock finishes the move.
+    marked = found_hba is not None and (
+        bool(_managed_methods(found_hba) - {"scram-sha-256"}) or created
+    )
+    if marked:
+        _write_hba(pgdata, _rewrite_hba(found_hba, "trust"))
+    inst = pg0.Pg0(name=_instance_name(pgdata), data_dir=str(pgdata))
+    try:
+        info = inst.start()
+    except BaseException as exc:
+        # The server may be running under another owner (pg0 refuses
+        # without a record of it): put its file back as it was, so a
+        # configuration reload cannot open it to trust.
+        if marked:
+            _write_hba(pgdata, found_hba)
+        if isinstance(exc, pg0.Pg0AlreadyRunningError):
             raise RuntimeError(
-                "embedded postgres reported no connection URI; check "
+                f"embedded postgres for {pgdata} is running but accepts "
+                "neither this bank's password nor the old fixed one; stop "
+                "the process that started it and try again."
+            ) from exc
+        raise
+    logger.info("storage: embedded postgres started (pgdata=%s)", pgdata)
+    try:
+        port = getattr(info, "port", None) or _running_port(pgdata)
+        if not port:
+            raise RuntimeError(
+                "embedded postgres started but reported no port; check "
                 "`pg0 logs` / ~/.pg0 for the underlying failure."
             )
-        if started is not None and (found_hba is None or marked):
-            _finish_secret(uri, pgdata, secret, migrate=marked)
-    return uri, started
+        if found_hba is None or marked:
+            _finish_secret(port, pgdata, secret, migrate=True)
+        _ensure_database(port, secret)
+    except BaseException:
+        # Never leave a server this call started running unowned (and
+        # possibly on trust): stop it; the next start finishes the move.
+        inst.stop()
+        raise
+    return _dsn(secret, port), inst
 
 
 def start_embedded(data_dir: Path) -> str:
@@ -282,14 +313,36 @@ def _start_lock(pgdata: Path, timeout_s: float = 120.0):
             fh.close()
 
 
+_LEGACY_PASSWORD = "postgres"  # pg0's fixed default, still held by old banks
+
+
+def _dsn(password: str, port: int, database: str = _DB_NAME) -> str:
+    return f"postgresql://postgres:{password}@127.0.0.1:{port}/{database}"
+
+
+def split_password(dsn: str) -> tuple[str, str | None]:
+    """A DSN this module built, without its password, and the password,
+    for a child process that should get it through ``PGPASSWORD``."""
+    from urllib.parse import urlsplit, urlunsplit
+
+    parts = urlsplit(dsn)
+    if parts.password is None:
+        return dsn, None
+    netloc = f"{parts.username}@{parts.hostname}"
+    if parts.port is not None:
+        netloc += f":{parts.port}"
+    return urlunsplit(parts._replace(netloc=netloc)), parts.password
+
+
 def _secret_path(pgdata: Path) -> Path:
     """The bank's superuser password file, beside the pgdata (initdb needs
     the pgdata itself empty, and a pgdata copy must not carry it)."""
     return pgdata.parent / (pgdata.name + ".secret")
 
 
-def _cluster_secret(pgdata: Path) -> str:
-    """This bank's superuser password: read it, or create it owner-only.
+def _cluster_secret(pgdata: Path) -> tuple[str, bool]:
+    """This bank's superuser password, read or created owner-only, and
+    whether this call created it.
 
     Written through the same owner-only writer as bearer-token files (an
     explicit owner-only ACL on Windows, mode 0600 elsewhere, set before the
@@ -300,34 +353,101 @@ def _cluster_secret(pgdata: Path) -> str:
     try:
         if path.exists() or path.is_symlink():
             secret, _ = credentials._open_token(path)
-            return secret
-        secret = secrets.token_hex(32)
-        credentials._write_token_file(path, secret)
-        return secret
+            created = False
+        else:
+            secret = secrets.token_hex(32)
+            credentials._write_token_file(path, secret)
+            created = True
     except credentials.CredentialError as exc:
         raise RuntimeError(
-            f"embedded postgres password file {path} cannot be used: {exc}. "
-            "It must be a regular file only your account can read; the bank's "
-            "superuser password is in it, so restore it from a backup of the "
-            "data dir rather than deleting it."
+            f"embedded postgres password file {path} cannot be used ({exc}). "
+            "Move it aside and start again: the next start gives the bank's "
+            "superuser a new password."
         ) from exc
+    # It goes into a SQL string literal and a URI: only the shape this
+    # module writes is accepted.
+    if not re.fullmatch(r"[0-9a-f]{64}", secret):
+        raise RuntimeError(
+            f"embedded postgres password file {path} holds an unexpected "
+            "value. Move it aside and start again: the next start gives the "
+            "bank's superuser a new password."
+        )
+    return secret, created
 
 
-# pg_hba.conf methods this module manages. Lines with any other method
-# (reject, peer, cert, ...) are someone's deliberate edit and stay as found.
+def _running_port(pgdata: Path) -> int | None:
+    """The port in the pgdata's postmaster.pid (line 4), if there is one."""
+    try:
+        lines = (pgdata / "postmaster.pid").read_text(
+            encoding="utf-8", errors="replace").splitlines()
+        return int(lines[3].strip())
+    except (OSError, IndexError, ValueError):
+        return None
+
+
+def _probe(port: int, pgdata: Path, passwords) -> str | None:
+    """The bank DSN of the first password the server on ``port`` accepts,
+    provided that server is this pgdata's own (a recorded port another
+    PostgreSQL has since taken must not be mistaken for the bank)."""
+    import psycopg
+
+    def canon(path: str) -> str:
+        resolved = str(Path(path).resolve())
+        return resolved.lower() if _PLATFORM == "win32" else resolved
+
+    for password in passwords:
+        try:
+            with psycopg.connect(
+                _dsn(password, port, "postgres"), connect_timeout=5,
+            ) as conn:
+                (reported,) = conn.execute("SHOW data_directory").fetchone()
+        except psycopg.Error:
+            continue
+        if canon(reported) == canon(str(pgdata)):
+            return _dsn(password, port)
+    return None
+
+
+def _settle_running(dsn: str, port: int, pgdata: Path, secret: str) -> str:
+    """Finish what a dead starter left on a running server.
+
+    Under the start lock nobody else is migrating, so this module's own
+    trust marker means its move was interrupted after the server came up:
+    finish it. A SCRAM file may not have been reloaded yet: reload. A
+    server on the old password method belongs to an older release: leave
+    it, it moves at its next own start."""
+    methods = _managed_methods((pgdata / "pg_hba.conf").read_text(encoding="utf-8"))
+    if methods == {"trust"}:
+        _finish_secret(port, pgdata, secret, migrate=True)
+        return _dsn(secret, port)
+    if methods == {"scram-sha-256"}:
+        _run_sql(dsn, ["SELECT pg_reload_conf()"])
+    return dsn
+
+
+# pg_hba.conf methods this module manages, on its rule lines. A rule with
+# any other method (reject, peer, cert, ...) and every other line (include
+# directives, comments) are someone's deliberate edits and stay as found.
 _MANAGED_METHODS = frozenset({"trust", "password", "md5", "scram-sha-256"})
+_RULE_TYPES = frozenset(
+    {"local", "host", "hostssl", "hostnossl", "hostgssenc", "hostnogssenc"})
 
 
-def _hba_methods(text: str) -> set[str]:
-    """The authentication methods on pg_hba.conf's rule lines."""
+def _rule_method(fields: list[str]) -> int | None:
+    """Index of the managed method in a rule line's fields, if any."""
+    if not fields or fields[0] not in _RULE_TYPES:
+        return None
+    return next((i for i in range(3, len(fields)) if fields[i] in _MANAGED_METHODS), None)
+
+
+def _managed_methods(text: str) -> set[str]:
+    """The managed authentication methods on pg_hba.conf's rule lines."""
     methods = set()
     for line in text.splitlines():
         fields = line.split("#", 1)[0].split()
-        method = next((f for f in fields[3:] if f in _MANAGED_METHODS), None)
-        if method is not None:
-            methods.add(method)
-        elif fields:
-            methods.add(fields[-1])
+        index = _rule_method(fields)
+        if index is not None:
+            methods.add(fields[index])
     return methods
 
 
@@ -338,55 +458,76 @@ def _rewrite_hba(text: str, method: str) -> str:
     for line in text.splitlines(keepends=True):
         rule, hash_, comment = line.partition("#")
         parts = re.split(r"(\s+)", rule)
-        fields = [i for i, part in enumerate(parts) if part and not part.isspace()]
-        for position in fields[3:]:
-            if parts[position] in _MANAGED_METHODS:
-                parts[position] = method
-                break
+        positions = [i for i, part in enumerate(parts) if part and not part.isspace()]
+        index = _rule_method([parts[i] for i in positions])
+        if index is not None:
+            parts[positions[index]] = method
         out.append("".join(parts) + hash_ + comment)
     return "".join(out)
 
 
 def _write_hba(pgdata: Path, text: str) -> None:
-    """Replace pg_hba.conf atomically, so a crash leaves old or new."""
+    """Replace pg_hba.conf atomically and durably, so a crash or power
+    loss leaves the old file or the new one, never an empty one."""
     target = pgdata / "pg_hba.conf"
     temporary = pgdata / "pg_hba.conf.tmp"
-    temporary.write_text(text, encoding="utf-8", newline="")
-    os.replace(temporary, target)
+    with open(temporary, "w", encoding="utf-8", newline="") as stream:
+        stream.write(text)
+        stream.flush()
+        os.fsync(stream.fileno())
+    # A scanner or indexer can hold the file for a moment on Windows; the
+    # token writer retries the same way (20 x 5 ms).
+    for attempt in range(20):
+        try:
+            os.replace(temporary, target)
+            return
+        except PermissionError:
+            if os.name != "nt" or attempt == 19:
+                raise
+            time.sleep(0.005)
 
 
-def _run_sql(dsn: str, statements: list[str]) -> None:
+def _run_sql(dsn: str, statements: list[str]) -> list:
+    """Run ``statements`` in order; the rows of the last one, if any."""
     import psycopg
 
+    rows: list = []
     with psycopg.connect(dsn, autocommit=True, connect_timeout=30) as conn:
         for statement in statements:
-            conn.execute(statement)
+            cursor = conn.execute(statement)
+            rows = cursor.fetchall() if cursor.description else []
+    return rows
 
 
-def _finish_secret(dsn: str, pgdata: Path, secret: str, *, migrate: bool) -> None:
-    """Move a server this process started onto SCRAM with the bank's secret.
+def _finish_secret(port: int, pgdata: Path, secret: str, *, migrate: bool) -> None:
+    """Move a server onto SCRAM with the bank's secret.
 
-    ``migrate``: the role may still have the old fixed password, so it is
-    given the secret first (idempotent, under the trust marker). A fresh
-    bank's role already has it from initdb. The method moves to SCRAM
-    last, then the server reloads its rules."""
+    ``migrate``: the role may not have the secret yet (a fresh bank's role
+    has pg0's default password; an old bank's has the fixed one; a re-key
+    has a lost one). Under the trust marker, or with a fresh bank's own
+    password method, the old password connects; the role gets the secret
+    (idempotent). The methods then move to SCRAM, and the server reloads."""
     if migrate:
-        # The secret is 64 hex characters (validated as a token on read),
-        # so it is safe inside a SQL string literal.
-        if not re.fullmatch(r"[0-9a-f]{64}", secret):
-            raise RuntimeError("embedded postgres password file holds an unexpected value")
-        _run_sql(dsn, [
+        _run_sql(_dsn(_LEGACY_PASSWORD, port, "postgres"), [
             "SET password_encryption = 'scram-sha-256'",
             f"ALTER ROLE \"postgres\" PASSWORD '{secret}'",
         ])
     hba = (pgdata / "pg_hba.conf").read_text(encoding="utf-8")
     _write_hba(pgdata, _rewrite_hba(hba, "scram-sha-256"))
-    _run_sql(dsn, ["SELECT pg_reload_conf()"])
+    _run_sql(_dsn(secret, port, "postgres"), ["SELECT pg_reload_conf()"])
     if migrate:
         logger.info(
-            "storage: embedded postgres moved to its own password "
-            "(%s) and SCRAM authentication", _secret_path(pgdata),
+            "storage: embedded postgres uses its own password (%s) and "
+            "SCRAM authentication", _secret_path(pgdata),
         )
+
+
+def _ensure_database(port: int, secret: str) -> None:
+    """Create the bank's database when it is missing (checked first, as
+    pg0 does, rather than parsing the localized duplicate error)."""
+    admin = _dsn(secret, port, "postgres")
+    if not _run_sql(admin, [f"SELECT 1 FROM pg_database WHERE datname = '{_DB_NAME}'"]):
+        _run_sql(admin, [f"CREATE DATABASE \"{_DB_NAME}\""])
 
 
 def _preflight_path(pgdata: Path) -> None:

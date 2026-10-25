@@ -40,13 +40,16 @@ _LEGACY_HBA = (
 )
 
 
-def _stub_pg0(monkeypatch, *, already_running: bool, uri: str):
+def _stub_pg0(monkeypatch, *, already_running: bool = False, uri: str = "",
+              start_error: Exception | None = None, sql_error_on: str | None = None):
     """Install a fake ``pg0`` module; returns the recorded call log.
 
     A start on a fresh pgdata writes what pg0's initdb leaves behind
     (``PG_VERSION`` and a password-method ``pg_hba.conf``); every start
     records the password pg0 was given and the hba file it saw. SQL the
-    module runs is recorded instead of executed."""
+    module runs is recorded instead of executed (``sql_error_on`` makes a
+    statement containing that text fail), and no server is ever probed
+    unless a test installs its own ``_probe``."""
     calls: list[tuple] = []
 
     class StubAlreadyRunning(Exception):
@@ -54,11 +57,12 @@ def _stub_pg0(monkeypatch, *, already_running: bool, uri: str):
 
     class StubInfo:
         def __init__(self):
-            self.uri = uri
+            self.uri = uri or None
+            self.port = 59999
 
     class StubPg0:
         def __init__(self, name=None, database=None, data_dir=None, **kw):
-            calls.append(("init", name, database, data_dir))
+            calls.append(("init", name, database, data_dir, kw))
             self.data_dir = Path(data_dir)
             self.password = kw.get("password", "postgres")
 
@@ -68,6 +72,8 @@ def _stub_pg0(monkeypatch, *, already_running: bool, uri: str):
                           hba.read_text() if hba.exists() else None))
             if already_running:
                 raise StubAlreadyRunning("already running")
+            if start_error is not None:
+                raise start_error
             if not (self.data_dir / "PG_VERSION").exists():
                 (self.data_dir / "PG_VERSION").write_text("18\n")
                 hba.write_text(_LEGACY_HBA)
@@ -84,10 +90,16 @@ def _stub_pg0(monkeypatch, *, already_running: bool, uri: str):
         Pg0=StubPg0, Pg0AlreadyRunningError=StubAlreadyRunning,
     )
     monkeypatch.setitem(sys.modules, "pg0", stub)
-    monkeypatch.setattr(
-        ep, "_run_sql",
-        lambda dsn, statements: calls.append(("sql", dsn, list(statements))),
-    )
+
+    def run_sql(dsn, statements):
+        for statement in statements:
+            if sql_error_on and sql_error_on in statement:
+                raise RuntimeError("injected SQL failure")
+        calls.append(("sql", dsn, list(statements)))
+        return []
+
+    monkeypatch.setattr(ep, "_run_sql", run_sql)
+    monkeypatch.setattr(ep, "_probe", lambda port, pgdata, passwords: None)
     return calls
 
 
@@ -105,7 +117,7 @@ def _legacy_bank(data_dir: Path) -> Path:
 
 
 def _methods(pgdata: Path) -> set[str]:
-    return ep._hba_methods((pgdata / "pg_hba.conf").read_text())
+    return ep._managed_methods((pgdata / "pg_hba.conf").read_text())
 
 
 # ----------------------------------------------------------------------
@@ -215,26 +227,46 @@ def test_pg_major_mismatch_is_refused(tmp_path):
         ep._guard_pg_major(pgdata)
 
 
+def _running(monkeypatch, pgdata: Path, accepts: str | None, port: int = 59998):
+    """A server already running for ``pgdata`` (its postmaster.pid), which
+    accepts the password ``accepts`` (or neither candidate when None)."""
+    pgdata.mkdir(parents=True, exist_ok=True)
+    (pgdata / "postmaster.pid").write_text(f"4242\n{pgdata}\n1\n{port}\n\n")
+
+    def probe(port_, pgdata_, passwords):
+        assert port_ == port and Path(pgdata_) == pgdata
+        return next((ep._dsn(p, port_) for p in passwords if p == accepts), None)
+
+    monkeypatch.setattr(ep, "_probe", probe)
+
+
 def test_start_embedded_attaches_without_taking_ownership(
     monkeypatch, tmp_path,
 ):
-    """Second process finding the instance running must attach via info()
-    and NOT register a stop — it doesn't own the server's lifecycle."""
-    uri = "postgresql://postgres:pw@127.0.0.1:59999/pseudolife_memory"
-    calls = _stub_pg0(monkeypatch, already_running=True, uri=uri)
+    """A second process finding the server running attaches through its
+    postmaster.pid and does NOT register a stop — it doesn't own the
+    server's lifecycle."""
+    calls = _stub_pg0(monkeypatch)
+    pgdata = tmp_path / "embedded_pg"
+    secret, _ = ep._cluster_secret(pgdata)
+    (pgdata.mkdir(parents=True, exist_ok=True))
+    (pgdata / "pg_hba.conf").write_text(ep._rewrite_hba(_LEGACY_HBA, "scram-sha-256"))
+    _running(monkeypatch, pgdata, accepts=secret)
     dsn = ep.start_embedded(tmp_path)
-    assert dsn == uri
-    assert ("info",) in calls
+    assert dsn == ep._dsn(secret, 59998)
+    assert not any(call[0] == "start" for call in calls)
     assert ep._owned == []
+    # A SCRAM file a dead starter may not have reloaded yet is reloaded.
+    assert _sql(calls) == ["SELECT pg_reload_conf()"]
 
 
 def test_start_embedded_owns_and_stops_what_it_started(
     monkeypatch, tmp_path,
 ):
-    uri = "postgresql://postgres:pw@127.0.0.1:59999/pseudolife_memory"
-    calls = _stub_pg0(monkeypatch, already_running=False, uri=uri)
+    calls = _stub_pg0(monkeypatch)
     dsn = ep.start_embedded(tmp_path)
-    assert dsn == uri
+    secret = (tmp_path / "embedded_pg.secret").read_text()
+    assert dsn == ep._dsn(secret, 59999)
     assert len(ep._owned) == 1
     ep.stop_embedded()
     assert ("stop",) in calls
@@ -244,56 +276,72 @@ def test_start_embedded_owns_and_stops_what_it_started(
 def test_attach_or_start_returns_handle_only_when_started(
     monkeypatch, tmp_path,
 ):
-    uri = "postgresql://postgres:pw@127.0.0.1:59999/pseudolife_memory"
-    _stub_pg0(monkeypatch, already_running=False, uri=uri)
+    _stub_pg0(monkeypatch)
     dsn, inst = ep.attach_or_start(tmp_path / "a")
-    assert dsn == uri and inst is not None
-    _stub_pg0(monkeypatch, already_running=True, uri=uri)
+    assert inst is not None
+    _stub_pg0(monkeypatch)
+    pgdata = tmp_path / "b" / "embedded_pg"
+    secret, _ = ep._cluster_secret(pgdata)
+    pgdata.mkdir(parents=True, exist_ok=True)
+    (pgdata / "pg_hba.conf").write_text(ep._rewrite_hba(_LEGACY_HBA, "scram-sha-256"))
+    _running(monkeypatch, pgdata, accepts=secret)
     dsn, inst = ep.attach_or_start(tmp_path / "b")
-    assert dsn == uri and inst is None
+    assert dsn == ep._dsn(secret, 59998) and inst is None
 
 
 # ----------------------------------------------------------------------
 # The per-cluster secret (replaces the fixed postgres/postgres password)
 # ----------------------------------------------------------------------
 
-_URI = "postgresql://postgres:x@127.0.0.1:59999/pseudolife_memory"
+_CREATE_DB = [
+    "SELECT 1 FROM pg_database WHERE datname = 'pseudolife_memory'",
+    "CREATE DATABASE \"pseudolife_memory\"",
+]
+
+
+def _move(secret: str) -> list[str]:
+    return [
+        "SET password_encryption = 'scram-sha-256'",
+        f"ALTER ROLE \"postgres\" PASSWORD '{secret}'",
+        "SELECT pg_reload_conf()",
+    ]
 
 
 def test_a_fresh_bank_gets_its_own_owner_only_secret(monkeypatch, tmp_path):
     from pseudolife_memory import credentials
 
-    calls = _stub_pg0(monkeypatch, already_running=False, uri=_URI)
-    ep.attach_or_start(tmp_path)
+    calls = _stub_pg0(monkeypatch)
+    dsn, _ = ep.attach_or_start(tmp_path)
     pgdata = tmp_path / "embedded_pg"
-    secret_path = tmp_path / "embedded_pg.secret"
     # Read back through the owner-only validator the token files use.
-    secret, _ = credentials._open_token(secret_path)
+    secret, _ = credentials._open_token(tmp_path / "embedded_pg.secret")
     assert len(secret) == 64 and int(secret, 16) >= 0
-    assert secret != "postgres"
+    assert dsn == ep._dsn(secret, 59999)
+    # pg0 never sees the secret: its own defaults, and it creates no database.
+    init = next(call for call in calls if call[0] == "init")
+    assert init[2] is None and "password" not in init[4]
     start = next(call for call in calls if call[0] == "start")
-    assert start[1] == secret  # initdb and pg0's record get the secret
-    # The role already has the secret; only the method moves to SCRAM.
-    assert _sql(calls) == ["SELECT pg_reload_conf()"]
+    assert start[1] == "postgres"
+    # The role moves from pg0's initdb password to the secret, over the old
+    # password; the reload and the database use the secret.
+    sql_calls = [call for call in calls if call[0] == "sql"]
+    assert sql_calls[0][1] == ep._dsn("postgres", 59999, "postgres")
+    assert all(call[1] == ep._dsn(secret, 59999, "postgres") for call in sql_calls[1:])
+    assert _sql(calls) == _move(secret) + _CREATE_DB
     assert _methods(pgdata) == {"scram-sha-256"}
 
 
 def test_a_legacy_bank_migrates_to_its_secret(monkeypatch, tmp_path):
     from pseudolife_memory import credentials
 
-    calls = _stub_pg0(monkeypatch, already_running=False, uri=_URI)
+    calls = _stub_pg0(monkeypatch)
     pgdata = _legacy_bank(tmp_path)
     ep.attach_or_start(tmp_path)
     secret, _ = credentials._open_token(tmp_path / "embedded_pg.secret")
     start = next(call for call in calls if call[0] == "start")
-    # The server starts with loopback trust (the progress marker), so pg0's
-    # own check passes whatever the role's password is at that moment.
-    assert ep._hba_methods(start[2]) == {"trust"}
-    assert _sql(calls) == [
-        "SET password_encryption = 'scram-sha-256'",
-        f"ALTER ROLE \"postgres\" PASSWORD '{secret}'",
-        "SELECT pg_reload_conf()",
-    ]
+    # The server starts with loopback trust (the progress marker).
+    assert ep._managed_methods(start[2]) == {"trust"}
+    assert _sql(calls) == _move(secret) + _CREATE_DB
     assert _methods(pgdata) == {"scram-sha-256"}
     # Comments and layout survive; only method columns change.
     text = (pgdata / "pg_hba.conf").read_text()
@@ -304,15 +352,14 @@ def test_a_legacy_bank_migrates_to_its_secret(monkeypatch, tmp_path):
 def test_a_migrated_bank_starts_with_its_secret_and_changes_nothing(
     monkeypatch, tmp_path,
 ):
-    calls = _stub_pg0(monkeypatch, already_running=False, uri=_URI)
+    _stub_pg0(monkeypatch)
     ep.attach_or_start(tmp_path)
     secret = (tmp_path / "embedded_pg.secret").read_text()
     hba = (tmp_path / "embedded_pg" / "pg_hba.conf").read_text()
-    calls = _stub_pg0(monkeypatch, already_running=False, uri=_URI)
-    ep.attach_or_start(tmp_path)
-    start = next(call for call in calls if call[0] == "start")
-    assert start[1] == secret
-    assert _sql(calls) == []
+    calls = _stub_pg0(monkeypatch)
+    dsn, _ = ep.attach_or_start(tmp_path)
+    assert dsn == ep._dsn(secret, 59999)
+    assert _sql(calls) == _CREATE_DB
     assert (tmp_path / "embedded_pg" / "pg_hba.conf").read_text() == hba
     assert (tmp_path / "embedded_pg.secret").read_text() == secret
 
@@ -320,48 +367,141 @@ def test_a_migrated_bank_starts_with_its_secret_and_changes_nothing(
 def test_an_interrupted_migration_completes_on_the_next_start(
     monkeypatch, tmp_path,
 ):
-    """A crash after the trust marker (before or after ALTER ROLE) leaves
-    trust in pg_hba.conf; the next start redoes the idempotent steps."""
+    """A crash after the trust marker (before or after ALTER ROLE) with the
+    server stopped leaves trust in pg_hba.conf; the next start finishes."""
     from pseudolife_memory import credentials
 
     pgdata = _legacy_bank(tmp_path)
     credentials._write_token_file(tmp_path / "embedded_pg.secret", "ab" * 32)
     (pgdata / "pg_hba.conf").write_text(ep._rewrite_hba(_LEGACY_HBA, "trust"))
-    calls = _stub_pg0(monkeypatch, already_running=False, uri=_URI)
+    calls = _stub_pg0(monkeypatch)
     ep.attach_or_start(tmp_path)
-    assert f"ALTER ROLE \"postgres\" PASSWORD '{'ab' * 32}'" in _sql(calls)
+    assert _sql(calls) == _move("ab" * 32) + _CREATE_DB
     assert _methods(pgdata) == {"scram-sha-256"}
 
 
-def test_attaching_to_a_running_legacy_server_leaves_its_hba_as_found(
+def test_an_interrupted_migration_on_a_running_server_is_finished_on_attach(
     monkeypatch, tmp_path,
 ):
-    """Only a server this process started is migrated; a running server's
-    pg_hba.conf goes back to what it was, so a reload cannot open it."""
-    calls = _stub_pg0(monkeypatch, already_running=True, uri=_URI)
+    """A starter killed after the server came up leaves it running on trust
+    with no owner. The next caller holds the start lock, so the marker is
+    this module's own unfinished move: it finishes it, without starting."""
+    from pseudolife_memory import credentials
+
     pgdata = _legacy_bank(tmp_path)
+    credentials._write_token_file(tmp_path / "embedded_pg.secret", "cd" * 32)
+    (pgdata / "pg_hba.conf").write_text(ep._rewrite_hba(_LEGACY_HBA, "trust"))
+    calls = _stub_pg0(monkeypatch)
+    _running(monkeypatch, pgdata, accepts="cd" * 32)  # trust takes anything
     dsn, started = ep.attach_or_start(tmp_path)
-    assert (dsn, started) == (_URI, None)
+    assert started is None and dsn == ep._dsn("cd" * 32, 59998)
+    assert not any(call[0] == "start" for call in calls)
+    assert _sql(calls) == _move("cd" * 32)
+    assert _methods(pgdata) == {"scram-sha-256"}
+
+
+def test_attaching_to_an_older_release_running_server_leaves_it_alone(
+    monkeypatch, tmp_path,
+):
+    """A server an older release started still has the fixed password and
+    the password method: attach with it, change nothing; it moves at its
+    next own start."""
+    calls = _stub_pg0(monkeypatch)
+    pgdata = _legacy_bank(tmp_path)
+    _running(monkeypatch, pgdata, accepts="postgres")
+    dsn, started = ep.attach_or_start(tmp_path)
+    assert (dsn, started) == (ep._dsn("postgres", 59998), None)
     assert (pgdata / "pg_hba.conf").read_text() == _LEGACY_HBA
     assert _sql(calls) == []
 
 
-def test_hba_rewrite_changes_only_password_style_methods():
+def test_a_failure_after_an_owned_start_stops_the_server(monkeypatch, tmp_path):
+    """Nothing this call started is left running unowned (and on trust);
+    the next start finishes the move."""
+    calls = _stub_pg0(monkeypatch, sql_error_on="ALTER ROLE")
+    pgdata = _legacy_bank(tmp_path)
+    with pytest.raises(RuntimeError, match="injected"):
+        ep.attach_or_start(tmp_path)
+    assert ("stop",) in calls
+    assert ep._owned == []
+    # The marker stays, and the unused new secret is dropped.
+    assert _methods(pgdata) == {"trust"}
+    assert not (tmp_path / "embedded_pg.secret").exists()
+    calls = _stub_pg0(monkeypatch)
+    ep.attach_or_start(tmp_path)
+    secret = (tmp_path / "embedded_pg.secret").read_text()
+    assert _sql(calls) == _move(secret) + _CREATE_DB
+
+
+def test_a_failed_start_puts_a_marked_file_back(monkeypatch, tmp_path):
+    """pg0 refuses a server it has no record of with a generic error; the
+    server may be running, so its file must not be left on trust."""
+    _stub_pg0(monkeypatch, start_error=RuntimeError("lock file exists"))
+    pgdata = _legacy_bank(tmp_path)
+    with pytest.raises(RuntimeError, match="lock file exists"):
+        ep.attach_or_start(tmp_path)
+    assert (pgdata / "pg_hba.conf").read_text() == _LEGACY_HBA
+
+
+def test_a_running_server_that_takes_no_known_password_is_refused(
+    monkeypatch, tmp_path,
+):
+    _stub_pg0(monkeypatch, already_running=True)
+    pgdata = _legacy_bank(tmp_path)
+    _running(monkeypatch, pgdata, accepts=None)
+    with pytest.raises(RuntimeError, match="accepts neither"):
+        ep.attach_or_start(tmp_path)
+    assert (pgdata / "pg_hba.conf").read_text() == _LEGACY_HBA
+
+
+def test_a_lost_secret_rekeys_through_the_trust_marker(monkeypatch, tmp_path):
+    """A migrated bank whose secret file is gone gets a new one, set on the
+    role under trust, instead of being locked for good."""
+    _stub_pg0(monkeypatch)
+    ep.attach_or_start(tmp_path)
+    old = (tmp_path / "embedded_pg.secret").read_text()
+    (tmp_path / "embedded_pg.secret").unlink()
+    calls = _stub_pg0(monkeypatch)
+    ep.attach_or_start(tmp_path)
+    new = (tmp_path / "embedded_pg.secret").read_text()
+    assert new != old
+    start = next(call for call in calls if call[0] == "start")
+    assert ep._managed_methods(start[2]) == {"trust"}
+    assert _sql(calls) == _move(new) + _CREATE_DB
+
+
+def test_a_secret_file_with_an_unexpected_value_is_refused(monkeypatch, tmp_path):
+    from pseudolife_memory import credentials
+
+    _stub_pg0(monkeypatch)
+    credentials._write_token_file(tmp_path / "embedded_pg.secret", "x'--")
+    with pytest.raises(RuntimeError, match="unexpected value"):
+        ep.attach_or_start(tmp_path)
+
+
+def test_hba_rewrite_changes_only_managed_methods_on_rule_lines():
     text = (
         "# host all all 0.0.0.0/0 trust   (a comment, untouched)\n"
         "\n"
         "local   all   all                       password\n"
         "host    all   all   127.0.0.1/32        md5\n"
-        "host    all   all   10.0.0.0 255.0.0.0  scram-sha-256\n"
+        "host    all   all   10.0.0.0 255.0.0.0  scram-sha-256\r\n"
         "host    all   all   0.0.0.0/0           reject\n"
+        "include_dir conf.d\n"
+        "hostssl all   all   ::1/128             cert clientcert=verify-full\n"
     )
     out = ep._rewrite_hba(text, "trust")
-    assert out.splitlines()[0] == text.splitlines()[0]
-    assert out.splitlines()[2] == "local   all   all                       trust"
-    assert out.splitlines()[3] == "host    all   all   127.0.0.1/32        trust"
-    assert out.splitlines()[4] == "host    all   all   10.0.0.0 255.0.0.0  trust"
-    assert out.splitlines()[5].endswith("reject")
-    assert ep._hba_methods(out) == {"trust", "reject"}
+    lines = out.split("\n")
+    assert lines[0] == text.split("\n")[0]
+    assert lines[2] == "local   all   all                       trust"
+    assert lines[3] == "host    all   all   127.0.0.1/32        trust"
+    assert lines[4] == "host    all   all   10.0.0.0 255.0.0.0  trust\r"
+    assert lines[5:8] == text.split("\n")[5:8]
+    assert ep._managed_methods(out) == {"trust"}
+    # Unmanaged rules do not make a SCRAM bank look unmigrated.
+    scram = ep._rewrite_hba(text, "scram-sha-256")
+    assert ep._managed_methods(scram) == {"scram-sha-256"}
+    assert ep._managed_methods("# only comments\n") == set()
 
 
 def test_start_lock_is_mutually_exclusive(tmp_path):
@@ -473,7 +613,7 @@ def test_embedded_legacy_bank_migrates_real(tmp_path):
             assert conn.execute("SELECT 1").fetchone() == (1,)
         with pytest.raises(psycopg.OperationalError):
             psycopg.connect(old_uri, connect_timeout=10).close()
-        assert ep._hba_methods((pgdata / "pg_hba.conf").read_text()) == {
+        assert ep._managed_methods((pgdata / "pg_hba.conf").read_text()) == {
             "scram-sha-256"}
         ep.stop_embedded()
         dsn_again = ep.start_embedded(data_dir)
