@@ -106,6 +106,22 @@ def test_state_archive_excludes_embedded_pg_and_backups(tmp_path):
     assert not any(".sql.gz" in n for n in names)
 
 
+def test_state_archive_leaves_the_cluster_password_out(tmp_path):
+    """A restore loads the dump into a fresh cluster with its own password;
+    extracting an old ``embedded_pg.secret`` over it would lock the bank."""
+    (tmp_path / "config.yaml").write_text("memory: {}\n")
+    (tmp_path / "embedded_pg.secret").write_text("ab" * 32)
+    bdir = tmp_path / "backups"
+    bdir.mkdir()
+
+    out = backup_cli._archive_state(tmp_path, bdir, "20261025-120000")
+
+    with tarfile.open(out) as tar:
+        names = tar.getnames()
+    assert any(n.endswith("config.yaml") for n in names)
+    assert not any("embedded_pg.secret" in n for n in names)
+
+
 # ----------------------------------------------------------------------
 # Orchestration
 # ----------------------------------------------------------------------

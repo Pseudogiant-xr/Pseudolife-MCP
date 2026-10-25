@@ -42,7 +42,8 @@ _DUMP_PREFIX = "pseudolife_lite_memory-"
 _STATE_PREFIX = "pseudolife_lite_state-"
 # Never archived into the state tar: the dump covers the bank, and the
 # backups dir must not recursively swallow itself.
-_STATE_EXCLUDE = {"embedded_pg", "backups"}
+# The cluster password stays out: a restore gives the fresh cluster its own.
+_STATE_EXCLUDE = {"embedded_pg", "embedded_pg.secret", "backups"}
 
 
 def perform_backup(
