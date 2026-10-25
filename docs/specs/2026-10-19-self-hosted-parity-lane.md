@@ -245,8 +245,12 @@ What it adds to the manual procedure:
   global prefix stays covered). Jobs, and their rootless
   containers (whose traffic leaves through that account's `slirp4netns`),
   reach the internet but not the live bank, the hypervisor or other
-  guests. It does not use the box's `nftables.service`, whose stock
-  configuration flushes every table, the root Docker engine's included.
+  guests. The box's `/etc/nftables.conf`, whose stock configuration starts
+  by flushing every table, includes the table's file (the script adds the
+  `include` line, keeping the original beside it as
+  `nftables.conf.before-parity-runner`), so a reload of `nftables.service`
+  replaces the table in the same transaction as the flush and never leaves
+  the account unfiltered.
   - The rules match the account's subordinate IDs as well as its own: a
     job can map itself onto one in a user namespace that keeps the box's
     network namespace.

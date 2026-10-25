@@ -220,12 +220,29 @@ $local_rules  }
 }
 NFT
 nft -c -f /etc/pseudolife-runner-egress.nft
+# The stock /etc/nftables.conf starts with "flush ruleset", so a reload of
+# nftables.service would drop the table until this unit reloaded it after.
+# Including the table there loads it in the same transaction as the flush,
+# so the account is never unfiltered.
+nft_conf=/etc/nftables.conf
+include_line='include "/etc/pseudolife-runner-egress.nft"'
+if [ -f "$nft_conf" ] && ! grep -qxF "$include_line" "$nft_conf"; then
+  cp -p "$nft_conf" "$nft_conf.before-parity-runner"
+  printf '\n# The parity runner account'\''s egress table (ops/selfhosted/setup-linux-runner.sh).\n%s\n' \
+    "$include_line" >> "$nft_conf"
+  if ! nft -c -f "$nft_conf"; then
+    cp -p "$nft_conf.before-parity-runner" "$nft_conf"
+    echo "$nft_conf does not check with the egress table included; it is restored unchanged" >&2
+    exit 1
+  fi
+fi
 cat > /etc/systemd/system/pseudolife-runner-egress.service <<UNIT
 [Unit]
 Description=Keep the parity runner account off the local network
-# Loaded before any network comes up. A reload of nftables.service (whose
-# stock configuration flushes every table) reloads this table after it; a
-# restart of nftables.service does not, so rerun this script after one.
+# Loaded before any network comes up. /etc/nftables.conf includes the table
+# (above), so a reload or restart of nftables.service reloads it with the
+# rest of the ruleset; a restart stops the runners (PartOf=), so rerun this
+# script after one.
 DefaultDependencies=no
 Before=network-pre.target
 Wants=network-pre.target
