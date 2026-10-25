@@ -267,7 +267,7 @@ cases run there or stay recorded as unrun:
 
 ## Before step 4: what the daemon side still needs
 
-Steps 2 and 3 landed as #935 and #946. Wiring the module into the
+Steps 2 and 3 are #935 and #946 (in review). Wiring the module into the
 daemon's startup (step 4) needs three things that are decisions or PRs of
 their own, not workarounds inside step 4.
 
