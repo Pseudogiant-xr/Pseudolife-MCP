@@ -14,11 +14,57 @@
 
 use sha2::{Digest, Sha256};
 use std::{
+    ffi::OsString,
     fmt, fs,
     io::{self, BufReader, BufWriter, Read, Write},
     path::{Path, PathBuf},
     time::Duration,
 };
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Platform {
+    Windows,
+    MacOs,
+    Other,
+}
+impl Platform {
+    pub fn current() -> Self {
+        if cfg!(windows) {
+            Self::Windows
+        } else if cfg!(target_os = "macos") {
+            Self::MacOs
+        } else {
+            Self::Other
+        }
+    }
+}
+
+/// `embedded_pg.default_lite_data_dir()`: the stable per-user data dir.
+/// `env` answers nonempty values only as Python's `os.environ.get(..) or`
+/// does; `home` is `Path.home()`. `None` when no home is known.
+pub fn default_data_dir(
+    platform: Platform,
+    env: &dyn Fn(&str) -> Option<OsString>,
+    home: Option<&Path>,
+) -> Option<PathBuf> {
+    let set = |name: &str| {
+        env(name)
+            .filter(|value| !value.is_empty())
+            .map(PathBuf::from)
+    };
+    let base = match platform {
+        Platform::Windows => match set("LOCALAPPDATA") {
+            Some(local) => local,
+            None => home?.join("AppData").join("Local"),
+        },
+        Platform::MacOs => home?.join("Library").join("Application Support"),
+        Platform::Other => match set("XDG_DATA_HOME") {
+            Some(data) => data,
+            None => home?.join(".local").join("share"),
+        },
+    };
+    Some(base.join("pseudolife-mcp"))
+}
 
 /// The record an install carries of the artifacts it was built from.
 pub const PROVENANCE: &str = "pseudolife-runtime.json";
@@ -359,6 +405,8 @@ fn install<A: Pinned, T>(
     let record = tree.join(PROVENANCE);
     let text = serde_json::to_vec_pretty(&manifest.provenance()).expect("provenance serializes");
     write_new(&record, &mut &text[..], 0o644).map_err(io_error("write", &record))?;
+    #[cfg(unix)]
+    sync_dirs(&tree).map_err(io_error("sync", &tree))?;
     let dir = manifest.install_dir(root);
     rename_dir(&tree, &dir).map_err(io_error("move the runtime into", &dir))?;
     #[cfg(unix)]
@@ -371,6 +419,21 @@ fn install<A: Pinned, T>(
         dir.display()
     ));
     validate(&dir).map_err(|detail| Error::Installed { dir, detail })
+}
+
+/// Every directory of the tree, deepest first, so its entries (links
+/// included, which `write_new`'s file syncs do not cover) are on disk
+/// before the rename publishes them; a power loss after the rename then
+/// leaves the whole tree or none of it. NTFS journals directory entries.
+#[cfg(unix)]
+fn sync_dirs(dir: &Path) -> io::Result<()> {
+    for entry in fs::read_dir(dir)? {
+        let entry = entry?;
+        if entry.file_type()?.is_dir() {
+            sync_dirs(&entry.path())?;
+        }
+    }
+    fs::File::open(dir)?.sync_all()
 }
 
 /// Antivirus scanners briefly hold newly written files open on Windows,

@@ -21,6 +21,8 @@
 //!   authentication, and a bank made with pg0's fixed `postgres` password
 //!   moves to its secret on its next owned start (`move_under_trust`, `move_over_scram`).
 
+// The per-user data dir is shared with the native runtime provisioner.
+pub use super::native_provision::{Platform, default_data_dir};
 use std::{
     collections::BTreeSet,
     ffi::OsString,
@@ -63,24 +65,6 @@ const SERVER_SETTINGS: &[(&str, &str)] = &[
     ("timezone", "UTC"),
     ("log_timezone", "UTC"),
 ];
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Platform {
-    Windows,
-    MacOs,
-    Other,
-}
-impl Platform {
-    pub fn current() -> Self {
-        if cfg!(windows) {
-            Self::Windows
-        } else if cfg!(target_os = "macos") {
-            Self::MacOs
-        } else {
-            Self::Other
-        }
-    }
-}
 
 #[derive(Debug)]
 pub enum Error {
@@ -210,33 +194,6 @@ fn py_repr(text: &str) -> String {
     }
     out.push(quote);
     out
-}
-
-/// `embedded_pg.default_lite_data_dir()`: the stable per-user data dir.
-/// `env` answers nonempty values only as Python's `os.environ.get(..) or`
-/// does; `home` is `Path.home()`. `None` when no home is known.
-pub fn default_data_dir(
-    platform: Platform,
-    env: &dyn Fn(&str) -> Option<OsString>,
-    home: Option<&Path>,
-) -> Option<PathBuf> {
-    let set = |name: &str| {
-        env(name)
-            .filter(|value| !value.is_empty())
-            .map(PathBuf::from)
-    };
-    let base = match platform {
-        Platform::Windows => match set("LOCALAPPDATA") {
-            Some(local) => local,
-            None => home?.join("AppData").join("Local"),
-        },
-        Platform::MacOs => home?.join("Library").join("Application Support"),
-        Platform::Other => match set("XDG_DATA_HOME") {
-            Some(data) => data,
-            None => home?.join(".local").join("share"),
-        },
-    };
-    Some(base.join("pseudolife-mcp"))
 }
 
 /// The pgdata of a lite data dir.
