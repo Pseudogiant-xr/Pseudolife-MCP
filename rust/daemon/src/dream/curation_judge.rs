@@ -654,10 +654,13 @@ async fn record_bound_judgment(
             Some(v) if py_truthy(v) => py_str(v),
             _ => "leave".into(),
         };
+        // A REAL bound as PostgreSQL's float8 cast takes it (an underflow
+        // fails the write, as Python's does).
         let confidence = verdict
             .get("confidence")
             .and_then(Value::as_f64)
-            .map(|x| x as f32);
+            .map(super::judge::real)
+            .transpose()?;
         c.execute(
             "INSERT INTO curation_judgments (store, a_key, b_key, verdict, \
              keep, fold, confidence, note, model, judged_at) \
@@ -915,6 +918,32 @@ async fn refresh_auto_dismissals(
 
 // ── the tick ─────────────────────────────────────────────────────────────
 
+/// A pair's memoised verdict as the replay rebuilds it (`verdict`, `keep`,
+/// `fold`, `confidence or 0.0`, `note`).
+fn saved_verdict(memo: &HashMap<(String, String), Map<String, Value>>, it: &Item) -> Row {
+    let mut keys = [
+        vs(&it.pair, "a_key").unwrap_or("").to_string(),
+        vs(&it.pair, "b_key").unwrap_or("").to_string(),
+    ];
+    keys.sort();
+    let [a, b] = keys;
+    let saved = memo.get(&(a, b)).cloned().unwrap_or_default();
+    let mut v = Map::new();
+    for k in ["verdict", "keep", "fold"] {
+        v.insert(k.into(), saved.get(k).cloned().unwrap_or(Value::Null));
+    }
+    let conf = match saved.get("confidence") {
+        Some(c) if py_truthy(c) => c.clone(),
+        _ => json!(0.0),
+    };
+    v.insert("confidence".into(), conf);
+    v.insert(
+        "note".into(),
+        saved.get("note").cloned().unwrap_or(Value::Null),
+    );
+    v
+}
+
 fn answer(pairs: &[(&str, Value)]) -> Map<String, Value> {
     pairs
         .iter()
@@ -1081,19 +1110,28 @@ async fn curation_tick(
         .map_err(e2s)?;
         ex = Some(x);
     }
-    let dups = |recs: &[crate::graph_consolidation::SlotRecord], store: &str| {
-        crate::graph_consolidation::slot_duplicate_candidates(
-            recs,
-            cfg.curation_min_similarity,
-            cfg.curation_top_k,
-            &super::deep::store_dismissed(&dismissed, store),
-        )
-    };
+    // The pairwise scans are quadratic in each store: they run on a
+    // blocking thread, and the tick checks for shutdown once they return.
+    let (min_sim, top_k) = (cfg.curation_min_similarity, cfg.curation_top_k);
+    let (lesson_dups, world_dups) = or_stop(
+        stop,
+        tokio::task::spawn_blocking(move || {
+            let dups = |recs: &[crate::graph_consolidation::SlotRecord], store: &str| {
+                crate::graph_consolidation::slot_duplicate_candidates(
+                    recs,
+                    min_sim,
+                    top_k,
+                    &super::deep::store_dismissed(&dismissed, store),
+                )
+            };
+            (dups(&lesson_recs, "lesson"), dups(&world_recs, "world"))
+        }),
+    )
+    .await?
+    .map_err(|e| e.to_string())?;
+    check_stop(stop)?;
     let mut items: Vec<Item> = Vec::new();
-    for (store, list) in [
-        ("lesson", dups(&lesson_recs, "lesson")),
-        ("world", dups(&world_recs, "world")),
-    ] {
+    for (store, list) in [("lesson", lesson_dups), ("world", world_dups)] {
         let snaps = &full.iter().find(|(s, _)| *s == store).expect("store").1;
         for pair in list {
             let Value::Object(pair) = pair else { continue };
@@ -1103,12 +1141,14 @@ async fn curation_tick(
             ) else {
                 continue;
             };
-            if let Some(ev) = capture_pair_evidence(store_of(store), l, r) {
-                items.push(Item {
-                    pair: pair.clone(),
-                    ev,
-                });
-            }
+            // Python's capture_pair_evidence raises on a same-slot pair.
+            let Some(ev) = capture_pair_evidence(store_of(store), l, r) else {
+                return Err("duplicate evidence sides must name different slots".into());
+            };
+            items.push(Item {
+                pair: pair.clone(),
+                ev,
+            });
         }
     }
     if items.is_empty() {
@@ -1196,9 +1236,26 @@ async fn curation_tick(
     } else {
         [Store::Lesson, Store::World]
     };
+    // In auto, Python applies a pending duplicate the safe-fold rule allows
+    // and the pair leaves the listing. Its fold is not ported (task
+    // P3b-4b): it stays bound `pending` for a daemon that folds, and is left
+    // out of the schedule so it cannot hold its store's slots every tick.
+    let fold_pending = |i: &Item| {
+        if mode != "auto" {
+            return false;
+        }
+        let saved = saved_verdict(memo_of(i.ev.store), i);
+        rj::vs(&saved, "verdict") == Some("duplicate")
+            && saved
+                .get("confidence")
+                .and_then(Value::as_f64)
+                .unwrap_or(0.0)
+                >= cfg.curation_forget_min_confidence
+            && can_auto_fold(&i.ev, &saved).0
+    };
     let pending: Vec<(Store, Item)> = classified
         .iter()
-        .filter(|(_, s)| s == "pending")
+        .filter(|(i, s)| s == "pending" && !fold_pending(i))
         .map(|(i, _)| (i.ev.store, i.clone()))
         .collect();
     let todo: Vec<(Store, Item)> = classified
@@ -1314,39 +1371,7 @@ async fn curation_tick(
         || crate::mutants::active("mcp-dream-curation-shadow-dismisses");
     let mut actions: Vec<(Item, Row)> = Vec::new();
     for it in &replay {
-        let mut keys = [
-            vs(&it.pair, "a_key").unwrap_or("").to_string(),
-            vs(&it.pair, "b_key").unwrap_or("").to_string(),
-        ];
-        keys.sort();
-        let [a, b] = keys;
-        let saved = memo_of(it.ev.store)
-            .get(&(a, b))
-            .cloned()
-            .unwrap_or_default();
-        let mut v = Map::new();
-        v.insert(
-            "verdict".into(),
-            saved.get("verdict").cloned().unwrap_or(Value::Null),
-        );
-        v.insert(
-            "keep".into(),
-            saved.get("keep").cloned().unwrap_or(Value::Null),
-        );
-        v.insert(
-            "fold".into(),
-            saved.get("fold").cloned().unwrap_or(Value::Null),
-        );
-        let conf = match saved.get("confidence") {
-            Some(c) if py_truthy(c) => c.clone(),
-            _ => json!(0.0),
-        };
-        v.insert("confidence".into(), conf);
-        v.insert(
-            "note".into(),
-            saved.get("note").cloned().unwrap_or(Value::Null),
-        );
-        actions.push((it.clone(), v));
+        actions.push((it.clone(), saved_verdict(memo_of(it.ev.store), it)));
     }
     for v in &verdicts {
         let n = v.get("n").and_then(Value::as_u64).unwrap_or(0) as usize;
