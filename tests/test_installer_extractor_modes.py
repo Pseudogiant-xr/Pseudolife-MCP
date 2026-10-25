@@ -432,15 +432,18 @@ def _ufw_files(shell: _Shell, *, enabled: str | None = "yes",
 def _shim_probe(shell: _Shell, *, mode: str = "claude-only", port: str = "8082",
                 container: int = 1, host_up: bool = True, ufw: str = "drop",
                 uname: str = "Linux", subnet: str = SUBNET, rule: str = "ask",
-                sudo_exit: int = 0, ip_ok: bool = True):
+                sudo_exit: int = 0, ip_ok: bool = True,
+                networks: dict[str, str] | None = None):
     """The probe block with stub docker, curl, ip, sudo and uname, under the
     installer's own `set -euo pipefail`. The container's request fails
     (``container``) until the stub sudo has added a rule."""
     _stub(shell.bin / "docker",
           "printf 'docker|%s\\n' \"$*\" >>\"$CALL_LOG\"\n"
           "case \"$1\" in\n"
-          "  inspect) printf 'pseudolife-mcp_default \\n' ;;\n"
-          "  network) [ -z \"$FAKE_SUBNET\" ] || printf '%s \\n' \"$FAKE_SUBNET\" ;;\n"
+          "  inspect) printf '%s \\n' \"$FAKE_NETWORKS\" ;;\n"
+          # One network's IPAM subnets, as the -f template prints them.
+          # docker network inspect -f <template> <name>: the name is $5.
+          "  network) eval \"subnets=\\${FAKE_SUBNET_$5:-}\"; printf '%s \\n' \"$subnets\" ;;\n"
           "  exec) [ -e \"$CALL_LOG.ruled\" ] && exit 0; exit \"$FAKE_DOCKER_EXIT\" ;;\n"
           "esac\nexit 0\n")
     _stub(shell.bin / "sudo",
@@ -455,6 +458,10 @@ def _shim_probe(shell: _Shell, *, mode: str = "claude-only", port: str = "8082",
                                  "off": {"enabled": None, "policy": None}}[ufw])
     claude = "1" if mode.startswith("claude") else ""
     codex = "1" if mode.startswith("openai") else ""
+    # Network name -> its IPAM subnets, space-separated (IPv6 included).
+    networks = {"pseudolife-mcp_default": subnet} if networks is None else networks
+    env = {f"FAKE_SUBNET_{name.replace('-', '_')}": value for name, value in networks.items()}
+    env["FAKE_NETWORKS"] = " ".join(name.replace("-", "_") for name in networks)
     return shell.run(
         f"EXTRACTOR='{mode}'\nSHIM_PORT={port}\nFIREWALL_RULE={rule}\n"
         f"claude_shim_mode='{claude}'\ncodex_shim_mode='{codex}'\n"
@@ -465,8 +472,8 @@ def _shim_probe(shell: _Shell, *, mode: str = "claude-only", port: str = "8082",
         strict="set -euo pipefail",
         extra_env={"FAKE_DOCKER_EXIT": str(container), "FAKE_UNAME": uname,
                    "FAKE_CURL_EXIT": "0" if host_up else "7",
-                   "FAKE_HEALTH": '{"status": "ok"}', "FAKE_SUBNET": subnet,
-                   "FAKE_SUDO_EXIT": str(sudo_exit), "FAKE_IP_OK": "1" if ip_ok else "0"})
+                   "FAKE_HEALTH": '{"status": "ok"}',
+                   "FAKE_SUDO_EXIT": str(sudo_exit), "FAKE_IP_OK": "1" if ip_ok else "0", **env})
 
 
 def _calls(shell: _Shell, tool: str, sub: str = "") -> list[str]:
@@ -555,6 +562,42 @@ def test_an_unreadable_subnet_never_falls_back_to_a_broad_rule(bash, tmp_path):
     assert not _calls(shell, "sudo")
     assert "docker network inspect pseudolife-mcp_default" in proc.stderr
     assert "from <subnet> to 172.17.0.1 port 8082" in proc.stderr
+
+
+@pytest.mark.parametrize("networks", [
+    {"pseudolife_mcp_default": "10.0.0.0/24", "proxy": "10.0.0.128/25"},
+    {"pseudolife_mcp_default": "0.0.0.0/0"},
+    {"pseudolife_mcp_default": "10.0.0.300/24"},
+    {"pseudolife_mcp_default": "10.0.0.0/4"},
+    {"pseudolife_mcp_default": "fd00:1::/64"}])
+@BASH
+def test_no_rule_is_offered_for_a_subnet_that_is_not_one_ipv4_network(bash, tmp_path, networks):
+    """Several networks would be a guess, and 0.0.0.0/0, a bad octet or a
+    /4 would open the port far wider than the daemon's network."""
+    shell = _Shell(bash, tmp_path)
+    proc = _shim_probe(shell, rule="yes", networks=networks)
+    assert proc.returncode == 0, proc.stderr
+    assert not _calls(shell, "sudo")
+    assert "from <subnet> to 172.17.0.1 port 8082" in proc.stderr
+    assert not re.search(r"ufw allow from [0-9]", proc.stderr), proc.stderr
+
+
+@BASH
+def test_an_ipv6_subnet_beside_the_ipv4_one_is_ignored(bash, tmp_path):
+    shell = _Shell(bash, tmp_path)
+    proc = _shim_probe(shell, rule="no",
+                       networks={"pseudolife_mcp_default": "fd00:1::/64 10.0.0.0/24"})
+    assert proc.returncode == 0, proc.stderr
+    assert UFW_RULE in proc.stderr
+
+
+@BASH
+def test_an_invalid_firewall_rule_value_is_refused_before_anything_runs(bash, tmp_path):
+    shell = _Shell(bash, tmp_path)
+    proc = shell.run(f"\"$BASH\" '{shell.path(ROOT / 'ops' / 'install.sh')}' --firewall-rule maybe\n")
+    assert proc.returncode == 2
+    assert "invalid --firewall-rule 'maybe' (ask|yes|no)" in proc.stderr
+    assert not _calls(shell, "docker")
 
 
 @pytest.mark.parametrize("ufw", ["accept", "off"])

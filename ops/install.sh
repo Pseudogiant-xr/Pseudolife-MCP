@@ -40,8 +40,9 @@
 #                                    daemon container's traffic to the shim: add
 #                                    the one ufw rule that lets only the
 #                                    daemon's network reach the shim's port
-#                                    (default: ask - prompts, no by default;
-#                                    unattended runs skip it and print it)
+#                                    (default: ask; the prompt defaults to no;
+#                                    unattended runs skip it and print the
+#                                    command)
 #   --instructions append|skip|auto  standing memory block (default: auto -
 #                                    prompts only where no briefing hook exists)
 #   --claude-md append|skip          compatibility alias for --instructions
@@ -2972,12 +2973,17 @@ docker_bridge_address() {
 # The subnet of the compose network the daemon sits on: the narrowest
 # source a rule can name that outlives the daemon's recreation on update
 # (only `down` drops the network, and `up` may then give it another one).
+# Echoes nothing unless there is exactly one well-formed IPv4 subnet with a
+# /8 to /32 prefix: a daemon on several networks, or a value such as
+# 0.0.0.0/0, gets no rule offered rather than a guess or a wide one.
 daemon_subnet() {
     docker inspect -f '{{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}' pseudolife-mcp-daemon 2>/dev/null \
         | tr ' ' '\n' | while IFS= read -r net; do
             [ -n "$net" ] || continue
             docker network inspect -f '{{range .IPAM.Config}}{{.Subnet}} {{end}}' "$net" 2>/dev/null || true
-        done | tr ' ' '\n' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/[0-9]+$' | head -1 || true
+        done | tr ' ' '\n' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/[0-9]+$' \
+        | awk -F'[./]' '$1 <= 255 && $2 <= 255 && $3 <= 255 && $4 <= 255 && $5 >= 8 && $5 <= 32 { n++; s = $0 }
+            END { if (n == 1) print s }' || true
 }
 ufw_drops_input() {  # status 0 when ufw is on and drops what no rule allows
     grep -qs '^ENABLED=yes' "$UFW_CONF" || return 1
@@ -3000,11 +3006,13 @@ firewall_rule_wanted() {
         yes) return 0 ;;
         no) echo "  Not added (--firewall-rule no): run the command above when you want dreams to reach the shim."; return 1 ;;
     esac
-    if [ ! -t 0 ]; then
+    # The prompt goes to stderr, which stays the terminal when stdout is
+    # captured; with no terminal on either side nothing is asked.
+    if [ ! -t 0 ] || [ ! -t 2 ]; then
         echo "  Not added (no terminal to ask on): run the command above, or re-run with --firewall-rule yes."
         return 1
     fi
-    printf "Add this ufw rule now? It runs sudo and opens only port %s on %s to the daemon's network [y/N]: " "$SHIM_PORT" "$bridge"
+    printf "Add this ufw rule now? It runs sudo and opens only port %s on %s to the daemon's network [y/N]: " "$SHIM_PORT" "$bridge" >&2
     firewall_reply=""
     IFS= read -r firewall_reply || firewall_reply=""
     case "$firewall_reply" in
@@ -3045,10 +3053,10 @@ shim_container_probe() {
     fi
     subnet="$(daemon_subnet)"
     if [ -z "$subnet" ]; then
-        echo "WARNING: the $shim_name answers on this host at $bridge:$SHIM_PORT, but ufw drops the daemon container's traffic to it, and the daemon's network subnet could not be read. Find it with docker network inspect pseudolife-mcp_default, then allow only that network: sudo ufw allow from <subnet> to $bridge port $SHIM_PORT proto tcp comment 'pseudolife dream shim'. The daemon retries every sweep, and until then $shim_until." >&2
+        echo "WARNING: the $shim_name answers on this host at $bridge:$SHIM_PORT, but the daemon's container cannot reach it; ufw is enabled with a dropping input policy, the likely cause. The daemon's network subnet could not be read as one IPv4 network, so no rule is offered. Find it with docker network inspect pseudolife-mcp_default, then allow only that network: sudo ufw allow from <subnet> to $bridge port $SHIM_PORT proto tcp comment 'pseudolife dream shim'. The daemon retries every sweep, and until then $shim_until." >&2
         return 0
     fi
-    echo "WARNING: the $shim_name answers on this host at $bridge:$SHIM_PORT, but ufw drops the daemon container's traffic to it. This rule lets only the daemon's network through, to that one port: sudo ufw allow from $subnet to $bridge port $SHIM_PORT proto tcp comment 'pseudolife dream shim'. If a later docker compose down gives the network another subnet, the installer's next run names the new rule." >&2
+    echo "WARNING: the $shim_name answers on this host at $bridge:$SHIM_PORT, but the daemon's container cannot reach it; ufw is enabled with a dropping input policy, the likely cause. This rule lets only the daemon's network through, to that one port: sudo ufw allow from $subnet to $bridge port $SHIM_PORT proto tcp comment 'pseudolife dream shim'. If a later docker compose down gives the network another subnet, the installer's next run names the new rule." >&2
     if firewall_rule_wanted; then
         if sudo ufw allow from "$subnet" to "$bridge" port "$SHIM_PORT" proto tcp comment 'pseudolife dream shim'; then
             if container_reaches_shim "$probe_url"; then
