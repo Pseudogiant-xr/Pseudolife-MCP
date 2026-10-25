@@ -1351,7 +1351,7 @@ def test_the_client_modes_import_without_the_daemons_heavy_dependencies(tmp_path
     import subprocess, sys, textwrap
     script = textwrap.dedent("""
         import sys
-        for name in ("torch", "sentence_transformers", "chromadb", "networkx", "pypdf"):
+        for name in ("torch", "sentence_transformers", "chromadb", "networkx", "pypdf", "pypdfium2"):
             sys.modules[name] = None
         import importlib
         for module in %r:

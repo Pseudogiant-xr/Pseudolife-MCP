@@ -1,7 +1,7 @@
 """Document parser extraction paths — pypdfium2 preferred, pypdf fallback.
 
 The PDF fixture is handcrafted (offsets computed, no writer dependency) so
-the test runs offline and exercises whichever extractor is installed.
+the tests run offline; the default install reads PDFs with pypdfium2.
 """
 
 from __future__ import annotations
@@ -73,19 +73,47 @@ def test_extract_pdf_pypdf_fallback(tmp_path, monkeypatch):
     assert "fallback path test" in extract_text(p)
 
 
+def test_a_pdf_pdfium_cannot_open_is_refused_as_a_read_failure(tmp_path):
+    """PDFium's own error reaches the caller as the ValueError every other
+    unreadable document gives, not as an unexpected exception."""
+    pytest.importorskip("pypdfium2")
+    p = tmp_path / "broken.pdf"
+    p.write_bytes(b"not a pdf at all")
+    with pytest.raises(ValueError) as caught:
+        extract_text(p)
+    assert str(caught.value) == "Failed to read PDF: Failed to load document (PDFium: Data format error)."
+
+
+def test_a_pdfium_whose_library_cannot_load_falls_back_to_pypdf(tmp_path, monkeypatch):
+    """An installed pypdfium2 whose bundled library fails to load (ctypes
+    raises OSError on import) leaves pypdf to read the file."""
+    p = tmp_path / "doc.pdf"
+    _make_minimal_pdf(p, "library load fallback")
+    real_import = builtins.__import__
+
+    def broken_pdfium(name, *args, **kwargs):
+        if name == "pypdfium2":
+            raise OSError("cannot load library 'pdfium.dll'")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", broken_pdfium)
+    assert "library load fallback" in extract_text(p)
+
+
 def _name(requirement: str) -> str:
     head = requirement.split(">")[0].split("<")[0].split("=")[0].split("[")[0]
     return head.strip().lower().replace("_", "-")
 
 
-def test_pypdfium2_is_a_core_dependency_locked_to_the_rust_pin():
-    """The default install extracts PDF text with PDFium (2026-10-26), at
-    the build the Rust daemon pins (rust/daemon/pdfium-pin.json), so both
-    daemons store the same text; ``pdf`` stays as an accepted no-op extra."""
+def test_pypdfium2_is_a_core_dependency_pinned_exactly():
+    """Every install extracts PDF text with the same PDFium (2026-10-26):
+    exactly pypdfium2 5.14.0, in pyproject and in the image lock, whose
+    wheels bundle the build the Rust daemon pins; ``pdf`` stays as an
+    accepted no-op extra."""
     tomllib = pytest.importorskip("tomllib", reason="needs Python 3.11")
     project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]
     core = [r for r in project["dependencies"] if _name(r) == "pypdfium2"]
-    assert core == ["pypdfium2>=5.14.0,<6"]
+    assert core == ["pypdfium2==5.14.0"]
     assert project["optional-dependencies"]["pdf"] == []
     lock = {}
     for line in (ROOT / "ops" / "requirements.lock.txt").read_text(encoding="utf-8").splitlines():

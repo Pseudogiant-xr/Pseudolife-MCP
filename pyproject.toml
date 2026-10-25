@@ -48,12 +48,13 @@ dependencies = [
     # floor matches what the mcp SDK already requires.
     "pydantic>=2.12,<3",
     "pypdf>=4.0",
-    # PDF text comes from PDFium by default (2026-10-26), so the Python and
-    # Rust daemons store the same text: the lock pins the release that
-    # bundles the PDFium build rust/daemon/pdfium-pin.json pins, and a bump
-    # moves both together (rust/daemon/pin_pdfium.py). pypdf stays the
-    # fallback document_parser uses when this cannot be imported.
-    "pypdfium2>=5.14.0,<6",
+    # PDF text comes from PDFium on every install (2026-10-26), and exactly
+    # this release: its wheels bundle PDFium chromium/8076, the build the
+    # Rust daemon pins, so both daemons store the same text for a PDF. It
+    # moves only together with the Rust PDFium pin, so PDFium security fixes
+    # reach users through a Pseudolife release. pypdf stays the fallback
+    # when this cannot be imported or its library cannot be loaded.
+    "pypdfium2==5.14.0",
     # 3.2.4+: every binary wheel ships libpq 16 or newer, which the lite tier
     # needs (require_auth keeps its password off the wire, 2026-10-25).
     "psycopg[binary]>=3.2.4",
