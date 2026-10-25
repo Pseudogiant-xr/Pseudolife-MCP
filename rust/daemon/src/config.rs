@@ -104,6 +104,31 @@ pub struct MemoryConfig {
     /// `memory.deep_dream` (`utils/config.py` `DeepDreamConfig`): the keys
     /// the daemon reads.
     pub deep_dream: DeepDreamConfig,
+    /// `memory.reference` (`utils/config.py` `ReferenceConfig`): the
+    /// document store's chunking and `document_search`'s default size.
+    pub reference: ReferenceConfig,
+    /// `memory.ref_top_k` (3): reference chunks a memory search appends.
+    pub ref_top_k: i64,
+}
+
+/// `ReferenceConfig` (`utils/config.py:131-139`): the keys the daemon reads
+/// (`persist_dir` and `collection_name` name the pre-v57 chromadb store,
+/// which only the Python daemon's one-time import reads).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ReferenceConfig {
+    pub chunk_size: i64,
+    pub chunk_overlap: i64,
+    pub max_results: i64,
+}
+
+impl Default for ReferenceConfig {
+    fn default() -> Self {
+        ReferenceConfig {
+            chunk_size: 512,
+            chunk_overlap: 64,
+            max_results: 5,
+        }
+    }
 }
 
 /// `DeepDreamConfig` (`utils/config.py:513-720`): the switches
@@ -782,6 +807,8 @@ impl Default for MemoryConfig {
             compaction_min_age_days: 30.0,
             recall: RecallConfig::default(),
             deep_dream: DeepDreamConfig::default(),
+            reference: ReferenceConfig::default(),
+            ref_top_k: 3,
         }
     }
 }
@@ -1722,7 +1749,18 @@ fn load_str(text: &str) -> Result<Config, ConfigError> {
             memory.cortex_auto_promote = want_bool(c, "auto_promote", "memory.cortex", false)?;
         }
         // `self.config.memory.reference.persist_dir = ...` (service.py:857).
-        section(m, "reference", "memory.")?;
+        // `_dict_to_dataclass` checks no types; a non-integer here would
+        // fail Python's first ingest or search, so it refuses the start.
+        if let Some(r) = section(m, "reference", "memory.")? {
+            let p = "memory.reference";
+            let d = ReferenceConfig::default();
+            memory.reference = ReferenceConfig {
+                chunk_size: want_int(r, "chunk_size", p, d.chunk_size)?,
+                chunk_overlap: want_int(r, "chunk_overlap", p, d.chunk_overlap)?,
+                max_results: want_int(r, "max_results", p, d.max_results)?,
+            };
+        }
+        memory.ref_top_k = want_int(m, "ref_top_k", p, memory.ref_top_k)?;
         if let Some(s) = section(m, "search", "memory.")? {
             memory.search = read_search(s)?;
         }

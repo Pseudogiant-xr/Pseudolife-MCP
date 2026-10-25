@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from mcp_ci import MUTANTS, UNSERVED, check_baseline
+from mcp_ci import CORPUS_RESPONSES, MUTANTS, UNSERVED, check_baseline
 
 def line(name, py, rs):
     return f"{name}: python={json.dumps(py)}\n          rust  ={json.dumps(rs)}"
@@ -21,7 +21,7 @@ def refusal_close(index):
 def baseline():
     """The shapes the strict corpus records on mcp 2.2.0: only the two 413s
     declaring a body past the daemon's discard budget (MCP-REFUSAL-CLEANUP)."""
-    return {"summary": {"responses": 316, "cases": 18, "diffs": 2, "unserved_checked": list(UNSERVED)},
+    return {"summary": {"responses": CORPUS_RESPONSES, "cases": 18, "diffs": 2, "unserved_checked": list(UNSERVED)},
             "diffs": [refusal_close(i) for i in (4, 5)]}
 
 

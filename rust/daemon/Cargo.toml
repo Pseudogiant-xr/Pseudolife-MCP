@@ -55,6 +55,9 @@ futures.workspace = true
 axum = { version = "=0.8.9", default-features = false, features = ["http1", "tokio"] }
 anyhow = "=1.0.104"
 hex = "=0.4.3"
+# Document chunk ids are md5 hex (`reference_bank.chunk_id`); the lock
+# already carries this version for postgres-protocol.
+md-5 = "=0.11.0"
 indexmap = "=2.14.2"
 reqwest.workspace = true
 hyper.workspace = true

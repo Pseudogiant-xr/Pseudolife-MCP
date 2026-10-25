@@ -216,6 +216,7 @@ import daemons  # noqa: E402
 import dbstate  # noqa: E402
 import pgdisposable as pg  # noqa: E402
 import run as w1a  # noqa: E402
+import w2e_documents  # noqa: E402
 from stub_extractor import StubExtractor  # noqa: E402
 
 pg.DISPOSABLE_NAME = re.compile(r"pl_cf_w2e_[a-z0-9_]{1,40}")
@@ -280,7 +281,8 @@ RECENT_CLOCK = {("world_facts", "retrieved_at")}
 # null-or-not; in any other, it compares exactly.
 ORDERED_CLOCK = {("lessons", "asserted_at"), ("lessons", "last_confirmed"),
                  ("lessons", "tx_time"), ("lessons", "valid_time"),
-                 ("outcome_signals", "created_at")}
+                 ("outcome_signals", "created_at"),
+                 ("reference_chunks", "ingested_at"), ("reference_chunks", "created_at")}
 # The same in wall-clock milliseconds (the HLC's physical part).
 RECENT_CLOCK_MS = {("lessons", "hlc_phys")}
 RECENT_S = 86400.0
@@ -4644,6 +4646,7 @@ def resolve_args(args: dict, dsn: str) -> dict:
     out = {}
     import psycopg
     for k, v in args.items():
+        v = w2e_documents.resolve(v)
         if isinstance(v, list) and any(isinstance(x, str) and x.startswith(("@id:", "@idn:"))
                                        for x in v):
             # a list of row ids: each element resolved as a value of its own
@@ -5130,6 +5133,7 @@ def normalize_state(state: dict, before: dict,
     numeric["facts"] = extract_fact_numeric(state)
     numeric["world_facts"] = extract_fact_numeric(state, "world_facts")
     numeric["lessons"] = extract_fact_numeric(state, "lessons")
+    numeric["reference_chunks"] = extract_fact_numeric(state, "reference_chunks")
     numeric["lesson_scores"] = extract_lesson_scores(state)
     emap = episode_map(state)
     ranks = clock_ranks(state)
@@ -5176,6 +5180,8 @@ def normalize_state(state: dict, before: dict,
                         if isinstance(v, (int, float)) and not isinstance(v, bool) \
                                 and float(v) in ts_map:
                             row[ci] = ts_map[float(v)]
+        if name == "reference_chunks":
+            w2e_documents.metadata_clocks(t, ranks, _ordered_clock)
         if name == "store_decisions" and "record" in t["columns"]:
             ri = t["columns"].index("record")
             for row in t["rows"]:
@@ -5218,7 +5224,9 @@ def compare_numeric(py: dict, rs: dict, tol: dict, stats: dict) -> list[str]:
                                   "lessons")
     diffs += compare_lesson_scores(py.get("lesson_scores", {}), rs.get("lesson_scores", {}),
                                    stats)
-    skip = ("facts", "world_facts", "lessons", "lesson_scores")
+    diffs += compare_fact_numeric(py.get("reference_chunks", {}), rs.get("reference_chunks", {}),
+                                  tol, stats, "reference_chunks")
+    skip = ("facts", "world_facts", "lessons", "lesson_scores", "reference_chunks")
     py = {k: v for k, v in py.items() if k not in skip}
     rs = {k: v for k, v in rs.items() if k not in skip}
     for eid in sorted(set(py) | set(rs)):
@@ -5915,6 +5923,8 @@ def _run_scenario(name: str, binary: Path, root: Path, mode: str, record: bool,
 def _run_live(name: str, scn: dict, tag: str, binary: Path, root: Path, record: bool,
               tol: dict, mutant: str | None, owned: list[str],
               stubs: dict[str, StubExtractor]) -> dict:
+    if name in w2e_documents.SCENARIOS:
+        w2e_documents.require_oracle_without_bs4()
     template = prepare_template(scn, tag, root, owned, stubs.get("seed"))
     dbs = {side: pg.name(f"pl_cf_w2e_{tag}_{suffix}")
            for side, suffix in (("python", "py"), ("rust", "rs"))}
@@ -5972,6 +5982,7 @@ def _run_live(name: str, scn: dict, tag: str, binary: Path, root: Path, record: 
                 if stubs:
                     py = replace_origin(py, stubs["python"].origin)
                     rs = replace_origin(rs, stubs["rust"].origin)
+                py, rs = w2e_documents.scrub(py), w2e_documents.scrub(rs)
                 row["python"], row["rust"] = py, rs
             if stubs:
                 sent = {side: drain_side(stubs, scn, side) for side in ("python", "rust")}
@@ -5998,6 +6009,9 @@ def _run_live(name: str, scn: dict, tag: str, binary: Path, root: Path, record: 
                     row["diffs"] += orphan_age_diffs(row["python"], row["rust"])
                     row["python"] = dream_tokens(row["python"], tsm_py)
                     row["rust"] = dream_tokens(row["rust"], tsm_rs)
+                if op.get("name") == "document_search":
+                    row["python"] = w2e_documents.answer_tokens(row["python"], clock_ranks(raw_py))
+                    row["rust"] = w2e_documents.answer_tokens(row["rust"], clock_ranks(raw_rs))
                 row["python"] = rename_prefixes(row["python"], ep)
                 row["rust"] = rename_prefixes(row["rust"], er)
                 row["diffs"] += compare_response(row["python"], row["rust"], tol, stats)
@@ -6025,11 +6039,15 @@ def _run_live(name: str, scn: dict, tag: str, binary: Path, root: Path, record: 
     return result
 
 
+SCENARIOS.update(w2e_documents.SCENARIOS)
+MUTANTS += w2e_documents.MUTANTS
+
+
 # Tables the write path touches: recorded every step (the rest only at init).
 WRITE_TABLES = ("entries", "episodes", "meta", "client_sessions", "facts", "entities",
                 "outcome_signals", "world_facts", "memory_trace_invalidations",
                 "entry_reinstatement_decisions", "lessons", "edges", "store_decisions",
-                "slot_reads", "entity_aliases", "relations")
+                "slot_reads", "entity_aliases", "relations", "reference_chunks")
 
 
 def pack(state: dict, full: bool) -> dict:
@@ -6046,7 +6064,7 @@ def pack_numeric(numeric: dict, seen: set) -> dict:
     import struct
     out = {}
     for eid, v in numeric.items():
-        if eid in ("facts", "world_facts", "lessons", "lesson_scores") or eid in seen:
+        if eid in ("facts", "world_facts", "lessons", "lesson_scores", "reference_chunks")                 or eid in seen:
             continue  # fact embeddings are compared live only (declared)
         seen.add(eid)
         emb = v["embedding"]
@@ -6098,6 +6116,7 @@ def run_golden(name: str, binary: Path, root: Path, tol: dict, owned: list[str])
             op = rec["op"]
             row = {"step": i, "op": op, "diffs": []}
             rs = run_op(op, d.port, client, dsn) if op["op"] != "init" else None
+            rs = w2e_documents.scrub(rs)
             if stubs:
                 if rs is not None:
                     rs = replace_origin(rs, stubs["rust"].origin)
@@ -6106,7 +6125,10 @@ def run_golden(name: str, binary: Path, root: Path, tol: dict, owned: list[str])
                 sent = stubs["rust"].drain()
                 row["extractor"] = {"rust": extractor_summary(sent)}
                 row["diffs"] += extractor_unanswered("rust", sent)
-            sr, nr, er = normalize_state(dbstate.dump(dsn), before)
+            raw = dbstate.dump(dsn)
+            sr, nr, er = normalize_state(raw, before)
+            if rs is not None and op.get("name") == "document_search":
+                rs = w2e_documents.answer_tokens(rs, clock_ranks(raw))
             if rs is not None:
                 row["rust"] = rename_prefixes(rs, er)
                 row["diffs"] += compare_response(rec["python"], row["rust"], tol, stats)
