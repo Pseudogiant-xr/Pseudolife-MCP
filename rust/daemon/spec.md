@@ -1631,6 +1631,43 @@ not cleared. `harness/goldens/w2e-merge-judge.json`
 prompt bytes, the proposal format, the reply validation, note tails, the
 served-model mismatch, the signed config and a policy fingerprint.
 
+### The dream sweep's ticks and the session-end dream (2026-10-25)
+
+Python sources: `memory/dream.py` `run_sweep_once` (2398-2547);
+`service_dream.py` `DreamStallTracker` (47-220), `dream_run_auto`
+(2922-2951), `dream_stall_tick` / `dream_stall_notify` (2958-3011),
+`dream_status`'s overdue arm (3080-3092), `_fire_and_forget_dream`
+(3120-3131), `deep_dream_tick` (3824-3845), `analyzer_duplicate_tick`
+(6043-6093) and `_file_analyzer_duplicates` (6095-6156);
+`storage/postgres.py` `reconcile_analyzer_proposals` (3772-3853);
+`memory/graph_review.py` `duplicate_candidates`' anchors (290-345);
+`memory/dream.py` `dream_stall_notice_text` and its helpers (2313-2363);
+`service.py` the reaper's and the session close's dream trigger (6612-6613,
+6755-6756).
+
+| # | Exact item | Source |
+|---|---|---|
+| SW1 | Order after the reapers, while `memory.dream.enabled`: the analyzer tick, the deep tick, the merge judge, (the review-queue judges: not run, P3b), `dream_status`, the stall tick, then the automatic dream when `would_fire`. The analyzer tick and `dream_status` failing end the tick; the deep tick, the judge and the stall tick never fail it. | `dream.py:2453-2547` |
+| SW2 | Analyzer tick: `judges_disabled` when `judges_enabled` is off; under the writer lock, `reconcile_analyzer_proposals(judge_batch)` (decided `analyzer` link proposals, then rejected `analyzer-duplicate` merges, each half behind its own `{at, id}` cursor and transaction, sharing the budget, closing each pair into `dismissed_pairs` at its decision time); `disabled` (with `reconciled`) when `analyzer_file_duplicates` is off; otherwise up to `judge_batch` anchors after `meta.analyzer_duplicate_cursor` (wrapping to the start), every pair touching an anchor in `duplicate_candidates`' order, filing at most `judge_batch` proposals as the deep apply does, then the cursor at the last anchor. | `service_dream.py:6043-6156`; `postgres.py:3772-3853` |
+| SW3 | Deep tick: `disabled` when `auto_tick` is off; `below_threshold` (with the need) unless `deep_dream_need` recommends; otherwise the deep dream's apply without snippets, answered as `{fired, reason, ...}` with the apply's `applied`, `error`, `rescored`, `superseded`, `merged`, `merge_proposed`, `junk_proposed`, `junk_deleted`, `scoped`, `analyzer_filed`, `orphans_deleted` and `snapshot`; a failure answers `fired: false` with `error: <text>`. | `service_dream.py:3824-3845` |
+| SW4 | Stall tick: the sweep's interval set on the tracker, then `check_overdue(backlog, min_batch, would_fire, interval)` (a due backlog no dream serves for three intervals opens a stall, `extractor_unreachable`), then the notice. `dream_status` applies the same rule once the interval is set. | `service_dream.py:2958-2971,3080-3092` |
+| SW5 | Notices (`stall_notice` on): one notifier at a time; `take_notice(stall_repeat_hours)`: `begin` for an unannounced incident, `repeat` while an announced one lasts, each at most once per window across incidents, `escalate` at once when a fallback warning becomes a hard stall, `clear` for an announced incident; posted through the board's daemon notice and marked only when someone received it. The text names the reason, the local minute (`isoformat(sep=" ", timespec="minutes")`, microseconds rounded first) and the remedy. Every automatic dream (the sweep's, a manual `run`, the session-end one) posts what is owed after recording its result. | `service_dream.py:47-220,2922-2951,2973-3011`; `dream.py:2313-2363` |
+| SW6 | The automatic dream and the session-end dream: `dream_run_auto` with no request (no session; the writer `PSEUDOLIFE_WRITER_ID` or `unknown`). The session reaper's idle close fires it in the background without waiting; the SessionEnd hook's close (served by the hook batch) calls the same entry point (`Service::fire_session_dream`). | `service_dream.py:2922-2951,3120-3131`; `service.py:6612-6613,6755-6756` |
+
+`harness/w2e.py live --only sweep-dream-auto sweep-deep-tick
+sweep-analyzer-tick sweep-stall` lets both daemons' sweeps run on their own
+timers (0.25 s, 1 s for the stall) and compares the banks, the answers and
+the model requests once both have settled: the automatic dream once the
+batch is stored (its run row and cursor), the deep tick's single apply (its
+snapshot file and watermark), the analyzer tick's filing and cursor with the
+reconcile pass's closure, and a stall the sweep opens as the failing memory
+is held, isolated and quarantined. Each settled state is independent of how
+many ticks ran. `src/dream/stall_tests.rs` replays five recorded sequences
+through Python's tracker (escalation, repeats inside and outside the
+window, an undelivered notice that stays owed, the overdue rule, flapping,
+the results that say nothing) and the notice texts at three fixed offsets.
+The `mcp-sweep-*` mutants are caught by their scenarios.
+
 ### Board tools over MCP (2026-10-16)
 
 `board/mcp.rs`, registered in `mcp::dispatch::registry`. Python:

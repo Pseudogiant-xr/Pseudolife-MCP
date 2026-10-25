@@ -100,6 +100,109 @@ async fn pending_entity_proposals(c: &Client) -> anyhow::Result<Vec<EntityPropos
     )
 }
 
+/// `dismissed_pairs` (3427-3429).
+async fn dismissed_pairs(c: &Client) -> anyhow::Result<HashSet<(String, String)>> {
+    Ok(c.query("SELECT a_norm, b_norm FROM dismissed_pairs", &[])
+        .await?
+        .iter()
+        .map(|r| (r.get(0), r.get(1)))
+        .collect())
+}
+
+/// `entity_proposal_keys` (3731-3744).
+async fn entity_proposal_keys(c: &Client) -> anyhow::Result<HashSet<PropKey>> {
+    let mut prop_keys = HashSet::new();
+    for r in c
+        .query("SELECT kind, entity_id, into_id FROM entity_proposals", &[])
+        .await?
+    {
+        let (kind, eid, into): (String, i64, Option<i64>) = (r.get(0), r.get(1), r.get(2));
+        prop_keys.insert(match (kind.as_str(), into) {
+            ("merge", Some(into)) => PropKey::Merge(eid.min(into), eid.max(into)),
+            _ => PropKey::Kind(kind, eid),
+        });
+    }
+    Ok(prop_keys)
+}
+
+/// `lesson_entity_ids` (4228-4238).
+async fn lesson_entity_ids(c: &Client) -> anyhow::Result<HashSet<i64>> {
+    Ok(c.query(
+        "SELECT entity_id FROM lessons WHERE entity_id IS NOT NULL \
+         UNION \
+         SELECT object_entity_id FROM lessons WHERE object_entity_id IS NOT NULL",
+        &[],
+    )
+    .await?
+    .iter()
+    .map(|r| r.get(0))
+    .collect())
+}
+
+/// `entity_fact_counts` (4240-4247).
+async fn entity_fact_counts(c: &Client) -> anyhow::Result<HashMap<i64, i64>> {
+    Ok(c.query(
+        "SELECT entity_id, COUNT(*) FROM facts \
+         WHERE status = 'current' AND entity_id IS NOT NULL GROUP BY entity_id",
+        &[],
+    )
+    .await?
+    .iter()
+    .map(|r| (r.get(0), r.get(1)))
+    .collect())
+}
+
+/// The graph and the four tables the analyzer tick reads (`load_graph`,
+/// `dismissed_pairs`, `lesson_entity_ids`, `entity_fact_counts`,
+/// `entity_proposal_keys`), not the whole deep-dream snapshot.
+struct AnalyzerInputs {
+    entities: Vec<Entity>,
+    edges: Vec<gr::Edge>,
+    dismissed: HashSet<(String, String)>,
+    lesson_refs: HashSet<i64>,
+    fact_counts: HashMap<i64, i64>,
+    prop_keys: HashSet<PropKey>,
+}
+
+async fn analyzer_inputs(c: &Client) -> anyhow::Result<AnalyzerInputs> {
+    let g = graph::load_graph_body(c).await?;
+    let s = |v: &Value| v.as_str().unwrap_or_default().to_string();
+    let entities = g["entities"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|e| Entity {
+            id: e["id"].as_i64().unwrap_or(0),
+            canonical: s(&e["canonical"]),
+            display: s(&e["display"]),
+        })
+        .collect();
+    let edges = g["edges"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|e| gr::Edge {
+            src_id: e["src_id"].as_i64().unwrap_or(0),
+            relation: s(&e["relation"]),
+            dst_id: e["dst_id"].as_i64().unwrap_or(0),
+            confidence: e["confidence"].as_f64().unwrap_or(0.0),
+            origin: e["origin"].as_str().map(str::to_string),
+        })
+        .collect();
+    let dismissed = dismissed_pairs(c).await?;
+    let lesson_refs = lesson_entity_ids(c).await?;
+    let fact_counts = entity_fact_counts(c).await?;
+    let prop_keys = entity_proposal_keys(c).await?;
+    Ok(AnalyzerInputs {
+        entities,
+        edges,
+        dismissed,
+        lesson_refs,
+        fact_counts,
+        prop_keys,
+    })
+}
+
 async fn load(c: &Client) -> anyhow::Result<Loaded> {
     let g = graph::load_graph_body(c).await?;
     let s = |v: &Value| v.as_str().unwrap_or_default().to_string();
@@ -171,25 +274,8 @@ async fn load(c: &Client) -> anyhow::Result<Loaded> {
             embedding: r.get(3),
         })
         .collect();
-    // `dismissed_pairs` (3427-3429).
-    let dismissed = c
-        .query("SELECT a_norm, b_norm FROM dismissed_pairs", &[])
-        .await?
-        .iter()
-        .map(|r| (r.get(0), r.get(1)))
-        .collect();
-    // `entity_proposal_keys` (3731-3744).
-    let mut prop_keys = HashSet::new();
-    for r in c
-        .query("SELECT kind, entity_id, into_id FROM entity_proposals", &[])
-        .await?
-    {
-        let (kind, eid, into): (String, i64, Option<i64>) = (r.get(0), r.get(1), r.get(2));
-        prop_keys.insert(match (kind.as_str(), into) {
-            ("merge", Some(into)) => PropKey::Merge(eid.min(into), eid.max(into)),
-            _ => PropKey::Kind(kind, eid),
-        });
-    }
+    let dismissed = dismissed_pairs(c).await?;
+    let prop_keys = entity_proposal_keys(c).await?;
     let pending_props = pending_entity_proposals(c).await?;
     // `pending_proposals` (3431-3455): the pairs.
     let pending_links = c
@@ -206,29 +292,8 @@ async fn load(c: &Client) -> anyhow::Result<Loaded> {
             (a.min(b), a.max(b))
         })
         .collect();
-    // `lesson_entity_ids` (4228-4238).
-    let lesson_refs = c
-        .query(
-            "SELECT entity_id FROM lessons WHERE entity_id IS NOT NULL \
-             UNION \
-             SELECT object_entity_id FROM lessons WHERE object_entity_id IS NOT NULL",
-            &[],
-        )
-        .await?
-        .iter()
-        .map(|r| r.get(0))
-        .collect();
-    // `entity_fact_counts` (4240-4247).
-    let fact_counts = c
-        .query(
-            "SELECT entity_id, COUNT(*) FROM facts \
-             WHERE status = 'current' AND entity_id IS NOT NULL GROUP BY entity_id",
-            &[],
-        )
-        .await?
-        .iter()
-        .map(|r| (r.get(0), r.get(1)))
-        .collect();
+    let lesson_refs = lesson_entity_ids(c).await?;
+    let fact_counts = entity_fact_counts(c).await?;
     // `current_fact_counts_by_entity_text` (4249-4260): `str(entity)`.
     let fact_texts = c
         .query(
@@ -795,14 +860,20 @@ async fn file_analyzer_duplicates(
     excluded: &HashSet<i64>,
     prop_keys: &HashSet<PropKey>,
     now: f64,
+    anchor_ids: Option<&HashSet<i64>>,
+    max_filed: Option<i64>,
 ) -> Result<i64, ToolError> {
     let alive: Vec<Entity> = entities
         .iter()
         .filter(|e| !excluded.contains(&e.id))
         .cloned()
         .collect();
-    let findings =
-        gr::duplicate_candidates(&alive, dismissed, &gr::lesson_only_ids(edges, lesson_refs));
+    let findings = gr::duplicate_candidates_anchored(
+        &alive,
+        dismissed,
+        &gr::lesson_only_ids(edges, lesson_refs),
+        anchor_ids,
+    );
     if findings.is_empty() {
         return Ok(0);
     }
@@ -885,8 +956,247 @@ async fn file_analyzer_duplicates(
             .await?
         };
         filed += i64::from(pid.is_some());
+        if let Some(cap) = max_filed
+            && filed >= cap.max(0)
+        {
+            break;
+        }
     }
     Ok(filed)
+}
+
+// ── the analyzer tick (`analyzer_duplicate_tick`) ────────────────────────
+
+fn reconcile_mark(v: Option<Value>) -> (f64, i64) {
+    let m = v.and_then(|v| v.as_object().cloned()).unwrap_or_default();
+    (
+        m.get("at").and_then(Value::as_f64).unwrap_or(0.0),
+        m.get("id").and_then(Value::as_i64).unwrap_or(0),
+    )
+}
+
+/// `reconcile_analyzer_proposals(limit=cap)` (`storage/postgres.py:3772-
+/// 3853`): close decided analyzer pairs into `dismissed_pairs` once, edge
+/// proposals then entity merge rejections, each half behind its own
+/// high-water cursor and in its own transaction, sharing one budget.
+async fn reconcile_analyzer_proposals(client: &Client, cap: i64) -> Result<Value, ToolError> {
+    let cap = cap.max(1);
+    let (edge_rows, edge_closed, edge_remaining) = crate::txn::run(client, |c| async move {
+        let key = "analyzer_pair_reconcile_cursor";
+        let row = c
+            .query_opt("SELECT value FROM meta WHERE key = $1 FOR UPDATE", &[&key])
+            .await?;
+        let (mut at, mut id) = reconcile_mark(row.map(|r| r.get::<_, Value>(0)));
+        let rows = c
+            .query(
+                "SELECT p.id, COALESCE(p.decided_at, p.created_at), s.canonical, d.canonical \
+                 FROM edge_proposals p \
+                 JOIN entities s ON s.id = p.src_id \
+                 JOIN entities d ON d.id = p.dst_id \
+                 WHERE p.source = 'analyzer' \
+                 AND p.status IN ('accepted', 'rejected', 'retyped') \
+                 AND (COALESCE(p.decided_at, p.created_at), p.id) > ($1, $2) \
+                 ORDER BY COALESCE(p.decided_at, p.created_at), p.id LIMIT $3",
+                &[&at, &id, &cap],
+            )
+            .await?;
+        let mut closed = 0i64;
+        for r in &rows {
+            let (left, right): (String, String) = (r.get(2), r.get(3));
+            if !left.is_empty() && !right.is_empty() && left != right {
+                let (a, b) = if left <= right {
+                    (left, right)
+                } else {
+                    (right, left)
+                };
+                let at_row: f64 = r.get(1);
+                let inserted = c
+                    .query_opt(
+                        "INSERT INTO dismissed_pairs (a_norm, b_norm, dismissed_at) \
+                         VALUES ($1, $2, $3) ON CONFLICT DO NOTHING RETURNING a_norm",
+                        &[&a, &b, &at_row],
+                    )
+                    .await?;
+                closed += i64::from(inserted.is_some());
+            }
+        }
+        if let Some(last) = rows.last() {
+            at = last.get(1);
+            id = last.get(0);
+            c.execute(
+                "INSERT INTO meta (key, value) VALUES ($1, $2) \
+                 ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
+                &[&key, &json!({"at": at, "id": id})],
+            )
+            .await?;
+        }
+        let remaining: i64 = c
+            .query_one(
+                "SELECT count(*) FROM edge_proposals p WHERE p.source = 'analyzer' \
+                 AND p.status IN ('accepted', 'rejected', 'retyped') \
+                 AND (COALESCE(p.decided_at, p.created_at), p.id) > ($1, $2)",
+                &[&at, &id],
+            )
+            .await?
+            .get(0);
+        Ok::<_, tokio_postgres::Error>((rows.len() as i64, closed, remaining))
+    })
+    .await
+    .map_err(internal)?;
+    let budget = (cap - edge_rows).max(0);
+    let (entity_rows, entity_closed, entity_remaining) = crate::txn::run(client, |c| async move {
+        let key = "analyzer_entity_reconcile_cursor";
+        let row = c
+            .query_opt("SELECT value FROM meta WHERE key = $1", &[&key])
+            .await?;
+        let (mut at, mut id) = reconcile_mark(row.map(|r| r.get::<_, Value>(0)));
+        let rows = c
+            .query(
+                "SELECT p.id, COALESCE(p.decided_at, p.created_at), s.canonical, d.canonical \
+                 FROM entity_proposals p JOIN entities s ON s.id=p.entity_id \
+                 JOIN entities d ON d.id=p.into_id \
+                 WHERE p.kind='merge' AND p.status='rejected' \
+                 AND p.reason LIKE 'analyzer-duplicate%' \
+                 AND (COALESCE(p.decided_at,p.created_at),p.id)>($1,$2) \
+                 ORDER BY COALESCE(p.decided_at,p.created_at),p.id LIMIT $3",
+                &[&at, &id, &budget],
+            )
+            .await?;
+        let mut closed = 0i64;
+        for r in &rows {
+            let (left, right): (String, String) = (r.get(2), r.get(3));
+            let (a, b) = if left <= right {
+                (left, right)
+            } else {
+                (right, left)
+            };
+            let at_row: f64 = r.get(1);
+            let inserted = c
+                .query_opt(
+                    "INSERT INTO dismissed_pairs (a_norm,b_norm,dismissed_at) \
+                     VALUES ($1,$2,$3) ON CONFLICT DO NOTHING RETURNING a_norm",
+                    &[&a, &b, &at_row],
+                )
+                .await?;
+            closed += i64::from(inserted.is_some());
+            at = at_row;
+            id = r.get(0);
+        }
+        if !rows.is_empty() {
+            c.execute(
+                "INSERT INTO meta (key, value) VALUES ($1, $2) \
+                 ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
+                &[&key, &json!({"at": at, "id": id})],
+            )
+            .await?;
+        }
+        let remaining: i64 = c
+            .query_one(
+                "SELECT count(*) FROM entity_proposals p WHERE p.kind='merge' \
+                 AND p.status='rejected' AND p.reason LIKE 'analyzer-duplicate%' \
+                 AND (COALESCE(p.decided_at,p.created_at),p.id)>($1,$2)",
+                &[&at, &id],
+            )
+            .await?
+            .get(0);
+        Ok::<_, tokio_postgres::Error>((rows.len() as i64, closed, remaining))
+    })
+    .await
+    .map_err(internal)?;
+    Ok(json!({
+        "considered": edge_rows + entity_rows,
+        "closed": edge_closed + entity_closed,
+        "remaining": edge_remaining + entity_remaining,
+    }))
+}
+
+/// `analyzer_duplicate_tick` (`service_dream.py:6043-6093`): one bounded
+/// analyzer slice per sweep tick, under the writer lock throughout, from a
+/// durable entity-id cursor (`meta.analyzer_duplicate_cursor`): at most
+/// `judge_batch` anchors compared against the whole graph and at most that
+/// many proposals filed.
+pub(crate) async fn analyzer_duplicate_tick(
+    service: &Service,
+    ready: &Ready,
+) -> Result<Value, ToolError> {
+    let cfg = &service.config.memory.deep_dream;
+    if !cfg.judges_enabled {
+        return Ok(json!({"fired": false, "reason": "judges_disabled"}));
+    }
+    let cap = cfg.judge_batch.max(1);
+    let client = ready.storage.client();
+    let _ws = ready.write.lock().await;
+    let reconciled = reconcile_analyzer_proposals(client, cap).await?;
+    if !cfg.analyzer_file_duplicates {
+        return Ok(json!({"fired": false, "reason": "disabled", "reconciled": reconciled}));
+    }
+    let ld = crate::txn::with_client(client, |c| async move { analyzer_inputs(c).await })
+        .await
+        .map_err(internal)?;
+    let mut entities = ld.entities.clone();
+    entities.sort_by_key(|e| e.id);
+    if entities.is_empty() {
+        return Ok(json!({"fired": true, "anchors": 0, "filed": 0, "reconciled": reconciled}));
+    }
+    let cursor = crate::txn::with_client(client, |c| async move {
+        c.query_opt(
+            "SELECT value FROM meta WHERE key = 'analyzer_duplicate_cursor'",
+            &[],
+        )
+        .await
+    })
+    .await
+    .map_err(internal)?
+    .map(|r| r.get::<_, Value>(0));
+    // `int(cursor.get("entity_id", 0)) if isinstance(cursor, dict) else 0`.
+    let after = match &cursor {
+        Some(Value::Object(m)) => match m.get("entity_id") {
+            None => 0,
+            Some(v) => v
+                .as_i64()
+                .or_else(|| v.as_f64().map(|f| f.trunc() as i64))
+                .ok_or_else(|| internal("analyzer_duplicate_cursor entity_id is not a number"))?,
+        },
+        _ => 0,
+    };
+    let take = usize::try_from(cap).unwrap_or(usize::MAX);
+    let mut anchors: Vec<&Entity> = entities
+        .iter()
+        .filter(|e| e.id > after)
+        .take(take)
+        .collect();
+    if anchors.len() < take {
+        let selected: HashSet<i64> = anchors.iter().map(|e| e.id).collect();
+        anchors.extend(entities.iter().filter(|e| !selected.contains(&e.id)));
+        anchors.truncate(take);
+    }
+    let anchor_ids: HashSet<i64> = anchors.iter().map(|e| e.id).collect();
+    let last = anchors.last().map(|e| e.id).unwrap_or_default();
+    let n_anchors = anchors.len();
+    let filed = file_analyzer_duplicates(
+        client,
+        &entities,
+        &ld.edges,
+        &ld.dismissed,
+        &ld.lesson_refs,
+        &ld.fact_counts,
+        &HashSet::new(),
+        &ld.prop_keys,
+        now(),
+        Some(&anchor_ids),
+        Some(cap),
+    )
+    .await?;
+    if !crate::mutants::active("mcp-sweep-analyzer-no-cursor") {
+        crate::txn::set_meta(
+            client,
+            "analyzer_duplicate_cursor",
+            &json!({"entity_id": last}),
+        )
+        .await
+        .map_err(internal)?;
+    }
+    Ok(json!({"fired": true, "anchors": n_anchors, "filed": filed, "reconciled": reconciled}))
 }
 
 // ── the response bound (`_bound_deep_response`) ──────────────────────────
@@ -1190,7 +1500,7 @@ fn plan(
 /// snapshot read to the end (Python releases it between its windows;
 /// declared).
 #[allow(clippy::result_large_err)]
-async fn deep_dream(
+pub(crate) async fn deep_dream(
     service: &Service,
     ready: &Ready,
     apply: bool,
@@ -1540,6 +1850,8 @@ async fn deep_dream(
             &excluded,
             &ld.prop_keys,
             now,
+            None,
+            None,
         )
         .await?;
     }

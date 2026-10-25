@@ -84,6 +84,9 @@ pub struct RunState {
     pub(super) alias_memo: Mutex<HashMap<String, Arc<[f32]>>>,
     /// `DreamStallTracker`.
     pub stall: Mutex<StallTracker>,
+    /// `DreamStallTracker.notify_lock`: one notifier at a time (the sweep
+    /// and a manual dream can both get there).
+    pub notify_lock: tokio::sync::Mutex<()>,
     /// `_last_dream_extractor`: `{which, base_url, at}`.
     pub last_dream_extractor: Mutex<Option<Value>>,
     /// `_lesson_signal_cursor`: where the next capped lesson batch starts.
@@ -101,9 +104,9 @@ impl Drop for Flight<'_> {
     }
 }
 
-/// `DreamStallTracker` (`service_dream.py:47-220`): `record` and `snapshot`.
-/// The overdue rule runs only once a sweep runs, which this daemon does not
-/// yet; the board notice is not ported (see `notice_due`).
+/// `DreamStallTracker` (`service_dream.py:47-220`): `record`, `snapshot`,
+/// the overdue rule the sweep arms (`check_overdue`) and the board notices
+/// it owes (`take_notice`, `mark_noticed`).
 #[derive(Debug, Default)]
 pub struct StallTracker {
     failures: u32,
@@ -111,10 +114,130 @@ pub struct StallTracker {
     reason: Option<String>,
     last_error: Option<String>,
     last_success_at: Option<f64>,
+    due_since: Option<f64>,
+    /// Set by the sweep's tick; `dream_status` applies the overdue rule
+    /// only once a sweep is running.
+    sweep_interval: Option<f64>,
     stall: Option<Map<String, Value>>,
     last_stall: Option<Map<String, Value>>,
+    /// When the open incident's last notice was delivered.
     notice_at: Option<f64>,
-    clear_owed: bool,
+    /// A closed, announced incident whose recovery notice is still owed.
+    clear_owed: Option<Map<String, Value>>,
+    /// Across incidents: the last begin/repeat/escalate, and whether it
+    /// named a hard stall.
+    last_notice_at: Option<f64>,
+    announced_hard: Option<bool>,
+}
+
+/// `DreamStallTracker.OVERDUE_SWEEPS`.
+const OVERDUE_SWEEPS: f64 = 3.0;
+
+/// `_STALL_REMEDIES` (`memory/dream.py:2313-2320`).
+fn stall_remedy(reason: &str) -> &'static str {
+    match reason {
+        "login_expired" => {
+            "the extractor CLI's login expired; re-run `claude auth login` (or `codex login`) on the daemon host"
+        }
+        "extractor_unreachable" => {
+            "check the extractor endpoint is up and reachable from the daemon"
+        }
+        "served_by_fallback" => {
+            "the primary is down and the fallback is serving; check the primary extractor"
+        }
+        _ => "the extractor answers with errors; check its log",
+    }
+}
+
+/// `_stall_reason`: a known reason, else `extractor_error`.
+fn stall_reason(record: &Map<String, Value>) -> String {
+    let reason = match record.get("reason") {
+        Some(Value::String(s)) => s.clone(),
+        _ => String::new(),
+    };
+    match reason.as_str() {
+        "login_expired" | "extractor_unreachable" | "extractor_error" | "served_by_fallback" => {
+            reason
+        }
+        _ => "extractor_error".into(),
+    }
+}
+
+/// `_local_minute(ts)`: `datetime.fromtimestamp(ts).astimezone().isoformat(
+/// sep=" ", timespec="minutes")` (microseconds rounded half to even, then
+/// truncated to the minute, with the local offset).
+pub(crate) fn local_minute(ts: f64) -> String {
+    use chrono::{Offset, TimeZone};
+    let (secs, micros) = py_timestamp_parts(ts);
+    match chrono::Local.timestamp_opt(secs, micros * 1000) {
+        chrono::LocalResult::Single(t) | chrono::LocalResult::Ambiguous(t, _) => {
+            minute_at_offset(ts, t.offset().fix().local_minus_utc())
+        }
+        chrono::LocalResult::None => String::new(),
+    }
+}
+
+/// `datetime.fromtimestamp`'s split: whole seconds and microseconds rounded
+/// half to even, carrying into the seconds.
+fn py_timestamp_parts(ts: f64) -> (i64, u32) {
+    let mut secs = ts.floor();
+    let mut micros = ((ts - secs) * 1e6).round_ties_even();
+    if micros >= 1e6 {
+        secs += 1.0;
+        micros -= 1e6;
+    }
+    (secs as i64, micros as u32)
+}
+
+/// `isoformat(sep=" ", timespec="minutes")` of `ts` at a fixed UTC offset.
+fn minute_at_offset(ts: f64, offset_seconds: i32) -> String {
+    use chrono::TimeZone;
+    let (secs, micros) = py_timestamp_parts(ts);
+    let Some(zone) = chrono::FixedOffset::east_opt(offset_seconds) else {
+        return String::new();
+    };
+    match zone.timestamp_opt(secs, micros * 1000) {
+        chrono::LocalResult::Single(t) | chrono::LocalResult::Ambiguous(t, _) => {
+            t.format("%Y-%m-%d %H:%M%:z").to_string()
+        }
+        chrono::LocalResult::None => String::new(),
+    }
+}
+
+/// `dream_stall_notice_text(kind, record)` (`memory/dream.py:2353-2363`).
+pub(crate) fn stall_notice_text(kind: &str, record: &Map<String, Value>) -> String {
+    stall_notice_text_with(kind, record, local_minute)
+}
+
+fn stall_notice_text_with(
+    kind: &str,
+    record: &Map<String, Value>,
+    minute: impl Fn(f64) -> String,
+) -> String {
+    let reason = stall_reason(record);
+    let ts = |k: &str| record.get(k).and_then(Value::as_f64).unwrap_or(0.0);
+    let since = minute(ts("since"));
+    if kind == "clear" {
+        return format!(
+            "Dream extraction recovered at {} (was {reason} since {since}).",
+            minute(ts("recovered_at"))
+        );
+    }
+    let head = if reason == "served_by_fallback" {
+        "degraded"
+    } else {
+        "stalled"
+    };
+    let remedy = stall_remedy(&reason);
+    let mut chars = remedy.chars();
+    let first = chars
+        .next()
+        .map(|c| c.to_uppercase().collect::<String>())
+        .unwrap_or_default();
+    format!(
+        "Dream extraction {head} since {since}: {reason}. {first}{}.",
+        chars.as_str()
+    )
 }
 
 fn truthy(v: Option<&Value>) -> bool {
@@ -138,7 +261,8 @@ fn text_or(v: Option<&Value>, default: &str) -> String {
 impl StallTracker {
     fn open(&mut self, since: f64) {
         if self.stall.is_none() {
-            self.clear_owed = false;
+            // A new incident: a recovery nobody received is stale now.
+            self.clear_owed = None;
         }
         let mut m = Map::new();
         m.insert("since".into(), json!(since));
@@ -151,11 +275,14 @@ impl StallTracker {
 
     /// `record(result, served_by_fallback=...)`.
     pub fn record(&mut self, result: &Map<String, Value>, served_by_fallback: bool) {
+        self.record_at(result, served_by_fallback, now());
+    }
+
+    fn record_at(&mut self, result: &Map<String, Value>, served_by_fallback: bool, now: f64) {
         if truthy(result.get("skipped")) || truthy(result.get("error")) {
             return;
         }
         let pulled = result.get("pulled").and_then(Value::as_i64).unwrap_or(0);
-        let now = now();
         let err = result.get("extractor_error").and_then(Value::as_object);
         let field = |k: &str| err.and_then(|e| e.get(k));
         let (reason, error) = if truthy(result.get("extractor_failed")) {
@@ -212,13 +339,107 @@ impl StallTracker {
         self.first_failure_at = None;
         self.reason = None;
         self.last_error = None;
+        self.due_since = None;
         if let Some(mut stall) = self.stall.take() {
             stall.insert("recovered_at".into(), json!(now));
             if self.notice_at.is_some() {
-                self.clear_owed = true;
+                self.clear_owed = Some(stall.clone());
             }
             self.last_stall = Some(stall);
             self.notice_at = None;
+        }
+    }
+
+    /// The sweep's interval, which arms the overdue rule in `dream_status`.
+    pub fn set_sweep_interval(&mut self, seconds: f64) {
+        self.sweep_interval = Some(seconds);
+    }
+
+    /// `tracker.sweep_interval` when truthy.
+    pub fn sweep_interval(&self) -> Option<f64> {
+        self.sweep_interval.filter(|s| *s != 0.0)
+    }
+
+    /// `check_overdue`: a due backlog no dream has served for
+    /// `OVERDUE_SWEEPS` sweep intervals opens a stall.
+    pub fn check_overdue(&mut self, backlog: i64, min_batch: i64, would_fire: bool, interval: f64) {
+        self.check_overdue_at(backlog, min_batch, would_fire, interval, now());
+    }
+
+    fn check_overdue_at(
+        &mut self,
+        backlog: i64,
+        min_batch: i64,
+        would_fire: bool,
+        interval: f64,
+        now: f64,
+    ) {
+        if !(would_fire && backlog >= min_batch) {
+            self.due_since = None;
+            return;
+        }
+        let due = *self.due_since.get_or_insert(now);
+        if self.stall.is_none() && now - due > OVERDUE_SWEEPS * interval {
+            if self.reason.is_none() {
+                self.reason = Some("extractor_unreachable".into());
+            }
+            if self.last_error.is_none() {
+                self.last_error = Some("no dream succeeded while the backlog was due".into());
+            }
+            self.open(due);
+        }
+    }
+
+    fn hard(record: &Map<String, Value>) -> bool {
+        record.get("reason").and_then(Value::as_str) != Some("served_by_fallback")
+    }
+
+    /// `take_notice(repeat_seconds)`: the notice due now, if any. Nothing
+    /// is marked until `mark_noticed`, so an undelivered one stays owed.
+    pub fn take_notice(
+        &mut self,
+        repeat_seconds: f64,
+    ) -> Option<(&'static str, Map<String, Value>)> {
+        self.take_notice_at(repeat_seconds, now())
+    }
+
+    fn take_notice_at(
+        &mut self,
+        repeat_seconds: f64,
+        now: f64,
+    ) -> Option<(&'static str, Map<String, Value>)> {
+        if let Some(stall) = &self.stall {
+            let hard = Self::hard(stall);
+            let window_open = self
+                .last_notice_at
+                .is_none_or(|t| now - t >= repeat_seconds);
+            let escalating = hard && self.announced_hard == Some(false);
+            if self.notice_at.is_some() {
+                if escalating {
+                    return Some(("escalate", stall.clone()));
+                }
+                return window_open.then(|| ("repeat", stall.clone()));
+            }
+            if window_open || escalating {
+                return Some(("begin", stall.clone()));
+            }
+            return None;
+        }
+        self.clear_owed.clone().map(|c| ("clear", c))
+    }
+
+    /// `mark_noticed(kind)`.
+    pub fn mark_noticed(&mut self, kind: &str) {
+        self.mark_noticed_at(kind, now());
+    }
+
+    fn mark_noticed_at(&mut self, kind: &str, now: f64) {
+        if kind == "clear" {
+            self.clear_owed = None;
+        } else if let Some(stall) = &self.stall {
+            self.announced_hard = Some(Self::hard(stall));
+            self.notice_at = Some(now);
+            self.last_notice_at = Some(now);
         }
     }
 
@@ -226,13 +447,6 @@ impl StallTracker {
     pub fn snapshot(&self) -> (Value, Value) {
         let v = |m: &Option<Map<String, Value>>| m.clone().map_or(Value::Null, Value::Object);
         (v(&self.stall), v(&self.last_stall))
-    }
-
-    /// Whether `take_notice` would owe a notice now (an open stall, or a
-    /// clear for an announced incident). The board notice itself is not
-    /// ported.
-    fn notice_due(&self) -> bool {
-        self.stall.is_some() || self.clear_owed
     }
 }
 
@@ -1543,14 +1757,13 @@ pub async fn run_auto(
     let mut result = dream_run(svc, &ready, &caller, &writer, &extractor, limit).await?;
     result.insert("extractor".into(), json!(which));
     let forced = super::extractor::resolve_endpoints(cfg).mode == "fallback";
-    let due = {
-        let mut stall = ready.dream_run.stall.lock().expect("stall tracker");
-        stall.record(&result, which == "fallback" && !forced);
-        stall.notice_due()
-    };
-    if due && cfg.stall_notice && svc.config.coordination.enabled {
-        eprintln!("dream stall notice owed; the board notice is not ported");
-    }
+    ready
+        .dream_run
+        .stall
+        .lock()
+        .expect("stall tracker")
+        .record(&result, which == "fallback" && !forced);
+    super::ticks::stall_notify(svc, &ready).await;
     Ok(Value::Object(result))
 }
 
@@ -2019,3 +2232,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "stall_tests.rs"]
+mod stall_tests;

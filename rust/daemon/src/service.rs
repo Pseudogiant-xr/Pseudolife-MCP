@@ -104,6 +104,11 @@ pub struct Service {
     /// The service lock: one init at a time; callers wait on it.
     inner: tokio::sync::Mutex<Inner>,
     snap: RwLock<Snapshot>,
+    /// This service's own handle and the board's, installed once at
+    /// startup (`install`): the background dream work needs an owned
+    /// service (the dream pass spawns), and the stall notice the board.
+    handle: std::sync::OnceLock<std::sync::Weak<Service>>,
+    board: std::sync::OnceLock<std::sync::Weak<crate::board::Board>>,
 }
 
 impl Service {
@@ -133,6 +138,38 @@ impl Service {
             ort_threads,
             inner: tokio::sync::Mutex::new(Inner::default()),
             snap: RwLock::new(Snapshot::default()),
+            handle: std::sync::OnceLock::new(),
+            board: std::sync::OnceLock::new(),
+        }
+    }
+
+    /// Install the handles the background dream work needs (once, at
+    /// startup, after the board exists). Weak, so neither keeps the other.
+    pub fn install(self: &Arc<Self>, board: &Arc<crate::board::Board>) {
+        let _ = self.handle.set(Arc::downgrade(self));
+        let _ = self.board.set(Arc::downgrade(board));
+    }
+
+    /// The owned service, once installed.
+    pub fn handle(&self) -> Option<Arc<Service>> {
+        self.handle.get().and_then(std::sync::Weak::upgrade)
+    }
+
+    /// The board, once installed.
+    pub fn board(&self) -> Option<Arc<crate::board::Board>> {
+        self.board.get().and_then(std::sync::Weak::upgrade)
+    }
+
+    /// `_fire_and_forget_dream` for a closed session (the reaper's idle
+    /// close here; the SessionEnd hook's close calls the same): one
+    /// automatic dream in the background.
+    pub fn fire_session_dream(&self) {
+        match self.handle() {
+            Some(me) => {
+                eprintln!("session-end dream trigger: fired");
+                crate::dream::ticks::fire_and_forget(&me);
+            }
+            None => self.session_dream.fire(),
         }
     }
 
@@ -451,24 +488,15 @@ impl crate::background::Duties for Service {
                 eprintln!("sweep maintenance: runs_pruned={runs} retrieval_pruned={retrieval}");
             }
             // `run_sweep_once` (`memory/dream.py:2398-2547`): the steps after
-            // the reapers run only while dreaming is enabled. The analyzer
-            // and deep ticks before the judge, the review-queue judges after
-            // it, the stall tick and the automatic dream are not ported
-            // (divergences.md).
+            // the reapers run only while dreaming is enabled: the analyzer
+            // and deep ticks, the merge judge, `dream_status`, the stall tick
+            // and the automatic dream (`dream/ticks.rs`). The review-queue
+            // judges are not run yet (divergences.md).
             if !self.config.dream.enabled {
                 return Ok(());
             }
-            // The judge checks its gates first and initializes inside its
-            // own `try` (`service_dream.py:4576-4596`).
-            let judged = crate::dream::judge::deep_dream_judge(self, &stop).await;
-            if crate::dream::judge::worth_logging(&judged) {
-                eprintln!(
-                    "deep-dream judge: {}",
-                    crate::pyjson::dumps(&serde_json::Value::Object(judged))
-                );
-            }
-            // The W3-H automatic-dream adapter runs after all maintenance.
-            Ok(())
+            let ready = self.ensure_init_inner().await?;
+            crate::dream::ticks::sweep(self, &ready, &stop).await
         })
     }
     fn autosave(&self) -> crate::background::Duty<'_> {
@@ -542,7 +570,7 @@ impl crate::background::Duties for Service {
                 return Err(error);
             }
             if result.fire_dream {
-                self.session_dream.fire();
+                self.fire_session_dream();
             }
             if !result.session_keys.is_empty() || result.swept > 0 {
                 eprintln!("session reaper: idle sessions closed or swept");
