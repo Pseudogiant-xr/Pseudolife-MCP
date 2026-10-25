@@ -26,6 +26,8 @@ if [ "${1:-}" = "--token" ]; then
   [ -d "$CONFIG" ] || { echo "install the watcher first (run without --token)" >&2; exit 1; }
   token=
   read -r token || true
+  # A token piped from Windows ends in a carriage return.
+  token=${token//[$'\r\t ']/}
   [ -n "$token" ] || { echo "no token on stdin; nothing changed" >&2; exit 1; }
   umask 077
   printf '%s\n' "$token" > "$TOKEN.part"
