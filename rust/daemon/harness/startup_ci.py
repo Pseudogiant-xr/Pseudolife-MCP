@@ -3,7 +3,9 @@
 The caller supplies the test-login environment and may set CARGO_TARGET_DIR.
 This helper checks generated schema inputs, runs schema and startup fixture unit tests,
 builds the native daemon test executable, and checks startup goldens and mutants.
-It does not provision PostgreSQL or load an embedding model.
+It does not provision PostgreSQL or load an embedding model. CI splits the cells
+over two shards with --part (startup_cases.part_cases): part 1 runs only its
+cases; part 2 runs the rest with the mutants, the clock retry and the writer guard.
 """
 from __future__ import annotations
 
@@ -72,9 +74,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--no-build", action="store_true", help="use an existing daemon test executable")
     parser.add_argument("--rust-test-bin", type=Path, help="test executable required with --no-build")
     parser.add_argument("--record-goldens", action="store_true", help="record oracle fixtures, then check replay")
+    parser.add_argument("--part", type=int, choices=(1, 2), help="run one CI part of the startup cells")
     args = parser.parse_args(argv)
     if args.no_build != (args.rust_test_bin is not None):
         parser.error("--no-build and --rust-test-bin must be supplied together")
+    if args.part and args.record_goldens:
+        parser.error("--record-goldens requires the complete startup matrix, not --part")
 
     env = dict(os.environ, PL_HARNESS_SLICE="pgs", CUDA_VISIBLE_DEVICES="-1",
                HF_HUB_OFFLINE="1", TRANSFORMERS_OFFLINE="1")
@@ -114,6 +119,8 @@ def main(argv: list[str] | None = None) -> int:
         output = args.out.resolve()
         output.parent.mkdir(parents=True, exist_ok=True)
         command = [sys.executable, str(HERE / "startup_cases.py"), "--rust-test-bin", str(binary)]
+        if args.part:
+            command += ["--part", str(args.part)]
         if args.record_goldens:
             code = subprocess.run(
                 [*command, "--record-goldens", "--mutants", "--out", str(output)],
@@ -124,9 +131,9 @@ def main(argv: list[str] | None = None) -> int:
             output = output.with_name(output.stem + "-replay" + output.suffix)
             flags = ["--check-goldens"]
         else:
-            flags = ["--check-goldens", "--mutants"]
+            flags = ["--check-goldens"] + ([] if args.part == 1 else ["--mutants"])
         code = subprocess.run([*command, *flags, "--out", str(output)], cwd=REPO, env=env).returncode
-        if code:
+        if code or args.part == 1:
             return code
         retry_output = args.out.resolve().with_name(args.out.stem + "-clock-retry" + args.out.suffix)
         retry = [sys.executable, str(HERE / "clock_retry_cases.py"), "--rust-test-bin", str(binary)]

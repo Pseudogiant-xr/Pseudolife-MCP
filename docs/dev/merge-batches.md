@@ -16,8 +16,8 @@ Each change waits for hosted CI once, on its batch:
   fast lanes only. In `ci.yml`: `scope`, `guards`, `lock-resolve` and
   `frontend`; the `test` job and the lite OS lanes are skipped. In
   `rust.yml`: `Scope`, the `Rust` job (format, clippy, builds, nextest),
-  the disposable-image check and the `Parity` gate; the candidate build
-  and the parity matrix are skipped. Both `scope` jobs decide this from
+  the disposable-image check and the `Parity` gate; the candidate, harness
+  candidate and fixtures builds and the parity matrix are skipped. Both `scope` jobs decide this from
   `github.head_ref` (an absent one runs everything). An ordinary pull
   request that changes CI or dependency inputs (`.github/workflows/`,
   `pyproject.toml`, a lock file, the Rust toolchain pin) or whose diff
@@ -44,8 +44,8 @@ Each change waits for hosted CI once, on its batch:
   newest batch run not completed, or an API error. In `ci.yml` that covers
   `lock-resolve`, `test`, the lite OS lanes and `frontend`. In `rust.yml` it
   covers the disposable-image check and each parity pair (OS and suite).
-  The `Rust` job, the candidate build, `parity-live` (which a pull request
-  never runs) and the `eval` and `judges` suites always run. They compare
+  The `Rust` job, the candidate, harness candidate and fixtures builds and
+  the `eval` and `judges` suites always run. They compare
   against the event-selected Python oracle (or, for `Rust`, its package
   metadata), which is the merge base on a pull request and the pushed head
   on a push, so the batch's pass is not the push's result. A merge made
@@ -53,7 +53,9 @@ Each change waits for hosted CI once, on its batch:
   the forwarded head itself; with no completed run there, its master push
   runs everything, which is the backstop that skill relies on.
 - **The nightly and manual runs** run everything, as before. The nightly
-  is the full backstop for everything a master push skipped.
+  is the full backstop for everything a master push skipped, and since
+  2026-10-24 the only automatic run of the non-gating Windows `cli-live`
+  job (`parity-live`).
 
 ## Joining a batch
 
