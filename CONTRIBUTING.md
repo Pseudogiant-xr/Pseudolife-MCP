@@ -232,7 +232,7 @@ from hard experience:
 - Branch off `master`; keep each PR to one logical change.
 - Commit style is conventional (`feat:`, `fix:`, `docs:`, `test:`,
   `chore:`, scope in parens — see `git log`).
-- User-visible changes add a changelog fragment,
+- Behavior, schema and performance changes add a changelog fragment,
   `changelog.d/<YYYY-MM-DD>-<slug>.md`, rather than editing `CHANGELOG.md`
   (see [changelog.d/README.md](changelog.d/README.md)); the release folds
   the fragments into `[Unreleased]`.
@@ -245,20 +245,25 @@ from hard experience:
 
 Agent-written pull requests are welcome. `CLAUDE.md` (which `AGENTS.md`
 points to) is the maintainer's own working rulebook, and many of its rules
-run on the maintainer's machines and usage budget, not yours. If you or
-your agent are contributing from a fork, this section is the whole
-contract; where it and `CLAUDE.md` differ, follow this section.
+run on the maintainer's machines and usage budget, not yours. If you are
+not the maintainer (usually you contribute from a fork), this section
+replaces only the `CLAUDE.md` steps listed under "Skip these" below.
+`CLAUDE.md`'s rules about the code itself (schema bumps, platform test
+lanes, hook definitions, generated docs, no personal data) still apply,
+and CI enforces most of them.
 
 Your pull request needs:
 
 - one focused change, branched off current `master`;
 - a test that fails without the change and passes with it, and a line in
   the PR saying you watched it fail;
-- the tests you ran, with the command and its exit code: the test files
-  you touched plus the ones that depend on the changed code (see
+- the tests you ran, with the commit you tested, the command and its exit
+  code, and why you chose those files: the test files you touched plus
+  the ones that depend on the changed code (see
   [Running the tests](#running-the-tests)); a local full suite is needed
   only for the cases listed there;
-- a changelog fragment for a user-visible change;
+- a changelog fragment for any behavior, schema or performance change
+  (docs-only and test-only changes are exempt);
 - a body that opens with the problem in plain words (the PR template shows
   the shape), naming anything you could not run, such as a `.ps1` change
   on a machine without PowerShell;
@@ -271,16 +276,17 @@ Skip these; the maintainer does them when your PR is taken up:
 
 - **Review passes:** `/code-review`, reviewer subagents and the Codex
   second review. The maintainer's session runs them on the final head
-  anyway, and the Codex model they pin is not available to every account. A self-review you
-  already did is welcome in the PR, but it is not required.
+  anyway. A self-review you already did is welcome in the PR, but it is
+  not required.
 - **The maintainer's infrastructure:** the Pseudolife memory bank and the
   `memory_*` recall steps, the agent board, leases and the suite lock's
   board mirror, `ops/wsl-suite.ps1` / `ops/remote-suite.ps1`, the dev
   machines, and integration batches.
 - **Deploys and releases:** `pseudolife-mcp update`, live verification and
   the release procedure.
-- **CI follow-up:** CI on a fork's pull request waits for the maintainer to
-  approve the run, so you do not need to rerun or chase it.
+- **CI upkeep:** CI on a fork's pull request waits for the maintainer to
+  approve the run. Fix failures it reports in your change; rerunning
+  flaky jobs and updating the branch from `master` are the maintainer's.
 
 ## Schema bumps
 
