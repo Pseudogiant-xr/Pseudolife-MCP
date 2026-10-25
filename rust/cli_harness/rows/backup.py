@@ -503,8 +503,8 @@ def cases() -> list[Case]:
 B = "shim/src/cli/backup/"
 MUTANTS = [
     Mutant("backup-archives-backups-dir", "backup", B + "archive.rs",
-           'const EXCLUDE: [&str; 2] = ["embedded_pg", "backups"];',
-           'const EXCLUDE: [&str; 2] = ["embedded_pg", "embedded_pg"];',
+           '    "backups",\n    "native",',
+           '    "embedded_pg",\n    "native",',
            ("file-mode", "file-mode-out-absolute-keep-half-day")),
     Mutant("backup-rotates-dumps-in-file-mode", "backup", B + "mod.rs",
            "    if include_dumps {\n        patterns.insert(0, (DUMP_PREFIX, \".sql.gz\"));",
