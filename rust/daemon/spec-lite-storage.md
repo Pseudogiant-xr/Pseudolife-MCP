@@ -264,3 +264,52 @@ cases run there or stay recorded as unrun:
 6. The deprecation notes for `embedded` mode and `.pt` file mode (release
    note and guides; D10 allows no new Python surface, so no Python warning
    is added).
+
+## Before step 4: what the daemon side still needs
+
+Steps 2 and 3 landed as #935 and #946. Wiring the module into the
+daemon's startup (step 4) needs three things that are decisions or PRs of
+their own, not workarounds inside step 4.
+
+1. **Runtime provisioning (decisions 2, 3 and 5), its own PR before step
+   4.** It downloads the two pinned archives (theseus-rs PostgreSQL
+   18.1.0, `pgvector_compiled` `v0.18.320`, and on Linux the two Ubuntu
+   runtime-library packages pg0 pins), checks each against an in-tree
+   sha256, and extracts them into the Pseudolife-owned runtime dir. It
+   exposes the function the daemon's first-start fallback calls. The
+   installers and release-mode `update` call it too (B11 wires them; the
+   PR says what they must call). Without it, step 4 can only resolve to
+   lite and refuse with "not provisioned", which no install can exercise.
+2. **An owner-only secret writer the daemon can use (proposed for the
+   maintainer).** The shim's writer rests on its credential module
+   (`credentials::windows_security`). Three ways:
+   - **(a)** The daemon depends on the shim library: 57 crate names the
+     daemon does not have today (rmcp, tungstenite, the `windows` crates
+     and more; measured with `cargo tree`).
+   - **(b)** Move the owner-only file code into `rust/shared/` and point
+     the shim's callers (`board/state.rs`, `cli/connect/files.rs`,
+     `pg/embedded_secret.rs`) at it: no new crates, but a refactor of
+     shim files outside B9.
+   - **(c)** The daemon only reads the secret, and install or a CLI mode
+     creates it: no refactor, but a first start can't create a bank by
+     itself.
+
+   Recommendation: (b), coordinated with whoever owns those shim files.
+3. **How the Rust daemon authenticates to the lite server (a decision for
+   the maintainer).** tokio-postgres has no `require_auth`: it answers a
+   server's cleartext password request with the password. The module's
+   psql calls refuse that (`PGREQUIREAUTH`), but the daemon's own
+   connections would not. Two ways:
+   - **(a)** Connect only after `serves()` has verified the port's server
+     is this bank's (SCRAM-only, through psql), and verify again on each
+     reconnect. A short check-then-connect gap remains.
+   - **(b)** Accept that gap as a declared divergence: it needs a local
+     attacker holding the bank's port with a fake server while the real
+     one is down.
+
+   Recommendation: (a), with the remaining gap declared.
+
+Decision 6 also needs wording before step 4 codes it. No standalone `.pt`
+import command exists today: `migrate_legacy` runs when the Python daemon
+starts. So the refusal names running the last Python release's `pseudolife-mcp
+serve` once, which the release notes must keep possible.
