@@ -43,15 +43,18 @@ _LEGACY_HBA = (
 
 _ROLES: dict[Path, str] = {}  # pgdata -> the role's password or stored verifier
 _SERVERS: dict[int, Path] = {}  # port -> the pgdata of the server on it
+# port -> the pg_hba.conf text a POSIX server loaded (absent: the file is in
+# force at once, as on Windows). A reload loads the file.
+_LOADED: dict[int, str] = {}
 
 
 @pytest.fixture(autouse=True)
 def _reset_fake_servers():
-    _ROLES.clear()
-    _SERVERS.clear()
+    for state in (_ROLES, _SERVERS, _LOADED):
+        state.clear()
     yield
-    _ROLES.clear()
-    _SERVERS.clear()
+    for state in (_ROLES, _SERVERS, _LOADED):
+        state.clear()
 
 
 def _takes(stored: str, password: str) -> bool:
@@ -73,7 +76,9 @@ def _connect_ok(dsn: str) -> bool:
     pgdata = _SERVERS.get(parts.port)
     if pgdata is None:
         return False
-    hba = (pgdata / "pg_hba.conf").read_text() if (pgdata / "pg_hba.conf").exists() else ""
+    hba = _LOADED.get(parts.port)
+    if hba is None:
+        hba = (pgdata / "pg_hba.conf").read_text() if (pgdata / "pg_hba.conf").exists() else ""
     scram_required = "require_auth=scram-sha-256" in dsn
     if ep._is_marked(hba):
         return not scram_required
@@ -83,7 +88,8 @@ def _connect_ok(dsn: str) -> bool:
 
 
 def _stub_pg0(monkeypatch, *, already_running: bool = False, uri: str = "",
-              start_error: Exception | None = None, sql_error_on: str | None = None):
+              start_error: Exception | None = None, sql_error_on: str | None = None,
+              posix: bool = False):
     """Install a fake ``pg0`` module and fake servers; returns the call log.
 
     A start on a fresh pgdata writes what pg0's initdb leaves behind
@@ -122,6 +128,8 @@ def _stub_pg0(monkeypatch, *, already_running: bool = False, uri: str = "",
                 hba.write_text(_LEGACY_HBA)
                 _ROLES[self.data_dir] = self.password
             _SERVERS[59999] = self.data_dir
+            if posix:
+                _LOADED[59999] = hba.read_text()
             return StubInfo()
 
         def info(self):
@@ -145,7 +153,10 @@ def _stub_pg0(monkeypatch, *, already_running: bool = False, uri: str = "",
         if not _connect_ok(dsn):
             raise RuntimeError("password authentication failed")
         calls.append(("sql", dsn, list(statements)))
-        pgdata = _SERVERS[urlsplit(dsn).port]
+        port = urlsplit(dsn).port
+        pgdata = _SERVERS[port]
+        if "SELECT pg_reload_conf()" in statements and port in _LOADED:
+            _LOADED[port] = (pgdata / "pg_hba.conf").read_text()
         for statement in statements:
             match = re.search(r"PASSWORD '([^']+)'", statement)
             if match:
@@ -161,7 +172,7 @@ def _stub_pg0(monkeypatch, *, already_running: bool = False, uri: str = "",
 
     monkeypatch.setattr(ep, "_run_sql", run_sql)
     monkeypatch.setattr(ep, "_probe", probe)
-    monkeypatch.setattr(ep, "_port_open", lambda port: port in _SERVERS)
+    monkeypatch.setattr(ep, "_postmaster_alive", lambda pgdata: Path(pgdata) in _SERVERS.values())
     monkeypatch.setattr(ep, "_scram_verifier", lambda secret: f"verifier-of-{secret}")
     return calls
 
@@ -290,13 +301,15 @@ def test_pg_major_mismatch_is_refused(tmp_path):
         ep._guard_pg_major(pgdata)
 
 
-def _running(pgdata: Path, role: str, port: int = 59998):
+def _running(pgdata: Path, role: str, port: int = 59998, loaded: str | None = None):
     """A server already running for ``pgdata`` (its postmaster.pid), whose
-    role takes ``role``."""
+    role takes ``role``; ``loaded``: the rules a POSIX server still runs."""
     pgdata.mkdir(parents=True, exist_ok=True)
     (pgdata / "postmaster.pid").write_text(f"4242\n{pgdata}\n1\n{port}\n\n")
     _SERVERS[port] = pgdata
     _ROLES[pgdata] = role
+    if loaded is not None:
+        _LOADED[port] = loaded
 
 
 def _moved_bank(data_dir: Path, secret: str) -> Path:
@@ -921,3 +934,133 @@ def test_the_scram_verifier_is_postgresql_s_format():
     assert base64.b64decode(server_b64) == hmac.new(salted, b"Server Key", "sha256").digest()
     # A fresh salt every call.
     assert _VERIFIER("ab" * 32) != _VERIFIER("ab" * 32)
+
+
+_REAL_ALIVE = ep._postmaster_alive
+
+
+@pytest.mark.parametrize("posix", [False, True])
+def test_fresh_and_legacy_banks_move_with_either_rule_timing(monkeypatch, tmp_path, posix):
+    """POSIX servers keep their loaded rules until a reload, Windows applies
+    the file at once; both moves end in the same place."""
+    calls = _stub_pg0(monkeypatch, posix=posix)
+    ep.attach_or_start(tmp_path / "fresh")
+    secret = (tmp_path / "fresh" / "embedded_pg.secret").read_text()
+    assert _sql(calls) == _scram_first(secret) + _CREATE_DB
+    _SERVERS.clear()
+    _LOADED.clear()
+    calls = _stub_pg0(monkeypatch, posix=posix)
+    pgdata = _legacy_bank(tmp_path / "legacy")
+    ep.attach_or_start(tmp_path / "legacy")
+    secret = (tmp_path / "legacy" / "embedded_pg.secret").read_text()
+    assert _sql(calls) == _move(secret) + _CREATE_DB
+    assert _ROLES[pgdata] == secret
+
+
+def test_lite_refuses_a_libpq_without_require_auth(monkeypatch, tmp_path):
+    _stub_pg0(monkeypatch)
+    monkeypatch.setattr(ep, "_libpq_has_require_auth", lambda: False)
+    with pytest.raises(RuntimeError, match="libpq 16 or newer"):
+        ep.attach_or_start(tmp_path)
+    assert not (tmp_path / "embedded_pg.secret").exists()
+
+
+def test_a_stale_pid_file_with_a_foreign_listener_does_not_block_the_move(
+    monkeypatch, tmp_path,
+):
+    """After a reboot the recorded pid is gone (or another program's) and an
+    unrelated server may listen on the recorded port: not a running bank."""
+    import os
+
+    calls = _stub_pg0(monkeypatch)
+    monkeypatch.setattr(ep, "_postmaster_alive", _REAL_ALIVE)
+    pgdata = _legacy_bank(tmp_path)
+    (pgdata / "postmaster.pid").write_text(f"{os.getpid()}\n{pgdata}\n1\n5432\n")
+    assert not ep._postmaster_alive(pgdata)
+    _, started = ep.attach_or_start(tmp_path)
+    assert started is not None
+    assert any(call[0] == "start" for call in calls)
+
+
+def test_postmaster_alive_needs_a_live_postgres_pid(tmp_path):
+    import os
+
+    assert not _REAL_ALIVE(tmp_path)  # no postmaster.pid
+    (tmp_path / "postmaster.pid").write_text(f"{os.getpid()}\nx\n")
+    assert not _REAL_ALIVE(tmp_path)  # alive, but no postgres
+    (tmp_path / "postmaster.pid").write_text("not a pid\n")
+    assert not _REAL_ALIVE(tmp_path)
+
+
+def test_a_failed_start_stops_whatever_pg0_may_have_launched(monkeypatch, tmp_path):
+    calls = _stub_pg0(monkeypatch, start_error=RuntimeError("readiness timeout"))
+    _legacy_bank(tmp_path)
+    with pytest.raises(RuntimeError, match="readiness timeout"):
+        ep.attach_or_start(tmp_path)
+    assert ("stop",) in calls
+
+
+def test_a_trust_file_on_a_server_running_scram_goes_back_to_scram(monkeypatch, tmp_path):
+    """POSIX: a starter killed after AlreadyRunning but before it restored
+    the file leaves trust in the file while the server runs SCRAM with the
+    role on the secret. The probe takes the secret over SCRAM, so only the
+    file goes back; the role is not changed."""
+    from pseudolife_memory import credentials
+
+    pgdata = _legacy_bank(tmp_path)
+    credentials._write_token_file(tmp_path / "embedded_pg.secret", "f0" * 32)
+    scram = ep._rewrite_hba(_LEGACY_HBA, "scram-sha-256")
+    (pgdata / "pg_hba.conf").write_text(ep._rewrite_hba(_LEGACY_HBA, "trust", loopback_only=True))
+    calls = _stub_pg0(monkeypatch, posix=True)
+    _running(pgdata, "f0" * 32, loaded=scram)
+    ep.attach_or_start(tmp_path)
+    assert _sql(calls) == ["SELECT pg_reload_conf()", "SELECT 1"] + _CREATE_DB
+    assert _methods(pgdata) == {"scram-sha-256"}
+
+
+def test_a_role_change_refused_by_a_just_applied_reload_waits_for_scram(
+    monkeypatch, tmp_path,
+):
+    """POSIX: the secret looked untaken while trust was still in force, then
+    the reload landed and the old password fails the role change: the role
+    already holds the secret, which the wait confirms."""
+    calls = _stub_pg0(monkeypatch, sql_error_on="ALTER ROLE")
+    pgdata = _legacy_bank(tmp_path)
+    _running(pgdata, "a1" * 32)
+    real = ep._takes_secret
+    first = {"call": True}
+
+    def takes_secret(port, secret):
+        # The first check meets trust (the reload still pending); later ones
+        # meet the server as it is.
+        if first["call"]:
+            first["call"] = False
+            return False
+        return real(port, secret)
+
+    monkeypatch.setattr(ep, "_takes_secret", takes_secret)
+    ep._move_over_scram(59998, pgdata, "a1" * 32, {"altered": False})
+    assert _sql(calls) == ["SELECT pg_reload_conf()", "SELECT 1"]
+
+
+def test_the_scram_verifier_passes_rfc_7677_s_published_exchange():
+    """RFC 7677 section 3: user "user", password "pencil", this salt and
+    4096 iterations. A verifier from these inputs must check the RFC's client
+    proof and produce its server signature."""
+    import base64
+    import hashlib
+    import hmac
+
+    salt = base64.b64decode("W22ZaJ0SNY7soEsUEjb6gQ==")
+    stored_key, server_key = (base64.b64decode(k) for k in
+                              _VERIFIER("pencil", salt=salt).split("$")[2].split(":"))
+    nonce = "rOprNGfwEbeRWgbNEkqO%hvYDpWUa2RaTCAfuxFIlj)hNlF$k0"
+    auth = ("n=user,r=rOprNGfwEbeRWgbNEkqO,"
+            f"r={nonce},s=W22ZaJ0SNY7soEsUEjb6gQ==,i=4096,"
+            f"c=biws,r={nonce}").encode()
+    proof = base64.b64decode("dHzbZapWIk4jUhN+Ute9ytag9zjfMHgsqmmiz7AndVQ=")
+    client_signature = hmac.new(stored_key, auth, hashlib.sha256).digest()
+    client_key = bytes(a ^ b for a, b in zip(proof, client_signature))
+    assert hashlib.sha256(client_key).digest() == stored_key
+    assert base64.b64encode(hmac.new(server_key, auth, hashlib.sha256).digest()).decode() \
+        == "6rriTRBi23WpRR/wtup+mMhUZUn/dB5nLTJRsjl95G4="
