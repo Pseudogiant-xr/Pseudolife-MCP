@@ -1115,3 +1115,21 @@ def test_postmaster_alive_fails_closed_and_matches_the_start_time(monkeypatch, t
     assert not _REAL_ALIVE(tmp_path)
     Fake.error, Fake.name_ = None, "notepad.exe"
     assert not _REAL_ALIVE(tmp_path)
+
+
+def test_the_method_is_found_by_the_rule_layout_not_by_matching_words():
+    """A host named like a method is an address; the method is the field
+    the rule's layout puts there."""
+    text = (
+        "host    all   all   password                  password\n"
+        "host    all   all   10.0.0.1 255.255.255.255  md5\n"
+        "hostssl all   all   trust.example.com         scram-sha-256\n"
+        "local   all   md5                             password\n"
+    )
+    out = ep._rewrite_hba(text, "scram-sha-256")
+    lines = out.splitlines()
+    assert lines[0] == "host    all   all   password                  scram-sha-256"
+    assert lines[1] == "host    all   all   10.0.0.1 255.255.255.255  scram-sha-256"
+    assert lines[2] == text.splitlines()[2]
+    assert lines[3] == "local   all   md5                             scram-sha-256"
+    assert ep._managed_methods(text) == {"password", "md5", "scram-sha-256"}

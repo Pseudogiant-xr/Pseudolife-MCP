@@ -528,11 +528,30 @@ _RULE_TYPES = frozenset(
     {"local", "host", "hostssl", "hostnossl", "hostgssenc", "hostnogssenc"})
 
 
+def _is_ip(text: str) -> bool:
+    import ipaddress
+
+    try:
+        ipaddress.ip_address(text)
+    except ValueError:
+        return False
+    return True
+
+
 def _rule_method(fields: list[str]) -> int | None:
-    """Index of the managed method in a rule line's fields, if any."""
+    """Index of the managed method in a rule line's fields, if any, located
+    by the rule's layout (``local DB USER METHOD``, ``host DB USER ADDRESS
+    METHOD`` or ``host DB USER IP MASK METHOD``), never by matching words:
+    a host named ``password`` is an address, not a method."""
     if not fields or fields[0] not in _RULE_TYPES:
         return None
-    return next((i for i in range(3, len(fields)) if fields[i] in _MANAGED_METHODS), None)
+    if fields[0] == "local":
+        index = 3
+    elif len(fields) > 5 and "/" not in fields[3] and _is_ip(fields[3]) and _is_ip(fields[4]):
+        index = 5
+    else:
+        index = 4
+    return index if index < len(fields) and fields[index] in _MANAGED_METHODS else None
 
 
 _LOOPBACK = {"127.0.0.1": "255.255.255.255", "::1": "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff"}
