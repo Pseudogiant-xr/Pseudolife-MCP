@@ -149,7 +149,12 @@ def scenarios(w) -> dict:
         "sweep-stall": {
             "config": config(dream="    min_batch: 1\n    idle_seconds: 1000000000\n",
                              interval=1.0),
-            "extractor": {"model": "stub-model", "replies": [fail]},
+            # Every model call fails: the batch, the per-entry retry and any
+            # other prompt the pass sends (kind-only entries answer them).
+            "extractor": {"model": "stub-model", "replies": [
+                fail, *({"kind": k, "status": 503,
+                         "body": json.dumps({"error": "upstream failure"})}
+                        for k in ("claims", "events", "relations"))]},
             "seed": [w.fact("Audit Exporter", "bucket", "audit-6")],
             "ops": [
                 {**w.store(STALL_NOTES[0], source="conversation"),
