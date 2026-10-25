@@ -1,7 +1,6 @@
 {
   "source": "https://github.com/bblanchon/pdfium-binaries",
   "tag": "chromium/8076",
-  "dir": "chromium-8076",
   "oracle_pypdfium2": "5.14.0",
   "attestation": {
     "signer": "https://github.com/bblanchon/pdfium-binaries/.github/workflows/build-all.yml@refs/heads/master",

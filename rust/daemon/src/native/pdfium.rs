@@ -83,6 +83,23 @@ pub fn this_target() -> Option<&'static str> {
     })
 }
 
+/// This build's platform as a refusal names it, with the C library on
+/// Linux (a musl build cannot load the glibc library).
+fn platform_label() -> String {
+    let os = std::env::consts::OS;
+    let arch = std::env::consts::ARCH;
+    let libc = if os != "linux" {
+        ""
+    } else if cfg!(target_env = "musl") {
+        "-musl"
+    } else if cfg!(target_env = "gnu") {
+        "-gnu"
+    } else {
+        "-other-libc"
+    };
+    format!("{os}-{arch}{libc}")
+}
+
 /// What one install is built from: the release tag and this target's pin.
 #[derive(Clone, Debug)]
 pub struct Build {
@@ -95,13 +112,8 @@ impl Build {
     /// This daemon's build, or why there is none for this platform.
     pub fn current() -> Result<Self, String> {
         let pins = all_pins();
-        let target = this_target().ok_or_else(|| {
-            format!(
-                "no PDFium build is pinned for {}-{}",
-                std::env::consts::OS,
-                std::env::consts::ARCH
-            )
-        })?;
+        let target = this_target()
+            .ok_or_else(|| format!("no PDFium build is pinned for {}", platform_label()))?;
         let pin = pins
             .target(target)
             .cloned()
@@ -143,7 +155,8 @@ impl Build {
         })
     }
 
-    /// `<root>/<build>-<12 hex of the pinned archive>`.
+    /// `<root>/<build>-<12 hex of its provenance record>`: the pins and the
+    /// unpack layout, so a change to either installs beside the old one.
     pub fn install_dir(&self, root: &Path) -> PathBuf {
         self.with_manifest(|m| m.install_dir(root))
     }
@@ -279,32 +292,53 @@ pub fn root() -> Option<PathBuf> {
     )
 }
 
-/// The refusal PDF ingest answers when the library is missing or does not
-/// match its pin; text and HTML ingest never need it.
-#[allow(dead_code)] // PDF ingest calls it from the extraction PR.
-pub fn unavailable(detail: &str) -> String {
+const PROVISION: &str = "`pseudolife-daemon provision pdfium`";
+
+/// The refusal PDF ingest answers when there is no usable library: the
+/// cause, then the one step that fixes it, if any; text and HTML ingest
+/// never need the library.
+fn unavailable(cause: &str, fix: Option<&str>) -> String {
+    let fix = fix
+        .map(|f| format!(": {f}, then ingest the file again"))
+        .unwrap_or_default();
     format!(
-        "pdf_engine_unavailable: reading a PDF needs the PDFium library, and {detail}. \
-         Install it with `pseudolife-daemon provision pdfium`, then ingest the file again; \
+        "pdf_engine_unavailable: reading a PDF needs the PDFium library, and {cause}{fix}; \
          text, Markdown and HTML files ingest without it"
     )
 }
 
 /// The installed library for PDF ingest, or the `pdf_engine_unavailable`
-/// refusal naming why there is none.
+/// refusal naming why there is none and what fixes it.
 #[allow(dead_code)] // PDF ingest calls it from the extraction PR.
 pub fn library() -> Result<PathBuf, String> {
-    let build = Build::current().map_err(|e| unavailable(&e))?;
-    let root = root().ok_or_else(|| {
-        unavailable("no install directory is known (neither LOCALAPPDATA, XDG_DATA_HOME nor a home directory)")
-    })?;
+    library_at(Build::current(), root())
+}
+
+fn library_at(build: Result<Build, String>, root: Option<PathBuf>) -> Result<PathBuf, String> {
+    let build = build.map_err(|cause| unavailable(&cause, None))?;
+    let Some(root) = root else {
+        return Err(unavailable(
+            "no install directory is known (no LOCALAPPDATA, XDG_DATA_HOME or home directory)",
+            Some(&format!("set {ROOT_ENV} to one and run {PROVISION}")),
+        ));
+    };
     match build.locate(&root) {
         Ok(Some(path)) => Ok(path),
-        Ok(None) => Err(unavailable(&format!(
-            "it is not installed at {}",
-            build.install_dir(&root).display()
-        ))),
-        Err(e) => Err(unavailable(&e.to_string())),
+        Ok(None) => Err(unavailable(
+            &format!(
+                "it is not installed at {}",
+                build.install_dir(&root).display()
+            ),
+            Some(&format!("run {PROVISION}")),
+        )),
+        Err(Error::Installed { dir, detail }) => Err(unavailable(
+            &format!(
+                "the install at {} does not match this build ({detail})",
+                dir.display()
+            ),
+            Some(&format!("move that directory aside and run {PROVISION}")),
+        )),
+        Err(e) => Err(unavailable(&e.to_string(), None)),
     }
 }
 

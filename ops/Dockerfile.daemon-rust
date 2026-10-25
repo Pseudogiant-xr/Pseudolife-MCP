@@ -8,8 +8,11 @@ RUN --mount=type=cache,id=w3j-cargo-registry,target=/usr/local/cargo/registry,sh
     cargo build --manifest-path rust/Cargo.toml --locked --release --bin pseudolife-daemon -j 3 \
     && cp rust/target/release/pseudolife-daemon /pseudolife-daemon
 # PDFium for PDF ingest, installed by the daemon's own provisioner: the pin
-# (rust/daemon/pdfium-pin.json) and checks a native install gets.
-RUN PSEUDOLIFE_DAEMON_PDFIUM_DIR=/opt/pdfium /pseudolife-daemon provision pdfium
+# (rust/daemon/pdfium-pin.json) and checks a native install gets. The
+# provisioner publishes owner-only (root here); readable by all, so a
+# non-root runtime user can load it too.
+RUN PSEUDOLIFE_DAEMON_PDFIUM_DIR=/opt/pdfium /pseudolife-daemon provision pdfium \
+    && chmod -R a+rX /opt/pdfium
 
 FROM python:3.12-slim-bookworm AS runtime-inputs
 COPY rust/daemon/provision_container_model.py /provision_container_model.py

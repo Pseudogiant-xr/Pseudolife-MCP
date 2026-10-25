@@ -68,8 +68,8 @@ fn this_build_has_a_pin_on_every_ci_platform() {
 }
 
 #[test]
-fn the_python_oracle_locks_the_pypdfium2_that_bundles_this_build() {
-    // pypdfium2's wheels bundle these PDFium builds; the PDF differential
+fn the_python_lock_names_the_pypdfium2_this_pin_was_checked_against() {
+    // pin_pdfium.py checked that this pypdfium2 bundles the pinned build; the PDF differential
     // compares the two daemons byte for byte, so the pins move together.
     let pin: serde_json::Value = serde_json::from_str(PIN_JSON).unwrap();
     let oracle = pin["oracle_pypdfium2"].as_str().expect("oracle_pypdfium2");
@@ -190,11 +190,78 @@ fn the_root_is_the_override_or_beside_the_lite_runtime() {
 }
 
 #[test]
-fn the_refusal_names_the_cause_and_the_command() {
-    let m = unavailable("it is not installed at /x/8076-abc");
-    assert!(m.starts_with("pdf_engine_unavailable: "), "{m}");
-    assert!(m.contains("it is not installed at /x/8076-abc"), "{m}");
-    assert!(m.contains("`pseudolife-daemon provision pdfium`"), "{m}");
+fn each_refusal_names_its_cause_and_only_the_fix_that_works() {
+    let cmd = "`pseudolife-daemon provision pdfium`";
+    let lib = |build, root| library_at(build, root).unwrap_err();
+    // No pinned build: nothing to run.
+    let m = lib(
+        Err("no PDFium build is pinned for linux-aarch64-musl".into()),
+        None,
+    );
+    assert!(
+        m.starts_with("pdf_engine_unavailable: reading a PDF needs"),
+        "{m}"
+    );
+    assert!(m.contains("pinned for linux-aarch64-musl"), "{m}");
+    assert!(!m.contains("provision"), "{m}");
+    // No install root: set one, then provision.
+    let build = build_for("lib/libpdfium.so", b"archive", LIB);
+    let m = lib(Ok(build.clone()), None);
+    assert!(
+        m.contains(&format!("set {ROOT_ENV} to one and run {cmd}, then ingest")),
+        "{m}"
+    );
+    // Not installed: provision.
+    let root = scratch("refusal");
+    let m = lib(Ok(build.clone()), Some(root.clone()));
+    assert!(
+        m.contains(&format!(
+            "it is not installed at {}: run {cmd}, then ingest the file again; text",
+            build.install_dir(&root).display()
+        )),
+        "{m}"
+    );
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn a_mismatched_install_is_refused_with_one_fix() {
+    let root = scratch("mismatch-refusal");
+    let body = archive();
+    let build = build_for("lib/libpdfium.so", &body, LIB);
+    let (path, _) = build
+        .provision(&root, &fetch_serving(&build, body), &mut |_| {})
+        .unwrap();
+    assert_eq!(
+        library_at(Ok(build.clone()), Some(root.clone())),
+        Ok(path.clone())
+    );
+    fs::write(&path, b"swapped").unwrap();
+    let m = library_at(Ok(build.clone()), Some(root.clone())).unwrap_err();
+    assert!(m.contains("does not match this build ("), "{m}");
+    assert!(
+        m.contains("): move that directory aside and run `pseudolife-daemon provision pdfium`"),
+        "{m}"
+    );
+    assert_eq!(m.matches("aside").count(), 1, "{m}");
+    assert!(!m.contains(".."), "{m}");
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn the_platform_label_names_the_c_library_on_linux() {
+    let label = platform_label();
+    if cfg!(target_os = "linux") {
+        assert!(
+            label.ends_with("-gnu") || label.ends_with("-musl"),
+            "{label}"
+        );
+    } else {
+        assert_eq!(
+            label,
+            format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH)
+        );
+    }
 }
 
 // ── provisioning a synthetic archive (runs the shared provisioner) ────────

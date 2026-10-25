@@ -5,7 +5,7 @@ Contributor tool for a pin bump, not run by install or update. For one
 archive, checks it against the digest GitHub records for the asset,
 verifies the release's build attestation with ``gh attestation verify``,
 and records the archive's sha256 and the sha256 of the library inside it.
-The daemon embeds the file at compile time (``src/provision/pdfium.rs``):
+The daemon embeds the file at compile time (``src/native/pdfium.rs``):
 ``pseudolife-daemon provision pdfium`` installs only an archive and a
 library that match it, and PDF ingest loads only a library that matches.
 
@@ -26,12 +26,13 @@ import sys
 import tarfile
 import tempfile
 import urllib.request
+import zipfile
 from pathlib import Path
 
 REPO = "bblanchon/pdfium-binaries"
 OUT = Path(__file__).with_name("pdfium-pin.json")
 
-# Daemon target (as `src/provision/pdfium.rs` names it) -> release asset and
+# Daemon target (as `src/native/pdfium.rs` names it) -> release asset and
 # the library's path inside it.
 TARGETS = {
     "windows-x86_64": ("pdfium-win-x64.tgz", "bin/pdfium.dll"),
@@ -42,6 +43,28 @@ TARGETS = {
     "macos-aarch64": ("pdfium-mac-arm64.tgz", "lib/libpdfium.dylib"),
     "macos-x86_64": ("pdfium-mac-x64.tgz", "lib/libpdfium.dylib"),
 }
+
+
+def check_oracle(version: str, build: str, windows_library_sha256: str) -> None:
+    """The named pypdfium2 bundles this build: its win_amd64 wheel's
+    ``pypdfium2_raw/version.json`` names the build, and its ``pdfium.dll``
+    is byte-identical to the pinned windows-x86_64 library."""
+    meta = json.loads(urllib.request.urlopen(
+        f"https://pypi.org/pypi/pypdfium2/{version}/json", timeout=60).read())
+    wheel = next((f for f in meta["urls"] if f["filename"].endswith("win_amd64.whl")), None)
+    if wheel is None:
+        sys.exit(f"pypdfium2 {version} has no win_amd64 wheel to check")
+    data = urllib.request.urlopen(wheel["url"], timeout=300).read()
+    if hashlib.sha256(data).hexdigest() != wheel["digests"]["sha256"]:
+        sys.exit(f"{wheel['filename']}: download does not match PyPI's sha256")
+    with zipfile.ZipFile(io.BytesIO(data)) as whl:
+        bundled = json.loads(whl.read("pypdfium2_raw/version.json"))
+        dll = hashlib.sha256(whl.read("pypdfium2_raw/pdfium.dll")).hexdigest()
+    if str(bundled.get("build")) != build:
+        sys.exit(f"pypdfium2 {version} bundles PDFium build {bundled.get('build')}, not {build}")
+    if dll != windows_library_sha256:
+        sys.exit(f"pypdfium2 {version}'s pdfium.dll ({dll}) is not the pinned library")
+    print(f"pypdfium2 {version} bundles build {build}, its pdfium.dll identical to the pin")
 
 
 def gh_json(*args: str):
@@ -90,10 +113,10 @@ def main() -> int:
             }
             print(f"{target}: {asset} {digest[:12]}, {library} {lib_digest[:12]}")
 
+    check_oracle(args.pypdfium2, build, targets["windows-x86_64"]["library_sha256"])
     pin = {
         "source": f"https://github.com/{REPO}",
         "tag": args.tag,
-        "dir": f"chromium-{build}",
         "oracle_pypdfium2": args.pypdfium2,
         "attestation": {
             "signer": signer,
