@@ -234,10 +234,18 @@ What it adds to the manual procedure:
 
 - **Rootless Docker** for `<runner-user>` (decision 3). Its image store is
   its own, so the `w1c-connection` shard's `pseudolife-pg:18` build never
-  replaces the root engine's image of that name. In an unprivileged
-  container only IDs 0–65535 are mapped, so the account's subordinate IDs
-  are 30000–64999, not `useradd`'s default range past 65535 (with which
-  `newuidmap` fails).
+  replaces the root engine's image of that name. The account gets a full
+  65536 subordinate IDs, 165536–231071, past the 100000–165535 that
+  `useradd` gives login accounts. A smaller range breaks that build:
+  `apt-get update` drops to `nogroup` (65534), which a 35000-ID range left
+  unmapped (`setgroups 65534 failed`, found by review on 2026-10-25). An
+  unprivileged Proxmox container maps only IDs 0–65535 by default, so the
+  container needs `lxc.idmap: u 0 100000 231072` and the same for `g`, with
+  root's range in the hypervisor's `/etc/subuid` and `/etc/subgid` widened
+  to `root:100000:231072`, and one restart. The script checks the map
+  first and refuses with that fix. On a rerun that changes the range, it
+  removes the account's old rootless Docker storage, whose files belong to
+  IDs the account no longer maps.
 - **No local network.** An nftables table, loaded by its own systemd unit,
   rejects `<runner-user>`'s IPv4 traffic to private, link-local, CGNAT
   (Tailscale), multicast and broadcast addresses, and all its IPv6 traffic

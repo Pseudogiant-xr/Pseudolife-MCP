@@ -29,11 +29,13 @@ set -euo pipefail
 
 REPO_URL=https://github.com/Pseudogiant-xr/Pseudolife-MCP
 LABEL=pseudolife-parity-linux
-# Subordinate IDs for rootless Docker. In an unprivileged container only
-# IDs 0-65535 are mapped; this range avoids system and login accounts and
-# stops short of nobody (65534).
-SUBID_START=30000
-SUBID_COUNT=35000
+# Subordinate IDs for rootless Docker: a full 65536, so an image build can
+# switch to any ID a Debian image uses (apt drops to nogroup, 65534). The
+# range lies past the 100000+65536 that useradd gives login accounts. An
+# unprivileged Proxmox container maps only IDs 0-65535 by default; the
+# script refuses until the container's ID map covers this range.
+SUBID_START=165536
+SUBID_COUNT=65536
 LIB=/usr/local/lib/pseudolife-parity-runner
 # Each runner's directory sits in a root-owned parent, so a job can change a
 # runner directory's contents but never swap the directory itself for a
@@ -68,6 +70,14 @@ id "$suite_user" >/dev/null 2>&1 || { echo "--suite-user $suite_user is not an a
 [[ "$sha256" =~ ^[0-9a-f]{64}$ ]] || { echo "--sha256 must be 64 lowercase hex digits" >&2; exit 2; }
 if [ "$(id -u)" -ne 0 ]; then echo "run as root" >&2; exit 1; fi
 command -v pwsh >/dev/null || { echo "install PowerShell 7 first (the shards' steps use shell: pwsh)" >&2; exit 1; }
+for map in /proc/self/uid_map /proc/self/gid_map; do
+  if ! awk -v s=$SUBID_START -v e=$((SUBID_START + SUBID_COUNT)) '$1 <= s && $1 + $3 >= e {found=1} END {exit !found}' "$map"; then
+    echo "this machine's $map does not cover IDs $SUBID_START-$((SUBID_START + SUBID_COUNT - 1)), which rootless Docker needs;" \
+      "on a Proxmox container, map IDs 0-$((SUBID_START + SUBID_COUNT - 1)) (lxc.idmap: u 0 100000 $((SUBID_START + SUBID_COUNT))" \
+      "and the same for g, with root's range in the host's /etc/subuid and /etc/subgid widened to match), restart it, and rerun" >&2
+    exit 1
+  fi
+done
 for tool in docker dockerd-rootless-setuptool.sh; do
   command -v "$tool" >/dev/null || { echo "install Docker Engine with its rootless extras first ($tool is missing)" >&2; exit 1; }
 done
@@ -107,8 +117,10 @@ done
 if awk -F: -v s=$SUBID_START -v e=$((SUBID_START + SUBID_COUNT)) '$3>=s && $3<e {found=1} END {exit !found}' /etc/passwd; then
   echo "an account's UID falls in the subordinate range $SUBID_START+$SUBID_COUNT" >&2; exit 1
 fi
-# useradd assigns a range past 65535 by default, which this container
-# cannot map, so the account's range is replaced rather than kept.
+# useradd's default range may not be this one, so the account's range is
+# replaced rather than kept. A changed range leaves the rootless Docker
+# storage owned by IDs the account no longer maps; it is rebuilt below.
+old_subids=$(grep "^$runner_user:" /etc/subuid /etc/subgid 2>/dev/null | cut -d: -f2- | sort | paste -sd' ' -)
 for file in /etc/subuid /etc/subgid; do
   if awk -F: -v me="$runner_user" -v s=$SUBID_START -v e=$((SUBID_START + SUBID_COUNT)) \
        '$1 != me && $2 < e && $2 + $3 > s {found=1} END {exit !found}' "$file"; then
@@ -119,6 +131,7 @@ for file in /etc/subuid /etc/subgid; do
   sed -i "/^$runner_user:/d" "$file"
   echo "$runner_user:$SUBID_START:$SUBID_COUNT" >> "$file"
 done
+new_subids=$(grep "^$runner_user:" /etc/subuid /etc/subgid | cut -d: -f2- | sort | paste -sd' ' -)
 loginctl enable-linger "$runner_user"
 for _ in $(seq 30); do [ -S "/run/user/$runner_uid/bus" ] && break; sleep 1; done
 
@@ -284,6 +297,14 @@ run_as uv tool install --quiet --upgrade pseudolife-mcp >/dev/null
 run_as pseudolife-mcp lease check --help >/dev/null
 
 echo "== rootless Docker"
+docker_data="$runner_home/.local/share/docker"
+if [ -n "$old_subids" ] && [ "$old_subids" != "$new_subids" ] && [ -e "$docker_data" ]; then
+  echo "the account's subordinate IDs changed; rebuilding its rootless Docker storage (images and build cache)"
+  run_as systemctl --user stop docker.service || true
+  # Its files belong to IDs the account no longer maps, so only root can
+  # remove them; rm does not follow symbolic links inside the tree.
+  rm -rf --one-file-system "$docker_data"
+fi
 if ! run_as systemctl --user is-active --quiet docker; then
   run_as dockerd-rootless-setuptool.sh install
 fi
