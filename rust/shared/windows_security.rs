@@ -3,8 +3,8 @@
 //! dependencies"). It lives in `rust/shared/` so every crate that writes
 //! private state uses the same code; the shim includes it as
 //! `credentials::windows_security`. The including module provides
-//! `CredentialError(&'static str)` and `reject_ancestor_redirects`.
-use super::{CredentialError, reject_ancestor_redirects};
+//! `CredentialError(&'static str)`.
+use super::CredentialError;
 use std::{
     ffi::c_void,
     mem,
@@ -46,8 +46,47 @@ pub(crate) fn inspect_redirect(path: &Path) -> io::Result<bool> {
     Ok(attributes & 0x400 != 0)
 }
 
-// pub(crate) for the shim's private-state tests, which build one.
-pub(crate) struct Descriptor(pub(crate) *mut c_void);
+/// Refuses a path with a redirect (a symlink or junction) in any ancestor,
+/// outermost first, and fails closed when an existing ancestor cannot be
+/// inspected; an ancestor that does not exist yet passes.
+pub(crate) fn reject_ancestor_redirects(path: &Path) -> Result<(), CredentialError> {
+    let ancestors: Vec<_> = path
+        .parent()
+        .into_iter()
+        .flat_map(Path::ancestors)
+        .collect();
+    for ancestor in ancestors.into_iter().rev() {
+        match inspect_redirect(ancestor) {
+            Ok(true) => {
+                return Err(CredentialError(
+                    "credential path must not contain redirects",
+                ));
+            }
+            Ok(_) => {}
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+            Err(_) => {
+                return Err(CredentialError(
+                    "credential path ancestors cannot be inspected",
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+pub(crate) struct Descriptor(*mut c_void);
+impl Descriptor {
+    /// For the shim's private-state tests, which read descriptors back.
+    ///
+    /// # Safety
+    /// `descriptor` must be a security descriptor the system allocated with
+    /// `LocalAlloc` (as `GetSecurityInfo` returns it) that nothing else
+    /// frees: dropping the guard frees it exactly once.
+    #[cfg(test)]
+    pub(crate) unsafe fn from_local_alloc(descriptor: *mut c_void) -> Self {
+        Self(descriptor)
+    }
+}
 impl Drop for Descriptor {
     fn drop(&mut self) {
         if !self.0.is_null() {

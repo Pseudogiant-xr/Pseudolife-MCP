@@ -295,6 +295,15 @@ fn inspect_redirect(path: &Path) -> io::Result<bool> {
     }
 }
 pub(crate) fn reject_ancestor_redirects(path: &Path) -> Result<(), CredentialError> {
+    #[cfg(windows)]
+    {
+        windows_security::reject_ancestor_redirects(path)
+    }
+    #[cfg(not(windows))]
+    reject_ancestor_symlinks(path)
+}
+#[cfg(not(windows))]
+fn reject_ancestor_symlinks(path: &Path) -> Result<(), CredentialError> {
     let ancestors: Vec<_> = path
         .parent()
         .into_iter()
