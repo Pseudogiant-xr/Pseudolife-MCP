@@ -60,6 +60,7 @@ enum Entry<'a> {
     File(&'a str, &'a [u8], u32),
     Dir(&'a str),
     Symlink(&'a str, &'a str),
+    HardLink(&'a str, &'a str),
 }
 
 fn tar_gz(entries: &[Entry]) -> Vec<u8> {
@@ -86,8 +87,12 @@ fn tar_gz(entries: &[Entry]) -> Vec<u8> {
                 header.set_cksum();
                 builder.append(&header, &[][..]).unwrap();
             }
-            Entry::Symlink(path, target) => {
-                header.set_entry_type(tar::EntryType::Symlink);
+            Entry::Symlink(path, target) | Entry::HardLink(path, target) => {
+                header.set_entry_type(if matches!(entry, Entry::Symlink(..)) {
+                    tar::EntryType::Symlink
+                } else {
+                    tar::EntryType::Link
+                });
                 header.set_size(0);
                 header.set_mode(0o777);
                 set_raw_path(&mut header, path);
@@ -235,6 +240,7 @@ fn libxml2_deb() -> Vec<u8> {
     deb_with(
         "data.tar.zst",
         zstd(&tar_plain(&[
+            Entry::Dir("./"),
             Entry::Dir("./usr/lib/x86_64-linux-gnu/"),
             Entry::File(
                 "./usr/lib/x86_64-linux-gnu/libxml2.so.2.9.13",
@@ -718,6 +724,7 @@ fn soname_follows_pg0() {
 #[test]
 fn the_real_pins_download_verify_and_install() {
     let Some(root) = std::env::var_os("PSEUDOLIFE_TEST_PG_PROVISION_ROOT") else {
+        eprintln!("skipped: set PSEUDOLIFE_TEST_PG_PROVISION_ROOT to download the real pins");
         return;
     };
     let root = PathBuf::from(root);
@@ -745,4 +752,116 @@ fn linux_loader_path(root: &Path) -> Vec<(String, OsString)> {
     } else {
         Vec::new()
     }
+}
+
+#[test]
+fn pgvector_entries_must_be_plain_file_names() {
+    let url = "https://example.com/pgvector.tar.gz";
+    refused(
+        tar_gz(&[Entry::File("pgvector/lib/..\\..\\evil.dll", b"x", 0o644)]),
+        url,
+        Unpack::Pgvector,
+        "..\\\\..\\\\evil.dll",
+    );
+    refused(
+        tar_gz(&[Entry::File("C:\\x\\evil.dll", b"x", 0o644)]),
+        url,
+        Unpack::Pgvector,
+        "evil.dll",
+    );
+    refused(
+        tar_gz(&[Entry::File("pgvector/../lib/vector.so", b"x", 0o644)]),
+        url,
+        Unpack::Pgvector,
+        "pgvector/../lib/vector.so",
+    );
+}
+
+#[test]
+fn hard_links_and_a_second_top_directory_are_refused() {
+    let url = "https://example.com/pg.tar.gz";
+    refused(
+        tar_gz(&[
+            Entry::File("top/lib/libpq.so.5.18", b"x", 0o644),
+            Entry::HardLink("top/lib/libpq.so", "top/lib/libpq.so.5.18"),
+        ]),
+        url,
+        Unpack::PostgreSql,
+        "Link",
+    );
+    refused(
+        tar_gz(&[
+            Entry::File("top/bin/postgres", b"x", 0o755),
+            Entry::File("other/bin/initdb", b"x", 0o755),
+        ]),
+        url,
+        Unpack::PostgreSql,
+        "outside the archive's top directory \"top\"",
+    );
+    refused(
+        tar_gz(&[Entry::File("README", b"x", 0o644)]),
+        url,
+        Unpack::PostgreSql,
+        "beside the archive's top directory",
+    );
+}
+
+#[test]
+fn layouts_place_entries_as_documented() {
+    let mut as_is = native::Layout::as_is();
+    assert_eq!(
+        as_is.place("bin/pdfium.dll", false).unwrap(),
+        Some(PathBuf::from("bin").join("pdfium.dll"))
+    );
+    assert_eq!(
+        as_is.place("LICENSE", false).unwrap(),
+        Some(PathBuf::from("LICENSE"))
+    );
+    assert_eq!(as_is.place("./", true).unwrap(), None);
+    assert!(as_is.place("../x", false).is_err());
+    let mut strip = native::Layout::strip_top();
+    assert_eq!(strip.place("top/", true).unwrap(), None);
+    assert_eq!(
+        strip.place("top/bin/psql", false).unwrap(),
+        Some(PathBuf::from("bin").join("psql"))
+    );
+    assert!(strip.place("other/bin/psql", false).is_err());
+    assert_eq!(
+        native::file_name("./usr/lib/libxml2.so.2").unwrap(),
+        "libxml2.so.2"
+    );
+    assert!(native::file_name("./").is_err());
+    assert!(native::file_name("a\\b.dll").is_err());
+}
+
+#[test]
+fn a_changed_record_or_layout_installs_beside_the_old_tree() {
+    let root = Path::new("runtimes");
+    let (pins, _) = fake_set(false, false);
+    let current = manifest(pins);
+    let mut next = manifest(pins);
+    next.record.insert("layout".into(), (LAYOUT + 1).into());
+    assert_ne!(next.install_dir(root), current.install_dir(root));
+    assert_eq!(current.install_dir(root), install_dir(root, pins));
+}
+
+#[test]
+fn locate_refuses_an_install_missing_a_bundled_or_pgvector_library() {
+    let root = scratch("libs");
+    let (pins, fetch) = fake_set(cfg!(windows), true);
+    provision(&root, pins, &fetch, &mut quiet()).unwrap();
+    let dir = install_dir(&root, pins);
+    fs::remove_file(dir.join("lib/libxml2.so.2.9.13")).unwrap();
+    let error = locate(&root, pins).unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("lib/libxml2.so.2.9.13 is missing"),
+        "{error}"
+    );
+    fs::write(dir.join("lib/libxml2.so.2.9.13"), b"libxml2 bytes").unwrap();
+    fs::remove_file(dir.join("lib/vector.so")).unwrap();
+    let error = locate(&root, pins).unwrap_err();
+    assert!(error.to_string().contains("pgvector's library"), "{error}");
+    fs::remove_dir_all(root).unwrap();
 }

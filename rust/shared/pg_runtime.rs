@@ -13,7 +13,9 @@
 //! Deliberate differences from pg0: an archive entry that would leave the
 //! install tree, a link to anything but a file beside it, or a hard link or
 //! device is refused rather than skipped or followed; unpacked files lose
-//! group and other write permission (pgvector_compiled ships mode 0777);
+//! group and other write permission (pgvector_compiled ships mode 0777)
+//! and otherwise keep their archive mode (pg0 sets everything in `bin/` and
+//! `lib/` to 0755, static `.a` libraries included);
 //! and the Ubuntu packages come from Launchpad's permanent file store at
 //! the versions pg0 pins, because the Ubuntu pool deletes a package version
 //! once a newer update supersedes it.
@@ -227,11 +229,15 @@ pub fn default_root(
 }
 
 const LABEL: &str = "PostgreSQL 18.1.0 runtime";
+/// Raised when the unpack layout changes, so trees laid out the old way are
+/// installed again beside, not trusted.
+const LAYOUT: u32 = 1;
 
 fn manifest(artifacts: &[Artifact]) -> Manifest<'_, Artifact> {
     let mut record = serde_json::Map::new();
     record.insert("postgresql".into(), PG_VERSION.into());
     record.insert("pgvector".into(), PGVECTOR_VERSION.into());
+    record.insert("layout".into(), LAYOUT.into());
     Manifest {
         label: LABEL,
         version: PG_VERSION,
@@ -249,7 +255,7 @@ pub fn install_dir(root: &Path, artifacts: &[Artifact]) -> PathBuf {
 /// The installed runtime for these pins: `None` when there is none, an
 /// error when the directory exists but is not a complete install of them.
 pub fn locate(root: &Path, artifacts: &[Artifact]) -> Result<Option<Runtime>, Error> {
-    native::locate(root, &manifest(artifacts), &validate)
+    native::locate(root, &manifest(artifacts), &|dir| validate(dir, artifacts))
 }
 
 /// Installs the runtime for these pins under `root` unless it is already
@@ -266,23 +272,52 @@ pub fn provision(
         fetch,
         log,
         &mut unpack,
-        &validate,
+        &|dir| validate(dir, artifacts),
     )
 }
 
-fn validate(dir: &Path) -> Result<Runtime, String> {
-    Runtime::new(dir.to_path_buf()).map_err(|error| match error {
+/// What the lifecycle needs (`Runtime::new`: the programs and pgvector's
+/// control file), plus pgvector's library and each bundled library with
+/// its SONAME link.
+fn validate(dir: &Path, artifacts: &[Artifact]) -> Result<Runtime, String> {
+    let runtime = Runtime::new(dir.to_path_buf()).map_err(|error| match error {
         embedded::Error::Runtime { missing, .. } => format!("{missing} is missing"),
         other => other.to_string(),
-    })
+    })?;
+    let lib = dir.join("lib");
+    if !["vector.so", "vector.dylib", "vector.dll"]
+        .iter()
+        .any(|name| lib.join(name).is_file())
+    {
+        return Err("lib/vector (pgvector's library) is missing".into());
+    }
+    for artifact in artifacts {
+        let Unpack::Deb(wanted) = artifact.unpack else {
+            continue;
+        };
+        for name in wanted {
+            if !lib.join(name).is_file() {
+                return Err(format!("lib/{name} is missing"));
+            }
+            #[cfg(unix)]
+            if let Some(link) = soname(name)
+                && fs::symlink_metadata(lib.join(&link)).is_err()
+            {
+                return Err(format!("lib/{link} is missing"));
+            }
+        }
+    }
+    Ok(runtime)
 }
 
 fn unpack(artifact: &Artifact, download: &Path, tree: &Path) -> Result<(), String> {
     match artifact.unpack {
         Unpack::PostgreSql if artifact.url.ends_with(".zip") => {
-            native::unpack_zip_tree(download, tree)
+            native::unpack_zip_tree(download, tree, native::Layout::strip_top())
         }
-        Unpack::PostgreSql => native::unpack_tar_tree(native::gzip(download)?, tree),
+        Unpack::PostgreSql => {
+            native::unpack_tar_tree(native::gzip(download)?, tree, native::Layout::strip_top())
+        }
         Unpack::Pgvector => unpack_pgvector(native::gzip(download)?, tree),
         Unpack::Deb(wanted) => unpack_deb(download, tree, wanted),
     }
@@ -304,7 +339,7 @@ fn unpack_pgvector(reader: impl Read, tree: &Path) -> Result<(), String> {
                 ));
             }
         }
-        let name = native::basename(&raw);
+        let name = native::file_name(&raw)?;
         let dest = if name.ends_with(".so") || name.ends_with(".dylib") || name.ends_with(".dll") {
             tree.join("lib").join(name)
         } else if name == "vector.control" || name.starts_with("vector--") {
@@ -363,8 +398,11 @@ fn unpack_deb(path: &Path, tree: &Path, wanted: &[&str]) -> Result<(), String> {
     let mut found = BTreeSet::new();
     for entry in archive.entries().map_err(|e| e.to_string())? {
         let mut entry = entry.map_err(|e| e.to_string())?;
+        if entry.header().entry_type() == tar::EntryType::Directory {
+            continue;
+        }
         let raw = String::from_utf8_lossy(&entry.path_bytes()).into_owned();
-        let name = native::basename(&raw).to_owned();
+        let name = native::file_name(&raw)?.to_owned();
         if !wanted.contains(&name.as_str()) {
             continue;
         }

@@ -92,16 +92,13 @@ pub struct Manifest<'a, A: Pinned> {
 }
 
 impl<A: Pinned> Manifest<'_, A> {
-    /// `<root>/<version>-<12 hex of the pin set>`.
+    /// `<root>/<version>-<12 hex of the provenance record>`: the pins and
+    /// the consumer's record fields (a layout version, say), so any change
+    /// to either installs beside the old tree rather than failing on it.
     pub fn install_dir(&self, root: &Path) -> PathBuf {
-        let mut hash = Sha256::new();
-        for artifact in self.artifacts {
-            hash.update(artifact.url().as_bytes());
-            hash.update(b"\n");
-            hash.update(artifact.sha256().as_bytes());
-            hash.update(b"\n");
-        }
-        root.join(format!("{}-{}", self.version, hex(&hash.finalize()[..6])))
+        let record = serde_json::to_vec(&self.provenance()).expect("provenance serializes");
+        let digest = Sha256::digest(&record);
+        root.join(format!("{}-{}", self.version, hex(&digest[..6])))
     }
 
     fn provenance(&self) -> serde_json::Value {
@@ -156,7 +153,8 @@ impl fmt::Display for Error {
             Self::Download { label, url, detail } => write!(
                 f,
                 "could not download {url} ({detail}); nothing was installed. The {label} is \
-                 downloaded once: check the network connection or HTTPS proxy and start again."
+                 downloaded once: check the network connection (behind a proxy, set \
+                 HTTPS_PROXY) and start again."
             ),
             Self::Checksum {
                 url,
@@ -299,7 +297,7 @@ pub fn locate<A: Pinned, T>(
         .map_err(|e| installed(format!("its {PROVENANCE} is not JSON: {e}")))?;
     if recorded != manifest.provenance() {
         return Err(installed(format!(
-            "its {PROVENANCE} records other artifacts than this build pins"
+            "its {PROVENANCE} records other artifacts or layout than this build's"
         )));
     }
     validate(&dir).map(Some).map_err(installed)
@@ -324,13 +322,19 @@ pub fn provision<A: Pinned, T>(
         return Ok((found, false));
     }
     fs::create_dir_all(root).map_err(io_error("create", root))?;
-    let _lock = InstallLock::acquire(root)?;
+    let _lock = InstallLock::acquire(root, &mut || {
+        log(&format!(
+            "waiting for another process installing the {} in {}",
+            manifest.label,
+            root.display()
+        ))
+    })?;
     // Another process may have installed it while this one waited.
     if let Some(found) = locate(root, manifest, validate)? {
         log(&already(&dir));
         return Ok((found, false));
     }
-    clear_staging(root)?;
+    clear_staging(root, log);
     let mut name = [0u8; 8];
     getrandom::fill(&mut name).map_err(|e| Error::Io {
         action: "name a staging directory in",
@@ -345,25 +349,33 @@ pub fn provision<A: Pinned, T>(
 }
 
 /// Staging trees of runs that died; the install lock proves no live run is
-/// using them.
-fn clear_staging(root: &Path) -> Result<(), Error> {
-    for entry in fs::read_dir(root).map_err(io_error("list", root))? {
-        let entry = entry.map_err(io_error("list", root))?;
-        if entry
+/// using them. Best effort: each run stages under a fresh name, so one that
+/// cannot be removed yet (a scanner holding a file) only costs disk space.
+fn clear_staging(root: &Path, log: &mut dyn FnMut(&str)) {
+    let Ok(entries) = fs::read_dir(root) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        if !entry
             .file_name()
             .to_string_lossy()
             .starts_with(STAGING_PREFIX)
         {
-            let path = entry.path();
-            let removed = if entry.file_type().is_ok_and(|t| t.is_dir()) {
-                fs::remove_dir_all(&path)
-            } else {
-                fs::remove_file(&path)
-            };
-            removed.map_err(io_error("remove the abandoned", &path))?;
+            continue;
+        }
+        let path = entry.path();
+        let removed = if entry.file_type().is_ok_and(|t| t.is_dir()) {
+            fs::remove_dir_all(&path)
+        } else {
+            fs::remove_file(&path)
+        };
+        if let Err(e) = removed {
+            log(&format!(
+                "left an abandoned staging directory {} in place ({e})",
+                path.display()
+            ));
         }
     }
-    Ok(())
 }
 
 fn install<A: Pinned, T>(
@@ -418,7 +430,13 @@ fn install<A: Pinned, T>(
         manifest.label,
         dir.display()
     ));
-    validate(&dir).map_err(|detail| Error::Installed { dir, detail })
+    validate(&dir).map_err(|detail| Error::Installed {
+        dir,
+        detail: format!(
+            "{detail} right after it was installed, so something else changed it, such as \
+             an antivirus quarantine"
+        ),
+    })
 }
 
 /// Every directory of the tree, deepest first, so its entries (links
@@ -518,7 +536,10 @@ struct InstallLock {
     file: fs::File,
 }
 impl InstallLock {
-    fn acquire(root: &Path) -> Result<Self, Error> {
+    /// Blocks until held, calling `waiting` once first if another process
+    /// holds it (a download can take minutes; the caller should not look
+    /// hung meanwhile).
+    fn acquire(root: &Path, waiting: &mut dyn FnMut()) -> Result<Self, Error> {
         let path = root.join(INSTALL_LOCK);
         let file = fs::OpenOptions::new()
             .read(true)
@@ -526,7 +547,14 @@ impl InstallLock {
             .create(true)
             .open(&path)
             .map_err(io_error("open", &path))?;
-        file.lock().map_err(io_error("lock", &path))?;
+        match file.try_lock() {
+            Ok(()) => {}
+            Err(fs::TryLockError::WouldBlock) => {
+                waiting();
+                file.lock().map_err(io_error("lock", &path))?;
+            }
+            Err(fs::TryLockError::Error(e)) => return Err(io_error("lock", &path)(e)),
+        }
         Ok(Self { file })
     }
 }
@@ -544,10 +572,10 @@ pub fn gzip(path: &Path) -> Result<impl Read, String> {
     Ok(flate2::read::GzDecoder::new(BufReader::new(file)))
 }
 
-/// The path of an archive entry below the archive's top directory (`None`
-/// for the top directory itself), or why it is refused: anything absolute,
-/// with a parent step, a backslash or a drive or stream colon.
-pub fn below_top(raw: &str) -> Result<Option<PathBuf>, String> {
+/// The components of an archive entry's path, or why it is refused:
+/// anything absolute, with a parent step, a backslash or a drive or stream
+/// colon.
+fn components(raw: &str) -> Result<Vec<&str>, String> {
     if raw.starts_with('/') || raw.contains('\\') || raw.contains(':') {
         return Err(format!("entry {raw:?} is not a plain relative path"));
     }
@@ -558,12 +586,66 @@ pub fn below_top(raw: &str) -> Result<Option<PathBuf>, String> {
     if parts.contains(&"..") {
         return Err(format!("entry {raw:?} would leave the install directory"));
     }
-    Ok((parts.len() > 1).then(|| parts[1..].iter().collect()))
+    Ok(parts)
 }
 
-/// The last component of an archive entry's path.
-pub fn basename(raw: &str) -> &str {
-    raw.rsplit('/').find(|p| !p.is_empty()).unwrap_or("")
+/// How an archive's paths map into the install tree.
+#[derive(Default)]
+pub struct Layout {
+    /// The archive holds one top directory, which becomes the tree; an
+    /// entry outside it, or a file beside it, is refused.
+    strip_top: bool,
+    top: Option<String>,
+}
+impl Layout {
+    /// Paths are kept as they are (an archive with `bin/`, `lib/`, ... at
+    /// its root).
+    pub fn as_is() -> Self {
+        Self::default()
+    }
+    /// One top directory (`postgresql-18.1.0-<target>/`) becomes the tree.
+    pub fn strip_top() -> Self {
+        Self {
+            strip_top: true,
+            top: None,
+        }
+    }
+    /// The entry's path in the tree (`None` for the top directory itself),
+    /// or why it is refused.
+    pub fn place(&mut self, raw: &str, is_dir: bool) -> Result<Option<PathBuf>, String> {
+        let parts = components(raw)?;
+        if !self.strip_top {
+            return Ok((!parts.is_empty()).then(|| parts.iter().collect()));
+        }
+        let Some(first) = parts.first() else {
+            return Ok(None);
+        };
+        match &self.top {
+            Some(top) if top != first => {
+                return Err(format!(
+                    "entry {raw:?} is outside the archive's top directory {top:?}"
+                ));
+            }
+            Some(_) => {}
+            None => self.top = Some((*first).to_owned()),
+        }
+        if parts.len() == 1 && !is_dir {
+            return Err(format!(
+                "entry {raw:?} is a file beside the archive's top directory"
+            ));
+        }
+        Ok((parts.len() > 1).then(|| parts[1..].iter().collect()))
+    }
+}
+
+/// The last component of an archive entry's path, for helpers that place
+/// files by name; refused unless it is a plain file name.
+pub fn file_name(raw: &str) -> Result<&str, String> {
+    let name = components(raw)?.last().copied().unwrap_or("");
+    if name.is_empty() {
+        return Err(format!("entry {raw:?} has no file name"));
+    }
+    Ok(name)
 }
 
 /// A new file with the archive's mode less group and other write (owner
@@ -622,14 +704,15 @@ pub fn check_link(raw: &str, target: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// A tar archive whose one top directory becomes `tree`: directories,
-/// files and same-directory links; anything else is refused.
-pub fn unpack_tar_tree(reader: impl Read, tree: &Path) -> Result<(), String> {
+/// A tar archive laid into `tree`: directories, files and same-directory
+/// links; anything else (hard links, devices) is refused.
+pub fn unpack_tar_tree(reader: impl Read, tree: &Path, mut layout: Layout) -> Result<(), String> {
     let mut archive = tar::Archive::new(reader);
     for entry in archive.entries().map_err(|e| e.to_string())? {
         let mut entry = entry.map_err(|e| e.to_string())?;
         let raw = String::from_utf8_lossy(&entry.path_bytes()).into_owned();
-        let Some(relative) = below_top(&raw)? else {
+        let is_dir = entry.header().entry_type() == tar::EntryType::Directory;
+        let Some(relative) = layout.place(&raw, is_dir)? else {
             continue;
         };
         let dest = tree.join(&relative);
@@ -665,14 +748,14 @@ pub fn unpack_tar_tree(reader: impl Read, tree: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// A zip archive whose one top directory becomes `tree`; links are refused.
-pub fn unpack_zip_tree(path: &Path, tree: &Path) -> Result<(), String> {
+/// A zip archive laid into `tree`; links are refused.
+pub fn unpack_zip_tree(path: &Path, tree: &Path, mut layout: Layout) -> Result<(), String> {
     let file = fs::File::open(path).map_err(|e| e.to_string())?;
     let mut archive = zip::ZipArchive::new(BufReader::new(file)).map_err(|e| e.to_string())?;
     for index in 0..archive.len() {
         let mut entry = archive.by_index(index).map_err(|e| e.to_string())?;
         let raw = entry.name().to_owned();
-        let Some(relative) = below_top(&raw)? else {
+        let Some(relative) = layout.place(&raw, entry.is_dir())? else {
             continue;
         };
         let dest = tree.join(&relative);

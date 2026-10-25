@@ -11,7 +11,7 @@ use std::{
     io::Write,
     path::{Path, PathBuf},
     sync::{
-        Mutex,
+        Barrier, Mutex,
         atomic::{AtomicUsize, Ordering},
         mpsc,
     },
@@ -111,8 +111,13 @@ fn two_provisioners_on_one_root_install_once() {
         calls: AtomicUsize::new(0),
     };
     let unpacks = Mutex::new(0);
+    let logs = Mutex::new(Vec::<String>::new());
+    // Both start together, so neither can find the other's finished install
+    // without the lock having made it wait.
+    let start = Barrier::new(2);
     let outcomes: Vec<bool> = std::thread::scope(|scope| {
         let run = || {
+            start.wait();
             let mut unpack = |_: &Payload, download: &Path, tree: &Path| {
                 *unpacks.lock().unwrap() += 1;
                 fs::copy(download, tree.join("payload"))
@@ -125,16 +130,10 @@ fn two_provisioners_on_one_root_install_once() {
                     .then_some(())
                     .ok_or_else(|| "payload is missing".to_owned())
             };
-            native::provision(
-                &root,
-                &manifest,
-                &fetch,
-                &mut |_| {},
-                &mut unpack,
-                &validate,
-            )
-            .unwrap()
-            .1
+            let mut log = |line: &str| logs.lock().unwrap().push(line.to_owned());
+            native::provision(&root, &manifest, &fetch, &mut log, &mut unpack, &validate)
+                .unwrap()
+                .1
         };
         let first = scope.spawn(run);
         let second = scope.spawn(run);
@@ -144,6 +143,12 @@ fn two_provisioners_on_one_root_install_once() {
     assert_eq!(outcomes.iter().filter(|installed| **installed).count(), 1);
     assert_eq!(fetch.calls.load(Ordering::SeqCst), 1);
     assert_eq!(*unpacks.lock().unwrap(), 1);
+    let logs = logs.into_inner().unwrap();
+    let waited = logs
+        .iter()
+        .filter(|line| line.starts_with("waiting for another process"))
+        .count();
+    assert_eq!(waited, 1, "{logs:?}");
     let dir = manifest.install_dir(&root);
     assert_eq!(fs::read(dir.join("payload")).unwrap(), b"payload");
     fs::remove_dir_all(root).unwrap();
