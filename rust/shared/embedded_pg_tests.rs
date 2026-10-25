@@ -71,12 +71,12 @@ fn default_data_dir_follows_the_oracle_per_platform() {
 
 #[test]
 fn non_ascii_pgdata_is_refused_on_windows_only() {
-    let path = Path::new("C:\\Users\\Zoë\\pseudolife-mcp\\embedded_pg");
+    let path = Path::new("C:\\data\\Zoë\\pseudolife-mcp\\embedded_pg");
     let error = preflight_path(path, Platform::Windows).unwrap_err();
     assert!(matches!(error, Error::NonAsciiPath(_)));
     assert_eq!(
         error.to_string(),
-        "embedded postgres data dir 'C:\\\\Users\\\\Zoë\\\\pseudolife-mcp\\\\embedded_pg' contains \
+        "embedded postgres data dir 'C:\\\\data\\\\Zoë\\\\pseudolife-mcp\\\\embedded_pg' contains \
          non-ASCII characters, which the embedded PostgreSQL runtime cannot handle on Windows. \
          Set PSEUDOLIFE_MCP_DATA_DIR to an ASCII-only path (for example C:\\pseudolife-data) \
          and restart the daemon."
