@@ -452,6 +452,10 @@ ACL. The Windows module must keep descriptor storage alive while inspecting
 borrowed owner/ACL pointers, validate buffer bounds, and release each owned
 allocation and handle exactly once without closing borrowed handles. Repository
 directory identity lookup is read-only and must not change its permissions.
+The Windows module's source is `shared/windows_security.rs`, included into the
+shim under its old path, so the daemon can protect private state (the lite
+bank's secret) with the same code; the shim's private-state tests stay in the
+shim, beside the include.
 The Unix callback
 must use only async-signal-safe operations between fork and exec. These
 exceptions preserve the operating-system behavior of the Python oracle; their
