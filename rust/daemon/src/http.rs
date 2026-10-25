@@ -1059,7 +1059,10 @@ mod tests {
 
     /// The declared 501s: every registered Console route but the served
     /// ones, plus the hook, pairing and session-end answers still owned by
-    /// later slices. Serving a route means removing it here.
+    /// later slices. Each route is probed with no query and no body, so a
+    /// partly served route (`GET /api/agents`, whose coordination view is
+    /// served) is checked for its unserved default. Serving a route means
+    /// removing it here.
     #[tokio::test]
     async fn unserved_routes_answer_the_declared_501() {
         const SERVED: [(&str, &str); 2] = [("GET", "/api/search"), ("POST", "/api/daemon-notice")];
