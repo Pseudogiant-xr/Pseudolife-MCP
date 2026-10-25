@@ -26,6 +26,7 @@ case here.
 from __future__ import annotations
 
 import functools
+import os
 import tempfile
 import time
 from pathlib import Path
@@ -86,6 +87,12 @@ def docs_dir() -> str:
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_bytes(data)
     (root / "folder.data").mkdir()
+    # A FIFO (POSIX) and a file one byte over the 64 MiB cap, sparse, so it
+    # costs no disk: both daemons refuse each from its metadata.
+    if hasattr(os, "mkfifo"):
+        os.mkfifo(root / "pipe.txt")
+    with open(root / "huge.txt", "wb") as f:
+        f.truncate(64 * 1024 * 1024 + 1)
     return str(root)
 
 
@@ -204,6 +211,7 @@ LIVE_ONLY = ("live mode only: golden replay compares boot-time bank rows that "
 MUTANTS = ["document-raw-newlines", "document-strip-rust-whitespace", "document-no-overlap",
            "document-search-no-id-order", "document-upsert-keeps-old",
            "document-upsert-clock-only", "document-zero-clock-kept",
+           "document-directory-allowed",
            # The reference pool and counts (search.rs, documents.rs, stats.rs):
            # caught by documents-search-pool and documents-search-seeded.
            "search-no-reference-pool", "search-reference-no-dedup",
@@ -229,6 +237,8 @@ SCENARIOS: dict[str, dict] = {
             ingest("@DOCS@//./page.html/"),
             ingest(MISSING),
             ingest("@DOCS@/folder.data"),
+            ingest("@DOCS@/pipe.txt"),
+            ingest("@DOCS@/huge.txt"),
             search("how do I restore a pg_dump backup", top_k=2),
             search("watering tomato seedlings", top_k=1),
             search("sourdough starter feeding schedule"),
