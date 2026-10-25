@@ -11,6 +11,7 @@ pub mod judge_agreement;
 pub mod lessons;
 pub mod prompts;
 pub mod py_json_error;
+pub mod queue_judges;
 pub mod relations;
 pub mod review_judgments;
 pub mod run;

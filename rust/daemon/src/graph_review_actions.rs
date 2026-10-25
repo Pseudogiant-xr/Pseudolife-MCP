@@ -930,6 +930,30 @@ async fn set_proposal_status(
         return Ok(false);
     };
     in_txn(client, |c| async move {
+        set_proposal_status_body(c, id, status, DECIDED_BY, decided_at).await
+    })
+    .await
+}
+
+/// The reviewed-edge floor (`max(confidence, _REVIEWED_EDGE_MIN_CONF)`) an
+/// accepted link's edge is stored with.
+pub(crate) fn reviewed_edge_confidence(confidence: f64) -> f64 {
+    if crate::mutants::active("mcp-review-accept-no-floor") {
+        confidence
+    } else {
+        confidence.max(REVIEWED_EDGE_MIN_CONF)
+    }
+}
+
+/// `set_proposal_status`'s body, in the caller's transaction.
+pub(crate) async fn set_proposal_status_body(
+    c: &Client,
+    id: i64,
+    status: &str,
+    decided_by: &str,
+    decided_at: f64,
+) -> Result<bool, ToolError> {
+    {
         let Some(row) = c
             .query_opt(
                 "SELECT p.source, s.canonical, d.canonical \
@@ -949,7 +973,7 @@ async fn set_proposal_status(
                 "UPDATE edge_proposals SET status = $1, \
                  decided_by = COALESCE($2, decided_by), \
                  decided_at = COALESCE($3, decided_at) WHERE id = $4 AND status = 'pending'",
-                &[&status, &DECIDED_BY, &decided_at, &id],
+                &[&status, &decided_by, &decided_at, &id],
             )
             .await
             .map_err(internal)?;
@@ -974,8 +998,7 @@ async fn set_proposal_status(
             .map_err(internal)?;
         }
         Ok(n > 0)
-    })
-    .await
+    }
 }
 
 /// The `get_entity_proposal` fields the settle paths read.
@@ -1345,11 +1368,7 @@ async fn accept_link(ready: &Ready, pid: &Pid) -> Result<Value, ToolError> {
         return Ok(not_pending("accepted", pid));
     };
     // The reviewed-edge floor, stored as a confirming action.
-    let confidence = if crate::mutants::active("mcp-review-accept-no-floor") {
-        prop.confidence
-    } else {
-        prop.confidence.max(REVIEWED_EDGE_MIN_CONF)
-    };
+    let confidence = reviewed_edge_confidence(prop.confidence);
     graph::upsert_edge(
         client,
         graph::Edge {
