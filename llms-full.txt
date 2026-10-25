@@ -4616,7 +4616,7 @@ backups. Part of the [user guide](../../README.md#documentation).
 
 | Variable | Default | Effect |
 |----------|---------|--------|
-| `PSEUDOLIFE_MCP_DATABASE_URL` | _(unset → lite/file mode)_ | Postgres DSN; when set, PG is the source of truth (schema v57). Unset: with the `[lite]` extra installed the daemon auto-starts an embedded PostgreSQL and fills this in itself; otherwise v0.1 file-only mode (announced loudly at startup). |
+| `PSEUDOLIFE_MCP_DATABASE_URL` | _(unset → lite/file mode)_ | Postgres DSN; when set, PG is the source of truth (schema v57). Unset: with the `[lite]` extra installed the daemon auto-starts an embedded PostgreSQL and fills this in itself (its superuser password is a random per-bank secret in the owner-only `<data_dir>/embedded_pg.secret`, with SCRAM authentication; a bank from before 2026-10-25 moves off the old fixed `postgres` password at its next start); otherwise v0.1 file-only mode (announced loudly at startup). |
 | `PSEUDOLIFE_MCP_STORAGE` | `auto` | `files` opts the daemon out of the `[lite]` embedded Postgres (file mode even when pg0-embedded is installed). Only consulted when no DSN is set. |
 | `PSEUDOLIFE_MCP_DAEMON_URL` | `http://127.0.0.1:8765` | Daemon the shim connects to (and auto-starts). Use an HTTP(S) origin: scheme, host and optional port, without a path, user information, query or fragment. |
 | `PSEUDOLIFE_MCP_NO_SPAWN` | _(unset)_ | Set `1` on the **shim** to disable its spawn-a-daemon fallback: when nothing answers at `PSEUDOLIFE_MCP_DAEMON_URL` it waits up to 5 s for an external daemon instead, then starts the session without it (the last handshake it cached for that URL, retried until the daemon answers; see [the remote bank guide](remote-bank.md#when-the-daemon-is-unreachable)). The Docker-tier installers set this on every shim registration — after a reboot the shim can probe before Docker Desktop has bound the port, and a spawned host fallback then wins the bind race and shadows the real bank with whatever stale local state it finds. Leave unset on pip/lite installs, where the spawn fallback is the intended zero-config path. |
@@ -8281,7 +8281,7 @@ straight into the Docker tier; the lite tier uses the embedded
 runtime's own bundled `pg_dump`, attaching to the running instance or
 starting it for the duration) plus a
 `pseudolife_lite_state-*.tar.gz` of the data dir (weights, config, any
-pre-v57 ChromaDB store; ingested documents are in the dump since v57; `embedded_pg/` is excluded — the dump covers it), with the same
+pre-v57 ChromaDB store; ingested documents are in the dump since v57; `embedded_pg/` is excluded — the dump covers it — and so is `embedded_pg.secret`, the bank's superuser password, since a restore gives the fresh cluster its own), with the same
 7-day rotation (`--keep-days`). The artifact names
 (`pseudolife_lite_memory-*` / `pseudolife_lite_state-*`) are deliberately
 disjoint from `ops/backup.*`'s, so the two tools can share a directory

@@ -42,7 +42,8 @@ _DUMP_PREFIX = "pseudolife_lite_memory-"
 _STATE_PREFIX = "pseudolife_lite_state-"
 # Never archived into the state tar: the dump covers the bank, and the
 # backups dir must not recursively swallow itself.
-_STATE_EXCLUDE = {"embedded_pg", "backups"}
+# The cluster password stays out: a restore gives the fresh cluster its own.
+_STATE_EXCLUDE = {"embedded_pg", "embedded_pg.secret", "backups"}
 
 
 def perform_backup(
@@ -60,10 +61,15 @@ def perform_backup(
 
     dsn = environ.get("PSEUDOLIFE_MCP_DATABASE_URL")
     own_instance = None
+    dump_password = None
     if not dsn and embedded_pg.available():
         pgdata = data_dir / "embedded_pg"
         if (pgdata / "PG_VERSION").exists():
             dsn, own_instance = embedded_pg.attach_or_start(data_dir)
+            # The lite bank's password is a secret: it reaches pg_dump
+            # through PGPASSWORD, never its command line, which other
+            # accounts can read.
+            dsn, dump_password = embedded_pg.split_password(dsn)
         # No PG_VERSION: nothing to dump — a backup must never be the
         # thing that initializes a bank.
 
@@ -77,7 +83,7 @@ def perform_backup(
                     "or the pseudolife-mcp[lite] extra (whose embedded "
                     "runtime bundles it)."
                 )
-            dump = _dump_bank(dsn, pg_dump, bdir, ts)
+            dump = _dump_bank(dsn, pg_dump, bdir, ts, password=dump_password)
         state = _archive_state(data_dir, bdir, ts)
     finally:
         if own_instance is not None:
@@ -110,7 +116,9 @@ def _find_pg_dump(home: Path | None = None) -> Path | None:
     return Path(which) if which else None
 
 
-def _dump_bank(dsn: str, pg_dump: Path, bdir: Path, ts: str) -> Path:
+def _dump_bank(
+    dsn: str, pg_dump: Path, bdir: Path, ts: str, password: str | None = None,
+) -> Path:
     target = bdir / f"{_DUMP_PREFIX}{ts}.sql.gz"
     partial = bdir / f"{_DUMP_PREFIX}{ts}.sql.gz.part"
     # --no-owner --no-acl: the embedded instance's role is `postgres`,
@@ -118,10 +126,12 @@ def _dump_bank(dsn: str, pg_dump: Path, bdir: Path, ts: str) -> Path:
     # the documented lite→Docker restore path with `role "postgres" does
     # not exist` under restore.*'s ON_ERROR_STOP (review finding,
     # 2026-08-14; restorability is pinned by the roundtrip test).
+    env = None if password is None else {**os.environ, "PGPASSWORD": password}
     proc = subprocess.Popen(
         [str(pg_dump), "--no-owner", "--no-acl", "--dbname", dsn],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
+        env=env,
     )
     try:
         with gzip.open(partial, "wb", compresslevel=9) as gz:
