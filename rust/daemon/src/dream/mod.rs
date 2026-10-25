@@ -2,6 +2,7 @@
 //! `memory_dream` actions served on `/mcp`.
 #![allow(dead_code)]
 
+pub mod candidates;
 pub mod cursors;
 pub mod deep;
 pub mod extractor;
