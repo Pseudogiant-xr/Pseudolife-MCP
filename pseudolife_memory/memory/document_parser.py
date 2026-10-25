@@ -126,19 +126,28 @@ def _extract_pdf(path: Path) -> str:
     # replaced — keep this path copyleft-free.
     try:
         import pypdfium2 as pdfium
-        pdf = pdfium.PdfDocument(read_document_bytes(path))
+    except (ImportError, OSError):
+        # Not installed, or its bundled library cannot be loaded here
+        # (ctypes raises OSError): pypdf reads the file instead.
+        pdfium = None
+    if pdfium is not None:
+        data = read_document_bytes(path)
         try:
-            pages = []
-            for page in pdf:
-                textpage = page.get_textpage()
-                pages.append(textpage.get_text_range())
-                textpage.close()
-                page.close()
-            return "\n\n".join(pages)
-        finally:
-            pdf.close()
-    except ImportError:
-        pass
+            pdf = pdfium.PdfDocument(data)
+            try:
+                pages = []
+                for page in pdf:
+                    textpage = page.get_textpage()
+                    pages.append(textpage.get_text_range())
+                    textpage.close()
+                    page.close()
+                return "\n\n".join(pages)
+            finally:
+                pdf.close()
+        except pdfium.PdfiumError as e:
+            # The same refusal an unreadable document gives on the pypdf
+            # path, with PDFium's reason (a wrong password, not a PDF).
+            raise ValueError(f"Failed to read PDF: {e}") from e
 
     # Fall back to pypdf (maintained successor to PyPDF2; same PdfReader API)
     try:
