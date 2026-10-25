@@ -98,7 +98,7 @@ def main(argv: list[str] | None = None) -> int:
             binary = args.rust_test_bin.resolve()
         else:
             build = subprocess.run(
-                ["cargo", "test", "--locked", "--manifest-path", "Cargo.toml", "-p", PACKAGE,
+                ["cargo", "test", "--locked", "--manifest-path", "Cargo.toml", "-p", PACKAGE, "--bin", PACKAGE,
                  "--no-run", "--message-format=json", "--features", "mutants", "-j", "3"],
                 cwd=REPO / "rust", env=env, stdout=subprocess.PIPE, text=True, encoding="utf-8",
             )
