@@ -148,7 +148,13 @@ pub async fn sweep(
     // pass writes nothing more, as Python's sweep thread dies with the
     // process; a transaction it had open is rolled back before the writer
     // client's next use (`txn`).
-    let job = super::run::run_auto(&me, ready.clone(), background_caller(), background_writer(), None);
+    let job = super::run::run_auto(
+        &me,
+        ready.clone(),
+        background_caller(),
+        background_writer(),
+        None,
+    );
     let mut rx = stop.clone();
     let stopped = async move {
         // A dropped sender (no background owner) never stops the tick.

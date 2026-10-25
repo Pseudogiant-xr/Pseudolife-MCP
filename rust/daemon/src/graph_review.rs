@@ -1140,7 +1140,11 @@ mod tests {
         let names = |anchors: Option<&HashSet<i64>>| {
             let got =
                 duplicate_candidates_anchored(&ents, &HashSet::new(), &HashSet::new(), anchors);
-            compact(&got.iter().map(|f| f["entities"].clone()).collect::<Vec<_>>())
+            compact(
+                &got.iter()
+                    .map(|f| f["entities"].clone())
+                    .collect::<Vec<_>>(),
+            )
         };
         assert_eq!(
             names(Some(&HashSet::from([2, 5]))),
