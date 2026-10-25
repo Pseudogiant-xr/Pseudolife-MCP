@@ -1,5 +1,8 @@
 //! Dedicated PostgreSQL connections shared by native SQL clients and operators.
 mod dsn;
+#[path = "../../../shared/embedded_pg.rs"]
+pub mod embedded;
+pub mod embedded_secret;
 mod password;
 pub mod resolution;
 mod tls;
