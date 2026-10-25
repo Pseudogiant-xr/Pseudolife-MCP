@@ -33,12 +33,18 @@ def register(harness):
 
         def configure_daemons(self, procs):
             if "python" not in procs: return
-            # The brief explicitly defers dream execution. Instrument its
-            # trigger, rather than normalizing away cursor/ack writes.
+            # Both daemons run the session-end dream; the trigger is counted
+            # from a log line each side writes when it fires (Python's
+            # through this wrapper, Rust's natively), and the capture waits
+            # for the dream's acknowledgements on both.
             code = '''
 import logging, signal
 from pseudolife_memory import mcp_server
-mcp_server.service._fire_and_forget_dream = lambda: logging.getLogger("pseudolife-mcp").warning("session-end dream trigger: stub (W3-H)")
+_real_dream = mcp_server.service._fire_and_forget_dream
+def _counted_dream():
+    logging.getLogger("pseudolife-mcp").warning("session-end dream trigger: fired")
+    _real_dream()
+mcp_server.service._fire_and_forget_dream = _counted_dream
 # Controlled normal-return exit: uvicorn rethrows captured signals to the
 # previous handler; the fixture supplies a returning handler so atexit runs.
 # Ordinary CLI signal exit statuses are separate, uninstrumented behavior.
@@ -103,6 +109,13 @@ svc._storage.close()
                     reached &= not empty if self.sweep else bool(empty and empty[0]["ended_at"] is not None)
                     triggers = daemon.log.read_text(errors="replace").count("session-end dream trigger:")
                     reached &= triggers == self.expected_triggers
+                    if self.expected_triggers:
+                        # The fired dream has acknowledged what it pulled.
+                        entries = state["rows"].get("public.entries", {"columns": [], "rows": []})
+                        col = entries["columns"].index("dream_state") \
+                            if "dream_state" in entries["columns"] else None
+                        reached &= col is None or all(row[col] != "pending"
+                                                      for row in entries["rows"])
                     if self.resume_refusal:
                         # Observe a second failing tick: the first tick's
                         # durable closes survive and neither tick dreams.

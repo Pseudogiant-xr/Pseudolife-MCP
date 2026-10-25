@@ -86,9 +86,9 @@ pub struct MemoryConfig {
     pub lessons_synthesis_max_signals: i64,
     /// `memory.lessons.rule_mode` (off): every signal under the rule contract.
     pub lessons_rule_mode: bool,
-    /// `memory.graph_insight.enabled` (on): the dream's graph-insight
-    /// refresh (not ported: `memory_dream run` refuses while it is on).
-    pub graph_insight_enabled: bool,
+    /// `memory.graph_insight` (`GraphInsightConfig`): the dream's
+    /// graph-insight refresh (`graph_insight.rs`).
+    pub graph_insight: GraphInsightConfig,
     /// `memory.scopes` (`ScopesConfig`): source tags that never become
     /// projects, and fine-grained sources rolled up to an umbrella.
     pub scopes_exclude: Vec<String>,
@@ -123,6 +123,39 @@ impl Default for ReferenceConfig {
         ReferenceConfig {
             chunk_size: 512,
             chunk_overlap: 64,
+        }
+    }
+}
+
+/// `GraphInsightConfig` (`utils/config.py:914-925`): the communities and
+/// digest every dream run refreshes. `algorithm` is read and kept; Python
+/// takes `leiden` only when graspologic is importable, which no install
+/// provides, and this daemon always runs its Louvain (`graph_insight.rs`).
+/// `betweenness_sample` is read and kept; this daemon's betweenness is exact
+/// at every size (Option B).
+#[derive(Debug, Clone, PartialEq)]
+pub struct GraphInsightConfig {
+    pub enabled: bool,
+    pub algorithm: String,
+    pub resolution: f64,
+    pub max_community_fraction: f64,
+    pub god_nodes_top_n: i64,
+    pub surprises_top_n: i64,
+    pub questions_top_n: i64,
+    pub betweenness_sample: i64,
+}
+
+impl Default for GraphInsightConfig {
+    fn default() -> Self {
+        GraphInsightConfig {
+            enabled: true,
+            algorithm: "louvain".into(),
+            resolution: 1.0,
+            max_community_fraction: 0.25,
+            god_nodes_top_n: 10,
+            surprises_top_n: 10,
+            questions_top_n: 7,
+            betweenness_sample: 200,
         }
     }
 }
@@ -549,6 +582,9 @@ pub struct DreamConfig {
     pub digest_target_chars: i64,
     /// The consolidation pass (`service_dream.py:_dream_run_locked`).
     pub stall_notice: bool,
+    /// `stall_repeat_hours` (6): how often an ongoing stall is announced
+    /// again (validated greater than 0 at load).
+    pub stall_repeat_hours: f64,
     pub quarantine_low_trust: bool,
     pub trusted_sources: Vec<String>,
     pub assistant_claims: String,
@@ -792,7 +828,7 @@ impl Default for MemoryConfig {
             lessons_synthesis_dedup_min_similarity: 0.88,
             lessons_synthesis_max_signals: 200,
             lessons_rule_mode: false,
-            graph_insight_enabled: true,
+            graph_insight: GraphInsightConfig::default(),
             scopes_exclude: ["status", "claude", "agent", "correction"]
                 .map(String::from)
                 .to_vec(),
@@ -895,6 +931,7 @@ impl Default for DreamConfig {
             digest_context_chars: 24000,
             digest_target_chars: 1200,
             stall_notice: true,
+            stall_repeat_hours: 6.0,
             quarantine_low_trust: false,
             trusted_sources: Vec::new(),
             assistant_claims: "contender".into(),
@@ -1797,7 +1834,23 @@ fn load_str(text: &str) -> Result<Config, ConfigError> {
             memory.lessons_rule_mode = want_bool(l, "rule_mode", "memory.lessons", false)?;
         }
         if let Some(g) = section(m, "graph_insight", "memory.")? {
-            memory.graph_insight_enabled = want_bool(g, "enabled", "memory.graph_insight", true)?;
+            let path = "memory.graph_insight";
+            let d = GraphInsightConfig::default();
+            memory.graph_insight = GraphInsightConfig {
+                enabled: want_bool(g, "enabled", path, d.enabled)?,
+                algorithm: want_str(g, "algorithm", path, &d.algorithm)?,
+                resolution: want_float(g, "resolution", path, d.resolution)?,
+                max_community_fraction: want_float(
+                    g,
+                    "max_community_fraction",
+                    path,
+                    d.max_community_fraction,
+                )?,
+                god_nodes_top_n: want_int(g, "god_nodes_top_n", path, d.god_nodes_top_n)?,
+                surprises_top_n: want_int(g, "surprises_top_n", path, d.surprises_top_n)?,
+                questions_top_n: want_int(g, "questions_top_n", path, d.questions_top_n)?,
+                betweenness_sample: want_int(g, "betweenness_sample", path, d.betweenness_sample)?,
+            };
         }
         if let Some(sc) = section(m, "scopes", "memory.")? {
             if let Some(node) = lookup(sc, "exclude") {
@@ -2339,6 +2392,10 @@ fn read_dream(d: &[(Node, Node)]) -> Result<DreamConfig, ConfigError> {
         digest_context_chars: want_int(d, "digest_context_chars", p, def.digest_context_chars)?,
         digest_target_chars: want_int(d, "digest_target_chars", p, def.digest_target_chars)?,
         stall_notice: want_bool(d, "stall_notice", p, def.stall_notice)?,
+        // Validated below with `__post_init__`'s own message.
+        stall_repeat_hours: lookup(d, "stall_repeat_hours")
+            .and_then(node_f64)
+            .unwrap_or(def.stall_repeat_hours),
         quarantine_low_trust: want_bool(d, "quarantine_low_trust", p, def.quarantine_low_trust)?,
         trusted_sources: match lookup(d, "trusted_sources") {
             None | Some(Node::Null) => Vec::new(),

@@ -1,5 +1,20 @@
 //! The Console route table (spec R8), embedded from the golden the harness
-//! records from Python's `ConsoleRoutes` (`harness/record_routes.py`).
+//! records from Python's `ConsoleRoutes` (`harness/record_routes.py`), and
+//! the handlers behind `http.rs`'s gates, one module per route family so
+//! each family's port edits only its own module (`rust/CUTOVER.md`,
+//! "Ordered plan").
+
+pub(crate) mod board;
+pub(crate) mod cli;
+pub(crate) mod console;
+pub(crate) mod episodes;
+pub(crate) mod graph;
+pub(crate) mod hook;
+pub(crate) mod maintainer;
+pub(crate) mod mcp;
+pub(crate) mod pair;
+pub(crate) mod read;
+pub(crate) mod writes;
 
 use std::collections::HashSet;
 use std::sync::OnceLock;

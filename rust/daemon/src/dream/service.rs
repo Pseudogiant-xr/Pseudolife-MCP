@@ -595,7 +595,11 @@ fn py_round(x: f64, n: usize) -> f64 {
 }
 
 /// `deep_dream_need` (`service_dream.py:3677-3710`).
-async fn deep_dream_need(ready: &Ready, config: &Config, now: f64) -> Result<Value, ToolError> {
+pub(crate) async fn deep_dream_need(
+    ready: &Ready,
+    config: &Config,
+    now: f64,
+) -> Result<Value, ToolError> {
     let cfg = &config.memory.deep_dream;
     let client = ready.storage.client();
     let mark = get_meta(client, "deep_last_apply").await?;
@@ -850,15 +854,15 @@ pub async fn status(ready: &Ready, config: &Config) -> Result<Value, ToolError> 
     );
     out.insert("deep_dream".into(), deep);
     out.insert("review_queue".into(), review);
-    // The stall tracker is process-local; its overdue rule is armed by the
-    // sweep tick, which this daemon does not run yet, so only `run` passes
-    // move it.
-    let (stall, last_stall) = ready
-        .dream_run
-        .stall
-        .lock()
-        .expect("stall tracker")
-        .snapshot();
+    // The stall tracker is process-local; the overdue rule applies once a
+    // sweep runs (its tick sets the interval).
+    let (stall, last_stall) = {
+        let mut tracker = ready.dream_run.stall.lock().expect("stall tracker");
+        if let Some(interval) = tracker.sweep_interval() {
+            tracker.check_overdue(backlog as i64, cfg.min_batch, would_fire, interval);
+        }
+        tracker.snapshot()
+    };
     out.insert("stall".into(), stall);
     out.insert("last_stall".into(), last_stall);
     out.extend(super::extractor::status_extractor_fields(cfg, last_dream_extractor.as_ref()).await);
@@ -909,9 +913,6 @@ fn mcp_memory_dream<'a>(app: &'a crate::http::App, call: ToolCall<'a>) -> ToolFu
         };
         let writer = call.ident.writer.clone();
         return Box::pin(async move {
-            if let Some(refused) = super::run::refusal(&service.config) {
-                return Err(refused);
-            }
             let ready = service.ensure_init().await.map_err(internal)?;
             let r2 = ready.clone();
             let svc = service.clone();

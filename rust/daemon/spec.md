@@ -1234,7 +1234,7 @@ the maintainer's 2026-10-19 decision returned it to scope.
 | RC3 | A query blank after `strip()` answers `{query: "", seeds: [], entities: [], edges: [], paths: [], texts: [], iterations: 0, hops, low_confidence: true}` (plus the bookkeeping RC15 drops) with no search. | `service.py:9127-9132` |
 | RC4 | The vocabulary: entity display names by id, then each entity's aliases (grouped by first alias, `ORDER BY alias`), empty names dropped, first occurrence kept. With the hub gate, the asserted undirected degree by display name, and the threshold `max(floor, sorted(degrees)[min(len - 1, int(len × percentile / 100))])` (the floor alone for no edges). | `service.py:9085-9107,9139-9141`; `recall.py:200-206` |
 | RC5 | The seed search: `search(query, top_k)` as `memory_search`'s service body runs it (access accrual and the retrieval event included); its non-empty hit texts open `texts`, first occurrence kept, and their count is `seed_text_count`. | `recall.py:271-278` |
-| RC6 | Seeds (the mechanical driver): the vocabulary names the query mentions, else those the joined seed hits mention; none sets `low_confidence` and ends the walk with the seed texts. Seeds are deduplicated in order and cut to `max_entities`, each at hop 0. | `recall.py:144-161,279-290` |
+| RC6 | Seeds (the mechanical driver; the llm driver's are RC17): the vocabulary names the query mentions, else those the joined seed hits mention; none sets `low_confidence` and ends the walk with the seed texts. Seeds are deduplicated in order and cut to `max_entities`, each at hop 0. | `recall.py:144-161,279-290` |
 | RC7 | Mentions (`_mentions`): word-bounded and case-insensitive under Python 3.11's `re` (Unicode 14 `\w`, `\s` and `IGNORECASE` folding), the name's separator runs (`[\s_\-/]+`) matching any such run, a dot after the name bounding only when no word character follows, a dot before never, an apostrophe inside a word bounding only a possessive `s`, and a combining mark just outside a match counting as a word character. | `recall.py:20-103` |
 | RC8 | Each hop while the frontier is non-empty, fewer than `hops` hops have run and fewer than `max_entities` names are seen: the frontier selection (seeds always; other names below the hub threshold, by ascending degree then name, cut to a non-zero `expand_budget` as Python slices; unchanged with the gate off). | `recall.py:174-197,291-306` |
 | RC9 | Each selected name: its depth-1 neighborhood (`memory_graph`'s body with facts); a miss is skipped. Each node's display joins `entities` at this hop the first time it is seen, its facts kept from the first sight; each edge joins once per `(src, relation, dst)` as `{src, relation, dst, derived}` with its hop; paths join once. The hop stops once `max_entities` names are seen. | `recall.py:307-349`; `recall.py:164-171` |
@@ -1245,12 +1245,13 @@ the maintainer's 2026-10-19 decision returned it to scope.
 | RC14 | The caps: entities to 10 and edges to 15, each by the per-hop quota (`cap // H` per hop, the remainder to the latest hops, unused slots granted latest-first, earliest items within a hop), edges between surviving entities first; each entity's facts to 5; texts to 6 with up to `min(3, top_k)` from the seed search and a short hop pool backfilled from the seed texts. | `mcp_server.py:2754-2833,2911-2928` |
 | RC15 | `entity_hop`, `edge_hop` and `seed_text_count` are dropped; `truncated` and `searches_issued` stay. | `mcp_server.py:2929-2938` |
 | RC16 | Without `verbose`: facts as `{attribute, value}` plus `re_verify`/`re_verify_reason` when set and `authority`, `distortion_tolerance`, `pinned` when truthy; edges as `{src, relation, dst}`; texts cut to 200 characters plus `…`. | `mcp_server.py:2836-2869,2939-2950` |
+| RC17 | Seeds under the llm driver (`driver` "llm"), after the seed search and with no lock held: `_seed_prompt` (the first 200 vocabulary names joined by ", ", the question, the first 5 seed hits, empty ones included, joined by " ") sent as one `POST <base>/chat/completions` carrying `json.dumps({model, messages: [{role: "user", content: prompt}], temperature: 0.0, max_tokens: 256, stream: false})`. Base, model and key are each `os.environ.get(PSEUDOLIFE_DREAM_BASE_URL / _MODEL / _API_KEY) or memory.dream.extractor_base_url / extractor_model / extractor_api_key` (not `extractor_source` or the model override); nothing is sent when the base or the model is empty. `Authorization: Bearer <key>` goes only with a non-empty key; the timeout is 30 s; a redirect is refused, never followed, and a URL with userinfo is refused before connecting. The answer is `choices[0].message.content or ""`, and "" on any failure. `_parse_name_list` (first `[` to last `]`, `json.loads`, its strings in order), filtered to the vocabulary in the model's order, gives the seeds, then RC6's dedup and cut; none sets `low_confidence`. A truthy non-string `content` is an internal error. Re-queries stay RC10's. | `service.py:9238,9246-9250`; `recall.py:421-492` |
 
 `recall_mentions.rs` is checked against Python's `_mentions` over a
 generated corpus (`harness/goldens/recall-mentions.json`, written by
 `harness/gen_recall_mentions_goldens.py`), and its tables against their
 generator (`harness/gen_recall_unicode.py`). `harness/w2e.py live --only
-recall recall-wide recall-caps recall-ceiling recall-ungated` compares every answer and the full bank
+recall recall-wide recall-caps recall-ceiling recall-ungated recall-llm` compares every answer and the full bank
 (retrieval events and access counts included) after each call, on templates
 the Python daemon's own tools wrote (memories, facts with a constraint, a
 graph with a part-of chain, an alias, a fact whose source memory a
@@ -1261,10 +1262,20 @@ a write; under tight settings the hub gate, the expansion budget, the per-hop
 ceiling, part-of arrivals and the entity ceiling; the total-search ceiling alone (`truncated`, `searches_issued`);
 with the gate, the ceilings, pinning and trace annotation off; and a hub of
 twelve leaves with one deeper node, where the entity cap keeps the deepest
-hop. The
+hop. `recall-llm` (`harness/w2e_recall_llm.py`) runs the llm driver against each
+side's stub extractor with a bearer key, comparing the two daemons' request
+bytes and `Authorization` digests after every call, and failing unless each
+side used every stub reply (`extractor_all_used`): model-named seeds in
+reverse vocabulary order (an alias among them, unknown names, a number and a
+repeat dropped), replies
+naming no array or only unknown names, a refused redirect, a 500, a
+non-string content, and a walk after a write. The
 `mcp-recall-seed-any`, `mcp-recall-no-hub-gate`, `mcp-recall-no-requery`,
-`mcp-recall-no-pin`, `mcp-recall-no-annotate` and `mcp-recall-flat-caps`
-mutants must be caught.
+`mcp-recall-no-pin`, `mcp-recall-no-annotate`, `mcp-recall-flat-caps` and
+`mcp-recall-llm-no-vocab-filter` mutants must be caught. `recall.rs`'s unit
+tests pin the prompt, the body bytes, `_parse_name_list` and the reply decoding
+against CPython's output, and the request against a local server (the key only
+when set, a redirect's target receiving nothing, every failure an empty reply).
 
 ### memory_graph_review over MCP: list and the decision actions (2026-10-19)
 
@@ -1367,9 +1378,9 @@ building 1999-2395); `memory/cortex.py` (the dream inputs of `write`,
 | DR3 | `pull`: the pending entries of the resident bank (not excluded sources, ordered by timestamp, row id and dream id, at most `limit or 40`, capped at 4096), with an HMAC commit token over them; `commit` acknowledges a token's entries (a legacy cursor or no token refused); `runs` lists recent run rows. Dream tracking covers entries stored after start. | `service_dream.py:1033-1302` |
 | DR4 | Endpoints: config or environment (`PSEUDOLIFE_DREAM_*`), the model override, the mode; `auto` with a fallback probes the primary's `/health` (a 404 retrying `/models`) twice, two seconds apart; the primary carries its key and `cache_prompt`/`reasoning_effort`, the fallback only its own key. No URL and model: a no-op extractor. | `dream.py:1999-2247,2366-2395` |
 | DR5 | Requests: `POST {base}/chat/completions` with Python's `json.dumps` bytes (default separators, `ensure_ascii`), the system prompt with the vocabulary hint (the top 60 of 120 slots ranked by cosine to the batch embedding) and the known-facts hint, the numbered notes; redirects refused; 240-second timeout. Replies: the outermost object of the content parsed as Python's `json.loads` would (lone surrogates and non-finite numbers included), each field coerced as `dream.py` does; failures classified (`login_expired`, `extractor_unreachable`, `extractor_error`) with Python's error class names. | `dream.py:619-880,1189-1630,2278-2308` |
-| DR6 | `run`: refused (`not_implemented`, naming the stage) while graph insight (`memory.graph_insight.enabled`) is enabled; otherwise a single-flight guard (`dream_in_progress`), then the extraction of the pending batch (hold twice on a failure, isolate per entry on the third, quarantine what fails alone). | `service_dream.py:1491-1735` |
+| DR6 | `run`: a single-flight guard (`dream_in_progress`), then the extraction of the pending batch (hold twice on a failure, isolate per entry on the third, quarantine what fails alone). | `service_dream.py:1491-1735` |
 | DR7 | Each claim: the write tier from the source entry, raised only when the claim's citation backs it; the assistant-speaker policy; the slot resolver; the literal gate (digit-bearing tokens must occur in the batch or source, Unicode digits folded as `float()` folds them) and the span gate; the trace skip; the constraint carrier; then the cortex write, set add or remove, or the quarantine route, each with `dream` set; a journal row and a trace with reinforcement for each, except the listed actions. Events go to the chronicle; a separate events pass follows. | `service_dream.py:264-303,1892-2270,2411-2568` |
-| DR8 | A write failure fails the run and holds (phase write); otherwise the batch is committed and the run stamped. After commit, unlocked and best effort: relations (the gates in order: generic hubs, junk names, the confidence floor, the cross-project and low-confidence proposals; write-dedup merge proposals for minted endpoints), alias candidates, outcome inference and lesson synthesis (DS1-DS12; the lesson tallies merged into the run row), the source backfill and the retype pass. An empty pull runs outcome inference, digests and lesson synthesis, then the retype pass. The answer is Python's, key for key, with `extractor` last. | `service_dream.py:367-466,1349-1489,2270-2394,2922-2951` |
+| DR8 | A write failure fails the run and holds (phase write); otherwise the batch is committed and the run stamped. After commit, unlocked and best effort: relations (the gates in order: generic hubs, junk names, the confidence floor, the cross-project and low-confidence proposals; write-dedup merge proposals for minted endpoints), alias candidates, outcome inference and lesson synthesis (DS1-DS12; the lesson tallies merged into the run row), the graph insight (GI1-GI6), the source backfill and the retype pass. An empty pull runs outcome inference, digests, lesson synthesis and the graph insight, then the retype pass. The answer is Python's, key for key, with `extractor` last. | `service_dream.py:367-466,1349-1489,2270-2394,2922-2951` |
 
 `harness/w2e.py live --only dream-*` compares every answer, the full bank
 and, through `harness/stub_extractor.py`, the two daemons' model requests:
@@ -1409,7 +1420,7 @@ the cursor and candidate helpers (3134-3283); `memory/dream.py`
 
 | # | Exact item | Source |
 |---|---|---|
-| DS1 | Order: an empty pull runs outcome inference, digests, lesson synthesis, the (refused-if-on) graph insight, then the retype pass; after a commit outcome inference and lesson synthesis (its `lesson_signals`, `lessons_written`, `lessons_deduped` merged into the run row; digests answer `claims-branch`). A stage switched off answers its fixed `disabled` dict; with the no-op extractor `no-extractor` (lesson synthesis only after selecting signals). | `service_dream.py:1520-1545,2290-2370` |
+| DS1 | Order: an empty pull runs outcome inference, digests, lesson synthesis, the graph insight (GI1-GI6), then the retype pass; after a commit outcome inference and lesson synthesis (its `lesson_signals`, `lessons_written`, `lessons_deduped` merged into the run row; digests answer `claims-branch`), then the graph insight before the source backfill. A stage switched off answers its fixed `disabled` dict; with the no-op extractor `no-extractor` (lesson synthesis only after selecting signals). | `service_dream.py:1520-1545,2290-2370` |
 | DS2 | Outcome inference candidates: closed session roots (no parent, a session key, `ended_at` strictly past the cursor's `ts`), oldest first, with at least one subtree entry (digests not counted) and no subtree signal, at most eight; the context is `Session: <title or (untitled)>`, `Sub-task: <title>` per titled descendant, then every subtree entry but digests (status and log included) by timestamp, `- (<source>)[ [superseded]] <text>`. | `service_dream.py:3149-3195` |
 | DS3 | Outcome inference: one unlocked `infer_outcomes(context, cap=infer_outcomes_max_signals)` per candidate; a transport failure halts the stage (cursor held). Under the writer lock the cursor is reloaded and the root skipped when the cursor passed it or it gained a signal; a malformed reply records `retry[root] += 1` and stops the stage, the second advances past it; claims become `origin="inferred"` signals (one insert each, a refused one skipped), then `ts = ended_at` and the retry dropped. The cursor is the meta `outcome_inference_cursor` `{ts, retry}`. `{scanned, written}`. | `service_dream.py:497-568,3134-3147` |
 | DS4 | `_parse_outcome_claims`: `[]` for a cap under one; the first `{` to the last `}` parsed, `None` when that fails (`ValueError`; a `RecursionError` escapes) or when `outcomes` is missing or not a list; claims need a stripped `task` and an outcome in the enum (else dropped), `about`/`detail` stripped or `None`; at most `cap`. | `dream.py:1092-1126` |
@@ -1421,6 +1432,12 @@ the cursor and candidate helpers (3134-3283); `memory/dream.py`
 | DS10 | `write_fact` / `lesson_write`: insert at an empty slot; the same normalized lesson confirms (last confirmed, `min(1, max(old, new))` confidence, set unions, the new outcome and polarity, a non-empty `about`/`origin`, the new vector, `tx_time`, HLC, writer and session); a different one supersedes unless its HLC is older (`stale`). `_link_lesson_graph`: the task-type entity, the `about` object unless blank, the task itself, junk or a compound, and the `prefers`/`avoids` edge at 0.7, origin `action`. | `lessons.py:91-208`; `service.py:5131-5171,5231-5267` |
 | DS11 | Digest candidates: closed session roots past the cursor or queued in `regenerate`, ordered by their `context_deferred` position then `ended_at`, without a live digest entry, with subtree entries, at most `digest_max_per_cycle`. One unlocked `summarize_session` (the digest prompt with `digest_target_chars`) per context of at most `digest_context_chars`, else one per `split_session_context` part and a reduce over the part digests joined by blank lines; a malformed part fails the root. `_parse_digest` refuses a blank digest and one echoing the prompt's own phrases that the record lacks. | `service_dream.py:570-612,3217-3262`; `dream.py:1129-1185,1955-1987` |
 | DS12 | Digest commit (writer lock): the cursor reloaded; skipped when the cursor passed the root (unless queued) or it has a live digest; a changed context re-queues it (`regenerate` sorted, `context_deferred` rotated); malformed output or a failed write: one held retry, then advance (`ts = max(ts, ended_at)`, the root dropped from both lists); a digest is stored as a `source="digest"` first-band entry at surprise 1.0, tagged `digest`, stamped to the root, text `Session digest: <title> (<UTC day[–day]>, <n> entries)\n<digest>`, outside the gate pipeline (the capacity victim dropped first). The cursor is the meta `session_digest_cursor`. | `service_dream.py:613-708,3197-3215,3263-3283` |
+| GI1 | The refresh: `{refreshed: false, reason: "disabled"}` when `memory.graph_insight.enabled` is off; under the writer lock the live graph (entities by id, unsuperseded edges by id) and the prior `entity_communities` assignment; `{refreshed: false, reason: "empty_graph"}` without an edge; the contested slots (each current record against the first contested record on its slot, in record order) under the lock again; the computation without it; then one transaction deleting and refilling `communities` and `entity_communities` and one upsert of `meta.graph_digest`, all at one `computed_at`; `{refreshed: true, communities: n}`. Any failure answers `{refreshed: false, error}` and the dream continues. | `service_dream.py:3285-3352`; `postgres.py:4565-4621` |
+| GI2 | Communities (Option B, a declared divergence): NetworkX 3.6.1's Louvain over the undirected asserted graph (nodes in order of first appearance, unit weights) at `resolution`, threshold 1e-7, each level visiting nodes in graph order rather than a seed-42 shuffle; a community larger than `max(10, int(n * max_community_fraction))` with an edge is partitioned again on its subgraph (in its parent's order) and replaced by the parts when there are more than one; then size descending, sorted ids. | `graph_insight.py:17-71` |
+| GI3 | `remap_to_previous`: overlaps with the prior assignment sorted by (size desc, old id, new id) matched greedily one-to-one; unmatched communities take the lowest ids no matched old community holds, by (size desc, sorted ids). | `graph_insight.py:88-123` |
+| GI4 | Summaries by id: the label is the display of the highest-(degree, id) member, cohesion the distinct unordered member pairs over `n(n-1)/2` (1.0 for one member) rounded to 4 places. | `graph_insight.py:74-85,130-148` |
+| GI5 | Betweenness: exact Brandes over the same graph (normalized by `(n-1)(n-2)`), in NetworkX's accumulation order, at every size (Python samples 200 seeded sources above `betweenness_sample`). God nodes: by (betweenness desc, degree desc, id), the first `god_nodes_top_n` (a Python slice), betweenness rounded to 4 places. | `graph_insight.py:24-29,151-167` |
+| GI6 | Surprises (agent or confidence under 0.6: 2, a cross-community edge: 3, a peripheral node of degree at most 2 reaching one at the hub cutoff `max(5, 10th-highest degree)`: 1; self-loops skipped; by (score desc, src, dst), one per community pair; the first appended before `surprises_top_n` is checked) and up to `questions_top_n` questions in Python's order and wording: contested facts, the top three bridges by betweenness naming the other communities' labels, the first of the top five god nodes with two agent edges, the entities of degree at most one, low cohesion (under 0.15 at five members or more); then the digest `{computed_at, communities, god_nodes, surprises, questions, totals}`. | `graph_insight.py:170-328` |
 | DS13 | `restore_slot` for lessons rewrites each purged slot's audit snapshot through `lesson_write` (task, aspect and lesson required; outcome, polarity, confidence, origin, provenance and support defaulted as Python does), then records a restore row `from audit snapshot` per slot; mixed with retired records it answers `source: mixed`. | `service.py:5476-5537,5553-5604` |
 
 `harness/w2e.py live --only dream-stages-infer dream-stages-lessons
@@ -1613,6 +1630,43 @@ not cleared. `harness/goldens/w2e-merge-judge.json`
 (`gen_w2e_merge_judge_goldens.py`) pins against Python's own functions the
 prompt bytes, the proposal format, the reply validation, note tails, the
 served-model mismatch, the signed config and a policy fingerprint.
+
+### The dream sweep's ticks and the session-end dream (2026-10-25)
+
+Python sources: `memory/dream.py` `run_sweep_once` (2398-2547);
+`service_dream.py` `DreamStallTracker` (47-220), `dream_run_auto`
+(2922-2951), `dream_stall_tick` / `dream_stall_notify` (2958-3011),
+`dream_status`'s overdue arm (3080-3092), `_fire_and_forget_dream`
+(3120-3131), `deep_dream_tick` (3824-3845), `analyzer_duplicate_tick`
+(6043-6093) and `_file_analyzer_duplicates` (6095-6156);
+`storage/postgres.py` `reconcile_analyzer_proposals` (3772-3853);
+`memory/graph_review.py` `duplicate_candidates`' anchors (290-345);
+`memory/dream.py` `dream_stall_notice_text` and its helpers (2313-2363);
+`service.py` the reaper's and the session close's dream trigger (6612-6613,
+6755-6756).
+
+| # | Exact item | Source |
+|---|---|---|
+| SW1 | Order after the reapers, while `memory.dream.enabled`: the analyzer tick, the deep tick, the merge judge, (the review-queue judges: not run, P3b), `dream_status`, the stall tick, then the automatic dream when `would_fire`. The analyzer tick and `dream_status` failing end the tick; the deep tick, the judge and the stall tick never fail it. | `dream.py:2453-2547` |
+| SW2 | Analyzer tick: `judges_disabled` when `judges_enabled` is off; under the writer lock, `reconcile_analyzer_proposals(judge_batch)` (decided `analyzer` link proposals, then rejected `analyzer-duplicate` merges, each half behind its own `{at, id}` cursor and transaction, sharing the budget, closing each pair into `dismissed_pairs` at its decision time); `disabled` (with `reconciled`) when `analyzer_file_duplicates` is off; otherwise up to `judge_batch` anchors after `meta.analyzer_duplicate_cursor` (wrapping to the start), every pair touching an anchor in `duplicate_candidates`' order, filing at most `judge_batch` proposals as the deep apply does, then the cursor at the last anchor. | `service_dream.py:6043-6156`; `postgres.py:3772-3853` |
+| SW3 | Deep tick: `disabled` when `auto_tick` is off; `below_threshold` (with the need) unless `deep_dream_need` recommends; otherwise the deep dream's apply without snippets, answered as `{fired, reason, ...}` with the apply's `applied`, `error`, `rescored`, `superseded`, `merged`, `merge_proposed`, `junk_proposed`, `junk_deleted`, `scoped`, `analyzer_filed`, `orphans_deleted` and `snapshot`; a failure answers `fired: false` with `error: <text>`. | `service_dream.py:3824-3845` |
+| SW4 | Stall tick: the sweep's interval set on the tracker, then `check_overdue(backlog, min_batch, would_fire, interval)` (a due backlog no dream serves for three intervals opens a stall, `extractor_unreachable`), then the notice. `dream_status` applies the same rule once the interval is set. | `service_dream.py:2958-2971,3080-3092` |
+| SW5 | Notices (`stall_notice` on): one notifier at a time; `take_notice(stall_repeat_hours)`: `begin` for an unannounced incident, `repeat` while an announced one lasts, each at most once per window across incidents, `escalate` at once when a fallback warning becomes a hard stall, `clear` for an announced incident; posted through the board's daemon notice and marked only when someone received it. The text names the reason, the local minute (`isoformat(sep=" ", timespec="minutes")`, microseconds rounded first) and the remedy. Every automatic dream (the sweep's, a manual `run`, the session-end one) posts what is owed after recording its result. | `service_dream.py:47-220,2922-2951,2973-3011`; `dream.py:2313-2363` |
+| SW6 | The automatic dream and the session-end dream: `dream_run_auto` with no request (no session; the writer `PSEUDOLIFE_WRITER_ID` or `unknown`). The session reaper's idle close fires it in the background without waiting; the SessionEnd hook's close (served by the hook batch) calls the same entry point (`Service::fire_session_dream`). | `service_dream.py:2922-2951,3120-3131`; `service.py:6612-6613,6755-6756` |
+
+`harness/w2e.py live --only sweep-dream-auto sweep-deep-tick
+sweep-analyzer-tick sweep-stall` lets both daemons' sweeps run on their own
+timers (0.25 s, 1 s for the stall) and compares the banks, the answers and
+the model requests once both have settled: the automatic dream once the
+batch is stored (its run row and cursor), the deep tick's single apply (its
+snapshot file and watermark), the analyzer tick's filing and cursor with the
+reconcile pass's closure, and a stall the sweep opens as the failing memory
+is held, isolated and quarantined. Each settled state is independent of how
+many ticks ran. `src/dream/stall_tests.rs` replays five recorded sequences
+through Python's tracker (escalation, repeats inside and outside the
+window, an undelivered notice that stays owed, the overdue rule, flapping,
+the results that say nothing) and the notice texts at three fixed offsets.
+The `mcp-sweep-*` mutants are caught by their scenarios.
 
 ### Board tools over MCP (2026-10-16)
 

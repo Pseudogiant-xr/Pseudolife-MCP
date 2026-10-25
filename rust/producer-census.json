@@ -103,7 +103,7 @@
     "docs/specs/2026-09-12-codex-coordination.md": "bc53ec0d2cc117c9e1140227c377d9e9010d9fad5e0c217715ea40d63bf351be",
     "docs/specs/2026-10-14-delegate-mode-design.md": "fe5bf5edf1e4b96fc7684b8aca4716fe450bc52b2aa9fdcb83dc461d3af50071",
     "docs/specs/2026-10-19-merge-queue.md": "90b30d5a94a696c4eeb36d5618242babc349914e629b405d5fffc8343a65100b",
-    "docs/specs/2026-10-19-self-hosted-parity-lane.md": "defe87653aacf39495679b216be28a73c1efaa2ca9905fbdf769021d38995e7c",
+    "docs/specs/2026-10-19-self-hosted-parity-lane.md": "54f891844fd3ddf82b12b637ee358cc897b535cca06ce2ccd82037e70cbe46db",
     "docs/specs/2026-10-20-suite-ci-optimization-plan.md": "5dd06d09718ddc4059b5744000959b99d1da4171c98bea281527fa9c44e3eb83",
     "docs/superpowers/plans/2026-06-25-cortex-console-v2-phase0.md": "131e2b6577abedcfb73428ba2d2e53686a73334c1a2cf6b789ebb05b5ce0a7f9",
     "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md": "93274a9c8d11f869bc844967510a8e13870df5f55425f739b2545ef08ca7308b",
@@ -262,6 +262,9 @@
     "ops/restore.sh": "58d15a15a2b175bb189182bf175557f89dd37575c5a9e763a8502904055efb4f",
     "ops/restore_from_pt.py": "bceaeb79d8ff9a537ab41d2a8ac783a167cd370e75786275211ba5baa30c213e",
     "ops/retire_by_writer.py": "5fb2b8152e3fa249a00295714f88f5fbcb6c7d61bdd6d22ef6ad6cfb9a6ee801",
+    "ops/selfhosted/runner_watch.py": "dd39d76a78c8d3cb97383035b258bc0f0be207826911bcce413e45c851f73406",
+    "ops/selfhosted/setup-linux-runner.sh": "1b391eb833fad77e8cd08d1c5f649e9923f11f0dd5ac1f1bfc051aca2faddcb2",
+    "ops/selfhosted/setup-runner-watch.sh": "355ff1bd2b34bc6fa2aba1ba6e881003a87ec11941c268e746ed26d017ad22f9",
     "ops/setup-codex-coordination.py": "fbd43cc2efee3b38fdabf237ea988c77a4230d703fa2a1b22b20b228c9ea4086",
     "ops/setup-codex-hooks.py": "42f141d432d428b5034a72dfdb19fccc8487aa782b3d69ae9e8bf218fa8093f5",
     "ops/shim_autostart.py": "3f159a5be7c73c8070da787322abf79701404a1b273b990c691cb51872a25ec3",
@@ -3594,7 +3597,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/specs/2026-10-19-self-hosted-parity-lane.md:120",
+          "location": "docs/specs/2026-10-19-self-hosted-parity-lane.md:123",
           "shape": {
             "argv_source": "lease check --json <lease>",
             "channel": "argv",
@@ -3619,6 +3622,23 @@
             "expression": "· named shared-resource holds\",",
             "omitted_optional": null,
             "parameters": {}
+          }
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "ops/selfhosted/setup-linux-runner.sh:396",
+          "shape": {
+            "argv_source": "lease check --help >/dev/null",
+            "channel": "argv",
+            "complete": false,
+            "expression": "check --help >/dev/null",
+            "omitted_optional": null,
+            "parameters": {
+              "--help": {
+                "expression": ">/dev/null"
+              }
+            }
           }
         },
         {
@@ -29676,7 +29696,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/specs/2026-10-19-self-hosted-parity-lane.md:159",
+          "location": "docs/specs/2026-10-19-self-hosted-parity-lane.md:162",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -39143,7 +39163,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/specs/2026-10-19-self-hosted-parity-lane.md:121",
+          "location": "docs/specs/2026-10-19-self-hosted-parity-lane.md:124",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -39282,7 +39302,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/specs/2026-10-19-self-hosted-parity-lane.md:121",
+          "location": "docs/specs/2026-10-19-self-hosted-parity-lane.md:124",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -57137,7 +57157,7 @@
       "dynamic": "unresolved",
       "evidence": "documented",
       "kind": "environment",
-      "location": "docs/specs/2026-10-19-self-hosted-parity-lane.md:113",
+      "location": "docs/specs/2026-10-19-self-hosted-parity-lane.md:116",
       "name": "PSEUDOLIFE_PARITY_LEASE",
       "shape": {
         "channel": "environment",
@@ -57151,7 +57171,21 @@
       "dynamic": "unresolved",
       "evidence": "documented",
       "kind": "environment",
-      "location": "docs/specs/2026-10-19-self-hosted-parity-lane.md:114",
+      "location": "docs/specs/2026-10-19-self-hosted-parity-lane.md:117",
+      "name": "PSEUDOLIFE_PARITY_LOCK_DIR",
+      "shape": {
+        "channel": "environment",
+        "complete": false,
+        "expression": "reference",
+        "parameters": {}
+      },
+      "usage": "reference"
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "documented",
+      "kind": "environment",
+      "location": "docs/specs/2026-10-19-self-hosted-parity-lane.md:311",
       "name": "PSEUDOLIFE_PARITY_LOCK_DIR",
       "shape": {
         "channel": "environment",
@@ -63363,7 +63397,7 @@
     {
       "evidence": "documented",
       "kind": "environment",
-      "location": "docs/specs/2026-10-19-self-hosted-parity-lane.md:274",
+      "location": "docs/specs/2026-10-19-self-hosted-parity-lane.md:430",
       "name": "PSEUDOLIFE_PARITY_LEASE",
       "shape": {
         "channel": "environment",
@@ -63379,7 +63413,7 @@
     {
       "evidence": "documented",
       "kind": "environment",
-      "location": "docs/specs/2026-10-19-self-hosted-parity-lane.md:275",
+      "location": "docs/specs/2026-10-19-self-hosted-parity-lane.md:431",
       "name": "PSEUDOLIFE_PARITY_LOCK_DIR",
       "shape": {
         "channel": "environment",
@@ -63395,7 +63429,7 @@
     {
       "evidence": "documented",
       "kind": "environment",
-      "location": "docs/specs/2026-10-19-self-hosted-parity-lane.md:347",
+      "location": "docs/specs/2026-10-19-self-hosted-parity-lane.md:505",
       "name": "PSEUDOLIFE_PARITY_LEASE",
       "shape": {
         "channel": "environment",
@@ -63411,7 +63445,7 @@
     {
       "evidence": "documented",
       "kind": "environment",
-      "location": "docs/specs/2026-10-19-self-hosted-parity-lane.md:348",
+      "location": "docs/specs/2026-10-19-self-hosted-parity-lane.md:506",
       "name": "PSEUDOLIFE_PARITY_LOCK_DIR",
       "shape": {
         "channel": "environment",
@@ -64162,6 +64196,38 @@
         "parameters": {
           "value": {
             "expression": "\"$PWD/ci-results/profile\""
+          }
+        }
+      },
+      "usage": "assignment"
+    },
+    {
+      "evidence": "static",
+      "kind": "environment",
+      "location": "ops/selfhosted/setup-linux-runner.sh:489",
+      "name": "PSEUDOLIFE_PARITY_LEASE",
+      "shape": {
+        "channel": "environment",
+        "complete": true,
+        "parameters": {
+          "value": {
+            "expression": "$lease"
+          }
+        }
+      },
+      "usage": "assignment"
+    },
+    {
+      "evidence": "static",
+      "kind": "environment",
+      "location": "ops/selfhosted/setup-linux-runner.sh:490",
+      "name": "PSEUDOLIFE_PARITY_LOCK_DIR",
+      "shape": {
+        "channel": "environment",
+        "complete": true,
+        "parameters": {
+          "value": {
+            "expression": "$runner_locks"
           }
         }
       },
@@ -73238,63 +73304,69 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/specs/2026-10-19-self-hosted-parity-lane.md:113",
+      "location": "docs/specs/2026-10-19-self-hosted-parity-lane.md:116",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_PARITY_LEASE"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/specs/2026-10-19-self-hosted-parity-lane.md:114",
+      "location": "docs/specs/2026-10-19-self-hosted-parity-lane.md:117",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_PARITY_LOCK_DIR"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/specs/2026-10-19-self-hosted-parity-lane.md:120",
+      "location": "docs/specs/2026-10-19-self-hosted-parity-lane.md:123",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:lease"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/specs/2026-10-19-self-hosted-parity-lane.md:121",
+      "location": "docs/specs/2026-10-19-self-hosted-parity-lane.md:124",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_SUITE_LEASE"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/specs/2026-10-19-self-hosted-parity-lane.md:121",
+      "location": "docs/specs/2026-10-19-self-hosted-parity-lane.md:124",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_SUITE_LOCK_DIR"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/specs/2026-10-19-self-hosted-parity-lane.md:159",
+      "location": "docs/specs/2026-10-19-self-hosted-parity-lane.md:162",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_DATABASE_URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/specs/2026-10-19-self-hosted-parity-lane.md:161",
+      "location": "docs/specs/2026-10-19-self-hosted-parity-lane.md:164",
       "reason": "forwarded parameters"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/specs/2026-10-19-self-hosted-parity-lane.md:263",
+      "location": "docs/specs/2026-10-19-self-hosted-parity-lane.md:311",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:environment:PSEUDOLIFE_PARITY_LOCK_DIR"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/specs/2026-10-19-self-hosted-parity-lane.md:419",
       "reason": "request target supplied dynamically or external"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/specs/2026-10-19-self-hosted-parity-lane.md:269",
+      "location": "docs/specs/2026-10-19-self-hosted-parity-lane.md:425",
       "reason": "request target supplied dynamically or external"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/specs/2026-10-19-self-hosted-parity-lane.md:341",
+      "location": "docs/specs/2026-10-19-self-hosted-parity-lane.md:499",
       "reason": "request target supplied dynamically or external"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/specs/2026-10-19-self-hosted-parity-lane.md:95",
+      "location": "docs/specs/2026-10-19-self-hosted-parity-lane.md:98",
       "reason": "forwarded parameters"
     },
     {
@@ -81172,6 +81244,27 @@
       "location": "ops/retire_by_writer.py:89",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_DATABASE_URL"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/selfhosted/setup-linux-runner.sh:393",
+      "reason": "request target supplied dynamically or external"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/selfhosted/setup-linux-runner.sh:396",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "cli:lease"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/selfhosted/setup-linux-runner.sh:428",
+      "reason": "request target supplied dynamically or external"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/selfhosted/setup-linux-runner.sh:94",
+      "reason": "request target supplied dynamically or external"
     },
     {
       "dynamic": "unresolved",
