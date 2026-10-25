@@ -159,6 +159,19 @@ None of these is decided here.
    writes) or start with fsync on (durable; either side still opens the
    bank, since fsync is a runtime setting, not a pgdata property). Until
    this is decided, step 2 follows pg0.
+8. **The fixed superuser password.** Every lite bank's superuser is
+   `postgres` with password `postgres`, listening on loopback with
+   `--auth=password` (cleartext over loopback). So any process on the
+   machine, under any local account, can open and change the bank. Both
+   sides must use the same credential, so the Rust side cannot change it
+   alone without stranding a rollback to Python. Keep it (identical, and a
+   single-user desktop is the usual lite host), or move both sides to a
+   random per-cluster secret: a password file in the data dir, readable
+   only by its owner, written at initdb, with a one-time `ALTER ROLE` for
+   existing banks, and `scram-sha-256` in place of cleartext. That is a
+   Python fix as well as a Rust feature (D10 admits fixes), and it changes
+   pg0 compatibility decision 4 (the record holds the password). Until
+   this is decided, step 2 follows pg0.
 
 ## Proof plan (step 2's acceptance cases, run before that PR leaves draft)
 
