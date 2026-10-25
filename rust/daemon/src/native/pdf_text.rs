@@ -175,8 +175,12 @@ unsafe fn text_range(b: &dyn PdfiumLibraryBindings, tp: FPDF_TEXTPAGE) -> Result
         };
         let index = l_passive;
         let count = n_chars - l_passive - r_passive;
+        // pypdfium2's size estimate, which its assertion below checks; the
+        // buffer itself is at least PDFium's contract for FPDFText_GetText
+        // (`count + 1` UTF-16 units), so no PDFium build can write past it.
         let in_count = usize::try_from(t_end + 2 - t_start).unwrap_or(0);
-        let mut buffer = vec![0u16; in_count];
+        let contract = usize::try_from(count).unwrap_or(0) + 1;
+        let mut buffer = vec![0u16; in_count.max(contract)];
         let out_count =
             usize::try_from(b.FPDFText_GetText(tp, index, count, buffer.as_mut_ptr())).unwrap_or(0);
         // pypdfium2 asserts the buffer held it.

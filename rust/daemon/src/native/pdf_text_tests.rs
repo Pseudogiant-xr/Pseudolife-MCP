@@ -66,7 +66,6 @@ fn error_codes_read_as_pypdfium2_names_them() {
 fn every_corpus_pdf_reads_as_the_python_daemon_reads_it() {
     let golden: Value = serde_json::from_str(GOLDEN).expect("golden json");
     let files = golden["files"].as_array().expect("files");
-    assert!(files.len() >= 28, "{} files", files.len());
     for entry in files {
         let name = entry["file"].as_str().unwrap();
         let data = corpus(name);
@@ -98,14 +97,44 @@ fn every_corpus_pdf_reads_as_the_python_daemon_reads_it() {
     }
 }
 
+/// A PDF with these objects (object 1 the catalog) and a correct xref.
+fn well_formed(objects: &[&[u8]]) -> Vec<u8> {
+    let mut out = b"%PDF-1.7\n".to_vec();
+    let mut offsets = Vec::new();
+    for (i, body) in objects.iter().enumerate() {
+        offsets.push(out.len());
+        out.extend_from_slice(format!("{} 0 obj\n", i + 1).as_bytes());
+        out.extend_from_slice(body);
+        out.extend_from_slice(b"\nendobj\n");
+    }
+    let xref = out.len();
+    out.extend_from_slice(
+        format!("xref\n0 {}\n0000000000 65535 f \n", objects.len() + 1).as_bytes(),
+    );
+    for off in offsets {
+        out.extend_from_slice(format!("{off:010} 00000 n \n").as_bytes());
+    }
+    out.extend_from_slice(
+        format!(
+            "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n",
+            objects.len() + 1
+        )
+        .as_bytes(),
+    );
+    out
+}
+
 #[test]
-fn a_zero_page_document_fails_as_pypdfium2_fails_it() {
+fn a_zero_page_document_that_loads_still_fails_as_pypdfium2_fails_it() {
     // `_open_pdf` raises on fewer than one page even when the load
-    // succeeded, with whatever FPDF_GetLastError then says.
-    let pdf = b"%PDF-1.4\n1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n\
-2 0 obj << /Type /Pages /Kids [] /Count 0 >> endobj\n\
-trailer << /Root 1 0 R >>\n%%EOF\n";
-    match read(pdf) {
+    // succeeded. The reason is whatever FPDF_GetLastError then holds, which
+    // depends on the process's (on Windows, the thread's) earlier PDFium
+    // calls on both daemons, so only the prefix is fixed.
+    let pdf = well_formed(&[
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [] /Count 0 >>",
+    ]);
+    match read(&pdf) {
         Err(PdfError::Unreadable(why)) => {
             assert!(
                 why.starts_with("Failed to load document (PDFium: "),
@@ -114,4 +143,39 @@ trailer << /Root 1 0 R >>\n%%EOF\n";
         }
         other => panic!("{other:?}"),
     }
+    // The branch is the loaded-but-empty one: PDFium opens the document.
+    let bound = BOUND.lock().unwrap_or_else(|p| p.into_inner());
+    let b = bound.as_deref().expect("bound by read");
+    // SAFETY: the bound library, under its lock; the handle is closed here.
+    unsafe {
+        let doc = b.FPDF_LoadMemDocument64(&pdf, None);
+        assert!(!doc.is_null());
+        assert_eq!(b.FPDF_GetPageCount(doc), 0);
+        b.FPDF_CloseDocument(doc);
+    }
+}
+
+#[test]
+fn the_goldens_cover_exactly_the_corpus() {
+    let golden: Value = serde_json::from_str(GOLDEN).expect("golden json");
+    let mut in_golden: Vec<String> = golden["files"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|f| f["file"].as_str().unwrap().to_string())
+        .collect();
+    in_golden.sort();
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("harness")
+        .join("pdf_corpus");
+    let mut on_disk: Vec<String> = std::fs::read_dir(&dir)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .filter(|n| n.ends_with(".pdf"))
+        .collect();
+    on_disk.sort();
+    assert_eq!(
+        on_disk, in_golden,
+        "regenerate goldens/pdf_text.json with harness/gen_pdf_goldens.py"
+    );
 }
