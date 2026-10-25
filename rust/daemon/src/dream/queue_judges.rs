@@ -1271,16 +1271,25 @@ async fn stored_second_distinct(
     if crate::mutants::active("mcp-dream-link-two-vote-same-model") {
         return Ok(true);
     }
+    let first_served = review.observed(c, row).await?;
+    Ok(second_distinct_from(
+        first_served.as_deref(),
+        row,
+        configured2,
+    ))
+}
+
+/// `_stored_second_distinct`'s rule, pure: `first_served` is the served
+/// model the first verdict was recorded with (the memo's).
+fn second_distinct_from(first_served: Option<&str>, row: &Row, configured2: Option<&str>) -> bool {
     let first_model = vs(row, "judge_model").unwrap_or("");
-    let first_served = review.observed(c, row).await?.filter(|s| !s.is_empty());
+    let first_served = first_served.filter(|s| !s.is_empty());
     let served2 = vs(row, "judge2_served_model").filter(|s| !s.is_empty());
     let alias_free_same = configured2
         .is_some_and(|m| !m.is_empty() && !JUDGE_ALIASES.contains(&m) && first_model == m);
-    Ok(
-        matches!((first_served.as_deref(), served2), (Some(a), Some(b)) if a != b)
-            && Some(first_model) != vs(row, "judge2_model")
-            && !alias_free_same,
-    )
+    matches!((first_served, served2), (Some(a), Some(b)) if a != b)
+        && Some(first_model) != vs(row, "judge2_model")
+        && !alias_free_same
 }
 
 /// `deep_dream_judge_links()`: never fails into the sweep; a failure is the

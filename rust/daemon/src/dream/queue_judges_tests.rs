@@ -287,3 +287,18 @@ fn recorded_link_votes_decide_as_pythons_two_vote_gate() {
         );
     }
 }
+
+#[test]
+fn recorded_second_votes_count_as_distinct_as_pythons_rule() {
+    for case in golden()["link_distinct"].as_array().unwrap() {
+        assert_eq!(
+            second_distinct_from(
+                case["first_served"].as_str(),
+                &row(&case["row"]),
+                case["configured2"].as_str()
+            ),
+            case["distinct"].as_bool().unwrap(),
+            "{case}"
+        );
+    }
+}

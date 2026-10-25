@@ -1745,7 +1745,8 @@ distinct models applied and a split left pending; agreeing votes refused when
 the second endpoint served the first model; and an automatic reject reopened
 when its source's evidence moves and judged again. The replay of recorded
 votes after a mode promotion has no scenario (it needs a config change
-mid-run); `src/dream/queue_judges_tests.rs` checks its gate, the prompt
+mid-run); `src/dream/queue_judges_tests.rs` checks its gate and its
+distinct-model rule over the stored votes, the prompt
 rows, the reply validation and the pack against Python's own output
 (`gen_queue_judge_goldens.py`). `mcp-dream-link-retype-applied` is caught by
 `link-auto` and `mcp-dream-link-two-vote-same-model` by

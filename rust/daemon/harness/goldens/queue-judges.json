@@ -1643,6 +1643,118 @@
    ]
   }
  ],
+ "link_distinct": [
+  {
+   "row": {
+    "judge_model": "judge-one",
+    "judge2_model": "judge-two",
+    "judge2_served_model": "judge-two"
+   },
+   "first_served": "judge-one",
+   "configured2": null,
+   "distinct": true
+  },
+  {
+   "row": {
+    "judge_model": "judge-one",
+    "judge2_model": "judge-two",
+    "judge2_served_model": "judge-one"
+   },
+   "first_served": "judge-one",
+   "configured2": null,
+   "distinct": false
+  },
+  {
+   "row": {
+    "judge_model": "judge-one",
+    "judge2_model": "judge-two",
+    "judge2_served_model": "judge-two"
+   },
+   "first_served": null,
+   "configured2": null,
+   "distinct": false
+  },
+  {
+   "row": {
+    "judge_model": "judge-one",
+    "judge2_model": "judge-two",
+    "judge2_served_model": "judge-two"
+   },
+   "first_served": "",
+   "configured2": null,
+   "distinct": false
+  },
+  {
+   "row": {
+    "judge_model": "judge-one",
+    "judge2_model": "judge-two",
+    "judge2_served_model": null
+   },
+   "first_served": "judge-one",
+   "configured2": null,
+   "distinct": false
+  },
+  {
+   "row": {
+    "judge_model": "same",
+    "judge2_model": "same",
+    "judge2_served_model": "b"
+   },
+   "first_served": "a",
+   "configured2": null,
+   "distinct": false
+  },
+  {
+   "row": {
+    "judge_model": "judge-one",
+    "judge2_model": "judge-two",
+    "judge2_served_model": "b"
+   },
+   "first_served": "a",
+   "configured2": "judge-one",
+   "distinct": false
+  },
+  {
+   "row": {
+    "judge_model": "judge",
+    "judge2_model": "judge-two",
+    "judge2_served_model": "b"
+   },
+   "first_served": "a",
+   "configured2": "judge",
+   "distinct": true
+  },
+  {
+   "row": {
+    "judge_model": "judge-one",
+    "judge2_model": "judge-two",
+    "judge2_served_model": "b"
+   },
+   "first_served": "a",
+   "configured2": "other",
+   "distinct": true
+  },
+  {
+   "row": {
+    "judge_model": null,
+    "judge2_model": null,
+    "judge2_served_model": "b"
+   },
+   "first_served": "a",
+   "configured2": null,
+   "distinct": true
+  },
+  {
+   "row": {
+    "judge_model": null,
+    "judge2_model": "",
+    "judge2_served_model": "b"
+   },
+   "first_served": "a",
+   "configured2": null,
+   "distinct": false
+  }
+ ],
  "link_two_vote": [
   {
    "row": {

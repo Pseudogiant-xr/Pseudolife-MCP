@@ -4,7 +4,8 @@
 ``_verdict_head`` / ``_text``) and the evidence pack
 (``_enrich_junk_proposals_from``); for the link judge, the same three
 (``format_link_proposal``, ``judge_links``, ``_enrich_link_proposals_from``)
-and the two-vote gate over recorded votes (``_link_two_vote_action``).
+and the two-vote gate over recorded votes (``_link_two_vote_action``,
+``_stored_second_distinct``).
 
 Every expected value comes from calling the Python code in this checkout:
 ``judge_junk`` runs on an ``OpenAICompatExtractor`` whose ``_judge_request``
@@ -212,6 +213,38 @@ TWO_VOTE_CASES = [
 ]
 
 
+# (row, the memo's served model for the first verdict, configured2)
+DISTINCT_CASES = [
+    ({"judge_model": "judge-one", "judge2_model": "judge-two",
+      "judge2_served_model": "judge-two"}, "judge-one", None),
+    ({"judge_model": "judge-one", "judge2_model": "judge-two",
+      "judge2_served_model": "judge-one"}, "judge-one", None),
+    ({"judge_model": "judge-one", "judge2_model": "judge-two",
+      "judge2_served_model": "judge-two"}, None, None),
+    ({"judge_model": "judge-one", "judge2_model": "judge-two",
+      "judge2_served_model": "judge-two"}, "", None),
+    ({"judge_model": "judge-one", "judge2_model": "judge-two",
+      "judge2_served_model": None}, "judge-one", None),
+    ({"judge_model": "same", "judge2_model": "same",
+      "judge2_served_model": "b"}, "a", None),
+    ({"judge_model": "judge-one", "judge2_model": "judge-two",
+      "judge2_served_model": "b"}, "a", "judge-one"),
+    ({"judge_model": "judge", "judge2_model": "judge-two",
+      "judge2_served_model": "b"}, "a", "judge"),
+    ({"judge_model": "judge-one", "judge2_model": "judge-two",
+      "judge2_served_model": "b"}, "a", "other"),
+    ({"judge_model": None, "judge2_model": None,
+      "judge2_served_model": "b"}, "a", None),
+    ({"judge_model": None, "judge2_model": "",
+      "judge2_served_model": "b"}, "a", None),
+]
+
+
+def distinct(row, first_served, configured2):
+    review = SimpleNamespace(observed=lambda p: first_served)
+    return DreamOps._stored_second_distinct(review, row, configured2)
+
+
 def two_vote(row, tv, mode, floor):
     cfg = SimpleNamespace(link_judge_two_vote=tv, link_two_vote_min_confidence=floor)
     return DreamOps._link_two_vote_action(row, cfg, mode)
@@ -240,6 +273,9 @@ def main() -> int:
                                                for k, v in LINK_EVIDENCE["scopes"].items()}},
                        "rows": link_pack(LINK_PENDING, LINK_EVIDENCE, cap)}
                       for cap in (240, 10)],
+        "link_distinct": [{"row": r, "first_served": fs, "configured2": c2,
+                           "distinct": distinct(r, fs, c2)}
+                          for r, fs, c2 in DISTINCT_CASES],
         "link_two_vote": [{"row": r, "two_vote": tv, "mode": m, "min": f,
                            "action": two_vote(r, tv, m, f)}
                           for r, tv, m, f in TWO_VOTE_CASES],
