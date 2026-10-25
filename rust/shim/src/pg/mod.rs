@@ -3,8 +3,12 @@ mod dsn;
 #[path = "../../../shared/embedded_pg.rs"]
 pub mod embedded;
 pub mod embedded_secret;
+#[path = "../../../shared/native_provision.rs"]
+pub mod native_provision;
 mod password;
 pub mod resolution;
+#[path = "../../../shared/pg_runtime.rs"]
+pub mod runtime;
 mod tls;
 mod transport;
 
