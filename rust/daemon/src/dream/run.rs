@@ -139,7 +139,9 @@ fn stall_remedy(reason: &str) -> &'static str {
         "login_expired" => {
             "the extractor CLI's login expired; re-run `claude auth login` (or `codex login`) on the daemon host"
         }
-        "extractor_unreachable" => "check the extractor endpoint is up and reachable from the daemon",
+        "extractor_unreachable" => {
+            "check the extractor endpoint is up and reachable from the daemon"
+        }
         "served_by_fallback" => {
             "the primary is down and the fallback is serving; check the primary extractor"
         }
@@ -228,7 +230,10 @@ fn stall_notice_text_with(
     };
     let remedy = stall_remedy(&reason);
     let mut chars = remedy.chars();
-    let first = chars.next().map(|c| c.to_uppercase().collect::<String>()).unwrap_or_default();
+    let first = chars
+        .next()
+        .map(|c| c.to_uppercase().collect::<String>())
+        .unwrap_or_default();
     format!(
         "Dream extraction {head} since {since}: {reason}. {first}{}.",
         chars.as_str()
@@ -391,7 +396,10 @@ impl StallTracker {
 
     /// `take_notice(repeat_seconds)`: the notice due now, if any. Nothing
     /// is marked until `mark_noticed`, so an undelivered one stays owed.
-    pub fn take_notice(&mut self, repeat_seconds: f64) -> Option<(&'static str, Map<String, Value>)> {
+    pub fn take_notice(
+        &mut self,
+        repeat_seconds: f64,
+    ) -> Option<(&'static str, Map<String, Value>)> {
         self.take_notice_at(repeat_seconds, now())
     }
 
@@ -402,7 +410,9 @@ impl StallTracker {
     ) -> Option<(&'static str, Map<String, Value>)> {
         if let Some(stall) = &self.stall {
             let hard = Self::hard(stall);
-            let window_open = self.last_notice_at.is_none_or(|t| now - t >= repeat_seconds);
+            let window_open = self
+                .last_notice_at
+                .is_none_or(|t| now - t >= repeat_seconds);
             let escalating = hard && self.announced_hard == Some(false);
             if self.notice_at.is_some() {
                 if escalating {
@@ -438,7 +448,6 @@ impl StallTracker {
         let v = |m: &Option<Map<String, Value>>| m.clone().map_or(Value::Null, Value::Object);
         (v(&self.stall), v(&self.last_stall))
     }
-
 }
 
 // ---------------------------------------------------------------------------

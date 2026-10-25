@@ -70,7 +70,10 @@ fn every_sequence_matches_python_step_by_step() {
                 failures.push(format!("{name}[{i}] answer: {got} != {}", step["got"]));
             }
             if norm(&snap) != norm(&step["snapshot"]) {
-                failures.push(format!("{name}[{i}] snapshot: {snap} != {}", step["snapshot"]));
+                failures.push(format!(
+                    "{name}[{i}] snapshot: {snap} != {}",
+                    step["snapshot"]
+                ));
             }
         }
     }

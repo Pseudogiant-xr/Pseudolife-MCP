@@ -1004,7 +1004,11 @@ async fn reconcile_analyzer_proposals(client: &Client, cap: i64) -> Result<Value
         for r in &rows {
             let (left, right): (String, String) = (r.get(2), r.get(3));
             if !left.is_empty() && !right.is_empty() && left != right {
-                let (a, b) = if left <= right { (left, right) } else { (right, left) };
+                let (a, b) = if left <= right {
+                    (left, right)
+                } else {
+                    (right, left)
+                };
                 let at_row: f64 = r.get(1);
                 let inserted = c
                     .query_opt(
@@ -1061,7 +1065,11 @@ async fn reconcile_analyzer_proposals(client: &Client, cap: i64) -> Result<Value
         let mut closed = 0i64;
         for r in &rows {
             let (left, right): (String, String) = (r.get(2), r.get(3));
-            let (a, b) = if left <= right { (left, right) } else { (right, left) };
+            let (a, b) = if left <= right {
+                (left, right)
+            } else {
+                (right, left)
+            };
             let at_row: f64 = r.get(1);
             let inserted = c
                 .query_opt(
@@ -1152,7 +1160,11 @@ pub(crate) async fn analyzer_duplicate_tick(
         _ => 0,
     };
     let take = usize::try_from(cap).unwrap_or(usize::MAX);
-    let mut anchors: Vec<&Entity> = entities.iter().filter(|e| e.id > after).take(take).collect();
+    let mut anchors: Vec<&Entity> = entities
+        .iter()
+        .filter(|e| e.id > after)
+        .take(take)
+        .collect();
     if anchors.len() < take {
         let selected: HashSet<i64> = anchors.iter().map(|e| e.id).collect();
         anchors.extend(entities.iter().filter(|e| !selected.contains(&e.id)));
@@ -1176,9 +1188,13 @@ pub(crate) async fn analyzer_duplicate_tick(
     )
     .await?;
     if !crate::mutants::active("mcp-sweep-analyzer-no-cursor") {
-        crate::txn::set_meta(client, "analyzer_duplicate_cursor", &json!({"entity_id": last}))
-            .await
-            .map_err(internal)?;
+        crate::txn::set_meta(
+            client,
+            "analyzer_duplicate_cursor",
+            &json!({"entity_id": last}),
+        )
+        .await
+        .map_err(internal)?;
     }
     Ok(json!({"fired": true, "anchors": n_anchors, "filed": filed, "reconciled": reconciled}))
 }

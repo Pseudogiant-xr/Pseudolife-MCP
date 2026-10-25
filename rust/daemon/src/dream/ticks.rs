@@ -136,11 +136,19 @@ pub async fn sweep(
         return Ok(());
     }
     let Some(me) = svc.handle() else {
-        eprintln!("dream sweep: the service handle is not installed; the automatic dream is skipped");
+        eprintln!(
+            "dream sweep: the service handle is not installed; the automatic dream is skipped"
+        );
         return Ok(());
     };
-    match super::run::run_auto(&me, ready.clone(), background_caller(), background_writer(), None)
-        .await
+    match super::run::run_auto(
+        &me,
+        ready.clone(),
+        background_caller(),
+        background_writer(),
+        None,
+    )
+    .await
     {
         Ok(result) => log_value("dream sweep fired", &result),
         Err(e) => return Err(error_text(&e)),

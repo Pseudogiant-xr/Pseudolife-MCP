@@ -446,7 +446,11 @@ fn candidate_pairs<'a>(
         ids.iter()
             .enumerate()
             .filter(move |(_, id)| anchors.contains(id))
-            .flat_map(move |(i, _)| (0..n).filter(move |&j| j != i).map(move |j| (i.min(j), i.max(j))))
+            .flat_map(move |(i, _)| {
+                (0..n)
+                    .filter(move |&j| j != i)
+                    .map(move |j| (i.min(j), i.max(j)))
+            })
             .filter(move |pair| seen.insert(*pair)),
     )
 }

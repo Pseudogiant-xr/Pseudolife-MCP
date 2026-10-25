@@ -595,7 +595,11 @@ fn py_round(x: f64, n: usize) -> f64 {
 }
 
 /// `deep_dream_need` (`service_dream.py:3677-3710`).
-pub(crate) async fn deep_dream_need(ready: &Ready, config: &Config, now: f64) -> Result<Value, ToolError> {
+pub(crate) async fn deep_dream_need(
+    ready: &Ready,
+    config: &Config,
+    now: f64,
+) -> Result<Value, ToolError> {
     let cfg = &config.memory.deep_dream;
     let client = ready.storage.client();
     let mark = get_meta(client, "deep_last_apply").await?;
