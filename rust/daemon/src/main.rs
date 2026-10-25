@@ -12,6 +12,7 @@ mod config;
 mod consolidation_tools;
 mod contradiction;
 mod correction_tools;
+mod documents;
 mod dream;
 mod embed;
 mod embedding_math;

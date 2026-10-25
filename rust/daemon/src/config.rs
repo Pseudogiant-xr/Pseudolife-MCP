@@ -104,6 +104,27 @@ pub struct MemoryConfig {
     /// `memory.deep_dream` (`utils/config.py` `DeepDreamConfig`): the keys
     /// the daemon reads.
     pub deep_dream: DeepDreamConfig,
+    /// `memory.reference` (`utils/config.py` `ReferenceConfig`): the
+    /// document store's chunking.
+    pub reference: ReferenceConfig,
+}
+
+/// `ReferenceConfig` (`utils/config.py:131-139`): the keys the daemon reads
+/// (`persist_dir` and `collection_name` name the pre-v57 chromadb store,
+/// which only the Python daemon's one-time import reads).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ReferenceConfig {
+    pub chunk_size: i64,
+    pub chunk_overlap: i64,
+}
+
+impl Default for ReferenceConfig {
+    fn default() -> Self {
+        ReferenceConfig {
+            chunk_size: 512,
+            chunk_overlap: 64,
+        }
+    }
 }
 
 /// `GraphInsightConfig` (`utils/config.py:914-925`): the communities and
@@ -841,6 +862,7 @@ impl Default for MemoryConfig {
             compaction_min_age_days: 30.0,
             recall: RecallConfig::default(),
             deep_dream: DeepDreamConfig::default(),
+            reference: ReferenceConfig::default(),
         }
     }
 }
@@ -1782,7 +1804,17 @@ fn load_str(text: &str) -> Result<Config, ConfigError> {
             memory.cortex_auto_promote = want_bool(c, "auto_promote", "memory.cortex", false)?;
         }
         // `self.config.memory.reference.persist_dir = ...` (service.py:857).
-        section(m, "reference", "memory.")?;
+        // `_dict_to_dataclass` checks no types; a non-integer size makes
+        // Python's first ingest fail (`range` refuses a float step), so it
+        // refuses the start.
+        if let Some(r) = section(m, "reference", "memory.")? {
+            let p = "memory.reference";
+            let d = ReferenceConfig::default();
+            memory.reference = ReferenceConfig {
+                chunk_size: want_int(r, "chunk_size", p, d.chunk_size)?,
+                chunk_overlap: want_int(r, "chunk_overlap", p, d.chunk_overlap)?,
+            };
+        }
         if let Some(s) = section(m, "search", "memory.")? {
             memory.search = read_search(s)?;
         }

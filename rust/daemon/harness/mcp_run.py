@@ -70,12 +70,12 @@ def seed_stored(dsn):
 
 
 def expected_summary(args):
-    from mcp_compare import UNSERVED
+    from mcp_compare import CORPUS_RESPONSES, UNSERVED
     if "--config2" in args:
         return {"responses": 10, "cases": 2, "unserved_checked": []}
     if "--tokenless" in args:
         return {"responses": 30, "cases": 3, "unserved_checked": []}
-    return {"responses": 316, "cases": 18, "unserved_checked": sorted(UNSERVED)}
+    return {"responses": CORPUS_RESPONSES, "cases": 18, "unserved_checked": sorted(UNSERVED)}
 
 
 def report_complete(report, expected):

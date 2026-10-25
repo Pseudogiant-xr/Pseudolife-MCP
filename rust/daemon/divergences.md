@@ -33,13 +33,13 @@ before cutover, so no client sees it. The harness (`harness/mcp_compare.py`,
 deletes its row in both places, and from then on the harness compares that
 tool's answers by value.
 
-| Tool | Body owner | Missing service prerequisite |
-|---|---|---|
-| `document_search` | W2-D | No reference-pool search service. |
-| `document_ingest` | W2-E | No parser/chunk/reference ingestion service. |
+Since B7's document tools no tool answers this stub: every one of the 38
+has its body registered, and `UNSERVED` is empty. The stub stays the
+answer for a tool added to the catalogue before its body.
 
 The integration batch retains W2-G's refusal stubs for every tool except
-`memory_toolset` and, since their body registrations, `memory_store`,
+`memory_toolset` and, since their body registrations, `document_ingest`,
+`document_search`, `memory_store`,
 `memory_search`, `memory_recent`, `memory_fact_get`, `memory_get`,
 `memory_fact_set`, `memory_set_add`, `memory_set_remove`,
 `memory_fact_resolve`, `memory_stats`, `memory_episode_start`,
@@ -189,8 +189,8 @@ binding"). What it cannot or does not reproduce:
 
 | Item | Python | Rust | Why / owner |
 |---|---|---|---|
-| Reference pool (Chroma documents from `document_ingest`, `ref_top_k` 3) | queried on every search once `<data_dir>/chromadb` holds a store | never queried: no reference hits, no `reference` components | the store is a private chromadb 1.5.9 on-disk format (HNSW segments); delegate ruling 2026-10-09: declared, harness banks hold no documents. `document_search` is declared with it. |
-| **Cutover blocker:** reference store | Chroma on-disk format | none | needs a Python document table at a future schema version (maintainer decision 2026-10-09: documents move to a pgvector table with exact cosine search; schema v56 shipped judge votes instead (#807), and no Python document-table PR is open as of 2026-10-19); W2-D then ports the reference pool and `document_search` against it |
+| Reference pool (the `reference_chunks` documents from `document_ingest`, `ref_top_k` 3) | queried on every search (schema v57; before, the chromadb store) | never queried: no reference hits, no `reference` components | B7's second Rust PR ports the pool into `/api/search` and `memory_search`; `document_ingest` and `document_search` are served since B7's first (see "Document store (B7)" below) |
+| **Cutover blocker:** reference store | the `reference_chunks` table (v57, #903) | the document tools read and write it; search does not yet | closes with the reference pool row above |
 | Cross-encoder model | `memory.reranker.model_name` from the Hugging Face cache, lazily | the ONNX export in `PSEUDOLIFE_DAEMON_RERANK_DIR` (same checkpoint; `model_name` is only logged) | model packaging is cutover work (W3-J); parity of the export is proven by `harness/w2d_rerank_check.py` |
 | Retrieval-event session and episode | resolved from the resident active-session pointer and episode tree | read from `meta.active_session_pointer` and `episodes` per search (same values) | W2-E owns the resident resolver; the call sites switch when it lands |
 | `entries.access_count` persistence | resident counts written on the save cadence | resident counts only | W2-E (autosave) |
@@ -198,7 +198,7 @@ binding"). What it cannot or does not reproduce:
 | Casefold in slot keys and pin scope | `str.casefold()` (full Unicode folding) | `to_lowercase` plus `ß` to `ss` and final sigma | rare foldings (ligatures and similar) differ; no producer writes them in slot names. Closable with a casefold crate |
 | Pin-scope word characters, non-ASCII | `isalnum()` plus Unicode category M | `char::is_alphanumeric` minus circled letters, plus the main combining-mark blocks | ASCII is exact; closable with `unicode-normalization` |
 | Duplicate current facts at hydration | demoted in memory, persisted on the next save | demoted in memory only | W2-E (save path); the bank's unique indexes prevent duplicates from every current producer |
-| `memory_stats` reference bank (`reference_bank_size`, `reference_document_count`, and its share of `total_memories`) | the `reference_chunks` table's row count and distinct sources (schema v57; before, the ChromaDB collection's) | `0`, as Python serves in file mode | B7's Rust half (`document_*`); Rust search serves no reference documents either |
+| `memory_stats` reference bank (`reference_bank_size`, `reference_document_count`, and its share of `total_memories`) | the `reference_chunks` table's row count and distinct sources (schema v57; before, the ChromaDB collection's) | `0`, as Python serves in file mode | B7's second Rust PR, with the search reference pool; the document tools fill the table since B7's first |
 | `memory_stats` counters persisted in `cms_counters` (`interaction_count`, per-band `hit_count`, `retrieval_queries`; schema v57, D2) | restored at startup from the bank's row, so they count across restarts | count from this process's start | B4 autosave (the same `cms_counters` row below) |
 | `memory_stats` `slot_index_shadow_divergences` and `weights_reset` | a sampled shadow check of the slot index; a flag for a pre-v57 `weights.pt` its one-time import found unreadable | `0` and `false`: Rust has no slot-index shadow and imports no `weights.pt` | the values Python serves on a healthy start |
 | `memory_stats` `true_drops_total` from a malformed `capacity_true_drops` count | `int()` of any value Python accepts, including non-ASCII digit strings | integers, floats (truncated), booleans and ASCII integer strings; anything else serves both drop keys as null, as Python does for what `int()` rejects | the only writer stores a JSON integer |
@@ -232,8 +232,9 @@ existing gates. The route inventory is `harness/goldens/routes.json`.
 | `w2d-model-provisioning` | Default automatic embedding and reranker artifact provisioning | Existing local ONNX graphs are required. The embedding override must contain the configured Qwen/MiniLM layout; the reranker override must be the configured cross-encoder checkpoint. W3-J owns installation/provisioning. No claim is made for arbitrary exported checkpoints. |
 | `w2d-query-cache-lifetime` | Multiple configured embedders in one process | The inherited outer query cache is process-global and keys raw query text; it is valid only for the daemon's single immutable service/model configuration. Per-embedder caching also remains. Hot model replacement or multiple service instances require cache ownership changes before support. |
 
-`no reference hits` remains the separate document-table dependency above: the
-Python Postgres document migration has not landed and no schema change is included.
+`no reference hits` remains the separate reference-pool row above: the
+document table landed in Python's schema v57 and the Rust document tools
+use it; search reads it in B7's second Rust PR. No schema change is included.
 The typed cortex loader uses the live embedder dimension, while the shared
 startup and PostgreSQL schema guards still refuse incompatible banks; this
 is not authorization to migrate vectors or change the schema dimension.
@@ -505,6 +506,29 @@ goldens.
 | Item | Python | Rust | Owner / why |
 |---|---|---|---|
 | A new merge rollup's `hint` that is not a string or null | kept in memory as sent; the episode write-through then stores PostgreSQL's text form of a value psycopg can adapt, or fails on one it cannot (a dict), and that failure leaves the merged entries and outcome signals pointing at an episode row never written (until a later write-through) | refused before any change: 500 `hint must be a string, not '<type>'` | Python's answer is a bank inconsistency, not a contract; every documented caller sends a string. Behaviour with no caller (D7) |
+
+## Document store (B7): document_ingest and document_search (2026-10-25)
+
+Both tools read and write the bank's `reference_chunks` table (schema v57)
+as Python does (`documents.rs`): pathlib's parse of the path, the
+missing-file refusal, `extract_text`'s branches and their error classes,
+UTF-8 decoding with replacement and text-mode newlines, the chunk windows
+and their md5 ids, the upsert that keeps a chunk's first `created_at`, and
+the exact cosine search ordered by distance then chunk id, a stored 0.0
+ingest time served as the clock at serving (`MemoryEntry.__post_init__`). The unit goldens
+come from the Python functions (`harness/gen_document_goldens.py`); the
+answers and the table are compared by `harness/w2e.py`'s `documents-*`
+scenarios (`harness/w2e_documents.py`).
+
+| Item | Python | Rust | Why / owner |
+|---|---|---|---|
+| **DOC-PDF:** `document_ingest` of a `.pdf` | pypdf's text (pypdfium2's with the optional `pdf` extra), chunked and stored | refused with `not_implemented` ("PDF text extraction is not yet served by the Rust daemon; …"); nothing is read or written | no Rust extractor reproduces pypdf's text, and a different text means different chunk ids and rows. Behaviour with a caller (the tool's description names `.pdf`). Maintainer ruling 2026-10-25 ("A, declared divergence"; cortex `rust-cutover-B7-pdf-ingest`): a following B7 PR ports a Rust PDF extractor, compared structurally (chunk count and text similarity, thresholds stated in that PR), and this row then records that divergence instead of the refusal |
+| **DOC-HTML:** `.html` / `.htm` text | BeautifulSoup's `get_text("\n", strip=True)` after dropping script, style, nav, footer and header, when `bs4` happens to be importable; otherwise the regex fallback (tags to spaces, whitespace runs to one space, strip) | the regex fallback, always | `bs4` is in no dependency list or lock file (`pyproject.toml`, `ops/requirements.lock.txt`), so every shipped install, the image included, serves the fallback; the BeautifulSoup path runs only in an environment that has `bs4` installed for another reason. Maintainer ruling 2026-10-25 (cortex `rust-cutover-B7-html-ingest`): port the regex path; an HTML-quality change moves both daemons together after cutover. The w2e scenarios refuse an oracle interpreter with `bs4` |
+| One-time import of a pre-v57 chromadb store | at service start (`storage/migrate_chroma.py`) | none | D5 (2026-10-09): Chroma is dropped from the Rust daemon; the Python daemon's v57 start imports the store before a cutover |
+| **DOC-INGEST-LOCK:** other calls during an ingest | wait on the service lock while the document embeds | ingests wait for one another in arrival order (a fair lock around the whole ingest), as Python orders them; every other call is served while a document embeds, and the write lock is held for the upsert alone | no stored row differs: two ingests still apply in arrival order. An ingest takes minutes on a large document |
+| **DOC-OSERROR-TEXT:** an OSError's text on Windows (`Cannot read file {name}: {error}`, and a file removed between the existence check and the read) | `[Errno N] strerror: 'path'` from the C runtime's errno (reading a directory is `[Errno 13] Permission denied`) | `[Errno W] <FormatMessage text>: 'path'` with the Win32 code (`[Errno 5] Access is denied.`) | both the number and the words differ on Windows; Linux and macOS render `[Errno N] strerror: 'path'` as Python does |
+| **DOC-PATH-WINDOWS:** the oracle's CPython version | `PureWindowsPath` as the running CPython parses it: 3.11 and 3.12 disagree on paths that start with two separators (`//`, `//srv`, `//srv//x`) and on drive-like first parts (`1:foo`) | CPython 3.12's parse (`ntpath.splitroot`), the daemon image's version, ported literally; the goldens come from 3.12 and the generator refuses another version | a lite install on Windows runs the user's own CPython, so a 3.11 Python daemon there shows those paths differently in a refusal or a default `source` |
+| `memory.reference` `chunk_size` or `chunk_overlap` of another type | stored as given (`_dict_to_dataclass` checks no types); a float or string size makes the first ingest fail (`range` refuses a float step) | the start refuses (`config-yaml-typed`) | as every other typed knob. `max_results`, `persist_dir` and `collection_name` are not read: no Rust path uses them yet |
 
 ## Coordination board completion (W2-F)
 

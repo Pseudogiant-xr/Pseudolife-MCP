@@ -558,8 +558,8 @@ All rows share `pseudolife_memory/mcp_server.py` and the `test_mcp_server.py`/`t
 | memory_graph | core | 3 | ported |
 | memory_recall | core | 3 | ported |
 | memory_relation_define | full | 4 | ported |
-| document_ingest | core | 4 | deferred |
-| document_search | core | 3 | deferred |
+| document_ingest | core | 4 | ported |
+| document_search | core | 3 | ported |
 | memory_toolset | minimal | 1/3 | ported |
 
 
