@@ -147,29 +147,41 @@ fn errors_take_python_classes() {
     std::fs::create_dir_all(dir.join("folder.html")).unwrap();
     std::fs::write(dir.join("paper.PDF"), b"%PDF-1.4").unwrap();
     let at = |n: &str| dir.join(n).to_str().unwrap().to_string();
-    // A text suffix and HTML read outside any `try`: the OSError itself.
-    assert!(matches!(
-        extract_text(&at("folder.txt"), "folder.txt"),
-        Err(ToolError::Internal(_))
-    ));
-    assert!(matches!(
-        extract_text(&at("folder.html"), "folder.html"),
-        Err(ToolError::Internal(_))
-    ));
-    // Any other suffix wraps it: `Cannot read file {name}: {e}`.
-    match extract_text(&at("folder.data"), "folder.data") {
-        Err(ToolError::Invalid(m)) => {
-            assert!(m.starts_with("Cannot read file folder.data: "), "{m}");
-            #[cfg(unix)]
-            assert_eq!(
+    // A directory reached past the service's check: on POSIX it opens, and
+    // the handle's check refuses it, whatever the suffix (`read_document_bytes`,
+    // as `document_parser.read_document_bytes`).
+    #[cfg(unix)]
+    for name in ["folder.txt", "folder.html", "folder.data"] {
+        match extract_text(&at(name), name) {
+            Err(ToolError::Invalid(m)) => assert_eq!(
                 m,
                 format!(
-                    "Cannot read file folder.data: [Errno 21] Is a directory: '{}'",
-                    at("folder.data")
+                    "not_a_regular_file: {} is a directory; document_ingest reads one regular \
+                     file, not a directory, FIFO, socket or device",
+                    at(name)
                 )
-            );
+            ),
+            other => panic!("{name}: {other:?}"),
         }
-        other => panic!("{other:?}"),
+    }
+    // On Windows the open fails: a text suffix and HTML raise the OSError
+    // itself, any other suffix wraps it (`Cannot read file {name}: {e}`).
+    #[cfg(windows)]
+    {
+        assert!(matches!(
+            extract_text(&at("folder.txt"), "folder.txt"),
+            Err(ToolError::Internal(_))
+        ));
+        assert!(matches!(
+            extract_text(&at("folder.html"), "folder.html"),
+            Err(ToolError::Internal(_))
+        ));
+        match extract_text(&at("folder.data"), "folder.data") {
+            Err(ToolError::Invalid(m)) => {
+                assert!(m.starts_with("Cannot read file folder.data: "), "{m}")
+            }
+            other => panic!("{other:?}"),
+        }
     }
     // A text-suffix file gone since `exists()`: FileNotFoundError's text.
     match extract_text(&at("gone.md"), "gone.md") {
@@ -192,6 +204,90 @@ fn errors_take_python_classes() {
     assert!(!py_exists(&at("folder.data/inside")).unwrap() || cfg!(windows));
     assert!(!py_exists("nul\0byte").unwrap());
     assert!(py_exists(&at("folder.txt")).unwrap());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+// `document_file_problem` (`reference_bank.py`): only a regular file of at
+// most the cap is read, with Python's `code: detail` text.
+#[test]
+fn only_a_regular_file_within_the_cap_is_read() {
+    let dir = std::env::temp_dir().join(format!("pl-documents-kind-{}", std::process::id()));
+    std::fs::create_dir_all(dir.join("notes.md")).unwrap();
+    std::fs::write(dir.join("at-cap.txt"), vec![b'x'; 1024]).unwrap();
+    std::fs::write(dir.join("over-cap.txt"), vec![b'x'; 1025]).unwrap();
+    let at = |n: &str| dir.join(n).to_str().unwrap().to_string();
+    let invalid = |r: Result<(), ToolError>| match r {
+        Err(ToolError::Invalid(m)) => m,
+        other => panic!("{other:?}"),
+    };
+    let m = invalid(document_file_problem(&at("notes.md"), 1024));
+    assert_eq!(
+        m,
+        format!(
+            "not_a_regular_file: {} is a directory; document_ingest reads one regular file, \
+             not a directory, FIFO, socket or device",
+            at("notes.md")
+        )
+    );
+    // The near-miss legitimate call: a normal file of exactly the cap.
+    assert!(document_file_problem(&at("at-cap.txt"), 1024).is_ok());
+    let m = invalid(document_file_problem(&at("over-cap.txt"), 1024));
+    assert_eq!(
+        m,
+        format!(
+            "document_too_large: {} is 1025 bytes; document_ingest reads files of at most \
+             1024 bytes: split the document or ingest the part you need",
+            at("over-cap.txt")
+        )
+    );
+    // The read itself: within the cap it returns the bytes; the open
+    // handle's metadata is checked again.
+    assert_eq!(
+        read_document_bytes(&at("at-cap.txt"), 1024).unwrap().len(),
+        1024
+    );
+    assert!(matches!(
+        read_document_bytes(&at("over-cap.txt"), 1024),
+        Err(ReadError::Refused(m)) if m.contains(" is 1025 bytes; ")
+    ));
+    #[cfg(unix)]
+    {
+        // A FIFO is refused from its metadata, never opened (opening one
+        // for reading blocks until a writer appears).
+        let fifo = dir.join("pipe.txt");
+        let made = std::process::Command::new("mkfifo")
+            .arg(&fifo)
+            .status()
+            .unwrap();
+        assert!(made.success());
+        let m = invalid(document_file_problem(fifo.to_str().unwrap(), 1024));
+        assert!(m.contains(" is a FIFO; "), "{m}");
+        // A FIFO swapped in after that check: the read opens it without
+        // blocking and refuses it from the handle.
+        assert!(matches!(
+            read_document_bytes(fifo.to_str().unwrap(), 1024),
+            Err(ReadError::Refused(m)) if m.contains(" is a FIFO; ")
+        ));
+        std::os::unix::fs::symlink(dir.join("at-cap.txt"), dir.join("link.txt")).unwrap();
+        assert!(document_file_problem(&at("link.txt"), 1024).is_ok());
+    }
+    // A `/proc` entry stats as an empty regular file and reads on: the
+    // read stops one byte past the cap.
+    if std::path::Path::new("/proc/self/status").exists() {
+        assert!(matches!(
+            read_document_bytes("/proc/self/status", 100),
+            Err(ReadError::Refused(m))
+                if m.starts_with("document_too_large: /proc/self/status holds more than 100 bytes")
+        ));
+        // pagemap reports no size and holds the whole address space (it
+        // ran a plain read out of memory): cut at the cap, as in Python.
+        assert!(matches!(
+            read_document_bytes("/proc/self/pagemap", 1 << 20),
+            Err(ReadError::Refused(m))
+                if m.starts_with("document_too_large: /proc/self/pagemap holds more than")
+        ));
+    }
+    assert_eq!(MAX_DOCUMENT_BYTES, 64 * 1024 * 1024);
     let _ = std::fs::remove_dir_all(&dir);
 }
 
