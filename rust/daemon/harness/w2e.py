@@ -5851,6 +5851,8 @@ def expect_diffs(op: dict, dsns: dict) -> list[str]:
                 row = conn.execute(query).fetchone()
             if not (row and row[0]):
                 out.append(f"expect {side}: {query}")
+    if op.get("candidate_fingerprints"):
+        out += w2e_queue_judges.fingerprint_diffs(dsns, op["candidate_fingerprints"])
     return out
 
 

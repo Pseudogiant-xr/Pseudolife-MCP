@@ -165,14 +165,13 @@ pub(crate) async fn load_inputs(c: &Client) -> Result<CandInputs, ToolError> {
             m
         })
         .collect();
-    let mut aliases: Vec<(i64, Vec<String>)> = Vec::new();
+    // By entity id (the fingerprint sorts the ids), each list in alias order.
+    let mut by_entity: HashMap<i64, Vec<String>> = HashMap::new();
     for r in q("SELECT alias, entity_id FROM entity_aliases ORDER BY alias").await? {
         let (alias, eid): (String, i64) = (r.get(0), r.get(1));
-        match aliases.iter_mut().find(|(id, _)| *id == eid) {
-            Some((_, list)) => list.push(alias),
-            None => aliases.push((eid, vec![alias])),
-        }
+        by_entity.entry(eid).or_default().push(alias);
     }
+    let aliases: Vec<(i64, Vec<String>)> = by_entity.into_iter().collect();
     let edges = q(
         "SELECT id, src_id, relation, dst_id, confidence::text::double precision, \
                    origin, asserted_at FROM edges WHERE superseded_at IS NULL ORDER BY id",
@@ -1150,6 +1149,12 @@ async fn candidate_tick(
             live = capped(live);
         }
         write_pairs(client, &live).await.map_err(e2s)?;
+        if !live.contains_key(&key) {
+            // The cap evicted the row being judged (500 newer memos: a
+            // clock stepped back): Python's `pairs[key(c)]` raises KeyError
+            // here, before any action.
+            return Err(format!("'{key}'"));
+        }
         if mode != "auto" || current.is_none() {
             set_complete(&mut live, &key, true);
             write_pairs(client, &live).await.map_err(e2s)?;

@@ -90,6 +90,59 @@ CANDIDATE_REOPENED = (
     "AND value->>'queue' = 'candidate' AND value->>'state' = 'active')")
 
 
+def fingerprint_diffs(dsns: dict, config_text: str) -> list[str]:
+    """Python's own candidate fingerprints over each side's bank: the scan
+    generation against the bank's watermark, and each active automatic
+    dismissal's evidence against its record. The bank is the same on both
+    sides of each comparison, so each side's clocks cancel out, and a read
+    that renders a column unlike ``storage/postgres.py`` shows here even
+    though the cross-side comparison only sees the hashes' presence."""
+    import tempfile
+    from types import SimpleNamespace
+
+    import psycopg
+    from pseudolife_memory.memory.review_decisions import candidate_evidence_fingerprints
+    from pseudolife_memory.memory.review_judgments import candidate_generation
+    from pseudolife_memory.storage import postgres
+    from pseudolife_memory.utils.config import load_config
+
+    class ReadStorage:
+        """The storage reads the candidate inputs make, on one plain
+        connection: no schema work, no writer lease."""
+        def __init__(self, conn):
+            self.conn = conn
+
+    for name in ("load_graph", "load_entries", "entity_sources_map", "traces_by_entity_norm",
+                 "entity_fact_counts", "current_fact_counts_by_entity_text",
+                 "pending_entity_proposals", "lesson_entity_ids", "pending_proposals",
+                 "dismissed_pairs"):
+        setattr(ReadStorage, name, getattr(postgres.PostgresStorage, name))
+    with tempfile.TemporaryDirectory() as tmp:
+        path = f"{tmp}/config.yaml"
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(config_text)
+        cfg = load_config(path)
+    out = []
+    for side in ("python", "rust"):
+        with psycopg.connect(dsns[side], autocommit=True) as conn:
+            postgres.register_vector(conn)
+            svc = SimpleNamespace(_storage=ReadStorage(conn), config=cfg)
+            mark = conn.execute(
+                "SELECT value FROM meta WHERE key = 'deep_candidates_judged'").fetchone()
+            want = candidate_generation(svc)
+            if not mark or mark[0].get("generation") != want:
+                out.append(f"candidate generation {side}: bank {want}, watermark "
+                           f"{mark[0].get('generation') if mark else None}")
+            for (rec,) in conn.execute(
+                    "SELECT value FROM meta WHERE key LIKE 'automatic_review_decision_v1:%' "
+                    "AND value->>'queue' = 'candidate' AND value->>'state' = 'active'"):
+                got = candidate_evidence_fingerprints(svc, [rec.get("candidate") or {}])[0]
+                if got != rec.get("evidence_fingerprint"):
+                    out.append(f"candidate evidence {side} {rec.get('target')}: bank {got}, "
+                               f"record {rec.get('evidence_fingerprint')}")
+    return out
+
+
 def scenarios(w) -> dict:
     """The scenarios, built with ``w2e``'s helpers (``w`` is the module)."""
 
@@ -189,6 +242,10 @@ def scenarios(w) -> dict:
         op["settle"] = {**w.JUDGE_SETTLE, "until": CANDIDATES_DONE}
         return op
 
+    def checked(op: dict, mode: str) -> dict:
+        """``op`` with Python's fingerprints checked over each bank."""
+        return {**op, "candidate_fingerprints": candidate_config(mode)}
+
     def candidate_scenario(mode: str, verdicts: dict, ops: list) -> dict:
         return {"config": candidate_config(mode), "seed_config": w.deep_config(),
                 "seed": w.DEEP_SEED, "extractor": candidate_stub(verdicts),
@@ -216,6 +273,10 @@ def scenarios(w) -> dict:
         "Warehouse|Tide Gauge": w.V("propose", 0.9, relation="related-to"),
         # dismissed and recorded
         "postgres|Kafka Broker": w.V("dismiss", 0.9),
+        # shares Warehouse with the filed pair: waits a tick, then dismissed
+        # on the evidence the filing moved (dismissed at once, it would be
+        # reopened by the next tick's reconsideration)
+        "Warehouse|Kelp Farm": w.V("dismiss", 0.9),
         # a propose naming another pair: left
         "billing-service|Kafka Broker Cluster": {
             **w.V("propose", 0.95, relation="uses"), "src": "Somebody Else"},
@@ -259,15 +320,19 @@ def scenarios(w) -> dict:
     }
     return {
         "candidate-shadow": candidate_scenario("shadow", candidate_verdicts, [
-            w.expect(apply_then_judge(), memo_count,
+            w.expect(checked(apply_then_judge(), "shadow"), memo_count,
                      "SELECT NOT EXISTS (SELECT 1 FROM edge_proposals "
                      "WHERE source = 'deep-dream-judge')",
                      f"SELECT NOT ({candidate_pair('postgres', 'kafka-broker')[7:]})"),
             w.review()]),
         "candidate-auto": candidate_scenario("auto", candidate_verdicts, [
-            w.expect(apply_then_judge(), memo_count,
+            w.expect(checked(apply_then_judge(), "auto"), memo_count,
                      proposed("warehouse", "tide-gauge"),
                      candidate_pair("postgres", "kafka-broker"), candidate_decision,
+                     candidate_pair("warehouse", "kelp-farm"),
+                     "SELECT NOT EXISTS (SELECT 1 FROM meta WHERE key LIKE "
+                     "'automatic_review_decision_v1:%' AND value->>'queue' = 'candidate' "
+                     "AND value->>'state' = 'reopened')",
                      f"SELECT NOT ({proposed('billing-service', 'kafka-broker-cluster')[7:]})",
                      f"SELECT NOT ({proposed('deploy-agent', 'kafka-broker-cluster')[7:]})"),
             w.review()]),
@@ -275,13 +340,14 @@ def scenarios(w) -> dict:
         # evidence moves, it reopens (the pair removed, the record retired)
         # and the judge dismisses it again.
         "candidate-auto-reopen": candidate_scenario("auto", candidate_verdicts, [
-            w.expect(apply_then_judge(), candidate_pair("postgres", "kafka-broker"),
-                     candidate_decision),
+            w.expect(checked(apply_then_judge(), "auto"),
+                     candidate_pair("postgres", "kafka-broker"), candidate_decision),
             w.expect({**w.external(
                 "INSERT INTO edges (src_id, relation, dst_id, confidence, origin, "
                 f"asserted_at) VALUES ({w.eid('postgres')}, 'uses', {w.eid('ocean')}, "
                 "0.8, NULL, 1.0)"),
-                "settle": {**w.JUDGE_SETTLE, "until": CANDIDATE_REOPENED}},
+                "settle": {**w.JUDGE_SETTLE, "until": CANDIDATE_REOPENED},
+                "candidate_fingerprints": candidate_config("auto")},
                 candidate_pair("postgres", "kafka-broker"), candidate_decision),
             w.review()]),
         "link-shadow": w.judge_scenario(
