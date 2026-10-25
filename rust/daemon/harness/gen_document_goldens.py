@@ -115,7 +115,8 @@ PATHS = [
     # CPython 3.12's ntpath.splitroot differs from 3.11's.
     "//srv", "//srv/", "//srv//x", "//srv/share", "\\\\srv\\share\\", "1:foo", "\u00e9:x",
     "./c:x", "a/b:c", "\\\\?\\C:\\x.txt", "\\\\.\\pipe\\name", "//?/UNC/srv/share/f.md",
-    "//?/unc/srv", "\\\\server", "c:", "c:/", "C:..\\up.txt",
+    "//?/unc/srv", "\\\\server", "c:", "c:/", "C:..\\up.txt", "///x", "//?./x", "//./x",
+    "//?/x",
 ]
 
 # Whole files through extract_text, then the ingest's chunking and ids.

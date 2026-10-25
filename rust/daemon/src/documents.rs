@@ -131,7 +131,9 @@ pub(crate) fn py_path_windows(raw: &str) -> PyPath {
     let (drive, mut root, rest) = nt_splitroot(&chars);
     if root.is_empty() && drive.starts_with(SEP) && !drive.ends_with(SEP) {
         let drive_parts: Vec<&str> = drive.split(SEP).collect();
-        if (drive_parts.len() == 4 && !["?", "."].contains(&drive_parts[2]))
+        // `drv_parts[2] not in '?.'` is a substring test: "", "?", "." and
+        // "?." all fail it.
+        if (drive_parts.len() == 4 && !matches!(drive_parts[2], "" | "?" | "." | "?."))
             || drive_parts.len() == 6
         {
             root = SEP.to_string();
