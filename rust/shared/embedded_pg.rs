@@ -1242,11 +1242,17 @@ fn initdb(runtime: &Runtime, pgdata: &Path) -> Result<(), Error> {
     run_logged(command, "initdb", pgdata)
 }
 
-fn start(runtime: &Runtime, pgdata: &Path, port: u16) -> Result<(), Error> {
+/// The server options `pg_ctl -o` passes to postgres.
+fn server_options(port: u16) -> String {
     let mut options = format!("-p {port}");
     for (key, value) in SERVER_SETTINGS {
         options.push_str(&format!(" -c {key}={value}"));
     }
+    options
+}
+
+fn start(runtime: &Runtime, pgdata: &Path, port: u16) -> Result<(), Error> {
+    let options = server_options(port);
     let log = pgdata.with_file_name("embedded_pg.start.log");
     let mut command = runtime.command("pg_ctl");
     command

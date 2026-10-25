@@ -536,6 +536,20 @@ pub(crate) fn real_runtime() -> Option<Runtime> {
 }
 
 #[test]
+fn servers_start_without_a_unix_socket_and_with_fsync_on() {
+    let options = server_options(5433);
+    assert!(options.starts_with("-p 5433 "), "{options}");
+    // An empty value: no socket, and nothing for a shell or cmd to unquote.
+    assert!(
+        options.contains(" -c unix_socket_directories= "),
+        "{options}"
+    );
+    assert!(options.contains(" -c timezone=UTC"), "{options}");
+    assert!(!options.contains("-F"), "{options}");
+    assert!(!options.contains("fsync"), "{options}");
+}
+
+#[test]
 fn a_fresh_bank_starts_owned_then_a_second_caller_attaches() {
     let Some(runtime) = real_runtime() else {
         return;
