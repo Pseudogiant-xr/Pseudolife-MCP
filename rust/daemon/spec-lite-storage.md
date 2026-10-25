@@ -66,7 +66,13 @@ daemon touched. So whatever the Rust side runs must agree with Python on:
 6. Server settings and port: the `-c` settings and port policy above.
    Without them a Rust-started server takes initdb's detected time zone and
    logs somewhere other than where Python's errors point. The recommendation
-   below matches pg0 exactly on these, except `-F`, which is decision 7.
+   below matches pg0 exactly on these, except `-F`, which is decision 7, and
+   the Unix socket: a Rust-started server has none (every client connects
+   over TCP to 127.0.0.1), because another account's server holding
+   `/tmp/.s.PGSQL.<port>.lock` for the same port number, whose TCP port the
+   free-port check cannot see, failed every start on a Linux dev box
+   (2026-10-26). A Python-started server keeps pg0's `/tmp` socket; neither
+   side's clients use it.
 
 ## Candidates
 
