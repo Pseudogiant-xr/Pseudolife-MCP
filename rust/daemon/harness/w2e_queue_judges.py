@@ -76,7 +76,9 @@ MUTANTS = ["mcp-dream-junk-no-evidence-bar",          # junk-auto
            "mcp-dream-link-retype-applied",           # link-auto
            "mcp-dream-link-two-vote-same-model",      # link-two-vote-same-model
            "mcp-dream-candidate-dismiss-unrecorded",  # candidate-auto
-           "mcp-dream-candidate-endpoint-stale"]      # candidate-auto
+           "mcp-dream-candidate-endpoint-stale",      # candidate-auto
+           # candidate-auto, by Python's fingerprints over the bank
+           "mcp-dream-candidate-real-binary"]
 
 # Every candidate of the current scan judged under this apply.
 CANDIDATES_DONE = (

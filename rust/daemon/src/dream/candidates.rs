@@ -172,9 +172,16 @@ pub(crate) async fn load_inputs(c: &Client) -> Result<CandInputs, ToolError> {
         by_entity.entry(eid).or_default().push(alias);
     }
     let aliases: Vec<(i64, Vec<String>)> = by_entity.into_iter().collect();
+    // REAL through its text form, as psycopg reads it (the mutant widens the
+    // float4 directly: 0.7 reads 0.699999988).
     let edges = q(
-        "SELECT id, src_id, relation, dst_id, confidence::text::double precision, \
-                   origin, asserted_at FROM edges WHERE superseded_at IS NULL ORDER BY id",
+        if crate::mutants::active("mcp-dream-candidate-real-binary") {
+            "SELECT id, src_id, relation, dst_id, confidence::double precision, \
+         origin, asserted_at FROM edges WHERE superseded_at IS NULL ORDER BY id"
+        } else {
+            "SELECT id, src_id, relation, dst_id, confidence::text::double precision, \
+         origin, asserted_at FROM edges WHERE superseded_at IS NULL ORDER BY id"
+        },
     )
     .await?
     .iter()
