@@ -429,6 +429,7 @@ needed; static assertions and Python fakes remain oracle evidence.
 | `setup-codex-coordination.py` | Pending | Effective config/identity authority, opt-in messaging and wake capability, private backup and preserved preexisting settings; real installed client with disposable config. |
 | `update.sh`, `update.ps1`, `update.py` | Pending | Every canonical flag/default maps to the checkout updater, streamed output and exact exit status; `test_ops_update_wrappers.py`, OPS-CUTOVER update sequence. |
 | `update_clients.py` | Pending | Separate runtime/plugin/hook/provider install steps, owned cache/config, effective credentials and failed-step exit; actual installed-runtime proof with old sessions present. |
+| Native runtime provisioning (`pseudolife-daemon provision <runtime>`) | Pending (B11) | Wherever install or release-mode `update` places the Rust daemon, it runs the installed binary's `provision pdfium` (and the lite tier's PostgreSQL step, B9), so a fresh or updated host ingests PDFs with no follow-up step: a rerun prints one line and changes nothing, and an offline run says nothing was installed and names the command. Once it does, the `pdf_engine_unavailable` refusal names `pseudolife-mcp update` instead of the provision command. Until then only `ops/Dockerfile.daemon-rust` provisions PDFium (into `/opt/pdfium`). |
 | Executable script modes | Pending | All tracked `ops/*.sh` retain index mode 100755 for Linux/macOS direct invocation; `test_ops_script_modes.py`. PowerShell has a separate native parse/runtime proof. |
 
 ## SHIM-CLIENT-UPDATES

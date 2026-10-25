@@ -69,7 +69,9 @@ class ContainerTests(unittest.TestCase):
         dockerfile = (ROOT / "ops/Dockerfile.daemon-rust").read_text()
         for item in ("USER root", 'EXPOSE 8765', 'VOLUME ["/data"]',
                      "HF_HUB_OFFLINE=1", "CUDA_VISIBLE_DEVICES=-1", "ORT_DYLIB_PATH=",
-                     "PSEUDOLIFE_DAEMON_ONNX_DIR=", "HEALTHCHECK", "--locked", "-j 3"):
+                     "PSEUDOLIFE_DAEMON_ONNX_DIR=", "HEALTHCHECK", "--locked", "-j 3",
+                     "provision pdfium", "COPY --from=builder /opt/pdfium /opt/pdfium",
+                     "PSEUDOLIFE_DAEMON_PDFIUM_DIR=/opt/pdfium"):
             self.assertIn(item, dockerfile)
         compose = (ROOT / "ops/docker-compose.rust.yml").read_text()
         self.assertIn("name: w3j-container-prep", compose)
