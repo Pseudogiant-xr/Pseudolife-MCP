@@ -23,6 +23,7 @@
   ],
   "backup": [
     "backup-archives-backups-dir",
+    "backup-archives-password-file",
     "backup-dotfile-suffix-windows",
     "backup-dump-keeps-owner",
     "backup-member-mode-posix",

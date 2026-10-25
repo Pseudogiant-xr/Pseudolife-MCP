@@ -568,6 +568,22 @@ cases need `PSEUDOLIFE_TEST_PG_RUNTIME` (and `PSEUDOLIFE_TEST_PG0_PYTHON`
 for the cross-side case); targeted Windows and Linux validation and
 independent review remain required before acceptance.
 
+`shared/native_provision.rs` and `shared/pg_runtime.rs` (included into the
+shim as `pg::native_provision` and `pg::runtime`) provision the lite tier's
+PostgreSQL runtime with no unsafe code. They download pinned archives over
+HTTPS with the existing `reqwest`, check each with `sha2` against an in-tree
+sha256 and unpack with the existing `zip`, `tar` and `flate2`. One new
+dependency, `ruzstd` 0.9.1 with default features off (so no transitive
+crates), decodes the `data.tar.zst` of the two Ubuntu library packages pg0
+also bundles on Linux. The install lock is the standard library's
+`File::lock` on `<root>/.install.lock`. Deliberate differences from pg0's
+extraction: an entry that would leave the tree, a link to anything but a
+file beside it, or a hard link or device is refused rather than skipped or
+followed; group and other write bits are dropped; and the tree is staged
+owner-only, synced and published by one rename. The Windows install
+matches pg0 0.15.1's installation file for file; the real-download case
+needs `PSEUDOLIFE_TEST_PG_PROVISION_ROOT`.
+
 Board label normalization follows the pinned Python 3.11 Unicode 14.0.0
 behavior: casefold, then NFC, with category-C inputs rejected. The pinned
 `unicode-casefold` crate uses Unicode 9.0.0; a full code-point probe found 129

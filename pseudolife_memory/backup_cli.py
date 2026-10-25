@@ -43,7 +43,10 @@ _STATE_PREFIX = "pseudolife_lite_state-"
 # Never archived into the state tar: the dump covers the bank, and the
 # backups dir must not recursively swallow itself.
 # The cluster password stays out: a restore gives the fresh cluster its own.
-_STATE_EXCLUDE = {"embedded_pg", "embedded_pg.secret", "backups"}
+# The per-user data dir also holds installed software, which reinstalls and
+# is no bank state: the shim's runtimes and launcher, and pinned native
+# runtimes (the Rust lite tier's PostgreSQL, PDFium).
+_STATE_EXCLUDE = {"embedded_pg", "embedded_pg.secret", "backups", "native", "runtimes", "bin"}
 
 
 def perform_backup(

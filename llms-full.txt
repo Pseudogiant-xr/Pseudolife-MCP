@@ -8307,7 +8307,7 @@ straight into the Docker tier; the lite tier uses the embedded
 runtime's own bundled `pg_dump`, attaching to the running instance or
 starting it for the duration) plus a
 `pseudolife_lite_state-*.tar.gz` of the data dir (weights, config, any
-pre-v57 ChromaDB store; ingested documents are in the dump since v57; `embedded_pg/` is excluded — the dump covers it — and so is `embedded_pg.secret`, the bank's superuser password, since a restore gives the fresh cluster its own), with the same
+pre-v57 ChromaDB store; ingested documents are in the dump since v57; `embedded_pg/` is excluded — the dump covers it — and so is `embedded_pg.secret`, the bank's superuser password, since a restore gives the fresh cluster its own; so is installed software the default data dir also holds, which reinstalls: `runtimes/` and `bin/` (the shim) and `native/` (pinned native runtimes)), with the same
 7-day rotation (`--keep-days`). The artifact names
 (`pseudolife_lite_memory-*` / `pseudolife_lite_state-*`) are deliberately
 disjoint from `ops/backup.*`'s, so the two tools can share a directory
