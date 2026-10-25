@@ -95,6 +95,9 @@ unsafe fn text_of(b: &dyn PdfiumLibraryBindings, data: &[u8]) -> Result<String, 
         // `_open_pdf`: fewer than one page fails the load, whatever the
         // handle (a null one counts no pages).
         if b.FPDF_GetPageCount(doc) < 1 {
+            // c_ulong: u32 on Windows, u64 elsewhere, where the conversion
+            // is the identity.
+            #[allow(clippy::useless_conversion)]
             let code = u64::from(b.FPDF_GetLastError());
             if !doc.is_null() {
                 b.FPDF_CloseDocument(doc);
