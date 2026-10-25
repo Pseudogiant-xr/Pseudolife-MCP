@@ -51,7 +51,7 @@ fn caller(call: &ToolCall<'_>) -> Caller {
 }
 
 /// `_episode_to_dict`.
-fn episode_dict(ep: &Episode) -> Map<String, Value> {
+pub(crate) fn episode_dict(ep: &Episode) -> Map<String, Value> {
     let mut m = Map::new();
     m.insert("id".into(), json!(ep.id));
     m.insert("title".into(), json!(ep.title));

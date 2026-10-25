@@ -26,7 +26,8 @@ pub(crate) const PATHS: [&str; 8] = [
 ];
 
 /// Hooks that intentionally answer 200 without reading a rejected body.
-pub(crate) const BODYLESS_OK_PATHS: [&str; 5] = [
+pub(crate) const BODYLESS_OK_PATHS: [&str; 6] = [
+    "/api/hook/memory-policy",
     "/api/hook/memory-changes",
     "/api/hook/park-gate",
     "/api/hook/woke",
@@ -114,14 +115,26 @@ pub(crate) async fn route(
                 Some(Value::Array(a)) => !a.is_empty(),
                 Some(Value::Object(o)) => !o.is_empty(),
             };
-            if present {
-                not_implemented(path)
-            } else {
-                json_response(200, &json!({"ok": true}))
+            if present && let Some(id) = id {
+                crate::session_close::hook_session_end(app, id).await;
             }
+            json_response(200, &json!({"ok": true}))
         }
-        // session-start, memory-policy: their bodies (briefing and policy
-        // text) belong to a later slice (W2-D).
+        // The session id and source pick an arm only for an authorized
+        // caller, as on session-start.
+        "/api/hook/memory-policy" => {
+            let params = if authorized(app, h) {
+                parse_query(raw_query)
+            } else {
+                Default::default()
+            };
+            hook_text(crate::session_hook::hook_memory_policy(
+                &app.service.config.memory_policy,
+                params.get("session_id").map(String::as_str),
+                params.get("source").map(String::as_str),
+            ))
+        }
+        // session-start: its body (the briefing) belongs to a later slice.
         _ => not_implemented(path),
     }
 }
@@ -134,18 +147,27 @@ mod tests {
     #[tokio::test]
     async fn unserved_hooks_answer_the_declared_501() {
         let app = mcp_refusal_app();
-        for path in [
-            "/api/hook/session-start",
-            "/api/hook/memory-policy",
-            "/api/hook/memory-changes",
-        ] {
+        for path in ["/api/hook/session-start", "/api/hook/memory-changes"] {
             assert_declared_501(&app, authed_request("GET", path, None)).await;
         }
-        let close = authed_request(
-            "POST",
-            "/api/hook/session-end",
-            Some(r#"{"session_id": "s"}"#),
+    }
+
+    /// With the default `compact` policy the separate hook serves nothing.
+    #[tokio::test]
+    async fn memory_policy_is_empty_text_by_default() {
+        let response = crate::http::handle(
+            axum::extract::State(mcp_refusal_app()),
+            authed_request("GET", "/api/hook/memory-policy?session_id=s", None),
+        )
+        .await;
+        assert_eq!(response.status(), 200);
+        assert_eq!(
+            response.headers().get("content-type").unwrap(),
+            "text/plain; charset=utf-8"
         );
-        assert_declared_501(&app, close).await;
+        let body = axum::body::to_bytes(response.into_body(), 64)
+            .await
+            .unwrap();
+        assert!(body.is_empty());
     }
 }

@@ -75,10 +75,9 @@ def cases(case, auth):
             case("end empty", "POST", end, a, b''),
             case("end null session", "POST", end, a, b'{"session_id":null}'),
             case("end empty session", "POST", end, a, b'{"session_id":""}'),
-            case("end session mutation remains delegated", "POST", end, a,
-                 b'{"session_id":"pl-http-session"}', declared="W2-E/F: session-end mutation"),
+            case("end unknown session", "POST", end, a, b'{"session_id":"pl-http-session"}'),
             case("end nonzero integer beyond float range", "POST", end, a,
-                 b'{"session_id":1' + b'0' * 400 + b'}', declared="W2-E/F: session-end mutation"),
+                 b'{"session_id":1' + b'0' * 400 + b'}'),
             case("end UTF8 error", "POST", end, a, b'\xff'),
             case("end method before body", "GET", end, a, object_body(16385))]
     # Deliberate difference: Python acknowledges these invalid closes without

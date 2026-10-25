@@ -5734,6 +5734,8 @@ def run_op(op: dict, port: int, mcp: Mcp, dsn: str) -> dict | None:
         hdrs = [AUTH] + ([("Content-Type", "application/json")] if body else [])
         r = w1a.call(port, op["method"], op["path"], hdrs, body)
         return {"isError": r["status"] != 200, "value": r.get("json", r.get("bytes"))}
+    if op["op"] in w2e_hooks.OPS:
+        return w2e_hooks.run(op, port, dsn, sys.modules[__name__])
     args = resolve_args(op["args"], dsn)
     headers = [tuple(h) for h in op.get("headers", [])]
     if op.get("abandon"):
@@ -5748,6 +5750,11 @@ def run_op(op: dict, port: int, mcp: Mcp, dsn: str) -> dict | None:
 
 # Operations on each side's data directory rather than its daemon.
 HOME_OPS = ("snapshot_file", "block_snapshots")
+
+import w2e_hooks  # noqa: E402
+
+SCENARIOS.update(w2e_hooks.register(sys.modules[__name__]))
+MUTANTS += w2e_hooks.MUTANTS
 
 
 def restart_sides(op: dict, scn: dict, procs: dict, homes: dict, envs: dict,
