@@ -125,25 +125,33 @@ for file in /etc/subuid /etc/subgid; do
     echo "another account's range in $file overlaps $SUBID_START+$SUBID_COUNT" >&2; exit 1
   fi
 done
-# Changing an existing range first ends everything of the account's: a
-# process left on an old ID would be outside the egress table once it names
-# the new range, and the rootless Docker storage belongs to the old IDs.
+# Changing an existing range first ends everything of the account's, and
+# removes its rootless Docker storage, which belongs to the old IDs. A file
+# a job left owned by an old ID (a setuid program, say) would still run as
+# that ID, so every range the account ever had stays in the egress table:
+# the retired ranges are recorded in a root-owned file.
 want="$runner_user:$SUBID_START:$SUBID_COUNT"
-old_lines=$({ grep -h "^$runner_user:" /etc/subuid /etc/subgid 2>/dev/null || true; } | paste -sd' ' -)
+install -d -m 0755 "$LIB"
+retired=$LIB/retired-subids
+# newuidmap honours a line keyed by the account's UID as well as its name.
+old_lines=$({ grep -hE "^($runner_user|$runner_uid):" /etc/subuid /etc/subgid 2>/dev/null || true; } | paste -sd' ' -)
 if [ -n "$old_lines" ] && [ "$old_lines" != "$want $want" ]; then
   echo "the account's subordinate IDs change ($old_lines); stopping its runners and processes first"
+  old_range=$(awk -F: -v me="$runner_user" -v uid="$runner_uid" '$1 == me || $1 == uid {print $2, $3}' /etc/subuid /etc/subgid | sort -u)
+  printf '%s\n' "$old_range" >> "$retired"
+  sort -u -o "$retired" "$retired"
   systemctl stop "pseudolife-$prefix-*.service"
   docker_data="$runner_home/.local/share/docker"
   if [ -e "$docker_data" ] || [ -L "$docker_data" ]; then
     systemctl start "user@$runner_uid.service"
-    run_as systemctl --user stop docker.service
+    for _ in $(seq 30); do [ -S "/run/user/$runner_uid/bus" ] && break; sleep 1; done
+    run_as systemctl --user stop docker.service 2>/dev/null || true
     # Removed as the account, inside its own user namespace while the old
     # range is still mapped, so root never deletes in a directory the
-    # account controls.
-    run_as rootlesskit rm -rf "$docker_data"
+    # account controls. Whether it worked is checked below.
+    run_as rootlesskit rm -rf "$docker_data" || true
   fi
   systemctl stop "user@$runner_uid.service"
-  old_range=$(awk -F: -v me="$runner_user" '$1 == me {print $2, $3}' /etc/subuid /etc/subgid | sort -u)
   for _ in $(seq 10); do
     left=$(ps -eo uid=,gid= | awk -v me="$runner_uid" -v ranges="$old_range" '
       BEGIN { n = split(ranges, r, "[ \n]+") }
@@ -162,12 +170,9 @@ if [ -n "$old_lines" ] && [ "$old_lines" != "$want $want" ]; then
   fi
 fi
 for file in /etc/subuid /etc/subgid; do
-  sed -i "/^$runner_user:/d" "$file"
+  sed -i -E "/^($runner_user|$runner_uid):/d" "$file"
   echo "$want" >> "$file"
 done
-loginctl enable-linger "$runner_user"
-systemctl start "user@$runner_uid.service"
-for _ in $(seq 30); do [ -S "/run/user/$runner_uid/bus" ] && break; sleep 1; done
 
 echo "== suite lock directory"
 suite_home=$(getent passwd "$suite_user" | cut -d: -f6)
@@ -217,7 +222,13 @@ while read -r keyword server _ || [ -n "${keyword:-}" ]; do
 done < /etc/resolv.conf
 # The account's subordinate IDs count too: a job can map itself onto one in
 # a user namespace that keeps this network namespace.
-ids="$runner_uid, $SUBID_START-$((SUBID_START + SUBID_COUNT - 1))"
+# The current range and every retired one, merged into intervals that do not
+# overlap (nft refuses overlapping elements in one set).
+id_ranges=$({ echo "$SUBID_START $SUBID_COUNT"; if [ -s "$retired" ]; then cat "$retired"; fi; } \
+  | awk '$1 ~ /^[0-9]+$/ && $2 ~ /^[1-9][0-9]*$/ {print $1, $1 + $2 - 1}' | sort -n -k1,1 \
+  | awk 'NR == 1 {s = $1; e = $2; next} $1 <= e + 1 {if ($2 > e) e = $2; next}
+         {printf "%s%d-%d", sep, s, e; sep = ", "; s = $1; e = $2} END {printf "%s%d-%d", sep, s, e}')
+ids="$runner_uid, $id_ranges"
 # This box's own services (any socket listening now that another account
 # owns) are refused on every local address. A port in use cannot be one a
 # job's own server binds; rerun this script after adding a service.
@@ -278,13 +289,15 @@ nft_conf=/etc/nftables.conf
 include_line='include "/etc/pseudolife-runner-egress.n[f]t"'
 if [ -f "$nft_conf" ] && ! grep -qxF "$include_line" "$nft_conf"; then
   [ -e "$nft_conf.before-parity-runner" ] || cp -p "$nft_conf" "$nft_conf.before-parity-runner"
+  cp -p "$nft_conf" "$nft_conf.parity-edit"
   printf '\n# The parity runner account'\''s egress table (ops/selfhosted/setup-linux-runner.sh).\n%s\n' \
     "$include_line" >> "$nft_conf"
   if ! nft -c -f "$nft_conf"; then
-    cp -p "$nft_conf.before-parity-runner" "$nft_conf"
+    mv "$nft_conf.parity-edit" "$nft_conf"
     echo "$nft_conf does not check with the egress table included; it is restored unchanged" >&2
     exit 1
   fi
+  rm -f "$nft_conf.parity-edit"
 fi
 cat > /etc/systemd/system/pseudolife-runner-egress.service <<UNIT
 [Unit]
@@ -326,6 +339,12 @@ UNIT
 systemctl daemon-reload
 systemctl enable pseudolife-runner-egress.service >/dev/null 2>&1
 systemctl reload-or-restart pseudolife-runner-egress.service
+# The account's user manager starts only now, once the table names the
+# account's current range: after a range change, nothing of the account's
+# runs until the new range is filtered.
+loginctl enable-linger "$runner_user"
+systemctl start "user@$runner_uid.service"
+for _ in $(seq 30); do [ -S "/run/user/$runner_uid/bus" ] && break; sleep 1; done
 
 echo "== tools for $runner_user"
 if [ ! -x "$runner_home/.local/bin/uv" ]; then
@@ -459,7 +478,9 @@ User=$runner_user
 WorkingDirectory=$dir
 # The runner gets SIGTERM to finish or cancel its job; whatever is left in
 # the unit's cgroup (a job's detached children included) is then killed, so
-# nothing of a job outlives the unit and the egress table it is bound to.
+# no process of the unit outlives it and the egress table it is bound to.
+# Work a job handed to the account's user manager (a container, a user
+# service) stops with that manager, which requires the table too.
 KillMode=mixed
 KillSignal=SIGTERM
 TimeoutStopSec=5min

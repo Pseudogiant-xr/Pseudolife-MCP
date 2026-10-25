@@ -248,7 +248,11 @@ What it adds to the manual procedure:
   Docker and containers), removes the old Docker storage as the account
   inside its own user namespace while the old range is still mapped, and
   refuses to go on while any process of the account or of its old range
-  remains, so no process outlives the range the egress table names.
+  remains. Every range the account ever had stays in the egress table
+  (recorded in `/usr/local/lib/pseudolife-parity-runner/retired-subids`),
+  because a file a job left owned by an old ID, such as a setuid program,
+  would still run as that ID. The account's user manager starts only once
+  the reloaded table names the new range.
 - **No local network.** An nftables table, loaded by its own systemd unit,
   rejects `<runner-user>`'s IPv4 traffic to private, link-local, CGNAT
   (Tailscale), multicast and broadcast addresses, and all its IPv6 traffic
