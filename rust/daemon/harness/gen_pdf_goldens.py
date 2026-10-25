@@ -36,6 +36,10 @@ def build() -> dict:
 
     from pseudolife_memory.memory.document_parser import extract_text
 
+    # The image's CPython: the recursion error's text (DOC-PDF-RECURSION)
+    # differs between minor versions.
+    if sys.version_info[:2] != (3, 12):
+        sys.exit(f"needs CPython 3.12 (the daemon image's), found {sys.version.split()[0]}")
     if v.PYPDFIUM_INFO.version != locked_pypdfium2():
         sys.exit(f"needs pypdfium2 {locked_pypdfium2()}, found {v.PYPDFIUM_INFO.version}")
     files = []

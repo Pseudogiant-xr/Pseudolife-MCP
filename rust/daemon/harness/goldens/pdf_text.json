@@ -1,5 +1,5 @@
 {
- "python": "3.11",
+ "python": "3.12",
  "pypdfium2": "5.14.0",
  "pdfium": "8076",
  "files": [
@@ -83,7 +83,7 @@
    "file": "hostile-excluded-chars.pdf",
    "sha256": "dbcafe4d325af63427fa45b106c6d2bc297eff33b588cde512e9fc1d4f754a24",
    "error": "ArgumentError",
-   "message": "argument 1: RecursionError: maximum recursion depth exceeded while calling a Python object"
+   "message": "argument 1: RecursionError: maximum recursion depth exceeded"
   },
   {
    "file": "hostile-image-as-content.pdf",

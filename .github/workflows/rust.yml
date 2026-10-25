@@ -348,7 +348,7 @@ jobs:
           $root = Join-Path $env:RUNNER_TEMP 'pdfium'
           "PSEUDOLIFE_DAEMON_PDFIUM_DIR=$root" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           $env:PSEUDOLIFE_DAEMON_PDFIUM_DIR = $root
-          cargo run --locked -p pseudolife-daemon -j 4 -- provision pdfium
+          cargo run --locked -p pseudolife-daemon --bin pseudolife-daemon -j 4 -- provision pdfium
           exit $LASTEXITCODE
       - name: Nextest
         run: cargo nextest run --locked --all-targets -j 4
