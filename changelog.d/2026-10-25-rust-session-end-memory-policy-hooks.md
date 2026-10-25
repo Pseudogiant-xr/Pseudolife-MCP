@@ -7,8 +7,9 @@
   daemon serves them. SessionEnd closes the session's root and every open
   episode below it, deletes it when it holds no entries, otherwise titles a
   generic-named root from its entries, stamps the registration row, clears
-  the active-session pointer only while that session owns it, and fires the
-  session-end dream trigger. The memory-policy hook serves the full
+  the active-session pointer only while that session owns it, and calls the
+  session-end dream trigger, which on the Rust daemon still only logs: the
+  dream itself is not ported yet. The memory-policy hook serves the full
   memory-loop block to sessions whose configured variant, or A/B arm, is
   `full_separate_hook`, and nothing on a resume or compaction. The daemon
   now reads `memory_policy.variant` and `memory_policy.ab_arms` from

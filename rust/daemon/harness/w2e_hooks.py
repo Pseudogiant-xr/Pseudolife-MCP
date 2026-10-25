@@ -56,9 +56,11 @@ def register(h) -> dict[str, dict]:
     start = "/api/hook/session-start?source=startup&session_id="
     seed_start = lambda key: {"op": "http", "method": "GET", "path": start + key}  # noqa: E731
     return {
-        # Seeded by Python: four registered sessions (one root with entries
-        # and its generic title, one empty, one with an open sub-episode,
-        # one titled by its agent), the active-session pointer on the last.
+        # Seeded by Python: registered sessions (one root with entries and
+        # its generic title, one empty, one whose entry is on an open
+        # sub-episode, one already ended, one whose registered root was
+        # pruned, one with a signal source, one titled by its agent), the
+        # active-session pointer on the last.
         # The session-end dream trigger fires on both sides; extractor_mode
         # fallback with no fallback endpoint makes Python's dream refuse
         # before it writes (its NoOp extractor would acknowledge every
@@ -70,9 +72,31 @@ def register(h) -> dict[str, dict]:
                 h.store("A note in session A about the deploy checklist.", [h.sess("end-a")]),
                 h.store("A second note in session A.", [h.sess("end-a")]),
                 seed_start("end-b"),
+                # C's only entry is on its open sub-episode, so the root is
+                # kept, and titled, by its subtree.
                 seed_start("end-c"),
-                h.store("A note in session C.", [h.sess("end-c")]),
                 h.ep_start("C sub-task", [h.sess("end-c")]),
+                h.store("A note in session C's sub-task.", [h.sess("end-c")]),
+                # E ended before; its registration then reads as reaped, so
+                # an end with nothing open shows in end_reason.
+                seed_start("end-e"),
+                h.store("A note in session E.", [h.sess("end-e")]),
+                {"op": "http", "method": "POST", "path": "/api/hook/session-end",
+                 "body": {"session_id": "end-e"}},
+                h.sql("UPDATE client_sessions SET end_reason = 'idle' WHERE session_key = 'end-e'",
+                      after_stop=True),
+                # F's registered root was pruned empty; a later store opened
+                # a second root the registration does not name yet.
+                seed_start("end-f"),
+                {"op": "http", "method": "POST", "path": "/api/hook/session-end",
+                 "body": {"session_id": "end-f"}},
+                h.store("A note in session F's second root.", [h.sess("end-f")]),
+                # G: a signal source beside noise, and a first entry long
+                # enough to cut at a word.
+                seed_start("end-g"),
+                h.store("The release checklist for the next version covers the installer, "
+                        "the shim and the plugin cache.", [h.sess("end-g")], source="proj-g"),
+                h.store("Status: halfway through.", [h.sess("end-g")], source="status"),
                 seed_start("end-d"),
                 h.store("A note in session D.", [h.sess("end-d")]),
                 h.session_title("Session D, named by its agent", [h.sess("end-d")]),
@@ -86,6 +110,14 @@ def register(h) -> dict[str, dict]:
                 end("end-b"),
                 # The open sub-episode closes with its root.
                 end("end-c"),
+                h.ep_summary("@root:end-c:32"),
+                # Nothing open: only the registration's end moves ('idle' to 'end').
+                end("end-e"),
+                # The second root is appended to the registration's roots.
+                end("end-f"),
+                # Titled from the signal source and the cut first entry.
+                end("end-g"),
+                h.ep_summary("@root:end-g:32"),
                 # Named by its agent: kept; it owns the pointer, which clears.
                 end("end-d"),
                 h.ep_summary("@root:end-d:32"),

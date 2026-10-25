@@ -81,16 +81,29 @@ async fn auto_title(
     ws: &mut WriteState,
     root: usize,
     subtree: &HashSet<String>,
+    band_order: &[String],
 ) {
     if !crate::episodes::is_generic_title(&ws.log.episodes[root].title) {
         return;
     }
     let title = {
         let bank = ready.bank.read().expect("bank lock");
-        let entries: Vec<(f64, &str, &str)> = bank
+        // Python walks band by band, so the title's first-seen and
+        // first-minimum tie-breaks follow the configured band order.
+        let rank = |band: &str| {
+            band_order
+                .iter()
+                .position(|b| b == band)
+                .unwrap_or(usize::MAX)
+        };
+        let mut held: Vec<&crate::bank::Entry> = bank
             .entries
             .iter()
             .filter(|e| e.episode_id.as_ref().is_some_and(|id| subtree.contains(id)))
+            .collect();
+        held.sort_by_key(|e| rank(&e.band));
+        let entries: Vec<(f64, &str, &str)> = held
+            .iter()
             .map(|e| (e.ts, e.source.as_str(), e.text.as_str()))
             .collect();
         crate::session_title::derive_session_title(ws.log.episodes[root].started_at, &entries)
@@ -104,7 +117,12 @@ async fn auto_title(
 /// root and its subtree. An empty subtree is deleted, answering `{}`; else
 /// the closed root's dict, and whether the session-end dream should fire.
 /// A key with nothing open still stamps its registration row.
-pub async fn episode_end_session(ready: &Arc<Ready>, key: &str, run_dream: bool) -> (Value, bool) {
+pub async fn episode_end_session(
+    ready: &Arc<Ready>,
+    key: &str,
+    run_dream: bool,
+    band_order: &[String],
+) -> (Value, bool) {
     let mut ws = ready.write.lock().await;
     let Some(root) = ws.log.end_session_root(key) else {
         end_client_session(ready, key, None).await;
@@ -149,11 +167,17 @@ pub async fn episode_end_session(ready: &Arc<Ready>, key: &str, run_dream: bool)
         return (json!({}), false);
     }
     if !empty {
-        auto_title(ready, &mut ws, root, &subtree).await;
+        auto_title(ready, &mut ws, root, &subtree, band_order).await;
     }
     ws.persist_episodes(ready.storage.client()).await;
     let result = Value::Object(crate::episode_tools::episode_dict(&ws.log.episodes[root]));
-    (result, run_dream && !empty)
+    (result, fires(run_dream, true, empty))
+}
+
+/// `_close_session_locked`'s `fire`: a found root whose subtree captured
+/// entries fires the session-end dream (an empty one was pruned instead).
+fn fires(run_dream: bool, found: bool, empty: bool) -> bool {
+    run_dream && found && !empty
 }
 
 /// `clear_active_session`: clear the active-session pointer only while it
@@ -197,15 +221,41 @@ pub async fn hook_session_end(app: &crate::http::App, session_id: &Value) {
         return;
     };
     let dream = app.service.session_dream.clone();
+    let band_order: Vec<String> = app
+        .service
+        .config
+        .memory
+        .band_specs
+        .iter()
+        .map(|b| b.name.clone())
+        .collect();
     let r2 = ready.clone();
     let task = ready.writes.spawn(async move {
-        let (_, fire) = episode_end_session(&r2, &key, true).await;
-        if fire {
-            dream.fire();
+        // Python clears the pointer even when the close raised.
+        let (r3, k2) = (r2.clone(), key.clone());
+        let close =
+            tokio::spawn(async move { episode_end_session(&r3, &k2, true, &band_order).await });
+        match close.await {
+            Ok((_, true)) => dream.fire(),
+            Ok(_) => {}
+            Err(e) => eprintln!("session-end episode close failed: {e}"),
         }
         clear_active_session(&r2, &key).await;
     });
     if let Err(e) = task.await {
         eprintln!("session-end task failed: {e}");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_a_found_root_with_entries_fires_the_dream() {
+        assert!(fires(true, true, false));
+        assert!(!fires(true, true, true));
+        assert!(!fires(true, false, false));
+        assert!(!fires(false, true, false));
     }
 }
