@@ -31,7 +31,7 @@ use crate::storage::graph::{norm_name, py_lower};
 /// `MERGE_REJECT_CLASS` (`memory/graph_review.py:25`).
 const MERGE_REJECT_CLASS: [&str; 2] = ["reject", "relate"];
 /// `_JUDGE_ALIASES`: names that ask an endpoint for whatever it serves.
-const JUDGE_ALIASES: [&str; 3] = ["judge", "extractor", "bench"];
+pub(crate) const JUDGE_ALIASES: [&str; 3] = ["judge", "extractor", "bench"];
 /// `_TIEBREAK_REFUSALS`.
 const REFUSE_UNKNOWN_SECOND: &str = "tiebreak needs the second vote's served model";
 const REFUSE_SAME_MODEL: &str = "tiebreak needs a distinct third model";
@@ -53,7 +53,7 @@ fn chars(s: &str, n: usize) -> String {
 }
 
 /// Python `f"{x:.2f}"`: the exact binary value rounded half to even.
-fn fixed2(x: f64) -> String {
+pub(crate) fn fixed2(x: f64) -> String {
     let wide = format!("{x:.30}");
     let Some(dot) = wide.find('.') else {
         return format!("{x:.2}");
@@ -183,7 +183,7 @@ pub(crate) async fn judge_extractor(service: &Service, model: Option<&str>) -> O
 }
 
 /// `_judge_second_extractor()`.
-async fn judge_second_extractor(service: &Service) -> Option<JudgeEx> {
+pub(crate) async fn judge_second_extractor(service: &Service) -> Option<JudgeEx> {
     let cfg = &service.config.memory.deep_dream;
     let dream = &service.config.dream;
     if set(&cfg.judge_second_url) {
@@ -463,7 +463,7 @@ fn served_model_mismatch(ex: &JudgeEx) -> Option<(String, String)> {
 }
 
 /// `_report_served_model(out, opinion, ex)`.
-fn report_served_model(out: &mut Map<String, Value>, opinion: &str, ex: &JudgeEx) {
+pub(crate) fn report_served_model(out: &mut Map<String, Value>, opinion: &str, ex: &JudgeEx) {
     let Some((requested, served)) = served_model_mismatch(ex) else {
         return;
     };
@@ -493,7 +493,7 @@ pub(crate) fn model_name(ex: &JudgeEx, fallback: Option<&str>) -> String {
 
 /// `_second_opinion_distinct(review, row, ex, ex2, model2)`; `ex2` None is
 /// the first opinion's own endpoint object.
-async fn second_opinion_distinct(
+pub(crate) async fn second_opinion_distinct(
     c: &Client,
     review: &Review,
     row: &Row,
@@ -627,7 +627,7 @@ fn tiebreak_majority(
 }
 
 /// `out[key] = out.get(key, 0) + n`.
-fn bump(out: &mut Map<String, Value>, key: &str, n: i64) {
+pub(crate) fn bump(out: &mut Map<String, Value>, key: &str, n: i64) {
     let cur = out.get(key).and_then(Value::as_i64).unwrap_or(0);
     out.insert(key.to_string(), json!(cur + n));
 }
@@ -640,7 +640,7 @@ fn bump(out: &mut Map<String, Value>, key: &str, n: i64) {
 /// answers the error. (The parser clamps confidences to [0, 1], so only an
 /// underflow is reachable.)
 #[allow(clippy::result_large_err)]
-fn real(x: f64) -> Result<f32, ToolError> {
+pub(crate) fn real(x: f64) -> Result<f32, ToolError> {
     let r = x as f32;
     if crate::mutants::active("mcp-dream-judge-real-unchecked") {
         return Ok(r);
@@ -658,7 +658,7 @@ fn real(x: f64) -> Result<f32, ToolError> {
 /// lone surrogate (the first such parameter, in bind order): raised while
 /// the parameters are dumped, so before any server-side error.
 #[allow(clippy::result_large_err)]
-fn encodable(params: &[Option<&str>]) -> Result<(), ToolError> {
+pub(crate) fn encodable(params: &[Option<&str>]) -> Result<(), ToolError> {
     if crate::mutants::active("mcp-dream-judge-encode-unchecked") {
         return Ok(());
     }
@@ -1395,7 +1395,7 @@ fn proposals_of(enriched: &[Row], cfg: &DeepDreamConfig) -> Vec<Row> {
 }
 
 /// Same endpoint (object, or URL and key): a failure there ends the tick.
-fn same_endpoint(other: Option<&JudgeEx>, ex: &JudgeEx) -> bool {
+pub(crate) fn same_endpoint(other: Option<&JudgeEx>, ex: &JudgeEx) -> bool {
     match other {
         None => true,
         Some(o) => {
@@ -1462,7 +1462,7 @@ pub(crate) async fn or_stop<T>(
 }
 
 /// No new phase starts once the daemon is shutting down.
-fn check_stop(stop: &watch::Receiver<bool>) -> Result<(), String> {
+pub(crate) fn check_stop(stop: &watch::Receiver<bool>) -> Result<(), String> {
     if *stop.borrow() {
         Err(STOPPED.into())
     } else {

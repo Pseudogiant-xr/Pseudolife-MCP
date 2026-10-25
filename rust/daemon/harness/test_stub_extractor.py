@@ -312,6 +312,26 @@ def test_junk_verdicts_answer_by_display():
                                   {"id": 2, "verdict": "leave", "confidence": 0.1}]}
 
 
+def test_link_verdicts_answer_by_src_and_dst():
+    import stub_extractor
+    sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+    from pseudolife_memory.memory import dream as d
+    rows = [{"n": 1, "src": "Bob", "relation": "uses", "dst": "Alpha Node",
+             "src_scopes": ["a", "b"]},
+            {"n": 2, "src": "Hub", "relation": "related-to", "dst": "Beta Store"},
+            {"n": 3, "src": "Nobody", "relation": "uses", "dst": "Nothing"}]
+    body = json.dumps({"messages": [
+        {"role": "system", "content": d._LINK_JUDGE_SYSTEM_PROMPT},
+        {"role": "user", "content": "\n\n".join(d.format_link_proposal(r) for r in rows)}]}).encode()
+    reply = json.loads(stub_extractor.judge_reply(
+        {"Alpha Node|Bob": {"verdict": "accept", "confidence": 0.9},
+         "Hub|Beta Store": [{"verdict": "retype", "relation": "uses"},
+                            {"verdict": "leave", "confidence": 0.1}]}, body))
+    assert reply == {"verdicts": [{"id": 1, "verdict": "accept", "confidence": 0.9},
+                                  {"id": 2, "verdict": "retype", "relation": "uses"},
+                                  {"id": 2, "verdict": "leave", "confidence": 0.1}]}
+
+
 def test_judge_verdicts_answer_by_pair_on_each_endpoint(stub_factory):
     s = stub_factory({"reply_model": "one", "second_reply_model": "two",
                       "third_reply_model": None, "replies": [

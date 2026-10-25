@@ -2,7 +2,9 @@
 (``src/dream/queue_judges.rs``): for the junk judge, the prompt row
 (``format_junk_proposal``), the reply validation (``judge_junk`` over
 ``_verdict_head`` / ``_text``) and the evidence pack
-(``_enrich_junk_proposals_from``).
+(``_enrich_junk_proposals_from``); for the link judge, the same three
+(``format_link_proposal``, ``judge_links``, ``_enrich_link_proposals_from``)
+and the two-vote gate over recorded votes (``_link_two_vote_action``).
 
 Every expected value comes from calling the Python code in this checkout:
 ``judge_junk`` runs on an ``OpenAICompatExtractor`` whose ``_judge_request``
@@ -107,6 +109,114 @@ PENDING = [
 ]
 
 
+LINK_FORMAT_ROWS = [
+    {"n": 1, "src": "Bob", "relation": "uses", "dst": "origin/master",
+     "src_scopes": ["homelab", "pseudolife"], "dst_scopes": [], "rationale": "co-mention",
+     "src_edges": [f"uses>x{i}" + "y" * 90 for i in range(10)], "dst_edges": [],
+     "co_mentions": ["Bob pushed origin/master " + "p" * 300, "two", "three", "four"],
+     "src_mentions": [], "dst_mentions": []},
+    {"n": 2, "src": "élan", "relation": "related-to", "dst": "🙂 Face",
+     "src_scopes": None, "dst_scopes": ["Ünicode"], "rationale": None,
+     "src_edges": ["a>b"], "dst_edges": ["c>related-to"], "co_mentions": [],
+     "src_mentions": ["[conversation] " + "m" * 300, "two", "three"], "dst_mentions": []},
+    {"n": 3, "src": None},
+    {"n": 4},
+]
+
+LINK_PARSE_CASES = [
+    [{"id": 1, "verdict": "accept", "confidence": 0.93, "note": "real"},
+     {"id": 2, "verdict": " RETYPE ", "confidence": "0.81", "relation": "depends-on"},
+     {"id": 3, "verdict": "retype", "confidence": 0.9, "relation": ""},
+     {"id": 3, "verdict": "retype", "confidence": 0.9},
+     {"id": 1, "verdict": "retype", "relation": "r" * 100, "note": "n" * 500},
+     {"id": 2, "verdict": "reject", "confidence": 2, "relation": "ignored"},
+     {"id": 2, "verdict": "leave", "confidence": None},
+     {"id": 9, "verdict": "accept"},
+     {"id": 1, "verdict": "keep", "confidence": 0.5},
+     {"id": 1.7, "verdict": "retype", "relation": 42, "note": ["x"]},
+     "not a dict"],
+    [],
+]
+
+
+def judge_links(rows, raw):
+    ex = dream.OpenAICompatExtractor("http://stub/v1", "stub-model")
+    ex._judge_request = lambda *a, **k: raw
+    return ex.judge_links(rows)
+
+
+def link_pack(pending, evidence, cap=240):
+    me = SimpleNamespace(config=SimpleNamespace(memory=SimpleNamespace(
+        deep_dream=SimpleNamespace(snippet_max_chars=cap))))
+    return DreamOps._enrich_link_proposals_from(me, pending, evidence)
+
+
+LINK_EVIDENCE = {
+    "graph": {
+        "entities": [
+            {"id": 1, "display": "Bob"},
+            {"id": 2, "display": "origin/master"},
+            {"id": 3, "display": "Alice Smith"},
+            {"id": 4, "display": "Lonely"},
+            {"id": 5, "display": "!!!"},
+        ],
+        "edges": [
+            {"src_id": 1, "relation": "uses", "dst_id": 2},
+            {"src_id": 3, "relation": "knows", "dst_id": 1},
+            {"src_id": 2, "relation": "related-to", "dst_id": 2},
+            {"src_id": 1, "relation": "uses", "dst_id": 99},
+        ] + [{"src_id": 3, "relation": f"r{i}", "dst_id": 2} for i in range(9)],
+    },
+    "scopes": {1: ["zeta", "Alpha", "beta"], 3: ["pseudolife"]},
+    "entries": [
+        {"id": 1, "text": "Bob pushed origin/master today", "source": "conversation"},
+        {"id": 2, "text": "Alice Smith met Bob " + "q" * 300, "source": ""},
+        {"id": 3, "text": "alice smith and bob again", "source": None},
+        {"id": 4, "text": "Bob alone", "source": "claude"},
+        {"id": 5, "text": "Bob once more", "source": "x"},
+        {"id": 6, "text": "Bob a third time", "source": "y"},
+        {"id": 7, "text": "Bob and Alice Smith, fourth", "source": "z"},
+        {"id": 8, "text": "Lonely is lonely " + "l" * 300, "source": "w"},
+    ],
+}
+LINK_PENDING = [
+    {"id": 20, "src_id": 1, "relation": "uses", "dst_id": 2, "src": "Bob",
+     "dst": "origin/master", "rationale": "co-mention", "source": "deep-dream"},
+    {"id": 21, "src_id": 3, "relation": "knows", "dst_id": 1, "src": "Alice Smith",
+     "dst": "Bob", "rationale": None, "source": "analyzer"},
+    {"id": 22, "src_id": 4, "relation": "related-to", "dst_id": 1, "src": "Lonely",
+     "dst": "Bob", "rationale": "x"},
+    {"id": 23, "src_id": 5, "relation": "related-to", "dst_id": 4, "src": "!!!",
+     "dst": "Lonely", "rationale": "y"},
+]
+
+TWO_VOTE_CASES = [
+    # (row, two_vote, mode, min)
+    ({"judge_verdict": "accept", "judge_confidence": 0.7,
+      "judge2_verdict": "accept", "judge2_confidence": 0.7}, "auto", "auto", 0.7),
+    ({"judge_verdict": "reject", "judge_confidence": 0.6,
+      "judge2_verdict": "reject", "judge2_confidence": 0.79}, "auto", "auto", 0.7),
+    ({"judge_verdict": "reject", "judge_confidence": 0.6,
+      "judge2_verdict": "reject", "judge2_confidence": 0.79}, "auto", "auto", 0.71),
+    ({"judge_verdict": "accept", "judge_confidence": 0.9,
+      "judge2_verdict": "reject", "judge2_confidence": 0.9}, "auto", "auto", 0.7),
+    ({"judge_verdict": "retype", "judge_confidence": 0.9,
+      "judge2_verdict": "retype", "judge2_confidence": 0.9}, "auto", "auto", 0.7),
+    ({"judge_verdict": "accept", "judge_confidence": 0.9,
+      "judge2_verdict": "accept", "judge2_confidence": 0.9}, "shadow", "auto", 0.7),
+    ({"judge_verdict": "accept", "judge_confidence": 0.9,
+      "judge2_verdict": "accept", "judge2_confidence": 0.9}, "auto", "shadow", 0.7),
+    ({"judge_verdict": "accept", "judge_confidence": None,
+      "judge2_verdict": "accept", "judge2_confidence": 1.0}, "auto", "auto", 0.5),
+    ({}, "auto", "auto", 0.7),
+]
+
+
+def two_vote(row, tv, mode, floor):
+    cfg = SimpleNamespace(link_judge_two_vote=tv, link_two_vote_min_confidence=floor)
+    return DreamOps._link_two_vote_action(row, cfg, mode)
+
+
 def main() -> int:
     rows = [{"n": i} for i in (1, 2, 3)]
     golden = {
@@ -120,6 +230,19 @@ def main() -> int:
                                "fact_rows": {str(k): v for k, v in EVIDENCE["fact_rows"].items()}},
                   "rows": pack(PENDING, EVIDENCE, cap)}
                  for cap in (240, 12)],
+        "link_format": [{"row": r, "text": dream.format_link_proposal(r)}
+                        for r in LINK_FORMAT_ROWS],
+        "link_parse": [{"raw": raw, "rows": rows, "verdicts": judge_links(rows, raw)}
+                       for raw in LINK_PARSE_CASES],
+        "link_pack": [{"cap": cap, "pending": LINK_PENDING,
+                       "evidence": {**LINK_EVIDENCE,
+                                    "scopes": {str(k): v
+                                               for k, v in LINK_EVIDENCE["scopes"].items()}},
+                       "rows": link_pack(LINK_PENDING, LINK_EVIDENCE, cap)}
+                      for cap in (240, 10)],
+        "link_two_vote": [{"row": r, "two_vote": tv, "mode": m, "min": f,
+                           "action": two_vote(r, tv, m, f)}
+                          for r, tv, m, f in TWO_VOTE_CASES],
     }
     TARGET.write_text(json.dumps(golden, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
     print(f"wrote {TARGET.relative_to(REPO)}")

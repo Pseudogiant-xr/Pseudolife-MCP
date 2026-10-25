@@ -808,5 +808,944 @@
     }
    ]
   }
+ ],
+ "link_format": [
+  {
+   "row": {
+    "n": 1,
+    "src": "Bob",
+    "relation": "uses",
+    "dst": "origin/master",
+    "src_scopes": [
+     "homelab",
+     "pseudolife"
+    ],
+    "dst_scopes": [],
+    "rationale": "co-mention",
+    "src_edges": [
+     "uses>x0yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+     "uses>x1yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+     "uses>x2yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+     "uses>x3yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+     "uses>x4yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+     "uses>x5yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+     "uses>x6yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+     "uses>x7yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+     "uses>x8yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+     "uses>x9yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"
+    ],
+    "dst_edges": [],
+    "co_mentions": [
+     "Bob pushed origin/master pppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp",
+     "two",
+     "three",
+     "four"
+    ],
+    "src_mentions": [],
+    "dst_mentions": []
+   },
+   "text": "[1] SRC 'Bob' (scopes ['homelab', 'pseudolife']) --uses--> DST 'origin/master' (scopes [])\n    detector: co-mention\n    src edges: uses>x0yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy; uses>x1yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy; uses>x2yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy; uses>x3yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy; uses>x4yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy; uses>x5yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy; uses>x6yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy; uses>x7yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy\n    dst edges: none\n    notes naming both: Bob pushed origin/master ppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp; two; three"
+  },
+  {
+   "row": {
+    "n": 2,
+    "src": "élan",
+    "relation": "related-to",
+    "dst": "🙂 Face",
+    "src_scopes": null,
+    "dst_scopes": [
+     "Ünicode"
+    ],
+    "rationale": null,
+    "src_edges": [
+     "a>b"
+    ],
+    "dst_edges": [
+     "c>related-to"
+    ],
+    "co_mentions": [],
+    "src_mentions": [
+     "[conversation] mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm",
+     "two",
+     "three"
+    ],
+    "dst_mentions": []
+   },
+   "text": "[2] SRC 'élan' (scopes []) --related-to--> DST '🙂 Face' (scopes ['Ünicode'])\n    detector: ?\n    src edges: a>b\n    dst edges: c>related-to\n    src notes: [conversation] mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm; two\n    dst notes: none"
+  },
+  {
+   "row": {
+    "n": 3,
+    "src": null
+   },
+   "text": "[3] SRC 'None' (scopes []) --?--> DST '?' (scopes [])\n    detector: ?\n    src edges: none\n    dst edges: none\n    src notes: none\n    dst notes: none"
+  },
+  {
+   "row": {
+    "n": 4
+   },
+   "text": "[4] SRC '?' (scopes []) --?--> DST '?' (scopes [])\n    detector: ?\n    src edges: none\n    dst edges: none\n    src notes: none\n    dst notes: none"
+  }
+ ],
+ "link_parse": [
+  {
+   "raw": [
+    {
+     "id": 1,
+     "verdict": "accept",
+     "confidence": 0.93,
+     "note": "real"
+    },
+    {
+     "id": 2,
+     "verdict": " RETYPE ",
+     "confidence": "0.81",
+     "relation": "depends-on"
+    },
+    {
+     "id": 3,
+     "verdict": "retype",
+     "confidence": 0.9,
+     "relation": ""
+    },
+    {
+     "id": 3,
+     "verdict": "retype",
+     "confidence": 0.9
+    },
+    {
+     "id": 1,
+     "verdict": "retype",
+     "relation": "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
+     "note": "nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn"
+    },
+    {
+     "id": 2,
+     "verdict": "reject",
+     "confidence": 2,
+     "relation": "ignored"
+    },
+    {
+     "id": 2,
+     "verdict": "leave",
+     "confidence": null
+    },
+    {
+     "id": 9,
+     "verdict": "accept"
+    },
+    {
+     "id": 1,
+     "verdict": "keep",
+     "confidence": 0.5
+    },
+    {
+     "id": 1.7,
+     "verdict": "retype",
+     "relation": 42,
+     "note": [
+      "x"
+     ]
+    },
+    "not a dict"
+   ],
+   "rows": [
+    {
+     "n": 1
+    },
+    {
+     "n": 2
+    },
+    {
+     "n": 3
+    }
+   ],
+   "verdicts": [
+    {
+     "n": 1,
+     "verdict": "accept",
+     "confidence": 0.93,
+     "note": "real",
+     "relation": null
+    },
+    {
+     "n": 2,
+     "verdict": "retype",
+     "confidence": 0.81,
+     "note": null,
+     "relation": "depends-on"
+    },
+    {
+     "n": 3,
+     "verdict": "leave",
+     "confidence": 0.9,
+     "note": null,
+     "relation": null
+    },
+    {
+     "n": 3,
+     "verdict": "leave",
+     "confidence": 0.9,
+     "note": null,
+     "relation": null
+    },
+    {
+     "n": 1,
+     "verdict": "retype",
+     "confidence": 0.5,
+     "note": "nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn",
+     "relation": "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr"
+    },
+    {
+     "n": 2,
+     "verdict": "reject",
+     "confidence": 1.0,
+     "note": null,
+     "relation": null
+    },
+    {
+     "n": 2,
+     "verdict": "leave",
+     "confidence": 0.5,
+     "note": null,
+     "relation": null
+    },
+    {
+     "n": 1,
+     "verdict": "retype",
+     "confidence": 0.5,
+     "note": "['x']",
+     "relation": "42"
+    }
+   ]
+  },
+  {
+   "raw": [],
+   "rows": [
+    {
+     "n": 1
+    },
+    {
+     "n": 2
+    },
+    {
+     "n": 3
+    }
+   ],
+   "verdicts": []
+  }
+ ],
+ "link_pack": [
+  {
+   "cap": 240,
+   "pending": [
+    {
+     "id": 20,
+     "src_id": 1,
+     "relation": "uses",
+     "dst_id": 2,
+     "src": "Bob",
+     "dst": "origin/master",
+     "rationale": "co-mention",
+     "source": "deep-dream"
+    },
+    {
+     "id": 21,
+     "src_id": 3,
+     "relation": "knows",
+     "dst_id": 1,
+     "src": "Alice Smith",
+     "dst": "Bob",
+     "rationale": null,
+     "source": "analyzer"
+    },
+    {
+     "id": 22,
+     "src_id": 4,
+     "relation": "related-to",
+     "dst_id": 1,
+     "src": "Lonely",
+     "dst": "Bob",
+     "rationale": "x"
+    },
+    {
+     "id": 23,
+     "src_id": 5,
+     "relation": "related-to",
+     "dst_id": 4,
+     "src": "!!!",
+     "dst": "Lonely",
+     "rationale": "y"
+    }
+   ],
+   "evidence": {
+    "graph": {
+     "entities": [
+      {
+       "id": 1,
+       "display": "Bob"
+      },
+      {
+       "id": 2,
+       "display": "origin/master"
+      },
+      {
+       "id": 3,
+       "display": "Alice Smith"
+      },
+      {
+       "id": 4,
+       "display": "Lonely"
+      },
+      {
+       "id": 5,
+       "display": "!!!"
+      }
+     ],
+     "edges": [
+      {
+       "src_id": 1,
+       "relation": "uses",
+       "dst_id": 2
+      },
+      {
+       "src_id": 3,
+       "relation": "knows",
+       "dst_id": 1
+      },
+      {
+       "src_id": 2,
+       "relation": "related-to",
+       "dst_id": 2
+      },
+      {
+       "src_id": 1,
+       "relation": "uses",
+       "dst_id": 99
+      },
+      {
+       "src_id": 3,
+       "relation": "r0",
+       "dst_id": 2
+      },
+      {
+       "src_id": 3,
+       "relation": "r1",
+       "dst_id": 2
+      },
+      {
+       "src_id": 3,
+       "relation": "r2",
+       "dst_id": 2
+      },
+      {
+       "src_id": 3,
+       "relation": "r3",
+       "dst_id": 2
+      },
+      {
+       "src_id": 3,
+       "relation": "r4",
+       "dst_id": 2
+      },
+      {
+       "src_id": 3,
+       "relation": "r5",
+       "dst_id": 2
+      },
+      {
+       "src_id": 3,
+       "relation": "r6",
+       "dst_id": 2
+      },
+      {
+       "src_id": 3,
+       "relation": "r7",
+       "dst_id": 2
+      },
+      {
+       "src_id": 3,
+       "relation": "r8",
+       "dst_id": 2
+      }
+     ]
+    },
+    "scopes": {
+     "1": [
+      "zeta",
+      "Alpha",
+      "beta"
+     ],
+     "3": [
+      "pseudolife"
+     ]
+    },
+    "entries": [
+     {
+      "id": 1,
+      "text": "Bob pushed origin/master today",
+      "source": "conversation"
+     },
+     {
+      "id": 2,
+      "text": "Alice Smith met Bob qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq",
+      "source": ""
+     },
+     {
+      "id": 3,
+      "text": "alice smith and bob again",
+      "source": null
+     },
+     {
+      "id": 4,
+      "text": "Bob alone",
+      "source": "claude"
+     },
+     {
+      "id": 5,
+      "text": "Bob once more",
+      "source": "x"
+     },
+     {
+      "id": 6,
+      "text": "Bob a third time",
+      "source": "y"
+     },
+     {
+      "id": 7,
+      "text": "Bob and Alice Smith, fourth",
+      "source": "z"
+     },
+     {
+      "id": 8,
+      "text": "Lonely is lonely llllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllll",
+      "source": "w"
+     }
+    ]
+   },
+   "rows": [
+    {
+     "n": 1,
+     "src": "Bob",
+     "relation": "uses",
+     "dst": "origin/master",
+     "rationale": "co-mention",
+     "src_edges": [
+      "uses>origin/master",
+      "uses>?",
+      "Alice Smith>knows"
+     ],
+     "dst_edges": [
+      "related-to>origin/master",
+      "Bob>uses",
+      "origin/master>related-to",
+      "Alice Smith>r0",
+      "Alice Smith>r1",
+      "Alice Smith>r2",
+      "Alice Smith>r3",
+      "Alice Smith>r4"
+     ],
+     "src_scopes": [
+      "Alpha",
+      "beta",
+      "zeta"
+     ],
+     "dst_scopes": [],
+     "co_mentions": [
+      "Bob pushed origin/master today"
+     ],
+     "src_mentions": [],
+     "dst_mentions": []
+    },
+    {
+     "n": 2,
+     "src": "Alice Smith",
+     "relation": "knows",
+     "dst": "Bob",
+     "rationale": null,
+     "src_edges": [
+      "knows>Bob",
+      "r0>origin/master",
+      "r1>origin/master",
+      "r2>origin/master",
+      "r3>origin/master",
+      "r4>origin/master",
+      "r5>origin/master",
+      "r6>origin/master"
+     ],
+     "dst_edges": [
+      "uses>origin/master",
+      "uses>?",
+      "Alice Smith>knows"
+     ],
+     "src_scopes": [
+      "pseudolife"
+     ],
+     "dst_scopes": [
+      "Alpha",
+      "beta",
+      "zeta"
+     ],
+     "co_mentions": [
+      "Alice Smith met Bob qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq",
+      "alice smith and bob again",
+      "Bob and Alice Smith, fourth"
+     ],
+     "src_mentions": [],
+     "dst_mentions": []
+    },
+    {
+     "n": 3,
+     "src": "Lonely",
+     "relation": "related-to",
+     "dst": "Bob",
+     "rationale": "x",
+     "src_edges": [],
+     "dst_edges": [
+      "uses>origin/master",
+      "uses>?",
+      "Alice Smith>knows"
+     ],
+     "src_scopes": [],
+     "dst_scopes": [
+      "Alpha",
+      "beta",
+      "zeta"
+     ],
+     "co_mentions": [],
+     "src_mentions": [
+      "[w] Lonely is lonely lllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllll"
+     ],
+     "dst_mentions": [
+      "[conversation] Bob pushed origin/master today",
+      "Alice Smith met Bob qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq"
+     ]
+    },
+    {
+     "n": 4,
+     "src": "!!!",
+     "relation": "related-to",
+     "dst": "Lonely",
+     "rationale": "y",
+     "src_edges": [],
+     "dst_edges": [],
+     "src_scopes": [],
+     "dst_scopes": [],
+     "co_mentions": [],
+     "src_mentions": [],
+     "dst_mentions": [
+      "[w] Lonely is lonely lllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllll"
+     ]
+    }
+   ]
+  },
+  {
+   "cap": 10,
+   "pending": [
+    {
+     "id": 20,
+     "src_id": 1,
+     "relation": "uses",
+     "dst_id": 2,
+     "src": "Bob",
+     "dst": "origin/master",
+     "rationale": "co-mention",
+     "source": "deep-dream"
+    },
+    {
+     "id": 21,
+     "src_id": 3,
+     "relation": "knows",
+     "dst_id": 1,
+     "src": "Alice Smith",
+     "dst": "Bob",
+     "rationale": null,
+     "source": "analyzer"
+    },
+    {
+     "id": 22,
+     "src_id": 4,
+     "relation": "related-to",
+     "dst_id": 1,
+     "src": "Lonely",
+     "dst": "Bob",
+     "rationale": "x"
+    },
+    {
+     "id": 23,
+     "src_id": 5,
+     "relation": "related-to",
+     "dst_id": 4,
+     "src": "!!!",
+     "dst": "Lonely",
+     "rationale": "y"
+    }
+   ],
+   "evidence": {
+    "graph": {
+     "entities": [
+      {
+       "id": 1,
+       "display": "Bob"
+      },
+      {
+       "id": 2,
+       "display": "origin/master"
+      },
+      {
+       "id": 3,
+       "display": "Alice Smith"
+      },
+      {
+       "id": 4,
+       "display": "Lonely"
+      },
+      {
+       "id": 5,
+       "display": "!!!"
+      }
+     ],
+     "edges": [
+      {
+       "src_id": 1,
+       "relation": "uses",
+       "dst_id": 2
+      },
+      {
+       "src_id": 3,
+       "relation": "knows",
+       "dst_id": 1
+      },
+      {
+       "src_id": 2,
+       "relation": "related-to",
+       "dst_id": 2
+      },
+      {
+       "src_id": 1,
+       "relation": "uses",
+       "dst_id": 99
+      },
+      {
+       "src_id": 3,
+       "relation": "r0",
+       "dst_id": 2
+      },
+      {
+       "src_id": 3,
+       "relation": "r1",
+       "dst_id": 2
+      },
+      {
+       "src_id": 3,
+       "relation": "r2",
+       "dst_id": 2
+      },
+      {
+       "src_id": 3,
+       "relation": "r3",
+       "dst_id": 2
+      },
+      {
+       "src_id": 3,
+       "relation": "r4",
+       "dst_id": 2
+      },
+      {
+       "src_id": 3,
+       "relation": "r5",
+       "dst_id": 2
+      },
+      {
+       "src_id": 3,
+       "relation": "r6",
+       "dst_id": 2
+      },
+      {
+       "src_id": 3,
+       "relation": "r7",
+       "dst_id": 2
+      },
+      {
+       "src_id": 3,
+       "relation": "r8",
+       "dst_id": 2
+      }
+     ]
+    },
+    "scopes": {
+     "1": [
+      "zeta",
+      "Alpha",
+      "beta"
+     ],
+     "3": [
+      "pseudolife"
+     ]
+    },
+    "entries": [
+     {
+      "id": 1,
+      "text": "Bob pushed origin/master today",
+      "source": "conversation"
+     },
+     {
+      "id": 2,
+      "text": "Alice Smith met Bob qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq",
+      "source": ""
+     },
+     {
+      "id": 3,
+      "text": "alice smith and bob again",
+      "source": null
+     },
+     {
+      "id": 4,
+      "text": "Bob alone",
+      "source": "claude"
+     },
+     {
+      "id": 5,
+      "text": "Bob once more",
+      "source": "x"
+     },
+     {
+      "id": 6,
+      "text": "Bob a third time",
+      "source": "y"
+     },
+     {
+      "id": 7,
+      "text": "Bob and Alice Smith, fourth",
+      "source": "z"
+     },
+     {
+      "id": 8,
+      "text": "Lonely is lonely llllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllll",
+      "source": "w"
+     }
+    ]
+   },
+   "rows": [
+    {
+     "n": 1,
+     "src": "Bob",
+     "relation": "uses",
+     "dst": "origin/master",
+     "rationale": "co-mention",
+     "src_edges": [
+      "uses>origin/master",
+      "uses>?",
+      "Alice Smith>knows"
+     ],
+     "dst_edges": [
+      "related-to>origin/master",
+      "Bob>uses",
+      "origin/master>related-to",
+      "Alice Smith>r0",
+      "Alice Smith>r1",
+      "Alice Smith>r2",
+      "Alice Smith>r3",
+      "Alice Smith>r4"
+     ],
+     "src_scopes": [
+      "Alpha",
+      "beta",
+      "zeta"
+     ],
+     "dst_scopes": [],
+     "co_mentions": [
+      "Bob pushed"
+     ],
+     "src_mentions": [],
+     "dst_mentions": []
+    },
+    {
+     "n": 2,
+     "src": "Alice Smith",
+     "relation": "knows",
+     "dst": "Bob",
+     "rationale": null,
+     "src_edges": [
+      "knows>Bob",
+      "r0>origin/master",
+      "r1>origin/master",
+      "r2>origin/master",
+      "r3>origin/master",
+      "r4>origin/master",
+      "r5>origin/master",
+      "r6>origin/master"
+     ],
+     "dst_edges": [
+      "uses>origin/master",
+      "uses>?",
+      "Alice Smith>knows"
+     ],
+     "src_scopes": [
+      "pseudolife"
+     ],
+     "dst_scopes": [
+      "Alpha",
+      "beta",
+      "zeta"
+     ],
+     "co_mentions": [
+      "Alice Smit",
+      "alice smit",
+      "Bob and Al"
+     ],
+     "src_mentions": [],
+     "dst_mentions": []
+    },
+    {
+     "n": 3,
+     "src": "Lonely",
+     "relation": "related-to",
+     "dst": "Bob",
+     "rationale": "x",
+     "src_edges": [],
+     "dst_edges": [
+      "uses>origin/master",
+      "uses>?",
+      "Alice Smith>knows"
+     ],
+     "src_scopes": [],
+     "dst_scopes": [
+      "Alpha",
+      "beta",
+      "zeta"
+     ],
+     "co_mentions": [],
+     "src_mentions": [
+      "[w] Lonely is "
+     ],
+     "dst_mentions": [
+      "[conversation] Bob pushed",
+      "Alice Smit"
+     ]
+    },
+    {
+     "n": 4,
+     "src": "!!!",
+     "relation": "related-to",
+     "dst": "Lonely",
+     "rationale": "y",
+     "src_edges": [],
+     "dst_edges": [],
+     "src_scopes": [],
+     "dst_scopes": [],
+     "co_mentions": [],
+     "src_mentions": [],
+     "dst_mentions": [
+      "[w] Lonely is "
+     ]
+    }
+   ]
+  }
+ ],
+ "link_two_vote": [
+  {
+   "row": {
+    "judge_verdict": "accept",
+    "judge_confidence": 0.7,
+    "judge2_verdict": "accept",
+    "judge2_confidence": 0.7
+   },
+   "two_vote": "auto",
+   "mode": "auto",
+   "min": 0.7,
+   "action": "accept"
+  },
+  {
+   "row": {
+    "judge_verdict": "reject",
+    "judge_confidence": 0.6,
+    "judge2_verdict": "reject",
+    "judge2_confidence": 0.79
+   },
+   "two_vote": "auto",
+   "mode": "auto",
+   "min": 0.7,
+   "action": null
+  },
+  {
+   "row": {
+    "judge_verdict": "reject",
+    "judge_confidence": 0.6,
+    "judge2_verdict": "reject",
+    "judge2_confidence": 0.79
+   },
+   "two_vote": "auto",
+   "mode": "auto",
+   "min": 0.71,
+   "action": null
+  },
+  {
+   "row": {
+    "judge_verdict": "accept",
+    "judge_confidence": 0.9,
+    "judge2_verdict": "reject",
+    "judge2_confidence": 0.9
+   },
+   "two_vote": "auto",
+   "mode": "auto",
+   "min": 0.7,
+   "action": null
+  },
+  {
+   "row": {
+    "judge_verdict": "retype",
+    "judge_confidence": 0.9,
+    "judge2_verdict": "retype",
+    "judge2_confidence": 0.9
+   },
+   "two_vote": "auto",
+   "mode": "auto",
+   "min": 0.7,
+   "action": null
+  },
+  {
+   "row": {
+    "judge_verdict": "accept",
+    "judge_confidence": 0.9,
+    "judge2_verdict": "accept",
+    "judge2_confidence": 0.9
+   },
+   "two_vote": "shadow",
+   "mode": "auto",
+   "min": 0.7,
+   "action": null
+  },
+  {
+   "row": {
+    "judge_verdict": "accept",
+    "judge_confidence": 0.9,
+    "judge2_verdict": "accept",
+    "judge2_confidence": 0.9
+   },
+   "two_vote": "auto",
+   "mode": "shadow",
+   "min": 0.7,
+   "action": null
+  },
+  {
+   "row": {
+    "judge_verdict": "accept",
+    "judge_confidence": null,
+    "judge2_verdict": "accept",
+    "judge2_confidence": 1.0
+   },
+   "two_vote": "auto",
+   "mode": "auto",
+   "min": 0.5,
+   "action": "accept"
+  },
+  {
+   "row": {},
+   "two_vote": "auto",
+   "mode": "auto",
+   "min": 0.7,
+   "action": null
+  }
  ]
 }

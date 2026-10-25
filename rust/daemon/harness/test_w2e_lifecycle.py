@@ -366,6 +366,28 @@ def test_junk_judge_scenarios_switch_on_only_the_junk_judge(harness):
     assert all(f'"{m}"' in src for m in qj.MUTANTS)
 
 
+def test_link_judge_scenarios_switch_on_only_the_link_judge(harness):
+    import w2e_queue_judges as qj
+    names = sorted(n for n in harness.SCENARIOS if n.startswith("link-"))
+    assert names == ["link-auto", "link-auto-reopen", "link-shadow", "link-two-vote",
+                     "link-two-vote-same-model"]
+    for n in names:
+        scn = harness.SCENARIOS[n]
+        config = scn["config"]
+        assert 'link_judge_mode: "off"' not in config, n
+        assert "link_judge_two_vote: " in config, n
+        for other in ("junk_judge_mode", "curation_judge_mode", "candidate_judge_mode",
+                      "judge_mode"):
+            assert f'    {other}: "off"' in config, (n, other)
+        assert scn["shared_stub"] is True and n in harness.EXTERNAL_WRITES
+        for reply in scn["extractor"]["replies"]:
+            assert reply["kind"] == "judge_links" and "verdicts" in reply
+        # No proposal is seeded where a judge could race the first comparison.
+        assert all("edge_proposals" not in op.get("sql", "") for op in scn["seed"])
+    assert {"mcp-dream-link-retype-applied", "mcp-dream-link-two-vote-same-model"} <= set(
+        qj.MUTANTS)
+
+
 def test_sweep_scenarios_settle_without_timing_on_their_mutants(harness):
     """Each sweep scenario's ``until`` must hold under its mutant too (a
     settle that times out crashes the mutants run instead of counting a

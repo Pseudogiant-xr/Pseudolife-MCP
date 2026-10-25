@@ -34,6 +34,7 @@ pub(crate) type Row = Map<String, Value>;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Queue {
     Merge,
+    Link,
     Junk,
 }
 
@@ -43,6 +44,7 @@ impl Queue {
     pub(crate) fn kind(self) -> &'static str {
         match self {
             Queue::Merge => "merge",
+            Queue::Link => "link",
             Queue::Junk => "junk",
         }
     }
@@ -51,6 +53,7 @@ impl Queue {
     fn memo_key(self) -> &'static str {
         match self {
             Queue::Merge => "review_judgments_v1_merge",
+            Queue::Link => "review_judgments_v1_link",
             Queue::Junk => "review_judgments_v1_junk",
         }
     }
@@ -59,6 +62,7 @@ impl Queue {
     pub(crate) fn prompt(self) -> &'static str {
         match self {
             Queue::Merge => crate::dream::prompts::JUDGE_SYSTEM_PROMPT,
+            Queue::Link => crate::dream::prompts::LINK_JUDGE_SYSTEM_PROMPT,
             Queue::Junk => crate::dream::prompts::JUNK_JUDGE_SYSTEM_PROMPT,
         }
     }
@@ -67,7 +71,7 @@ impl Queue {
     /// record may hold.
     fn terminal_action(self) -> &'static str {
         match self {
-            Queue::Merge => "reject",
+            Queue::Merge | Queue::Link => "reject",
             Queue::Junk => "keep",
         }
     }
@@ -195,8 +199,60 @@ const PENDING_COLS: [(&str, Col); 27] = [
     ("into", Col::S),
 ];
 
-/// The pending merge rows.
+/// `pending_proposals` (3571-3597): the pending link rows, in its order
+/// and key order (the 23 columns, then the endpoints' displays).
+const LINK_PENDING_SQL: &str = "SELECT p.id, p.src_id, p.relation, p.dst_id, \
+     p.confidence::text::double precision, p.similarity::text::double precision, \
+     p.rationale, p.source, p.created_at, p.status, \
+     p.judge_verdict, p.judge_confidence::text::double precision, p.judge_note, \
+     p.judge_model, p.judged_at, p.judge_relation, \
+     p.judge2_verdict, p.judge2_confidence::text::double precision, p.judge2_model, \
+     p.judged2_at, p.judge2_relation, p.judge2_served_model, p.judge2_policy, \
+     s.display, d.display \
+     FROM edge_proposals p \
+     JOIN entities s ON s.id = p.src_id JOIN entities d ON d.id = p.dst_id \
+     WHERE p.status = 'pending' ORDER BY p.confidence DESC, p.id";
+
+const LINK_PENDING_COLS: [(&str, Col); 25] = [
+    ("id", Col::I),
+    ("src_id", Col::I),
+    ("relation", Col::S),
+    ("dst_id", Col::I),
+    ("confidence", Col::F),
+    ("similarity", Col::F),
+    ("rationale", Col::S),
+    ("source", Col::S),
+    ("created_at", Col::F),
+    ("status", Col::S),
+    ("judge_verdict", Col::S),
+    ("judge_confidence", Col::F),
+    ("judge_note", Col::S),
+    ("judge_model", Col::S),
+    ("judged_at", Col::F),
+    ("judge_relation", Col::S),
+    ("judge2_verdict", Col::S),
+    ("judge2_confidence", Col::F),
+    ("judge2_model", Col::S),
+    ("judged2_at", Col::F),
+    ("judge2_relation", Col::S),
+    ("judge2_served_model", Col::S),
+    ("judge2_policy", Col::S),
+    ("src", Col::S),
+    ("dst", Col::S),
+];
+
+/// The queue's pending rows: `pending_proposals()` for links, the
+/// `pending_entity_proposals()` rows of the queue's kind otherwise.
 pub(crate) async fn pending_rows(c: &Client, queue: Queue) -> Result<Vec<Row>, ToolError> {
+    if queue == Queue::Link {
+        return Ok(c
+            .query(LINK_PENDING_SQL, &[])
+            .await
+            .map_err(internal)?
+            .iter()
+            .map(|r| decode(r, &LINK_PENDING_COLS))
+            .collect());
+    }
     Ok(c.query(PENDING_SQL, &[])
         .await
         .map_err(internal)?
@@ -239,6 +295,50 @@ pub(crate) async fn get_entity_proposal(c: &Client, id: i64) -> Result<Option<Ro
     .await
     .map_err(internal)?
     .map(|r| decode(&r, &PROPOSAL_COLS)))
+}
+
+const LINK_PROPOSAL_COLS: [(&str, Col); 17] = [
+    ("id", Col::I),
+    ("src_id", Col::I),
+    ("relation", Col::S),
+    ("dst_id", Col::I),
+    ("confidence", Col::F),
+    ("similarity", Col::F),
+    ("rationale", Col::S),
+    ("source", Col::S),
+    ("created_at", Col::F),
+    ("status", Col::S),
+    ("decided_by", Col::S),
+    ("decided_at", Col::F),
+    ("judge_verdict", Col::S),
+    ("judge_confidence", Col::F),
+    ("judge_relation", Col::S),
+    ("judge2_verdict", Col::S),
+    ("judge2_confidence", Col::F),
+];
+
+/// `get_proposal` (3733-3741).
+pub(crate) async fn get_link_proposal(c: &Client, id: i64) -> Result<Option<Row>, ToolError> {
+    Ok(c.query_opt(
+        "SELECT id, src_id, relation, dst_id, confidence::text::double precision, \
+         similarity::text::double precision, rationale, source, created_at, status, \
+         decided_by, decided_at, judge_verdict, judge_confidence::text::double precision, \
+         judge_relation, judge2_verdict, judge2_confidence::text::double precision \
+         FROM edge_proposals WHERE id = $1",
+        &[&id],
+    )
+    .await
+    .map_err(internal)?
+    .map(|r| decode(&r, &LINK_PROPOSAL_COLS)))
+}
+
+/// `storage.get_proposal(id) if queue == "link" else
+/// storage.get_entity_proposal(id)`.
+pub(crate) async fn get_row(c: &Client, queue: Queue, id: i64) -> Result<Option<Row>, ToolError> {
+    match queue {
+        Queue::Link => get_link_proposal(c, id).await,
+        _ => get_entity_proposal(c, id).await,
+    }
 }
 
 /// A row as the enrichment reads it.
@@ -529,6 +629,7 @@ fn without_tail(note: Option<&str>, marker: &str) -> String {
 /// (`_ENRICH[kind][0]`).
 pub(crate) enum QEvidence {
     Merge(JudgeEvidence),
+    Link(crate::dream::queue_judges::LinkEvidence),
     Junk(crate::dream::queue_judges::JunkEvidence),
 }
 
@@ -540,6 +641,7 @@ pub(crate) async fn load_evidence(
 ) -> Result<QEvidence, ToolError> {
     Ok(match queue {
         Queue::Merge => QEvidence::Merge(deep::judge_evidence_body(c).await.map_err(internal)?),
+        Queue::Link => QEvidence::Link(crate::dream::queue_judges::link_evidence_body(c).await?),
         Queue::Junk => {
             QEvidence::Junk(crate::dream::queue_judges::junk_evidence_body(c, rows).await?)
         }
@@ -559,6 +661,7 @@ pub(crate) fn sign_rows(
             let props: Vec<EntityProposal> = rows.iter().map(entity_proposal).collect();
             deep::judge_enrich_from(&props, ev, cfg)?
         }
+        QEvidence::Link(ev) => crate::dream::queue_judges::enrich_link_from(rows, ev, cfg),
         QEvidence::Junk(ev) => crate::dream::queue_judges::enrich_junk_from(rows, ev, cfg),
     };
     let mut sigs = HashMap::new();
@@ -596,6 +699,8 @@ pub(crate) struct Review {
     to_sign: Vec<Row>,
     evidence: Option<QEvidence>,
     pub valid: HashSet<i64>,
+    /// `batch`: the live rows the last validation re-signed, by id.
+    pub batch: HashMap<i64, Row>,
     pub second_policy: Option<String>,
     pub second_model: Option<String>,
     pub third_policy: Option<String>,
@@ -623,6 +728,7 @@ impl Review {
             to_sign: Vec::new(),
             evidence: None,
             valid: HashSet::new(),
+            batch: HashMap::new(),
             second_policy: None,
             second_model: None,
             third_policy: None,
@@ -762,7 +868,15 @@ impl Review {
             if matches {
                 continue;
             }
-            c.execute(
+            let sql = if self.queue == Queue::Link {
+                "UPDATE edge_proposals SET judge_verdict=NULL, \
+                 judge_confidence=NULL, judge_note=NULL, judge_model=NULL, \
+                 judged_at=NULL, judge_relation=NULL, judge_served_model=NULL, \
+                 judge2_verdict=NULL, judge2_confidence=NULL, \
+                 judge2_model=NULL, judged2_at=NULL, judge2_relation=NULL, \
+                 judge2_served_model=NULL, judge2_policy=NULL \
+                 WHERE id=$1 AND status='pending'"
+            } else {
                 "UPDATE entity_proposals SET judge_verdict=NULL, \
                  judge_confidence=NULL, judge_note=NULL, judge_model=NULL, \
                  judged_at=NULL, judge_served_model=NULL, \
@@ -771,11 +885,9 @@ impl Review {
                  judge3_confidence=NULL, judge3_model=NULL, judged3_at=NULL, \
                  judge2_served_model=NULL, judge2_policy=NULL, \
                  judge3_served_model=NULL, judge3_policy=NULL \
-                 WHERE id=$1 AND status='pending'",
-                &[&id_of(p)],
-            )
-            .await
-            .map_err(internal)?;
+                 WHERE id=$1 AND status='pending'"
+            };
+            c.execute(sql, &[&id_of(p)]).await.map_err(internal)?;
             for (k, v) in p.iter_mut() {
                 if k.starts_with("judge") {
                     *v = Value::Null;
@@ -799,18 +911,24 @@ impl Review {
             }
             if vote_endpoint_moved(c, self.queue, p, "second", Some(&mut cache)).await? {
                 let note = without_tail(vs(p, "judge_note"), "| 2nd (");
-                c.execute(
+                let sql = if self.queue == Queue::Link {
+                    "UPDATE edge_proposals SET judge2_verdict=NULL, \
+                     judge2_confidence=NULL, judge2_model=NULL, judged2_at=NULL, \
+                     judge2_relation=NULL, judge2_served_model=NULL, \
+                     judge2_policy=NULL, judge_note=$1 \
+                     WHERE id=$2 AND status='pending'"
+                } else {
                     "UPDATE entity_proposals SET judge2_verdict=NULL, \
                      judge2_confidence=NULL, judge2_model=NULL, judged2_at=NULL, \
                      judge2_served_model=NULL, judge2_policy=NULL, \
                      judge3_verdict=NULL, judge3_confidence=NULL, \
                      judge3_model=NULL, judged3_at=NULL, \
                      judge3_served_model=NULL, judge3_policy=NULL, judge_note=$1 \
-                     WHERE id=$2 AND status='pending'",
-                    &[&note, &id_of(p)],
-                )
-                .await
-                .map_err(internal)?;
+                     WHERE id=$2 AND status='pending'"
+                };
+                c.execute(sql, &[&note, &id_of(p)])
+                    .await
+                    .map_err(internal)?;
                 for (k, v) in p.iter_mut() {
                     if ["judge2", "judged2", "judge3", "judged3"]
                         .iter()
@@ -820,7 +938,8 @@ impl Review {
                     }
                 }
                 p.insert("judge_note".into(), json!(note));
-            } else if truthy(p, "judge3_verdict")
+            } else if self.queue != Queue::Link
+                && truthy(p, "judge3_verdict")
                 && vote_endpoint_moved(c, self.queue, p, "third", Some(&mut cache)).await?
             {
                 let note = without_tail(vs(p, "judge_note"), "| 3rd (");
@@ -922,7 +1041,27 @@ impl Review {
             })
             .map(id_of)
             .collect();
+        self.batch = live.into_iter().map(|p| (id_of(&p), p)).collect();
         Ok(())
+    }
+
+    /// `apply`'s link accept: a promoted edge changes the evidence of every
+    /// batch row sharing one of its endpoints, and only theirs.
+    pub(crate) fn invalidate_endpoints(&mut self, row: &Row) {
+        let ends = [vi(row, "src_id"), vi(row, "dst_id")];
+        let touched: Vec<i64> = self
+            .batch
+            .iter()
+            .filter(|(_, r)| {
+                [vi(r, "src_id"), vi(r, "dst_id")]
+                    .iter()
+                    .any(|e| ends.contains(e))
+            })
+            .map(|(id, _)| *id)
+            .collect();
+        for id in touched {
+            self.valid.remove(&id);
+        }
     }
 
     /// `current(proposal, first_opinion=, second_opinion=)`.
@@ -936,7 +1075,7 @@ impl Review {
         if !self.valid.contains(&id_of(row)) {
             return Ok(false);
         }
-        let Some(live) = get_entity_proposal(c, id_of(row)).await? else {
+        let Some(live) = get_row(c, self.queue, id_of(row)).await? else {
             return Ok(false);
         };
         if vs(&live, "status") != Some("pending") {
@@ -1122,6 +1261,10 @@ async fn canonical_pair(
                 .map(|c| format!("junk:{c}"));
             return Ok(key.map(|k| [k.clone(), k]));
         }
+        Queue::Link if vs(row, "source") == Some("analyzer") => {
+            (canon(vi(row, "src_id")), canon(vi(row, "dst_id")))
+        }
+        Queue::Link => return Ok(None),
     };
     Ok(match (left, right) {
         (Some(l), Some(r)) if !l.is_empty() && !r.is_empty() && l != r => {
@@ -1212,7 +1355,7 @@ pub(crate) async fn record_proposal_terminal(
     extractor_served: Option<&str>,
 ) -> Result<(), ToolError> {
     let id = id_of(row);
-    let Some(current) = get_entity_proposal(c, id).await? else {
+    let Some(current) = get_row(c, review.queue, id).await? else {
         return Ok(());
     };
     if vs(&current, "status") != Some("rejected")
@@ -1293,7 +1436,8 @@ async fn proposal_projection(
         .get("proposal_id")
         .and_then(Value::as_i64)
         .unwrap_or(0);
-    let Some(current) = get_entity_proposal(c, pid).await? else {
+    let queue = marker_queue(marker);
+    let Some(current) = get_row(c, queue, pid).await? else {
         return Ok((None, None));
     };
     let mut projection = match marker.get("proposal") {
@@ -1323,10 +1467,26 @@ async fn proposal_projection(
             .and_then(|id| display.get(&id).cloned())
             .unwrap_or(Value::Null)
     };
-    let (entity, into) = (disp("entity_id"), disp("into_id"));
-    projection.insert("entity".into(), entity);
-    projection.insert("into".into(), into);
+    if queue == Queue::Link {
+        let (src, dst) = (disp("src_id"), disp("dst_id"));
+        projection.insert("src".into(), src);
+        projection.insert("dst".into(), dst);
+    } else {
+        let (entity, into) = (disp("entity_id"), disp("into_id"));
+        projection.insert("entity".into(), entity);
+        projection.insert("into".into(), into);
+    }
     Ok((Some(current), Some(projection)))
+}
+
+/// `marker["queue"] == "link"`: which table a decision record's proposal
+/// lives in.
+fn marker_queue(marker: &Map<String, Value>) -> Queue {
+    if marker.get("queue").and_then(Value::as_str) == Some("link") {
+        Queue::Link
+    } else {
+        Queue::Merge
+    }
 }
 
 /// `_owns_terminal(storage, marker, current)`.
@@ -1369,7 +1529,8 @@ async fn reopen_proposal(c: &Client, marker: &Map<String, Value>) -> Result<bool
         .get("proposal_id")
         .and_then(Value::as_i64)
         .unwrap_or(0);
-    let current = get_entity_proposal(c, pid).await?;
+    let queue = marker_queue(marker);
+    let current = get_row(c, queue, pid).await?;
     if !owns_terminal(c, marker, current.as_ref()).await? {
         return Ok(false);
     }
@@ -1379,20 +1540,29 @@ async fn reopen_proposal(c: &Client, marker: &Map<String, Value>) -> Result<bool
         .unwrap_or_default();
     let decided_by = marker.get("decided_by").and_then(Value::as_str);
     let decided_at = marker.get("decided_at").and_then(Value::as_f64);
+    let sql = if queue == Queue::Link {
+        "UPDATE edge_proposals SET status='pending', decided_by=NULL, decided_at=NULL, \
+         judge_verdict=NULL, judge_confidence=NULL, judge_note=NULL, \
+         judge_model=NULL, judged_at=NULL, judge_served_model=NULL, \
+         judge2_verdict=NULL, judge2_confidence=NULL, \
+         judge2_model=NULL, judged2_at=NULL, \
+         judge2_served_model=NULL, judge2_policy=NULL, \
+         judge_relation=NULL, judge2_relation=NULL \
+         WHERE id=$1 AND status=$2 AND decided_by=$3 AND decided_at=$4"
+    } else {
+        "UPDATE entity_proposals SET status='pending', decided_by=NULL, decided_at=NULL, \
+         judge_verdict=NULL, judge_confidence=NULL, judge_note=NULL, \
+         judge_model=NULL, judged_at=NULL, judge_served_model=NULL, \
+         judge2_verdict=NULL, judge2_confidence=NULL, \
+         judge2_model=NULL, judged2_at=NULL, \
+         judge2_served_model=NULL, judge2_policy=NULL, \
+         judge3_verdict=NULL, judge3_confidence=NULL, \
+         judge3_model=NULL, judged3_at=NULL, \
+         judge3_served_model=NULL, judge3_policy=NULL \
+         WHERE id=$1 AND status=$2 AND decided_by=$3 AND decided_at=$4"
+    };
     let n = c
-        .execute(
-            "UPDATE entity_proposals SET status='pending', decided_by=NULL, decided_at=NULL, \
-             judge_verdict=NULL, judge_confidence=NULL, judge_note=NULL, \
-             judge_model=NULL, judged_at=NULL, judge_served_model=NULL, \
-             judge2_verdict=NULL, judge2_confidence=NULL, \
-             judge2_model=NULL, judged2_at=NULL, \
-             judge2_served_model=NULL, judge2_policy=NULL, \
-             judge3_verdict=NULL, judge3_confidence=NULL, \
-             judge3_model=NULL, judged3_at=NULL, \
-             judge3_served_model=NULL, judge3_policy=NULL \
-             WHERE id=$1 AND status=$2 AND decided_by=$3 AND decided_at=$4",
-            &[&pid, &status, &decided_by, &decided_at],
-        )
+        .execute(sql, &[&pid, &status, &decided_by, &decided_at])
         .await
         .map_err(internal)?;
     if n != 1 {

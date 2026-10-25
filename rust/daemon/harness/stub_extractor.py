@@ -35,7 +35,9 @@ numbered proposals, listing a verdict for each proposal whose FROM and INTO
 displays (either order) name a key, and none for the rest; a key naming a
 list of verdicts lists each of them under that proposal's number (a reply
 repeating an id). A ``judge_junk`` entry keys its verdicts by the flagged
-entity's display alone (``"verdicts": {"a, b, c": {...}}``). An entry with
+entity's display alone (``"verdicts": {"a, b, c": {...}}``), and a
+``judge_links`` entry by the proposal's ``SRC|DST`` displays (either order).
+An entry with
 ``"times": N`` answers N requests per caller (the request's
 ``Authorization`` digest), then lets the next matching entry answer, so an
 endpoint can fail once and recover.
@@ -82,6 +84,8 @@ JUDGE_ENDPOINTS = ("second", "third")
 PROPOSAL_HEAD = re.compile(r"^\[(\d+)\] FROM '(.*?)' \(degree ", re.M)
 PROPOSAL_INTO = re.compile(r"^    INTO '(.*?)' \(degree ", re.M)
 JUNK_HEAD = re.compile(r"^\[(\d+)\] '(.*?)' \u2014 detector: ", re.M)
+LINK_HEAD = re.compile(r"^\[(\d+)\] SRC '(.*?)' \(scopes .*?\) --.*?--> DST '(.*?)' \(scopes ",
+                       re.M)
 HEALTH_PATHS = {"/health": "primary", "/fallback/health": "fallback"}
 
 
@@ -360,6 +364,16 @@ def judge_reply(verdicts: dict, body: bytes) -> str:
             if not head:
                 continue
             v = verdicts.get(head.group(2))
+            for one in (v if isinstance(v, list) else [] if v is None else [v]):
+                out.append({"id": int(head.group(1)), **one})
+        return json.dumps({"verdicts": out})
+    if parsed and parsed[0] == "judge_links":
+        for block in re.split(r"\n\n(?=\[\d+\] SRC ')", user):
+            head = LINK_HEAD.search(block)
+            if not head:
+                continue
+            a, b = head.group(2), head.group(3)
+            v = verdicts.get(f"{a}|{b}") or verdicts.get(f"{b}|{a}")
             for one in (v if isinstance(v, list) else [] if v is None else [v]):
                 out.append({"id": int(head.group(1)), **one})
         return json.dumps({"verdicts": out})
