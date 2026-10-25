@@ -397,6 +397,134 @@ def candidate_fingerprints():
             "evidence": candidate_evidence_fingerprints(svc, CAND_CANDIDATES, inputs=inputs)}
 
 
+def _lesson(task, aspect, lesson, **kw):
+    rec = {"task": task, "aspect": aspect, "lesson": lesson, "polarity": "+",
+           "status": "current", "confidence": 0.9, "origin": "agent", "support": [],
+           "provenance": ["p2", "p1"], "asserted_at": 10.0, "last_confirmed": 11.0,
+           "version": 1, "about": None, "outcome": "success", "embedding": None}
+    rec.update(kw)
+    return rec
+
+
+def _world(entity, attribute, value, **kw):
+    rec = {"entity": entity, "attribute": attribute, "value": value, "polarity": "+",
+           "status": "current", "confidence": 0.8, "origin": "agent",
+           "support": ["source"], "provenance": [], "asserted_at": 20.0,
+           "last_confirmed": 21.0, "version": 1, "source_url": "https://example.org/a",
+           "source_quote": "q", "retrieved_at": 30.0, "freshness_class": "slow",
+           "content_hash": "h", "source_doc_id": None, "embedding": None}
+    rec.update(kw)
+    return rec
+
+
+def curation_cases():
+    import numpy as np
+    from pseudolife_memory import curation_safety as cs
+    lesson_pairs = [
+        (_lesson("Rotate Keys", "Cadence", "Rotate keys quarterly."),
+         _lesson("Rotate Secrets", "Cadence", "  Rotate keys quarterly. ")),
+        (_lesson("Rotate Keys", "Cadence", "Rotate keys quarterly.", about="ops"),
+         _lesson("Rotate Secrets", "Cadence", "Rotate keys quarterly.")),
+        (_lesson("Ship", "Freeze", "Freeze merges.", embedding=np.asarray([0.5, -1.0],
+                                                                          dtype=np.float32)),
+         _lesson("Ship Release", "Freeze", "Freeze all merges.")),
+        (_lesson("Ünicode | pipe", "Asp", "x", polarity="-"),
+         _lesson("Unicode", "Asp", "x")),
+    ]
+    world_pairs = [
+        (_world("Host A", "os", "Debian 12"), _world("Host B", "os", "Debian 12")),
+        (_world("Host A", "os", "Debian 12", retrieved_at=10.0),
+         _world("Host B", "os", "Debian 12")),
+        (_world("Host A", "os", "Debian 12", source_url="https://example.org/b"),
+         _world("Host B", "os", "Debian 12")),
+    ]
+    verdicts = [
+        {"verdict": "duplicate", "keep": "a", "fold": None},
+        {"verdict": "duplicate", "keep": "b", "fold": ""},
+        {"verdict": "duplicate", "keep": "a", "fold": "invented"},
+        {"verdict": "duplicate", "keep": "c"},
+        {"verdict": "distinct"},
+        {"keep": "a"},
+    ]
+    out = []
+    for store, pairs in (("lesson", lesson_pairs), ("world", world_pairs)):
+        for a, b in pairs:
+            ev = cs.capture_pair_evidence(store, a, b)
+            policy = "p" * 64
+            sig = cs._judgment_signature(ev, policy)
+            pid = cs._pair_id(ev)
+            states = []
+            for judgment, binding, at in (
+                    (None, None, 100.0),
+                    ({"judged_at": 50.0}, None, 100.0),
+                    ({"judged_at": 50.0}, sig, 100.0),
+                    ({"judged_at": 50.0}, {"signature": sig, "action": "pending"}, 100.0),
+                    ({"judged_at": 50.0}, {"signature": sig, "action": ""}, 100.0),
+                    ({"judged_at": 50.0}, {"signature": "other"}, 100.0),
+                    ({"judged_at": 50.0}, {"signature": sig}, 1000.0),
+                    ({"judged_at": "x"}, {"signature": sig}, 100.0)):
+                bindings = {} if binding is None else {pid: binding}
+                states.append({
+                    "judgment": judgment, "bindings": bindings, "at": at,
+                    "state": cs.curation_judgment_state(judgment, bindings, ev, policy,
+                                                        now=at, horizon=500.0),
+                    "observed": cs.curation_bound_observed_model(bindings, ev),
+                    "action": cs.curation_bound_action(bindings, ev)})
+            out.append({
+                "store": store, "a": ev.a, "b": ev.b,
+                "a_fingerprint": ev.a_fingerprint, "b_fingerprint": ev.b_fingerprint,
+                "pair_id": pid, "signature": sig, "policy": policy,
+                "pair_keys": list(cs.curation_pair_keys(ev)),
+                "folds": [{"verdict": v, "allowed": cs.can_auto_fold(ev, v).allowed,
+                           "reason": cs.can_auto_fold(ev, v).reason} for v in verdicts],
+                "states": states})
+    return out
+
+
+def curation_policy():
+    from pseudolife_memory import curation_safety as cs
+    from pseudolife_memory.utils.config import MemoryConfig
+    svc = SimpleNamespace(config=SimpleNamespace(memory=MemoryConfig()))
+    ex = SimpleNamespace(model="judge-one", base_url="http://127.0.0.1:9/v1", max_tokens=4096,
+                         timeout=240.0, extra_body={"z": 1, "a": [1, 2]}, judge_thinking=False)
+    return [{"observed": o, "fingerprint": cs.curation_policy_fingerprint(svc, ex,
+                                                                           observed_model=o)}
+            for o in (None, "judge-one", "élan")]
+
+
+SLOT_FORMAT_ROWS = [
+    {"n": 1, "store": "lesson", "similarity": 0.91,
+     "a": {"entity": "Rotate Keys", "attribute": "Cadence", "value": "v" * 300,
+           "polarity": "+", "outcome": "success", "about": "ops"},
+     "b": {"entity": "Rotate Secrets", "attribute": "Cadence", "value": "x",
+           "polarity": "-", "outcome": None, "about": None}},
+    {"n": 2, "store": "world", "similarity": 1.0,
+     "a": {"entity": "Host A", "attribute": "os", "value": "Debian 12",
+           "source_url": "https://example.org/a"},
+     "b": {"entity": "Host B", "attribute": "os", "value": "Debian 12", "source_url": ""}},
+    {"n": 3, "store": "world", "a": None},
+]
+
+SLOT_PARSE_CASES = [
+    [{"id": 1, "verdict": "duplicate", "keep": " A ", "fold": "f" * 700, "confidence": 0.9},
+     {"id": 2, "verdict": "duplicate", "keep": "c", "fold": "x"},
+     {"id": 3, "verdict": "duplicate"},
+     {"id": 1, "verdict": "distinct", "keep": "a", "fold": "ignored", "note": "n" * 500},
+     {"id": 2, "verdict": "leave", "confidence": "0.4"},
+     {"id": 3, "verdict": "duplicate", "keep": 0, "confidence": 1},
+     {"id": 3, "verdict": "duplicate", "keep": "B", "note": ""},
+     {"id": 9, "verdict": "distinct"},
+     "x"],
+    [],
+]
+
+
+def judge_slot_pairs(rows, raw):
+    ex = dream.OpenAICompatExtractor("http://stub/v1", "stub-model")
+    ex._judge_request = lambda *a, **k: raw
+    return ex.judge_slot_pairs(rows)
+
+
 def main() -> int:
     rows = [{"n": i} for i in (1, 2, 3)]
     golden = {
@@ -420,6 +548,11 @@ def main() -> int:
                                                for k, v in LINK_EVIDENCE["scopes"].items()}},
                        "rows": link_pack(LINK_PENDING, LINK_EVIDENCE, cap)}
                       for cap in (240, 10)],
+        "curation_cases": curation_cases(),
+        "curation_policy": curation_policy(),
+        "slot_format": [{"row": r, "text": dream.format_slot_pair(r)} for r in SLOT_FORMAT_ROWS],
+        "slot_parse": [{"raw": raw, "rows": rows, "verdicts": judge_slot_pairs(rows, raw)}
+                       for raw in SLOT_PARSE_CASES],
         "candidate_format": [{"row": r, "text": dream.format_candidate(r)}
                              for r in CAND_FORMAT_ROWS],
         "candidate_parse": [{"raw": raw, "rows": CAND_ROWS,

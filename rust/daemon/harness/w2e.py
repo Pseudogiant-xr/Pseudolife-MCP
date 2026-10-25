@@ -260,7 +260,8 @@ CLOCK = {("entries", "ts"), ("entries", "superseded_at"), ("episodes", "started_
          # the merge and link judges' verdict clocks
          ("entity_proposals", "judged_at"), ("entity_proposals", "judged2_at"),
          ("entity_proposals", "judged3_at"),
-         ("edge_proposals", "judged_at"), ("edge_proposals", "judged2_at")}
+         ("edge_proposals", "judged_at"), ("edge_proposals", "judged2_at"),
+         ("curation_judgments", "judged_at")}
 # dream_runs cursor columns: an entry's ts becomes its <ts:ID> token.
 DREAM_RUN_CURSORS = ("cursor_before", "cursor_after")
 # memory_dream answer keys holding wall-clock seconds (the stall record and
@@ -5607,7 +5608,7 @@ MUTANTS += w2e_sweep.MUTANTS
 
 
 JUDGE_TABLES = ("entity_proposals", "merge_decisions", "dismissed_pairs", "edge_proposals",
-                "entities", "edges", "meta")
+                "entities", "edges", "meta", "curation_judgments")
 
 
 def judge_digest(dsn: str) -> str:

@@ -100,7 +100,7 @@ const WORLD_FIELDS: [&str; 6] = [
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum Store {
+pub(crate) enum Store {
     Lesson,
     World,
 }
@@ -114,7 +114,7 @@ impl Store {
         }
     }
 
-    fn name(self) -> &'static str {
+    pub(crate) fn name(self) -> &'static str {
         match self {
             Store::Lesson => "lesson",
             Store::World => "world",
@@ -987,10 +987,15 @@ fn canonical_str(out: &mut String, s: &str) {
 }
 
 /// `evidence_fingerprint`: the SHA-256 of the canonical JSON.
-pub(super) fn fingerprint(record: &Map<String, Value>) -> String {
+pub(crate) fn fingerprint(record: &Map<String, Value>) -> String {
     let mut text = String::new();
     canonical_json(&mut text, &Value::Object(record.clone()));
     hex::encode(Sha256::digest(text.as_bytes()))
+}
+
+/// `evidence_fingerprint(record)`, by its Python name.
+pub(crate) fn evidence_fingerprint(record: &Map<String, Value>) -> String {
+    fingerprint(record)
 }
 
 /// `_embedding_snapshot` of a float32 vector.
@@ -1019,7 +1024,7 @@ fn finite(x: f64) -> Result<Value, ToolError> {
 /// `snapshot_record(store, record)` over the record as `_get` sees it: `d`
 /// holds every attribute (or column) the record has, an absent one taking
 /// the default; the embedding is passed apart.
-pub(super) fn snapshot_record(
+pub(crate) fn snapshot_record(
     store: Store,
     d: &Map<String, Value>,
     embedding: Option<&[f32]>,
@@ -1103,7 +1108,7 @@ fn round6(x: f64) -> f64 {
 
 /// A resident lesson as `_get` reads the dataclass (hydration's
 /// `version or 1` applied, as Python's resident record holds it).
-fn lesson_dict(r: &LessonRecord) -> Map<String, Value> {
+pub(crate) fn lesson_dict(r: &LessonRecord) -> Map<String, Value> {
     let mut d = Map::new();
     d.insert("entity".into(), json!(r.entity));
     d.insert("attribute".into(), json!(r.attribute));
@@ -1136,7 +1141,7 @@ fn lesson_dict(r: &LessonRecord) -> Map<String, Value> {
 
 /// A resident world fact as `_get` reads the dataclass: no `support` or
 /// `provenance` attribute (the defaults apply), `origin` the constant.
-fn world_dict(r: &WorldRecord) -> Map<String, Value> {
+pub(crate) fn world_dict(r: &WorldRecord) -> Map<String, Value> {
     let mut d = Map::new();
     d.insert("entity".into(), json!(r.entity));
     d.insert("attribute".into(), json!(r.attribute));
@@ -1505,7 +1510,7 @@ fn restore_decision_snapshot(
 
 /// The two slots' rows of any status, locked (`_targeted_all_rows`), each
 /// as its evidence snapshot.
-async fn targeted_snapshots(
+pub(crate) async fn targeted_snapshots(
     c: &Client,
     store: Store,
     a: &SlotKey,
