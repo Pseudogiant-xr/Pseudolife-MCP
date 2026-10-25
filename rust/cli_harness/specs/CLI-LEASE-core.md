@@ -76,10 +76,11 @@ is the same in both arms. Interpreter-specific argument parsing/path corner
 cases, noncanonical producer shapes, and the phase 4 actions are excluded
 from this core row. There is no per-case performance acceptance.
 
-Nine real source mutants cover lock-name hashing, child exit status, local
+Eight real source mutants cover lock-name hashing, child exit status, local
 lock truth, same-instance stale mirrors, timeout status, mirror release, the
-named list filter, the gated check's held refusal and the gated child's empty
-held list.
+named list filter and the gated check's held refusal. The row's eight fill one
+source-mutant shard; the gated child's empty held list is pinned by the
+`check-gated-*` cases' `ran` file and the unit tests instead of a ninth.
 Goldens are recorded separately on Windows and Linux and use the same rules
 as live comparison.
 

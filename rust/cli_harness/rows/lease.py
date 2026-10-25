@@ -453,7 +453,4 @@ MUTANTS = [
            ("list-board-filter-missing",)),
     Mutant("lease-gated-refusal", "lease", "shim/src/cli/lease/run.rs",
            "            return 75;\n", "            return 1;\n", ("check-gated-held",)),
-    Mutant("lease-gated-holds-nothing", "lease", "shim/src/cli/lease/run.rs",
-           "start(&args.command, None)", "start(&args.command, args.name.as_deref())",
-           ("check-gated-absent",)),
 ]
