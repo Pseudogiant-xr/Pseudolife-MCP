@@ -90,7 +90,7 @@ MUTANTS = ["mcp-dream-junk-no-evidence-bar",          # junk-auto
            # candidate-auto, by Python's fingerprints over the bank
            "mcp-dream-candidate-real-binary",
            "mcp-dream-curation-distinct-unmarked",    # curation-auto-distinct
-           "mcp-dream-curation-manual-unsettled"]     # curation-auto
+           "mcp-dream-curation-shadow-dismisses"]     # curation-shadow
 
 # The two listed pairs every curation scenario judges.
 CURATION_JUDGED = (

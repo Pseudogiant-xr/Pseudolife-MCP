@@ -433,7 +433,7 @@ def test_curation_judge_scenarios_settle_before_their_first_comparison(harness):
     assert ("curation_judgments", "judged_at") in harness.CLOCK
     assert "curation_judgments" in harness.JUDGE_TABLES
     assert {"mcp-dream-curation-distinct-unmarked",
-            "mcp-dream-curation-manual-unsettled"} <= set(qj.MUTANTS)
+            "mcp-dream-curation-shadow-dismisses"} <= set(qj.MUTANTS)
 
 
 def test_sweep_scenarios_settle_without_timing_on_their_mutants(harness):

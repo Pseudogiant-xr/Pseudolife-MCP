@@ -2042,8 +2042,9 @@ selection and update-offer formatter use live Python policy goldens.
 Writer durability and canonical-store slot synchronization require W2-E;
 session write/resume routes and generic close-time titles are not integrated;
 automatic dreams and the graph sweep ticks are served (`rust/daemon/spec.md`
-SW1-SW6), with the merge, link, junk and candidate judges (LJ1-LJ6,
-JJ1-JJ5, CJ1-CJ5) but not the curation judge (task P3b), and the reaper's
+SW1-SW6), with the merge, link, junk, curation and candidate judges
+(LJ1-LJ6, JJ1-JJ5, CU1-CU5, CJ1-CJ5) but not the curation judge's safe-class
+fold (task P3b-4b), and the reaper's
 session trigger fires the automatic dream. File-mode tensors and embedded bank lifecycle
 remain separately deferred. Source preparation and unit tests do not establish
 those missing process-boundary contracts.

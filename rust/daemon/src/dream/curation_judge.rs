@@ -1309,6 +1309,9 @@ async fn curation_tick(
     let bound_policy = policy_fingerprint(&service.config, &ex.compat, observed.as_deref());
     let response_served = ex.served.clone();
     let (mut judged, mut applied, mut deferred_unknown) = (0i64, 0i64, 0i64);
+    // Only auto-distinct and auto act on a distinct verdict.
+    let distinct_acts = matches!(mode.as_str(), "auto-distinct" | "auto")
+        || crate::mutants::active("mcp-dream-curation-shadow-dismisses");
     let mut actions: Vec<(Item, Row)> = Vec::new();
     for it in &replay {
         let mut keys = [
@@ -1353,7 +1356,7 @@ async fn curation_tick(
         let conf = v.get("confidence").and_then(Value::as_f64).unwrap_or(0.0);
         let verdict = vs(v, "verdict").unwrap_or("");
         let wants = (verdict == "distinct"
-            && matches!(mode.as_str(), "auto-distinct" | "auto")
+            && distinct_acts
             && conf >= cfg.curation_distinct_min_confidence)
             || (verdict == "duplicate"
                 && mode == "auto"
@@ -1411,10 +1414,7 @@ async fn curation_tick(
                 .await
                 .map_err(e2s)?
             };
-        if verdict == "distinct"
-            && matches!(mode.as_str(), "auto-distinct" | "auto")
-            && conf >= cfg.curation_distinct_min_confidence
-        {
+        if verdict == "distinct" && distinct_acts && conf >= cfg.curation_distinct_min_confidence {
             applied += i64::from(
                 apply_auto_distinct(client, &ready, &it.ev, guard)
                     .await
@@ -1428,14 +1428,12 @@ async fn curation_tick(
             // A duplicate the safe-fold rule allows is not applied: the
             // fold is not ported (task P3b-4b), so its action stays pending
             // and replays on the next tick. One it refuses settles manual.
-            if !crate::mutants::active("mcp-dream-curation-manual-unsettled") {
-                let ev = &it.ev;
-                in_txn(client, |c| async move {
-                    set_action_state(c, ev, "manual").await
-                })
-                .await
-                .map_err(e2s)?;
-            }
+            let ev = &it.ev;
+            in_txn(client, |c| async move {
+                set_action_state(c, ev, "manual").await
+            })
+            .await
+            .map_err(e2s)?;
         }
     }
     let pending_unjudged = (todo.len() as i64 - judged).max(0);
