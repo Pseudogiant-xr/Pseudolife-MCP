@@ -96,7 +96,13 @@ fn connections_elsewhere_are_not_probed() {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .build()
         .unwrap();
-    assert_eq!(runtime.block_on(verify_before_connect(&config)), Ok(()));
+    assert_eq!(
+        runtime.block_on(verify_before_connect(
+            &config,
+            std::time::Duration::from_secs(2)
+        )),
+        Ok(())
+    );
 }
 
 /// Decision 6 against a real server (`PSEUDOLIFE_TEST_PG_RUNTIME` names a

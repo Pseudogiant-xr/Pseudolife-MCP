@@ -246,7 +246,10 @@ static RUNNING: Mutex<Option<Lite>> = Mutex::new(None);
 /// Before any connection to the lite server: prove, with SCRAM required,
 /// that the server on its port is still this bank's. Connections to any
 /// other host or port (an explicit DSN) are not probed.
-pub async fn verify_before_connect(config: &tokio_postgres::Config) -> Result<(), String> {
+pub async fn verify_before_connect(
+    config: &tokio_postgres::Config,
+    timeout: std::time::Duration,
+) -> Result<(), String> {
     let Some(probe) = PROBE.get() else {
         return Ok(());
     };
@@ -257,11 +260,22 @@ pub async fn verify_before_connect(config: &tokio_postgres::Config) -> Result<()
     if !ours {
         return Ok(());
     }
-    let verified = tokio::task::spawn_blocking(|| {
-        embedded::serves(&probe.runtime, probe.port, &probe.password, &probe.pgdata)
-    })
-    .await
-    .unwrap_or(false);
+    // Within the connection's own deadline: psql's connect timeout is set
+    // from it, and the wait is bounded by it too (a probe that outlives the
+    // deadline ends at that connect timeout on its own).
+    let check = tokio::task::spawn_blocking(move || {
+        embedded::serves_within(
+            &probe.runtime,
+            probe.port,
+            &probe.password,
+            &probe.pgdata,
+            timeout,
+        )
+    });
+    let verified = matches!(
+        tokio::time::timeout(timeout + std::time::Duration::from_secs(1), check).await,
+        Ok(Ok(true))
+    );
     if verified {
         Ok(())
     } else {
@@ -272,6 +286,14 @@ pub async fn verify_before_connect(config: &tokio_postgres::Config) -> Result<()
             probe.pgdata.display()
         ))
     }
+}
+
+/// Make every daemon connection pass `verify_before_connect` (called once,
+/// after a lite start).
+pub fn register_connect_guard() {
+    let _ = crate::storage::CONNECT_GUARD.set(Box::new(|config, timeout| {
+        Box::pin(async move { verify_before_connect(&config, timeout).await })
+    }));
 }
 
 fn stop_lite(lite: Lite) {

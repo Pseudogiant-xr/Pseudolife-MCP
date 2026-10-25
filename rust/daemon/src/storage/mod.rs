@@ -200,6 +200,21 @@ fn jitter() -> f64 {
     0.5 + f64::from(nanos % 1_000_000) / 1_000_000.0
 }
 
+/// A check every connection must pass first, given the connection's config
+/// and deadline; `Err` refuses the connection with that text.
+pub type ConnectGuard = Box<
+    dyn Fn(
+            Config,
+            Duration,
+        )
+            -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send>>
+        + Send
+        + Sync,
+>;
+/// Set once by the daemon when the bank is the lite tier's
+/// (`native::lite::verify_before_connect`); unset, nothing is checked.
+pub static CONNECT_GUARD: std::sync::OnceLock<ConnectGuard> = std::sync::OnceLock::new();
+
 /// `connect_retrying_local_ports` (postgres.py:81-101) with libpq's
 /// `connect_timeout` semantics: the timeout bounds the whole connection
 /// attempt (socket and startup), not only the socket connect.
@@ -208,10 +223,16 @@ pub async fn connect(
     timeout: Duration,
 ) -> Result<(Client, JoinHandle<()>), String> {
     const ATTEMPTS: u32 = 4;
-    // The lite bank's server is proved this bank's over SCRAM before every
-    // connection (this client would answer a cleartext request); other
-    // servers are not probed.
-    crate::native::lite::verify_before_connect(config).await?;
+    // A registered guard runs first, within the same deadline: the daemon's
+    // lite tier proves its server is the bank's over SCRAM before every
+    // connection (this client would answer a cleartext request).
+    let started = std::time::Instant::now();
+    if let Some(guard) = CONNECT_GUARD.get() {
+        guard(config.clone(), timeout).await?;
+    }
+    let timeout = timeout
+        .saturating_sub(started.elapsed())
+        .max(Duration::from_millis(500));
     let mut config = config.clone();
     config.connect_timeout(timeout);
     let mut attempt = 1;

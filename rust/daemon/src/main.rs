@@ -187,6 +187,7 @@ fn main() {
             let dsn =
                 native::lite::start(&data_dir, home.as_deref(), &mut |line| eprintln!("{line}"))
                     .unwrap_or_else(|e| fail(2, &format!("storage resolution refused: {e}")));
+            native::lite::register_connect_guard();
             eprintln!(
                 "storage: embedded postgres (lite tier) — data dir {}",
                 data_dir.display()

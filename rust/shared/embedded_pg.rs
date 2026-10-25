@@ -1076,7 +1076,28 @@ fn settle_running(
 /// Whether the server on `port` accepts `password` over SCRAM and serves
 /// `pgdata`: the bank's own server, not an impostor on its port.
 pub fn serves(runtime: &Runtime, port: u16, password: &str, pgdata: &Path) -> bool {
-    let Ok(reported) = psql(runtime, port, password, "SHOW data_directory") else {
+    serves_within(runtime, port, password, pgdata, Duration::from_secs(10))
+}
+
+/// `serves` with the connection bounded by `connect_timeout` (libpq's
+/// `PGCONNECT_TIMEOUT`, whole seconds, at least 2), for a caller whose own
+/// deadline is shorter than the default.
+pub fn serves_within(
+    runtime: &Runtime,
+    port: u16,
+    password: &str,
+    pgdata: &Path,
+    connect_timeout: Duration,
+) -> bool {
+    let seconds = connect_timeout.as_secs_f64().ceil().max(2.0) as u64;
+    let Ok(output) = psql_command(runtime, port, password)
+        .env("PGCONNECT_TIMEOUT", seconds.to_string())
+        .args(["-c", "SHOW data_directory"])
+        .output()
+    else {
+        return false;
+    };
+    let Ok(reported) = psql_result(output) else {
         return false;
     };
     let canonical = |path: &Path| fs::canonicalize(path).ok();
