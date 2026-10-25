@@ -117,22 +117,58 @@ def search(query: str, **kw) -> dict:
             "headers": []}
 
 
+def memory_search(query: str, **kw) -> dict:
+    return {"op": "tool", "name": "memory_search", "args": {"query": query, **kw},
+            "headers": []}
+
+
+def rest_search(query: str, **params) -> dict:
+    """``GET /api/search`` (the Console route over the same search)."""
+    from urllib.parse import urlencode
+    return {"op": "http", "method": "GET",
+            "path": "/api/search?" + urlencode({"q": query, **params})}
+
+
+def remember(text: str, source: str = "agent") -> dict:
+    return {"op": "tool", "name": "memory_store", "args": {"text": text, "source": source},
+            "headers": []}
+
+
+def stats() -> dict:
+    return {"op": "tool", "name": "memory_stats", "args": {}, "headers": []}
+
+
+def is_search(op: dict) -> bool:
+    """An operation whose answer serves entries that may be reference chunks."""
+    return (op.get("name") in ("document_search", "memory_search")
+            or (op.get("op") == "http" and str(op.get("path", "")).startswith("/api/search")))
+
+
 def answer_tokens(answer, ranks: dict[float, str]):
-    """A ``document_search`` answer with each entry's ``timestamp`` as the
-    rank token of the ``ingested_at`` it equals (``w2e.clock_ranks``). A
-    reference hit's timestamp matching no ingest is the clock at serving (a
-    stored 0.0 becomes ``time.time()``): within a day of now it is
-    ``<served-now>``, each side's own moment."""
-    if not isinstance(answer, dict):
-        return answer
-    value = answer.get("value")
-    if isinstance(value, dict) and isinstance(value.get("entries"), list):
-        for e in value["entries"]:
-            if isinstance(e, dict) and isinstance(e.get("timestamp"), float):
-                if e["timestamp"] in ranks:
-                    e["timestamp"] = ranks[e["timestamp"]]
-                elif e.get("bank") == "reference" and abs(time.time() - e["timestamp"]) < 86400:
-                    e["timestamp"] = "<served-now>"
+    """An answer with each served entry's ``timestamp`` (in any ``entries``
+    list: ``document_search``, ``memory_search``, ``GET /api/search``) as
+    the rank token of the clock it equals (``w2e.clock_ranks``): a
+    reference chunk's is its ``ingested_at``. A reference hit's timestamp
+    matching no ingest is the clock at serving (a stored 0.0 becomes
+    ``time.time()``): within a day of now it is ``<served-now>``, each
+    side's own moment."""
+    def walk(v):
+        if isinstance(v, dict):
+            for k, x in v.items():
+                if k == "entries" and isinstance(x, list):
+                    for e in x:
+                        if not (isinstance(e, dict) and isinstance(e.get("timestamp"), float)):
+                            continue
+                        if e["timestamp"] in ranks:
+                            e["timestamp"] = ranks[e["timestamp"]]
+                        elif (e.get("bank") == "reference"
+                              and abs(time.time() - e["timestamp"]) < 86400):
+                            e["timestamp"] = "<served-now>"
+                walk(x)
+        elif isinstance(v, list):
+            for x in v:
+                walk(x)
+    walk(answer)
     return answer
 
 
@@ -167,7 +203,12 @@ LIVE_ONLY = ("live mode only: golden replay compares boot-time bank rows that "
 # scenarios.
 MUTANTS = ["document-raw-newlines", "document-strip-rust-whitespace", "document-no-overlap",
            "document-search-no-id-order", "document-upsert-keeps-old",
-           "document-upsert-clock-only", "document-zero-clock-kept"]
+           "document-upsert-clock-only", "document-zero-clock-kept",
+           # The reference pool and counts (search.rs, documents.rs, stats.rs):
+           # caught by documents-search-pool and documents-search-seeded.
+           "search-no-reference-pool", "search-reference-no-dedup",
+           "search-reference-no-floor", "stats-no-reference-counts",
+           "search-reference-no-contiguity"]
 
 
 SCENARIOS: dict[str, dict] = {
@@ -249,6 +290,69 @@ SCENARIOS: dict[str, dict] = {
         "ops": [
             ingest("@DOCS@/garden.txt"),
             search("transplanting seedlings outside"),
+        ],
+    },
+    # The reference pool in memory search (cms.py Pool 2) and the reference
+    # counts in memory_stats: each daemon ingests its own copy, the memories
+    # come from the shared seed. One memory has a chunk's exact text, so the
+    # pool skips that chunk once the memory is served.
+    "documents-search-pool": {
+        "config": None,
+        "seed": [
+            remember("The nightly backup job runs at two in the morning."),
+            remember("Tomatoes in the north bed get watered every second day."),
+            remember("Information separators pad this lone chunk."),
+        ],
+        "live_only": LIVE_ONLY,
+        "ops": [
+            memory_search("how do I restore a pg_dump backup", top_k=2, verbose=True),
+            stats(),
+            ingest("@DOCS@/guide.md"),
+            ingest("@DOCS@/garden.txt"),
+            ingest("@DOCS@/separators.txt"),
+            stats(),
+            memory_search("how do I restore a pg_dump backup", top_k=2, verbose=True),
+            memory_search("watering tomato seedlings", top_k=3),
+            memory_search("information separators", top_k=2, verbose=True),
+            memory_search("how do I restore a pg_dump backup", min_score=0.75, verbose=True),
+            rest_search("how do I restore a pg_dump backup", top_k=3),
+            rest_search("watering tomato seedlings"),
+        ],
+    },
+    # Rows the Python daemon wrote, read by both (the older side's rows, as
+    # after a rollback): the pool under ref_top_k 1, contiguity and the
+    # timeline channel, then ref_top_k 0 (the read takes
+    # reference.max_results rows and `ref_pool[:0]` serves none), RRF fusion,
+    # and a negative ref_top_k (the LIMIT fails; the lenient read serves no
+    # chunk).
+    "documents-search-seeded": {
+        "config": "memory:\n  ref_top_k: 1\n  search:\n    contiguity_neighbors: 1\n"
+                  "    timeline_channel: true\n",
+        "seed": [
+            ingest("@DOCS@/guide.md"),
+            ingest("@DOCS@/garden.txt", source="garden.txt"),
+            remember("Seedlings were moved to the greenhouse.", source="nursery"),
+            remember("The restore drill passed on the staging bank."),
+            # The only episode-less memory of the document's source, and one
+            # no query here matches: only the reference hit anchors it as a
+            # contiguity neighbour.
+            remember("Quarterly payroll forms are due at the end of April.", source="garden.txt"),
+            {"op": "sql", "sql": "UPDATE entries SET episode_id = NULL WHERE source = 'garden.txt'",
+             "after_stop": True},
+        ],
+        "live_only": LIVE_ONLY,
+        "ops": [
+            memory_search("how do I restore a pg_dump backup", verbose=True),
+            rest_search("watering tomato seedlings", top_k=2),
+            memory_search("what did we restore before the drill", verbose=True),
+            stats(),
+            {"op": "restart", "config": "memory:\n  ref_top_k: 0\n  reference:\n"
+                                        "    max_results: 2\n"},
+            memory_search("how do I restore a pg_dump backup", top_k=1, verbose=True),
+            {"op": "restart", "config": "memory:\n  search:\n    fusion: rrf\n"},
+            memory_search("watering tomato seedlings", top_k=2, verbose=True),
+            {"op": "restart", "config": "memory:\n  ref_top_k: -1\n"},
+            memory_search("how do I restore a pg_dump backup", verbose=True),
         ],
     },
 }

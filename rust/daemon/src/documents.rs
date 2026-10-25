@@ -362,7 +362,7 @@ fn extract_text(path: &str, name: &str) -> Result<String, ToolError> {
 // ── storage ──────────────────────────────────────────────────────────────
 
 /// One `search_reference_chunks` row.
-pub(crate) struct Nearest {
+pub struct Nearest {
     pub text: String,
     pub source: String,
     pub ingested_at: f64,
@@ -402,6 +402,42 @@ pub(crate) async fn nearest(
         .collect())
 }
 
+/// The memory search's reference pool: `reference.retrieve(q,
+/// top_k=ref_k)` with `strict=False`, so `top_k or max_results` chunks and
+/// a failed read (a negative LIMIT included) serves none, logged.
+pub(crate) async fn reference_pool(
+    db: &tokio_postgres::Client,
+    query: &[f32],
+    cfg: &crate::config::MemoryConfig,
+) -> Vec<crate::search::RefHit> {
+    if crate::mutants::active("search-no-reference-pool") {
+        return Vec::new();
+    }
+    // `top_k or self.config.max_results`: 0 and null fall through, and a
+    // null `max_results` fails `int(limit)` inside the lenient read.
+    let limit = match cfg.ref_top_k {
+        Some(k) if k != 0 => Some(k),
+        _ => cfg.reference.max_results,
+    };
+    let Some(limit) = limit else {
+        eprintln!("reference pool skipped: memory.reference.max_results is null");
+        return Vec::new();
+    };
+    match nearest(db, query, limit).await {
+        Ok(rows) => rows
+            .into_iter()
+            .map(|n| {
+                let score = similarity(n.distance);
+                crate::search::RefHit { nearest: n, score }
+            })
+            .collect(),
+        Err(e) => {
+            eprintln!("reference pool skipped: document query failed: {e}");
+            Vec::new()
+        }
+    }
+}
+
 /// `cosine_similarity_from_distance`: `max(0.0, 1 - dist)`, whose tie (and
 /// a NaN distance) keeps the first argument.
 pub(crate) fn similarity(distance: f64) -> f64 {
@@ -410,15 +446,17 @@ pub(crate) fn similarity(distance: f64) -> f64 {
 }
 
 /// `_entry_to_dict` of a reference hit: no row id, the reference band, the
-/// chunk's latest ingest as its timestamp, nothing else set.
-pub(crate) fn hit_json(n: &Nearest, score: f64) -> Value {
+/// chunk's latest ingest as its timestamp, nothing else set. `accesses` is
+/// the throwaway entry's count when served: 1 from a memory search that
+/// accrues access (`retrieve` bumps every served entry), else 0.
+pub(crate) fn hit_json(n: &Nearest, score: f64, accesses: i64) -> Value {
     let mut m = Map::new();
     m.insert("id".into(), Value::Null);
     m.insert("text".into(), json!(n.text));
     m.insert("source".into(), json!(n.source));
     m.insert("bank".into(), json!("reference"));
     m.insert("timestamp".into(), json!(n.ingested_at));
-    m.insert("access_count".into(), json!(0));
+    m.insert("access_count".into(), json!(accesses));
     m.insert("surprise_score".into(), json!(0.0));
     m.insert("superseded".into(), json!(false));
     m.insert("superseded_at".into(), Value::Null);
@@ -589,7 +627,7 @@ fn mcp_document_search<'a>(app: &'a crate::http::App, call: ToolCall<'a>) -> Too
         .map_err(internal)?;
         let entries: Vec<Value> = hits
             .iter()
-            .map(|n| hit_json(n, similarity(n.distance)))
+            .map(|n| hit_json(n, similarity(n.distance), 0))
             .collect();
         Ok(json!({"count": entries.len(), "entries": entries}))
     })
