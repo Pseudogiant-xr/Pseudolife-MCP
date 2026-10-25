@@ -71,6 +71,9 @@ tokenizers = { version = "=0.21.4", default-features = false, features = ["fancy
 flate2.workspace = true
 tar.workspace = true
 zip.workspace = true
+# PDF text through PDFium, bound at runtime to the pinned library
+# (src/native/pdfium.rs); no image support.
+pdfium-render = { version = "=0.9.4", default-features = false, features = ["thread_safe", "pdfium_latest"] }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { workspace = true, features = ["Win32_System_Registry"] }
