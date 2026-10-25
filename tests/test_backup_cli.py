@@ -123,6 +123,25 @@ def test_state_archive_leaves_the_cluster_password_out(tmp_path):
     assert not any("embedded_pg.secret" in n for n in names)
 
 
+def test_state_archive_leaves_installed_runtimes_out(tmp_path):
+    """The per-user data dir also holds the shim's runtimes and launcher
+    (``runtimes/``, ``bin/``) and the pinned native runtimes (``native/``):
+    reinstallable, hundreds of MB, and not bank state."""
+    (tmp_path / "config.yaml").write_text("memory: {}\n")
+    for name in ("native", "runtimes", "bin"):
+        (tmp_path / name).mkdir()
+        (tmp_path / name / "payload").write_bytes(b"x")
+    bdir = tmp_path / "backups"
+    bdir.mkdir()
+
+    out = backup_cli._archive_state(tmp_path, bdir, "20261026-120000")
+
+    with tarfile.open(out) as tar:
+        tops = {n.split("/")[0] for n in tar.getnames()}
+    assert "config.yaml" in tops
+    assert not tops & {"native", "runtimes", "bin"}
+
+
 # ----------------------------------------------------------------------
 # Orchestration
 # ----------------------------------------------------------------------

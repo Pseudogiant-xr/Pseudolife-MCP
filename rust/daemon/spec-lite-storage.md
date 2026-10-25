@@ -270,3 +270,56 @@ cases run there or stay recorded as unrun:
 6. The deprecation notes for `embedded` mode and `.pt` file mode (release
    note and guides; D10 allows no new Python surface, so no Python warning
    is added).
+
+## Before step 4: what the daemon side needed, and what was decided
+
+Wiring the module into the daemon's startup (step 4) needed three things
+that are decisions or PRs of their own, not workarounds inside step 4. The
+maintainer decided the two open ones on 2026-10-26 (cortex slot
+`rust-cutover-B9-lite-decisions / step 4 decisions A and B`).
+
+1. **Runtime provisioning (decisions 2, 3 and 5), its own PR before step
+   4.** `rust/shared/native_provision.rs` is a generic provisioner (the
+   PDFium runtime builds on it too): download over HTTPS, check each
+   artifact against its in-tree sha256, unpack under an OS install lock
+   into a staging tree, validate it, record the pins in
+   `pseudolife-runtime.json` and publish it with one rename.
+   `rust/shared/pg_runtime.rs` holds the pins and the PostgreSQL layout.
+   - The runtime lands in `<per-user data dir>/native/postgresql/18.1.0-<12
+     hex of the pin set>`. It is per user, not per bank: a data dir set by
+     `PSEUDOLIFE_MCP_DATA_DIR` does not move it. On macOS the per-user dir is
+     `~/Library/Application Support/pseudolife-mcp` (as Python lite's data
+     dir is), not the shim runtimes' `~/.local/share`.
+   - The installed Windows tree matches pg0 0.15.1's
+     `~/.pg0/installation/18.1.0` file for file (3011 files, measured
+     2026-10-26).
+   - pg0's `versions.env` pins its Linux libraries by Ubuntu pool URL, and
+     the pool has already deleted the pinned libxml2 build (superseded by a
+     later security update); the same bytes stay at Launchpad's permanent
+     file store, which the pins use. The packages' `data.tar.zst` needs a
+     zstd decoder: `ruzstd`, pure Rust, no default features, no transitive
+     crates.
+   - The daemon's first-start fallback and the installers call the same
+     provisioner. The install-time entry point will be the
+     `pseudolife-daemon provision <runtime>` subcommand B7 adds for PDFium,
+     with a `postgresql` arm; B11's installers and release-mode `update`
+     call it. Until step 4 wires the lite path, no user can reach the
+     provisioner.
+2. **The owner-only secret writer the daemon uses: (b).** Move the shim's
+   owner-only file code into `rust/shared/` and point its callers
+   (`board/state.rs`, `cli/connect/files.rs`, `pg/embedded_secret.rs`) at
+   it, coordinated with whoever holds those files. Rejected: (a) the
+   daemon depending on the shim library (57 crate names the daemon does
+   not have) and (c) a daemon that only reads the secret (a first start
+   could not create a bank).
+3. **How the daemon authenticates to the lite server: (a).**
+   tokio-postgres has no `require_auth`: it answers a server's cleartext
+   password request with the password. So the daemon connects only after
+   a SCRAM-only psql probe (`serves()`) has verified the port's server is
+   this bank's, and probes again before each reconnect. The short
+   check-then-connect gap that remains is a declared divergence.
+
+Decision 6 also needed wording before step 4 codes it. No standalone `.pt`
+import command exists today: `migrate_legacy` runs when the Python daemon
+starts. So the refusal names running the last Python release's
+`pseudolife-mcp serve` once, which the release notes must keep possible.

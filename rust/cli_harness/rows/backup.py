@@ -103,6 +103,12 @@ def tree(root_rel: str = "bank", old_backups: bool = True, bdir_rel: str | None 
         os.chmod(root / "locked.txt", stat.S_IREAD)
         (root / "empty").mkdir()
         _write(root / "embedded_pg" / "postmaster.opts", "excluded, no PG_VERSION")
+        # Excluded by name on both sides: the bank's password file and the
+        # installed software the default data dir also holds.
+        _write(root / "embedded_pg.secret", "ab" * 32)
+        _write(root / "runtimes" / "000001" / "pyvenv.cfg", "excluded runtime")
+        _write(root / "bin" / "pseudolife-mcp", "excluded launcher")
+        _write(root / "native" / "postgresql" / "18.1.0-0" / "bin" / "postgres", "excluded")
         if bdir_rel is not None:
             # A backups dir the run does not write to is still excluded by name.
             _write(root / "backups" / "docker-tier.sql.gz", b"not archived")
@@ -503,9 +509,13 @@ def cases() -> list[Case]:
 B = "shim/src/cli/backup/"
 MUTANTS = [
     Mutant("backup-archives-backups-dir", "backup", B + "archive.rs",
-           'const EXCLUDE: [&str; 2] = ["embedded_pg", "backups"];',
-           'const EXCLUDE: [&str; 2] = ["embedded_pg", "embedded_pg"];',
+           '    "backups",\n    "native",',
+           '    "embedded_pg",\n    "native",',
            ("file-mode", "file-mode-out-absolute-keep-half-day")),
+    Mutant("backup-archives-password-file", "backup", B + "archive.rs",
+           '    "embedded_pg",\n    "embedded_pg.secret",\n',
+           '    "embedded_pg",\n    "embedded_pg",\n',
+           ("file-mode",)),
     Mutant("backup-rotates-dumps-in-file-mode", "backup", B + "mod.rs",
            "    if include_dumps {\n        patterns.insert(0, (DUMP_PREFIX, \".sql.gz\"));",
            "    if true {\n        patterns.insert(0, (DUMP_PREFIX, \".sql.gz\"));", ("file-mode",)),
