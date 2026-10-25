@@ -1,8 +1,11 @@
 # Self-hosted parity lane: the Rust parity shards on the dev machines
 
-Status: proposed, 2026-10-19. The first PR adds the workflow job, switched
-off. Nothing runs until the maintainer registers runners and sets one
-repository variable (see "Rollout").
+Status: comparison week started 2026-10-24. The first PR (#840) added the
+workflow job, switched off. On 2026-10-24 the maintainer settled the
+decisions below ("Decisions") and had a session set up the sibling Linux
+dev box: three runners, rootless Docker, no LAN access, and a watcher that
+keeps the repository variable on the online runners. The Windows dev VM
+has no runner; its shards stay on hosted runners.
 
 ## Problem
 
@@ -214,10 +217,135 @@ fork that edits the workflow can delete the guard in the same edit. What
 limits an approved run's reach is the dedicated account and the absence of
 credentials on the machine.
 
+## Setting up the sibling Linux dev box (scripted, 2026-10-24)
+
+`ops/selfhosted/setup-linux-runner.sh`, run as root on the box, does every
+Linux step of the manual procedure below and adds what running several
+runners and Docker safely needs. Rerunning it is safe:
+
+```bash
+setup-linux-runner.sh --runner-user <runner-user> --suite-user <suite-user> \
+  --lease full-suite@<machine> --runners 3 --version <x.y.z> --sha256 <hex>
+# then, to register, with a token from the command in the next section:
+RUNNER_TOKEN=<registration token> setup-linux-runner.sh ...same arguments...
+```
+
+What it adds to the manual procedure:
+
+- **Rootless Docker** for `<runner-user>` (decision 3). Its image store is
+  its own, so the `w1c-connection` shard's `pseudolife-pg:18` build never
+  replaces the root engine's image of that name. In an unprivileged
+  container only IDs 0–65535 are mapped, so the account's subordinate IDs
+  are 30000–64999, not `useradd`'s default range past 65535 (with which
+  `newuidmap` fails).
+- **No local network.** An nftables table, loaded by its own systemd unit,
+  rejects `<runner-user>`'s IPv4 traffic to private, link-local, CGNAT
+  (Tailscale), multicast and broadcast addresses, and all its IPv6 traffic
+  but loopback (the box has no global IPv6 route, and a LAN that gains a
+  global prefix stays covered). Jobs, and their rootless
+  containers (whose traffic leaves through that account's `slirp4netns`),
+  reach the internet but not the live bank, the hypervisor or other
+  guests. It does not use the box's `nftables.service`, whose stock
+  configuration flushes every table, the root Docker engine's included.
+  - The rules match the account's subordinate IDs as well as its own: a
+    job can map itself onto one in a user namespace that keeps the box's
+    network namespace.
+  - The box's own services are refused too: every socket another account
+    listens on when the script runs (an SSH server, a test PostgreSQL, a
+    mail relay). A wildcard listener is refused on every local address,
+    one bound to a loopback address on that address only. Rerun the
+    script after adding a service.
+  - The table outlives its unit: the unit has no stop action, because the
+    account's rootless Docker and its containers run outside the runner
+    units and would lose the filter. A rerun reloads the table in one
+    transaction. The runner units are bound to the rule's unit
+    (`BindsTo=`) and check the table is loaded before they start; the
+    account's user manager, which starts its rootless Docker, requires it
+    at boot; cron and `at` are denied to the account. Stopping
+    `nftables.service`, whose stock configuration flushes every table,
+    stops all of them; a restart of it needs a rerun of the script.
+  - DNS goes to a public resolver. A box whose resolver is on the LAN or
+    Tailscale would need that address allowed; the script refuses until
+    then.
+- **Root never runs or writes a file a job could have replaced.** The
+  runner release is downloaded and checked by root into
+  `/usr/local/lib/pseudolife-parity-runner/`. A runner is registered from a
+  fresh extraction that root owns until `config.sh` (run as root, with the
+  token in its environment, never on a command line) has finished, and is
+  then handed to the account. Runner directories live in a root-owned
+  parent (`/srv/pseudolife-parity-runners/<n>`), so a job can change a
+  runner directory's contents but cannot swap the directory for a link
+  before root removes or re-creates it. The service units are written by the script,
+  not by the runner's `svc.sh`, which root would otherwise run from the
+  account's directory. The job-started hook is root's, and `.env` and
+  `.path` are written as the account.
+- **The suite lock directory through a read-only bind mount**
+  (`/usr/local/lib/pseudolife-parity-runner/locks`), which
+  `PSEUDOLIFE_PARITY_LOCK_DIR` names. The account then needs no search
+  right on the suite user's home, where it could read any file whose path
+  it guessed; the manual procedure's `setfacl ... :x` on that home is
+  removed. The runner units require the mount's unit. What this does not give: every job runs as the
+  one account, so a job can change what later jobs run (the account's
+  tools, tool cache, `.env` files and rootless Docker). The lane runs only
+  master's code and dispatches by someone with write access, and the
+  account can reach nothing on the network that matters, so that is
+  accepted; ephemeral runners would remove it (decision 7). Two more
+  residuals of the same kind: services reached through a Unix socket
+  (rather than TCP or UDP) are outside the egress table, and a job can
+  hold a lock on the read-only suite lock file, which would hold off that
+  box's full suites until the job ends.
+- **Reruns leave running jobs alone.** A runner restarts only when its
+  `.env`, `.path` or unit changed, or it is down.
+- **Several runners per machine, each with its own `HOME`**
+  (`~<runner-user>/homes/<n>`, set in the runner's `.env`). The job-started hook
+  deletes `$HOME/pl-cli-lease-postgres-*`; with one shared `HOME`, one
+  runner's hook would delete another's running job's clusters. The hook
+  stops a postgres only when its working directory is that cluster's data
+  directory, so a PID reused by another runner's cluster is left alone.
+  The cost is per-runner caches: pip's, and the Rust toolchain the shards
+  that build install under `HOME` (about 1.5 GB each).
+- **Python 3.11 in a shared tool cache** (`AGENT_TOOLSDIRECTORY`).
+  `actions/setup-python` ships builds for Ubuntu only, so the script copies
+  a standalone CPython 3.11 build from `uv` into the cache layout
+  `setup-python` looks up first.
+
+Verified on the box on 2026-10-24 as `<runner-user>`: the hypervisor's
+address and a Tailscale address were refused, from the account and from a
+rootless container; the internet answered; the suite user's home was
+unreadable and its lock directory readable; `lease check` read the lock as
+free; the root engine's images were not visible. The three runners came
+online. Untested until the first nightly: the shards themselves on this
+box (glibc, the tool-cache Python, `docker build` under rootless Docker).
+
+## The watcher (decision 11)
+
+`ops/selfhosted/runner_watch.py` lists a machine in
+`PARITY_SELFHOSTED_RUNNERS` while one of its runners is online, and for 10
+minutes after its last one was seen online, so a runner's update restart
+does not drop it. With none online it deletes the variable, which switches
+the lane off. It writes only when the value is wrong, and an API error
+changes nothing.
+
+`ops/selfhosted/setup-runner-watch.sh` installs it as a systemd timer
+(every two minutes) under a system account of its own. It runs on a dev
+box that is not a runner, because a machine that goes down cannot take
+itself out. Its token is a fine-grained token for this repository alone,
+with "Administration: read" (listing runners needs it) and "Variables:
+read and write", stored readable by the watcher's account only:
+`setup-runner-watch.sh --token < <token file>`. Until it is stored the
+timer's runs are skipped.
+
+What it cannot do: jobs already queued for a machine that then goes down
+stay queued. GitHub has no API to cancel one job of a run, so the
+nightly's next run still cancels them ("Switching the lane on").
+
 ## Commands for the maintainer
 
-These are run by the maintainer, on each lane machine. No session runs
-them. Use the runner release currently listed at
+These are the manual steps behind the script above, and still the procedure
+for the Windows dev VM. On Linux, use the script: these steps lack its
+hardening (the egress table, the lock directory mount in place of the
+search ACL on the suite user's home, and units that root writes itself
+rather than running `svc.sh` from the account's directory). Use the runner release currently listed at
 `https://github.com/actions/runner/releases`, and check its SHA-256 against
 that page.
 
@@ -278,9 +406,10 @@ ENV
 ```
 
 `~/actions-runner/job-started.sh`, mode 0755. It removes the previous
-job's PostgreSQL data directories. Every process it stops is a postgres
-owned by this account and named by that directory's own `postmaster.pid`,
-so it can only stop a leftover of this runner's jobs.
+job's PostgreSQL data directories. Every process it stops is owned by this
+account, named by that directory's own `postmaster.pid`, and running in that
+data directory, so a reused PID is never stopped. (The script above puts
+the hook in a root-owned directory instead, where jobs cannot change it.)
 
 ```bash
 #!/usr/bin/env bash
@@ -290,8 +419,9 @@ for dir in "$HOME"/pl-cli-lease-postgres-*/; do
   [ -d "$dir" ] || continue
   while IFS= read -r pidfile; do
     pid=$(head -n 1 "$pidfile")
-    if [ -n "$pid" ] && [ "$(stat -c %U "/proc/$pid" 2>/dev/null)" = "$me" ] \
-       && tr '\0' ' ' < "/proc/$pid/cmdline" | grep -q postgres; then
+    data=$(dirname "$(readlink -f "$pidfile")")
+    if [[ "$pid" =~ ^[0-9]+$ ]] && [ "$(stat -c %U "/proc/$pid" 2>/dev/null)" = "$me" ] \
+       && [ "$(readlink "/proc/$pid/cwd" 2>/dev/null)" = "$data" ]; then
       kill -INT "$pid"; sleep 5
     fi
   done < <(find "$dir" -maxdepth 4 -name postmaster.pid)
@@ -455,7 +585,26 @@ source-mutant matrix, 74 jobs per nightly) to the dev machines. That
 frees hosted capacity without touching the PR path. The week's numbers
 should decide.
 
-## Decisions the maintainer needs to make
+## Decisions
+
+Settled by the maintainer on 2026-10-24:
+
+- **1, fork approval:** set to "Require approval for all external
+  contributors"; the endpoint reads `all_external_contributors`. A
+  `gh api -X PUT ... -f approval_policy=...` call returned success without
+  changing it; a JSON body (`--input`) did. Read the setting back after
+  changing it.
+- **2, runner account:** a dedicated unprivileged account.
+- **3, Docker:** rootless Docker for that account.
+- **4, runners per machine:** three on the sibling Linux box, whose disk
+  was grown by 30 GB for them. One check rarely keeps more than one or two
+  of its 8 cores busy; memory and disk are the limits. The Windows dev VM
+  gets none for now: its disk is the hypervisor's old spinning one, and it
+  stays free to reproduce Windows CI failures.
+- **7, persistent runners** with the job-started hook.
+- **11, offline machines:** the watcher above.
+
+Still open: 5, 6, 8, 9 and 10. The original options follow.
 
 1. **Fork PR workflow approval**: "Require approval for all external
    contributors", set and verified before any runner is registered. This
