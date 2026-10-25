@@ -514,7 +514,7 @@ MUTANTS = [
            ("file-mode", "file-mode-out-absolute-keep-half-day")),
     Mutant("backup-archives-password-file", "backup", B + "archive.rs",
            '    "embedded_pg",\n    "embedded_pg.secret",\n',
-           '    "embedded_pg",\n',
+           '    "embedded_pg",\n    "embedded_pg",\n',
            ("file-mode",)),
     Mutant("backup-rotates-dumps-in-file-mode", "backup", B + "mod.rs",
            "    if include_dumps {\n        patterns.insert(0, (DUMP_PREFIX, \".sql.gz\"));",
