@@ -361,8 +361,9 @@ def test_junk_judge_scenarios_switch_on_only_the_junk_judge(harness):
         for reply in scn["extractor"]["replies"]:
             assert reply["kind"] == "judge_junk" and "verdicts" in reply
     assert set(qj.MUTANTS) <= set(harness.MUTANTS)
-    src = (Path(__file__).resolve().parents[1] / "src" / "dream" / "queue_judges.rs").read_text(
-        encoding="utf-8")
+    dream = Path(__file__).resolve().parents[1] / "src" / "dream"
+    src = "".join((dream / f).read_text(encoding="utf-8")
+                  for f in ("queue_judges.rs", "candidates.rs"))
     assert all(f'"{m}"' in src for m in qj.MUTANTS)
 
 
@@ -386,6 +387,29 @@ def test_link_judge_scenarios_switch_on_only_the_link_judge(harness):
         assert all("edge_proposals" not in op.get("sql", "") for op in scn["seed"])
     assert {"mcp-dream-link-retype-applied", "mcp-dream-link-two-vote-same-model"} <= set(
         qj.MUTANTS)
+
+
+def test_candidate_judge_scenarios_switch_on_only_the_candidate_judge(harness):
+    import w2e_queue_judges as qj
+    names = sorted(n for n in harness.SCENARIOS if n.startswith("candidate-"))
+    assert names == ["candidate-auto", "candidate-auto-reopen", "candidate-shadow"]
+    for n in names:
+        scn = harness.SCENARIOS[n]
+        config = scn["config"]
+        assert 'candidate_judge_mode: "off"' not in config, n
+        for other in ("junk_judge_mode", "curation_judge_mode", "link_judge_mode",
+                      "judge_mode"):
+            assert f'    {other}: "off"' in config, (n, other)
+        assert scn["shared_stub"] is True and n in harness.EXTERNAL_WRITES
+        # Seeded with dreaming off: no judge runs before the first comparison.
+        assert "enabled: false" in scn["seed_config"]
+        for reply in scn["extractor"]["replies"]:
+            assert reply["kind"] == "judge_candidates" and "verdicts" in reply
+        # The first op is the apply whose watermark the judge waits for.
+        assert scn["ops"][0]["args"]["apply"] is True
+        assert scn["ops"][0]["settle"]["until"] == qj.CANDIDATES_DONE
+    assert {"mcp-dream-candidate-dismiss-unrecorded",
+            "mcp-dream-candidate-endpoint-stale"} <= set(qj.MUTANTS)
 
 
 def test_sweep_scenarios_settle_without_timing_on_their_mutants(harness):

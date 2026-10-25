@@ -313,7 +313,9 @@ META_CLOCK = {"capacity_true_drops": {"last_at"}, "active_session_pointer": {"ts
               "deep_last_apply": {"ts"},
               # the sweep's analyzer-pair reconcile cursor (a link judge
               # deciding an analyzer row moves it)
-              "analyzer_pair_reconcile_cursor": {"at"}}
+              "analyzer_pair_reconcile_cursor": {"at"},
+              # the candidate judge's watermark (its ts is the apply's)
+              "deep_candidates_judged": {"ts"}}
 # An automatic review decision record (``automatic_review_decision_v1:<n>``,
 # written by the merge judge): its clocks, and the verdict clocks of the
 # proposal snapshot it carries.
@@ -5179,6 +5181,13 @@ def normalize_state(state: dict, before: dict,
                     row[1] = {k: (_clock(x) if k in META_CLOCK[key] else x) for k, x in value.items()}
                 elif key.startswith(DECISION_RECORD_PREFIX) and isinstance(value, dict):
                     row[1] = decision_record_clocks(value)
+                elif key == "deep_candidate_verdicts" and isinstance(value, dict):
+                    # each judged pair's memo carries its judging time
+                    pairs = value.get("pairs")
+                    if isinstance(pairs, dict):
+                        row[1] = {**value, "pairs": {
+                            k: {**x, "ts": _clock(x.get("ts"))} if isinstance(x, dict) else x
+                            for k, x in pairs.items()}}
                 elif key == "episode_tombstones" and isinstance(value, dict):
                     row[1] = {k: {**x, "ended_at": _clock(x.get("ended_at"))} if isinstance(x, dict) else x
                               for k, x in value.items()}

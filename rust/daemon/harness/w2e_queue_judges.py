@@ -20,6 +20,17 @@ votes from distinct models and leaves a split pending;
 endpoint served the first model; ``link-auto-reopen`` moves a rejected
 row's evidence, so the automatic reject reopens and is judged again.
 
+The candidate judge (``candidate-*``) runs on the deep dream's seed: a
+``memory_dream deep`` apply writes the watermark it waits for, then each
+tick judges one ``judge_batch`` slice of the scan's candidates. Shadow
+memoises every verdict only; auto files a propose as a ``deep-dream-judge``
+link proposal (the slice's later rows sharing an endpoint wait for the next
+tick), dismisses a pair and records the automatic dismissal, leaves a
+propose naming another pair or under its gate, and stamps a skipped row.
+``candidate-auto-reopen`` moves a dismissed pair's evidence, so the
+dismissal reopens and the pair is judged again. The memo, the watermark and
+the decision records carry Python's fingerprints, compared as they are.
+
 The junk judge (``junk-*``): shadow records verdicts only; auto keeps (the
 proposal rejected, its keep pair closed, an automatic decision recorded),
 deletes under the evidence bar (degree at most ``junk_max_auto_degree``, at
@@ -58,12 +69,25 @@ LINK_KEYS = {"P1": "Alpha Node|Beta Store", "P7": "Beta Store|Hub",
              "P4": "Epsilon Box|Llama 26B", "P5": "Beta Node|Delta Node",
              "P6": "Epsilon Node|Alpha Service"}
 
-# The judge mutants (src/dream/queue_judges.rs), caught by the scenario
-# beside each.
-MUTANTS = ["mcp-dream-junk-no-evidence-bar",      # junk-auto
-           "mcp-dream-junk-keep-unrecorded",      # junk-auto
-           "mcp-dream-link-retype-applied",       # link-auto
-           "mcp-dream-link-two-vote-same-model"]  # link-two-vote-same-model
+# The judge mutants (src/dream/queue_judges.rs, src/dream/candidates.rs),
+# caught by the scenario beside each.
+MUTANTS = ["mcp-dream-junk-no-evidence-bar",          # junk-auto
+           "mcp-dream-junk-keep-unrecorded",          # junk-auto
+           "mcp-dream-link-retype-applied",           # link-auto
+           "mcp-dream-link-two-vote-same-model",      # link-two-vote-same-model
+           "mcp-dream-candidate-dismiss-unrecorded",  # candidate-auto
+           "mcp-dream-candidate-endpoint-stale"]      # candidate-auto
+
+# Every candidate of the current scan judged under this apply.
+CANDIDATES_DONE = (
+    "SELECT EXISTS (SELECT 1 FROM meta j JOIN meta a ON a.key = 'deep_last_apply' "
+    "WHERE j.key = 'deep_candidates_judged' AND (j.value->>'complete')::boolean "
+    "AND j.value->'ts' = a.value->'ts')")
+CANDIDATE_REOPENED = (
+    "SELECT EXISTS (SELECT 1 FROM meta WHERE key LIKE 'automatic_review_decision_v1:%' "
+    "AND value->>'queue' = 'candidate' AND value->>'state' = 'reopened') "
+    "AND EXISTS (SELECT 1 FROM meta WHERE key LIKE 'automatic_review_decision_v1:%' "
+    "AND value->>'queue' = 'candidate' AND value->>'state' = 'active')")
 
 
 def scenarios(w) -> dict:
@@ -146,6 +170,60 @@ def scenarios(w) -> dict:
                 "AND value->>'action' = 'reject' AND value->>'state' = 'active' "
                 f"AND value->'proposal'->>'rationale' = 'detector: {key.lower()}' AND {cond})")
 
+    def candidate_config(mode: str) -> str:
+        text = w.judge_config("off", second=None, extra=(
+            "    min_similarity: -1.0\n    merge_min_similarity: -1.0\n"
+            "    min_entity_mentions: 1\n    top_k_candidates: 25\n"
+            "    curation_min_similarity: -1.0\n    curation_top_k: 8\n"))
+        text = text.replace("memory:\n", "memory:\n  scopes:\n"
+                            "    exclude: [status, claude, agent, correction, noise]\n"
+                            "    rollup:\n      proj-a: family\n", 1)
+        return text.replace('candidate_judge_mode: "off"', f'candidate_judge_mode: "{mode}"')
+
+    def candidate_stub(verdicts: dict) -> dict:
+        return {"model": "judge-one", "reply_model": "judge-one",
+                "replies": [{"kind": "judge_candidates", "verdicts": verdicts}]}
+
+    def apply_then_judge() -> dict:
+        op = w.dream("deep", apply=True)
+        op["settle"] = {**w.JUDGE_SETTLE, "until": CANDIDATES_DONE}
+        return op
+
+    def candidate_scenario(mode: str, verdicts: dict, ops: list) -> dict:
+        return {"config": candidate_config(mode), "seed_config": w.deep_config(),
+                "seed": w.DEEP_SEED, "extractor": candidate_stub(verdicts),
+                "shared_stub": True, "ops": ops}
+
+    def proposed(src: str, dst: str) -> str:
+        return ("SELECT EXISTS (SELECT 1 FROM edge_proposals p "
+                "JOIN entities s ON s.id = p.src_id JOIN entities d ON d.id = p.dst_id "
+                f"WHERE p.source = 'deep-dream-judge' AND ((s.canonical = '{src}' AND "
+                f"d.canonical = '{dst}') OR (s.canonical = '{dst}' AND d.canonical = '{src}')))")
+
+    def candidate_pair(a: str, b: str) -> str:
+        a, b = sorted((a, b))
+        return ("SELECT EXISTS (SELECT 1 FROM dismissed_pairs "
+                f"WHERE a_norm = '{a}' AND b_norm = '{b}')")
+
+    candidate_decision = ("SELECT EXISTS (SELECT 1 FROM meta WHERE key LIKE "
+                          "'automatic_review_decision_v1:%' AND value->>'queue' = 'candidate' "
+                          "AND value->>'action' = 'dismiss' AND value->>'state' = 'active')")
+    memo_count = ("SELECT (SELECT COUNT(*) FROM jsonb_object_keys("
+                  "(SELECT value->'pairs' FROM meta WHERE key = 'deep_candidate_verdicts'))) "
+                  "> 0")
+    candidate_verdicts = {
+        # filed; the slice's later rows on Warehouse or Tide Gauge wait
+        "Warehouse|Tide Gauge": w.V("propose", 0.9, relation="related-to"),
+        # dismissed and recorded
+        "postgres|Kafka Broker": w.V("dismiss", 0.9),
+        # a propose naming another pair: left
+        "billing-service|Kafka Broker Cluster": {
+            **w.V("propose", 0.95, relation="uses"), "src": "Somebody Else"},
+        # under the gate: left
+        "deploy agent|Kafka Broker Cluster": w.V("propose", 0.4, relation="uses"),
+        # every other candidate gets no verdict: a stamped leave
+    }
+
     two_vote_done = ("SELECT NOT EXISTS (SELECT 1 FROM edge_proposals WHERE status = 'pending' "
                      "AND (judge_verdict IS NULL OR (judge_verdict IN ('accept', 'reject') "
                      "AND judge2_verdict IS NULL AND judge_confidence < 0.8)))")
@@ -180,6 +258,32 @@ def scenarios(w) -> dict:
         # Delta Unit gets no verdict: stamped as a zero-confidence leave
     }
     return {
+        "candidate-shadow": candidate_scenario("shadow", candidate_verdicts, [
+            w.expect(apply_then_judge(), memo_count,
+                     "SELECT NOT EXISTS (SELECT 1 FROM edge_proposals "
+                     "WHERE source = 'deep-dream-judge')",
+                     f"SELECT NOT ({candidate_pair('postgres', 'kafka-broker')[7:]})"),
+            w.review()]),
+        "candidate-auto": candidate_scenario("auto", candidate_verdicts, [
+            w.expect(apply_then_judge(), memo_count,
+                     proposed("warehouse", "tide-gauge"),
+                     candidate_pair("postgres", "kafka-broker"), candidate_decision,
+                     f"SELECT NOT ({proposed('billing-service', 'kafka-broker-cluster')[7:]})",
+                     f"SELECT NOT ({proposed('deploy-agent', 'kafka-broker-cluster')[7:]})"),
+            w.review()]),
+        # The dismissed pair's postgres gains an edge: the dismissal's
+        # evidence moves, it reopens (the pair removed, the record retired)
+        # and the judge dismisses it again.
+        "candidate-auto-reopen": candidate_scenario("auto", candidate_verdicts, [
+            w.expect(apply_then_judge(), candidate_pair("postgres", "kafka-broker"),
+                     candidate_decision),
+            w.expect({**w.external(
+                "INSERT INTO edges (src_id, relation, dst_id, confidence, origin, "
+                f"asserted_at) VALUES ({w.eid('postgres')}, 'uses', {w.eid('ocean')}, "
+                "0.8, NULL, 1.0)"),
+                "settle": {**w.JUDGE_SETTLE, "until": CANDIDATE_REOPENED}},
+                candidate_pair("postgres", "kafka-broker"), candidate_decision),
+            w.review()]),
         "link-shadow": w.judge_scenario(
             link_config("shadow", "shadow"),
             link_stub({"P1": V("accept", 0.95), "P2": V("reject", 0.7, note="weak")},
