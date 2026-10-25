@@ -248,11 +248,13 @@ What it adds to the manual procedure:
   Docker and containers), removes the old Docker storage as the account
   inside its own user namespace while the old range is still mapped, and
   refuses to go on while any process of the account or of its old range
-  remains. Every range the account ever had stays in the egress table
-  (recorded in `/usr/local/lib/pseudolife-parity-runner/retired-subids`),
-  because a file a job left owned by an old ID, such as a setuid program,
-  would still run as that ID. The account's user manager starts only once
-  the reloaded table names the new range.
+  remains. Every range the account has run anything under since this
+  version stays in the egress table (recorded in
+  `/usr/local/lib/pseudolife-parity-runner/retired-subids`), because a file
+  a job left owned by an old ID, such as a setuid program, would still run
+  as that ID. The table naming the new range is loaded before the account's
+  sub-ID lines change, so anything that starts as the account afterwards,
+  even after a run that stopped partway, is filtered.
 - **No local network.** An nftables table, loaded by its own systemd unit,
   rejects `<runner-user>`'s IPv4 traffic to private, link-local, CGNAT
   (Tailscale), multicast and broadcast addresses, and all its IPv6 traffic
@@ -283,7 +285,9 @@ What it adds to the manual procedure:
     transaction. The runner units are bound to the rule's unit
     (`BindsTo=`) and check the table is loaded before they start; the
     account's user manager, which starts its rootless Docker, requires it
-    at boot; cron and `at` are denied to the account. Stopping
+    at boot; cron and `at` are denied to the account, and sshd refuses
+    it (a locked password does not stop a key login under PAM, and a job
+    can write the account's `authorized_keys`). Stopping
     `nftables.service`, whose stock configuration flushes every table,
     stops all of them; a restart of it restarts them with the table loaded.
   - DNS goes to a public resolver. A box whose resolver is on the LAN or

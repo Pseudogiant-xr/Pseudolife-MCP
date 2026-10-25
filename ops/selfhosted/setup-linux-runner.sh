@@ -114,14 +114,37 @@ chmod 0700 "$runner_home"
 for deny in /etc/cron.deny /etc/at.deny; do
   grep -qx "$runner_user" "$deny" 2>/dev/null || echo "$runner_user" >> "$deny"
 done
+# A locked password does not stop a key login under PAM, and a job can
+# write the account's authorized_keys, so sshd refuses the account outright.
+if [ -d /etc/ssh/sshd_config.d ]; then
+  sshd_conf=/etc/ssh/sshd_config.d/pseudolife-parity-runner.conf
+  if [ "$(cat "$sshd_conf" 2>/dev/null)" != "DenyUsers $runner_user" ]; then
+    echo "DenyUsers $runner_user" > "$sshd_conf"
+    # sshd -t needs its privilege separation directory, which exists only
+    # while the service runs.
+    install -d -m 0755 /run/sshd
+    if ! sshd -t; then
+      rm -f "$sshd_conf"
+      echo "sshd's configuration does not check with $sshd_conf added; it is removed again" >&2
+      exit 1
+    fi
+    # A restart, not a reload: Debian's sshd is socket-activated, and on a
+    # reload it re-executes, cannot bind the socket's port and exits. Open
+    # sessions are separate processes and survive the restart; a service the
+    # socket has not started yet reads the file when it does.
+    for unit in ssh.service sshd.service; do
+      systemctl try-restart "$unit" 2>/dev/null || true
+    done
+  fi
+fi
 if awk -F: -v s=$SUBID_START -v e=$((SUBID_START + SUBID_COUNT)) '$3>=s && $3<e {found=1} END {exit !found}' /etc/passwd; then
   echo "an account's UID falls in the subordinate range $SUBID_START+$SUBID_COUNT" >&2; exit 1
 fi
 # useradd's default range may not be this one, so the account's range is
 # replaced rather than kept.
 for file in /etc/subuid /etc/subgid; do
-  if awk -F: -v me="$runner_user" -v s=$SUBID_START -v e=$((SUBID_START + SUBID_COUNT)) \
-       '$1 != me && $2 < e && $2 + $3 > s {found=1} END {exit !found}' "$file"; then
+  if awk -F: -v me="$runner_user" -v uid="$runner_uid" -v s=$SUBID_START -v e=$((SUBID_START + SUBID_COUNT)) \
+       '$1 != me && $1 != uid && $2 < e && $2 + $3 > s {found=1} END {exit !found}' "$file"; then
     echo "another account's range in $file overlaps $SUBID_START+$SUBID_COUNT" >&2; exit 1
   fi
 done
@@ -138,10 +161,14 @@ old_lines=$({ grep -hE "^($runner_user|$runner_uid):" /etc/subuid /etc/subgid 2>
 if [ -n "$old_lines" ] && [ "$old_lines" != "$want $want" ]; then
   echo "the account's subordinate IDs change ($old_lines); stopping its runners and processes first"
   old_range=$(awk -F: -v me="$runner_user" -v uid="$runner_uid" '$1 == me || $1 == uid {print $2, $3}' /etc/subuid /etc/subgid | sort -u)
-  printf '%s\n' "$old_range" >> "$retired"
-  sort -u -o "$retired" "$retired"
-  systemctl stop "pseudolife-$prefix-*.service"
   docker_data="$runner_home/.local/share/docker"
+  # A range nothing ran under (useradd's default, on a first install) is
+  # not kept, so a later account given it is not filtered too.
+  if [ -e "$docker_data" ] || [ -L "$docker_data" ] || compgen -G "$RUNNERS/*/.runner" >/dev/null; then
+    printf '%s\n' "$old_range" >> "$retired"
+    sort -u -o "$retired" "$retired"
+  fi
+  systemctl stop "pseudolife-$prefix-*.service"
   if [ -e "$docker_data" ] || [ -L "$docker_data" ]; then
     systemctl start "user@$runner_uid.service"
     for _ in $(seq 30); do [ -S "/run/user/$runner_uid/bus" ] && break; sleep 1; done
@@ -169,48 +196,6 @@ if [ -n "$old_lines" ] && [ "$old_lines" != "$want $want" ]; then
     exit 1
   fi
 fi
-for file in /etc/subuid /etc/subgid; do
-  sed -i -E "/^($runner_user|$runner_uid):/d" "$file"
-  echo "$want" >> "$file"
-done
-
-echo "== suite lock directory"
-suite_home=$(getent passwd "$suite_user" | cut -d: -f6)
-[[ "$suite_home" =~ ^/[A-Za-z0-9/._-]+$ ]] || { echo "the suite user's home path has characters this script does not quote" >&2; exit 1; }
-locks="$suite_home/.pseudolife-mcp/locks"
-runuser -u "$suite_user" -- mkdir -p "$locks"
-[ -s "$locks/full-suite.lease" ] || runuser -u "$suite_user" -- sh -c "echo '$lease' > '$locks/full-suite.lease'"
-named=$(head -n 1 "$locks/full-suite.lease")
-[ "$named" = "$lease" ] || echo "note: $locks/full-suite.lease names $named, not $lease; the runners use $lease"
-[ -e "$locks/full-suite.lock" ] || runuser -u "$suite_user" -- touch "$locks/full-suite.lock"
-# The account reads the lock directory through a read-only bind mount, so it
-# needs no search right on the suite user's home, where it could otherwise
-# read any file whose path it guessed.
-setfacl -x "u:$runner_user" "$suite_home" "$suite_home/.pseudolife-mcp" 2>/dev/null || true
-setfacl -m "u:$runner_user:rx" "$locks"
-setfacl -d -m "u:$runner_user:r" "$locks"
-find "$locks" -maxdepth 1 -type f -exec setfacl -m "u:$runner_user:r" {} +
-runner_locks=$LIB/locks
-install -d -m 0755 "$LIB"
-mountpoint -q "$runner_locks" || install -d -m 0755 "$runner_locks"
-cat > /etc/systemd/system/pseudolife-parity-locks.service <<UNIT
-[Unit]
-Description=The suite lock directory, read-only, for the parity runners
-
-[Service]
-Type=oneshot
-RemainAfterExit=yes
-ExecStart=/bin/sh -c 'mountpoint -q $runner_locks || { mount --bind $locks $runner_locks && mount -o remount,bind,ro $runner_locks; }'
-ExecStop=/bin/umount $runner_locks
-
-[Install]
-WantedBy=multi-user.target
-UNIT
-systemctl daemon-reload
-systemctl enable pseudolife-parity-locks.service >/dev/null 2>&1
-systemctl start pseudolife-parity-locks.service
-[ -e "$runner_locks/full-suite.lock" ] || { echo "the lock directory bind mount failed" >&2; exit 1; }
-
 echo "== egress: no LAN for $runner_user"
 while read -r keyword server _ || [ -n "${keyword:-}" ]; do
   [ "$keyword" = nameserver ] || continue
@@ -266,7 +251,7 @@ done
 # guard (tests/test_release_ux.py) flags private addresses, and these
 # generic blocks are none.
 private="10.0"".0.0/8, 172.16"".0.0/12, 192.168"".0.0/16"
-cat > /etc/pseudolife-runner-egress.nft <<NFT
+cat > /etc/pseudolife-runner-egress.nft.new <<NFT
 table inet pseudolife_runner_egress
 delete table inet pseudolife_runner_egress
 table inet pseudolife_runner_egress {
@@ -277,7 +262,10 @@ table inet pseudolife_runner_egress {
 $local_rules  }
 }
 NFT
-nft -c -f /etc/pseudolife-runner-egress.nft
+# Checked as a separate file and renamed into place, because /etc/nftables.conf
+# includes the live one and a reload may read it at any moment.
+nft -c -f /etc/pseudolife-runner-egress.nft.new
+mv /etc/pseudolife-runner-egress.nft.new /etc/pseudolife-runner-egress.nft
 # The stock /etc/nftables.conf starts with "flush ruleset", so a reload of
 # nftables.service would drop the table until this unit reloaded it after.
 # Including the table there loads it in the same transaction as the flush,
@@ -339,9 +327,54 @@ UNIT
 systemctl daemon-reload
 systemctl enable pseudolife-runner-egress.service >/dev/null 2>&1
 systemctl reload-or-restart pseudolife-runner-egress.service
-# The account's user manager starts only now, once the table names the
-# account's current range: after a range change, nothing of the account's
-# runs until the new range is filtered.
+
+# Only now, with the table above naming the new range, may the account's
+# lines name it: whatever starts as the account afterwards, even after a run
+# that stopped partway, is filtered.
+for file in /etc/subuid /etc/subgid; do
+  sed -i -E "/^($runner_user|$runner_uid):/d" "$file"
+  echo "$want" >> "$file"
+done
+
+echo "== suite lock directory"
+suite_home=$(getent passwd "$suite_user" | cut -d: -f6)
+[[ "$suite_home" =~ ^/[A-Za-z0-9/._-]+$ ]] || { echo "the suite user's home path has characters this script does not quote" >&2; exit 1; }
+locks="$suite_home/.pseudolife-mcp/locks"
+runuser -u "$suite_user" -- mkdir -p "$locks"
+[ -s "$locks/full-suite.lease" ] || runuser -u "$suite_user" -- sh -c "echo '$lease' > '$locks/full-suite.lease'"
+named=$(head -n 1 "$locks/full-suite.lease")
+[ "$named" = "$lease" ] || echo "note: $locks/full-suite.lease names $named, not $lease; the runners use $lease"
+[ -e "$locks/full-suite.lock" ] || runuser -u "$suite_user" -- touch "$locks/full-suite.lock"
+# The account reads the lock directory through a read-only bind mount, so it
+# needs no search right on the suite user's home, where it could otherwise
+# read any file whose path it guessed.
+setfacl -x "u:$runner_user" "$suite_home" "$suite_home/.pseudolife-mcp" 2>/dev/null || true
+setfacl -m "u:$runner_user:rx" "$locks"
+setfacl -d -m "u:$runner_user:r" "$locks"
+find "$locks" -maxdepth 1 -type f -exec setfacl -m "u:$runner_user:r" {} +
+runner_locks=$LIB/locks
+install -d -m 0755 "$LIB"
+mountpoint -q "$runner_locks" || install -d -m 0755 "$runner_locks"
+cat > /etc/systemd/system/pseudolife-parity-locks.service <<UNIT
+[Unit]
+Description=The suite lock directory, read-only, for the parity runners
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/sh -c 'mountpoint -q $runner_locks || { mount --bind $locks $runner_locks && mount -o remount,bind,ro $runner_locks; }'
+ExecStop=/bin/umount $runner_locks
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+systemctl daemon-reload
+systemctl enable pseudolife-parity-locks.service >/dev/null 2>&1
+systemctl start pseudolife-parity-locks.service
+[ -e "$runner_locks/full-suite.lock" ] || { echo "the lock directory bind mount failed" >&2; exit 1; }
+
+# The account's user manager starts only after the egress table and the
+# account's sub-ID lines agree.
 loginctl enable-linger "$runner_user"
 systemctl start "user@$runner_uid.service"
 for _ in $(seq 30); do [ -S "/run/user/$runner_uid/bus" ] && break; sleep 1; done
