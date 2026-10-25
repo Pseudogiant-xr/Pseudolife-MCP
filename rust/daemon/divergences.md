@@ -474,7 +474,8 @@ as Python does (`documents.rs`): pathlib's parse of the path, the
 missing-file refusal, `extract_text`'s branches and their error classes,
 UTF-8 decoding with replacement and text-mode newlines, the chunk windows
 and their md5 ids, the upsert that keeps a chunk's first `created_at`, and
-the exact cosine search ordered by distance then chunk id. The unit goldens
+the exact cosine search ordered by distance then chunk id, a stored 0.0
+ingest time served as the clock at serving (`MemoryEntry.__post_init__`). The unit goldens
 come from the Python functions (`harness/gen_document_goldens.py`); the
 answers and the table are compared by `harness/w2e.py`'s `documents-*`
 scenarios (`harness/w2e_documents.py`).

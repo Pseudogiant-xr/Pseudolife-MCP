@@ -391,7 +391,12 @@ pub(crate) async fn nearest(
         .map(|r| Nearest {
             text: r.get(0),
             source: r.get(1),
-            ingested_at: r.get(2),
+            // `MemoryEntry.__post_init__`: a 0.0 timestamp (the chromadb
+            // import's default for a chunk without one) is the clock now.
+            ingested_at: match r.get::<_, f64>(2) {
+                t if t == 0.0 && !crate::mutants::active("document-zero-clock-kept") => now(),
+                t => t,
+            },
             distance: r.get(3),
         })
         .collect())

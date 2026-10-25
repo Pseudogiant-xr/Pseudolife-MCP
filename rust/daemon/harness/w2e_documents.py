@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import functools
 import tempfile
+import time
 from pathlib import Path
 
 GUIDE = (
@@ -118,15 +119,20 @@ def search(query: str, **kw) -> dict:
 
 def answer_tokens(answer, ranks: dict[float, str]):
     """A ``document_search`` answer with each entry's ``timestamp`` as the
-    rank token of the ``ingested_at`` it equals (``w2e.clock_ranks``)."""
+    rank token of the ``ingested_at`` it equals (``w2e.clock_ranks``). A
+    reference hit's timestamp matching no ingest is the clock at serving (a
+    stored 0.0 becomes ``time.time()``): within a day of now it is
+    ``<served-now>``, each side's own moment."""
     if not isinstance(answer, dict):
         return answer
     value = answer.get("value")
     if isinstance(value, dict) and isinstance(value.get("entries"), list):
         for e in value["entries"]:
-            if isinstance(e, dict) and isinstance(e.get("timestamp"), float) \
-                    and e["timestamp"] in ranks:
-                e["timestamp"] = ranks[e["timestamp"]]
+            if isinstance(e, dict) and isinstance(e.get("timestamp"), float):
+                if e["timestamp"] in ranks:
+                    e["timestamp"] = ranks[e["timestamp"]]
+                elif e.get("bank") == "reference" and abs(time.time() - e["timestamp"]) < 86400:
+                    e["timestamp"] = "<served-now>"
     return answer
 
 
@@ -161,7 +167,7 @@ LIVE_ONLY = ("live mode only: golden replay compares boot-time bank rows that "
 # scenarios.
 MUTANTS = ["document-raw-newlines", "document-strip-rust-whitespace", "document-no-overlap",
            "document-search-no-id-order", "document-upsert-keeps-old",
-           "document-upsert-clock-only"]
+           "document-upsert-clock-only", "document-zero-clock-kept"]
 
 
 SCENARIOS: dict[str, dict] = {
@@ -219,6 +225,20 @@ SCENARIOS: dict[str, dict] = {
             search("watering tomato seedlings", top_k=2),
             ingest("@DOCS@/separators.txt"),
             search("information separators", top_k=1),
+        ],
+    },
+    # A chunk whose stored ingested_at is 0.0 (Python's chromadb import writes
+    # that for a chunk without a timestamp) serves the clock at serving, as
+    # `MemoryEntry.__post_init__` sets it.
+    "documents-zero-clock": {
+        "config": None,
+        "seed": [
+            ingest("@DOCS@/garden.txt"),
+            {"op": "sql", "sql": "UPDATE reference_chunks SET ingested_at = 0",
+             "after_stop": True},
+        ],
+        "ops": [
+            search("watering tomato seedlings", top_k=1),
         ],
     },
     # Configured chunking: the memory.reference sizes.
