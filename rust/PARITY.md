@@ -273,9 +273,12 @@ dream batch: graph store writes (task M), graph reads with recall's graph
 expansion (task N), graph review (task O), and the dream with the deep-dream
 edge pass and graph-insight refresh (task P). Recall's graph expansion is
 served over MCP since task N2 ("memory_recall over MCP" in
-`rust/daemon/spec.md`; `GET /api/recall` is not yet served);
-the deep-dream edge pass stays `deferred` until task P lands. The decision
-of 2026-10-12 and its evidence follow as history.
+`rust/daemon/spec.md`; `GET /api/recall` is not yet served). The deep-dream
+edge pass is served with the deep dream (edge re-scoring, hard-violation
+cleanup and the Step C link proposals it files: "memory_dream deep" in
+`rust/daemon/spec.md`), and the graph-insight refresh with every dream run
+under Option B (GI1-GI6 there, a structurally compared declared divergence).
+The decision of 2026-10-12 and its evidence follow as history.
 
 **History.** Maintainer decision, 2026-10-12 (reaffirmed 2026-10-16): two
 graph-traversal surfaces are not ported. The evidence is the completed graph-assisted versus

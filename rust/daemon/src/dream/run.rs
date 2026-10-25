@@ -16,10 +16,9 @@
 //! The post-consolidation stages run in Python's order: on an empty pull
 //! outcome inference, session digests and lesson synthesis
 //! (`stages.rs`, `lessons.rs`); after a commit outcome inference and lesson
-//! synthesis (whose tallies join the run row). The graph-insight refresh is
-//! not ported: while `memory.graph_insight.enabled` is on the whole action
-//! refuses with `not_implemented` naming it; with it off Python returns a
-//! fixed `disabled` answer, reproduced here.
+//! synthesis (whose tallies join the run row). Both exits then refresh the
+//! graph insight (`graph_insight.rs`) where Python does: before the
+//! quarantine retype, and before the source backfill.
 
 use std::collections::{BTreeSet, HashMap};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -29,7 +28,7 @@ use serde_json::{Map, Value, json};
 
 use super::extractor::{Claim, Event, ExtractFailure, Extracted, Extractor};
 use super::gates;
-use crate::config::{Config, DreamConfig};
+use crate::config::DreamConfig;
 use crate::episodes::Caller;
 use crate::fact_set::{CortexWriteArgs, LabelArg};
 use crate::mcp::dispatch::ToolError;
@@ -240,26 +239,6 @@ impl StallTracker {
 // ---------------------------------------------------------------------------
 // Stages
 // ---------------------------------------------------------------------------
-
-/// The `not_implemented` refusal while the one stage this port does not run
-/// (the graph-insight refresh) is switched on, or None.
-pub fn refusal(config: &Config) -> Option<ToolError> {
-    if !config.memory.graph_insight_enabled {
-        return None;
-    }
-    let stage = "_safe_refresh_graph_insight (memory.graph_insight.enabled)";
-    Some(ToolError::refused(
-        "not_implemented",
-        Some(&format!(
-            "memory_dream run: the {stage} stage is not yet served by the Rust daemon; switch it off to run the consolidation pass"
-        )),
-    ))
-}
-
-/// `_safe_refresh_graph_insight` with `memory.graph_insight.enabled` off.
-fn graph_insight_disabled() -> Value {
-    json!({"refreshed": false, "reason": "disabled"})
-}
 
 // ---------------------------------------------------------------------------
 // Hints
@@ -1635,6 +1614,7 @@ async fn run_locked(
         let digests = super::stages::generate_digests_stage(svc, ready, extractor).await?;
         let lessons =
             super::lessons::synthesize_lessons(svc, ready, caller, writer, extractor).await?;
+        let graph_insight = crate::graph_insight::safe_refresh(svc, ready).await;
         let retyped = super::relations::retype_quarantined_links(
             svc,
             ready,
@@ -1668,7 +1648,7 @@ async fn run_locked(
         m.insert("lessons".into(), lessons);
         m.insert("outcome_inference".into(), outcome_inference);
         m.insert("digests".into(), digests);
-        m.insert("graph_insight".into(), graph_insight_disabled());
+        m.insert("graph_insight".into(), graph_insight);
         m.insert("retyped".into(), retyped);
         return Ok(m);
     }
@@ -1937,6 +1917,7 @@ async fn run_locked(
     {
         eprintln!("dream: lesson-tally update failed ({e:?})");
     }
+    let graph_insight = crate::graph_insight::safe_refresh(svc, ready).await;
     let sources_attributed = super::relations::graph_backfill_sources(svc, ready).await?;
     let retyped = super::relations::retype_quarantined_links(
         svc,
@@ -1961,7 +1942,7 @@ async fn run_locked(
     );
     m.insert("lessons".into(), lessons);
     m.insert("outcome_inference".into(), outcome_inference);
-    m.insert("graph_insight".into(), graph_insight_disabled());
+    m.insert("graph_insight".into(), graph_insight);
     counters_tail(&mut m, c, true);
     m.insert("constraint_verbatim".into(), json!(c.carried.len()));
     m.insert("constraint_misses".into(), Value::Array(constraint_misses));
@@ -2036,19 +2017,5 @@ mod tests {
             t.last_error.as_deref(),
             Some("every pulled memory failed extraction")
         );
-    }
-
-    #[test]
-    fn only_the_graph_insight_stage_refuses() {
-        let mut c = Config::default();
-        let text = |c: &Config| match refusal(c) {
-            Some(ToolError::Refused { detail, .. }) => detail.unwrap_or_default(),
-            _ => String::new(),
-        };
-        assert!(text(&c).contains("_safe_refresh_graph_insight"));
-        c.dream.digest_enabled = true;
-        assert!(text(&c).contains("_safe_refresh_graph_insight"));
-        c.memory.graph_insight_enabled = false;
-        assert!(refusal(&c).is_none());
     }
 }
