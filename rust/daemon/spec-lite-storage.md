@@ -109,7 +109,50 @@ provisional until its platform behaviour is demonstrated).
 
 ## Decisions for the maintainer
 
-None of these is decided here.
+**Decided 2026-10-25 by the maintainer**, adopting the recommendations
+(recorded in the memory bank as the cortex slot
+`rust-cutover-B9-lite-decisions / maintainer decision`):
+
+1. Keep pg0's artifact sources (theseus-rs PostgreSQL, `pgvector_compiled`)
+   with in-tree sha256 pins; our own CI builds can come later.
+2. Pinned download at install (the installers and release-mode `update` do
+   it), with a first-start fallback, the D4 pattern; not bundled.
+3. Exactly PostgreSQL 18.1.0, the EnterpriseDB-derived build pg0 runs
+   today, during the transition; upgrade after the cutover.
+4. The Rust daemon writes a current `~/.pg0/instances/<name>/instance.json`
+   so Python tools and a rolled-back Python daemon can attach.
+5. A Pseudolife-owned runtime install dir, not `~/.pg0/installation`.
+6. The `.pt` import stays in Python; the Rust daemon refuses a data dir
+   holding un-imported `.pt` state and names the command that imports it.
+7. fsync on: start without `-F`.
+8. Replace `postgres`/`postgres` with a random per-cluster secret: an
+   owner-only password file in the data dir, written at initdb, a one-time
+   `ALTER ROLE` for existing banks, `scram-sha-256`. It lands as a Python
+   fix first (D10 admits fixes), then in Rust, with decision 4's record
+   carrying whatever the Python side needs.
+
+How decision 8 is carried out on both sides (the Python fix is the oracle,
+so it fixes the format first):
+
+- The secret is `<data_dir>/embedded_pg.secret`, beside the pgdata like the
+  lock, written owner-only before the first byte (Python's
+  `credentials._write_token_file`, which sets the Windows ACL), 64
+  lowercase hex characters from a CSPRNG.
+- A new bank is initialized with that secret.
+- An existing bank is migrated under the first-boot lock with the server
+  down, using `pg_hba.conf` itself as the progress marker: set the
+  loopback methods to `trust`, start, `ALTER ROLE postgres PASSWORD
+  <secret>`, set the methods to `scram-sha-256` and reload. A crash at any
+  point leaves either `trust` (the next start redoes the steps, which are
+  idempotent) or `scram-sha-256` (done). The `trust` window lasts one
+  start and is no weaker than today's public password.
+- A bank whose `pg_hba.conf` already says `scram-sha-256` starts with the
+  secret and nothing else changes.
+- pg0 is given the secret as its password, so pg0's own database check
+  and its `instance.json` (decision 4) carry it; the Rust side writes the
+  same record.
+
+The questions as they were put to the maintainer, kept for the reasoning:
 
 1. **Artifact chain.** The pgvector build pg0 bundles comes from a
    single-maintainer repository (`nicoloboschi/pgvector_compiled`, release
@@ -197,24 +240,27 @@ cases run there or stay recorded as unrun:
 ## How the work splits into PRs
 
 1. This note.
-2. The embedded-PostgreSQL module: resolve the per-user data dir, both
+2. The Python fix for decision 8 (the per-cluster secret and its
+   migration), landing before the Rust side reads the secret.
+3. The embedded-PostgreSQL module: resolve the per-user data dir, both
    guards, the first-boot lock, start or attach through `postmaster.pid`,
-   pg0's server settings and port policy, database creation, and stop only
-   what this process started. It takes the runtime dir as an input, so it
-   does not wait on decisions 2, 3 and 5; provisioning and the Linux
-   runtime libraries come with decision 2.
-3. The daemon's startup resolution: DSN, then lite, then refuse.
+   pg0's server settings (fsync on, decision 7) and port policy, the
+   per-cluster secret, database creation, and stop only what this process
+   started. It takes the runtime dir as an input; provisioning the pinned
+   runtime into the Pseudolife-owned dir (decisions 2, 3 and 5) and
+   writing pg0's record (decision 4) follow in their own PRs.
+4. The daemon's startup resolution: DSN, then lite, then refuse.
    `PSEUDOLIFE_MCP_STORAGE=files` and the in-process mode are refused with a
    message naming their replacement; an unrecognized value is refused as
    Python refuses it. When lite engages, the data-dir handoff Python does by
    exporting `PSEUDOLIFE_MCP_DATA_DIR` applies too: `config.rs`
    `config_path` otherwise falls back to `<cwd>/data`, which would put
    `config.yaml` and the moved-bank markers somewhere other than the bank.
-4. The lite halves of CLI-BACKUP-LITE, CLI-TRANSFER-LITE,
+5. The lite halves of CLI-BACKUP-LITE, CLI-TRANSFER-LITE,
    CLI-AUDIT-TRANSPORT, CLI-PAIRING-CONTAINER and CLI-MAINTAINER-TRANSPORT
    and the lease's `phase4-embedded-pg-deferred` refusal, replacing the
    shim's "needs native embedded_pg" deferrals (`rust/shim/src/pg/resolution.rs`
    and the per-mode modules).
-5. The deprecation notes for `embedded` mode and `.pt` file mode (release
+6. The deprecation notes for `embedded` mode and `.pt` file mode (release
    note and guides; D10 allows no new Python surface, so no Python warning
    is added).
