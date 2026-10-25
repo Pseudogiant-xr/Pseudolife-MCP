@@ -55,7 +55,7 @@ def wait_db_ok(daemon, port: int, timeout: float = 180.0) -> dict:
     deadline = time.monotonic() + timeout
     last = None
     while time.monotonic() < deadline:
-        assert daemon.proc.poll() is None, daemon.log.read_text(errors="replace")[-3000:]
+        assert daemon.proc.poll() is None, daemon.log.read_text(encoding="utf-8", errors="replace")[-3000:]
         try:
             last = health(port)
             if last.get("db") == "ok":
@@ -64,7 +64,7 @@ def wait_db_ok(daemon, port: int, timeout: float = 180.0) -> dict:
             pass
         time.sleep(0.5)
     raise AssertionError(f"no db ok within {timeout}s: {last}\n"
-                         + daemon.log.read_text(errors="replace")[-3000:])
+                         + daemon.log.read_text(encoding="utf-8", errors="replace")[-3000:])
 
 
 def stop_server(base: Path) -> None:
@@ -96,7 +96,7 @@ def test_lite_provisions_starts_attaches_and_stops(tmp_path):
     try:
         reply = wait_db_ok(first, port)
         assert reply["storage"] == "postgres"
-        log = first.log.read_text(errors="replace")
+        log = first.log.read_text(encoding="utf-8", errors="replace")
         assert f"storage: embedded postgres (lite tier) — data dir {data_dir(tmp_path)}" in log
         assert (data_dir(tmp_path) / "embedded_pg" / "PG_VERSION").read_text().strip() == "18"
         assert (data_dir(tmp_path) / "embedded_pg.secret").is_file()
@@ -110,7 +110,7 @@ def test_lite_provisions_starts_attaches_and_stops(tmp_path):
     second = run.daemons.rust_daemon(Path(BIN), home, port, env).launch()
     try:
         wait_db_ok(second, port)
-        assert "installing" not in second.log.read_text(errors="replace")
+        assert "installing" not in second.log.read_text(encoding="utf-8", errors="replace")
     finally:
         second.stop()
         stop_server(tmp_path)
