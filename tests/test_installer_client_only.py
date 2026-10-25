@@ -1358,6 +1358,8 @@ def test_preflight_fails_without_the_buildx_plugin_the_image_build_needs(bash, t
     shell = _Shell(bash, tmp_path)
     _stub(shell.bin / "docker",
           'case "$*" in "buildx version") exit "$FAKE_BUILDX_EXIT" ;; esac\nexit 0\n')
+    # The fix line asserted below is the Linux one, whatever this host runs.
+    _stub(shell.bin / "uname", "printf 'Linux\\n'\n")
     script = (ROOT / "ops" / "preflight.sh").read_text(encoding="utf-8")
     proc = shell.run("set -- --client generic\n" + script,
                      extra_env={"FAKE_BUILDX_EXIT": str(buildx_exit)})

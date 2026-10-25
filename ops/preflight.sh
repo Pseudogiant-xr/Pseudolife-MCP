@@ -71,7 +71,7 @@ if command -v docker >/dev/null 2>&1 && docker buildx version >/dev/null 2>&1; t
     ok "docker buildx (BuildKit image builds)"
 else
     case "$(uname -s)" in
-        Darwin) fix="Docker Desktop bundles it - update Docker Desktop" ;;
+        Darwin) fix="Docker Desktop bundles it - update Docker Desktop; colima or Homebrew docker: brew install docker-buildx, then link it into ~/.docker/cli-plugins as its caveat says" ;;
         *)      fix="Arch: sudo pacman -S docker-buildx; Debian/Ubuntu with Docker's repo: sudo apt install docker-buildx-plugin; Fedora: sudo dnf install docker-buildx-plugin; other: https://github.com/docker/buildx#installing" ;;
     esac
     fail "docker buildx plugin missing - the image build needs BuildKit for its RUN --mount caches" "$fix"
