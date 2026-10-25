@@ -5236,6 +5236,11 @@ def normalize_state(state: dict, before: dict,
             for row in t["rows"]:
                 if isinstance(row[ri], dict) and "superseded_at" in row[ri]:
                     row[ri] = {**row[ri], "superseded_at": _clock(row[ri]["superseded_at"])}
+                # a curated retirement signs the retired record, its
+                # superseded_at included
+                if isinstance(row[ri], dict) and "_curation_retired_fingerprint" in row[ri]:
+                    row[ri] = {**row[ri], "_curation_retired_fingerprint": _bank_hash(
+                        row[ri]["_curation_retired_fingerprint"])}
                 # a synthesis lineage audit names its lesson by asserted_at
                 if isinstance(row[ri], dict) and "asserted_at" in row[ri]:
                     row[ri] = {**row[ri], "asserted_at": _ordered_clock(

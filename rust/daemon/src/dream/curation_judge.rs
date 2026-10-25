@@ -9,9 +9,11 @@
 //! 144-720), and the request and reply parsing (`memory/dream.py`
 //! `format_slot_pair`, `judge_slot_pairs`).
 //!
-//! In `auto`, a duplicate `can_auto_fold` allows is recorded as a pending
-//! action and not applied: the safe-class fold (`apply_slot_duplicate`) is
-//! not ported yet (task P3b-4b, `divergences.md`).
+//! In `auto`, a duplicate `can_auto_fold` allows is folded
+//! (`apply_slot_duplicate`, 1246-1344, with `_stage_lesson` /
+//! `_stage_world`, `_audit_snapshot` and the commit reconciliation of
+//! `_recovery_state`, 794-997): the loser retired with its audit, the
+//! survivor rewritten unchanged in the same transaction.
 
 #![allow(clippy::result_large_err)]
 
@@ -30,8 +32,8 @@ use super::review_judgments::{self as rj, Row, internal, now, vs};
 use crate::config::Config;
 use crate::graph_review_tools::actions::{dismiss_pair_body, in_txn, reads};
 use crate::graph_review_tools::slots::{
-    Store, evidence_fingerprint, lesson_dict, slot_key_text, snapshot_record, targeted_snapshots,
-    world_dict,
+    Staged, Store, evidence_fingerprint, latest_decision, lesson_dict, slot_key_text,
+    snapshot_record, targeted_snapshots, world_dict,
 };
 use crate::mcp::dispatch::ToolError;
 use crate::service::{Ready, Service};
@@ -916,6 +918,220 @@ async fn refresh_auto_dismissals(
     Ok(n)
 }
 
+// ── the safe-class fold ──────────────────────────────────────────────────
+
+/// `_audit_snapshot(store, retired, original_fingerprint, evidence, keep)`:
+/// the retired loser's record for its `store_decisions` row, with the
+/// curation evidence a restore needs.
+fn audit_snapshot(
+    store: Store,
+    mut snap: Map<String, Value>,
+    loser_embedding: Option<Vec<f32>>,
+    original_fingerprint: &str,
+    ev: &PairEvidence,
+    keep: &str,
+) -> Value {
+    let retired_fingerprint = evidence_fingerprint(&snap);
+    snap.insert(
+        "_curation_evidence_fingerprint".into(),
+        json!(original_fingerprint),
+    );
+    snap.insert(
+        "_curation_retired_fingerprint".into(),
+        json!(retired_fingerprint),
+    );
+    let embedding = loser_embedding.map_or(Value::Null, |e| {
+        Value::Array(e.into_iter().map(|x| json!(f64::from(x))).collect())
+    });
+    snap.insert(
+        "_curation_duplicate".into(),
+        json!({"version": 1, "keep": keep, "a": ev.a, "b": ev.b,
+               "a_fingerprint": ev.a_fingerprint, "b_fingerprint": ev.b_fingerprint,
+               "loser_embedding": embedding}),
+    );
+    snap.shift_remove("embedding");
+    if store == Store::Lesson {
+        for (from, to) in [
+            ("entity", "task"),
+            ("attribute", "aspect"),
+            ("value", "lesson"),
+        ] {
+            if let Some(v) = snap.shift_remove(from) {
+                snap.insert(to.into(), v);
+            }
+        }
+    }
+    Value::Object(snap)
+}
+
+/// `_recovery_state(service, pending, resident)` over the hydrated store:
+/// `Some(true)` committed, `Some(false)` rolled back, None when the bank
+/// is neither (Python's CurationReconciliationError).
+async fn fold_recovery_state(
+    client: &Client,
+    resident: &Staged,
+    ev: &PairEvidence,
+    keep_a: bool,
+    expected_survivor: &str,
+) -> Result<Option<bool>, ToolError> {
+    let index = resident.current_index();
+    let fp = |slot: &(String, String)| -> Result<Option<String>, ToolError> {
+        index
+            .get(slot)
+            .map(|&i| resident.snapshot(i).map(|s| evidence_fingerprint(&s)))
+            .transpose()
+    };
+    let (a, b) = (fp(&snap_slot(&ev.a))?, fp(&snap_slot(&ev.b))?);
+    if a.as_deref() == Some(ev.a_fingerprint.as_str())
+        && b.as_deref() == Some(ev.b_fingerprint.as_str())
+    {
+        return Ok(Some(false));
+    }
+    let (survivor, loser, loser_fp) = if keep_a {
+        (&ev.a, &ev.b, &ev.b_fingerprint)
+    } else {
+        (&ev.b, &ev.a, &ev.a_fingerprint)
+    };
+    let after = fp(&snap_slot(survivor))?.as_deref() == Some(expected_survivor)
+        && !index.contains_key(&snap_slot(loser));
+    if !after {
+        return Ok(None);
+    }
+    let latest = latest_decision(client, ev.store, &snap_slot(loser)).await?;
+    let audited = latest.as_ref().is_some_and(|d| {
+        d.action == "retire"
+            && d.record
+                .as_ref()
+                .and_then(|r| r.get("_curation_evidence_fingerprint"))
+                .and_then(Value::as_str)
+                == Some(loser_fp.as_str())
+    });
+    Ok(audited.then_some(true))
+}
+
+/// `apply_slot_duplicate(service, evidence, verdict=..., reason=...,
+/// policy_guard=..., settle_judgment=True)` under the writer lock: retire
+/// the loser with its audit, the survivor rewritten unchanged in the same
+/// transaction; `true` when applied.
+async fn apply_slot_duplicate(
+    client: &Client,
+    ready: &Ready,
+    ev: &PairEvidence,
+    verdict: &Row,
+    reason: Option<&str>,
+    guard: bool,
+) -> Result<bool, ToolError> {
+    if !can_auto_fold(ev, verdict).0 {
+        return Ok(false);
+    }
+    let keep_a = vs(verdict, "keep") == Some("a");
+    let keep = if keep_a { "a" } else { "b" };
+    if !guard {
+        return Ok(false);
+    }
+    if resident_evidence_state(ready, ev)? != "current" {
+        return Ok(false);
+    }
+    let confirmed = |m: &Map<String, Value>| {
+        m.get("last_confirmed")
+            .and_then(Value::as_f64)
+            .unwrap_or(0.0)
+    };
+    let stamp = now().max(confirmed(&ev.a)).max(confirmed(&ev.b));
+    let (survivor_snap, loser_snap, loser_fp) = if keep_a {
+        (&ev.a, &ev.b, &ev.b_fingerprint)
+    } else {
+        (&ev.b, &ev.a, &ev.a_fingerprint)
+    };
+    // `_stage_lesson` / `_stage_world`; any failure there is
+    // `staging_error`.
+    let mut survivor_stage = Staged::of(ready, ev.store);
+    let index = survivor_stage.current_index();
+    let (survivor_slot, loser_slot) = (snap_slot(survivor_snap), snap_slot(loser_snap));
+    let (Some(&survivor_i), Some(_)) = (index.get(&survivor_slot), index.get(&loser_slot)) else {
+        return Ok(false);
+    };
+    survivor_stage.mark_dirty(&survivor_slot);
+    let mut final_stage = survivor_stage.clone();
+    let retired = final_stage.retire(
+        vs(loser_snap, "entity").unwrap_or(""),
+        vs(loser_snap, "attribute").unwrap_or(""),
+        stamp,
+    );
+    let [retired_i] = retired[..] else {
+        return Ok(false);
+    };
+    final_stage.only_dirty(&loser_slot);
+    let expected_survivor = evidence_fingerprint(&survivor_stage.snapshot(survivor_i)?);
+    let audit = audit_snapshot(
+        ev.store,
+        final_stage.snapshot(retired_i)?,
+        final_stage.embedding(retired_i),
+        loser_fp,
+        ev,
+        keep,
+    );
+    let outcome = {
+        let (s1, s2, audit) = (&survivor_stage, &final_stage, &audit);
+        let (ne, na) = (&loser_slot.0, &loser_slot.1);
+        in_txn(client, |c| async move {
+            let locked = locked_evidence_state(c, ev).await?;
+            if locked != "current" {
+                return Ok(Some(locked));
+            }
+            s1.sync_in(c).await.map_err(internal)?;
+            s2.sync_in(c).await.map_err(internal)?;
+            if !crate::mutants::active("mcp-dream-curation-fold-unaudited") {
+                crate::forget_tools::record_store_decision(
+                    c,
+                    ev.store.name(),
+                    (ne, na),
+                    "retire",
+                    Some("dream-judge"),
+                    reason,
+                    audit,
+                    stamp,
+                )
+                .await
+                .map_err(internal)?;
+            }
+            set_action_state(c, ev, "applied").await?;
+            Ok(None)
+        })
+        .await
+    };
+    match outcome {
+        Ok(None) => {
+            final_stage.publish(ready);
+            Ok(true)
+        }
+        Ok(Some(_changed)) => {
+            // `_publish_store(service, store, _hydrate_store(...))`, any
+            // failure there ignored.
+            if let Ok(resident) = Staged::hydrate(client, ev.store).await {
+                resident.publish(ready);
+            }
+            Ok(false)
+        }
+        // The commit may have landed with its reply lost: the bank decides
+        // (`_recover_slot_curation_locked`).
+        Err(_) => {
+            let Ok(resident) = Staged::hydrate(client, ev.store).await else {
+                return Ok(false);
+            };
+            match fold_recovery_state(client, &resident, ev, keep_a, &expected_survivor).await {
+                Ok(Some(true)) => {
+                    resident.publish(ready);
+                    Ok(true)
+                }
+                // Rolled back: the resident store was never touched.
+                Ok(Some(false)) => Ok(false),
+                _ => Ok(false),
+            }
+        }
+    }
+}
+
 // ── the tick ─────────────────────────────────────────────────────────────
 
 /// A pair's memoised verdict as the replay rebuilds it (`verdict`, `keep`,
@@ -1236,26 +1452,9 @@ async fn curation_tick(
     } else {
         [Store::Lesson, Store::World]
     };
-    // In auto, Python applies a pending duplicate the safe-fold rule allows
-    // and the pair leaves the listing. Its fold is not ported (task
-    // P3b-4b): it stays bound `pending` for a daemon that folds, and is left
-    // out of the schedule so it cannot hold its store's slots every tick.
-    let fold_pending = |i: &Item| {
-        if mode != "auto" {
-            return false;
-        }
-        let saved = saved_verdict(memo_of(i.ev.store), i);
-        rj::vs(&saved, "verdict") == Some("duplicate")
-            && saved
-                .get("confidence")
-                .and_then(Value::as_f64)
-                .unwrap_or(0.0)
-                >= cfg.curation_forget_min_confidence
-            && can_auto_fold(&i.ev, &saved).0
-    };
     let pending: Vec<(Store, Item)> = classified
         .iter()
-        .filter(|(i, s)| s == "pending" && !fold_pending(i))
+        .filter(|(_, s)| s == "pending")
         .map(|(i, _)| (i.ev.store, i.clone()))
         .collect();
     let todo: Vec<(Store, Item)> = classified
@@ -1448,17 +1647,37 @@ async fn curation_tick(
         } else if verdict == "duplicate"
             && mode == "auto"
             && conf >= cfg.curation_forget_min_confidence
-            && !can_auto_fold(&it.ev, v).0
         {
-            // A duplicate the safe-fold rule allows is not applied: the
-            // fold is not ported (task P3b-4b), so its action stays pending
-            // and replays on the next tick. One it refuses settles manual.
-            let ev = &it.ev;
-            in_txn(client, |c| async move {
-                set_action_state(c, ev, "manual").await
-            })
+            if !can_auto_fold(&it.ev, v).0 {
+                let ev = &it.ev;
+                in_txn(client, |c| async move {
+                    set_action_state(c, ev, "manual").await
+                })
+                .await
+                .map_err(e2s)?;
+                continue;
+            }
+            // `_apply_slot_duplicate(store, c, keep, fold, reason=note or
+            // None, ...)`.
+            let mut fold_verdict = Map::new();
+            fold_verdict.insert("verdict".into(), json!("duplicate"));
+            fold_verdict.insert("keep".into(), v.get("keep").cloned().unwrap_or(Value::Null));
+            fold_verdict.insert("fold".into(), v.get("fold").cloned().unwrap_or(Value::Null));
+            let reason = match v.get("note") {
+                Some(Value::String(s)) if !s.is_empty() => Some(s.clone()),
+                _ => None,
+            };
+            let applied_fold = apply_slot_duplicate(
+                client,
+                &ready,
+                &it.ev,
+                &fold_verdict,
+                reason.as_deref(),
+                guard,
+            )
             .await
             .map_err(e2s)?;
+            applied += i64::from(applied_fold);
         }
     }
     let pending_unjudged = (todo.len() as i64 - judged).max(0);

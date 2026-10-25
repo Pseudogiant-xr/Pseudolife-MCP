@@ -11,8 +11,7 @@
 //!
 //! Of the review-queue judges between the merge judge and `dream_status`,
 //! the link, junk, curation and candidate judges run (`queue_judges.rs`,
-//! `curation_judge.rs`, `candidates.rs`); the curation judge's
-//! safe-class fold is not applied yet (task P3b-4b, `divergences.md`).
+//! `curation_judge.rs`, `candidates.rs`).
 
 use std::sync::Arc;
 
