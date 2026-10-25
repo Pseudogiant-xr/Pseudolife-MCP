@@ -888,6 +888,12 @@ pub fn compute(
     computed_at: f64,
 ) -> Insight {
     let detected = detect_communities(edges, cfg.resolution, cfg.max_community_fraction);
+    let no_prior = BTreeMap::new();
+    let prior = if crate::mutants::active("mcp-dream-insight-no-remap") {
+        &no_prior
+    } else {
+        prior
+    };
     let communities = remap_to_previous(&detected, prior);
     let disp: HashMap<i64, String> = entities.iter().map(|e| (e.id, e.display.clone())).collect();
     let summaries = summarize_communities(&communities, edges, &disp);
@@ -1044,7 +1050,9 @@ async fn refresh(svc: &Arc<Service>, ready: &Arc<Ready>) -> anyhow::Result<Value
     {
         let _ws = ready.write.lock().await;
         replace_communities(client, &insight, computed_at).await?;
-        crate::txn::set_meta(client, "graph_digest", &insight.digest).await?;
+        if !crate::mutants::active("mcp-dream-insight-no-digest") {
+            crate::txn::set_meta(client, "graph_digest", &insight.digest).await?;
+        }
     }
     Ok(json!({"refreshed": true, "communities": n}))
 }

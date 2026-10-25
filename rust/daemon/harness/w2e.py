@@ -3373,6 +3373,7 @@ import w2e_graph_insight  # noqa: E402
 SCENARIOS.update(w2e_graph_insight.scenarios(sys.modules[__name__]))
 CLOCK |= w2e_graph_insight.CLOCK
 META_CLOCK.update(w2e_graph_insight.META_CLOCK)
+MUTANTS += w2e_graph_insight.MUTANTS
 
 
 # The dream pass's remaining branches. Every scenario here switches the

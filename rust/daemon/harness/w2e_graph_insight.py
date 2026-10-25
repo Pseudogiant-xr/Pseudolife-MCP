@@ -24,6 +24,10 @@ from __future__ import annotations
 CLOCK = {("communities", "computed_at"), ("entity_communities", "computed_at")}
 # meta key -> wall-clock keys inside its value (w2e.META_CLOCK).
 META_CLOCK = {"graph_digest": {"computed_at"}}
+# Deliberate breaks (``src/graph_insight.rs``), each caught by
+# dream-insight-planted: the second refresh renumbers the old communities
+# without the remap, and the digest row never appears without its write.
+MUTANTS = ["mcp-dream-insight-no-remap", "mcp-dream-insight-no-digest"]
 
 # The insight on; everything else as the dream-run scenarios have it.
 INSIGHT_CONFIG = (
@@ -61,13 +65,13 @@ def planted_edges() -> list[tuple]:
     return out
 
 
-# The second phase: a new cluster hung off Auth and a bridge into Ledger.
-GROWTH = [
-    ("Billing API", "uses", "Billing DB", {}), ("Billing API", "uses", "Billing Jobs", {}),
-    ("Billing DB", "uses", "Billing Jobs", {}), ("Billing Jobs", "uses", "Billing Mail", {}),
-    ("Billing API", "uses", "Billing Mail", {}), ("Billing DB", "uses", "Billing Mail", {}),
-    ("Billing API", "depends-on", "Auth API", {"confidence": 0.55}),
-]
+# The second phase: a new cluster, larger than any old one, hung off Auth.
+# Fresh ids would number it first; the remap keeps every old community's id
+# and gives it the next free one.
+BILLING = ["Billing API", "Billing DB", "Billing Jobs", "Billing Mail", "Billing Tax",
+           "Billing Ledger", "Billing Export"]
+GROWTH = [(a, "uses", b, {}) for i, a in enumerate(BILLING) for b in BILLING[i + 1:]]
+GROWTH.append(("Billing API", "depends-on", "Auth API", {"confidence": 0.55}))
 
 
 def scenarios(w) -> dict:
