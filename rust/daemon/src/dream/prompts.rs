@@ -310,6 +310,111 @@ pub const JUDGE_SYSTEM_PROMPT: &str = concat!(
     "(for a reject: that FROM and INTO are different things).",
 );
 
+/// `_JUNK_JUDGE_SYSTEM_PROMPT` (`memory/dream.py`).
+pub const JUNK_JUDGE_SYSTEM_PROMPT: &str = concat!(
+    "You judge JUNK ENTITY proposals for a knowledge graph. A name-shape ",
+    "detector flagged each numbered entity as an over-extraction ",
+    "artifact; accepting HARD-DELETES the entity (its edges cascade ",
+    "away; fact and lesson rows survive, merely unlinked). The detector ",
+    "classes have a measured false-positive tail (2026-09-02: ",
+    "list-artifact 6/6 correct, compound 2/4, slot-key 3/10), so judge ",
+    "the REFERENT, not the shape.\nVerdicts:\n- delete: no real referent \u{2014} ",
+    "a comma list or spaced \"A / B\" / \"A + B\" compound of several things ",
+    "captured as one name, a flattened slot key (entity.attribute copied ",
+    "into a name), a captured sentence or task description, a bare ",
+    "number or status word. A lesson-minted object (its only edges are ",
+    "prefers/avoids from a lesson) with such a shape is a safe delete: ",
+    "the lesson keeps its text.\n- keep: a real thing \u{2014} a file path, git ",
+    "branch or ref (origin/master, fix/x), a model or server id, a ",
+    "dotted config key, a code symbol (module.function, Class.method), a ",
+    "systemd unit, a host, a tool. Typed edges, facts and mentions are ",
+    "evidence of reality.\n- leave: genuinely undecidable.\nReturn JSON ",
+    "only: ",
+    "{\"verdicts\":[{\"id\":<number>,\"verdict\":\"delete\"|\"keep\"|\"leave\",\"confidence\":<0..1>,\"note\":\"<max ",
+    "25 words>\"}]} \u{2014} one entry per proposal, confidence is your honest ",
+    "probability.",
+);
+
+/// `_LINK_JUDGE_SYSTEM_PROMPT` (`memory/dream.py`).
+pub const LINK_JUDGE_SYSTEM_PROMPT: &str = concat!(
+    "You judge LINK PROPOSALS for a knowledge graph. Each numbered ",
+    "proposal is a typed edge SRC --relation--> DST awaiting a verdict. ",
+    "Accepting writes it as durable structure that recall traverses; the ",
+    "bar is \"true and useful\", and direction and relation type ",
+    "matter.\nRelations: depends-on (src needs dst), part-of (src is a ",
+    "component of dst), runs-on (src executes on host/platform dst), ",
+    "hosts (src serves dst), uses (src makes use of dst), configures ",
+    "(src sets up dst), stores-data-in, tests (src is a test of dst), ",
+    "implements (src code realizes concept dst), superseded-by (src ",
+    "replaced by dst), related-to (untyped; weakest).\nVerdicts:\n- ",
+    "accept: the relation holds in the stated direction and the evidence ",
+    "(notes naming both, existing edges, scopes) supports it. Different ",
+    "project scopes are NOT by themselves a reason to reject.\n- retype: ",
+    "the pair is genuinely related but the RELATION is wrong; give the ",
+    "corrected relation (same direction). A wrong direction is reject.\n- ",
+    "reject: false, vague, an edge that merely re-files one that already ",
+    "exists between the canonical nodes on a version- or value-suffixed ",
+    "alias, an endpoint that is an attribute/state name or a captured ",
+    "list rather than a thing, a relation that asserts something untrue ",
+    "of a file (a module does not run on a host), or evidence that says ",
+    "the thing is gone (uninstalled, deleted, superseded, rolled ",
+    "back).\n- leave: genuinely undecidable.\nReturn JSON only: ",
+    "{\"verdicts\":[{\"id\":<number>,\"verdict\":\"accept\"|\"retype\"|\"reject\"|\"leave\",\"confidence\":<0..1>,\"relation\":<vocab ",
+    "or null>,\"note\":\"<reason, max 25 words>\"}]} \u{2014} one entry per ",
+    "proposal, confidence is your honest probability that the verdict is ",
+    "correct.",
+);
+
+/// `_CANDIDATE_JUDGE_SYSTEM_PROMPT` (`memory/dream.py`).
+pub const CANDIDATE_JUDGE_SYSTEM_PROMPT: &str = concat!(
+    "You judge LINK CANDIDATES for a knowledge graph: numbered pairs of ",
+    "currently UNLINKED entities whose context vectors are near. For ",
+    "each, decide whether a real typed relation holds that the graph ",
+    "should carry \u{2014} or whether the similarity is shared context ",
+    "(mentioned in the same note), siblings under one parent (two ",
+    "options, models, runs, settings of one thing), or a name-similarity ",
+    "accident.\nRelations: depends-on (src needs dst), part-of (src is a ",
+    "component of dst), runs-on (src executes on host/platform dst), ",
+    "hosts (src serves dst), uses (src makes use of dst), configures ",
+    "(src sets up dst), stores-data-in, tests (src is a test of dst), ",
+    "implements (src code realizes concept dst), superseded-by (src ",
+    "replaced by dst), related-to (untyped; weakest).\nVerdicts:\n- ",
+    "propose: a real relation holds; give relation, src and dst in the ",
+    "direction the relation reads, and a one-line rationale grounded in ",
+    "the evidence.\n- dismiss: no real relation (the pair is marked ",
+    "distinct and never resurfaces).\n- leave: undecidable \u{2014} or the two ",
+    "names look like the SAME referent (that is a merge question, not a ",
+    "link; never dismiss it).\nReturn JSON only: ",
+    "{\"verdicts\":[{\"id\":<number>,\"verdict\":\"propose\"|\"dismiss\"|\"leave\",\"confidence\":<0..1>,\"relation\":<vocab ",
+    "or null>,\"src\":<display or null>,\"dst\":<display or ",
+    "null>,\"rationale\":\"<max 25 words>\"}]} \u{2014} one entry per pair.",
+);
+
+/// `_SLOT_JUDGE_SYSTEM_PROMPT` (`memory/dream.py`).
+pub const SLOT_JUDGE_SYSTEM_PROMPT: &str = concat!(
+    "You judge DUPLICATE SLOT pairs in a slot-keyed store: the LESSON ",
+    "store (procedural do/avoid guidance keyed by task|aspect) or the ",
+    "WORLD-FACT store (cited external facts keyed by entity|attribute). ",
+    "Slot supersession only dedups within one key, so a near-duplicate ",
+    "parked under a second key accumulates silently.\nVerdicts:\n- ",
+    "duplicate: the two slots carry the SAME guidance or fact (a re-mint ",
+    "under a drifted key: the same task named two ways, the same ",
+    "pitfall, a low-confidence inferred twin of an observed lesson, the ",
+    "same external fact about the same entity). Say which to KEEP (\"a\" ",
+    "or \"b\"): the more general, reusable key; the observed over the ",
+    "inferred; for world facts the more precise entity and more ",
+    "authoritative source. Put anything the dropped side adds in ",
+    "\"fold\".\n- distinct: deliberate siblings \u{2014} aspect variants of one ",
+    "task (approach vs pitfall vs correction), two different ",
+    "tools/products/papers that merely share an attribute, facts about ",
+    "different entities, two tasks that share wording but not ",
+    "guidance.\n- leave: undecidable from the values shown.\nReturn JSON ",
+    "only: ",
+    "{\"verdicts\":[{\"id\":<number>,\"verdict\":\"duplicate\"|\"distinct\"|\"leave\",\"keep\":\"a\"|\"b\"|null,\"fold\":<text ",
+    "or null>,\"confidence\":<0..1>,\"note\":\"<max 25 words>\"}]} \u{2014} one entry ",
+    "per pair.",
+);
+
 #[cfg(test)]
 mod judge_prompt_tests {
     use sha2::{Digest, Sha256};
@@ -328,5 +433,18 @@ mod judge_prompt_tests {
             .map(|part| part.split(" (").next().unwrap_or("").trim())
             .collect();
         assert_eq!(names, super::RELATION_NAMES);
+    }
+
+    #[test]
+    fn queue_judge_prompts_are_pythons_bytes() {
+        // sha256 and length of each dream._*_SYSTEM_PROMPT (CPython 3.11).
+        assert_eq!(super::JUNK_JUDGE_SYSTEM_PROMPT.chars().count(), 1286);
+        assert_eq!(hex::encode(Sha256::digest(super::JUNK_JUDGE_SYSTEM_PROMPT.as_bytes())), "4f7df9010e89c5c6bd6a07e9c55bdae4391441e3d9a9ad0298a4e3985b118f29");
+        assert_eq!(super::LINK_JUDGE_SYSTEM_PROMPT.chars().count(), 1671);
+        assert_eq!(hex::encode(Sha256::digest(super::LINK_JUDGE_SYSTEM_PROMPT.as_bytes())), "fcdc8bf8153b9a3997acb720fd72a8e6f4ca3ca38bbf662c95c7f8153699ef34");
+        assert_eq!(super::CANDIDATE_JUDGE_SYSTEM_PROMPT.chars().count(), 1352);
+        assert_eq!(hex::encode(Sha256::digest(super::CANDIDATE_JUDGE_SYSTEM_PROMPT.as_bytes())), "bd2c271eb5eb6b6ea5b711861cf9897766f03953af85439ce842fd228291e4ea");
+        assert_eq!(super::SLOT_JUDGE_SYSTEM_PROMPT.chars().count(), 1261);
+        assert_eq!(hex::encode(Sha256::digest(super::SLOT_JUDGE_SYSTEM_PROMPT.as_bytes())), "a05434c8e5ac7f6bb24b6a687d335c6a2c3a11ea3d1b17e785c4dd0f35c4730f");
     }
 }

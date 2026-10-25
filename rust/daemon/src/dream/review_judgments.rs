@@ -34,6 +34,7 @@ pub(crate) type Row = Map<String, Value>;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Queue {
     Merge,
+    Junk,
 }
 
 impl Queue {
@@ -42,6 +43,7 @@ impl Queue {
     pub(crate) fn kind(self) -> &'static str {
         match self {
             Queue::Merge => "merge",
+            Queue::Junk => "junk",
         }
     }
 
@@ -49,6 +51,7 @@ impl Queue {
     fn memo_key(self) -> &'static str {
         match self {
             Queue::Merge => "review_judgments_v1_merge",
+            Queue::Junk => "review_judgments_v1_junk",
         }
     }
 
@@ -56,6 +59,7 @@ impl Queue {
     pub(crate) fn prompt(self) -> &'static str {
         match self {
             Queue::Merge => crate::dream::prompts::JUDGE_SYSTEM_PROMPT,
+            Queue::Junk => crate::dream::prompts::JUNK_JUDGE_SYSTEM_PROMPT,
         }
     }
 
@@ -64,6 +68,7 @@ impl Queue {
     fn terminal_action(self) -> &'static str {
         match self {
             Queue::Merge => "reject",
+            Queue::Junk => "keep",
         }
     }
 }
@@ -524,16 +529,20 @@ fn without_tail(note: Option<&str>, marker: &str) -> String {
 /// (`_ENRICH[kind][0]`).
 pub(crate) enum QEvidence {
     Merge(JudgeEvidence),
+    Junk(crate::dream::queue_judges::JunkEvidence),
 }
 
 /// Caller holds the lock.
 pub(crate) async fn load_evidence(
     c: &Client,
     queue: Queue,
-    _rows: &[Row],
+    rows: &[Row],
 ) -> Result<QEvidence, ToolError> {
     Ok(match queue {
         Queue::Merge => QEvidence::Merge(deep::judge_evidence_body(c).await.map_err(internal)?),
+        Queue::Junk => {
+            QEvidence::Junk(crate::dream::queue_judges::junk_evidence_body(c, rows).await?)
+        }
     })
 }
 
@@ -550,6 +559,7 @@ pub(crate) fn sign_rows(
             let props: Vec<EntityProposal> = rows.iter().map(entity_proposal).collect();
             deep::judge_enrich_from(&props, ev, cfg)?
         }
+        QEvidence::Junk(ev) => crate::dream::queue_judges::enrich_junk_from(rows, ev, cfg),
     };
     let mut sigs = HashMap::new();
     let mut packs = HashMap::new();
@@ -1104,6 +1114,14 @@ async fn canonical_pair(
     };
     let (left, right) = match queue {
         Queue::Merge => (canon(vi(row, "entity_id")), canon(vi(row, "into_id"))),
+        Queue::Junk => {
+            // `(_junk_keep_key(c), _junk_keep_key(c))`: the keep closes the
+            // name against a re-proposal.
+            let key = canon(vi(row, "entity_id"))
+                .filter(|c| !c.is_empty())
+                .map(|c| format!("junk:{c}"));
+            return Ok(key.map(|k| [k.clone(), k]));
+        }
     };
     Ok(match (left, right) {
         (Some(l), Some(r)) if !l.is_empty() && !r.is_empty() && l != r => {

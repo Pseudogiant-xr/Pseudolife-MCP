@@ -123,6 +123,13 @@ pub async fn sweep(
     if super::judge::worth_logging(&judged) {
         log_value("deep-dream judge", &Value::Object(judged));
     }
+    // The review-queue judges, each a bounded, mode-gated batch that never
+    // fails the tick. Links, curation and candidates are not run yet
+    // (task P3b).
+    let junk = super::queue_judges::deep_dream_judge_junk(svc, stop).await;
+    if super::queue_judges::worth_logging(&junk) {
+        log_value("deep-dream judge_junk", &Value::Object(junk));
+    }
     if *stop.borrow() {
         return Ok(());
     }

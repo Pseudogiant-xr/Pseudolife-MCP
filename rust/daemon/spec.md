@@ -1647,7 +1647,7 @@ Python sources: `memory/dream.py` `run_sweep_once` (2398-2547);
 
 | # | Exact item | Source |
 |---|---|---|
-| SW1 | Order after the reapers, while `memory.dream.enabled`: the analyzer tick, the deep tick, the merge judge, (the review-queue judges: not run, P3b), `dream_status`, the stall tick, then the automatic dream when `would_fire`. The analyzer tick and `dream_status` failing end the tick; the deep tick, the judge and the stall tick never fail it. | `dream.py:2453-2547` |
+| SW1 | Order after the reapers, while `memory.dream.enabled`: the analyzer tick, the deep tick, the merge judge, the junk judge (JJ1-JJ5; the link, curation and candidate judges not run, P3b), `dream_status`, the stall tick, then the automatic dream when `would_fire`. The analyzer tick and `dream_status` failing end the tick; the deep tick, the judge and the stall tick never fail it. | `dream.py:2453-2547` |
 | SW2 | Analyzer tick: `judges_disabled` when `judges_enabled` is off; under the writer lock, `reconcile_analyzer_proposals(judge_batch)` (decided `analyzer` link proposals, then rejected `analyzer-duplicate` merges, each half behind its own `{at, id}` cursor and transaction, sharing the budget, closing each pair into `dismissed_pairs` at its decision time); `disabled` (with `reconciled`) when `analyzer_file_duplicates` is off; otherwise up to `judge_batch` anchors after `meta.analyzer_duplicate_cursor` (wrapping to the start), every pair touching an anchor in `duplicate_candidates`' order, filing at most `judge_batch` proposals as the deep apply does, then the cursor at the last anchor. | `service_dream.py:6043-6156`; `postgres.py:3772-3853` |
 | SW3 | Deep tick: `disabled` when `auto_tick` is off; `below_threshold` (with the need) unless `deep_dream_need` recommends; otherwise the deep dream's apply without snippets, answered as `{fired, reason, ...}` with the apply's `applied`, `error`, `rescored`, `superseded`, `merged`, `merge_proposed`, `junk_proposed`, `junk_deleted`, `scoped`, `analyzer_filed`, `orphans_deleted` and `snapshot`; a failure answers `fired: false` with `error: <text>`. | `service_dream.py:3824-3845` |
 | SW4 | Stall tick: the sweep's interval set on the tracker, then `check_overdue(backlog, min_batch, would_fire, interval)` (a due backlog no dream serves for three intervals opens a stall, `extractor_unreachable`), then the notice. `dream_status` applies the same rule once the interval is set. | `service_dream.py:2958-2971,3080-3092` |
@@ -1667,6 +1667,42 @@ through Python's tracker (escalation, repeats inside and outside the
 window, an undelivered notice that stays owed, the overdue rule, flapping,
 the results that say nothing) and the notice texts at three fixed offsets.
 The `mcp-sweep-*` mutants are caught by their scenarios.
+
+### The junk judge (2026-10-25)
+
+Python sources: `service_dream.py` `deep_dream_judge_junk` (5329-5422),
+`_junk_evidence_locked` / `_enrich_junk_proposals_from` (5244-5327),
+`_stamp_skipped` (4424-4438), `_snapshot_once` (4414-4421);
+`memory/review_judgments.py` `ReviewJudgments(kind="junk")` (214-521);
+`memory/review_decisions.py` (the `junk` branches: `_canonical_pair`,
+`record_proposal_terminal` with `action="keep"`); `memory/dream.py`
+`_JUNK_JUDGE_SYSTEM_PROMPT` (514-536), `format_junk_proposal` (592-602),
+`judge_junk` (1905-1923), `_verdict_head` / `_text` (1825-1846);
+`service.py` `_graph_accept_entity_junk_locked` (9118-9144) and the junk
+branch of `_graph_reject_entity_proposal_locked` (9151-9195).
+
+| # | Exact item | Source |
+|---|---|---|
+| JJ1 | Gates: `judges_disabled` when `judges_enabled` is off, `disabled` unless `junk_judge_mode` is shadow or auto; no pending junk row and no active junk decision answers `{judged: 0}`; no judge endpoint answers `no_judge_extractor`; any failure answers `{judged: 0, error}`. | `service_dream.py:5329-5360` |
+| JJ2 | One tick: the active automatic keeps reconsidered (`refresh_proposal_terminals`, the merge judge's rules over the `junk` queue), the pending junk rows re-read and the evidence read for the verdict rows and the first `judge_batch` unjudged ones (`prepare`), signed with the lock released, stale verdicts cleared (`refresh`), then the first `judge_batch` unjudged rows judged in one call. | `service_dream.py:5360-5380`; `review_judgments.py:214-341` |
+| JJ3 | The pack per row: the display (else the row's `entity`, else `?`), the detector reason, the degree over live edges (a self-loop counts twice), the first eight incident edges `A -rel-> B [origin or ?]`, the fact count (the most of the entity's current facts by id, by its display's graph norm and by its canonical over raw subject texts), up to three `attribute=value[:120]` rows by id or norm, whether every incident edge is an `action` prefers/avoids edge (a lesson-minted object), the sorted scopes, and up to three mentioning notes (`[source] text[:snippet_max_chars]`, every display token in the note's tokens). The fingerprint signs the proposal and the pack without `n`, ids and judge fields, with the judging policy over `_JUNK_JUDGE_SYSTEM_PROMPT`. | `service_dream.py:5244-5327` |
+| JJ4 | The request is the shared judge request (`_judge_request`, label `judge_junk`) over the rows `format_junk_proposal` renders, blank-line separated; a reply row keeps an `id` the batch knows (`int()`), a verdict of delete, keep or leave (stripped, lowercased), a confidence clamped to 0..1 (0.5 when not a number) and a note (`str()[:400]`, none when null or empty); a row the model skipped becomes a zero-confidence leave noting "model returned no verdict". | `dream.py:514-536,592-602,1825-1846,1905-1923`; `service_dream.py:4424-4438` |
+| JJ5 | Each verdict, keeps first, in its own transaction, only while the row is still pending and its evidence unchanged (`current`): the judgment recorded (`judge_*` columns, the memo). In auto: a keep at `junk_keep_min_confidence` or more rejects the proposal (`decided_by="dream-judge"`, a `merge_decisions` audit `junk keep: <reason>` with no target, the keep pair `junk:<canonical>` closed) and records an automatic keep decision; a delete at `junk_delete_min_confidence` or more, at degree `junk_max_auto_degree` or less and at most one fact, writes the graph snapshot once per tick (no snapshot: the row is retried), audits `junk: <reason>`, deletes the entity and accepts the proposal, after which the rest of the batch waits for the next tick (its evidence changed). | `service_dream.py:5380-5422`; `service.py:9118-9195`; `review_decisions.py:111-200` |
+
+`harness/w2e.py live --only junk-shadow junk-auto junk-auto-reopen` runs
+both daemons with dreaming on, a 0.25 s sweep and every other judge and
+sweep step off, against one stub answering `judge_junk` by display
+(`shared_stub`), inserts the pending junk proposals out of band, and compares
+the banks and the request sequences once both judges have settled: shadow
+verdicts recorded only; auto keep, delete under the bar (with its snapshot),
+a delete under its gate and one above the bar left pending, a leave and a
+skipped row; and an automatic keep reopened when its entity's evidence moves
+and judged again. `src/dream/queue_judges_tests.rs` checks the prompt rows,
+the reply validation and the pack against Python's own output
+(`gen_queue_judge_goldens.py`); `src/dream/prompts.rs` pins the four queue
+judges' prompts by length and SHA-256. The `mcp-dream-junk-*` mutants are
+caught by `junk-auto`. The merge judge's queue is now a `Queue` value
+(`review_judgments.rs`); the 18 `judge-merge-*` scenarios are unchanged.
 
 ### Board tools over MCP (2026-10-16)
 
