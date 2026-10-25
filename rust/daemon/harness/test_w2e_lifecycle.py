@@ -416,7 +416,7 @@ def test_curation_judge_scenarios_settle_before_their_first_comparison(harness):
     import w2e_queue_judges as qj
     names = sorted(n for n in harness.SCENARIOS if n.startswith("curation-"))
     assert names == ["curation-auto", "curation-auto-distinct",
-                     "curation-auto-distinct-reopen", "curation-shadow"]
+                     "curation-auto-distinct-reopen", "curation-auto-fold", "curation-shadow"]
     for n in names:
         scn = harness.SCENARIOS[n]
         config = scn["config"]
@@ -426,14 +426,15 @@ def test_curation_judge_scenarios_settle_before_their_first_comparison(harness):
             assert f'    {other}: "off"' in config, (n, other)
         assert scn["shared_stub"] is True and n in harness.EXTERNAL_WRITES
         # The judge runs from the daemons' start: the first comparison waits.
-        assert scn["init_settle"]["until"] == qj.CURATION_JUDGED
+        assert scn["init_settle"]["until"].startswith(qj.CURATION_JUDGED)
         assert "enabled: false" in scn["seed_config"]
         for reply in scn["extractor"]["replies"]:
             assert reply["kind"] == "judge_slot_pairs" and "verdicts" in reply
     assert ("curation_judgments", "judged_at") in harness.CLOCK
     assert "curation_judgments" in harness.JUDGE_TABLES
     assert {"mcp-dream-curation-distinct-unmarked",
-            "mcp-dream-curation-shadow-dismisses"} <= set(qj.MUTANTS)
+            "mcp-dream-curation-shadow-dismisses",
+            "mcp-dream-curation-fold-unaudited"} <= set(qj.MUTANTS)
 
 
 def test_sweep_scenarios_settle_without_timing_on_their_mutants(harness):

@@ -331,12 +331,12 @@ fn marker_pair_is(m: &Map<String, Value>, target: &[&str; 2]) -> Result<bool, To
 
 /// One `store_decisions` row as `retired_slots` returns it.
 #[derive(Debug, Clone)]
-struct Decision {
+pub(crate) struct Decision {
     id: i64,
     entity_norm: String,
     attribute_norm: String,
-    action: String,
-    record: Option<Value>,
+    pub(crate) action: String,
+    pub(crate) record: Option<Value>,
     decided_at: f64,
 }
 
@@ -1245,13 +1245,13 @@ fn snap_slot(snap: &Map<String, Value>) -> Result<SlotKey, ToolError> {
 
 /// A staged copy of the resident store the curation restore works on.
 #[derive(Clone)]
-enum Staged {
+pub(crate) enum Staged {
     Lesson(LessonStore),
     World(WorldStore),
 }
 
 impl Staged {
-    fn of(ready: &Ready, store: Store) -> Self {
+    pub(crate) fn of(ready: &Ready, store: Store) -> Self {
         match store {
             Store::Lesson => Staged::Lesson((*ready.lessons.snapshot()).clone()),
             Store::World => Staged::World((*ready.world.snapshot()).clone()),
@@ -1266,7 +1266,7 @@ impl Staged {
     }
 
     /// `_resident_records`: slot to current record index, the last wins.
-    fn current_index(&self) -> HashMap<SlotKey, usize> {
+    pub(crate) fn current_index(&self) -> HashMap<SlotKey, usize> {
         let mut out = HashMap::new();
         match self {
             Staged::Lesson(s) => {
@@ -1287,8 +1287,49 @@ impl Staged {
         out
     }
 
+    /// `_hydrate_store(service, store)`: the store as the bank holds it.
+    pub(crate) async fn hydrate(client: &Client, store: Store) -> anyhow::Result<Self> {
+        Ok(match store {
+            Store::Lesson => Staged::Lesson(crate::stores::lessons::hydrate(client).await?),
+            Store::World => Staged::World(crate::stores::world::hydrate(client).await?),
+        })
+    }
+
+    /// `dirty_slots |= {key}`.
+    pub(crate) fn mark_dirty(&mut self, key: &SlotKey) {
+        match self {
+            Staged::Lesson(s) => s.dirty_slots.insert(key.clone()),
+            Staged::World(s) => s.dirty_slots.insert(key.clone()),
+        };
+    }
+
+    /// `dirty_slots = {key}`.
+    pub(crate) fn only_dirty(&mut self, key: &SlotKey) {
+        let one: std::collections::BTreeSet<SlotKey> = [key.clone()].into();
+        match self {
+            Staged::Lesson(s) => s.dirty_slots = one,
+            Staged::World(s) => s.dirty_slots = one,
+        }
+    }
+
+    /// `retire(entity, attribute, now=now)`: the retired record indexes.
+    pub(crate) fn retire(&mut self, entity: &str, attribute: &str, now: f64) -> Vec<usize> {
+        match self {
+            Staged::Lesson(s) => s.retire(entity, Some(attribute), now),
+            Staged::World(s) => s.retire(entity, Some(attribute), now),
+        }
+    }
+
+    /// Record `i`'s embedding.
+    pub(crate) fn embedding(&self, i: usize) -> Option<Vec<f32>> {
+        match self {
+            Staged::Lesson(s) => s.records[i].embedding.as_deref().map(<[f32]>::to_vec),
+            Staged::World(s) => s.records[i].embedding.as_deref().map(<[f32]>::to_vec),
+        }
+    }
+
     /// `snapshot_record(store, record)` of record `i`.
-    fn snapshot(&self, i: usize) -> Result<Map<String, Value>, ToolError> {
+    pub(crate) fn snapshot(&self, i: usize) -> Result<Map<String, Value>, ToolError> {
         match self {
             Staged::Lesson(s) => {
                 let r = &s.records[i];
@@ -1461,7 +1502,7 @@ impl Staged {
 
     /// `sync_lesson_slots` / `sync_world_slots` inside the caller's
     /// transaction.
-    async fn sync_in(&self, c: &Client) -> anyhow::Result<()> {
+    pub(crate) async fn sync_in(&self, c: &Client) -> anyhow::Result<()> {
         match self {
             Staged::Lesson(s) => crate::stores::lessons::sync_slot_rows_in(c, s)
                 .await
@@ -1473,7 +1514,7 @@ impl Staged {
     }
 
     /// `staged.dirty_slots.clear()`, then `_publish_store`.
-    fn publish(self, ready: &Ready) {
+    pub(crate) fn publish(self, ready: &Ready) {
         match self {
             Staged::Lesson(mut s) => {
                 s.dirty_slots.clear();
@@ -1760,7 +1801,7 @@ fn py_eq_int(v: &Value, n: i64) -> bool {
 
 /// `store_decisions(store, entity_norm, attribute_norm, limit=1)`: the
 /// slot's newest decision.
-async fn latest_decision(
+pub(crate) async fn latest_decision(
     client: &Client,
     store: Store,
     slot: &SlotKey,

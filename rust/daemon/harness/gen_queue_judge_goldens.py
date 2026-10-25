@@ -481,6 +481,31 @@ def curation_cases():
     return out
 
 
+def curation_audit():
+    import numpy as np
+    from pseudolife_memory import curation_safety as cs
+    out = []
+    for store, a, b in (
+            ("lesson", _lesson("Backup Drill", "Cadence", "Run the drill monthly."),
+             _lesson("Restore Drill", "Cadence", "Run the drill monthly.")),
+            ("world", _world("Host C", "os", "Alpine"), _world("Host D", "os", "Alpine"))):
+        ev = cs.capture_pair_evidence(store, a, b)
+        # A resident record, as the fold retires it: attributes, not a dict
+        # (``_audit_snapshot`` reads the embedding with getattr).
+        fields = dict(b, status="retired", superseded_at=1700000123.5,
+                      embedding=np.asarray([0.1, -2.5, 3.0], dtype=np.float32))
+        for alias, name in (("task", "entity"), ("aspect", "attribute"), ("lesson", "value")):
+            if alias in fields:
+                fields[name] = fields.pop(alias)
+        retired = SimpleNamespace(**fields)
+        out.append({"store": store, "a": ev.a, "b": ev.b,
+                    "a_fingerprint": ev.a_fingerprint, "b_fingerprint": ev.b_fingerprint,
+                    "retired_snapshot": cs.snapshot_record(store, retired),
+                    "embedding": [float(x) for x in retired.embedding],
+                    "audit": cs._audit_snapshot(store, retired, ev.b_fingerprint, ev, "a")})
+    return out
+
+
 def curation_policy():
     from pseudolife_memory import curation_safety as cs
     from pseudolife_memory.utils.config import MemoryConfig
@@ -550,6 +575,7 @@ def main() -> int:
                       for cap in (240, 10)],
         "curation_cases": curation_cases(),
         "curation_policy": curation_policy(),
+        "curation_audit": curation_audit(),
         "slot_format": [{"row": r, "text": dream.format_slot_pair(r)} for r in SLOT_FORMAT_ROWS],
         "slot_parse": [{"raw": raw, "rows": rows, "verdicts": judge_slot_pairs(rows, raw)}
                        for raw in SLOT_PARSE_CASES],

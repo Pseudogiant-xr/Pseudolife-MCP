@@ -36,8 +36,10 @@ world duplicate listings from the daemons' start, so each scenario settles
 before its first comparison (``init_settle``). Shadow memoises verdicts and
 their bindings only; auto-distinct dismisses a distinct pair under its
 listing names and marks the dismissal automatic; auto settles a duplicate
-the safe-fold rule refuses as manual (no listing of this seed is a safe
-fold). ``curation-auto-distinct-reopen`` restarts both daemons in shadow:
+the safe-fold rule refuses as manual (``curation-auto``) and folds one it
+allows (``curation-auto-fold``: two seeded lessons with one text, the loser
+retired with its audit). ``curation-auto-distinct-reopen`` restarts both
+daemons in shadow:
 the signed policy moved, so the automatic dismissal reopens and the pair is
 judged again without being dismissed.
 
@@ -90,9 +92,13 @@ MUTANTS = ["mcp-dream-junk-no-evidence-bar",          # junk-auto
            # candidate-auto, by Python's fingerprints over the bank
            "mcp-dream-candidate-real-binary",
            "mcp-dream-curation-distinct-unmarked",    # curation-auto-distinct
-           "mcp-dream-curation-shadow-dismisses"]     # curation-shadow
+           "mcp-dream-curation-shadow-dismisses",     # curation-shadow
+           "mcp-dream-curation-fold-unaudited"]       # curation-auto-fold
 
 # The two listed pairs every curation scenario judges.
+# The fold scenario's pair, judged too.
+CURATION_JUDGED_FOLD = ("SELECT EXISTS (SELECT 1 FROM curation_judgments WHERE store = 'lesson' "
+                        "AND a_key = 'backup-drill|cadence' AND b_key = 'restore-drill|cadence')")
 CURATION_JUDGED = (
     "SELECT EXISTS (SELECT 1 FROM curation_judgments WHERE store = 'world' "
     "AND a_key = 'host-a|os' AND b_key = 'host-b|os') "
@@ -254,13 +260,14 @@ def scenarios(w) -> dict:
         return candidate_config("off").replace('curation_judge_mode: "off"',
                                                f'curation_judge_mode: "{mode}"')
 
-    def curation_scenario(mode: str, verdicts: dict, ops: list, *expects: str) -> dict:
+    def curation_scenario(mode: str, verdicts: dict, ops: list, *expects: str,
+                          until: str = CURATION_JUDGED) -> dict:
         return {"config": curation_config(mode), "seed_config": w.deep_config(),
                 "seed": w.DEEP_SEED,
                 "extractor": {"model": "judge-one", "reply_model": "judge-one",
                               "replies": [{"kind": "judge_slot_pairs", "verdicts": verdicts}]},
                 "shared_stub": True,
-                "init_settle": {**w.JUDGE_SETTLE, "until": CURATION_JUDGED,
+                "init_settle": {**w.JUDGE_SETTLE, "until": until,
                                 "expect": list(expects)},
                 "ops": ops}
 
@@ -386,6 +393,23 @@ def scenarios(w) -> dict:
             # texts differ: neither is a safe fold
             binding_action("manual"), f"SELECT NOT ({HOSTS_DISMISSED[7:]})",
             f"SELECT NOT ({binding_action('pending')[7:]})"),
+        # Two lessons with one text on two slots: a safe fold. The loser is
+        # retired with its audit, the survivor kept, the action applied.
+        "curation-auto-fold": {**curation_scenario(
+            "auto", {**curation_verdicts, "Backup Drill.Cadence|Restore Drill.Cadence": {
+                **w.V("duplicate", 0.95, note="one drill"), "keep": "a"}}, [w.review()],
+            "SELECT (SELECT COUNT(*) FROM lessons WHERE entity IN ('Backup Drill', "
+            "'Restore Drill') AND status = 'retired') = 1 AND (SELECT COUNT(*) FROM lessons "
+            "WHERE entity IN ('Backup Drill', 'Restore Drill') AND status = 'current') = 1",
+            "SELECT EXISTS (SELECT 1 FROM store_decisions WHERE store = 'lesson' "
+            "AND action = 'retire' AND decided_by = 'dream-judge' AND reason = 'one drill' "
+            "AND entity_norm IN ('backup-drill', 'restore-drill') "
+            "AND record->'_curation_duplicate'->>'keep' = 'a')",
+            binding_action("applied"),
+            until=f"{CURATION_JUDGED} AND {CURATION_JUDGED_FOLD[7:]}"),
+            "seed": [*w.DEEP_SEED,
+                     w.deep_lesson("Backup Drill", "Cadence", "Run the drill monthly.", 9),
+                     w.deep_lesson("Restore Drill", "Cadence", "Run the drill monthly.", 9)]},
         "curation-auto-distinct-reopen": curation_scenario(
             "auto-distinct", curation_verdicts, [
                 w.expect(w.judge_restart(curation_config("shadow"),

@@ -174,3 +174,25 @@ fn interleave_alternates_stores_with_pending_first() {
     assert_eq!(got, vec!["pw1", "pl1", "sw1", "sl1", "sl2", "sl3"]);
     assert!(interleave::<&str>(&[], &[], [L, W]).is_empty());
 }
+
+#[test]
+fn the_retire_audit_is_pythons() {
+    for case in golden()["curation_audit"].as_array().unwrap() {
+        let ev = evidence(case);
+        let embedding: Vec<f32> = case["embedding"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|x| x.as_f64().unwrap() as f32)
+            .collect();
+        let got = audit_snapshot(
+            ev.store,
+            obj(&case["retired_snapshot"]),
+            Some(embedding),
+            &ev.b_fingerprint,
+            &ev,
+            "a",
+        );
+        assert_eq!(norm(&got), norm(&case["audit"]), "{}", case["store"]);
+    }
+}
