@@ -862,7 +862,8 @@ pub(crate) async fn reject_locked(
         let entity = vi(&prop, "entity_id");
         let reason = format!(
             "junk keep: {}",
-            prop.get("reason").map_or_else(|| "None".to_string(), py_str)
+            prop.get("reason")
+                .map_or_else(|| "None".to_string(), py_str)
         );
         crate::graph_review_tools::actions::record_merge_decision_by(
             c,
@@ -1536,7 +1537,13 @@ async fn judge_tick(
         return Ok(m);
     };
     let current_model = or_stop(stop, rj::observed_model(&ex.compat, ex.served.as_deref())).await?;
-    let mut review = Review::new(&service.config, &ex.compat, rj::Queue::Merge, pending, current_model);
+    let mut review = Review::new(
+        &service.config,
+        &ex.compat,
+        rj::Queue::Merge,
+        pending,
+        current_model,
+    );
     let reconsidered = {
         let _lock = ready.write.lock().await;
         let reconsidered =

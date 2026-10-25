@@ -223,7 +223,10 @@ pub(crate) struct JunkEvidence {
 }
 
 /// Caller holds the lock.
-pub(crate) async fn junk_evidence_body(c: &Client, rows: &[Row]) -> Result<JunkEvidence, ToolError> {
+pub(crate) async fn junk_evidence_body(
+    c: &Client,
+    rows: &[Row],
+) -> Result<JunkEvidence, ToolError> {
     let g = crate::storage::graph::load_graph_body(c)
         .await
         .map_err(internal)?;
@@ -232,7 +235,13 @@ pub(crate) async fn junk_evidence_body(c: &Client, rows: &[Row]) -> Result<JunkE
         .as_array()
         .into_iter()
         .flatten()
-        .map(|e| (e["id"].as_i64().unwrap_or(0), s(&e["canonical"]), s(&e["display"])))
+        .map(|e| {
+            (
+                e["id"].as_i64().unwrap_or(0),
+                s(&e["canonical"]),
+                s(&e["display"]),
+            )
+        })
         .collect();
     let edges = g["edges"]
         .as_array()
@@ -309,8 +318,10 @@ pub(crate) async fn junk_evidence_body(c: &Client, rows: &[Row]) -> Result<JunkE
             .iter()
             .map(|r| {
                 (
-                    r.get::<_, Option<String>>(0).unwrap_or_else(|| "None".into()),
-                    r.get::<_, Option<String>>(1).unwrap_or_else(|| "None".into()),
+                    r.get::<_, Option<String>>(0)
+                        .unwrap_or_else(|| "None".into()),
+                    r.get::<_, Option<String>>(1)
+                        .unwrap_or_else(|| "None".into()),
                 )
             })
             .collect();
@@ -328,10 +339,22 @@ pub(crate) async fn junk_evidence_body(c: &Client, rows: &[Row]) -> Result<JunkE
 }
 
 /// `_enrich_junk_proposals_from(pending, evidence)`: pure.
-pub(crate) fn enrich_junk_from(rows: &[Row], ev: &JunkEvidence, cfg: &DeepDreamConfig) -> Vec<Value> {
+pub(crate) fn enrich_junk_from(
+    rows: &[Row],
+    ev: &JunkEvidence,
+    cfg: &DeepDreamConfig,
+) -> Vec<Value> {
     let cap = cfg.snippet_max_chars;
-    let disp: HashMap<i64, &str> = ev.entities.iter().map(|(i, _, d)| (*i, d.as_str())).collect();
-    let canon: HashMap<i64, &str> = ev.entities.iter().map(|(i, c, _)| (*i, c.as_str())).collect();
+    let disp: HashMap<i64, &str> = ev
+        .entities
+        .iter()
+        .map(|(i, _, d)| (*i, d.as_str()))
+        .collect();
+    let canon: HashMap<i64, &str> = ev
+        .entities
+        .iter()
+        .map(|(i, c, _)| (*i, c.as_str()))
+        .collect();
     let mut deg: HashMap<i64, i64> = HashMap::new();
     let mut by_ent: HashMap<i64, Vec<&JEdge>> = HashMap::new();
     for ed in &ev.edges {
@@ -385,7 +408,10 @@ pub(crate) fn enrich_junk_from(rows: &[Row], ev: &JunkEvidence, cfg: &DeepDreamC
             });
         let facts = [
             ev.facts.get(&eid).copied().unwrap_or(0),
-            facts_by_norm.get(&norm_name(&display)).copied().unwrap_or(0),
+            facts_by_norm
+                .get(&norm_name(&display))
+                .copied()
+                .unwrap_or(0),
             facts_by_norm
                 .get(canon.get(&eid).copied().unwrap_or(""))
                 .copied()
@@ -438,7 +464,12 @@ pub(crate) fn enrich_junk_from(rows: &[Row], ev: &JunkEvidence, cfg: &DeepDreamC
 /// `_graph_accept_entity_junk_locked(id, decided_by="dream-judge",
 /// _review_guard=...)` in the caller's transaction: the audit (the
 /// tombstone that suppresses a re-mint), the delete, the status.
-async fn accept_junk_locked(c: &Client, review: &Review, row: &Row, id: i64) -> Result<bool, ToolError> {
+async fn accept_junk_locked(
+    c: &Client,
+    review: &Review,
+    row: &Row,
+    id: i64,
+) -> Result<bool, ToolError> {
     if !review.current(c, row, false, false).await? {
         return Ok(false);
     }
@@ -460,7 +491,8 @@ async fn accept_junk_locked(c: &Client, review: &Review, row: &Row, id: i64) -> 
     let votes = crate::graph_review_tools::actions::entity_proposal_votes_body(c, id).await?;
     let reason = format!(
         "junk: {}",
-        prop.get("reason").map_or_else(|| "None".to_string(), py_str)
+        prop.get("reason")
+            .map_or_else(|| "None".to_string(), py_str)
     );
     crate::graph_review_tools::actions::record_merge_decision_by(
         c,
@@ -644,10 +676,10 @@ async fn junk_tick(
             let Some(r) = rows.get(v.n.wrapping_sub(1)) else {
                 continue;
             };
-            let (review, model, served, snap) = (&review, &model, served.as_deref(), &mut snap);
+            let (rv, model, served, snap) = (&review, &model, served.as_deref(), &mut snap);
             let mode = mode.as_str();
             let outcome = in_txn(client, |c| async move {
-                if !review.current(c, p, false, false).await? {
+                if !rv.current(c, p, false, false).await? {
                     return Ok((false, false));
                 }
                 let id = id_of(p);
@@ -663,7 +695,7 @@ async fn junk_tick(
                 )
                 .await?;
                 if ok {
-                    review.record(c, p, served).await?;
+                    rv.record(c, p, served).await?;
                 } else {
                     return Ok((false, false));
                 }
@@ -674,19 +706,21 @@ async fn junk_tick(
                 let facts = r.get("facts").and_then(Value::as_i64).unwrap_or(0);
                 if v.verdict == "keep" && v.confidence >= cfg.junk_keep_min_confidence {
                     let prior = rj::capture_proposal_pair(c, Queue::Junk, p).await?;
-                    let rejected = reject_locked(c, review, p, id).await?;
+                    let rejected = reject_locked(c, rv, p, id).await?;
                     if rejected {
                         if !crate::mutants::active("mcp-dream-junk-keep-unrecorded") {
-                            rj::record_proposal_terminal(c, review, p, &prior, served).await?;
+                            rj::record_proposal_terminal(c, rv, p, &prior, served).await?;
                         }
                     } else {
-                        review.retry(c, p).await?;
+                        rv.retry(c, p).await?;
                     }
                     return Ok((true, rejected));
                 }
                 let under_bar = (degree <= cfg.junk_max_auto_degree && facts <= 1)
                     || crate::mutants::active("mcp-dream-junk-no-evidence-bar");
-                if v.verdict == "delete" && v.confidence >= cfg.junk_delete_min_confidence && under_bar
+                if v.verdict == "delete"
+                    && v.confidence >= cfg.junk_delete_min_confidence
+                    && under_bar
                 {
                     if snap.is_none() {
                         *snap = Some(
@@ -699,12 +733,12 @@ async fn junk_tick(
                         );
                     }
                     if snap.as_ref().is_some_and(Option::is_none) {
-                        review.retry(c, p).await?;
+                        rv.retry(c, p).await?;
                         return Ok((true, false));
                     }
-                    let accepted = accept_junk_locked(c, review, p, id).await?;
+                    let accepted = accept_junk_locked(c, rv, p, id).await?;
                     if !accepted {
-                        review.retry(c, p).await?;
+                        rv.retry(c, p).await?;
                     }
                     return Ok((true, accepted));
                 }

@@ -73,7 +73,13 @@ fn evidence(v: &Value) -> JunkEvidence {
             .as_array()
             .unwrap()
             .iter()
-            .map(|e| (e["id"].as_i64().unwrap(), s(&e["canonical"]), s(&e["display"])))
+            .map(|e| {
+                (
+                    e["id"].as_i64().unwrap(),
+                    s(&e["canonical"]),
+                    s(&e["display"]),
+                )
+            })
             .collect(),
         edges: g["edges"]
             .as_array()
@@ -131,11 +137,23 @@ fn evidence(v: &Value) -> JunkEvidence {
 #[test]
 fn junk_packs_match_pythons_enrichment() {
     for case in golden()["pack"].as_array().unwrap() {
-        let mut cfg = crate::config::DeepDreamConfig::default();
-        cfg.snippet_max_chars = case["cap"].as_i64().unwrap();
-        let pending: Vec<Row> = case["pending"].as_array().unwrap().iter().map(row).collect();
+        let cfg = crate::config::DeepDreamConfig {
+            snippet_max_chars: case["cap"].as_i64().unwrap(),
+            ..Default::default()
+        };
+        let pending: Vec<Row> = case["pending"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(row)
+            .collect();
         let got = enrich_junk_from(&pending, &evidence(&case["evidence"]), &cfg);
-        assert_eq!(norm(&Value::Array(got)), norm(&case["rows"]), "cap {}", case["cap"]);
+        assert_eq!(
+            norm(&Value::Array(got)),
+            norm(&case["rows"]),
+            "cap {}",
+            case["cap"]
+        );
     }
 }
 

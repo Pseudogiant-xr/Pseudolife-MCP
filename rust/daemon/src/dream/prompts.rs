@@ -439,12 +439,26 @@ mod judge_prompt_tests {
     fn queue_judge_prompts_are_pythons_bytes() {
         // sha256 and length of each dream._*_SYSTEM_PROMPT (CPython 3.11).
         assert_eq!(super::JUNK_JUDGE_SYSTEM_PROMPT.chars().count(), 1286);
-        assert_eq!(hex::encode(Sha256::digest(super::JUNK_JUDGE_SYSTEM_PROMPT.as_bytes())), "4f7df9010e89c5c6bd6a07e9c55bdae4391441e3d9a9ad0298a4e3985b118f29");
+        assert_eq!(
+            hex::encode(Sha256::digest(super::JUNK_JUDGE_SYSTEM_PROMPT.as_bytes())),
+            "4f7df9010e89c5c6bd6a07e9c55bdae4391441e3d9a9ad0298a4e3985b118f29"
+        );
         assert_eq!(super::LINK_JUDGE_SYSTEM_PROMPT.chars().count(), 1671);
-        assert_eq!(hex::encode(Sha256::digest(super::LINK_JUDGE_SYSTEM_PROMPT.as_bytes())), "fcdc8bf8153b9a3997acb720fd72a8e6f4ca3ca38bbf662c95c7f8153699ef34");
+        assert_eq!(
+            hex::encode(Sha256::digest(super::LINK_JUDGE_SYSTEM_PROMPT.as_bytes())),
+            "fcdc8bf8153b9a3997acb720fd72a8e6f4ca3ca38bbf662c95c7f8153699ef34"
+        );
         assert_eq!(super::CANDIDATE_JUDGE_SYSTEM_PROMPT.chars().count(), 1352);
-        assert_eq!(hex::encode(Sha256::digest(super::CANDIDATE_JUDGE_SYSTEM_PROMPT.as_bytes())), "bd2c271eb5eb6b6ea5b711861cf9897766f03953af85439ce842fd228291e4ea");
+        assert_eq!(
+            hex::encode(Sha256::digest(
+                super::CANDIDATE_JUDGE_SYSTEM_PROMPT.as_bytes()
+            )),
+            "bd2c271eb5eb6b6ea5b711861cf9897766f03953af85439ce842fd228291e4ea"
+        );
         assert_eq!(super::SLOT_JUDGE_SYSTEM_PROMPT.chars().count(), 1261);
-        assert_eq!(hex::encode(Sha256::digest(super::SLOT_JUDGE_SYSTEM_PROMPT.as_bytes())), "a05434c8e5ac7f6bb24b6a687d335c6a2c3a11ea3d1b17e785c4dd0f35c4730f");
+        assert_eq!(
+            hex::encode(Sha256::digest(super::SLOT_JUDGE_SYSTEM_PROMPT.as_bytes())),
+            "a05434c8e5ac7f6bb24b6a687d335c6a2c3a11ea3d1b17e785c4dd0f35c4730f"
+        );
     }
 }

@@ -2049,7 +2049,12 @@ fn load_str(text: &str) -> Result<Config, ConfigError> {
                     p,
                     d.junk_delete_min_confidence,
                 )?,
-                junk_max_auto_degree: want_int(r, "junk_max_auto_degree", p, d.junk_max_auto_degree)?,
+                junk_max_auto_degree: want_int(
+                    r,
+                    "junk_max_auto_degree",
+                    p,
+                    d.junk_max_auto_degree,
+                )?,
                 curation_distinct_min_confidence: want_float(
                     r,
                     "curation_distinct_min_confidence",
