@@ -6092,6 +6092,8 @@ def run_golden(name: str, binary: Path, root: Path, tol: dict, owned: list[str])
     if scn["seed"]:
         return {"scenario": name, "skipped": "seeded through the Python daemon", "steps": [],
                 "stats": {}}
+    if scn.get("live_only"):
+        return {"scenario": name, "skipped": scn["live_only"], "steps": [], "stats": {}}
     golden = json.loads((GOLDENS / f"{name}.json").read_text(encoding="utf-8"))
     tag = name.replace("-", "_")
     db = pg.name(f"pl_cf_w2e_{tag}_rs")

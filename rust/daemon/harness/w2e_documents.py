@@ -149,6 +149,14 @@ def require_oracle_without_bs4() -> None:
                          "daemon image lacks; run from an environment without bs4")
 
 
+# Golden replay skips these scenarios (``live_only``): a replay boots one
+# Rust bank and compares its whole state with the recorded oracle bank, and
+# every w2e recording on master already differs there in boot-time rows (the
+# schema version, Python's startup meta keys, the warmup's retrieval event),
+# so a recording would add no check. Live mode compares both daemons.
+LIVE_ONLY = ("live mode only: golden replay compares boot-time bank rows that "
+             "differ for every w2e recording on master")
+
 # The document breaks (``documents.rs``), each caught by the documents-*
 # scenarios.
 MUTANTS = ["document-raw-newlines", "document-strip-rust-whitespace", "document-no-overlap",
@@ -162,6 +170,7 @@ SCENARIOS: dict[str, dict] = {
     "documents-ingest-search": {
         "config": None,
         "seed": [],
+        "live_only": LIVE_ONLY,
         "ops": [
             search("restoring the bank from a backup", top_k=3),
             ingest("@DOCS@/guide.md"),
@@ -186,6 +195,7 @@ SCENARIOS: dict[str, dict] = {
     "documents-reingest": {
         "config": None,
         "seed": [],
+        "live_only": LIVE_ONLY,
         "ops": [
             ingest("@DOCS@/guide.md"),
             ingest("@DOCS@/guide.md"),
@@ -202,6 +212,7 @@ SCENARIOS: dict[str, dict] = {
     "documents-ties": {
         "config": None,
         "seed": [],
+        "live_only": LIVE_ONLY,
         "ops": [
             ingest("@DOCS@/garden.txt", source="twin-a"),
             ingest("@DOCS@/garden.txt", source="twin-b"),
@@ -214,6 +225,7 @@ SCENARIOS: dict[str, dict] = {
     "documents-config": {
         "config": "memory:\n  reference:\n    chunk_size: 40\n    chunk_overlap: 8\n",
         "seed": [],
+        "live_only": LIVE_ONLY,
         "ops": [
             ingest("@DOCS@/garden.txt"),
             search("transplanting seedlings outside"),
