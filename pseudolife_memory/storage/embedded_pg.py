@@ -474,9 +474,12 @@ def _postmaster_alive(pgdata: Path) -> bool:
         process = psutil.Process(pid)
         if not process.name().lower().startswith("postgres"):
             return False
-        # postmaster.pid's third line is the postmaster's start time: another
-        # postgres that took the recorded pid after a reboot is not this one.
-        return abs(process.create_time() - started) < 2
+        # postmaster.pid's third line is the postmaster's start time, stamped
+        # a little after the process began (seconds on a slow start). Only a
+        # process created well after it is another postgres that took the
+        # recorded pid after a reboot; anything else counts as the bank's
+        # server (fail closed).
+        return process.create_time() <= started + 60
     except (psutil.NoSuchProcess, psutil.ZombieProcess):
         return False
     except psutil.Error:

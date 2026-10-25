@@ -1103,6 +1103,10 @@ def test_postmaster_alive_fails_closed_and_matches_the_start_time(monkeypatch, t
 
     monkeypatch.setattr(psutil, "Process", Fake)
     assert _REAL_ALIVE(tmp_path)
+    # The stamp lags the process start, by seconds on a slow start: still it.
+    for created in (1792899999.5, 1792900030.0):
+        Fake.created = created
+        assert _REAL_ALIVE(tmp_path)
     Fake.created = 1792990000.0  # another postgres took the pid after a reboot
     assert not _REAL_ALIVE(tmp_path)
     Fake.error = psutil.AccessDenied(4321)  # alive, not inspectable
