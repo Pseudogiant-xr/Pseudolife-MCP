@@ -231,7 +231,7 @@ def _attach_or_start_locked(pg0, pgdata: Path, secret: str, created: bool):
         # possibly on trust): stop it; the next start finishes the move.
         inst.stop()
         raise
-    return _dsn(secret, port), inst
+    return _dsn(secret, port, scram=True), inst
 
 
 def start_embedded(data_dir: Path) -> str:
@@ -316,8 +316,18 @@ def _start_lock(pgdata: Path, timeout_s: float = 120.0):
 _LEGACY_PASSWORD = "postgres"  # pg0's fixed default, still held by old banks
 
 
-def _dsn(password: str, port: int, database: str = _DB_NAME) -> str:
-    return f"postgresql://postgres:{password}@127.0.0.1:{port}/{database}"
+def _dsn(password: str, port: int, database: str = _DB_NAME, *, scram: bool = False) -> str:
+    """A DSN for the bank's server. ``scram``: the client refuses any
+    authentication but SCRAM (libpq 16+), so the secret itself is never
+    sent, not even to an impostor on the recorded port."""
+    dsn = f"postgresql://postgres:{password}@127.0.0.1:{port}/{database}"
+    return dsn + "?require_auth=scram-sha-256" if scram and _libpq_has_require_auth() else dsn
+
+
+def _libpq_has_require_auth() -> bool:
+    import psycopg
+
+    return psycopg.pq.version() >= 160000
 
 
 def split_password(dsn: str) -> tuple[str, str | None]:
@@ -396,15 +406,16 @@ def _probe(port: int, pgdata: Path, passwords) -> str | None:
         return resolved.lower() if _PLATFORM == "win32" else resolved
 
     for password in passwords:
+        scram = password != _LEGACY_PASSWORD
         try:
             with psycopg.connect(
-                _dsn(password, port, "postgres"), connect_timeout=5,
+                _dsn(password, port, "postgres", scram=scram), connect_timeout=5,
             ) as conn:
                 (reported,) = conn.execute("SHOW data_directory").fetchone()
         except psycopg.Error:
             continue
         if canon(reported) == canon(str(pgdata)):
-            return _dsn(password, port)
+            return _dsn(password, port, scram=scram)
     return None
 
 
@@ -419,9 +430,10 @@ def _settle_running(dsn: str, port: int, pgdata: Path, secret: str) -> str:
     methods = _managed_methods((pgdata / "pg_hba.conf").read_text(encoding="utf-8"))
     if methods == {"trust"}:
         _finish_secret(port, pgdata, secret, migrate=True)
-        return _dsn(secret, port)
+        return _dsn(secret, port, scram=True)
     if methods == {"scram-sha-256"}:
         _run_sql(dsn, ["SELECT pg_reload_conf()"])
+        return _dsn(secret, port, scram=True)
     return dsn
 
 
@@ -514,6 +526,9 @@ def _finish_secret(port: int, pgdata: Path, secret: str, *, migrate: bool) -> No
         ])
     hba = (pgdata / "pg_hba.conf").read_text(encoding="utf-8")
     _write_hba(pgdata, _rewrite_hba(hba, "scram-sha-256"))
+    # The server still runs the rules it loaded (trust, or a fresh bank's
+    # password method) until this reload, so SCRAM cannot be required yet;
+    # it is this call's own server, or one the probe verified.
     _run_sql(_dsn(secret, port, "postgres"), ["SELECT pg_reload_conf()"])
     if migrate:
         logger.info(
@@ -525,7 +540,7 @@ def _finish_secret(port: int, pgdata: Path, secret: str, *, migrate: bool) -> No
 def _ensure_database(port: int, secret: str) -> None:
     """Create the bank's database when it is missing (checked first, as
     pg0 does, rather than parsing the localized duplicate error)."""
-    admin = _dsn(secret, port, "postgres")
+    admin = _dsn(secret, port, "postgres", scram=True)
     if not _run_sql(admin, [f"SELECT 1 FROM pg_database WHERE datname = '{_DB_NAME}'"]):
         _run_sql(admin, [f"CREATE DATABASE \"{_DB_NAME}\""])
 

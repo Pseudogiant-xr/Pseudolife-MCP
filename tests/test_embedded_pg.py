@@ -253,7 +253,7 @@ def test_start_embedded_attaches_without_taking_ownership(
     (pgdata / "pg_hba.conf").write_text(ep._rewrite_hba(_LEGACY_HBA, "scram-sha-256"))
     _running(monkeypatch, pgdata, accepts=secret)
     dsn = ep.start_embedded(tmp_path)
-    assert dsn == ep._dsn(secret, 59998)
+    assert dsn == ep._dsn(secret, 59998, scram=True)
     assert not any(call[0] == "start" for call in calls)
     assert ep._owned == []
     # A SCRAM file a dead starter may not have reloaded yet is reloaded.
@@ -266,7 +266,7 @@ def test_start_embedded_owns_and_stops_what_it_started(
     calls = _stub_pg0(monkeypatch)
     dsn = ep.start_embedded(tmp_path)
     secret = (tmp_path / "embedded_pg.secret").read_text()
-    assert dsn == ep._dsn(secret, 59999)
+    assert dsn == ep._dsn(secret, 59999, scram=True)
     assert len(ep._owned) == 1
     ep.stop_embedded()
     assert ("stop",) in calls
@@ -286,7 +286,7 @@ def test_attach_or_start_returns_handle_only_when_started(
     (pgdata / "pg_hba.conf").write_text(ep._rewrite_hba(_LEGACY_HBA, "scram-sha-256"))
     _running(monkeypatch, pgdata, accepts=secret)
     dsn, inst = ep.attach_or_start(tmp_path / "b")
-    assert dsn == ep._dsn(secret, 59998) and inst is None
+    assert dsn == ep._dsn(secret, 59998, scram=True) and inst is None
 
 
 # ----------------------------------------------------------------------
@@ -316,7 +316,7 @@ def test_a_fresh_bank_gets_its_own_owner_only_secret(monkeypatch, tmp_path):
     # Read back through the owner-only validator the token files use.
     secret, _ = credentials._open_token(tmp_path / "embedded_pg.secret")
     assert len(secret) == 64 and int(secret, 16) >= 0
-    assert dsn == ep._dsn(secret, 59999)
+    assert dsn == ep._dsn(secret, 59999, scram=True)
     # pg0 never sees the secret: its own defaults, and it creates no database.
     init = next(call for call in calls if call[0] == "init")
     assert init[2] is None and "password" not in init[4]
@@ -326,7 +326,10 @@ def test_a_fresh_bank_gets_its_own_owner_only_secret(monkeypatch, tmp_path):
     # password; the reload and the database use the secret.
     sql_calls = [call for call in calls if call[0] == "sql"]
     assert sql_calls[0][1] == ep._dsn("postgres", 59999, "postgres")
-    assert all(call[1] == ep._dsn(secret, 59999, "postgres") for call in sql_calls[1:])
+    # The reload runs before SCRAM is loaded; the database check after.
+    assert sql_calls[1][1] == ep._dsn(secret, 59999, "postgres")
+    assert all(call[1] == ep._dsn(secret, 59999, "postgres", scram=True)
+               for call in sql_calls[2:])
     assert _sql(calls) == _move(secret) + _CREATE_DB
     assert _methods(pgdata) == {"scram-sha-256"}
 
@@ -358,7 +361,7 @@ def test_a_migrated_bank_starts_with_its_secret_and_changes_nothing(
     hba = (tmp_path / "embedded_pg" / "pg_hba.conf").read_text()
     calls = _stub_pg0(monkeypatch)
     dsn, _ = ep.attach_or_start(tmp_path)
-    assert dsn == ep._dsn(secret, 59999)
+    assert dsn == ep._dsn(secret, 59999, scram=True)
     assert _sql(calls) == _CREATE_DB
     assert (tmp_path / "embedded_pg" / "pg_hba.conf").read_text() == hba
     assert (tmp_path / "embedded_pg.secret").read_text() == secret
@@ -394,7 +397,7 @@ def test_an_interrupted_migration_on_a_running_server_is_finished_on_attach(
     calls = _stub_pg0(monkeypatch)
     _running(monkeypatch, pgdata, accepts="cd" * 32)  # trust takes anything
     dsn, started = ep.attach_or_start(tmp_path)
-    assert started is None and dsn == ep._dsn("cd" * 32, 59998)
+    assert started is None and dsn == ep._dsn("cd" * 32, 59998, scram=True)
     assert not any(call[0] == "start" for call in calls)
     assert _sql(calls) == _move("cd" * 32)
     assert _methods(pgdata) == {"scram-sha-256"}
@@ -623,3 +626,15 @@ def test_embedded_legacy_bank_migrates_real(tmp_path):
     finally:
         ep.stop_embedded()
         _pg0.drop(name)
+
+
+def test_secret_dsns_require_scram_and_split_for_pgpassword():
+    secret = "ef" * 32
+    if ep._libpq_has_require_auth():
+        assert ep._dsn(secret, 5999, scram=True).endswith("?require_auth=scram-sha-256")
+    # The public old password is never sent with a SCRAM requirement.
+    assert "require_auth" not in ep._dsn("postgres", 5999)
+    bare, password = ep.split_password(ep._dsn(secret, 5999, scram=True))
+    assert password == secret and secret not in bare
+    assert bare.startswith("postgresql://postgres@127.0.0.1:5999/pseudolife_memory")
+    assert ep.split_password("postgresql://u@h:1/db") == ("postgresql://u@h:1/db", None)
