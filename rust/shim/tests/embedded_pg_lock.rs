@@ -1,9 +1,22 @@
-//! The lite tier's first-boot lock (`pg::embedded::StartLock`), in its own
-//! test binary so the hosted stress loop can select it (it rests on file
-//! locks, which `windows-latest` runs differently from a dev machine).
+//! The lite tier's file locks: the first-boot lock
+//! (`pg::embedded::StartLock`) and the runtime install lock
+//! (`pg::native_provision`), in their own test binary so the hosted stress
+//! loop can select them (file locks behave differently on `windows-latest`
+//! than on a dev machine).
 #![forbid(unsafe_code)]
 use pseudolife_stdio::pg::embedded::{START_LOCK_TIMEOUT, StartLock};
-use std::{fs, path::PathBuf, sync::mpsc, time::Duration};
+use pseudolife_stdio::pg::native_provision::{self as native, Fetch, Manifest, Pinned};
+use std::{
+    fs,
+    io::Write,
+    path::{Path, PathBuf},
+    sync::{
+        Mutex,
+        atomic::{AtomicUsize, Ordering},
+        mpsc,
+    },
+    time::Duration,
+};
 
 fn scratch(label: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!(
@@ -55,4 +68,83 @@ fn the_windows_start_lock_gives_up_at_its_deadline() {
     );
     drop(held);
     fs::remove_dir_all(dir).unwrap();
+}
+
+struct Payload {
+    sha256: String,
+}
+impl Pinned for Payload {
+    fn url(&self) -> &str {
+        "https://example.com/payload.bin"
+    }
+    fn sha256(&self) -> &str {
+        &self.sha256
+    }
+}
+
+/// Serves the payload slowly, so two provisioners overlap.
+struct SlowFetch {
+    calls: AtomicUsize,
+}
+impl Fetch for SlowFetch {
+    fn fetch(&self, _url: &str, sink: &mut dyn Write) -> Result<(), String> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        std::thread::sleep(Duration::from_millis(400));
+        sink.write_all(b"payload").map_err(|e| e.to_string())
+    }
+}
+
+#[test]
+fn two_provisioners_on_one_root_install_once() {
+    use sha2::{Digest, Sha256};
+    let root = scratch("install-lock");
+    let pins = [Payload {
+        sha256: native::hex(&Sha256::digest(b"payload")),
+    }];
+    let manifest = Manifest {
+        label: "test runtime",
+        version: "1.0",
+        artifacts: &pins,
+        record: serde_json::Map::new(),
+    };
+    let fetch = SlowFetch {
+        calls: AtomicUsize::new(0),
+    };
+    let unpacks = Mutex::new(0);
+    let outcomes: Vec<bool> = std::thread::scope(|scope| {
+        let run = || {
+            let mut unpack = |_: &Payload, download: &Path, tree: &Path| {
+                *unpacks.lock().unwrap() += 1;
+                fs::copy(download, tree.join("payload"))
+                    .map(drop)
+                    .map_err(|e| e.to_string())
+            };
+            let validate = |dir: &Path| {
+                dir.join("payload")
+                    .is_file()
+                    .then_some(())
+                    .ok_or_else(|| "payload is missing".to_owned())
+            };
+            native::provision(
+                &root,
+                &manifest,
+                &fetch,
+                &mut |_| {},
+                &mut unpack,
+                &validate,
+            )
+            .unwrap()
+            .1
+        };
+        let first = scope.spawn(run);
+        let second = scope.spawn(run);
+        vec![first.join().unwrap(), second.join().unwrap()]
+    });
+    // The lock serializes them: one installs, the other then finds it.
+    assert_eq!(outcomes.iter().filter(|installed| **installed).count(), 1);
+    assert_eq!(fetch.calls.load(Ordering::SeqCst), 1);
+    assert_eq!(*unpacks.lock().unwrap(), 1);
+    let dir = manifest.install_dir(&root);
+    assert_eq!(fs::read(dir.join("payload")).unwrap(), b"payload");
+    fs::remove_dir_all(root).unwrap();
 }
