@@ -65,16 +65,26 @@ impl SecretStore for CredentialSecrets {
         }
     }
 
+    /// Written owner-only to a temporary file beside `path`, synced, then
+    /// renamed into place, so a crash leaves no partial secret behind. Only
+    /// a missing `path` is created; callers hold the lite tier's start lock,
+    /// so no other writer races the check.
     fn create(&self, path: &Path) -> Result<String, String> {
         let mut bytes = [0u8; 32];
         getrandom::fill(&mut bytes).map_err(|e| e.to_string())?;
         let secret: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
         credentials::reject_ancestor_redirects(path).map_err(|e| e.to_string())?;
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        let parent = path.parent().unwrap_or(Path::new("."));
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        if fs::symlink_metadata(path).is_ok() {
+            return Err("a secret file already exists".to_owned());
         }
-        let target = path.to_path_buf();
-        let mut file = private_file(&target).map_err(|e| e.to_string())?;
+        let name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let temporary = parent.join(format!(".{name}.{}", uuid::Uuid::new_v4().simple()));
+        let mut file = private_file(&temporary).map_err(|e| e.to_string())?;
         let written = (|| {
             // Owner-only before a byte is written.
             make_private(&file)?;
@@ -82,14 +92,16 @@ impl SecretStore for CredentialSecrets {
                 .and_then(|()| file.sync_all())
                 .map_err(|e| e.to_string())?;
             drop(file);
-            if read_back(&target)? != secret {
+            fs::rename(&temporary, path).map_err(|e| e.to_string())?;
+            if read_back(path)? != secret {
                 return Err("credential file validation failed".to_owned());
             }
             Ok(())
         })();
-        if written.is_err() {
-            // This call created the file, so removing a half-written one is safe.
-            let _ = fs::remove_file(&target);
+        let _ = fs::remove_file(&temporary);
+        if written.is_err() && read_back(path).ok().as_deref() == Some(secret.as_str()) {
+            // Renamed into place but failed afterwards: this call created it.
+            let _ = fs::remove_file(path);
         }
         written.map(|()| secret)
     }

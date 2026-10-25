@@ -198,3 +198,84 @@ fn a_bank_opens_on_both_sides() {
     fs::remove_dir_all(dir).unwrap();
     fs::remove_dir_all(fresh).unwrap();
 }
+
+#[test]
+fn a_leftover_temporary_file_does_not_block_creation() {
+    // A crash between writing the temporary file and renaming it leaves
+    // the temporary behind, never a partial secret at the real path.
+    let dir = scratch("leftover");
+    fs::write(dir.join(".embedded_pg.secret.deadbeef"), "partial").unwrap();
+    let path = dir.join("embedded_pg.secret");
+    let secret = CredentialSecrets.create(&path).unwrap();
+    assert_eq!(
+        CredentialSecrets.read(&path).unwrap().as_deref(),
+        Some(secret.as_str())
+    );
+    fs::remove_dir_all(dir).unwrap();
+}
+
+/// Python lite holds its own first-boot lock (`_start_lock`: msvcrt byte 0
+/// on Windows, fcntl.flock elsewhere) in another process; the Rust lock
+/// must wait for it, then get it once Python lets go.
+const PYTHON_LOCK: &str = r#"
+import sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[2])
+from pseudolife_memory.storage import embedded_pg
+with embedded_pg._start_lock(Path(sys.argv[1])):
+    print("locked", flush=True)
+    sys.stdin.read()
+"#;
+
+#[test]
+fn the_rust_lock_and_python_lite_s_lock_exclude_each_other() {
+    use crate::pg::embedded::{START_LOCK_TIMEOUT, StartLock};
+    use std::io::{BufRead, BufReader};
+    let Some(python) = std::env::var_os("PSEUDOLIFE_TEST_PG0_PYTHON").filter(|v| !v.is_empty())
+    else {
+        eprintln!("PSEUDOLIFE_TEST_PG0_PYTHON unset: cross-process lock case not run");
+        return;
+    };
+    let dir = scratch("pylock");
+    let pgdata = dir.join("embedded_pg");
+    fs::create_dir_all(&pgdata).unwrap();
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("..");
+    let mut child = std::process::Command::new(python)
+        .arg("-c")
+        .arg(PYTHON_LOCK)
+        .arg(&pgdata)
+        .arg(repo)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut line = String::new();
+    BufReader::new(child.stdout.take().unwrap())
+        .read_line(&mut line)
+        .unwrap();
+    assert_eq!(line.trim(), "locked");
+    let (sent, acquired) = std::sync::mpsc::channel();
+    let contender = {
+        let pgdata = pgdata.clone();
+        std::thread::spawn(move || {
+            let lock = StartLock::acquire(&pgdata, START_LOCK_TIMEOUT);
+            sent.send(lock.is_ok()).unwrap();
+            lock
+        })
+    };
+    // Negative check: no Rust lock while Python holds its own.
+    assert!(
+        acquired
+            .recv_timeout(std::time::Duration::from_secs(1))
+            .is_err()
+    );
+    drop(child.stdin.take());
+    child.wait().unwrap();
+    assert!(
+        acquired
+            .recv_timeout(std::time::Duration::from_secs(60))
+            .unwrap()
+    );
+    drop(contender.join().unwrap());
+    fs::remove_dir_all(dir).unwrap();
+}

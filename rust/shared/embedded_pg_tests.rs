@@ -252,11 +252,7 @@ fn the_secret_sits_beside_the_pgdata_and_must_be_64_hex() {
     for bad in ["postgres", "ABCDEF", "' OR 1=1 --"] {
         let error = cluster_secret(&FixedSecret(bad), &pgdata).unwrap_err();
         assert!(matches!(error, Error::Secret { .. }));
-        assert!(
-            error
-                .to_string()
-                .contains("restore it from a backup of the data dir")
-        );
+        assert!(error.to_string().contains("Move it aside and start again"));
     }
     let dir = scratch("secret");
     let pgdata = dir.join("embedded_pg");
@@ -370,6 +366,47 @@ fn the_scram_verifier_passes_rfc_7677_s_published_exchange() {
     assert_eq!(base64(b"ab"), "YWI=");
     assert_eq!(base64(b"abc"), "YWJj");
     assert_eq!(base64(b"a"), "YQ==");
+}
+
+#[test]
+fn a_handle_redacts_its_password_and_hands_out_a_scram_only_dsn() {
+    let secret = "5e".repeat(32);
+    let handle = Embedded {
+        pgdata: PathBuf::from("d"),
+        port: 5999,
+        password: secret.clone(),
+        owned: None,
+    };
+    assert!(!format!("{handle:?}").contains(&secret));
+    assert!(
+        handle
+            .dsn()
+            .ends_with("/pseudolife_memory?require_auth=scram-sha-256")
+    );
+}
+
+#[test]
+fn stop_leaves_a_server_another_caller_restarted() {
+    // The launched server exited and another caller started the bank again:
+    // postmaster.pid names another pid, so stop must not run pg_ctl (the
+    // runtime here has no binaries; running one would fail).
+    let dir = scratch("stopid");
+    let pgdata = dir.join("embedded_pg");
+    fs::create_dir_all(&pgdata).unwrap();
+    fs::write(pgdata.join("postmaster.pid"), "2222\nd\n1\n5999\n").unwrap();
+    let handle = Embedded {
+        pgdata: pgdata.clone(),
+        port: 5999,
+        password: "5e".repeat(32),
+        owned: Some((
+            Runtime {
+                root: dir.join("no-runtime"),
+            },
+            Some(1111),
+        )),
+    };
+    handle.stop().unwrap();
+    fs::remove_dir_all(dir).unwrap();
 }
 
 #[test]
@@ -543,6 +580,60 @@ fn concurrent_first_boots_start_one_server() {
     for embedded in results {
         embedded.stop().unwrap();
     }
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn a_stopped_bank_on_scram_rules_with_the_old_role_password_finishes_its_move() {
+    // A move interrupted between its SCRAM rewrite and its role change,
+    // then stopped: the rules say SCRAM, the role still takes the public
+    // password. The owned start asks the server and moves the role.
+    let Some(runtime) = real_runtime() else {
+        return;
+    };
+    let dir = scratch("scramold");
+    let pgdata = dir.join("embedded_pg");
+    fs::create_dir_all(&pgdata).unwrap();
+    let pwfile = dir.join("legacy.pw");
+    fs::write(&pwfile, LEGACY_PASSWORD).unwrap();
+    let mut initdb = runtime.command("initdb");
+    initdb
+        .arg("-D")
+        .arg(&pgdata)
+        .args(["-U", SUPERUSER, "--auth=scram-sha-256", "--encoding=UTF8"])
+        .arg(format!("--pwfile={}", pwfile.display()));
+    run_logged(initdb, "initdb", &pgdata).unwrap();
+    PlainSecrets.create(&secret_path(&pgdata)).unwrap();
+    let moved = attach_or_start(&dir, &runtime, &PlainSecrets).unwrap();
+    assert!(moved.owned());
+    assert!(psql(&runtime, moved.port, LEGACY_PASSWORD, "SELECT 1").is_err());
+    assert_eq!(psql_in(&runtime, &moved, "SELECT 1"), "1");
+    moved.stop().unwrap();
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn a_running_postgres_serving_another_pgdata_is_refused_with_its_remedy() {
+    // A reused pid (or a copied pgdata) can point postmaster.pid at a live
+    // postgres that serves another bank: refuse, never take it for this one.
+    let Some(runtime) = real_runtime() else {
+        return;
+    };
+    let dir = scratch("otherbank");
+    let other = attach_or_start(&dir.join("a"), &runtime, &PlainSecrets).unwrap();
+    let pgdata = dir.join("b").join("embedded_pg");
+    fs::create_dir_all(&pgdata).unwrap();
+    let record =
+        fs::read_to_string(dir.join("a").join("embedded_pg").join("postmaster.pid")).unwrap();
+    fs::write(pgdata.join("postmaster.pid"), record).unwrap();
+    let error = attach_or_start(&dir.join("b"), &runtime, &PlainSecrets).unwrap_err();
+    let text = error.to_string();
+    assert!(text.contains("answers to neither"), "{text}");
+    assert!(text.contains("may be busy"), "{text}");
+    assert!(text.contains("postmaster.pid"), "{text}");
+    // The other bank's server is untouched.
+    assert_eq!(psql_in(&runtime, &other, "SELECT 1"), "1");
+    other.stop().unwrap();
     fs::remove_dir_all(dir).unwrap();
 }
 

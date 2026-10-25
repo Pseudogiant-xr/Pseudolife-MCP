@@ -163,9 +163,8 @@ impl fmt::Display for Error {
             }
             Self::Secret { path, detail } => write!(
                 f,
-                "embedded postgres password file {} cannot be used: {detail}. It must be a \
-                 regular file only your account can read; the bank's superuser password is \
-                 in it, so restore it from a backup of the data dir rather than deleting it.",
+                "embedded postgres password file {} cannot be used ({detail}). Move it aside \
+                 and start again: the next start gives the bank's superuser a new password.",
                 path.display()
             ),
         }
@@ -654,7 +653,7 @@ fn is_postgres_image(image: &str) -> bool {
     Path::new(image.trim())
         .file_name()
         .and_then(|name| name.to_str())
-        .is_some_and(|name| name.starts_with("postgres"))
+        .is_some_and(|name| name.to_ascii_lowercase().starts_with("postgres"))
 }
 
 enum Image {
@@ -738,23 +737,37 @@ fn process_image(pid: u32) -> Image {
 }
 
 /// A running lite server and whether this process owns it.
-#[derive(Debug)]
 pub struct Embedded {
     pub pgdata: PathBuf,
     pub port: u16,
     password: String,
-    owned: Option<Runtime>,
+    /// The runtime and the pid of the server this process launched.
+    owned: Option<(Runtime, Option<u32>)>,
+}
+impl fmt::Debug for Embedded {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Embedded")
+            .field("pgdata", &self.pgdata)
+            .field("port", &self.port)
+            .field("password", &"<redacted>")
+            .field("owned", &self.owned.as_ref().map(|(_, pid)| pid))
+            .finish()
+    }
 }
 impl Embedded {
-    /// The DSN Python lite exports for the same server.
+    /// The DSN Python lite exports for the same server, for a libpq or
+    /// psycopg child: it requires SCRAM, so the password is never sent as
+    /// text. A Rust client connecting with `password()` must refuse every
+    /// authentication but SCRAM itself (tokio-postgres rejects the
+    /// `require_auth` option).
     pub fn dsn(&self) -> String {
         format!(
-            "postgresql://{SUPERUSER}:{}@127.0.0.1:{}/{DATABASE}",
+            "postgresql://{SUPERUSER}:{}@127.0.0.1:{}/{DATABASE}?require_auth=scram-sha-256",
             self.password, self.port
         )
     }
     /// The superuser password the server accepts (for a child process's
-    /// `PGPASSWORD`, which keeps it off command lines).
+    /// `PGPASSWORD`, which keeps it off command lines, with SCRAM required).
     pub fn password(&self) -> &str {
         &self.password
     }
@@ -762,11 +775,19 @@ impl Embedded {
     pub fn owned(&self) -> bool {
         self.owned.is_some()
     }
-    /// Stop the server if, and only if, this process started it.
+    /// Stop the server if, and only if, this process started it and it is
+    /// still that server: one that exited and was started again by another
+    /// caller is theirs.
     pub fn stop(self) -> Result<(), Error> {
-        let Some(runtime) = &self.owned else {
+        let Some((runtime, launched)) = &self.owned else {
             return Ok(());
         };
+        if let Some(launched) = launched {
+            let current = PidFile::read(&self.pgdata)?.and_then(|(_, record)| record);
+            if current.map(|record| record.pid) != Some(*launched) {
+                return Ok(());
+            }
+        }
         let mut command = runtime.command("pg_ctl");
         command
             .arg("stop")
@@ -830,11 +851,14 @@ fn attach_or_start_locked(
                     program: "attach",
                     detail: format!(
                         "the server running for {} (port {}, pid {}) answers to neither this \
-                         bank's password nor the old fixed one; stop that process and start \
-                         again",
+                         bank's password nor the old fixed one (it may be busy or still \
+                         starting: try again in a moment). If it persists, stop that process \
+                         and start again; if no server for this bank runs, the pid now belongs \
+                         to another program: remove {} and start again",
                         pgdata.display(),
                         record.port,
-                        record.pid
+                        record.pid,
+                        pgdata.join("postmaster.pid").display()
                     ),
                 })?
                 .to_owned();
@@ -866,7 +890,8 @@ fn attach_or_start_locked(
     }
     let started = (|| {
         if !pgdata.join("PG_VERSION").exists() {
-            initdb(runtime, &pgdata, &secret)?;
+            initdb(runtime, &pgdata)?;
+            *altered = true;
         }
         let port = free_port(DEFAULT_PORT);
         start(runtime, &pgdata, port)?;
@@ -889,11 +914,14 @@ fn attach_or_start_locked(
             return Err(error);
         }
     };
+    let launched = PidFile::read(&pgdata)?
+        .and_then(|(_, record)| record)
+        .map(|record| record.pid);
     let embedded = Embedded {
         pgdata,
         port,
         password: secret,
-        owned: Some(runtime.clone()),
+        owned: Some((runtime.clone(), launched)),
     };
     // A fresh bank's role has the secret from initdb, and its rules are
     // SCRAM already; an existing one on the trust marker moves trust-first;
@@ -1020,9 +1048,15 @@ fn move_over_scram(
 /// here, connecting with the public old password (accepted under the trust
 /// marker, or by a role still on it), so the secret never reaches the server.
 fn alter_role(runtime: &Runtime, port: u16, secret: &str) -> Result<(), Error> {
-    let verifier = scram_verifier(secret, *uuid::Uuid::new_v4().as_bytes(), 4096);
+    let mut salt = [0u8; 16];
+    getrandom::fill(&mut salt).map_err(|e| Error::Command {
+        program: "getrandom",
+        detail: e.to_string(),
+    })?;
+    let verifier = scram_verifier(secret, salt, 4096);
+    // Over stdin, not psql's command line, which other accounts can read.
     let alter = format!("ALTER ROLE \"{SUPERUSER}\" PASSWORD '{verifier}'");
-    psql(runtime, port, LEGACY_PASSWORD, &alter).map(drop)
+    psql_stdin(runtime, port, LEGACY_PASSWORD, &alter).map(drop)
 }
 
 /// `_switch_to_scram`: rewrite the managed rules to SCRAM, then reload. On
@@ -1103,27 +1137,22 @@ fn base64(data: &[u8]) -> String {
 }
 
 /// pg0's initdb, with the bank's secret and SCRAM from the start: superuser
-/// `postgres`, UTF8 and the C locale (pg0 0.15.2 on Windows; it keeps
-/// localized locale names from failing initdb). The oracle reaches the same
-/// pg_hba.conf through password-then-SCRAM.
-fn initdb(runtime: &Runtime, pgdata: &Path, secret: &str) -> Result<(), Error> {
-    let pwfile = pgdata.with_file_name(format!("embedded_pg.initdb-{}.pw", std::process::id()));
-    fs::write(&pwfile, secret).map_err(io_error("write", &pwfile))?;
+/// `postgres`, UTF8, and pg0's locale per OS (the C locale on Windows since
+/// pg0 0.15.2, which keeps localized locale names from failing initdb; the
+/// system locale elsewhere). The password file is the bank's owner-only
+/// secret file itself, so no other copy of the secret is ever written. The
+/// oracle reaches the same pg_hba.conf through password-then-SCRAM.
+fn initdb(runtime: &Runtime, pgdata: &Path) -> Result<(), Error> {
     let mut command = runtime.command("initdb");
     command
         .arg("-D")
         .arg(pgdata)
-        .args([
-            "-U",
-            SUPERUSER,
-            "--auth=scram-sha-256",
-            "--encoding=UTF8",
-            "--locale=C",
-        ])
-        .arg(format!("--pwfile={}", pwfile.display()));
-    let result = run_logged(command, "initdb", pgdata);
-    let _ = fs::remove_file(&pwfile);
-    result
+        .args(["-U", SUPERUSER, "--auth=scram-sha-256", "--encoding=UTF8"])
+        .arg(format!("--pwfile={}", secret_path(pgdata).display()));
+    if cfg!(windows) {
+        command.arg("--locale=C");
+    }
+    run_logged(command, "initdb", pgdata)
 }
 
 fn start(runtime: &Runtime, pgdata: &Path, port: u16) -> Result<(), Error> {
@@ -1166,8 +1195,44 @@ fn ensure_database(runtime: &Runtime, port: u16, password: &str) -> Result<(), E
 /// psql against the server's `postgres` database. The password goes in
 /// `PGPASSWORD`, never on the command line.
 fn psql(runtime: &Runtime, port: u16, password: &str, sql: &str) -> Result<String, Error> {
-    let output = runtime
-        .command("psql")
+    let output = psql_command(runtime, port, password)
+        .args(["-c", sql])
+        .output()
+        .map_err(|e| Error::Command {
+            program: "psql",
+            detail: e.to_string(),
+        })?;
+    psql_result(output)
+}
+
+/// `psql`, reading the statement from stdin (for one that carries a
+/// credential, which must stay off the command line).
+fn psql_stdin(runtime: &Runtime, port: u16, password: &str, sql: &str) -> Result<String, Error> {
+    use std::io::Write;
+    let fail = |e: io::Error| Error::Command {
+        program: "psql",
+        detail: e.to_string(),
+    };
+    let mut child = psql_command(runtime, port, password)
+        .args(["-f", "-"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(fail)?;
+    let written = child
+        .stdin
+        .take()
+        .map(|mut stdin| stdin.write_all(sql.as_bytes()))
+        .unwrap_or(Ok(()));
+    let output = child.wait_with_output().map_err(fail)?;
+    written.map_err(fail)?;
+    psql_result(output)
+}
+
+fn psql_command(runtime: &Runtime, port: u16, password: &str) -> Command {
+    let mut command = runtime.command("psql");
+    command
         .args(["-X", "-w", "-q", "-t", "-A", "-v", "ON_ERROR_STOP=1"])
         .args([
             "-h",
@@ -1179,9 +1244,10 @@ fn psql(runtime: &Runtime, port: u16, password: &str, sql: &str) -> Result<Strin
             "-d",
             "postgres",
         ])
-        .args(["-c", sql])
         .env("PGPASSWORD", password)
-        .env("PGCONNECT_TIMEOUT", "30")
+        // Bounded: a hung port or a blocked statement must not hang a start.
+        .env("PGCONNECT_TIMEOUT", "10")
+        .env("PGOPTIONS", "-c statement_timeout=60000")
         .env(
             // The public old password may go as text; anything else is
             // offered over SCRAM only, so a server (or an impostor on the
@@ -1192,12 +1258,11 @@ fn psql(runtime: &Runtime, port: u16, password: &str, sql: &str) -> Result<Strin
             } else {
                 "scram-sha-256"
             },
-        )
-        .output()
-        .map_err(|e| Error::Command {
-            program: "psql",
-            detail: e.to_string(),
-        })?;
+        );
+    command
+}
+
+fn psql_result(output: std::process::Output) -> Result<String, Error> {
     if !output.status.success() {
         return Err(Error::Command {
             program: "psql",
@@ -1212,7 +1277,11 @@ fn psql(runtime: &Runtime, port: u16, password: &str, sql: &str) -> Result<Strin
 /// would never reach end-of-file (the pg0 wrapper routes through files for
 /// the same reason).
 fn run_logged(mut command: Command, program: &'static str, pgdata: &Path) -> Result<(), Error> {
-    let out = pgdata.with_file_name(format!("embedded_pg.{}.out", std::process::id()));
+    let out = pgdata.with_file_name(format!(
+        "embedded_pg.{}-{}.out",
+        std::process::id(),
+        uuid::Uuid::new_v4().simple()
+    ));
     let file = fs::File::create(&out).map_err(io_error("create", &out))?;
     let err = file.try_clone().map_err(io_error("open", &out))?;
     let status = command
