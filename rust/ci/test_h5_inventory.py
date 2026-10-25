@@ -562,3 +562,32 @@ def test_a_failed_selection_is_named_at_exit(monkeypatch, tmp_path, capsys, keep
     out = capsys.readouterr().out.splitlines()
     assert 'h5-w1a: FAILED dim-mismatch golden (exit 1)' in out
     assert out[-1].startswith('h5-w1a: 1 of ') and out[-1].endswith(' selections failed; see h5-w1a-timings.json')
+
+
+@pytest.mark.parametrize('keep_going', [True, False])
+def test_a_composite_runs_each_suite_with_its_own_receipts(monkeypatch, tmp_path, keep_going):
+    """h5-light runs h5-audit, h5-backup and h5-background in one hosted
+    Linux job: each part's actions in order, each with its own timings
+    file, and the job fails if any part fails."""
+    import run_coverage
+    from coverage_plan import COMPOSITES, SUITES
+    monkeypatch.setattr(run_coverage, 'os', SimpleNamespace(name='posix', environ=dict(run_coverage.os.environ)))
+    monkeypatch.setattr(sys, 'argv', ['run_coverage.py', '--suite', 'h5-light', '--out-dir', str(tmp_path)]
+                        + (['--keep-going'] if keep_going else []))
+    ran = []
+
+    def run(argv, **kw):
+        output = Path(argv[argv.index('--out') + 1]).name if '--out' in argv else ''
+        ran.append(output)
+        return SimpleNamespace(returncode=1 if output.startswith('h5-backup-0-') else 0)
+
+    monkeypatch.setattr(run_coverage.subprocess, 'run', run)
+    assert run_coverage.main() == 1
+    parts = COMPOSITES['h5-light']
+    started = [part for part in parts if any(name.startswith(part + '-') for name in ran)]
+    # Without --keep-going the first failing part stops the job.
+    assert started == (list(parts) if keep_going else list(parts[:2]))
+    for part in started:
+        receipts = json.loads((tmp_path / f'{part}-timings.json').read_text(encoding='utf-8'))['receipts']
+        assert [receipt['selection'] for receipt in receipts] == (
+            SUITES[part] if keep_going or part != 'h5-backup' else SUITES[part][:1])

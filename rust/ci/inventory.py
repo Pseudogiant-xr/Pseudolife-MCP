@@ -139,13 +139,28 @@ def check(workflow):
     parity = jobs["parity-checks"]
     ordinary_ci = "github.event_name != 'workflow_dispatch' || inputs.mode == 'ci'"
     assert parity['if'] == (f"${{{{ !cancelled() && ({ordinary_ci}) && needs.candidate.result == 'success' "
-                            "&& needs.rust.result == 'success' }}"), 'H5 PR event selection changed'
+                            "&& needs.candidate-harness.result == 'success' "
+                            "&& needs.fixtures.result == 'success' }}"), 'H5 PR event selection changed'
     matrix = parity["strategy"]["matrix"]
     assert matrix["os"] == SYSTEMS
-    # Only hosted Windows' live comparisons leave the required matrix; they
-    # run in the non-gating parity-live job (test_workflow.py pins it).
-    assert matrix.get("exclude") == [{"os": "windows-latest", "suite": "cli-live"}], \
-        'required parity matrix excludes more than the Windows live comparisons'
+    # Hosted Windows' live comparisons leave the required matrix (they run
+    # in the non-gating parity-live job; test_workflow.py pins it), and so
+    # does each H5 suite whose OS runs it inside a composite shard instead.
+    from coverage_plan import COMPOSITES
+    excluded = matrix.get("exclude")
+    composite_excludes = [pair for pair in excluded
+                          if pair != {"os": "windows-latest", "suite": "cli-live"}]
+    assert {"os": "windows-latest", "suite": "cli-live"} in excluded and len(composite_excludes) == len(excluded) - 1, \
+        'required parity matrix no longer leaves out the Windows live comparisons'
+    for pair in composite_excludes:
+        if pair["suite"] in COMPOSITES:
+            continue
+        hosts = [name for name, parts in COMPOSITES.items() if pair["suite"] in parts
+                 and name in matrix["suite"] and {"os": pair["os"], "suite": name} not in excluded]
+        assert pair["suite"] in SUITES and hosts, \
+            f'required parity matrix leaves out {pair["os"]}/{pair["suite"]} with no composite running it'
+    for name, parts in COMPOSITES.items():
+        assert name in matrix["suite"] and set(parts) <= set(SUITES), f"composite {name} lost a suite"
     assert set(SUITES) <= set(matrix["suite"]), "missing H5 suite"
     step = next(s for s in parity["steps"] if s.get("name") == "Ported rows and daemon controls")
     assert step["if"] == "startsWith(matrix.suite, 'h5-')"

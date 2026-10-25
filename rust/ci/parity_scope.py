@@ -34,23 +34,35 @@ ROOT = Path(__file__).resolve().parents[2]
 
 # Every parity suite, in matrix order. Windows step medians on 2026-10-10,
 # 14 successful runs (eval, cli, judges): 317s/476s/552.5s.
-SUITES = ["eval", "cli", "cli-daemon", "cli-live", "judges",
-          "w1c-doctor", "w1c-pairing", "w1c-connection",
-          "h5-audit", "h5-backup", "h5-w1a", "h5-background", "h5-daemon-mutants", "h5-graph-mutants"]
+SUITES = ["eval", "cli", "cli-store", "cli-daemon", "cli-daemon-2", "cli-live", "judges",
+          "w1c-doctor", "w1c-pairing", "w1c-connection", "w1c-connect",
+          "h5-audit", "h5-backup", "h5-w1a", "h5-background", "h5-daemon-mutants", "h5-graph-mutants",
+          "h5-light"]
 
 # Per-suite matrix values (the include list). eval and judges have none and
 # keep the job's 210-minute fallback.
 SHARDS = [
     # Hosted Windows cli was one serial job: 70.4 and 61.5 min on master
     # runs 39205533092 and 39236836263 (2026-10-19; Linux 40.3 and 42.7).
-    # Split three ways so no shard runs past about half an hour. cli keeps
-    # the CLI rows' self-tests and goldens, lease, dream cursor, static,
-    # graph store, principal and background steps: about 22 min of steps on
-    # Windows plus about 4 min setup.
-    {"suite": "cli", "job_timeout": 55},
-    # Schema startup 5.9-7.1 min, then resident startup 12.1-14.9 min on the
-    # binary the schema step builds; about 26 min with setup.
-    {"suite": "cli-daemon", "job_timeout": 55},
+    # Split three ways so no shard runs past about half an hour, then on
+    # 2026-10-24 the cli and cli-daemon shards in two again: under the
+    # account's 20-job cap a 23-26 minute shard that starts in the second
+    # wave set the batch's critical path (batch run 40047950017: Windows
+    # cli 23.2 min, cli-daemon 25.9, started 9.6 min late). Windows step
+    # times from that run, plus about 3.5 min setup per shard:
+    # cli keeps the sent-YAML check and the CLI rows' self-tests and goldens,
+    # lease and lease operator steps, 10.0 min.
+    {"suite": "cli", "job_timeout": 35},
+    # cli-store: dream cursor, static, graph store, background and
+    # principal steps, 9.6 min.
+    {"suite": "cli-store", "job_timeout": 35},
+    # Schema startup 4.7 min, then 11 resident startup cases at about 29 s
+    # each, on the storage test binary the fixtures job built.
+    {"suite": "cli-daemon", "startup_part": 1, "job_timeout": 40},
+    # The other 11 cases (every mutant's control among them), 9 startup
+    # mutants, the clock retry and the writer guard, about 10.6 min
+    # (startup_cases.part_cases).
+    {"suite": "cli-daemon-2", "startup_part": 2, "job_timeout": 40},
     # Same runs, the four live steps: Windows 22.4 min (body 2.5, security
     # 8.6, MCP 8.9, CLI live arms about 2.5) plus about 4 min setup; Linux
     # 14 min. About twice the Windows total.
@@ -62,8 +74,14 @@ SHARDS = [
     {"suite": "w1c-doctor", "w1c_rows": "'doctor'", "w1c_timeout": 32, "job_timeout": 36},
     {"suite": "w1c-pairing", "w1c_rows": "'transfer', 'invite', 'pair'", "w1c_timeout": 36,
      "job_timeout": 40},
-    {"suite": "w1c-connection", "w1c_rows": "'test_login', 'connect', 'maintainer', 'move', 'tunnel'",
-     "w1c_timeout": 42, "job_timeout": 66},
+    # Connection's five rows ran 20.2 min on Windows in batch run
+    # 40047950017 (2026-10-24; live + golden: test_login 7.3, connect 6.3,
+    # maintainer 3.5, tunnel 1.9, move 1.2), so they split in two: 10.4 and
+    # 9.8 min. test_login stays here with its container image and record.
+    {"suite": "w1c-connection", "w1c_rows": "'test_login', 'move', 'tunnel'",
+     "w1c_timeout": 26, "job_timeout": 50},
+    {"suite": "w1c-connect", "w1c_rows": "'connect', 'maintainer'", "w1c_timeout": 25,
+     "job_timeout": 29},
     # Hosted step timings for rust.yml runs 2026-10-11 to 10-20, about 300
     # successful steps per suite and OS (h5_linux_measurements.json
     # "hosted_step_distribution"). Linux step budgets are five times each
@@ -84,12 +102,23 @@ SHARDS = [
     {"suite": "h5-background", "h5_timeout": 10, "h5_windows_timeout": 20, "job_timeout": 30},
     {"suite": "h5-daemon-mutants", "h5_timeout": 22, "h5_windows_timeout": 20, "job_timeout": 37},
     {"suite": "h5-graph-mutants", "h5_timeout": 50, "h5_windows_timeout": 30, "job_timeout": 65},
+    # Linux only: h5-audit, h5-backup and h5-background in one job
+    # (coverage_plan.COMPOSITES), with the sum of their Linux step budgets.
+    # Windows runs the three as their own shards and never this one.
+    {"suite": "h5-light", "h5_timeout": 40, "h5_windows_timeout": 40, "job_timeout": 55},
 ]
 
 # The hosted matrix's systems, and the pair it always leaves out: hosted
 # Windows' live comparisons run in the non-gating parity-live job instead.
 SYSTEMS = ("ubuntu-latest", "windows-latest")
 STATIC_EXCLUDE = ({"os": "windows-latest", "suite": "cli-live"},)
+# The H5 suites Linux runs inside h5-light (maintainer decision 2026-10-24:
+# two fewer short jobs per run under the 20-job cap). Every pair below is
+# left out of the matrix, and selecting any of these suites selects
+# h5-light, so Linux still runs each of them wherever it did before.
+LINUX_LIGHT = ("h5-audit", "h5-backup", "h5-background")
+STATIC_EXCLUDE += ({"os": "windows-latest", "suite": "h5-light"},) + tuple(
+    {"os": "ubuntu-latest", "suite": suite} for suite in LINUX_LIGHT)
 # Suites that compare against the event-selected Python oracle
 # (evals/rust_port/oracle_selection.py): the merge base on a pull request,
 # the pushed head on a push. A batch's pass compared the base, so a master
@@ -97,9 +126,10 @@ STATIC_EXCLUDE = ({"os": "windows-latest", "suite": "cli-live"},)
 EVENT_BOUND = ("eval", "judges")
 
 # Every pull request that runs parity at all runs these: the CLI rows most
-# changes touch (mail, hook, episode, lease), the daemon startup, live and
-# W1-A rows, and the eval harness.
-FLOOR = ("eval", "cli", "cli-daemon", "cli-live", "h5-w1a")
+# changes touch (mail, hook, episode, lease), the daemon store, startup, live
+# and W1-A rows, and the eval harness. cli-store and cli-daemon-2 hold steps
+# the cli and cli-daemon shards ran until 2026-10-24.
+FLOOR = ("eval", "cli", "cli-store", "cli-daemon", "cli-daemon-2", "cli-live", "h5-w1a")
 ALL = tuple(SUITES)
 
 # The rust/cli_harness rows outside the floor, by the suite that runs them
@@ -108,15 +138,16 @@ ROW_SUITES = {
     "mail": "cli", "hook": "cli", "episode": "cli", "lease": "cli", "lease_operator": "cli",
     "doctor": "w1c-doctor",
     "transfer": "w1c-pairing", "invite": "w1c-pairing", "pair": "w1c-pairing",
-    "test_login": "w1c-connection", "connect": "w1c-connection", "maintainer": "w1c-connection",
+    "test_login": "w1c-connection", "connect": "w1c-connect", "maintainer": "w1c-connect",
     "move": "w1c-connection", "tunnel": "w1c-connection",
     "audit": "h5-audit", "backup": "h5-backup",
 }
 # The pseudolife-stdio binary: every CLI row, plus the differential judges,
 # which cover its whole argv, help and version surface.
-SHIM = ("cli", "cli-live", "judges", "w1c-doctor", "w1c-pairing", "w1c-connection", "h5-audit", "h5-backup")
+SHIM = ("cli", "cli-live", "judges", "w1c-doctor", "w1c-pairing", "w1c-connection", "w1c-connect",
+        "h5-audit", "h5-backup")
 # The pseudolife-daemon crate (and its graph and dream contract binaries).
-DAEMON = ("cli", "cli-daemon", "cli-live", "eval", "h5-w1a", "h5-background",
+DAEMON = ("cli", "cli-store", "cli-daemon", "cli-daemon-2", "cli-live", "eval", "h5-w1a", "h5-background",
           "h5-daemon-mutants", "h5-graph-mutants")
 # rust/shim/src/cli entries that only one command's code uses, by the rows
 # that compare it; any other shim file reaches the whole binary. Shared
@@ -275,12 +306,21 @@ def select(event: str, files: list[str] | None) -> tuple[list[str], dict[str, tu
         if set(suites) - chosen:
             reasons[path] = suites
         chosen.update(suites)
+    if chosen & set(LINUX_LIGHT):
+        chosen.add("h5-light")
     return [suite for suite in SUITES if suite in chosen], reasons
 
 
 SUITE_EXPRESSION = "${{ fromJSON(needs.scope.outputs.parity).suite }}"
 INCLUDE_EXPRESSION = "${{ fromJSON(needs.scope.outputs.parity).include }}"
 EXCLUDE_EXPRESSION = "${{ fromJSON(needs.scope.outputs.parity).exclude }}"
+# The self-hosted lane has no os axis to exclude a composite from, and an
+# include entry for a suite its matrix lacks would become a job with no
+# runner, queued for a day. It takes the same values less the hosted-only
+# composites; each runner runs their parts as their own shards.
+HOSTED_ONLY = ("h5-light",)
+SELFHOSTED_SUITE_EXPRESSION = "${{ fromJSON(needs.scope.outputs.parity_selfhosted).suite }}"
+SELFHOSTED_INCLUDE_EXPRESSION = "${{ fromJSON(needs.scope.outputs.parity_selfhosted).include }}"
 
 
 def resolve(workflow: dict) -> dict:
@@ -295,7 +335,19 @@ def resolve(workflow: dict) -> dict:
             values["include"] = [dict(shard) for shard in SHARDS]
         if values.get("exclude") == EXCLUDE_EXPRESSION:
             values["exclude"] = [dict(pair) for pair in STATIC_EXCLUDE]
+        full = selfhosted(matrix(list(SUITES)))
+        if values.get("suite") == SELFHOSTED_SUITE_EXPRESSION:
+            values["suite"] = full["suite"]
+        if values.get("include") == SELFHOSTED_INCLUDE_EXPRESSION:
+            values["include"] = full["include"]
     return workflow
+
+
+def selfhosted(values: dict) -> dict:
+    """The self-hosted lane's suite and include values: ``values`` less the
+    hosted-only composites, so every include entry has a combination."""
+    return {"suite": [suite for suite in values["suite"] if suite not in HOSTED_ONLY],
+            "include": [dict(entry) for entry in values["include"] if entry["suite"] not in HOSTED_ONLY]}
 
 
 def matrix(suites: list[str], exclude: list[dict] | None = None) -> dict:
@@ -399,6 +451,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"parity: running {len(values['suite'])} of {len(SUITES)} suites: {', '.join(values['suite'])}")
     with open(options.github_output, "a", encoding="utf-8") as output:
         output.write(f"parity={json.dumps(values, separators=(',', ':'))}\n")
+        output.write(f"selfhosted={json.dumps(selfhosted(values), separators=(',', ':'))}\n")
     return 0
 
 
