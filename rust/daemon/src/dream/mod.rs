@@ -3,6 +3,7 @@
 #![allow(dead_code)]
 
 pub mod candidates;
+pub mod curation_judge;
 pub mod cursors;
 pub mod deep;
 pub mod extractor;

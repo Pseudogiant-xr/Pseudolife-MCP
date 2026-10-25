@@ -31,6 +31,16 @@ propose naming another pair or under its gate, and stamps a skipped row.
 dismissal reopens and the pair is judged again. The memo, the watermark and
 the decision records carry Python's fingerprints, compared as they are.
 
+The curation judge (``curation-*``) judges the deep dream seed's lesson and
+world duplicate listings from the daemons' start, so each scenario settles
+before its first comparison (``init_settle``). Shadow memoises verdicts and
+their bindings only; auto-distinct dismisses a distinct pair under its
+listing names and marks the dismissal automatic; auto settles a duplicate
+the safe-fold rule refuses as manual (no listing of this seed is a safe
+fold). ``curation-auto-distinct-reopen`` restarts both daemons in shadow:
+the signed policy moved, so the automatic dismissal reopens and the pair is
+judged again without being dismissed.
+
 The junk judge (``junk-*``): shadow records verdicts only; auto keeps (the
 proposal rejected, its keep pair closed, an automatic decision recorded),
 deletes under the evidence bar (degree at most ``junk_max_auto_degree``, at
@@ -78,7 +88,22 @@ MUTANTS = ["mcp-dream-junk-no-evidence-bar",          # junk-auto
            "mcp-dream-candidate-dismiss-unrecorded",  # candidate-auto
            "mcp-dream-candidate-endpoint-stale",      # candidate-auto
            # candidate-auto, by Python's fingerprints over the bank
-           "mcp-dream-candidate-real-binary"]
+           "mcp-dream-candidate-real-binary",
+           "mcp-dream-curation-distinct-unmarked",    # curation-auto-distinct
+           "mcp-dream-curation-manual-unsettled"]     # curation-auto
+
+# The two listed pairs every curation scenario judges.
+CURATION_JUDGED = (
+    "SELECT EXISTS (SELECT 1 FROM curation_judgments WHERE store = 'world' "
+    "AND a_key = 'host-a|os' AND b_key = 'host-b|os') "
+    "AND EXISTS (SELECT 1 FROM curation_judgments WHERE store = 'lesson' "
+    "AND a_key = 'rotate-keys|cadence' AND b_key = 'rotate-secrets|cadence')")
+HOSTS_DISMISSED = ("SELECT EXISTS (SELECT 1 FROM dismissed_pairs "
+                   "WHERE a_norm = 'world:host-a|os' AND b_norm = 'world:host-b|os')")
+HOSTS_MARKED = ("SELECT EXISTS (SELECT 1 FROM meta, jsonb_each(meta.value) m "
+                "WHERE meta.key = 'curation_auto_dismissals_v1' "
+                "AND m.value->'a'->>'key' = 'host-a|os' AND m.value->'b'->>'key' = 'host-b|os')")
+
 
 # Every candidate of the current scan judged under this apply.
 CANDIDATES_DONE = (
@@ -225,6 +250,32 @@ def scenarios(w) -> dict:
                 "AND value->>'action' = 'reject' AND value->>'state' = 'active' "
                 f"AND value->'proposal'->>'rationale' = 'detector: {key.lower()}' AND {cond})")
 
+    def curation_config(mode: str) -> str:
+        return candidate_config("off").replace('curation_judge_mode: "off"',
+                                               f'curation_judge_mode: "{mode}"')
+
+    def curation_scenario(mode: str, verdicts: dict, ops: list, *expects: str) -> dict:
+        return {"config": curation_config(mode), "seed_config": w.deep_config(),
+                "seed": w.DEEP_SEED,
+                "extractor": {"model": "judge-one", "reply_model": "judge-one",
+                              "replies": [{"kind": "judge_slot_pairs", "verdicts": verdicts}]},
+                "shared_stub": True,
+                "init_settle": {**w.JUDGE_SETTLE, "until": CURATION_JUDGED,
+                                "expect": list(expects)},
+                "ops": ops}
+
+    def binding_action(action: str) -> str:
+        return ("SELECT EXISTS (SELECT 1 FROM meta, jsonb_each(meta.value) b "
+                "WHERE meta.key = 'curation_judgment_evidence_v1' "
+                f"AND b.value->>'action' = '{action}')")
+
+    curation_verdicts = {
+        "Host A.os|Host B.os": w.V("distinct", 0.95, note="two hosts"),
+        "Rotate Keys.Cadence|Rotate Secrets.Cadence": {
+            **w.V("duplicate", 0.95), "keep": "a"},
+        # every other listing gets no verdict: a stamped leave
+    }
+
     def candidate_config(mode: str) -> str:
         text = w.judge_config("off", second=None, extra=(
             "    min_similarity: -1.0\n    merge_min_similarity: -1.0\n"
@@ -321,6 +372,27 @@ def scenarios(w) -> dict:
         # Delta Unit gets no verdict: stamped as a zero-confidence leave
     }
     return {
+        "curation-shadow": curation_scenario(
+            "shadow", curation_verdicts, [w.review()],
+            f"SELECT NOT ({HOSTS_DISMISSED[7:]})", binding_action("settled"),
+            f"SELECT NOT ({binding_action('pending')[7:]})"),
+        "curation-auto-distinct": curation_scenario(
+            "auto-distinct", curation_verdicts, [w.review()],
+            HOSTS_DISMISSED, HOSTS_MARKED, binding_action("applied")),
+        "curation-auto": curation_scenario(
+            "auto", {**curation_verdicts, "Host A.os|Host B.os": {
+                **w.V("duplicate", 0.95), "keep": "a"}}, [w.review()],
+            # Host A and Host B cite different sources, the Rotate pair's
+            # texts differ: neither is a safe fold
+            binding_action("manual"), f"SELECT NOT ({HOSTS_DISMISSED[7:]})",
+            f"SELECT NOT ({binding_action('pending')[7:]})"),
+        "curation-auto-distinct-reopen": curation_scenario(
+            "auto-distinct", curation_verdicts, [
+                w.expect(w.judge_restart(curation_config("shadow"),
+                                         until=f"SELECT NOT ({HOSTS_DISMISSED[7:]})"),
+                         f"SELECT NOT ({HOSTS_MARKED[7:]})"),
+                w.review()],
+            HOSTS_DISMISSED, HOSTS_MARKED),
         "candidate-shadow": candidate_scenario("shadow", candidate_verdicts, [
             w.expect(checked(apply_then_judge(), "shadow"), memo_count,
                      "SELECT NOT EXISTS (SELECT 1 FROM edge_proposals "

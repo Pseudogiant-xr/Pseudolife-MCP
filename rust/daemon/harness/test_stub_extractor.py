@@ -380,6 +380,31 @@ def test_candidate_head_reads_hostile_lines_in_linear_time():
     assert time.perf_counter() - start < 2.0
 
 
+def test_slot_pair_verdicts_answer_by_their_two_slots():
+    import time
+    import stub_extractor
+    sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+    from pseudolife_memory.memory import dream as d
+    rows = [{"n": 1, "store": "world", "similarity": 0.9,
+             "a": {"entity": "Host A", "attribute": "os", "value": "Debian 12"},
+             "b": {"entity": "Host B", "attribute": "os", "value": "Debian 12"}},
+            {"n": 2, "store": "lesson", "similarity": 0.8,
+             "a": {"entity": "Rotate Keys", "attribute": "Cadence", "value": "x"},
+             "b": {"entity": "Nobody", "attribute": "None", "value": "y"}}]
+    body = json.dumps({"messages": [
+        {"role": "system", "content": d._SLOT_JUDGE_SYSTEM_PROMPT},
+        {"role": "user", "content": NL.join(d.format_slot_pair(r) for r in rows)}]}).encode()
+    reply = json.loads(stub_extractor.judge_reply(
+        {"Host B.os|Host A.os": {"verdict": "distinct", "confidence": 0.9}}, body))
+    assert reply == {"verdicts": [{"id": 1, "verdict": "distinct", "confidence": 0.9}]}
+    hostile = "[0] store=x cosine 1" + chr(10) + "    A '" + "'| '" * 20000
+    start = time.perf_counter()
+    stub_extractor.judge_reply({}, json.dumps({"messages": [
+        {"role": "system", "content": d._SLOT_JUDGE_SYSTEM_PROMPT},
+        {"role": "user", "content": hostile}]}).encode())
+    assert time.perf_counter() - start < 2.0
+
+
 def test_judge_verdicts_answer_by_pair_on_each_endpoint(stub_factory):
     s = stub_factory({"reply_model": "one", "second_reply_model": "two",
                       "third_reply_model": None, "replies": [
