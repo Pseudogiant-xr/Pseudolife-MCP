@@ -427,6 +427,38 @@ pub(crate) fn duplicate_candidates(
     dismissed: &HashSet<(String, String)>,
     lesson_ids: &HashSet<i64>,
 ) -> Vec<Map<String, Value>> {
+    duplicate_candidates_anchored(entities, dismissed, lesson_ids, None)
+}
+
+/// The pairs `duplicate_candidates` walks, in its order: every `(i, j)`
+/// with `i < j`, or with `anchor_ids` each anchor row against every other
+/// row, a pair once (`(min, max)`), in first-seen order.
+fn candidate_pairs<'a>(
+    ids: &'a [i64],
+    anchor_ids: Option<&'a HashSet<i64>>,
+) -> Box<dyn Iterator<Item = (usize, usize)> + 'a> {
+    let n = ids.len();
+    let Some(anchors) = anchor_ids else {
+        return Box::new((0..n).flat_map(move |i| (i + 1..n).map(move |j| (i, j))));
+    };
+    let mut seen: HashSet<(usize, usize)> = HashSet::new();
+    Box::new(
+        ids.iter()
+            .enumerate()
+            .filter(move |(_, id)| anchors.contains(id))
+            .flat_map(move |(i, _)| (0..n).filter(move |&j| j != i).map(move |j| (i.min(j), i.max(j))))
+            .filter(move |pair| seen.insert(*pair)),
+    )
+}
+
+/// `duplicate_candidates(..., anchor_ids=...)`: the analyzer tick's bounded
+/// form compares only the pairs that touch an anchor.
+pub(crate) fn duplicate_candidates_anchored(
+    entities: &[Entity],
+    dismissed: &HashSet<(String, String)>,
+    lesson_ids: &HashSet<i64>,
+    anchor_ids: Option<&HashSet<i64>>,
+) -> Vec<Map<String, Value>> {
     // Tokens interned to ids so the all-pairs Jaccard is a sorted merge.
     let mut intern: HashMap<String, u32> = HashMap::new();
     let toks: Vec<(&Entity, Vec<u32>)> = entities
@@ -450,51 +482,48 @@ pub(crate) fn duplicate_candidates(
         DUPLICATE_MIN_JACCARD
     };
     let mut out: Vec<(f64, Map<String, Value>)> = Vec::new();
-    for i in 0..toks.len() {
+    let row_ids: Vec<i64> = toks.iter().map(|(e, _)| e.id).collect();
+    for (i, j) in candidate_pairs(&row_ids, anchor_ids) {
         let (ei, a) = (&toks[i].0, &toks[i].1);
-        if a.is_empty() {
+        let (ej, b) = (&toks[j].0, &toks[j].1);
+        if a.is_empty() || b.is_empty() {
             continue;
         }
-        for (ej, b) in &toks[i + 1..] {
-            if b.is_empty() {
-                continue;
-            }
-            let inter = sorted_intersection(a, b);
-            let union = a.len() + b.len() - inter;
-            // `len(a & b) / len(a | b)`: both exact, one correctly rounded divide.
-            let jac = inter as f64 / union as f64;
-            if jac < min_jaccard {
-                continue;
-            }
-            let (ca, cb) = (ei.canonical.clone(), ej.canonical.clone());
-            let key = if ca <= cb { (ca, cb) } else { (cb, ca) };
-            if dismissed.contains(&key) {
-                continue;
-            }
-            let pair = file_concept_split(&ei.display, &ej.display);
-            if pair.is_none()
-                && merge_veto(&ei.display, &ej.display).is_some()
-                && !crate::mutants::active("mcp-review-no-merge-veto")
-            {
-                continue;
-            }
-            let (n0, n1) = pair.unwrap_or((&ei.display, &ej.display));
-            let score = round3(jac);
-            let mut found = Map::new();
-            found.insert("type".into(), json!("duplicate"));
-            found.insert("severity".into(), json!("warn"));
-            found.insert("label".into(), json!(format!("{n0} \u{2194} {n1}")));
-            found.insert("entities".into(), json!([n0, n1]));
-            found.insert("score".into(), json!(score));
-            found.insert(
-                "action".into(),
-                json!(if pair.is_some() { "relate" } else { "merge" }),
-            );
-            if pair.is_some() {
-                found.insert("suggested_relation".into(), json!("implements"));
-            }
-            out.push((score, found));
+        let inter = sorted_intersection(a, b);
+        let union = a.len() + b.len() - inter;
+        // `len(a & b) / len(a | b)`: both exact, one correctly rounded divide.
+        let jac = inter as f64 / union as f64;
+        if jac < min_jaccard {
+            continue;
         }
+        let (ca, cb) = (ei.canonical.clone(), ej.canonical.clone());
+        let key = if ca <= cb { (ca, cb) } else { (cb, ca) };
+        if dismissed.contains(&key) {
+            continue;
+        }
+        let pair = file_concept_split(&ei.display, &ej.display);
+        if pair.is_none()
+            && merge_veto(&ei.display, &ej.display).is_some()
+            && !crate::mutants::active("mcp-review-no-merge-veto")
+        {
+            continue;
+        }
+        let (n0, n1) = pair.unwrap_or((&ei.display, &ej.display));
+        let score = round3(jac);
+        let mut found = Map::new();
+        found.insert("type".into(), json!("duplicate"));
+        found.insert("severity".into(), json!("warn"));
+        found.insert("label".into(), json!(format!("{n0} \u{2194} {n1}")));
+        found.insert("entities".into(), json!([n0, n1]));
+        found.insert("score".into(), json!(score));
+        found.insert(
+            "action".into(),
+            json!(if pair.is_some() { "relate" } else { "merge" }),
+        );
+        if pair.is_some() {
+            found.insert("suggested_relation".into(), json!("implements"));
+        }
+        out.push((score, found));
     }
     // `out.sort(key=lambda f: -f["score"])`: stable, highest first.
     out.sort_by(|x, y| y.0.total_cmp(&x.0));

@@ -5528,6 +5528,13 @@ def drain_side(stubs: dict[str, StubExtractor], scn: dict, side: str) -> list[di
 
 
 # The tables the merge judge writes: settled when none of them changes.
+# The dream sweep's steps (P4): their scenarios live in their own module.
+import w2e_sweep  # noqa: E402
+
+SCENARIOS.update(w2e_sweep.scenarios(sys.modules[__name__]))
+MUTANTS += w2e_sweep.MUTANTS
+
+
 JUDGE_TABLES = ("entity_proposals", "merge_decisions", "dismissed_pairs", "edge_proposals",
                 "entities", "edges", "meta")
 

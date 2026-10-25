@@ -1,0 +1,162 @@
+"""The dream sweep's differential scenarios (task P4), merged into
+``w2e.py``'s ``SCENARIOS`` by ``scenarios(w2e_module)``.
+
+``run_sweep_once`` runs on the daemon's own timer, not on a call: after its
+reapers, with dreaming enabled, the analyzer filing tick, the deep tick,
+the merge judge, ``dream_status``, the stall tick and, when the trigger
+would fire, the automatic dream. Each scenario switches on the step it is
+written for and leaves the others off, writes the inputs through the
+Python daemon's own write path, then waits for both sides' sweeps to
+settle (``settle_sides``: an ``until`` query holds, then the judge tables
+and the stub's requests stay unchanged) and compares the whole banks, the
+answers after it and the model requests. The two daemons' timers are
+independent, so every scenario is built so that the settled state does not
+depend on how many ticks ran: the automatic dream's trigger fires only once
+the whole batch is stored, the deep tick fires once (its watermark stops
+it), the analyzer's batch covers every entity (its cursor stays put), and
+the stall's failures run out when the failing memory is quarantined.
+"""
+from __future__ import annotations
+
+import json
+
+SWEEP_BASE = (
+    "memory:\n"
+    "  lessons:\n    enabled: false\n    infer_outcomes: false\n"
+    "  graph_insight:\n    enabled: false\n"
+)
+JUDGES_OFF = (
+    "    judge_mode: \"off\"\n    link_judge_mode: \"off\"\n    junk_judge_mode: \"off\"\n"
+    "    curation_judge_mode: \"off\"\n    candidate_judge_mode: \"off\"\n"
+)
+
+
+def config(dream: str = "", deep: str = "", extra: str = "", interval: float = 0.25) -> str:
+    """Dreaming on with a fast sweep; the deep tick and the analyzer off
+    unless ``deep`` turns them on; every judge off."""
+    return (SWEEP_BASE
+            + f"  dream:\n    enabled: true\n    sweep_interval_seconds: {interval}\n"
+            + "    stall_notice: false\n" + dream
+            + "  deep_dream:\n    auto_tick: false\n    analyzer_file_duplicates: false\n"
+            + JUDGES_OFF + deep + extra)
+
+
+SETTLE = {"quiet_s": 3.0, "timeout_s": 120.0}
+
+AUTO_NOTES = ["The staging ingress moved to nginx 1.27.",
+              "Gwen owns the release calendar.",
+              "The staging ingress listens on port 8443."]
+AUTO_CLAIMS = [
+    {"entity": "Staging Ingress", "attribute": "proxy", "value": "nginx 1.27", "source": 1},
+    {"entity": "Gwen", "attribute": "owns", "value": "release calendar", "source": 2},
+    {"entity": "Staging Ingress", "attribute": "port", "value": "8443", "source": 3},
+]
+STALL_NOTES = ["The audit exporter writes to bucket audit-7."]
+
+ANALYZER_SEED_SQL = (
+    # A decided analyzer link proposal the reconcile pass closes into
+    # dismissed_pairs (behind its cursor), and one still pending it leaves.
+    "INSERT INTO edge_proposals (src_id, relation, dst_id, confidence, similarity, rationale, "
+    "source, status, created_at, decided_at) SELECT a.id, 'related-to', b.id, 0.5, NULL, "
+    "'analyzer file/concept pair', 'analyzer', 'rejected', 10, 20 FROM entities a, entities b "
+    "WHERE a.display = 'Ledger Export' AND b.display = 'Ledger Exporter'; "
+    "INSERT INTO edge_proposals (src_id, relation, dst_id, confidence, similarity, rationale, "
+    "source, status, created_at) SELECT a.id, 'related-to', b.id, 0.5, NULL, "
+    "'analyzer file/concept pair', 'analyzer', 'pending', 30 FROM entities a, entities b "
+    "WHERE a.display = 'Ledger Export' AND b.display = 'Billing Gateway'"
+)
+
+# The sweep's mutants (src/dream/ticks.rs, deep.rs), each caught by the
+# scenario named beside it. The overdue rule and the notices are checked
+# against Python's tracker in src/dream/stall_tests.rs.
+MUTANTS = ["mcp-sweep-no-auto-dream",         # sweep-dream-auto
+           "mcp-sweep-no-deep-tick",          # sweep-deep-tick
+           "mcp-sweep-analyzer-no-cursor"]    # sweep-analyzer-tick
+
+
+def scenarios(w) -> dict:
+    """The scenarios, built with ``w2e``'s helpers (``w`` is the module)."""
+    auto_stub = {"model": "stub-model",
+                 "replies": w.batch_replies(AUTO_NOTES, AUTO_CLAIMS)}
+    fail = {"kind": "claims", "user": w.numbered(STALL_NOTES), "status": 503,
+            "body": json.dumps({"error": "upstream failure"})}
+    return {
+        # The automatic dream: the trigger fires once the third note makes
+        # the batch, the sweep dreams it, the cursor and the run row land.
+        "sweep-dream-auto": {
+            "config": config(dream="    min_batch: 3\n    idle_seconds: 1000000000\n"),
+            "extractor": auto_stub,
+            "seed": [w.fact("Staging Ingress", "proxy", "nginx 1.25")],
+            "ops": [
+                w.store(AUTO_NOTES[0], source="conversation"),
+                w.store(AUTO_NOTES[1], source="conversation"),
+                # No ``until``: a mutant that never dreams must answer a
+                # diff (the ``expect``), not time the settle out.
+                {**w.store(AUTO_NOTES[2], source="conversation"),
+                 "settle": dict(SETTLE),
+                 "expect": ["SELECT EXISTS (SELECT 1 FROM dream_runs WHERE status = 'committed')",
+                            "SELECT EXISTS (SELECT 1 FROM meta "
+                            "WHERE key = 'cortex_dream_cursor')"]},
+                w.dream("status"),
+                w.dream("runs"),
+                w.fact_get("Staging Ingress", "proxy"),
+            ],
+        },
+        # The deep tick: a never-deep-dreamed graph is recommended, the
+        # sweep applies the deep dream once (snapshot first), and its
+        # watermark keeps it from firing again.
+        "sweep-deep-tick": {
+            "config": config(dream="    min_batch: 1000000\n    idle_seconds: 1000000000\n",
+                             deep="    auto_tick: true\n"),
+            "seed": [w.relate("Cache Node", "uses", "Redis"),
+                     w.relate("Cache-Node", "uses", "Redis"),
+                     w.relate("TODO", "related-to", "Redis"),
+                     w.fact("Redis", "port", "6379")],
+            "ops": [
+                {**w.dream("status"),
+                 "settle": dict(SETTLE),
+                 "expect": ["SELECT EXISTS (SELECT 1 FROM meta WHERE key = 'deep_last_apply')"]},
+                {"op": "snapshot_file"},
+                w.dream("status"),
+                w.review("list"),
+            ],
+        },
+        # The analyzer tick: one batch covers every entity, so it files the
+        # near-duplicate pair and leaves its cursor on the last entity; the
+        # reconcile pass closes the decided analyzer proposal.
+        "sweep-analyzer-tick": {
+            "config": config(dream="    min_batch: 1000000\n    idle_seconds: 1000000000\n",
+                             deep="    analyzer_file_duplicates: true\n    judge_batch: 50\n"),
+            "seed": [w.fact("Billing Gateway", "region", "eu-west"),
+                     w.fact("Billing Gateway Service", "owner", "Hana"),
+                     w.relate("Ledger Export", "uses", "Billing Gateway"),
+                     w.relate("Ledger Exporter", "uses", "Billing Gateway"),
+                     w.sql(ANALYZER_SEED_SQL, after_stop=True)],
+            "ops": [
+                {**w.dream("status"),
+                 "settle": {**SETTLE, "until": "SELECT EXISTS (SELECT 1 FROM meta "
+                                               "WHERE key = 'analyzer_pair_reconcile_cursor')"},
+                 "expect": ["SELECT EXISTS (SELECT 1 FROM meta "
+                            "WHERE key = 'analyzer_duplicate_cursor')"]},
+                w.review("list"),
+            ],
+        },
+        # A stall the sweep opens: the extractor fails every call, the
+        # second failed automatic dream opens the stall, the hold and the
+        # per-entry isolation run out and the memory is quarantined. A
+        # sweep interval of one second keeps the overdue rule (three
+        # intervals of a due backlog) from opening it first.
+        "sweep-stall": {
+            "config": config(dream="    min_batch: 1\n    idle_seconds: 1000000000\n",
+                             interval=1.0),
+            "extractor": {"model": "stub-model", "replies": [fail]},
+            "seed": [w.fact("Audit Exporter", "bucket", "audit-6")],
+            "ops": [
+                {**w.store(STALL_NOTES[0], source="conversation"),
+                 "settle": {**SETTLE, "until": "SELECT EXISTS (SELECT 1 FROM dream_runs "
+                                               "WHERE status <> 'running')"}},
+                w.dream("status"),
+                w.dream("runs"),
+            ],
+        },
+    }
