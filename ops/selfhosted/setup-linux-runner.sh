@@ -457,7 +457,10 @@ ExecStartPre=+/usr/sbin/nft list table inet pseudolife_runner_egress
 ExecStart=$dir/bin/runsvc.sh
 User=$runner_user
 WorkingDirectory=$dir
-KillMode=process
+# The runner gets SIGTERM to finish or cancel its job; whatever is left in
+# the unit's cgroup (a job's detached children included) is then killed, so
+# nothing of a job outlives the unit and the egress table it is bound to.
+KillMode=mixed
 KillSignal=SIGTERM
 TimeoutStopSec=5min
 
