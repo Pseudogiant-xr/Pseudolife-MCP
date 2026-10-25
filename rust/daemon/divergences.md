@@ -386,6 +386,7 @@ of its own.
 | Item | Python | Rust | Owner / why |
 |---|---|---|---|
 | A curated restore whose commit outcome is unknown and whose reload cannot be classified | raises, and every later call retries the recovery until it resolves | raises the same internal error; later calls are not gated | the daemon runs no per-call recovery passes (the `_ensure_init` row above) |
+| A curation judge fold whose commit outcome is unknown and whose reload cannot be classified | answers `reconciliation_required` and latches the recovery: every later call retries it and raises until the bank resolves | logs the reconciliation and applies nothing; later ticks are not gated (the next one sees the bank's state under its row locks and rehydrates the resident store) | the daemon runs no per-call recovery passes (the `_ensure_init` row above) |
 | A batch (`proposal_ids`) | takes the service lock per call, so another request can run between items | holds the writer lock for the whole batch | strictly more serialized; a single client sees the same results |
 | `list`'s analysis | between two locked blocks, so writes can land while it runs and `recent_merges` can follow a later state than the findings | under the writer lock throughout | writes wait for the analysis (quadratic in the entities); the answer is one consistent state |
 | A `proposals` entry whose `rationale` is a list | stored as its array text | refused (`internal_error`, after the entities are minted) | the binder's `list[dict]` admits it; no producer sends one. An object errors on both |

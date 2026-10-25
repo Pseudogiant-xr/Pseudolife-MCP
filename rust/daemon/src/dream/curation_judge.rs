@@ -1026,6 +1026,12 @@ async fn apply_slot_duplicate(
     }
     let keep_a = vs(verdict, "keep") == Some("a");
     let keep = if keep_a { "a" } else { "b" };
+    // `service._ensure_init()`'s read barrier for committed cascade
+    // retirements, as the restore takes it: a staged copy must not carry a
+    // lesson a forget already retired.
+    crate::forget_tools::ensure_lessons_refreshed(ready)
+        .await
+        .map_err(internal)?;
     if !guard {
         return Ok(false);
     }
@@ -1115,9 +1121,20 @@ async fn apply_slot_duplicate(
         }
         // The commit may have landed with its reply lost: the bank decides
         // (`_recover_slot_curation_locked`).
-        Err(_) => {
-            let Ok(resident) = Staged::hydrate(client, ev.store).await else {
-                return Ok(false);
+        Err(exc) => {
+            let unresolved = |why: String| {
+                // Python latches `reconciliation_required` until the bank
+                // resolves (declared in `divergences.md`).
+                eprintln!(
+                    "deep-dream curation judge: slot curation commit reconciliation \
+                     required ({}): {why}",
+                    super::judge::err_text(&exc)
+                );
+                Ok(false)
+            };
+            let resident = match Staged::hydrate(client, ev.store).await {
+                Ok(r) => r,
+                Err(e) => return unresolved(format!("{e:#}")),
             };
             match fold_recovery_state(client, &resident, ev, keep_a, &expected_survivor).await {
                 Ok(Some(true)) => {
@@ -1126,7 +1143,10 @@ async fn apply_slot_duplicate(
                 }
                 // Rolled back: the resident store was never touched.
                 Ok(Some(false)) => Ok(false),
-                _ => Ok(false),
+                Ok(None) => unresolved(
+                    "durable curation state is neither before nor after the decision".into(),
+                ),
+                Err(e) => unresolved(super::judge::err_text(&e)),
             }
         }
     }
