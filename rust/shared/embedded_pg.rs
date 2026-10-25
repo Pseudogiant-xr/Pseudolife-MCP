@@ -4,9 +4,14 @@
 //! Oracle: `pseudolife_memory/storage/embedded_pg.py`, which drives the pg0
 //! CLI. This module runs the same PostgreSQL binaries itself, so a bank
 //! either side created opens on the other: the same pgdata
-//! (`<data_dir>/embedded_pg`), role, password, database, initdb arguments
-//! and lock file. A running server is found through its own
-//! `postmaster.pid`, whichever program started it.
+//! (`<data_dir>/embedded_pg`), role, password file, database and lock file
+//! (initdb's arguments differ only as `initdb` describes). A running server
+//! is found through its own `postmaster.pid`, whichever program started it.
+//!
+//! One deliberate difference: a live postgres at the recorded pid that does
+//! not serve this pgdata is refused here, where the oracle compares its
+//! start time and treats a much younger one as a reused pid; refusing is
+//! the safe direction, and the refusal names the file to remove.
 //!
 //! Invariants carried over from the oracle:
 //! * nothing here deletes or re-initializes a pgdata that holds a cluster;
@@ -614,7 +619,8 @@ impl Runtime {
 /// a clean stop.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PidFile {
-    pub pid: u32,
+    /// Negative for a single-user (`postgres --single`) backend.
+    pub pid: i64,
     pub port: u16,
 }
 impl PidFile {
@@ -782,9 +788,11 @@ impl Embedded {
         let Some((runtime, launched)) = &self.owned else {
             return Ok(());
         };
-        if let Some(launched) = launched {
-            let current = PidFile::read(&self.pgdata)?.and_then(|(_, record)| record);
-            if current.map(|record| record.pid) != Some(*launched) {
+        if let (Some(launched), Ok(current)) = (launched, PidFile::read(&self.pgdata)) {
+            // A read error cannot show the server is someone else's, so the
+            // stop goes ahead rather than leave this call's server running.
+            let current = current.and_then(|(_, record)| record);
+            if current.map(|record| record.pid.unsigned_abs() as u32) != Some(*launched) {
                 return Ok(());
             }
         }
@@ -842,7 +850,31 @@ fn attach_or_start_locked(
     altered: &mut bool,
 ) -> Result<Embedded, Error> {
     if let Some((path, record)) = PidFile::read(&pgdata)? {
-        if let Some(record) = record.filter(|record| is_postgres_process(record.pid)) {
+        // An unreadable record proves nothing about its owner: refuse rather
+        // than delete what may be a live server's interlock.
+        let Some(record) = record else {
+            return Err(Error::Command {
+                program: "attach",
+                detail: format!(
+                    "{} cannot be read as PostgreSQL's lock file, so a server may still be \
+                     running; if none runs for this bank, remove it and start again",
+                    path.display()
+                ),
+            });
+        };
+        let alive = is_postgres_process(record.pid.unsigned_abs() as u32);
+        if alive && record.pid < 0 {
+            return Err(Error::Command {
+                program: "attach",
+                detail: format!(
+                    "PostgreSQL is running in single-user mode on {} (pid {}); let it finish, \
+                     then start again",
+                    pgdata.display(),
+                    record.pid.unsigned_abs()
+                ),
+            });
+        }
+        if alive {
             // A server started before the move still takes the old password.
             let password = [secret.as_str(), LEGACY_PASSWORD]
                 .into_iter()
@@ -893,9 +925,24 @@ fn attach_or_start_locked(
             initdb(runtime, &pgdata)?;
             *altered = true;
         }
-        let port = free_port(DEFAULT_PORT);
-        start(runtime, &pgdata, port)?;
-        Ok(port)
+        let mut attempt = 0;
+        loop {
+            let port = free_port(DEFAULT_PORT);
+            match start(runtime, &pgdata, port) {
+                Ok(()) => return Ok(port),
+                // Another bank (whose own lock does not exclude this one)
+                // can take the port between the check and the bind: try the
+                // next free one, while this bank's server is not running.
+                Err(_)
+                    if attempt < 4
+                        && !port_free(port)
+                        && PidFile::read(&pgdata).ok().flatten().is_none() =>
+                {
+                    attempt += 1;
+                }
+                Err(error) => return Err(error),
+            }
+        }
     })();
     let port = match started {
         Ok(port) => port,
@@ -914,9 +961,11 @@ fn attach_or_start_locked(
             return Err(error);
         }
     };
-    let launched = PidFile::read(&pgdata)?
+    let launched = PidFile::read(&pgdata)
+        .ok()
+        .flatten()
         .and_then(|(_, record)| record)
-        .map(|record| record.pid);
+        .map(|record| record.pid.unsigned_abs() as u32);
     let embedded = Embedded {
         pgdata,
         port,
@@ -1226,6 +1275,10 @@ fn psql_stdin(runtime: &Runtime, port: u16, password: &str, sql: &str) -> Result
         .map(|mut stdin| stdin.write_all(sql.as_bytes()))
         .unwrap_or(Ok(()));
     let output = child.wait_with_output().map_err(fail)?;
+    if !output.status.success() {
+        // psql's own error, not the broken pipe its early exit caused.
+        return psql_result(output);
+    }
     written.map_err(fail)?;
     psql_result(output)
 }
@@ -1305,10 +1358,13 @@ fn run_logged(mut command: Command, program: &'static str, pgdata: &Path) -> Res
 
 /// pg0's port choice: the default when it is free on loopback, otherwise
 /// the next free one up (wrapping into the dynamic range near the top).
+fn port_free(port: u16) -> bool {
+    std::net::TcpListener::bind(("127.0.0.1", port)).is_ok()
+}
+
 fn free_port(start: u16) -> u16 {
-    let available = |port: u16| std::net::TcpListener::bind(("127.0.0.1", port)).is_ok();
     let mut port = start;
-    while !available(port) {
+    while !port_free(port) {
         port = if port >= 65535 - 100 { 49152 } else { port + 1 };
     }
     port

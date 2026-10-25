@@ -76,8 +76,10 @@ impl SecretStore for CredentialSecrets {
         credentials::reject_ancestor_redirects(path).map_err(|e| e.to_string())?;
         let parent = path.parent().unwrap_or(Path::new("."));
         fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-        if fs::symlink_metadata(path).is_ok() {
-            return Err("a secret file already exists".to_owned());
+        match fs::symlink_metadata(path) {
+            Ok(_) => return Err("a secret file already exists".to_owned()),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e.to_string()),
         }
         let name = path
             .file_name()

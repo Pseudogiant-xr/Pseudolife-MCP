@@ -211,6 +211,12 @@ fn a_leftover_temporary_file_does_not_block_creation() {
         CredentialSecrets.read(&path).unwrap().as_deref(),
         Some(secret.as_str())
     );
+    // The create left no temporary file of its own behind.
+    let names: Vec<String> = fs::read_dir(&dir)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(names.len(), 2, "{names:?}");
     fs::remove_dir_all(dir).unwrap();
 }
 

@@ -149,6 +149,34 @@ fn postmaster_pid_yields_pid_and_port() {
     );
     assert_eq!(PidFile::parse("4242\n"), None);
     assert_eq!(PidFile::parse("x\nd\n1\n5433\n"), None);
+    // A single-user (`postgres --single`) backend records its pid negated.
+    assert_eq!(
+        PidFile::parse("-4242\nd\n1\n5433\n"),
+        Some(PidFile {
+            pid: -4242,
+            port: 5433
+        })
+    );
+}
+
+#[test]
+fn an_unreadable_pid_file_is_refused_never_deleted() {
+    // It may be a live server's interlock; nothing here proves otherwise.
+    let dir = scratch("badpid");
+    let pgdata = dir.join("embedded_pg");
+    fs::create_dir_all(&pgdata).unwrap();
+    fs::write(pgdata.join("postmaster.pid"), "not a lock file\n").unwrap();
+    let runtime = Runtime {
+        root: dir.join("no-runtime"),
+    };
+    let error = attach_or_start(&dir, &runtime, &PlainSecrets).unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("cannot be read as PostgreSQL's lock file")
+    );
+    assert!(pgdata.join("postmaster.pid").exists());
+    fs::remove_dir_all(dir).unwrap();
 }
 
 #[test]
@@ -406,6 +434,20 @@ fn stop_leaves_a_server_another_caller_restarted() {
         )),
     };
     handle.stop().unwrap();
+    // No postmaster.pid at all: no server runs, so there is nothing to stop.
+    fs::remove_file(pgdata.join("postmaster.pid")).unwrap();
+    let handle = Embedded {
+        pgdata: pgdata.clone(),
+        port: 5999,
+        password: "5e".repeat(32),
+        owned: Some((
+            Runtime {
+                root: dir.join("no-runtime"),
+            },
+            Some(1111),
+        )),
+    };
+    handle.stop().unwrap();
     fs::remove_dir_all(dir).unwrap();
 }
 
@@ -459,6 +501,23 @@ fn a_fresh_bank_starts_owned_then_a_second_caller_attaches() {
     let secret = fs::read_to_string(dir.join("embedded_pg.secret")).unwrap();
     assert_eq!(first.password(), secret);
     assert!(first.dsn().contains(&format!(":{secret}@")));
+    // No other copy of the secret was written anywhere in the data dir
+    // (initdb read the owner-only secret file itself).
+    let mut copies = Vec::new();
+    let mut pending = vec![dir.clone()];
+    while let Some(next) = pending.pop() {
+        for entry in fs::read_dir(&next).into_iter().flatten().flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                pending.push(path);
+            } else if fs::read(&path)
+                .is_ok_and(|bytes| bytes.windows(secret.len()).any(|w| w == secret.as_bytes()))
+            {
+                copies.push(path);
+            }
+        }
+    }
+    assert_eq!(copies, vec![dir.join("embedded_pg.secret")]);
     let hba = fs::read_to_string(dir.join("embedded_pg").join("pg_hba.conf")).unwrap();
     assert!(scram_only(&managed_methods(&hba)));
     assert!(psql(&runtime, first.port, LEGACY_PASSWORD, "SELECT 1").is_err());
