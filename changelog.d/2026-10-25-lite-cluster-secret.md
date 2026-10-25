@@ -4,7 +4,7 @@
 - An existing bank moves over at its next start by the daemon or a lite CLI command, with nothing to do by hand. An interrupted move is finished by the next call, whether the server was left running or was stopped. The next call works out where the move stopped from `pg_hba.conf` and from which password the server accepts. A missing secret file gets a new password the same way.
 - Two short windows remain:
   - A new bank keeps pg0's default password with cleartext authentication from its first start until its move runs, a moment later. If that first start is killed in between, it keeps that password until the next call.
-  - A move or re-key opens a loopback-only `trust` window for one start. It is never opened while a server is answering on the bank's port.
+  - A move or re-key opens a loopback-only `trust` window for one start. It is never opened while the bank's own server is running.
 - Attaching moves a running server that still accepts the old password, including one an older release started. That release's daemon keeps its open connections, but new ones fail until it restarts on this release.
 - No going back to an older release: once a bank has moved, a Pseudolife release from before this one can neither start it nor attach to it. Upgrade every runtime that opens the bank (daemon, shims and CLI) together.
 - `pg0-embedded` 0.15.2 is now the minimum version (was 0.15.1). After a reboot, 0.15.1 trusted a recorded process ID without checking it was PostgreSQL, so its stop could kill an unrelated process.
