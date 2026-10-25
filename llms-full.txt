@@ -2388,9 +2388,9 @@ For an important document, do both: distil the key facts into memory *and*
 `document_ingest` the file itself.
 
 > **Scope of the server-side parser.** Extraction is intentionally minimal:
-> the embedded text layer only, via `pypdf` (always available) or
-> `pypdfium2` (the optional `pdf` extra — better quality, still
-> copyleft-free). There is **no OCR** — a scanned, image-only PDF ingests
+> the embedded text layer only, via Chromium's PDFium (`pypdfium2`,
+> installed by default and copyleft-free; `pypdf` is the fallback when it
+> cannot be imported). There is **no OCR** — a scanned, image-only PDF ingests
 > as empty text; have the agent read it and store the distillate instead.
 > Paths resolve on the **server's** filesystem: with the Docker daemon,
 > `document_ingest` needs a path visible inside the container (a mounted

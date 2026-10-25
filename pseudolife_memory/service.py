@@ -3605,6 +3605,12 @@ class MemoryService(DreamOps, MaintainerOps):
                     "The path resolves where the daemon runs (with Docker, "
                     "inside the container, e.g. a mounted volume), not on "
                     "the client.")
+            # Refused from its metadata before anything is read; the read
+            # itself checks the open handle again (document_parser).
+            from pseudolife_memory.memory import document_parser
+            problem = document_parser.file_problem(file_path, file_path.stat())
+            if problem is not None:
+                raise ValueError(problem)
             result = self._reference.ingest_file(
                 file_path, source=source, embedder=self._embedder,
             )
