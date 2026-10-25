@@ -9,7 +9,7 @@
 //! `_graph_reject_entity_proposal_locked` 9151-9195).
 //!
 //! The link, curation and candidate judges join this module in their own
-//! changes (task P3b); until then the sweep reports them as not run.
+//! changes (task P3b); until then the sweep does not run them.
 //!
 //! Lock windows follow Python's, as the merge judge's do: the model call
 //! runs with the writer lock released, the reads and writes under it, and

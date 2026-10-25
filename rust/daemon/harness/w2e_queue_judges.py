@@ -24,7 +24,8 @@ JUNK_ALL_JUDGED = ("SELECT NOT EXISTS (SELECT 1 FROM entity_proposals "
 # The junk proposals, by entity (canonical) and the detector reason the
 # prompt shows.
 JUNK = {"alpha-node": "list-artifact", "beta-store": "compound", "gamma-tool": "slot-key",
-        "delta-unit": "list-artifact", "hub": "compound", "llama-4b": "slot-key"}
+        "delta-unit": "list-artifact", "hub": "compound", "llama-4b": "slot-key",
+        "delta-node": "compound"}
 
 # The deep_dream_judge_junk mutants (src/dream/queue_judges.rs), caught by
 # the scenario beside each.
@@ -75,6 +76,8 @@ def scenarios(w) -> dict:
         "Hub": V("delete", 0.99),
         # a leave: pending
         "Llama 4B": V("leave", 0.4),
+        # above the fact bar (two current facts at degree one): pending
+        "Delta Node": V("delete", 0.99),
         # Delta Unit gets no verdict: stamped as a zero-confidence leave
     }
     return {
@@ -85,22 +88,26 @@ def scenarios(w) -> dict:
                       junk_row("alpha-node", "status = 'pending' AND judge_verdict = 'delete'"),
                       junk_row("beta-store", "status = 'pending' AND judge_verdict = 'keep'")),
              w.review()]),
-        "junk-auto": w.judge_scenario(
+        "junk-auto": {**w.judge_scenario(
             config("auto", extra="    snapshot_keep: 1\n"),
             stub(auto_verdicts),
             [w.expect(junk_insert("alpha-node", "beta-store", "gamma-tool", "hub",
-                                  "llama-4b", "delta-unit"),
+                                  "llama-4b", "delta-unit", "delta-node"),
                       gone("alpha-node"),
                       junk_row("beta-store", "status = 'rejected' AND decided_by = 'dream-judge'"),
                       keep_pair("beta-store"),
                       junk_row("gamma-tool", "status = 'pending' AND judge_verdict = 'delete'"),
                       junk_row("hub", "status = 'pending' AND judge_verdict = 'delete'"),
+                      junk_row("delta-node", "status = 'pending' AND judge_verdict = 'delete'"),
                       junk_row("delta-unit", "status = 'pending' AND judge_verdict = 'leave' "
                                              "AND judge_confidence = 0"),
                       "SELECT EXISTS (SELECT 1 FROM meta WHERE key LIKE "
                       "'automatic_review_decision_v1:%' AND value->>'queue' = 'junk' "
                       "AND value->>'action' = 'keep')"),
              w.snapshot_file(), w.review()]),
+            # Delta Node carries two current facts: its delete fails the bar.
+            "seed": [*w.JUDGE_SEED, w.fact("Delta Node", "port", "7001"),
+                     w.fact("Delta Node", "owner", "ops")]},
         # The kept entity gains an edge: its evidence moves, the automatic
         # keep reopens (the keep pair removed, the record retired) and the
         # judge asks again, keeping it again.

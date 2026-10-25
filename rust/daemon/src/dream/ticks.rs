@@ -9,9 +9,9 @@
 //! shape), and one Python lets propagate (the analyzer tick, `dream_status`)
 //! ends the tick, as an exception ends Python's.
 //!
-//! The review-queue judges between the merge judge and `dream_status`
-//! (links, junk, curation, candidates) are not run yet (task P3b,
-//! `divergences.md`).
+//! Of the review-queue judges between the merge judge and `dream_status`,
+//! the junk judge runs (`queue_judges.rs`); the link, curation and
+//! candidate judges are not run yet (task P3b, `divergences.md`).
 
 use std::sync::Arc;
 
