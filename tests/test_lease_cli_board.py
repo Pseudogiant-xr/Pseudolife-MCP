@@ -186,6 +186,29 @@ def test_a_queued_run_times_out_and_leaves_the_queue(board, capsys):
     assert code == 3
 
 
+def test_a_gated_check_refuses_while_the_board_holds_then_runs_once_freed(
+        board, tmp_path, capsys):
+    bridge, _storage = board
+    marker = tmp_path / "ran"
+    child = [sys.executable, "-c",
+             f"import pathlib; pathlib.Path({str(marker)!r}).touch(); raise SystemExit(1)"]
+    holder = _post(bridge, "register", {"label": "suite-holder"})
+    headers = {"X-PL-Agent": holder["agent_id"], "X-PL-Agent-Key": holder["credential"]}
+    assert _post(bridge, "lease", {"name": "bench-window", "ttl": 300}, headers)["state"] == "held"
+    code = lease_cli.main(["check", "bench-window", "--", *child], transport=bridge)
+    assert code == lease_cli.EXIT_TEMPFAIL
+    assert not marker.exists()
+    captured = capsys.readouterr()
+    assert "suite-holder" in captured.out and "the command did not run" in captured.err
+    # A check holds nothing: the holder keeps the lease and no one queued.
+    [lease] = _post(bridge, "leases", {"name": "bench-window"})["leases"]
+    assert lease["holder"]["agent_id"] == holder["agent_id"] and lease["queued"] == 0
+    _post(bridge, "release", {"name": "bench-window"}, headers)
+    # Freed, the command runs and its own exit 1 comes back, not a refusal.
+    assert lease_cli.main(["check", "bench-window", "--", *child], transport=bridge) == 1
+    assert marker.exists()
+
+
 def test_lease_list_shows_the_board_beside_local_locks(board, capsys):
     bridge, _ = board
     holder = _post(bridge, "register", {"label": "coordinator-session"})
