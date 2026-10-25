@@ -5884,7 +5884,10 @@ def prepare_template(scn: dict, tag: str, root: Path, owned: list[str],
     template = pg.name(f"pl_cf_w2e_{tag}_t")
     owned.append(template)
     dsn = pg.create(template)
-    home = daemons.make_home(root, f"{tag}-seed", scenario_config(scn, stub))
+    # ``seed_config``: the seeding daemon's own config, for scenarios whose
+    # measured config runs background work the template must not carry.
+    seed_scn = {**scn, "config": scn["seed_config"]} if "seed_config" in scn else scn
+    home = daemons.make_home(root, f"{tag}-seed", scenario_config(seed_scn, stub))
     extra = {**extractor_env(scn, stub, "seed"), **(scn.get("seed_env") or {})}
     d = daemons.python_daemon(home, daemons.free_port(),
                               daemons.base_env(home, side_env(scn, dsn, extra)))
@@ -5966,6 +5969,11 @@ def _run_live(name: str, scn: dict, tag: str, binary: Path, root: Path, record: 
         max_wall = 0.0
         for i, op in enumerate([{"op": "init"}] + scn["ops"]):
             row = {"step": i, "op": op, "diffs": [] if i else list(warmup_diffs)}
+            if op["op"] == "init" and scn.get("init_settle"):
+                # Background work that starts with the daemons settles
+                # before the first comparison.
+                settle_sides(scn["init_settle"], dsns, stubs, scn)
+                row["diffs"] += expect_diffs(scn["init_settle"], dsns)
             if op["op"] != "init":
                 started = time.monotonic()
                 if op["op"] in HOME_OPS:

@@ -355,10 +355,13 @@ def test_sweep_scenarios_settle_without_timing_on_their_mutants(harness):
     assert names == ["sweep-analyzer-tick", "sweep-deep-tick", "sweep-dream-auto",
                      "sweep-stall"]
     for n in names:
-        config = harness.SCENARIOS[n]["config"]
-        assert "  dream:\n    enabled: true\n" in config, n
-        for op in harness.SCENARIOS[n]["ops"]:
-            until = (op.get("settle") or {}).get("until") or ""
+        scn = harness.SCENARIOS[n]
+        assert "  dream:\n    enabled: true\n" in scn["config"], n
+        # The seeding daemon's sweep must not write what the arms compare.
+        assert "  dream:\n    enabled: false\n" in scn["seed_config"], n
+        settles = [scn.get("init_settle") or {}] + [op.get("settle") or {} for op in scn["ops"]]
+        for settle in settles:
+            until = settle.get("until") or ""
             for broken in ("deep_last_apply", "analyzer_duplicate_cursor",
                            "status = 'committed'"):
                 assert broken not in until, (n, until)

@@ -141,17 +141,32 @@ pub async fn sweep(
         );
         return Ok(());
     };
-    match super::run::run_auto(
-        &me,
-        ready.clone(),
-        background_caller(),
-        background_writer(),
-        None,
-    )
-    .await
-    {
-        Ok(result) => log_value("dream sweep fired", &result),
-        Err(e) => return Err(error_text(&e)),
+    // The dream runs as an admitted write task, like a manual `run`, and
+    // the tick waits for it unless shutdown begins: a model call can take
+    // its whole timeout (240 s by default), and `Background::shutdown`
+    // waits for this tick. An abandoned pass ends with the process, as
+    // Python's sweep thread does (an open transaction rolls back with its
+    // connection).
+    let r2 = ready.clone();
+    let job = ready.writes.spawn(async move {
+        super::run::run_auto(&me, r2, background_caller(), background_writer(), None).await
+    });
+    let mut rx = stop.clone();
+    let stopped = async move {
+        // A dropped sender (no background owner) never stops the tick.
+        if rx.wait_for(|v| *v).await.is_err() {
+            std::future::pending::<()>().await;
+        }
+    };
+    tokio::select! {
+        done = job => match done {
+            Ok(Ok(result)) => log_value("dream sweep fired", &result),
+            Ok(Err(e)) => return Err(error_text(&e)),
+            Err(e) => return Err(e.to_string()),
+        },
+        () = stopped => {
+            eprintln!("dream sweep: shutting down; the automatic dream in flight is abandoned");
+        }
     }
     Ok(())
 }

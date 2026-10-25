@@ -42,6 +42,10 @@ def config(dream: str = "", deep: str = "", extra: str = "", interval: float = 0
 
 
 SETTLE = {"quiet_s": 3.0, "timeout_s": 120.0}
+# The seeding daemon dreams nothing: its sweep must not write the markers
+# (the deep watermark, the analyzer cursor) the measured arms are compared
+# on, nor leave a snapshot file the template does not carry.
+SEED_CONFIG = SWEEP_BASE + "  dream:\n    enabled: false\n    stall_notice: false\n"
 
 AUTO_NOTES = ["The staging ingress moved to nginx 1.27.",
               "Gwen owns the release calendar.",
@@ -85,6 +89,7 @@ def scenarios(w) -> dict:
         # the batch, the sweep dreams it, the cursor and the run row land.
         "sweep-dream-auto": {
             "config": config(dream="    min_batch: 3\n    idle_seconds: 1000000000\n"),
+            "seed_config": SEED_CONFIG,
             "extractor": auto_stub,
             "seed": [w.fact("Staging Ingress", "proxy", "nginx 1.25")],
             "ops": [
@@ -108,14 +113,15 @@ def scenarios(w) -> dict:
         "sweep-deep-tick": {
             "config": config(dream="    min_batch: 1000000\n    idle_seconds: 1000000000\n",
                              deep="    auto_tick: true\n"),
+            "seed_config": SEED_CONFIG,
+            # The tick fires at the daemons' first sweep, before any op.
+            "init_settle": {**SETTLE, "expect": [
+                "SELECT EXISTS (SELECT 1 FROM meta WHERE key = 'deep_last_apply')"]},
             "seed": [w.relate("Cache Node", "uses", "Redis"),
                      w.relate("Cache-Node", "uses", "Redis"),
                      w.relate("TODO", "related-to", "Redis"),
                      w.fact("Redis", "port", "6379")],
             "ops": [
-                {**w.dream("status"),
-                 "settle": dict(SETTLE),
-                 "expect": ["SELECT EXISTS (SELECT 1 FROM meta WHERE key = 'deep_last_apply')"]},
                 {"op": "snapshot_file"},
                 w.dream("status"),
                 w.review("list"),
@@ -127,17 +133,20 @@ def scenarios(w) -> dict:
         "sweep-analyzer-tick": {
             "config": config(dream="    min_batch: 1000000\n    idle_seconds: 1000000000\n",
                              deep="    analyzer_file_duplicates: true\n    judge_batch: 50\n"),
+            "seed_config": SEED_CONFIG,
+            # The reconcile pass and the filing run at the first sweep.
+            "init_settle": {**SETTLE,
+                            "until": "SELECT EXISTS (SELECT 1 FROM meta "
+                                     "WHERE key = 'analyzer_pair_reconcile_cursor')",
+                            "expect": ["SELECT EXISTS (SELECT 1 FROM meta "
+                                       "WHERE key = 'analyzer_duplicate_cursor')"]},
             "seed": [w.fact("Billing Gateway", "region", "eu-west"),
                      w.fact("Billing Gateway Service", "owner", "Hana"),
                      w.relate("Ledger Export", "uses", "Billing Gateway"),
                      w.relate("Ledger Exporter", "uses", "Billing Gateway"),
                      w.sql(ANALYZER_SEED_SQL, after_stop=True)],
             "ops": [
-                {**w.dream("status"),
-                 "settle": {**SETTLE, "until": "SELECT EXISTS (SELECT 1 FROM meta "
-                                               "WHERE key = 'analyzer_pair_reconcile_cursor')"},
-                 "expect": ["SELECT EXISTS (SELECT 1 FROM meta "
-                            "WHERE key = 'analyzer_duplicate_cursor')"]},
+                w.dream("status"),
                 w.review("list"),
             ],
         },
@@ -149,6 +158,7 @@ def scenarios(w) -> dict:
         "sweep-stall": {
             "config": config(dream="    min_batch: 1\n    idle_seconds: 1000000000\n",
                              interval=1.0),
+            "seed_config": SEED_CONFIG,
             # Every model call fails: the batch, the per-entry retry and any
             # other prompt the pass sends (kind-only entries answer them).
             "extractor": {"model": "stub-model", "replies": [
