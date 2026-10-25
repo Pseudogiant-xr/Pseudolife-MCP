@@ -71,12 +71,16 @@ tokenizers = { version = "=0.21.4", default-features = false, features = ["fancy
 flate2.workspace = true
 tar.workspace = true
 zip.workspace = true
+# The lite tier's PostgreSQL runtime: the Linux library packages' data.tar.zst.
+ruzstd.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { workspace = true, features = ["Win32_System_Registry"] }
 
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true
+# The lite bank's password file: the owner check (shared/secret_file.rs).
+rustix.workspace = true
 
 [dev-dependencies]
 futures.workspace = true

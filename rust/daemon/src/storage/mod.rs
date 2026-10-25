@@ -208,6 +208,10 @@ pub async fn connect(
     timeout: Duration,
 ) -> Result<(Client, JoinHandle<()>), String> {
     const ATTEMPTS: u32 = 4;
+    // The lite bank's server is proved this bank's over SCRAM before every
+    // connection (this client would answer a cleartext request); other
+    // servers are not probed.
+    crate::native::lite::verify_before_connect(config).await?;
     let mut config = config.clone();
     config.connect_timeout(timeout);
     let mut attempt = 1;

@@ -9,6 +9,11 @@ mod password;
 pub mod resolution;
 #[path = "../../../shared/pg_runtime.rs"]
 pub mod runtime;
+#[path = "../../../shared/secret_file.rs"]
+pub mod secret_file;
+// The shared secret writer reaches the owner-only code as a sibling.
+#[cfg(windows)]
+pub(crate) use crate::credentials::windows_security;
 mod tls;
 mod transport;
 

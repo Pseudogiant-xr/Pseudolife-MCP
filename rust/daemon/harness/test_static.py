@@ -24,11 +24,16 @@ def test_production_capability_switch_does_not_replace_startup(tmp_path):
     candidate = os.environ.get("PL_STATIC_DEFAULT_BIN")
     if not candidate:
         pytest.skip("requires the explicit production candidate")
-    env = run.daemons.base_env(tmp_path, {"PSEUDOLIFE_DAEMON_HARNESS_CAPABILITIES": "1"})
+    # File mode, which the Rust daemon refuses: a start with no DSN would
+    # otherwise start (and first provision) the lite tier's PostgreSQL.
+    env = run.daemons.base_env(tmp_path, {"PSEUDOLIFE_DAEMON_HARNESS_CAPABILITIES": "1",
+                                          "PSEUDOLIFE_MCP_STORAGE": "files"})
+    env.pop("PSEUDOLIFE_MCP_DATABASE_URL", None)
     result = subprocess.run([candidate], env=env, capture_output=True, timeout=10)
-    # Without a DSN ordinary startup refuses; it never prints capabilities.
+    # Ordinary startup refuses; it never prints capabilities.
     assert result.returncode == 2
     assert result.stdout == b""
+    assert b"storage resolution refused: PSEUDOLIFE_MCP_STORAGE=files" in result.stderr
 
 
 @pytest.mark.parametrize("kind,cache", [(None, "no-store"), ("image/webp", "max-age=86400")])

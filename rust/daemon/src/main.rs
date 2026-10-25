@@ -100,6 +100,9 @@ fn moved_refusal(data_dir: Option<&str>) -> Option<String> {
 
 fn fail(code: i32, message: &str) -> ! {
     eprintln!("{message}");
+    // `exit` runs no destructors: stop the lite server this process
+    // started, if any, before leaving (an attached one keeps running).
+    native::lite::shutdown();
     std::process::exit(code)
 }
 
@@ -170,16 +173,31 @@ fn main() {
     ) {
         fail(2, &format!("pseudolife-mcp serve: {msg}"));
     }
-    // Storage resolution: an explicit DSN is the only mode this port has
-    // (no file mode, no embedded lite Postgres: declared divergence).
-    let Some(dsn) = std::env::var("PSEUDOLIFE_MCP_DATABASE_URL")
-        .ok()
-        .filter(|s| !s.is_empty())
-    else {
-        fail(
-            2,
-            "storage resolution refused: the Rust daemon requires PSEUDOLIFE_MCP_DATABASE_URL",
-        );
+    // Storage resolution (Python's resolve_daemon_storage): an explicit DSN,
+    // or the lite tier's embedded PostgreSQL in the per-user data dir,
+    // started or attached before anything reads configuration. The lite
+    // bank's DSN and data dir then stand in for the environment's, as
+    // Python exports them (an overlay: no process-wide set_var).
+    let home = std::env::home_dir();
+    let storage = native::lite::resolve(&env_lookup, home.as_deref())
+        .unwrap_or_else(|e| fail(2, &format!("storage resolution refused: {e}")));
+    let (dsn, lite_data_dir) = match storage {
+        native::lite::Storage::Explicit(dsn) => (dsn, None),
+        native::lite::Storage::Lite(data_dir) => {
+            let dsn =
+                native::lite::start(&data_dir, home.as_deref(), &mut |line| eprintln!("{line}"))
+                    .unwrap_or_else(|e| fail(2, &format!("storage resolution refused: {e}")));
+            eprintln!(
+                "storage: embedded postgres (lite tier) — data dir {}",
+                data_dir.display()
+            );
+            (dsn, Some(data_dir.to_string_lossy().into_owned()))
+        }
+    };
+    let env_lookup = |k: &str| match k {
+        "PSEUDOLIFE_MCP_DATABASE_URL" => Some(dsn.clone()),
+        "PSEUDOLIFE_MCP_DATA_DIR" if lite_data_dir.is_some() => lite_data_dir.clone(),
+        _ => std::env::var(k).ok(),
     };
     let cwd = std::env::current_dir().unwrap_or_else(|e| fail(1, &format!("cwd: {e}")));
     let (data_dir, config_file) = config::config_path(&env_lookup, &cwd);
@@ -191,6 +209,7 @@ fn main() {
     // differential can compare it with Python's AppConfig (harness/run.py).
     if std::env::var_os("PSEUDOLIFE_DAEMON_DUMP_CONFIG").is_some() {
         println!("{}", pyjson::dumps(&config.dump()));
+        native::lite::shutdown();
         std::process::exit(0);
     }
     let env = config::DaemonEnv::from_env(&env_lookup).unwrap_or_else(|e| fail(1, &e.to_string()));
@@ -348,6 +367,9 @@ fn main() {
         background.shutdown(service.as_ref()).await;
         code
     });
+    // After the final persistence: stop the lite server if this process
+    // started it (Python's atexit stop runs after its flush the same way).
+    native::lite::shutdown();
     std::process::exit(code);
 }
 

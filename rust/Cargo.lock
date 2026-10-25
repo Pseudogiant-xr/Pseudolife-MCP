@@ -1742,6 +1742,8 @@ dependencies = [
  "percent-encoding",
  "regex",
  "reqwest",
+ "rustix",
+ "ruzstd",
  "serde",
  "serde_json",
  "sha2 0.10.9",

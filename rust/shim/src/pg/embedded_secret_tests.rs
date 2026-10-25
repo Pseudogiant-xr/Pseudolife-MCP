@@ -1,4 +1,5 @@
 use super::*;
+use std::path::PathBuf;
 
 fn scratch(label: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!(

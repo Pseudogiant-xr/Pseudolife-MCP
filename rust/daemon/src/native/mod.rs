@@ -11,7 +11,32 @@ pub mod native_provision;
 
 pub mod pdfium;
 
-const USAGE: &str = "usage: pseudolife-daemon provision pdfium";
+// The lite tier: the pinned PostgreSQL runtime, the embedded server's
+// lifecycle, the bank's password file and (on Windows) the owner-only file
+// code they rest on. The shim includes the same files; the daemon calls a
+// part of each.
+#[path = "../../../shared/embedded_pg.rs"]
+#[allow(dead_code)]
+pub mod embedded;
+pub mod lite;
+#[path = "../../../shared/pg_runtime.rs"]
+#[allow(dead_code, unused_imports)]
+pub mod pg_runtime;
+#[path = "../../../shared/secret_file.rs"]
+#[allow(dead_code)]
+pub mod secret_file;
+#[cfg(windows)]
+#[allow(unsafe_code, dead_code)]
+#[path = "../../../shared/windows_security.rs"]
+pub(crate) mod windows_security;
+
+/// The error the owner-only file code reports (the shim's
+/// `credentials::CredentialError`).
+#[cfg_attr(not(windows), allow(dead_code))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CredentialError(pub &'static str);
+
+const USAGE: &str = "usage: pseudolife-daemon provision pdfium|postgresql";
 
 /// `pseudolife-daemon provision <runtime>`: installs a pinned native
 /// runtime and exits; it needs no bank, configuration or token. Returns the
@@ -27,6 +52,7 @@ pub fn command(args: &[OsString]) -> i32 {
     };
     match runtime.as_ref() {
         "pdfium" => provision_pdfium(),
+        "postgresql" => lite::provision_command(),
         other => {
             eprintln!("pseudolife-daemon provision: no runtime named {other:?}; {USAGE}");
             2

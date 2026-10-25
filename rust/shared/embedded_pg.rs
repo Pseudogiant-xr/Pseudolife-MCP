@@ -748,6 +748,40 @@ impl Embedded {
     pub fn password(&self) -> &str {
         &self.password
     }
+    /// The DSN for a client that has no `require_auth` (tokio-postgres): it
+    /// must be used only after `verify` has shown, over SCRAM, that the
+    /// server on the port is this bank's, since such a client answers a
+    /// cleartext password request.
+    pub fn client_dsn(&self) -> String {
+        format!(
+            "postgresql://{SUPERUSER}:{}@127.0.0.1:{}/{DATABASE}",
+            self.password, self.port
+        )
+    }
+    /// Whether the server on this handle's port is still this bank's,
+    /// asked with SCRAM required (so an impostor on the port gets nothing):
+    /// it must accept the bank's secret and report this pgdata.
+    pub fn verify(&self, runtime: &Runtime) -> bool {
+        serves(runtime, self.port, &self.password, &self.pgdata)
+    }
+    /// What `verify` needs, for a caller that checks again later (the
+    /// daemon, before each connection) while this handle stays with its
+    /// owner: (pgdata, port, password).
+    pub fn identity(&self) -> (PathBuf, u16, String) {
+        (self.pgdata.clone(), self.port, self.password.clone())
+    }
+    /// One statement against the bank's database, SCRAM required; the rows
+    /// as `psql -t -A` prints them.
+    pub fn query(&self, runtime: &Runtime, sql: &str) -> Result<String, Error> {
+        let output = psql_command(runtime, self.port, &self.password)
+            .args(["-d", DATABASE, "-c", sql])
+            .output()
+            .map_err(|e| Error::Command {
+                program: "psql",
+                detail: e.to_string(),
+            })?;
+        psql_result(output)
+    }
     /// True when this process started the server (and so may stop it).
     pub fn owned(&self) -> bool {
         self.owned.is_some()
@@ -1033,7 +1067,9 @@ fn settle_running(
 /// Whether the server on `port` accepts `password` and is this pgdata's
 /// own: a recorded port another PostgreSQL has since taken must not be
 /// mistaken for the bank.
-fn serves(runtime: &Runtime, port: u16, password: &str, pgdata: &Path) -> bool {
+/// Whether the server on `port` accepts `password` over SCRAM and serves
+/// `pgdata`: the bank's own server, not an impostor on its port.
+pub fn serves(runtime: &Runtime, port: u16, password: &str, pgdata: &Path) -> bool {
     let Ok(reported) = psql(runtime, port, password, "SHOW data_directory") else {
         return false;
     };
