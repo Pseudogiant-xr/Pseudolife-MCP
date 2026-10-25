@@ -66,7 +66,7 @@ harness's live arms (the hook row's 250 ms health probe), and daemon body
 admission, security admission and MCP live parity (early refusals that
 Windows can turn into a reset). Linux runs `cli-live` under the gate. Hosted
 Windows runs it in `Parity live (non-gating) / windows-latest / cli-live`, on
-master pushes, the nightly and manual CI only. That job has
+the nightly and manual CI only (master pushes ran it too until 2026-10-24). That job has
 `continue-on-error` and no job needs it, so it reports a Windows-only live
 divergence without blocking a merge or holding a pull request's checks open.
 
@@ -103,8 +103,10 @@ then the 61-70 minute cli shard) to about 45 (`Rust`, then a 26-minute
 shard). Since 2026-10-24 the shards wait for the candidate and fixtures
 builds, not `Rust` (which the `Parity` gate still needs), and the cli,
 cli-daemon and w1c-connection shards are split in two, so no Windows shard
-is planned past about 15 minutes; a pull request push runs 23 jobs for a
-floor-only change and 43 when every suite runs.
+is planned past about 15 minutes. The same day the candidate's harness
+build moved to its own job beside it, and Linux began running `h5-audit`,
+`h5-backup` and `h5-background` as one `h5-light` job; a pull request push
+runs 25 jobs for a floor-only change and 43 when every suite runs.
 
 The scope jobs diff from master's tip rather than `merge_group.base_sha`
 because GitHub does not formally define `base_sha`. It is either master's tip

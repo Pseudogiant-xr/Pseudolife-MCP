@@ -95,9 +95,8 @@ jobs:
     # (ops/ci_batch_passed.py; any failed check or API error lists none).
     # A push then skips the image check and each parity pair (os, suite) on
     # that list, and runs everything else: the Rust job (its nextest reads
-    # the event-selected oracle's package metadata), the candidate and
-    # fixtures builds (parity-live needs the debug bind fixture), parity-live
-    # (never run on a pull request), the eval and judges suites (they compare
+    # the event-selected oracle's package metadata), the candidate, harness
+    # candidate and fixtures builds, the eval and judges suites (they compare
     # against the event-selected oracle, the merge base on a pull request
     # and the pushed head on a push) and every pair the batch did not pass.
     if: github.event_name != 'workflow_dispatch' || inputs.mode != 'wait-mail'
@@ -112,6 +111,7 @@ jobs:
       rust: ${{ steps.scope.outputs.rust }}
       full: ${{ steps.scope.outputs.full }}
       parity: ${{ steps.parity.outputs.parity }}
+      parity_selfhosted: ${{ steps.parity.outputs.selfhosted }}
       batch_passed: ${{ steps.batch.outputs.passed }}
     steps:
       - uses: actions/checkout@v4
@@ -517,18 +517,76 @@ jobs:
           $daemonName = if ($IsWindows) { 'pseudolife-daemon.exe' } else { 'pseudolife-daemon' }
           $staticName = if ($IsWindows) { 'pseudolife-daemon-static.exe' } else { 'pseudolife-daemon-static' }
           Copy-Item -LiteralPath (Join-Path 'rust/target/release' $daemonName) -Destination (Join-Path 'rust/target/release' $staticName)
-      - name: Build embedding candidate
-        run: cargo build --locked --release -p pseudolife-daemon --bins --features mutants,graph-harness,contract-harness,principal-harness -j 3
+      # The default daemon ships as pseudolife-daemon-static; the artifact's
+      # pseudolife-daemon is candidate-harness's mutants build, and both
+      # artifacts download into one directory.
       - uses: actions/upload-artifact@v4
         with:
           name: rust-shim-${{ runner.os }}
           path: |
             rust/target/release/pseudolife-stdio
             rust/target/release/pseudolife-stdio.exe
-            rust/target/release/pseudolife-daemon
-            rust/target/release/pseudolife-daemon.exe
             rust/target/release/pseudolife-daemon-static
             rust/target/release/pseudolife-daemon-static.exe
+          if-no-files-found: error
+
+  candidate-harness:
+    # The candidate job's second build, run beside it: the daemon with its
+    # mutant and harness features, and the graph and dream contract
+    # binaries. In the candidate job it ran after the default build, 2.7 of
+    # hosted Windows' 8.1 minutes (run 40058307040), so every parity shard
+    # waited for both. Built alone, -p pseudolife-daemon resolves other
+    # dependency features than the two-binary candidate build (serde,
+    # serde_json, syn, chrono, indexmap, windows-sys), so it keeps a cache of
+    # its own; the cli-daemon parity cache this workflow stopped using frees
+    # about as much.
+    needs: scope
+    if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || inputs.mode != 'wait-mail') && needs.scope.outputs.rust != 'false' && needs.scope.outputs.full != 'false' }}
+    name: Candidate harness / ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: rust
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.94.0
+      - name: Keep only the pinned Rust toolchain
+        if: runner.environment != 'self-hosted'
+        shell: pwsh
+        run: |
+          $toolchainFile = Join-Path $env:GITHUB_WORKSPACE 'rust/rust-toolchain.toml'
+          $match = Select-String -LiteralPath $toolchainFile -Pattern '^channel = "([^"]+)"$' | Select-Object -First 1
+          if (-not $match) { throw "rust/rust-toolchain.toml names no channel; nothing is known to keep" }
+          $pinned = $match.Matches[0].Groups[1].Value
+          foreach ($line in @(rustup toolchain list)) {
+            $name = ($line -split '\s+')[0]
+            if ($name -and -not $name.StartsWith("$pinned-")) {
+              rustup toolchain uninstall $name
+              if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            }
+          }
+          rustup toolchain list
+          exit $LASTEXITCODE
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+          shared-key: shim-harness
+          cache-on-failure: true
+      - name: Build embedding candidate
+        run: cargo build --locked --release -p pseudolife-daemon --bins --features mutants,graph-harness,contract-harness,principal-harness -j 3
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rust-shim-harness-${{ runner.os }}
+          path: |
+            rust/target/release/pseudolife-daemon
+            rust/target/release/pseudolife-daemon.exe
             rust/target/release/graph-contract
             rust/target/release/graph-contract.exe
             rust/target/release/dream-contract
@@ -541,9 +599,9 @@ jobs:
     # this job and the Parity gate fail rather than skip. The shards read
     # nothing from the Rust job (see fixtures), so they start beside it; the
     # Parity gate still needs it, and a Rust failure still fails the gate.
-    if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || inputs.mode == 'ci') && needs.candidate.result == 'success' && needs.fixtures.result == 'success' }}
+    if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || inputs.mode == 'ci') && needs.candidate.result == 'success' && needs.candidate-harness.result == 'success' && needs.fixtures.result == 'success' }}
     name: Parity checks / ${{ matrix.os }} / ${{ matrix.suite }}
-    needs: [scope, candidate, fixtures]
+    needs: [scope, candidate, candidate-harness, fixtures]
     strategy:
       fail-fast: false
       matrix:
@@ -653,8 +711,10 @@ jobs:
           $bin = if ($IsWindows) { Join-Path $venv 'Scripts' } else { Join-Path $venv 'bin' }
           $bin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
           "VIRTUAL_ENV=$venv" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      # Only these suites run cargo or rustc (which_comparison in eval, the
+      # sent-YAML mutants in cli); the rest run the downloaded binaries.
       - uses: dtolnay/rust-toolchain@stable
-        if: "!startsWith(matrix.suite, 'w1c-')"
+        if: matrix.suite == 'eval' || matrix.suite == 'cli'
         with:
           toolchain: 1.94.0
       - name: Keep only the pinned Rust toolchain
@@ -687,16 +747,25 @@ jobs:
           key: ${{ matrix.suite }}
           cache-on-failure: true
           save-if: ${{ runner.environment != 'self-hosted' }}
+      # --no-compile: the same packages, without byte-compiling every file
+      # at install time (Python compiles what a shard imports, on first
+      # import). Locally, torch installed in 11 s instead of 39 s
+      # (2026-10-24); the step took 2.3 minutes per hosted Windows shard.
       - name: Install checkout and test dependencies
         timeout-minutes: 10
         run: |
           python -m pip install --upgrade pip
-          python -m pip install "setuptools>=68" wheel
-          python -m pip install --index-url https://download.pytorch.org/whl/cpu "torch==2.13.0"
-          python -m pip install -e ".[dev,lite]" "mcp==2.2.0"
+          python -m pip install --no-compile "setuptools>=68" wheel
+          python -m pip install --no-compile --index-url https://download.pytorch.org/whl/cpu "torch==2.13.0"
+          python -m pip install --no-compile -e ".[dev,lite]" "mcp==2.2.0"
       - uses: actions/download-artifact@v4
         with:
           name: rust-shim-${{ runner.os }}
+          path: rust/target/release
+      - name: Download harness candidate
+        uses: actions/download-artifact@v4
+        with:
+          name: rust-shim-harness-${{ runner.os }}
           path: rust/target/release
       - name: Download debug bind fixture
         if: matrix.suite == 'cli-live' || matrix.suite == 'h5-w1a'
@@ -1202,10 +1271,10 @@ jobs:
           python rust/cli_harness/lease_ci.py
           exit $LASTEXITCODE
       - name: Install offline W1-A fixture dependencies
-        if: matrix.suite == 'h5-w1a' || matrix.suite == 'h5-background' || matrix.suite == 'h5-daemon-mutants'
+        if: matrix.suite == 'h5-w1a' || matrix.suite == 'h5-background' || matrix.suite == 'h5-daemon-mutants' || matrix.suite == 'h5-light'
         # Network-bound setup gets the five-minute floor.
         timeout-minutes: 5
-        run: python -m pip install "onnx==1.22.0" "onnxruntime==1.27.0" "optimum==2.1.0" "optimum-onnx==0.1.0"
+        run: python -m pip install --no-compile "onnx==1.22.0" "onnxruntime==1.27.0" "optimum==2.1.0" "optimum-onnx==0.1.0"
       - name: Restore H5 fixture executable permissions
         if: runner.os == 'Linux' && startsWith(matrix.suite, 'h5-')
         shell: pwsh
@@ -1344,13 +1413,15 @@ jobs:
     # Hosted Windows' live comparisons (the cli-live suite), outside the
     # required gate: continue-on-error and no place in any job's needs keep
     # its result out of every required check, so it reports and never
-    # gates. Master pushes, the nightly and manual CI run it; a pull
-    # request or merge group never does, so it holds no PR check open. A
+    # gates. The nightly and manual CI run it; a pull request, a merge group
+    # and, since 2026-10-24 (maintainer decision), a master push never do:
+    # it held no check open but took a Windows runner for about 26 minutes
+    # on every push (run 40052100399) under the account's 20-job cap. A
     # failure here is a Windows-only live divergence to triage against the
     # Linux cli-live shard, which stays required.
-    if: ${{ !cancelled() && (github.event_name == 'push' || github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'ci')) && needs.candidate.result == 'success' && needs.fixtures.result == 'success' }}
+    if: ${{ !cancelled() && (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'ci')) && needs.candidate.result == 'success' && needs.candidate-harness.result == 'success' && needs.fixtures.result == 'success' }}
     name: Parity live (non-gating) / ${{ matrix.os }} / ${{ matrix.suite }}
-    needs: [candidate, fixtures]
+    needs: [candidate, candidate-harness, fixtures]
     continue-on-error: true
     strategy:
       fail-fast: false
@@ -1377,17 +1448,19 @@ jobs:
     # PARITY_SELFHOSTED_RUNNERS lists the registered runners (JSON, such as
     # ["linux", "windows"]); a job for an unregistered label would queue for
     # a day.
-    if: ${{ !cancelled() && (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'ci')) && vars.PARITY_SELFHOSTED_RUNNERS != '' && needs.candidate.result == 'success' && needs.fixtures.result == 'success' }}
+    if: ${{ !cancelled() && (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'ci')) && vars.PARITY_SELFHOSTED_RUNNERS != '' && needs.candidate.result == 'success' && needs.candidate-harness.result == 'success' && needs.fixtures.result == 'success' }}
     name: Parity self-hosted / ${{ matrix.runner }} / ${{ matrix.suite }}
-    needs: [scope, candidate, fixtures]
+    needs: [scope, candidate, candidate-harness, fixtures]
     continue-on-error: true
     strategy:
       fail-fast: false
       matrix:
         runner: ${{ fromJSON(vars.PARITY_SELFHOSTED_RUNNERS || '["off"]') }}
-        # Every suite: the nightly and manual CI select them all.
-        suite: ${{ fromJSON(needs.scope.outputs.parity).suite }}
-        include: ${{ fromJSON(needs.scope.outputs.parity).include }}
+        # Every suite the nightly and manual CI select, less the hosted-only
+        # composites (h5-light), whose parts each runner runs on its own:
+        # rust/ci/parity_scope.py's selfhosted output.
+        suite: ${{ fromJSON(needs.scope.outputs.parity_selfhosted).suite }}
+        include: ${{ fromJSON(needs.scope.outputs.parity_selfhosted).include }}
     runs-on: [self-hosted, "pseudolife-parity-${{ matrix.runner }}"]
     # The slowest hosted shard budget (210m) plus the hour a shard may wait
     # for this machine's full suite before it yields.
@@ -1690,8 +1763,8 @@ jobs:
 
   stress:
     name: Stress / ${{ inputs.os }} / ${{ matrix.iteration }}
-    needs: [stress-plan, candidate, stress-build]
-    if: ${{ !cancelled() && needs.stress-plan.result == 'success' && needs.candidate.result == 'success' && (needs.stress-plan.outputs.kind != 'cargo' || needs.stress-build.result == 'success') }}
+    needs: [stress-plan, candidate, candidate-harness, stress-build]
+    if: ${{ !cancelled() && needs.stress-plan.result == 'success' && needs.candidate.result == 'success' && needs.candidate-harness.result == 'success' && (needs.stress-plan.outputs.kind != 'cargo' || needs.stress-build.result == 'success') }}
     strategy:
       fail-fast: false
       # Half the account's 20-job cap, so a loop never starves other runs.
@@ -1743,6 +1816,11 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: rust-shim-${{ runner.os }}
+          path: rust/target/release
+      - name: Download harness candidate
+        uses: actions/download-artifact@v4
+        with:
+          name: rust-shim-harness-${{ runner.os }}
           path: rust/target/release
       - name: Restore executable permission
         if: runner.os == 'Linux'
