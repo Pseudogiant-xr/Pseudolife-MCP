@@ -588,6 +588,18 @@ owner-only, synced and published by one rename. The Windows install
 matches pg0 0.15.1's installation file for file; the real-download case
 needs `PSEUDOLIFE_TEST_PG_PROVISION_ROOT`.
 
+The daemon includes the same shared files under `native::` (beside the
+PDFium provisioner), with `shared/windows_security.rs` on Windows, and
+`shared/secret_file.rs`, the one writer of the bank's password file both
+crates use. The daemon reads the file through that module's reader (a
+regular, owner-only file, opened without following links, at most 4096
+bytes, one token as `credentials._decode_token` accepts it); the shim reads
+it through its credential provider, which applies the oracle's full
+credential-file validation. The daemon crate root has no
+`#![deny(unsafe_code)]` yet, so its existing unsafe modules and these
+includes are not held to a crate-wide denial; adding one is raised as its
+own change.
+
 Board label normalization follows the pinned Python 3.11 Unicode 14.0.0
 behavior: casefold, then NFC, with category-C inputs rejected. The pinned
 `unicode-casefold` crate uses Unicode 9.0.0; a full code-point probe found 129

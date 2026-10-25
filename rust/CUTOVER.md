@@ -643,13 +643,13 @@ PARITY environment appendix; no values are copied into this checklist.
 | `PSEUDOLIFE_MCP_CONFIG` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
 | `PSEUDOLIFE_MCP_DAEMON_URL` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
 | `PSEUDOLIFE_MCP_DATABASE_URL` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_MCP_DATA_DIR` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
+| `PSEUDOLIFE_MCP_DATA_DIR` | Ported | Ported for the lite tier (B9 step 4): with no DSN the daemon resolves it as Python does (the variable, else the per-user default) and uses the result for `config.yaml` and its state, as Python's export does; `rust/daemon/harness/test_lite_start.py` proves the default path end to end. |
 | `PSEUDOLIFE_MCP_HOST` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
 | `PSEUDOLIFE_MCP_NO_SPAWN` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
 | `PSEUDOLIFE_MCP_PORT` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
 | `PSEUDOLIFE_MCP_PROXY_TIMEOUT_SECONDS` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
 | `PSEUDOLIFE_MCP_SHARED_HOST` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_MCP_STORAGE` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
+| `PSEUDOLIFE_MCP_STORAGE` | Ported | Ported with a declared difference (B9 step 4): `auto` (or unset) is the lite tier; `files` is refused naming its replacement, since file mode retires (D1); other values are refused (`rust/daemon/divergences.md`, Storage modes). |
 | `PSEUDOLIFE_MCP_TIER_MAP` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
 | `PSEUDOLIFE_MCP_TOKEN` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
 | `PSEUDOLIFE_MCP_TOKENS` | Pending | Reader/propagation/installed-path proof or accepted disposition. |

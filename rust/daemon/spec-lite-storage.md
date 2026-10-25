@@ -256,12 +256,18 @@ cases run there or stay recorded as unrun:
    runtime into the Pseudolife-owned dir (decisions 2, 3 and 5) and
    writing pg0's record (decision 4) follow in their own PRs.
 4. The daemon's startup resolution: DSN, then lite, then refuse.
-   `PSEUDOLIFE_MCP_STORAGE=files` and the in-process mode are refused with a
-   message naming their replacement; an unrecognized value is refused as
-   Python refuses it. When lite engages, the data-dir handoff Python does by
-   exporting `PSEUDOLIFE_MCP_DATA_DIR` applies too: `config.rs`
-   `config_path` otherwise falls back to `<cwd>/data`, which would put
-   `config.yaml` and the moved-bank markers somewhere other than the bank.
+   `PSEUDOLIFE_MCP_STORAGE=files` is refused with a message naming its
+   replacement, and any other value but `auto` is refused (Python's
+   variable has no `embedded` value: the in-process `embedded` mode is a
+   CLI mode, refused in step 6). When lite engages, the data-dir handoff
+   Python does by exporting `PSEUDOLIFE_MCP_DATA_DIR` applies too:
+   `config.rs` `config_path` otherwise falls back to `<cwd>/data`, which
+   would put `config.yaml` somewhere other than the bank. Decision 6's
+   refusal reads the bank, not only the files: Python renames imported
+   `.pt` files to `.pre-v8.bak` and records `legacy_migration` in the
+   bank's `meta`, and skips the import (leaving the files) when the bank
+   already holds entries or facts, so the daemon refuses only where Python
+   would still import.
 5. The lite halves of CLI-BACKUP-LITE, CLI-TRANSFER-LITE,
    CLI-AUDIT-TRANSPORT, CLI-PAIRING-CONTAINER and CLI-MAINTAINER-TRANSPORT
    and the lease's `phase4-embedded-pg-deferred` refusal, replacing the
