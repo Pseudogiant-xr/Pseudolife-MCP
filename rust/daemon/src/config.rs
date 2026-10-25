@@ -2360,7 +2360,10 @@ fn read_dream(d: &[(Node, Node)]) -> Result<DreamConfig, ConfigError> {
         digest_context_chars: want_int(d, "digest_context_chars", p, def.digest_context_chars)?,
         digest_target_chars: want_int(d, "digest_target_chars", p, def.digest_target_chars)?,
         stall_notice: want_bool(d, "stall_notice", p, def.stall_notice)?,
-        stall_repeat_hours: want_float(d, "stall_repeat_hours", p, def.stall_repeat_hours)?,
+        // Validated below with `__post_init__`'s own message.
+        stall_repeat_hours: lookup(d, "stall_repeat_hours")
+            .and_then(node_f64)
+            .unwrap_or(def.stall_repeat_hours),
         quarantine_low_trust: want_bool(d, "quarantine_low_trust", p, def.quarantine_low_trust)?,
         trusted_sources: match lookup(d, "trusted_sources") {
             None | Some(Node::Null) => Vec::new(),

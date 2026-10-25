@@ -67,7 +67,12 @@ ANALYZER_SEED_SQL = (
     "INSERT INTO edge_proposals (src_id, relation, dst_id, confidence, similarity, rationale, "
     "source, status, created_at) SELECT a.id, 'related-to', b.id, 0.5, NULL, "
     "'analyzer file/concept pair', 'analyzer', 'pending', 30 FROM entities a, entities b "
-    "WHERE a.display = 'Ledger Export' AND b.display = 'Billing Gateway'"
+    "WHERE a.display = 'Ledger Export' AND b.display = 'Billing Gateway'; "
+    # A rejected analyzer merge, the reconcile pass's entity half.
+    "INSERT INTO entity_proposals (kind, entity_id, into_id, score, reason, status, "
+    "created_at, decided_at) SELECT 'merge', a.id, b.id, 0.7, "
+    "'analyzer-duplicate: jaccard 0.7', 'rejected', 40, 50 FROM entities a, entities b "
+    "WHERE a.display = 'Ledger Exporter' AND b.display = 'Ledger Export'"
 )
 
 # The sweep's mutants (src/dream/ticks.rs, deep.rs), each caught by the

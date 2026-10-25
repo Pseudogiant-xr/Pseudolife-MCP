@@ -165,7 +165,10 @@ impl Service {
     /// automatic dream in the background.
     pub fn fire_session_dream(&self) {
         match self.handle() {
-            Some(me) => crate::dream::ticks::fire_and_forget(&me),
+            Some(me) => {
+                eprintln!("session-end dream trigger: fired");
+                crate::dream::ticks::fire_and_forget(&me);
+            }
             None => self.session_dream.fire(),
         }
     }

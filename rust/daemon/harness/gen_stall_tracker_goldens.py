@@ -65,6 +65,14 @@ SEQUENCES = {
         ("at", 181.0), ("overdue", 5, 3, True, 60.0), ("take", 21600.0), ("mark", "begin"),
         ("at", 200.0), ("overdue", 1, 3, True, 60.0), ("overdue", 5, 3, False, 60.0),
         ("at", 400.0), ("record", OK, False), ("take", 21600.0),
+        # a success resets the due clock: the next due tick starts afresh
+        ("at", 500.0), ("overdue", 5, 3, True, 60.0), ("at", 600.0),
+        ("overdue", 5, 3, True, 60.0), ("take", 21600.0),
+    ],
+    "due-clock-resets-on-success": [
+        ("at", 0.0), ("overdue", 5, 3, True, 60.0), ("at", 150.0), ("record", OK, False),
+        ("at", 200.0), ("overdue", 5, 3, True, 60.0), ("take", 21600.0),
+        ("at", 381.0), ("overdue", 5, 3, True, 60.0), ("take", 21600.0),
     ],
     "flapping-is-announced-once-per-window": [
         ("at", 0.0), ("record", FAIL, False), ("at", 10.0), ("record", FAIL, False),

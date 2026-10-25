@@ -818,6 +818,186 @@
       "recovered_at": 400.0
      }
     }
+   },
+   {
+    "op": "overdue",
+    "args": [
+     5,
+     3,
+     true,
+     60.0
+    ],
+    "now": 500.0,
+    "got": null,
+    "snapshot": {
+     "stall": null,
+     "last_stall": {
+      "since": 0.0,
+      "reason": "extractor_unreachable",
+      "consecutive_failures": 0,
+      "last_error": "no dream succeeded while the backlog was due",
+      "last_success_at": null,
+      "recovered_at": 400.0
+     }
+    }
+   },
+   {
+    "op": "overdue",
+    "args": [
+     5,
+     3,
+     true,
+     60.0
+    ],
+    "now": 600.0,
+    "got": null,
+    "snapshot": {
+     "stall": null,
+     "last_stall": {
+      "since": 0.0,
+      "reason": "extractor_unreachable",
+      "consecutive_failures": 0,
+      "last_error": "no dream succeeded while the backlog was due",
+      "last_success_at": null,
+      "recovered_at": 400.0
+     }
+    }
+   },
+   {
+    "op": "take",
+    "args": [
+     21600.0
+    ],
+    "now": 600.0,
+    "got": [
+     "clear",
+     {
+      "since": 0.0,
+      "reason": "extractor_unreachable",
+      "consecutive_failures": 0,
+      "last_error": "no dream succeeded while the backlog was due",
+      "last_success_at": null,
+      "recovered_at": 400.0
+     }
+    ],
+    "snapshot": {
+     "stall": null,
+     "last_stall": {
+      "since": 0.0,
+      "reason": "extractor_unreachable",
+      "consecutive_failures": 0,
+      "last_error": "no dream succeeded while the backlog was due",
+      "last_success_at": null,
+      "recovered_at": 400.0
+     }
+    }
+   }
+  ],
+  "due-clock-resets-on-success": [
+   {
+    "op": "overdue",
+    "args": [
+     5,
+     3,
+     true,
+     60.0
+    ],
+    "now": 0.0,
+    "got": null,
+    "snapshot": {
+     "stall": null,
+     "last_stall": null
+    }
+   },
+   {
+    "op": "record",
+    "args": [
+     {
+      "pulled": 3
+     },
+     false
+    ],
+    "now": 150.0,
+    "got": null,
+    "snapshot": {
+     "stall": null,
+     "last_stall": null
+    }
+   },
+   {
+    "op": "overdue",
+    "args": [
+     5,
+     3,
+     true,
+     60.0
+    ],
+    "now": 200.0,
+    "got": null,
+    "snapshot": {
+     "stall": null,
+     "last_stall": null
+    }
+   },
+   {
+    "op": "take",
+    "args": [
+     21600.0
+    ],
+    "now": 200.0,
+    "got": null,
+    "snapshot": {
+     "stall": null,
+     "last_stall": null
+    }
+   },
+   {
+    "op": "overdue",
+    "args": [
+     5,
+     3,
+     true,
+     60.0
+    ],
+    "now": 381.0,
+    "got": null,
+    "snapshot": {
+     "stall": {
+      "since": 200.0,
+      "reason": "extractor_unreachable",
+      "consecutive_failures": 0,
+      "last_error": "no dream succeeded while the backlog was due",
+      "last_success_at": 150.0
+     },
+     "last_stall": null
+    }
+   },
+   {
+    "op": "take",
+    "args": [
+     21600.0
+    ],
+    "now": 381.0,
+    "got": [
+     "begin",
+     {
+      "since": 200.0,
+      "reason": "extractor_unreachable",
+      "consecutive_failures": 0,
+      "last_error": "no dream succeeded while the backlog was due",
+      "last_success_at": 150.0
+     }
+    ],
+    "snapshot": {
+     "stall": {
+      "since": 200.0,
+      "reason": "extractor_unreachable",
+      "consecutive_failures": 0,
+      "last_error": "no dream succeeded while the backlog was due",
+      "last_success_at": 150.0
+     },
+     "last_stall": null
+    }
    }
   ],
   "flapping-is-announced-once-per-window": [

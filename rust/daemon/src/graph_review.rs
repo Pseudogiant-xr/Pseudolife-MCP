@@ -1124,6 +1124,38 @@ mod tests {
         serde_json::to_string(v).unwrap()
     }
 
+    /// `duplicate_candidates(..., anchor_ids=...)`: the anchored walk keeps
+    /// Python's pair order, which the stable score sort preserves among
+    /// ties (here every score is 0.667, and anchors {2, 5} order the pairs
+    /// differently from the all-pairs walk).
+    #[test]
+    fn anchored_duplicates_keep_pythons_pair_order() {
+        let ents = vec![
+            ent(1, "alpha beta", "alpha beta"),
+            ent(2, "alpha beta gamma", "alpha beta gamma"),
+            ent(3, "beta gamma", "beta gamma"),
+            ent(4, "beta gamma delta", "beta gamma delta"),
+            ent(5, "alpha beta delta", "alpha beta delta"),
+        ];
+        let names = |anchors: Option<&HashSet<i64>>| {
+            let got =
+                duplicate_candidates_anchored(&ents, &HashSet::new(), &HashSet::new(), anchors);
+            compact(&got.iter().map(|f| f["entities"].clone()).collect::<Vec<_>>())
+        };
+        assert_eq!(
+            names(Some(&HashSet::from([2, 5]))),
+            r#"[["alpha beta","alpha beta gamma"],["alpha beta gamma","beta gamma"],["alpha beta","alpha beta delta"]]"#
+        );
+        assert_eq!(
+            names(None),
+            r#"[["alpha beta","alpha beta gamma"],["alpha beta","alpha beta delta"],["alpha beta gamma","beta gamma"],["beta gamma","beta gamma delta"]]"#
+        );
+        assert_eq!(
+            names(Some(&HashSet::from([3]))),
+            r#"[["alpha beta gamma","beta gamma"],["beta gamma","beta gamma delta"]]"#
+        );
+    }
+
     fn ent(id: i64, canonical: &str, display: &str) -> Entity {
         Entity {
             id,
