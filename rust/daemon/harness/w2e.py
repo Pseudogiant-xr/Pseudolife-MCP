@@ -109,8 +109,9 @@ Normalizers (declared, spec "Free for W1 and W2"):
   ``entity_proposals.created_at`` keep only null-or-not; a ``dream_runs``
   ``cursor_before`` / ``cursor_after`` equal to an entry's ``ts`` becomes
   ``<ts:ENTRY_ID>``, as the cortex dream cursor does;
-* the merge judge's clocks: ``entity_proposals`` ``judged_at``,
-  ``judged2_at`` and ``judged3_at``, and in an automatic review decision
+* the review judges' clocks: ``entity_proposals`` ``judged_at``,
+  ``judged2_at`` and ``judged3_at``, ``edge_proposals`` ``judged_at`` and
+  ``judged2_at``, and in an automatic review decision
   record (``automatic_review_decision_v1:<n>``) its ``recorded_at``,
   ``ended_at``, ``decided_at`` and ``dismissed_at`` and its proposal
   snapshot's verdict clocks keep only null-or-not (in memory_graph_review's
@@ -255,9 +256,10 @@ CLOCK = {("entries", "ts"), ("entries", "superseded_at"), ("episodes", "started_
          ("dream_run_slots", "at"), ("chronicle_events", "recorded_at"),
          ("memory_traces", "created_at"), ("entity_sources", "updated_at"),
          ("entity_proposals", "created_at"),
-         # the merge judge's verdict clocks
+         # the merge and link judges' verdict clocks
          ("entity_proposals", "judged_at"), ("entity_proposals", "judged2_at"),
-         ("entity_proposals", "judged3_at")}
+         ("entity_proposals", "judged3_at"),
+         ("edge_proposals", "judged_at"), ("edge_proposals", "judged2_at")}
 # dream_runs cursor columns: an entry's ts becomes its <ts:ID> token.
 DREAM_RUN_CURSORS = ("cursor_before", "cursor_after")
 # memory_dream answer keys holding wall-clock seconds (the stall record and
@@ -308,7 +310,10 @@ META_CLOCK = {"capacity_true_drops": {"last_at"}, "active_session_pointer": {"ts
               "automatic_review_decision_v1:d2": {"ended_at"},
               "automatic_review_decision_v1:d3": {"ended_at"},
               # the deep dream's apply watermark (memory_dream deep)
-              "deep_last_apply": {"ts"}}
+              "deep_last_apply": {"ts"},
+              # the sweep's analyzer-pair reconcile cursor (a link judge
+              # deciding an analyzer row moves it)
+              "analyzer_pair_reconcile_cursor": {"at"}}
 # An automatic review decision record (``automatic_review_decision_v1:<n>``,
 # written by the merge judge): its clocks, and the verdict clocks of the
 # proposal snapshot it carries.
