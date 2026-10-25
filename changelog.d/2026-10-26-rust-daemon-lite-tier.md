@@ -6,7 +6,8 @@
   daemon created opens on the other.
 - The first start without an installed runtime downloads the pinned
   PostgreSQL 18.1.0 and pgvector 0.8.5 build (about 55 MB, sha256-checked)
-  into `<data dir>/native/postgresql`; `pseudolife-daemon provision
+  into `native/postgresql` under the per-user data dir (also when
+  `PSEUDOLIFE_MCP_DATA_DIR` moves the bank); `pseudolife-daemon provision
   postgresql` installs it ahead of time.
 - `PSEUDOLIFE_MCP_STORAGE=files` is refused, naming what replaces it: file
   mode retires with the Rust daemon. A data dir whose `.pt` state was never

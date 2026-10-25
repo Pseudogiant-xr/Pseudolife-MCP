@@ -128,8 +128,8 @@ fn runtime(home: Option<&Path>, log: &mut dyn FnMut(&str)) -> Result<Runtime, St
                 .map(|(runtime, _)| runtime)
                 .map_err(|e| {
                     format!(
-                        "{e} (`pseudolife-daemon provision postgresql` installs it ahead of \
-                         a start)"
+                        "{e} (`pseudolife-daemon provision postgresql` installs it ahead of a \
+                         start; or set PSEUDOLIFE_MCP_DATABASE_URL to a PostgreSQL server)"
                     )
                 })
         }
@@ -138,12 +138,21 @@ fn runtime(home: Option<&Path>, log: &mut dyn FnMut(&str)) -> Result<Runtime, St
 
 /// Start or attach the lite bank for `data_dir`, refuse it if it holds
 /// file-mode state only Python can import (decision 6), and register it
-/// for the connection probe and for the stop at exit.
+/// for the connection probe and for the stop at exit. Called once.
 pub fn start(
     data_dir: &Path,
     home: Option<&Path>,
     log: &mut dyn FnMut(&str),
 ) -> Result<String, String> {
+    if PROBE.get().is_some() {
+        return Err("the lite bank is already started in this process".to_owned());
+    }
+    let sources = legacy_sources(data_dir);
+    // No cluster yet and legacy files: Python would import into the fresh
+    // bank it creates, so refuse before downloading or initializing one.
+    if !sources.is_empty() && !embedded::pgdata(data_dir).join("PG_VERSION").exists() {
+        return Err(legacy_refusal(data_dir, &sources, false));
+    }
     let runtime = runtime(home, log)?;
     let embedded =
         embedded::attach_or_start(data_dir, &runtime, &DaemonSecrets).map_err(|e| e.to_string())?;
@@ -152,7 +161,7 @@ pub fn start(
         runtime,
         data_dir: data_dir.to_path_buf(),
     };
-    if let Err(refusal) = legacy_state(&lite) {
+    if let Err(refusal) = legacy_state(&lite, &sources) {
         stop_lite(lite);
         return Err(refusal);
     }
@@ -168,21 +177,48 @@ pub fn start(
     Ok(dsn)
 }
 
-/// Decision 6: the Rust daemon does not import `.pt` state. A data dir
-/// whose legacy files the oracle would still import into this bank
-/// (`storage/migrate.py` `migrate_legacy`: the files are there, the
-/// `legacy_migration` meta record is not `done`, and either an import is in
-/// progress or the bank holds no entries or facts) is refused, naming the
-/// command that imports them. A bank with entries and no import under way
-/// is served, as Python serves it (it skips the files).
-fn legacy_state(lite: &Lite) -> Result<(), String> {
-    let sources: Vec<PathBuf> = [
-        lite.data_dir.join("memory_state").join("cms_state.pt"),
-        lite.data_dir.join("cortex_state.pt"),
+/// The oracle's legacy sources (`migrate.py`), those present.
+fn legacy_sources(data_dir: &Path) -> Vec<PathBuf> {
+    [
+        data_dir.join("memory_state").join("cms_state.pt"),
+        data_dir.join("cortex_state.pt"),
     ]
     .into_iter()
     .filter(|path| path.exists())
-    .collect();
+    .collect()
+}
+
+fn legacy_refusal(data_dir: &Path, sources: &[PathBuf], in_progress: bool) -> String {
+    let files: Vec<String> = sources.iter().map(|p| p.display().to_string()).collect();
+    if in_progress {
+        return format!(
+            "the lite bank in {} records an import of its file-mode state ({}) as in progress \
+             (meta 'legacy_migration'). The Rust daemon does not import .pt files: start the \
+             last Python release once (`pseudolife-mcp serve` with the same data dir) to finish \
+             it. If that run logs that the sources do not match the recorded import, restore \
+             the original .pt files, or clear that meta row deliberately, as its log says.",
+            data_dir.display(),
+            files.join(", ")
+        );
+    }
+    format!(
+        "the lite data dir {} holds file-mode state that was never imported into its bank ({}). \
+         The Rust daemon does not import .pt files: start the last Python release once \
+         (`pseudolife-mcp serve` with the same data dir), which imports them and renames them \
+         to .pre-v8.bak, then start this daemon again.",
+        data_dir.display(),
+        files.join(", ")
+    )
+}
+
+/// Decision 6: the Rust daemon does not import `.pt` state, so a data dir
+/// whose legacy files the oracle would import into this bank is refused,
+/// naming the command that does. `migrate.py` `migrate_legacy` imports when
+/// the files are there and either its `legacy_migration` record is
+/// `in_progress` (a resume) or the bank holds no entries and no facts,
+/// whatever the record says otherwise; a bank with entries and no import
+/// under way is served, as Python serves it (it skips the files).
+fn legacy_state(lite: &Lite, sources: &[PathBuf]) -> Result<(), String> {
     if sources.is_empty() {
         return Ok(());
     }
@@ -209,26 +245,16 @@ fn legacy_state(lite: &Lite) -> Result<(), String> {
     } else {
         String::new()
     };
+    if status == "in_progress" {
+        return Err(legacy_refusal(&lite.data_dir, sources, true));
+    }
     let has_rows = |table: &str, present: bool| -> Result<bool, String> {
         Ok(present && query(&format!("SELECT EXISTS (SELECT 1 FROM {table})"))? == "t")
     };
-    let pending = match status.as_str() {
-        "done" => false,
-        "in_progress" => true,
-        _ => !(has_rows("entries", entries)? || has_rows("facts", facts)?),
-    };
-    if !pending {
+    if has_rows("entries", entries)? || has_rows("facts", facts)? {
         return Ok(());
     }
-    let files: Vec<String> = sources.iter().map(|p| p.display().to_string()).collect();
-    Err(format!(
-        "the lite data dir {} holds file-mode state that was never imported into its bank ({}). \
-         The Rust daemon does not import .pt files: start the last Python release once \
-         (`pseudolife-mcp serve` with the same data dir), which imports them and renames them \
-         to .pre-v8.bak, then start this daemon again.",
-        lite.data_dir.display(),
-        files.join(", ")
-    ))
+    Err(legacy_refusal(&lite.data_dir, sources, false))
 }
 
 /// What the probe before each connection needs.
@@ -253,10 +279,16 @@ pub async fn verify_before_connect(
     let Some(probe) = PROBE.get() else {
         return Ok(());
     };
-    let ours = config.get_ports().contains(&probe.port)
-        && config.get_hosts().iter().any(
-            |host| matches!(host, tokio_postgres::config::Host::Tcp(name) if name == "127.0.0.1"),
-        );
+    let ports = config.get_ports();
+    let ours = config.get_hosts().iter().enumerate().any(|(index, host)| {
+        let port = ports
+            .get(index)
+            .or_else(|| ports.first())
+            .copied()
+            .unwrap_or(5432);
+        matches!(host, tokio_postgres::config::Host::Tcp(name) if name == "127.0.0.1")
+            && port == probe.port
+    });
     if !ours {
         return Ok(());
     }
@@ -264,7 +296,7 @@ pub async fn verify_before_connect(
     // from it, and the wait is bounded by it too (a probe that outlives the
     // deadline ends at that connect timeout on its own).
     let check = tokio::task::spawn_blocking(move || {
-        embedded::serves_within(
+        embedded::check_serves(
             &probe.runtime,
             probe.port,
             &probe.password,
@@ -272,20 +304,17 @@ pub async fn verify_before_connect(
             timeout,
         )
     });
-    let verified = matches!(
-        tokio::time::timeout(timeout + std::time::Duration::from_secs(1), check).await,
-        Ok(Ok(true))
-    );
-    if verified {
-        Ok(())
-    } else {
-        Err(format!(
-            "the server on 127.0.0.1:{} did not prove it is the lite bank's own (SCRAM with \
-             the bank's secret, serving {}); not connecting",
-            probe.port,
-            probe.pgdata.display()
-        ))
-    }
+    let reason =
+        match tokio::time::timeout(timeout + std::time::Duration::from_secs(1), check).await {
+            Ok(Ok(Ok(()))) => return Ok(()),
+            Ok(Ok(Err(reason))) => reason,
+            Ok(Err(join)) => format!("the check did not finish: {join}"),
+            Err(_) => "the check timed out".to_owned(),
+        };
+    Err(format!(
+        "the lite bank's server on 127.0.0.1:{} was not verified as this bank's ({reason});          not connecting",
+        probe.port
+    ))
 }
 
 /// Make every daemon connection pass `verify_before_connect` (called once,
@@ -301,6 +330,16 @@ fn stop_lite(lite: Lite) {
         && let Err(e) = lite.embedded.stop()
     {
         eprintln!("storage: could not stop the lite bank's server: {e}");
+    }
+}
+
+/// Stops the lite server when dropped: held by `main` so a panic that
+/// unwinds out of it still stops a server this process started (statics
+/// never drop, and Python's atexit runs on an unhandled exception too).
+pub struct StopOnDrop;
+impl Drop for StopOnDrop {
+    fn drop(&mut self) {
+        shutdown();
     }
 }
 

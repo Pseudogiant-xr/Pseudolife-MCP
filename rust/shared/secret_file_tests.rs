@@ -89,6 +89,17 @@ fn a_secret_file_others_can_read_or_a_link_in_its_place_is_refused() {
     fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
     assert!(read_secret(&path).unwrap_err().contains("owner-only"));
     fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+    // A hard link is a second name for the secret: refused, as the oracle
+    // refuses it.
+    let hard = dir.join("hard.secret");
+    fs::hard_link(&path, &hard).unwrap();
+    assert!(
+        read_secret(&path)
+            .unwrap_err()
+            .contains("private regular file")
+    );
+    fs::remove_file(&hard).unwrap();
+    assert!(read_secret(&path).unwrap().is_some());
     let link = dir.join("link.secret");
     std::os::unix::fs::symlink(&path, &link).unwrap();
     assert!(read_secret(&link).unwrap_err().contains("regular file"));

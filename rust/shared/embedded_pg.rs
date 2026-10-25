@@ -1089,20 +1089,39 @@ pub fn serves_within(
     pgdata: &Path,
     connect_timeout: Duration,
 ) -> bool {
+    check_serves(runtime, port, password, pgdata, connect_timeout).is_ok()
+}
+
+/// `serves_within`, with the reason when the answer is no: psql's own error
+/// (a server that is down, restarting or refusing the secret) or the data
+/// directory another server reports.
+pub fn check_serves(
+    runtime: &Runtime,
+    port: u16,
+    password: &str,
+    pgdata: &Path,
+    connect_timeout: Duration,
+) -> Result<(), String> {
     let seconds = connect_timeout.as_secs_f64().ceil().max(2.0) as u64;
-    let Ok(output) = psql_command(runtime, port, password)
+    let output = psql_command(runtime, port, password)
         .env("PGCONNECT_TIMEOUT", seconds.to_string())
         .args(["-c", "SHOW data_directory"])
         .output()
-    else {
-        return false;
-    };
-    let Ok(reported) = psql_result(output) else {
-        return false;
-    };
+        .map_err(|e| format!("psql could not run: {e}"))?;
+    let reported = psql_result(output).map_err(|e| match e {
+        Error::Command { detail, .. } => detail,
+        other => other.to_string(),
+    })?;
     let canonical = |path: &Path| fs::canonicalize(path).ok();
     let reported = PathBuf::from(reported.trim());
-    canonical(&reported).is_some() && canonical(&reported) == canonical(pgdata)
+    if canonical(&reported).is_some() && canonical(&reported) == canonical(pgdata) {
+        Ok(())
+    } else {
+        Err(format!(
+            "the server on the port serves {}, not this bank",
+            reported.display()
+        ))
+    }
 }
 
 /// `_move_under_trust`: the role gets the secret (idempotent; trust accepts

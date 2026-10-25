@@ -177,7 +177,24 @@ fn open_no_follow(path: &Path) -> io::Result<fs::File> {
         // FILE_FLAG_OPEN_REPARSE_POINT: open a link itself, never its target.
         options.custom_flags(0x0020_0000);
     }
-    options.open(path)
+    // A scanner briefly holding a just-written file open on Windows fails
+    // the open with a sharing violation; the oracle retries 20 times at
+    // 5 ms (`credentials._open_token`), and so does this.
+    let mut attempt = 0;
+    loop {
+        match options.open(path) {
+            Err(e)
+                if cfg!(windows)
+                    && attempt < 19
+                    && (e.kind() == io::ErrorKind::PermissionDenied
+                        || matches!(e.raw_os_error(), Some(32 | 33))) =>
+            {
+                attempt += 1;
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            other => return other,
+        }
+    }
 }
 
 /// Owner-only: on Windows the handle's owner and DACL
@@ -194,10 +211,14 @@ fn check_private(file: &fs::File) -> Result<(), String> {
     {
         use std::os::unix::fs::MetadataExt;
         let info = file.metadata().map_err(|e| e.to_string())?;
-        if !info.is_file()
-            || info.uid() != rustix::process::geteuid().as_raw()
-            || info.mode() & 0o077 != 0
-        {
+        if !info.is_file() || info.nlink() != 1 {
+            // A hard link is a second name another directory could hold.
+            return Err("credential file must be a private regular file".to_owned());
+        }
+        if info.uid() != rustix::process::geteuid().as_raw() {
+            return Err("credential file is owned by another account".to_owned());
+        }
+        if info.mode() & 0o077 != 0 {
             return Err("credential file must be owner-only".to_owned());
         }
         Ok(())

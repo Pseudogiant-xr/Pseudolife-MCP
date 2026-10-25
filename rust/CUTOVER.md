@@ -643,7 +643,7 @@ PARITY environment appendix; no values are copied into this checklist.
 | `PSEUDOLIFE_MCP_CONFIG` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
 | `PSEUDOLIFE_MCP_DAEMON_URL` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
 | `PSEUDOLIFE_MCP_DATABASE_URL` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
-| `PSEUDOLIFE_MCP_DATA_DIR` | Ported | Ported for the lite tier (B9 step 4): with no DSN the daemon resolves it as Python does (the variable, else the per-user default) and uses the result for `config.yaml` and its state, as Python's export does; `rust/daemon/harness/test_lite_start.py` proves the default path end to end. |
+| `PSEUDOLIFE_MCP_DATA_DIR` | Ported | Ported for the lite tier (B9 step 4): with no DSN the daemon resolves it as Python does (the variable, else the per-user default) and uses the result for `config.yaml` and its state, as Python's export does; `rust/daemon/harness/test_lite_start.py` exercises the default path end to end, run by hand on dev machines (a network test CI does not run; on Windows its stop is a hard kill, so the stop on Ctrl-Break is not exercised there). |
 | `PSEUDOLIFE_MCP_HOST` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
 | `PSEUDOLIFE_MCP_NO_SPAWN` | Pending | Reader/propagation/installed-path proof or accepted disposition. |
 | `PSEUDOLIFE_MCP_PORT` | Pending | Reader/propagation/installed-path proof or accepted disposition. |

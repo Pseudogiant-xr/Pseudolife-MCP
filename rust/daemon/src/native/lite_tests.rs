@@ -125,28 +125,54 @@ fn legacy_state_is_refused_only_where_python_would_import_it() {
         runtime,
         data_dir: data_dir.clone(),
     };
+    let sources = |dir: &Path| legacy_sources(dir);
     // No legacy files: served.
-    assert_eq!(legacy_state(&lite), Ok(()));
+    assert_eq!(legacy_state(&lite, &sources(&data_dir)), Ok(()));
     fs::write(data_dir.join("cortex_state.pt"), b"legacy").unwrap();
     // A fresh bank (no tables yet) with legacy files: refused.
-    let error = legacy_state(&lite).unwrap_err();
+    let error = legacy_state(&lite, &sources(&data_dir)).unwrap_err();
     assert!(error.contains("cortex_state.pt"), "{error}");
+    assert!(error.contains("never imported"), "{error}");
     assert!(error.contains("pseudolife-mcp serve"), "{error}");
     let sql = |statement: &str| lite.embedded.query(&lite.runtime, statement).unwrap();
     sql("CREATE TABLE meta (key text PRIMARY KEY, value jsonb)");
     sql("CREATE TABLE entries (id bigint)");
     sql("CREATE TABLE facts (id bigint)");
     // Empty tables, no record: still refused.
-    assert!(legacy_state(&lite).is_err());
+    assert!(legacy_state(&lite, &sources(&data_dir)).is_err());
     // A bank with entries and no import under way: served (Python skips).
     sql("INSERT INTO entries VALUES (1)");
-    assert_eq!(legacy_state(&lite), Ok(()));
-    // An import in progress: refused even with entries.
+    assert_eq!(legacy_state(&lite, &sources(&data_dir)), Ok(()));
+    // An import in progress: refused even with entries, with its own text.
     sql("INSERT INTO meta VALUES ('legacy_migration', '{\"status\": \"in_progress\"}')");
-    assert!(legacy_state(&lite).is_err());
-    // Done: served.
+    let error = legacy_state(&lite, &sources(&data_dir)).unwrap_err();
+    assert!(error.contains("as in progress"), "{error}");
+    // Done, with entries: served.
     sql("UPDATE meta SET value = '{\"status\": \"done\"}' WHERE key = 'legacy_migration'");
-    assert_eq!(legacy_state(&lite), Ok(()));
+    assert_eq!(legacy_state(&lite, &sources(&data_dir)), Ok(()));
+    // Done but emptied: Python imports the files again, so refused.
+    sql("DELETE FROM entries");
+    assert!(legacy_state(&lite, &sources(&data_dir)).is_err());
     stop_lite(lite);
     let _ = fs::remove_dir_all(data_dir);
+}
+
+#[test]
+fn legacy_files_without_a_cluster_are_refused_before_any_download() {
+    let mut tag = [0u8; 8];
+    getrandom::fill(&mut tag).unwrap();
+    let tag: String = tag.iter().map(|b| format!("{b:02x}")).collect();
+    let data_dir = std::env::temp_dir().join(format!("pl-lite-precheck-{tag}"));
+    fs::create_dir_all(data_dir.join("memory_state")).unwrap();
+    fs::write(
+        data_dir.join("memory_state").join("cms_state.pt"),
+        b"legacy",
+    )
+    .unwrap();
+    // No home: had it got as far as the runtime, it would refuse for that.
+    let error = start(&data_dir, None, &mut |_| {}).unwrap_err();
+    assert!(error.contains("never imported"), "{error}");
+    assert!(error.contains("cms_state.pt"), "{error}");
+    assert!(!data_dir.join("embedded_pg").exists());
+    fs::remove_dir_all(data_dir).unwrap();
 }

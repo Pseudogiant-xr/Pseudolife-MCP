@@ -164,6 +164,21 @@ fn main() {
             Err(e) => fail(1, &e.to_string()),
         }
     }
+    // A value that is not valid Unicode would read as unset and pick another
+    // bank (a lite one, or the default data dir); refuse instead, as for
+    // the token variables below.
+    for name in [
+        "PSEUDOLIFE_MCP_DATABASE_URL",
+        "PSEUDOLIFE_MCP_DATA_DIR",
+        "PSEUDOLIFE_MCP_STORAGE",
+    ] {
+        if std::env::var_os(name).is_some_and(|v| v.to_str().is_none()) {
+            fail(
+                2,
+                &format!("{name} is not valid Unicode; refusing to start"),
+            );
+        }
+    }
     let env_lookup = |k: &str| std::env::var(k).ok();
     if let Some(msg) = moved_refusal(
         std::env::var("PSEUDOLIFE_MCP_DATA_DIR")
@@ -195,6 +210,7 @@ fn main() {
             (dsn, Some(data_dir.to_string_lossy().into_owned()))
         }
     };
+    let _stop_lite_on_unwind = native::lite::StopOnDrop;
     let env_lookup = |k: &str| match k {
         "PSEUDOLIFE_MCP_DATABASE_URL" => Some(dsn.clone()),
         "PSEUDOLIFE_MCP_DATA_DIR" if lite_data_dir.is_some() => lite_data_dir.clone(),
