@@ -85,7 +85,9 @@ JUDGE_ENDPOINTS = ("second", "third")
 PROPOSAL_HEAD = re.compile(r"^\[(\d+)\] FROM '(.*?)' \(degree ", re.M)
 PROPOSAL_INTO = re.compile(r"^    INTO '(.*?)' \(degree ", re.M)
 JUNK_HEAD = re.compile(r"^\[(\d+)\] '(.*?)' \u2014 detector: ", re.M)
-CANDIDATE_HEAD = re.compile(r"^\[(\d+)\] '(.*?)' vs '(.*?)' \(cosine ", re.M)
+# A candidate's first line: one quote-or-newline-bounded run per name, so
+# the read stays linear (see LINK_SRC).
+CANDIDATE_HEAD = re.compile(r"\[(\d+)\] '([^'\n]*)' vs '([^'\n]*)' \(cosine ")
 # A link proposal's first line, read in two linear pieces: no pattern
 # holds more than one unbounded run, and each run stops at a quote or a
 # newline (CodeQL py/polynomial-redos on the single pattern it replaced).
@@ -385,7 +387,7 @@ def judge_reply(verdicts: dict, body: bytes) -> str:
         return json.dumps({"verdicts": out})
     if parsed and parsed[0] == "judge_candidates":
         for block in re.split(r"\n\n(?=\[\d+\] ')", user):
-            head = CANDIDATE_HEAD.search(block)
+            head = CANDIDATE_HEAD.match(block.split("\n", 1)[0])
             if not head:
                 continue
             a, b = head.group(2), head.group(3)

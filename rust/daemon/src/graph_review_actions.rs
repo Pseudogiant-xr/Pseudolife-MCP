@@ -849,6 +849,28 @@ pub(crate) async fn insert_proposal(
     created_at: f64,
 ) -> Result<Option<i64>, ToolError> {
     in_txn(client, |c| async move {
+        insert_proposal_body(
+            c, src_id, relation, dst_id, confidence, similarity, rationale, source, created_at,
+        )
+        .await
+    })
+    .await
+}
+
+/// `insert_proposal` in the caller's transaction.
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn insert_proposal_body(
+    c: &Client,
+    src_id: i64,
+    relation: &str,
+    dst_id: i64,
+    confidence: f32,
+    similarity: Option<f32>,
+    rationale: Option<String>,
+    source: &str,
+    created_at: f64,
+) -> Result<Option<i64>, ToolError> {
+    {
         Ok(c.query_opt(
             "INSERT INTO edge_proposals \
              (src_id, relation, dst_id, confidence, similarity, rationale, source, created_at) \
@@ -868,8 +890,7 @@ pub(crate) async fn insert_proposal(
         .await
         .map_err(internal)?
         .map(|r| r.get(0)))
-    })
-    .await
+    }
 }
 
 /// `dismiss_pair` (3414-3425) on a borrowed client.
@@ -1232,7 +1253,12 @@ pub(crate) async fn propose_body(
     source: &str,
     in_txn: bool,
 ) -> Result<Value, ToolError> {
-    let known: Vec<String> = match graph::load_relations(client).await.map_err(internal)? {
+    let relations = if in_txn {
+        graph::load_relations_body(client).await
+    } else {
+        graph::load_relations(client).await
+    };
+    let known: Vec<String> = match relations.map_err(internal)? {
         Value::Array(rows) => rows
             .iter()
             .filter_map(|r| r.get("name").and_then(Value::as_str))
@@ -1273,18 +1299,37 @@ pub(crate) async fn propose_body(
         let confidence = real(edge_confidence(&src, &relation, &dst))?;
         let similarity = real_param(p.get("similarity"))?;
         let rationale = text_param(p.get("rationale"))?;
-        let id = insert_proposal(
-            client,
+        let (src_id, dst_id) = (
             se["id"].as_i64().unwrap_or(0),
-            &relation,
             de["id"].as_i64().unwrap_or(0),
-            confidence,
-            similarity,
-            rationale,
-            source,
-            now(),
-        )
-        .await?;
+        );
+        let id = if in_txn {
+            insert_proposal_body(
+                client,
+                src_id,
+                &relation,
+                dst_id,
+                confidence,
+                similarity,
+                rationale,
+                source,
+                now(),
+            )
+            .await?
+        } else {
+            insert_proposal(
+                client,
+                src_id,
+                &relation,
+                dst_id,
+                confidence,
+                similarity,
+                rationale,
+                source,
+                now(),
+            )
+            .await?
+        };
         if id.is_some() {
             proposed += 1;
         } else {

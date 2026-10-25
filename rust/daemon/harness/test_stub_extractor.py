@@ -369,6 +369,17 @@ def test_candidate_verdicts_answer_by_their_two_names():
                                   {"id": 2, "verdict": "dismiss", "confidence": 0.9}]}
 
 
+def test_candidate_head_reads_hostile_lines_in_linear_time():
+    import time
+    import stub_extractor
+    hostile = "[0] '' vs '' (cosine " * 20000 + "'"
+    start = time.perf_counter()
+    stub_extractor.judge_reply({"a|b": {"verdict": "leave"}}, json.dumps({
+        "messages": [{"role": "system", "content": "You judge LINK CANDIDATES"},
+                     {"role": "user", "content": hostile}]}).encode())
+    assert time.perf_counter() - start < 2.0
+
+
 def test_judge_verdicts_answer_by_pair_on_each_endpoint(stub_factory):
     s = stub_factory({"reply_model": "one", "second_reply_model": "two",
                       "third_reply_model": None, "replies": [

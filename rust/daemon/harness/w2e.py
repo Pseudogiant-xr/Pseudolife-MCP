@@ -314,14 +314,16 @@ META_CLOCK = {"capacity_true_drops": {"last_at"}, "active_session_pointer": {"ts
               # the sweep's analyzer-pair reconcile cursor (a link judge
               # deciding an analyzer row moves it)
               "analyzer_pair_reconcile_cursor": {"at"},
-              # the candidate judge's watermark (its ts is the apply's)
-              "deep_candidates_judged": {"ts"}}
+}
 # An automatic review decision record (``automatic_review_decision_v1:<n>``,
 # written by the merge judge): its clocks, and the verdict clocks of the
 # proposal snapshot it carries.
 DECISION_RECORD_PREFIX = "automatic_review_decision_v1:"
 DECISION_RECORD_CLOCK = {"recorded_at", "ended_at", "decided_at", "dismissed_at"}
 DECISION_PROPOSAL_CLOCK = {"judged_at", "judged2_at", "judged3_at"}
+# A candidate dismissal's fingerprints signed over bank rows (its policy
+# fingerprint signs no bank row and compares as it is).
+CANDIDATE_RECORD_HASHES = ("fingerprint", "evidence_fingerprint", "generation_fingerprint")
 EP_ID = re.compile(r"^[0-9a-f]{32}$")
 GENERIC = re.compile(r"^session - \d{4}-\d{2}-\d{2} \d{2}:\d{2}$")
 # store-cancellable is w2e_shutdown.py's control: over MCP every call runs
@@ -4855,10 +4857,23 @@ def compare_fact_numeric(py: dict, rs: dict, tol: dict, stats: dict,
     return diffs
 
 
+def _bank_hash(value):
+    """A candidate-judge fingerprint signed over bank rows that carry each
+    side's own clocks (an apply's edge times, a filed proposal's
+    created_at): only its presence compares. The byte-exact rule is checked
+    by ``src/dream/candidates_tests.rs`` over a snapshot both sides share."""
+    return "<bank-hash>" if isinstance(value, str) and value else value
+
+
 def decision_record_clocks(value: dict) -> dict:
     """A decision record with its clocks (and its proposal snapshot's
-    verdict clocks) reduced to null-or-not."""
+    verdict clocks) reduced to null-or-not; a candidate dismissal's
+    bank-signed fingerprints to presence."""
     out = {k: (_clock(x) if k in DECISION_RECORD_CLOCK else x) for k, x in value.items()}
+    if out.get("queue") == "candidate":
+        for k in CANDIDATE_RECORD_HASHES:
+            if k in out:
+                out[k] = _bank_hash(out[k])
     if isinstance(out.get("proposal"), dict):
         out["proposal"] = {k: (_clock(x) if k in DECISION_PROPOSAL_CLOCK else x)
                            for k, x in out["proposal"].items()}
@@ -5182,12 +5197,18 @@ def normalize_state(state: dict, before: dict,
                 elif key.startswith(DECISION_RECORD_PREFIX) and isinstance(value, dict):
                     row[1] = decision_record_clocks(value)
                 elif key == "deep_candidate_verdicts" and isinstance(value, dict):
-                    # each judged pair's memo carries its judging time
+                    # each judged pair's memo carries its judging time and a
+                    # fingerprint signed over the bank
                     pairs = value.get("pairs")
                     if isinstance(pairs, dict):
                         row[1] = {**value, "pairs": {
-                            k: {**x, "ts": _clock(x.get("ts"))} if isinstance(x, dict) else x
+                            k: {**x, "ts": _clock(x.get("ts")),
+                                "fingerprint": _bank_hash(x.get("fingerprint"))}
+                            if isinstance(x, dict) else x
                             for k, x in pairs.items()}}
+                elif key == "deep_candidates_judged" and isinstance(value, dict):
+                    row[1] = {**value, "ts": _clock(value.get("ts")),
+                              "generation": _bank_hash(value.get("generation"))}
                 elif key == "episode_tombstones" and isinstance(value, dict):
                     row[1] = {k: {**x, "ended_at": _clock(x.get("ended_at"))} if isinstance(x, dict) else x
                               for k, x in value.items()}

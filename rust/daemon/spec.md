@@ -1647,7 +1647,7 @@ Python sources: `memory/dream.py` `run_sweep_once` (2398-2547);
 
 | # | Exact item | Source |
 |---|---|---|
-| SW1 | Order after the reapers, while `memory.dream.enabled`: the analyzer tick, the deep tick, the merge judge, the link judge (LJ1-LJ6), the junk judge (JJ1-JJ5; the curation and candidate judges not run, P3b), `dream_status`, the stall tick, then the automatic dream when `would_fire`. The analyzer tick and `dream_status` failing end the tick; the deep tick, the judge and the stall tick never fail it. | `dream.py:2453-2547` |
+| SW1 | Order after the reapers, while `memory.dream.enabled`: the analyzer tick, the deep tick, the merge judge, the link judge (LJ1-LJ6), the junk judge (JJ1-JJ5), the candidate judge (CJ1-CJ5; the curation judge not run, P3b), `dream_status`, the stall tick, then the automatic dream when `would_fire`. The analyzer tick and `dream_status` failing end the tick; the deep tick, the judge and the stall tick never fail it. | `dream.py:2453-2547` |
 | SW2 | Analyzer tick: `judges_disabled` when `judges_enabled` is off; under the writer lock, `reconcile_analyzer_proposals(judge_batch)` (decided `analyzer` link proposals, then rejected `analyzer-duplicate` merges, each half behind its own `{at, id}` cursor and transaction, sharing the budget, closing each pair into `dismissed_pairs` at its decision time); `disabled` (with `reconciled`) when `analyzer_file_duplicates` is off; otherwise up to `judge_batch` anchors after `meta.analyzer_duplicate_cursor` (wrapping to the start), every pair touching an anchor in `duplicate_candidates`' order, filing at most `judge_batch` proposals as the deep apply does, then the cursor at the last anchor. | `service_dream.py:6043-6156`; `postgres.py:3772-3853` |
 | SW3 | Deep tick: `disabled` when `auto_tick` is off; `below_threshold` (with the need) unless `deep_dream_need` recommends; otherwise the deep dream's apply without snippets, answered as `{fired, reason, ...}` with the apply's `applied`, `error`, `rescored`, `superseded`, `merged`, `merge_proposed`, `junk_proposed`, `junk_deleted`, `scoped`, `analyzer_filed`, `orphans_deleted` and `snapshot`; a failure answers `fired: false` with `error: <text>`. | `service_dream.py:3824-3845` |
 | SW4 | Stall tick: the sweep's interval set on the tracker, then `check_overdue(backlog, min_batch, would_fire, interval)` (a due backlog no dream serves for three intervals opens a stall, `extractor_unreachable`), then the notice. `dream_status` applies the same rule once the interval is set. | `service_dream.py:2958-2971,3080-3092` |
@@ -1751,6 +1751,45 @@ rows, the reply validation and the pack against Python's own output
 (`gen_queue_judge_goldens.py`). `mcp-dream-link-retype-applied` is caught by
 `link-auto` and `mcp-dream-link-two-vote-same-model` by
 `link-two-vote-same-model`.
+
+### The candidate judge (2026-10-25)
+
+Python sources: `service_dream.py` `deep_dream_judge_candidates`
+(5779-6034), `_stamp_skipped` (4424-4438);
+`memory/review_judgments.py` `fingerprint` / `_fingerprint_default`
+(14-27), `candidate_inputs`, `candidate_generation`, `candidate_current`
+(133-197); `memory/review_decisions.py` `record_candidate_dismissal`
+(201-245), `candidate_evidence_fingerprints` (248-355),
+`refresh_candidate_dismissals` (530-597); `memory/dream.py`
+`_CANDIDATE_JUDGE_SYSTEM_PROMPT`, `format_candidate`, `judge_candidates`;
+`service.py` `_graph_propose_links_locked` (8921-8968, source
+`deep-dream-judge`) and `_graph_dismiss_duplicate_locked` (8021-8054,
+with the candidate's own guard).
+
+| # | Exact item | Source |
+|---|---|---|
+| CJ1 | Gates: `judges_disabled` when `judges_enabled` is off, `disabled` unless `candidate_judge_mode` is shadow or auto; no judge endpoint answers `no_judge_extractor`; any failure answers `{judged: 0, error}`. No `deep_last_apply` watermark, or a `deep_candidates_judged` watermark for it that is complete under the same policy, observed models and scan generation, answers `{judged: 0, reason: "no_new_apply"}`. | `service_dream.py:5779-5846` |
+| CJ2 | The fingerprints are Python's bytes: `json.dumps(sort_keys=True, separators=(",", ":"))` with an int-keyed dict sorted by its integers, a set by `str`, and a float32 embedding as `{"shape", "dtype", "bytes"}` (SHA-256 of its bytes). The scan generation signs the graph (entities, aliases, live edges), the entries' id, text and embedding, the scopes, traces, fact counts by id and by raw subject, the pending entity proposals and lesson references, and the signed deep_dream config; the decision generation adds the pending link proposals and the dismissed pairs. A candidate's evidence signs each endpoint (resolved by id, else by canonical or normalized display): the entity, its incident live edges, sorted scopes, trace ids, fact count, the notes it is mentioned in (traces, else every token of its display in the note's tokens) with their embeddings, and the pending proposals touching it. | `review_judgments.py:14-27,133-180`; `review_decisions.py:248-355` |
+| CJ3 | One tick: the active automatic dismissals reconsidered (`refresh_candidate_dismissals`, only when an observed or last-response model is known: a record whose pair is no longer the one it closed is retired as externally superseded; one whose policy, evidence or model moved reopens, deleting its pair), then the dry deep scan's candidates; a generation that moved during the scan answers `stale_evidence`. A candidate is fresh when its memo is within `candidate_rejudge_days`, signs the same candidate, policy and evidence, and names the observed models; candidates not fresh or not complete are the todo list (none: the watermark is completed and the answer is `all_judged`), whose first `judge_batch` are the slice. A fresh, incomplete row with a saved reply and a known model replays it; the rest are asked in one call (`judge_candidates`), whose served model is recorded as the queue's response identity; a model change since the tick began answers `changed_judge_identity`. | `service_dream.py:5815-5925`; `review_decisions.py:530-597` |
+| CJ4 | The request rows (`format_candidate`: names, cosine, up to three notes per side) and the reply validation: an `id` the slice knows, a verdict of propose, dismiss or leave, a clamped confidence, a relation (`[:64]`), src and dst (`[:200]`, defaulting to the pair's own) and a rationale (`[:400]`); a propose naming no relation becomes a leave; a skipped row becomes a zero-confidence leave. | `dream.py`; `service_dream.py:4424-4438` |
+| CJ5 | Under the lock, each verdict in reply order against the live memo: a replayed reply the memo no longer holds is skipped; a row whose evidence moved since the scan, or that shares an endpoint with a link filed earlier in the slice, is dropped from the memo for the next tick. Otherwise the memo records the verdict, confidence, time, mode, fingerprint, model, served and memo models and the reply, incomplete; in shadow, or with no observed model, it is completed and left. In auto, in one transaction: a propose with a relation at `candidate_min_confidence` or more files a `deep-dream-judge` link proposal through the propose-links gate when the candidate still stands (both endpoints resolve, no pending proposal or live edge between them, the pair not dismissed) and its src and dst name the candidate's pair (else it is left); a dismiss at that confidence closes the pair without a human confirmation and records an automatic dismissal (`candidate:<a>|<b>`); anything else is left. The memo keeps the newest 500 pairs; the watermark is written complete when nothing of the scan remains unjudged. | `service_dream.py:5926-6030`; `service.py:8021-8054,8921-8968`; `review_decisions.py:201-245` |
+
+`harness/w2e.py live --only candidate-shadow candidate-auto
+candidate-auto-reopen` seeds the deep dream's bank with dreaming off, then
+runs both daemons with dreaming on, a 0.25 s sweep and every other judge and
+sweep step off, against one stub answering `judge_candidates` by the two
+names (`shared_stub`). A `memory_dream deep` apply writes the watermark, and
+the banks (the memo, the watermark and the decision records with their
+fingerprints as stored), the answers and the request sequences are compared
+once every candidate is judged: shadow memo only; auto with a filed propose
+whose slice neighbours wait a tick, a dismissal and its record, a propose
+naming another pair and one under its gate left, and stamped leaves; and a
+dismissal reopened when its endpoint gains an edge and dismissed again.
+`src/dream/candidates_tests.rs` checks the prompt rows, the reply
+validation and both fingerprints over one synthetic bank snapshot (int keys
+on both sides of ten, a set, embeddings, a missing endpoint, an endpoint
+with no tokens) against Python's own output. The `mcp-dream-candidate-*`
+mutants are caught by `candidate-auto`.
 
 ### Board tools over MCP (2026-10-16)
 
