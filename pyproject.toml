@@ -48,7 +48,9 @@ dependencies = [
     # floor matches what the mcp SDK already requires.
     "pydantic>=2.12,<3",
     "pypdf>=4.0",
-    "psycopg[binary]>=3.1",
+    # 3.2.4+: every binary wheel ships libpq 16 or newer, which the lite tier
+    # needs (require_auth keeps its password off the wire, 2026-10-25).
+    "psycopg[binary]>=3.2.4",
     "pgvector>=0.3",
     "uvicorn>=0.30",
     "networkx>=3.0",
@@ -95,9 +97,11 @@ pdf = [
 # (18) — a silent major bump in a new pg0 wheel would strand existing
 # embedded banks (cross-major pgdata cannot start). 0.15.1 verified on
 # Windows 2026-08-14: crash recovery preserves data, attach-if-running
-# works, vector(1024)+HNSW pass.
+# works, vector(1024)+HNSW pass. 0.15.2 is the floor (2026-10-25): 0.15.1's
+# start and stop trust a recorded pid without checking it is postgres, so
+# after a reboot its stop can kill an unrelated process (pg0 #37).
 lite = [
-    "pg0-embedded>=0.15.1,<0.16",
+    "pg0-embedded>=0.15.2,<0.16",
 ]
 # ONNX embedding backend — ~3x faster single-text encode on CPU with
 # bit-identical embeddings. Off by default; set ``embedding.backend =
