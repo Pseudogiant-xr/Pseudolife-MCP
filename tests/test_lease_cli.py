@@ -1301,6 +1301,131 @@ def test_check_falls_back_to_the_local_lock_when_the_board_refuses(lease_env, ca
     assert "principal" in report["board"]["reason"]
 
 
+# --- lease check NAME -- COMMAND: the gate runs the command itself ---------------
+# A gate that only reports is ignored by `check; cargo build`: the `;` runs
+# the build whatever the check said. With a command, check runs it only when
+# the lease is free, and a refusal (75) is never the command's own exit code.
+
+def test_a_gated_command_runs_when_free_and_its_exit_1_passes_through(
+        lease_env, lease_without_token, tmp_path, capsys):
+    command, marker = _command(tmp_path, exit_code=1)
+    daemon = FakeDaemon()
+    assert _run(["check", "gpu", "--", *command], daemon) == 1
+    assert marker.exists()
+    assert _ran(marker)["held"] is None  # check holds nothing, so it claims nothing
+    captured = capsys.readouterr()
+    assert "lease gpu: free" in captured.out
+    assert "did not run" not in captured.err
+
+
+def test_a_gated_command_keeps_an_inherited_held_list(lease_env, lease_without_token,
+                                                      tmp_path, monkeypatch):
+    monkeypatch.setenv("PSEUDOLIFE_LEASES_HELD", "gpu")
+    command, marker = _command(tmp_path)
+    assert _run(["check", "bench", "--", *command], FakeDaemon()) == 0
+    assert _ran(marker)["held"] == "gpu"
+
+
+def test_a_gated_command_is_refused_with_75_while_the_lock_is_held(lease_env, tmp_path, capsys):
+    command, marker = _command(tmp_path)
+    daemon = FakeDaemon()
+    gpu = _hold(lease_env, "gpu")
+    try:
+        code = _run(["check", "gpu", "--", *command], daemon)
+    finally:
+        gpu.release()
+    assert code == lease_cli.EXIT_TEMPFAIL
+    assert not marker.exists()
+    captured = capsys.readouterr()
+    assert "lease gpu: held" in captured.out  # the usual report, unchanged
+    [line] = captured.err.splitlines()
+    assert "'gpu' is held" in line and "the command did not run" in line
+    assert "pseudolife-mcp lease run gpu -- COMMAND" in line
+
+
+def test_a_gated_command_is_refused_while_only_the_board_shows_a_holder(
+        lease_env, tmp_path, capsys):
+    now = time.time()
+    daemon = FakeDaemon(leases=[(200, {"leases": [
+        {"name": "gpu", "holder": _holder(purpose="overnight brief", age=120, expected=1800),
+         "fence": 3, "expires_at": now + 90, "expected_end": now + 1800, "stale": False,
+         "queued": 0, "queue": []}], "truncated": False})])
+    command, marker = _command(tmp_path)
+    assert _run(["check", "gpu", "--", *command], daemon) == lease_cli.EXIT_TEMPFAIL
+    assert not marker.exists()
+    assert "overnight brief" in capsys.readouterr().out
+
+
+def test_a_gated_command_is_refused_with_70_when_the_check_fails(
+        lease_env, tmp_path, monkeypatch, capsys):
+    def broken(name):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(lease_cli, "_local_state", broken)
+    command, marker = _command(tmp_path)
+    assert _run(["check", "gpu", "--", *command], FakeDaemon()) == lease_cli.EXIT_SOFTWARE
+    assert not marker.exists()
+    err = capsys.readouterr().err.splitlines()
+    assert len(err) == 2 and "RuntimeError" in err[0]
+    assert "the command did not run" in err[1]
+
+
+def test_a_gated_missing_command_exits_127(lease_env, lease_without_token, capsys):
+    assert _run(["check", "gpu", "--", "fixture-no-such-program"], FakeDaemon()) == 127
+    assert "command not found: fixture-no-such-program" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("argv,needle", [
+    (["check", "gpu", "--"], "pseudolife-mcp lease check full-suite -- cargo build"),
+    (["check", "gpu", "--json", "--", "x"], "--json takes no command"),
+])
+def test_a_gated_check_refuses_an_empty_command_or_json(lease_env, capsys, argv, needle):
+    daemon = FakeDaemon()
+    assert _run(argv, daemon) == 2
+    assert needle in capsys.readouterr().err
+    assert daemon.calls == []
+
+
+def test_a_gated_report_reaches_stdout_before_the_command_output(tmp_path):
+    # The report is flushed before the command starts, so a log reads in
+    # order; without the flush the buffered report followed the child's.
+    env = {key: value for key, value in os.environ.items()
+           if not key.startswith("PSEUDOLIFE_")}
+    env.update({os_lock.LOCK_DIR_ENV: str(tmp_path / "locks"),
+                "PSEUDOLIFE_SUITE_LOCK_DIR": str(tmp_path / "suite"),
+                "PSEUDOLIFE_MCP_DAEMON_URL": "http://127.0.0.1:1",
+                "PYTHONIOENCODING": "utf-8"})
+    result = subprocess.run(
+        [sys.executable, "-m", "pseudolife_memory.cli", "lease", "check", "gpu", "--",
+         sys.executable, "-c", "print('child output')"],
+        env=env, capture_output=True, text=True, timeout=START_TIMEOUT, cwd=ROOT)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.index("lease gpu: free") < result.stdout.index("child output")
+
+
+def test_a_stop_signal_stops_the_gated_command_and_exits_128_plus_n(
+        lease_env, lease_without_token, tmp_path, monkeypatch, signal_later):
+    monkeypatch.setattr(lease_cli, "KILL_GRACE", 0.3)
+    children = _recording_spawn(monkeypatch)
+    ready = tmp_path / "ready"
+    signal_later(0.0, ready=ready)
+    try:
+        code = _run(["check", "gpu", "--", *_sleeper(ready)], FakeDaemon())
+    finally:
+        orphaned = _reap(children)
+    assert code == 130
+    assert children and not orphaned
+
+
+def test_check_help_names_the_gated_form_and_its_exit_codes(lease_env, capsys):
+    assert _run(["check", "--help"], FakeDaemon()) == 0
+    text = capsys.readouterr().out
+    assert "[-- COMMAND [ARGS...]]" in text
+    assert "lease check full-suite -- sh -c 'cargo clippy && cargo nextest run && cargo build'" in text
+    for code in ("0 free", "1 held", "70", "75"):
+        assert code in text
+
+
 # --- lease hold: a lease around a process this run did not start --------------
 #
 # Start-Qwen launches a detached server and returns; the lease must outlive
@@ -1531,7 +1656,8 @@ def test_hold_is_stopped_by_a_signal_and_releases(
     ["hold", "gpu", "--while-pid", "-4"],
     ["hold", "gpu", "--while-pid", "12", "--", "x"],
     ["check"],
-    ["check", "gpu", "--", "x"],
+    ["check", "gpu", "--"],
+    ["check", "gpu", "--json", "--", "x"],
     ["check", "a\tb"],
 ])
 def test_hold_and_check_usage_errors_exit_2(lease_env, argv):

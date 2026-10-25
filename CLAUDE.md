@@ -289,9 +289,11 @@ current merge ref, except as the `merge-forward` skill allows):
 - **CPU- or memory-saturating work never overlaps a full suite** (stress
   repros, benchmark sweeps, a model server, a large in-memory eval), since
   it causes timing flakes and os error 1455. Gate it on the lease of the
-  machine it runs on (`lease check full-suite` on the Windows host, `lease
-  check full-suite@<name>` on a dev machine) and on `lease check gpu` (0
-  free, 1 held, anything else a failed check), also look for `suite=running` in
+  machine it runs on by letting the check run it (`lease check full-suite --
+  <command>` on the Windows host, `lease check full-suite@<name> -- <command>`
+  on a dev machine, one command per sequence, since a `;` after a bare check
+  runs the work whatever it said) and on `lease check gpu` (0 free, 1 held,
+  75 a gated command refused, anything else a failed check), also look for `suite=running` in
   `memory_agents` list, announce the window with a fixed duration and a
   stop switch (a sentinel file), and stop at once if a suite starts.
 - **Broadcast a host-shaped symptom to every active peer before debugging

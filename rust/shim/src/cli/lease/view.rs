@@ -339,16 +339,32 @@ fn iso_clock(text: &Text) -> Option<String> {
     }
     Some(text.get(11..16)?.to_owned())
 }
+/// What a check found: free, held, or a failure with the exit it reports.
+pub(super) enum Verdict {
+    Free,
+    Held,
+    Failed(i32),
+}
 pub async fn check(args: &Args) -> i32 {
+    match verdict(args, false).await {
+        Verdict::Free => 0,
+        Verdict::Held => 1,
+        Verdict::Failed(code) => code,
+    }
+}
+/// The report and its verdict. `gated` (a command waits on it) flushes
+/// the report before the command runs, and a report that cannot be
+/// written is a failed check.
+pub(super) async fn verdict(args: &Args, gated: bool) -> Verdict {
     let name = args.name.as_deref().unwrap_or("");
     let local = local_state(name);
     let mut report = json!({"available":false,"reason":Value::Null,"holder":Value::Null,"expected_end":Value::Null,"stale":false,"queued":0,"queue":json!([])});
     let mut reason = None;
     match board::connect(false) {
-        Err(e) if e.fatal_input => return e.report(),
+        Err(e) if e.fatal_input => return Verdict::Failed(e.report()),
         Err(e) => reason = Some(e.text),
         Ok(client) => match client.leases(Some(name)).await {
-            Err(e) if e.fatal_input => return e.report(),
+            Err(e) if e.fatal_input => return Verdict::Failed(e.report()),
             Err(e) => reason = Some(e.text),
             Ok((leases, _)) => {
                 report["available"] = json!(true);
@@ -403,7 +419,7 @@ pub async fn check(args: &Args) -> i32 {
                 lines.push(format!("  board: held by {}{}{}",holder(&report["holder"],now()),expected,if stale{"; stale: the local lock is free, so this record outlived its holder and lapses at its ttl"}else{""}));
                 if truth(&report["queued"]) {
                     if !report["queue"].is_array() {
-                        return failed_check(name, "queue is not understood");
+                        return Verdict::Failed(failed_check(name, "queue is not understood"));
                     }
                     let waiting = report["queue"].as_array().map_or_else(String::new, |q| {
                         q.iter()
@@ -429,19 +445,28 @@ pub async fn check(args: &Args) -> i32 {
         }
         lines.join("\n") + "\n"
     };
-    if let Err(error) = super::write(&text, false) {
+    let written = super::write(&text, false).and_then(|()| {
+        if gated {
+            use std::io::Write;
+            std::io::stdout().flush()
+        } else {
+            Ok(())
+        }
+    });
+    if let Err(error) = written {
         // CPython's redirected TextIOWrapper buffers up to 8192 encoded bytes.
         // A failed large print raises inside _check; a buffered small print
         // instead fails at interpreter shutdown and changes the exit to 120.
+        // A gated check flushes inside _check, so any failure is its own.
         let encoded = super::super::text_bytes(&text);
         let newline = if cfg!(windows) { 2 } else { 1 };
-        if encoded.len().saturating_sub(newline) > 8192 {
-            return failed_check(name, &super::output_error(&error));
+        if gated || encoded.len().saturating_sub(newline) > 8192 {
+            return Verdict::Failed(failed_check(name, &super::output_error(&error)));
         }
         super::flush_failure(&error);
-        return 120;
+        return Verdict::Failed(120);
     }
-    i32::from(held)
+    if held { Verdict::Held } else { Verdict::Free }
 }
 fn failed_check(name: &str, error: &str) -> i32 {
     super::say(&format!(

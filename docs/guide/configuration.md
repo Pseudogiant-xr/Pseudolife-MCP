@@ -531,7 +531,7 @@ expiring hold on a shared resource, taken around any command.
 ```sh
 pseudolife-mcp lease run NAME [--expect DURATION] [--ttl SECONDS] [--purpose TEXT] [--no-board] [--timeout DURATION] -- COMMAND [ARGS...]
 pseudolife-mcp lease hold NAME --while-pid PID [--expect DURATION] [--ttl SECONDS] [--purpose TEXT] [--worktree PATH] [--no-board] [--timeout DURATION]
-pseudolife-mcp lease check NAME [--json]
+pseudolife-mcp lease check NAME [--json] [-- COMMAND [ARGS...]]
 pseudolife-mcp lease list [NAME] [--json]
 ```
 
@@ -616,6 +616,31 @@ For `full-suite` it probes the test suite's own lock (`full-suite.lock` and its
 slots, with the holder record's pid, worktree and start time), since that file,
 not `lease-full-suite.lock`, is the truth for a full run. A run with
 `PSEUDOLIFE_SUITE_LOCK=off` takes no lock, so no check sees it.
+
+Given a command after `--`, the check is the gate itself: it prints the same
+report, then runs the command only when the lease is free and exits with the
+command's own status. A check that reports and leaves the obeying to the caller
+is easy to defeat: in `lease check full-suite; cargo build` the `;` starts the
+build whatever the check said. When the lease is held, the command does not
+run, one stderr line says so and names the next step, and the exit is `75`,
+so a refusal is never read as the command's own `1`. A failed check runs
+nothing and exits `70`. Put a sequence in one command, so that every step is
+gated:
+
+```sh
+pseudolife-mcp lease check full-suite -- sh -c 'cargo clippy && cargo nextest run && cargo build'
+```
+
+```powershell
+pseudolife-mcp lease check full-suite -- pwsh -c 'cargo clippy && cargo nextest run && cargo build'
+```
+
+The command inherits the terminal and the environment, as under `lease run`,
+and is stopped the same way (`126`, `127` and `128+N` mean the same), but
+nothing is held while it runs: another process may take the lease a moment
+after the check passed. Use `lease run NAME -- COMMAND` when the command should
+hold the lease and wait its turn for it. `--json` takes no command, since the
+command's output would follow the report on stdout.
 
 Each machine mirrors its suite lock under its own lease name:
 `PSEUDOLIFE_SUITE_LEASE`, else a `full-suite.lease` file in the lock

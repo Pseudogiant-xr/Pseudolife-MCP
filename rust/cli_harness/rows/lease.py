@@ -409,6 +409,26 @@ def cases():
     add("run-board-timeout", ["run", NAME, "--timeout", "0", *command], scenario="held", board=True)
     for flag, value in (("--expect", "8d"), ("--expect", "0"), ("--ttl", "29"), ("--timeout", "-1")):
         add("usage-" + flag[2:] + "-" + value, ["run", NAME, flag, value, *command])
+    # check NAME -- COMMAND: free runs the child and passes its own exit 1
+    # through, after the flushed report; held refuses with 75 and never runs
+    # it (no 'ran' file). The child exits 1, the code a refusal must not be.
+    gated = ["--", command[1], "-c",
+             "import os,sys,pathlib; pathlib.Path(os.environ['HOME'],'ran').write_bytes("
+             "os.environ.get('PSEUDOLIFE_LEASES_HELD','<unset>').encode()); "
+             "sys.stdout.buffer.write(b'out\\x00\\xff'); sys.stderr.buffer.write(b'err\\x00\\xfe'); "
+             "sys.exit(1)"]
+    for local in ("absent", "free", "held"):
+        add("check-gated-" + local, ["check", NAME, *gated], local=local, **host_python)
+    add("check-gated-board-claim", ["check", NAME, *gated], scenario="claim", board=True,
+        **host_python)
+    add("check-gated-board-free", ["check", NAME, *gated], scenario="free", board=True,
+        **host_python)
+    add("check-gated-suite-held", ["check", "full-suite", *gated], setup=_suite("held", 7),
+        **host_python)
+    add("check-gated-missing-executable", ["check", NAME, "--", "fixture-no-such-program"],
+        programs=("fixture-no-such-program",))
+    add("check-gated-empty-command", ["check", NAME, "--"])
+    add("check-gated-json", ["check", NAME, "--json", *gated])
     return result
 
 
@@ -431,4 +451,9 @@ MUTANTS = [
     Mutant("lease-list-filter", "lease", "shim/src/cli/lease/view.rs",
            "wanted.as_ref().is_none_or(|w| w == &file)", "wanted.as_ref().is_none_or(|_w| true)",
            ("list-board-filter-missing",)),
+    Mutant("lease-gated-refusal", "lease", "shim/src/cli/lease/run.rs",
+           "            return 75;\n", "            return 1;\n", ("check-gated-held",)),
+    Mutant("lease-gated-holds-nothing", "lease", "shim/src/cli/lease/run.rs",
+           "start(&args.command, None)", "start(&args.command, args.name.as_deref())",
+           ("check-gated-absent",)),
 ]

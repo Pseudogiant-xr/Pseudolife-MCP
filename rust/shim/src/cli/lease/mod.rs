@@ -54,6 +54,7 @@ pub async fn main(arguments: &[String]) -> i32 {
         }
     };
     let code = match args.action.as_str() {
+        "check" if !args.command.is_empty() => run::gated(args).await,
         "check" => view::check(&args).await,
         "list" => view::list(&args).await,
         "hold" => hold::hold(args).await,
