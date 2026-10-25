@@ -204,8 +204,12 @@ impl Build {
                 return Err(format!("entry {raw:?} is not a regular file"));
             }
             let mode = entry.header().mode().map_err(|e| e.to_string())?;
-            native::write_new(&tree.join(dest), &mut entry, mode)
-                .map_err(|e| format!("{raw}: {e}"))?;
+            let dest = tree.join(dest);
+            // `licenses/` gets the core's directory mode, not the umask's.
+            if let Some(parent) = dest.parent().filter(|p| *p != tree) {
+                native::create_dir(parent).map_err(|e| format!("{raw}: {e}"))?;
+            }
+            native::write_new(&dest, &mut entry, mode).map_err(|e| format!("{raw}: {e}"))?;
         }
         Ok(())
     }

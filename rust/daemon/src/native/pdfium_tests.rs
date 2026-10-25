@@ -363,6 +363,14 @@ fn provisioning_installs_the_pinned_library_once() {
         ["LICENSE", "libpdfium.so", "licenses", native::PROVENANCE]
     );
     assert_eq!(names(&dir.join("licenses")), ["icu.txt"]);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = |p: &Path| fs::metadata(p).unwrap().permissions().mode() & 0o777;
+        // Nothing in the tree is writable by group or others.
+        assert_eq!(mode(&dir.join("licenses")) & 0o022, 0);
+        assert_eq!(mode(&path) & 0o022, 0);
+    }
     assert!(
         lines
             .last()
