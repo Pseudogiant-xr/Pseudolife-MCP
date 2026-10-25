@@ -404,6 +404,99 @@ def test_nothing_is_probed_without_a_rewritten_loopback_url(bash, tmp_path, mode
     assert "Extractor endpoint" not in proc.stdout
 
 
+# -- the CLI shim must be reachable from the daemon's container ------------------
+# On Linux the shim autostart binds the docker bridge address, where a host
+# firewall drops the container's traffic by default: the shim answered on
+# the host, the install said Healthy and Done, and dreams paused for good
+# (CachyOS with ufw enabled, 2026-10-25).
+
+def _shim_probe(shell: _Shell, *, mode: str = "claude-only", port: str = "8082",
+                container: int = 1, host_up: bool = True, ufw: bool = False,
+                uname: str = "Linux"):
+    _stub(shell.bin / "docker",
+          "printf 'docker|%s\\n' \"$*\" >>\"$CALL_LOG\"\nexit \"$FAKE_DOCKER_EXIT\"\n")
+    _stub(shell.bin / "uname", "printf '%s\\n' \"$FAKE_UNAME\"\n")
+    claude = "1" if mode.startswith("claude") else ""
+    codex = "1" if mode.startswith("openai") else ""
+    return shell.run(
+        f"EXTRACTOR='{mode}'\nSHIM_PORT={port}\n"
+        f"claude_shim_mode='{claude}'\ncodex_shim_mode='{codex}'\n"
+        + _block("endpoint container probe")
+        # The host's own answers, which the block reads through these.
+        + "docker_bridge_address() { printf '172.17.0.1\\n'; }\n"
+        + f"ufw_enabled() {{ return {0 if ufw else 1}; }}\n"
+        + "sleep() { :; }\n"
+        + "shim_container_probe\nprintf 'STATE=%s\\n' \"$ENDPOINT_CONTAINER\"\n"
+        + "describe_endpoint_container\n",
+        extra_env={"FAKE_DOCKER_EXIT": str(container), "FAKE_UNAME": uname,
+                   "FAKE_CURL_EXIT": "0" if host_up else "7",
+                   "FAKE_HEALTH": '{"status": "ok"}'})
+
+
+def _docker_calls(shell: _Shell) -> list[str]:
+    return [line for line in shell.logged() if line.startswith("docker|")]
+
+
+@BASH
+def test_a_shim_the_container_reaches_passes(bash, tmp_path):
+    shell = _Shell(bash, tmp_path)
+    proc = _shim_probe(shell, container=0)
+    assert proc.returncode == 0, proc.stderr
+    log = shell.calls.read_text(encoding="utf-8")
+    assert log.startswith("docker|exec pseudolife-mcp-daemon python")
+    assert "http://host.docker.internal:8082/v1" in log
+    assert len(_docker_calls(shell)) == 1
+    assert "STATE=reachable" in proc.stdout
+    assert "WARNING" not in proc.stderr
+    assert re.search(r"\[x\] Extractor shim", proc.stdout)
+
+
+@BASH
+def test_ufw_dropping_the_container_names_the_rule_that_lets_it_through(bash, tmp_path):
+    shell = _Shell(bash, tmp_path)
+    proc = _shim_probe(shell, ufw=True)
+    assert proc.returncode == 0, proc.stderr
+    # The autostart unit started moments ago: a few tries before warning.
+    assert len(_docker_calls(shell)) == 3
+    assert "STATE=unreachable" in proc.stdout
+    assert ("sudo ufw allow from 172.16.0.0/12 to 172.17.0.1 port 8082 proto tcp"
+            in proc.stderr)
+    assert "dreams pause" in proc.stderr
+    assert re.search(r"\[!\] Extractor shim", proc.stdout)
+
+
+@BASH
+def test_another_firewall_is_named_without_a_ufw_rule(bash, tmp_path):
+    proc = _shim_probe(_Shell(bash, tmp_path), mode="claude-fallback")
+    assert proc.returncode == 0, proc.stderr
+    assert "firewall" in proc.stderr and "172.17.0.1 port 8082/tcp" in proc.stderr
+    assert "ufw allow" not in proc.stderr
+    assert "dreams fall back to the sidecar" in proc.stderr
+
+
+@BASH
+def test_a_shim_that_is_down_on_the_host_points_at_its_unit_not_the_firewall(bash, tmp_path):
+    proc = _shim_probe(_Shell(bash, tmp_path), mode="openai-only", port="8086",
+                       host_up=False, ufw=True)
+    assert proc.returncode == 0, proc.stderr
+    assert "Codex shim" in proc.stderr
+    assert "systemctl --user status pseudolife-codex-shim.service" in proc.stderr
+    assert "ufw" not in proc.stderr
+
+
+@pytest.mark.parametrize("mode,uname", [("sidecar", "Linux"), ("endpoint", "Linux"),
+                                        ("claude-only", "Darwin")])
+@BASH
+def test_the_shim_probe_runs_only_for_a_shim_mode_on_linux(bash, tmp_path, mode, uname):
+    """Docker Desktop routes host.docker.internal to this machine's loopback,
+    where no bridge firewall stands between the container and the shim."""
+    shell = _Shell(bash, tmp_path)
+    proc = _shim_probe(shell, mode=mode, uname=uname)
+    assert proc.returncode == 0, proc.stderr
+    assert not _docker_calls(shell)
+    assert "Extractor shim" not in proc.stdout
+
+
 # -- the compose override the installer owns ------------------------------------
 
 def _markers() -> str:

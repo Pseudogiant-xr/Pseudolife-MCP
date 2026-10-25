@@ -515,7 +515,9 @@ _RFC1918_PAT = re.compile(
     rb"|172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}"
     rb"|192\.168\.\d{1,3}\.\d{1,3})\b")
 _RFC1918_PRESCREEN = (b"10.", b"172.", b"192.168.")
-_ALLOWED_IP_PREFIXES = (b"10.0.0.", b"192.168.1.", b"172.17.0.1")
+# 172.16.0.0 is the network address of Docker's default bridge pool
+# (172.16.0.0/12), which the installer's ufw rule names: no machine has it.
+_ALLOWED_IP_PREFIXES = (b"10.0.0.", b"192.168.1.", b"172.17.0.1", b"172.16.0.0")
 # Tailnet addresses (CGNAT 100.64.0.0/10) and MagicDNS names: the remote-bank
 # docs and tests talk about them, and a real one is a machine identifier
 # like a LAN address. Sanctioned placeholders: the 100.64.0.x prefix and the

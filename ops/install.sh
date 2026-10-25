@@ -2945,10 +2945,60 @@ except urllib.error.HTTPError:
         echo "WARNING: the daemon's container cannot reach the extractor endpoint at $probe_url/models. A server on this machine must listen where the container can reach it, not only on 127.0.0.1: OLLAMA_HOST=0.0.0.0 (or the docker bridge address) for Ollama, llama-server --host <bridge address>, LM Studio's \"Serve on Local Network\". Restart the server so; the daemon retries every sweep, and until then $endpoint_until." >&2
     fi
 }
+# The CLI shim modes: on Linux the shim autostart binds the docker bridge
+# address (ops/install-shim-autostart.sh), where a host firewall such as
+# ufw drops the container's traffic by default, so the shim answers on this
+# host while every dream pauses. Docker Desktop routes host.docker.internal
+# to this machine's loopback, with no bridge firewall in between, so the
+# shim is probed on Linux only.
+ENDPOINT_WHAT="Extractor endpoint"
+docker_bridge_address() {
+    ip -4 addr show docker0 2>/dev/null | sed -n 's/.*inet \([0-9.]*\).*/\1/p' | head -1
+}
+# ufw's own switch; readable without root, unlike `ufw status`.
+ufw_enabled() {
+    grep -qs '^ENABLED=yes' /etc/ufw/ufw.conf
+}
+shim_container_probe() {
+    [ -n "${claude_shim_mode:-}${codex_shim_mode:-}" ] || return 0
+    [ "$(uname -s 2>/dev/null)" = Linux ] || return 0
+    if [ -n "${claude_shim_mode:-}" ]; then
+        shim_name="Claude shim"; shim_unit=pseudolife-sonnet-shim.service
+    else
+        shim_name="Codex shim"; shim_unit=pseudolife-codex-shim.service
+    fi
+    ENDPOINT_WHAT="Extractor shim"
+    probe_url="http://host.docker.internal:$SHIM_PORT/v1"
+    # The autostart unit started moments ago: give it a few tries.
+    for attempt in 1 2 3; do
+        if docker exec pseudolife-mcp-daemon python -c 'import sys, urllib.error, urllib.request
+try:
+    urllib.request.urlopen(sys.argv[1] + "/models", timeout=10)
+except urllib.error.HTTPError:
+    pass' "$probe_url" >/dev/null 2>&1; then
+            ENDPOINT_CONTAINER=reachable
+            step "The daemon's container reaches the $shim_name at $probe_url."
+            return 0
+        fi
+        [ "$attempt" = 3 ] || sleep 2
+    done
+    ENDPOINT_CONTAINER=unreachable
+    case "$EXTRACTOR" in *-fallback) shim_until="dreams fall back to the sidecar" ;; *) shim_until="dreams pause" ;; esac
+    bridge="$(docker_bridge_address)"; bridge="${bridge:-172.17.0.1}"
+    if ! curl -fsS --max-time 5 "http://$bridge:$SHIM_PORT/health" >/dev/null 2>&1; then
+        echo "WARNING: the $shim_name is not answering at $bridge:$SHIM_PORT, so the daemon's container cannot reach it either. Check it: systemctl --user status $shim_unit (log: journalctl --user -u $shim_unit). The daemon retries every sweep, and until then $shim_until." >&2
+    elif ufw_enabled; then
+        # 172.16.0.0/12 is Docker's default pool for bridge networks, so the
+        # rule outlives a recreated compose network with a new subnet.
+        echo "WARNING: the $shim_name answers on this host at $bridge:$SHIM_PORT, but ufw drops the daemon container's traffic to it. Let the docker networks through once: sudo ufw allow from 172.16.0.0/12 to $bridge port $SHIM_PORT proto tcp comment 'pseudolife dream shim'. The daemon retries every sweep, and until then $shim_until." >&2
+    else
+        echo "WARNING: the $shim_name answers on this host at $bridge:$SHIM_PORT, but the daemon's container cannot reach it: a host firewall (nftables, firewalld or iptables rules) drops traffic from the docker networks to $bridge port $SHIM_PORT/tcp. Allow it; the daemon retries every sweep, and until then $shim_until." >&2
+    fi
+}
 describe_endpoint_container() {
     case "${ENDPOINT_CONTAINER:-}" in
-        reachable) echo "  [x] Extractor endpoint   reachable from the daemon's container" ;;
-        unreachable) echo "  [!] Extractor endpoint   not reachable from the daemon's container - see the warning above" ;;
+        reachable) printf '  [x] %-21sreachable from the daemon'"'"'s container\n' "$ENDPOINT_WHAT" ;;
+        unreachable) printf '  [!] %-21snot reachable from the daemon'"'"'s container - see the warning above\n' "$ENDPOINT_WHAT" ;;
     esac
 }
 # <<< endpoint container probe <<<
@@ -3044,6 +3094,7 @@ if [ -z "$CLIENT_ONLY" ]; then
     }
     step "Healthy: http://127.0.0.1:8765/health (Console: http://127.0.0.1:8765/ui/)"
     endpoint_container_probe
+    shim_container_probe
     if [ -n "${TEST_LOGIN:-}" ]; then
         setup_test_login
     fi
