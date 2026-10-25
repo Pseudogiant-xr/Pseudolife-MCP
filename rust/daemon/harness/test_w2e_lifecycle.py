@@ -346,20 +346,34 @@ def test_dream_run_scenarios_switch_off_unported_stages_and_answer_every_request
     assert all(f'"{m}"' in text for m in extractor_mutants)
 
 
+def test_graph_insight_scenarios_register_their_clocks_and_mutants(harness):
+    import w2e_graph_insight as gi
+    names = sorted(n for n in harness.SCENARIOS if n.startswith("dream-insight-"))
+    assert names == ["dream-insight-empty", "dream-insight-planted"]
+    for n in names:
+        # the insight is on (its default) until a restart switches it off
+        assert "graph_insight:" not in harness.SCENARIOS[n]["config"]
+    assert harness.CLOCK >= gi.CLOCK
+    assert harness.META_CLOCK["graph_digest"] == {"computed_at"}
+    assert set(gi.MUTANTS) <= set(harness.MUTANTS)
+    src = (Path(__file__).resolve().parents[1] / "src" / "graph_insight.rs").read_text(
+        encoding="utf-8")
+    assert all(f'"{m}"' in src for m in gi.MUTANTS)
+
+
 def test_graph_insight_scenarios_partition_independently_of_order(harness):
     """Each dream-insight scenario's graph, at every refresh, gets the same
     communities and digest from ``memory/graph_insight.py`` with NetworkX's
     seed-42 shuffle as without it (the Rust daemon's order), so the banks
     compare exactly; graphs where the order matters are compared
-    structurally in ``src/graph_insight_tests.rs``."""
+    structurally in ``src/graph_insight_tests.rs``. The oracle needs
+    NetworkX, and the memory package it lives in needs torch; the Rust CI
+    lane installs neither, so there it is skipped (run it where the
+    harness's oracle runs)."""
+    pytest.importorskip("networkx", reason="the graph-insight oracle needs networkx")
+    pytest.importorskip("torch", reason="the Python memory package needs torch")
     import gen_graph_insight_goldens as gen
     import w2e_graph_insight as gi
-    names = sorted(n for n in harness.SCENARIOS if n.startswith("dream-insight-"))
-    assert names == ["dream-insight-empty", "dream-insight-planted"]
-    for n in names:
-        assert "graph_insight:" not in harness.SCENARIOS[n]["config"].split("restart")[0]
-    assert harness.CLOCK >= gi.CLOCK
-    assert harness.META_CLOCK["graph_digest"] == {"computed_at"}
     for name, refreshes in gi.graphs().items():
         # Entity ids in mint order: the seed's fact subjects, then each
         # relate's endpoints as they first appear.
