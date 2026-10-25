@@ -156,6 +156,15 @@ def attach_or_start(data_dir: Path) -> tuple[str, Any | None]:
 
     import pg0
 
+    # libpq 16+ (require_auth) is what keeps the secret off the wire.
+    if not _libpq_has_require_auth():
+        raise RuntimeError(
+            "the lite tier needs libpq 16 or newer, so the bank's password is "
+            "only ever offered over SCRAM; this install's psycopg uses an "
+            "older one. Upgrade it: pip install -U \"psycopg[binary]\" (and set "
+            "PSYCOPG_IMPL=binary if a psycopg-c build is installed)."
+        )
+
     # Cross-process lock around the start attempt: two daemons racing at
     # first boot (two shims spawning `serve` at logon) must not run
     # initdb concurrently on the same fresh pgdata — pg0's own locking
@@ -163,12 +172,6 @@ def attach_or_start(data_dir: Path) -> tuple[str, Any | None]:
     # a recoverable failure mode. The loser waits, then attaches. The OS
     # releases the lock if the holder dies, so there is no stale-lock
     # state. Holding it also proves no other process is mid-migration.
-    if not _libpq_has_require_auth():
-        raise RuntimeError(
-            "the lite tier needs libpq 16 or newer, so the bank's password is "
-            "only ever offered over SCRAM; this install's psycopg uses an "
-            "older one. Upgrade it: pip install -U \"psycopg[binary]\"."
-        )
     with _start_lock(pgdata):
         secret, created = _cluster_secret(pgdata)
         progress = {"altered": False}
@@ -211,10 +214,11 @@ def _attach_or_start_locked(pg0, pgdata: Path, secret: str, created: bool,
     marked = found_hba is not None and (
         bool(_managed_methods(found_hba) - {"scram-sha-256"}) or created
     )
-    if marked and port and _postmaster_alive(pgdata):
-        # A server answers but took neither password (a lost secret, or one
-        # still starting up): the marker would open it to every local
-        # account at once on Windows, so refuse instead.
+    if port and _postmaster_alive(pgdata):
+        # The bank's server is running but took neither password (busy, still
+        # starting, or a lost secret). A start cannot succeed over it, the
+        # trust marker would open it to every local account at once on
+        # Windows, and stopping it is not this call's to do: refuse.
         raise RuntimeError(_running_refusal(pgdata, port))
     if marked:
         _write_hba(pgdata, _rewrite_hba(found_hba, "trust", loopback_only=True))
@@ -461,19 +465,32 @@ def _postmaster_alive(pgdata: Path) -> bool:
     import psutil
 
     try:
-        pid = int((pgdata / "postmaster.pid").read_text(
-            encoding="utf-8", errors="replace").splitlines()[0].strip())
-        return psutil.Process(pid).name().lower().startswith("postgres")
-    except (OSError, IndexError, ValueError, psutil.Error):
+        lines = (pgdata / "postmaster.pid").read_text(
+            encoding="utf-8", errors="replace").splitlines()
+        pid, started = int(lines[0].strip()), float(lines[2].strip())
+    except (OSError, IndexError, ValueError):
         return False
+    try:
+        process = psutil.Process(pid)
+        if not process.name().lower().startswith("postgres"):
+            return False
+        # postmaster.pid's third line is the postmaster's start time: another
+        # postgres that took the recorded pid after a reboot is not this one.
+        return abs(process.create_time() - started) < 2
+    except (psutil.NoSuchProcess, psutil.ZombieProcess):
+        return False
+    except psutil.Error:
+        # Alive but not inspectable: assume it is (fail closed).
+        return True
 
 
 def _running_refusal(pgdata: Path, port: int | None) -> str:
     where = f" on port {port}" if port else ""
     return (
         f"embedded postgres for {pgdata} is running{where} but accepts "
-        "neither this bank's password nor the old fixed one. Stop it with: "
-        f"python -c \"import pg0; pg0.stop('{_instance_name(pgdata)}')\" "
+        "neither this bank's password nor the old fixed one (it may be busy "
+        "or still starting: try again in a moment). If it persists, stop it "
+        f"with: python -c \"import pg0; pg0.stop('{_instance_name(pgdata)}')\" "
         "and start again."
     )
 

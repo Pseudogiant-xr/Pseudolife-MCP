@@ -1064,3 +1064,50 @@ def test_the_scram_verifier_passes_rfc_7677_s_published_exchange():
     assert hashlib.sha256(client_key).digest() == stored_key
     assert base64.b64encode(hmac.new(server_key, auth, hashlib.sha256).digest()).decode() \
         == "6rriTRBi23WpRR/wtup+mMhUZUn/dB5nLTJRsjl95G4="
+
+
+def test_a_running_moved_bank_that_takes_no_password_is_refused_not_stopped(
+    monkeypatch, tmp_path,
+):
+    """A healthy server can fail the probe (busy, starting): an unmarked
+    bank is refused too, so no start runs and nothing stops the daemon's
+    server."""
+    calls = _stub_pg0(monkeypatch)
+    pgdata = _moved_bank(tmp_path, "c4" * 32)
+    _running(pgdata, "the-probe-cannot-get-in")
+    with pytest.raises(RuntimeError, match="may be busy"):
+        ep.attach_or_start(tmp_path)
+    assert not any(call[0] in ("start", "stop") for call in calls)
+
+
+def test_postmaster_alive_fails_closed_and_matches_the_start_time(monkeypatch, tmp_path):
+    import psutil
+
+    (tmp_path / "postmaster.pid").write_text("4321\nd\n1792900000\n5432\n")
+
+    class Fake:
+        name_ = "postgres.exe"
+        created = 1792900000.4
+        error = None
+
+        def __init__(self, pid):
+            assert pid == 4321
+            if Fake.error:
+                raise Fake.error
+
+        def name(self):
+            return Fake.name_
+
+        def create_time(self):
+            return Fake.created
+
+    monkeypatch.setattr(psutil, "Process", Fake)
+    assert _REAL_ALIVE(tmp_path)
+    Fake.created = 1792990000.0  # another postgres took the pid after a reboot
+    assert not _REAL_ALIVE(tmp_path)
+    Fake.error = psutil.AccessDenied(4321)  # alive, not inspectable
+    assert _REAL_ALIVE(tmp_path)
+    Fake.error = psutil.NoSuchProcess(4321)
+    assert not _REAL_ALIVE(tmp_path)
+    Fake.error, Fake.name_ = None, "notepad.exe"
+    assert not _REAL_ALIVE(tmp_path)
