@@ -109,8 +109,13 @@ PATHS = [
     "", ".", "./", "/", "//", "///", "////x", "//srv/share/f.txt", "a", "a/", "a//b",
     "a/./b", "./a/b/", "a/../b", "/tmp/x.txt", "/tmp/dir/", "x.tar.gz", ".bashrc",
     "file.", "..", "a/..", "notes.MD", "trailing.txt/", "sp ace/na me.md",
-    "C:\\Users\\x\\doc.txt", "C:/Users/x/doc.txt", "C:doc.txt", "\\rooted\\a.md",
+    "C:\\Users\\<user>\\doc.txt", "C:/Users/<user>/doc.txt", "C:doc.txt", "\\rooted\\a.md",
     "rel\\win\\b.html", "mix/ed\\sep.TXT",
+    # Two leading separators, drive-like first parts and device paths, where
+    # CPython 3.12's ntpath.splitroot differs from 3.11's.
+    "//srv", "//srv/", "//srv//x", "//srv/share", "\\\\srv\\share\\", "1:foo", "\u00e9:x",
+    "./c:x", "a/b:c", "\\\\?\\C:\\x.txt", "\\\\.\\pipe\\name", "//?/UNC/srv/share/f.md",
+    "//?/unc/srv", "\\\\server", "c:", "c:/", "C:..\\up.txt",
 ]
 
 # Whole files through extract_text, then the ingest's chunking and ids.
@@ -183,8 +188,19 @@ def build() -> dict:
     return out
 
 
+# pathlib's parse changed between CPython 3.11 and 3.12 (ntpath.splitroot);
+# the daemon image runs 3.12.
+PYTHON = "3.12"
+
+
 def main() -> int:
-    text = json.dumps(build(), ensure_ascii=False, indent=1, sort_keys=True) + "\n"
+    if not sys.version.startswith(PYTHON + "."):
+        print(f"gen_document_goldens.py needs CPython {PYTHON} (the daemon image's), "
+              f"not {sys.version.split()[0]}", file=sys.stderr)
+        return 2
+    out = build()
+    out["python"] = PYTHON  # the minor version, so any 3.12.x checks clean
+    text = json.dumps(out, ensure_ascii=False, indent=1, sort_keys=True) + "\n"
     if "--check" in sys.argv[1:]:
         current = TARGET.read_text(encoding="utf-8") if TARGET.exists() else ""
         if current != text:

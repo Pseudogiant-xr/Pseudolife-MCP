@@ -2731,15 +2731,15 @@
    "suffix": ".md"
   },
   {
-   "name": "C:\\Users\\x\\doc.txt",
-   "raw": "C:\\Users\\x\\doc.txt",
-   "shown": "C:\\Users\\x\\doc.txt",
+   "name": "C:\\Users\\<user>\\doc.txt",
+   "raw": "C:\\Users\\<user>\\doc.txt",
+   "shown": "C:\\Users\\<user>\\doc.txt",
    "suffix": ".txt"
   },
   {
    "name": "doc.txt",
-   "raw": "C:/Users/x/doc.txt",
-   "shown": "C:/Users/x/doc.txt",
+   "raw": "C:/Users/<user>/doc.txt",
+   "shown": "C:/Users/<user>/doc.txt",
    "suffix": ".txt"
   },
   {
@@ -2765,6 +2765,108 @@
    "raw": "mix/ed\\sep.TXT",
    "shown": "mix/ed\\sep.TXT",
    "suffix": ".TXT"
+  },
+  {
+   "name": "srv",
+   "raw": "//srv",
+   "shown": "//srv",
+   "suffix": ""
+  },
+  {
+   "name": "srv",
+   "raw": "//srv/",
+   "shown": "//srv",
+   "suffix": ""
+  },
+  {
+   "name": "x",
+   "raw": "//srv//x",
+   "shown": "//srv/x",
+   "suffix": ""
+  },
+  {
+   "name": "share",
+   "raw": "//srv/share",
+   "shown": "//srv/share",
+   "suffix": ""
+  },
+  {
+   "name": "\\\\srv\\share\\",
+   "raw": "\\\\srv\\share\\",
+   "shown": "\\\\srv\\share\\",
+   "suffix": ""
+  },
+  {
+   "name": "1:foo",
+   "raw": "1:foo",
+   "shown": "1:foo",
+   "suffix": ""
+  },
+  {
+   "name": "é:x",
+   "raw": "é:x",
+   "shown": "é:x",
+   "suffix": ""
+  },
+  {
+   "name": "c:x",
+   "raw": "./c:x",
+   "shown": "c:x",
+   "suffix": ""
+  },
+  {
+   "name": "b:c",
+   "raw": "a/b:c",
+   "shown": "a/b:c",
+   "suffix": ""
+  },
+  {
+   "name": "\\\\?\\C:\\x.txt",
+   "raw": "\\\\?\\C:\\x.txt",
+   "shown": "\\\\?\\C:\\x.txt",
+   "suffix": ".txt"
+  },
+  {
+   "name": "\\\\.\\pipe\\name",
+   "raw": "\\\\.\\pipe\\name",
+   "shown": "\\\\.\\pipe\\name",
+   "suffix": ".\\pipe\\name"
+  },
+  {
+   "name": "f.md",
+   "raw": "//?/UNC/srv/share/f.md",
+   "shown": "//?/UNC/srv/share/f.md",
+   "suffix": ".md"
+  },
+  {
+   "name": "srv",
+   "raw": "//?/unc/srv",
+   "shown": "//?/unc/srv",
+   "suffix": ""
+  },
+  {
+   "name": "\\\\server",
+   "raw": "\\\\server",
+   "shown": "\\\\server",
+   "suffix": ""
+  },
+  {
+   "name": "c:",
+   "raw": "c:",
+   "shown": "c:",
+   "suffix": ""
+  },
+  {
+   "name": "c:",
+   "raw": "c:/",
+   "shown": "c:",
+   "suffix": ""
+  },
+  {
+   "name": "C:..\\up.txt",
+   "raw": "C:..\\up.txt",
+   "shown": "C:..\\up.txt",
+   "suffix": ".txt"
   }
  ],
  "path_windows": [
@@ -2795,19 +2897,19 @@
   {
    "name": "",
    "raw": "//",
-   "shown": "\\",
+   "shown": "\\\\",
    "suffix": ""
   },
   {
    "name": "",
    "raw": "///",
-   "shown": "\\",
+   "shown": "\\\\\\",
    "suffix": ""
   },
   {
    "name": "x",
    "raw": "////x",
-   "shown": "\\x",
+   "shown": "\\\\\\\\x",
    "suffix": ""
   },
   {
@@ -2914,14 +3016,14 @@
   },
   {
    "name": "doc.txt",
-   "raw": "C:\\Users\\x\\doc.txt",
-   "shown": "C:\\Users\\x\\doc.txt",
+   "raw": "C:\\Users\\<user>\\doc.txt",
+   "shown": "C:\\Users\\<user>\\doc.txt",
    "suffix": ".txt"
   },
   {
    "name": "doc.txt",
-   "raw": "C:/Users/x/doc.txt",
-   "shown": "C:\\Users\\x\\doc.txt",
+   "raw": "C:/Users/<user>/doc.txt",
+   "shown": "C:\\Users\\<user>\\doc.txt",
    "suffix": ".txt"
   },
   {
@@ -2947,8 +3049,111 @@
    "raw": "mix/ed\\sep.TXT",
    "shown": "mix\\ed\\sep.TXT",
    "suffix": ".TXT"
+  },
+  {
+   "name": "",
+   "raw": "//srv",
+   "shown": "\\\\srv",
+   "suffix": ""
+  },
+  {
+   "name": "",
+   "raw": "//srv/",
+   "shown": "\\\\srv\\",
+   "suffix": ""
+  },
+  {
+   "name": "x",
+   "raw": "//srv//x",
+   "shown": "\\\\srv\\\\x",
+   "suffix": ""
+  },
+  {
+   "name": "",
+   "raw": "//srv/share",
+   "shown": "\\\\srv\\share\\",
+   "suffix": ""
+  },
+  {
+   "name": "",
+   "raw": "\\\\srv\\share\\",
+   "shown": "\\\\srv\\share\\",
+   "suffix": ""
+  },
+  {
+   "name": "foo",
+   "raw": "1:foo",
+   "shown": "1:foo",
+   "suffix": ""
+  },
+  {
+   "name": "x",
+   "raw": "é:x",
+   "shown": "é:x",
+   "suffix": ""
+  },
+  {
+   "name": "c:x",
+   "raw": "./c:x",
+   "shown": ".\\c:x",
+   "suffix": ""
+  },
+  {
+   "name": "b:c",
+   "raw": "a/b:c",
+   "shown": "a\\b:c",
+   "suffix": ""
+  },
+  {
+   "name": "x.txt",
+   "raw": "\\\\?\\C:\\x.txt",
+   "shown": "\\\\?\\C:\\x.txt",
+   "suffix": ".txt"
+  },
+  {
+   "name": "name",
+   "raw": "\\\\.\\pipe\\name",
+   "shown": "\\\\.\\pipe\\name",
+   "suffix": ""
+  },
+  {
+   "name": "f.md",
+   "raw": "//?/UNC/srv/share/f.md",
+   "shown": "\\\\?\\UNC\\srv\\share\\f.md",
+   "suffix": ".md"
+  },
+  {
+   "name": "",
+   "raw": "//?/unc/srv",
+   "shown": "\\\\?\\unc\\srv",
+   "suffix": ""
+  },
+  {
+   "name": "",
+   "raw": "\\\\server",
+   "shown": "\\\\server",
+   "suffix": ""
+  },
+  {
+   "name": "",
+   "raw": "c:",
+   "shown": "c:",
+   "suffix": ""
+  },
+  {
+   "name": "",
+   "raw": "c:/",
+   "shown": "c:\\",
+   "suffix": ""
+  },
+  {
+   "name": "up.txt",
+   "raw": "C:..\\up.txt",
+   "shown": "C:..\\up.txt",
+   "suffix": ".txt"
   }
  ],
+ "python": "3.12",
  "strip": [
   {
    "out": "both",

@@ -27,14 +27,24 @@ fn strings(v: &Value) -> Vec<String> {
 fn decode_matches_read_text() {
     for case in golden("decode") {
         let bytes = hex::decode(s(&case["hex"])).unwrap();
-        assert_eq!(decode_text(&bytes), s(&case["text"]), "bytes {}", case["hex"]);
+        assert_eq!(
+            decode_text(&bytes),
+            s(&case["text"]),
+            "bytes {}",
+            case["hex"]
+        );
     }
 }
 
 #[test]
 fn html_matches_the_regex_fallback() {
     for case in golden("html") {
-        assert_eq!(strip_html(s(&case["html"])), s(&case["text"]), "{}", case["html"]);
+        assert_eq!(
+            strip_html(s(&case["html"])),
+            s(&case["text"]),
+            "{}",
+            case["html"]
+        );
     }
 }
 
@@ -73,18 +83,31 @@ fn chunk_ids_match() {
     }
 }
 
+type PathParser = fn(&str) -> PyPath;
+
 #[test]
 fn paths_match_pathlib() {
-    let kind = if cfg!(windows) {
-        "path_windows"
-    } else {
-        "path_posix"
-    };
+    // The Windows parse is checked on every OS; the native one on its own.
+    let mut parsers: Vec<(&str, PathParser)> = vec![("path_windows", py_path_windows)];
+    if !cfg!(windows) {
+        parsers.push(("path_posix", py_path));
+    }
+    for (kind, parse) in parsers {
+        check_paths(kind, parse);
+    }
+}
+
+fn check_paths(kind: &str, parse: PathParser) {
     for case in golden(kind) {
-        let p = py_path(s(&case["raw"]));
+        let p = parse(s(&case["raw"]));
         assert_eq!(p.shown, s(&case["shown"]), "raw {:?}", case["raw"]);
         assert_eq!(p.name, s(&case["name"]), "raw {:?}", case["raw"]);
-        assert_eq!(py_suffix(&p.name), s(&case["suffix"]), "raw {:?}", case["raw"]);
+        assert_eq!(
+            py_suffix(&p.name),
+            s(&case["suffix"]),
+            "raw {:?}",
+            case["raw"]
+        );
     }
 }
 
@@ -106,7 +129,11 @@ fn files_extract_chunk_and_name_as_ingest_does() {
         assert_eq!(chunks.len(), want.len(), "{name}");
         for (i, (got, w)) in chunks.iter().zip(want).enumerate() {
             assert_eq!(got, s(&w["text"]), "{name} chunk {i}");
-            assert_eq!(chunk_id(&format!("src-{name}"), i, got), s(&w["id"]), "{name} id {i}");
+            assert_eq!(
+                chunk_id(&format!("src-{name}"), i, got),
+                s(&w["id"]),
+                "{name} id {i}"
+            );
         }
     }
     let _ = std::fs::remove_dir_all(&dir);
@@ -141,6 +168,18 @@ fn errors_take_python_classes() {
                     at("folder.data")
                 )
             );
+        }
+        other => panic!("{other:?}"),
+    }
+    // A text-suffix file gone since `exists()`: FileNotFoundError's text.
+    match extract_text(&at("gone.md"), "gone.md") {
+        Err(ToolError::FileNotFound(m)) => {
+            #[cfg(unix)]
+            assert_eq!(
+                m,
+                format!("[Errno 2] No such file or directory: '{}'", at("gone.md"))
+            );
+            assert!(!m.is_empty());
         }
         other => panic!("{other:?}"),
     }

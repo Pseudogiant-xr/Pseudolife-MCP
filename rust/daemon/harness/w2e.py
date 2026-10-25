@@ -6064,7 +6064,8 @@ def pack_numeric(numeric: dict, seen: set) -> dict:
     import struct
     out = {}
     for eid, v in numeric.items():
-        if eid in ("facts", "world_facts", "lessons", "lesson_scores", "reference_chunks")                 or eid in seen:
+        if eid in ("facts", "world_facts", "lessons", "lesson_scores",
+                   "reference_chunks") or eid in seen:
             continue  # fact embeddings are compared live only (declared)
         seen.add(eid)
         emb = v["embedding"]

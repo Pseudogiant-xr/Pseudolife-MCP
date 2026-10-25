@@ -76,49 +76,90 @@ pub(crate) fn py_path(raw: &str) -> PyPath {
     }
 }
 
-/// `PureWindowsPath`'s parse for drive-absolute, drive-relative, rooted,
-/// relative and `\\server\share` paths: both slashes separate and the
-/// shown form uses `\`. Device paths (`\\?\`, `\\.\`) are not parsed as
-/// drives (`divergences.md`, DOC-PATH-WINDOWS).
-#[cfg(windows)]
-pub(crate) fn py_path(raw: &str) -> PyPath {
+/// CPython 3.12's `ntpath.splitroot` over a path whose `/` are already
+/// `\`: `(drive, root, rest)`, sliced by code point as Python slices.
+#[cfg(any(windows, test))]
+fn nt_splitroot(p: &[char]) -> (String, String, String) {
     const SEP: char = '\\';
-    let s = raw.replace('/', r"\");
-    // `\\server\share` is the drive; the rest always has a root.
-    let unc = s
-        .strip_prefix(r"\\")
-        .filter(|r| !r.starts_with(SEP))
-        .and_then(|r| {
-            let mut it = r.splitn(3, SEP);
-            let (server, share) = (it.next()?, it.next()?);
-            (!server.is_empty() && !share.is_empty()).then(|| {
-                (
-                    format!(r"\\{server}\{share}"),
-                    it.next().unwrap_or("").to_string(),
-                    true,
-                )
-            })
-        });
-    let (drive, rest, unc_root) = match (unc, s.as_bytes()) {
-        (Some(parsed), _) => parsed,
-        (None, [d, b':', ..]) if d.is_ascii_alphabetic() => {
-            (s[..2].to_string(), s[2..].to_string(), false)
+    let s = |a: usize, b: usize| -> String { p[a.min(p.len())..b.min(p.len())].iter().collect() };
+    let at = |i: usize| p.get(i).copied();
+    let find = |from: usize| (from..p.len()).find(|&i| p[i] == SEP);
+    let n = p.len();
+    if at(0) == Some(SEP) {
+        if at(1) == Some(SEP) {
+            // UNC drives (`\\server\share`, `\\?\UNC\server\share`) and
+            // device drives (`\\.\device`, `\\?\device`).
+            let head: String = p.iter().take(8).collect::<String>().to_uppercase();
+            let start = if head == r"\\?\UNC\" { 8 } else { 2 };
+            let Some(index) = find(start) else {
+                return (s(0, n), String::new(), String::new());
+            };
+            let Some(index2) = find(index + 1) else {
+                return (s(0, n), String::new(), String::new());
+            };
+            return (s(0, index2), s(index2, index2 + 1), s(index2 + 1, n));
         }
-        (None, _) => (String::new(), s.clone(), false),
-    };
-    let root = if unc_root || rest.starts_with(SEP) { r"\" } else { "" };
-    let parts: Vec<&str> = rest
+        return (String::new(), s(0, 1), s(1, n));
+    }
+    if at(1) == Some(':') {
+        if at(2) == Some(SEP) {
+            return (s(0, 2), s(2, 3), s(3, n));
+        }
+        return (s(0, 2), String::new(), s(2, n));
+    }
+    (String::new(), String::new(), s(0, n))
+}
+
+/// `PureWindowsPath` as CPython 3.12 parses and formats it (`_parse_path`,
+/// `_format_parsed_parts`): both slashes separate, the shown form uses `\`,
+/// a `\\server\share` drive always has a root, and a first part that reads
+/// as a drive is shown behind `.\`. CPython 3.11 parsed paths that start
+/// with two separators differently (`divergences.md`, DOC-PATH-WINDOWS).
+#[cfg(any(windows, test))]
+pub(crate) fn py_path_windows(raw: &str) -> PyPath {
+    const SEP: char = '\\';
+    if raw.is_empty() {
+        return PyPath {
+            shown: ".".into(),
+            name: String::new(),
+        };
+    }
+    let chars: Vec<char> = raw
+        .chars()
+        .map(|c| if c == '/' { SEP } else { c })
+        .collect();
+    let (drive, mut root, rest) = nt_splitroot(&chars);
+    if root.is_empty() && drive.starts_with(SEP) && !drive.ends_with(SEP) {
+        let drive_parts: Vec<&str> = drive.split(SEP).collect();
+        if (drive_parts.len() == 4 && !["?", "."].contains(&drive_parts[2]))
+            || drive_parts.len() == 6
+        {
+            root = SEP.to_string();
+        }
+    }
+    let tail: Vec<&str> = rest
         .split(SEP)
         .filter(|p| !p.is_empty() && *p != ".")
         .collect();
-    let mut shown = format!("{drive}{root}{}", parts.join(r"\"));
-    if shown.is_empty() {
-        shown = ".".into();
-    }
+    let shown = if !drive.is_empty() || !root.is_empty() {
+        format!("{drive}{root}{}", tail.join(r"\"))
+    } else if tail
+        .first()
+        .is_some_and(|t| !nt_splitroot(&t.chars().collect::<Vec<_>>()).0.is_empty())
+    {
+        format!(r".\{}", tail.join(r"\"))
+    } else {
+        tail.join(r"\")
+    };
     PyPath {
-        shown,
-        name: parts.last().map_or(String::new(), |p| p.to_string()),
+        shown: if shown.is_empty() { ".".into() } else { shown },
+        name: tail.last().map_or(String::new(), |p| p.to_string()),
     }
+}
+
+#[cfg(windows)]
+pub(crate) fn py_path(raw: &str) -> PyPath {
+    py_path_windows(raw)
 }
 
 /// `PurePath.suffix`: from the name's last dot, unless the dot leads or
@@ -143,7 +184,12 @@ fn py_exists(path: &str) -> Result<bool, std::io::Error> {
         Ok(_) => Ok(true),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
         #[cfg(unix)]
-        Err(e) if matches!(e.raw_os_error(), Some(libc::ENOTDIR | libc::EBADF | libc::ELOOP)) => {
+        Err(e)
+            if matches!(
+                e.raw_os_error(),
+                Some(libc::ENOTDIR | libc::EBADF | libc::ELOOP)
+            ) =>
+        {
             Ok(false)
         }
         // `_IGNORED_WINERRORS`: not ready, invalid name, symlink loop.
@@ -220,7 +266,11 @@ pub(crate) fn strip_html(html: &str) -> String {
 /// Python's `s[start:stop]` over code points, for `start` in `0..len`.
 fn py_slice(chars: &[char], start: usize, stop: i128) -> String {
     let n = chars.len() as i128;
-    let stop = if stop < 0 { (stop + n).max(0) } else { stop.min(n) };
+    let stop = if stop < 0 {
+        (stop + n).max(0)
+    } else {
+        stop.min(n)
+    };
     if stop <= start as i128 {
         return String::new();
     }
@@ -270,6 +320,8 @@ fn without_nul(s: &str) -> String {
 }
 
 /// `extract_text(path)` as `_read_file` runs it.
+// The body-slice error type (`dispatch::ToolError`) is the large one.
+#[allow(clippy::result_large_err)]
 fn extract_text(path: &str, name: &str) -> Result<String, ToolError> {
     let suffix = py_suffix(name).to_lowercase();
     if suffix == ".pdf" {
@@ -281,17 +333,22 @@ fn extract_text(path: &str, name: &str) -> Result<String, ToolError> {
             ),
         ));
     }
-    let read = || std::fs::read(path);
+    // Unwrapped reads raise the OSError itself: a file removed since the
+    // `exists()` check is FileNotFoundError, anything else internal.
+    let read = || {
+        std::fs::read(path).map_err(|e| match e.kind() {
+            std::io::ErrorKind::NotFound => ToolError::FileNotFound(py_oserror(&e, path)),
+            _ => internal(e),
+        })
+    };
     if suffix == ".html" || suffix == ".htm" {
         // The fallback's read sits outside the `try` that wraps the parser.
-        let bytes = read().map_err(internal)?;
-        return Ok(strip_html(&decode_text(&bytes)));
+        return Ok(strip_html(&decode_text(&read()?)));
     }
     if TEXT_SUFFIXES.contains(&suffix.as_str()) {
-        let bytes = read().map_err(internal)?;
-        return Ok(decode_text(&bytes));
+        return Ok(decode_text(&read()?));
     }
-    match read() {
+    match std::fs::read(path) {
         Ok(bytes) => Ok(decode_text(&bytes)),
         Err(e) => Err(ToolError::Invalid(format!(
             "Cannot read file {name}: {}",
@@ -366,15 +423,20 @@ pub(crate) fn hit_json(n: &Nearest, score: f64) -> Value {
     Value::Object(m)
 }
 
+/// One chunk row: id, source, chunk_index, text, embedding, metadata.
+type ChunkRow = (String, String, i32, String, Vec<f32>, Value);
+
 /// `upsert_reference_chunks(rows)` with `replace=True`: a chunk with the
 /// same id is overwritten except its first `created_at`.
 async fn upsert(
     db: &tokio_postgres::Client,
-    rows: &[(String, String, i32, String, Vec<f32>, Value)],
+    rows: &[ChunkRow],
     now: f64,
 ) -> Result<(), tokio_postgres::Error> {
     let conflict = if crate::mutants::active("document-upsert-keeps-old") {
         "DO NOTHING"
+    } else if crate::mutants::active("document-upsert-clock-only") {
+        "DO UPDATE SET ingested_at = EXCLUDED.ingested_at"
     } else {
         "DO UPDATE SET source = EXCLUDED.source, chunk_index = EXCLUDED.chunk_index, \
          text = EXCLUDED.text, embedding = EXCLUDED.embedding, \
@@ -387,16 +449,19 @@ async fn upsert(
     );
     let stmt = db.prepare(&sql).await?;
     for (id, source, index, text, embedding, metadata) in rows {
-        db.execute(
-            &stmt,
-            &[id, source, index, text, embedding, metadata, &now],
-        )
-        .await?;
+        db.execute(&stmt, &[id, source, index, text, embedding, metadata, &now])
+            .await?;
     }
     Ok(())
 }
 
 // ── tools ────────────────────────────────────────────────────────────────
+
+/// Orders ingests among themselves; tokio's mutex is fair (FIFO).
+fn ingest_lock() -> &'static tokio::sync::Mutex<()> {
+    static LOCK: std::sync::OnceLock<tokio::sync::Mutex<()>> = std::sync::OnceLock::new();
+    LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
+}
 
 fn now() -> f64 {
     std::time::SystemTime::now()
@@ -413,60 +478,66 @@ fn mcp_document_ingest<'a>(app: &'a crate::http::App, call: ToolCall<'a>) -> Too
         let svc = app.service.clone();
         let ready = svc.ensure_init().await.map_err(internal)?;
         let path = py_path(raw);
-        if !py_exists(&path.shown).map_err(internal)? {
-            return Err(ToolError::FileNotFound(format!(
-                "Not found on the server's filesystem: {}. The path resolves where the \
-                 daemon runs (with Docker, inside the container, e.g. a mounted volume), \
-                 not on the client.",
-                path.shown
-            )));
-        }
-        // `source or file_path.name`: an empty source names the file too.
-        let src = source.filter(|s| !s.is_empty()).unwrap_or(path.name.clone());
         let reference = svc.config.memory.reference.clone();
         let r2 = ready.clone();
         // Admitted ingests outlive their callers, as every write does.
         ready
             .writes
             .spawn(async move {
+                // One ingest at a time, in arrival order (a fair lock), as
+                // Python's service lock orders them; other calls are not
+                // held (`divergences.md`, DOC-INGEST-LOCK).
+                let _ingest = ingest_lock().lock().await;
+                let shown = path.shown.clone();
+                let exists = tokio::task::spawn_blocking(move || py_exists(&shown))
+                    .await
+                    .map_err(internal)?
+                    .map_err(internal)?;
+                if !exists {
+                    return Err(ToolError::FileNotFound(format!(
+                        "Not found on the server's filesystem: {}. The path resolves where \
+                         the daemon runs (with Docker, inside the container, e.g. a mounted \
+                         volume), not on the client.",
+                        path.shown
+                    )));
+                }
+                // `source or file_path.name`: an empty source names the file too.
+                let src = source
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or(path.name.clone());
                 let shown = path.shown.clone();
                 let name = path.name.clone();
                 let embedder = r2.embedder.clone();
-                let (chunks, embeddings) = tokio::task::spawn_blocking(move || {
+                #[allow(clippy::result_large_err)]
+                let read_and_embed = move || {
                     let text = extract_text(&shown, &name)?;
-                    let chunks =
-                        chunk_text(&text, reference.chunk_size, reference.chunk_overlap);
+                    let chunks = chunk_text(&text, reference.chunk_size, reference.chunk_overlap);
                     let mut embeddings = Vec::with_capacity(chunks.len());
                     for slice in chunks.chunks(INGEST_ENCODE_BATCH) {
                         embeddings.extend(embedder.encode(slice, true).map_err(internal)?);
                     }
                     Ok::<_, ToolError>((chunks, embeddings))
-                })
-                .await
-                .map_err(internal)??;
+                };
+                let (chunks, embeddings) = tokio::task::spawn_blocking(read_and_embed)
+                    .await
+                    .map_err(internal)??;
                 let total = chunks.len();
                 if total > 0 {
                     let now = now();
                     let stored_source = without_nul(&src);
-                    let rows: Vec<_> = chunks
-                        .iter()
-                        .zip(embeddings)
-                        .enumerate()
-                        .map(|(i, (chunk, embedding))| {
-                            (
-                                chunk_id(&src, i, chunk),
-                                stored_source.clone(),
-                                i32::try_from(i).unwrap_or(i32::MAX),
-                                without_nul(chunk),
-                                embedding,
-                                json!({"source": stored_source, "chunk_index": i,
-                                       "timestamp": now}),
-                            )
-                        })
-                        .collect();
-                    // Under the write lock for the upsert alone: Python holds
-                    // its service lock across the embedding as well
-                    // (`divergences.md`, DOC-INGEST-LOCK).
+                    let mut rows = Vec::with_capacity(total);
+                    for (i, (chunk, embedding)) in chunks.iter().zip(embeddings).enumerate() {
+                        // `int(chunk_index)` into INTEGER: past it the write fails.
+                        let index = i32::try_from(i).map_err(internal)?;
+                        rows.push((
+                            chunk_id(&src, i, chunk),
+                            stored_source.clone(),
+                            index,
+                            without_nul(chunk),
+                            embedding,
+                            json!({"source": stored_source, "chunk_index": i, "timestamp": now}),
+                        ));
+                    }
                     let _ws = r2.write.lock().await;
                     crate::txn::run(r2.storage.client(), |db| async move {
                         upsert(db, &rows, now).await

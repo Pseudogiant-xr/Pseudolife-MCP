@@ -105,10 +105,8 @@ pub struct MemoryConfig {
     /// the daemon reads.
     pub deep_dream: DeepDreamConfig,
     /// `memory.reference` (`utils/config.py` `ReferenceConfig`): the
-    /// document store's chunking and `document_search`'s default size.
+    /// document store's chunking.
     pub reference: ReferenceConfig,
-    /// `memory.ref_top_k` (3): reference chunks a memory search appends.
-    pub ref_top_k: i64,
 }
 
 /// `ReferenceConfig` (`utils/config.py:131-139`): the keys the daemon reads
@@ -118,7 +116,6 @@ pub struct MemoryConfig {
 pub struct ReferenceConfig {
     pub chunk_size: i64,
     pub chunk_overlap: i64,
-    pub max_results: i64,
 }
 
 impl Default for ReferenceConfig {
@@ -126,7 +123,6 @@ impl Default for ReferenceConfig {
         ReferenceConfig {
             chunk_size: 512,
             chunk_overlap: 64,
-            max_results: 5,
         }
     }
 }
@@ -808,7 +804,6 @@ impl Default for MemoryConfig {
             recall: RecallConfig::default(),
             deep_dream: DeepDreamConfig::default(),
             reference: ReferenceConfig::default(),
-            ref_top_k: 3,
         }
     }
 }
@@ -1749,18 +1744,17 @@ fn load_str(text: &str) -> Result<Config, ConfigError> {
             memory.cortex_auto_promote = want_bool(c, "auto_promote", "memory.cortex", false)?;
         }
         // `self.config.memory.reference.persist_dir = ...` (service.py:857).
-        // `_dict_to_dataclass` checks no types; a non-integer here would
-        // fail Python's first ingest or search, so it refuses the start.
+        // `_dict_to_dataclass` checks no types; a non-integer size makes
+        // Python's first ingest fail (`range` refuses a float step), so it
+        // refuses the start.
         if let Some(r) = section(m, "reference", "memory.")? {
             let p = "memory.reference";
             let d = ReferenceConfig::default();
             memory.reference = ReferenceConfig {
                 chunk_size: want_int(r, "chunk_size", p, d.chunk_size)?,
                 chunk_overlap: want_int(r, "chunk_overlap", p, d.chunk_overlap)?,
-                max_results: want_int(r, "max_results", p, d.max_results)?,
             };
         }
-        memory.ref_top_k = want_int(m, "ref_top_k", p, memory.ref_top_k)?;
         if let Some(s) = section(m, "search", "memory.")? {
             memory.search = read_search(s)?;
         }

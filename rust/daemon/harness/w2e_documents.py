@@ -37,9 +37,11 @@ GUIDE = (
     "schema check runs before any request is served. "
 ) * 12
 
-GUIDE_V2 = (
-    "# Restoring the bank from a backup\n\n"
-    "Restores now go through the update command, which takes a fresh backup "
+# A shorter revision sharing GUIDE's first 160 characters: its one chunk has
+# the id of GUIDE's first (the id hashes the first 100), so the re-ingest
+# overwrites that row with new text, and GUIDE's other chunks stay.
+GUIDE_V2 = GUIDE[:160] + (
+    " Restores now go through the update command, which takes a fresh backup "
     "first and rolls back on a failed health check. "
 ) * 3
 
@@ -148,7 +150,8 @@ def require_oracle_without_bs4() -> None:
 # The document breaks (``documents.rs``), each caught by the documents-*
 # scenarios.
 MUTANTS = ["document-raw-newlines", "document-strip-rust-whitespace", "document-no-overlap",
-           "document-search-no-id-order", "document-upsert-keeps-old"]
+           "document-search-no-id-order", "document-upsert-keeps-old",
+           "document-upsert-clock-only"]
 
 
 SCENARIOS: dict[str, dict] = {
