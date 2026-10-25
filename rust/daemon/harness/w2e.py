@@ -3111,10 +3111,11 @@ SCENARIOS.update({
 # events pass number the notes (``[1] text``, blank-line separated), the
 # relations calls join them with a blank line. The vocab hint in the system
 # prompt depends on embeddings, so replies are never keyed by body hash.
-# The unported stages (outcome inference, lesson synthesis, digests, the
-# graph-insight refresh) are switched off: the Rust daemon refuses ``run``
-# while any is on. The sweep and the stall notice are off too, so nothing
-# runs behind the operations.
+# Lesson synthesis and the graph-insight refresh are switched off: their
+# own scenarios cover them (``dream-stages-*``, ``dream-insight-*``), and a
+# refresh here would need every graph these scenarios write to partition
+# independently of Louvain's visiting order. The sweep and the stall notice
+# are off too, so nothing runs behind the operations.
 DREAM_RUN_CONFIG = (
     "memory:\n"
     "  lessons:\n    enabled: false\n"
@@ -3363,6 +3364,16 @@ SCENARIOS.update({
         ],
     },
 })
+
+
+# The graph-insight refresh (P2b): its scenarios and clocks live in their
+# own module.
+import w2e_graph_insight  # noqa: E402
+
+SCENARIOS.update(w2e_graph_insight.scenarios(sys.modules[__name__]))
+CLOCK |= w2e_graph_insight.CLOCK
+META_CLOCK.update(w2e_graph_insight.META_CLOCK)
+MUTANTS += w2e_graph_insight.MUTANTS
 
 
 # The dream pass's remaining branches. Every scenario here switches the

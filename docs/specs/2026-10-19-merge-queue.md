@@ -66,7 +66,7 @@ harness's live arms (the hook row's 250 ms health probe), and daemon body
 admission, security admission and MCP live parity (early refusals that
 Windows can turn into a reset). Linux runs `cli-live` under the gate. Hosted
 Windows runs it in `Parity live (non-gating) / windows-latest / cli-live`, on
-master pushes, the nightly and manual CI only. That job has
+the nightly and manual CI only (master pushes ran it too until 2026-10-24). That job has
 `continue-on-error` and no job needs it, so it reports a Windows-only live
 divergence without blocking a merge or holding a pull request's checks open.
 
@@ -79,8 +79,9 @@ same tree (never `eval` or `judges`; `docs/dev/merge-batches.md`). Since
 candidate build and the matrix unless it changes CI or dependency
 inputs (`docs/dev/merge-batches.md`, "What CI runs where"). Any other pull
 request runs only the suites its diff reaches, and never fewer
-than the floor: `eval`, `cli`, `cli-daemon`, `cli-live` and `h5-w1a`. The
-`cli` suite was split into those three shards. The scope job's
+than the floor: `eval`, `cli`, `cli-store`, `cli-daemon`, `cli-daemon-2`,
+`cli-live` and `h5-w1a`. The `cli` suite was split into `cli`, `cli-daemon`
+and `cli-live`, and on 2026-10-24 `cli` and `cli-daemon` in two again. The scope job's
 `rust/ci/parity_scope.py` maps each changed file to suites:
 
 - A CLI row (`rust/cli_harness/rows/<row>`, its goldens or its spec), or
@@ -95,11 +96,17 @@ than the floor: `eval`, `cli`, `cli-daemon`, `cli-live` and `h5-w1a`. The
 
 A divergence in a suite a pull request skipped surfaces on the master push
 that merges it. Per pull request push, `rust.yml` used to run 32 jobs, 24 of
-them parity shards, against the account's 20-job cap. It now runs 17 for a
+them parity shards, against the account's 20-job cap. It then ran 17 for a
 floor-only change, about 21 for one CLI command's change, and 35 when every
-suite runs. The Windows critical path drops from about 85 minutes (`Rust`,
+suite ran. The Windows critical path dropped from about 85 minutes (`Rust`,
 then the 61-70 minute cli shard) to about 45 (`Rust`, then a 26-minute
-shard).
+shard). Since 2026-10-24 the shards wait for the candidate and fixtures
+builds, not `Rust` (which the `Parity` gate still needs), and the cli,
+cli-daemon and w1c-connection shards are split in two, so no Windows shard
+is planned past about 15 minutes. The same day the candidate's harness
+build moved to its own job beside it, and Linux began running `h5-audit`,
+`h5-backup` and `h5-background` as one `h5-light` job; a pull request push
+runs 25 jobs for a floor-only change and 43 when every suite runs.
 
 The scope jobs diff from master's tip rather than `merge_group.base_sha`
 because GitHub does not formally define `base_sha`. It is either master's tip

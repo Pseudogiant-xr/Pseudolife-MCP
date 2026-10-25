@@ -80,6 +80,11 @@ the memory bank; procedures belong in a skill or doc this file points to.
    path through the daemon (an MCP call, a psql check of new DDL).
 8. **A change is not released until install and update do its setup**
    (next section); the release procedure checks it.
+9. **A CI change pays for its slots:** one that adds a hosted job, shard or
+   setup cost re-measures `rust/ci/ci_budget.json` from its own hosted runs
+   and raises a limit only with its reason (`rust/ci/test_ci_budget.py`
+   enforces both), because every job shares the account's 20 hosted slots
+   (`docs/dev/ci-budget.md`).
 
 ## Install and update experience
 
