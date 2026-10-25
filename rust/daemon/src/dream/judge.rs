@@ -932,7 +932,7 @@ async fn apply_reject(
     id: i64,
     ex_served: Option<&str>,
 ) -> Result<bool, ToolError> {
-    let prior = rj::capture_proposal_pair(c, row).await?;
+    let prior = rj::capture_proposal_pair(c, rj::Queue::Merge, row).await?;
     let rejected = reject_locked(c, review, row, id).await?;
     if rejected {
         rj::record_proposal_terminal(c, review, row, &prior, ex_served).await?;
@@ -1234,7 +1234,7 @@ async fn tiebreak_apply(
         return Ok(());
     };
     for opinion in ["second", "third"] {
-        if rj::vote_endpoint_moved(c, row, opinion, None).await?
+        if rj::vote_endpoint_moved(c, rj::Queue::Merge, row, opinion, None).await?
             && !crate::mutants::active("mcp-dream-judge-moved-applies")
         {
             return Ok(());
@@ -1478,8 +1478,8 @@ async fn judge_tick(
         let _lock = ready.write.lock().await;
         reads(client, |c| async move {
             Ok((
-                rj::pending_rows(c).await?,
-                rj::has_active_decisions(c).await?,
+                rj::pending_rows(c, rj::Queue::Merge).await?,
+                rj::has_active_decisions(c, rj::Queue::Merge).await?,
             ))
         })
         .await
@@ -1497,7 +1497,7 @@ async fn judge_tick(
         return Ok(m);
     };
     let current_model = or_stop(stop, rj::observed_model(&ex.compat, ex.served.as_deref())).await?;
-    let mut review = Review::new(&service.config, &ex.compat, pending, current_model);
+    let mut review = Review::new(&service.config, &ex.compat, rj::Queue::Merge, pending, current_model);
     let reconsidered = {
         let _lock = ready.write.lock().await;
         let reconsidered =
@@ -1506,7 +1506,7 @@ async fn judge_tick(
                 .map_err(e2s)?;
         let r = &mut review;
         reads(client, |c| async move {
-            r.pending = rj::pending_rows(c).await?;
+            r.pending = rj::pending_rows(c, rj::Queue::Merge).await?;
             r.prepare(c, cap).await
         })
         .await
