@@ -47,8 +47,9 @@ def reply(content) -> dict:
 
 EXTRACTOR = {"model": "stub-model", "replies": [
     # Known names (one an alias), an unknown one, a number and a repeat,
-    # inside prose: the vocabulary filter keeps "Web App" and "pg", in order.
-    reply('Seeds: ["Web App", "Nowhere Corp", 7, "pg", "Web App"] -- done'),
+    # inside prose, the known ones in reverse vocabulary order (an alias
+    # follows every display name): the filter keeps "pg" then "Web App".
+    reply('Seeds: ["pg", "Nowhere Corp", 7, "Web App", "pg"] -- done'),
     # The same question, compact.
     reply('["Web App", "Nowhere Corp", "pg"]'),
     # No JSON array: no seeds, low_confidence, the seed texts kept.
@@ -64,8 +65,8 @@ EXTRACTOR = {"model": "stub-model", "replies": [
     # A truthy content that is no string: Python's _parse_name_list calls
     # .find on it outside simple_complete's try, an internal error.
     reply(5),
-    # After a write, a new name the model returns seeds the walk.
-    reply('["Redis", "Disk"]'),
+    # After a write, the new name first: reverse vocabulary order again.
+    reply('["Disk", "Redis"]'),
 ]}
 
 
@@ -76,6 +77,9 @@ def scenarios(recall_seed: list[dict]) -> dict[str, dict]:
             "config": CONFIG,
             "extractor": EXTRACTOR,
             "extractor_keys": KEYS,
+            # every reply answers a request: a daemon that never calls the
+            # model fails the scenario (w2e.py unused_reply_diffs)
+            "extractor_all_used": True,
             "seed": recall_seed,
             "ops": [
                 # blank: the canned answer, no model call

@@ -680,8 +680,17 @@ async fn llm_seed_entities(
         None => json!(""),
     };
     let Value::String(raw) = raw else {
+        // Python's message names only the type; the model's content stays
+        // out of the log.
+        let type_name = match &raw {
+            Value::Bool(_) => "bool",
+            Value::Number(n) if n.to_string().contains(['.', 'e', 'E']) => "float",
+            Value::Number(_) => "int",
+            Value::Array(_) => "list",
+            _ => "dict",
+        };
         return Err(internal(format!(
-            "AttributeError: a non-string recall seed reply has no attribute 'find': {raw}"
+            "AttributeError: '{type_name}' object has no attribute 'find'"
         )));
     };
     let known: HashSet<&str> = vocab.iter().map(String::as_str).collect();
@@ -1534,6 +1543,23 @@ mod tests {
         let (origin, _) = serve(answer("200 OK", &envelope(json!(5)), &[]));
         let ep = at(&format!("{origin}/v1"), None);
         let got = llm_seed_entities(Some(&ep), 5.0, "q", &[], &vocab).await;
-        assert!(matches!(got, Err(ToolError::Internal(_))));
+        let Err(ToolError::Internal(e)) = got else {
+            panic!("expected an internal error");
+        };
+        // Python's message: the type only, never the model's content.
+        assert_eq!(
+            e.to_string(),
+            "AttributeError: 'int' object has no attribute 'find'"
+        );
+        let (origin, _) = serve(answer("200 OK", &envelope(json!({"a": 1.5})), &[]));
+        let ep = at(&format!("{origin}/v1"), None);
+        let got = llm_seed_entities(Some(&ep), 5.0, "q", &[], &vocab).await;
+        let Err(ToolError::Internal(e)) = got else {
+            panic!("expected an internal error");
+        };
+        assert_eq!(
+            e.to_string(),
+            "AttributeError: 'dict' object has no attribute 'find'"
+        );
     }
 }

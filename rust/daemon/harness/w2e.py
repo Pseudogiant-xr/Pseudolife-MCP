@@ -187,7 +187,9 @@ with ``"extractor_keys": {"primary": ..., "fallback": ...}`` (passed as
 ``PSEUDOLIFE_DREAM_API_KEY`` and ``PSEUDOLIFE_DREAM_FALLBACK_API_KEY``)
 each side's chat requests must also carry their own endpoint's key and its
 GETs none (``extractor_key_diffs``); each side's stub origin in its
-responses becomes ``http://stub``. The claim: given identical model replies, both
+responses becomes ``http://stub``. With ``"extractor_all_used": true`` every
+reply carrying ``times`` must be used up on each side by the scenario's end
+(``unused_reply_diffs``). The claim: given identical model replies, both
 daemons send byte-identical requests and write identical banks; it claims
 nothing about model behaviour.
 
@@ -5516,6 +5518,17 @@ def scenario_config(scn: dict, stub: StubExtractor | None) -> str | None:
     return config
 
 
+def unused_reply_diffs(scn: dict, stubs: dict[str, StubExtractor]) -> list[str]:
+    """With ``"extractor_all_used": true``, every reply carrying ``times``
+    must have answered that many requests on each side by the scenario's
+    end, so a run in which a daemon never called the model fails."""
+    if not scn.get("extractor_all_used"):
+        return []
+    return [f"extractor {side}: reply never used {json.dumps(entry)[:160]}"
+            for side in ("python", "rust")
+            for entry in stubs[side].unused(side_auth(side) if scn.get("shared_stub") else None)]
+
+
 def drain_side(stubs: dict[str, StubExtractor], scn: dict, side: str) -> list[dict]:
     if scn.get("shared_stub"):
         return stubs[side].drain(auth=side_auth(side))
@@ -6012,6 +6025,8 @@ def _run_live(name: str, scn: dict, tag: str, binary: Path, root: Path, record: 
             steps.append(row)
             if record:
                 row["_python_state"], row["_python_numeric"] = sp, np_
+        if stubs and steps:
+            steps[-1]["diffs"] += unused_reply_diffs(scn, stubs)
     finally:
         for d in procs.values():
             d.stop()

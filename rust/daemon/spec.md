@@ -1264,8 +1264,10 @@ with the gate, the ceilings, pinning and trace annotation off; and a hub of
 twelve leaves with one deeper node, where the entity cap keeps the deepest
 hop. `recall-llm` (`harness/w2e_recall_llm.py`) runs the llm driver against each
 side's stub extractor with a bearer key, comparing the two daemons' request
-bytes and `Authorization` digests after every call: model-named seeds (an
-alias among them, unknown names, a number and a repeat dropped), replies
+bytes and `Authorization` digests after every call, and failing unless each
+side used every stub reply (`extractor_all_used`): model-named seeds in
+reverse vocabulary order (an alias among them, unknown names, a number and a
+repeat dropped), replies
 naming no array or only unknown names, a refused redirect, a 500, a
 non-string content, and a walk after a write. The
 `mcp-recall-seed-any`, `mcp-recall-no-hub-gate`, `mcp-recall-no-requery`,

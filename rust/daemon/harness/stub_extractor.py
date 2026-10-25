@@ -201,6 +201,14 @@ class StubExtractor:
         with self._lock:
             return sum(1 for r in self._records if auth is None or r["authorization"] == auth)
 
+    def unused(self, auth: str | None = None) -> list[dict]:
+        """The ``times`` entries that answered fewer than ``times`` requests
+        (from ``auth`` alone, else from every caller together)."""
+        with self._lock:
+            return [e for e in self.replies if e.get("times") is not None
+                    and sum(n for (eid, a), n in self._times_served.items()
+                            if eid == id(e) and (auth is None or a == auth)) < int(e["times"])]
+
     # ── handling ───────────────────────────────────────────────────────────
     def _read_body(self, handler: BaseHTTPRequestHandler) -> bytes:
         if "chunked" in (handler.headers.get("Transfer-Encoding") or "").lower():

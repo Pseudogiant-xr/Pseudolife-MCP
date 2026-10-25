@@ -43,14 +43,54 @@ def test_each_model_calling_recall_has_its_reply_in_turn():
     assert redirect["headers"]["Location"].startswith("/v1/")
 
 
-def test_the_mutant_is_registered_and_compiled_in(monkeypatch):
+def import_w2e(monkeypatch):
     import importlib
 
     import pgdisposable as pg
     # w2e changes the shared name admission on import (test_w2e_lifecycle's
     # fixture): restore it afterwards for the other harness test files.
     monkeypatch.setattr(pg, "DISPOSABLE_NAME", pg.DISPOSABLE_NAME)
-    w2e = importlib.import_module("w2e")
+    return importlib.import_module("w2e")
+
+
+def test_unused_replies_fail_an_opted_in_scenario_per_side(monkeypatch):
+    w2e = import_w2e(monkeypatch)
+    spec = {"replies": [rl.reply("first"), rl.reply("second")]}
+    stubs = {"python": StubExtractor(spec, "py"), "rust": StubExtractor(spec, "rs")}
+    scn = {"extractor": spec, "extractor_all_used": True}
+    stubs["python"].lookup(seed_body("p"), "primary", "sha256:py")
+    stubs["python"].lookup(seed_body("p"), "primary", "sha256:py")
+    stubs["rust"].lookup(seed_body("p"), "primary", "sha256:rs")
+    diffs = w2e.unused_reply_diffs(scn, stubs)
+    assert len(diffs) == 1 and diffs[0].startswith("extractor rust: reply never used")
+    assert '"content": "second"' in diffs[0]
+    stubs["rust"].lookup(seed_body("p"), "primary", "sha256:rs")
+    assert w2e.unused_reply_diffs(scn, stubs) == []
+    # Not opted in: nothing is checked.
+    assert w2e.unused_reply_diffs({"extractor": spec}, {
+        side: StubExtractor(spec, side) for side in ("python", "rust")}) == []
+
+
+def test_a_recall_llm_run_missing_a_model_call_is_reported(monkeypatch):
+    w2e = import_w2e(monkeypatch)
+    scn = rl.scenarios([])["recall-llm"]
+    assert scn["extractor_all_used"] is True
+    calls = [op for op in scn["ops"]
+             if op["name"] == "memory_recall" and op["args"]["query"].strip()]
+    stubs = {side: StubExtractor(scn["extractor"], side) for side in ("python", "rust")}
+    # As if one recall never reached the model (or one op were dropped).
+    for side, stub in stubs.items():
+        for i in range(len(calls) - 1):
+            stub.lookup(seed_body(f"prompt {i}"), "primary", f"sha256:{side}")
+    diffs = w2e.unused_reply_diffs(scn, stubs)
+    assert [d.split(":")[0] for d in diffs] == ["extractor python", "extractor rust"]
+    for side, stub in stubs.items():
+        stub.lookup(seed_body("last"), "primary", f"sha256:{side}")
+    assert w2e.unused_reply_diffs(scn, stubs) == []
+
+
+def test_the_mutant_is_registered_and_compiled_in(monkeypatch):
+    w2e = import_w2e(monkeypatch)
     assert set(rl.MUTANTS) <= set(w2e.MUTANTS)
     assert "recall-llm" in w2e.SCENARIOS
     src = (HERE.parent / "src" / "recall.rs").read_text(encoding="utf-8")
