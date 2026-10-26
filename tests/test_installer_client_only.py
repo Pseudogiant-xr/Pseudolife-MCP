@@ -1347,6 +1347,38 @@ def test_preflight_checks_the_venv_the_shim_runtime_needs(bash, tmp_path, venv_e
     assert "fallback" in pipx and "preferred" not in proc.stdout
 
 
+@pytest.mark.parametrize("buildx_exit", [0, 1])
+@BASH
+def test_preflight_fails_without_the_buildx_plugin_the_image_build_needs(bash, tmp_path, buildx_exit):
+    """The daemon's Dockerfile uses ``RUN --mount`` caches, which only
+    BuildKit runs; without the buildx plugin compose falls back to the
+    classic builder, and the install died mid-build with "the --mount
+    option requires BuildKit" after preflight said all checks passed
+    (CachyOS with Docker Engine and no docker-buildx, 2026-10-25)."""
+    shell = _Shell(bash, tmp_path)
+    _stub(shell.bin / "docker",
+          'case "$*" in "buildx version") exit "$FAKE_BUILDX_EXIT" ;; esac\nexit 0\n')
+    # The fix line asserted below is the Linux one, whatever this host runs.
+    _stub(shell.bin / "uname", "printf 'Linux\\n'\n")
+    # The stub PATH keeps only /usr/bin:/bin, which on Git for Windows has
+    # neither git nor python3: stub both so the exit code is buildx's alone.
+    _stub(shell.bin / "git", "exit 0\n")
+    _stub(shell.bin / "python3", "exit 0\n")
+    script = (ROOT / "ops" / "preflight.sh").read_text(encoding="utf-8")
+    proc = shell.run("set -- --client generic\n" + script,
+                     extra_env={"FAKE_BUILDX_EXIT": str(buildx_exit)})
+    lines = proc.stdout.splitlines()
+    if buildx_exit == 0:
+        assert any(re.search(r"OK\S*\s+docker buildx", line) for line in lines), proc.stdout
+        assert proc.returncode == 0, proc.stdout
+    else:
+        [failed] = [i for i, line in enumerate(lines) if re.search(r"FAIL\S*\s+docker buildx", line)]
+        assert "BuildKit" in lines[failed]
+        assert "sudo pacman -S docker-buildx" in lines[failed + 1]
+        assert "docker-buildx-plugin" in lines[failed + 1]
+        assert proc.returncode == 1, proc.stdout
+
+
 
 def test_the_pairing_code_help_says_the_prompt_keeps_it_off_the_command_line():
     """Security review, 2026-10-02: a code passed as a flag sits in shell

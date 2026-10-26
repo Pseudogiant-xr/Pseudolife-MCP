@@ -1182,7 +1182,7 @@
    "s": "read-only doctor",
    "p": "ops/preflight.ps1",
    "d": [
-    "Docker, Compose v2, ports 8765/5433, git, python3, client CLI",
+    "Docker, Compose v2, buildx, ports 8765/5433, git, python3, client CLI",
     "One exact fix line per failure; changes nothing"
    ]
   },
