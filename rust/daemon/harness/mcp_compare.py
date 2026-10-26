@@ -38,10 +38,9 @@ JSON_HDRS = [("Content-Type", "application/json"), ("Accept", ACCEPT)]
 FREE_PREFIXES = ("Parse error: ", "Validation error: ")
 # Bodies not yet served by the Rust daemon: tool -> owning slice. Mirrors
 # rust/daemon/divergences.md; delete a row when its body is wired.
-UNSERVED = {
-    "document_search": "W2-D",
-    "document_ingest": "W2-E",
-}
+UNSERVED: dict[str, str] = {}
+# The full corpus: 314 case responses plus one stub probe per unserved tool.
+CORPUS_RESPONSES = 314 + len(UNSERVED)
 
 
 BINDING = json.loads((Path(__file__).resolve().parents[1] / "src/mcp/binding.json")
@@ -754,7 +753,8 @@ def recording_errors(data, cases=None):
                  for response in stubs.values()):
             errors.append('stub_tools: oracle call failed')
     total = sum(len(value) for value in data.values() if isinstance(value, (list, dict)))
-    expected_total = 10 if names == {'config_lists'} else 30 if side_config else 316
+    expected_total = (10 if names == {'config_lists'} else 30 if side_config
+                      else CORPUS_RESPONSES)
     if total != expected_total:
         errors.append(f'corpus: {total} responses, expected {expected_total}')
     if not errors:

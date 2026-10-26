@@ -1,4 +1,5 @@
 //! Feature-gated process adapter for the dream differential harness.
+#![deny(unsafe_code)]
 /// The acknowledgement engine only: the daemon's other dream modules
 /// (extractor, `memory_dream`) need the whole service.
 #[path = "../dream"]

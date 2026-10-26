@@ -4,6 +4,7 @@
 
 use crate::http::{App, json_response};
 use crate::read::{chronicle, cortex_search, embed_cache, identity, rerank};
+use crate::search::Item;
 use crate::search::{self, Bm25Knobs, CrossEncoder, Params, RerankKnobs};
 use crate::service::{Ready, Service};
 use axum::http::HeaderMap;
@@ -262,43 +263,87 @@ pub async fn run(svc: &Service, ready: &Arc<Ready>, req: Request) -> anyhow::Res
         s.contiguity_neighbors.max(0) as usize
     };
     let hide_superseded = cfg.hide_superseded;
+    // A served reference hit's `access_count` (its entry is built per search).
+    let ref_accesses =
+        i64::from(req.count_access && !crate::mutants::active("search-no-access-bump"));
     let floor = cfg.search_confidence_floor;
-    let r2 = ready.clone();
     let cache_size = svc.config.embedding.cache_size;
+    let embedder = ready.embedder.clone();
+    let query_text = params.query.clone();
+    let qv = tokio::task::spawn_blocking(move || {
+        embed_cache::encode_query(&embedder, &query_text, cache_size)
+    })
+    .await??;
+    // Pool 2's rows, read before ranking (`reference.retrieve`, lenient).
+    let refs = {
+        let q = qv.clone();
+        crate::txn::with_client(ready.storage.client(), |db| async move {
+            Ok::<_, tokio_postgres::Error>(crate::documents::reference_pool(db, &q, cfg).await)
+        })
+        .await
+        .unwrap_or_else(|e| {
+            eprintln!("reference pool skipped: {e}");
+            Vec::new()
+        })
+    };
+    let ref_k = cfg.ref_top_k;
+    let r2 = ready.clone();
     let (entries_out, served_comps, params_json, direct_scores) =
         tokio::task::spawn_blocking(move || {
-            let qv = embed_cache::encode_query(&r2.embedder, &params.query, cache_size)?;
             let bank_guard = r2.bank.read().expect("bank lock");
             let bank = &*bank_guard;
-            let ranked = search::rank(bank, &qv, &params, Some(LazyReranker::get()));
+            let ranked = search::rank(bank, &qv, &params, Some(LazyReranker::get()), &refs, ref_k);
             let direct_scores: Vec<f64> = ranked.hits.iter().map(|h| h.score).collect();
-            // (index, score, via, components) with contiguity neighbours placed
+            let text_of = |item: Item| -> &str {
+                match item {
+                    Item::Entry(i) => bank.entries[i].text.as_str(),
+                    Item::Reference(i) => refs[i].nearest.text.as_str(),
+                }
+            };
+            // (item, score, via, components) with contiguity neighbours placed
             // around their parent hit (service.py:1984-2004).
-            let mut rows: Vec<(usize, f64, Option<&'static str>, Option<Value>)> = ranked
+            let mut rows: Vec<(Item, f64, Option<&'static str>, Option<Value>)> = ranked
                 .hits
                 .iter()
                 .map(|h| {
-                    let text = &bank.entries[h.idx].text;
                     (
-                        h.idx,
+                        h.item,
                         h.score,
                         h.via,
-                        ranked.comps.get(text).cloned().map(Value::Object),
+                        ranked
+                            .comps
+                            .get(text_of(h.item))
+                            .cloned()
+                            .map(Value::Object),
                     )
                 })
                 .collect();
             if n_ctg > 0 && !rows.is_empty() {
-                let mut seen: HashSet<&str> = rows
-                    .iter()
-                    .map(|r| bank.entries[r.0].text.as_str())
-                    .collect();
+                let mut seen: HashSet<&str> = rows.iter().map(|r| text_of(r.0)).collect();
                 let mut expanded = Vec::new();
                 for row in rows {
-                    let (before, after) =
-                        search::temporal_neighbors(bank, row.0, n_ctg, hide_superseded);
+                    let (before, after) = match row.0 {
+                        Item::Entry(i) => {
+                            search::temporal_neighbors(bank, i, n_ctg, hide_superseded)
+                        }
+                        Item::Reference(i) => {
+                            let n = &refs[i].nearest;
+                            let anchor = search::Anchor {
+                                text: &n.text,
+                                episode_id: None,
+                                source: &n.source,
+                                key: (n.ingested_at, i64::MAX),
+                            };
+                            if crate::mutants::active("search-reference-no-contiguity") {
+                                (Vec::new(), Vec::new())
+                            } else {
+                                search::temporal_neighbors_at(bank, &anchor, n_ctg, hide_superseded)
+                            }
+                        }
+                    };
                     let neighbour = |i: usize| {
                         (
-                            i,
+                            Item::Entry(i),
                             0.0,
                             Some("contiguity"),
                             Some(json!({"channel": "contiguity"})),
@@ -318,24 +363,37 @@ pub async fn run(svc: &Service, ready: &Arc<Ready>, req: Request) -> anyhow::Res
                 }
                 rows = expanded;
             }
-            let mut out: Vec<(usize, Value)> = rows
+            let mut out: Vec<Value> = rows
                 .iter()
-                .map(|(i, s, via, _)| {
-                    let mut d = search::entry_json(&bank.entries[*i], *s);
+                .map(|(item, s, via, _)| {
+                    let mut d = match item {
+                        Item::Entry(i) => search::entry_json(&bank.entries[*i], *s),
+                        Item::Reference(i) => {
+                            crate::documents::hit_json(&refs[*i].nearest, *s, ref_accesses)
+                        }
+                    };
                     if let (Some(v), Value::Object(m)) = (via, &mut d) {
                         m.insert("via".into(), json!(v));
                     }
-                    (*i, d)
+                    d
                 })
                 .collect();
-            search::annotate_supersession_in(bank, &mut out);
+            // Supersession is resolved for entries only; a reference chunk is
+            // never superseded.
+            let mut served: Vec<(usize, Value)> = Vec::new();
+            let mut at: Vec<usize> = Vec::new();
+            for (pos, row) in rows.iter().enumerate() {
+                if let Item::Entry(i) = row.0 {
+                    served.push((i, std::mem::take(&mut out[pos])));
+                    at.push(pos);
+                }
+            }
+            search::annotate_supersession_in(bank, &mut served);
+            for (pos, (_, d)) in at.into_iter().zip(served) {
+                out[pos] = d;
+            }
             let comps: Vec<Option<Value>> = rows.into_iter().map(|r| r.3).collect();
-            Ok::<_, anyhow::Error>((
-                out.into_iter().map(|(_, d)| d).collect::<Vec<Value>>(),
-                comps,
-                ranked.params,
-                direct_scores,
-            ))
+            Ok::<_, anyhow::Error>((out, comps, ranked.params, direct_scores))
         })
         .await??;
 

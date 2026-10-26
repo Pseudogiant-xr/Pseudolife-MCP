@@ -327,7 +327,10 @@ async fn load(c: &Client) -> anyhow::Result<Loaded> {
 
 /// `_curation_records(store, value_cap)` for both stores, from the resident
 /// lesson and world stores' current records.
-fn curation_records(ready: &Ready, value_cap: i64) -> (Vec<SlotRecord>, Vec<SlotRecord>) {
+pub(crate) fn curation_records(
+    ready: &Ready,
+    value_cap: i64,
+) -> (Vec<SlotRecord>, Vec<SlotRecord>) {
     let cap = |v: &str| {
         if value_cap != 0 {
             py_slice_chars(v, value_cap)
@@ -376,7 +379,7 @@ fn curation_records(ready: &Ready, value_cap: i64) -> (Vec<SlotRecord>, Vec<Slot
 }
 
 /// `_store_dismissed(dismissed, store)`: the store's namespaced pairs, bare.
-fn store_dismissed(
+pub(crate) fn store_dismissed(
     dismissed: &HashSet<(String, String)>,
     store: &str,
 ) -> HashSet<(String, String)> {

@@ -34,7 +34,13 @@ A ``judge_merges`` entry may answer by pair instead of by user content:
 numbered proposals, listing a verdict for each proposal whose FROM and INTO
 displays (either order) name a key, and none for the rest; a key naming a
 list of verdicts lists each of them under that proposal's number (a reply
-repeating an id). An entry with
+repeating an id). A ``judge_junk`` entry keys its verdicts by the flagged
+entity's display alone (``"verdicts": {"a, b, c": {...}}``), and a
+``judge_links`` entry by the proposal's ``SRC|DST`` displays (either order),
+a ``judge_candidates`` entry by the candidate's two names (either order),
+and a ``judge_slot_pairs`` entry by ``Entity.attribute|Entity.attribute``
+of its two sides (either order).
+An entry with
 ``"times": N`` answers N requests per caller (the request's
 ``Authorization`` digest), then lets the next matching entry answer, so an
 endpoint can fail once and recover.
@@ -67,6 +73,11 @@ KIND_PREFIXES = (
     ("You write a factual narrative digest", "digest"),
     # the deep dream's merge judge
     ("You judge MERGE PROPOSALS", "judge_merges"),
+    # the review-queue judges
+    ("You judge LINK PROPOSALS", "judge_links"),
+    ("You judge JUNK ENTITY", "judge_junk"),
+    ("You judge LINK CANDIDATES", "judge_candidates"),
+    ("You judge DUPLICATE SLOT", "judge_slot_pairs"),
 )
 CHAT_PATHS = {"/v1/chat/completions": "primary", "/fallback/v1/chat/completions": "fallback",
               "/second/v1/chat/completions": "second", "/third/v1/chat/completions": "third"}
@@ -75,6 +86,28 @@ MODEL_PATHS = {"/v1/models": "primary", "/fallback/v1/models": "fallback",
 JUDGE_ENDPOINTS = ("second", "third")
 PROPOSAL_HEAD = re.compile(r"^\[(\d+)\] FROM '(.*?)' \(degree ", re.M)
 PROPOSAL_INTO = re.compile(r"^    INTO '(.*?)' \(degree ", re.M)
+JUNK_HEAD = re.compile(r"^\[(\d+)\] '(.*?)' \u2014 detector: ", re.M)
+# A candidate's first line: one quote-or-newline-bounded run per name, so
+# the read stays linear (see LINK_SRC).
+# A slot pair's side line: one quote-or-newline-bounded run per name.
+SLOT_SIDE = re.compile(r"    ([AB]) '([^'\n]*)' \| '([^'\n]*)'")
+CANDIDATE_HEAD = re.compile(r"\[(\d+)\] '([^'\n]*)' vs '([^'\n]*)' \(cosine ")
+# A link proposal's first line, read in two linear pieces: no pattern
+# holds more than one unbounded run, and each run stops at a quote or a
+# newline (CodeQL py/polynomial-redos on the single pattern it replaced).
+LINK_SRC = re.compile(r"\[(\d+)\] SRC '([^'\n]*)' \(scopes ")
+LINK_DST = re.compile(r"--> DST '([^'\n]*)' \(scopes ")
+
+
+def link_head(block: str) -> tuple[int, str, str] | None:
+    """``(n, src, dst)`` from a ``format_link_proposal`` block's first line."""
+    line = block.split("\n", 1)[0]
+    src, dst = LINK_SRC.match(line), LINK_DST.search(line)
+    if not src or not dst:
+        return None
+    return int(src.group(1)), src.group(2), dst.group(1)
+
+
 HEALTH_PATHS = {"/health": "primary", "/fallback/health": "fallback"}
 
 
@@ -347,6 +380,47 @@ def judge_reply(verdicts: dict, body: bytes) -> str:
     parsed = parse_chat(body)
     user = parsed[1] if parsed and isinstance(parsed[1], str) else ""
     out = []
+    if parsed and parsed[0] == "judge_junk":
+        for block in re.split(r"\n\n(?=\[\d+\] ')", user):
+            head = JUNK_HEAD.search(block)
+            if not head:
+                continue
+            v = verdicts.get(head.group(2))
+            for one in (v if isinstance(v, list) else [] if v is None else [v]):
+                out.append({"id": int(head.group(1)), **one})
+        return json.dumps({"verdicts": out})
+    if parsed and parsed[0] == "judge_slot_pairs":
+        for block in re.split(r"\n\n(?=\[\d+\] store=)", user):
+            lines = block.split("\n")
+            head = re.match(r"\[(\d+)\] store=", lines[0])
+            sides = [SLOT_SIDE.match(line) for line in lines[1:3]]
+            if not head or not all(sides):
+                continue
+            a, b = (f"{m.group(2)}.{m.group(3)}" for m in sides)
+            v = verdicts.get(f"{a}|{b}") or verdicts.get(f"{b}|{a}")
+            for one in (v if isinstance(v, list) else [] if v is None else [v]):
+                out.append({"id": int(head.group(1)), **one})
+        return json.dumps({"verdicts": out})
+    if parsed and parsed[0] == "judge_candidates":
+        for block in re.split(r"\n\n(?=\[\d+\] ')", user):
+            head = CANDIDATE_HEAD.match(block.split("\n", 1)[0])
+            if not head:
+                continue
+            a, b = head.group(2), head.group(3)
+            v = verdicts.get(f"{a}|{b}") or verdicts.get(f"{b}|{a}")
+            for one in (v if isinstance(v, list) else [] if v is None else [v]):
+                out.append({"id": int(head.group(1)), **one})
+        return json.dumps({"verdicts": out})
+    if parsed and parsed[0] == "judge_links":
+        for block in re.split(r"\n\n(?=\[\d+\] SRC ')", user):
+            head = link_head(block)
+            if not head:
+                continue
+            n, a, b = head
+            v = verdicts.get(f"{a}|{b}") or verdicts.get(f"{b}|{a}")
+            for one in (v if isinstance(v, list) else [] if v is None else [v]):
+                out.append({"id": n, **one})
+        return json.dumps({"verdicts": out})
     for block in re.split(r"\n\n(?=\[\d+\] FROM )", user):
         head = PROPOSAL_HEAD.search(block)
         into = PROPOSAL_INTO.search(block)

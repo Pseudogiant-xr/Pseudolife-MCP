@@ -126,6 +126,10 @@ class SchemaBuildOnly(unittest.TestCase):
         self.assertEqual(len(commands), 1)
         self.assertEqual(commands[0][:3], ["cargo", "test", "--locked"])
         self.assertTrue({"--no-run", "--features", "mutants"} <= set(commands[0]))
+        # The daemon binary's own test executable, whatever integration
+        # test binaries the package also has (tests/pdfium_provision.rs).
+        self.assertIn(["--bin", schema_ci.PACKAGE],
+                      [commands[0][i:i + 2] for i in range(len(commands[0]) - 1)])
 
     def test_build_only_refuses_run_options(self):
         for extra in (["--out", "schema.json"], ["--record-goldens"], []):
