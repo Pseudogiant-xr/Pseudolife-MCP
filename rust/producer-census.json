@@ -211,7 +211,7 @@
     "examples/hook-instructions.md": "63e99f370c3b24c904bb806308f98b7adba4a561b9c38a4eef1d7b80f317c22e",
     "ops/.env.example": "60d44256635f0a131092c54104994cfa65c6e5ab93f94fd8b4f7339442185e0d",
     "ops/Dockerfile.daemon": "5acaa924f9ced1bf142d9a9d711b24e2d83917bb2b57cd214b4919b37dd31534",
-    "ops/Dockerfile.daemon-rust": "906c82fa8cf796f6fec24a38a5c12cd8951f048c35842d6c373e5d94f9ba4cfd",
+    "ops/Dockerfile.daemon-rust": "b1f94d4f33bad1cd299df381878960aaa040808033c0efec0ac8a93b4601d08e",
     "ops/Dockerfile.extractor": "cfd9068d7ba58aad49e00b000ca82ebe83add0e4d8ba7f75043c424243e3451d",
     "ops/Dockerfile.pg": "06308c96aaa3ceedf2fc988c1fccfe8573e4ae1836143546ce1fb7d996707201",
     "ops/assemble_changelog.py": "5462bfcb97a59e280311f0a1628e406fd3a47a45ed3ef39418e1e263b422fb38",
@@ -22857,7 +22857,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/Dockerfile.daemon-rust:51",
+          "location": "ops/Dockerfile.daemon-rust:59",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -22921,7 +22921,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/Dockerfile.daemon-rust:50",
+          "location": "ops/Dockerfile.daemon-rust:58",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -22959,7 +22959,7 @@
       "producers": [
         {
           "evidence": "static",
-          "location": "ops/Dockerfile.daemon-rust:53",
+          "location": "ops/Dockerfile.daemon-rust:61",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -23023,7 +23023,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/Dockerfile.daemon-rust:52",
+          "location": "ops/Dockerfile.daemon-rust:60",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -30843,7 +30843,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/Dockerfile.daemon-rust:35",
+          "location": "ops/Dockerfile.daemon-rust:42",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -30974,7 +30974,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/Dockerfile.daemon-rust:33",
+          "location": "ops/Dockerfile.daemon-rust:40",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -32121,7 +32121,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/Dockerfile.daemon-rust:34",
+          "location": "ops/Dockerfile.daemon-rust:41",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -37842,7 +37842,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/Dockerfile.daemon-rust:39",
+          "location": "ops/Dockerfile.daemon-rust:47",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -62159,7 +62159,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "ops/Dockerfile.daemon-rust:56",
+      "location": "ops/Dockerfile.daemon-rust:64",
       "method": null,
       "name": "/health",
       "shape": {
@@ -64244,7 +64244,23 @@
     {
       "evidence": "static",
       "kind": "environment",
-      "location": "ops/Dockerfile.daemon-rust:36",
+      "location": "ops/Dockerfile.daemon-rust:14",
+      "name": "PSEUDOLIFE_DAEMON_PDFIUM_DIR",
+      "shape": {
+        "channel": "environment",
+        "complete": true,
+        "parameters": {
+          "value": {
+            "literal": "/opt/pdfium"
+          }
+        }
+      },
+      "usage": "assignment"
+    },
+    {
+      "evidence": "static",
+      "kind": "environment",
+      "location": "ops/Dockerfile.daemon-rust:43",
       "name": "PSEUDOLIFE_DAEMON_ONNX_DIR",
       "shape": {
         "channel": "environment",
@@ -64260,7 +64276,7 @@
     {
       "evidence": "static",
       "kind": "environment",
-      "location": "ops/Dockerfile.daemon-rust:37",
+      "location": "ops/Dockerfile.daemon-rust:44",
       "name": "PSEUDOLIFE_DAEMON_ORT_THREADS",
       "shape": {
         "channel": "environment",
@@ -64268,6 +64284,22 @@
         "parameters": {
           "value": {
             "literal": "3"
+          }
+        }
+      },
+      "usage": "assignment"
+    },
+    {
+      "evidence": "static",
+      "kind": "environment",
+      "location": "ops/Dockerfile.daemon-rust:46",
+      "name": "PSEUDOLIFE_DAEMON_PDFIUM_DIR",
+      "shape": {
+        "channel": "environment",
+        "complete": true,
+        "parameters": {
+          "value": {
+            "literal": "/opt/pdfium"
           }
         }
       },
@@ -78518,18 +78550,18 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/Dockerfile.daemon-rust:22",
+      "location": "ops/Dockerfile.daemon-rust:28",
       "reason": "request target supplied dynamically or external"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/Dockerfile.daemon-rust:56",
+      "location": "ops/Dockerfile.daemon-rust:64",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/Dockerfile.daemon-rust:56",
+      "location": "ops/Dockerfile.daemon-rust:64",
       "reason": "request target supplied dynamically or external"
     },
     {

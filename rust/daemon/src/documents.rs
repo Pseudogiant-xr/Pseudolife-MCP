@@ -9,8 +9,8 @@
 //!
 //! The Rust daemon has no chromadb reader: the one-time import of a pre-v57
 //! store (`storage/migrate_chroma.py`) stays with the Python daemon (D5).
-//! PDF text extraction (pypdf) has no byte-equal Rust port and is refused
-//! with the declared stub refusal (`divergences.md`, DOC-PDF).
+//! PDF text comes from PDFium (`native/pdf_text.rs`), the pinned build the
+//! Python daemon's pypdfium2 bundles, through pypdfium2's own calls.
 
 use md5::{Digest, Md5};
 use serde_json::{Map, Value, json};
@@ -443,15 +443,6 @@ fn without_nul(s: &str) -> String {
 #[allow(clippy::result_large_err)]
 fn extract_text(path: &str, name: &str) -> Result<String, ToolError> {
     let suffix = py_suffix(name).to_lowercase();
-    if suffix == ".pdf" {
-        return Err(ToolError::refused(
-            "not_implemented",
-            Some(
-                "PDF text extraction is not yet served by the Rust daemon; \
-                 ingest .txt, .md or .html, or a PDF through the Python daemon",
-            ),
-        ));
-    }
     // Unwrapped reads raise the OSError itself: a file removed since the
     // `exists()` check is FileNotFoundError, anything else internal; a
     // refusal of the file is raised as it is.
@@ -464,6 +455,26 @@ fn extract_text(path: &str, name: &str) -> Result<String, ToolError> {
             ReadError::Io(e) => internal(e),
         })
     };
+    if suffix == ".pdf" {
+        // `_extract_pdf`: the bounded read sits outside the PDFium `try`,
+        // whose `PdfiumError` becomes `ValueError("Failed to read PDF: …")`.
+        use crate::native::pdf_text::{PdfError, extract};
+        return match extract(&read()?) {
+            Ok(text) => Ok(text),
+            Err(PdfError::Unreadable(why)) => {
+                Err(ToolError::Invalid(format!("Failed to read PDF: {why}")))
+            }
+            // Python reads with pypdf when PDFium cannot be loaded; this
+            // daemon refuses instead (`divergences.md`, DOC-PDF-ENGINE).
+            Err(PdfError::Unavailable(text)) => {
+                let detail = text
+                    .strip_prefix("pdf_engine_unavailable: ")
+                    .unwrap_or(&text);
+                Err(ToolError::refused("pdf_engine_unavailable", Some(detail)))
+            }
+            Err(PdfError::Internal(why)) => Err(internal(why)),
+        };
+    }
     if suffix == ".html" || suffix == ".htm" {
         // The fallback's read sits outside the `try` that wraps the parser.
         return Ok(strip_html(&decode_text(&read()?)));
