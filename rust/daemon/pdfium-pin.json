@@ -1,0 +1,67 @@
+{
+  "source": "https://github.com/bblanchon/pdfium-binaries",
+  "tag": "chromium/8076",
+  "oracle_pypdfium2": "5.14.0",
+  "attestation": {
+    "signer": "https://github.com/bblanchon/pdfium-binaries/.github/workflows/build-all.yml@refs/heads/master",
+    "verified": "2026-10-26"
+  },
+  "targets": {
+    "windows-x86_64": {
+      "asset": "pdfium-win-x64.tgz",
+      "url": "https://github.com/bblanchon/pdfium-binaries/releases/download/chromium/8076/pdfium-win-x64.tgz",
+      "archive_sha256": "808d36da9bc5a3104315fb307c80998121f565ee53953633bf33e80d7429e5ac",
+      "archive_bytes": 3826721,
+      "library": "bin/pdfium.dll",
+      "library_sha256": "69f1e860f6742fbaafcc4db80e785eec9a4ee0da36ea6d1dc0867ea0f18baea6"
+    },
+    "windows-aarch64": {
+      "asset": "pdfium-win-arm64.tgz",
+      "url": "https://github.com/bblanchon/pdfium-binaries/releases/download/chromium/8076/pdfium-win-arm64.tgz",
+      "archive_sha256": "ab7c45c25fc8456fd9b94666ce3dd27a940f4984f54b328f012468f869d34346",
+      "archive_bytes": 3600366,
+      "library": "bin/pdfium.dll",
+      "library_sha256": "45e414bce25cd698d25ac7e90e91b967c9d0b5b28ca5fad6cf69c5a8ce699f40"
+    },
+    "linux-x86_64-gnu": {
+      "asset": "pdfium-linux-x64.tgz",
+      "url": "https://github.com/bblanchon/pdfium-binaries/releases/download/chromium/8076/pdfium-linux-x64.tgz",
+      "archive_sha256": "d9d67bc40af03aef4fe28a60b19b1086f28ace019c8c9caf19cb7fe3d14ceca3",
+      "archive_bytes": 3747808,
+      "library": "lib/libpdfium.so",
+      "library_sha256": "fd4de9f91f183476d04b1bc3fd17dacd95aba349c55d2c376512d95e082b441e"
+    },
+    "linux-x86_64-musl": {
+      "asset": "pdfium-linux-musl-x64.tgz",
+      "url": "https://github.com/bblanchon/pdfium-binaries/releases/download/chromium/8076/pdfium-linux-musl-x64.tgz",
+      "archive_sha256": "312d2a7d66aecbf3b8f5965af6aa458cc433a35190f4a1ec69b5560683ca91b4",
+      "archive_bytes": 7301879,
+      "library": "lib/libpdfium.so",
+      "library_sha256": "c752a94bccc478c8095198dea1231617e3f9747d730ae32a8a35d6c7052c4f7b"
+    },
+    "linux-aarch64-gnu": {
+      "asset": "pdfium-linux-arm64.tgz",
+      "url": "https://github.com/bblanchon/pdfium-binaries/releases/download/chromium/8076/pdfium-linux-arm64.tgz",
+      "archive_sha256": "d7247b33ae5545615a5e877235dd97afc879e3a8805689684f528cae3339d352",
+      "archive_bytes": 3668763,
+      "library": "lib/libpdfium.so",
+      "library_sha256": "2c6b186b84596e1e6c370b9058c8dfd64b3d944f4878e51993b3cddb160209e2"
+    },
+    "macos-aarch64": {
+      "asset": "pdfium-mac-arm64.tgz",
+      "url": "https://github.com/bblanchon/pdfium-binaries/releases/download/chromium/8076/pdfium-mac-arm64.tgz",
+      "archive_sha256": "0d6781fe08906baff3d82c90953e519fbc4eb253fe76431e5ed53b157763b97c",
+      "archive_bytes": 3487497,
+      "library": "lib/libpdfium.dylib",
+      "library_sha256": "8de224826cb9784c8f8540ba36a174dd710f1f4f59e72211b7b882a2618aa401"
+    },
+    "macos-x86_64": {
+      "asset": "pdfium-mac-x64.tgz",
+      "url": "https://github.com/bblanchon/pdfium-binaries/releases/download/chromium/8076/pdfium-mac-x64.tgz",
+      "archive_sha256": "40865f34642c34d82cc336132df9e0347133f4692cd46776647af160f9a5cca9",
+      "archive_bytes": 3680415,
+      "library": "lib/libpdfium.dylib",
+      "library_sha256": "f8f4e387fb58f16ea24031e66744d8c3e9ae3e03b73e9c13d466a55ea0b5005f"
+    }
+  }
+}

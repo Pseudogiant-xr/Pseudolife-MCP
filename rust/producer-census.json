@@ -17,7 +17,7 @@
     "docs/guide/agent-isolation.md": "465b0c24a386ae3a92bf1a3d46e01114db061dc6ddd4a68836512fd191ff23f4",
     "docs/guide/benchmarks.md": "577a6a8230de0d57351e3e57262bb2b5385b27e6292bfc131c21c3522330fb97",
     "docs/guide/comparison.md": "841d814e64e6d2aa2385d7d0bdf3069e9ec216bea0e43adf1c286d18810e9bab",
-    "docs/guide/configuration.md": "ef53acf7b320038e83b12a594b575621e4018c352899c901687408c3cdc9d5f6",
+    "docs/guide/configuration.md": "134fbb8dedd47d398fec45396a5cf4b874afc797c0a64af92822c30b9f96a33a",
     "docs/guide/coordination-recovery.md": "04425509736ec7e40beb4bc46e7810d32ee0a68d791a969b77876c945ab5cb79",
     "docs/guide/dreaming.md": "f7d4b4cc8a121bb40f9b6d1814e207afc0d164cd0c9983725abd11bdc9c23e80",
     "docs/guide/episodes.md": "547f36bb2469f3ae352107374ba63ebbeecb3929be344730af9c7501d8802f49",
@@ -211,7 +211,7 @@
     "examples/hook-instructions.md": "63e99f370c3b24c904bb806308f98b7adba4a561b9c38a4eef1d7b80f317c22e",
     "ops/.env.example": "60d44256635f0a131092c54104994cfa65c6e5ab93f94fd8b4f7339442185e0d",
     "ops/Dockerfile.daemon": "5acaa924f9ced1bf142d9a9d711b24e2d83917bb2b57cd214b4919b37dd31534",
-    "ops/Dockerfile.daemon-rust": "906c82fa8cf796f6fec24a38a5c12cd8951f048c35842d6c373e5d94f9ba4cfd",
+    "ops/Dockerfile.daemon-rust": "b1f94d4f33bad1cd299df381878960aaa040808033c0efec0ac8a93b4601d08e",
     "ops/Dockerfile.extractor": "cfd9068d7ba58aad49e00b000ca82ebe83add0e4d8ba7f75043c424243e3451d",
     "ops/Dockerfile.pg": "06308c96aaa3ceedf2fc988c1fccfe8573e4ae1836143546ce1fb7d996707201",
     "ops/assemble_changelog.py": "5462bfcb97a59e280311f0a1628e406fd3a47a45ed3ef39418e1e263b422fb38",
@@ -320,7 +320,7 @@
     "rust/shim/src/board/unicode14.rs": "0305821a91aedd6cbebec63cefcaa76cb70b96f3b77aff8589013cca073dfbbb",
     "rust/shim/src/cache.rs": "12f79ec63ebb7ef019cc7897d56bc78e2b752e3fecb327e495e6936a0fa41753",
     "rust/shim/src/cli.rs": "cc536b4cf11db2a167c911dcebc785c14d9c392e501617208114d2e04f1dd333",
-    "rust/shim/src/cli/backup/archive.rs": "16c9cda2e1c850460046b83f6cd3d919483a8b39b493d2efebf6dba51dd07333",
+    "rust/shim/src/cli/backup/archive.rs": "546bc6a8e9d6dd2368070fa3cf541ccfadeca545576b549685b7bd234f9ca1ef",
     "rust/shim/src/cli/backup/args.rs": "43bb3f43324d7f43b3c960ccfbeaa70a42069673f994d05e6114bfaf913fe36d",
     "rust/shim/src/cli/backup/dump.rs": "d913b521ee145a28fa776c875f3b4d9d4a5116a882b648cb7b627c61b6a86358",
     "rust/shim/src/cli/backup/mod.rs": "5bba26e4cf0c13caa38499c8e496cc3f52ad069084a0737c7bd6634cc6cacdea",
@@ -431,7 +431,7 @@
     "rust/shim/src/owned_transport.rs": "6723acb67817f2901774ff5ffd3ff401e96ab1fe50f1d063a985d50c7c23520e",
     "rust/shim/src/pg/dsn.rs": "6fcfc5e2ce0a2bdb06ab3d83b6f0bf38e074af2cddba669fe6bbb7be424117c4",
     "rust/shim/src/pg/embedded_secret.rs": "ddb65ed137a57e12676b5bd5527fccaa4bc05aa6ecfec6e7cca2c2cea689d8f7",
-    "rust/shim/src/pg/mod.rs": "3d642e57c10f1de8305f8b6b30013317ab5328a45c7f7cc0dd56d48d87ba8b15",
+    "rust/shim/src/pg/mod.rs": "ea7b225824d697de8f71b0522c65a843dfbcf7282c4d0729bcf10e7747475f18",
     "rust/shim/src/pg/password.rs": "b9b6bf948b584a0bc5ef53e83bbb866ef9802340ea39ae057d801acd4121a05d",
     "rust/shim/src/pg/resolution.rs": "91eafb10b9521ddc6554a2f941140f6bf26daddbe479367ac7ec8a79f38d6841",
     "rust/shim/src/pg/tls.rs": "0dcf3efecac80d985a5e49ba4efbb83715d70d7d16057c1a821543ed3906180e",
@@ -22783,7 +22783,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/Dockerfile.daemon-rust:51",
+          "location": "ops/Dockerfile.daemon-rust:59",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -22847,7 +22847,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/Dockerfile.daemon-rust:50",
+          "location": "ops/Dockerfile.daemon-rust:58",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -22885,7 +22885,7 @@
       "producers": [
         {
           "evidence": "static",
-          "location": "ops/Dockerfile.daemon-rust:53",
+          "location": "ops/Dockerfile.daemon-rust:61",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -22949,7 +22949,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/Dockerfile.daemon-rust:52",
+          "location": "ops/Dockerfile.daemon-rust:60",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -30756,7 +30756,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/Dockerfile.daemon-rust:35",
+          "location": "ops/Dockerfile.daemon-rust:42",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -30887,7 +30887,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/Dockerfile.daemon-rust:33",
+          "location": "ops/Dockerfile.daemon-rust:40",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -32034,7 +32034,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/Dockerfile.daemon-rust:34",
+          "location": "ops/Dockerfile.daemon-rust:41",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -37755,7 +37755,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/Dockerfile.daemon-rust:39",
+          "location": "ops/Dockerfile.daemon-rust:47",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -62072,7 +62072,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "ops/Dockerfile.daemon-rust:56",
+      "location": "ops/Dockerfile.daemon-rust:64",
       "method": null,
       "name": "/health",
       "shape": {
@@ -64157,7 +64157,23 @@
     {
       "evidence": "static",
       "kind": "environment",
-      "location": "ops/Dockerfile.daemon-rust:36",
+      "location": "ops/Dockerfile.daemon-rust:14",
+      "name": "PSEUDOLIFE_DAEMON_PDFIUM_DIR",
+      "shape": {
+        "channel": "environment",
+        "complete": true,
+        "parameters": {
+          "value": {
+            "literal": "/opt/pdfium"
+          }
+        }
+      },
+      "usage": "assignment"
+    },
+    {
+      "evidence": "static",
+      "kind": "environment",
+      "location": "ops/Dockerfile.daemon-rust:43",
       "name": "PSEUDOLIFE_DAEMON_ONNX_DIR",
       "shape": {
         "channel": "environment",
@@ -64173,7 +64189,7 @@
     {
       "evidence": "static",
       "kind": "environment",
-      "location": "ops/Dockerfile.daemon-rust:37",
+      "location": "ops/Dockerfile.daemon-rust:44",
       "name": "PSEUDOLIFE_DAEMON_ORT_THREADS",
       "shape": {
         "channel": "environment",
@@ -64181,6 +64197,22 @@
         "parameters": {
           "value": {
             "literal": "3"
+          }
+        }
+      },
+      "usage": "assignment"
+    },
+    {
+      "evidence": "static",
+      "kind": "environment",
+      "location": "ops/Dockerfile.daemon-rust:46",
+      "name": "PSEUDOLIFE_DAEMON_PDFIUM_DIR",
+      "shape": {
+        "channel": "environment",
+        "complete": true,
+        "parameters": {
+          "value": {
+            "literal": "/opt/pdfium"
           }
         }
       },
@@ -78431,18 +78463,18 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/Dockerfile.daemon-rust:22",
+      "location": "ops/Dockerfile.daemon-rust:28",
       "reason": "request target supplied dynamically or external"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/Dockerfile.daemon-rust:56",
+      "location": "ops/Dockerfile.daemon-rust:64",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/Dockerfile.daemon-rust:56",
+      "location": "ops/Dockerfile.daemon-rust:64",
       "reason": "request target supplied dynamically or external"
     },
     {
