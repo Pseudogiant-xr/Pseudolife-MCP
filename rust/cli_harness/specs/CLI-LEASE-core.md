@@ -4,18 +4,38 @@ Canonical producers are `pseudolife_memory/lease_cli.py`'s help and
 `ops/remote-suite.ps1`, `ops/wsl-suite.ps1`, the suite gate in
 `.github/workflows/rust.yml`, the `evals/qwen_server.ps1` launch gate, and the lease examples in
 `docs/guide/agent-isolation.md` and `docs/guide/configuration.md`.
-The row admits `lease check NAME [--json]`, `lease list [NAME] [--json]`,
-and `lease run NAME [--expect DURATION] [--ttl DURATION] [--purpose TEXT]
-[--no-board] [--timeout DURATION] -- COMMAND...`, plus their help.
+The row admits `lease check NAME [--json] [-- COMMAND...]`, `lease list
+[NAME] [--json]`, and `lease run NAME [--expect DURATION] [--ttl DURATION]
+[--purpose TEXT] [--no-board] [--timeout DURATION] -- COMMAND...`, plus their
+help.
 `hold` and the offline operator actions are the separate CLI-LEASE remainder.
 
-The 66 cases exercise absent/free/held OS locks, eight-slot suite lock
+The 77 cases (75 of them recorded in goldens) exercise absent/free/held OS locks, eight-slot suite lock
 selection and another machine's suite name, the board's independent session
 claim, same-instance stale mirror and another instance's mirror, FIFO
 acquisition behind an earlier waiter, transient retry, registration refusal,
 malformed registration, local contention, nested refusal, timeout, hashed
 lock names, missing executables, binary child streams and child exit status.
 Closed stdout is tested for check/list/help and for the inherited child.
+
+The gated check (`check NAME -- COMMAND`) runs the child only when the lease
+is free: on an absent or free lock and a free board it runs, holds nothing
+(the child sees no `PSEUDOLIFE_LEASES_HELD`), follows the flushed report on
+stdout with the child's binary streams, and exits with the child's own 1.
+Held, whether by the local lock, a suite slot or a board claim, it prints the
+report and one refusal line, exits 75 and never runs the child (no `ran`
+file). A missing executable is 127, and an empty command or `--json` with a
+command is a usage error. The check-failure refusal (70) has no case: no
+fixture input fails the check in both arms with the same diagnostic (a
+malformed board queue fails only the native arm), so the unit tests in
+`tests/test_lease_cli.py` and `shim/tests/lease_cli.rs` cover it. Nor has a
+gated check under a closed stdout: neither arm runs the command, but CPython's
+shutdown flush turns its exit 70 into 120, where the native arm exits 70.
+A bearer the native client refuses to send (a control character, the
+declared reduced-input refusal) fails the native check: plain `check`
+reports it and exits 1, as before, and the gated form refuses with 70
+without running the command, where Python reads the board as unavailable
+and decides by the local lock.
 
 Each arm receives a disposable home and a loopback fixture daemon. PostgreSQL
 databases have unique `pl_cf_lease_<n>` names and use only the test login.
@@ -56,9 +76,11 @@ is the same in both arms. Interpreter-specific argument parsing/path corner
 cases, noncanonical producer shapes, and the phase 4 actions are excluded
 from this core row. There is no per-case performance acceptance.
 
-Seven real source mutants cover lock-name hashing, child exit status, local
-lock truth, same-instance stale mirrors, timeout status, mirror release and
-the named list filter.
+Eight real source mutants cover lock-name hashing, child exit status, local
+lock truth, same-instance stale mirrors, timeout status, mirror release, the
+named list filter and the gated check's held refusal. The row's eight fill one
+source-mutant shard; the gated child's empty held list is pinned by the
+`check-gated-*` cases' `ran` file and the unit tests instead of a ninth.
 Goldens are recorded separately on Windows and Linux and use the same rules
 as live comparison.
 

@@ -135,7 +135,8 @@
     "lease-os-truth",
     "lease-release-mirror",
     "lease-stale-mirror",
-    "lease-timeout-status"
+    "lease-timeout-status",
+    "lease-gated-refusal"
   ],
   "lease_operator": [
     "lease-hold-status",
