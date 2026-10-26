@@ -6,6 +6,11 @@
 //! pdfium-render's own text API differs (it reads a line-end hyphen as
 //! `\x02` where `FPDFText_GetText` gives U+FFFE, and drops some breaks).
 
+// Exception to the crate's safe-code rule: pdfium-render's raw bindings are
+// unsafe FFI into PDFium; every call runs under BOUND's lock, and each
+// document, page and text-page handle is closed exactly once.
+#![allow(unsafe_code)]
+
 use std::path::Path;
 use std::sync::Mutex;
 

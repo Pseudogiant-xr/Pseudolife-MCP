@@ -1,4 +1,5 @@
 //! Executable store boundary for the differential harness, never installed.
+#![deny(unsafe_code)]
 #![allow(dead_code)]
 
 #[path = "../src/graph_read.rs"]
