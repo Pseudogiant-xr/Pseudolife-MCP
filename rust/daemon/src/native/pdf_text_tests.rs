@@ -146,13 +146,16 @@ fn a_zero_page_document_that_loads_still_fails_as_pypdfium2_fails_it() {
     // The branch is the loaded-but-empty one: PDFium opens the document.
     let bound = BOUND.lock().unwrap_or_else(|p| p.into_inner());
     let b = bound.as_deref().expect("bound by read");
-    // SAFETY: the bound library, under its lock; the handle is closed here.
-    unsafe {
+    // SAFETY: the bound library, under its lock; the handle is closed
+    // before the page count is asserted, so a failure leaks nothing.
+    let pages = unsafe {
         let doc = b.FPDF_LoadMemDocument64(&pdf, None);
         assert!(!doc.is_null());
-        assert_eq!(b.FPDF_GetPageCount(doc), 0);
+        let pages = b.FPDF_GetPageCount(doc);
         b.FPDF_CloseDocument(doc);
-    }
+        pages
+    };
+    assert_eq!(pages, 0);
 }
 
 #[test]

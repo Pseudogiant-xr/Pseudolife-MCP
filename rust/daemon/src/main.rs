@@ -3,6 +3,8 @@
 //! gate, storage resolution, config, tokens, the bind guard, then the
 //! background warmup and the HTTP server. See `spec-w1a-foundation.md`.
 
+#![deny(unsafe_code)]
+
 mod auth;
 mod background;
 mod background_sessions;
@@ -379,5 +381,23 @@ mod listener_tests {
         let _client = tokio::net::TcpStream::connect(address).await.unwrap();
         let (accepted, _) = listener.accept().await;
         assert!(accepted.nodelay().unwrap());
+    }
+}
+
+#[cfg(test)]
+mod manifest_tests {
+    /// `cargo run -p pseudolife-daemon` (the PDF tests' provisioning hint)
+    /// needs `default-run`: cargo refuses a package with several binaries,
+    /// feature-gated ones included, when none is named.
+    #[test]
+    fn cargo_run_picks_the_daemon() {
+        let manifest = include_str!("../Cargo.toml");
+        assert!(manifest.matches("[[bin]]").count() > 1);
+        assert!(
+            manifest
+                .lines()
+                .any(|line| line.trim() == r#"default-run = "pseudolife-daemon""#),
+            "rust/daemon/Cargo.toml must set default-run = \"pseudolife-daemon\""
+        );
     }
 }

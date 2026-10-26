@@ -38,6 +38,11 @@
 //! the instructions this process may use; the fused kernels only run under
 //! `avx2,fma` code generation when the CPU has both, for speed.
 
+// Exception to the crate's safe-code rule: calling the `avx2,fma`
+// `#[target_feature]` kernels and reading XCR0 with `xgetbv` are unsafe;
+// each call site states the CPU feature check that makes it sound.
+#![allow(unsafe_code)]
+
 use std::sync::LazyLock;
 
 /// One distinct `sdot` summation order in numpy's OpenBLAS build.
