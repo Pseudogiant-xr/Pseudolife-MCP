@@ -6,6 +6,8 @@ rust-version.workspace = true
 license.workspace = true
 publish = false
 description = "Contract-first Rust port of the Pseudolife memory daemon"
+# `cargo run -p pseudolife-daemon` runs the daemon; the harness binaries need --bin.
+default-run = "pseudolife-daemon"
 
 [[bin]]
 name = "pseudolife-daemon"
