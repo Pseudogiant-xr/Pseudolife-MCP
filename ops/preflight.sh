@@ -63,6 +63,20 @@ else
          "Docker Desktop bundles it; on Linux: https://docs.docker.com/compose/install/linux/ (Arch: sudo pacman -S docker-compose)"
 fi
 
+# ── docker buildx (BuildKit, which the image build needs) ──────────────────
+# The Dockerfiles use RUN --mount caches, which only BuildKit runs; without
+# the buildx plugin compose falls back to the classic builder and the build
+# dies with "the --mount option requires BuildKit".
+if command -v docker >/dev/null 2>&1 && docker buildx version >/dev/null 2>&1; then
+    ok "docker buildx (BuildKit image builds)"
+else
+    case "$(uname -s)" in
+        Darwin) fix="Docker Desktop bundles it - update Docker Desktop; colima or Homebrew docker: brew install docker-buildx, then link it into ~/.docker/cli-plugins as its caveat says" ;;
+        *)      fix="Arch: sudo pacman -S docker-buildx; Debian/Ubuntu with Docker's repo: sudo apt install docker-buildx-plugin; Fedora: sudo dnf install docker-buildx-plugin; other: https://github.com/docker/buildx#installing" ;;
+    esac
+    fail "docker buildx plugin missing - the image build needs BuildKit for its RUN --mount caches" "$fix"
+fi
+
 # ── ports 8765 (daemon) / 5433 (postgres): free, or held by our own stack ──
 # Warn-only: a taken port turns into a cryptic "port is already allocated" at
 # compose up; held-by-us means an existing install (idempotent re-run is fine).

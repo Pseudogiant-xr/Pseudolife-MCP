@@ -1,0 +1,2 @@
+### Fixed (2026-10-25 — preflight catches a missing buildx before the image build fails)
+- `ops/preflight.sh` and `ops/preflight.ps1` now fail when the Docker buildx plugin is missing, with the install line for the distro. Without it compose falls back to the classic builder, which cannot run the Dockerfiles' `RUN --mount` caches, so the install used to pass preflight and then die mid-build with "the --mount option requires BuildKit" (seen on Arch-based Docker Engine without `docker-buildx`).
