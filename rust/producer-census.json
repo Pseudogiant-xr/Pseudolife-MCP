@@ -419,7 +419,7 @@
     "rust/shim/src/cli/wait_mail_args.rs": "e82e0e78f3377a6a981cfd5ba133578be6ac6cdc0975a550233b38cc6fb2ba4b",
     "rust/shim/src/cli/wait_mail_help.txt": "d6ee2b145e55e105a7885b653fcc88f56eabacf1c4626fd8675cd17258b8c60e",
     "rust/shim/src/cli_help.txt": "00e581d612cb27e5d650fe79580aae90da8cba622c69649a94112ec43548c95c",
-    "rust/shim/src/credentials.rs": "412febda61793cad085c63d26f56763b4916e59363f788769195303c1396c136",
+    "rust/shim/src/credentials.rs": "4b95a8503e2fbf896c041dfe93a14cde63e8bbb0c6b285541cd50a5be68c0a7f",
     "rust/shim/src/credentials/unix_accounts.rs": "d30f56e73eb66cb4dad5989bab84e4ccb33692b0433262f50caca02dcf58a0be",
     "rust/shim/src/daemon_url.rs": "5aabc9e4811af93f9292d84e2abc7c182884ea201284b7bbc2f722ff94d3817e",
     "rust/shim/src/errors.rs": "fbc3d61cd678051ab68ea1a3d7f9a91b4df392e5019d143ad05f8e9a7a48290c",
