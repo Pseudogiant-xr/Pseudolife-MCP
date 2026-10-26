@@ -301,7 +301,7 @@ const PROVISION: &str = "`pseudolife-daemon provision pdfium`";
 /// The refusal PDF ingest answers when there is no usable library: the
 /// cause, then the one step that fixes it, if any; text and HTML ingest
 /// never need the library.
-fn unavailable(cause: &str, fix: Option<&str>) -> String {
+pub(super) fn unavailable(cause: &str, fix: Option<&str>) -> String {
     let fix = fix
         .map(|f| format!(": {f}, then ingest the file again"))
         .unwrap_or_default();
@@ -313,7 +313,6 @@ fn unavailable(cause: &str, fix: Option<&str>) -> String {
 
 /// The installed library for PDF ingest, or the `pdf_engine_unavailable`
 /// refusal naming why there is none and what fixes it.
-#[allow(dead_code)] // PDF ingest calls it from the extraction PR.
 pub fn library() -> Result<PathBuf, String> {
     library_at(Build::current(), root())
 }

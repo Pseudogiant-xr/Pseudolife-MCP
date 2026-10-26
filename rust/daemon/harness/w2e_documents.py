@@ -19,14 +19,17 @@ Normalizers (declared, added to ``w2e.py``'s list):
 
 The oracle must run without BeautifulSoup, as the daemon image does (the
 HTML fixture then takes ``_extract_html``'s regex fallback);
-``require_oracle_without_bs4`` refuses a run whose interpreter has it. PDF
-ingest is a declared divergence (``divergences.md``, DOC-PDF) and has no
-case here.
+``require_document_oracles`` refuses a run whose interpreter has it. PDFs
+are read by PDFium on both sides: the oracle needs the pypdfium2 the image
+locks, and the Rust daemon the pinned library under
+``PSEUDOLIFE_DAEMON_PDFIUM_DIR`` (``pseudolife-daemon provision pdfium``);
+the same guard refuses a run without either.
 """
 from __future__ import annotations
 
 import functools
 import os
+import shutil
 import tempfile
 import time
 from pathlib import Path
@@ -76,6 +79,14 @@ FIXTURES: dict[str, bytes] = {
 
 MISSING = "/nonexistent-pl-w2e-documents/missing.txt"
 
+# PDFs from the corpus the extraction goldens cover (``pdf_corpus/``):
+# multi-page, CSS-hyphenated browser output, several scripts, and the
+# refusals PDFium gives (not a PDF, a wrong password, a page-tree cycle).
+PDF_CORPUS = Path(__file__).with_name("pdf_corpus")
+PDF_FIXTURES = ("three-pages.pdf", "chrome-prose.pdf", "chrome-scripts.pdf",
+                "fpdf-long.pdf", "not-a-pdf.pdf", "encrypted-user-password.pdf",
+                "hostile-self-parent.pdf", "empty-page.pdf")
+
 
 @functools.lru_cache(maxsize=1)
 def docs_dir() -> str:
@@ -87,6 +98,10 @@ def docs_dir() -> str:
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_bytes(data)
     (root / "folder.data").mkdir()
+    (root / "folder.pdf").mkdir()
+    (root / "pdf").mkdir()
+    for name in PDF_FIXTURES:
+        shutil.copyfile(PDF_CORPUS / name, root / "pdf" / name)
     # A FIFO (POSIX) and a file one byte over the 64 MiB cap, sparse, so it
     # costs no disk: both daemons refuse each from its metadata.
     if hasattr(os, "mkfifo"):
@@ -190,12 +205,29 @@ def metadata_clocks(t: dict, ranks: dict[float, str], ordered) -> None:
             row[mi] = {**m, "timestamp": ordered(m["timestamp"], ranks, False)}
 
 
-def require_oracle_without_bs4() -> None:
-    """The oracle daemon runs on this interpreter (``daemons.python_daemon``)."""
+def require_document_oracles() -> None:
+    """The oracle daemon runs on this interpreter (``daemons.python_daemon``):
+    without BeautifulSoup and with the locked pypdfium2, as in the image;
+    the Rust daemon reads PDFs from the provisioned PDFium root."""
     import importlib.util
     if importlib.util.find_spec("bs4") is not None:
         raise SystemExit("documents scenarios: this interpreter has BeautifulSoup, which the "
                          "daemon image lacks; run from an environment without bs4")
+    lock = Path(__file__).resolve().parents[3] / "ops" / "requirements.lock.txt"
+    locked = next((line.split("==", 1)[1].strip() for line in
+                   lock.read_text(encoding="utf-8").splitlines()
+                   if line.lower().startswith("pypdfium2==")), None)
+    try:
+        import pypdfium2.version as v
+        found = v.PYPDFIUM_INFO.version
+    except ImportError:
+        found = None
+    if found != locked:
+        raise SystemExit(f"documents scenarios: the oracle needs pypdfium2 {locked} (the "
+                         f"image lock), found {found}")
+    if not os.environ.get("PSEUDOLIFE_DAEMON_PDFIUM_DIR"):
+        raise SystemExit("documents scenarios: set PSEUDOLIFE_DAEMON_PDFIUM_DIR to a root "
+                         "`pseudolife-daemon provision pdfium` installed into")
 
 
 # Golden replay skips these scenarios (``live_only``): a replay boots one
@@ -216,7 +248,10 @@ MUTANTS = ["document-raw-newlines", "document-strip-rust-whitespace", "document-
            # caught by documents-search-pool and documents-search-seeded.
            "search-no-reference-pool", "search-reference-no-dedup",
            "search-reference-no-floor", "stats-no-reference-counts",
-           "search-reference-no-contiguity"]
+           "search-reference-no-contiguity",
+           # PDF text (native/pdf_text.rs): caught by documents-pdf.
+           "document-pdf-first-page-only", "document-pdf-pages-one-newline",
+           "document-pdf-error-names-shifted"]
 
 
 SCENARIOS: dict[str, dict] = {
@@ -244,6 +279,29 @@ SCENARIOS: dict[str, dict] = {
             search("sourdough starter feeding schedule"),
             search("comet orbital period", top_k=50),
             search(""),
+        ],
+    },
+    # PDFs, read by PDFium on both sides: multi-page and browser-printed
+    # text chunked and stored identically, a page with no text, the
+    # refusals PDFium gives, and a directory named .pdf refused before
+    # PDFium is reached; then search over what was stored.
+    "documents-pdf": {
+        "config": None,
+        "seed": [],
+        "live_only": LIVE_ONLY,
+        "ops": [
+            ingest("@DOCS@/pdf/three-pages.pdf"),
+            ingest("@DOCS@/pdf/chrome-prose.pdf", source="prose"),
+            ingest("@DOCS@/pdf/chrome-scripts.pdf"),
+            ingest("@DOCS@/pdf/fpdf-long.pdf"),
+            ingest("@DOCS@/pdf/empty-page.pdf"),
+            ingest("@DOCS@/pdf/not-a-pdf.pdf"),
+            ingest("@DOCS@/pdf/encrypted-user-password.pdf"),
+            ingest("@DOCS@/pdf/hostile-self-parent.pdf"),
+            ingest("@DOCS@/folder.pdf"),
+            search("ligatures and kerning pairs", top_k=3),
+            search("memory keeps every fact with its history", top_k=5),
+            search("page two of three", top_k=2),
         ],
     },
     # A re-ingest: the same file moves ingested_at and keeps created_at; a

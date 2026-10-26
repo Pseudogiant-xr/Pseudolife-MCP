@@ -9,6 +9,7 @@ use std::ffi::OsString;
 #[allow(dead_code)]
 pub mod native_provision;
 
+pub mod pdf_text;
 pub mod pdfium;
 
 const USAGE: &str = "usage: pseudolife-daemon provision pdfium";
