@@ -240,7 +240,7 @@
     "ops/install-shim-autostart.ps1": "87b5da0355343e797ce7895d4b2cc8725ccd0ac21f2cce346cf4967a6efc0646",
     "ops/install-shim-autostart.sh": "6f32b1c2ebd688546fdfd1837a3b6445d3195db99e9668c0360d13582c248888",
     "ops/install.ps1": "88264a10cb50a0f2b6348201e8befc46b271d06c2cdb8ea559a2a2591eaac565",
-    "ops/install.sh": "e27b4bf7fceaefa644bf26de89ff83ad5da7d5c25ab72005cd1107cfd8b60f58",
+    "ops/install.sh": "7aad5c81dc204ace2adf3557a53ac5efff556152a71470b38a564fb1ae613866",
     "ops/integrate.py": "5c6c0c4c32e4be0c1e635b19bdf15bf51afe2caf97d1d3cb05fbfaf10df1d0f0",
     "ops/measure_reverify_population.py": "413ff8baa0e0b25b8a727b6bead248df753d4d26e7c697aa6a0542b68715cfa5",
     "ops/migrate-pg18.ps1": "a2a8bd96ab754249395a9d42b26bfd8e6b5ecf8d6da1cd72383ebf745c0acde8",
@@ -1141,7 +1141,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:2012",
+          "location": "ops/install.sh:2024",
           "shape": {
             "argv_source": "briefing --hook-json\"",
             "channel": "argv",
@@ -1799,7 +1799,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:1886",
+          "location": "ops/install.sh:1898",
           "shape": {
             "argv_source": "connect \"$DAEMON_URL\" --token-file \"$TOKEN_FILE\" --client \"$connect_names\" --dry-run --json </dev/null",
             "channel": "argv",
@@ -1826,7 +1826,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:1902",
+          "location": "ops/install.sh:1914",
           "shape": {
             "argv_source": "connect found entries it does not rewrite; change them by hand:\" >&2",
             "channel": "argv",
@@ -1839,7 +1839,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:1912",
+          "location": "ops/install.sh:1924",
           "shape": {
             "argv_source": "connect points them at $DAEMON_URL:\"",
             "channel": "argv",
@@ -1852,7 +1852,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:1915",
+          "location": "ops/install.sh:1927",
           "shape": {
             "argv_source": "connect \"$DAEMON_URL\" --token-file \"$TOKEN_FILE\" --client \"$connect_names\" --yes </dev/null",
             "channel": "argv",
@@ -1876,7 +1876,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:2082",
+          "location": "ops/install.sh:2094",
           "shape": {
             "argv_source": "connect did not re-point it (see its lines above for why). Set PSEUDOLIFE_MCP_DAEMON_URL=$DAEMON_URL where that Codex configuration sets it, or run pseudolife-mcp connect $DAEMON_URL --client codex --token-file $TOKEN_FILE, then re-run.\"",
             "channel": "argv",
@@ -1896,7 +1896,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:2864",
+          "location": "ops/install.sh:2876",
           "shape": {
             "argv_source": "connect did not re-point it (see its lines above for why). Set PSEUDOLIFE_MCP_DAEMON_URL=$CLIENT_DAEMON_URL and PSEUDOLIFE_MCP_TOKEN_FILE=$CLAUDE_TOKEN_FILE in the entry it names, or run pseudolife-mcp connect $CLIENT_DAEMON_URL --client claude-code --token-file $CLAUDE_TOKEN_FILE.\" >&2",
             "channel": "argv",
@@ -2922,7 +2922,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:453",
+          "location": "ops/install.sh:465",
           "shape": {
             "argv_source": "expose tailscale",
             "channel": "argv",
@@ -2935,7 +2935,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:468",
+          "location": "ops/install.sh:480",
           "shape": {
             "argv_source": "expose tailscale now? It changes this machine's tailnet serve [y/N]: \" ||",
             "channel": "argv",
@@ -2948,7 +2948,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:472",
+          "location": "ops/install.sh:484",
           "shape": {
             "argv_source": "expose tailscale when you are ready.\"; return 0 ;;",
             "channel": "argv",
@@ -2961,7 +2961,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:480",
+          "location": "ops/install.sh:492",
           "shape": {
             "argv_source": "expose tailscale",
             "channel": "argv",
@@ -3296,7 +3296,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:1965",
+          "location": "ops/install.sh:1977",
           "shape": {
             "argv_source": "invite <machine> on the daemon's host), then re-run\" ;;",
             "channel": "argv",
@@ -3309,7 +3309,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:455",
+          "location": "ops/install.sh:467",
           "shape": {
             "argv_source": "invite <machine>",
             "channel": "argv",
@@ -3322,7 +3322,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:647",
+          "location": "ops/install.sh:659",
           "shape": {
             "argv_source": "invite :\"",
             "channel": "argv",
@@ -3335,7 +3335,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:910",
+          "location": "ops/install.sh:922",
           "shape": {
             "argv_source": "invite (not shown), then Enter: \" >&2",
             "channel": "argv",
@@ -4463,7 +4463,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:1960",
+          "location": "ops/install.sh:1972",
           "shape": {
             "argv_source": "pair \"$DAEMON_URL\" --read-code --token-file \"$TOKEN_FILE\" --json",
             "channel": "argv",
@@ -4487,7 +4487,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:458",
+          "location": "ops/install.sh:470",
           "shape": {
             "argv_source": "pair <url> <code> there). The steps by hand,",
             "channel": "argv",
@@ -5184,7 +5184,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:1655",
+          "location": "ops/install.sh:1667",
           "shape": {
             "argv_source": "shim from $shim_held_list; it was left as it is rather than upgraded. Close every Claude Code / Codex session using it, then rerun: $shim_rerun\"",
             "channel": "argv",
@@ -5197,7 +5197,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:1882",
+          "location": "ops/install.sh:1894",
           "shape": {
             "argv_source": "shim is unavailable (see above). One that names another daemon stays as it is.\" >&2",
             "channel": "argv",
@@ -5210,7 +5210,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:1955",
+          "location": "ops/install.sh:1967",
           "shape": {
             "argv_source": "shim , and it is unavailable (see above). Fix its installation and re-run with the pairing code, or pass --token-file <path> with the daemon's token\" >&2",
             "channel": "argv",
@@ -5227,7 +5227,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:2430",
+          "location": "ops/install.sh:2442",
           "shape": {
             "argv_source": "shim installation did not yield a usable executable — Claude Desktop not wired. Re-run after fixing pipx/Python, or register by hand: python3 ops/register_claude_desktop.py --command <absolute path to pseudolife-mcp>\" >&2",
             "channel": "argv",
@@ -5244,7 +5244,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:2472",
+          "location": "ops/install.sh:2484",
           "shape": {
             "argv_source": "shim (claude_desktop_config.json) — fully quit and relaunch Desktop to load it.\"",
             "channel": "argv",
@@ -5257,7 +5257,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:2537",
+          "location": "ops/install.sh:2549",
           "shape": {
             "argv_source": "shim from this checkout.\"",
             "channel": "argv",
@@ -5270,7 +5270,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:2560",
+          "location": "ops/install.sh:2572",
           "shape": {
             "argv_source": "shim from this checkout.\"",
             "channel": "argv",
@@ -5283,7 +5283,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:2609",
+          "location": "ops/install.sh:2621",
           "shape": {
             "argv_source": "shim — per-session identity (a Codex session no longer inherits a concurrent Claude session's episode).\"",
             "channel": "argv",
@@ -5296,7 +5296,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:2663",
+          "location": "ops/install.sh:2675",
           "shape": {
             "argv_source": "shim from this checkout.\"",
             "channel": "argv",
@@ -5309,7 +5309,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:2686",
+          "location": "ops/install.sh:2698",
           "shape": {
             "argv_source": "shim from this checkout.\"",
             "channel": "argv",
@@ -5322,7 +5322,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:2740",
+          "location": "ops/install.sh:2752",
           "shape": {
             "argv_source": "shim — per-session identity.\"",
             "channel": "argv",
@@ -5335,7 +5335,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:2789",
+          "location": "ops/install.sh:2801",
           "shape": {
             "argv_source": "shim from this checkout.\"",
             "channel": "argv",
@@ -5348,7 +5348,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:2812",
+          "location": "ops/install.sh:2824",
           "shape": {
             "argv_source": "shim from this checkout.\"",
             "channel": "argv",
@@ -5361,7 +5361,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:2896",
+          "location": "ops/install.sh:2908",
           "shape": {
             "argv_source": "shim — per-session identity (required for correct episodes with concurrent sessions).\"",
             "channel": "argv",
@@ -5374,7 +5374,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:2899",
+          "location": "ops/install.sh:2911",
           "shape": {
             "argv_source": "shim is unavailable (see the pip/pipx output above), and a remote daemon needs it: an HTTP registration cannot carry the token file. Install pipx and re-run.\" >&2",
             "channel": "argv",
@@ -5387,7 +5387,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:3069",
+          "location": "ops/install.sh:3202",
           "shape": {
             "argv_source": "shim , which is unavailable (see above).\" >&2",
             "channel": "argv",
@@ -5400,7 +5400,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:476",
+          "location": "ops/install.sh:488",
           "shape": {
             "argv_source": "shim is unavailable (see above), so expose did not run: run pseudolife-mcp expose tailscale once it is installed.\" >&2",
             "channel": "argv",
@@ -5413,7 +5413,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:515",
+          "location": "ops/install.sh:527",
           "shape": {
             "argv_source": "shim is unavailable (see above), so the passkey setup did not run: run pseudolife-mcp maintainer setup once it is installed.\" >&2",
             "channel": "argv",
@@ -5545,7 +5545,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:3259",
+          "location": "ops/install.sh:3392",
           "shape": {
             "argv_source": "tunnel setup.\" >&2",
             "channel": "argv",
@@ -5558,7 +5558,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:3263",
+          "location": "ops/install.sh:3396",
           "shape": {
             "argv_source": "tunnel setup",
             "channel": "argv",
@@ -5572,7 +5572,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:3265",
+          "location": "ops/install.sh:3398",
           "shape": {
             "argv_source": "tunnel setup",
             "channel": "argv",
@@ -5586,7 +5586,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:3268",
+          "location": "ops/install.sh:3401",
           "shape": {
             "argv_source": "tunnel setup (guided private key and app setup; docs/guide/tunnels.md).\"",
             "channel": "argv",
@@ -21945,7 +21945,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install.sh:2842",
+          "location": "ops/install.sh:2854",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -21960,7 +21960,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install.sh:2886",
+          "location": "ops/install.sh:2898",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -22689,7 +22689,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:1170",
+          "location": "ops/install.sh:1182",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -24420,7 +24420,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:2459",
+          "location": "ops/install.sh:2471",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -24462,7 +24462,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install.sh:2465",
+          "location": "ops/install.sh:2477",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -24512,7 +24512,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:2457",
+          "location": "ops/install.sh:2469",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -24554,7 +24554,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install.sh:2464",
+          "location": "ops/install.sh:2476",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -24984,7 +24984,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:1052",
+          "location": "ops/install.sh:1064",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -24997,7 +24997,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:1062",
+          "location": "ops/install.sh:1074",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -25010,7 +25010,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:1254",
+          "location": "ops/install.sh:1266",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -25023,7 +25023,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:231",
+          "location": "ops/install.sh:240",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -25491,37 +25491,37 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install.sh:1202",
-          "shape": {
-            "channel": "environment",
-            "complete": true,
-            "omitted_optional": null,
-            "parameters": {
-              "value": {
-                "expression": "http://host.docker.internal:$SHIM_PORT/v1"
-              }
-            }
-          },
-          "usage": "assignment"
-        },
-        {
-          "evidence": "static",
-          "location": "ops/install.sh:1208",
-          "shape": {
-            "channel": "environment",
-            "complete": true,
-            "omitted_optional": null,
-            "parameters": {
-              "value": {
-                "expression": "http://host.docker.internal:$SHIM_PORT/v1"
-              }
-            }
-          },
-          "usage": "assignment"
-        },
-        {
-          "evidence": "static",
           "location": "ops/install.sh:1214",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "expression": "http://host.docker.internal:$SHIM_PORT/v1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "ops/install.sh:1220",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "expression": "http://host.docker.internal:$SHIM_PORT/v1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "ops/install.sh:1226",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -25845,7 +25845,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install.sh:1206",
+          "location": "ops/install.sh:1218",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -25860,7 +25860,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install.sh:1212",
+          "location": "ops/install.sh:1224",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -25875,7 +25875,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install.sh:1219",
+          "location": "ops/install.sh:1231",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -25890,7 +25890,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install.sh:1221",
+          "location": "ops/install.sh:1233",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -26268,7 +26268,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install.sh:1204",
+          "location": "ops/install.sh:1216",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -26283,7 +26283,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install.sh:1217",
+          "location": "ops/install.sh:1229",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -26536,7 +26536,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install.sh:1205",
+          "location": "ops/install.sh:1217",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -26551,7 +26551,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install.sh:1218",
+          "location": "ops/install.sh:1230",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -27017,37 +27017,37 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install.sh:1203",
-          "shape": {
-            "channel": "environment",
-            "complete": true,
-            "omitted_optional": null,
-            "parameters": {
-              "value": {
-                "literal": "extractor"
-              }
-            }
-          },
-          "usage": "assignment"
-        },
-        {
-          "evidence": "static",
-          "location": "ops/install.sh:1209",
-          "shape": {
-            "channel": "environment",
-            "complete": true,
-            "omitted_optional": null,
-            "parameters": {
-              "value": {
-                "literal": "extractor"
-              }
-            }
-          },
-          "usage": "assignment"
-        },
-        {
-          "evidence": "static",
           "location": "ops/install.sh:1215",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "extractor"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "ops/install.sh:1221",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "extractor"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "ops/install.sh:1227",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -27505,7 +27505,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install.sh:2373",
+          "location": "ops/install.sh:2385",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -27520,7 +27520,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install.sh:3194",
+          "location": "ops/install.sh:3327",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -27599,7 +27599,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install.sh:2374",
+          "location": "ops/install.sh:2386",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -28609,7 +28609,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:2035",
+          "location": "ops/install.sh:2047",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -28622,7 +28622,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:2363",
+          "location": "ops/install.sh:2375",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -28635,7 +28635,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:2486",
+          "location": "ops/install.sh:2498",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -28648,7 +28648,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:554",
+          "location": "ops/install.sh:566",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -28661,7 +28661,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:590",
+          "location": "ops/install.sh:602",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -28674,7 +28674,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:68",
+          "location": "ops/install.sh:705",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -28687,20 +28687,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:693",
-          "shape": {
-            "channel": "environment",
-            "complete": false,
-            "expression": "reference",
-            "omitted_optional": null,
-            "parameters": {}
-          },
-          "usage": "reference"
-        },
-        {
-          "dynamic": "unresolved",
-          "evidence": "static",
-          "location": "ops/install.sh:727",
+          "location": "ops/install.sh:739",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -28713,7 +28700,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:728",
+          "location": "ops/install.sh:740",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -28726,7 +28713,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:755",
+          "location": "ops/install.sh:75",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -28739,7 +28726,20 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:760",
+          "location": "ops/install.sh:767",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "ops/install.sh:772",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -29314,7 +29314,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install.sh:2082",
+          "location": "ops/install.sh:2094",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -29329,7 +29329,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install.sh:2084",
+          "location": "ops/install.sh:2096",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -29344,7 +29344,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install.sh:2098",
+          "location": "ops/install.sh:2110",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -29359,7 +29359,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install.sh:2100",
+          "location": "ops/install.sh:2112",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -29374,7 +29374,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install.sh:2103",
+          "location": "ops/install.sh:2115",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -29389,7 +29389,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install.sh:2413",
+          "location": "ops/install.sh:2425",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -29404,7 +29404,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install.sh:2596",
+          "location": "ops/install.sh:2608",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -29419,7 +29419,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install.sh:2598",
+          "location": "ops/install.sh:2610",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -29434,7 +29434,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install.sh:2730",
+          "location": "ops/install.sh:2742",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -29449,7 +29449,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install.sh:2841",
+          "location": "ops/install.sh:2853",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -29464,7 +29464,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install.sh:2864",
+          "location": "ops/install.sh:2876",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -29479,7 +29479,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install.sh:2866",
+          "location": "ops/install.sh:2878",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -29494,7 +29494,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install.sh:2886",
+          "location": "ops/install.sh:2898",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -29509,7 +29509,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install.sh:3263",
+          "location": "ops/install.sh:3396",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -31132,7 +31132,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:1796",
+          "location": "ops/install.sh:1808",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -31145,7 +31145,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:2589",
+          "location": "ops/install.sh:2601",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -31158,7 +31158,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:2726",
+          "location": "ops/install.sh:2738",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -31171,7 +31171,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:2879",
+          "location": "ops/install.sh:2891",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -31617,7 +31617,7 @@
         },
         {
           "evidence": "documented",
-          "location": "ops/install.sh:1811",
+          "location": "ops/install.sh:1823",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -31812,7 +31812,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install.sh:1805",
+          "location": "ops/install.sh:1817",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -31827,7 +31827,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install.sh:2596",
+          "location": "ops/install.sh:2608",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -31842,7 +31842,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install.sh:2598",
+          "location": "ops/install.sh:2610",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -31857,7 +31857,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install.sh:2600",
+          "location": "ops/install.sh:2612",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -31872,7 +31872,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install.sh:2605",
+          "location": "ops/install.sh:2617",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -31887,7 +31887,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install.sh:2730",
+          "location": "ops/install.sh:2742",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -31902,7 +31902,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install.sh:2732",
+          "location": "ops/install.sh:2744",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -31917,7 +31917,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install.sh:2736",
+          "location": "ops/install.sh:2748",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -31932,7 +31932,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install.sh:2886",
+          "location": "ops/install.sh:2898",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -31947,7 +31947,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install.sh:2888",
+          "location": "ops/install.sh:2900",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -31962,7 +31962,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install.sh:2892",
+          "location": "ops/install.sh:2904",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -31977,7 +31977,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install.sh:417",
+          "location": "ops/install.sh:429",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -33621,7 +33621,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:1284",
+          "location": "ops/install.sh:1296",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -33634,7 +33634,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:1285",
+          "location": "ops/install.sh:1297",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -33647,7 +33647,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:1302",
+          "location": "ops/install.sh:1314",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -33660,7 +33660,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:2034",
+          "location": "ops/install.sh:2046",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -33673,7 +33673,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:2098",
+          "location": "ops/install.sh:2110",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -33686,7 +33686,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:2100",
+          "location": "ops/install.sh:2112",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -33699,7 +33699,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:2103",
+          "location": "ops/install.sh:2115",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -33712,7 +33712,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:2306",
+          "location": "ops/install.sh:2318",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -33721,45 +33721,6 @@
             "parameters": {}
           },
           "usage": "assignment-candidate"
-        },
-        {
-          "dynamic": "unresolved",
-          "evidence": "static",
-          "location": "ops/install.sh:2307",
-          "shape": {
-            "channel": "environment",
-            "complete": false,
-            "expression": "reference",
-            "omitted_optional": null,
-            "parameters": {}
-          },
-          "usage": "reference"
-        },
-        {
-          "dynamic": "unresolved",
-          "evidence": "static",
-          "location": "ops/install.sh:2315",
-          "shape": {
-            "channel": "environment",
-            "complete": false,
-            "expression": "-}\" ]; then",
-            "omitted_optional": null,
-            "parameters": {}
-          },
-          "usage": "assignment-candidate"
-        },
-        {
-          "dynamic": "unresolved",
-          "evidence": "static",
-          "location": "ops/install.sh:2316",
-          "shape": {
-            "channel": "environment",
-            "complete": false,
-            "expression": "reference",
-            "omitted_optional": null,
-            "parameters": {}
-          },
-          "usage": "reference"
         },
         {
           "dynamic": "unresolved",
@@ -33777,7 +33738,20 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:2851",
+          "location": "ops/install.sh:2327",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "-}\" ]; then",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "assignment-candidate"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "ops/install.sh:2328",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -33790,7 +33764,33 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:966",
+          "location": "ops/install.sh:2331",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "ops/install.sh:2863",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "ops/install.sh:978",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -34951,7 +34951,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:1284",
+          "location": "ops/install.sh:1296",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -34964,7 +34964,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:1285",
+          "location": "ops/install.sh:1297",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -34977,7 +34977,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:2306",
+          "location": "ops/install.sh:2318",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -34990,7 +34990,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:2307",
+          "location": "ops/install.sh:2319",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -35003,7 +35003,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:2313",
+          "location": "ops/install.sh:2325",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -35016,7 +35016,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:2322",
+          "location": "ops/install.sh:2334",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -35029,7 +35029,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:2323",
+          "location": "ops/install.sh:2335",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -35042,7 +35042,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:2326",
+          "location": "ops/install.sh:2338",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -35055,7 +35055,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:2356",
+          "location": "ops/install.sh:2368",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -35068,7 +35068,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:2461",
+          "location": "ops/install.sh:2473",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -35751,7 +35751,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:2100",
+          "location": "ops/install.sh:2112",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -35764,7 +35764,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:2296",
+          "location": "ops/install.sh:2308",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -35777,7 +35777,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:2302",
+          "location": "ops/install.sh:2314",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -35790,7 +35790,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:2303",
+          "location": "ops/install.sh:2315",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -35803,7 +35803,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:2410",
+          "location": "ops/install.sh:2422",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -35816,7 +35816,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:2447",
+          "location": "ops/install.sh:2459",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -35829,7 +35829,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:2487",
+          "location": "ops/install.sh:2499",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -35842,7 +35842,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:640",
+          "location": "ops/install.sh:652",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -35855,7 +35855,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:641",
+          "location": "ops/install.sh:653",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -35868,7 +35868,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:73",
+          "location": "ops/install.sh:80",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -35881,7 +35881,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:887",
+          "location": "ops/install.sh:899",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -35894,7 +35894,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:889",
+          "location": "ops/install.sh:901",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -36755,7 +36755,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install.sh:2098",
+          "location": "ops/install.sh:2110",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -36770,7 +36770,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install.sh:2103",
+          "location": "ops/install.sh:2115",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -36785,7 +36785,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install.sh:2413",
+          "location": "ops/install.sh:2425",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -36800,7 +36800,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install.sh:2596",
+          "location": "ops/install.sh:2608",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -36815,7 +36815,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install.sh:2711",
+          "location": "ops/install.sh:2723",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -36830,7 +36830,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install.sh:2730",
+          "location": "ops/install.sh:2742",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -36838,21 +36838,6 @@
             "parameters": {
               "value": {
                 "expression": "$GEMINI_TOKEN_FILE"
-              }
-            }
-          },
-          "usage": "assignment"
-        },
-        {
-          "evidence": "static",
-          "location": "ops/install.sh:2840",
-          "shape": {
-            "channel": "environment",
-            "complete": true,
-            "omitted_optional": null,
-            "parameters": {
-              "value": {
-                "expression": "$CLAUDE_TOKEN_FILE"
               }
             }
           },
@@ -36890,22 +36875,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install.sh:2866",
-          "shape": {
-            "channel": "environment",
-            "complete": true,
-            "omitted_optional": null,
-            "parameters": {
-              "value": {
-                "expression": "$CLAUDE_TOKEN_FILE."
-              }
-            }
-          },
-          "usage": "assignment"
-        },
-        {
-          "evidence": "static",
-          "location": "ops/install.sh:2886",
+          "location": "ops/install.sh:2876",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -36920,7 +36890,37 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install.sh:3263",
+          "location": "ops/install.sh:2878",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "expression": "$CLAUDE_TOKEN_FILE."
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "ops/install.sh:2898",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "expression": "$CLAUDE_TOKEN_FILE"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "ops/install.sh:3396",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -36935,7 +36935,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install.sh:520",
+          "location": "ops/install.sh:532",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -38575,7 +38575,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:1598",
+          "location": "ops/install.sh:1610",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -38588,7 +38588,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:1601",
+          "location": "ops/install.sh:1613",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -38755,7 +38755,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:1171",
+          "location": "ops/install.sh:1183",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -40665,7 +40665,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:1809",
+          "location": "ops/install.sh:1821",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -41109,7 +41109,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install.sh:1246",
+          "location": "ops/install.sh:1258",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -41124,7 +41124,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install.sh:2596",
+          "location": "ops/install.sh:2608",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -41139,7 +41139,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install.sh:2598",
+          "location": "ops/install.sh:2610",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -41154,7 +41154,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install.sh:2600",
+          "location": "ops/install.sh:2612",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -41169,7 +41169,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install.sh:2730",
+          "location": "ops/install.sh:2742",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -41184,7 +41184,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install.sh:2732",
+          "location": "ops/install.sh:2744",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -41199,7 +41199,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install.sh:2886",
+          "location": "ops/install.sh:2898",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -41214,7 +41214,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install.sh:2888",
+          "location": "ops/install.sh:2900",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -41229,7 +41229,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install.sh:416",
+          "location": "ops/install.sh:428",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -49480,7 +49480,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:3215",
+          "location": "ops/install.sh:3348",
           "shape": {
             "channel": "parameters",
             "complete": false,
@@ -49496,7 +49496,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:3217",
+          "location": "ops/install.sh:3350",
           "shape": {
             "channel": "parameters",
             "complete": false,
@@ -49512,7 +49512,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:3219",
+          "location": "ops/install.sh:3352",
           "shape": {
             "channel": "parameters",
             "complete": false,
@@ -49528,7 +49528,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:3222",
+          "location": "ops/install.sh:3355",
           "shape": {
             "channel": "parameters",
             "complete": false,
@@ -49544,7 +49544,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:3224",
+          "location": "ops/install.sh:3357",
           "shape": {
             "channel": "parameters",
             "complete": false,
@@ -58299,7 +58299,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "cli",
-      "location": "ops/install.sh:2971",
+      "location": "ops/install.sh:3103",
       "name": "test-login",
       "shape": {
         "argv_source": "test-login create\" >&2",
@@ -58314,7 +58314,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "cli",
-      "location": "ops/install.sh:497",
+      "location": "ops/install.sh:509",
       "name": "maintainer",
       "shape": {
         "argv_source": "maintainer setup --check >/dev/null 2>&1",
@@ -58333,7 +58333,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "cli",
-      "location": "ops/install.sh:502",
+      "location": "ops/install.sh:514",
       "name": "maintainer",
       "shape": {
         "argv_source": "maintainer setup in a terminal when you want them.\"",
@@ -58347,7 +58347,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "cli",
-      "location": "ops/install.sh:512",
+      "location": "ops/install.sh:524",
       "name": "maintainer",
       "shape": {
         "argv_source": "maintainer setup when you want them.\"; return 0 ;;",
@@ -58361,7 +58361,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "cli",
-      "location": "ops/install.sh:520",
+      "location": "ops/install.sh:532",
       "name": "maintainer",
       "shape": {
         "argv_source": "maintainer setup --yes",
@@ -58380,7 +58380,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "cli",
-      "location": "ops/install.sh:522",
+      "location": "ops/install.sh:534",
       "name": "maintainer",
       "shape": {
         "argv_source": "maintainer setup --yes",
@@ -62355,20 +62355,6 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "ops/install.sh:2618",
-      "method": null,
-      "name": "/mcp",
-      "shape": {
-        "channel": "body",
-        "complete": false,
-        "expression": "Request helper, URL suffix or body requires resolution at this location.",
-        "parameters": {}
-      }
-    },
-    {
-      "dynamic": "unresolved",
-      "evidence": "unverified",
-      "kind": "route",
       "location": "ops/install.sh:2630",
       "method": null,
       "name": "/mcp",
@@ -62383,7 +62369,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "ops/install.sh:2747",
+      "location": "ops/install.sh:2642",
       "method": null,
       "name": "/mcp",
       "shape": {
@@ -62397,7 +62383,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "ops/install.sh:2752",
+      "location": "ops/install.sh:2759",
       "method": null,
       "name": "/mcp",
       "shape": {
@@ -62411,7 +62397,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "ops/install.sh:2905",
+      "location": "ops/install.sh:2764",
       "method": null,
       "name": "/mcp",
       "shape": {
@@ -62425,7 +62411,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "ops/install.sh:2910",
+      "location": "ops/install.sh:2917",
       "method": null,
       "name": "/mcp",
       "shape": {
@@ -62439,7 +62425,21 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "ops/install.sh:3035",
+      "location": "ops/install.sh:2922",
+      "method": null,
+      "name": "/mcp",
+      "shape": {
+        "channel": "body",
+        "complete": false,
+        "expression": "Request helper, URL suffix or body requires resolution at this location.",
+        "parameters": {}
+      }
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "unverified",
+      "kind": "route",
+      "location": "ops/install.sh:3048",
       "method": null,
       "name": "/health",
       "shape": {
@@ -62453,7 +62453,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "ops/install.sh:3045",
+      "location": "ops/install.sh:3167",
       "method": null,
       "name": "/health",
       "shape": {
@@ -62467,7 +62467,21 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "ops/install.sh:421",
+      "location": "ops/install.sh:3177",
+      "method": null,
+      "name": "/health",
+      "shape": {
+        "channel": "body",
+        "complete": false,
+        "expression": "Request helper, URL suffix or body requires resolution at this location.",
+        "parameters": {}
+      }
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "unverified",
+      "kind": "route",
+      "location": "ops/install.sh:433",
       "method": null,
       "name": "/mcp",
       "shape": {
@@ -62481,7 +62495,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "ops/install.sh:958",
+      "location": "ops/install.sh:970",
       "method": null,
       "name": "/health",
       "shape": {
@@ -62495,7 +62509,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "ops/install.sh:961",
+      "location": "ops/install.sh:973",
       "method": null,
       "name": "/health",
       "shape": {
@@ -80173,285 +80187,249 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:1052",
+      "location": "ops/install.sh:1064",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_DREAM_API_KEY"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:1055",
+      "location": "ops/install.sh:1067",
       "reason": "request target supplied dynamically or external"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:1056",
+      "location": "ops/install.sh:1068",
       "reason": "request target supplied dynamically or external"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:1058",
+      "location": "ops/install.sh:1070",
       "reason": "request target supplied dynamically or external"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:1062",
+      "location": "ops/install.sh:1074",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_DREAM_API_KEY"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:1170",
+      "location": "ops/install.sh:1182",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_BANK_VOLUME"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:1171",
+      "location": "ops/install.sh:1183",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_STATE_VOLUME"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:1254",
+      "location": "ops/install.sh:1266",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_DREAM_API_KEY"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:1284",
+      "location": "ops/install.sh:1296",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:1284",
+      "location": "ops/install.sh:1296",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKENS"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:1285",
+      "location": "ops/install.sh:1297",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:1285",
+      "location": "ops/install.sh:1297",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKENS"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:1302",
+      "location": "ops/install.sh:1314",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:1598",
+      "location": "ops/install.sh:1610",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_SHIM_PYTHON"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:1601",
+      "location": "ops/install.sh:1613",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_SHIM_PYTHON"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:1655",
+      "location": "ops/install.sh:1667",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:shim"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:1796",
+      "location": "ops/install.sh:1808",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_NO_SPAWN"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:1809",
+      "location": "ops/install.sh:1821",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_WRITER_ID"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:1882",
+      "location": "ops/install.sh:1894",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:shim"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:1886",
+      "location": "ops/install.sh:1898",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:connect"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:1886",
+      "location": "ops/install.sh:1898",
       "reason": "shell-built command"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:1902",
+      "location": "ops/install.sh:1914",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:connect"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:1912",
+      "location": "ops/install.sh:1924",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:connect"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:1915",
+      "location": "ops/install.sh:1927",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:connect"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:1915",
+      "location": "ops/install.sh:1927",
       "reason": "shell-built command"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:1955",
+      "location": "ops/install.sh:1967",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:shim"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:1960",
+      "location": "ops/install.sh:1972",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:pair"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:1960",
+      "location": "ops/install.sh:1972",
       "reason": "shell-built command"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:1965",
+      "location": "ops/install.sh:1977",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:invite"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:2012",
+      "location": "ops/install.sh:2024",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:briefing"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:2034",
+      "location": "ops/install.sh:2046",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:2035",
+      "location": "ops/install.sh:2047",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_DAEMON_URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:2082",
+      "location": "ops/install.sh:2094",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:connect"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:2098",
+      "location": "ops/install.sh:2110",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:2100",
+      "location": "ops/install.sh:2112",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:2100",
+      "location": "ops/install.sh:2112",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:2103",
+      "location": "ops/install.sh:2115",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:2296",
+      "location": "ops/install.sh:2308",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:2302",
+      "location": "ops/install.sh:2314",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "ops/install.sh:2303",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "ops/install.sh:2306",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "ops/install.sh:2306",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_MCP_TOKENS"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "ops/install.sh:2307",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "ops/install.sh:2307",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_MCP_TOKENS"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "ops/install.sh:231",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_DREAM_API_KEY"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "ops/install.sh:2313",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_MCP_TOKENS"
     },
     {
       "dynamic": "unresolved",
       "location": "ops/install.sh:2315",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/install.sh:2318",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:2316",
+      "location": "ops/install.sh:2318",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
+      "surface": "environment:PSEUDOLIFE_MCP_TOKENS"
     },
     {
       "dynamic": "unresolved",
@@ -80461,122 +80439,152 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:2322",
+      "location": "ops/install.sh:2319",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKENS"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:2323",
+      "location": "ops/install.sh:2325",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKENS"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:2326",
+      "location": "ops/install.sh:2327",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/install.sh:2328",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/install.sh:2331",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/install.sh:2334",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKENS"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:2356",
+      "location": "ops/install.sh:2335",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKENS"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:2363",
+      "location": "ops/install.sh:2338",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOKENS"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/install.sh:2368",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOKENS"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/install.sh:2375",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_DAEMON_URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:2410",
+      "location": "ops/install.sh:240",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_DREAM_API_KEY"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/install.sh:2422",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:2430",
+      "location": "ops/install.sh:2442",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:shim"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:2442",
+      "location": "ops/install.sh:2454",
       "reason": "shell-built command"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "ops/install.sh:2447",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "ops/install.sh:2457",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_DESKTOP_TOKEN_SOURCE"
     },
     {
       "dynamic": "unresolved",
       "location": "ops/install.sh:2459",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/install.sh:2469",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_DESKTOP_TOKEN_SOURCE"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/install.sh:2471",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_DESKTOP_TOKENS_SOURCE"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:2461",
+      "location": "ops/install.sh:2473",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKENS"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:2472",
+      "location": "ops/install.sh:2484",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:shim"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:2486",
+      "location": "ops/install.sh:2498",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_DAEMON_URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:2487",
+      "location": "ops/install.sh:2499",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:2537",
+      "location": "ops/install.sh:2549",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:shim"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:2560",
+      "location": "ops/install.sh:2572",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:shim"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:2589",
+      "location": "ops/install.sh:2601",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_NO_SPAWN"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:2609",
+      "location": "ops/install.sh:2621",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:shim"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "ops/install.sh:2618",
-      "reason": "Unknown or forwarded inventory target/shape.",
-      "surface": "inventory-gap:route:/mcp"
     },
     {
       "dynamic": "unresolved",
@@ -80586,218 +80594,217 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:2663",
+      "location": "ops/install.sh:2642",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:route:/mcp"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/install.sh:2675",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:shim"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:2686",
+      "location": "ops/install.sh:2698",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:shim"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:2726",
+      "location": "ops/install.sh:2738",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_NO_SPAWN"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:2740",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "cli:shim"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "ops/install.sh:2747",
-      "reason": "Unknown or forwarded inventory target/shape.",
-      "surface": "inventory-gap:route:/mcp"
-    },
-    {
-      "dynamic": "unresolved",
       "location": "ops/install.sh:2752",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "cli:shim"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/install.sh:2759",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/mcp"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:2789",
+      "location": "ops/install.sh:2764",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:route:/mcp"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/install.sh:2801",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:shim"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:2812",
+      "location": "ops/install.sh:2824",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:shim"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:2851",
+      "location": "ops/install.sh:2863",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:2864",
+      "location": "ops/install.sh:2876",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:connect"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:2879",
+      "location": "ops/install.sh:2891",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_NO_SPAWN"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:2896",
+      "location": "ops/install.sh:2908",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:shim"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:2899",
+      "location": "ops/install.sh:2911",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:shim"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:2905",
+      "location": "ops/install.sh:2917",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/mcp"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:2910",
+      "location": "ops/install.sh:2922",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/mcp"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:2971",
+      "location": "ops/install.sh:3048",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:route:/health"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/install.sh:3048",
+      "reason": "request target supplied dynamically or external"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/install.sh:3103",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:cli:test-login"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:3035",
+      "location": "ops/install.sh:3167",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:3035",
+      "location": "ops/install.sh:3167",
       "reason": "request target supplied dynamically or external"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:3045",
+      "location": "ops/install.sh:3177",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:3069",
+      "location": "ops/install.sh:3202",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:shim"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:3215",
+      "location": "ops/install.sh:3348",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "tool:memory_dream"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:3217",
+      "location": "ops/install.sh:3350",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "tool:memory_dream"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:3219",
+      "location": "ops/install.sh:3352",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "tool:memory_dream"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:3222",
+      "location": "ops/install.sh:3355",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "tool:memory_dream"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:3224",
+      "location": "ops/install.sh:3357",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "tool:memory_dream"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:3259",
+      "location": "ops/install.sh:3392",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:tunnel"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:3263",
+      "location": "ops/install.sh:3396",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:tunnel"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:3265",
+      "location": "ops/install.sh:3398",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:tunnel"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:3268",
+      "location": "ops/install.sh:3401",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:tunnel"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:421",
+      "location": "ops/install.sh:433",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/mcp"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:453",
+      "location": "ops/install.sh:465",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:expose"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:455",
+      "location": "ops/install.sh:467",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:invite"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:458",
+      "location": "ops/install.sh:470",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:pair"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "ops/install.sh:468",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "cli:expose"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "ops/install.sh:472",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "cli:expose"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "ops/install.sh:476",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "cli:shim"
     },
     {
       "dynamic": "unresolved",
@@ -80807,180 +80814,198 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:497",
-      "reason": "Unknown or forwarded inventory target/shape.",
-      "surface": "inventory-gap:cli:maintainer"
+      "location": "ops/install.sh:484",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "cli:expose"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:497",
-      "reason": "shell-built command"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "ops/install.sh:502",
-      "reason": "Unknown or forwarded inventory target/shape.",
-      "surface": "inventory-gap:cli:maintainer"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "ops/install.sh:512",
-      "reason": "Unknown or forwarded inventory target/shape.",
-      "surface": "inventory-gap:cli:maintainer"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "ops/install.sh:515",
+      "location": "ops/install.sh:488",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:shim"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:520",
+      "location": "ops/install.sh:492",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "cli:expose"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/install.sh:509",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:cli:maintainer"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:520",
+      "location": "ops/install.sh:509",
       "reason": "shell-built command"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:522",
+      "location": "ops/install.sh:514",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:cli:maintainer"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:522",
+      "location": "ops/install.sh:524",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:cli:maintainer"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/install.sh:527",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "cli:shim"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/install.sh:532",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:cli:maintainer"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/install.sh:532",
       "reason": "shell-built command"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:554",
+      "location": "ops/install.sh:534",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:cli:maintainer"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/install.sh:534",
+      "reason": "shell-built command"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/install.sh:566",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_DAEMON_URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:590",
+      "location": "ops/install.sh:602",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_DAEMON_URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:640",
+      "location": "ops/install.sh:652",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:641",
+      "location": "ops/install.sh:653",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:647",
+      "location": "ops/install.sh:659",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:invite"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:68",
+      "location": "ops/install.sh:705",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_DAEMON_URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:693",
+      "location": "ops/install.sh:739",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_DAEMON_URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:727",
+      "location": "ops/install.sh:740",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_DAEMON_URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:728",
+      "location": "ops/install.sh:75",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_DAEMON_URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:73",
+      "location": "ops/install.sh:767",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_DAEMON_URL"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/install.sh:772",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_DAEMON_URL"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/install.sh:80",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:755",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_MCP_DAEMON_URL"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "ops/install.sh:760",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_MCP_DAEMON_URL"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "ops/install.sh:887",
+      "location": "ops/install.sh:899",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:889",
+      "location": "ops/install.sh:901",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:910",
+      "location": "ops/install.sh:922",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:invite"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:953",
-      "reason": "request target supplied dynamically or external"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "ops/install.sh:954",
-      "reason": "request target supplied dynamically or external"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "ops/install.sh:958",
-      "reason": "Unknown or forwarded inventory target/shape.",
-      "surface": "inventory-gap:route:/health"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "ops/install.sh:958",
-      "reason": "request target supplied dynamically or external"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "ops/install.sh:961",
-      "reason": "Unknown or forwarded inventory target/shape.",
-      "surface": "inventory-gap:route:/health"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "ops/install.sh:961",
+      "location": "ops/install.sh:965",
       "reason": "request target supplied dynamically or external"
     },
     {
       "dynamic": "unresolved",
       "location": "ops/install.sh:966",
+      "reason": "request target supplied dynamically or external"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/install.sh:970",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:route:/health"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/install.sh:970",
+      "reason": "request target supplied dynamically or external"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/install.sh:973",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:route:/health"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/install.sh:973",
+      "reason": "request target supplied dynamically or external"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/install.sh:978",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
     },
