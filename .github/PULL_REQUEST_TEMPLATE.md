@@ -23,19 +23,25 @@ and any evidence with its date. Link the issue this closes.
 ## Verification
 
 <!--
-How you know it works. Paste the test invocation and its exit code:
-  HF_HUB_OFFLINE=1 python -m pytest tests/ > /tmp/pytest-last.log 2>&1; echo $?
+How you know it works. Paste the test invocation, the files it selected
+and why, and its exit code:
+  HF_HUB_OFFLINE=1 python -m pytest tests/test_<area>.py > /tmp/pytest-last.log 2>&1; echo $?
 Never pipe a test run through a pager — the pipe replaces the suite's exit
 code with the pager's.
+
+Contributing from a fork? Review passes (/code-review, reviewer subagents,
+the Codex second review) are the maintainer's to run; see "Contributing
+with a coding agent" in CONTRIBUTING.md.
 -->
 
 ## Checklist
 
 - [ ] A changelog fragment in `changelog.d/` (see its README), not a
       `CHANGELOG.md` edit (docs-only and test-only changes are exempt)
-- [ ] Full suite green, with the bench Postgres up (`127.0.0.1:5433`) —
-      PG-backed tests skip silently without it, which is not a pass
-      (docs-only: the doc guards instead, see `CONTRIBUTING.md`)
+- [ ] The touched and dependent tests green, with a Postgres up —
+      PG-backed tests skip silently without it, which is not a pass; a full
+      local suite only where `CONTRIBUTING.md` requires one (docs-only: the
+      doc guards instead)
 - [ ] New behaviour has a test that was **watched fail** before the fix
 - [ ] Docs updated, and `python ops/gen_llms_txt.py` re-run if any README or
       `docs/guide/` page changed
