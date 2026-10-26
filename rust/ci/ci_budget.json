@@ -157,14 +157,21 @@
     },
     "fingerprints": {
       "scope": "962fa4e9cfc14128",
-      "rust": "2a3582262b638f1a",
+      "rust": "a04c4b10cfbb5b6a",
       "fixtures": "defc5e07c5ac3f94",
       "candidate": "77b0c5fa6b2afcbf",
       "candidate-harness": "ab479a8fc85283e7",
       "parity-checks": "dc6efde1c2658559",
       "daemon-image": "cf93a3a209618bdc",
       "parity": "4c39a489bf4b1642"
-    }
+    },
+    "accepted": [
+      {
+        "job": "rust",
+        "fingerprint": "a04c4b10cfbb5b6a",
+        "reason": "The PDFium provisioning step drops --bin pseudolife-daemon now that the package sets default-run; cargo builds and runs the same binary, so the job's cost is unchanged."
+      }
+    ]
   },
   "ci.yml": {
     "limits": {
