@@ -534,8 +534,10 @@ def test_firewall_rule_yes_adds_the_rule_and_checks_it_worked(bash, tmp_path):
     shell = _Shell(bash, tmp_path)
     proc = _shim_probe(shell, rule="yes")
     assert proc.returncode == 0, proc.stderr
+    # No terminal here, so sudo must not ask for a password (-n): an
+    # unattended run with --firewall-rule yes never waits on a prompt.
     [sudo] = _calls(shell, "sudo")
-    assert sudo == ("sudo|ufw allow from 10.0.0.0/24 to 172.17.0.1 port 8082 proto tcp "
+    assert sudo == ("sudo|-n ufw allow from 10.0.0.0/24 to 172.17.0.1 port 8082 proto tcp "
                     "comment pseudolife dream shim")
     # The probe after the rule is what says it happened.
     assert len(_calls(shell, "docker", "exec")) == 4
@@ -623,6 +625,22 @@ def test_a_shim_that_is_down_on_the_host_points_at_its_unit_not_the_firewall(bas
     assert "systemctl --user status pseudolife-codex-shim.service" in proc.stderr
     assert "ufw" not in proc.stderr
     assert not _calls(shell, "sudo")
+
+
+@BASH
+def test_a_shim_answering_unhealthy_still_counts_as_answering(bash, tmp_path):
+    """A shim whose CLI is signed out serves /health as 503; it still
+    answers on the host, so the firewall is still the cause and the rule
+    is still offered. `curl -f` once read the 503 as the shim being down."""
+    shell = _Shell(bash, tmp_path)
+    _stub(shell.bin / "curl",
+          "printf 'curl|%s\\n' \"$*\" >>\"$CALL_LOG\"\n"
+          "case \" $* \" in *\" -f\"*) exit 22 ;; esac\n"
+          "printf '%s' '{\"status\": \"cli_error\"}'\n")
+    proc = _shim_probe(shell, rule="no")
+    assert proc.returncode == 0, proc.stderr
+    assert "not answering" not in proc.stderr
+    assert UFW_RULE in proc.stderr
 
 
 @BASH

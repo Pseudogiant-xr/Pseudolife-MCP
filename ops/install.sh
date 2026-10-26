@@ -3043,7 +3043,9 @@ shim_container_probe() {
     ENDPOINT_CONTAINER=unreachable
     case "$EXTRACTOR" in *-fallback) shim_until="dreams fall back to the sidecar" ;; *) shim_until="dreams pause" ;; esac
     bridge="$(docker_bridge_address)"; bridge="${bridge:-172.17.0.1}"
-    if ! curl -fsS --max-time 5 "http://$bridge:$SHIM_PORT/health" >/dev/null 2>&1; then
+    # Any HTTP answer counts, without -f: a shim whose CLI is signed out
+    # serves /health as 503 but is up, and the firewall is still the cause.
+    if ! curl -sS --max-time 5 -o /dev/null "http://$bridge:$SHIM_PORT/health" >/dev/null 2>&1; then
         echo "WARNING: the $shim_name is not answering at $bridge:$SHIM_PORT, so the daemon's container cannot reach it either. Check it: systemctl --user status $shim_unit (log: journalctl --user -u $shim_unit). The daemon retries every sweep, and until then $shim_until." >&2
         return 0
     fi
@@ -3058,7 +3060,11 @@ shim_container_probe() {
     fi
     echo "WARNING: the $shim_name answers on this host at $bridge:$SHIM_PORT, but the daemon's container cannot reach it; ufw is enabled with a dropping input policy, the likely cause. This rule lets only the daemon's network through, to that one port: sudo ufw allow from $subnet to $bridge port $SHIM_PORT proto tcp comment 'pseudolife dream shim'. If a later docker compose down gives the network another subnet, the installer's next run names the new rule." >&2
     if firewall_rule_wanted; then
-        if sudo ufw allow from "$subnet" to "$bridge" port "$SHIM_PORT" proto tcp comment 'pseudolife dream shim'; then
+        # Without a terminal on both sides sudo must not ask for a password
+        # (it could still prompt on /dev/tty and wait): -n fails instead.
+        sudo_ask=-n
+        if [ -t 0 ] && [ -t 2 ]; then sudo_ask=""; fi
+        if sudo ${sudo_ask:+"$sudo_ask"} ufw allow from "$subnet" to "$bridge" port "$SHIM_PORT" proto tcp comment 'pseudolife dream shim'; then
             if container_reaches_shim "$probe_url"; then
                 ENDPOINT_CONTAINER=reachable
                 step "Added the ufw rule: the daemon's container now reaches the $shim_name at $probe_url."
