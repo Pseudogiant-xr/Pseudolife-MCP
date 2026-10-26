@@ -47,6 +47,7 @@ mod maintenance;
 mod mcp;
 mod meta_filter;
 mod mutants;
+mod native;
 mod onnx_artifacts;
 mod onnx_runtime;
 mod openblas_sdot;
@@ -128,6 +129,12 @@ fn nodelay_listener(
 }
 
 fn main() {
+    // `provision <runtime>` installs a pinned native runtime and exits,
+    // before anything that needs a bank or configuration.
+    let args: Vec<std::ffi::OsString> = std::env::args_os().skip(1).collect();
+    if args.first().is_some_and(|a| a == "provision") {
+        std::process::exit(native::command(&args[1..]));
+    }
     #[cfg(feature = "principal-harness")]
     if std::env::var_os("PSEUDOLIFE_PRINCIPAL_HARNESS").is_some() {
         let runtime = tokio::runtime::Runtime::new().unwrap();

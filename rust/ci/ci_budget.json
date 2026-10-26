@@ -3,9 +3,9 @@
     "limits": {
       "jobs": 43,
       "runner_minutes": 410,
-      "longest_job_minutes": 25,
+      "longest_job_minutes": 34,
       "critical_path_minutes": 33,
-      "why": "2026-10-24 Rust CI speed pass (#922, #924), measured on the runs below: job count at its measured 43; runner minutes (374.2) and longest job (19.7) about 10% above; critical path 28.1 with the harness build's cache cold on pull-request refs (about 22 once master has saved it), so 33, which still refuses parity waiting on the Rust job (38 or more)"
+      "why": "2026-10-24 Rust CI speed pass (#922, #924), measured on the runs below: job count at its measured 43; runner minutes (374.2) and longest job (19.7) about 10% above; critical path 28.1 with the harness build's cache cold on pull-request refs (about 22 once master has saved it), so 33, which still refuses parity waiting on the Rust job (38 or more); 2026-10-26 (#967, PDF ingest): longest job 25 -> 34. Rust / windows-latest measured 31.4 (median of runs 40209914303 and 40223580054): about 26 before this change (#965's run 40223499916, 26.1, and master push 40218426648, 24.2, had already passed the 19.7 the old limit rested on), plus about 4.6 for the PDF tests: provisioning the pinned PDFium library (1.2), pdfium-render compiled in each daemon override build (+1.7) and the Nextest steps (+0.8). 34 is the measured 31.4 plus about 8%"
     },
     "pip_no_compile": true,
     "needs_without_data": {
@@ -20,143 +20,144 @@
       }
     },
     "measured_on": [
-      40071746653,
-      40074592535
+      40209914303,
+      40223580054,
+      40223499916
     ],
     "jobs": {
       "Scope": {
-        "minutes": 0.4
+        "minutes": 0.2
       },
       "Rust / ubuntu-latest": {
-        "minutes": 10.9
+        "minutes": 16.2
       },
       "Rust / windows-latest": {
-        "minutes": 19.7
+        "minutes": 31.4
       },
       "Fixtures / ubuntu-latest": {
-        "minutes": 1.9
+        "minutes": 2.4
       },
       "Fixtures / windows-latest": {
-        "minutes": 3.5
+        "minutes": 3.6
       },
       "Candidate / ubuntu-latest": {
-        "minutes": 2.8
-      },
-      "Candidate / windows-latest": {
-        "minutes": 6.4
-      },
-      "Candidate harness / ubuntu-latest": {
         "minutes": 3.5
       },
+      "Candidate / windows-latest": {
+        "minutes": 8.1
+      },
+      "Candidate harness / ubuntu-latest": {
+        "minutes": 3.0
+      },
       "Candidate harness / windows-latest": {
-        "minutes": 9.0
+        "minutes": 5.1
       },
       "Parity checks / ubuntu-latest / eval": {
-        "minutes": 9.4
-      },
-      "Parity checks / ubuntu-latest / cli": {
-        "minutes": 7.2
-      },
-      "Parity checks / ubuntu-latest / cli-store": {
-        "minutes": 7.0
-      },
-      "Parity checks / ubuntu-latest / cli-daemon": {
-        "minutes": 4.5
-      },
-      "Parity checks / ubuntu-latest / cli-daemon-2": {
-        "minutes": 7.7
-      },
-      "Parity checks / ubuntu-latest / cli-live": {
-        "minutes": 12.9
-      },
-      "Parity checks / ubuntu-latest / judges": {
-        "minutes": 6.3
-      },
-      "Parity checks / ubuntu-latest / w1c-doctor": {
         "minutes": 9.6
       },
+      "Parity checks / ubuntu-latest / cli": {
+        "minutes": 6.8
+      },
+      "Parity checks / ubuntu-latest / cli-store": {
+        "minutes": 6.0
+      },
+      "Parity checks / ubuntu-latest / cli-daemon": {
+        "minutes": 6.1
+      },
+      "Parity checks / ubuntu-latest / cli-daemon-2": {
+        "minutes": 6.6
+      },
+      "Parity checks / ubuntu-latest / cli-live": {
+        "minutes": 14.2
+      },
+      "Parity checks / ubuntu-latest / judges": {
+        "minutes": 5.5
+      },
+      "Parity checks / ubuntu-latest / w1c-doctor": {
+        "minutes": 10.8
+      },
       "Parity checks / ubuntu-latest / w1c-pairing": {
-        "minutes": 11.3
+        "minutes": 10.5
       },
       "Parity checks / ubuntu-latest / w1c-connection": {
-        "minutes": 5.9
+        "minutes": 5.7
       },
       "Parity checks / ubuntu-latest / w1c-connect": {
-        "minutes": 7.1
+        "minutes": 6.8
       },
       "Parity checks / ubuntu-latest / h5-w1a": {
-        "minutes": 9.1
+        "minutes": 8.4
       },
       "Parity checks / ubuntu-latest / h5-daemon-mutants": {
-        "minutes": 4.6
+        "minutes": 4.9
       },
       "Parity checks / ubuntu-latest / h5-graph-mutants": {
-        "minutes": 9.7
+        "minutes": 8.6
       },
       "Parity checks / ubuntu-latest / h5-light": {
-        "minutes": 8.2
+        "minutes": 7.5
       },
       "Parity checks / windows-latest / eval": {
-        "minutes": 13.3
+        "minutes": 11.2
       },
       "Parity checks / windows-latest / cli": {
-        "minutes": 12.5
+        "minutes": 12.7
       },
       "Parity checks / windows-latest / cli-store": {
-        "minutes": 12.4
+        "minutes": 11.8
       },
       "Parity checks / windows-latest / cli-daemon": {
-        "minutes": 11.9
+        "minutes": 9.2
       },
       "Parity checks / windows-latest / cli-daemon-2": {
-        "minutes": 12.6
+        "minutes": 12.3
       },
       "Parity checks / windows-latest / judges": {
-        "minutes": 11.4
+        "minutes": 11.0
       },
       "Parity checks / windows-latest / w1c-doctor": {
-        "minutes": 14.7
+        "minutes": 14.1
       },
       "Parity checks / windows-latest / w1c-pairing": {
         "minutes": 17.6
       },
       "Parity checks / windows-latest / w1c-connection": {
-        "minutes": 11.7
+        "minutes": 11.8
       },
       "Parity checks / windows-latest / w1c-connect": {
-        "minutes": 10.8
+        "minutes": 12.3
       },
       "Parity checks / windows-latest / h5-audit": {
-        "minutes": 6.9
+        "minutes": 7.1
       },
       "Parity checks / windows-latest / h5-backup": {
-        "minutes": 3.6
+        "minutes": 3.8
       },
       "Parity checks / windows-latest / h5-w1a": {
-        "minutes": 12.5
+        "minutes": 12.0
       },
       "Parity checks / windows-latest / h5-background": {
-        "minutes": 5.2
+        "minutes": 5.0
       },
       "Parity checks / windows-latest / h5-daemon-mutants": {
-        "minutes": 15.2
+        "minutes": 14.0
       },
       "Parity checks / windows-latest / h5-graph-mutants": {
-        "minutes": 18.6
+        "minutes": 21.3
       },
       "Rust daemon / disposable image": {
-        "minutes": 4.5
+        "minutes": 5.4
       },
       "Parity / ubuntu-latest": {
         "minutes": 0.1
       },
       "Parity / windows-latest": {
-        "minutes": 0.1
+        "minutes": 0.0
       }
     },
     "fingerprints": {
       "scope": "962fa4e9cfc14128",
-      "rust": "0c74b084f529d07c",
+      "rust": "2a3582262b638f1a",
       "fixtures": "defc5e07c5ac3f94",
       "candidate": "77b0c5fa6b2afcbf",
       "candidate-harness": "ab479a8fc85283e7",

@@ -6018,7 +6018,7 @@ def _run_live(name: str, scn: dict, tag: str, binary: Path, root: Path, record: 
               tol: dict, mutant: str | None, owned: list[str],
               stubs: dict[str, StubExtractor]) -> dict:
     if name in w2e_documents.SCENARIOS:
-        w2e_documents.require_oracle_without_bs4()
+        w2e_documents.require_document_oracles()
     template = prepare_template(scn, tag, root, owned, stubs.get("seed"))
     dbs = {side: pg.name(f"pl_cf_w2e_{tag}_{suffix}")
            for side, suffix in (("python", "py"), ("rust", "rs"))}

@@ -145,13 +145,14 @@ fn errors_take_python_classes() {
     std::fs::create_dir_all(dir.join("folder.txt")).unwrap();
     std::fs::create_dir_all(dir.join("folder.data")).unwrap();
     std::fs::create_dir_all(dir.join("folder.html")).unwrap();
+    std::fs::create_dir_all(dir.join("folder.pdf")).unwrap();
     std::fs::write(dir.join("paper.PDF"), b"%PDF-1.4").unwrap();
     let at = |n: &str| dir.join(n).to_str().unwrap().to_string();
     // A directory reached past the service's check: on POSIX it opens, and
     // the handle's check refuses it, whatever the suffix (`read_document_bytes`,
     // as `document_parser.read_document_bytes`).
     #[cfg(unix)]
-    for name in ["folder.txt", "folder.html", "folder.data"] {
+    for name in ["folder.txt", "folder.html", "folder.data", "folder.pdf"] {
         match extract_text(&at(name), name) {
             Err(ToolError::Invalid(m)) => assert_eq!(
                 m,
@@ -176,6 +177,11 @@ fn errors_take_python_classes() {
             extract_text(&at("folder.html"), "folder.html"),
             Err(ToolError::Internal(_))
         ));
+        // The PDF branch reads first, outside its PDFium `try`, as HTML does.
+        assert!(matches!(
+            extract_text(&at("folder.pdf"), "folder.pdf"),
+            Err(ToolError::Internal(_))
+        ));
         match extract_text(&at("folder.data"), "folder.data") {
             Err(ToolError::Invalid(m)) => {
                 assert!(m.starts_with("Cannot read file folder.data: "), "{m}")
@@ -195,9 +201,13 @@ fn errors_take_python_classes() {
         }
         other => panic!("{other:?}"),
     }
-    // PDF is the declared refusal, whatever the suffix's case.
+    // A file PDFium cannot open is ValueError's "Failed to read PDF: …",
+    // whatever the suffix's case (needs the provisioned library).
     match extract_text(&at("paper.PDF"), "paper.PDF") {
-        Err(ToolError::Refused { code, .. }) => assert_eq!(code, "not_implemented"),
+        Err(ToolError::Invalid(m)) => assert!(
+            m.starts_with("Failed to read PDF: Failed to load document (PDFium: "),
+            "{m}"
+        ),
         other => panic!("{other:?}"),
     }
     assert!(!py_exists(&at("missing.txt")).unwrap());
