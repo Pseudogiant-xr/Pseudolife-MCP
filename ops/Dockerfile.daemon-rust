@@ -7,6 +7,12 @@ RUN --mount=type=cache,id=w3j-cargo-registry,target=/usr/local/cargo/registry,sh
     --mount=type=cache,id=w3j-cargo-target,target=/build/rust/target,sharing=locked \
     cargo build --manifest-path rust/Cargo.toml --locked --release --bin pseudolife-daemon -j 3 \
     && cp rust/target/release/pseudolife-daemon /pseudolife-daemon
+# PDFium for PDF ingest, installed by the daemon's own provisioner: the pin
+# (rust/daemon/pdfium-pin.json) and checks a native install gets. The
+# provisioner publishes owner-only (root here); readable by all, so a
+# non-root runtime user can load it too.
+RUN PSEUDOLIFE_DAEMON_PDFIUM_DIR=/opt/pdfium /pseudolife-daemon provision pdfium \
+    && chmod -R a+rX /opt/pdfium
 
 FROM python:3.12-slim-bookworm AS runtime-inputs
 COPY rust/daemon/provision_container_model.py /provision_container_model.py
@@ -26,6 +32,7 @@ WORKDIR /app
 COPY --from=builder /pseudolife-daemon /usr/local/bin/pseudolife-daemon
 COPY --from=runtime-inputs /opt/models /opt/models
 COPY --from=runtime-inputs /opt/ort /opt/ort
+COPY --from=builder /opt/pdfium /opt/pdfium
 COPY plugin/hooks /app/plugin/hooks
 ENV CUDA_VISIBLE_DEVICES=-1 \
     HF_HUB_OFFLINE=1 \
@@ -36,6 +43,7 @@ ENV CUDA_VISIBLE_DEVICES=-1 \
     PSEUDOLIFE_DAEMON_ONNX_DIR=/opt/models/qwen3 \
     PSEUDOLIFE_DAEMON_ORT_THREADS=3 \
     ORT_DYLIB_PATH=/opt/ort/libonnxruntime.so.1.27.0 \
+    PSEUDOLIFE_DAEMON_PDFIUM_DIR=/opt/pdfium \
     PSEUDOLIFE_PLUGIN_DIR=/app/plugin
 RUN mkdir /data
 VOLUME ["/data"]
