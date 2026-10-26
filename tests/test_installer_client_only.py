@@ -1360,6 +1360,10 @@ def test_preflight_fails_without_the_buildx_plugin_the_image_build_needs(bash, t
           'case "$*" in "buildx version") exit "$FAKE_BUILDX_EXIT" ;; esac\nexit 0\n')
     # The fix line asserted below is the Linux one, whatever this host runs.
     _stub(shell.bin / "uname", "printf 'Linux\\n'\n")
+    # The stub PATH keeps only /usr/bin:/bin, which on Git for Windows has
+    # neither git nor python3: stub both so the exit code is buildx's alone.
+    _stub(shell.bin / "git", "exit 0\n")
+    _stub(shell.bin / "python3", "exit 0\n")
     script = (ROOT / "ops" / "preflight.sh").read_text(encoding="utf-8")
     proc = shell.run("set -- --client generic\n" + script,
                      extra_env={"FAKE_BUILDX_EXIT": str(buildx_exit)})
