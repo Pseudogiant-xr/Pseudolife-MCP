@@ -70,6 +70,7 @@ fn guess_type_with(path: &Path, platform: impl Fn(&str) -> Option<String>) -> Op
 
 /// The Windows oracle reads REG_SZ Content Type values under HKCR.
 /// WebP and Markdown have no built-in mapping in the supported Python.
+///
 /// Exception to the crate's safe-code rule: `RegGetValueW` has no safe
 /// binding; both calls pass terminated strings and a bounded owned buffer.
 #[cfg(windows)]
