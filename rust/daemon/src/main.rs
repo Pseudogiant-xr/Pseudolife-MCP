@@ -383,3 +383,21 @@ mod listener_tests {
         assert!(accepted.nodelay().unwrap());
     }
 }
+
+#[cfg(test)]
+mod manifest_tests {
+    /// `cargo run -p pseudolife-daemon` (the PDF tests' provisioning hint)
+    /// needs `default-run`: cargo refuses a package with several binaries,
+    /// feature-gated ones included, when none is named.
+    #[test]
+    fn cargo_run_picks_the_daemon() {
+        let manifest = include_str!("../Cargo.toml");
+        assert!(manifest.matches("[[bin]]").count() > 1);
+        assert!(
+            manifest
+                .lines()
+                .any(|line| line.trim() == r#"default-run = "pseudolife-daemon""#),
+            "rust/daemon/Cargo.toml must set default-run = \"pseudolife-daemon\""
+        );
+    }
+}
