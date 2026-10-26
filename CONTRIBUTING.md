@@ -137,7 +137,7 @@ daemon processes. Finish review
 fixes and targeted validation before queueing a required full run. Keep
 the suite lock, one local slot, CPU-only execution, PostgreSQL preflight
 and fingerprint guard, and avoid overlapping saturating work. Follow
-[the project validation rules](CLAUDE.md#running-tests-exit-code-discipline)
+[the project validation rules](CLAUDE.md#running-tests)
 for docs-only and test-only changes, merges from master, review fixes after
 a passing full run, and integration batches.
 
@@ -172,11 +172,13 @@ All tests must pass. Every PR requires fresh CI for its current head
 integrated with current master, including the full PostgreSQL, lite Linux,
 Windows, macOS and required analysis checks. If master moves, update the
 branch and wait for fresh CI; rerunning an old job tests its old merge
-commit. Independent review remains required, and the maintainer owns the
-merge.
+commit. Independent review remains required; for an outside contribution
+the maintainer runs it (see
+[Contributing with a coding agent](#contributing-with-a-coding-agent)) and
+owns the merge.
 
-Trial from 2026-09-28; the maintainer reassesses on 2026-10-12 against the
-measures in the maintainer's private suite-gate memo of 2026-09-28.
+These validation rules began as a trial on 2026-09-28 and have been
+permanent since 2026-10-19.
 
 CI's two full-suite lanes run this exact invocation
 (`-n 2 --dist loadfile` shards whole files across two workers so
@@ -230,7 +232,7 @@ from hard experience:
 - Branch off `master`; keep each PR to one logical change.
 - Commit style is conventional (`feat:`, `fix:`, `docs:`, `test:`,
   `chore:`, scope in parens — see `git log`).
-- User-visible changes add a changelog fragment,
+- Behavior, schema and performance changes add a changelog fragment,
   `changelog.d/<YYYY-MM-DD>-<slug>.md`, rather than editing `CHANGELOG.md`
   (see [changelog.d/README.md](changelog.d/README.md)); the release folds
   the fragments into `[Unreleased]`.
@@ -238,6 +240,53 @@ from hard experience:
   *why*, not *what*.
 - Schema changes bump the schema version — see [Schema bumps](#schema-bumps)
   below for the migration rule and the files that move together.
+
+## Contributing with a coding agent
+
+Agent-written pull requests are welcome. `CLAUDE.md` (which `AGENTS.md`
+points to) is the maintainer's own working rulebook, and many of its rules
+run on the maintainer's machines and usage budget, not yours. If you are
+not the maintainer (usually you contribute from a fork), this section
+replaces only the `CLAUDE.md` steps listed under "Skip these" below.
+`CLAUDE.md`'s rules about the code itself (schema bumps, platform test
+lanes, hook definitions, generated docs, no personal data) still apply,
+and CI enforces most of them.
+
+Your pull request needs:
+
+- one focused change, branched off current `master`;
+- a test that fails without the change and passes with it, and a line in
+  the PR saying you watched it fail;
+- the tests you ran, with the commit you tested, the command and its exit
+  code, and why you chose those files: the test files you touched plus
+  the ones that depend on the changed code (see
+  [Running the tests](#running-the-tests)); a local full suite is needed
+  only for the cases listed there;
+- a changelog fragment for any behavior, schema or performance change
+  (docs-only and test-only changes are exempt);
+- a body that opens with the problem in plain words (the PR template shows
+  the shape), naming anything you could not run, such as a `.ps1` change
+  on a machine without PowerShell;
+- commits under your own name or GitHub noreply address, signed off
+  (`git commit -s`);
+- no personal data: no emails, OS usernames, hostnames, LAN IPs, tokens or
+  keys.
+
+Skip these; the maintainer does them when your PR is taken up:
+
+- **Review passes:** `/code-review`, reviewer subagents and the Codex
+  second review. The maintainer's session runs them on the final head
+  anyway. A self-review you already did is welcome in the PR, but it is
+  not required.
+- **The maintainer's infrastructure:** the Pseudolife memory bank and the
+  `memory_*` recall steps, the agent board, leases and the suite lock's
+  board mirror, `ops/wsl-suite.ps1` / `ops/remote-suite.ps1`, the dev
+  machines, and integration batches.
+- **Deploys and releases:** `pseudolife-mcp update`, live verification and
+  the release procedure.
+- **CI upkeep:** CI on a fork's pull request waits for the maintainer to
+  approve the run. Fix failures it reports in your change; rerunning
+  flaky jobs and updating the branch from `master` are the maintainer's.
 
 ## Schema bumps
 
