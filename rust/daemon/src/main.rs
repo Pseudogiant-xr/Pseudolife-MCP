@@ -3,6 +3,8 @@
 //! gate, storage resolution, config, tokens, the bind guard, then the
 //! background warmup and the HTTP server. See `spec-w1a-foundation.md`.
 
+#![deny(unsafe_code)]
+
 mod auth;
 mod background;
 mod background_sessions;

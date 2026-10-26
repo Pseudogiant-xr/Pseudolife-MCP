@@ -458,6 +458,13 @@ exceptions preserve the operating-system behavior of the Python oracle; their
 presence does not establish parity. Each requires targeted platform evidence
 and independent review before acceptance.
 
+The daemon crate's roots also use `#![deny(unsafe_code)]`, with three commented
+exceptions: `heap_trim::trim_glibc` calls glibc's `malloc_trim` (Linux glibc
+only); `static_files::registry_type` reads Content Type values with
+`RegGetValueW` into a bounded owned buffer (Windows only); and the
+`openblas_sdot` module calls its `avx2,fma` kernels only after the CPU reports
+both features, and reads XCR0 only after OSXSAVE is checked.
+
 `credentials::unix_accounts::{home_by_name, home_with_lookup}` are local
 exceptions for reentrant `libc::getpwnam_r` account-database lookup after removing
 `users` 0.11. The caller owns the initialized passwd structure and lookup buffer.
