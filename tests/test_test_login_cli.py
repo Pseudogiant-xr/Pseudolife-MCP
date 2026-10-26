@@ -153,8 +153,9 @@ class _FakeServer:
 
     def __init__(self, *, superuser=True, user="pseudolife", database="pseudolife_memory",
                  role=None, owns=(), fail_on=None, daemon=None, leftovers=(),
-                 connected=()):
+                 connected=(), has_bank=True):
         self.superuser, self.user, self.database = superuser, user, database
+        self.has_bank = has_bank
         self.role, self.owns, self.fail_on = role, list(owns), fail_on
         self.daemon, self.leftovers = daemon, list(leftovers)
         self.connected = list(connected)
@@ -180,7 +181,7 @@ class _FakeServer:
             banks = {"pseudolife_memory": {
                 "owner": "pseudolife", "public_connect": not self.applied,
                 "role_connect": False if self.applied else role is not None,
-                "owner_connect": True}}
+                "owner_connect": True}} if self.has_bank else {}
             return json.dumps({"role": role, "member_of": [], "banks": banks,
                                "owns": self.owns, "others": ["pseudolife_memory_bench"],
                                "daemon": self.daemon, "connected": self.connected,
@@ -218,6 +219,22 @@ def test_create_provisions_closes_the_bank_and_writes_the_file(tmp_path):
     for database, statements in server.calls:
         assert password not in "\n".join(statements)
     assert [db for db, _ in server.calls if any("CREATE EXTENSION" in s for s in _)] == ["template1"]
+
+
+def test_the_done_line_names_the_databases_the_login_is_kept_out_of(tmp_path):
+    code, out = _run([], _FakeServer(), tmp_path)
+    assert code == cli.EXIT_OK, out
+    assert ("done: the test suite on this account logs in as pseudolife_test, which cannot "
+            "connect to pseudolife_memory. Copy the file") in out
+
+
+def test_the_done_line_says_plainly_when_the_server_has_no_production_database(tmp_path):
+    code, out = _run([], _FakeServer(has_bank=False), tmp_path)
+    assert code == cli.EXIT_OK, out
+    assert "database pseudolife_memory: not on this server" in out
+    assert ("done: the test suite on this account logs in as pseudolife_test; this server "
+            "has no production database for it to be kept out of. Copy the file") in out
+    assert "cannot connect to no" not in out
 
 
 def test_a_second_run_reapplies_the_files_password_and_rotate_replaces_it(tmp_path):
