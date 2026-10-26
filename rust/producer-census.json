@@ -401,7 +401,7 @@
     "rust/shim/src/cli/pyjson.rs": "9ae94081f15448e2bd0feb55b67ba404056737781724eaab04e5eb30b156b05f",
     "rust/shim/src/cli/test_login/exec.rs": "0f9e2ba28835b73cfbe7cfe4b092d39c3dac97feea629972e8b5c86458e1b48b",
     "rust/shim/src/cli/test_login/file.rs": "5663d8ddebb2db52088c3ac70c766296a556852a2d16518b2616b5a6cafbf641",
-    "rust/shim/src/cli/test_login/mod.rs": "d23544181f5823ee1aa9a1f92aade815694c5794e13fec6599683263e949dd55",
+    "rust/shim/src/cli/test_login/mod.rs": "8b6fb0c0b231a40671155760c1b35e2bbcbc05ee13addedc1cc18cbd37604ee3",
     "rust/shim/src/cli/test_login/scram.rs": "7433382dd2709a856ea0568017def16347839589b6b38a5bdec70b5d09a1d7a5",
     "rust/shim/src/cli/test_login/sql.rs": "d81f5f393862545a3e7e4d021da2ab0fd9734e18afc19e7d6ca20dd7469e5384",
     "rust/shim/src/cli/transfer.rs": "35eea9f4ab378a2b23a28d3d7d6ef00c79341f66e28f92a3ce7fec64df603b6c",
