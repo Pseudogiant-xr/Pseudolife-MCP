@@ -584,6 +584,13 @@ owner-only, synced and published by one rename. The Windows install
 matches pg0 0.15.1's installation file for file; the real-download case
 needs `PSEUDOLIFE_TEST_PG_PROVISION_ROOT`.
 
+The daemon crate's roots also use `#![deny(unsafe_code)]`, with three commented
+exceptions: `heap_trim::trim_glibc` calls glibc's `malloc_trim` (Linux glibc
+only); `static_files::registry_type` reads Content Type values with
+`RegGetValueW` into a bounded owned buffer (Windows only); and the
+`openblas_sdot` module calls its `avx2,fma` kernels only after the CPU reports
+both features, and reads XCR0 only after OSXSAVE is checked.
+
 Board label normalization follows the pinned Python 3.11 Unicode 14.0.0
 behavior: casefold, then NFC, with category-C inputs rejected. The pinned
 `unicode-casefold` crate uses Unicode 9.0.0; a full code-point probe found 129
