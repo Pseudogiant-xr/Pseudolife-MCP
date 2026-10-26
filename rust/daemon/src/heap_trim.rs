@@ -52,11 +52,16 @@ fn read_anon_bytes() -> Option<i64> {
         .checked_mul(1024)
 }
 
+/// Exception to the crate's safe-code rule: calls glibc's `malloc_trim`,
+/// which has no safe binding.
+///
 /// Invariant: glibc owns all allocator state; malloc_trim accepts a scalar
 /// pad and exposes no borrowed pointer or handle. It is thread safe and
 /// runs on a blocking worker without holding a service lock.
 #[cfg(all(target_os = "linux", target_env = "gnu"))]
+#[allow(unsafe_code)]
 fn trim_glibc() {
+    // SAFETY: see the invariant above.
     unsafe {
         libc::malloc_trim(0);
     }
