@@ -20,9 +20,9 @@ def test_changed_difference_catches_mutant_and_crashes_do_not():
 
 def test_execution_failures_and_incomplete_reports_are_not_kills():
     import copy
-    from mcp_compare import UNSERVED
+    from mcp_compare import CORPUS_RESPONSES, UNSERVED
 
-    baseline = {"summary": {"responses": 316, "cases": 18, "diffs": 0,
+    baseline = {"summary": {"responses": CORPUS_RESPONSES, "cases": 18, "diffs": 0,
                             "unserved_checked": sorted(UNSERVED)}, "diffs": []}
     for failure in [
         'handshake[0]: python={"exception": "TimeoutError: timed out"}\n          rust  ={}',
@@ -33,7 +33,9 @@ def test_execution_failures_and_incomplete_reports_are_not_kills():
         report["summary"]["diffs"] = 1
         report["diffs"] = [failure]
         assert not mcp_run.mutant_caught(1, report, baseline)
-    for key, value in [("responses", 260), ("cases", 15), ("unserved_checked", [])]:
+    # An unserved list that differs from the baseline's either way.
+    unserved = sorted(UNSERVED)[1:] if UNSERVED else ["memory_not_a_tool"]
+    for key, value in [("responses", 260), ("cases", 15), ("unserved_checked", unserved)]:
         report = copy.deepcopy(baseline)
         report["summary"]["diffs"] = 1
         report["diffs"] = ["toolset[0]: wrong tier"]

@@ -510,3 +510,123 @@ fn enclosing_run_is_rejected_before_clock_overflow() {
     drop(lock);
     assert_eq!(fs::read(home.0.join("lease-resource.lock")).unwrap(), b"");
 }
+
+#[test]
+fn gated_child_sentinel() {
+    if let Some(path) = std::env::var_os("LEASE_GATED_SENTINEL") {
+        let held = std::env::var("PSEUDOLIFE_LEASES_HELD").unwrap_or_else(|_| "<unset>".into());
+        fs::write(path, held).unwrap();
+        std::process::exit(1);
+    }
+}
+
+fn gated(home: &Home, name: &str, sentinel: &std::path::Path) -> std::process::Output {
+    home.command()
+        .args(["lease", "check", name, "--"])
+        .arg(std::env::current_exe().unwrap())
+        .args(["--exact", "gated_child_sentinel", "--nocapture"])
+        .env("LEASE_GATED_SENTINEL", sentinel)
+        .output()
+        .unwrap()
+}
+
+#[test]
+fn gated_check_runs_a_free_command_and_passes_its_exit_1_through() {
+    let home = Home::new();
+    let sentinel = home.0.join("child-sentinel");
+    let output = gated(&home, "resource", &sentinel);
+    // The command's own exit 1, not a refusal: check holds nothing.
+    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(fs::read(&sentinel).unwrap(), b"<unset>");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.starts_with("lease resource: free"), "{stdout}");
+    assert!(!String::from_utf8_lossy(&output.stderr).contains("did not run"));
+}
+
+#[test]
+fn gated_check_refuses_a_held_lease_with_75_without_running_it() {
+    let home = Home::new();
+    let sentinel = home.0.join("child-sentinel");
+    let file = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create_new(true)
+        .open(home.0.join("lease-resource.lock"))
+        .unwrap();
+    file.lock().unwrap();
+    let output = gated(&home, "resource", &sentinel);
+    assert_eq!(output.status.code(), Some(75));
+    assert!(!sentinel.exists());
+    assert!(String::from_utf8_lossy(&output.stdout).starts_with("lease resource: held"));
+    assert_eq!(
+        output.stderr,
+        native_text(
+            "lease: 'resource' is held, so the command did not run; run it again once the lease is free, or, if the command should hold the lease while it runs, queue for it with: pseudolife-mcp lease run resource -- COMMAND\n"
+        )
+    );
+    drop(file);
+}
+
+#[test]
+fn gated_check_refuses_a_failed_check_with_70_without_running_it() {
+    let home = Home::new();
+    let sentinel = home.0.join("child-sentinel");
+    // A bearer the header refuses: a plain check reports it and exits 1,
+    // which a gate must not mistake for held or run past.
+    let output = home
+        .command()
+        .args(["lease", "check", "resource", "--"])
+        .arg(std::env::current_exe().unwrap())
+        .args(["--exact", "gated_child_sentinel", "--nocapture"])
+        .env("LEASE_GATED_SENTINEL", &sentinel)
+        .env("PSEUDOLIFE_MCP_TOKEN", "fixture\tbearer")
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(70));
+    assert!(!sentinel.exists());
+    assert_eq!(
+        output.stderr,
+        native_text(
+            "lease: HTTP_FORBIDDEN_INPUT_REFUSED: invalid bearer header\nlease: the check of 'resource' failed, so the command did not run\n"
+        )
+    );
+}
+
+#[test]
+fn gated_check_usage_errors_and_a_missing_command() {
+    let home = Home::new();
+    for (argv, message) in [
+        (
+            &["lease", "check", "resource", "--"][..],
+            "put the command to gate after --, as in: pseudolife-mcp lease check full-suite -- cargo build",
+        ),
+        (
+            &["lease", "check", "resource", "--json", "--", "child"][..],
+            "check --json takes no command: the command's output would follow the JSON report on stdout; drop --json",
+        ),
+    ] {
+        let output = home.call(argv);
+        assert_eq!(output.status.code(), Some(2));
+        assert!(output.stdout.is_empty());
+        assert_eq!(
+            output.stderr,
+            native_text(&format!(
+                "{}pseudolife-mcp lease check: error: {message}\n",
+                include_str!("../src/cli/lease/assets/check_usage.txt")
+            ))
+        );
+    }
+    assert_eq!(fs::read_dir(&home.0).unwrap().count(), 0);
+    let output = home.call(&[
+        "lease",
+        "check",
+        "resource",
+        "--",
+        "missing-native-lease-child",
+    ]);
+    assert_eq!(output.status.code(), Some(127));
+    assert_eq!(
+        output.stderr,
+        native_text("lease: command not found: missing-native-lease-child\n")
+    );
+}

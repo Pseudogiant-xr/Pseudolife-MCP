@@ -2388,9 +2388,9 @@ For an important document, do both: distil the key facts into memory *and*
 `document_ingest` the file itself.
 
 > **Scope of the server-side parser.** Extraction is intentionally minimal:
-> the embedded text layer only, via `pypdf` (always available) or
-> `pypdfium2` (the optional `pdf` extra — better quality, still
-> copyleft-free). There is **no OCR** — a scanned, image-only PDF ingests
+> the embedded text layer only, via Chromium's PDFium (`pypdfium2`,
+> installed by default and copyleft-free; `pypdf` is the fallback when it
+> cannot be imported). There is **no OCR** — a scanned, image-only PDF ingests
 > as empty text; have the agent read it and store the distillate instead.
 > Paths resolve on the **server's** filesystem: with the Docker daemon,
 > `document_ingest` needs a path visible inside the container (a mounted
@@ -4616,7 +4616,7 @@ backups. Part of the [user guide](../../README.md#documentation).
 
 | Variable | Default | Effect |
 |----------|---------|--------|
-| `PSEUDOLIFE_MCP_DATABASE_URL` | _(unset → lite/file mode)_ | Postgres DSN; when set, PG is the source of truth (schema v57). Unset: with the `[lite]` extra installed the daemon auto-starts an embedded PostgreSQL and fills this in itself; otherwise v0.1 file-only mode (announced loudly at startup). |
+| `PSEUDOLIFE_MCP_DATABASE_URL` | _(unset → lite/file mode)_ | Postgres DSN; when set, PG is the source of truth (schema v57). Unset: with the `[lite]` extra installed the daemon auto-starts an embedded PostgreSQL and fills this in itself (its superuser password is a random per-bank secret in the owner-only `<data_dir>/embedded_pg.secret`, with SCRAM authentication; a bank from before 2026-10-25 moves off the old fixed `postgres` password at its next start); otherwise v0.1 file-only mode (announced loudly at startup). |
 | `PSEUDOLIFE_MCP_STORAGE` | `auto` | `files` opts the daemon out of the `[lite]` embedded Postgres (file mode even when pg0-embedded is installed). Only consulted when no DSN is set. |
 | `PSEUDOLIFE_MCP_DAEMON_URL` | `http://127.0.0.1:8765` | Daemon the shim connects to (and auto-starts). Use an HTTP(S) origin: scheme, host and optional port, without a path, user information, query or fragment. |
 | `PSEUDOLIFE_MCP_NO_SPAWN` | _(unset)_ | Set `1` on the **shim** to disable its spawn-a-daemon fallback: when nothing answers at `PSEUDOLIFE_MCP_DAEMON_URL` it waits up to 5 s for an external daemon instead, then starts the session without it (the last handshake it cached for that URL, retried until the daemon answers; see [the remote bank guide](remote-bank.md#when-the-daemon-is-unreachable)). The Docker-tier installers set this on every shim registration — after a reboot the shim can probe before Docker Desktop has bound the port, and a spawned host fallback then wins the bind race and shadows the real bank with whatever stale local state it finds. Leave unset on pip/lite installs, where the spawn fallback is the intended zero-config path. |
@@ -5139,7 +5139,7 @@ expiring hold on a shared resource, taken around any command.
 ```sh
 pseudolife-mcp lease run NAME [--expect DURATION] [--ttl SECONDS] [--purpose TEXT] [--no-board] [--timeout DURATION] -- COMMAND [ARGS...]
 pseudolife-mcp lease hold NAME --while-pid PID [--expect DURATION] [--ttl SECONDS] [--purpose TEXT] [--worktree PATH] [--no-board] [--timeout DURATION]
-pseudolife-mcp lease check NAME [--json]
+pseudolife-mcp lease check NAME [--json] [-- COMMAND [ARGS...]]
 pseudolife-mcp lease list [NAME] [--json]
 ```
 
@@ -5224,6 +5224,32 @@ For `full-suite` it probes the test suite's own lock (`full-suite.lock` and its
 slots, with the holder record's pid, worktree and start time), since that file,
 not `lease-full-suite.lock`, is the truth for a full run. A run with
 `PSEUDOLIFE_SUITE_LOCK=off` takes no lock, so no check sees it.
+
+Given a command after `--`, the check is the gate itself: it prints the same
+report, then runs the command only when the lease is free and exits with the
+command's own status. A check that reports and leaves the obeying to the caller
+is easy to defeat: in `lease check full-suite; cargo build` the `;` starts the
+build whatever the check said. When the lease is held, the command does not
+run, one stderr line says so and names the next step, and the exit is `75`,
+so a refusal is never read as the command's own `1`. A failed check runs
+nothing and exits `70`. A command's own `70` or `75` passes through unchanged;
+the stderr line is what tells a refusal apart. Put a sequence in one command, so that every step is
+gated:
+
+```sh
+pseudolife-mcp lease check full-suite -- sh -c 'cargo clippy && cargo nextest run && cargo build'
+```
+
+```powershell
+pseudolife-mcp lease check full-suite -- pwsh -c 'cargo clippy && cargo nextest run && cargo build'
+```
+
+The command inherits the terminal and the environment, as under `lease run`,
+and is stopped the same way (`126`, `127` and `128+N` mean the same), but
+nothing is held while it runs: another process may take the lease a moment
+after the check passed. Use `lease run NAME -- COMMAND` when the command should
+hold the lease and wait its turn for it. `--json` takes no command, since the
+command's output would follow the report on stdout.
 
 Each machine mirrors its suite lock under its own lease name:
 `PSEUDOLIFE_SUITE_LEASE`, else a `full-suite.lease` file in the lock
@@ -8281,7 +8307,7 @@ straight into the Docker tier; the lite tier uses the embedded
 runtime's own bundled `pg_dump`, attaching to the running instance or
 starting it for the duration) plus a
 `pseudolife_lite_state-*.tar.gz` of the data dir (weights, config, any
-pre-v57 ChromaDB store; ingested documents are in the dump since v57; `embedded_pg/` is excluded — the dump covers it), with the same
+pre-v57 ChromaDB store; ingested documents are in the dump since v57; `embedded_pg/` is excluded — the dump covers it — and so is `embedded_pg.secret`, the bank's superuser password, since a restore gives the fresh cluster its own; so is installed software the default data dir also holds, which reinstalls: `runtimes/` and `bin/` (the shim) and `native/` (pinned native runtimes)), with the same
 7-day rotation (`--keep-days`). The artifact names
 (`pseudolife_lite_memory-*` / `pseudolife_lite_state-*`) are deliberately
 disjoint from `ops/backup.*`'s, so the two tools can share a directory

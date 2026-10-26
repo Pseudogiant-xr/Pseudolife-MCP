@@ -1,4 +1,5 @@
-// Included only inside credentials::windows_security's native unit-test scope.
+// Included only inside credentials::auth_private_state, the native unit-test
+// scope beside the credentials::windows_security include.
 // All fixtures are fresh empty handles; no pathname security setter is used.
 use super::*;
 use std::{fs, io::Write, os::windows::fs::OpenOptionsExt};
@@ -88,7 +89,9 @@ fn acl_snapshot(file: &File, expect_private: bool) -> (Vec<u8>, u16) {
             ),
             0
         );
-        let _descriptor = Descriptor(descriptor);
+        // SAFETY: the call above returned a LocalAlloc'd descriptor that
+        // nothing else frees.
+        let _descriptor = Descriptor::from_local_alloc(descriptor);
         assert!(!descriptor.is_null() && !dacl.is_null());
         let mut control = 0;
         let mut revision = 0;
@@ -133,7 +136,9 @@ fn seed_dacl(file: &File, sddl: &str) {
             ),
             0
         );
-        let _descriptor = Descriptor(descriptor);
+        // SAFETY: the call above returned a LocalAlloc'd descriptor that
+        // nothing else frees.
+        let _descriptor = Descriptor::from_local_alloc(descriptor);
         let mut present = 0;
         let mut defaulted = 0;
         let mut dacl = ptr::null_mut();

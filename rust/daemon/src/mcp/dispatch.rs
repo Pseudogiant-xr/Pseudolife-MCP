@@ -117,6 +117,7 @@ pub fn registry() -> &'static HashMap<&'static str, ToolFn> {
         map.extend(crate::recall::mcp_tools());
         map.extend(crate::board::mcp::mcp_tools());
         map.extend(crate::dream::service::mcp_tools());
+        map.extend(crate::documents::mcp_tools());
         map
     })
 }

@@ -493,7 +493,20 @@ pub fn parse(argv: &[String]) -> Result<Args, i32> {
             "put the command to run after --, as in: pseudolife-mcp lease run gpu -- python train.py",
         ));
     }
-    if action != "run" && split.is_some() {
+    if action == "check" && split.is_some() {
+        if args.command.is_empty() {
+            return Err(error(
+                "check",
+                "put the command to gate after --, as in: pseudolife-mcp lease check full-suite -- cargo build",
+            ));
+        }
+        if args.json {
+            return Err(error(
+                "check",
+                "check --json takes no command: the command's output would follow the JSON report on stdout; drop --json",
+            ));
+        }
+    } else if action != "run" && split.is_some() {
         return Err(error(action, &format!("{action} takes no command")));
     }
     Ok(args)

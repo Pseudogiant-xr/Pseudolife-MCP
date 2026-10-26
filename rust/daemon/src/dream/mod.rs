@@ -2,6 +2,8 @@
 //! `memory_dream` actions served on `/mcp`.
 #![allow(dead_code)]
 
+pub mod candidates;
+pub mod curation_judge;
 pub mod cursors;
 pub mod deep;
 pub mod extractor;
@@ -11,6 +13,7 @@ pub mod judge_agreement;
 pub mod lessons;
 pub mod prompts;
 pub mod py_json_error;
+pub mod queue_judges;
 pub mod relations;
 pub mod review_judgments;
 pub mod run;

@@ -624,6 +624,22 @@ def _scan_identifiers(rel: str, low: bytes, hits: list) -> None:
             return
 
 
+def _git_binary_paths(repo: Path, paths: list[str]) -> set[str]:
+    """The paths ``.gitattributes`` declares ``binary`` (which unsets both
+    ``text`` and ``diff``): bytes, never text. A bare ``-text`` (the
+    vendored and built frontend files) only stops EOL conversion, so those
+    stay scanned."""
+    proc = subprocess.run(["git", "check-attr", "--stdin", "-z", "text", "diff"],
+                          cwd=repo, input="\0".join(paths), check=True,
+                          capture_output=True, text=True, timeout=30)
+    fields = proc.stdout.split("\0")
+    unset: dict[str, set[str]] = {}
+    for i in range(0, len(fields) - 2, 3):
+        if fields[i + 2] == "unset":
+            unset.setdefault(fields[i], set()).add(fields[i + 1])
+    return {path for path, attrs in unset.items() if attrs >= {"text", "diff"}}
+
+
 def _scan_control_bytes(rel: str, data: bytes, hits: list) -> None:
     if b"\x00" in data:  # binary file
         return
@@ -647,13 +663,17 @@ def tracked_tree_scan():
         pytest.skip("not a git checkout")
     ident_hits: list = []
     control_hits: list = []
-    for rel in proc.stdout.splitlines():
+    tracked = proc.stdout.splitlines()
+    # Files declared binary hold arbitrary bytes (a PDF need not hold a NUL).
+    binary = _git_binary_paths(repo, tracked)
+    for rel in tracked:
         try:
             data = (repo / rel).read_bytes()
         except OSError:
             continue
         _scan_identifiers(rel, data.lower(), ident_hits)
-        _scan_control_bytes(rel, data, control_hits)
+        if rel not in binary:
+            _scan_control_bytes(rel, data, control_hits)
     return ident_hits, control_hits
 
 
@@ -699,6 +719,14 @@ def test_identifier_scan_rejects_dev_machine_labels(value, rejected):
     hits = []
     _scan_identifiers("fixture.txt", value.lower(), hits)
     assert bool(hits) is rejected
+
+
+def test_only_files_declared_binary_skip_the_control_byte_scan() -> None:
+    repo = Path(__file__).resolve().parents[1]
+    pdf = "rust/daemon/harness/pdf_corpus/encrypted-empty-user.pdf"
+    vendored = "frontend/public/vendor/galaxy.bundle.js"  # -text, not binary
+    source = "pseudolife_memory/daemon.py"
+    assert _git_binary_paths(repo, [pdf, vendored, source]) == {pdf}
 
 
 def test_tracked_tree_carries_no_stray_control_bytes(
