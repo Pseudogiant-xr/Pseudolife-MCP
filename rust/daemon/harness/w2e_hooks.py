@@ -9,10 +9,10 @@ hook (``GET /api/hook/session-start``), the SessionEnd close (``POST
 answered as ``{"isError", "status", "headers", "value"}``, so the status,
 the content type and cache policy, and the body (JSON by value, text by
 bytes) are all compared. ``"@root:<key>:<n>"`` in a JSON body resolves per
-side as ``w2e.resolve_args`` does. In a session-start answer the episode
-handle (12 hex characters of a random id) is named by the episode it
-resolves to on that side, so the two answers compare by what they point at.
-The ``write_file`` home op writes a file into each side's data directory
+side as ``w2e.resolve_args`` does. A session-start answer's episode handle
+(the first 12 characters of a random id) is renamed by w2e's episode-id
+normalizer like any other id (``<ep#i>[:12]``), so the two answers compare
+by the episode they name. The ``write_file`` home op writes a file into each side's data directory
 (the daemon-side ``hook-instructions.md``).
 """
 from __future__ import annotations
@@ -104,41 +104,9 @@ def run(op: dict, port: int, dsn: str, harness) -> dict:
     value = r.get("json", r.get("bytes"))
     if op.get("cursor"):
         value = _cursor(value, port, before, after)
-    if op.get("handles"):
-        value = _handles(value, dsn)
     return {"isError": r["status"] != 200, "status": r["status"],
             "headers": {k: r["headers"].get(k) for k in _HEADERS},
             "value": value}
-
-
-# The session-start advertisement's handle: the first 12 characters of the
-# episode id the registration returned.
-_HANDLE = re.compile(r'Session episode: ([0-9a-f]{12}) — pass episode="([0-9a-f]{12})"')
-
-
-def _handles(value, dsn: str):
-    """Name each advertised handle by the episode it resolves to on this
-    side: its session key and, for a sub-episode, its title (a root's title
-    is the minute it opened). A handle that resolves to no episode, or to
-    more than one, stays visible as a difference."""
-    if not isinstance(value, str):
-        return value
-    import psycopg
-
-    def name(m):
-        if m.group(1) != m.group(2):
-            return m.group(0) + " <handles disagree>"
-        with psycopg.connect(dsn, autocommit=True) as conn:
-            rows = conn.execute(
-                "SELECT session_key, parent_id IS NULL, title FROM episodes WHERE id LIKE %s",
-                (m.group(1) + "%",)).fetchall()
-        if len(rows) != 1:
-            return f"{m.group(0)} <{len(rows)} episodes>"
-        key, root, title = rows[0]
-        label = f"<episode {key}: {'root' if root else title}>"
-        return f'Session episode: {label} — pass episode="{label}"'
-
-    return _HANDLE.sub(name, value)
 
 
 def home_op(op: dict, home: Path) -> dict:
@@ -172,8 +140,7 @@ def policy(query: str = "", auth: bool = True) -> dict:
 
 
 def session_start(query: str = "", auth: bool = True) -> dict:
-    return {**hook("GET", "/api/hook/session-start" + (f"?{query}" if query else ""), auth=auth),
-            "handles": True}
+    return hook("GET", "/api/hook/session-start" + (f"?{query}" if query else ""), auth=auth)
 
 
 def changes(query: str = "", auth: bool = True) -> dict:
