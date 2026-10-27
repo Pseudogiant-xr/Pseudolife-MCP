@@ -89,7 +89,7 @@ MUTANTS = ["mcp-sweep-no-auto-dream",         # sweep-dream-auto
 COMPACTION_CONFIG = ("memory:\n  dream:\n    enabled: false\n    sweep_interval_seconds: 1\n"
                      "  compaction:\n    enabled: true\n    keep_per_slot: 1\n"
                      "    min_age_days: 30\n")
-COMPACTION_SLOT = "entity_norm = 'compaction host' AND attribute_norm = 'os'"
+COMPACTION_SLOT = "entity_norm = 'compaction-host' AND attribute_norm = 'os'"
 
 
 def scenarios(w) -> dict:

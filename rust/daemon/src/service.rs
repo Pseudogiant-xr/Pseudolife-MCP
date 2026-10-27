@@ -527,21 +527,25 @@ impl Service {
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs_f64())
             .unwrap_or(0.0);
+        // Each store saves when this tick purged from it, or when an earlier
+        // save left slots dirty: Python's autosave retries those, and this
+        // daemon's autosave does not save the canonical stores, so without
+        // the retry a purge whose save failed would come back at restart.
         let _write = ready.write.lock().await;
         let facts = ready.cortex.write(|s| s.compact(keep, min_age, now));
-        if facts > 0
+        if (facts > 0 || !ready.cortex.snapshot().dirty_slots.is_empty())
             && let Err(e) = crate::fact_set::save_cortex(self, ready).await
         {
             eprintln!("compaction: cortex save failed: {e:?}");
         }
         let world_facts = ready.world.write(|s| s.compact(keep, min_age, now));
-        if world_facts > 0
+        if (world_facts > 0 || !ready.world.snapshot().dirty_slots.is_empty())
             && let Err(e) = crate::world_tools::save_world(self, ready).await
         {
             eprintln!("compaction: world cortex save failed: {e:?}");
         }
         let lessons = ready.lessons.write(|s| s.compact(keep, min_age, now));
-        if lessons > 0
+        if (lessons > 0 || !ready.lessons.snapshot().dirty_slots.is_empty())
             && let Err(e) = crate::forget_tools::save_lessons(self, ready).await
         {
             eprintln!("compaction: lesson store save failed: {e:?}");
