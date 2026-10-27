@@ -246,8 +246,9 @@ impl Board {
             .dispatch_once(action, params.clone(), headers, principal)
             .await
         {
+            // The retry's `tick` runs `_ensure_init` again (W2F-CLOCK-RETRY:
+            // without Python's forced writer-session reprobe).
             Err(BoardError::ClockChanged) if action == "send" => {
-                self.hlc.lock().expect("hlc lock").seeded = false;
                 self.dispatch_once(action, params, headers, principal).await
             }
             other => other,
@@ -670,25 +671,19 @@ impl Board {
             .map_err(BoardError::Internal)
     }
 
-    /// A send's HLC stamp and the writer epoch it must see, seeding the
-    /// clock first (`_ensure_tier(full=True)`; see the declared divergence).
+    /// A send's HLC stamp and the writer epoch it must see: the service
+    /// clock (`service._hlc.tick()`), after `_ensure_tier(full=True)`, so
+    /// board and memory writes share one ordering authority and the stamp
+    /// outranks every reseeded high-water mark. The epoch is the published
+    /// storage's, which a writer-session reconnect replaces.
     pub(crate) async fn tick(&self) -> Result<(String, i64)> {
-        let storage = self
+        let ready = self
             .service
-            .storage_tier()
+            .ensure_init()
             .await
             .map_err(BoardError::Internal)?;
-        let seeded = self.hlc.lock().expect("hlc lock").seeded;
-        if !seeded {
-            let best = super::hlc::stored_high_water(storage.client()).await?;
-            let mut hlc = self.hlc.lock().expect("hlc lock");
-            if best > (0, 0) {
-                hlc.observe(best.0, best.1);
-            }
-            hlc.seeded = true;
-        }
-        let (phys, logical) = self.hlc.lock().expect("hlc lock").tick();
-        Ok((format!("{phys}:{logical}"), storage.lease_epoch()))
+        let (phys, logical) = ready.tick_hlc();
+        Ok((format!("{phys}:{logical}"), ready.storage.lease_epoch()))
     }
 
     /// `_acknowledge_page`: acknowledge the page a receive returned, in the

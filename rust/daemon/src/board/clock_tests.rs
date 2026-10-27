@@ -9,7 +9,7 @@ use crate::config::DaemonEnv;
 use crate::service::Service;
 use serde_json::{Map, Value, json};
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 fn params(v: Value) -> Map<String, Value> {
@@ -32,7 +32,7 @@ fn fixture() -> (String, PathBuf) {
     (dsn, config)
 }
 
-fn service(dsn: &str, config_path: &PathBuf) -> (Arc<Service>, Arc<Board>) {
+fn service(dsn: &str, config_path: &Path) -> (Arc<Service>, Arc<Board>) {
     let service = Arc::new(Service::new(
         crate::config::load(config_path).unwrap(),
         DaemonEnv::from_env(&|_| None).unwrap(),

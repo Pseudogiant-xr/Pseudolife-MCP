@@ -8,7 +8,6 @@ pub mod console;
 pub mod db;
 pub mod dispatch;
 pub mod error;
-pub mod hlc;
 pub mod http;
 pub mod hub;
 pub mod lease;
@@ -49,7 +48,6 @@ pub struct Board {
     pub(crate) store: Store,
     /// The coordination lock and the board's own connection.
     pub(crate) conn: tokio::sync::Mutex<db::Conn>,
-    pub(crate) hlc: Mutex<hlc::Hlc>,
     pub(crate) pruned_at: Mutex<Option<Instant>>,
     pub(crate) hub: hub::Hub,
     pub(crate) service: Arc<Service>,
@@ -83,7 +81,6 @@ impl Board {
             },
             config,
             conn: tokio::sync::Mutex::new(db::Conn::new(dsn)),
-            hlc: Mutex::new(hlc::Hlc::default()),
             pruned_at: Mutex::new(None),
             hub: hub::Hub::default(),
             service,

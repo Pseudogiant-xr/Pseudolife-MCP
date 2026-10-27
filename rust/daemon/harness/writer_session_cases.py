@@ -61,7 +61,7 @@ NOOP_CALLBACKS = (
 PAST_PROBE = 1.1
 # Past _LEASE_RETRY_SECONDS (5 s).
 PAST_LEASE_RETRY = 5.1
-MUTANTS = ("writer-no-reconnect", "writer-epoch-unchecked", "writer-board-clock-kept")
+MUTANTS = ("writer-no-reconnect", "writer-epoch-unchecked")
 
 
 def _dsn() -> str:

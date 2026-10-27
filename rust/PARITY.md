@@ -680,7 +680,7 @@ Source: `pseudolife_memory/coordination.py`. Each item requires normal, invalid-
 | attach | 1/4 | ported | served | Board harness scenarios: identity, mail, wake, console, mixed |
 | heartbeat | 1/4 | ported | served | Board harness scenarios: identity, mail, wake |
 | detach | 1/4 | ported | served | Board harness scenarios: identity, mixed |
-| send | 1/4 | ported | served | Board harness scenarios: mail, wake, prune, console, mixed, mcp-tools; declared: W2F-CLOCK-RETRY, W2F-SHARED-HLC (cutover blockers) and W2F-MAIL-PACING |
+| send | 1/4 | ported | served | Board harness scenarios: mail, wake, prune, console, mixed, mcp-tools; declared: W2F-CLOCK-RETRY (cutover blocker) and W2F-MAIL-PACING. Sends tick the service clock (spec FS6; `board::clock_tests`, run by `board.boundary --shared-clock`) |
 | receive | 1/4 | ported | served | Board harness scenarios: mail, console, mixed; includes `wait_seconds` (W2-F). The `ack` flag (#754) is compared over MCP by #777's `mcp-tools` run; its REST steps await a live run. W2F-MAIL-PACING applies |
 | history | 1/4 | ported | served | Board harness scenarios: mail |
 | ack | 1/4 | ported | served | Board harness scenarios: mail, console |

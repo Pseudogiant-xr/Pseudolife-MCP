@@ -466,17 +466,6 @@ impl Service {
             return Ok(());
         };
         let fresh = Arc::new(fresh);
-        if fresh.resident_invalidated().is_some()
-            && !crate::mutants::active("writer-board-clock-kept")
-            && let Some(board) = self.board()
-        {
-            // `_coordination_hlc_epoch = None` (service.py:1420): the board's
-            // own clock never saw the other writer's high-water mark, and the
-            // replacement's epoch would let a send past the epoch fence. Mark
-            // it unseeded before any caller can see that epoch, so the next
-            // send reseeds from the bank.
-            board.hlc.lock().expect("hlc lock").seeded = false;
-        }
         inner.storage = Some(fresh.clone());
         if let Some(ready) = inner.ready.take() {
             inner.ready = Some(Arc::new(ready.over(fresh.clone())));
@@ -819,137 +808,6 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "requires a disposable board database through board.boundary"]
-    async fn board_send_refuses_an_incomplete_clock_seed() {
-        let dsn = std::env::var("PL_W2F_BOARD_DSN").expect("owned board fixture DSN");
-        let parsed = crate::storage::parse_dsn(&dsn).unwrap();
-        assert!(
-            parsed
-                .get_dbname()
-                .is_some_and(|n| n.starts_with("pl_cf_w2f_"))
-        );
-        assert_eq!(parsed.get_ports(), &[5434]);
-        assert!(
-            matches!(parsed.get_hosts(), [tokio_postgres::config::Host::Tcp(h)] if h == "127.0.0.1")
-        );
-        let service = Arc::new(Service::new(
-            Config::default(),
-            DaemonEnv::from_env(&|_| None).unwrap(),
-            PathBuf::new(),
-            dsn.clone(),
-            true,
-        ));
-        let board = crate::board::Board::new(
-            service.config.coordination.clone(),
-            dsn.clone(),
-            service.clone(),
-            Arc::new(crate::auth::PrincipalStore::new()),
-        );
-        let params = |v: Value| v.as_object().unwrap().clone();
-        let mut headers = std::collections::HashMap::new();
-        let sender = board
-            .dispatch(
-                "register",
-                params(json!({"label": "sender"})),
-                &headers,
-                "default",
-            )
-            .await
-            .unwrap();
-        let recipient = board
-            .dispatch(
-                "register",
-                params(json!({"label": "recipient"})),
-                &headers,
-                "default",
-            )
-            .await
-            .unwrap();
-        headers.insert(
-            "x-pl-agent".into(),
-            sender["agent_id"].as_str().unwrap().into(),
-        );
-        headers.insert(
-            "x-pl-agent-key".into(),
-            sender["credential"].as_str().unwrap().into(),
-        );
-        let storage = service.storage_tier().await.unwrap();
-        let future = (crate::board::store::now() * 1000.0) as i64 + 3_600_000;
-        storage.client().execute(
-            "INSERT INTO facts(entity,attribute,entity_norm,attribute_norm,value,status,confidence,asserted_at,last_confirmed,hlc_phys,hlc_logical) VALUES ('clock','fixture','clock','fixture','future','current',1,0,0,$1,7)",
-            &[&future],
-        ).await.unwrap();
-        // A real query timeout hides a persisted high-water mark from the
-        // first seed attempt. No schema mutation or production bank is used.
-        let (mut locker, connection) = tokio_postgres::connect(&dsn, tokio_postgres::NoTls)
-            .await
-            .unwrap();
-        let driver = tokio::spawn(connection);
-        let lock = locker.transaction().await.unwrap();
-        lock.batch_execute("LOCK TABLE facts IN ACCESS EXCLUSIVE MODE")
-            .await
-            .unwrap();
-        storage
-            .client()
-            .batch_execute("SET statement_timeout = '100ms'")
-            .await
-            .unwrap();
-        let send = params(
-            json!({"to": recipient["agent_id"], "text": "clock proof", "request_id": "clock-proof"}),
-        );
-        let refused = board
-            .dispatch("send", send.clone(), &headers, "default")
-            .await;
-        lock.rollback().await.unwrap();
-        storage
-            .client()
-            .batch_execute("RESET statement_timeout")
-            .await
-            .unwrap();
-        let committed: i64 = storage
-            .client()
-            .query_one("SELECT count(*) FROM coordination_messages", &[])
-            .await
-            .unwrap()
-            .get(0);
-        assert_eq!(
-            committed, 0,
-            "incomplete clock seed committed mail below bank history"
-        );
-        assert!(refused.is_err());
-        assert!(!board.hlc.lock().unwrap().seeded);
-        board
-            .dispatch("send", send, &headers, "default")
-            .await
-            .unwrap();
-        assert!(board.hlc.lock().unwrap().seeded);
-        let stamp: String = storage
-            .client()
-            .query_one("SELECT hlc FROM coordination_messages", &[])
-            .await
-            .unwrap()
-            .get(0);
-        let (phys, logical) = stamp.split_once(':').unwrap();
-        assert!(
-            (
-                phys.parse::<i64>().unwrap(),
-                logical.parse::<i64>().unwrap()
-            ) > (future, 7)
-        );
-        drop(storage);
-        drop(board);
-        drop(locker);
-        driver.abort();
-        let storage = service.inner.lock().await.storage.take().unwrap();
-        service.update(|s| s.storage = None);
-        Arc::try_unwrap(storage)
-            .ok()
-            .expect("storage released")
-            .close()
-            .await;
-    }
-
-    #[tokio::test]
-    #[ignore = "requires a disposable board database through board.boundary"]
     async fn board_json_capabilities_roundtrip() {
         let dsn = std::env::var("PL_W2F_BOARD_DSN").expect("owned board fixture DSN");
         let parsed = crate::storage::parse_dsn(&dsn).unwrap();
@@ -1230,7 +1088,6 @@ mod tests {
             dsn.clone(),
             false,
         ));
-        // The board's own clock, which a handover must unseed.
         let board = Arc::new(crate::board::Board::new(
             service.config.coordination.clone(),
             dsn.clone(),
@@ -1334,7 +1191,6 @@ mod tests {
                     (observed, served)
                 }
             };
-        let seeded = || board.hlc.lock().unwrap().seeded;
         let first = service.ensure_init().await.expect("initial init");
         let pid = backend_pid(&first.storage).await;
         let (observed, mut current) = observe(Ok(first.clone()), pid, first.clone()).await;
@@ -1343,24 +1199,19 @@ mod tests {
         run_helper(&["--dump-db", "initial"]);
 
         // Death with no other writer: the next call reconnects and keeps
-        // the resident copy, and the board keeps its seeded clock.
-        board.hlc.lock().unwrap().seeded = true;
+        // the resident copy.
         let pid = backend_pid(&current.storage).await;
         kill(&current.storage, &dsn).await;
         past_probe().await;
         let result = service.ensure_init().await;
         let (observed, next) = observe(result, pid, current).await;
         current = next;
-        assert!(
-            seeded(),
-            "a reconnect with no other writer keeps the board clock"
-        );
         phases.push(json!({"phase": "death", "observed": observed}));
         run_helper(&["--dump-db", "death"]);
 
         // Another writer held the bank in the gap: the reconnect flags the
-        // handover, the board clock must reseed before its next send, and
-        // the service re-reads the bank before serving.
+        // handover and the service re-reads the bank, reseeding the clock the
+        // board's sends tick, before serving.
         let pid = backend_pid(&current.storage).await;
         kill(&current.storage, &dsn).await;
         run_helper(&["--other-writer"]);
@@ -1368,7 +1219,22 @@ mod tests {
         let result = service.ensure_init().await;
         let (observed, next) = observe(result, pid, current).await;
         current = next;
-        assert!(!seeded(), "a handover must unseed the board clock");
+        assert!(!current.startup.clock_state().hlc_reseed_pending);
+        let mark: Option<Value> = current
+            .storage
+            .client()
+            .query_opt(
+                "SELECT value FROM meta WHERE key = 'coordination_hlc_highwater'",
+                &[],
+            )
+            .await
+            .unwrap()
+            .map(|row| row.get(0));
+        if let Some((phys, logical)) =
+            mark.and_then(|v| Some((v.get(0)?.as_i64()?, v.get(1)?.as_i64()?)))
+        {
+            assert!(current.tick_hlc() > (phys, logical));
+        }
         phases.push(json!({"phase": "handover", "observed": observed}));
         run_helper(&["--dump-db", "handover"]);
 
