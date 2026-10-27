@@ -248,7 +248,7 @@ impl Board {
             .dispatch_once(action, params.clone(), headers, principal)
             .await
         {
-            // The retry's `tick` runs `_ensure_init` again (W2F-CLOCK-RETRY:
+            // The retry's `full_tier` runs `_ensure_init` again (W2F-CLOCK-RETRY:
             // without Python's forced writer-session reprobe).
             Err(BoardError::ClockChanged) if action == "send" => {
                 self.dispatch_once(action, params, headers, principal).await
