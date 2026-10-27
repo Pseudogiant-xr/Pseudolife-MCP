@@ -10,7 +10,7 @@ side must answer exactly `501 {"error": "not_implemented", "path": P}`.
 
 | Surface | Python behaviour | Owner |
 |---|---|---|
-| Every Console route in `harness/goldens/routes.json` other than `GET /api/search`, the coordination view of `GET /api/agents`, `POST /api/daemon-notice` and `POST /api/episodes/rename`, `/merge` and `/prune`, the reads `read/console.rs` serves (the `w2d-console-projections` row below) `/api/agents`' default view, the maintainer reads and `/api/config`, after all gates | the handler's answer | W2-D (reads), W2-E (writes), W2-F (board, maintainer) |
+| Every Console route in `harness/goldens/routes.json` other than `GET /api/search`, the coordination view of `GET /api/agents`, `POST /api/daemon-notice` and `POST /api/episodes/rename`, `/merge` and `/prune`, the reads `read/console.rs` serves (the `w2d-console-projections` row below) `/api/agents`' default view, the maintainer reads, `POST /api/maintainer/challenge` and `/api/config`, after all gates | the handler's answer | W2-D (reads), W2-E (writes), W2-F (board, maintainer) |
 | `/api/hook/session-start`, `memory-policy` (any caller) | briefing and memory-policy text | W2-D |
 | Authorized `memory-changes` and `session-end` after its gates | change note and episode close | W2-E |
 | `POST /api/pair` after a valid body on an authenticated install | the 2-slot redemption gate (`RedemptionGate`, 429 `rate_limited`), invocation of the implemented `principals::redeem` store transaction plus immediate `PrincipalStore::add`, the failure-budget refund on success, and 503 `pairing_unavailable` on a store error | HTTP-SECURITY / CLI-PAIRING (the gate wraps only `principal_store.redeem`, `web/api.py:378-393`) |
