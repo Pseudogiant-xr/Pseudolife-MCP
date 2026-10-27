@@ -231,7 +231,10 @@ current merge ref, except as the `merge-forward` skill allows):
   `ops/integrate.py open` pushes it, because since #846 that costs less
   than one CI run and the suite never collects `rust/`; nothing
   is fixed inside a batch (a conflicting member, or the culprit a red
-  batch's local bisection finds, is dropped with a comment), and the
+  batch's local bisection finds, is dropped with a comment) except the
+  one generated commit `build` adds to regenerate
+  `rust/producer-census.json`, which no PR regenerates itself because
+  master moving staled every PR that did (maintainer, 2026-10-27), and the
   maintainer or the delegated session merges it with a merge commit, never
   squash, so GitHub marks its members merged (the command: item 4).
   Procedure:
