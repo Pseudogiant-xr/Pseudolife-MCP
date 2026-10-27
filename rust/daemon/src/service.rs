@@ -572,6 +572,11 @@ impl Service {
     ) {
         *self.last_saved.lock().expect("last saved lock") = None;
         let mut carry = crate::counters::Carry::default();
+        if row.is_none() {
+            // A freshly built CMS's `reset_counters`: the tier counters are
+            // process statics, so a re-read of a row-less bank zeroes them.
+            crate::read::stats::restore_tier(0, Vec::new());
+        }
         if let Some(row) = row {
             let applied = crate::counters::apply(row, std::mem::take(&mut ws.surprise_history));
             ws.interaction_count = applied.interaction_count;
@@ -589,13 +594,13 @@ impl Service {
         *reported = pending;
     }
 
-    /// `_persist_all`'s counters arm for autosave (`always` false: only when
-    /// the bank or cortex changed since the last save, or the last counters
-    /// write failed) and the clean-exit flush (`always`). Entries, access
+    /// `_persist_all`'s counters arm for `autosave_if_changed`: only when the
+    /// bank or cortex changed since the last save, or the last counters
+    /// write failed. Entries, access
     /// counts and the canonical stores write through here, so the counters
     /// row is the one thing these saves add. A failed write is logged and
     /// retried by the next autosave, as in Python.
-    async fn save_counters(&self, always: bool) -> Result<(), String> {
+    async fn save_counters(&self) -> Result<(), String> {
         let mut inner = self.inner.lock().await;
         if inner.ready.is_none() {
             return Ok(());
@@ -633,7 +638,7 @@ impl Service {
         let pending = self
             .counters_pending
             .load(std::sync::atomic::Ordering::SeqCst);
-        if !always && !pending && *self.last_saved.lock().expect("last saved lock") == Some(fp) {
+        if !pending && *self.last_saved.lock().expect("last saved lock") == Some(fp) {
             return Ok(());
         }
         let row = {
@@ -698,6 +703,10 @@ impl Service {
             }
             match self.ensure_init_inner().await {
                 Ok(ready) => {
+                    // `_last_saved_fingerprint` right after init (service.py
+                    // 6359-6361): an idle start never writes the counters.
+                    *self.last_saved.lock().expect("last saved lock") =
+                        Some(crate::counters::fingerprint(&ready));
                     crate::read::search_route::warmup_probe(self, &ready).await;
                     return;
                 }
@@ -770,14 +779,11 @@ impl crate::background::Duties for Service {
             crate::dream::ticks::sweep(self, &ready, &stop).await
         })
     }
-    /// `autosave_if_changed` (service.py:3687-3700).
+    /// `autosave_if_changed` (service.py:3687-3700), from the autosave loop
+    /// and at a clean exit (`mcp_server._flush_on_exit`): only what changed
+    /// since the last save, so an idle or read-only run writes nothing.
     fn autosave(&self) -> crate::background::Duty<'_> {
-        Box::pin(self.save_counters(false))
-    }
-
-    /// `flush` (service.py:3702-3711): unconditional, at a clean exit.
-    fn flush(&self) -> crate::background::Duty<'_> {
-        Box::pin(self.save_counters(true))
+        Box::pin(self.save_counters())
     }
 
     fn warmup(&self, stop: tokio::sync::watch::Receiver<bool>) -> crate::background::Duty<'_> {

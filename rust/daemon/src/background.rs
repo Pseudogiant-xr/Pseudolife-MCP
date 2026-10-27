@@ -38,12 +38,9 @@ pub fn seconds(raw: Option<&str>, default: f64) -> Result<f64, String> {
 /// it runs. Callbacks finish before shutdown joins their tasks, so a
 /// durable write is never abandoned half way through an await.
 pub trait Duties: Send + Sync + 'static {
+    /// `autosave_if_changed`: the background loop's save, and the exit's
+    /// (`mcp_server._flush_on_exit` calls the same gated save).
     fn autosave(&self) -> Duty<'_>;
-    /// `MemoryService.flush`: the unconditional save at a clean exit
-    /// (autosave saves only what changed since the last save).
-    fn flush(&self) -> Duty<'_> {
-        self.autosave()
-    }
     fn warmup(&self, stop: watch::Receiver<bool>) -> Duty<'_>;
     fn reap(&self, idle_seconds: f64) -> Duty<'_>;
     /// One sweep tick; `stop` fires when shutdown begins, so a long
@@ -181,7 +178,7 @@ impl Background {
             }
         }
         if self.durability_started.load(Ordering::SeqCst)
-            && let Err(e) = duties.flush().await
+            && let Err(e) = duties.autosave().await
         {
             eprintln!("exit flush failed: {e}");
         }

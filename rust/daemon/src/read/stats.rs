@@ -3,7 +3,8 @@
 //! `ContinuumMemorySystem.stats` (memory/cms.py:2811-2875).
 //!
 //! The process-local counters live here as statics: like Python's, they
-//! start at zero with the process and count only what this process did.
+//! start at zero with the process, except the tier counters, which an
+//! initialization restores from the bank's `cms_counters` row (B4).
 
 use crate::mcp::dispatch::{ToolCall, ToolError, ToolFn, ToolFuture};
 use serde_json::{Map, Value, json};
