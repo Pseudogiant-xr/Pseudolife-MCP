@@ -238,12 +238,12 @@ pub(crate) async fn candidates(
         return Ok(json!({"query": null, "episode": null, "count": 0, "clusters": []}));
     }
     // `retrieve`'s `k = top_k or self.config.top_k`; a negative width
-    // fails there as it does on `GET /api/search`.
+    // fails in the band's `torch.topk`, whose message Python answers.
     let retrieve_k = match top_k {
         0 => svc.config.memory.top_k.max(0) as usize,
         n if n < 0 => {
             if query_anchor {
-                return Err(internal("top_k must not be negative"));
+                return Err(internal("selected index k out of range"));
             }
             0
         }

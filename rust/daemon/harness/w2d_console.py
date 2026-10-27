@@ -14,12 +14,14 @@ starts both daemons and sends every operation to both, comparing the
 answer by value (with ``w2e``'s declared response normalizers: record clocks
 null-or-not, ``age`` one step apart, episode ids renamed ``<ep#i>``) and the
 full database state of both banks after every operation, so a read's side
-effects (``/api/entry``'s access count and retrieval credit, the query
-anchor's access accrual in ``/api/consolidation``) are compared too.
+effects (``/api/entry``'s access count, and its retrieval credit to the
+event a session's search logged; the query anchor's access accrual in
+``/api/consolidation``) are compared too.
 
 This module adds one operation, ``get``: a Console GET whose ``query``
 values may name a row on each side (``@id:<entry text>``, ``@ep:<title>``,
-resolved by ``w2e.resolve_args``); its answer is ``{"isError", "status",
+resolved by ``w2e.resolve_args``) and whose ``headers`` follow the bearer
+(an ``X-PL-Session``); its answer is ``{"isError", "status",
 "value"}``, so a refusal compares by status as well as body. Nothing here
 edits ``w2e.py``: the scenarios, the mutants and the ``get`` dispatch are
 registered on the imported module.
@@ -36,8 +38,8 @@ import w2e  # noqa: E402
 
 # Deliberate breaks (``--features mutants``) the scenarios must catch.
 MUTANTS = ["console-facts-no-contender", "console-sources-by-name", "console-chain-limit-clamped",
-           "console-episodes-unsorted", "mcp-get-no-db-bump", "mcp-recent-oldest-first",
-           "mcp-consolidation-unsorted"]
+           "console-episodes-unsorted", "mcp-get-no-db-bump", "mcp-get-no-use-credit",
+           "mcp-recent-oldest-first", "mcp-consolidation-unsorted"]
 
 OPS = ("get",)
 
@@ -49,7 +51,8 @@ def run_get(op: dict, port: int, dsn: str) -> dict:
             v = w2e.resolve_args({"v": v}, dsn)["v"]
         query[k] = str(v)
     path = op["path"] + ("?" + urllib.parse.urlencode(query) if query else "")
-    r = w2e.w1a.call(port, "GET", path, [w2e.AUTH], None)
+    headers = [w2e.AUTH] + [tuple(h) for h in op.get("headers", [])]
+    r = w2e.w1a.call(port, "GET", path, headers, None)
     value = r.get("json", r.get("bytes"))
     return {"isError": r["status"] != 200, "status": r["status"], "value": value}
 
@@ -63,8 +66,8 @@ def run_op(op: dict, port: int, mcp, dsn: str) -> dict | None:
     return _base_run_op(op, port, mcp, dsn)
 
 
-def get(path: str, **query) -> dict:
-    return {"op": "get", "path": path, "query": query}
+def get(path: str, headers=(), **query) -> dict:
+    return {"op": "get", "path": path, "query": query, "headers": list(headers)}
 
 
 store, sess, fact, tool = w2e.store, w2e.sess, w2e.fact, w2e.tool
@@ -96,6 +99,15 @@ READ_SEED = [
     session_title("Beta", [sess("cr-b")]),
     ep_start("Beta sub", [sess("cr-b")]),
     store("Beta sub-episode note on cache eviction.", [sess("cr-b")], source="eval"),
+    # An episode whose first seed forms the smaller cluster, so the
+    # clusters' cohesion x size order differs from their seed order.
+    store("The office cat sleeps on the server rack every afternoon.", [sess("cr-g")]),
+    store("Every afternoon the office cat naps on top of the server rack.", [sess("cr-g")]),
+    store("The deploy freeze starts on Friday at noon.", [sess("cr-g")]),
+    store("No deploys after Friday noon: the freeze begins then.", [sess("cr-g")]),
+    store("The Friday noon deploy freeze blocks all releases.", [sess("cr-g")]),
+    session_title("Gamma", [sess("cr-g")]),
+    _close("cr-g"),
     # A correction: the old note stays as superseded history.
     store("The staging cluster runs on version 3."),
     supersede("The staging cluster runs on version 4.",
@@ -157,6 +169,8 @@ def scenarios() -> dict[str, dict]:
                 get("/api/facts", limit=2),
                 get("/api/facts", limit=-1),
                 get("/api/facts", limit="many"),
+                get("/api/facts", limit="100000000000000000000"),
+                get("/api/recent", n="-100000000000000000000"),
                 # /api/facts/history: a scalar slot's versions, a set slot's
                 # events, an unknown slot, and the absent parameters (None).
                 get("/api/facts/history", entity="blue-green pipeline", attribute="status"),
@@ -198,6 +212,14 @@ def scenarios() -> dict[str, dict]:
                 # unknown id, a non-numeric and an absent id.
                 get("/api/entry", id="@id:The payments database lives on host db-7."),
                 get("/api/entry", id="@id:The payments database lives on host db-7."),
+                # A session's search served it: a dereference under that
+                # session credits the event (retrieval_uses), another
+                # session's does not.
+                w2e.search("which host runs the payments database", [sess("cr-x")], top_k=3),
+                get("/api/entry", [sess("cr-y")],
+                    id="@id:The payments database lives on host db-7."),
+                get("/api/entry", [sess("cr-x")],
+                    id="@id:The payments database lives on host db-7."),
                 get("/api/entry", id="@id:The staging cluster runs on version 3."),
                 get("/api/entry", id=987654321),
                 get("/api/entry", id="seven"),
@@ -223,6 +245,8 @@ def scenarios() -> dict[str, dict]:
                 get("/api/consolidation", episode="@ep:Beta", min_cohesion=0.3),
                 get("/api/consolidation", episode="@ep:Beta", min_cohesion=0.3, source="eval",
                     tag="cache"),
+                get("/api/consolidation", episode="@ep:Gamma"),
+                get("/api/consolidation", episode="@ep:Gamma", min_cohesion=0.5),
                 get("/api/consolidation", episode="@ep:Beta", min_cohesion=0.3, top_k=0),
                 get("/api/consolidation", episode="@ep:Beta", min_cohesion=0.3, top_k=-1),
                 get("/api/consolidation", q="cache hit rate", top_k=0, min_cohesion=0.2),

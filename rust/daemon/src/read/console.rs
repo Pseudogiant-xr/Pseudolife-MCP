@@ -46,12 +46,30 @@ fn s_param(q: &HashMap<String, String>, key: &str) -> Option<String> {
     q.get(key).filter(|v| !v.is_empty()).cloned()
 }
 
-/// `_i(params, key, default)`: `int(v)`, else the default.
+/// `_i(params, key, default)`: `int(v)`, else the default. Python's
+/// integers are unbounded; one past i64 saturates, which every bound here
+/// reads the same way (all rows, or none).
 fn i_param(q: &HashMap<String, String>, key: &str, default: i64) -> i64 {
     q.get(key)
         .filter(|v| !v.is_empty())
-        .and_then(|v| py_int(v))
+        .and_then(|v| py_int(v).or_else(|| saturated_int(v)))
         .unwrap_or(default)
+}
+
+/// An ASCII integer literal `py_int` cannot hold: `i64::MAX` or `i64::MIN`
+/// by its sign. Underscores follow Python's rule (single, between digits).
+fn saturated_int(v: &str) -> Option<i64> {
+    let t = crate::read::search_route::py_strip(v);
+    let (negative, digits) = match t.as_bytes().first() {
+        Some(b'-') => (true, &t[1..]),
+        Some(b'+') => (false, &t[1..]),
+        _ => (false, t),
+    };
+    let well_formed = !digits.is_empty()
+        && digits
+            .split('_')
+            .all(|g| !g.is_empty() && g.bytes().all(|b| b.is_ascii_digit()));
+    well_formed.then_some(if negative { i64::MIN } else { i64::MAX })
 }
 
 /// `_f(params, key, default)`: `float(v)`, else the default.
@@ -223,6 +241,9 @@ const LESSONS_DUMP_LIMIT: usize = 100_000;
 /// stale-demoted, then each row's graph `entity_id`, its slot's
 /// `source_entries` and the evidence-supersession flag.
 async fn facts_dump(svc: &Service, ready: &Ready) -> anyhow::Result<Vec<Value>> {
+    // Python holds the service lock for the whole dump, so no write lands
+    // between the snapshot and the per-row trace reads.
+    let _ws = ready.write.lock().await;
     let knobs = CortexKnobs::from_config(&svc.config);
     let relative_age = svc.config.time.relative_age;
     let now = crate::episodes::now();
@@ -492,6 +513,19 @@ mod tests {
         assert_eq!(i_param(&q, "e", 5), 5);
         assert_eq!(i_param(&q, "f", 5), -3);
         assert_eq!(i_param(&q, "missing", 5), 5);
+        let big: HashMap<String, String> = [
+            ("p", "100000000000000000000"),
+            ("n", "-1_000_000_000_000_000_000"),
+            ("bad", "1__0"),
+            ("frac", "1e30"),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect();
+        assert_eq!(i_param(&big, "p", 5), i64::MAX);
+        assert_eq!(i_param(&big, "n", 5), i64::MIN);
+        assert_eq!(i_param(&big, "bad", 5), 5);
+        assert_eq!(i_param(&big, "frac", 5), 5);
         assert_eq!(f_param(&q, "e", 0.6), 1.5);
         assert_eq!(f_param(&q, "c", 0.6), 0.6);
         assert_eq!(s_param(&q, "b"), None);
