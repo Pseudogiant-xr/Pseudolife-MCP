@@ -1114,23 +1114,6 @@ mod tests {
     }
 
     #[test]
-    fn a_served_components_surprise_is_the_entry_value_not_its_f32() {
-        // `comps["surprise"] = float(surprise)`: the entry's double, the
-        // value a store computed (`1 - max_sim`) or the REAL text a
-        // hydration parsed, never its f32 rounding.
-        let mut e = entry(1, "a", "x", false);
-        e.surprise_value = 0.6854406297206879;
-        e.surprise = e.surprise_value as f32;
-        let bank = Bank {
-            dim: DIM,
-            entries: vec![e],
-            matrix: unit(0.9),
-        };
-        let r = rank(&bank, &unit(1.0), &params("", 3), None, &[], Some(3));
-        assert_eq!(r.comps["a"]["surprise"], json!(0.6854406297206879));
-    }
-
-    #[test]
     fn floor_dedup_and_multipliers() {
         let rows = [
             (1, "a", "x", false, 0.9),
@@ -1952,5 +1935,22 @@ mod tests {
             served(&r),
             [Item::Entry(1), Item::Entry(0), Item::Reference(0)]
         );
+    }
+
+    #[test]
+    fn a_served_components_surprise_is_the_entry_value_not_its_f32() {
+        // `comps["surprise"] = float(surprise)`: the entry's double, the
+        // value a store computed (`1 - max_sim`) or the REAL text a
+        // hydration parsed, never its f32 rounding.
+        let mut e = entry(1, "a", "x", false);
+        e.surprise_value = 0.6854406297206879;
+        e.surprise = e.surprise_value as f32;
+        let bank = Bank {
+            dim: DIM,
+            entries: vec![e],
+            matrix: unit(0.9),
+        };
+        let r = rank(&bank, &unit(1.0), &params("", 3), None, &[], Some(3));
+        assert_eq!(r.comps["a"]["surprise"], json!(0.6854406297206879));
     }
 }
