@@ -2179,10 +2179,12 @@ def fallback_warning(r: dict) -> str | None:
 
 
 def _url_host(url: str) -> str | None:
-    """``urllib.parse.urlsplit(url).hostname``, by hand so the Rust daemon
-    can mirror it exactly: the authority after ``//`` up to ``/?#``, the
-    userinfo before its last ``@`` dropped, the bracketed IPv6 literal or
-    the text before the first ``:``, lowercased; None when empty."""
+    """The host this daemon's transport dials: ``urlsplit(url).hostname``,
+    the host urllib connects to (the authority after ``//`` up to ``/?#``,
+    the userinfo before its last ``@`` dropped, the bracketed IPv6 literal
+    or the text before the first ``:``, lowercased; None when empty). The
+    Rust daemon judges reqwest's parsed host instead, so each judges what
+    its own transport would look up."""
     if "://" not in url:
         return None
     netloc = url.split("://", 1)[1]

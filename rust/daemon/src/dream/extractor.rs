@@ -2231,15 +2231,18 @@ fn definitely_not_found(e: &std::io::Error) -> bool {
     .any(|w| text.contains(w))
 }
 
-/// `_url_host` (`memory/dream.py`): `urlsplit(url).hostname` by hand.
+/// `_url_host` (`memory/dream.py`): the host this daemon's transport
+/// dials, so the check never judges a name the transport would not look
+/// up. Python's is `urlsplit().hostname`, the host urllib connects to;
+/// here it is reqwest's parsed host (percent-decoded, IDNA-mapped), with
+/// IPv6 brackets dropped. The two differ only where the transports do
+/// (`http:///v1`, a percent-encoded or out-of-range-port URL).
 fn url_host(url: &str) -> Option<String> {
-    let (_, rest) = url.split_once("://")?;
-    let netloc = &rest[..rest.find(['/', '?', '#']).unwrap_or(rest.len())];
-    let netloc = netloc.rsplit_once('@').map_or(netloc, |(_, h)| h);
-    let host = match netloc.split_once('[') {
-        Some((_, after)) => after.split_once(']').map_or(after, |(h, _)| h),
-        None => netloc.split_once(':').map_or(netloc, |(h, _)| h),
-    };
+    let parsed = reqwest::Url::parse(url).ok()?;
+    let host = parsed
+        .host_str()?
+        .trim_start_matches('[')
+        .trim_end_matches(']');
     Some(host.to_lowercase()).filter(|h| !h.is_empty())
 }
 
@@ -3029,8 +3032,13 @@ mod tests {
             ),
             ("http://User:Pass@Host.Example:1/v1", Some("host.example")),
             ("http://[::1]:8/v1", Some("::1")),
-            ("http:///v1", None),
-            ("http://h:99999/v1", Some("h")),
+            // Codex review of ef2c6389: the transport decodes this host
+            // and reaches it, so the check must judge the decoded name.
+            ("http://127%2e0%2e0%2e1:8081/v1", Some("127.0.0.1")),
+            // Where reqwest's parse differs from urlsplit, the check
+            // follows the transport that will dial it.
+            ("http:///v1", Some("v1")),
+            ("http://h:99999/v1", None),
             ("pseudolife-extractor:8081", None),
         ] {
             assert_eq!(url_host(url).as_deref(), host, "{url}");
