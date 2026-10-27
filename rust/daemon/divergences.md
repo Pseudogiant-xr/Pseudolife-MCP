@@ -11,7 +11,6 @@ side must answer exactly `501 {"error": "not_implemented", "path": P}`.
 | Surface | Python behaviour | Owner |
 |---|---|---|
 | Every Console route in `harness/goldens/routes.json` other than `GET /api/search`, the coordination view of `GET /api/agents`, `POST /api/daemon-notice` and `POST /api/episodes/rename`, `/merge` and `/prune`, after all gates | the handler's answer | W2-D (reads), W2-E (writes), W2-F (board, maintainer) |
-| Tokenless MCP Host/Origin rebinding policy | SDK transport policy before tool dispatch | **CUTOVER BLOCKER — W2-G**; tokenless MCP stays unmounted (501) until this gate is accepted. Authenticated bound-identity checks are served (spec.md M18) |
 | `/api/hook/session-start`, `memory-policy` (any caller) | briefing and memory-policy text | W2-D |
 | Authorized `memory-changes` and `session-end` after its gates | change note and episode close | W2-E |
 | `POST /api/pair` after a valid body on an authenticated install | the 2-slot redemption gate (`RedemptionGate`, 429 `rate_limited`), invocation of the implemented `principals::redeem` store transaction plus immediate `PrincipalStore::add`, the failure-budget refund on success, and 503 `pairing_unavailable` on a store error | HTTP-SECURITY / CLI-PAIRING (the gate wraps only `principal_store.redeem`, `web/api.py:378-393`) |
@@ -86,9 +85,14 @@ and 5, GETs declaring 9999999 bytes: the added `Connection: close` on the
 413); `mcp_ci.py` declares exactly those. Indices 0, 2 and 3, which used to
 differ the same way, now match.
 
-**MCP-TOKENLESS-GUARD:** the Host/Origin helper exists inside the transport,
-but the production tokenless mount still returns 501 before reaching it.
-This slice does not enable tokenless MCP or claim live rebinding parity.
+**MCP-TOKENLESS-GUARD** is closed (B6, under D3): tokenless `/mcp` is
+served behind the SDK's loopback Host/Origin allowlist (spec.md M4), checked
+on every request, the stateless era's included. `mcp_ci.py` compares the
+tokenless corpus (`rebinding`, `rebinding_edges`, `open_lists`) with Python,
+legitimate near misses beside each refusal, with no declared difference,
+and catches `mcp-bare-host`, `mcp-any-origin` and `mcp-era-skips-security`;
+it runs on Linux, and the same checks run in-process on both OSes
+(`routes/mcp.rs` tests).
 **MCP-BOUND-IDENTITY** is closed: an authenticated `/mcp` request carrying
 `X-PL-Bank` / `X-PL-Principal` is checked against the bearer's W2-F board
 context before the MCP layer (spec.md M18); the live `bound_identity` case
