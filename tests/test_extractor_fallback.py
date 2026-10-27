@@ -638,13 +638,28 @@ def test_probe_cause_401_is_login_expired():
         assert d.probe_endpoint_cause(base) == ("login_expired", "/health HTTP 401")
 
 
-def test_probe_cause_refused_and_healthy():
+@pytest.mark.parametrize("failure, error", [
+    (ConnectionRefusedError(111, "refused"), "connection refused"),
+    (TimeoutError("timed out"), "timed out"),
+])
+def test_probe_cause_names_a_transport_failure(monkeypatch, failure, error):
+    # The transport failure is raised directly, so no wall-clock budget
+    # decides the verdict (a real refused connect on Windows retries past a
+    # short timeout, which once let either answer pass).
+    import urllib.error
+    import urllib.request
+
     from pseudolife_memory.memory import dream as d
-    # Windows retries a refused connect past a short timeout, so either
-    # unreachable form is the answer here.
-    reason, error = d.probe_endpoint_cause("http://127.0.0.1:9/v1", timeout=0.3)
-    assert reason == "extractor_unreachable"
-    assert error in ("connection refused", "timed out")
+
+    def _urlopen(url, timeout=None):
+        raise urllib.error.URLError(failure)
+    monkeypatch.setattr(urllib.request, "urlopen", _urlopen)
+    assert d.probe_endpoint_cause("http://127.0.0.1:9/v1") == (
+        "extractor_unreachable", error)
+
+
+def test_probe_cause_healthy():
+    from pseudolife_memory.memory import dream as d
     with _health_server() as base:
         assert d.probe_endpoint_cause(base) is None
 
