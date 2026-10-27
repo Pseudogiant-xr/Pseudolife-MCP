@@ -156,8 +156,8 @@
       }
     },
     "fingerprints": {
-      "scope": "962fa4e9cfc14128",
-      "rust": "a04c4b10cfbb5b6a",
+      "scope": "96dd91911ecc126e",
+      "rust": "7e31d77eff2ceb0b",
       "fixtures": "defc5e07c5ac3f94",
       "candidate": "77b0c5fa6b2afcbf",
       "candidate-harness": "ab479a8fc85283e7",
@@ -170,6 +170,16 @@
         "job": "rust",
         "fingerprint": "a04c4b10cfbb5b6a",
         "reason": "The PDFium provisioning step drops --bin pseudolife-daemon now that the package sets default-run; cargo builds and runs the same binary, so the job's cost is unchanged."
+      },
+      {
+        "job": "rust",
+        "fingerprint": "7e31d77eff2ceb0b",
+        "reason": "Drops the -k deselect of the deleted census currency test; the same tests run, so its minutes are unchanged"
+      },
+      {
+        "job": "scope",
+        "fingerprint": "96dd91911ecc126e",
+        "reason": "Classification only: a regenerated producer census beside docs keeps a docs-only diff docs-only; same steps, same minutes"
       }
     ]
   },
