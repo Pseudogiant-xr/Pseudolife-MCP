@@ -329,6 +329,14 @@ def test_preflight_checks_pipx_on_both_platforms() -> None:
     assert "pipx" in _read("ops/preflight.ps1")
 
 
+def test_preflight_checks_buildx_on_both_platforms() -> None:
+    """Both installers build the images with compose, and the Dockerfiles'
+    RUN --mount caches need BuildKit; the .sh check runs against a stub
+    docker in test_installer_client_only.py."""
+    assert "docker buildx version" in _read("ops/preflight.sh")
+    assert "docker buildx version" in _read("ops/preflight.ps1")
+
+
 def test_installers_wire_gemini_via_shim_and_http() -> None:
     """Gemini CLI is first-class: stdio shim with a per-provider writer id
     (user scope — gemini defaults to project scope) and an HTTP fallback.

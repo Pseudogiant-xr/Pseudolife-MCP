@@ -849,6 +849,28 @@ pub(crate) async fn insert_proposal(
     created_at: f64,
 ) -> Result<Option<i64>, ToolError> {
     in_txn(client, |c| async move {
+        insert_proposal_body(
+            c, src_id, relation, dst_id, confidence, similarity, rationale, source, created_at,
+        )
+        .await
+    })
+    .await
+}
+
+/// `insert_proposal` in the caller's transaction.
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn insert_proposal_body(
+    c: &Client,
+    src_id: i64,
+    relation: &str,
+    dst_id: i64,
+    confidence: f32,
+    similarity: Option<f32>,
+    rationale: Option<String>,
+    source: &str,
+    created_at: f64,
+) -> Result<Option<i64>, ToolError> {
+    {
         Ok(c.query_opt(
             "INSERT INTO edge_proposals \
              (src_id, relation, dst_id, confidence, similarity, rationale, source, created_at) \
@@ -868,12 +890,11 @@ pub(crate) async fn insert_proposal(
         .await
         .map_err(internal)?
         .map(|r| r.get(0)))
-    })
-    .await
+    }
 }
 
 /// `dismiss_pair` (3414-3425) on a borrowed client.
-pub(super) async fn dismiss_pair_body(c: &Client, a: &str, b: &str) -> Result<bool, ToolError> {
+pub(crate) async fn dismiss_pair_body(c: &Client, a: &str, b: &str) -> Result<bool, ToolError> {
     let mut pair = [a, b];
     pair.sort();
     Ok(c.query_opt(
@@ -930,6 +951,30 @@ async fn set_proposal_status(
         return Ok(false);
     };
     in_txn(client, |c| async move {
+        set_proposal_status_body(c, id, status, DECIDED_BY, decided_at).await
+    })
+    .await
+}
+
+/// The reviewed-edge floor (`max(confidence, _REVIEWED_EDGE_MIN_CONF)`) an
+/// accepted link's edge is stored with.
+pub(crate) fn reviewed_edge_confidence(confidence: f64) -> f64 {
+    if crate::mutants::active("mcp-review-accept-no-floor") {
+        confidence
+    } else {
+        confidence.max(REVIEWED_EDGE_MIN_CONF)
+    }
+}
+
+/// `set_proposal_status`'s body, in the caller's transaction.
+pub(crate) async fn set_proposal_status_body(
+    c: &Client,
+    id: i64,
+    status: &str,
+    decided_by: &str,
+    decided_at: f64,
+) -> Result<bool, ToolError> {
+    {
         let Some(row) = c
             .query_opt(
                 "SELECT p.source, s.canonical, d.canonical \
@@ -949,7 +994,7 @@ async fn set_proposal_status(
                 "UPDATE edge_proposals SET status = $1, \
                  decided_by = COALESCE($2, decided_by), \
                  decided_at = COALESCE($3, decided_at) WHERE id = $4 AND status = 'pending'",
-                &[&status, &DECIDED_BY, &decided_at, &id],
+                &[&status, &decided_by, &decided_at, &id],
             )
             .await
             .map_err(internal)?;
@@ -974,8 +1019,7 @@ async fn set_proposal_status(
             .map_err(internal)?;
         }
         Ok(n > 0)
-    })
-    .await
+    }
 }
 
 /// The `get_entity_proposal` fields the settle paths read.
@@ -1197,8 +1241,24 @@ fn py_fmt(s: &Option<String>) -> String {
 
 /// `service.graph_propose_links` (8809-8854), source `deep-dream`.
 async fn propose(ready: &Ready, proposals: &[Value]) -> Result<Value, ToolError> {
-    let client = ready.storage.client();
-    let known: Vec<String> = match graph::load_relations(client).await.map_err(internal)? {
+    propose_body(ready.storage.client(), proposals, "deep-dream", false).await
+}
+
+/// `_graph_propose_links_locked(proposals, source=source)` after its guard:
+/// `in_txn` when the caller holds a transaction (the candidate judge), so
+/// the endpoints are resolved on the borrowed client.
+pub(crate) async fn propose_body(
+    client: &Client,
+    proposals: &[Value],
+    source: &str,
+    in_txn: bool,
+) -> Result<Value, ToolError> {
+    let relations = if in_txn {
+        graph::load_relations_body(client).await
+    } else {
+        graph::load_relations(client).await
+    };
+    let known: Vec<String> = match relations.map_err(internal)? {
         Value::Array(rows) => rows
             .iter()
             .filter_map(|r| r.get("name").and_then(Value::as_str))
@@ -1225,23 +1285,51 @@ async fn propose(ready: &Ready, proposals: &[Value]) -> Result<Value, ToolError>
         }
         // Both nodes are minted before the insert: a conflicting proposal
         // still leaves them.
-        let se = crate::graph_write_tools::resolve_or_create(client, &src, None).await?;
-        let de = crate::graph_write_tools::resolve_or_create(client, &dst, None).await?;
+        let (se, de) = if in_txn {
+            (
+                crate::graph_write_tools::resolve_or_create_in(client, &src, None).await?,
+                crate::graph_write_tools::resolve_or_create_in(client, &dst, None).await?,
+            )
+        } else {
+            (
+                crate::graph_write_tools::resolve_or_create(client, &src, None).await?,
+                crate::graph_write_tools::resolve_or_create(client, &dst, None).await?,
+            )
+        };
         let confidence = real(edge_confidence(&src, &relation, &dst))?;
         let similarity = real_param(p.get("similarity"))?;
         let rationale = text_param(p.get("rationale"))?;
-        let id = insert_proposal(
-            client,
+        let (src_id, dst_id) = (
             se["id"].as_i64().unwrap_or(0),
-            &relation,
             de["id"].as_i64().unwrap_or(0),
-            confidence,
-            similarity,
-            rationale,
-            "deep-dream",
-            now(),
-        )
-        .await?;
+        );
+        let id = if in_txn {
+            insert_proposal_body(
+                client,
+                src_id,
+                &relation,
+                dst_id,
+                confidence,
+                similarity,
+                rationale,
+                source,
+                now(),
+            )
+            .await?
+        } else {
+            insert_proposal(
+                client,
+                src_id,
+                &relation,
+                dst_id,
+                confidence,
+                similarity,
+                rationale,
+                source,
+                now(),
+            )
+            .await?
+        };
         if id.is_some() {
             proposed += 1;
         } else {
@@ -1260,8 +1348,22 @@ async fn dismiss_duplicate(ready: &Ready, a: &str, b: &str) -> Result<Value, Too
     }
     let client = ready.storage.client();
     let g = graph::load_graph(client).await.map_err(internal)?;
-    // The stored canonical by canonical or normalized display, first entity
-    // (by id) wins; aliases are not consulted.
+    let (an, bn) = dismiss_canonicals(&g, an, bn);
+    if an == bn {
+        return Ok(bad());
+    }
+    let new = in_txn(client, |c| async move {
+        confirm_human_pair_body(c, &an, &bn).await?;
+        dismiss_pair_body(c, &an, &bn).await
+    })
+    .await?;
+    Ok(json!({"dismissed": true, "new": new, "a": a, "b": b}))
+}
+
+/// `_graph_dismiss_duplicate_locked`'s resolution over the loaded graph:
+/// each name's stored canonical by canonical or normalized display, first
+/// entity (by id) wins; aliases are not consulted.
+pub(crate) fn dismiss_canonicals(g: &Value, an: String, bn: String) -> (String, String) {
     let mut canon_by_norm: Map<String, Value> = Map::new();
     let mut canon_of: Map<String, Value> = Map::new();
     for e in g["entities"].as_array().into_iter().flatten() {
@@ -1294,16 +1396,7 @@ async fn dismiss_duplicate(ready: &Ready, a: &str, b: &str) -> Result<Value, Too
             .and_then(Value::as_str)
             .map_or(n, str::to_string)
     };
-    let (an, bn) = (resolve(an), resolve(bn));
-    if an == bn {
-        return Ok(bad());
-    }
-    let new = in_txn(client, |c| async move {
-        confirm_human_pair_body(c, &an, &bn).await?;
-        dismiss_pair_body(c, &an, &bn).await
-    })
-    .await?;
-    Ok(json!({"dismissed": true, "new": new, "a": a, "b": b}))
+    (resolve(an), resolve(bn))
 }
 
 /// The `relate` action: `graph_relate(..., origin="agent")`, then the pair
@@ -1345,11 +1438,7 @@ async fn accept_link(ready: &Ready, pid: &Pid) -> Result<Value, ToolError> {
         return Ok(not_pending("accepted", pid));
     };
     // The reviewed-edge floor, stored as a confirming action.
-    let confidence = if crate::mutants::active("mcp-review-accept-no-floor") {
-        prop.confidence
-    } else {
-        prop.confidence.max(REVIEWED_EDGE_MIN_CONF)
-    };
+    let confidence = reviewed_edge_confidence(prop.confidence);
     graph::upsert_edge(
         client,
         graph::Edge {

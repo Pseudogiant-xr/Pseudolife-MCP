@@ -212,9 +212,28 @@ fn mcp_memory_consolidation_candidates<'a>(
             tags,
             top_k,
         };
+        // The anchor's `retrieve` reads the reference pool too: its chunks
+        // are dropped as unaddressable, but they count against the
+        // reranker's candidate budget.
+        let refs = match &qv {
+            Some(q) => {
+                let (q, mem) = (q.clone(), &svc.config.memory);
+                crate::txn::with_client(ready.storage.client(), |db| async move {
+                    Ok::<_, tokio_postgres::Error>(
+                        crate::documents::reference_pool(db, &q, mem).await,
+                    )
+                })
+                .await
+                .unwrap_or_else(|e| {
+                    eprintln!("reference pool skipped: {e}");
+                    Vec::new()
+                })
+            }
+            None => Vec::new(),
+        };
         let (r2, cfg) = (ready.clone(), svc.config.memory.clone());
         let mut candidates =
-            tokio::task::spawn_blocking(move || pool(&r2, &cfg, qv.as_deref(), &pool_args))
+            tokio::task::spawn_blocking(move || pool(&r2, &cfg, qv.as_deref(), &pool_args, &refs))
                 .await
                 .map_err(internal)?;
 
@@ -285,7 +304,13 @@ struct PoolArgs {
 
 /// The candidate pool (`service.py:7352-7410`): the query anchor's
 /// addressable hits, else the episode's addressable entries.
-fn pool(ready: &Ready, cfg: &MemoryConfig, qv: Option<&[f32]>, a: &PoolArgs) -> Vec<(usize, f64)> {
+fn pool(
+    ready: &Ready,
+    cfg: &MemoryConfig,
+    qv: Option<&[f32]>,
+    a: &PoolArgs,
+    refs: &[search::RefHit],
+) -> Vec<(usize, f64)> {
     let bank = ready.bank.read().expect("bank lock");
     // Every resident id once, the correction path's uniqueness rule.
     let mut counts: HashMap<i64, usize> = HashMap::new();
@@ -346,12 +371,15 @@ fn pool(ready: &Ready, cfg: &MemoryConfig, qv: Option<&[f32]>, a: &PoolArgs) -> 
             qv,
             &params,
             Some(crate::read::search_route::LazyReranker::get()),
+            refs,
+            cfg.ref_top_k,
         );
+        // A reference chunk has no row id, so it is never actionable.
         return ranked
             .hits
             .iter()
-            .filter(|h| actionable(&bank.entries[h.idx]))
-            .map(|h| (h.idx, h.score))
+            .filter_map(|h| h.entry().map(|i| (i, h.score)))
+            .filter(|&(i, _)| actionable(&bank.entries[i]))
             .collect();
     }
     // The episode's entries in band order, one per text.

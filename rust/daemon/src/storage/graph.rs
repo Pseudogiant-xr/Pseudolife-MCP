@@ -330,7 +330,7 @@ async fn unlink(tx: &Client, id: i64) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn delete_entity_body(client: &Client, id: i64) -> anyhow::Result<bool> {
+pub(crate) async fn delete_entity_body(client: &Client, id: i64) -> anyhow::Result<bool> {
     let tx = client;
     unlink(tx, id).await?;
     let deleted = tx

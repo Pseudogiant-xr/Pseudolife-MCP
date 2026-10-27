@@ -1,0 +1,4704 @@
+{
+ "format": [
+  {
+   "row": {
+    "n": 1,
+    "display": "a, b, c",
+    "reason": "list-artifact",
+    "degree": 0,
+    "edges": [],
+    "facts": 0,
+    "fact_text": [],
+    "lesson_object": false,
+    "scopes": [],
+    "mentions": []
+   },
+   "text": "[1] 'a, b, c' — detector: list-artifact; degree 0; facts 0; lesson-minted object: no; scopes []\n    edges: none\n    facts: none\n    notes: none"
+  },
+  {
+   "row": {
+    "n": 2,
+    "display": "origin/master",
+    "reason": "compound",
+    "degree": 3,
+    "edges": [
+     "x0 -uses-> origin/master [agent]yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+     "x1 -uses-> origin/master [agent]yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+     "x2 -uses-> origin/master [agent]yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+     "x3 -uses-> origin/master [agent]yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+     "x4 -uses-> origin/master [agent]yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+     "x5 -uses-> origin/master [agent]yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+     "x6 -uses-> origin/master [agent]yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+     "x7 -uses-> origin/master [agent]yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+     "x8 -uses-> origin/master [agent]yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+     "x9 -uses-> origin/master [agent]yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"
+    ],
+    "facts": 2,
+    "fact_text": [
+     "role=zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+     "owner=me",
+     "x=1",
+     "y=2"
+    ],
+    "lesson_object": true,
+    "scopes": [
+     "homelab",
+     "pseudolife"
+    ],
+    "mentions": [
+     "[conversation] mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm",
+     "two",
+     "three",
+     "four"
+    ]
+   },
+   "text": "[2] 'origin/master' — detector: compound; degree 3; facts 2; lesson-minted object: yes; scopes ['homelab', 'pseudolife']\n    edges: x0 -uses-> origin/master [agent]yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy; x1 -uses-> origin/master [agent]yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy; x2 -uses-> origin/master [agent]yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy; x3 -uses-> origin/master [agent]yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy; x4 -uses-> origin/master [agent]yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy; x5 -uses-> origin/master [agent]yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy; x6 -uses-> origin/master [agent]yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy; x7 -uses-> origin/master [agent]yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy\n    facts: role=zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz; owner=me; x=1\n    notes: [conversation] mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm; two; three"
+  },
+  {
+   "row": {
+    "n": 3,
+    "display": "élan — 🙂",
+    "reason": null,
+    "degree": 1,
+    "edges": [
+     "e"
+    ],
+    "facts": 1,
+    "fact_text": [
+     "k=v"
+    ],
+    "lesson_object": false,
+    "scopes": [
+     "Ünicode"
+    ],
+    "mentions": []
+   },
+   "text": "[3] 'élan — 🙂' — detector: ?; degree 1; facts 1; lesson-minted object: no; scopes ['Ünicode']\n    edges: e\n    facts: k=v\n    notes: none"
+  },
+  {
+   "row": {
+    "n": 4
+   },
+   "text": "[4] '?' — detector: ?; degree 0; facts 0; lesson-minted object: no; scopes []\n    edges: none\n    facts: none\n    notes: none"
+  }
+ ],
+ "parse": [
+  {
+   "raw": [
+    {
+     "id": 1,
+     "verdict": "delete",
+     "confidence": 0.93,
+     "note": "a list"
+    },
+    {
+     "id": 2,
+     "verdict": " KEEP ",
+     "confidence": "0.81",
+     "note": ""
+    },
+    {
+     "id": 3,
+     "verdict": "leave"
+    },
+    {
+     "id": 9,
+     "verdict": "delete",
+     "confidence": 1
+    },
+    {
+     "id": "2",
+     "verdict": "accept",
+     "confidence": 0.5
+    },
+    {
+     "id": null,
+     "verdict": "keep"
+    },
+    "not a dict",
+    {
+     "id": 1.9,
+     "verdict": "keep",
+     "confidence": 7,
+     "note": 12345
+    },
+    {
+     "id": true,
+     "verdict": "delete",
+     "confidence": [
+      1
+     ],
+     "note": [
+      "x",
+      "x",
+      "x"
+     ]
+    },
+    {
+     "id": 3,
+     "verdict": "keep",
+     "confidence": -2,
+     "note": "nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn"
+    }
+   ],
+   "rows": [
+    {
+     "n": 1
+    },
+    {
+     "n": 2
+    },
+    {
+     "n": 3
+    }
+   ],
+   "verdicts": [
+    {
+     "n": 1,
+     "verdict": "delete",
+     "confidence": 0.93,
+     "note": "a list"
+    },
+    {
+     "n": 2,
+     "verdict": "keep",
+     "confidence": 0.81,
+     "note": null
+    },
+    {
+     "n": 3,
+     "verdict": "leave",
+     "confidence": 0.5,
+     "note": null
+    },
+    {
+     "n": 1,
+     "verdict": "keep",
+     "confidence": 1.0,
+     "note": "12345"
+    },
+    {
+     "n": 1,
+     "verdict": "delete",
+     "confidence": 0.5,
+     "note": "['x', 'x', 'x']"
+    },
+    {
+     "n": 3,
+     "verdict": "keep",
+     "confidence": 0.0,
+     "note": "nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn"
+    }
+   ]
+  },
+  {
+   "raw": [],
+   "rows": [
+    {
+     "n": 1
+    },
+    {
+     "n": 2
+    },
+    {
+     "n": 3
+    }
+   ],
+   "verdicts": []
+  }
+ ],
+ "pack": [
+  {
+   "cap": 240,
+   "pending": [
+    {
+     "id": 10,
+     "kind": "junk",
+     "entity_id": 1,
+     "reason": "list-artifact"
+    },
+    {
+     "id": 11,
+     "kind": "junk",
+     "entity_id": 2,
+     "reason": "compound"
+    },
+    {
+     "id": 12,
+     "kind": "junk",
+     "entity_id": 4,
+     "reason": "slot-key"
+    },
+    {
+     "id": 13,
+     "kind": "junk",
+     "entity_id": 6,
+     "reason": null
+    },
+    {
+     "id": 14,
+     "kind": "junk",
+     "entity_id": 99,
+     "entity": "Gone",
+     "reason": "x"
+    }
+   ],
+   "evidence": {
+    "graph": {
+     "entities": [
+      {
+       "id": 1,
+       "canonical": "a, b, c",
+       "display": "a, b, c"
+      },
+      {
+       "id": 2,
+       "canonical": "origin/master",
+       "display": "origin/master"
+      },
+      {
+       "id": 3,
+       "canonical": "bob",
+       "display": "Bob"
+      },
+      {
+       "id": 4,
+       "canonical": "lesson object",
+       "display": "Lesson Object"
+      },
+      {
+       "id": 5,
+       "canonical": "shell lesson",
+       "display": "Shell Lesson"
+      },
+      {
+       "id": 6,
+       "canonical": "orphan",
+       "display": "Orphan"
+      }
+     ],
+     "edges": [
+      {
+       "src_id": 3,
+       "relation": "uses",
+       "dst_id": 2,
+       "origin": "agent"
+      },
+      {
+       "src_id": 2,
+       "relation": "related-to",
+       "dst_id": 2,
+       "origin": null
+      },
+      {
+       "src_id": 5,
+       "relation": "prefers",
+       "dst_id": 4,
+       "origin": "action"
+      },
+      {
+       "src_id": 5,
+       "relation": "avoids",
+       "dst_id": 4,
+       "origin": "action"
+      },
+      {
+       "src_id": 3,
+       "relation": "prefers",
+       "dst_id": 1,
+       "origin": "agent"
+      },
+      {
+       "src_id": 3,
+       "relation": "uses",
+       "dst_id": 2,
+       "origin": ""
+      },
+      {
+       "src_id": 3,
+       "relation": "uses",
+       "dst_id": 2,
+       "origin": ""
+      },
+      {
+       "src_id": 3,
+       "relation": "uses",
+       "dst_id": 2,
+       "origin": ""
+      },
+      {
+       "src_id": 3,
+       "relation": "uses",
+       "dst_id": 2,
+       "origin": ""
+      },
+      {
+       "src_id": 3,
+       "relation": "uses",
+       "dst_id": 2,
+       "origin": ""
+      },
+      {
+       "src_id": 3,
+       "relation": "uses",
+       "dst_id": 2,
+       "origin": ""
+      },
+      {
+       "src_id": 3,
+       "relation": "uses",
+       "dst_id": 2,
+       "origin": ""
+      },
+      {
+       "src_id": 3,
+       "relation": "uses",
+       "dst_id": 2,
+       "origin": ""
+      }
+     ]
+    },
+    "scopes": {
+     "2": [
+      "zeta",
+      "alpha"
+     ],
+     "4": [
+      "pseudolife"
+     ]
+    },
+    "entries": [
+     {
+      "id": 1,
+      "text": "Bob pushed origin/master today",
+      "source": "conversation"
+     },
+     {
+      "id": 2,
+      "text": "origin master is behind",
+      "source": ""
+     },
+     {
+      "id": 3,
+      "text": "The orphan oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo",
+      "source": null
+     },
+     {
+      "id": 4,
+      "text": "origin/master again",
+      "source": "claude"
+     },
+     {
+      "id": 5,
+      "text": "and origin/master once more",
+      "source": "x"
+     }
+    ],
+    "facts": {
+     "2": 1,
+     "3": 2
+    },
+    "fact_texts": {
+     "Origin/Master": 2,
+     "lesson object": 3,
+     "": 4
+    },
+    "fact_rows": {
+     "2": [
+      [
+       "role",
+       "the main branch"
+      ],
+      [
+       "note",
+       "nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn"
+      ]
+     ],
+     "6": []
+    }
+   },
+   "rows": [
+    {
+     "n": 1,
+     "display": "a, b, c",
+     "reason": "list-artifact",
+     "degree": 1,
+     "edges": [
+      "Bob -prefers-> a, b, c [agent]"
+     ],
+     "facts": 0,
+     "fact_text": [],
+     "lesson_object": false,
+     "scopes": [],
+     "mentions": []
+    },
+    {
+     "n": 2,
+     "display": "origin/master",
+     "reason": "compound",
+     "degree": 11,
+     "edges": [
+      "Bob -uses-> origin/master [agent]",
+      "origin/master -related-to-> origin/master [?]",
+      "origin/master -related-to-> origin/master [?]",
+      "Bob -uses-> origin/master [?]",
+      "Bob -uses-> origin/master [?]",
+      "Bob -uses-> origin/master [?]",
+      "Bob -uses-> origin/master [?]",
+      "Bob -uses-> origin/master [?]"
+     ],
+     "facts": 2,
+     "fact_text": [
+      "role=the main branch",
+      "note=nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn"
+     ],
+     "lesson_object": false,
+     "scopes": [
+      "alpha",
+      "zeta"
+     ],
+     "mentions": [
+      "[conversation] Bob pushed origin/master today",
+      "origin master is behind",
+      "[claude] origin/master again"
+     ]
+    },
+    {
+     "n": 3,
+     "display": "Lesson Object",
+     "reason": "slot-key",
+     "degree": 2,
+     "edges": [
+      "Shell Lesson -prefers-> Lesson Object [action]",
+      "Shell Lesson -avoids-> Lesson Object [action]"
+     ],
+     "facts": 3,
+     "fact_text": [],
+     "lesson_object": true,
+     "scopes": [
+      "pseudolife"
+     ],
+     "mentions": []
+    },
+    {
+     "n": 4,
+     "display": "Orphan",
+     "reason": null,
+     "degree": 0,
+     "edges": [],
+     "facts": 0,
+     "fact_text": [],
+     "lesson_object": false,
+     "scopes": [],
+     "mentions": [
+      "The orphan ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo"
+     ]
+    },
+    {
+     "n": 5,
+     "display": "Gone",
+     "reason": "x",
+     "degree": 0,
+     "edges": [],
+     "facts": 0,
+     "fact_text": [],
+     "lesson_object": false,
+     "scopes": [],
+     "mentions": []
+    }
+   ]
+  },
+  {
+   "cap": 12,
+   "pending": [
+    {
+     "id": 10,
+     "kind": "junk",
+     "entity_id": 1,
+     "reason": "list-artifact"
+    },
+    {
+     "id": 11,
+     "kind": "junk",
+     "entity_id": 2,
+     "reason": "compound"
+    },
+    {
+     "id": 12,
+     "kind": "junk",
+     "entity_id": 4,
+     "reason": "slot-key"
+    },
+    {
+     "id": 13,
+     "kind": "junk",
+     "entity_id": 6,
+     "reason": null
+    },
+    {
+     "id": 14,
+     "kind": "junk",
+     "entity_id": 99,
+     "entity": "Gone",
+     "reason": "x"
+    }
+   ],
+   "evidence": {
+    "graph": {
+     "entities": [
+      {
+       "id": 1,
+       "canonical": "a, b, c",
+       "display": "a, b, c"
+      },
+      {
+       "id": 2,
+       "canonical": "origin/master",
+       "display": "origin/master"
+      },
+      {
+       "id": 3,
+       "canonical": "bob",
+       "display": "Bob"
+      },
+      {
+       "id": 4,
+       "canonical": "lesson object",
+       "display": "Lesson Object"
+      },
+      {
+       "id": 5,
+       "canonical": "shell lesson",
+       "display": "Shell Lesson"
+      },
+      {
+       "id": 6,
+       "canonical": "orphan",
+       "display": "Orphan"
+      }
+     ],
+     "edges": [
+      {
+       "src_id": 3,
+       "relation": "uses",
+       "dst_id": 2,
+       "origin": "agent"
+      },
+      {
+       "src_id": 2,
+       "relation": "related-to",
+       "dst_id": 2,
+       "origin": null
+      },
+      {
+       "src_id": 5,
+       "relation": "prefers",
+       "dst_id": 4,
+       "origin": "action"
+      },
+      {
+       "src_id": 5,
+       "relation": "avoids",
+       "dst_id": 4,
+       "origin": "action"
+      },
+      {
+       "src_id": 3,
+       "relation": "prefers",
+       "dst_id": 1,
+       "origin": "agent"
+      },
+      {
+       "src_id": 3,
+       "relation": "uses",
+       "dst_id": 2,
+       "origin": ""
+      },
+      {
+       "src_id": 3,
+       "relation": "uses",
+       "dst_id": 2,
+       "origin": ""
+      },
+      {
+       "src_id": 3,
+       "relation": "uses",
+       "dst_id": 2,
+       "origin": ""
+      },
+      {
+       "src_id": 3,
+       "relation": "uses",
+       "dst_id": 2,
+       "origin": ""
+      },
+      {
+       "src_id": 3,
+       "relation": "uses",
+       "dst_id": 2,
+       "origin": ""
+      },
+      {
+       "src_id": 3,
+       "relation": "uses",
+       "dst_id": 2,
+       "origin": ""
+      },
+      {
+       "src_id": 3,
+       "relation": "uses",
+       "dst_id": 2,
+       "origin": ""
+      },
+      {
+       "src_id": 3,
+       "relation": "uses",
+       "dst_id": 2,
+       "origin": ""
+      }
+     ]
+    },
+    "scopes": {
+     "2": [
+      "zeta",
+      "alpha"
+     ],
+     "4": [
+      "pseudolife"
+     ]
+    },
+    "entries": [
+     {
+      "id": 1,
+      "text": "Bob pushed origin/master today",
+      "source": "conversation"
+     },
+     {
+      "id": 2,
+      "text": "origin master is behind",
+      "source": ""
+     },
+     {
+      "id": 3,
+      "text": "The orphan oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo",
+      "source": null
+     },
+     {
+      "id": 4,
+      "text": "origin/master again",
+      "source": "claude"
+     },
+     {
+      "id": 5,
+      "text": "and origin/master once more",
+      "source": "x"
+     }
+    ],
+    "facts": {
+     "2": 1,
+     "3": 2
+    },
+    "fact_texts": {
+     "Origin/Master": 2,
+     "lesson object": 3,
+     "": 4
+    },
+    "fact_rows": {
+     "2": [
+      [
+       "role",
+       "the main branch"
+      ],
+      [
+       "note",
+       "nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn"
+      ]
+     ],
+     "6": []
+    }
+   },
+   "rows": [
+    {
+     "n": 1,
+     "display": "a, b, c",
+     "reason": "list-artifact",
+     "degree": 1,
+     "edges": [
+      "Bob -prefers-> a, b, c [agent]"
+     ],
+     "facts": 0,
+     "fact_text": [],
+     "lesson_object": false,
+     "scopes": [],
+     "mentions": []
+    },
+    {
+     "n": 2,
+     "display": "origin/master",
+     "reason": "compound",
+     "degree": 11,
+     "edges": [
+      "Bob -uses-> origin/master [agent]",
+      "origin/master -related-to-> origin/master [?]",
+      "origin/master -related-to-> origin/master [?]",
+      "Bob -uses-> origin/master [?]",
+      "Bob -uses-> origin/master [?]",
+      "Bob -uses-> origin/master [?]",
+      "Bob -uses-> origin/master [?]",
+      "Bob -uses-> origin/master [?]"
+     ],
+     "facts": 2,
+     "fact_text": [
+      "role=the main branch",
+      "note=nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn"
+     ],
+     "lesson_object": false,
+     "scopes": [
+      "alpha",
+      "zeta"
+     ],
+     "mentions": [
+      "[conversation] Bob pushed o",
+      "origin maste",
+      "[claude] origin/maste"
+     ]
+    },
+    {
+     "n": 3,
+     "display": "Lesson Object",
+     "reason": "slot-key",
+     "degree": 2,
+     "edges": [
+      "Shell Lesson -prefers-> Lesson Object [action]",
+      "Shell Lesson -avoids-> Lesson Object [action]"
+     ],
+     "facts": 3,
+     "fact_text": [],
+     "lesson_object": true,
+     "scopes": [
+      "pseudolife"
+     ],
+     "mentions": []
+    },
+    {
+     "n": 4,
+     "display": "Orphan",
+     "reason": null,
+     "degree": 0,
+     "edges": [],
+     "facts": 0,
+     "fact_text": [],
+     "lesson_object": false,
+     "scopes": [],
+     "mentions": [
+      "The orphan o"
+     ]
+    },
+    {
+     "n": 5,
+     "display": "Gone",
+     "reason": "x",
+     "degree": 0,
+     "edges": [],
+     "facts": 0,
+     "fact_text": [],
+     "lesson_object": false,
+     "scopes": [],
+     "mentions": []
+    }
+   ]
+  }
+ ],
+ "link_format": [
+  {
+   "row": {
+    "n": 1,
+    "src": "Bob",
+    "relation": "uses",
+    "dst": "origin/master",
+    "src_scopes": [
+     "homelab",
+     "pseudolife"
+    ],
+    "dst_scopes": [],
+    "rationale": "co-mention",
+    "src_edges": [
+     "uses>x0yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+     "uses>x1yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+     "uses>x2yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+     "uses>x3yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+     "uses>x4yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+     "uses>x5yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+     "uses>x6yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+     "uses>x7yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+     "uses>x8yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+     "uses>x9yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"
+    ],
+    "dst_edges": [],
+    "co_mentions": [
+     "Bob pushed origin/master pppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp",
+     "two",
+     "three",
+     "four"
+    ],
+    "src_mentions": [],
+    "dst_mentions": []
+   },
+   "text": "[1] SRC 'Bob' (scopes ['homelab', 'pseudolife']) --uses--> DST 'origin/master' (scopes [])\n    detector: co-mention\n    src edges: uses>x0yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy; uses>x1yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy; uses>x2yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy; uses>x3yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy; uses>x4yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy; uses>x5yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy; uses>x6yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy; uses>x7yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy\n    dst edges: none\n    notes naming both: Bob pushed origin/master ppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp; two; three"
+  },
+  {
+   "row": {
+    "n": 2,
+    "src": "élan",
+    "relation": "related-to",
+    "dst": "🙂 Face",
+    "src_scopes": null,
+    "dst_scopes": [
+     "Ünicode"
+    ],
+    "rationale": null,
+    "src_edges": [
+     "a>b"
+    ],
+    "dst_edges": [
+     "c>related-to"
+    ],
+    "co_mentions": [],
+    "src_mentions": [
+     "[conversation] mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm",
+     "two",
+     "three"
+    ],
+    "dst_mentions": []
+   },
+   "text": "[2] SRC 'élan' (scopes []) --related-to--> DST '🙂 Face' (scopes ['Ünicode'])\n    detector: ?\n    src edges: a>b\n    dst edges: c>related-to\n    src notes: [conversation] mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm; two\n    dst notes: none"
+  },
+  {
+   "row": {
+    "n": 3,
+    "src": null
+   },
+   "text": "[3] SRC 'None' (scopes []) --?--> DST '?' (scopes [])\n    detector: ?\n    src edges: none\n    dst edges: none\n    src notes: none\n    dst notes: none"
+  },
+  {
+   "row": {
+    "n": 4
+   },
+   "text": "[4] SRC '?' (scopes []) --?--> DST '?' (scopes [])\n    detector: ?\n    src edges: none\n    dst edges: none\n    src notes: none\n    dst notes: none"
+  }
+ ],
+ "link_parse": [
+  {
+   "raw": [
+    {
+     "id": 1,
+     "verdict": "accept",
+     "confidence": 0.93,
+     "note": "real"
+    },
+    {
+     "id": 2,
+     "verdict": " RETYPE ",
+     "confidence": "0.81",
+     "relation": "depends-on"
+    },
+    {
+     "id": 3,
+     "verdict": "retype",
+     "confidence": 0.9,
+     "relation": ""
+    },
+    {
+     "id": 3,
+     "verdict": "retype",
+     "confidence": 0.9
+    },
+    {
+     "id": 1,
+     "verdict": "retype",
+     "relation": "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
+     "note": "nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn"
+    },
+    {
+     "id": 2,
+     "verdict": "reject",
+     "confidence": 2,
+     "relation": "ignored"
+    },
+    {
+     "id": 2,
+     "verdict": "leave",
+     "confidence": null
+    },
+    {
+     "id": 9,
+     "verdict": "accept"
+    },
+    {
+     "id": 1,
+     "verdict": "keep",
+     "confidence": 0.5
+    },
+    {
+     "id": 1.7,
+     "verdict": "retype",
+     "relation": 42,
+     "note": [
+      "x"
+     ]
+    },
+    "not a dict"
+   ],
+   "rows": [
+    {
+     "n": 1
+    },
+    {
+     "n": 2
+    },
+    {
+     "n": 3
+    }
+   ],
+   "verdicts": [
+    {
+     "n": 1,
+     "verdict": "accept",
+     "confidence": 0.93,
+     "note": "real",
+     "relation": null
+    },
+    {
+     "n": 2,
+     "verdict": "retype",
+     "confidence": 0.81,
+     "note": null,
+     "relation": "depends-on"
+    },
+    {
+     "n": 3,
+     "verdict": "leave",
+     "confidence": 0.9,
+     "note": null,
+     "relation": null
+    },
+    {
+     "n": 3,
+     "verdict": "leave",
+     "confidence": 0.9,
+     "note": null,
+     "relation": null
+    },
+    {
+     "n": 1,
+     "verdict": "retype",
+     "confidence": 0.5,
+     "note": "nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn",
+     "relation": "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr"
+    },
+    {
+     "n": 2,
+     "verdict": "reject",
+     "confidence": 1.0,
+     "note": null,
+     "relation": null
+    },
+    {
+     "n": 2,
+     "verdict": "leave",
+     "confidence": 0.5,
+     "note": null,
+     "relation": null
+    },
+    {
+     "n": 1,
+     "verdict": "retype",
+     "confidence": 0.5,
+     "note": "['x']",
+     "relation": "42"
+    }
+   ]
+  },
+  {
+   "raw": [],
+   "rows": [
+    {
+     "n": 1
+    },
+    {
+     "n": 2
+    },
+    {
+     "n": 3
+    }
+   ],
+   "verdicts": []
+  }
+ ],
+ "link_pack": [
+  {
+   "cap": 240,
+   "pending": [
+    {
+     "id": 20,
+     "src_id": 1,
+     "relation": "uses",
+     "dst_id": 2,
+     "src": "Bob",
+     "dst": "origin/master",
+     "rationale": "co-mention",
+     "source": "deep-dream"
+    },
+    {
+     "id": 21,
+     "src_id": 3,
+     "relation": "knows",
+     "dst_id": 1,
+     "src": "Alice Smith",
+     "dst": "Bob",
+     "rationale": null,
+     "source": "analyzer"
+    },
+    {
+     "id": 22,
+     "src_id": 4,
+     "relation": "related-to",
+     "dst_id": 1,
+     "src": "Lonely",
+     "dst": "Bob",
+     "rationale": "x"
+    },
+    {
+     "id": 23,
+     "src_id": 5,
+     "relation": "related-to",
+     "dst_id": 4,
+     "src": "!!!",
+     "dst": "Lonely",
+     "rationale": "y"
+    }
+   ],
+   "evidence": {
+    "graph": {
+     "entities": [
+      {
+       "id": 1,
+       "display": "Bob"
+      },
+      {
+       "id": 2,
+       "display": "origin/master"
+      },
+      {
+       "id": 3,
+       "display": "Alice Smith"
+      },
+      {
+       "id": 4,
+       "display": "Lonely"
+      },
+      {
+       "id": 5,
+       "display": "!!!"
+      }
+     ],
+     "edges": [
+      {
+       "src_id": 1,
+       "relation": "uses",
+       "dst_id": 2
+      },
+      {
+       "src_id": 3,
+       "relation": "knows",
+       "dst_id": 1
+      },
+      {
+       "src_id": 2,
+       "relation": "related-to",
+       "dst_id": 2
+      },
+      {
+       "src_id": 1,
+       "relation": "uses",
+       "dst_id": 99
+      },
+      {
+       "src_id": 3,
+       "relation": "r0",
+       "dst_id": 2
+      },
+      {
+       "src_id": 3,
+       "relation": "r1",
+       "dst_id": 2
+      },
+      {
+       "src_id": 3,
+       "relation": "r2",
+       "dst_id": 2
+      },
+      {
+       "src_id": 3,
+       "relation": "r3",
+       "dst_id": 2
+      },
+      {
+       "src_id": 3,
+       "relation": "r4",
+       "dst_id": 2
+      },
+      {
+       "src_id": 3,
+       "relation": "r5",
+       "dst_id": 2
+      },
+      {
+       "src_id": 3,
+       "relation": "r6",
+       "dst_id": 2
+      },
+      {
+       "src_id": 3,
+       "relation": "r7",
+       "dst_id": 2
+      },
+      {
+       "src_id": 3,
+       "relation": "r8",
+       "dst_id": 2
+      }
+     ]
+    },
+    "scopes": {
+     "1": [
+      "zeta",
+      "Alpha",
+      "beta"
+     ],
+     "3": [
+      "pseudolife"
+     ]
+    },
+    "entries": [
+     {
+      "id": 1,
+      "text": "Bob pushed origin/master today",
+      "source": "conversation"
+     },
+     {
+      "id": 2,
+      "text": "Alice Smith met Bob qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq",
+      "source": ""
+     },
+     {
+      "id": 3,
+      "text": "alice smith and bob again",
+      "source": null
+     },
+     {
+      "id": 4,
+      "text": "Bob alone",
+      "source": "claude"
+     },
+     {
+      "id": 5,
+      "text": "Bob once more",
+      "source": "x"
+     },
+     {
+      "id": 6,
+      "text": "Bob a third time",
+      "source": "y"
+     },
+     {
+      "id": 7,
+      "text": "Bob and Alice Smith, fourth",
+      "source": "z"
+     },
+     {
+      "id": 8,
+      "text": "Lonely is lonely llllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllll",
+      "source": "w"
+     }
+    ]
+   },
+   "rows": [
+    {
+     "n": 1,
+     "src": "Bob",
+     "relation": "uses",
+     "dst": "origin/master",
+     "rationale": "co-mention",
+     "src_edges": [
+      "uses>origin/master",
+      "uses>?",
+      "Alice Smith>knows"
+     ],
+     "dst_edges": [
+      "related-to>origin/master",
+      "Bob>uses",
+      "origin/master>related-to",
+      "Alice Smith>r0",
+      "Alice Smith>r1",
+      "Alice Smith>r2",
+      "Alice Smith>r3",
+      "Alice Smith>r4"
+     ],
+     "src_scopes": [
+      "Alpha",
+      "beta",
+      "zeta"
+     ],
+     "dst_scopes": [],
+     "co_mentions": [
+      "Bob pushed origin/master today"
+     ],
+     "src_mentions": [],
+     "dst_mentions": []
+    },
+    {
+     "n": 2,
+     "src": "Alice Smith",
+     "relation": "knows",
+     "dst": "Bob",
+     "rationale": null,
+     "src_edges": [
+      "knows>Bob",
+      "r0>origin/master",
+      "r1>origin/master",
+      "r2>origin/master",
+      "r3>origin/master",
+      "r4>origin/master",
+      "r5>origin/master",
+      "r6>origin/master"
+     ],
+     "dst_edges": [
+      "uses>origin/master",
+      "uses>?",
+      "Alice Smith>knows"
+     ],
+     "src_scopes": [
+      "pseudolife"
+     ],
+     "dst_scopes": [
+      "Alpha",
+      "beta",
+      "zeta"
+     ],
+     "co_mentions": [
+      "Alice Smith met Bob qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq",
+      "alice smith and bob again",
+      "Bob and Alice Smith, fourth"
+     ],
+     "src_mentions": [],
+     "dst_mentions": []
+    },
+    {
+     "n": 3,
+     "src": "Lonely",
+     "relation": "related-to",
+     "dst": "Bob",
+     "rationale": "x",
+     "src_edges": [],
+     "dst_edges": [
+      "uses>origin/master",
+      "uses>?",
+      "Alice Smith>knows"
+     ],
+     "src_scopes": [],
+     "dst_scopes": [
+      "Alpha",
+      "beta",
+      "zeta"
+     ],
+     "co_mentions": [],
+     "src_mentions": [
+      "[w] Lonely is lonely lllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllll"
+     ],
+     "dst_mentions": [
+      "[conversation] Bob pushed origin/master today",
+      "Alice Smith met Bob qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq"
+     ]
+    },
+    {
+     "n": 4,
+     "src": "!!!",
+     "relation": "related-to",
+     "dst": "Lonely",
+     "rationale": "y",
+     "src_edges": [],
+     "dst_edges": [],
+     "src_scopes": [],
+     "dst_scopes": [],
+     "co_mentions": [],
+     "src_mentions": [],
+     "dst_mentions": [
+      "[w] Lonely is lonely lllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllll"
+     ]
+    }
+   ]
+  },
+  {
+   "cap": 10,
+   "pending": [
+    {
+     "id": 20,
+     "src_id": 1,
+     "relation": "uses",
+     "dst_id": 2,
+     "src": "Bob",
+     "dst": "origin/master",
+     "rationale": "co-mention",
+     "source": "deep-dream"
+    },
+    {
+     "id": 21,
+     "src_id": 3,
+     "relation": "knows",
+     "dst_id": 1,
+     "src": "Alice Smith",
+     "dst": "Bob",
+     "rationale": null,
+     "source": "analyzer"
+    },
+    {
+     "id": 22,
+     "src_id": 4,
+     "relation": "related-to",
+     "dst_id": 1,
+     "src": "Lonely",
+     "dst": "Bob",
+     "rationale": "x"
+    },
+    {
+     "id": 23,
+     "src_id": 5,
+     "relation": "related-to",
+     "dst_id": 4,
+     "src": "!!!",
+     "dst": "Lonely",
+     "rationale": "y"
+    }
+   ],
+   "evidence": {
+    "graph": {
+     "entities": [
+      {
+       "id": 1,
+       "display": "Bob"
+      },
+      {
+       "id": 2,
+       "display": "origin/master"
+      },
+      {
+       "id": 3,
+       "display": "Alice Smith"
+      },
+      {
+       "id": 4,
+       "display": "Lonely"
+      },
+      {
+       "id": 5,
+       "display": "!!!"
+      }
+     ],
+     "edges": [
+      {
+       "src_id": 1,
+       "relation": "uses",
+       "dst_id": 2
+      },
+      {
+       "src_id": 3,
+       "relation": "knows",
+       "dst_id": 1
+      },
+      {
+       "src_id": 2,
+       "relation": "related-to",
+       "dst_id": 2
+      },
+      {
+       "src_id": 1,
+       "relation": "uses",
+       "dst_id": 99
+      },
+      {
+       "src_id": 3,
+       "relation": "r0",
+       "dst_id": 2
+      },
+      {
+       "src_id": 3,
+       "relation": "r1",
+       "dst_id": 2
+      },
+      {
+       "src_id": 3,
+       "relation": "r2",
+       "dst_id": 2
+      },
+      {
+       "src_id": 3,
+       "relation": "r3",
+       "dst_id": 2
+      },
+      {
+       "src_id": 3,
+       "relation": "r4",
+       "dst_id": 2
+      },
+      {
+       "src_id": 3,
+       "relation": "r5",
+       "dst_id": 2
+      },
+      {
+       "src_id": 3,
+       "relation": "r6",
+       "dst_id": 2
+      },
+      {
+       "src_id": 3,
+       "relation": "r7",
+       "dst_id": 2
+      },
+      {
+       "src_id": 3,
+       "relation": "r8",
+       "dst_id": 2
+      }
+     ]
+    },
+    "scopes": {
+     "1": [
+      "zeta",
+      "Alpha",
+      "beta"
+     ],
+     "3": [
+      "pseudolife"
+     ]
+    },
+    "entries": [
+     {
+      "id": 1,
+      "text": "Bob pushed origin/master today",
+      "source": "conversation"
+     },
+     {
+      "id": 2,
+      "text": "Alice Smith met Bob qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq",
+      "source": ""
+     },
+     {
+      "id": 3,
+      "text": "alice smith and bob again",
+      "source": null
+     },
+     {
+      "id": 4,
+      "text": "Bob alone",
+      "source": "claude"
+     },
+     {
+      "id": 5,
+      "text": "Bob once more",
+      "source": "x"
+     },
+     {
+      "id": 6,
+      "text": "Bob a third time",
+      "source": "y"
+     },
+     {
+      "id": 7,
+      "text": "Bob and Alice Smith, fourth",
+      "source": "z"
+     },
+     {
+      "id": 8,
+      "text": "Lonely is lonely llllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllll",
+      "source": "w"
+     }
+    ]
+   },
+   "rows": [
+    {
+     "n": 1,
+     "src": "Bob",
+     "relation": "uses",
+     "dst": "origin/master",
+     "rationale": "co-mention",
+     "src_edges": [
+      "uses>origin/master",
+      "uses>?",
+      "Alice Smith>knows"
+     ],
+     "dst_edges": [
+      "related-to>origin/master",
+      "Bob>uses",
+      "origin/master>related-to",
+      "Alice Smith>r0",
+      "Alice Smith>r1",
+      "Alice Smith>r2",
+      "Alice Smith>r3",
+      "Alice Smith>r4"
+     ],
+     "src_scopes": [
+      "Alpha",
+      "beta",
+      "zeta"
+     ],
+     "dst_scopes": [],
+     "co_mentions": [
+      "Bob pushed"
+     ],
+     "src_mentions": [],
+     "dst_mentions": []
+    },
+    {
+     "n": 2,
+     "src": "Alice Smith",
+     "relation": "knows",
+     "dst": "Bob",
+     "rationale": null,
+     "src_edges": [
+      "knows>Bob",
+      "r0>origin/master",
+      "r1>origin/master",
+      "r2>origin/master",
+      "r3>origin/master",
+      "r4>origin/master",
+      "r5>origin/master",
+      "r6>origin/master"
+     ],
+     "dst_edges": [
+      "uses>origin/master",
+      "uses>?",
+      "Alice Smith>knows"
+     ],
+     "src_scopes": [
+      "pseudolife"
+     ],
+     "dst_scopes": [
+      "Alpha",
+      "beta",
+      "zeta"
+     ],
+     "co_mentions": [
+      "Alice Smit",
+      "alice smit",
+      "Bob and Al"
+     ],
+     "src_mentions": [],
+     "dst_mentions": []
+    },
+    {
+     "n": 3,
+     "src": "Lonely",
+     "relation": "related-to",
+     "dst": "Bob",
+     "rationale": "x",
+     "src_edges": [],
+     "dst_edges": [
+      "uses>origin/master",
+      "uses>?",
+      "Alice Smith>knows"
+     ],
+     "src_scopes": [],
+     "dst_scopes": [
+      "Alpha",
+      "beta",
+      "zeta"
+     ],
+     "co_mentions": [],
+     "src_mentions": [
+      "[w] Lonely is "
+     ],
+     "dst_mentions": [
+      "[conversation] Bob pushed",
+      "Alice Smit"
+     ]
+    },
+    {
+     "n": 4,
+     "src": "!!!",
+     "relation": "related-to",
+     "dst": "Lonely",
+     "rationale": "y",
+     "src_edges": [],
+     "dst_edges": [],
+     "src_scopes": [],
+     "dst_scopes": [],
+     "co_mentions": [],
+     "src_mentions": [],
+     "dst_mentions": [
+      "[w] Lonely is "
+     ]
+    }
+   ]
+  }
+ ],
+ "curation_cases": [
+  {
+   "store": "lesson",
+   "a": {
+    "store": "lesson",
+    "key": "rotate-keys|cadence",
+    "entity_norm": "rotate-keys",
+    "attribute_norm": "cadence",
+    "entity": "Rotate Keys",
+    "attribute": "Cadence",
+    "value": "Rotate keys quarterly.",
+    "polarity": "+",
+    "status": "current",
+    "confidence": 0.9,
+    "origin": "agent",
+    "support": [],
+    "provenance": [
+     "p1",
+     "p2"
+    ],
+    "asserted_at": 10.0,
+    "last_confirmed": 11.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": null,
+    "valid_time": null,
+    "hlc_phys": null,
+    "hlc_logical": null,
+    "writer_id": null,
+    "session_id": null,
+    "version": 1,
+    "about": null,
+    "outcome": "success",
+    "embedding": null
+   },
+   "b": {
+    "store": "lesson",
+    "key": "rotate-secrets|cadence",
+    "entity_norm": "rotate-secrets",
+    "attribute_norm": "cadence",
+    "entity": "Rotate Secrets",
+    "attribute": "Cadence",
+    "value": "  Rotate keys quarterly. ",
+    "polarity": "+",
+    "status": "current",
+    "confidence": 0.9,
+    "origin": "agent",
+    "support": [],
+    "provenance": [
+     "p1",
+     "p2"
+    ],
+    "asserted_at": 10.0,
+    "last_confirmed": 11.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": null,
+    "valid_time": null,
+    "hlc_phys": null,
+    "hlc_logical": null,
+    "writer_id": null,
+    "session_id": null,
+    "version": 1,
+    "about": null,
+    "outcome": "success",
+    "embedding": null
+   },
+   "a_fingerprint": "a05704bf8d1456e5a233c98bed1ea92a32ec963d9e4264c372d1dce9a2a44982",
+   "b_fingerprint": "bd8d99cefc74a60e700c0c5b166f2229034aac79b002bc6067b503279a8aaafb",
+   "pair_id": "63a7b10bb2a23907a54235b23bbeb3ef515d4ad881201e6400341f263d0bcbea",
+   "signature": "b043192bf24493ba2422825d018ba73f3d999b3f9ceff7b496e4492b4e62bc4f",
+   "policy": "pppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp",
+   "pair_keys": [
+    "rotate-keys|cadence",
+    "rotate-secrets|cadence"
+   ],
+   "folds": [
+    {
+     "verdict": {
+      "verdict": "duplicate",
+      "keep": "a",
+      "fold": null
+     },
+     "allowed": true,
+     "reason": "exact"
+    },
+    {
+     "verdict": {
+      "verdict": "duplicate",
+      "keep": "b",
+      "fold": ""
+     },
+     "allowed": true,
+     "reason": "exact"
+    },
+    {
+     "verdict": {
+      "verdict": "duplicate",
+      "keep": "a",
+      "fold": "invented"
+     },
+     "allowed": false,
+     "reason": "invented_fold"
+    },
+    {
+     "verdict": {
+      "verdict": "duplicate",
+      "keep": "c"
+     },
+     "allowed": false,
+     "reason": "invalid_keep"
+    },
+    {
+     "verdict": {
+      "verdict": "distinct"
+     },
+     "allowed": false,
+     "reason": "verdict_not_duplicate"
+    },
+    {
+     "verdict": {
+      "keep": "a"
+     },
+     "allowed": true,
+     "reason": "exact"
+    }
+   ],
+   "states": [
+    {
+     "judgment": null,
+     "bindings": {},
+     "at": 100.0,
+     "state": "stale",
+     "observed": null,
+     "action": null
+    },
+    {
+     "judgment": {
+      "judged_at": 50.0
+     },
+     "bindings": {},
+     "at": 100.0,
+     "state": "stale",
+     "observed": null,
+     "action": null
+    },
+    {
+     "judgment": {
+      "judged_at": 50.0
+     },
+     "bindings": {
+      "63a7b10bb2a23907a54235b23bbeb3ef515d4ad881201e6400341f263d0bcbea": "b043192bf24493ba2422825d018ba73f3d999b3f9ceff7b496e4492b4e62bc4f"
+     },
+     "at": 100.0,
+     "state": "settled",
+     "observed": null,
+     "action": "settled"
+    },
+    {
+     "judgment": {
+      "judged_at": 50.0
+     },
+     "bindings": {
+      "63a7b10bb2a23907a54235b23bbeb3ef515d4ad881201e6400341f263d0bcbea": {
+       "signature": "b043192bf24493ba2422825d018ba73f3d999b3f9ceff7b496e4492b4e62bc4f",
+       "action": "pending"
+      }
+     },
+     "at": 100.0,
+     "state": "pending",
+     "observed": null,
+     "action": "pending"
+    },
+    {
+     "judgment": {
+      "judged_at": 50.0
+     },
+     "bindings": {
+      "63a7b10bb2a23907a54235b23bbeb3ef515d4ad881201e6400341f263d0bcbea": {
+       "signature": "b043192bf24493ba2422825d018ba73f3d999b3f9ceff7b496e4492b4e62bc4f",
+       "action": ""
+      }
+     },
+     "at": 100.0,
+     "state": "settled",
+     "observed": null,
+     "action": "settled"
+    },
+    {
+     "judgment": {
+      "judged_at": 50.0
+     },
+     "bindings": {
+      "63a7b10bb2a23907a54235b23bbeb3ef515d4ad881201e6400341f263d0bcbea": {
+       "signature": "other"
+      }
+     },
+     "at": 100.0,
+     "state": "stale",
+     "observed": null,
+     "action": "settled"
+    },
+    {
+     "judgment": {
+      "judged_at": 50.0
+     },
+     "bindings": {
+      "63a7b10bb2a23907a54235b23bbeb3ef515d4ad881201e6400341f263d0bcbea": {
+       "signature": "b043192bf24493ba2422825d018ba73f3d999b3f9ceff7b496e4492b4e62bc4f"
+      }
+     },
+     "at": 1000.0,
+     "state": "stale",
+     "observed": null,
+     "action": "settled"
+    },
+    {
+     "judgment": {
+      "judged_at": "x"
+     },
+     "bindings": {
+      "63a7b10bb2a23907a54235b23bbeb3ef515d4ad881201e6400341f263d0bcbea": {
+       "signature": "b043192bf24493ba2422825d018ba73f3d999b3f9ceff7b496e4492b4e62bc4f"
+      }
+     },
+     "at": 100.0,
+     "state": "stale",
+     "observed": null,
+     "action": "settled"
+    }
+   ]
+  },
+  {
+   "store": "lesson",
+   "a": {
+    "store": "lesson",
+    "key": "rotate-keys|cadence",
+    "entity_norm": "rotate-keys",
+    "attribute_norm": "cadence",
+    "entity": "Rotate Keys",
+    "attribute": "Cadence",
+    "value": "Rotate keys quarterly.",
+    "polarity": "+",
+    "status": "current",
+    "confidence": 0.9,
+    "origin": "agent",
+    "support": [],
+    "provenance": [
+     "p1",
+     "p2"
+    ],
+    "asserted_at": 10.0,
+    "last_confirmed": 11.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": null,
+    "valid_time": null,
+    "hlc_phys": null,
+    "hlc_logical": null,
+    "writer_id": null,
+    "session_id": null,
+    "version": 1,
+    "about": "ops",
+    "outcome": "success",
+    "embedding": null
+   },
+   "b": {
+    "store": "lesson",
+    "key": "rotate-secrets|cadence",
+    "entity_norm": "rotate-secrets",
+    "attribute_norm": "cadence",
+    "entity": "Rotate Secrets",
+    "attribute": "Cadence",
+    "value": "Rotate keys quarterly.",
+    "polarity": "+",
+    "status": "current",
+    "confidence": 0.9,
+    "origin": "agent",
+    "support": [],
+    "provenance": [
+     "p1",
+     "p2"
+    ],
+    "asserted_at": 10.0,
+    "last_confirmed": 11.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": null,
+    "valid_time": null,
+    "hlc_phys": null,
+    "hlc_logical": null,
+    "writer_id": null,
+    "session_id": null,
+    "version": 1,
+    "about": null,
+    "outcome": "success",
+    "embedding": null
+   },
+   "a_fingerprint": "b966acf6b17440372d35b5acc2a4c51162b0e9d266e318e7d1eb9823119d6d3b",
+   "b_fingerprint": "a54124209a841db165a56aa47460d7b31aa3c91be1a06f51d1ac48b322aa4914",
+   "pair_id": "63a7b10bb2a23907a54235b23bbeb3ef515d4ad881201e6400341f263d0bcbea",
+   "signature": "bfe738122f012d4eb567f729779eaa5e66dec06da3772a2bb6fd1dcedff8beb0",
+   "policy": "pppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp",
+   "pair_keys": [
+    "rotate-keys|cadence",
+    "rotate-secrets|cadence"
+   ],
+   "folds": [
+    {
+     "verdict": {
+      "verdict": "duplicate",
+      "keep": "a",
+      "fold": null
+     },
+     "allowed": false,
+     "reason": "conflicting_about"
+    },
+    {
+     "verdict": {
+      "verdict": "duplicate",
+      "keep": "b",
+      "fold": ""
+     },
+     "allowed": false,
+     "reason": "conflicting_about"
+    },
+    {
+     "verdict": {
+      "verdict": "duplicate",
+      "keep": "a",
+      "fold": "invented"
+     },
+     "allowed": false,
+     "reason": "invented_fold"
+    },
+    {
+     "verdict": {
+      "verdict": "duplicate",
+      "keep": "c"
+     },
+     "allowed": false,
+     "reason": "invalid_keep"
+    },
+    {
+     "verdict": {
+      "verdict": "distinct"
+     },
+     "allowed": false,
+     "reason": "verdict_not_duplicate"
+    },
+    {
+     "verdict": {
+      "keep": "a"
+     },
+     "allowed": false,
+     "reason": "conflicting_about"
+    }
+   ],
+   "states": [
+    {
+     "judgment": null,
+     "bindings": {},
+     "at": 100.0,
+     "state": "stale",
+     "observed": null,
+     "action": null
+    },
+    {
+     "judgment": {
+      "judged_at": 50.0
+     },
+     "bindings": {},
+     "at": 100.0,
+     "state": "stale",
+     "observed": null,
+     "action": null
+    },
+    {
+     "judgment": {
+      "judged_at": 50.0
+     },
+     "bindings": {
+      "63a7b10bb2a23907a54235b23bbeb3ef515d4ad881201e6400341f263d0bcbea": "bfe738122f012d4eb567f729779eaa5e66dec06da3772a2bb6fd1dcedff8beb0"
+     },
+     "at": 100.0,
+     "state": "settled",
+     "observed": null,
+     "action": "settled"
+    },
+    {
+     "judgment": {
+      "judged_at": 50.0
+     },
+     "bindings": {
+      "63a7b10bb2a23907a54235b23bbeb3ef515d4ad881201e6400341f263d0bcbea": {
+       "signature": "bfe738122f012d4eb567f729779eaa5e66dec06da3772a2bb6fd1dcedff8beb0",
+       "action": "pending"
+      }
+     },
+     "at": 100.0,
+     "state": "pending",
+     "observed": null,
+     "action": "pending"
+    },
+    {
+     "judgment": {
+      "judged_at": 50.0
+     },
+     "bindings": {
+      "63a7b10bb2a23907a54235b23bbeb3ef515d4ad881201e6400341f263d0bcbea": {
+       "signature": "bfe738122f012d4eb567f729779eaa5e66dec06da3772a2bb6fd1dcedff8beb0",
+       "action": ""
+      }
+     },
+     "at": 100.0,
+     "state": "settled",
+     "observed": null,
+     "action": "settled"
+    },
+    {
+     "judgment": {
+      "judged_at": 50.0
+     },
+     "bindings": {
+      "63a7b10bb2a23907a54235b23bbeb3ef515d4ad881201e6400341f263d0bcbea": {
+       "signature": "other"
+      }
+     },
+     "at": 100.0,
+     "state": "stale",
+     "observed": null,
+     "action": "settled"
+    },
+    {
+     "judgment": {
+      "judged_at": 50.0
+     },
+     "bindings": {
+      "63a7b10bb2a23907a54235b23bbeb3ef515d4ad881201e6400341f263d0bcbea": {
+       "signature": "bfe738122f012d4eb567f729779eaa5e66dec06da3772a2bb6fd1dcedff8beb0"
+      }
+     },
+     "at": 1000.0,
+     "state": "stale",
+     "observed": null,
+     "action": "settled"
+    },
+    {
+     "judgment": {
+      "judged_at": "x"
+     },
+     "bindings": {
+      "63a7b10bb2a23907a54235b23bbeb3ef515d4ad881201e6400341f263d0bcbea": {
+       "signature": "bfe738122f012d4eb567f729779eaa5e66dec06da3772a2bb6fd1dcedff8beb0"
+      }
+     },
+     "at": 100.0,
+     "state": "stale",
+     "observed": null,
+     "action": "settled"
+    }
+   ]
+  },
+  {
+   "store": "lesson",
+   "a": {
+    "store": "lesson",
+    "key": "ship|freeze",
+    "entity_norm": "ship",
+    "attribute_norm": "freeze",
+    "entity": "Ship",
+    "attribute": "Freeze",
+    "value": "Freeze merges.",
+    "polarity": "+",
+    "status": "current",
+    "confidence": 0.9,
+    "origin": "agent",
+    "support": [],
+    "provenance": [
+     "p1",
+     "p2"
+    ],
+    "asserted_at": 10.0,
+    "last_confirmed": 11.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": null,
+    "valid_time": null,
+    "hlc_phys": null,
+    "hlc_logical": null,
+    "writer_id": null,
+    "session_id": null,
+    "version": 1,
+    "about": null,
+    "outcome": "success",
+    "embedding": {
+     "dtype": "float32",
+     "shape": [
+      2
+     ],
+     "sha256": "031a5e93e726630d2e7087e4356829de6907683f3a2aba769e5155e7a068d167"
+    }
+   },
+   "b": {
+    "store": "lesson",
+    "key": "ship-release|freeze",
+    "entity_norm": "ship-release",
+    "attribute_norm": "freeze",
+    "entity": "Ship Release",
+    "attribute": "Freeze",
+    "value": "Freeze all merges.",
+    "polarity": "+",
+    "status": "current",
+    "confidence": 0.9,
+    "origin": "agent",
+    "support": [],
+    "provenance": [
+     "p1",
+     "p2"
+    ],
+    "asserted_at": 10.0,
+    "last_confirmed": 11.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": null,
+    "valid_time": null,
+    "hlc_phys": null,
+    "hlc_logical": null,
+    "writer_id": null,
+    "session_id": null,
+    "version": 1,
+    "about": null,
+    "outcome": "success",
+    "embedding": null
+   },
+   "a_fingerprint": "4dec6646c2e4d2334fc582f34578eeade8099b421afb358daa836c39aed151c5",
+   "b_fingerprint": "6ce58ac16af99b7c804b55709eaf7a17fa1bab0312b1f8496df641b6ec09c851",
+   "pair_id": "c77142a43f511ff289754b5394717619fa7fee5f3e07572f509e91015f4c5635",
+   "signature": "9c25a64fa59d051f8dab9d8c12e456dc966f0a0fce085fd79a6e6674f6e58754",
+   "policy": "pppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp",
+   "pair_keys": [
+    "ship-release|freeze",
+    "ship|freeze"
+   ],
+   "folds": [
+    {
+     "verdict": {
+      "verdict": "duplicate",
+      "keep": "a",
+      "fold": null
+     },
+     "allowed": false,
+     "reason": "no_exact_safe_relation"
+    },
+    {
+     "verdict": {
+      "verdict": "duplicate",
+      "keep": "b",
+      "fold": ""
+     },
+     "allowed": false,
+     "reason": "no_exact_safe_relation"
+    },
+    {
+     "verdict": {
+      "verdict": "duplicate",
+      "keep": "a",
+      "fold": "invented"
+     },
+     "allowed": false,
+     "reason": "invented_fold"
+    },
+    {
+     "verdict": {
+      "verdict": "duplicate",
+      "keep": "c"
+     },
+     "allowed": false,
+     "reason": "invalid_keep"
+    },
+    {
+     "verdict": {
+      "verdict": "distinct"
+     },
+     "allowed": false,
+     "reason": "verdict_not_duplicate"
+    },
+    {
+     "verdict": {
+      "keep": "a"
+     },
+     "allowed": false,
+     "reason": "no_exact_safe_relation"
+    }
+   ],
+   "states": [
+    {
+     "judgment": null,
+     "bindings": {},
+     "at": 100.0,
+     "state": "stale",
+     "observed": null,
+     "action": null
+    },
+    {
+     "judgment": {
+      "judged_at": 50.0
+     },
+     "bindings": {},
+     "at": 100.0,
+     "state": "stale",
+     "observed": null,
+     "action": null
+    },
+    {
+     "judgment": {
+      "judged_at": 50.0
+     },
+     "bindings": {
+      "c77142a43f511ff289754b5394717619fa7fee5f3e07572f509e91015f4c5635": "9c25a64fa59d051f8dab9d8c12e456dc966f0a0fce085fd79a6e6674f6e58754"
+     },
+     "at": 100.0,
+     "state": "settled",
+     "observed": null,
+     "action": "settled"
+    },
+    {
+     "judgment": {
+      "judged_at": 50.0
+     },
+     "bindings": {
+      "c77142a43f511ff289754b5394717619fa7fee5f3e07572f509e91015f4c5635": {
+       "signature": "9c25a64fa59d051f8dab9d8c12e456dc966f0a0fce085fd79a6e6674f6e58754",
+       "action": "pending"
+      }
+     },
+     "at": 100.0,
+     "state": "pending",
+     "observed": null,
+     "action": "pending"
+    },
+    {
+     "judgment": {
+      "judged_at": 50.0
+     },
+     "bindings": {
+      "c77142a43f511ff289754b5394717619fa7fee5f3e07572f509e91015f4c5635": {
+       "signature": "9c25a64fa59d051f8dab9d8c12e456dc966f0a0fce085fd79a6e6674f6e58754",
+       "action": ""
+      }
+     },
+     "at": 100.0,
+     "state": "settled",
+     "observed": null,
+     "action": "settled"
+    },
+    {
+     "judgment": {
+      "judged_at": 50.0
+     },
+     "bindings": {
+      "c77142a43f511ff289754b5394717619fa7fee5f3e07572f509e91015f4c5635": {
+       "signature": "other"
+      }
+     },
+     "at": 100.0,
+     "state": "stale",
+     "observed": null,
+     "action": "settled"
+    },
+    {
+     "judgment": {
+      "judged_at": 50.0
+     },
+     "bindings": {
+      "c77142a43f511ff289754b5394717619fa7fee5f3e07572f509e91015f4c5635": {
+       "signature": "9c25a64fa59d051f8dab9d8c12e456dc966f0a0fce085fd79a6e6674f6e58754"
+      }
+     },
+     "at": 1000.0,
+     "state": "stale",
+     "observed": null,
+     "action": "settled"
+    },
+    {
+     "judgment": {
+      "judged_at": "x"
+     },
+     "bindings": {
+      "c77142a43f511ff289754b5394717619fa7fee5f3e07572f509e91015f4c5635": {
+       "signature": "9c25a64fa59d051f8dab9d8c12e456dc966f0a0fce085fd79a6e6674f6e58754"
+      }
+     },
+     "at": 100.0,
+     "state": "stale",
+     "observed": null,
+     "action": "settled"
+    }
+   ]
+  },
+  {
+   "store": "lesson",
+   "a": {
+    "store": "lesson",
+    "key": "ünicode-|-pipe|asp",
+    "entity_norm": "ünicode-|-pipe",
+    "attribute_norm": "asp",
+    "entity": "Ünicode | pipe",
+    "attribute": "Asp",
+    "value": "x",
+    "polarity": "-",
+    "status": "current",
+    "confidence": 0.9,
+    "origin": "agent",
+    "support": [],
+    "provenance": [
+     "p1",
+     "p2"
+    ],
+    "asserted_at": 10.0,
+    "last_confirmed": 11.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": null,
+    "valid_time": null,
+    "hlc_phys": null,
+    "hlc_logical": null,
+    "writer_id": null,
+    "session_id": null,
+    "version": 1,
+    "about": null,
+    "outcome": "success",
+    "embedding": null
+   },
+   "b": {
+    "store": "lesson",
+    "key": "unicode|asp",
+    "entity_norm": "unicode",
+    "attribute_norm": "asp",
+    "entity": "Unicode",
+    "attribute": "Asp",
+    "value": "x",
+    "polarity": "+",
+    "status": "current",
+    "confidence": 0.9,
+    "origin": "agent",
+    "support": [],
+    "provenance": [
+     "p1",
+     "p2"
+    ],
+    "asserted_at": 10.0,
+    "last_confirmed": 11.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": null,
+    "valid_time": null,
+    "hlc_phys": null,
+    "hlc_logical": null,
+    "writer_id": null,
+    "session_id": null,
+    "version": 1,
+    "about": null,
+    "outcome": "success",
+    "embedding": null
+   },
+   "a_fingerprint": "b96518426df1fafdf72eca7a86d66c35314c2c9c9dff940d989f0fd8283ff7fa",
+   "b_fingerprint": "544144b462c5bfb7a864ae7097b76f4c0c8a8744584c76fd54d4842883cfd278",
+   "pair_id": "2383b5df4339a361715d6b6748b25f67e08d16d4ab378e75556a088572aa28ec",
+   "signature": "0bb2c27fa6f0d78beebea255e1109011323584a1f42ee3aafeeeca45b4978a83",
+   "policy": "pppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp",
+   "pair_keys": [
+    "unicode|asp",
+    "ünicode-%7C-pipe|asp"
+   ],
+   "folds": [
+    {
+     "verdict": {
+      "verdict": "duplicate",
+      "keep": "a",
+      "fold": null
+     },
+     "allowed": false,
+     "reason": "conflicting_polarity"
+    },
+    {
+     "verdict": {
+      "verdict": "duplicate",
+      "keep": "b",
+      "fold": ""
+     },
+     "allowed": false,
+     "reason": "conflicting_polarity"
+    },
+    {
+     "verdict": {
+      "verdict": "duplicate",
+      "keep": "a",
+      "fold": "invented"
+     },
+     "allowed": false,
+     "reason": "invented_fold"
+    },
+    {
+     "verdict": {
+      "verdict": "duplicate",
+      "keep": "c"
+     },
+     "allowed": false,
+     "reason": "invalid_keep"
+    },
+    {
+     "verdict": {
+      "verdict": "distinct"
+     },
+     "allowed": false,
+     "reason": "verdict_not_duplicate"
+    },
+    {
+     "verdict": {
+      "keep": "a"
+     },
+     "allowed": false,
+     "reason": "conflicting_polarity"
+    }
+   ],
+   "states": [
+    {
+     "judgment": null,
+     "bindings": {},
+     "at": 100.0,
+     "state": "stale",
+     "observed": null,
+     "action": null
+    },
+    {
+     "judgment": {
+      "judged_at": 50.0
+     },
+     "bindings": {},
+     "at": 100.0,
+     "state": "stale",
+     "observed": null,
+     "action": null
+    },
+    {
+     "judgment": {
+      "judged_at": 50.0
+     },
+     "bindings": {
+      "2383b5df4339a361715d6b6748b25f67e08d16d4ab378e75556a088572aa28ec": "0bb2c27fa6f0d78beebea255e1109011323584a1f42ee3aafeeeca45b4978a83"
+     },
+     "at": 100.0,
+     "state": "settled",
+     "observed": null,
+     "action": "settled"
+    },
+    {
+     "judgment": {
+      "judged_at": 50.0
+     },
+     "bindings": {
+      "2383b5df4339a361715d6b6748b25f67e08d16d4ab378e75556a088572aa28ec": {
+       "signature": "0bb2c27fa6f0d78beebea255e1109011323584a1f42ee3aafeeeca45b4978a83",
+       "action": "pending"
+      }
+     },
+     "at": 100.0,
+     "state": "pending",
+     "observed": null,
+     "action": "pending"
+    },
+    {
+     "judgment": {
+      "judged_at": 50.0
+     },
+     "bindings": {
+      "2383b5df4339a361715d6b6748b25f67e08d16d4ab378e75556a088572aa28ec": {
+       "signature": "0bb2c27fa6f0d78beebea255e1109011323584a1f42ee3aafeeeca45b4978a83",
+       "action": ""
+      }
+     },
+     "at": 100.0,
+     "state": "settled",
+     "observed": null,
+     "action": "settled"
+    },
+    {
+     "judgment": {
+      "judged_at": 50.0
+     },
+     "bindings": {
+      "2383b5df4339a361715d6b6748b25f67e08d16d4ab378e75556a088572aa28ec": {
+       "signature": "other"
+      }
+     },
+     "at": 100.0,
+     "state": "stale",
+     "observed": null,
+     "action": "settled"
+    },
+    {
+     "judgment": {
+      "judged_at": 50.0
+     },
+     "bindings": {
+      "2383b5df4339a361715d6b6748b25f67e08d16d4ab378e75556a088572aa28ec": {
+       "signature": "0bb2c27fa6f0d78beebea255e1109011323584a1f42ee3aafeeeca45b4978a83"
+      }
+     },
+     "at": 1000.0,
+     "state": "stale",
+     "observed": null,
+     "action": "settled"
+    },
+    {
+     "judgment": {
+      "judged_at": "x"
+     },
+     "bindings": {
+      "2383b5df4339a361715d6b6748b25f67e08d16d4ab378e75556a088572aa28ec": {
+       "signature": "0bb2c27fa6f0d78beebea255e1109011323584a1f42ee3aafeeeca45b4978a83"
+      }
+     },
+     "at": 100.0,
+     "state": "stale",
+     "observed": null,
+     "action": "settled"
+    }
+   ]
+  },
+  {
+   "store": "world",
+   "a": {
+    "store": "world",
+    "key": "host-a|os",
+    "entity_norm": "host-a",
+    "attribute_norm": "os",
+    "entity": "Host A",
+    "attribute": "os",
+    "value": "Debian 12",
+    "polarity": "+",
+    "status": "current",
+    "confidence": 0.8,
+    "origin": "agent",
+    "support": [
+     "source"
+    ],
+    "provenance": [],
+    "asserted_at": 20.0,
+    "last_confirmed": 21.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": null,
+    "valid_time": null,
+    "hlc_phys": null,
+    "hlc_logical": null,
+    "writer_id": null,
+    "session_id": null,
+    "version": 1,
+    "source_url": "https://example.org/a",
+    "source_quote": "q",
+    "retrieved_at": 30.0,
+    "freshness_class": "slow",
+    "content_hash": "h",
+    "source_doc_id": null,
+    "embedding": null
+   },
+   "b": {
+    "store": "world",
+    "key": "host-b|os",
+    "entity_norm": "host-b",
+    "attribute_norm": "os",
+    "entity": "Host B",
+    "attribute": "os",
+    "value": "Debian 12",
+    "polarity": "+",
+    "status": "current",
+    "confidence": 0.8,
+    "origin": "agent",
+    "support": [
+     "source"
+    ],
+    "provenance": [],
+    "asserted_at": 20.0,
+    "last_confirmed": 21.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": null,
+    "valid_time": null,
+    "hlc_phys": null,
+    "hlc_logical": null,
+    "writer_id": null,
+    "session_id": null,
+    "version": 1,
+    "source_url": "https://example.org/a",
+    "source_quote": "q",
+    "retrieved_at": 30.0,
+    "freshness_class": "slow",
+    "content_hash": "h",
+    "source_doc_id": null,
+    "embedding": null
+   },
+   "a_fingerprint": "166c89f2a966f7efed6535e83c582829cf9afa22d1aa187319c4f22452bcd264",
+   "b_fingerprint": "7a30f163f6e975920cb06356a2a45c55c2880aec131d621eff17b63738d75455",
+   "pair_id": "8afd250055d5efcdff1c2c6012c8e114a3c430d30b59e05afc15883866045f57",
+   "signature": "1dfbe3cbc351ff9a2994e5faa328348decc09c60c64f5a83f1dfbe54807df665",
+   "policy": "pppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp",
+   "pair_keys": [
+    "host-a|os",
+    "host-b|os"
+   ],
+   "folds": [
+    {
+     "verdict": {
+      "verdict": "duplicate",
+      "keep": "a",
+      "fold": null
+     },
+     "allowed": true,
+     "reason": "exact"
+    },
+    {
+     "verdict": {
+      "verdict": "duplicate",
+      "keep": "b",
+      "fold": ""
+     },
+     "allowed": true,
+     "reason": "exact"
+    },
+    {
+     "verdict": {
+      "verdict": "duplicate",
+      "keep": "a",
+      "fold": "invented"
+     },
+     "allowed": false,
+     "reason": "invented_fold"
+    },
+    {
+     "verdict": {
+      "verdict": "duplicate",
+      "keep": "c"
+     },
+     "allowed": false,
+     "reason": "invalid_keep"
+    },
+    {
+     "verdict": {
+      "verdict": "distinct"
+     },
+     "allowed": false,
+     "reason": "verdict_not_duplicate"
+    },
+    {
+     "verdict": {
+      "keep": "a"
+     },
+     "allowed": true,
+     "reason": "exact"
+    }
+   ],
+   "states": [
+    {
+     "judgment": null,
+     "bindings": {},
+     "at": 100.0,
+     "state": "stale",
+     "observed": null,
+     "action": null
+    },
+    {
+     "judgment": {
+      "judged_at": 50.0
+     },
+     "bindings": {},
+     "at": 100.0,
+     "state": "stale",
+     "observed": null,
+     "action": null
+    },
+    {
+     "judgment": {
+      "judged_at": 50.0
+     },
+     "bindings": {
+      "8afd250055d5efcdff1c2c6012c8e114a3c430d30b59e05afc15883866045f57": "1dfbe3cbc351ff9a2994e5faa328348decc09c60c64f5a83f1dfbe54807df665"
+     },
+     "at": 100.0,
+     "state": "settled",
+     "observed": null,
+     "action": "settled"
+    },
+    {
+     "judgment": {
+      "judged_at": 50.0
+     },
+     "bindings": {
+      "8afd250055d5efcdff1c2c6012c8e114a3c430d30b59e05afc15883866045f57": {
+       "signature": "1dfbe3cbc351ff9a2994e5faa328348decc09c60c64f5a83f1dfbe54807df665",
+       "action": "pending"
+      }
+     },
+     "at": 100.0,
+     "state": "pending",
+     "observed": null,
+     "action": "pending"
+    },
+    {
+     "judgment": {
+      "judged_at": 50.0
+     },
+     "bindings": {
+      "8afd250055d5efcdff1c2c6012c8e114a3c430d30b59e05afc15883866045f57": {
+       "signature": "1dfbe3cbc351ff9a2994e5faa328348decc09c60c64f5a83f1dfbe54807df665",
+       "action": ""
+      }
+     },
+     "at": 100.0,
+     "state": "settled",
+     "observed": null,
+     "action": "settled"
+    },
+    {
+     "judgment": {
+      "judged_at": 50.0
+     },
+     "bindings": {
+      "8afd250055d5efcdff1c2c6012c8e114a3c430d30b59e05afc15883866045f57": {
+       "signature": "other"
+      }
+     },
+     "at": 100.0,
+     "state": "stale",
+     "observed": null,
+     "action": "settled"
+    },
+    {
+     "judgment": {
+      "judged_at": 50.0
+     },
+     "bindings": {
+      "8afd250055d5efcdff1c2c6012c8e114a3c430d30b59e05afc15883866045f57": {
+       "signature": "1dfbe3cbc351ff9a2994e5faa328348decc09c60c64f5a83f1dfbe54807df665"
+      }
+     },
+     "at": 1000.0,
+     "state": "stale",
+     "observed": null,
+     "action": "settled"
+    },
+    {
+     "judgment": {
+      "judged_at": "x"
+     },
+     "bindings": {
+      "8afd250055d5efcdff1c2c6012c8e114a3c430d30b59e05afc15883866045f57": {
+       "signature": "1dfbe3cbc351ff9a2994e5faa328348decc09c60c64f5a83f1dfbe54807df665"
+      }
+     },
+     "at": 100.0,
+     "state": "stale",
+     "observed": null,
+     "action": "settled"
+    }
+   ]
+  },
+  {
+   "store": "world",
+   "a": {
+    "store": "world",
+    "key": "host-a|os",
+    "entity_norm": "host-a",
+    "attribute_norm": "os",
+    "entity": "Host A",
+    "attribute": "os",
+    "value": "Debian 12",
+    "polarity": "+",
+    "status": "current",
+    "confidence": 0.8,
+    "origin": "agent",
+    "support": [
+     "source"
+    ],
+    "provenance": [],
+    "asserted_at": 20.0,
+    "last_confirmed": 21.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": null,
+    "valid_time": null,
+    "hlc_phys": null,
+    "hlc_logical": null,
+    "writer_id": null,
+    "session_id": null,
+    "version": 1,
+    "source_url": "https://example.org/a",
+    "source_quote": "q",
+    "retrieved_at": 10.0,
+    "freshness_class": "slow",
+    "content_hash": "h",
+    "source_doc_id": null,
+    "embedding": null
+   },
+   "b": {
+    "store": "world",
+    "key": "host-b|os",
+    "entity_norm": "host-b",
+    "attribute_norm": "os",
+    "entity": "Host B",
+    "attribute": "os",
+    "value": "Debian 12",
+    "polarity": "+",
+    "status": "current",
+    "confidence": 0.8,
+    "origin": "agent",
+    "support": [
+     "source"
+    ],
+    "provenance": [],
+    "asserted_at": 20.0,
+    "last_confirmed": 21.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": null,
+    "valid_time": null,
+    "hlc_phys": null,
+    "hlc_logical": null,
+    "writer_id": null,
+    "session_id": null,
+    "version": 1,
+    "source_url": "https://example.org/a",
+    "source_quote": "q",
+    "retrieved_at": 30.0,
+    "freshness_class": "slow",
+    "content_hash": "h",
+    "source_doc_id": null,
+    "embedding": null
+   },
+   "a_fingerprint": "cd5f51fef2c3619cc1f614b98283f3871efa2b5c9441ad8454e962acbc98e7ed",
+   "b_fingerprint": "7a30f163f6e975920cb06356a2a45c55c2880aec131d621eff17b63738d75455",
+   "pair_id": "8afd250055d5efcdff1c2c6012c8e114a3c430d30b59e05afc15883866045f57",
+   "signature": "8a4ecd1482a08912cbebf68228b9ed61d6159fb8b879bf16c42ef1e0f682b1a9",
+   "policy": "pppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp",
+   "pair_keys": [
+    "host-a|os",
+    "host-b|os"
+   ],
+   "folds": [
+    {
+     "verdict": {
+      "verdict": "duplicate",
+      "keep": "a",
+      "fold": null
+     },
+     "allowed": false,
+     "reason": "stale_world_survivor"
+    },
+    {
+     "verdict": {
+      "verdict": "duplicate",
+      "keep": "b",
+      "fold": ""
+     },
+     "allowed": true,
+     "reason": "exact"
+    },
+    {
+     "verdict": {
+      "verdict": "duplicate",
+      "keep": "a",
+      "fold": "invented"
+     },
+     "allowed": false,
+     "reason": "invented_fold"
+    },
+    {
+     "verdict": {
+      "verdict": "duplicate",
+      "keep": "c"
+     },
+     "allowed": false,
+     "reason": "invalid_keep"
+    },
+    {
+     "verdict": {
+      "verdict": "distinct"
+     },
+     "allowed": false,
+     "reason": "verdict_not_duplicate"
+    },
+    {
+     "verdict": {
+      "keep": "a"
+     },
+     "allowed": false,
+     "reason": "stale_world_survivor"
+    }
+   ],
+   "states": [
+    {
+     "judgment": null,
+     "bindings": {},
+     "at": 100.0,
+     "state": "stale",
+     "observed": null,
+     "action": null
+    },
+    {
+     "judgment": {
+      "judged_at": 50.0
+     },
+     "bindings": {},
+     "at": 100.0,
+     "state": "stale",
+     "observed": null,
+     "action": null
+    },
+    {
+     "judgment": {
+      "judged_at": 50.0
+     },
+     "bindings": {
+      "8afd250055d5efcdff1c2c6012c8e114a3c430d30b59e05afc15883866045f57": "8a4ecd1482a08912cbebf68228b9ed61d6159fb8b879bf16c42ef1e0f682b1a9"
+     },
+     "at": 100.0,
+     "state": "settled",
+     "observed": null,
+     "action": "settled"
+    },
+    {
+     "judgment": {
+      "judged_at": 50.0
+     },
+     "bindings": {
+      "8afd250055d5efcdff1c2c6012c8e114a3c430d30b59e05afc15883866045f57": {
+       "signature": "8a4ecd1482a08912cbebf68228b9ed61d6159fb8b879bf16c42ef1e0f682b1a9",
+       "action": "pending"
+      }
+     },
+     "at": 100.0,
+     "state": "pending",
+     "observed": null,
+     "action": "pending"
+    },
+    {
+     "judgment": {
+      "judged_at": 50.0
+     },
+     "bindings": {
+      "8afd250055d5efcdff1c2c6012c8e114a3c430d30b59e05afc15883866045f57": {
+       "signature": "8a4ecd1482a08912cbebf68228b9ed61d6159fb8b879bf16c42ef1e0f682b1a9",
+       "action": ""
+      }
+     },
+     "at": 100.0,
+     "state": "settled",
+     "observed": null,
+     "action": "settled"
+    },
+    {
+     "judgment": {
+      "judged_at": 50.0
+     },
+     "bindings": {
+      "8afd250055d5efcdff1c2c6012c8e114a3c430d30b59e05afc15883866045f57": {
+       "signature": "other"
+      }
+     },
+     "at": 100.0,
+     "state": "stale",
+     "observed": null,
+     "action": "settled"
+    },
+    {
+     "judgment": {
+      "judged_at": 50.0
+     },
+     "bindings": {
+      "8afd250055d5efcdff1c2c6012c8e114a3c430d30b59e05afc15883866045f57": {
+       "signature": "8a4ecd1482a08912cbebf68228b9ed61d6159fb8b879bf16c42ef1e0f682b1a9"
+      }
+     },
+     "at": 1000.0,
+     "state": "stale",
+     "observed": null,
+     "action": "settled"
+    },
+    {
+     "judgment": {
+      "judged_at": "x"
+     },
+     "bindings": {
+      "8afd250055d5efcdff1c2c6012c8e114a3c430d30b59e05afc15883866045f57": {
+       "signature": "8a4ecd1482a08912cbebf68228b9ed61d6159fb8b879bf16c42ef1e0f682b1a9"
+      }
+     },
+     "at": 100.0,
+     "state": "stale",
+     "observed": null,
+     "action": "settled"
+    }
+   ]
+  },
+  {
+   "store": "world",
+   "a": {
+    "store": "world",
+    "key": "host-a|os",
+    "entity_norm": "host-a",
+    "attribute_norm": "os",
+    "entity": "Host A",
+    "attribute": "os",
+    "value": "Debian 12",
+    "polarity": "+",
+    "status": "current",
+    "confidence": 0.8,
+    "origin": "agent",
+    "support": [
+     "source"
+    ],
+    "provenance": [],
+    "asserted_at": 20.0,
+    "last_confirmed": 21.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": null,
+    "valid_time": null,
+    "hlc_phys": null,
+    "hlc_logical": null,
+    "writer_id": null,
+    "session_id": null,
+    "version": 1,
+    "source_url": "https://example.org/b",
+    "source_quote": "q",
+    "retrieved_at": 30.0,
+    "freshness_class": "slow",
+    "content_hash": "h",
+    "source_doc_id": null,
+    "embedding": null
+   },
+   "b": {
+    "store": "world",
+    "key": "host-b|os",
+    "entity_norm": "host-b",
+    "attribute_norm": "os",
+    "entity": "Host B",
+    "attribute": "os",
+    "value": "Debian 12",
+    "polarity": "+",
+    "status": "current",
+    "confidence": 0.8,
+    "origin": "agent",
+    "support": [
+     "source"
+    ],
+    "provenance": [],
+    "asserted_at": 20.0,
+    "last_confirmed": 21.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": null,
+    "valid_time": null,
+    "hlc_phys": null,
+    "hlc_logical": null,
+    "writer_id": null,
+    "session_id": null,
+    "version": 1,
+    "source_url": "https://example.org/a",
+    "source_quote": "q",
+    "retrieved_at": 30.0,
+    "freshness_class": "slow",
+    "content_hash": "h",
+    "source_doc_id": null,
+    "embedding": null
+   },
+   "a_fingerprint": "3139bf666bcd2be4c4d28a41105963fa26bef18413e526f06f892249e5a5695b",
+   "b_fingerprint": "7a30f163f6e975920cb06356a2a45c55c2880aec131d621eff17b63738d75455",
+   "pair_id": "8afd250055d5efcdff1c2c6012c8e114a3c430d30b59e05afc15883866045f57",
+   "signature": "00520054d7950692a794dd920cf3869e42648f9997fc639d5d36cef739e36eff",
+   "policy": "pppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp",
+   "pair_keys": [
+    "host-a|os",
+    "host-b|os"
+   ],
+   "folds": [
+    {
+     "verdict": {
+      "verdict": "duplicate",
+      "keep": "a",
+      "fold": null
+     },
+     "allowed": false,
+     "reason": "conflicting_source_url"
+    },
+    {
+     "verdict": {
+      "verdict": "duplicate",
+      "keep": "b",
+      "fold": ""
+     },
+     "allowed": false,
+     "reason": "conflicting_source_url"
+    },
+    {
+     "verdict": {
+      "verdict": "duplicate",
+      "keep": "a",
+      "fold": "invented"
+     },
+     "allowed": false,
+     "reason": "invented_fold"
+    },
+    {
+     "verdict": {
+      "verdict": "duplicate",
+      "keep": "c"
+     },
+     "allowed": false,
+     "reason": "invalid_keep"
+    },
+    {
+     "verdict": {
+      "verdict": "distinct"
+     },
+     "allowed": false,
+     "reason": "verdict_not_duplicate"
+    },
+    {
+     "verdict": {
+      "keep": "a"
+     },
+     "allowed": false,
+     "reason": "conflicting_source_url"
+    }
+   ],
+   "states": [
+    {
+     "judgment": null,
+     "bindings": {},
+     "at": 100.0,
+     "state": "stale",
+     "observed": null,
+     "action": null
+    },
+    {
+     "judgment": {
+      "judged_at": 50.0
+     },
+     "bindings": {},
+     "at": 100.0,
+     "state": "stale",
+     "observed": null,
+     "action": null
+    },
+    {
+     "judgment": {
+      "judged_at": 50.0
+     },
+     "bindings": {
+      "8afd250055d5efcdff1c2c6012c8e114a3c430d30b59e05afc15883866045f57": "00520054d7950692a794dd920cf3869e42648f9997fc639d5d36cef739e36eff"
+     },
+     "at": 100.0,
+     "state": "settled",
+     "observed": null,
+     "action": "settled"
+    },
+    {
+     "judgment": {
+      "judged_at": 50.0
+     },
+     "bindings": {
+      "8afd250055d5efcdff1c2c6012c8e114a3c430d30b59e05afc15883866045f57": {
+       "signature": "00520054d7950692a794dd920cf3869e42648f9997fc639d5d36cef739e36eff",
+       "action": "pending"
+      }
+     },
+     "at": 100.0,
+     "state": "pending",
+     "observed": null,
+     "action": "pending"
+    },
+    {
+     "judgment": {
+      "judged_at": 50.0
+     },
+     "bindings": {
+      "8afd250055d5efcdff1c2c6012c8e114a3c430d30b59e05afc15883866045f57": {
+       "signature": "00520054d7950692a794dd920cf3869e42648f9997fc639d5d36cef739e36eff",
+       "action": ""
+      }
+     },
+     "at": 100.0,
+     "state": "settled",
+     "observed": null,
+     "action": "settled"
+    },
+    {
+     "judgment": {
+      "judged_at": 50.0
+     },
+     "bindings": {
+      "8afd250055d5efcdff1c2c6012c8e114a3c430d30b59e05afc15883866045f57": {
+       "signature": "other"
+      }
+     },
+     "at": 100.0,
+     "state": "stale",
+     "observed": null,
+     "action": "settled"
+    },
+    {
+     "judgment": {
+      "judged_at": 50.0
+     },
+     "bindings": {
+      "8afd250055d5efcdff1c2c6012c8e114a3c430d30b59e05afc15883866045f57": {
+       "signature": "00520054d7950692a794dd920cf3869e42648f9997fc639d5d36cef739e36eff"
+      }
+     },
+     "at": 1000.0,
+     "state": "stale",
+     "observed": null,
+     "action": "settled"
+    },
+    {
+     "judgment": {
+      "judged_at": "x"
+     },
+     "bindings": {
+      "8afd250055d5efcdff1c2c6012c8e114a3c430d30b59e05afc15883866045f57": {
+       "signature": "00520054d7950692a794dd920cf3869e42648f9997fc639d5d36cef739e36eff"
+      }
+     },
+     "at": 100.0,
+     "state": "stale",
+     "observed": null,
+     "action": "settled"
+    }
+   ]
+  }
+ ],
+ "curation_policy": [
+  {
+   "observed": null,
+   "fingerprint": "56eeb3575cf82f1b92cc833d2ac4f3485e7a5c338703479579ac23426d30fc45"
+  },
+  {
+   "observed": "judge-one",
+   "fingerprint": "fce54df076ffa6e3a3cecbcfca774206d2b8970c06edec739977142414e2a02a"
+  },
+  {
+   "observed": "élan",
+   "fingerprint": "e4b09af5714699810508c9b631f634a37510bd38a11112508c6346c950999e9d"
+  }
+ ],
+ "curation_audit": [
+  {
+   "store": "lesson",
+   "a": {
+    "store": "lesson",
+    "key": "backup-drill|cadence",
+    "entity_norm": "backup-drill",
+    "attribute_norm": "cadence",
+    "entity": "Backup Drill",
+    "attribute": "Cadence",
+    "value": "Run the drill monthly.",
+    "polarity": "+",
+    "status": "current",
+    "confidence": 0.9,
+    "origin": "agent",
+    "support": [],
+    "provenance": [
+     "p1",
+     "p2"
+    ],
+    "asserted_at": 10.0,
+    "last_confirmed": 11.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": null,
+    "valid_time": null,
+    "hlc_phys": null,
+    "hlc_logical": null,
+    "writer_id": null,
+    "session_id": null,
+    "version": 1,
+    "about": null,
+    "outcome": "success",
+    "embedding": null
+   },
+   "b": {
+    "store": "lesson",
+    "key": "restore-drill|cadence",
+    "entity_norm": "restore-drill",
+    "attribute_norm": "cadence",
+    "entity": "Restore Drill",
+    "attribute": "Cadence",
+    "value": "Run the drill monthly.",
+    "polarity": "+",
+    "status": "current",
+    "confidence": 0.9,
+    "origin": "agent",
+    "support": [],
+    "provenance": [
+     "p1",
+     "p2"
+    ],
+    "asserted_at": 10.0,
+    "last_confirmed": 11.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": null,
+    "valid_time": null,
+    "hlc_phys": null,
+    "hlc_logical": null,
+    "writer_id": null,
+    "session_id": null,
+    "version": 1,
+    "about": null,
+    "outcome": "success",
+    "embedding": null
+   },
+   "a_fingerprint": "9f9b5951c8aacae9003dbdd90b8f287fbb9cf60fd70b82dea8ce5f3cdd9efde9",
+   "b_fingerprint": "056e1f93cc236ea7dd38ca04610c6cb572b679ddb603b000c5150732510fc39f",
+   "retired_snapshot": {
+    "store": "lesson",
+    "key": "restore-drill|cadence",
+    "entity_norm": "restore-drill",
+    "attribute_norm": "cadence",
+    "entity": "Restore Drill",
+    "attribute": "Cadence",
+    "value": "Run the drill monthly.",
+    "polarity": "+",
+    "status": "retired",
+    "confidence": 0.9,
+    "origin": "agent",
+    "support": [],
+    "provenance": [
+     "p1",
+     "p2"
+    ],
+    "asserted_at": 10.0,
+    "last_confirmed": 11.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": 1700000123.5,
+    "tx_time": null,
+    "valid_time": null,
+    "hlc_phys": null,
+    "hlc_logical": null,
+    "writer_id": null,
+    "session_id": null,
+    "version": 1,
+    "about": null,
+    "outcome": "success",
+    "embedding": {
+     "dtype": "float32",
+     "shape": [
+      3
+     ],
+     "sha256": "2bb1c7913a96cf0dcacdbb1df8ae8c56173ee2a572cb795fa22d0b7445bd6a21"
+    }
+   },
+   "embedding": [
+    0.10000000149011612,
+    -2.5,
+    3.0
+   ],
+   "audit": {
+    "store": "lesson",
+    "key": "restore-drill|cadence",
+    "entity_norm": "restore-drill",
+    "attribute_norm": "cadence",
+    "polarity": "+",
+    "status": "retired",
+    "confidence": 0.9,
+    "origin": "agent",
+    "support": [],
+    "provenance": [
+     "p1",
+     "p2"
+    ],
+    "asserted_at": 10.0,
+    "last_confirmed": 11.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": 1700000123.5,
+    "tx_time": null,
+    "valid_time": null,
+    "hlc_phys": null,
+    "hlc_logical": null,
+    "writer_id": null,
+    "session_id": null,
+    "version": 1,
+    "about": null,
+    "outcome": "success",
+    "_curation_evidence_fingerprint": "056e1f93cc236ea7dd38ca04610c6cb572b679ddb603b000c5150732510fc39f",
+    "_curation_retired_fingerprint": "03ef6866535b5e9ff532da6fb604a8fde2bba5fd37d070602a81e2cb1e47680a",
+    "_curation_duplicate": {
+     "version": 1,
+     "keep": "a",
+     "a": {
+      "store": "lesson",
+      "key": "backup-drill|cadence",
+      "entity_norm": "backup-drill",
+      "attribute_norm": "cadence",
+      "entity": "Backup Drill",
+      "attribute": "Cadence",
+      "value": "Run the drill monthly.",
+      "polarity": "+",
+      "status": "current",
+      "confidence": 0.9,
+      "origin": "agent",
+      "support": [],
+      "provenance": [
+       "p1",
+       "p2"
+      ],
+      "asserted_at": 10.0,
+      "last_confirmed": 11.0,
+      "supersedes_value": null,
+      "superseded_by_value": null,
+      "superseded_at": null,
+      "tx_time": null,
+      "valid_time": null,
+      "hlc_phys": null,
+      "hlc_logical": null,
+      "writer_id": null,
+      "session_id": null,
+      "version": 1,
+      "about": null,
+      "outcome": "success",
+      "embedding": null
+     },
+     "b": {
+      "store": "lesson",
+      "key": "restore-drill|cadence",
+      "entity_norm": "restore-drill",
+      "attribute_norm": "cadence",
+      "entity": "Restore Drill",
+      "attribute": "Cadence",
+      "value": "Run the drill monthly.",
+      "polarity": "+",
+      "status": "current",
+      "confidence": 0.9,
+      "origin": "agent",
+      "support": [],
+      "provenance": [
+       "p1",
+       "p2"
+      ],
+      "asserted_at": 10.0,
+      "last_confirmed": 11.0,
+      "supersedes_value": null,
+      "superseded_by_value": null,
+      "superseded_at": null,
+      "tx_time": null,
+      "valid_time": null,
+      "hlc_phys": null,
+      "hlc_logical": null,
+      "writer_id": null,
+      "session_id": null,
+      "version": 1,
+      "about": null,
+      "outcome": "success",
+      "embedding": null
+     },
+     "a_fingerprint": "9f9b5951c8aacae9003dbdd90b8f287fbb9cf60fd70b82dea8ce5f3cdd9efde9",
+     "b_fingerprint": "056e1f93cc236ea7dd38ca04610c6cb572b679ddb603b000c5150732510fc39f",
+     "loser_embedding": [
+      0.10000000149011612,
+      -2.5,
+      3.0
+     ]
+    },
+    "task": "Restore Drill",
+    "aspect": "Cadence",
+    "lesson": "Run the drill monthly."
+   }
+  },
+  {
+   "store": "world",
+   "a": {
+    "store": "world",
+    "key": "host-c|os",
+    "entity_norm": "host-c",
+    "attribute_norm": "os",
+    "entity": "Host C",
+    "attribute": "os",
+    "value": "Alpine",
+    "polarity": "+",
+    "status": "current",
+    "confidence": 0.8,
+    "origin": "agent",
+    "support": [
+     "source"
+    ],
+    "provenance": [],
+    "asserted_at": 20.0,
+    "last_confirmed": 21.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": null,
+    "valid_time": null,
+    "hlc_phys": null,
+    "hlc_logical": null,
+    "writer_id": null,
+    "session_id": null,
+    "version": 1,
+    "source_url": "https://example.org/a",
+    "source_quote": "q",
+    "retrieved_at": 30.0,
+    "freshness_class": "slow",
+    "content_hash": "h",
+    "source_doc_id": null,
+    "embedding": null
+   },
+   "b": {
+    "store": "world",
+    "key": "host-d|os",
+    "entity_norm": "host-d",
+    "attribute_norm": "os",
+    "entity": "Host D",
+    "attribute": "os",
+    "value": "Alpine",
+    "polarity": "+",
+    "status": "current",
+    "confidence": 0.8,
+    "origin": "agent",
+    "support": [
+     "source"
+    ],
+    "provenance": [],
+    "asserted_at": 20.0,
+    "last_confirmed": 21.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": null,
+    "valid_time": null,
+    "hlc_phys": null,
+    "hlc_logical": null,
+    "writer_id": null,
+    "session_id": null,
+    "version": 1,
+    "source_url": "https://example.org/a",
+    "source_quote": "q",
+    "retrieved_at": 30.0,
+    "freshness_class": "slow",
+    "content_hash": "h",
+    "source_doc_id": null,
+    "embedding": null
+   },
+   "a_fingerprint": "ec0de723ff8138f29af8b860e811f5e0d7fb4aa36fbcd043ee733fd78a49f7fd",
+   "b_fingerprint": "75c65ed94a494c4aaf0548fd74724b336e48ea5d4f6d864346ce9c1f72aea3f5",
+   "retired_snapshot": {
+    "store": "world",
+    "key": "host-d|os",
+    "entity_norm": "host-d",
+    "attribute_norm": "os",
+    "entity": "Host D",
+    "attribute": "os",
+    "value": "Alpine",
+    "polarity": "+",
+    "status": "retired",
+    "confidence": 0.8,
+    "origin": "agent",
+    "support": [
+     "source"
+    ],
+    "provenance": [],
+    "asserted_at": 20.0,
+    "last_confirmed": 21.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": 1700000123.5,
+    "tx_time": null,
+    "valid_time": null,
+    "hlc_phys": null,
+    "hlc_logical": null,
+    "writer_id": null,
+    "session_id": null,
+    "version": 1,
+    "source_url": "https://example.org/a",
+    "source_quote": "q",
+    "retrieved_at": 30.0,
+    "freshness_class": "slow",
+    "content_hash": "h",
+    "source_doc_id": null,
+    "embedding": {
+     "dtype": "float32",
+     "shape": [
+      3
+     ],
+     "sha256": "2bb1c7913a96cf0dcacdbb1df8ae8c56173ee2a572cb795fa22d0b7445bd6a21"
+    }
+   },
+   "embedding": [
+    0.10000000149011612,
+    -2.5,
+    3.0
+   ],
+   "audit": {
+    "store": "world",
+    "key": "host-d|os",
+    "entity_norm": "host-d",
+    "attribute_norm": "os",
+    "entity": "Host D",
+    "attribute": "os",
+    "value": "Alpine",
+    "polarity": "+",
+    "status": "retired",
+    "confidence": 0.8,
+    "origin": "agent",
+    "support": [
+     "source"
+    ],
+    "provenance": [],
+    "asserted_at": 20.0,
+    "last_confirmed": 21.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": 1700000123.5,
+    "tx_time": null,
+    "valid_time": null,
+    "hlc_phys": null,
+    "hlc_logical": null,
+    "writer_id": null,
+    "session_id": null,
+    "version": 1,
+    "source_url": "https://example.org/a",
+    "source_quote": "q",
+    "retrieved_at": 30.0,
+    "freshness_class": "slow",
+    "content_hash": "h",
+    "source_doc_id": null,
+    "_curation_evidence_fingerprint": "75c65ed94a494c4aaf0548fd74724b336e48ea5d4f6d864346ce9c1f72aea3f5",
+    "_curation_retired_fingerprint": "75c7174d3ba81d744f2cb821399217eb04d06a98b4cabe8ff7730bc101b3c04d",
+    "_curation_duplicate": {
+     "version": 1,
+     "keep": "a",
+     "a": {
+      "store": "world",
+      "key": "host-c|os",
+      "entity_norm": "host-c",
+      "attribute_norm": "os",
+      "entity": "Host C",
+      "attribute": "os",
+      "value": "Alpine",
+      "polarity": "+",
+      "status": "current",
+      "confidence": 0.8,
+      "origin": "agent",
+      "support": [
+       "source"
+      ],
+      "provenance": [],
+      "asserted_at": 20.0,
+      "last_confirmed": 21.0,
+      "supersedes_value": null,
+      "superseded_by_value": null,
+      "superseded_at": null,
+      "tx_time": null,
+      "valid_time": null,
+      "hlc_phys": null,
+      "hlc_logical": null,
+      "writer_id": null,
+      "session_id": null,
+      "version": 1,
+      "source_url": "https://example.org/a",
+      "source_quote": "q",
+      "retrieved_at": 30.0,
+      "freshness_class": "slow",
+      "content_hash": "h",
+      "source_doc_id": null,
+      "embedding": null
+     },
+     "b": {
+      "store": "world",
+      "key": "host-d|os",
+      "entity_norm": "host-d",
+      "attribute_norm": "os",
+      "entity": "Host D",
+      "attribute": "os",
+      "value": "Alpine",
+      "polarity": "+",
+      "status": "current",
+      "confidence": 0.8,
+      "origin": "agent",
+      "support": [
+       "source"
+      ],
+      "provenance": [],
+      "asserted_at": 20.0,
+      "last_confirmed": 21.0,
+      "supersedes_value": null,
+      "superseded_by_value": null,
+      "superseded_at": null,
+      "tx_time": null,
+      "valid_time": null,
+      "hlc_phys": null,
+      "hlc_logical": null,
+      "writer_id": null,
+      "session_id": null,
+      "version": 1,
+      "source_url": "https://example.org/a",
+      "source_quote": "q",
+      "retrieved_at": 30.0,
+      "freshness_class": "slow",
+      "content_hash": "h",
+      "source_doc_id": null,
+      "embedding": null
+     },
+     "a_fingerprint": "ec0de723ff8138f29af8b860e811f5e0d7fb4aa36fbcd043ee733fd78a49f7fd",
+     "b_fingerprint": "75c65ed94a494c4aaf0548fd74724b336e48ea5d4f6d864346ce9c1f72aea3f5",
+     "loser_embedding": [
+      0.10000000149011612,
+      -2.5,
+      3.0
+     ]
+    }
+   }
+  }
+ ],
+ "slot_format": [
+  {
+   "row": {
+    "n": 1,
+    "store": "lesson",
+    "similarity": 0.91,
+    "a": {
+     "entity": "Rotate Keys",
+     "attribute": "Cadence",
+     "value": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv",
+     "polarity": "+",
+     "outcome": "success",
+     "about": "ops"
+    },
+    "b": {
+     "entity": "Rotate Secrets",
+     "attribute": "Cadence",
+     "value": "x",
+     "polarity": "-",
+     "outcome": null,
+     "about": null
+    }
+   },
+   "text": "[1] store=lesson cosine 0.91\n    A 'Rotate Keys' | 'Cadence' [polarity +, outcome success, about 'ops']: vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\n    B 'Rotate Secrets' | 'Cadence' [polarity -, outcome None, about None]: x"
+  },
+  {
+   "row": {
+    "n": 2,
+    "store": "world",
+    "similarity": 1.0,
+    "a": {
+     "entity": "Host A",
+     "attribute": "os",
+     "value": "Debian 12",
+     "source_url": "https://example.org/a"
+    },
+    "b": {
+     "entity": "Host B",
+     "attribute": "os",
+     "value": "Debian 12",
+     "source_url": ""
+    }
+   },
+   "text": "[2] store=world cosine 1.0\n    A 'Host A' | 'os' [source https://example.org/a]: Debian 12\n    B 'Host B' | 'os': Debian 12"
+  },
+  {
+   "row": {
+    "n": 3,
+    "store": "world",
+    "a": null
+   },
+   "text": "[3] store=world cosine None\n    A '?' | '?': \n    B '?' | '?': "
+  }
+ ],
+ "slot_parse": [
+  {
+   "raw": [
+    {
+     "id": 1,
+     "verdict": "duplicate",
+     "keep": " A ",
+     "fold": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+     "confidence": 0.9
+    },
+    {
+     "id": 2,
+     "verdict": "duplicate",
+     "keep": "c",
+     "fold": "x"
+    },
+    {
+     "id": 3,
+     "verdict": "duplicate"
+    },
+    {
+     "id": 1,
+     "verdict": "distinct",
+     "keep": "a",
+     "fold": "ignored",
+     "note": "nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn"
+    },
+    {
+     "id": 2,
+     "verdict": "leave",
+     "confidence": "0.4"
+    },
+    {
+     "id": 3,
+     "verdict": "duplicate",
+     "keep": 0,
+     "confidence": 1
+    },
+    {
+     "id": 3,
+     "verdict": "duplicate",
+     "keep": "B",
+     "note": ""
+    },
+    {
+     "id": 9,
+     "verdict": "distinct"
+    },
+    "x"
+   ],
+   "rows": [
+    {
+     "n": 1
+    },
+    {
+     "n": 2
+    },
+    {
+     "n": 3
+    }
+   ],
+   "verdicts": [
+    {
+     "n": 1,
+     "verdict": "duplicate",
+     "keep": "a",
+     "fold": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+     "confidence": 0.9,
+     "note": null
+    },
+    {
+     "n": 2,
+     "verdict": "leave",
+     "keep": null,
+     "fold": null,
+     "confidence": 0.5,
+     "note": null
+    },
+    {
+     "n": 3,
+     "verdict": "leave",
+     "keep": null,
+     "fold": null,
+     "confidence": 0.5,
+     "note": null
+    },
+    {
+     "n": 1,
+     "verdict": "distinct",
+     "keep": null,
+     "fold": null,
+     "confidence": 0.5,
+     "note": "nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn"
+    },
+    {
+     "n": 2,
+     "verdict": "leave",
+     "keep": null,
+     "fold": null,
+     "confidence": 0.4,
+     "note": null
+    },
+    {
+     "n": 3,
+     "verdict": "leave",
+     "keep": null,
+     "fold": null,
+     "confidence": 1.0,
+     "note": null
+    },
+    {
+     "n": 3,
+     "verdict": "duplicate",
+     "keep": "b",
+     "fold": null,
+     "confidence": 0.5,
+     "note": null
+    }
+   ]
+  },
+  {
+   "raw": [],
+   "rows": [
+    {
+     "n": 1
+    },
+    {
+     "n": 2
+    },
+    {
+     "n": 3
+    }
+   ],
+   "verdicts": []
+  }
+ ],
+ "candidate_format": [
+  {
+   "row": {
+    "n": 1,
+    "src": "Alpha",
+    "dst": "Beta",
+    "similarity": 0.8123,
+    "src_snippets": [
+     "[conversation] ssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssss",
+     "two",
+     "three",
+     "four"
+    ],
+    "dst_snippets": []
+   },
+   "text": "[1] 'Alpha' vs 'Beta' (cosine 0.8123)\n    src notes: [conversation] sssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssss; two; three\n    dst notes: none"
+  },
+  {
+   "row": {
+    "n": 2,
+    "src": "élan",
+    "dst": "🙂",
+    "similarity": 1.0,
+    "src_snippets": null,
+    "dst_snippets": [
+     "x"
+    ]
+   },
+   "text": "[2] 'élan' vs '🙂' (cosine 1.0)\n    src notes: none\n    dst notes: x"
+  },
+  {
+   "row": {
+    "n": 3,
+    "src": null,
+    "similarity": null
+   },
+   "text": "[3] 'None' vs '?' (cosine None)\n    src notes: none\n    dst notes: none"
+  },
+  {
+   "row": {
+    "n": 4
+   },
+   "text": "[4] '?' vs '?' (cosine None)\n    src notes: none\n    dst notes: none"
+  }
+ ],
+ "candidate_parse": [
+  {
+   "raw": [
+    {
+     "id": 1,
+     "verdict": "propose",
+     "confidence": 0.9,
+     "relation": "uses",
+     "rationale": "both run it"
+    },
+    {
+     "id": 2,
+     "verdict": " PROPOSE ",
+     "confidence": "0.7",
+     "relation": "depends-on",
+     "src": "Gamma",
+     "dst": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    },
+    {
+     "id": 3,
+     "verdict": "propose",
+     "confidence": 0.9,
+     "relation": ""
+    },
+    {
+     "id": 1,
+     "verdict": "propose",
+     "relation": "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
+     "rationale": "nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn"
+    },
+    {
+     "id": 2,
+     "verdict": "dismiss",
+     "confidence": 2,
+     "relation": "ignored",
+     "src": "s"
+    },
+    {
+     "id": 3,
+     "verdict": "leave",
+     "confidence": null
+    },
+    {
+     "id": 9,
+     "verdict": "propose",
+     "relation": "uses"
+    },
+    {
+     "id": 1,
+     "verdict": "accept"
+    },
+    {
+     "id": 2.5,
+     "verdict": "propose",
+     "relation": 7,
+     "src": 0,
+     "dst": ""
+    },
+    "nope"
+   ],
+   "rows": [
+    {
+     "n": 1,
+     "src": "Alpha",
+     "dst": "Beta"
+    },
+    {
+     "n": 2,
+     "src": "Gamma",
+     "dst": "Delta"
+    },
+    {
+     "n": 3,
+     "src": "Eps",
+     "dst": "Zeta"
+    }
+   ],
+   "verdicts": [
+    {
+     "n": 1,
+     "verdict": "propose",
+     "confidence": 0.9,
+     "relation": "uses",
+     "src": "Alpha",
+     "dst": "Beta",
+     "rationale": "both run it"
+    },
+    {
+     "n": 2,
+     "verdict": "propose",
+     "confidence": 0.7,
+     "relation": "depends-on",
+     "src": "Gamma",
+     "dst": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+     "rationale": null
+    },
+    {
+     "n": 3,
+     "verdict": "leave",
+     "confidence": 0.9,
+     "relation": null,
+     "src": null,
+     "dst": null,
+     "rationale": null
+    },
+    {
+     "n": 1,
+     "verdict": "propose",
+     "confidence": 0.5,
+     "relation": "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
+     "src": "Alpha",
+     "dst": "Beta",
+     "rationale": "nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn"
+    },
+    {
+     "n": 2,
+     "verdict": "dismiss",
+     "confidence": 1.0,
+     "relation": null,
+     "src": null,
+     "dst": null,
+     "rationale": null
+    },
+    {
+     "n": 3,
+     "verdict": "leave",
+     "confidence": 0.5,
+     "relation": null,
+     "src": null,
+     "dst": null,
+     "rationale": null
+    },
+    {
+     "n": 2,
+     "verdict": "propose",
+     "confidence": 0.5,
+     "relation": "7",
+     "src": "0",
+     "dst": "Delta",
+     "rationale": null
+    }
+   ]
+  },
+  {
+   "raw": [],
+   "rows": [
+    {
+     "n": 1,
+     "src": "Alpha",
+     "dst": "Beta"
+    },
+    {
+     "n": 2,
+     "src": "Gamma",
+     "dst": "Delta"
+    },
+    {
+     "n": 3,
+     "src": "Eps",
+     "dst": "Zeta"
+    }
+   ],
+   "verdicts": []
+  }
+ ],
+ "candidate_fingerprints": {
+  "inputs": {
+   "entities": [
+    {
+     "id": 1,
+     "canonical": "alpha",
+     "display": "Alpha",
+     "etype": null,
+     "created_at": 1700000000.123456
+    },
+    {
+     "id": 2,
+     "canonical": "beta-node",
+     "display": "Beta Node",
+     "etype": "service",
+     "created_at": 1700000001.5
+    },
+    {
+     "id": 10,
+     "canonical": "élan",
+     "display": "Élan",
+     "etype": "",
+     "created_at": 3.0
+    },
+    {
+     "id": 11,
+     "canonical": "orphan",
+     "display": null,
+     "created_at": 4.25,
+     "etype": null
+    },
+    {
+     "id": 12,
+     "canonical": "bang",
+     "display": "!!!",
+     "etype": null,
+     "created_at": 6.0
+    }
+   ],
+   "aliases": [
+    [
+     10,
+     [
+      "elan"
+     ]
+    ],
+    [
+     2,
+     [
+      "beta",
+      "bn"
+     ]
+    ]
+   ],
+   "edges": [
+    {
+     "id": 7,
+     "src_id": 1,
+     "relation": "uses",
+     "dst_id": 2,
+     "confidence": 0.7,
+     "origin": "agent",
+     "asserted_at": 1700000002.0
+    },
+    {
+     "id": 3,
+     "src_id": 10,
+     "relation": "related-to",
+     "dst_id": 1,
+     "confidence": 0.45,
+     "origin": null,
+     "asserted_at": null
+    },
+    {
+     "id": 12,
+     "src_id": 2,
+     "relation": "related-to",
+     "dst_id": 2,
+     "confidence": 1.0,
+     "origin": "action",
+     "asserted_at": 5.5
+    }
+   ],
+   "entries": [
+    {
+     "id": 1,
+     "text": "Alpha uses Beta Node daily",
+     "embedding": [
+      0.10000000149011612,
+      -0.25,
+      3.0
+     ]
+    },
+    {
+     "id": 2,
+     "text": "Élan was here 🙂",
+     "embedding": [
+      0.5,
+      0.5,
+      0.5
+     ]
+    },
+    {
+     "id": 5,
+     "text": "alpha alone",
+     "embedding": null
+    },
+    {
+     "id": 9,
+     "text": "beta node notes",
+     "embedding": [
+      9.99999993922529e-09,
+      24999999488.0,
+      -0.0
+     ]
+    }
+   ],
+   "scopes": [
+    [
+     10,
+     [
+      "proj-b",
+      "Proj-A"
+     ]
+    ],
+    [
+     2,
+     [
+      "zeta",
+      "alpha"
+     ]
+    ]
+   ],
+   "traces": [
+    [
+     "beta-node",
+     [
+      9,
+      1,
+      9
+     ]
+    ],
+    [
+     "orphan",
+     [
+      42
+     ]
+    ]
+   ],
+   "facts": [
+    [
+     10,
+     2
+    ],
+    [
+     2,
+     1
+    ]
+   ],
+   "fact_texts": [
+    [
+     "Alpha",
+     1
+    ],
+    [
+     "None",
+     3
+    ],
+    [
+     "2024",
+     2
+    ]
+   ],
+   "pending_entities": [
+    {
+     "id": 30,
+     "kind": "merge",
+     "entity_id": 1,
+     "into_id": 10,
+     "score": 0.91,
+     "reason": "write-dedup",
+     "status": "pending",
+     "created_at": 9.0,
+     "judge_verdict": "reject",
+     "judge_confidence": 0.8,
+     "judged_at": 10.0,
+     "judge2_policy": "x",
+     "entity": "Alpha",
+     "into": "Élan"
+    },
+    {
+     "id": 31,
+     "kind": "junk",
+     "entity_id": 11,
+     "into_id": null,
+     "score": null,
+     "reason": "list-artifact",
+     "status": "pending",
+     "created_at": 11.0,
+     "judge_verdict": null,
+     "entity": null,
+     "into": null
+    }
+   ],
+   "lesson_refs": [
+    10,
+    2,
+    3
+   ],
+   "pending_links": [
+    {
+     "id": 40,
+     "src_id": 2,
+     "relation": "uses",
+     "dst_id": 10,
+     "confidence": 0.5,
+     "similarity": null,
+     "rationale": "co-mention",
+     "source": "analyzer",
+     "created_at": 12.0,
+     "status": "pending",
+     "judge_verdict": "accept",
+     "judged_at": 13.0,
+     "src": "Beta Node",
+     "dst": "Élan"
+    },
+    {
+     "id": 41,
+     "src_id": 1,
+     "relation": "related-to",
+     "dst_id": 1,
+     "confidence": 0.3,
+     "similarity": 0.66,
+     "rationale": null,
+     "source": "deep-dream",
+     "created_at": 14.0,
+     "status": "pending",
+     "src": "Alpha",
+     "dst": "Alpha"
+    }
+   ],
+   "dismissed": [
+    [
+     "a",
+     "b"
+    ],
+    [
+     "a",
+     "z"
+    ],
+    [
+     "b",
+     "c"
+    ]
+   ]
+  },
+  "candidates": [
+   {
+    "src_id": 1,
+    "dst_id": 10,
+    "src": "Alpha",
+    "dst": "Élan",
+    "similarity": 0.8123,
+    "src_snippets": [
+     "a"
+    ],
+    "dst_snippets": []
+   },
+   {
+    "src": "beta node",
+    "dst": "Ghost",
+    "similarity": 0.6
+   },
+   {
+    "src_id": 99,
+    "dst_id": 11,
+    "src": "Alpha",
+    "dst": "Orphan"
+   },
+   {
+    "src_id": 12,
+    "dst_id": 1,
+    "src": "!!!",
+    "dst": "Alpha",
+    "similarity": 0.55
+   },
+   {}
+  ],
+  "generation": "cb8f7257287951e95bb2a3a039630b76d4032631c740b99fe589062025153181",
+  "decision_generation": "1c6a0d7c1b07c288a10cfd471e61013b701f05c3a354282ea641acd337fe4a93",
+  "evidence": [
+   "5f5e4174a3a7dba536235051805c728432ceab0f9f09a47bb39caf24d173ddb2",
+   "dca4644bd5aae398d317b985088dd072b691ae2594e87ce31d1c7dc07340de4a",
+   "209aaef862ee10f31ee067f382359c8bbac5dcb8a71ea850b740e7f8169e70f2",
+   "f83b90f8624b18b4f36335feb7d99066ca8eb863273b19f55b6f14559f1e02bb",
+   "43092ad160d2039f2d967edba00402984509d0843470566d5df4d0a1af6f6426"
+  ]
+ },
+ "link_distinct": [
+  {
+   "row": {
+    "judge_model": "judge-one",
+    "judge2_model": "judge-two",
+    "judge2_served_model": "judge-two"
+   },
+   "first_served": "judge-one",
+   "configured2": null,
+   "distinct": true
+  },
+  {
+   "row": {
+    "judge_model": "judge-one",
+    "judge2_model": "judge-two",
+    "judge2_served_model": "judge-one"
+   },
+   "first_served": "judge-one",
+   "configured2": null,
+   "distinct": false
+  },
+  {
+   "row": {
+    "judge_model": "judge-one",
+    "judge2_model": "judge-two",
+    "judge2_served_model": "judge-two"
+   },
+   "first_served": null,
+   "configured2": null,
+   "distinct": false
+  },
+  {
+   "row": {
+    "judge_model": "judge-one",
+    "judge2_model": "judge-two",
+    "judge2_served_model": "judge-two"
+   },
+   "first_served": "",
+   "configured2": null,
+   "distinct": false
+  },
+  {
+   "row": {
+    "judge_model": "judge-one",
+    "judge2_model": "judge-two",
+    "judge2_served_model": null
+   },
+   "first_served": "judge-one",
+   "configured2": null,
+   "distinct": false
+  },
+  {
+   "row": {
+    "judge_model": "same",
+    "judge2_model": "same",
+    "judge2_served_model": "b"
+   },
+   "first_served": "a",
+   "configured2": null,
+   "distinct": false
+  },
+  {
+   "row": {
+    "judge_model": "judge-one",
+    "judge2_model": "judge-two",
+    "judge2_served_model": "b"
+   },
+   "first_served": "a",
+   "configured2": "judge-one",
+   "distinct": false
+  },
+  {
+   "row": {
+    "judge_model": "judge",
+    "judge2_model": "judge-two",
+    "judge2_served_model": "b"
+   },
+   "first_served": "a",
+   "configured2": "judge",
+   "distinct": true
+  },
+  {
+   "row": {
+    "judge_model": "judge-one",
+    "judge2_model": "judge-two",
+    "judge2_served_model": "b"
+   },
+   "first_served": "a",
+   "configured2": "other",
+   "distinct": true
+  },
+  {
+   "row": {
+    "judge_model": null,
+    "judge2_model": null,
+    "judge2_served_model": "b"
+   },
+   "first_served": "a",
+   "configured2": null,
+   "distinct": true
+  },
+  {
+   "row": {
+    "judge_model": null,
+    "judge2_model": "",
+    "judge2_served_model": "b"
+   },
+   "first_served": "a",
+   "configured2": null,
+   "distinct": false
+  }
+ ],
+ "link_two_vote": [
+  {
+   "row": {
+    "judge_verdict": "accept",
+    "judge_confidence": 0.7,
+    "judge2_verdict": "accept",
+    "judge2_confidence": 0.7
+   },
+   "two_vote": "auto",
+   "mode": "auto",
+   "min": 0.7,
+   "action": "accept"
+  },
+  {
+   "row": {
+    "judge_verdict": "reject",
+    "judge_confidence": 0.6,
+    "judge2_verdict": "reject",
+    "judge2_confidence": 0.79
+   },
+   "two_vote": "auto",
+   "mode": "auto",
+   "min": 0.7,
+   "action": null
+  },
+  {
+   "row": {
+    "judge_verdict": "reject",
+    "judge_confidence": 0.6,
+    "judge2_verdict": "reject",
+    "judge2_confidence": 0.79
+   },
+   "two_vote": "auto",
+   "mode": "auto",
+   "min": 0.71,
+   "action": null
+  },
+  {
+   "row": {
+    "judge_verdict": "accept",
+    "judge_confidence": 0.9,
+    "judge2_verdict": "reject",
+    "judge2_confidence": 0.9
+   },
+   "two_vote": "auto",
+   "mode": "auto",
+   "min": 0.7,
+   "action": null
+  },
+  {
+   "row": {
+    "judge_verdict": "retype",
+    "judge_confidence": 0.9,
+    "judge2_verdict": "retype",
+    "judge2_confidence": 0.9
+   },
+   "two_vote": "auto",
+   "mode": "auto",
+   "min": 0.7,
+   "action": null
+  },
+  {
+   "row": {
+    "judge_verdict": "accept",
+    "judge_confidence": 0.9,
+    "judge2_verdict": "accept",
+    "judge2_confidence": 0.9
+   },
+   "two_vote": "shadow",
+   "mode": "auto",
+   "min": 0.7,
+   "action": null
+  },
+  {
+   "row": {
+    "judge_verdict": "accept",
+    "judge_confidence": 0.9,
+    "judge2_verdict": "accept",
+    "judge2_confidence": 0.9
+   },
+   "two_vote": "auto",
+   "mode": "shadow",
+   "min": 0.7,
+   "action": null
+  },
+  {
+   "row": {
+    "judge_verdict": "accept",
+    "judge_confidence": null,
+    "judge2_verdict": "accept",
+    "judge2_confidence": 1.0
+   },
+   "two_vote": "auto",
+   "mode": "auto",
+   "min": 0.5,
+   "action": "accept"
+  },
+  {
+   "row": {},
+   "two_vote": "auto",
+   "mode": "auto",
+   "min": 0.7,
+   "action": null
+  }
+ ]
+}

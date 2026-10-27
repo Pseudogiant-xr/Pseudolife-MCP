@@ -452,6 +452,10 @@ ACL. The Windows module must keep descriptor storage alive while inspecting
 borrowed owner/ACL pointers, validate buffer bounds, and release each owned
 allocation and handle exactly once without closing borrowed handles. Repository
 directory identity lookup is read-only and must not change its permissions.
+The Windows module's source is `shared/windows_security.rs`, included into the
+shim under its old path, so the daemon can protect private state (the lite
+bank's secret) with the same code; the shim's private-state tests stay in the
+shim, beside the include.
 The Unix callback
 must use only async-signal-safe operations between fork and exec. These
 exceptions preserve the operating-system behavior of the Python oracle; their
@@ -546,6 +550,54 @@ and inherited environment with explicit changes; it does not support
 passes the native error, ELF/shebang and session-identity assertions;
 frozen whole-candidate validation and independent review remain required
 before acceptance.
+
+`shared/embedded_pg.rs` (the lite tier's embedded PostgreSQL, included into
+the shim as `pg::embedded`) has one local Windows exception,
+`process_image`: it opens a query-only process handle, reads the exit code
+and the image path into an owned fixed buffer whose length the call bounds,
+and closes the handle exactly once; a failed open reads the thread's last
+error to tell an access refusal from a gone process. It decides whether the
+pid in a pgdata's `postmaster.pid` is a live postgres process, so a pid the
+OS reassigned after a reboot is never attached to or stopped (pg0 issue
+#37; pg0 makes the same calls), and a process this account may not inspect
+counts as live (fail closed). The first-boot lock uses the standard
+library's `File::lock`, not an unsafe call: `flock` on Unix, as the
+oracle's `fcntl.flock`, and on Windows a whole-file `LockFileEx` that
+overlaps the oracle's byte-0 `msvcrt.locking` range, so each side excludes
+the other. The bank's superuser secret is read and created through the
+shim's existing credential code (`pg/embedded_secret.rs` uses
+`credentials::windows_security`, already an exception above); its SCRAM
+verifier is computed with the safe `hmac` and `sha2` crates. One deliberate difference from the oracle: a live postgres at the recorded pid that does not serve the bank's pgdata is refused (naming the stale `postmaster.pid`), where the oracle compares its start time and starts over a much younger one; refusing is the safe direction. An unreadable `postmaster.pid`, or a single-user backend's negated pid, is likewise refused, never treated as stale. A second: the server starts with no Unix socket (`unix_socket_directories` empty), since every client connects over TCP and another account's socket lock for the same port number would otherwise fail the start. Real-runtime
+cases need `PSEUDOLIFE_TEST_PG_RUNTIME` (and `PSEUDOLIFE_TEST_PG0_PYTHON`
+for the cross-side case); targeted Windows and Linux validation and
+independent review remain required before acceptance.
+
+`shared/native_provision.rs` and `shared/pg_runtime.rs` (included into the
+shim as `pg::native_provision` and `pg::runtime`) provision the lite tier's
+PostgreSQL runtime with no unsafe code. They download pinned archives over
+HTTPS with the existing `reqwest`, check each with `sha2` against an in-tree
+sha256 and unpack with the existing `zip`, `tar` and `flate2`. One new
+dependency, `ruzstd` 0.9.1 with default features off (so no transitive
+crates), decodes the `data.tar.zst` of the two Ubuntu library packages pg0
+also bundles on Linux. The install lock is the standard library's
+`File::lock` on `<root>/.install.lock`. Deliberate differences from pg0's
+extraction: an entry that would leave the tree, a link to anything but a
+file beside it, or a hard link or device is refused rather than skipped or
+followed; group and other write bits are dropped; and the tree is staged
+owner-only, synced and published by one rename. The Windows install
+matches pg0 0.15.1's installation file for file; the real-download case
+needs `PSEUDOLIFE_TEST_PG_PROVISION_ROOT`.
+
+The daemon crate's roots also use `#![deny(unsafe_code)]`, with four commented
+exceptions: `heap_trim::trim_glibc` calls glibc's `malloc_trim` (Linux glibc
+only); `static_files::registry_type` reads Content Type values with
+`RegGetValueW` into a bounded owned buffer (Windows only); the
+`openblas_sdot` module calls its `avx2,fma` kernels only after the CPU reports
+both features, and reads XCR0 only after OSXSAVE is checked; and the
+`native::pdf_text` module calls PDFium through pdfium-render's raw FFI
+bindings, bound once from the pinned, hash-checked library and used only
+under its process-wide lock (PDFium is not thread-safe), closing each
+document, page and text-page handle exactly once.
 
 Board label normalization follows the pinned Python 3.11 Unicode 14.0.0
 behavior: casefold, then NFC, with category-C inputs rejected. The pinned

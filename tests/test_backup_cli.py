@@ -16,6 +16,7 @@ Contract under test:
 from __future__ import annotations
 
 import gzip
+import io
 import os
 import tarfile
 import time
@@ -106,6 +107,41 @@ def test_state_archive_excludes_embedded_pg_and_backups(tmp_path):
     assert not any(".sql.gz" in n for n in names)
 
 
+def test_state_archive_leaves_the_cluster_password_out(tmp_path):
+    """A restore loads the dump into a fresh cluster with its own password;
+    extracting an old ``embedded_pg.secret`` over it would lock the bank."""
+    (tmp_path / "config.yaml").write_text("memory: {}\n")
+    (tmp_path / "embedded_pg.secret").write_text("ab" * 32)
+    bdir = tmp_path / "backups"
+    bdir.mkdir()
+
+    out = backup_cli._archive_state(tmp_path, bdir, "20261025-120000")
+
+    with tarfile.open(out) as tar:
+        names = tar.getnames()
+    assert any(n.endswith("config.yaml") for n in names)
+    assert not any("embedded_pg.secret" in n for n in names)
+
+
+def test_state_archive_leaves_installed_runtimes_out(tmp_path):
+    """The per-user data dir also holds the shim's runtimes and launcher
+    (``runtimes/``, ``bin/``) and the pinned native runtimes (``native/``):
+    reinstallable, hundreds of MB, and not bank state."""
+    (tmp_path / "config.yaml").write_text("memory: {}\n")
+    for name in ("native", "runtimes", "bin"):
+        (tmp_path / name).mkdir()
+        (tmp_path / name / "payload").write_bytes(b"x")
+    bdir = tmp_path / "backups"
+    bdir.mkdir()
+
+    out = backup_cli._archive_state(tmp_path, bdir, "20261026-120000")
+
+    with tarfile.open(out) as tar:
+        tops = {n.split("/")[0] for n in tar.getnames()}
+    assert "config.yaml" in tops
+    assert not tops & {"native", "runtimes", "bin"}
+
+
 # ----------------------------------------------------------------------
 # Orchestration
 # ----------------------------------------------------------------------
@@ -131,6 +167,39 @@ def test_file_mode_backup_archives_state_only(tmp_path, monkeypatch):
     assert old_dump.exists(), (
         "a dump-less run rotated out the only dump copy"
     )
+
+
+def test_lite_backup_keeps_the_bank_password_off_pg_dumps_command_line(
+    tmp_path, monkeypatch,
+):
+    """Other accounts can read command lines; the lite bank's password goes
+    to pg_dump through PGPASSWORD, and the DSN on its command line has none."""
+    monkeypatch.setattr(ep, "available", lambda: True)
+    (tmp_path / "embedded_pg").mkdir()
+    (tmp_path / "embedded_pg" / "PG_VERSION").write_text("18\n")
+    secret = "ab" * 32
+    monkeypatch.setattr(
+        ep, "attach_or_start",
+        lambda d: (f"postgresql://postgres:{secret}@127.0.0.1:5999/pseudolife_memory", None),
+    )
+    monkeypatch.setattr(backup_cli, "_find_pg_dump", lambda: Path("pg_dump"))
+    seen = {}
+
+    class FakeProc:
+        def __init__(self, args, stdout=None, stderr=None, env=None):
+            seen["args"], seen["env"] = args, env
+            self.stdout = io.BytesIO(b"-- dump\n")
+            self.stderr = io.BytesIO(b"")
+
+        def wait(self):
+            return 0
+
+    monkeypatch.setattr(backup_cli.subprocess, "Popen", FakeProc)
+    result = backup_cli.perform_backup(tmp_path, environ={})
+    assert result["dump"] is not None
+    assert secret not in " ".join(seen["args"])
+    assert "postgresql://postgres@127.0.0.1:5999/pseudolife_memory" in seen["args"]
+    assert seen["env"]["PGPASSWORD"] == secret
 
 
 def test_pg_dump_discovery_prefers_pg0_bundle(tmp_path):
@@ -174,9 +243,13 @@ def test_backup_roundtrip_embedded(tmp_path):
 
         result = backup_cli.perform_backup(data_dir, environ={})
 
-        assert _pg0.info(name).running, (
-            "backup stopped an instance it merely attached to"
-        )
+        # pg0's own `info` checks with the password pg0 was given, which is
+        # never the bank's secret, so ask the server itself.
+        import psycopg
+        with psycopg.connect(dsn, connect_timeout=10) as conn:
+            assert conn.execute("SELECT 1").fetchone() == (1,), (
+                "backup stopped an instance it merely attached to"
+            )
         dump = result["dump"]
         assert dump is not None and dump.exists()
         with gzip.open(dump, "rt", encoding="utf-8", errors="replace") as fh:

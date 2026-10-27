@@ -109,7 +109,7 @@ still holds; these rows complete the route. Config keys are read through
 | S11 | Timeline channel, when `memory.search.timeline_channel` (default false) and the query has a temporal cue (`first last when earliest latest before after since until ago`, `how many times`, `how long`, `what order`, `in order`, `order in which`, `sequence`, `chronolog\w*`, `timeline`, and the month names except `may`; word-bounded, case-insensitive): BM25 (the configured k1, b) over the same filtered candidate pool, top 6, min-max normalised; each unseen hit with norm > 0 enters at `0.3 x norm` (dropped under an explicit `min_score` above it), marked `via: "timeline"`. After the cut, the memory part of the result is ordered by `(timestamp, seq)` (seq preserves insertion-id order before band seating), reference documents trailing. This ordering also applies when every served hit came from another channel. | `cms.py:62-82, 1185-1196, 1315-1370, 1719-1726` |
 | S12 | Contiguity, when `memory.search.contiguity_neighbors` n > 0 (default 0): around each direct hit in order, up to n stream neighbours per side (same `episode_id` when the hit has one, else the same `source` among episode-less entries; superseded digests and, under `hide_superseded`, superseded entries excluded; texts already served skipped), ordered by `(timestamp, seq)`, served with score 0.0 and `via: "contiguity"`. `low_confidence` judges only the direct hits. | `service.py:1980-2004`; `cms.py:620-664` |
 | S13 | Cross-encoder rerank, when `rerank` (route tribool) or `memory.reranker.enabled` (default false) is on: only when the combined pool (memories + reference) is non-empty and fits `reranker.top_n` (20); a margin gate (`skip_margin`, default 0 = off) on the sorted original scores may skip it. Scores are `sigmoid(logit)` of `cross-encoder/ms-marco-MiniLM-L-6-v2` per (query, text), fused `w x ce + (1 - w) x original` with `fusion_weight` 0.7, then a stable sort. Over budget: `skip_reason: "candidate_budget_exceeded"`, order unchanged. The rerank log (`enabled, fired, skip_reason, top_n, candidate_count, scored_candidates, scoring_policy`, and when the pool qualified `skip_margin, fusion_weight, model`, `margin`) is `params.reranker`. Model: an ONNX export of the same checkpoint (rows R1-R6). | `cms.py:1466-1600`; `memory/reranker.py` |
-| S14 | Reference pool (Chroma documents, `ref_top_k` 3): see the divergence list. | `cms.py:1439-1465` |
+| S14 | Reference pool (`reference_chunks`, `ref_top_k` 3; with 0 the read takes `reference.max_results` rows and `ref_pool[:0]` serves none): the nearest chunks by exact cosine, read leniently; each skipped when its text was seen or it scores under the floor; `ref_pool[:ref_k]` appended after the memories, kept by the deferred cut, trailing in timeline order (`documents.rs`, `search.rs`). | `cms.py:1439-1465`, `reference_bank.py` `retrieve` |
 | S15 | Query-embedding LRU cache: keyed on the prefixed query text, `embedding.cache_size` entries (default 1024), least recently used evicted. Observable only as latency (free). | `memory/embedding.py:406-484` |
 | S16 | Cortex facts block, when `memory.cortex.enabled` and `search_first` (both default true): `cortex_search(q, top_k=5, min_score=memory.cortex.guard_min_score (0.2))`; non-empty results are served as `cortex` and attached to the event (S8d). Contract rows C1-C18 below. | `web/routes.py:371-378`; `service.py:4499-4610` |
 | S17 | Warmup: once init succeeds, the daemon runs `search("warmup probe", top_k=1, count_access=False)`: one retrieval event, no access accrual, no cortex block. | `service.py:6219-6224` |
@@ -1647,7 +1647,7 @@ Python sources: `memory/dream.py` `run_sweep_once` (2398-2547);
 
 | # | Exact item | Source |
 |---|---|---|
-| SW1 | Order after the reapers, while `memory.dream.enabled`: the analyzer tick, the deep tick, the merge judge, (the review-queue judges: not run, P3b), `dream_status`, the stall tick, then the automatic dream when `would_fire`. The analyzer tick and `dream_status` failing end the tick; the deep tick, the judge and the stall tick never fail it. | `dream.py:2453-2547` |
+| SW1 | Order after the reapers, while `memory.dream.enabled`: the analyzer tick, the deep tick, the merge judge, the link judge (LJ1-LJ6), the junk judge (JJ1-JJ5), the curation judge (CU1-CU6), the candidate judge (CJ1-CJ5), `dream_status`, the stall tick, then the automatic dream when `would_fire`. The analyzer tick and `dream_status` failing end the tick; the deep tick, the judge and the stall tick never fail it. | `dream.py:2453-2547` |
 | SW2 | Analyzer tick: `judges_disabled` when `judges_enabled` is off; under the writer lock, `reconcile_analyzer_proposals(judge_batch)` (decided `analyzer` link proposals, then rejected `analyzer-duplicate` merges, each half behind its own `{at, id}` cursor and transaction, sharing the budget, closing each pair into `dismissed_pairs` at its decision time); `disabled` (with `reconciled`) when `analyzer_file_duplicates` is off; otherwise up to `judge_batch` anchors after `meta.analyzer_duplicate_cursor` (wrapping to the start), every pair touching an anchor in `duplicate_candidates`' order, filing at most `judge_batch` proposals as the deep apply does, then the cursor at the last anchor. | `service_dream.py:6043-6156`; `postgres.py:3772-3853` |
 | SW3 | Deep tick: `disabled` when `auto_tick` is off; `below_threshold` (with the need) unless `deep_dream_need` recommends; otherwise the deep dream's apply without snippets, answered as `{fired, reason, ...}` with the apply's `applied`, `error`, `rescored`, `superseded`, `merged`, `merge_proposed`, `junk_proposed`, `junk_deleted`, `scoped`, `analyzer_filed`, `orphans_deleted` and `snapshot`; a failure answers `fired: false` with `error: <text>`. | `service_dream.py:3824-3845` |
 | SW4 | Stall tick: the sweep's interval set on the tracker, then `check_overdue(backlog, min_batch, would_fire, interval)` (a due backlog no dream serves for three intervals opens a stall, `extractor_unreachable`), then the notice. `dream_status` applies the same rule once the interval is set. | `service_dream.py:2958-2971,3080-3092` |
@@ -1667,6 +1667,171 @@ through Python's tracker (escalation, repeats inside and outside the
 window, an undelivered notice that stays owed, the overdue rule, flapping,
 the results that say nothing) and the notice texts at three fixed offsets.
 The `mcp-sweep-*` mutants are caught by their scenarios.
+
+### The junk judge (2026-10-25)
+
+Python sources: `service_dream.py` `deep_dream_judge_junk` (5329-5422),
+`_junk_evidence_locked` / `_enrich_junk_proposals_from` (5244-5327),
+`_stamp_skipped` (4424-4438), `_snapshot_once` (4414-4421);
+`memory/review_judgments.py` `ReviewJudgments(kind="junk")` (214-521);
+`memory/review_decisions.py` (the `junk` branches: `_canonical_pair`,
+`record_proposal_terminal` with `action="keep"`); `memory/dream.py`
+`_JUNK_JUDGE_SYSTEM_PROMPT` (514-536), `format_junk_proposal` (592-602),
+`judge_junk` (1905-1923), `_verdict_head` / `_text` (1825-1846);
+`service.py` `_graph_accept_entity_junk_locked` (9118-9144) and the junk
+branch of `_graph_reject_entity_proposal_locked` (9151-9195).
+
+| # | Exact item | Source |
+|---|---|---|
+| JJ1 | Gates: `judges_disabled` when `judges_enabled` is off, `disabled` unless `junk_judge_mode` is shadow or auto; no pending junk row and no active junk decision answers `{judged: 0}`; no judge endpoint answers `no_judge_extractor`; any failure answers `{judged: 0, error}`. | `service_dream.py:5329-5360` |
+| JJ2 | One tick: the active automatic keeps reconsidered (`refresh_proposal_terminals`, the merge judge's rules over the `junk` queue), the pending junk rows re-read and the evidence read for the verdict rows and the first `judge_batch` unjudged ones (`prepare`), signed with the lock released, stale verdicts cleared (`refresh`), then the first `judge_batch` unjudged rows judged in one call. | `service_dream.py:5360-5380`; `review_judgments.py:214-341` |
+| JJ3 | The pack per row: the display (else the row's `entity`, else `?`), the detector reason, the degree over live edges (a self-loop counts twice), the first eight incident edges `A -rel-> B [origin or ?]`, the fact count (the most of the entity's current facts by id, by its display's graph norm and by its canonical over raw subject texts), up to three `attribute=value[:120]` rows by id or norm, whether every incident edge is an `action` prefers/avoids edge (a lesson-minted object), the sorted scopes, and up to three mentioning notes (`[source] text[:snippet_max_chars]`, every display token in the note's tokens). The fingerprint signs the proposal and the pack without `n`, ids and judge fields, with the judging policy over `_JUNK_JUDGE_SYSTEM_PROMPT`. | `service_dream.py:5244-5327` |
+| JJ4 | The request is the shared judge request (`_judge_request`, label `judge_junk`) over the rows `format_junk_proposal` renders, blank-line separated; a reply row keeps an `id` the batch knows (`int()`), a verdict of delete, keep or leave (stripped, lowercased), a confidence clamped to 0..1 (0.5 when not a number) and a note (`str()[:400]`, none when null or empty); a row the model skipped becomes a zero-confidence leave noting "model returned no verdict". | `dream.py:514-536,592-602,1825-1846,1905-1923`; `service_dream.py:4424-4438` |
+| JJ5 | Each verdict, keeps first, in its own transaction, only while the row is still pending and its evidence unchanged (`current`): the judgment recorded (`judge_*` columns, the memo). In auto: a keep at `junk_keep_min_confidence` or more rejects the proposal (`decided_by="dream-judge"`, a `merge_decisions` audit `junk keep: <reason>` with no target, the keep pair `junk:<canonical>` closed) and records an automatic keep decision; a delete at `junk_delete_min_confidence` or more, at degree `junk_max_auto_degree` or less and at most one fact, writes the graph snapshot once per tick (no snapshot: the row is retried), audits `junk: <reason>`, deletes the entity and accepts the proposal, after which the rest of the batch waits for the next tick (its evidence changed). | `service_dream.py:5380-5422`; `service.py:9118-9195`; `review_decisions.py:111-200` |
+
+`harness/w2e.py live --only junk-shadow junk-auto junk-auto-reopen` runs
+both daemons with dreaming on, a 0.25 s sweep and every other judge and
+sweep step off, against one stub answering `judge_junk` by display
+(`shared_stub`), inserts the pending junk proposals out of band, and compares
+the banks and the request sequences once both judges have settled: shadow
+verdicts recorded only; auto keep, delete under the bar (with its snapshot),
+a delete under its gate and one above the bar left pending, a leave and a
+skipped row; and an automatic keep reopened when its entity's evidence moves
+and judged again. `src/dream/queue_judges_tests.rs` checks the prompt rows,
+the reply validation and the pack against Python's own output
+(`gen_queue_judge_goldens.py`); `src/dream/prompts.rs` pins the four queue
+judges' prompts by length and SHA-256. The `mcp-dream-junk-*` mutants are
+caught by `junk-auto`. The merge judge's queue is now a `Queue` value
+(`review_judgments.rs`); the 18 `judge-merge-*` scenarios are unchanged.
+
+### The link judge (2026-10-25)
+
+Python sources: `service_dream.py` `deep_dream_judge_links` (5003-5240),
+`_link_evidence_locked` / `_enrich_link_proposals_from` (4936-5001),
+`_TWO_VOTE_REFUSAL`, `_link_two_vote_action`, `_stored_second_distinct`,
+`_link_two_vote_replay` (4176-4239), `_second_opinion_distinct`
+(3976-3991), `_stamp_skipped` (4424-4438);
+`memory/review_judgments.py` `ReviewJudgments(kind="link")` (214-521);
+`memory/review_decisions.py` (the `link` branches: `_canonical_pair` for an
+analyzer row, `_proposal_projection`, `_reopen_proposal`);
+`memory/graph_consolidation.py` `shared_mention_entries` (145-168);
+`memory/dream.py` `_LINK_JUDGE_SYSTEM_PROMPT`, `format_link_proposal`
+(567-582), `judge_links` (1848-1873); `storage/postgres.py`
+`pending_proposals` (3571-3597), `set_proposal_judgment` (3599-3613),
+`set_proposal_second_judgment` (3615-3638), `get_proposal` (3733-3741),
+`set_proposal_status` (3743-3767); `service.py`
+`_graph_accept_proposal_locked` without a retype and
+`_graph_reject_proposal_locked` (8979-9058).
+
+| # | Exact item | Source |
+|---|---|---|
+| LJ1 | Gates: `judges_disabled` when `judges_enabled` is off, `disabled` unless `link_judge_mode` is shadow or auto; no pending link row and no active link decision answers `{judged: 0}`; no judge endpoint answers `no_judge_extractor`; any failure answers `{judged: 0, error}`. | `service_dream.py:5003-5045` |
+| LJ2 | One tick: the active automatic link rejects reconsidered (`refresh_proposal_terminals` over the `link` queue: the projection carries the live row and the endpoints' displays as `src` / `dst`, a reopen resets the row to pending with every judge column, `judge_relation` and `judge2_relation` included, and reopens an analyzer row's pair), the pending rows re-read (`pending_proposals`: the 23 columns and the displays, by proposal confidence descending then id), the evidence prepared, signed with the lock released, and stale verdicts cleared with every link judge column (`refresh`); a later vote whose endpoint has since served another model is cleared alone, its note tail cut (`_clear_moved_votes`, no third vote on this queue). | `service_dream.py:5046-5060`; `review_judgments.py:214-421`; `review_decisions.py:111-130,368-440` |
+| LJ3 | The pack per row: the endpoints' displays and relation, the detector rationale, each endpoint's first eight live edges (outgoing `relation>dst` then incoming `src>relation`, `?` for a missing display), the sorted scopes, up to three notes naming both endpoints (`text[:snippet_max_chars]`, unstamped), and only when there are none up to two notes per endpoint (`[source] text[:snippet_max_chars]`). The fingerprint signs the proposal and the pack without `n`, ids and judge fields, with the judging policy over `_LINK_JUDGE_SYSTEM_PROMPT`. | `service_dream.py:4936-5001`; `graph_consolidation.py:145-168` |
+| LJ4 | The request is the shared judge request (label `judge_links`) over the rows `format_link_proposal` renders; a reply row keeps an `id` the batch knows, a verdict of accept, retype, reject or leave, a clamped confidence, a note (`str()[:400]`) and, on a retype only, a relation (`str()[:64]`); a retype naming no relation becomes a leave; a skipped row becomes a zero-confidence leave. | `dream.py:567-582,1825-1873`; `service_dream.py:4424-4438` |
+| LJ5 | Second opinions (while `judge_second_opinion` is on and `link_judge_two_vote` is shadow or auto): a row whose first accept or reject sat below its single-vote gate is judged again by the second endpoint, before first opinions and on at most `judge_batch - min(first opinions, judge_batch // 2)` rows; a configuration that makes the second opinion the first model again asks nothing (`second_opinion_skipped_same_model`); a second endpoint's failure ends the tick only when it is the first's endpoint. Each vote, rejects first, is recorded (`judge2_*`, its served model and policy, the note `<first note[:160]> \| 2nd (<model>): <verdict or retype:rel> <c:.2f> [agree\|split]`); in auto with two-vote auto, two agreeing accepts or rejects at mean `link_two_vote_min_confidence` or more apply when the votes came from distinct models, else the note gains `\| two-vote apply needs a distinct second model`. Recorded agreeing votes are replayed with no model call when the two-vote mode was promoted after they were taken (not a refused row, not a moved second endpoint). | `service_dream.py:4176-4239,5061-5190` |
+| LJ6 | First opinions, rejects first, each in its own transaction while the row is pending and its evidence unchanged: the judgment recorded (`judge_*`, `judge_relation`, the memo). In auto, an accept at `link_accept_min_confidence` or more promotes the edge (confidence floored to 0.7, origin `action`) and accepts the row (`decided_by="dream-judge"`), after which the batch rows sharing one of its endpoints wait for the next tick; a reject at `link_reject_min_confidence` or more rejects the row (an analyzer row's pair closed) and records an automatic reject decision; a retype is recorded and never applied. | `service_dream.py:5191-5240`; `service.py:8979-9058`; `review_judgments.py:497-521`; `review_decisions.py:142-200` |
+
+`harness/w2e.py live --only link-shadow link-auto link-two-vote
+link-two-vote-same-model link-auto-reopen` runs both daemons with dreaming
+on, a 0.25 s sweep and every other judge and sweep step off, against one
+stub answering `judge_links` by `SRC|DST` on the first and second endpoints
+(`shared_stub`), inserts the pending link proposals out of band, and compares
+the banks and the request sequences once both judges have settled: shadow
+first and second opinions; auto accept (with the shared-endpoint row left to
+the next tick), analyzer and plain rejects with their decisions, a retype
+recorded only, a below-gate accept and a skipped row; two agreeing votes from
+distinct models applied and a split left pending; agreeing votes refused when
+the second endpoint served the first model; and an automatic reject reopened
+when its source's evidence moves and judged again. The replay of recorded
+votes after a mode promotion has no scenario (it needs a config change
+mid-run); `src/dream/queue_judges_tests.rs` checks its gate and its
+distinct-model rule over the stored votes, the prompt
+rows, the reply validation and the pack against Python's own output
+(`gen_queue_judge_goldens.py`). `mcp-dream-link-retype-applied` is caught by
+`link-auto` and `mcp-dream-link-two-vote-same-model` by
+`link-two-vote-same-model`.
+
+### The curation judge (2026-10-25)
+
+Python sources: `service_dream.py` `deep_dream_judge_curation`
+(5426-5735); `curation_safety.py` `snapshot_record`, `evidence_fingerprint`,
+`capture_pair_evidence`, `can_auto_fold`, `_pair_id`,
+`curation_policy_fingerprint`, `curation_observed_model`,
+`_judgment_signature`, `curation_judgment_state`, the bindings helpers,
+`curation_pair_keys`, `curation_judgment_saved`,
+`record_bound_curation_judgment`, `_set_action_state`,
+`settle_curation_judgment_action`, `apply_auto_distinct`,
+`has_auto_dismissals`, `refresh_auto_dismissals`,
+`_resident_evidence_state`, `_locked_evidence_state` (60-783);
+`service.py` `_curation_records`, `_slot_duplicate_listings`, `_slot_key`;
+`memory/dream.py` `_SLOT_JUDGE_SYSTEM_PROMPT`, `format_slot_pair`,
+`judge_slot_pairs`; `storage/postgres.py` `record_curation_judgment`,
+`curation_judgments`.
+
+| # | Exact item | Source |
+|---|---|---|
+| CU1 | Gates: `judges_disabled` when `judges_enabled` is off, `disabled` unless `curation_judge_mode` is shadow, auto-distinct or auto; no judge endpoint answers `no_judge_extractor`; any failure answers `{judged: 0, error, reopened_auto_dismissals}`. | `service_dream.py:5426-5460` |
+| CU2 | One tick, under the lock: the automatic dismissals reconsidered on evidence (`refresh_auto_dismissals`: a marker whose two current records' fingerprints moved, or whose keys are not the listing's spelling, is withdrawn with its `dismissed_pairs` row), then the dismissed pairs, the listing records, every current record's evidence snapshot by listing key, the memo, the bindings and the first store read. When a marker exists, the extractor and its requested policy are resolved first and the markers are reconsidered again with the policy check (a marker under another requested policy, or a known observed or last-response model other than its own, is withdrawn), one bounded batch from the refresh cursor. | `service_dream.py:5455-5505`; `curation_safety.py:627-712` |
+| CU3 | The listings (`_slot_duplicate_listings`, the deep dream's) each become a pair of complete evidence snapshots. Each pair's state is the memo's: stale without a judgment, a binding, a time-fresh `judged_at` within `curation_rejudge_days`, or a binding signature equal to the judgment signature over its policy (the requested policy with the observed model: the bound one for a decision deferred on an unknown identity, else the observed or last-response model, else the bound one); stale when a known model differs from the bound one, and a pending action is stale unless the pre-call observed model equals the bound one. Pending actions and stale pairs are interleaved store by store from the first store, pending first within a store, cut to `judge_batch`; the next first store is written before the call. | `service_dream.py:5506-5600`; `curation_safety.py:262-383` |
+| CU4 | The request rows (`format_slot_pair`: store, cosine, each side's names, the lesson's polarity, outcome and about or the world fact's source, the value cut to 240) and the reply validation: an `id` the batch knows, a verdict of duplicate, distinct or leave, a clamped confidence, `keep` stripped and lowercased (not `a` or `b`: the duplicate becomes a leave), `fold` cut to 600 and a note cut to 400; a skipped row becomes a zero-confidence leave. | `dream.py`; `service_dream.py:5600-5625` |
+| CU5 | After the call: a requested policy that moved answers `policy_changed`; the observed model is recorded as the response identity, and one other than the pre-call model answers `served_model_changed`. Each verdict is recorded with its binding after both records are revalidated against the resident store and under row locks (`record_bound_curation_judgment`): a distinct at `curation_distinct_min_confidence` in auto-distinct or auto, or a duplicate at `curation_forget_min_confidence` in auto, wants an action (`pending`, or `deferred_identity_unknown` when no model was observed); the rest settle. The actions, replayed pending ones first, run under the lock with the guard (a known model, the policy and served model unchanged, the judgment still saved): a distinct is dismissed under the listing names with an automatic marker bound to the two record fingerprints (a pre-existing unmarked dismissal stays a human one) and the action applied; a duplicate the safe-fold rule (`can_auto_fold`: exact text, no conflicting polarity, origin, lesson outcome and about or world citation, a world survivor at least as fresh) refuses settles manual. A duplicate it allows is folded (CU6). | `service_dream.py:5625-5735`; `curation_safety.py:144-545` |
+| CU6 | The fold (`apply_slot_duplicate`), in auto under the writer lock for a duplicate the safe-fold rule allows: the guard, both records current in the resident store, the stamp the latest of now and the two `last_confirmed`; the survivor's slot staged dirty unchanged and the loser retired in a copy of it (exactly one record, else nothing applies); in one transaction, both rows locked and re-fingerprinted (a change rehydrates the resident store from the bank and applies nothing), the survivor's then the loser's slot rows synced, a `retire` decision by `dream-judge` with the judge's note as reason and the loser's audit snapshot (its pre-fold fingerprint, its retired fingerprint, the pair's evidence and the loser's embedding; a lesson's names as `task` / `aspect` / `lesson`), and the action applied; then the staged store published. A commit whose outcome is unknown is classified from the rehydrated store: rolled back (both records unchanged), committed (the survivor as staged, the loser gone, its latest decision this retire) or neither, which applies nothing. | `curation_safety.py:794-997,1246-1344` |
+
+`harness/w2e.py live --only curation-shadow curation-auto-distinct
+curation-auto curation-auto-fold curation-auto-distinct-reopen` seeds the deep dream's bank
+with dreaming off, then runs both daemons with dreaming on, a 0.25 s sweep
+and every other judge off against one stub answering `judge_slot_pairs` by
+the two slots (`shared_stub`), settling before the first comparison
+(`init_settle`): shadow verdicts and bindings only; an automatic distinct
+dismissal with its marker; two duplicates the safe-fold rule refuses settled
+manual; a safe fold of two lessons with one text, the loser retired with its
+audit; and an automatic dismissal reopened by a restart that moves the
+signed policy, its pair judged again in shadow. The memo, the bindings and
+the markers compare as stored, fingerprints included.
+`src/dream/curation_judge_tests.rs` checks the evidence identities, the
+safe-fold rule, the memo state, the policy fingerprint, the retire audit,
+the prompt rows and the reply validation against Python's own output. The
+`mcp-dream-curation-*` mutants are caught by their scenarios.
+
+### The candidate judge (2026-10-25)
+
+Python sources: `service_dream.py` `deep_dream_judge_candidates`
+(5779-6034), `_stamp_skipped` (4424-4438);
+`memory/review_judgments.py` `fingerprint` / `_fingerprint_default`
+(14-27), `candidate_inputs`, `candidate_generation`, `candidate_current`
+(133-197); `memory/review_decisions.py` `record_candidate_dismissal`
+(201-245), `candidate_evidence_fingerprints` (248-355),
+`refresh_candidate_dismissals` (530-597); `memory/dream.py`
+`_CANDIDATE_JUDGE_SYSTEM_PROMPT`, `format_candidate`, `judge_candidates`;
+`service.py` `_graph_propose_links_locked` (8921-8968, source
+`deep-dream-judge`) and `_graph_dismiss_duplicate_locked` (8021-8054,
+with the candidate's own guard).
+
+| # | Exact item | Source |
+|---|---|---|
+| CJ1 | Gates: `judges_disabled` when `judges_enabled` is off, `disabled` unless `candidate_judge_mode` is shadow or auto; no judge endpoint answers `no_judge_extractor`; any failure answers `{judged: 0, error}`. No `deep_last_apply` watermark, or a `deep_candidates_judged` watermark for it that is complete under the same policy, observed models and scan generation, answers `{judged: 0, reason: "no_new_apply"}`. | `service_dream.py:5779-5846` |
+| CJ2 | The fingerprints are Python's bytes: `json.dumps(sort_keys=True, separators=(",", ":"))` with an int-keyed dict sorted by its integers, a set by `str`, and a float32 embedding as `{"shape", "dtype", "bytes"}` (SHA-256 of its bytes). The scan generation signs the graph (entities, aliases, live edges), the entries' id, text and embedding, the scopes, traces, fact counts by id and by raw subject, the pending entity proposals and lesson references, and the signed deep_dream config; the decision generation adds the pending link proposals and the dismissed pairs. A candidate's evidence signs each endpoint (resolved by id, else by canonical or normalized display): the entity, its incident live edges, sorted scopes, trace ids, fact count, the notes it is mentioned in (traces, else every token of its display in the note's tokens) with their embeddings, and the pending proposals touching it. | `review_judgments.py:14-27,133-180`; `review_decisions.py:248-355` |
+| CJ3 | One tick: the active automatic dismissals reconsidered (`refresh_candidate_dismissals`, only when an observed or last-response model is known: a record whose pair is no longer the one it closed is retired as externally superseded; one whose policy, evidence or model moved reopens, deleting its pair), then the dry deep scan's candidates; a generation that moved during the scan answers `stale_evidence`. A candidate is fresh when its memo is within `candidate_rejudge_days`, signs the same candidate, policy and evidence, and names the observed models; candidates not fresh or not complete are the todo list (none: the watermark is completed and the answer is `all_judged`), whose first `judge_batch` are the slice. A fresh, incomplete row with a saved reply and a known model replays it; the rest are asked in one call (`judge_candidates`), whose served model is recorded as the queue's response identity; a model change since the tick began answers `changed_judge_identity`. | `service_dream.py:5815-5925`; `review_decisions.py:530-597` |
+| CJ4 | The request rows (`format_candidate`: names, cosine, up to three notes per side) and the reply validation: an `id` the slice knows, a verdict of propose, dismiss or leave, a clamped confidence, a relation (`[:64]`), src and dst (`[:200]`, defaulting to the pair's own) and a rationale (`[:400]`); a propose naming no relation becomes a leave; a skipped row becomes a zero-confidence leave. | `dream.py`; `service_dream.py:4424-4438` |
+| CJ5 | Under the lock, each verdict in reply order against the live memo: a replayed reply the memo no longer holds is skipped; a row whose evidence moved since the scan, or that shares an endpoint with a link filed earlier in the slice, is dropped from the memo for the next tick. Otherwise the memo records the verdict, confidence, time, mode, fingerprint, model, served and memo models and the reply, incomplete; in shadow, or with no observed model, it is completed and left. In auto, in one transaction: a propose with a relation at `candidate_min_confidence` or more files a `deep-dream-judge` link proposal through the propose-links gate when the candidate still stands (both endpoints resolve, no pending proposal or live edge between them, the pair not dismissed) and its src and dst name the candidate's pair (else it is left); a dismiss at that confidence closes the pair without a human confirmation and records an automatic dismissal (`candidate:<a>|<b>`); anything else is left. The memo keeps the newest 500 pairs; the watermark is written complete when nothing of the scan remains unjudged. | `service_dream.py:5926-6030`; `service.py:8021-8054,8921-8968`; `review_decisions.py:201-245` |
+
+`harness/w2e.py live --only candidate-shadow candidate-auto
+candidate-auto-reopen` seeds the deep dream's bank with dreaming off, then
+runs both daemons with dreaming on, a 0.25 s sweep and every other judge and
+sweep step off, against one stub answering `judge_candidates` by the two
+names (`shared_stub`). A `memory_dream deep` apply writes the watermark, and
+the banks (the memo, the watermark and the decision records with their
+fingerprints as stored), the answers and the request sequences are compared
+once every candidate is judged: shadow memo only; auto with a filed propose
+whose slice neighbours wait a tick, a dismissal and its record, a propose
+naming another pair and one under its gate left, and stamped leaves; and a
+dismissal reopened when its endpoint gains an edge and dismissed again.
+`src/dream/candidates_tests.rs` checks the prompt rows, the reply
+validation and both fingerprints over one synthetic bank snapshot (int keys
+on both sides of ten, a set, embeddings, a missing endpoint, an endpoint
+with no tokens) against Python's own output. The `mcp-dream-candidate-*`
+mutants are caught by `candidate-auto`.
 
 ### Board tools over MCP (2026-10-16)
 

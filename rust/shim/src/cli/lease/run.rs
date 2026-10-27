@@ -193,8 +193,10 @@ pub(super) async fn wait_lock(
         }
     }
 }
-fn start(args: &Args) -> Result<Child, RunError> {
-    let original = &args.command[0];
+/// Start the command; `name` joins PSEUDOLIFE_LEASES_HELD, unless None (a
+/// gated check, which holds nothing).
+fn start(command: &[String], name: Option<&str>) -> Result<Child, RunError> {
+    let original = &command[0];
     #[cfg(windows)]
     let program = crate::lifecycle::find_executable(original)
         .ok()
@@ -202,19 +204,20 @@ fn start(args: &Args) -> Result<Child, RunError> {
         .unwrap_or_else(|| original.into());
     #[cfg(unix)]
     let program = std::ffi::OsString::from(original);
-    let held = std::env::var("PSEUDOLIFE_LEASES_HELD").unwrap_or_default();
-    let name = args.name.as_deref().unwrap_or("");
-    let child = Command::new(program)
-        .args(&args.command[1..])
-        .env(
+    let mut child = Command::new(program);
+    child.args(&command[1..]);
+    if let Some(name) = name {
+        let held = std::env::var("PSEUDOLIFE_LEASES_HELD").unwrap_or_default();
+        child.env(
             "PSEUDOLIFE_LEASES_HELD",
             if held.is_empty() {
                 name.into()
             } else {
                 format!("{held},{name}")
             },
-        )
-        .spawn();
+        );
+    }
+    let child = child.spawn();
     child.map_err(|e| {
         if e.kind() == io::ErrorKind::NotFound {
             RunError::CannotRun(127, format!("lease: command not found: {original}"))
@@ -334,7 +337,7 @@ async fn work(
         ));
     }
     wait_lock(lock, name, deadline, renewer.is_some()).await?;
-    *child = Some(start(&args)?);
+    *child = Some(start(&args.command, Some(name))?);
     let status = child
         .as_mut()
         .expect("started child")
@@ -380,7 +383,7 @@ pub async fn run(args: Args) -> i32 {
         result=work(args.clone(),&mut lock,&mut board,&mut renewer,&mut child)=>result,
         signal=stops.wait()=>{
             if let Some(child)=&mut child{stop_child(child,signal,&mut stops).await;}
-            let what=match signal{2=>"interrupted",15=>"stopped by SIGTERM",_=>"stopped by SIGHUP"};say(&format!("lease: {what}; releasing {}",repr(&name)));Ok(128+signal)
+            say(&format!("lease: {}; releasing {}",stopped(signal),repr(&name)));Ok(128+signal)
         }
     };
     let code = match result {
@@ -414,4 +417,76 @@ pub async fn run(args: Args) -> i32 {
         board.release(&name).await;
     }
     code
+}
+fn stopped(signal: i32) -> &'static str {
+    match signal {
+        2 => "interrupted",
+        15 => "stopped by SIGTERM",
+        _ => "stopped by SIGHUP",
+    }
+}
+/// `check NAME -- COMMAND`: run COMMAND only while NAME is free, with its
+/// own exit status. Held is 75 and a failed check 70, neither of which runs
+/// it, so a refusal is never read as the command's own exit 1. Nothing is
+/// held while it runs (lease run holds the lease instead).
+async fn gated_work(args: &Args, child: &mut Option<Child>) -> i32 {
+    let name = args.name.as_deref().unwrap_or("");
+    match view::verdict(args, true).await {
+        view::Verdict::Free => {}
+        view::Verdict::Held => {
+            say(&format!(
+                "lease: {} is held, so the command did not run; run it again once the lease is free, or, if the command should hold the lease while it runs, queue for it with: pseudolife-mcp lease run {} -- COMMAND",
+                repr(name),
+                view::clean_text(name, 120)
+            ));
+            return 75;
+        }
+        view::Verdict::Failed(_) => {
+            say(&format!(
+                "lease: the check of {} failed, so the command did not run",
+                repr(name)
+            ));
+            return 70;
+        }
+    }
+    match start(&args.command, None) {
+        Ok(started) => *child = Some(started),
+        Err(RunError::CannotRun(code, message)) => {
+            say(&message);
+            return code;
+        }
+        Err(_) => unreachable!("starting a command fails only as CannotRun"),
+    }
+    match child.as_mut().expect("started child").wait().await {
+        Ok(status) => exit_status(status),
+        Err(e) => {
+            say(&format!("lease: cannot run {}: {e}", args.command[0]));
+            126
+        }
+    }
+}
+pub async fn gated(args: Args) -> i32 {
+    let mut stops = match Stops::new() {
+        Ok(s) => s,
+        Err(_) => {
+            say("lease: cannot install stop handlers");
+            return 71;
+        }
+    };
+    // One select over the check, the start and the wait, as run() does: a
+    // stop is heard throughout, with no gap before the command starts.
+    let mut child = None;
+    tokio::select! {
+        code = gated_work(&args, &mut child) => code,
+        signal = stops.wait() => {
+            let what = if let Some(child) = &mut child {
+                stop_child(child, signal, &mut stops).await;
+                "the command was stopped"
+            } else {
+                "the command did not run"
+            };
+            say(&format!("lease: {}; {what}", stopped(signal)));
+            128 + signal
+        }
+    }
 }

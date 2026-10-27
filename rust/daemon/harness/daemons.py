@@ -26,7 +26,10 @@ from pseudolife_memory import readiness  # noqa: E402  the one readiness contrac
 # Environment variables the daemons read that must never leak in from the
 # caller's shell (a real token, a real bank, a real config).
 _SCRUB_PREFIXES = ("PSEUDOLIFE_",)
-_KEEP = {"PSEUDOLIFE_TEST_PG_HOST_PORT", "PSEUDOLIFE_TEST_PG_LOGIN_FILE"}
+# The provisioned PDFium root is the caller's, like the model cache: a
+# daemon's disposable home has none, and PDF ingest needs it.
+_KEEP = {"PSEUDOLIFE_TEST_PG_HOST_PORT", "PSEUDOLIFE_TEST_PG_LOGIN_FILE",
+         "PSEUDOLIFE_DAEMON_PDFIUM_DIR"}
 
 
 def free_port() -> int:
