@@ -456,7 +456,7 @@ def test_health_names_the_sign_in_fix_when_the_cli_login_expired():
     assert code == 503
     assert body["status"] == "login_required"
     assert "OAuth session expired" in body["detail"]
-    assert "claude auth login" in body["fix"] and "shim host" in body["fix"]
+    assert "/login" in body["fix"] and "shim host" in body["fix"]
 
 
 @pytest.mark.parametrize("message", [
@@ -553,3 +553,52 @@ def test_a_refresh_publishes_verdict_and_body_together(monkeypatch):
         release.set()
         t.join(10)
     assert cli.health_answer() == (True, {"status": "ok"})
+
+
+# ── who to sign in, and a fast recovery (2026-10-27 maintainer request) ──
+#
+# The notice must say which provider is signed out and as which OS user to
+# sign it in, and it must clear soon after the user signs in: with the
+# 5-minute health TTL the shim kept answering the stale 503 for up to five
+# minutes after a live re-login on 2026-10-27.
+
+
+def test_a_sign_in_failure_names_the_provider_and_the_shims_user(monkeypatch):
+    monkeypatch.setattr(shim.getpass, "getuser", lambda: "svc-user")
+    code, body = _health_answer(_failing_cli(stdout=_EXPIRED))
+    assert (code, body["status"]) == (503, "login_required")
+    assert body["provider"] == "claude" and body["user"] == "svc-user"
+    assert "as svc-user" in body["fix"]
+    assert "`claude`" in body["fix"] and "/login" in body["fix"]
+
+
+def test_an_unknown_user_is_left_out(monkeypatch):
+    def _no_user():
+        raise OSError("no login name")
+    monkeypatch.setattr(shim.getpass, "getuser", _no_user)
+    code, body = _health_answer(_failing_cli(stdout=_EXPIRED))
+    assert body["provider"] == "claude" and "user" not in body
+
+
+def test_other_failures_carry_no_sign_in_fields():
+    code, body = _health_answer(_failing_cli(stdout=b"API Error: 529 overloaded"))
+    assert body["status"] == "cli_error"
+    assert "provider" not in body and "user" not in body
+
+
+@pytest.mark.parametrize("ok, age, refreshes", [
+    (False, 31.0, True),     # a failure is re-checked after 30 s
+    (False, 29.0, False),
+    (True, 31.0, False),     # a healthy verdict keeps the 5-minute TTL
+    (True, 301.0, True),
+])
+def test_a_failure_verdict_is_rechecked_sooner(monkeypatch, ok, age, refreshes):
+    cli = shim.ClaudeCli(Path("claude.exe"), "m", 30.0)
+    cli._health_snapshot = (ok, {"status": "ok"} if ok else {"status": "cli_error"})
+    cli._health_at = time.monotonic() - age
+    started = []
+    monkeypatch.setattr(shim.threading, "Thread",
+                        lambda target, daemon: type("T", (), {
+                            "start": lambda self: started.append(target)})())
+    cli.health_answer()
+    assert bool(started) is refreshes

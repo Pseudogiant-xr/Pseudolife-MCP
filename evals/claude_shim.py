@@ -54,6 +54,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import getpass
 import json
 import logging
 import os
@@ -94,9 +95,23 @@ _SIGN_IN_RE = re.compile(
     r"|oauth (?:token|session)|not logged in|please run /login"
     r"|please log ?in again|invalid api key|\bunauthori[sz]ed\b|api error: 401\b",
     re.IGNORECASE)
-SIGN_IN_FIX = ("sign in to the Claude CLI on the shim host: run `claude auth "
-               "login` as the user the shim runs as; /health recovers within "
-               "5 minutes, no restart needed")
+PROVIDER = "claude"
+
+
+def _sign_in_fix(user: str | None) -> str:
+    who = f"as {user}" if user else "as the user the shim runs as"
+    return (f"sign in to the Claude CLI on the shim host {who}: run `claude`, "
+            "then `/login`; /health recovers within 30 seconds, no restart "
+            "needed")
+
+
+def _shim_user() -> str | None:
+    """The OS user this shim runs as, whose CLI sign-in it uses; None when
+    the platform cannot say."""
+    try:
+        return getpass.getuser() or None
+    except Exception:  # noqa: BLE001 — a hint for the fix text, never an error
+        return None
 
 
 class CliCallFailed(RuntimeError):
@@ -149,7 +164,14 @@ def health_status(detail: str, sign_in: bool | None = None) -> dict:
     if sign_in is None:
         sign_in = bool(_SIGN_IN_RE.search(detail))
     if sign_in:
-        return {"status": "login_required", "detail": detail, "fix": SIGN_IN_FIX}
+        # ``provider`` and ``user`` let the daemon say which CLI to sign in,
+        # as whom (the CLI's sign-in is per OS user).
+        user = _shim_user()
+        body = {"status": "login_required", "detail": detail,
+                "fix": _sign_in_fix(user), "provider": PROVIDER}
+        if user:
+            body["user"] = user
+        return body
     return {"status": "cli_error", "detail": detail}
 
 
@@ -594,6 +616,11 @@ class ClaudeCli:
         return reply
 
     _HEALTH_TTL = 300.0  # one trivial CLI call per 5 min keeps /health honest
+    # While the cached verdict is a failure, re-check this often: on
+    # 2026-10-27 the 5-minute TTL kept answering a stale 503 for up to five
+    # minutes after a live re-login. A failing check is cheap (the signed-out
+    # CLI exits at once), so 30 s costs little and clears the notice soon.
+    _HEALTH_FAILURE_TTL = 30.0
 
     @property
     def _health_ok(self) -> bool | None:
@@ -621,8 +648,8 @@ class ClaudeCli:
         if snapshot is None:
             return self._health_refresh()
         ok, body = snapshot  # pre-refresh verdict
-        if (now - self._health_at >= self._HEALTH_TTL
-                and not self._health_refreshing):
+        ttl = self._HEALTH_TTL if ok else self._HEALTH_FAILURE_TTL
+        if now - self._health_at >= ttl and not self._health_refreshing:
             self._health_refreshing = True
             threading.Thread(target=self._health_refresh, daemon=True).start()
         return ok, body
