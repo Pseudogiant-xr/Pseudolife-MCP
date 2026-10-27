@@ -334,20 +334,26 @@ fn main() {
             }
         };
         eprintln!("daemon: listening on {host}:{port} (auth={auth_configured})");
-        // Graceful: stop accepting, let open requests finish. A request still
-        // open `HTTP_DRAIN` after the signal (a parked board wait, a client
-        // that never reads) is closed; stores it admitted run on in their
-        // own tracked tasks, which the next stage waits for.
-        let (signalled, mut on_signal) = tokio::sync::watch::channel(false);
+        // Graceful: stop accepting, wait for open requests. One budget is
+        // taken at the signal (`background::HTTP_DRAIN` etc. are its marks):
+        // a request still open at the first mark (a parked board wait, a
+        // client that never reads) is no longer waited for. It keeps running
+        // on its own connection task until exit, but a write it submits from
+        // then on is refused, since the exit could cut it part way.
+        let (signalled, mut on_signal) = tokio::sync::watch::channel(None);
         let serve = std::future::IntoFuture::into_future(
             axum::serve(serving_listener(listener), router).with_graceful_shutdown(async move {
                 shutdown_signal().await;
-                let _ = signalled.send(true);
+                let _ = signalled.send(Some(tokio::time::Instant::now()));
             }),
         );
+        let mut deadline_watch = on_signal.clone();
         let http_deadline = async move {
-            let _ = on_signal.wait_for(|signalled| *signalled).await;
-            tokio::time::sleep(crate::background::HTTP_DRAIN).await;
+            let signalled_at = match deadline_watch.wait_for(Option::is_some).await {
+                Ok(at) => at.expect("waited for Some"),
+                Err(_) => std::future::pending().await,
+            };
+            tokio::time::sleep_until(signalled_at + crate::background::HTTP_DRAIN).await;
         };
         let code = tokio::select! {
             served = serve => match served {
@@ -359,25 +365,37 @@ fn main() {
             },
             () = http_deadline => {
                 eprintln!(
-                    "shutdown: open requests still running after {:.1}s; closing them",
+                    "shutdown: open requests still running after {:.1}s; no longer waiting for them",
                     crate::background::HTTP_DRAIN.as_secs_f64()
                 );
                 0
             }
         };
-        // HTTP admission has stopped. Admitted stores finish before the
-        // final save, within their share of the exit budget; one stuck on an
-        // unresponsive database is left to the exit, never cancelled.
-        if tokio::time::timeout(crate::background::WRITES_DRAIN, service.writes.drain())
+        let start = (*on_signal.borrow_and_update()).unwrap_or_else(tokio::time::Instant::now);
+        let writes_until = start + crate::background::HTTP_DRAIN + crate::background::WRITES_DRAIN;
+        let join_until = writes_until + crate::background::JOIN_DEADLINE;
+        let save_until = join_until + crate::background::SAVE_DEADLINE;
+        // HTTP admission has stopped. Admitted writes finish before the
+        // final save, until their mark; later ones are refused.
+        service.writes.close_admission();
+        if tokio::time::timeout_at(writes_until, service.writes.drain())
+            .await
+            .is_err()
+        {
+            eprintln!("shutdown: admitted writes still running; the final save runs beside them");
+        }
+        background
+            .shutdown_until(service.as_ref(), join_until, save_until)
+            .await;
+        // Writes still running get the rest of the budget before the exit.
+        if tokio::time::timeout_at(save_until, service.writes.wait())
             .await
             .is_err()
         {
             eprintln!(
-                "shutdown: admitted writes still running after {:.1}s; leaving them to the exit",
-                crate::background::WRITES_DRAIN.as_secs_f64()
+                "shutdown: admitted writes still running at the end of the exit budget; leaving them to the exit"
             );
         }
-        background.shutdown(service.as_ref()).await;
         code
     });
     std::process::exit(code);

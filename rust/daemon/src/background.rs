@@ -174,17 +174,29 @@ impl Background {
             .await
     }
 
-    /// [`Background::shutdown`] with explicit deadlines. A task still running
-    /// at its deadline is no longer waited for (it ends with the process); a
-    /// final save still running at its deadline is abandoned, and its open
-    /// transaction rolls back when the session closes at exit.
+    /// [`Background::shutdown`] with deadlines relative to now.
     pub async fn shutdown_within(&self, duties: &dyn Duties, join: Duration, save: Duration) {
+        let now = tokio::time::Instant::now();
+        self.shutdown_until(duties, now + join, now + join + save)
+            .await
+    }
+
+    /// Stop the background tasks, waiting for them until `join_until`, then
+    /// run the final save until `save_until`. A task still running at its
+    /// deadline is no longer waited for (it ends with the process); a final
+    /// save still running at its deadline is abandoned, and its open
+    /// transaction rolls back when the session closes at exit.
+    pub async fn shutdown_until(
+        &self,
+        duties: &dyn Duties,
+        join_until: tokio::time::Instant,
+        save_until: tokio::time::Instant,
+    ) {
         self.stop.send_replace(true);
         let handles = std::mem::take(&mut *self.tasks.lock().expect("background tasks"));
-        let deadline = tokio::time::Instant::now() + join;
         let mut left = 0;
         for handle in handles {
-            match tokio::time::timeout_at(deadline, handle).await {
+            match tokio::time::timeout_at(join_until, handle).await {
                 Ok(Ok(())) => {}
                 Ok(Err(e)) => eprintln!("background task failed: {e}"),
                 Err(_) => left += 1,
@@ -192,34 +204,34 @@ impl Background {
         }
         if left > 0 {
             eprintln!(
-                "shutdown: {left} background task(s) still running after {:.1}s; leaving them to the exit",
-                join.as_secs_f64()
+                "shutdown: {left} background task(s) still running; leaving them to the exit"
             );
         }
         if self.durability_started.load(Ordering::SeqCst) {
-            match tokio::time::timeout(save, duties.autosave()).await {
+            match tokio::time::timeout_at(save_until, duties.autosave()).await {
                 Ok(Ok(())) => {}
                 Ok(Err(e)) => eprintln!("exit flush failed: {e}"),
                 Err(_) => eprintln!(
-                    "exit flush failed: not finished within {:.1}s (the database may be unresponsive)",
-                    save.as_secs_f64()
+                    "exit flush failed: not finished by its deadline (the database may be unresponsive)"
                 ),
             }
         }
     }
 }
 
-/// The exit budget, stage by stage. Python sets none (uvicorn waits for
-/// open requests, then the atexit save runs, however long each takes); the
-/// container stops it anyway after Docker's default 10 s stop grace, since
-/// `ops/docker-compose.yml` sets no `stop_grace_period`. These stages fit in
-/// 9 s of that grace, so the final save gets its turn before the kill:
-/// open HTTP requests (a board wait can park for up to 30 s) 3 s, admitted
-/// writes 3 s, background tasks 1.5 s, the final save 1.5 s. Not measured:
-/// a store over a healthy database takes a fraction of a second, and work
-/// still running at a deadline is left to the exit, never cancelled, so a
-/// store's eviction and insert (two transactions, in both daemons) are cut
-/// no earlier than the kill would cut them.
+/// The exit budget. Python sets none (uvicorn waits for open requests, then
+/// the atexit save runs, however long each takes); in the container both
+/// are cut by Docker's kill, 10 s after its SIGTERM by default
+/// (`ops/docker-compose.yml` sets no `stop_grace_period`). Here every stage
+/// ends at a fixed point after the signal, so the final save gets its turn
+/// before that kill and time a stage does not use passes to the next: open
+/// HTTP requests are waited for until 3 s (a board wait can park for 30 s),
+/// admitted writes until 6 s, background tasks until 7.5 s, the final save
+/// until 9 s, and writes still running after the save until 9 s too. Not
+/// measured: a store over a healthy database takes a fraction of a second.
+/// Work still running at the end is left to the exit, never cancelled; a
+/// store's eviction and insert (two transactions in both daemons) can then
+/// be torn apart, as the kill would tear them a second later.
 pub const HTTP_DRAIN: Duration = Duration::from_secs(3);
 pub const WRITES_DRAIN: Duration = Duration::from_secs(3);
 pub const JOIN_DEADLINE: Duration = Duration::from_millis(1500);
