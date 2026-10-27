@@ -1006,8 +1006,15 @@ def _can_symlink(directory: Path) -> bool:
 @pytest.fixture
 def posix_link(tmp_path):
     """A POSIX-shaped layout under tmp_path with its launcher written and a
-    user bin directory beside it; skipped where this user cannot symlink
-    (Windows without Developer Mode)."""
+    user bin directory beside it; skipped where this user cannot symlink.
+    Skipped on Windows too: there every layout has a ``.exe`` launcher
+    (``default_layout`` refuses any other), so ``expose_launcher`` takes the
+    user PATH branch and never links. Windows semantics would also fail
+    these POSIX checks for reasons the product never meets: ``os.readlink``
+    returns an absolute target as ``\\\\?\\C:\\...``, and ``shutil.which``
+    skips a file with no PATHEXT extension."""
+    if os.name == "nt":
+        pytest.skip("POSIX-only: on Windows expose_launcher puts the launcher on the user PATH instead")
     if not _can_symlink(tmp_path):
         pytest.skip("this user cannot create symlinks here")
     home = tmp_path / "home"
