@@ -1177,6 +1177,41 @@ def test_a_member_that_breaks_the_census_is_dropped(world, capsys):
     assert edit_args[2] == "10"
 
 
+def test_a_census_breaker_a_conflict_hid_is_dropped_too(world, capsys):
+    # #10 and #11 both break the census script and conflict with each other,
+    # so #11 merges only once #10 has left; it must leave too, and #12 lands.
+    _with_census(world)
+    sha10 = world.pr(10, {"rust/producer_census.py":
+                          'raise SystemExit("broken by 10")\n' + _stub()})
+    sha11 = world.pr(11, {"rust/producer_census.py":
+                          'raise SystemExit("broken by 11")\n' + _stub()})
+    sha12 = world.pr(12, {"ops/twelve.sh": "12\n"})
+    for n, sha in ((10, sha10), (11, sha11), (12, sha12)):
+        world.gh.add(n, sha)
+
+    assert _publish(world) == 0, capsys.readouterr()
+
+    branch = f"integrate/{DATE}-batch-1"
+    assert _second_parents(world.origin, branch) == [sha12]
+    comments = {args[2]: body for args, body in world.gh.bodies("comment")}
+    assert set(comments) == {"10", "11"}
+    assert "broken by 10" in comments["10"] and "broken by 11" in comments["11"]
+
+
+def test_a_member_deleting_the_census_gets_it_back_in_the_batch(world, capsys):
+    # The census is the batch's to write: a member deleting it does not
+    # leave the batch without one (an untracked rewrite would never be pushed).
+    _with_census(world)
+    (world.seed / "rust" / "producer-census.json").unlink()
+    sha10 = world.pr(10, {"ops/ten.sh": "10\n"})
+    world.gh.add(10, sha10)
+
+    assert _publish(world) == 0, capsys.readouterr()
+
+    branch = f"integrate/{DATE}-batch-1"
+    assert _census_at(world.origin, branch) == _census(tool="t\n", ten="10\n")
+
+
 def test_a_census_broken_on_master_refuses_the_build(world, capsys):
     # No member changes the census inputs, so no member is to blame.
     _with_census(world, 'raise SystemExit("census broken")\n')

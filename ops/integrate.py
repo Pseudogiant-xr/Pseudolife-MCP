@@ -527,6 +527,10 @@ def _regenerate_census(plan: Plan) -> str | None:
     if proc.returncode != 0:
         git("reset", "-q", "--hard", "HEAD")
         return _census_failure(proc)
+    # Staged first: when a member deleted the census, the rewrite is untracked
+    # and an unstaged diff would never show (or commit) it.
+    if (root / CENSUS_JSON).is_file():
+        git("add", "--", CENSUS_JSON)
     changed = _out("diff", "--name-only", "HEAD").splitlines()
     if not changed:
         return None
@@ -579,28 +583,27 @@ def _merge_batch(plan: Plan, members: list[Member]) -> None:
     inputs = _census_inputs(plan.base_sha)
     if inputs is None or not plan.merged:
         return    # with no census on master there is nothing to keep current
-    failure = _regenerate_census(plan)
-    if failure is None:
-        return
-    culprits = [(m, sorted(_changed(m.sha, plan.base_sha) & inputs)) for m in plan.merged]
-    culprits = [(m, files) for m, files in culprits if files]
-    if not culprits:
-        raise Refusal(f"`python {CENSUS}` fails on the batch head ({failure}), and no "
-                      f"member's own diff changes {', '.join(sorted(inputs))}. Run it on "
-                      f"{REMOTE}/{BASE}: if it fails there too, the cause is master or "
-                      "this machine; otherwise run it on each member's head and leave "
-                      "out the one that breaks it")
-    left = [m for m, _ in culprits]
-    drops = [Dropped(m, _census_reason(m, files, failure, left)) for m, files in culprits]
-    for d in drops:
-        print(f"  dropped #{d.member.number}: {d.reason}")
-    out = {m.number for m in left}
-    print("  merging again without " + ", ".join(f"#{n}" for n in sorted(out)))
-    _remerge(plan, members, cut_drops + drops, out)
-    if plan.merged and (failure := _regenerate_census(plan)) is not None:
-        raise Refusal(f"`python {CENSUS}` still fails on the batch head ({failure}) "
-                      "without the members that change its inputs; run it on "
-                      f"{REMOTE}/{BASE} and on each member's head to find the cause")
+    drops: list[Dropped] = []
+    # Each round drops at least one member, so this ends. A member a dropped
+    # one had kept out (a conflict with it) merges in the next round, and is
+    # searched like the rest.
+    while plan.merged and (failure := _regenerate_census(plan)) is not None:
+        culprits = [(m, sorted(_changed(m.sha, plan.base_sha) & inputs)) for m in plan.merged]
+        culprits = [(m, files) for m, files in culprits if files]
+        if not culprits:
+            without = (" without the members that change its inputs" if drops else
+                       f", and no member's own diff changes {', '.join(sorted(inputs))}")
+            raise Refusal(f"`python {CENSUS}` fails on the batch head ({failure}){without}. "
+                          f"Run it on {REMOTE}/{BASE}: if it fails there too, the cause is "
+                          "master or this machine; otherwise run it on each member's head "
+                          "and leave out the one that breaks it")
+        left = [m for m, _ in culprits]
+        for m, files in culprits:
+            drops.append(Dropped(m, _census_reason(m, files, failure, left)))
+            print(f"  dropped #{m.number}: {drops[-1].reason}")
+        out = {d.member.number for d in drops}
+        print("  merging again without " + ", ".join(f"#{n}" for n in sorted(out)))
+        _remerge(plan, members, cut_drops + drops, out)
 
 
 def _new_markers(base_sha: str) -> list[str]:
