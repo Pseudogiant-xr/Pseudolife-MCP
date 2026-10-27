@@ -3091,10 +3091,9 @@ def health() -> dict:
     return {"op": "health"}
 
 
-# The cms_counters row (D2): `stop` first stops both daemons (SIGTERM, a
-# clean exit, so each runs its exit save, which like autosave writes only
-# when the bank changed), else it reads the row as the running daemons'
-# autosave left it. dbstate dumps the table without rows
+# The cms_counters row (D2): read as the running daemons' autosave left
+# it, or, with `stop`, after both daemons have stopped (the harness's stop:
+# SIGTERM on Linux, a kill on Windows). dbstate dumps the table without rows
 # everywhere else, since each daemon's autosave clock is its own.
 def counters(stop: bool = False) -> dict:
     return {"op": "counters", "stop": stop}
@@ -3640,24 +3639,28 @@ SCENARIOS.update({
             fact_get("Staging Database", "engine"),
         ],
     },
-    # The counters row (D2). A clean exit after stores writes it, the
-    # restarted daemons read it back, and the next exit writes the sum:
-    # interaction and query counts carry across the restart. Linux only (the
-    # harness's SIGTERM is a clean exit there; on Windows it kills).
-    "counters-flush-restore": {
-        "live_only": "the row is written at each daemon's exit; compared live on Linux",
-        "linux_only": "needs a clean exit (SIGTERM); the Windows harness kills",
+    # The counters row (D2), written by autosave and read back at start: two
+    # stores and a search autosave the row; a restart reads it back; one more
+    # store autosaves the sum (interaction 3, not 1). The exits write nothing
+    # comparable: Python's exit save never runs on SIGTERM (uvicorn re-raises
+    # it; divergences.md), and Rust's, gated like autosave, finds nothing
+    # changed since the last autosave, so the row stands on both sides.
+    "counters-restore": {
+        "live_only": "autosave writes on each daemon's own clock; compared live",
         "config": COUNTERS_CONFIG,
-        "env": {"PSEUDOLIFE_MCP_AUTOSAVE_SECONDS": "3600"},
+        "env": {"PSEUDOLIFE_MCP_AUTOSAVE_SECONDS": "1"},
         "seed": [],
         "ops": [
             store("The counters note about the build cache.", source="pseudolife-mcp"),
             store("The counters note about the token rotation.", source="pseudolife-mcp"),
             search("build cache"),
+            {"op": "sleep", "s": 3},
             counters(),
             {"op": "restart", "config": COUNTERS_CONFIG},
             counters(),
             store("The counters note after the restart.", source="pseudolife-mcp"),
+            {"op": "sleep", "s": 3},
+            counters(),
             search("token rotation"),
             counters(stop=True),
         ],
@@ -3666,8 +3669,7 @@ SCENARIOS.update({
     # a search alone does not, so neither autosave nor the (equally gated)
     # exit save writes its query count: the row keeps the pre-search count.
     "counters-autosave": {
-        "live_only": "autosave writes on each daemon's own clock; compared live on Linux",
-        "linux_only": "needs a clean exit (SIGTERM); the Windows harness kills",
+        "live_only": "autosave writes on each daemon's own clock; compared live",
         "config": COUNTERS_CONFIG,
         "env": {"PSEUDOLIFE_MCP_AUTOSAVE_SECONDS": "1"},
         "seed": [],
@@ -6203,10 +6205,6 @@ def _run_live(name: str, scn: dict, tag: str, binary: Path, root: Path, record: 
               stubs: dict[str, StubExtractor]) -> dict:
     if name in w2e_documents.SCENARIOS:
         w2e_documents.require_document_oracles()
-    if scn.get("linux_only") and os.name == "nt":
-        # Skipped, never passed: on Windows the harness stops a daemon with
-        # taskkill /F, so an exit-save comparison would compare nothing.
-        return {"scenario": name, "skipped": scn["linux_only"], "steps": [], "stats": {}}
     template = prepare_template(scn, tag, root, owned, stubs.get("seed"))
     dbs = {side: pg.name(f"pl_cf_w2e_{tag}_{suffix}")
            for side, suffix in (("python", "py"), ("rust", "rs"))}
