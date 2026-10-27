@@ -114,7 +114,12 @@ def scenarios(w) -> dict:
                            f"WHERE {COMPACTION_SLOT} AND status = 'superseded'",
                            after_stop=True)],
             "ops": [
-                {"op": "sleep", "s": 4,
+                # Until the sweep has compacted (a cold start loads models
+                # first); a side that never compacts times out and the
+                # expect query answers false.
+                {"op": "sleep", "s": 1,
+                 "settle": {"quiet_s": 1.0, "timeout_s": 60.0,
+                            "until": f"SELECT count(*) = 2 FROM facts WHERE {COMPACTION_SLOT}"},
                  "expect": [f"SELECT count(*) = 2 FROM facts WHERE {COMPACTION_SLOT}",
                             f"SELECT count(*) = 1 FROM facts WHERE {COMPACTION_SLOT} "
                             "AND status = 'current'"]},

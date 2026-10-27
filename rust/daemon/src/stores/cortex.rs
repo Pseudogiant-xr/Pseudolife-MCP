@@ -267,9 +267,14 @@ impl CortexStore {
         let before = self.records.len();
         let purged = crate::maintenance::compact_records(
             &mut self.records,
+            // Grouped by the record's key, as Python's `r.key` and this
+            // store's slot sync select it, not the stored norm columns: a
+            // row whose stored norm differs (a casefold difference) would
+            // otherwise mark a slot dirty that no record maps to, and the
+            // sync would delete the whole slot.
             |r| crate::maintenance::CompactRecord {
-                entity_norm: &r.entity_norm,
-                attribute_norm: &r.attribute_norm,
+                entity_norm: &r.key().0,
+                attribute_norm: &r.key().1,
                 status: &r.status,
                 superseded_at: r.superseded_at,
                 asserted_at: r.asserted_at,
@@ -759,6 +764,29 @@ pub(crate) mod tests {
         store.dirty_slots.clear();
         assert_eq!(store.compact(2, 30.0, now), 0);
         assert!(store.dirty_slots.is_empty());
+    }
+
+    /// A row whose stored norm columns differ from its key (written by a
+    /// casefold that differs from this one) compacts under its key, the
+    /// slot the per-slot sync rewrites: never a slot no record maps to.
+    #[test]
+    fn compaction_groups_by_the_record_key_not_the_stored_norm_columns() {
+        let now = 100.0 * 86400.0;
+        let stale = |value: &str, days_ago: f64| {
+            let mut r = rec("Server", "OS", value);
+            r.entity_norm = "stored-elsewhere".into();
+            r.status = "superseded".into();
+            r.superseded_at = Some(now - days_ago * 86400.0);
+            r
+        };
+        let mut store = CortexStore {
+            records: vec![stale("a", 90.0), stale("b", 80.0), rec("Server", "OS", "c")],
+            ..Default::default()
+        };
+        store.reindex();
+        assert_eq!(store.compact(1, 30.0, now), 1);
+        let dirty: Vec<&SlotKey> = store.dirty_slots.iter().collect();
+        assert_eq!(dirty, [store.records[0].key()]);
     }
 
     pub(crate) fn rec(entity: &str, attribute: &str, value: &str) -> CortexRecord {
