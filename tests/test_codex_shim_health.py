@@ -577,3 +577,33 @@ def test_chat_says_when_stdout_had_only_non_error_events():
         _failing(stdout=b'{"type":"thread.started"}\n{"type":"turn.started"}\n').chat("sys", "hi")
     assert "no output on stdout or stderr" not in str(e.value)
     assert "2 JSON events" in str(e.value)
+
+
+def test_a_refresh_publishes_verdict_and_body_together():
+    # Codex review of f8582a7c: see the Claude shim's twin of this test.
+    first_write, release = threading.Event(), threading.Event()
+
+    class _Paused(shim.CodexCli):
+        def __setattr__(self, name, value):
+            super().__setattr__(name, value)
+            if (name.startswith("_health") and name != "_health_refreshing"
+                    and getattr(self, "_pause", False)):
+                self._pause = False
+                first_write.set()
+                release.wait(10)
+
+    cli = _Paused(Path("codex"), "m", 30.0)
+    _stub_run(cli, rc=1, stderr=b"Not logged in. Run `codex login`.")
+    assert cli.health_answer()[1]["status"] == "login_required"   # warm, down
+    cli.chat = lambda system, user, model=None, effort=None: "OK"
+    cli._pause = True
+    t = threading.Thread(target=cli._health_refresh)
+    t.start()
+    try:
+        assert first_write.wait(10)
+        ok, body = cli.health_answer()
+        assert (ok, body["status"] == "ok") in ((True, True), (False, False))
+    finally:
+        release.set()
+        t.join(10)
+    assert cli.health_answer() == (True, {"status": "ok"})

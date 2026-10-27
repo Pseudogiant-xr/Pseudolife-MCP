@@ -520,3 +520,36 @@ def test_a_lone_stream_gets_both_streams_budget():
     with pytest.raises(RuntimeError) as e:
         _failing_cli(stderr=b"a" * 400 + b"END").chat("sys", "hi")
     assert "a" * 400 + "END" in str(e.value)
+
+
+def test_a_refresh_publishes_verdict_and_body_together(monkeypatch):
+    # Codex review of f8582a7c: the refresh wrote the body and the verdict
+    # one after the other, so a /health landing between them answered 503
+    # with {"status": "ok"}. Pause the refresh after its first write to the
+    # health cache and read it from another thread.
+    first_write, release = threading.Event(), threading.Event()
+
+    class _Paused(shim.ClaudeCli):
+        def __setattr__(self, name, value):
+            super().__setattr__(name, value)
+            if (name.startswith("_health") and name != "_health_refreshing"
+                    and getattr(self, "_pause", False)):
+                self._pause = False
+                first_write.set()
+                release.wait(10)
+
+    cli = _Paused(Path("claude.exe"), "m", 30.0)
+    cli._run = lambda cmd, payload: (1, _EXPIRED, b"")
+    assert cli.health_answer()[1]["status"] == "login_required"   # warm, down
+    cli._run = lambda cmd, payload: (0, b'{"result": "OK"}', b"")
+    cli._pause = True
+    t = threading.Thread(target=cli._health_refresh)
+    t.start()
+    try:
+        assert first_write.wait(10)
+        ok, body = cli.health_answer()
+        assert (ok, body["status"] == "ok") in ((True, True), (False, False))
+    finally:
+        release.set()
+        t.join(10)
+    assert cli.health_answer() == (True, {"status": "ok"})

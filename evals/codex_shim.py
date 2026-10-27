@@ -285,9 +285,9 @@ class CodexCli:
         self.lock = threading.Lock()
         self.calls = 0
         self._instr: Path | None = None
-        self._health_ok: bool | None = None
-        self._health_detail = ""
-        self._health_body: dict = {"status": "ok"}
+        # (ok, /health body), replaced whole so a reader never pairs one
+        # refresh's verdict with another's body. None until the first check.
+        self._health_snapshot: tuple[bool, dict] | None = None
         self._health_at = 0.0
         self._health_refreshing = False
 
@@ -380,6 +380,11 @@ class CodexCli:
               flush=True)
         return reply
 
+    @property
+    def _health_ok(self) -> bool | None:
+        snapshot = self._health_snapshot
+        return None if snapshot is None else snapshot[0]
+
     def health(self) -> tuple[bool, str]:
         """``(ok, detail)`` of :meth:`health_answer`."""
         ok, body = self.health_answer()
@@ -397,9 +402,10 @@ class CodexCli:
         (startup warms it). The body is cached with the verdict, so a status
         never pairs with another refresh's detail."""
         now = time.monotonic()
-        if self._health_ok is None:
+        snapshot = self._health_snapshot
+        if snapshot is None:
             return self._health_refresh()
-        ok, body = self._health_ok, self._health_body  # pre-refresh verdict
+        ok, body = snapshot  # pre-refresh verdict
         if (now - self._health_at >= self._health_ttl
                 and not self._health_refreshing):
             self._health_refreshing = True
@@ -420,9 +426,7 @@ class CodexCli:
                 # Room for both streams' bounded output (_cli_output).
                 ok, body = False, health_status(str(e)[:600],
                                                 getattr(e, "sign_in", None))
-            self._health_body = body
-            self._health_detail = body.get("detail", "")
-            self._health_ok = ok
+            self._health_snapshot = (ok, body)
             self._health_at = time.monotonic()
             return ok, body
         finally:

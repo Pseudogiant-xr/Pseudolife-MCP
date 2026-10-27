@@ -489,9 +489,9 @@ class ClaudeCli:
         # below is one line per distinct prompt rather than one per call.
         self._override_miss_seen: set[str] = set()
         self.calls = 0
-        self._health_ok: bool | None = None
-        self._health_detail = ""
-        self._health_body: dict = {"status": "ok"}
+        # (ok, /health body), replaced whole so a reader never pairs one
+        # refresh's verdict with another's body. None until the first check.
+        self._health_snapshot: tuple[bool, dict] | None = None
         self._health_at = 0.0
         self._health_refreshing = False
 
@@ -595,6 +595,11 @@ class ClaudeCli:
 
     _HEALTH_TTL = 300.0  # one trivial CLI call per 5 min keeps /health honest
 
+    @property
+    def _health_ok(self) -> bool | None:
+        snapshot = self._health_snapshot
+        return None if snapshot is None else snapshot[0]
+
     def health(self) -> tuple[bool, str]:
         """``(ok, detail)`` of :meth:`health_answer`."""
         ok, body = self.health_answer()
@@ -612,9 +617,10 @@ class ClaudeCli:
         The body is cached with the verdict, so a status never pairs with
         another refresh's detail."""
         now = time.monotonic()
-        if self._health_ok is None:
+        snapshot = self._health_snapshot
+        if snapshot is None:
             return self._health_refresh()
-        ok, body = self._health_ok, self._health_body  # pre-refresh verdict
+        ok, body = snapshot  # pre-refresh verdict
         if (now - self._health_at >= self._HEALTH_TTL
                 and not self._health_refreshing):
             self._health_refreshing = True
@@ -630,9 +636,7 @@ class ClaudeCli:
                 # Room for both streams' bounded output (_cli_failure).
                 ok, body = False, health_status(str(e)[:600],
                                                 getattr(e, "sign_in", None))
-            self._health_body = body
-            self._health_detail = body.get("detail", "")
-            self._health_ok = ok
+            self._health_snapshot = (ok, body)
             self._health_at = time.monotonic()
             return ok, body
         finally:
