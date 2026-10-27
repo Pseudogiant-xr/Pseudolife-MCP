@@ -379,3 +379,177 @@ def test_reuse_address_is_dropped_only_on_windows():
     assert shim.ShimHTTPServer.allow_reuse_address is (os.name != "nt")
     src = Path(shim.__file__).read_text(encoding="utf-8")
     assert "ShimHTTPServer((args.host, args.port)" in src
+
+
+# ── a failed CLI call keeps the CLI's own words (2026-10-27) ──────────────
+#
+# Live: the CLI's OAuth session expired and `claude -p` printed "Failed to
+# authenticate: OAuth session expired and could not be refreshed" and exited
+# 1, but /health answered `{"status": "cli_error", "detail": "claude -p
+# rc=1: "}` because only stderr was read and the message was on stdout.
+# Nobody could tell from it that the fix was to sign in again.
+
+_EXPIRED = b"Failed to authenticate: OAuth session expired and could not be refreshed\n"
+
+
+def _failing_cli(stdout=b"", stderr=b"", rc=1):
+    cli = shim.ClaudeCli(Path("claude.exe"), "m", 30.0)
+    cli._run = lambda cmd, payload: (rc, stdout, stderr)
+    return cli
+
+
+def test_a_failed_call_reports_the_message_the_cli_printed_on_stdout():
+    with pytest.raises(RuntimeError, match="OAuth session expired") as e:
+        _failing_cli(stdout=_EXPIRED).chat("sys", "hi")
+    assert "rc=1" in str(e.value)
+
+
+def test_a_failed_call_reads_a_json_error_result_on_stdout():
+    out = (b'{"type":"result","subtype":"error","is_error":true,'
+           b'"result":"Failed to authenticate: OAuth session expired"}')
+    with pytest.raises(RuntimeError) as e:
+        _failing_cli(stdout=out).chat("sys", "hi")
+    assert "Failed to authenticate: OAuth session expired" in str(e.value)
+    assert '"is_error"' not in str(e.value)
+
+
+def test_a_failed_call_keeps_both_streams():
+    with pytest.raises(RuntimeError) as e:
+        _failing_cli(stdout=b"on stdout", stderr=b"on stderr").chat("sys", "hi")
+    assert "on stdout" in str(e.value) and "on stderr" in str(e.value)
+
+
+def test_a_failed_call_with_no_output_says_so():
+    with pytest.raises(RuntimeError, match="no output on stdout or stderr"):
+        _failing_cli().chat("sys", "hi")
+
+
+def test_a_failed_calls_detail_is_bounded_per_stream():
+    with pytest.raises(RuntimeError) as e:
+        _failing_cli(stdout=b"x" * 5000, stderr=b"the real cause").chat("sys", "hi")
+    # A flood on one stream must not push the other out of the detail.
+    assert "the real cause" in str(e.value)
+    assert len(str(e.value)) < 700
+
+
+def _health_answer(cli):
+    import json
+    import urllib.error
+    import urllib.request
+
+    srv = shim.ThreadingHTTPServer(("127.0.0.1", 0), shim.make_handler(cli))
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        url = f"http://127.0.0.1:{srv.server_address[1]}/health"
+        try:
+            with urllib.request.urlopen(url) as resp:
+                return resp.status, json.loads(resp.read())
+        except urllib.error.HTTPError as err:
+            return err.code, json.loads(err.read())
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
+def test_health_names_the_sign_in_fix_when_the_cli_login_expired():
+    code, body = _health_answer(_failing_cli(stdout=_EXPIRED))
+    assert code == 503
+    assert body["status"] == "login_required"
+    assert "OAuth session expired" in body["detail"]
+    assert "claude auth login" in body["fix"] and "shim host" in body["fix"]
+
+
+@pytest.mark.parametrize("message", [
+    b"Invalid API key \xc2\xb7 Please run /login",
+    b"Not logged in",
+])
+def test_health_maps_each_sign_in_message(message):
+    code, body = _health_answer(_failing_cli(stdout=message))
+    assert (code, body["status"]) == (503, "login_required")
+
+
+@pytest.mark.parametrize("message", [
+    # Near misses: an error that mentions neither a login nor credentials,
+    # and one whose words only resemble them, stay a plain CLI error.
+    b"API Error: 529 overloaded",
+    b"error: unknown option '--catalog-in'",
+    b"Credit balance is too low",
+])
+def test_health_keeps_other_cli_failures_as_cli_error(message):
+    code, body = _health_answer(_failing_cli(stdout=message))
+    assert (code, body["status"]) == (503, "cli_error")
+    assert message.decode()[:20] in body["detail"]
+    assert "fix" not in body
+
+
+def test_a_sign_in_failure_after_long_warnings_is_still_named():
+    # Codex review of bc1176d8: classifying the bounded text lost a sign-in
+    # message that followed more than one stream's worth of warnings.
+    noise = b"warning: something unrelated happened. " * 20
+    code, body = _health_answer(_failing_cli(stdout=noise + _EXPIRED))
+    assert (code, body["status"]) == (503, "login_required")
+    # The bound keeps the stream's end, where the CLI prints its error.
+    assert "could not be refreshed" in body["detail"]
+
+
+@pytest.mark.parametrize("message", [
+    b"authentication_failed",
+    b"Your organization does not have access to Claude. Please login again.",
+    b"OAuth token has expired. Please obtain a new token or refresh your existing token.",
+    b"API Error: 401 {\"type\":\"error\",\"error\":{\"type\":\"authentication_error\"}}",
+])
+def test_health_maps_more_sign_in_messages(message):
+    code, body = _health_answer(_failing_cli(stdout=message))
+    assert (code, body["status"]) == (503, "login_required")
+
+
+@pytest.mark.parametrize("message", [
+    # Reviewer near misses on bc1176d8: a number field equal to 401 in a
+    # JSON result with no message, and a 403 that names OAuth but that no
+    # sign-in fixes.
+    b'{"type":"result","subtype":"error_during_execution","is_error":true,"duration_ms":401}',
+    b'API Error: 403 {"type":"error","error":{"type":"permission_error",'
+    b'"message":"OAuth authentication is currently not supported."}}',
+])
+def test_health_does_not_call_these_a_sign_in_failure(message):
+    code, body = _health_answer(_failing_cli(stdout=message))
+    assert (code, body["status"]) == (503, "cli_error")
+
+
+def test_a_lone_stream_gets_both_streams_budget():
+    with pytest.raises(RuntimeError) as e:
+        _failing_cli(stderr=b"a" * 400 + b"END").chat("sys", "hi")
+    assert "a" * 400 + "END" in str(e.value)
+
+
+def test_a_refresh_publishes_verdict_and_body_together(monkeypatch):
+    # Codex review of f8582a7c: the refresh wrote the body and the verdict
+    # one after the other, so a /health landing between them answered 503
+    # with {"status": "ok"}. Pause the refresh after its first write to the
+    # health cache and read it from another thread.
+    first_write, release = threading.Event(), threading.Event()
+
+    class _Paused(shim.ClaudeCli):
+        def __setattr__(self, name, value):
+            super().__setattr__(name, value)
+            if (name.startswith("_health") and name != "_health_refreshing"
+                    and getattr(self, "_pause", False)):
+                self._pause = False
+                first_write.set()
+                release.wait(10)
+
+    cli = _Paused(Path("claude.exe"), "m", 30.0)
+    cli._run = lambda cmd, payload: (1, _EXPIRED, b"")
+    assert cli.health_answer()[1]["status"] == "login_required"   # warm, down
+    cli._run = lambda cmd, payload: (0, b'{"result": "OK"}', b"")
+    cli._pause = True
+    t = threading.Thread(target=cli._health_refresh)
+    t.start()
+    try:
+        assert first_write.wait(10)
+        ok, body = cli.health_answer()
+        assert (ok, body["status"] == "ok") in ((True, True), (False, False))
+    finally:
+        release.set()
+        t.join(10)
+    assert cli.health_answer() == (True, {"status": "ok"})
