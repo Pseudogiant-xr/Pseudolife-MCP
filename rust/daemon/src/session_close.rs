@@ -124,10 +124,28 @@ pub async fn episode_end_session(
     run_dream: bool,
     band_order: &[String],
 ) -> (Value, bool) {
+    let (result, fire, _) = close_session(ready, key, run_dream, band_order, true).await;
+    (result, fire)
+}
+
+/// `_close_session_locked` under the service lock, as `episode_end_session`
+/// runs it: the answer, whether the dream should fire, and whether a root
+/// matched. With nothing open, `stamp_unfound` stamps the end on the key's
+/// registration (an explicit key's end); the ownership-guarded path, whose
+/// key may be another session's pointer, does not.
+pub async fn close_session(
+    ready: &Arc<Ready>,
+    key: &str,
+    run_dream: bool,
+    band_order: &[String],
+    stamp_unfound: bool,
+) -> (Value, bool, bool) {
     let mut ws = ready.write.lock().await;
     let Some(root) = ws.log.end_session_root(key) else {
-        end_client_session(ready, key, None).await;
-        return (json!({}), false);
+        if stamp_unfound {
+            end_client_session(ready, key, None).await;
+        }
+        return (json!({}), false, false);
     };
     let (root_id, root_key, root_ended) = {
         let ep = &ws.log.episodes[root];
@@ -165,14 +183,14 @@ pub async fn episode_end_session(
                 eprintln!("episode delete failed: {e}");
             }
         }
-        return (json!({}), false);
+        return (json!({}), false, true);
     }
     if !empty {
         auto_title(ready, &mut ws, root, &subtree, band_order).await;
     }
     ws.persist_episodes(ready.storage.client()).await;
     let result = Value::Object(crate::episode_tools::episode_dict(&ws.log.episodes[root]));
-    (result, fires(run_dream, true, empty))
+    (result, fires(run_dream, true, empty), true)
 }
 
 /// `_close_session_locked`'s `fire`: a found root whose subtree captured

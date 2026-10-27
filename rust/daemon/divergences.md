@@ -10,7 +10,7 @@ side must answer exactly `501 {"error": "not_implemented", "path": P}`.
 
 | Surface | Python behaviour | Owner |
 |---|---|---|
-| Every Console route in `harness/goldens/routes.json` other than `GET /api/search`, the coordination view of `GET /api/agents`, `POST /api/daemon-notice` and `POST /api/episodes/rename`, `/merge` and `/prune`, after all gates | the handler's answer | W2-D (reads), W2-E (writes), W2-F (board, maintainer) |
+| Every Console route in `harness/goldens/routes.json` other than `GET /api/search`, the coordination view of `GET /api/agents`, `POST /api/daemon-notice`, `POST /api/episodes/rename`, `/merge` and `/prune`, and `POST /api/episode/start` and `/end`, after all gates | the handler's answer | W2-D (reads), W2-E (writes), W2-F (board, maintainer) |
 | Tokenless MCP Host/Origin rebinding policy | SDK transport policy before tool dispatch | **CUTOVER BLOCKER — W2-G**; tokenless MCP stays unmounted (501) until this gate is accepted. Authenticated bound-identity checks are served (spec.md M18) |
 | `POST /api/pair` after a valid body on an authenticated install | the 2-slot redemption gate (`RedemptionGate`, 429 `rate_limited`), invocation of the implemented `principals::redeem` store transaction plus immediate `PrincipalStore::add`, the failure-budget refund on success, and 503 `pairing_unavailable` on a store error | HTTP-SECURITY / CLI-PAIRING (the gate wraps only `principal_store.redeem`, `web/api.py:378-393`) |
 | Stored callers' POST `/api/config` and `/api/daemon-notice` gate | HTTP already returns 403 `operator_principal_required` by stored-name inference; method-aware source policy is implemented for HTTP-SECURITY to consume with `resolve_detailed` | HTTP-SECURITY |
@@ -496,13 +496,14 @@ goldens.
 |---|---|---|---|
 | A new merge rollup's `hint` that is not a string or null | kept in memory as sent; the episode write-through then stores PostgreSQL's text form of a value psycopg can adapt, or fails on one it cannot (a dict), and that failure leaves the merged entries and outcome signals pointing at an episode row never written (until a later write-through) | refused before any change: 500 `hint must be a string, not '<type>'` | Python's answer is a bank inconsistency, not a contract; every documented caller sends a string. Behaviour with no caller (D7) |
 
-### Hooks (2026-10-25)
+### Hooks and the CLI's episode routes (2026-10-25)
 
-The SessionStart hook, the SessionEnd close, the memory-policy hook and the memory-change note (`routes/hook.rs`).
+The SessionStart hook, the SessionEnd close, the memory-policy hook and the memory-change note (`routes/hook.rs`), and `POST /api/episode/start` and `/end` (`routes/cli.rs`).
 
 | Item | Python | Rust | Owner / why |
 |---|---|---|---|
 | The maintainer's delegate's reminder line on `memory-changes` (`?agent=`), after the cursor and any note | `coordination.delegate_reminder`: one line when the agent is the project's delegate | never added: the delegate lookup, and the coordination-start brief that uses it, are not ported | the board batch (B5); a non-delegate agent gets the same answer on both |
+| A non-string `session_key`, `title` or `hint` in `POST /api/episode/start`, or `session_key` in `/end` | carried as that value: an episode opens in memory with it, its write-through and the registration fail on the type (logged), and the answer echoes it; `/end` stamps nothing | refused before any change: 400 `<field> must be a string, not '<type>'` | Python's answer leaves an in-memory episode the bank never holds; every caller (the CLI episode hooks, the shims) sends strings. Behaviour with no caller (D7) |
 | The daemon version the session-start notices compare and print | the package version (PEP 440: a pre-release reads `0.20.0rc1`) | the crate version (semver: `0.20.0-rc1`) | inherits `version` ("free until cutover") above; the strings are equal for every final release, and a pre-release cut would print a false "plugin and daemon differ" notice on each Rust session until the daemon reports the package version (W3-J / the release procedure) |
 | The hooks notice on session-start when `PSEUDOLIFE_PLUGIN_DIR` is unset | the daemon's hooks digest falls back to `plugin/` beside the package, so a plugin of the daemon's version with other hooks gets the notice | no digest, so no notice | inherits "Plugin dir for `hooks_digest`" above: the images set the variable, and so does a checkout run |
 

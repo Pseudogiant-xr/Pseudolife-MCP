@@ -30,7 +30,7 @@ MUTANTS = ["session-end-no-client-stamp", "session-end-keeps-empty",
            "changes-cursor-echoes-since", "changes-counts-superseded",
            "session-start-no-registration", "session-start-no-pointer",
            "session-start-no-briefing", "briefing-no-avoid-first",
-           "briefing-recap-includes-open"]
+           "briefing-recap-includes-open", "episode-end-ignores-header"]
 
 HOME_OPS = ("write_file",)
 
@@ -95,6 +95,7 @@ def run(op: dict, port: int, dsn: str, harness) -> dict:
                     for k, v in op["body"].items()}
         body = json.dumps(resolved).encode()
     hdrs = [harness.AUTH] if op.get("auth", True) else []
+    hdrs += [tuple(x) for x in op.get("headers", ())]
     if body is not None:
         hdrs.append(("Content-Type", "application/json"))
     path = op["path"].replace("@prev", _LAST_CURSOR.get(port, ""))
@@ -141,6 +142,17 @@ def policy(query: str = "", auth: bool = True) -> dict:
 
 def session_start(query: str = "", auth: bool = True) -> dict:
     return hook("GET", "/api/hook/session-start" + (f"?{query}" if query else ""), auth=auth)
+
+
+def episode_start(body: dict) -> dict:
+    return hook("POST", "/api/episode/start", body)
+
+
+def episode_end(body: dict, headers=()) -> dict:
+    op = hook("POST", "/api/episode/end", body)
+    if headers:
+        op["headers"] = [list(h) for h in headers]
+    return op
 
 
 def changes(query: str = "", auth: bool = True) -> dict:
@@ -402,6 +414,50 @@ def register(h) -> dict[str, dict]:
                 # Authorized with no session id: nothing registers.
                 session_start("source=startup"),
                 h.ep_summary("@root:ss-a:32"),
+            ],
+        },
+        # The CLI's episode routes (B10f): POST /api/episode/start opens or
+        # re-finds a session's episode and registers it as `api`; POST
+        # /api/episode/end closes an explicit key, or with none only the
+        # caller's own session (header, else the active-session pointer).
+        "cli-episode-routes": {
+            "config": "memory:\n  dream:\n    enabled: false\n    extractor_mode: fallback\n",
+            "seed": [
+                h.store("A note in session A about the cache.", [h.sess("es-a")]),
+                h.store("A note in session B.", [h.sess("es-b")]),
+                h.ep_start("es-b sub-task", [h.sess("es-b")]),
+                h.store("A note in es-b's sub-task.", [h.sess("es-b")]),
+                # Registered through the route, and left empty. Seeded, so
+                # both banks hold its id after the end prunes it.
+                {"op": "http", "method": "POST", "path": "/api/episode/start",
+                 "body": {"session_key": "es-empty", "title": "Empty CLI session"}},
+                seed_start("es-ptr"),
+                h.store("A note in the pointer's session.", [h.sess("es-ptr")]),
+            ],
+            "ops": [
+                # A new keyed root with its title and hint, registered as api.
+                episode_start({"session_key": "es-new", "title": "CLI start", "hint": "a hint"}),
+                # Again: the same open episode; the registration appends.
+                episode_start({"session_key": "es-new", "title": "Ignored"}),
+                # An open sub-episode is handed back; the row names the root.
+                episode_start({"session_key": "es-b"}),
+                # Keyless, and an empty key with an empty title.
+                episode_start({}),
+                episode_start({"session_key": "", "title": ""}),
+                # An explicit end: closed and titled from its entries.
+                episode_end({"session_key": "es-a"}),
+                h.ep_summary("@root:es-a:32"),
+                # Nothing open any more, and a key never seen: {}.
+                episode_end({"session_key": "es-a"}),
+                episode_end({"session_key": "never-seen"}),
+                # Empty: pruned, its registration stamped; no dream asked.
+                episode_end({"session_key": "es-empty", "run_dream": False}),
+                # Guarded: the header's session (the sub-task closes too).
+                episode_end({}, headers=[("X-PL-Session", "es-b")]),
+                # Guarded: no header, so the active-session pointer's.
+                episode_end({}),
+                # Guarded again: the pointer's session has nothing open.
+                episode_end({}),
             ],
         },
         # A cold bank and the A/B arms: sess-a gets compact (policy and
