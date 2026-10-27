@@ -156,7 +156,7 @@
       }
     },
     "fingerprints": {
-      "scope": "962fa4e9cfc14128",
+      "scope": "96dd91911ecc126e",
       "rust": "7e31d77eff2ceb0b",
       "fixtures": "defc5e07c5ac3f94",
       "candidate": "77b0c5fa6b2afcbf",
@@ -175,6 +175,11 @@
         "job": "rust",
         "fingerprint": "7e31d77eff2ceb0b",
         "reason": "Drops the -k deselect of the deleted census currency test; the same tests run, so its minutes are unchanged"
+      },
+      {
+        "job": "scope",
+        "fingerprint": "96dd91911ecc126e",
+        "reason": "Classification only: a regenerated producer census beside docs keeps a docs-only diff docs-only; same steps, same minutes"
       }
     ]
   },

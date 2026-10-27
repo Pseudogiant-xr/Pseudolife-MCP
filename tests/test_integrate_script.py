@@ -199,7 +199,8 @@ def world(tmp_path, monkeypatch):
         _git(seed, "switch", "-q", "-C", f"pr-{number}", base)
         for name, text in files.items():
             (seed / name).parent.mkdir(parents=True, exist_ok=True)
-            (seed / name).write_text(text, encoding="utf-8")
+            # LF, as repository blobs are (and as the census is written).
+            (seed / name).write_text(text, encoding="utf-8", newline="\n")
         _git(seed, "add", "-A")
         _git(seed, "commit", "-q", "-m", f"change {number}")
         _git(seed, "push", "-q", "-f", "origin", f"HEAD:refs/pull/{number}/head")
@@ -210,7 +211,8 @@ def world(tmp_path, monkeypatch):
         _git(seed, "switch", "-q", "-C", "master", "origin/master")
         for name, text in files.items():
             (seed / name).parent.mkdir(parents=True, exist_ok=True)
-            (seed / name).write_text(text, encoding="utf-8")
+            # LF, as repository blobs are (and as the census is written).
+            (seed / name).write_text(text, encoding="utf-8", newline="\n")
         _git(seed, "add", "-A")
         _git(seed, "commit", "-q", "-m", "master moves")
         _git(seed, "push", "-q", "origin", "master")
@@ -1278,6 +1280,58 @@ def test_the_batch_lists_the_manual_shapes_its_census_withdrew(world, capsys):
     (_, create_body), = world.gh.bodies("create")
     census_section = create_body.split("## Producer census", 1)[1].split("\n## ", 1)[0]
     assert "`ops/tool.sh`" in census_section and "ops/old.sh" not in census_section
+
+
+def test_withdrawn_manual_shapes_are_listed_without_a_census_commit(world, capsys):
+    # The member regenerated its own census, current on the batch head, so
+    # `build` commits nothing; the withdrawn shape is still the batch's news.
+    import hashlib
+    _with_census(world, _stub({"ops/tool.sh": hashlib.sha256(b"t\n").hexdigest()}))
+    world.pr(10, {"ops/tool.sh": "changed\n"})
+    subprocess.run([sys.executable, "rust/producer_census.py"], cwd=world.seed,
+                   check=True, capture_output=True)
+    sha10 = world.pr(10, {}, base="HEAD")
+    world.gh.add(10, sha10)
+
+    assert _publish(world) == 0, capsys.readouterr()
+
+    branch = f"integrate/{DATE}-batch-1"
+    assert _census_commits(world.origin, branch) == []
+    (_, create_body), = world.gh.bodies("create")
+    census_section = create_body.split("## Producer census", 1)[1].split("\n## ", 1)[0]
+    assert "`ops/tool.sh`" in census_section and "regenerates" not in census_section
+
+
+def test_a_census_failure_posts_no_path_of_this_machine(world, capsys):
+    # The failure lands in a public comment; the checkout's path is replaced.
+    _with_census(world)
+    sha10 = world.pr(10, {"rust/producer_census.py":
+                          "raise SystemExit('cannot read ' + __file__)\n" + _stub()})
+    sha11 = world.pr(11, {"ops/eleven.sh": "11\n"})
+    world.gh.add(10, sha10)
+    world.gh.add(11, sha11)
+
+    assert _publish(world) == 0, capsys.readouterr()
+
+    (args, body), = world.gh.bodies("comment")
+    assert args[2] == "10" and "cannot read <checkout>" in body
+    assert str(world.work.parent).lower() not in body.lower()
+    assert world.work.parent.as_posix().lower() not in body.lower()
+
+
+def test_a_dry_run_shows_the_census_commit_and_leaves_nothing(world, capsys):
+    _with_census(world)
+    sha10 = world.pr(10, {"ops/ten.sh": "10\n"})
+    world.gh.add(10, sha10)
+    master = _git(world.work, "rev-parse", "origin/master")
+
+    assert _build("--dry-run") == 0
+    out = capsys.readouterr().out
+
+    assert "## Producer census" in out
+    assert _git(world.work, "rev-parse", "HEAD") == master
+    assert _git(world.work, "status", "--porcelain") == ""
+    assert _git(world.work, "branch", "--list", "integrate/*") == ""
 
 
 def test_census_inputs_come_from_masters_census_module(world):

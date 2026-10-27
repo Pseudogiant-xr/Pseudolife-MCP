@@ -19,7 +19,7 @@ historical. `input_sha256` identifies the exact scanned tracked working-tree tex
 (UTF-8, BOM removed, CRLF normalized to LF), independently of commit history and
 squash merges. Modified tracked files and newly staged producers are included;
 untracked and ignored scratch files are excluded using `git ls-files`. A changed
-tracked file, contract or extraction result makes the currency test fail.
+tracked file, contract or extraction result makes `--check` fail.
 
 Do not commit a regenerated census in a pull request: `python ops/integrate.py
 build` regenerates it on every integration batch head as one generated commit,

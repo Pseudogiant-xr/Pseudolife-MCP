@@ -12,7 +12,7 @@
     "docs/cortex-mcp-spec.md": "43fba1fe5e5cd3710f59d7e99b414f7b78ea15eaa70b620b23716f3fae308d32",
     "docs/dev/ci-budget.md": "4167e11e4e6c9ce2d50b1c702e6f73d630276516aaf84152e370e3e71a909731",
     "docs/dev/dev-machines.md": "135cb4cbd97e7b34fddbc858df6e0d53e131fb2ec0589e7f3ce26026670dc0a1",
-    "docs/dev/merge-batches.md": "cbd23d9cfdea8325aac65da61e58000a9ce930ae27c8ef9c481b3cc00444d866",
+    "docs/dev/merge-batches.md": "84d6da0db1621364d28b16e11e1d576c30c90c9bfd63f9775f2c79856141d8e7",
     "docs/evidence/rust-stream-c-episode-20261009.json": "6dda143104a5b745eb322041190496caa9af3b61a219620c41633f6477d15079",
     "docs/guide/agent-isolation.md": "465b0c24a386ae3a92bf1a3d46e01114db061dc6ddd4a68836512fd191ff23f4",
     "docs/guide/benchmarks.md": "577a6a8230de0d57351e3e57262bb2b5385b27e6292bfc131c21c3522330fb97",
@@ -241,7 +241,7 @@
     "ops/install-shim-autostart.sh": "6f32b1c2ebd688546fdfd1837a3b6445d3195db99e9668c0360d13582c248888",
     "ops/install.ps1": "88264a10cb50a0f2b6348201e8befc46b271d06c2cdb8ea559a2a2591eaac565",
     "ops/install.sh": "7aad5c81dc204ace2adf3557a53ac5efff556152a71470b38a564fb1ae613866",
-    "ops/integrate.py": "42386fd3ea93472fc263e9ba8487069ddb851d25ec41a7d9b92ec5a4f189ca27",
+    "ops/integrate.py": "bfdc9005fbf0680fc10c6cf3103e6205daad203d678c0e3e390c7315078681f9",
     "ops/measure_reverify_population.py": "413ff8baa0e0b25b8a727b6bead248df753d4d26e7c697aa6a0542b68715cfa5",
     "ops/migrate-pg18.ps1": "a2a8bd96ab754249395a9d42b26bfd8e6b5ecf8d6da1cd72383ebf745c0acde8",
     "ops/migrate_drop_age.py": "bad14579affef14699a3e1898afd4ba6326944f5db1e9b5c0486ee2b23153eac",
@@ -39729,7 +39729,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/dev/merge-batches.md:214",
+          "location": "docs/dev/merge-batches.md:215",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -39759,7 +39759,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/integrate.py:728",
+          "location": "ops/integrate.py:742",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -65386,7 +65386,7 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/dev/merge-batches.md:261",
+      "location": "docs/dev/merge-batches.md:264",
       "reason": "forwarded parameters"
     },
     {

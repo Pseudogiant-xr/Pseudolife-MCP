@@ -190,7 +190,8 @@ If the census script fails on the batch head, `build` drops the members
 whose own diff changes the census inputs, naming the failure, and merges
 the rest again from master; `open` comments on and unlabels each, as after a
 conflict. If no member changes the inputs, or the script still fails
-without them, `build` refuses: the cause is master or this machine. Before
+without them, `build` refuses and names where to look: master, this
+machine or a member's head. Before
 the push, `open` runs CI's check on the batch head and refuses if it would
 fail, so a plan built without the regeneration cannot reach CI.
 
@@ -249,7 +250,9 @@ the push or `gh pr create` fails, nothing is commented on and rerunning
 4. CI on the batch pull request is the combined check of its members and
    their only full CI; no member is ever merged directly. If master moves
    before the merge, merge it forward only under the `merge-forward`
-   skill's exceptions; otherwise close the batch and build the next one.
+   skill's exceptions, regenerating the producer census in the merge
+   commit as the skill says (CI gates every batch on its currency);
+   otherwise close the batch and build the next one.
 5. The batch pull request gets the usual review pass before the merge
    click and the ruleset's approving review. Its members were reviewed on
    their own, so the batch review checks that its members and merged heads

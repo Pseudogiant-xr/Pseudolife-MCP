@@ -427,8 +427,9 @@ def _merge_members(plan: Plan, members: list[Member]) -> None:
         print(f"  dropped #{m.number}: {reason}")
 
 
-# The census script is member code, so it runs without the operator's
-# credentials: only what Python and git need to start, on Windows or POSIX.
+# The census script is member code, so it runs without the operator's tokens
+# in its environment: only what Python and git need to start, on Windows or
+# POSIX. (It still runs as the operator, as the full suite does.)
 CENSUS_ENV = ("PATH", "PATHEXT", "SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "COMSPEC",
               "TEMP", "TMP", "TMPDIR", "HOME", "USERPROFILE", "LANG", "LC_ALL",
               "PYTHONUTF8", "PYTHONIOENCODING")
@@ -507,10 +508,14 @@ def _census_ci_fails(root: Path, plan: Plan) -> bool:
     return False
 
 
-def _census_failure(proc: subprocess.CompletedProcess) -> str:
-    """The census script's failure in one line: its last output line."""
+def _census_failure(proc: subprocess.CompletedProcess, root: Path) -> str:
+    """The census script's failure in one line, its last output line, with
+    this machine's paths replaced: it is posted on a public pull request."""
     lines = (proc.stderr.strip() or proc.stdout.strip()).splitlines()
     text = lines[-1].strip() if lines else ""
+    for path, name in ((root, "<checkout>"), (Path.home(), "<home>")):
+        for form in {str(path), path.as_posix()}:
+            text = re.sub(re.escape(form), name, text, flags=re.IGNORECASE)
     return f"exit {proc.returncode}" + (f": {text[:300]}" if text else "")
 
 
@@ -526,13 +531,16 @@ def _regenerate_census(plan: Plan) -> str | None:
     proc = _census_run(root)
     if proc.returncode != 0:
         git("reset", "-q", "--hard", "HEAD")
-        return _census_failure(proc)
+        return _census_failure(proc, root)
     # Staged first: when a member deleted the census, the rewrite is untracked
     # and an unstaged diff would never show (or commit) it.
     if (root / CENSUS_JSON).is_file():
         git("add", "--", CENSUS_JSON)
     changed = _out("diff", "--name-only", "HEAD").splitlines()
     if not changed:
+        # A member's own census can already be current and still withdraw
+        # manual shapes master's had not.
+        plan.census_drift = sorted(_census_drift("HEAD") - _census_drift(plan.base_sha))
         return None
     if changed != [CENSUS_JSON]:
         git("reset", "-q", "--hard", "HEAD")
@@ -546,7 +554,8 @@ def _regenerate_census(plan: Plan) -> str | None:
     if _census_ci_fails(root, plan):
         raise Refusal(f"the census `python {CENSUS}` just wrote on the batch head is "
                       "already stale by its own `--ci-check`, so the script does not "
-                      "reproduce its output; fix that on master before building")
+                      f"reproduce its output: if a member changes {CENSUS}, leave it "
+                      "out of the next build; otherwise fix the script on master")
     plan.census_commit = _out("rev-parse", "HEAD")
     plan.census_drift = sorted(_census_drift("HEAD") - _census_drift(plan.base_sha))
     print(f"  regenerated the producer census in {plan.census_commit[:12]}")
@@ -636,14 +645,16 @@ def body(plan: Plan, suite: str | None = None, harness: str | None = None) -> st
     if plan.dropped:
         lines += ["", "## Dropped", ""]
         lines += [f"- #{d.member.number}: {d.reason}" for d in plan.dropped]
-    if plan.census_commit:
-        lines += ["", "## Producer census", "",
-                  f"`{plan.census_commit}` regenerates `{CENSUS_JSON}` for this head "
-                  f"with `python {CENSUS}`, the batch's one generated commit: the "
-                  "census is derived data that `build` keeps current, so no member "
-                  "regenerates it and no member was edited."]
+    if plan.census_commit or plan.census_drift:
+        lines += ["", "## Producer census", ""]
+        if plan.census_commit:
+            lines += [f"`{plan.census_commit}` regenerates `{CENSUS_JSON}` for this head "
+                      f"with `python {CENSUS}`, the batch's one generated commit: the "
+                      "census is derived data that `build` keeps current, so no member "
+                      "regenerates it and no member was edited."]
         if plan.census_drift:
-            lines += ["", "Trusted manual shapes withdrawn because a member changed "
+            lines += [""] * bool(plan.census_commit) + [
+                      "Trusted manual shapes withdrawn because a member changed "
                       "their source: " + ", ".join(f"`{p}`" for p in plan.census_drift)
                       + ". Review each construction and refresh its `MANUAL_SHA256` "
                       "fingerprint in a follow-up pull request (`rust/producer-census.md`)."]

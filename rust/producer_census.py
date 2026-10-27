@@ -1053,7 +1053,9 @@ def main() -> None:
                 parser.exit(1, "producer census is stale; run python rust/producer_census.py\n")
             print("producer census is stale (report only); regenerate before using it in a port slice")
     else:
-        OUTPUT.write_text(json.dumps(result, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        # LF on every OS, so a batch built on Windows commits the same bytes.
+        OUTPUT.write_text(json.dumps(result, indent=2, ensure_ascii=False) + "\n", encoding="utf-8",
+                          newline="\n")
     print(json.dumps({"surfaces": len(result["surface"]), "gaps": len(result["inventory_gaps"]),
                       "unreached": len(result["no_observed_producer"]), "unresolved": len(result["unresolved"])}))
 
