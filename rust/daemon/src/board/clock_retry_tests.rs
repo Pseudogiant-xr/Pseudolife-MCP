@@ -220,12 +220,33 @@ async fn half_open_proxy(upstream: std::net::SocketAddr) -> (u16, Cuts) {
     (port, cuts)
 }
 
-/// Another writer takes the bank's lease (its epoch moves) and leaves.
-async fn other_writer(dsn: &str) {
-    match Storage::open(dsn).await {
-        Ok(storage) => storage.close().await,
-        Err(_) => panic!("the second writer could not take the lease"),
-    }
+/// Another writer takes the bank's lease, moves its epoch and leaves, as
+/// `Storage::open` and `close` do (the advisory lock and the epoch bump), in
+/// a few milliseconds so the send that follows stays inside the probe
+/// interval.
+async fn other_writer(client: &tokio_postgres::Client) {
+    client
+        .execute(
+            "SELECT pg_advisory_lock(hashtextextended($1, 0))",
+            &[&crate::storage::WRITER_LEASE_KEY],
+        )
+        .await
+        .unwrap();
+    client
+        .execute(
+            "UPDATE meta SET value = to_jsonb((value #>> '{}')::bigint + 1) \
+             WHERE key = 'writer_lease_epoch'",
+            &[],
+        )
+        .await
+        .unwrap();
+    client
+        .execute(
+            "SELECT pg_advisory_unlock(hashtextextended($1, 0))",
+            &[&crate::storage::WRITER_LEASE_KEY],
+        )
+        .await
+        .unwrap();
 }
 
 #[tokio::test]
@@ -249,7 +270,7 @@ async fn a_send_heals_a_half_open_writer_session_on_its_retry() {
     // holds the bank for a moment, so the epoch the board captured is stale.
     cuts.cut_open();
     terminate(&side, pid).await;
-    other_writer(&dsn).await;
+    other_writer(&side).await;
     let messages = count(&side, "coordination_messages").await;
     let sent = board
         .dispatch("send", send(&to, "half-open"), &headers, "default")
