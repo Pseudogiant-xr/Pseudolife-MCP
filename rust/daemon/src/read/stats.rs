@@ -67,7 +67,7 @@ pub fn mcp_tools() -> Vec<(&'static str, ToolFn)> {
 /// `memory_stats` (mcp_server.py:1423-1428): `service.stats()` as is.
 fn mcp_memory_stats<'a>(app: &'a crate::http::App, _call: ToolCall<'a>) -> ToolFuture<'a> {
     Box::pin(async move {
-        stats(app)
+        stats(&app.service)
             .await
             .map(Value::Object)
             .map_err(ToolError::Internal)
@@ -184,13 +184,11 @@ fn capacity_warning(name: &str, size: usize, capacity: usize) -> Value {
 }
 
 /// `service.stats()`: the CMS block, then the Postgres block.
-async fn stats(app: &crate::http::App) -> anyhow::Result<Map<String, Value>> {
-    let ready = app
-        .service
-        .ensure_init()
-        .await
-        .map_err(|e| anyhow::anyhow!(e))?;
-    let cfg = &app.service.config.memory;
+pub(crate) async fn stats(
+    svc: &std::sync::Arc<crate::service::Service>,
+) -> anyhow::Result<Map<String, Value>> {
+    let ready = svc.ensure_init().await.map_err(|e| anyhow::anyhow!(e))?;
+    let cfg = &svc.config.memory;
     let specs = &cfg.band_specs;
     let Some(last) = specs.last() else {
         anyhow::bail!("no memory bands configured");

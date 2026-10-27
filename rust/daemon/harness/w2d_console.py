@@ -2,7 +2,8 @@
 (oracle) against the Rust daemon over ``GET /api/facts``,
 ``/api/facts/history``, ``/api/world``, ``/api/lessons``, ``/api/sources``,
 ``/api/recent``, ``/api/chain``, ``/api/entry``, ``/api/episodes``,
-``/api/episodes/summary`` and ``/api/consolidation``.
+``/api/episodes/summary``, ``/api/consolidation``, ``/api/overview`` and
+``/api/agents``' default view.
 
 usage:
   python w2d_console.py live    --rust-bin PATH [--only NAME ...] [--out FILE]
@@ -39,7 +40,9 @@ import w2e  # noqa: E402
 # Deliberate breaks (``--features mutants``) the scenarios must catch.
 MUTANTS = ["console-facts-no-contender", "console-sources-by-name", "console-chain-limit-clamped",
            "console-episodes-unsorted", "mcp-get-no-db-bump", "mcp-get-no-use-credit",
-           "mcp-recent-oldest-first", "mcp-consolidation-unsorted"]
+           "mcp-recent-oldest-first", "mcp-consolidation-unsorted",
+           "console-overview-contested-rows", "console-agents-no-limit-refusal",
+           "console-agents-ignore-limit"]
 
 OPS = ("get",)
 
@@ -64,6 +67,36 @@ def run_op(op: dict, port: int, mcp, dsn: str) -> dict | None:
     if op["op"] in OPS:
         return run_get(op, port, dsn)
     return _base_run_op(op, port, mcp, dsn)
+
+
+# ``/api/overview``'s ``dream.idle_seconds`` is ``now - (newest entry's ts)``
+# on each side, read moments apart: like ``w2e.idle_diffs`` for
+# ``memory_dream``, both must be numbers >= 0 within this bound (seconds;
+# a step's wall time plus slack), and the rest of the answer is exact.
+IDLE_BOUND_S = 10.0
+
+_base_compare = w2e.compare_response
+
+
+def compare_response(py, rs, tol, stats) -> list[str]:
+    out = []
+
+    def dream(r):
+        v = r.get("value") if isinstance(r, dict) else None
+        d = v.get("dream") if isinstance(v, dict) else None
+        return d if isinstance(d, dict) and "idle_seconds" in d else None
+
+    a, b = dream(py), dream(rs)
+    if a is not None and b is not None:
+        x, y = a["idle_seconds"], b["idle_seconds"]
+        numbers = all(isinstance(v, (int, float)) and not isinstance(v, bool) and v >= 0
+                      for v in (x, y))
+        if not numbers or abs(x - y) > IDLE_BOUND_S:
+            out.append(f"dream.idle_seconds: python {x!r} vs rust {y!r} "
+                       f"(not both >= 0 within {IDLE_BOUND_S}s)")
+        py = {**py, "value": {**py["value"], "dream": {**a, "idle_seconds": "<idle>"}}}
+        rs = {**rs, "value": {**rs["value"], "dream": {**b, "idle_seconds": "<idle>"}}}
+    return out + _base_compare(py, rs, tol, stats)
 
 
 def get(path: str, headers=(), **query) -> dict:
@@ -252,6 +285,31 @@ def scenarios() -> dict[str, dict]:
                 get("/api/consolidation", q="cache hit rate", top_k=0, min_cohesion=0.2),
                 get("/api/consolidation", q="cache hit rate", top_k=-1),
                 get("/api/consolidation", q="cache hit rate", min_cohesion="x"),
+                # /api/overview: every layer's count, the stats, dream and
+                # loop blocks in one answer.
+                get("/api/overview"),
+                # /api/agents (default view): open sessions other than the
+                # caller's, the limit below the configured cap, a limit
+                # below 1 (the service's ValueError, a 400), a non-numeric
+                # limit (the default 5).
+                get("/api/agents"),
+                get("/api/agents", [sess("cr-b")]),
+                get("/api/agents", limit=1),
+                get("/api/agents", limit=0),
+                get("/api/agents", limit=-2),
+                get("/api/agents", limit="x"),
+                get("/api/agents", view="other"),
+            ],
+        },
+        # With the board off, awareness answers its disabled shape before
+        # the limit is checked.
+        "console-agents-off": {
+            "config": "coordination:\n  enabled: false\n",
+            "seed": [store("An open session's note.", [sess("off-a")])],
+            "ops": [
+                get("/api/agents"),
+                get("/api/agents", limit=0),
+                get("/api/overview"),
             ],
         },
         # Stale rows under the "demote" policy: sorted last, with the
@@ -292,6 +350,7 @@ def install() -> None:
         if m not in w2e.MUTANTS:
             w2e.MUTANTS.append(m)
     w2e.run_op = run_op
+    w2e.compare_response = compare_response
 
 
 def main() -> int:
