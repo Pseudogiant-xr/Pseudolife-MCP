@@ -285,6 +285,14 @@ async fn a_send_after_a_half_open_writer_session_is_delivered() {
     drop(ready);
     // Inside the probe interval: the session dies unseen and another writer
     // holds the bank for a moment, so the epoch the board captured is stale.
+    let peer: Option<i32> = session
+        .client()
+        .query_one("SELECT inet_client_port()", &[])
+        .await
+        .unwrap()
+        .get(0);
+    eprintln!("DIAG proxied={} session client port {peer:?} dsn {}", cuts.0.lock().unwrap().len(),
+              proxied.split('@').nth(1).unwrap_or("?"));
     cuts.cut_open();
     eprintln!("DIAG cut: closed={} {:?}", session.client().is_closed(), probed.elapsed());
     terminate(&side, pid).await;
