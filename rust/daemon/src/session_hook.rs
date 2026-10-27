@@ -506,15 +506,11 @@ async fn episode_advertisement(
     let ep = match task.await {
         Ok(Ok(ep)) => ep,
         Ok(Err(e)) => {
-            eprintln!(
-                "session-start identity registration failed for session_id={session_id:?}: {e}"
-            );
+            eprintln!("session-start identity registration failed: {e}");
             return String::new();
         }
         Err(e) => {
-            eprintln!(
-                "session-start identity registration failed for session_id={session_id:?}: {e}"
-            );
+            eprintln!("session-start identity registration failed: {e}");
             return String::new();
         }
     };
@@ -617,8 +613,7 @@ pub async fn hook_session_start(app: &App, q: SessionStartQuery<'_>) -> String {
             prefix.push(ad);
             has_handle = true;
             let variant = memory_policy_variant(&app.service.config.memory_policy, Some(id));
-            let short: String = id.chars().take(12).collect();
-            eprintln!("memory-policy variant {variant} for session {short}");
+            eprintln!("memory-policy variant {variant} for a registered session");
         }
     }
     let prefix = prefix.join("\n\n");
