@@ -3075,6 +3075,18 @@ def dream(action, **kw) -> dict:
     return tool("memory_dream", action=action, **kw)
 
 
+# /health's conditional subsystem keys (daemon.py:284-365) and `status`, as
+# one answer: each key's value, or "<absent>" where the payload omits it; a
+# stall record's clocks keep only null-or-not. The rest of the payload is
+# the w1a harness's (run.py).
+HEALTH_KEYS = ("status", "extractor", "stall", "migration_partial", "dream_tracking_error",
+               "capacity_warning", "lesson_reconciliation_required")
+
+
+def health() -> dict:
+    return {"op": "health"}
+
+
 # A tool argument naming the last commit_token this side answered.
 PULL_TOKEN = "@pull_token"
 
@@ -3404,6 +3416,11 @@ MUTANTS += w2e_graph_insight.MUTANTS
 # embedded record and then the rest alphabetically, and no near-tie can
 # reorder them.
 DREAM_RUN_QUIET = DREAM_RUN_CONFIG + "    alias_candidate_min_cosine: 0\n"
+# DREAM_RUN_QUIET with dreams enabled (/health reads "disabled" otherwise)
+# and the sweep a day away, so no automatic dream joins the manual ones.
+HEALTH_DREAM_CONFIG = DREAM_RUN_QUIET.replace(
+    "    enabled: false\n    stall_notice: false\n",
+    "    enabled: true\n    stall_notice: false\n    sweep_interval_seconds: 86400\n")
 
 
 def batch_replies(texts, claims=(), events=(), relations=()) -> list[dict]:
@@ -3571,6 +3588,73 @@ SCENARIOS.update({
             dream("runs"),
             fact_get("Ops Board", "owner"),
             fact_get("Staging Database", "engine"),
+        ],
+    },
+    # /health's conditional keys. Dreams on, with the sweep a day away so
+    # only the manual runs below dream: two failed extractions open a hard
+    # stall ("stalled" plus the stall record), a status call reads it.
+    "health-stall": {
+        "config": HEALTH_DREAM_CONFIG,
+        "extractor": OUTAGE_EXTRACTOR,
+        "seed": [fact("Health Host", "OS", "Debian 12")],
+        "ops": [
+            *[store(t, source="conversation") for t in OUTAGE_NOTES],
+            health(),
+            dream("run"),
+            health(),
+            dream("run"),
+            health(),
+            dream("status"),
+        ],
+    },
+    # Two runs the fallback served open a warning stall ("configured" plus
+    # the record); the primary's recovery closes it (no record).
+    "health-stall-fallback": {
+        "config": HEALTH_DREAM_CONFIG,
+        "extractor": FALLBACK_EXTRACTOR,
+        "extractor_fallback": True,
+        "extractor_keys": {"primary": "sk-w2e-primary-0001", "fallback": "sk-w2e-fallback-0002"},
+        "seed": [fact("Fallback Host", "OS", "Debian 12")],
+        "ops": [
+            store(FALLBACK_NOTES[0], source="conversation"),
+            dream("run"),
+            store(FALLBACK_NOTES[1], source="conversation"),
+            dream("run"),
+            health(),
+            store(FALLBACK_NOTES[2], source="conversation"),
+            dream("run"),
+            health(),
+        ],
+    },
+    # A one-band bank of five: no flag at three, the flag at four (exactly
+    # 80%) and when full; never `degraded`.
+    "health-capacity": {
+        "live_only": "compared live against the Python daemon; no golden recorded",
+        "config": "memory:\n  miras:\n    preset: custom\n    bands:\n      - name: flat\n        max_entries: 5\n",
+        "seed": [],
+        "ops": [
+            store("Capacity note one about the deploy checklist."),
+            store("Capacity note two about rotating the bearer tokens."),
+            store("Capacity note three about the weather in Hobart."),
+            health(),
+            store("Capacity note four about lunch plans."),
+            health(),
+            store("Capacity note five about the index rebuild."),
+            store("Capacity note six about the backup window."),
+            health(),
+        ],
+    },
+    # A corrupt dream acknowledgement secret: dream tracking refuses (a
+    # dream-only degradation), /health names the code, status stays ok.
+    # Rust initializes tracking at the first dream call, so one comes first.
+    "health-tracking-error": {
+        "config": DREAM_RUN_QUIET,
+        "seed": [fact("Tracking Host", "OS", "Debian 12"),
+                 sql("UPDATE meta SET value = '\"not-a-secret\"'::jsonb "
+                     "WHERE key = 'dream_ack_secret_v1'", after_stop=True)],
+        "ops": [
+            dream("status"),
+            health(),
         ],
     },
     "dream-run-outage": {
@@ -5787,6 +5871,15 @@ def run_op(op: dict, port: int, mcp: Mcp, dsn: str) -> dict | None:
         return {"isError": False, "value": None}
     if op["op"] in w2e_episodes.OPS:
         return w2e_episodes.run(op, port, dsn, sys.modules[__name__])
+    if op["op"] == "health":
+        r = w1a.call(port, "GET", "/health", [AUTH], None)
+        body = r.get("json") if isinstance(r.get("json"), dict) else {}
+        value = {k: body.get(k, "<absent>") for k in HEALTH_KEYS}
+        if isinstance(value["stall"], dict):
+            value["stall"] = {k: _clock(v) if k in DREAM_CLOCK_KEYS else v
+                              for k, v in value["stall"].items()}
+        # A degraded payload answers 503; the status key carries it.
+        return {"isError": r["status"] not in (200, 503), "value": value}
     if op["op"] == "http":
         body = json.dumps(op["body"]).encode() if "body" in op else None
         hdrs = [AUTH] + ([("Content-Type", "application/json")] if body else [])

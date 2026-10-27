@@ -98,6 +98,10 @@ pub struct Snapshot {
     /// clock reseed: `/health` `ready` reads its live reseed flag
     /// (`MemoryService.coordination_tier_ready`).
     pub startup: Option<Arc<crate::startup::StartupState>>,
+    /// The ready service, published with `startup`: `/health` reads the
+    /// resident bank and the dream's tracking state from it, as Python
+    /// reads `svc._cms` and `svc._dream_tracking_error`, without the lock.
+    pub ready: Option<Arc<Ready>>,
 }
 
 #[derive(Default)]
@@ -140,6 +144,9 @@ pub struct Service {
     /// attributes in Python, kept across a rehydrate, so a pass still
     /// running over a superseded ready service keeps its single flight.
     dream_run: Arc<crate::dream::run::RunState>,
+    /// `/health`'s last `dream_tracking_error` code, for a read that finds
+    /// the tracking state busy.
+    pub(crate) health_tracking_code: std::sync::Mutex<Option<String>>,
 }
 
 impl Service {
@@ -173,6 +180,7 @@ impl Service {
             board: std::sync::OnceLock::new(),
             hlc: Arc::default(),
             dream_run: Arc::default(),
+            health_tracking_code: std::sync::Mutex::new(None),
         }
     }
 
@@ -181,6 +189,12 @@ impl Service {
     pub fn install(self: &Arc<Self>, board: &Arc<crate::board::Board>) {
         let _ = self.handle.set(Arc::downgrade(self));
         let _ = self.board.set(Arc::downgrade(board));
+    }
+
+    /// The dream's process state (`/health` reads the stall tracker here,
+    /// without the service lock).
+    pub fn dream_run(&self) -> &Arc<crate::dream::run::RunState> {
+        &self.dream_run
     }
 
     /// The owned service, once installed.
@@ -343,7 +357,11 @@ impl Service {
                         .await
                         .map_err(|error| format!("{error:#}"))?;
                     let startup = r.startup.clone();
-                    self.update(|s| s.startup = Some(startup));
+                    let published = r.clone();
+                    self.update(|s| {
+                        s.startup = Some(startup);
+                        s.ready = Some(published);
+                    });
                 }
                 return Ok(r.clone());
             }
@@ -423,7 +441,11 @@ impl Service {
                 // Published only now, as Python's flag stays pending until
                 // the reseed: `ready` never leads the clock.
                 let startup = ready.startup.clone();
-                self.update(|s| s.startup = Some(startup));
+                let published = ready.clone();
+                self.update(|s| {
+                    s.startup = Some(startup);
+                    s.ready = Some(published);
+                });
                 Ok(ready)
             }
             Err(e) => {
@@ -478,10 +500,18 @@ impl Service {
             board.hlc.lock().expect("hlc lock").seeded = false;
         }
         inner.storage = Some(fresh.clone());
-        if let Some(ready) = inner.ready.take() {
-            inner.ready = Some(Arc::new(ready.over(fresh.clone())));
-        }
-        self.update(|s| s.storage = Some(fresh));
+        let republished = inner
+            .ready
+            .take()
+            .map(|ready| Arc::new(ready.over(fresh.clone())));
+        inner.ready = republished.clone();
+        self.update(|s| {
+            s.storage = Some(fresh);
+            // Only a ready service `/health` already sees is republished.
+            if s.ready.is_some() {
+                s.ready = republished;
+            }
+        });
         Ok(())
     }
 
@@ -505,7 +535,10 @@ impl Service {
         eprintln!("{reason}: dropping the resident stores and re-reading the bank before serving");
         inner.ready = None;
         self.dream_run.forget_batch_failures();
-        self.update(|s| s.startup = None);
+        self.update(|s| {
+            s.startup = None;
+            s.ready = None;
+        });
         storage.acknowledge_rehydration();
     }
 

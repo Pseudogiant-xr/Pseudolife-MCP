@@ -63,9 +63,10 @@ DB_DECLARED = [
     ("row", "meta", "curation_listing_spelling_v2", "the listing-spelling carry-over stamps the clock (W2-E)"),
     ("warmup", "retrieval_events", None, "one warmup probe and its sequence increment (W2-D telemetry)"),
 ]
-# /health keys only Python can emit, owned by later slices (each is conditional there).
-HEALTH_DECLARED_ONLY_PYTHON = {"stall", "migration_partial", "dream_tracking_error",
-                               "capacity_warning", "lesson_reconciliation_required"}
+# /health keys only Python can emit (each is conditional there): no Rust
+# producer yet. `stall`, `dream_tracking_error` and `capacity_warning` are
+# emitted by both since B4 (w2e.py's health-* scenarios).
+HEALTH_DECLARED_ONLY_PYTHON = {"migration_partial", "lesson_reconciliation_required"}
 NOT_IMPLEMENTED = "not_implemented"
 MUTANTS = ["del-unescaped", "auth-candidate-order", "serde-json-writer", "skip-relation-seed", "skip-lease-epoch", "drop-alter-tail", "pair-ignores-origin",
            "health-omits-db", "route-405-as-404", "body-limit-off", "tokenless-maintainer-open",
