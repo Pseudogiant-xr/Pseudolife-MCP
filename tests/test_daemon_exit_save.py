@@ -208,20 +208,18 @@ def test_a_failed_exit_save_is_not_retried(monkeypatch):
     assert calls == [1]
 
 
-def _drive_lifespan(app):
+def _drive_lifespan(app, events):
     """Run ``app`` through a lifespan startup and shutdown the way uvicorn
-    does; returns the messages the app sent, in order."""
+    does, logging each message it sends to ``events``."""
     incoming = [{"type": "lifespan.startup"}, {"type": "lifespan.shutdown"}]
-    sent = []
 
     async def receive():
         return incoming.pop(0)
 
     async def send(message):
-        sent.append(message["type"])
+        events.append("sent " + message["type"])
 
     asyncio.run(app({"type": "lifespan"}, receive, send))
-    return sent
 
 
 def _inner_lifespan_app(events, *, fail_shutdown: bool = False):
@@ -237,19 +235,23 @@ def _inner_lifespan_app(events, *, fail_shutdown: bool = False):
 
 
 @pytest.mark.parametrize("fail_shutdown", [False, True])
-def test_lifespan_shutdown_runs_the_save_after_the_app_shuts_down(fail_shutdown):
+def test_lifespan_shutdown_saves_after_the_app_and_before_uvicorn_hears(fail_shutdown):
+    """Startup does not save; the save runs after the wrapped app shut down
+    and before uvicorn is told the shutdown finished, so uvicorn waits for
+    it before re-raising the signal."""
     from pseudolife_memory.daemon import save_on_lifespan_shutdown
 
     events = []
     app = save_on_lifespan_shutdown(
         _inner_lifespan_app(events, fail_shutdown=fail_shutdown),
         lambda: events.append("save"))
-    sent = _drive_lifespan(app)
-    assert events == ["inner shutdown", "save"]
-    assert sent[-1] in ("lifespan.shutdown.complete", "lifespan.shutdown.failed")
+    _drive_lifespan(app, events)
+    done = "failed" if fail_shutdown else "complete"
+    assert events == ["sent lifespan.startup.complete", "inner shutdown",
+                      "save", f"sent lifespan.shutdown.{done}"]
 
 
-def test_lifespan_startup_and_http_traffic_do_not_save():
+def test_http_traffic_does_not_save():
     from pseudolife_memory.daemon import save_on_lifespan_shutdown
 
     saves = []

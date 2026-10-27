@@ -490,10 +490,12 @@ def save_on_lifespan_shutdown(app, save):
     running atexit handlers: the atexit exit save never ran when SIGTERM
     stopped a daemon that is not PID 1 (a pip install, a shim-spawned
     daemon; a container's PID 1 drops the re-raised signal and exits
-    normally). The lifespan shutdown runs before that re-raise. ``save`` runs once the wrapped app has shut down (the MCP
-    session manager stopped, so no tool call is mid-write), and before
-    uvicorn hears it finished, on a worker thread: it takes the service
-    lock.
+    normally). The lifespan shutdown runs before that re-raise. ``save``
+    runs once the wrapped app has shut down (the MCP session manager
+    stopped, so no tool call is mid-write), and before uvicorn hears it
+    finished, on a worker thread: it takes the service lock. A second
+    Ctrl-C during the graceful shutdown makes uvicorn skip the lifespan
+    shutdown, and then neither path saves.
     """
     import asyncio
 
