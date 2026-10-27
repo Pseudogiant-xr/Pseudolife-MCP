@@ -80,7 +80,7 @@ export interface DreamStatus {
   last_stall?: Stall | null;
   /** The session-start hook's one-line stall notice, rendered by the daemon;
    *  null while dreams are healthy. */
-  stall_notice?: string | null;
+  stall_line?: string | null;
   extractor_mode?: string;
   primary_healthy?: boolean;
   error?: string;

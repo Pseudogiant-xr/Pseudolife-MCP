@@ -1350,9 +1350,10 @@ pseudolife-mcp-daemon`).
   means dreaming itself is switched off in config. `"extractor":
   "stalled"` means an extractor is configured but live dreams have stopped
   reaching it; the `stall` sub-object gives the reason and times. For
-  `stall.reason` `login_expired`, the extractor CLI's login lapsed (or a
-  hosted endpoint rejected its key): re-run
-  `claude auth login` (or `codex login`) on the daemon host. See
+  `stall.reason` `login_expired`, the extractor CLI is signed out (or a
+  hosted endpoint rejected its key): sign it in again on the machine
+  running the CLI shim (`stall.shim_host` when that is not the daemon's
+  machine) by running `claude`, then `/login` (or `codex login`). See
   [When dreaming stalls](docs/guide/dreaming.md#when-dreaming-stalls).
 - **Lite daemon refuses to start on Windows** with a message about the data
   path: the embedded Postgres runtime needs an **ASCII-only** data
@@ -3686,7 +3687,7 @@ stall record and reports it:
   and `pseudolife-mcp briefing` open with one line, for example:
 
   ```text
-  Pseudolife-MCP: dreams stalled since 2026-09-28 09:10+00:00 (login_expired): the extractor CLI's login expired; re-run `claude auth login` (or `codex login`) on the daemon host.
+  Pseudolife-MCP: dreams stalled since 2026-09-28 09:10+00:00 (login_expired): the extractor CLI is signed out on the machine running the CLI shim; sign it in there: run `claude`, then `/login` (or `codex login`).
   ```
 - **On the board.** The daemon posts, as the reserved sender `daemon`, one
   message to every attached, non-idle session when a stall begins and one
@@ -3710,32 +3711,41 @@ you work on.
 
 - **The shim.** Its own `/health` answers 503 with `"status":
   "login_required"`. The body carries the CLI's message in `detail`, the
-  `provider` (`claude` or `codex`), the shim's OS `user`, and the command in
-  `fix`. Any other CLI failure is `"status": "cli_error"`, with the CLI's own
-  output from stdout and stderr in `detail`.
+  `provider` (`claude` or `codex`), the shim's OS `user` (left out when it is
+  not a plain user name), and the command in `fix`. That endpoint has no
+  authentication, so the user name is visible to anything that can reach the
+  shim: loopback, or the Docker bridge, by default. Any other CLI failure is
+  `"status": "cli_error"`, with the CLI's own output from stdout and stderr
+  in `detail`.
 - **The stall record.** The daemon carries the provider and user into the
-  record (`provider`, `shim_user`).
+  record (`provider`, `shim_user`), plus `shim_host` when the primary shim
+  runs on another machine. In `primary` mode, where no auto-mode probe runs,
+  a dream that fails with `login_expired` asks the shim's `/health` once.
 - **Every surface names the sign-in.** That means the session-start line,
   `pseudolife-mcp briefing`, the board notice, the Console (the Observatory
-  and the Dreamer card) and `pseudolife-mcp doctor`. Each says which CLI is
-  signed out, on which machine, as which user, and the one command, for
-  example:
+  and the Dreamer card), `pseudolife-mcp doctor` and `memory_dream(action=
+  "status")`'s `stall_line`. Each says which CLI is signed out, where, as
+  which user, and the one command, for example:
 
   ```text
-  Pseudolife-MCP: dreams stalled since 2026-10-27 03:01+11:00 (login_expired): the Claude Code CLI is signed out on this machine; sign it in there as svc: run `claude`, then `/login`.
+  Pseudolife-MCP: dreams stalled since 2026-10-27 03:01+11:00 (login_expired): the Claude Code CLI is signed out on the machine running the Pseudolife daemon (box.example); sign it in there as svc: run `claude`, then `/login`.
   ```
 - **Which machine the line names.**
-  - The session-start line reads it from the address the session reaches
-    the daemon at: "this machine" for a loopback address, else "the machine
-    running the Pseudolife daemon (<host>)".
-  - Doctor uses its own daemon URL the same way.
-  - The briefing, the board notice and the Console say "the machine running
-    the Pseudolife daemon".
-  - `/health` is unauthenticated, so it carries the provider but never the
-    user.
-- **Recovery.** While the shim's cached verdict is a failure it re-checks
-  every 30 seconds, so the notice clears soon after you sign in. The next
-  sweep's dream then closes the stall.
+  - A shim on another machine than the daemon is named by its own host:
+    "the machine running the CLI shim (<host>)".
+  - Otherwise the session-start line names the daemon's machine by the
+    address the session reaches it at, and doctor does the same with its own
+    daemon URL. A loopback address gets the generic "the machine running the
+    Pseudolife daemon", because an SSH tunnel to a remote daemon looks the
+    same.
+  - The briefing, the board notice and the Console always use the generic
+    words.
+  - `/health` is unauthenticated, so it carries the provider and a remote
+    shim's host but never the user.
+- **Recovery.** While the shim's cached verdict is a sign-in failure, it
+  re-checks every 30 seconds, so the notice clears soon after you sign in.
+  Other failures keep the 5-minute pace. The next sweep's dream then closes
+  the stall.
 
 ## Session digests (opt-in) — one prose memory per closed session
 

@@ -894,3 +894,19 @@ def test_builder_puts_the_identity_on_the_probe(monkeypatch):
     ext, which = d.build_extractor_with_fallback(_cfg("http://p:1/v1", fb="http://f:2/v1"))
     assert ext.primary_probe["provider"] == "claude"
     assert ext.primary_probe["shim_user"] == "svc"
+
+
+@pytest.mark.parametrize("primary, shim_host", [
+    ("http://host.docker.internal:8082/v1", None),     # the daemon's own host
+    ("http://127.0.0.1:8082/v1", None),
+    ("http://localhost:8082/v1", None),
+    ("http://gpu-box.example:8082/v1", "gpu-box.example"),
+])
+def test_builder_records_where_the_signed_out_shim_runs(monkeypatch, primary, shim_host):
+    from pseudolife_memory.memory import dream as d
+    cause = d.ProbeCause("login_expired", "/health HTTP 503 (login_required)",
+                         provider="claude", shim_user="svc")
+    monkeypatch.setattr(d, "probe_endpoint_cause", lambda *a, **k: cause)
+    monkeypatch.setattr(d, "_probe_retry_delay", 0.0)
+    ext, _ = d.build_extractor_with_fallback(_cfg(primary, fb="http://f:2/v1"))
+    assert ext.primary_probe["shim_host"] == shim_host

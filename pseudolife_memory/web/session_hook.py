@@ -621,21 +621,22 @@ def hook_memory_policy(service: Any, session_id: str | None = None,
 
 
 _HOST_HEADER_RE = re.compile(r"(\[[0-9A-Fa-f:.%]{2,64}\]|[A-Za-z0-9.-]{1,253})(:\d{1,5})?")
-_LOOPBACK_HOSTS = {"localhost", "::1"}
 
 
 def stall_where(host_header: str | None) -> str | None:
     """Where the daemon runs, as the hook's caller reaches it, for the
-    dream-stall line: "this machine" for a loopback ``Host``, else the
-    daemon's machine named by the host the client used. None (the line's
-    default) for a missing or malformed header; the value is echoed only
-    to the client that sent it."""
+    dream-stall line: the daemon's machine named by the host the client
+    used. None (the line's default, "the machine running the Pseudolife
+    daemon") for a missing or malformed header, and for a loopback one: an
+    SSH tunnel to a remote daemon looks the same, so loopback is no
+    evidence the daemon runs on the caller's machine (Codex review of
+    1f782865). The value is echoed only to the client that sent it."""
     if not host_header or not _HOST_HEADER_RE.fullmatch(host_header):
         return None
     host = _HOST_HEADER_RE.fullmatch(host_header).group(1).strip("[]").lower()
-    if host in _LOOPBACK_HOSTS or host.startswith("127."):
-        return "this machine"
-    from pseudolife_memory.memory.dream import DAEMON_MACHINE
+    from pseudolife_memory.memory.dream import DAEMON_MACHINE, loopback_host
+    if loopback_host(host):
+        return None
     return f"{DAEMON_MACHINE} ({host})"
 
 

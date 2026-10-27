@@ -47,28 +47,28 @@ describe("describeDreamRun", () => {
   });
 });
 
-// GET /api/dream/status and /api/overview's dream block carry stall_notice:
+// GET /api/dream/status and /api/overview's dream block carry stall_line:
 // the daemon's rendered line while dreams are stalled, else null.
 describe("stallNotice", () => {
   const NOTICE =
     "Pseudolife-MCP: dreams stalled since 2026-10-27 03:01+11:00 (login_expired): the Claude Code CLI is signed out on the machine running the Pseudolife daemon; sign it in there as svc: run `claude`, then `/login`.";
 
   it("shows the daemon's notice verbatim", () => {
-    expect(stallNotice({ stall_notice: NOTICE })).toBe(NOTICE);
+    expect(stallNotice({ stall_line: NOTICE })).toBe(NOTICE);
   });
 
   it("shows nothing for a null, missing, blank or non-string notice", () => {
-    expect(stallNotice({ stall_notice: null })).toBeNull();
+    expect(stallNotice({ stall_line: null })).toBeNull();
     expect(stallNotice({})).toBeNull();
     expect(stallNotice(undefined)).toBeNull();
     expect(stallNotice(null)).toBeNull();
-    expect(stallNotice({ stall_notice: "" })).toBeNull();
-    expect(stallNotice({ stall_notice: "   " })).toBeNull();
-    expect(stallNotice({ stall_notice: 42 })).toBeNull();
+    expect(stallNotice({ stall_line: "" })).toBeNull();
+    expect(stallNotice({ stall_line: "   " })).toBeNull();
+    expect(stallNotice({ stall_line: 42 })).toBeNull();
   });
 
   it("renders the notice's backticked commands as inline code", () => {
-    const code = splitBackticks(stallNotice({ stall_notice: NOTICE })).filter((s) => s.code);
+    const code = splitBackticks(stallNotice({ stall_line: NOTICE })).filter((s) => s.code);
     expect(code.map((s) => s.text)).toEqual(["claude", "/login"]);
   });
 });

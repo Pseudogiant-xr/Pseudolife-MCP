@@ -46,13 +46,13 @@ export function describeDreamRun(r: DreamRunResult): DreamOutcome {
 }
 
 /**
- * The daemon's stall notice (GET /api/dream/status `stall_notice`), the line
+ * The daemon's stall notice (GET /api/dream/status `stall_line`), the line
  * the session-start hook shows: the daemon writes the whole sentence, remedy
  * included, so the Console only decides whether to show it. Anything but a
  * non-empty string reads as no notice.
  */
-export function stallNotice(d: { stall_notice?: unknown } | null | undefined): string | null {
-  const n = d?.stall_notice;
+export function stallNotice(d: { stall_line?: unknown } | null | undefined): string | null {
+  const n = d?.stall_line;
   if (typeof n !== "string") return null;
   const t = n.trim();
   return t ? t : null;

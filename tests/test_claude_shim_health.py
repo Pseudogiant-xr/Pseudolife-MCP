@@ -586,15 +586,20 @@ def test_other_failures_carry_no_sign_in_fields():
     assert "provider" not in body and "user" not in body
 
 
-@pytest.mark.parametrize("ok, age, refreshes", [
-    (False, 31.0, True),     # a failure is re-checked after 30 s
-    (False, 29.0, False),
-    (True, 31.0, False),     # a healthy verdict keeps the 5-minute TTL
-    (True, 301.0, True),
+@pytest.mark.parametrize("status, age, refreshes", [
+    ("login_required", 31.0, True),   # a sign-in failure is re-checked after 30 s
+    ("login_required", 29.0, False),
+    # Opus review of 1f782865: any other failure (a rate limit, a slow CLI)
+    # keeps the 5-minute TTL, or a polled /health would spend a real call
+    # every 30 s.
+    ("cli_error", 31.0, False),
+    ("cli_error", 301.0, True),
+    ("ok", 31.0, False),
+    ("ok", 301.0, True),
 ])
-def test_a_failure_verdict_is_rechecked_sooner(monkeypatch, ok, age, refreshes):
+def test_a_sign_in_failure_is_rechecked_sooner(monkeypatch, status, age, refreshes):
     cli = shim.ClaudeCli(Path("claude.exe"), "m", 30.0)
-    cli._health_snapshot = (ok, {"status": "ok"} if ok else {"status": "cli_error"})
+    cli._health_snapshot = (status == "ok", {"status": status})
     cli._health_at = time.monotonic() - age
     started = []
     monkeypatch.setattr(shim.threading, "Thread",

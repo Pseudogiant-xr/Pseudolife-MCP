@@ -132,6 +132,8 @@ pub struct StallTracker {
     /// `login_required` answer, via the primary probe).
     provider: Option<String>,
     shim_user: Option<String>,
+    /// The shim's host when it runs on another machine than the daemon.
+    shim_host: Option<String>,
 }
 
 /// `DreamStallTracker.OVERDUE_SWEEPS`.
@@ -141,7 +143,7 @@ const OVERDUE_SWEEPS: f64 = 3.0;
 fn stall_remedy(reason: &str) -> &'static str {
     match reason {
         "login_expired" => {
-            "the extractor CLI's login expired; re-run `claude auth login` (or `codex login`) on the daemon host"
+            "the extractor CLI is signed out on the machine running the CLI shim; sign it in there: run `claude`, then `/login` (or `codex login`)"
         }
         "extractor_unreachable" => {
             "check the extractor endpoint is up and reachable from the daemon"
@@ -236,7 +238,15 @@ fn signed_out_remedy(
     } else {
         ""
     };
-    let place = where_.filter(|w| !w.is_empty()).unwrap_or(DAEMON_MACHINE);
+    // The sign-in lives where the shim runs: a shim on another machine is
+    // named by its own host, whatever `where_` says of the daemon.
+    let place = match record.get("shim_host").and_then(Value::as_str) {
+        Some(host) if !host.is_empty() => format!("the machine running the CLI shim ({host})"),
+        _ => where_
+            .filter(|w| !w.is_empty())
+            .unwrap_or(DAEMON_MACHINE)
+            .to_string(),
+    };
     Some(format!(
         "the {name} CLI is signed out on {place}{serving}; sign it in there{as_user}: {sign_in}"
     ))
@@ -345,6 +355,7 @@ impl StallTracker {
         if let Some(provider) = self.provider.as_deref().filter(|p| !p.is_empty()) {
             m.insert("provider".into(), json!(provider));
             m.insert("shim_user".into(), json!(self.shim_user));
+            m.insert("shim_host".into(), json!(self.shim_host));
         }
         self.stall = Some(m);
     }
@@ -427,6 +438,7 @@ impl StallTracker {
         });
         self.provider = signed_out.and_then(|p| p.provider.clone());
         self.shim_user = signed_out.and_then(|p| p.shim_user.clone());
+        self.shim_host = signed_out.and_then(|p| p.shim_host.clone());
         if self.stall.is_some() || self.failures >= 2 {
             let since = self
                 .stall
@@ -447,6 +459,7 @@ impl StallTracker {
         self.last_error = None;
         self.provider = None;
         self.shim_user = None;
+        self.shim_host = None;
         self.due_since = None;
         if let Some(mut stall) = self.stall.take() {
             stall.insert("recovered_at".into(), json!(now));
@@ -1865,6 +1878,12 @@ pub async fn run_auto(
         Some(json!({"which": which, "base_url": base_url, "at": now()}));
     let mut result = dream_run(svc, &ready, &caller, &writer, &extractor, limit).await?;
     result.insert("extractor".into(), json!(which));
+    // No auto-mode probe ran (primary mode, or no fallback): a sign-in
+    // failure asks the shim's /health once for who to sign in.
+    let probe = match probe {
+        None if which == "primary" => super::extractor::signed_out_probe(cfg, &result).await,
+        other => other,
+    };
     let forced = super::extractor::resolve_endpoints(cfg).mode == "fallback";
     ready.dream_run.stall.lock().expect("stall tracker").record(
         &result,

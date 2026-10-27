@@ -67,7 +67,7 @@ export interface DreamerStatus {
   last_dream_extractor?: { which?: string; base_url?: string | null; at?: Epoch | null } | null;
   /** The session-start hook's one-line stall notice, rendered by the daemon;
    *  null while dreams are healthy. */
-  stall_notice?: string | null;
+  stall_line?: string | null;
 }
 
 export type ConfigPatch = Record<string, unknown>;

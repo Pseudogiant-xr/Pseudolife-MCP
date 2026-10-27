@@ -325,17 +325,19 @@ def _wake_report(health: dict | None) -> dict:
 
 
 def dream_health_line(health: dict | None, daemon_url: str) -> str:
-    """Dream health from the daemon's ``/health``: ``ok``, ``unknown`` (no
-    answer), or the session-start hook's stall line. A signed-out extractor
-    CLI is named on the machine this client reaches the daemon at ("this
-    machine" for a loopback URL, else the URL's host). ``/health`` never
-    carries the shim's user, so the line says to sign in there without
-    one."""
+    """Dream health from the daemon's ``/health``: ``no stall reported``
+    (the Rust daemon's ``/health`` carries no stall object, so this is not
+    a clean bill), ``unknown`` (no answer), or the session-start hook's
+    stall line. A signed-out extractor CLI is named where it runs: a shim
+    on another machine by its own host, else the daemon's machine, named by
+    this client's daemon URL unless that is loopback (a tunnel looks the
+    same). ``/health`` never carries the shim's user, so the line says to
+    sign in there without one."""
     if not isinstance(health, dict):
         return "unknown"
     stall = health.get("stall")
     if not isinstance(stall, dict):
-        return "ok"
+        return "no stall reported"
     from urllib.parse import urlsplit
 
     from pseudolife_memory.memory.dream import dream_stall_line
@@ -344,7 +346,7 @@ def dream_health_line(health: dict | None, daemon_url: str) -> str:
         netloc = urlsplit(daemon_url).netloc.rpartition("@")[2]
     except ValueError:
         netloc = ""
-    return dream_stall_line(stall, where=stall_where(netloc)) or "ok"
+    return dream_stall_line(stall, where=stall_where(netloc)) or "no stall reported"
 
 
 def _codex_hooks_line(health: dict) -> str:

@@ -48,7 +48,8 @@ PRIMARY_500 = {"pulled": 3, "extractor_failed": True,
 LOGIN_PROBE = {"reason": "login_expired", "error": "/health HTTP 503 (login_required)",
                "fallback_resolves": True}
 SKIP_PROBE = {**LOGIN_PROBE, "fallback_resolves": False}
-SIGNED_OUT_PROBE = {**LOGIN_PROBE, "provider": "claude", "shim_user": "svc"}
+SIGNED_OUT_PROBE = {**LOGIN_PROBE, "provider": "claude", "shim_user": "svc",
+                    "shim_host": "gpu-box.example"}
 
 # (op, args...) steps; "at" advances the fake clock to an absolute time.
 SEQUENCES = {
@@ -142,6 +143,9 @@ TEXT_RECORDS = [
                "shim_user": "svc"}),
     ("begin", {"since": 1700000000.0, "reason": "login_expired", "provider": "other",
                "shim_user": "svc"}),
+    # A shim on another machine is named by its own host.
+    ("begin", {"since": 1700000000.0, "reason": "login_expired", "provider": "claude",
+               "shim_user": "svc", "shim_host": "gpu-box.example"}),
 ]
 # ``dream_stall_line(stall, where)``: the session-start line and
 # dream_status's ``stall_notice``.
@@ -154,6 +158,9 @@ LINE_RECORDS = [
       "shim_user": "svc"}, "this machine"),
     ({"since": 1700000000.0, "reason": "served_by_fallback", "provider": "codex",
       "shim_user": None}, "the machine running the Pseudolife daemon (box.example)"),
+    ({"since": 1700000000.0, "reason": "login_expired", "provider": "claude",
+      "shim_user": "svc", "shim_host": "gpu-box.example"},
+     "the machine running the Pseudolife daemon (box.example)"),
     ({"since": 1700000000.0, "reason": "something_new"}, None),
     ({}, None),
 ]

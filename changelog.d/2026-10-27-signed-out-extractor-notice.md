@@ -1,6 +1,13 @@
 ### Added (2026-10-27 — tell the user plainly when their dream extractor's CLI is signed out, and where)
-- When the dream extractor's Claude Code or Codex CLI is signed out, every place a user looks says which CLI, on which machine, as which OS user, and the one command. That covers the session-start line, `pseudolife-mcp briefing`, the board notice, the Console (the Observatory and the Dreamer card), `pseudolife-mcp doctor` and `memory_dream(action="status")`'s new `stall_notice`. For example: "the Claude Code CLI is signed out on this machine; sign it in there as svc: run `claude`, then `/login`" (Codex: `codex login`).
-- The CLI shims' `login_required` `/health` answer names its `provider` and OS `user`. The daemon carries them into the stall record (`provider`, `shim_user`). `/health`'s unauthenticated stall object carries only the provider.
-- The session-start line names the machine as the session reaches it: "this machine" for a loopback daemon address, else the daemon's host. Doctor does the same from its daemon URL.
-- While a shim's cached health verdict is a failure, it re-checks every 30 seconds instead of every 5 minutes, so the notice clears soon after the user signs in.
-- The Rust daemon mirrors the stall record's provider and user, the signed-out wording of the board notice, and `stall_notice`. Its session-start hook is still being ported, and gets the line's contract.
+- When the dream extractor's Claude Code or Codex CLI is signed out, the surfaces where users look at dream health say which CLI, where to sign it in, as which OS user, and the one command. That covers the session-start line, `pseudolife-mcp briefing`, the board notice, the Console (the Observatory and the Dreamer card), `pseudolife-mcp doctor` and the new `stall_line` in `memory_dream(action="status")`. For example: "the Claude Code CLI is signed out on the machine running the Pseudolife daemon (box.example); sign it in there as svc: run `claude`, then `/login`" (Codex: `codex login`).
+- **Where.** The sign-in lives where the CLI shim runs.
+  - A shim on another machine than the daemon is named by its own host.
+  - Otherwise the line names the daemon's machine, by the host the session or doctor reaches it at.
+  - A loopback address (which an SSH tunnel to a remote daemon also is) gets the generic words "the machine running the Pseudolife daemon".
+- **Primary-only installs too.** The installer's `claude-only` and `openai-only` modes (no auto-mode probe) learn the identity by asking the shim's `/health` once after a dream fails with `login_expired`. The generic sign-in remedy now gives the same command.
+- **Field plumbing.**
+  - The CLI shims' `login_required` `/health` answer names its `provider` and OS `user`, to whoever can reach the shim (loopback or the Docker bridge by default).
+  - The daemon carries `provider`, `shim_user` and `shim_host` in the stall record.
+  - The daemon's unauthenticated `/health` stall object carries the provider and a remote shim's host, never the user.
+- **Faster recovery.** While a shim's cached health verdict is a sign-in failure, it re-checks every 30 seconds instead of every 5 minutes, so the notice clears soon after the user signs in. Other failures keep the 5-minute pace.
+- **Rust daemon.** It mirrors the stall record's fields, the signed-out and generic wording, the primary-mode identity probe and `stall_line`. Its session-start hook is being ported separately with this line's contract.

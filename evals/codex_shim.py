@@ -84,9 +84,10 @@ _SIGN_IN_RE = re.compile(
     r"|incorrect api key|invalid_api_key",
     re.IGNORECASE)
 PROVIDER = "codex"
-# While the cached verdict is a failure, re-check at least this often: on
-# 2026-10-27 the Claude shim's 5-minute TTL kept answering a stale 503 for
-# up to five minutes after a live re-login. A failing check is cheap.
+# While the cached verdict is a sign-in failure, re-check at least this
+# often: on 2026-10-27 the Claude shim's 5-minute TTL kept answering a stale
+# 503 for up to five minutes after a live re-login. A signed-out CLI exits
+# at once, so the check is cheap.
 HEALTH_FAILURE_TTL = 30.0
 
 
@@ -431,8 +432,11 @@ class CodexCli:
         if snapshot is None:
             return self._health_refresh()
         ok, body = snapshot  # pre-refresh verdict
-        ttl = (self._health_ttl if ok
-               else min(self._health_ttl, HEALTH_FAILURE_TTL))
+        # Only a sign-in failure is re-checked sooner: it exits at once,
+        # while a rate limit or a slow CLI would spend a real call every
+        # 30 s on a polled /health.
+        ttl = (min(self._health_ttl, HEALTH_FAILURE_TTL)
+               if body.get("status") == "login_required" else self._health_ttl)
         if now - self._health_at >= ttl and not self._health_refreshing:
             self._health_refreshing = True
             threading.Thread(target=self._health_refresh, daemon=True).start()

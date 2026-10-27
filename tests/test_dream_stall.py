@@ -252,7 +252,7 @@ def test_an_undelivered_begin_owes_no_recovery_notice():
 # ── the one-line text ─────────────────────────────────────────────────────
 
 @pytest.mark.parametrize("reason, needle", [
-    ("login_expired", "claude auth login"),
+    ("login_expired", "`claude`, then `/login`"),
     ("extractor_unreachable", "extractor endpoint"),
     ("extractor_error", "extractor"),
     ("served_by_fallback", "fallback is serving"),
@@ -270,7 +270,7 @@ def test_the_stall_line_names_reason_and_remedy_in_one_short_line(reason, needle
 def test_login_remedy_names_both_cli_logins():
     from pseudolife_memory.memory.dream import stall_remedy
     text = stall_remedy("login_expired")
-    assert "claude auth login" in text and "codex login" in text
+    assert "`claude`, then `/login`" in text and "codex login" in text
 
 
 # ── service wiring (PG-backed) ────────────────────────────────────────────
@@ -370,7 +370,7 @@ def test_the_notifier_posts_one_begin_and_one_clear(monkeypatch):
     svc.dream_stall_notify()
     assert len(sent) == 1
     assert sent[0].startswith("Dream extraction stalled since ")
-    assert "login_expired" in sent[0] and "claude auth login" in sent[0]
+    assert "login_expired" in sent[0] and "/login" in sent[0]
     svc._dream_stall_tracker.record(OK, served_by_fallback=False)
     svc.dream_stall_notify()
     svc.dream_stall_notify()
@@ -698,7 +698,7 @@ def test_a_failed_fallback_does_not_hide_the_primarys_cause():
     assert stall["last_error"] == ("primary /health HTTP 503 (login_required); "
                                    "fallback unreachable (gaierror)")
     line = dream_stall_line(stall)
-    assert "claude auth login" in line and "reachable" not in line
+    assert "`claude`, then `/login`" in line and "reachable" not in line
 
 
 def test_a_served_fallback_names_the_primarys_cause():
@@ -844,15 +844,22 @@ def test_the_board_notice_names_the_sign_in():
 def test_records_without_a_provider_keep_todays_text():
     from pseudolife_memory.memory.dream import dream_stall_line, dream_stall_notice_text
     old = {k: v for k, v in _signed_out_stall().items() if k not in ("provider", "shim_user")}
-    assert "claude auth login" in dream_stall_line(old)
-    assert "claude auth login" in dream_stall_notice_text("begin", old)
+    # Opus review of 1f782865: one sign-in command, provider or not.
+    for text in (dream_stall_line(old), dream_stall_notice_text("begin", old)):
+        assert "`claude`, then `/login`" in text and "`codex login`" in text
+        assert "claude auth login" not in text
 
 
 @pytest.mark.parametrize("host, where", [
-    ("127.0.0.1:8765", "this machine"),
-    ("localhost:8765", "this machine"),
-    ("[::1]:8765", "this machine"),
+    # Codex review of 1f782865: a loopback address may be an SSH tunnel to
+    # a remote daemon, so it is no evidence the daemon runs here.
+    ("127.0.0.1:8765", None),
+    ("localhost:8765", None),
+    ("[::1]:8765", None),
     ("Box.Example:8765", "the machine running the Pseudolife daemon (box.example)"),
+    # A name that merely starts with "127." is not loopback.
+    ("127.example.com:8765", "the machine running the Pseudolife daemon (127.example.com)"),
+    ("[::ffff:127.0.0.1]:8765", None),
     ("evil host\nInjected", None),
     (None, None),
 ])
@@ -874,12 +881,93 @@ def test_dream_status_carries_the_stall_notice(svc, monkeypatch):
     monkeypatch.setattr(d, "build_extractor_with_fallback",
                         lambda cfg: (_SignedOutFails(), "fallback"))
     svc.store("the relay port is 4001", source="notes")
-    assert svc.dream_status()["stall_notice"] is None
+    assert svc.dream_status()["stall_line"] is None
     svc.dream_run_auto()
     svc.dream_run_auto()
     status = svc.dream_status()
     assert status["stall"]["provider"] == "claude"
-    assert status["stall_notice"].startswith("Pseudolife-MCP: dreams stalled since ")
-    assert "Claude Code CLI is signed out" in status["stall_notice"]
+    # ``stall_line``: not ``stall_notice``, the config switch's name.
+    assert status["stall_line"].startswith("Pseudolife-MCP: dreams stalled since ")
+    assert "Claude Code CLI is signed out" in status["stall_line"]
     keys = list(status)
-    assert keys.index("stall_notice") == keys.index("last_stall") + 1
+    assert keys.index("stall_line") == keys.index("last_stall") + 1
+
+
+def test_a_remote_shim_is_named_where_it_runs():
+    # Codex review of 1f782865: the sign-in lives on the shim's machine,
+    # which need not be the daemon's.
+    from pseudolife_memory.memory.dream import dream_stall_line, dream_stall_notice_text
+    stall = _signed_out_stall(shim_host="gpu-box.example")
+    for text in (dream_stall_line(stall), dream_stall_line(stall, where="anything"),
+                 dream_stall_notice_text("begin", stall)):
+        assert "signed out on the machine running the CLI shim (gpu-box.example)" in text
+
+
+def test_the_tracker_carries_the_shim_host_with_the_identity():
+    t, clock = _tracker()
+    probe = {**SIGNED_OUT, "shim_host": "gpu-box.example"}
+    t.record(_failed(), served_by_fallback=True, primary_probe=probe)
+    clock.t += 600
+    t.record(_failed(), served_by_fallback=True, primary_probe=probe)
+    assert t.snapshot()["stall"]["shim_host"] == "gpu-box.example"
+
+
+def test_a_primary_only_setup_learns_the_identity_after_a_sign_in_failure(monkeypatch):
+    # Opus review of 1f782865: the installer's claude-only and openai-only
+    # modes (extractor_mode=primary) never probe, so they never learned who
+    # to sign in. A dream that fails with login_expired asks /health once.
+    from pseudolife_memory.memory import dream as d
+    cause = d.ProbeCause("login_expired", "/health HTTP 503 (login_required)",
+                         provider="claude", shim_user="svc")
+    calls = []
+    monkeypatch.setattr(d, "probe_endpoint_cause",
+                        lambda *a, **k: calls.append(a) or cause)
+    svc = _fallback_service("primary")
+    svc.dream_run = lambda extractor, *, limit=None: _failed()
+    svc.dream_run_auto()
+    svc.dream_run_auto()
+    stall = svc.dream_stall_state()["stall"]
+    assert stall["reason"] == "login_expired" and stall["provider"] == "claude"
+    assert stall["last_error"] == "HTTP 500"
+    assert len(calls) == 2
+
+
+def test_other_failures_do_not_probe_for_an_identity(monkeypatch):
+    from pseudolife_memory.memory import dream as d
+
+    def _boom(*a, **k):
+        raise AssertionError("no probe for a failure that is not a sign-in")
+    monkeypatch.setattr(d, "probe_endpoint_cause", _boom)
+    svc = _fallback_service("primary")
+    svc.dream_run = lambda extractor, *, limit=None: _failed("extractor_error", "HTTP 500")
+    svc.dream_run_auto()
+
+
+def test_the_session_start_route_hands_the_host_header_to_the_hook(monkeypatch):
+    # Opus review of 1f782865: only stall_where itself was tested.
+    from pseudolife_memory.web import api
+    from tests.asgi_helpers import call, stub_mcp
+    seen = {}
+
+    def _hook(service, *a, **k):
+        seen["host"] = k.get("host")
+        return "ok"
+    monkeypatch.setattr(api, "hook_session_start", _hook)
+    class _Service:            # the route only hands the service to the hook
+        def __getattr__(self, name):
+            return None
+    # A remote Host is served only with a token (a tokenless /api is
+    # loopback-only), which is how a remote daemon is reached.
+    monkeypatch.setenv("PSEUDOLIFE_MCP_TOKENS", "tok-a:codex")
+    app = api.build_console_app(stub_mcp, None, lambda: {"status": "ok"}, _Service(),
+                                token_map={"tok-a": "codex"})
+    st, _ = call(app, "GET", "/api/hook/session-start",
+                 headers=[(b"host", b"box.example:8765"),
+                          (b"authorization", b"Bearer tok-a")])
+    assert st == 200 and seen["host"] == "box.example:8765"
+
+
+def test_the_remedy_never_raises_on_a_strange_record():
+    from pseudolife_memory.memory.dream import dream_stall_line
+    line = dream_stall_line(_signed_out_stall(provider=["claude"]))
+    assert line.startswith("Pseudolife-MCP: dreams stalled since ")

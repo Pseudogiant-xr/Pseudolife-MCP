@@ -49,6 +49,7 @@ fn every_sequence_matches_python_step_by_step() {
                         fallback_resolves: p["fallback_resolves"].as_bool().unwrap(),
                         provider: p.get("provider").and_then(Value::as_str).map(String::from),
                         shim_user: p.get("shim_user").and_then(Value::as_str).map(String::from),
+                        shim_host: p.get("shim_host").and_then(Value::as_str).map(String::from),
                     });
                     t.record_at(
                         &obj(&args[0]),

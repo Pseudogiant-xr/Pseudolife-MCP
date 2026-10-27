@@ -447,7 +447,8 @@ _SIGNED_OUT_HEALTH = {"status": "ok", "extractor": "stalled", "stall": {
 
 
 @pytest.mark.parametrize("url, where", [
-    ("http://127.0.0.1:8765", "signed out on this machine"),
+    # A loopback URL may be a tunnel: no claim the daemon is local.
+    ("http://127.0.0.1:8765", "signed out on the machine running the Pseudolife daemon;"),
     ("http://box.example:8765", "signed out on the machine running the Pseudolife daemon (box.example)"),
 ])
 def test_doctor_names_a_signed_out_cli_where_the_daemon_runs(url, where):
@@ -457,8 +458,10 @@ def test_doctor_names_a_signed_out_cli_where_the_daemon_runs(url, where):
 
 
 def test_doctor_dream_health_is_ok_without_a_stall():
+    # Opus review of 1f782865: the Rust daemon's /health never carries a
+    # stall object, so absence is "no stall reported", not "ok".
     assert doctor_cli.dream_health_line({"status": "ok", "extractor": "configured"},
-                                        "http://127.0.0.1:8765") == "ok"
+                                        "http://127.0.0.1:8765") == "no stall reported"
     assert doctor_cli.dream_health_line(None, "http://127.0.0.1:8765") == "unknown"
 
 
@@ -475,4 +478,4 @@ def test_doctor_reports_dream_health(monkeypatch, capsys):
     with pytest.raises(SystemExit):
         doctor_cli.run_doctor()
     report = json.loads(capsys.readouterr().out)
-    assert "Claude Code CLI is signed out on this machine" in report["dreams"]
+    assert "Claude Code CLI is signed out on the machine running the Pseudolife daemon" in report["dreams"]

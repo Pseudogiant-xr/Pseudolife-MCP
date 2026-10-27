@@ -867,7 +867,7 @@ pub async fn status(ready: &Ready, config: &Config) -> Result<Value, ToolError> 
     out.insert("stall".into(), stall);
     out.insert("last_stall".into(), last_stall);
     out.insert(
-        "stall_notice".into(),
+        "stall_line".into(),
         if notice.is_empty() {
             Value::Null
         } else {

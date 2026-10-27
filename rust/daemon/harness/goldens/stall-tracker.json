@@ -1543,7 +1543,8 @@
       "error": "/health HTTP 503 (login_required)",
       "fallback_resolves": true,
       "provider": "claude",
-      "shim_user": "svc"
+      "shim_user": "svc",
+      "shim_host": "gpu-box.example"
      }
     ],
     "now": 0.0,
@@ -1570,7 +1571,8 @@
       "error": "/health HTTP 503 (login_required)",
       "fallback_resolves": true,
       "provider": "claude",
-      "shim_user": "svc"
+      "shim_user": "svc",
+      "shim_host": "gpu-box.example"
      }
     ],
     "now": 10.0,
@@ -1583,7 +1585,8 @@
       "last_error": "primary /health HTTP 503 (login_required); fallback unreachable (gaierror)",
       "last_success_at": null,
       "provider": "claude",
-      "shim_user": "svc"
+      "shim_user": "svc",
+      "shim_host": "gpu-box.example"
      },
      "last_stall": null
     }
@@ -1603,7 +1606,8 @@
       "last_error": "primary /health HTTP 503 (login_required); fallback unreachable (gaierror)",
       "last_success_at": null,
       "provider": "claude",
-      "shim_user": "svc"
+      "shim_user": "svc",
+      "shim_host": "gpu-box.example"
      }
     ],
     "snapshot": {
@@ -1614,7 +1618,8 @@
       "last_error": "primary /health HTTP 503 (login_required); fallback unreachable (gaierror)",
       "last_success_at": null,
       "provider": "claude",
-      "shim_user": "svc"
+      "shim_user": "svc",
+      "shim_host": "gpu-box.example"
      },
      "last_stall": null
     }
@@ -1634,7 +1639,8 @@
       "last_error": "primary /health HTTP 503 (login_required); fallback unreachable (gaierror)",
       "last_success_at": null,
       "provider": "claude",
-      "shim_user": "svc"
+      "shim_user": "svc",
+      "shim_host": "gpu-box.example"
      },
      "last_stall": null
     }
@@ -1651,7 +1657,8 @@
       "error": "/health HTTP 503 (login_required)",
       "fallback_resolves": true,
       "provider": "claude",
-      "shim_user": "svc"
+      "shim_user": "svc",
+      "shim_host": "gpu-box.example"
      }
     ],
     "now": 20.0,
@@ -1664,7 +1671,8 @@
       "last_error": "primary /health HTTP 503 (login_required)",
       "last_success_at": null,
       "provider": "claude",
-      "shim_user": "svc"
+      "shim_user": "svc",
+      "shim_host": "gpu-box.example"
      },
      "last_stall": null
     }
@@ -2189,7 +2197,7 @@
     "reason": "login_expired"
    },
    "offset": 0,
-   "text": "Dream extraction stalled since 2026-10-25 01:21+00:00: login_expired. The extractor CLI's login expired; re-run `claude auth login` (or `codex login`) on the daemon host."
+   "text": "Dream extraction stalled since 2026-10-25 01:21+00:00: login_expired. The extractor CLI is signed out on the machine running the CLI shim; sign it in there: run `claude`, then `/login` (or `codex login`)."
   },
   {
    "kind": "repeat",
@@ -2198,7 +2206,7 @@
     "reason": "login_expired"
    },
    "offset": 39600,
-   "text": "Dream extraction stalled since 2026-10-25 12:21+11:00: login_expired. The extractor CLI's login expired; re-run `claude auth login` (or `codex login`) on the daemon host."
+   "text": "Dream extraction stalled since 2026-10-25 12:21+11:00: login_expired. The extractor CLI is signed out on the machine running the CLI shim; sign it in there: run `claude`, then `/login` (or `codex login`)."
   },
   {
    "kind": "repeat",
@@ -2207,7 +2215,7 @@
     "reason": "login_expired"
    },
    "offset": -19800,
-   "text": "Dream extraction stalled since 2026-10-24 19:51-05:30: login_expired. The extractor CLI's login expired; re-run `claude auth login` (or `codex login`) on the daemon host."
+   "text": "Dream extraction stalled since 2026-10-24 19:51-05:30: login_expired. The extractor CLI is signed out on the machine running the CLI shim; sign it in there: run `claude`, then `/login` (or `codex login`)."
   },
   {
    "kind": "escalate",
@@ -2428,7 +2436,7 @@
     "shim_user": "svc"
    },
    "offset": 0,
-   "text": "Dream extraction stalled since 2023-11-14 22:13+00:00: login_expired. The extractor CLI's login expired; re-run `claude auth login` (or `codex login`) on the daemon host."
+   "text": "Dream extraction stalled since 2023-11-14 22:13+00:00: login_expired. The extractor CLI is signed out on the machine running the CLI shim; sign it in there: run `claude`, then `/login` (or `codex login`)."
   },
   {
    "kind": "begin",
@@ -2439,7 +2447,7 @@
     "shim_user": "svc"
    },
    "offset": 39600,
-   "text": "Dream extraction stalled since 2023-11-15 09:13+11:00: login_expired. The extractor CLI's login expired; re-run `claude auth login` (or `codex login`) on the daemon host."
+   "text": "Dream extraction stalled since 2023-11-15 09:13+11:00: login_expired. The extractor CLI is signed out on the machine running the CLI shim; sign it in there: run `claude`, then `/login` (or `codex login`)."
   },
   {
    "kind": "begin",
@@ -2450,7 +2458,43 @@
     "shim_user": "svc"
    },
    "offset": -19800,
-   "text": "Dream extraction stalled since 2023-11-14 16:43-05:30: login_expired. The extractor CLI's login expired; re-run `claude auth login` (or `codex login`) on the daemon host."
+   "text": "Dream extraction stalled since 2023-11-14 16:43-05:30: login_expired. The extractor CLI is signed out on the machine running the CLI shim; sign it in there: run `claude`, then `/login` (or `codex login`)."
+  },
+  {
+   "kind": "begin",
+   "record": {
+    "since": 1700000000.0,
+    "reason": "login_expired",
+    "provider": "claude",
+    "shim_user": "svc",
+    "shim_host": "gpu-box.example"
+   },
+   "offset": 0,
+   "text": "Dream extraction stalled since 2023-11-14 22:13+00:00: login_expired. The Claude Code CLI is signed out on the machine running the CLI shim (gpu-box.example); sign it in there as svc: run `claude`, then `/login`."
+  },
+  {
+   "kind": "begin",
+   "record": {
+    "since": 1700000000.0,
+    "reason": "login_expired",
+    "provider": "claude",
+    "shim_user": "svc",
+    "shim_host": "gpu-box.example"
+   },
+   "offset": 39600,
+   "text": "Dream extraction stalled since 2023-11-15 09:13+11:00: login_expired. The Claude Code CLI is signed out on the machine running the CLI shim (gpu-box.example); sign it in there as svc: run `claude`, then `/login`."
+  },
+  {
+   "kind": "begin",
+   "record": {
+    "since": 1700000000.0,
+    "reason": "login_expired",
+    "provider": "claude",
+    "shim_user": "svc",
+    "shim_host": "gpu-box.example"
+   },
+   "offset": -19800,
+   "text": "Dream extraction stalled since 2023-11-14 16:43-05:30: login_expired. The Claude Code CLI is signed out on the machine running the CLI shim (gpu-box.example); sign it in there as svc: run `claude`, then `/login`."
   }
  ],
  "lines": [
@@ -2606,6 +2650,42 @@
    "where": "the machine running the Pseudolife daemon (box.example)",
    "offset": -19800,
    "line": "Pseudolife-MCP: dream primary extractor down since 2023-11-14 16:43-05:30 (served_by_fallback): the Codex CLI is signed out on the machine running the Pseudolife daemon (box.example), so the fallback is serving; sign it in there: run `codex login`."
+  },
+  {
+   "record": {
+    "since": 1700000000.0,
+    "reason": "login_expired",
+    "provider": "claude",
+    "shim_user": "svc",
+    "shim_host": "gpu-box.example"
+   },
+   "where": "the machine running the Pseudolife daemon (box.example)",
+   "offset": 0,
+   "line": "Pseudolife-MCP: dreams stalled since 2023-11-14 22:13+00:00 (login_expired): the Claude Code CLI is signed out on the machine running the CLI shim (gpu-box.example); sign it in there as svc: run `claude`, then `/login`."
+  },
+  {
+   "record": {
+    "since": 1700000000.0,
+    "reason": "login_expired",
+    "provider": "claude",
+    "shim_user": "svc",
+    "shim_host": "gpu-box.example"
+   },
+   "where": "the machine running the Pseudolife daemon (box.example)",
+   "offset": 39600,
+   "line": "Pseudolife-MCP: dreams stalled since 2023-11-15 09:13+11:00 (login_expired): the Claude Code CLI is signed out on the machine running the CLI shim (gpu-box.example); sign it in there as svc: run `claude`, then `/login`."
+  },
+  {
+   "record": {
+    "since": 1700000000.0,
+    "reason": "login_expired",
+    "provider": "claude",
+    "shim_user": "svc",
+    "shim_host": "gpu-box.example"
+   },
+   "where": "the machine running the Pseudolife daemon (box.example)",
+   "offset": -19800,
+   "line": "Pseudolife-MCP: dreams stalled since 2023-11-14 16:43-05:30 (login_expired): the Claude Code CLI is signed out on the machine running the CLI shim (gpu-box.example); sign it in there as svc: run `claude`, then `/login`."
   },
   {
    "record": {

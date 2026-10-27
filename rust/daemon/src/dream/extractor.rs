@@ -2015,6 +2015,10 @@ pub async fn build_extractor_with_fallback_using(
         reason: cause.reason.to_string(),
         error: cause.error,
         fallback_resolves: url_resolves(fallback_url).await,
+        shim_host: cause
+            .provider
+            .as_ref()
+            .and_then(|_| shim_host(r.primary_url.as_deref())),
         provider: cause.provider,
         shim_user: cause.shim_user,
     };
@@ -2068,6 +2072,65 @@ pub struct PrimaryProbe {
     /// answer), for the signed-out notice.
     pub provider: Option<String>,
     pub shim_user: Option<String>,
+    /// The primary shim's host when it runs on another machine than the
+    /// daemon's (`_shim_host`).
+    pub shim_host: Option<String>,
+}
+
+/// `loopback_host` (`memory/dream.py`): `localhost` or a loopback IP
+/// literal, IPv4-mapped included.
+fn loopback_host(host: &str) -> bool {
+    if host == "localhost" {
+        return true;
+    }
+    match host.parse::<std::net::IpAddr>() {
+        Ok(std::net::IpAddr::V4(ip)) => ip.is_loopback(),
+        Ok(std::net::IpAddr::V6(ip)) => {
+            ip.is_loopback() || ip.to_ipv4_mapped().is_some_and(|v4| v4.is_loopback())
+        }
+        Err(_) => false,
+    }
+}
+
+/// `_shim_host` (`memory/dream.py`): the primary shim's host when it runs
+/// on another machine than the daemon's; `host.docker.internal` and
+/// loopback are the daemon's own machine.
+fn shim_host(primary_url: Option<&str>) -> Option<String> {
+    let host = url_host(primary_url.unwrap_or(""))?;
+    (host != "host.docker.internal" && !loopback_host(&host)).then_some(host)
+}
+
+/// `signed_out_probe` (`memory/dream.py`): after a primary dream no
+/// auto-mode probe chose failed with `login_expired`, ask the primary's
+/// `/health` once for the signed-out shim's provider and user.
+pub async fn signed_out_probe(
+    cfg: &DreamConfig,
+    result: &Map<String, Value>,
+) -> Option<PrimaryProbe> {
+    let failed = result
+        .get("extractor_failed")
+        .is_some_and(|v| v.as_bool().unwrap_or(false) || v.as_i64().is_some_and(|n| n != 0));
+    let write_hold = result.get("hold_phase").and_then(Value::as_str) == Some("write");
+    let reason = result
+        .get("extractor_error")
+        .and_then(Value::as_object)
+        .and_then(|e| e.get("reason"))
+        .and_then(Value::as_str);
+    if !failed || write_hold || reason != Some("login_expired") {
+        return None;
+    }
+    let r = resolve_endpoints(cfg);
+    let url = r.primary_url.as_deref().filter(|u| !u.is_empty())?;
+    let cause = probe_endpoint_cause(url, 3.0).await?;
+    let provider = cause.provider?;
+    Some(PrimaryProbe {
+        reason: cause.reason.to_string(),
+        error: cause.error,
+        fallback_resolves: true,
+        provider: Some(provider),
+        shim_user: cause.shim_user,
+        shim_host: shim_host(Some(url)),
+    })
 }
 
 /// The extractor, which endpoint it is, and the failed primary probe that
@@ -3115,6 +3178,24 @@ mod tests {
                 format!(r#"{{"status": "login_required", "provider": "codex", "user": "{user}"}}"#);
             assert_eq!(id(&body), (some("codex"), kept), "{user}");
         }
+    }
+
+    /// `_shim_host` and `loopback_host` (`test_extractor_fallback.py`'s
+    /// shim-host cases): the daemon's own machine is no named host.
+    #[test]
+    fn shim_host_matches_python() {
+        for (url, host) in [
+            ("http://host.docker.internal:8082/v1", None),
+            ("http://127.0.0.1:8082/v1", None),
+            ("http://localhost:8082/v1", None),
+            ("http://[::1]:8082/v1", None),
+            ("http://[::ffff:127.0.0.1]:8082/v1", None),
+            ("http://gpu-box.example:8082/v1", Some("gpu-box.example")),
+            ("http://127.example.com:8082/v1", Some("127.example.com")),
+        ] {
+            assert_eq!(shim_host(Some(url)).as_deref(), host, "{url}");
+        }
+        assert_eq!(shim_host(None), None);
     }
 
     /// `_url_host`, `_proxied` and the warning wording

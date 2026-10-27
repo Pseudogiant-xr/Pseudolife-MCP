@@ -626,15 +626,16 @@ def test_other_failures_carry_no_sign_in_fields():
     assert "provider" not in body and "user" not in body
 
 
-@pytest.mark.parametrize("ttl, ok, age, refreshes", [
-    (300.0, False, 31.0, True),
-    (300.0, False, 29.0, False),
-    (300.0, True, 31.0, False),
-    (10.0, False, 11.0, True),    # a TTL below 30 s keeps its own pace
+@pytest.mark.parametrize("ttl, status, age, refreshes", [
+    (300.0, "login_required", 31.0, True),
+    (300.0, "login_required", 29.0, False),
+    (300.0, "cli_error", 31.0, False),   # only a sign-in failure is re-checked sooner
+    (300.0, "ok", 31.0, False),
+    (10.0, "login_required", 11.0, True),    # a TTL below 30 s keeps its own pace
 ])
-def test_a_failure_verdict_is_rechecked_sooner(monkeypatch, ttl, ok, age, refreshes):
+def test_a_sign_in_failure_is_rechecked_sooner(monkeypatch, ttl, status, age, refreshes):
     cli = shim.CodexCli(Path("codex"), "m", 30.0, health_ttl=ttl)
-    cli._health_snapshot = (ok, {"status": "ok"} if ok else {"status": "cli_error"})
+    cli._health_snapshot = (status == "ok", {"status": status})
     cli._health_at = time.monotonic() - age
     started = []
     monkeypatch.setattr(shim.threading, "Thread",
