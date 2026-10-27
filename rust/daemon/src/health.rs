@@ -415,6 +415,17 @@ pub async fn payload(svc: &Service, principals: &crate::auth::PrincipalStore) ->
     if capacity_warning(svc, ready) && !crate::mutants::active("health-no-capacity-warning") {
         p.insert("capacity_warning".into(), json!(true));
     }
+    // Rust only (D2): a pre-v57 `weights.pt` this daemon cannot import sits
+    // beside a bank with no counters row; the text names the step. Never
+    // `degraded`: the daemon serves, only the counters wait for the import.
+    if let Some(step) = svc
+        .counters_import
+        .lock()
+        .expect("counters import lock")
+        .clone()
+    {
+        p.insert("counters_import_required".into(), json!(step));
+    }
     let memory = memory_headroom(Path::new("/sys/fs/cgroup"), Path::new("/proc/self"));
     if memory["near_limit"] == json!(true) {
         warn_near_memory_limit(&memory);

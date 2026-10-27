@@ -336,6 +336,8 @@ MUTANTS = ["store-tags-raw", "store-skip-session-episode", "store-no-hint", "sto
            "mcp-store-no-session",
            # /health's subsystem keys: caught by the health-* scenarios.
            "health-no-stall", "health-no-capacity-warning",
+           # The counters row: caught by the counters-* scenarios.
+           "counters-save-off",
            # memory_fact_set (spec FS1-FS12): caught by the fact-set-* scenarios.
            "mcp-fact-set-no-supersede", "mcp-fact-set-no-confirm-reinforce",
            "mcp-fact-set-no-correction-signal", "mcp-fact-set-no-entity-mint",
@@ -3089,6 +3091,49 @@ def health() -> dict:
     return {"op": "health"}
 
 
+# The cms_counters row (D2): `stop` first stops both daemons (SIGTERM, a
+# clean exit, so each runs its exit flush), else it reads the row as the
+# running daemons' autosave left it. dbstate dumps the table without rows
+# everywhere else, since each daemon's autosave clock is its own.
+def counters(stop: bool = False) -> dict:
+    return {"op": "counters", "stop": stop}
+
+
+COUNTERS_COLUMNS = ("preset_name", "interaction_count", "logical_turn_count", "tier_queries",
+                    "tier_hits", "surprise_history", "consolidation_events", "updated_at")
+# The surprises in the history: the stores' own surprise tolerance.
+COUNTERS_SURPRISE_TOL = 1e-5
+
+
+def counters_rows(dsns: dict) -> tuple[dict, dict]:
+    """Both sides' rows, ``updated_at`` as null-or-not, and each band's
+    surprise history as its length once every value agrees within
+    ``COUNTERS_SURPRISE_TOL`` (raw on both sides otherwise, so it differs)."""
+    import psycopg
+    rows = {}
+    for side in ("python", "rust"):
+        with psycopg.connect(dsns[side], autocommit=True) as conn:
+            r = conn.execute(f"SELECT {', '.join(COUNTERS_COLUMNS)} FROM cms_counters "
+                             "WHERE id = 1").fetchone()
+        rows[side] = None if r is None else dict(zip(COUNTERS_COLUMNS, r))
+    py, rs = rows["python"], rows["rust"]
+    for row in (py, rs):
+        if row is not None:
+            row["updated_at"] = _clock(row["updated_at"])
+    if py and rs and isinstance(py["surprise_history"], dict) \
+            and isinstance(rs["surprise_history"], dict) \
+            and set(py["surprise_history"]) == set(rs["surprise_history"]):
+        close = all(
+            len(py["surprise_history"][b]) == len(rs["surprise_history"][b])
+            and all(abs(a - c) <= COUNTERS_SURPRISE_TOL
+                    for a, c in zip(py["surprise_history"][b], rs["surprise_history"][b]))
+            for b in py["surprise_history"])
+        if close:
+            for row in (py, rs):
+                row["surprise_history"] = {b: len(v) for b, v in row["surprise_history"].items()}
+    return {"isError": False, "value": py}, {"isError": False, "value": rs}
+
+
 # A tool argument naming the last commit_token this side answered.
 PULL_TOKEN = "@pull_token"
 
@@ -3418,6 +3463,8 @@ MUTANTS += w2e_graph_insight.MUTANTS
 # embedded record and then the rest alphabetically, and no near-tie can
 # reorder them.
 DREAM_RUN_QUIET = DREAM_RUN_CONFIG + "    alias_candidate_min_cosine: 0\n"
+# The counters scenarios: no dreams, no reaping, nothing else writing.
+COUNTERS_CONFIG = "memory:\n  dream:\n    enabled: false\n"
 # DREAM_RUN_QUIET with dreams enabled (/health reads "disabled" otherwise)
 # and the sweep a day away, so no automatic dream joins the manual ones.
 HEALTH_DREAM_CONFIG = DREAM_RUN_QUIET.replace(
@@ -3590,6 +3637,44 @@ SCENARIOS.update({
             dream("runs"),
             fact_get("Ops Board", "owner"),
             fact_get("Staging Database", "engine"),
+        ],
+    },
+    # The counters row (D2). A clean exit writes it, the restarted daemons
+    # read it back, and the next exit writes the sum: interaction and query
+    # counts carry across the restart. Linux only (the harness's SIGTERM is
+    # a clean exit there; on Windows it kills).
+    "counters-flush-restore": {
+        "live_only": "the row is written at each daemon's exit; compared live on Linux",
+        "config": COUNTERS_CONFIG,
+        "env": {"PSEUDOLIFE_MCP_AUTOSAVE_SECONDS": "3600"},
+        "seed": [],
+        "ops": [
+            store("The counters note about the build cache.", source="pseudolife-mcp"),
+            store("The counters note about the token rotation.", source="pseudolife-mcp"),
+            search("build cache"),
+            counters(),
+            {"op": "restart", "config": COUNTERS_CONFIG},
+            counters(),
+            store("The counters note after the restart.", source="pseudolife-mcp"),
+            search("token rotation"),
+            counters(stop=True),
+        ],
+    },
+    # Autosave: a store changes the bank, so the next autosave writes the row;
+    # a search alone does not, so its query count waits for the exit flush.
+    "counters-autosave": {
+        "live_only": "autosave writes on each daemon's own clock; compared live on Linux",
+        "config": COUNTERS_CONFIG,
+        "env": {"PSEUDOLIFE_MCP_AUTOSAVE_SECONDS": "1"},
+        "seed": [],
+        "ops": [
+            store("The autosave note about the deploy window.", source="pseudolife-mcp"),
+            {"op": "sleep", "s": 3},
+            counters(),
+            search("deploy window"),
+            {"op": "sleep", "s": 3},
+            counters(),
+            counters(stop=True),
         ],
     },
     # /health's conditional keys. Dreams on, with the sweep a day away so
@@ -6159,6 +6244,11 @@ def _run_live(name: str, scn: dict, tag: str, binary: Path, root: Path, record: 
                 elif op["op"] == "restart":
                     clients = restart_sides(op, scn, procs, homes, envs, stubs, binary)
                     py = rs = {"isError": False, "value": None}
+                elif op["op"] == "counters":
+                    if op["stop"]:
+                        for d in procs.values():
+                            d.stop()
+                    py, rs = counters_rows(dsns)
                 else:
                     py = run_op(with_pull_token(op, tokens["python"]), procs["python"].port,
                                 clients["python"], dsns["python"])

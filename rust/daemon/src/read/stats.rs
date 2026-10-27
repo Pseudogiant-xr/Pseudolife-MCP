@@ -45,6 +45,23 @@ pub fn record_query<'a>(hit_bands: impl IntoIterator<Item = &'a str>) {
     }
 }
 
+/// `_tier_queries` and `_tier_hits` for the `cms_counters` row
+/// (`counters_state`, autosave and the exit flush).
+pub fn tier_state() -> (u64, BTreeMap<String, u64>) {
+    let tier = TIER.lock().expect("tier lock");
+    (tier.queries, tier.hits.clone())
+}
+
+/// `reset_counters` then `apply_counters` for the tier counters, as a
+/// freshly built CMS restores them: the row's query count and per-band hits
+/// (a current band the row does not name counts from zero, which
+/// `counters::state` writes).
+pub fn restore_tier(queries: u64, hits: impl IntoIterator<Item = (String, u64)>) {
+    let mut tier = TIER.lock().expect("tier lock");
+    tier.queries = queries;
+    tier.hits = hits.into_iter().collect();
+}
+
 /// `_on_band_evict` for the last band (cms.py:2748).
 pub fn record_true_drop() {
     TRUE_DROPS.fetch_add(1, Ordering::Relaxed);
