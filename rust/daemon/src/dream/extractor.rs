@@ -2907,6 +2907,42 @@ mod tests {
         }
     }
 
+    /// `_probe_answer_cause` (`tests/test_extractor_fallback.py`'s probe
+    /// cases): only a status token of the fixed shape is quoted, and only
+    /// 401/403 or `login_required` reads as a sign-in failure.
+    #[test]
+    fn probe_answer_cause_matches_python() {
+        let signed_out = br#"{"status": "login_required", "detail": "OAuth session expired"}"#;
+        assert_eq!(
+            probe_answer_cause("/health", 503, signed_out),
+            ("login_expired", "/health HTTP 503 (login_required)".into())
+        );
+        let other = br#"{"status": "cli_error", "detail": "/home/someone/secret"}"#;
+        assert_eq!(
+            probe_answer_cause("/health", 503, other),
+            ("extractor_error", "/health HTTP 503 (cli_error)".into())
+        );
+        for body in [
+            &br#"{"status": "Bearer abc.def", "detail": "x"}"#[..],
+            b"not json at all",
+            br#"{"detail": "OAuth session expired"}"#,
+        ] {
+            assert_eq!(
+                probe_answer_cause("/health", 503, body),
+                ("extractor_error", "/health HTTP 503".into())
+            );
+        }
+        assert_eq!(
+            probe_answer_cause("/models", 401, b"{}"),
+            ("login_expired", "/models HTTP 401".into())
+        );
+        assert!(health_status_token("login_required"));
+        assert!(!health_status_token("_x"));
+        assert!(!health_status_token(""));
+        assert!(!health_status_token(&"a".repeat(33)));
+        assert!(health_status_token(&"a".repeat(32)));
+    }
+
     #[test]
     fn python_coercions() {
         assert_eq!(py_float_str(" 1_0 "), Some(10.0));

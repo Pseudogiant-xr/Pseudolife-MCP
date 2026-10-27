@@ -46,7 +46,12 @@ fn every_sequence_matches_python_step_by_step() {
                         error: p["error"].as_str().unwrap().to_string(),
                         fallback_resolves: p["fallback_resolves"].as_bool().unwrap(),
                     });
-                    t.record_at(&obj(&args[0]), args[1].as_bool().unwrap(), probe.as_ref(), now);
+                    t.record_at(
+                        &obj(&args[0]),
+                        args[1].as_bool().unwrap(),
+                        probe.as_ref(),
+                        now,
+                    );
                     Value::Null
                 }
                 "overdue" => {
