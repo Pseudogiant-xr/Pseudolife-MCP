@@ -11,6 +11,11 @@ the memory bank; procedures belong in a skill or doc this file points to.
 
 - Every rule here binds every agent working in this repo, whatever its
   harness.
+- **Outside contributors** (a session working for someone other than the
+  maintainer, usually from a fork) follow `CONTRIBUTING.md`'s "Contributing
+  with a coding agent" section in place of this file's review passes,
+  memory bank, board, leases, suite launchers, dev machines, deploy and
+  release rules, because those run on the maintainer's hosts and budget.
 - Where a rule names the Claude Code mechanism that enforces it here (a
   hookify rule, ScheduleWakeup, a Stop hook, the plugin's hooks), follow
   the rule directly and use your harness's equivalent; where none exists
@@ -289,9 +294,12 @@ current merge ref, except as the `merge-forward` skill allows):
 - **CPU- or memory-saturating work never overlaps a full suite** (stress
   repros, benchmark sweeps, a model server, a large in-memory eval), since
   it causes timing flakes and os error 1455. Gate it on the lease of the
-  machine it runs on (`lease check full-suite` on the Windows host, `lease
-  check full-suite@<name>` on a dev machine) and on `lease check gpu` (0
-  free, 1 held, anything else a failed check), also look for `suite=running` in
+  machine it runs on by letting the check run it (`lease check full-suite --
+  <command>` on the Windows host, `lease check full-suite@<name> -- <command>`
+  on a dev machine, one command per sequence, nested for `gpu` too: `lease
+  check full-suite -- pseudolife-mcp lease check gpu -- <command>`), since a
+  `;` after a bare check runs the work whatever it said (75 held, 70 a failed
+  check, else the command's own exit), also look for `suite=running` in
   `memory_agents` list, announce the window with a fixed duration and a
   stop switch (a sentinel file), and stop at once if a suite starts.
 - **Broadcast a host-shaped symptom to every active peer before debugging
@@ -417,7 +425,8 @@ prove are yours.
   missing, signed-out or failed Codex run is recorded as a single-reviewer
   pass.
 - **Those two rules bind only the session that owns the PR** (the main
-  thread opening or forwarding it). A reviewer of
+  thread opening or forwarding it; for an outside contributor's PR, the
+  maintainer's session that takes it up). A reviewer of
   any kind reviews the diff it was given, starts no other review, subagent
   or Codex run, and does not call its pass single-reviewer.
 - **Perf, cache and index changes get an independent review before
@@ -490,7 +499,8 @@ Anything pushed is public forever: merged-PR commits stay reachable via
   `tests/test_release_ux.py::test_tracked_tree_carries_no_maintainer_identifiers`
   with a watched RED before the scrub.
 - **Commit as the GitHub noreply address**
-  (`Pseudogiant-xr@users.noreply.github.com`), and keep tee'd script output
+  (`Pseudogiant-xr@users.noreply.github.com` for the maintainer's sessions;
+  an outside contributor uses their own), and keep tee'd script output
   (`deploy-*.log`) out of the tree, since it embeds home paths.
 - **Commit metadata leaks past the guard:** GitHub web-UI edits stamp the
   real email unless "Keep my email addresses private" is on, so check an

@@ -1009,17 +1009,22 @@ async fn create(
             Some(&format!("after the change: {}", problems.join("; "))),
         ));
     }
-    let closed = if present.is_empty() {
-        "no production database (none on this server)".to_owned()
-    } else {
-        present.join(", ")
-    };
-    report.say(format!(
-        "done: the test suite on this account logs in as {role_name}, which cannot connect to \
-         {closed}. Copy the file to another account's ~/.pseudolife-mcp/ to give its sessions \
-         the same login."
-    ))?;
+    report.say(done_line(role_name, &present))?;
     Ok(report.finish(EXIT_OK, None))
+}
+
+/// The success line: the production databases the login is kept out of, or
+/// plainly that the server has none.
+fn done_line(role_name: &str, present: &[String]) -> String {
+    let closed = if present.is_empty() {
+        "; this server has no production database for it to be kept out of".to_owned()
+    } else {
+        format!(", which cannot connect to {}", present.join(", "))
+    };
+    format!(
+        "done: the test suite on this account logs in as {role_name}{closed}. Copy the file to \
+         another account's ~/.pseudolife-mcp/ to give its sessions the same login."
+    )
 }
 
 /// `_verify`: what the state after the change still gets wrong.
@@ -1151,6 +1156,26 @@ mod tests {
             r#""], "b": null, "c": true}"#
         );
         assert_eq!(out, expected);
+    }
+
+    #[test]
+    fn the_done_line_names_the_banks_or_says_there_are_none() {
+        let tail = " Copy the file to another account's ~/.pseudolife-mcp/ to give its sessions \
+                    the same login.";
+        assert_eq!(
+            done_line("pseudolife_test", &["pseudolife_memory".to_owned()]),
+            format!(
+                "done: the test suite on this account logs in as pseudolife_test, which cannot \
+                 connect to pseudolife_memory.{tail}"
+            )
+        );
+        assert_eq!(
+            done_line("pseudolife_test", &[]),
+            format!(
+                "done: the test suite on this account logs in as pseudolife_test; this server \
+                 has no production database for it to be kept out of.{tail}"
+            )
+        );
     }
 
     #[test]

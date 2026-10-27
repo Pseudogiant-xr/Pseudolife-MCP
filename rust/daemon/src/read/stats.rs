@@ -212,6 +212,25 @@ async fn stats(app: &crate::http::App) -> anyhow::Result<Map<String, Value>> {
             })
             .collect()
     };
+    // The reference bank (`reference.size`, `reference.stats()`): its chunk
+    // count and distinct sources, read from the table as Python reads them;
+    // a failed read fails the call there too.
+    let (ref_chunks, ref_documents) =
+        crate::txn::with_client(ready.storage.client(), |db| async move {
+            let row = db
+                .query_one(
+                    "SELECT count(*), count(DISTINCT source) FROM reference_chunks",
+                    &[],
+                )
+                .await?;
+            Ok::<_, tokio_postgres::Error>((row.get::<_, i64>(0), row.get::<_, i64>(1)))
+        })
+        .await?;
+    let (ref_chunks, ref_documents) = if crate::mutants::active("stats-no-reference-counts") {
+        (0, 0)
+    } else {
+        (ref_chunks, ref_documents)
+    };
     let (queries, hits) = {
         let tier = TIER.lock().expect("tier lock");
         (tier.queries, tier.hits.clone())
@@ -237,8 +256,10 @@ async fn stats(app: &crate::http::App) -> anyhow::Result<Map<String, Value>> {
         .collect();
     out.insert("bands".into(), Value::Array(bands));
     out.insert("preset".into(), json!(cfg.preset));
-    // `+ reference.size`: no reference bank is read (divergences.md).
-    out.insert("total_memories".into(), json!(sizes.iter().sum::<usize>()));
+    out.insert(
+        "total_memories".into(),
+        json!(sizes.iter().sum::<usize>() as i64 + ref_chunks),
+    );
     out.insert("interaction_count".into(), json!(interaction_count));
     out.insert("logical_turn_count".into(), json!(0));
     out.insert("retrieval_queries".into(), json!(queries));
@@ -266,8 +287,8 @@ async fn stats(app: &crate::http::App) -> anyhow::Result<Map<String, Value>> {
         out.insert(format!("{key}_bank_size"), json!(sizes[i]));
         out.insert(format!("{key}_bank_capacity"), json!(specs[i].max_entries));
     }
-    out.insert("reference_bank_size".into(), json!(0));
-    out.insert("reference_document_count".into(), json!(0));
+    out.insert("reference_bank_size".into(), json!(ref_chunks));
+    out.insert("reference_document_count".into(), json!(ref_documents));
 
     let enabled = cfg.retrieval_log_enabled;
     let read_tracking = cfg.cortex.read_tracking;

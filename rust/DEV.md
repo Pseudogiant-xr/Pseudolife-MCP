@@ -11,20 +11,21 @@ default location so Windows credential fixtures retain the expected ACLs.
 
 ```powershell
 $env:CARGO_TARGET_DIR = 'E:\rust-target\port-dev'
-python -m pseudolife_memory.cli lease check full-suite
-if ($LASTEXITCODE -ne 0) { throw 'Wait for the full-suite lease before building' }
-Push-Location rust
-try {
-    cargo build --locked --bin pseudolife-stdio -j 3
-    if ($LASTEXITCODE -ne 0) { throw 'Cargo build failed' }
-} finally {
-    Pop-Location
-}
+# The check runs the build only while the lease is free; 75 means it is held.
+python -m pseudolife_memory.cli lease check full-suite -- pwsh -NoProfile -Command 'Set-Location rust; cargo build --locked --bin pseudolife-stdio -j 3; exit $LASTEXITCODE'
+if ($LASTEXITCODE -eq 75) { throw 'Wait for the full-suite lease before building' }
+if ($LASTEXITCODE -eq 70) { throw 'The lease check itself failed; the build did not run' }
+if ($LASTEXITCODE -ne 0) { throw 'Cargo build failed' }
 $candidate = Join-Path $env:CARGO_TARGET_DIR 'debug/pseudolife-stdio.exe'
 ```
 
-Building inside `rust/` selects its pinned toolchain. On Linux, use a separate
-Linux target directory and the `debug/pseudolife-stdio` filename.
+The check runs from the repository root, so Python imports this checkout's
+CLI; building inside `rust/` selects its pinned toolchain. On Linux, use a
+separate Linux target directory and the `debug/pseudolife-stdio` filename.
+Gate a sequence of steps as one command, so that every step waits on the
+check (`lease check full-suite -- pwsh -NoProfile -Command 'Set-Location rust;
+cargo clippy && cargo nextest run && cargo build'`); a bare check followed by
+`;` runs the steps whatever it said.
 
 Run a single row, live or against its golden:
 
@@ -56,7 +57,9 @@ python rust/cli_harness --row mail --mutants -v
 
 The mutant runner builds copies under `$CARGO_TARGET_DIR/mutant-src` into
 `$CARGO_TARGET_DIR/mutant`, retaining the ordinary build. `--mutant <id>` selects
-one control. Use the same full-suite lease check before this build work.
+one control. Run it through the same check (`lease check full-suite --
+python rust/cli_harness ...`), which starts the build work only while the lease
+is free.
 
 The [daemon harness](daemon/README.md#the-harness) has equivalent `live`,
 `golden`, `live --record` and `mutants` modes, with `--only <scenario>` for a

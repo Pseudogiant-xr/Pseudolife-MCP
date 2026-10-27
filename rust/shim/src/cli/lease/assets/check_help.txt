@@ -1,4 +1,4 @@
-usage: pseudolife-mcp lease check [-h] [--json] NAME
+usage: pseudolife-mcp lease check NAME [--json] [-- COMMAND [ARGS...]]
 
 The launch gate: print the lease's holder (OS lock and board) and its expected
 end, and exit 0 when it is free, 1 when it is held, or 70 when the check
@@ -12,3 +12,16 @@ positional arguments:
 options:
   -h, --help  show this help message and exit
   --json      print one JSON report
+
+With a command after --, check is the gate itself: it runs COMMAND only when
+NAME is free, and exits with the command's own status. Held, or a check that
+failed, does not run it. Nothing is held while it runs; lease run holds the
+lease instead. Put a sequence in one command, so that every step is gated:
+
+  pseudolife-mcp lease check full-suite -- sh -c 'cargo clippy && cargo nextest run && cargo build'
+  pseudolife-mcp lease check full-suite -- pwsh -c 'cargo clippy && cargo nextest run && cargo build'
+
+exit codes: 0 free; 1 held; 2 usage error; 70 the check itself failed. With a
+command: the command's own; 70 the check failed and 75 held (the command did
+not run); 126 cannot start the command; 127 command not found; 128+N stopped
+by signal N (130 Ctrl-C).

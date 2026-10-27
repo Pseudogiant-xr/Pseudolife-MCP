@@ -64,6 +64,16 @@ if (Get-Command docker -ErrorAction SilentlyContinue) {
     else { Fail "docker compose v2 plugin missing" "Docker Desktop bundles it - update Docker Desktop" }
 }
 
+# -- docker buildx (BuildKit, which the image build needs) ---------------------
+# The Dockerfiles use RUN --mount caches, which only BuildKit runs; without
+# the buildx plugin compose falls back to the classic builder and the build
+# dies with "the --mount option requires BuildKit".
+if (Get-Command docker -ErrorAction SilentlyContinue) {
+    docker buildx version *> $null
+    if ($LASTEXITCODE -eq 0) { Ok "docker buildx (BuildKit image builds)" }
+    else { Fail "docker buildx plugin missing - the image build needs BuildKit for its RUN --mount caches" "Docker Desktop bundles it - update Docker Desktop" }
+}
+
 # -- ports 8765 (daemon) / 5433 (postgres): free, or held by our own stack -----
 # Warn-only: a taken port turns into a cryptic "port is already allocated" at
 # compose up; held-by-us means an existing install (idempotent re-run is fine).

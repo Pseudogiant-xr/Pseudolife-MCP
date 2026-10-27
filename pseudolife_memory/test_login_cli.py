@@ -698,10 +698,11 @@ def _create(args, executor, path: Path, banks: list[str], report: _Report,
                    "template1": new_ext, "others": others, "password_reused": reuse}
     if problems:
         return report.finish(EXIT_FAILED, "after the change: " + "; ".join(problems))
-    closed = ", ".join(present) or "no production database (none on this server)"
-    report.say(f"done: the test suite on this account logs in as {args.role}, which cannot "
-               f"connect to {closed}. Copy the file to another account's "
-               "~/.pseudolife-mcp/ to give its sessions the same login.")
+    closed = (f", which cannot connect to {', '.join(present)}" if present
+              else "; this server has no production database for it to be kept out of")
+    report.say(f"done: the test suite on this account logs in as {args.role}{closed}. Copy "
+               "the file to another account's ~/.pseudolife-mcp/ to give its sessions the "
+               "same login.")
     return report.finish(EXIT_OK)
 
 

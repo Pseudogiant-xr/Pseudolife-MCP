@@ -1,0 +1,35 @@
+%PDF-1.4
+%‚„œ”
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [5 0 R 7 0 R 9 0 R 11 0 R 13 0 R] /Count 5 >>
+endobj
+3 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+4 0 obj
+<< /Length 1160 >>
+stream
+BT /F1 11 Tf 1 0 0 1 72 740 Tm (The nightly backup writes a compressed dump of the memory bank to the backups volume, and) Tj ET
+BT /F1 11 Tf 1 0 0 1 72 726 Tm (a restore replays it into an empty database. The nightly backup writes a compressed dump) Tj ET
+BT /F1 11 Tf 1 0 0 1 72 712 Tm (of the memory bank to the backups volume, and a restore replays it into an empty database.) Tj ET
+BT /F1 11 Tf 1 0 0 1 72 698 Tm (The nightly backup writes a compressed dump of the memory bank to the backups volume, and) Tj ET
+BT /F1 11 Tf 1 0 0 1 72 684 Tm (a restore replays it into an empty database. The nightly backup writes a compressed dump) Tj ET
+BT /F1 11 Tf 1 0 0 1 72 670 Tm (of the memory bank to the backups volume, and a restore replays it into an empty database.) Tj ET
+BT /F1 11 Tf 1 0 0 1 72 656 Tm (The nightly backup writes a compressed dump of the memory bank to the backups volume, and) Tj ET
+BT /F1 11 Tf 1 0 0 1 72 642 Tm (a restore replays it into an empty database. The nightly backup writes a compressed dump) Tj ET
+BT /F1 11 Tf 1 0 0 1 72 628 Tm (of the memory bank to the backups volume, and a restore replays it into an empty database.) Tj ET
+endstream
+endobj
+5 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents 4 0 R >>
+endobj
+6 0 obj
+<< /Length 1160 >>
+stream
+BT /F1 11 Tf 1 0 0 1 72 740 Tm (The nightly backup writes a compressed dump of the memory bank to the backups volume, and) Tj ET
+BT /F1 11 Tf 1 0 0 1 72 726 Tm (a restore replays it into an empty database. The nightly backup writes a compressed dump) Tj ET
+BT /F1 11 Tf 1 0 0 1 72 712 Tm (of the memory bank to the backups volume, and a restore replays it into an empty database.) Tj ET
+BT /F1 11 Tf 1 0 0 1 72 

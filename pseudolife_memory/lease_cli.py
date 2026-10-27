@@ -733,10 +733,13 @@ def _spawn(command: list[str], env: dict[str, str]) -> subprocess.Popen:
     return subprocess.Popen(command, env=env)
 
 
-def _start(command: list[str], name: str) -> subprocess.Popen:
+def _start(command: list[str], name: str | None) -> subprocess.Popen:
+    """Start the command; ``name`` joins PSEUDOLIFE_LEASES_HELD, unless None
+    (a gated check, which holds nothing)."""
     env = dict(os.environ)
-    held = env.get(HELD_ENV)
-    env[HELD_ENV] = f"{held},{name}" if held else name
+    if name is not None:
+        held = env.get(HELD_ENV)
+        env[HELD_ENV] = f"{held},{name}" if held else name
     try:
         return _spawn(command, env)
     except FileNotFoundError:
@@ -1441,18 +1444,59 @@ def _local_text(local: dict) -> str:
             f"{_clean(local.get('worktree', '?'), MAX_PURPOSE)}{since})")
 
 
-def _check(args, transport) -> int:
+def _check(args, transport, *, flush: bool = False) -> int:
     """Exit 1 when held, 0 when free, EXIT_SOFTWARE when the check itself
-    failed: a gate that reads 1 as held must never refuse on a crash."""
+    failed: a gate that reads 1 as held must never refuse on a crash. With
+    ``flush``, a report that cannot be written is such a failure too."""
     try:
-        return _check_lease(args, transport)
+        return _check_lease(args, transport, flush=flush)
     except Exception as exc:  # noqa: BLE001
         _say(f"lease: check of {args.name!r} failed ({type(exc).__name__}: "
              f"{_clean(str(exc), MAX_PURPOSE)}); neither held nor free is known")
         return EXIT_SOFTWARE
 
 
-def _check_lease(args, transport) -> int:
+def _gated(args, command: list[str], transport) -> int:
+    """``check NAME -- COMMAND``: run COMMAND only while NAME is free, and
+    exit with its status. Held is EXIT_TEMPFAIL and a failed check
+    EXIT_SOFTWARE, neither of which runs it, so a refusal is never read as
+    the command's own exit 1. Nothing is held: another process may take the
+    lease once the check has passed (``lease run`` holds it instead)."""
+    name = args.name
+    child = None
+    state = {"cleaning": False}
+    previous = _install_stop_handlers(state)
+    try:
+        # The report goes out before the command's own output, in order.
+        code = _check(args, transport, flush=True)
+        if code == 1:
+            _say(f"lease: {name!r} is held, so the command did not run; run it again once "
+                 f"the lease is free, or, if the command should hold the lease while it "
+                 f"runs, queue for it with: pseudolife-mcp lease run {_clean(name)} -- COMMAND")
+            return EXIT_TEMPFAIL
+        if code != 0:
+            _say(f"lease: the check of {name!r} failed, so the command did not run")
+            return code
+        child = _start(command, None)
+        return _exit_status(_wait_up_to(child, None))
+    except _CannotRun as exc:
+        _say(str(exc))
+        return exc.code
+    except (KeyboardInterrupt, _Signalled) as stop:
+        signum = stop.signum if isinstance(stop, _Signalled) else signal.SIGINT
+        if child is not None:
+            _stop_child(child, signum)
+        what = ("interrupted" if signum == signal.SIGINT
+                else f"stopped by {signal.Signals(signum).name}")
+        _say(f"lease: {what}; " + ("the command was stopped" if child is not None
+                                   else "the command did not run"))
+        return 128 + signum
+    finally:
+        state["cleaning"] = True
+        _restore_handlers(previous)
+
+
+def _check_lease(args, transport, *, flush: bool = False) -> int:
     local = _local_state(args.name)
     board: dict = {"available": False, "reason": None, "holder": None, "expected_end": None,
                    "stale": False, "queued": 0, "queue": []}
@@ -1499,7 +1543,7 @@ def _check_lease(args, transport) -> int:
     held = local["state"] == "held" or (holder is not None and not board_stale)
     if args.json:
         print(json.dumps({"name": args.name, "held": held, "local": local, "board": board},
-                         indent=2))
+                         indent=2), flush=flush)
         return 1 if held else 0
     now = time.time()
     lines = [f"lease {_clean(args.name)}: {'held' if held else 'free'}",
@@ -1518,7 +1562,7 @@ def _check_lease(args, transport) -> int:
             lines.append("  board: free")
     else:
         lines.append(f"  board unavailable: {reason}")
-    print("\n".join(lines))
+    print("\n".join(lines), flush=flush)
     return 1 if held else 0
 
 
@@ -1760,6 +1804,22 @@ signal N (130 Ctrl-C).
 """
 
 
+_CHECK_EPILOG = """\
+With a command after --, check is the gate itself: it runs COMMAND only when
+NAME is free, and exits with the command's own status. Held, or a check that
+failed, does not run it. Nothing is held while it runs; lease run holds the
+lease instead. Put a sequence in one command, so that every step is gated:
+
+  pseudolife-mcp lease check full-suite -- sh -c 'cargo clippy && cargo nextest run && cargo build'
+  pseudolife-mcp lease check full-suite -- pwsh -c 'cargo clippy && cargo nextest run && cargo build'
+
+exit codes: 0 free; 1 held; 2 usage error; 70 the check itself failed. With a
+command: the command's own; 70 the check failed and 75 held (the command did
+not run); 126 cannot start the command; 127 command not found; 128+N stopped
+by signal N (130 Ctrl-C).
+"""
+
+
 def _parsers():
     parser = argparse.ArgumentParser(
         prog="pseudolife-mcp lease",
@@ -1822,13 +1882,16 @@ def _parsers():
     hold.add_argument("--timeout", type=_seconds(0, None), metavar="DURATION",
                       help="give up waiting for a held lock after DURATION: exit 75")
     check = actions.add_parser(
-        "check", help="exit 0 when a lease is free, 1 when it is held",
-        description="The launch gate: print the lease's holder (OS lock and board) and "
-                    "its expected end, and exit 0 when it is free, 1 when it is held, or "
-                    "70 when the check itself failed. The local lock decides wherever its "
-                    "file exists; a board holder beside a free lock is shown as stale. For "
-                    "full-suite the test suite's own lock is probed, with its holder "
-                    "record.")
+        "check", help="exit 0 when a lease is free, 1 when it is held; with -- COMMAND, "
+                      "run it only when free",
+        usage="pseudolife-mcp lease check NAME [--json] [-- COMMAND [ARGS...]]",
+        epilog=_CHECK_EPILOG, formatter_class=argparse.RawDescriptionHelpFormatter,
+        # Wrapped by hand: the raw formatter keeps the epilog's example lines.
+        description="The launch gate: print the lease's holder (OS lock and board) and its "
+                    "expected\nend, and exit 0 when it is free, 1 when it is held, or 70 when "
+                    "the check\nitself failed. The local lock decides wherever its file "
+                    "exists; a board holder\nbeside a free lock is shown as stale. For "
+                    "full-suite the test suite's own lock\nis probed, with its holder record.")
     check.add_argument("name", type=_lease_name, metavar="NAME", help="the lease to check")
     check.add_argument("--json", action="store_true", help="print one JSON report")
     listing = actions.add_parser(
@@ -1894,14 +1957,21 @@ def main(argv: list[str] | None = None, *, transport=None) -> int:
         if args.action == "run" and not command:
             run.error("put the command to run after --, as in: "
                       "pseudolife-mcp lease run gpu -- python train.py")
-        if args.action in others and command is not None:
+        if args.action == "check" and command is not None:
+            if not command:
+                others["check"].error("put the command to gate after --, as in: "
+                                      "pseudolife-mcp lease check full-suite -- cargo build")
+            if args.json:
+                others["check"].error("check --json takes no command: the command's output "
+                                      "would follow the JSON report on stdout; drop --json")
+        elif args.action in others and command is not None:
             others[args.action].error(f"{args.action} takes no command")
     except SystemExit as stop:
         return stop.code if isinstance(stop.code, int) else EXIT_USAGE
     if args.action == "hold":
         return _hold(args, transport)
     if args.action == "check":
-        return _check(args, transport)
+        return _check(args, transport) if command is None else _gated(args, command, transport)
     if args.action == "list":
         return _list(args, transport)
     if args.action in ("break", "delegate"):

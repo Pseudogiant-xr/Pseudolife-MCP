@@ -469,12 +469,13 @@ mod tests {
                             ..crate::search::fixture_params("", 12)
                         };
                         output["search_entries"] = json!(
-                            crate::search::rank(&bank, &query, &params, None)
+                            crate::search::rank(&bank, &query, &params, None, &[], None)
                                 .hits
                                 .iter()
-                                .map(|hit| crate::search::entry_json(
-                                    &bank.entries[hit.idx],
-                                    hit.score
+                                .filter_map(|hit| hit.entry().map(|i| (i, hit.score)))
+                                .map(|(i, score)| crate::search::entry_json(
+                                    &bank.entries[i],
+                                    score
                                 ))
                                 .collect::<Vec<_>>()
                         );

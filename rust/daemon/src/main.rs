@@ -3,6 +3,8 @@
 //! gate, storage resolution, config, tokens, the bind guard, then the
 //! background warmup and the HTTP server. See `spec-w1a-foundation.md`.
 
+#![deny(unsafe_code)]
+
 mod auth;
 mod background;
 mod background_sessions;
@@ -12,6 +14,7 @@ mod config;
 mod consolidation_tools;
 mod contradiction;
 mod correction_tools;
+mod documents;
 mod dream;
 mod embed;
 mod embedding_math;
@@ -44,6 +47,7 @@ mod maintenance;
 mod mcp;
 mod meta_filter;
 mod mutants;
+mod native;
 mod onnx_artifacts;
 mod onnx_runtime;
 mod openblas_sdot;
@@ -128,6 +132,12 @@ fn nodelay_listener(
 }
 
 fn main() {
+    // `provision <runtime>` installs a pinned native runtime and exits,
+    // before anything that needs a bank or configuration.
+    let args: Vec<std::ffi::OsString> = std::env::args_os().skip(1).collect();
+    if args.first().is_some_and(|a| a == "provision") {
+        std::process::exit(native::command(&args[1..]));
+    }
     #[cfg(feature = "principal-harness")]
     if std::env::var_os("PSEUDOLIFE_PRINCIPAL_HARNESS").is_some() {
         let runtime = tokio::runtime::Runtime::new().unwrap();
@@ -374,5 +384,23 @@ mod listener_tests {
         let _client = tokio::net::TcpStream::connect(address).await.unwrap();
         let (accepted, _) = listener.accept().await;
         assert!(accepted.nodelay().unwrap());
+    }
+}
+
+#[cfg(test)]
+mod manifest_tests {
+    /// `cargo run -p pseudolife-daemon` (the PDF tests' provisioning hint)
+    /// needs `default-run`: cargo refuses a package with several binaries,
+    /// feature-gated ones included, when none is named.
+    #[test]
+    fn cargo_run_picks_the_daemon() {
+        let manifest = include_str!("../Cargo.toml");
+        assert!(manifest.matches("[[bin]]").count() > 1);
+        assert!(
+            manifest
+                .lines()
+                .any(|line| line.trim() == r#"default-run = "pseudolife-daemon""#),
+            "rust/daemon/Cargo.toml must set default-run = \"pseudolife-daemon\""
+        );
     }
 }
