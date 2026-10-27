@@ -1,6 +1,7 @@
 //! The maintainer routes and `/api/config`, behind the operator gate. The
-//! three maintainer reads (`read/maintainer.rs`) and `GET /api/config`
-//! (`config_io.rs`) are served; the POSTs are not yet.
+//! three maintainer reads (`read/maintainer.rs`) and `/api/config`
+//! (`config_io.rs`, after `http.rs`'s operator gate) are served; the
+//! maintainer POSTs are not yet.
 
 use super::console::Request;
 use crate::http::json_response;
@@ -13,6 +14,7 @@ pub(super) const SERVED: &[(&str, &str)] = &[
     ("GET", "/api/maintainer/sent"),
     ("GET", "/api/maintainer/inbox"),
     ("GET", "/api/config"),
+    ("POST", "/api/config"),
 ];
 
 pub(super) async fn route(req: &mut Request<'_>) -> Option<Response> {
@@ -28,6 +30,25 @@ pub(super) async fn route(req: &mut Request<'_>) -> Option<Response> {
                     // An exception `read_config` lets escape: the generic
                     // handler's 500 with its text.
                     Err(text) => json_response(500, &serde_json::json!({"error": text})),
+                },
+            )
+        }
+        ("POST", "/api/config") => {
+            // `b.get("patch") or b`.
+            let body = std::mem::take(&mut req.body);
+            let patch = match body.get("patch") {
+                Some(p) if crate::config_io::truthy(p) => p.clone(),
+                _ => serde_json::Value::Object(body),
+            };
+            Some(
+                match crate::config_io::write_config(&req.app.service.data_dir, &patch) {
+                    Ok(answer) => json_response(200, &answer),
+                    Err(crate::config_io::WriteError::Invalid(text)) => {
+                        json_response(400, &serde_json::json!({"error": text}))
+                    }
+                    Err(crate::config_io::WriteError::Failed(text)) => {
+                        json_response(500, &serde_json::json!({"error": text}))
+                    }
                 },
             )
         }

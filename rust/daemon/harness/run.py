@@ -668,7 +668,7 @@ class Tokens(Scenario):
             case("revoked stored principal", "GET", "/api/nope", [bearer("stored-dave-token-w1a")]),
             case("stored principal POST /api/config", "POST", "/api/config", [bearer("stored-carol-token-w1a")]),
             case("stored principal POST /api/daemon-notice", "POST", "/api/daemon-notice", [bearer("stored-carol-token-w1a")]),
-            case("env principal POST /api/config", "POST", "/api/config", [auth], declared="W2-D: config write"),
+            case("env principal POST /api/config", "POST", "/api/config", [auth]),
             case("duplicate authorization, valid last", "GET", "/api/nope", [bearer("junk"), auth]),
             case("duplicate authorization, valid first", "GET", "/api/nope", [auth, bearer("junk")]),
             case("browser gate off with token", "GET", "/api/nope", [auth, ("Origin", "http://evil.example")]),

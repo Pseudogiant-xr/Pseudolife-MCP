@@ -6194,5 +6194,217 @@
    "error": "OverflowError",
    "text": "cannot convert float infinity to integer"
   }
+ ],
+ "write": [
+  {
+   "name": "new-file",
+   "before": null,
+   "patch": {
+    "memory.top_k": 12
+   },
+   "ok": {
+    "file": "memory:\n  top_k: 12\n",
+    "backup": false,
+    "paths": [
+     "memory.top_k"
+    ]
+   }
+  },
+  {
+   "name": "merge-in-place",
+   "before": "# Pseudolife daemon settings.\nmemory:\n  top_k: 8\n  hide_superseded: yes\n  ref_top_k: 017\n  miras:\n    preset: custom\n    bands:\n    - name: flat\n      max_entries: 5000\n  dream:\n    enabled: false\n    extractor_base_url: 'http://127.0.0.1:8080/v1'\n    extractor_model: \"claude-sonnet-4-5\"\n  cortex: off\ncoordination:\n  enabled: true\n  maintainer:\n    rp_id: console.example.com\n    origin: https://console.example.com\n",
+   "patch": {
+    "memory.top_k": "12",
+    "memory.dream.enabled": "on",
+    "memory.dream.extractor_base_url": "",
+    "memory.cortex.guard_min_score": 0.25,
+    "memory.lessons.top_k": 7,
+    "time.relative_age": false,
+    "memory.dream.idle_seconds": 1e-05
+   },
+   "ok": {
+    "file": "memory:\n  top_k: 12\n  hide_superseded: true\n  ref_top_k: 15\n  miras:\n    preset: custom\n    bands:\n    - name: flat\n      max_entries: 5000\n  dream:\n    enabled: true\n    extractor_base_url: null\n    extractor_model: claude-sonnet-4-5\n    idle_seconds: 1.0e-05\n  cortex:\n    guard_min_score: 0.25\n  lessons:\n    top_k: 7\ncoordination:\n  enabled: true\n  maintainer:\n    rp_id: console.example.com\n    origin: https://console.example.com\ntime:\n  relative_age: false\n",
+    "backup": true,
+    "paths": [
+     "memory.top_k",
+     "memory.dream.extractor_base_url",
+     "memory.cortex.guard_min_score",
+     "memory.lessons.top_k",
+     "time.relative_age",
+     "memory.dream.idle_seconds",
+     "memory.dream.enabled"
+    ]
+   }
+  },
+  {
+   "name": "new-sections-in-patch-order",
+   "before": "time:\n  relative_age: true\n",
+   "patch": {
+    "memory.recall.driver": "mechanical",
+    "memory.bm25.weight": 1,
+    "memory.dream.extractor_model": "  some-model  "
+   },
+   "ok": {
+    "file": "time:\n  relative_age: true\nmemory:\n  recall:\n    driver: mechanical\n  bm25:\n    weight: 1.0\n  dream:\n    extractor_model: some-model\n",
+    "backup": true,
+    "paths": [
+     "memory.recall.driver",
+     "memory.bm25.weight",
+     "memory.dream.extractor_model"
+    ]
+   }
+  },
+  {
+   "name": "empty-file",
+   "before": "",
+   "patch": {
+    "memory.hide_superseded": true
+   },
+   "ok": {
+    "file": "memory:\n  hide_superseded: true\n",
+    "backup": true,
+    "paths": [
+     "memory.hide_superseded"
+    ]
+   }
+  },
+  {
+   "name": "comment-only-file",
+   "before": "# nothing yet\n",
+   "patch": {
+    "memory.mcp.entry_text_chars": 900
+   },
+   "ok": {
+    "file": "memory:\n  mcp:\n    entry_text_chars: 900\n",
+    "backup": true,
+    "paths": [
+     "memory.mcp.entry_text_chars"
+    ]
+   }
+  },
+  {
+   "name": "unicode-and-long-text",
+   "before": "note: \"café — long words long words long words long words long words long words long words long words long words long words long words long words \"\n",
+   "patch": {
+    "memory.dream.extractor_model": "modèle-é"
+   },
+   "ok": {
+    "file": "note: \"caf\\xE9 \\u2014 long words long words long words long words long words long\\\n  \\ words long words long words long words long words long words long words \"\nmemory:\n  dream:\n    extractor_model: \"mod\\xE8le-\\xE9\"\n",
+    "backup": true,
+    "paths": [
+     "memory.dream.extractor_model"
+    ]
+   }
+  },
+  {
+   "name": "protected",
+   "before": "# Pseudolife daemon settings.\nmemory:\n  top_k: 8\n  hide_superseded: yes\n  ref_top_k: 017\n  miras:\n    preset: custom\n    bands:\n    - name: flat\n      max_entries: 5000\n  dream:\n    enabled: false\n    extractor_base_url: 'http://127.0.0.1:8080/v1'\n    extractor_model: \"claude-sonnet-4-5\"\n  cortex: off\ncoordination:\n  enabled: true\n  maintainer:\n    rp_id: console.example.com\n    origin: https://console.example.com\n",
+   "patch": {
+    "memory.top_k": 9,
+    "Coordination.Maintainer.rp_id": "x"
+   },
+   "error": "ValueError",
+   "text": "config_protected"
+  },
+  {
+   "name": "protected-padded",
+   "before": "# Pseudolife daemon settings.\nmemory:\n  top_k: 8\n  hide_superseded: yes\n  ref_top_k: 017\n  miras:\n    preset: custom\n    bands:\n    - name: flat\n      max_entries: 5000\n  dream:\n    enabled: false\n    extractor_base_url: 'http://127.0.0.1:8080/v1'\n    extractor_model: \"claude-sonnet-4-5\"\n  cortex: off\ncoordination:\n  enabled: true\n  maintainer:\n    rp_id: console.example.com\n    origin: https://console.example.com\n",
+   "patch": {
+    " coordination.maintainer ": {}
+   },
+   "error": "ValueError",
+   "text": "config_protected"
+  },
+  {
+   "name": "protected-before-unknown",
+   "before": "# Pseudolife daemon settings.\nmemory:\n  top_k: 8\n  hide_superseded: yes\n  ref_top_k: 017\n  miras:\n    preset: custom\n    bands:\n    - name: flat\n      max_entries: 5000\n  dream:\n    enabled: false\n    extractor_base_url: 'http://127.0.0.1:8080/v1'\n    extractor_model: \"claude-sonnet-4-5\"\n  cortex: off\ncoordination:\n  enabled: true\n  maintainer:\n    rp_id: console.example.com\n    origin: https://console.example.com\n",
+   "patch": {
+    "nope": 1,
+    "coordination.maintainer.origin": "x"
+   },
+   "error": "ValueError",
+   "text": "config_protected"
+  },
+  {
+   "name": "unknown-knob",
+   "before": "# Pseudolife daemon settings.\nmemory:\n  top_k: 8\n  hide_superseded: yes\n  ref_top_k: 017\n  miras:\n    preset: custom\n    bands:\n    - name: flat\n      max_entries: 5000\n  dream:\n    enabled: false\n    extractor_base_url: 'http://127.0.0.1:8080/v1'\n    extractor_model: \"claude-sonnet-4-5\"\n  cortex: off\ncoordination:\n  enabled: true\n  maintainer:\n    rp_id: console.example.com\n    origin: https://console.example.com\n",
+   "patch": {
+    "memory.top_k": 9,
+    "memory.nope": 1
+   },
+   "error": "ValueError",
+   "text": "unknown knob: memory.nope"
+  },
+  {
+   "name": "invalid-value",
+   "before": "# Pseudolife daemon settings.\nmemory:\n  top_k: 8\n  hide_superseded: yes\n  ref_top_k: 017\n  miras:\n    preset: custom\n    bands:\n    - name: flat\n      max_entries: 5000\n  dream:\n    enabled: false\n    extractor_base_url: 'http://127.0.0.1:8080/v1'\n    extractor_model: \"claude-sonnet-4-5\"\n  cortex: off\ncoordination:\n  enabled: true\n  maintainer:\n    rp_id: console.example.com\n    origin: https://console.example.com\n",
+   "patch": {
+    "memory.top_k": 99
+   },
+   "error": "ValueError",
+   "text": "memory.top_k: 99 > max 50"
+  },
+  {
+   "name": "type-error",
+   "before": "# Pseudolife daemon settings.\nmemory:\n  top_k: 8\n  hide_superseded: yes\n  ref_top_k: 017\n  miras:\n    preset: custom\n    bands:\n    - name: flat\n      max_entries: 5000\n  dream:\n    enabled: false\n    extractor_base_url: 'http://127.0.0.1:8080/v1'\n    extractor_model: \"claude-sonnet-4-5\"\n  cortex: off\ncoordination:\n  enabled: true\n  maintainer:\n    rp_id: console.example.com\n    origin: https://console.example.com\n",
+   "patch": {
+    "memory.top_k": null
+   },
+   "error": "TypeError",
+   "text": "int() argument must be a string, a bytes-like object or a real number, not 'NoneType'"
+  },
+  {
+   "name": "empty-patch",
+   "before": "# Pseudolife daemon settings.\nmemory:\n  top_k: 8\n  hide_superseded: yes\n  ref_top_k: 017\n  miras:\n    preset: custom\n    bands:\n    - name: flat\n      max_entries: 5000\n  dream:\n    enabled: false\n    extractor_base_url: 'http://127.0.0.1:8080/v1'\n    extractor_model: \"claude-sonnet-4-5\"\n  cortex: off\ncoordination:\n  enabled: true\n  maintainer:\n    rp_id: console.example.com\n    origin: https://console.example.com\n",
+   "patch": {},
+   "error": "ValueError",
+   "text": "empty patch"
+  },
+  {
+   "name": "list-document",
+   "before": "- a\n- b\n",
+   "patch": {
+    "memory.top_k": 9
+   },
+   "error": "AttributeError",
+   "text": "'list' object has no attribute 'get'"
+  },
+  {
+   "name": "scalar-document",
+   "before": "hello\n",
+   "patch": {
+    "memory.top_k": 9
+   },
+   "error": "AttributeError",
+   "text": "'str' object has no attribute 'get'"
+  },
+  {
+   "name": "falsy-document",
+   "before": "0\n",
+   "patch": {
+    "memory.top_k": 9
+   },
+   "ok": {
+    "file": "memory:\n  top_k: 9\n",
+    "backup": true,
+    "paths": [
+     "memory.top_k"
+    ]
+   }
+  },
+  {
+   "name": "timestamp-in-file",
+   "before": "built: 2026-10-27\n",
+   "patch": {
+    "memory.top_k": 9
+   },
+   "ok": {
+    "file": "built: 2026-10-27\nmemory:\n  top_k: 9\n",
+    "backup": true,
+    "paths": [
+     "memory.top_k"
+    ]
+   }
+  }
  ]
 }

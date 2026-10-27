@@ -1301,6 +1301,10 @@ enum Frame {
     Map(Vec<(Node, Node)>, Option<Node>, usize),
 }
 
+/// How a scalar event becomes a node: [`resolve_scalar`] for the daemon's
+/// own load, or a caller's (`config_io`'s PyYAML 1.1 rules).
+pub(crate) type ScalarResolver = fn(String, TScalarStyle, Option<Tag>) -> Result<Node, String>;
+
 #[derive(Default)]
 struct Loader {
     docs: Vec<Node>,
@@ -1308,6 +1312,7 @@ struct Loader {
     stack: Vec<Frame>,
     anchors: HashMap<usize, Node>,
     error: Option<String>,
+    resolve: Option<ScalarResolver>,
 }
 
 fn unknown_tag(tag: &Tag) -> String {
@@ -1317,7 +1322,11 @@ fn unknown_tag(tag: &Tag) -> String {
     )
 }
 
-fn resolve_scalar(value: String, style: TScalarStyle, tag: Option<Tag>) -> Result<Node, String> {
+pub(crate) fn resolve_scalar(
+    value: String,
+    style: TScalarStyle,
+    tag: Option<Tag>,
+) -> Result<Node, String> {
     if let Some(tag) = tag {
         if tag.handle == "!" && tag.suffix.is_empty() {
             return Ok(Node::Str(value));
@@ -1464,7 +1473,7 @@ impl Loader {
                 self.complete(node, 0);
             }
             Event::Scalar(value, style, anchor, tag) => {
-                let node = resolve_scalar(value, style, tag)?;
+                let node = self.resolve.unwrap_or(resolve_scalar)(value, style, tag)?;
                 self.complete(node, anchor);
             }
             Event::SequenceStart(anchor, tag) => {
@@ -1520,6 +1529,15 @@ fn non_printable(c: char) -> bool {
 /// error, more than one document, an unknown tag or a non-printable
 /// character.
 pub(crate) fn safe_load(text: &str) -> Result<Option<Node>, String> {
+    load_with(text, None)
+}
+
+/// [`safe_load`] with another scalar resolver.
+pub(crate) fn safe_load_with(text: &str, resolve: ScalarResolver) -> Result<Option<Node>, String> {
+    load_with(text, Some(resolve))
+}
+
+fn load_with(text: &str, resolve: Option<ScalarResolver>) -> Result<Option<Node>, String> {
     if let Some((offset, c)) = text.char_indices().find(|(_, c)| non_printable(*c)) {
         return Err(format!(
             "unacceptable character #x{:04x} at offset {offset}",
@@ -1527,7 +1545,10 @@ pub(crate) fn safe_load(text: &str) -> Result<Option<Node>, String> {
         ));
     }
     let text = text.strip_prefix('\u{feff}').unwrap_or(text);
-    let mut loader = Loader::default();
+    let mut loader = Loader {
+        resolve,
+        ..Loader::default()
+    };
     let mut parser = Parser::new_from_str(text);
     parser.load(&mut loader, true).map_err(|e| e.to_string())?;
     if let Some(e) = loader.error {
