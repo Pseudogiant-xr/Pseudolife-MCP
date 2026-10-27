@@ -320,7 +320,7 @@ fn security(state: &McpState, method: &Method, h: &HeaderMap) -> Option<Response
         let ok = ["http://127.0.0.1", "http://localhost", "http://[::1]"]
             .iter()
             .any(|base| origin.starts_with(&format!("{base}:")));
-        if !ok {
+        if !ok && !crate::mutants::active("mcp-any-origin") {
             return Some(plain(403, "Invalid Origin header"));
         }
     }
@@ -387,10 +387,16 @@ pub async fn handle(
 
     // Era routing (`StreamableHTTPSessionManager._handle_request`): a
     // protocol-version header outside the handshake versions belongs to the
-    // 2026-07-28 stateless era, which this port does not serve yet.
+    // 2026-07-28 stateless era, which this port does not serve yet. Its
+    // handler (`handle_modern_request`) runs the transport check first.
     if let Some(pv) = latin1(&headers, "mcp-protocol-version")
         && !HANDSHAKE_VERSIONS.contains(&pv.as_str())
     {
+        if let Some(r) = security(state, &method, &headers)
+            && !crate::mutants::active("mcp-era-skips-security")
+        {
+            return r;
+        }
         return modern_era_refusal(&body);
     }
 

@@ -1,6 +1,7 @@
 """Only the exact declared differences may accompany MCP controls."""
 import copy
 import json
+from pathlib import Path
 
 import pytest
 
@@ -127,3 +128,69 @@ def test_ci_rejects_missing_or_failed_coercion_evidence(failure):
         report['source']['pydantic-core'] = '99.0.0'
     with pytest.raises((AssertionError, KeyError)):
         mcp_ci.check_coercion_report(report)
+
+
+def tokenless_report():
+    import mcp_ci
+    return {"summary": {"responses": mcp_ci.TOKENLESS_RESPONSES, "cases": len(mcp_ci.TOKENLESS_CASES) + 1,
+                        "diffs": 0, "unserved_checked": []}, "diffs": []}
+
+
+def test_tokenless_corpus_declares_no_difference():
+    import mcp_ci
+    assert mcp_ci.TOKENLESS_RESPONSES == 66
+    assert mcp_ci.TOKENLESS_MUTANTS == ("mcp-bare-host", "mcp-any-origin", "mcp-era-skips-security")
+    mcp_ci.check_tokenless(tokenless_report())
+    for change in ("diff", "short", "unserved"):
+        report = tokenless_report()
+        if change == "diff":
+            report["diffs"] = ["rebinding[0]: python=1\n          rust  =2"]
+            report["summary"]["diffs"] = 1
+        elif change == "short":
+            report["summary"]["responses"] -= 1
+        else:
+            report["summary"]["unserved_checked"] = ["memory_dream"]
+        with pytest.raises(AssertionError):
+            mcp_ci.check_tokenless(report)
+
+
+@pytest.mark.parametrize("platform", ["linux", "win32"])
+def test_tokenless_runs_on_linux_only(tmp_path, monkeypatch, platform):
+    import subprocess
+    import mcp_ci
+    labels = []
+
+    def run(command, **kwargs):
+        """A fake mcp_run.py: writes the report each invocation would write."""
+        target = Path(command[3])
+        labels.append(target.name)
+        target.mkdir(parents=True, exist_ok=True)
+        mutant = command[command.index("--mutant") + 1] if "--mutant" in command else None
+        if "--tokenless" not in command:
+            name = f"mutant-{mutant}.json" if mutant else "compare.json"
+            (target / name).write_text("{}", encoding="utf-8")
+            (target / "validation-sweep.json").write_text("{}", encoding="utf-8")
+            (target / "foundation-mount.json").write_text(
+                json.dumps({"case": "mcp path, auth", "diffs": []}), encoding="utf-8")
+            return subprocess.CompletedProcess(command, 1)
+        report = tokenless_report()
+        if mutant:
+            report["diffs"] = [f"rebinding[3]: {mutant}"]
+            report["summary"]["diffs"] = 1
+        (target / (f"mutant-{mutant}.json" if mutant else "compare.json")).write_text(
+            json.dumps(report), encoding="utf-8")
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(mcp_ci.sys, "platform", platform)
+    monkeypatch.setattr(mcp_ci.subprocess, "run", run)
+    monkeypatch.setattr(mcp_ci, "MUTANTS", ())
+    monkeypatch.setattr(mcp_ci, "check_baseline", lambda report: None)
+    monkeypatch.setattr(mcp_ci, "check_coercion_report", lambda report: None)
+    monkeypatch.setattr(mcp_ci, "mutant_caught",
+                        lambda code, report, baseline: bool(report.get("diffs")))
+    assert mcp_ci.main(["--default-bin", "unused", "--mutant-bin", "unused", "--out", str(tmp_path)]) == 0
+    tokenless = [label for label in labels if label.startswith("tokenless")]
+    if platform == "linux":
+        assert tokenless == ["tokenless"] + [f"tokenless-{m}" for m in mcp_ci.TOKENLESS_MUTANTS]
+    else:
+        assert tokenless == []

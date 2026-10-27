@@ -36,6 +36,21 @@ const LEASE_KEEPALIVE: [(&str, i64); 3] = [
 ];
 /// `_LEASE_WAIT` (postgres.py:266).
 const LEASE_WAIT: &str = "2s";
+/// `_LEASE_RETRY_SECONDS` (postgres.py:295): after a reconnect is refused
+/// the lease, calls inside this window get the cached refusal instead of
+/// each waiting out `LEASE_WAIT` under the service lock.
+const LEASE_RETRY: Duration = Duration::from_secs(5);
+/// `_RECONNECT_RETRY_SECONDS` (postgres.py:301): after a reconnect cannot
+/// reach the server, calls inside this window skip another attempt. Not
+/// measured in Python either: it bounds a burst to one attempt.
+const RECONNECT_RETRY: Duration = Duration::from_secs(5);
+/// `_SESSION_PROBE_INTERVAL` (postgres.py:310-320): how long a writer
+/// session verified alive stays trusted. Python measured it 2026-09-23 on
+/// the bench PostgreSQL (Windows host to Docker): the `SELECT 1` probe costs
+/// 0.72 ms median, 1.8 ms p95; probing on every call cost +1.0 ms (+17%) on
+/// `cortex_lookup`, so at most one probe per interval keeps a burst of cheap
+/// calls cheap. Writes are not exposed: every reconnect re-checks the epoch.
+const SESSION_PROBE_INTERVAL: Duration = Duration::from_secs(1);
 /// `BANK_ID_RETRY_SECONDS` (postgres.py:286).
 pub const BANK_ID_RETRY: Duration = Duration::from_secs(60);
 /// `_LEASE_EPOCH_KEY` (postgres.py:305).
@@ -114,6 +129,61 @@ impl From<tokio_postgres::Error> for OpenError {
     }
 }
 
+/// Whether psycopg would raise `OperationalError` (or a subclass) for this
+/// error, the class `verify_writer_session` tolerates: every client-side
+/// failure (a closed connection, I/O, a timeout) and the server SQLSTATE
+/// classes psycopg 3 maps to it (`psycopg.errors.lookup`, checked against
+/// the installed psycopg).
+pub fn operational(e: &tokio_postgres::Error) -> bool {
+    let Some(code) = e.code() else { return true };
+    matches!(
+        code.code().get(..2),
+        Some(
+            "08" | "27"
+                | "28"
+                | "2F"
+                | "38"
+                | "39"
+                | "3B"
+                | "40"
+                | "53"
+                | "54"
+                | "55"
+                | "57"
+                | "58"
+                | "F0"
+                | "HV"
+        )
+    )
+}
+
+/// Why a reconnect failed, in the classes `PostgresStorage.conn` and
+/// `verify_writer_session` treat differently.
+#[derive(Debug)]
+enum Reopen {
+    /// `WriterLeaseHeld`.
+    LeaseHeld(String),
+    /// `psycopg.OperationalError`: the server could not be reached.
+    Unreachable(String),
+    /// Any other error, which Python lets propagate to the caller.
+    Failed(String),
+    /// A failure after the lease was won (reading or bumping the epoch).
+    /// Python has already cleared `_reconnect_error` by then, so nothing
+    /// is cached: an operational one is tolerated and the next call
+    /// reconnects again, any other propagates.
+    AfterLease { message: String, operational: bool },
+}
+
+impl From<tokio_postgres::Error> for Reopen {
+    fn from(e: tokio_postgres::Error) -> Self {
+        if operational(&e) {
+            Reopen::Unreachable(error_text(&e))
+        } else {
+            Reopen::Failed(error_text(&e))
+        }
+    }
+}
+
 /// An error's text: the server's message for a database error, else the
 /// client's description. Free per spec (H8 `db` text, L3).
 pub fn error_text(e: &tokio_postgres::Error) -> String {
@@ -131,11 +201,29 @@ pub struct Storage {
     /// `ping` and `cached_bank_id` connections pass none.
     base: Config,
     lease_epoch: i64,
-    /// `_lease_lost`: set only by Python's reconnect path when the lease was
-    /// lost to another writer (postgres.py `conn`). This slice has no
-    /// reconnect, so it stays `None`; kept so `ping` carries the check.
-    lease_lost: Option<String>,
+    /// The reconnect bookkeeping `PostgresStorage` keeps beside its session.
+    session: Mutex<SessionState>,
     bank_id: Mutex<BankIdCache>,
+}
+
+/// `PostgresStorage`'s session bookkeeping (postgres.py:424-437). A
+/// reconnect builds a new [`Storage`]; these fields stay on the one whose
+/// session died, which `/health` keeps probing until the replacement exists.
+#[derive(Default)]
+struct SessionState {
+    /// `_lease_lost`: the refusal a reconnect got because another writer
+    /// took the lease; `ping` reports it while that writer is still there.
+    lease_lost: Option<String>,
+    /// `_lease_retry_at`; `None` is Python's initial 0.0 (always due).
+    lease_retry_at: Option<Instant>,
+    /// `_reconnect_error`: the last reconnect's connection failure.
+    reconnect_error: Option<String>,
+    reconnect_retry_at: Option<Instant>,
+    /// `_session_ok_at`; `None` is 0.0 (never verified).
+    ok_at: Option<Instant>,
+    /// `resident_invalidated`: set on the replacement session when another
+    /// writer held the bank in the gap, until the owner re-reads the bank.
+    resident_invalidated: Option<String>,
 }
 
 struct BankIdCache {
@@ -368,6 +456,25 @@ async fn connect_session(base: &Config) -> Result<(Client, JoinHandle<()>), Open
 
 /// `_acquire_writer_lease` (postgres.py:447-479).
 async fn acquire_writer_lease(client: &Client) -> Result<(), OpenError> {
+    match take_writer_lease(client).await {
+        Ok(()) => Ok(()),
+        Err(LeaseError::Held(m)) => Err(OpenError::LeaseHeld(m)),
+        Err(LeaseError::Db(e)) => Err(e.into()),
+    }
+}
+
+enum LeaseError {
+    Held(String),
+    Db(tokio_postgres::Error),
+}
+
+impl From<tokio_postgres::Error> for LeaseError {
+    fn from(e: tokio_postgres::Error) -> Self {
+        LeaseError::Db(e)
+    }
+}
+
+async fn take_writer_lease(client: &Client) -> Result<(), LeaseError> {
     for (name, value) in LEASE_KEEPALIVE {
         client
             .batch_execute(&format!("SET {name} = {value}"))
@@ -392,7 +499,7 @@ async fn acquire_writer_lease(client: &Client) -> Result<(), OpenError> {
     {
         Ok(_) => {}
         Err(e) if e.code() == Some(&SqlState::LOCK_NOT_AVAILABLE) => {
-            return Err(OpenError::LeaseHeld(describe_lease_holder(client).await?));
+            return Err(LeaseError::Held(describe_lease_holder(client).await?));
         }
         Err(e) => return Err(e.into()),
     }
@@ -462,6 +569,10 @@ async fn seed_relations(client: &Client) -> Result<(), OpenError> {
 
 /// `_bump_lease_epoch` (postgres.py:482-498).
 async fn bump_lease_epoch(client: &Client) -> Result<i64, OpenError> {
+    Ok(bump_lease_epoch_raw(client).await?)
+}
+
+async fn bump_lease_epoch_raw(client: &Client) -> Result<i64, tokio_postgres::Error> {
     let row = client
         .query_one(
             "
@@ -476,6 +587,25 @@ async fn bump_lease_epoch(client: &Client) -> Result<i64, OpenError> {
         )
         .await?;
     Ok(row.get(0))
+}
+
+/// `_read_lease_epoch` (postgres.py:523-530): `None` when the row is
+/// missing or holds no number.
+async fn read_lease_epoch(client: &Client) -> Result<Option<i64>, tokio_postgres::Error> {
+    let row = client
+        .query_opt(
+            "SELECT CASE WHEN jsonb_typeof(value) = 'number' \
+             THEN (value #>> '{}')::numeric::bigint END \
+             FROM meta WHERE key = $1",
+            &[&LEASE_EPOCH_KEY],
+        )
+        .await?;
+    Ok(row.and_then(|r| r.get(0)))
+}
+
+/// Python's `str()` of an `int | None`.
+fn py_epoch(epoch: Option<i64>) -> String {
+    epoch.map_or_else(|| "None".into(), |e| e.to_string())
 }
 
 /// `_assert_public_search_path`'s rule (service.py:1047-1065) over a
@@ -538,7 +668,10 @@ impl Storage {
                 conn_task,
                 base,
                 lease_epoch,
-                lease_lost: None,
+                session: Mutex::new(SessionState {
+                    ok_at: Some(Instant::now()),
+                    ..SessionState::default()
+                }),
                 bank_id: Mutex::new(BankIdCache {
                     id: None,
                     retry_at: None,
@@ -574,18 +707,20 @@ impl Storage {
         }
     }
 
-    /// `ping` (postgres.py:702-719, spec H8): a fresh connection (2 s
-    /// connect timeout, no application-name fallback) runs `SELECT 1`. The
-    /// lease-lost branch can only fire after a reconnect, which this slice
-    /// does not have; `resident_invalidated` likewise (always unset).
+    /// `ping` (postgres.py:725-742, spec H8): a fresh connection (2 s
+    /// connect timeout, no application-name fallback) runs `SELECT 1`; then
+    /// it fails while a reconnect was refused the lease and a holder is
+    /// still there, and while the owner has yet to re-read a bank another
+    /// writer held in the meantime.
     pub async fn ping(&self) -> Result<(), String> {
         let (client, task) = connect(&self.base, Duration::from_secs(2)).await?;
         let probe = async {
             client.batch_execute("SELECT 1").await?;
-            if let Some(lost) = &self.lease_lost
+            let lost = self.session.lock().unwrap().lease_lost.clone();
+            if let Some(lost) = lost
                 && !lease_holders(&client).await?.is_empty()
             {
-                return Ok(Err(lost.clone()));
+                return Ok(Err(lost));
             }
             Ok::<_, tokio_postgres::Error>(Ok(()))
         };
@@ -593,6 +728,11 @@ impl Storage {
         drop(client);
         let _ = task.await;
         match result {
+            Ok(Ok(())) => match self.resident_invalidated() {
+                // `BankChangedHands` until the owner re-reads the bank.
+                Some(m) => Err(m),
+                None => Ok(()),
+            },
             Ok(r) => r,
             Err(e) => Err(error_text(&e)),
         }
@@ -639,6 +779,199 @@ impl Storage {
             cache.id = Some(id);
         }
         cache.id.clone()
+    }
+
+    /// `verify_writer_session` (postgres.py:533-568): round-trip on the
+    /// writer session before its owner serves from a resident copy, at most
+    /// once per [`SESSION_PROBE_INTERVAL`]. A dead session is replaced here
+    /// (`Ok(Some(replacement))`), which runs the handover check, so the
+    /// owner learns from [`Storage::resident_invalidated`] before it serves
+    /// a copy another writer may have made stale. An unreachable server is
+    /// tolerated (`Ok(None)`): nothing else can write a bank this process
+    /// cannot reach either, and every storage call still fails on its own.
+    /// `Err` only when another writer holds the lease, or when the
+    /// reconnect hits an error Python does not catch here.
+    ///
+    /// Python skips the probe while a transaction pins its connection
+    /// (`_pinned`); here that is [`crate::txn::try_hold`] failing (any
+    /// transaction or statement group) or a dropped transaction still open,
+    /// and the guard keeps one from starting mid-probe. A session already
+    /// closed needs no guard: its replacement is a new client.
+    pub async fn verify_writer_session(&self) -> Result<Option<Storage>, String> {
+        if crate::mutants::active("writer-no-reconnect") {
+            return Ok(None);
+        }
+        if !self.client.is_closed() {
+            let fresh = matches!(self.session.lock().unwrap().ok_at,
+                Some(at) if at.elapsed() < SESSION_PROBE_INTERVAL);
+            if fresh {
+                return Ok(None);
+            }
+            // Probe only while nothing else uses the shared, pipelined client.
+            let Some(_hold) = crate::txn::try_hold() else {
+                return Ok(None);
+            };
+            if crate::txn::recovery_pending() {
+                return Ok(None);
+            }
+            match self.client.batch_execute("SELECT 1").await {
+                Ok(()) => {
+                    self.session.lock().unwrap().ok_at = Some(Instant::now());
+                    return Ok(None);
+                }
+                // `except psycopg.OperationalError`: with a reconnect
+                // already failing, the server is unreachable; with the
+                // session still open, `self.conn` keeps it (nothing to heal).
+                Err(e) if operational(&e) => {
+                    let failing = self.session.lock().unwrap().reconnect_error.is_some();
+                    if failing || !self.client.is_closed() {
+                        return Ok(None);
+                    }
+                }
+                Err(e) => return Err(error_text(&e)),
+            }
+        }
+        self.heal().await
+    }
+
+    /// The reconnect half of `PostgresStorage.conn` (postgres.py:675-722):
+    /// the cached refusal or failure inside its retry window, else a new
+    /// session that must win the lease back before it serves anything.
+    async fn heal(&self) -> Result<Option<Storage>, String> {
+        {
+            let state = self.session.lock().unwrap();
+            let now = Instant::now();
+            if let (Some(lost), Some(at)) = (&state.lease_lost, state.lease_retry_at)
+                && now < at
+            {
+                return Err(lost.clone());
+            }
+            if state.reconnect_error.is_some()
+                && state.reconnect_retry_at.is_some_and(|at| now < at)
+            {
+                return Ok(None);
+            }
+        }
+        eprintln!("postgres connection lost; reconnecting");
+        match self.reopen().await {
+            Ok(fresh) => Ok(Some(fresh)),
+            Err(Reopen::LeaseHeld(m)) => {
+                let mut state = self.session.lock().unwrap();
+                state.lease_lost = Some(m.clone());
+                state.lease_retry_at = Some(Instant::now() + LEASE_RETRY);
+                Err(m)
+            }
+            Err(Reopen::Unreachable(m)) => {
+                let mut state = self.session.lock().unwrap();
+                state.reconnect_error = Some(format!("reconnect failed: {m}"));
+                state.reconnect_retry_at = Some(Instant::now() + RECONNECT_RETRY);
+                Ok(None)
+            }
+            Err(Reopen::AfterLease {
+                operational: true, ..
+            }) => {
+                self.session.lock().unwrap().reconnect_error = None;
+                Ok(None)
+            }
+            Err(Reopen::AfterLease { message, .. }) => {
+                self.session.lock().unwrap().reconnect_error = None;
+                Err(message)
+            }
+            Err(Reopen::Failed(m)) => Err(m),
+        }
+    }
+
+    /// `_open_session` plus the epoch check of `PostgresStorage.conn`: no
+    /// `ensure_schema` (the schema exists) and no relation seeds. A
+    /// different stored epoch means another writer held the bank in the
+    /// gap: the replacement carries the `resident_invalidated` refusal and
+    /// starts with no cached bank id. Closed again on any failure.
+    async fn reopen(&self) -> Result<Storage, Reopen> {
+        let (client, conn_task) = connect_session(&self.base).await.map_err(|e| match e {
+            OpenError::LeaseHeld(m) => Reopen::LeaseHeld(m),
+            // `_connect`'s failures are psycopg OperationalErrors (a refused
+            // connect, a timeout, a dropped session during its two SETs).
+            OpenError::Failed(m) | OpenError::Refused(m) => Reopen::Unreachable(m),
+        })?;
+        let built = async {
+            match take_writer_lease(&client).await {
+                Ok(()) => {}
+                Err(LeaseError::Held(m)) => return Err(Reopen::LeaseHeld(m)),
+                Err(LeaseError::Db(e)) => return Err(e.into()),
+            }
+            let after_lease = |e: tokio_postgres::Error| Reopen::AfterLease {
+                operational: operational(&e),
+                message: error_text(&e),
+            };
+            let found = read_lease_epoch(&client).await.map_err(after_lease)?;
+            let epoch = bump_lease_epoch_raw(&client).await.map_err(after_lease)?;
+            Ok::<_, Reopen>((found, epoch))
+        };
+        let (found, epoch) = match built.await {
+            Ok(v) => v,
+            Err(e) => {
+                drop(client);
+                let _ = conn_task.await;
+                return Err(e);
+            }
+        };
+        let moved =
+            found != Some(self.lease_epoch) && !crate::mutants::active("writer-epoch-unchecked");
+        let handed_over = moved.then(|| {
+            format!(
+                "another writer held this bank while this process was \
+                 disconnected (lease epoch {} -> {}); its resident copy may \
+                 be stale, so nothing is served or saved until it re-reads \
+                 the bank",
+                self.lease_epoch,
+                py_epoch(found)
+            )
+        });
+        if let Some(m) = &handed_over {
+            eprintln!("{m}");
+        }
+        // Another writer may have restored a different bank here: the
+        // cached bank id goes with the resident copy.
+        let bank_id = if handed_over.is_some() {
+            BankIdCache {
+                id: None,
+                retry_at: None,
+            }
+        } else {
+            let cache = self.bank_id.lock().unwrap();
+            BankIdCache {
+                id: cache.id.clone(),
+                retry_at: cache.retry_at,
+            }
+        };
+        Ok(Storage {
+            client,
+            conn_task,
+            base: self.base.clone(),
+            lease_epoch: epoch,
+            session: Mutex::new(SessionState {
+                ok_at: Some(Instant::now()),
+                resident_invalidated: handed_over,
+                ..SessionState::default()
+            }),
+            bank_id: Mutex::new(bank_id),
+        })
+    }
+
+    /// `resident_invalidated`.
+    pub fn resident_invalidated(&self) -> Option<String> {
+        self.session.lock().unwrap().resident_invalidated.clone()
+    }
+
+    /// `acknowledge_rehydration` (postgres.py:579-582).
+    pub fn acknowledge_rehydration(&self) {
+        self.session.lock().unwrap().resident_invalidated = None;
+    }
+
+    /// `_session_ok_at = 0.0`: the next verify probes even inside the
+    /// interval (the board's clock retry, `coordination.dispatch`).
+    pub fn forget_probe(&self) {
+        self.session.lock().unwrap().ok_at = None;
     }
 
     /// The lease epoch this session wrote (`_lease_epoch`).

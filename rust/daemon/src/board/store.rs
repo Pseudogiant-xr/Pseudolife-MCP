@@ -605,11 +605,15 @@ impl Store {
     /// `_check_label`: only a set label is checked.
     fn check_label(principal: &str, label: Option<&Value>) -> Result<()> {
         if let Some(Value::String(label)) = label
-            && text::reserved_name(label)
+            && let Some(reserved) = text::reserved_word(label)
             && !(RESERVED_SENDERS.contains(&principal)
                 && text::casefold(text::py_strip(label)) == principal)
         {
-            return Err(BoardError::code("invalid_label"));
+            return Err(BoardError::detail(
+                "invalid_label",
+                text::reserved_detail("label", reserved),
+            )
+            .with_param("label"));
         }
         Ok(())
     }
@@ -617,8 +621,17 @@ impl Store {
     /// `_check_name`: returned stripped; empty clears.
     pub fn check_name(name: &Value) -> Result<String> {
         let name = check_value(name, MAX_NAME, "name", true)?;
-        if name.chars().any(text::category_c) || text::reserved_name(name) {
-            return Err(BoardError::code("invalid_name"));
+        if name.chars().any(text::category_c) {
+            return Err(
+                BoardError::detail("invalid_name", text::CONTROL_NAME_DETAIL).with_param("name"),
+            );
+        }
+        if let Some(reserved) = text::reserved_word(name) {
+            return Err(BoardError::detail(
+                "invalid_name",
+                text::reserved_detail("name", reserved),
+            )
+            .with_param("name"));
         }
         refuse_secret(name, "name")?;
         Ok(text::py_strip(name).to_string())
@@ -2147,6 +2160,77 @@ mod proof_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn refusal(e: BoardError) -> (String, Option<String>, Option<String>) {
+        match e {
+            BoardError::Refused(r) => (r.code, r.detail, r.param),
+            other => panic!("not a refusal: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_refused_name_or_label_says_which_rule_it_broke() {
+        // tests/test_coordination_names.py, byte for byte: the 2026-10-27
+        // report answered only "invalid_name: the call was refused."
+        let ign = "ignoring case, spacing, punctuation and look-alike letters";
+        let contains = format!(
+            "the name contains the reserved word 'maintainer' ({ign}); choose a name without it"
+        );
+        let reads = |word: &str, near: &str| {
+            format!(
+                "the name reads as the reserved word '{word}' ({ign}{near}); choose another name"
+            )
+        };
+        for (bad, detail) in [
+            ("Rust B2a/B2d maintainer/config", contains.clone()),
+            ("domain tainer", contains.clone()),
+            ("maintaner", reads("maintainer", ", within one letter")),
+            ("Daemon", reads("daemon", ", within one letter")),
+            ("pass key", reads("passkey", "")),
+            ("VERIFIED", reads("verified", "")),
+            ("board\u{200b}names", text::CONTROL_NAME_DETAIL.to_string()),
+        ] {
+            let got = refusal(Store::check_name(&json!(bad)).unwrap_err());
+            assert_eq!(
+                got,
+                ("invalid_name".into(), Some(detail), Some("name".into())),
+                "{bad}"
+            );
+        }
+        assert_eq!(
+            text::CONTROL_NAME_DETAIL,
+            "the name holds a control or format character (Unicode category C, such as a \
+             zero-width or bidi mark); remove it"
+        );
+        for near_miss in [
+            "Rust B2a/B2d config",
+            "daemon watcher",
+            "verifier",
+            "passkeys",
+            "main config",
+            "maintaner review",
+        ] {
+            assert_eq!(Store::check_name(&json!(near_miss)).unwrap(), near_miss);
+        }
+        let label = |l: &str| refusal(Store::check_label("alice", Some(&json!(l))).unwrap_err());
+        assert_eq!(
+            label("maintainer-bot"),
+            (
+                "invalid_label".into(),
+                Some(format!(
+                    "the label contains the reserved word 'maintainer' ({ign}); choose a label without it"
+                )),
+                Some("label".into())
+            )
+        );
+        assert_eq!(
+            label("Daemn").1.unwrap(),
+            format!(
+                "the label reads as the reserved word 'daemon' ({ign}, within one letter); choose another label"
+            )
+        );
+        assert!(Store::check_label("alice", Some(&json!("claude-code"))).is_ok());
+    }
 
     #[test]
     fn a_session_title_names_one_clean_bounded_line_or_nothing() {
