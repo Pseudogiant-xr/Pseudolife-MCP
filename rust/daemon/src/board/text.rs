@@ -200,20 +200,55 @@ const NAME_RULES: [(&str, bool, usize); 4] = [
     ("verified", false, 0),
 ];
 
-/// `reserved_name`.
-pub fn reserved_name(value: &str) -> bool {
+/// `reserved_word`: the reserved word `value` reads as, if any.
+pub fn reserved_word(value: &str) -> Option<&'static str> {
     let sk = skeleton(value);
     let len = py_len(&sk);
     for (word, contained, allowance) in NAME_RULES {
         if contained && sk.contains(word) {
-            return true;
+            return Some(word);
         }
         if len.abs_diff(word.len()) <= allowance && edits(&sk, word) <= allowance {
-            return true;
+            return Some(word);
         }
     }
-    false
+    None
 }
+
+/// `reserved_name`.
+pub fn reserved_name(value: &str) -> bool {
+    reserved_word(value).is_some()
+}
+
+/// `reserved_detail`: why a `field` reading as `word` is refused, and what
+/// to do instead. It names the reserved word, never the refused text.
+pub fn reserved_detail(field: &str, word: &str) -> String {
+    let (_, contained, allowance) = NAME_RULES
+        .iter()
+        .copied()
+        .find(|(w, _, _)| *w == word)
+        .expect("a reserved word");
+    let counts = if allowance > 0 {
+        "look-alike letters and one-letter changes count"
+    } else {
+        "look-alike letters count"
+    };
+    if contained {
+        format!(
+            "the {field} contains the reserved word '{word}' ({counts}); choose a {field} without it"
+        )
+    } else {
+        format!(
+            "the {field} reads as the reserved word '{word}' ({counts}); choose another {field}"
+        )
+    }
+}
+
+/// `CONTROL_NAME_DETAIL`.
+pub const CONTROL_NAME_DETAIL: &str = concat!(
+    "the name holds a control or format character (Unicode category C, ",
+    "such as a zero-width or bidi mark); remove it"
+);
 
 /// `PREVIEW_EXCERPT`.
 pub const PREVIEW_EXCERPT: usize = 100;

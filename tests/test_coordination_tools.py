@@ -153,6 +153,21 @@ def _refusal(name, args):
     return json.loads(text)
 
 
+def test_a_reserved_word_in_a_name_says_so_over_mcp(monkeypatch):
+    """2026-10-27: ``memory_agents(update, name="... maintainer/config")``
+    answered only "invalid_name: the call was refused."; the agent could not
+    tell the reserved word was the cause."""
+    from pseudolife_memory import coordination
+    from pseudolife_memory.storage.coordination import CoordinationStore
+    monkeypatch.setattr(coordination, "dispatch", lambda svc, action, args: (
+        CoordinationStore._check_name(args["name"])))
+    out = _refusal("memory_agents", {"action": "update", "name": "Rust B2a/B2d maintainer/config"})
+    assert (out["error"], out["param"]) == ("invalid_name", "name")
+    assert out["message"] == (
+        "invalid_name: the name contains the reserved word 'maintainer' (look-alike letters and "
+        "one-letter changes count); choose a name without it")
+
+
 def test_send_without_request_id_names_the_missing_parameter(monkeypatch):
     """Every send without request_id in the 2026-10-04 transcripts was
     retried by guessing; the refusal now says which parameter is missing."""
