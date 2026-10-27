@@ -14,7 +14,7 @@
 //! Every failure is an [`AssertionInvalid`] whose `check` names the rule for
 //! the log; callers answer `assertion_invalid` and nothing more.
 //!
-//! Known differences from the Python module, both outside any shape a real
+//! Known differences from the Python module, each outside any shape a real
 //! authenticator produces:
 //!
 //! * clientDataJSON nesting deeper than [`MAX_CLIENT_DATA_DEPTH`] is refused
@@ -24,6 +24,11 @@
 //! * RS256 moduli above 8192 bits verify in Python (OpenSSL allows 16384)
 //!   but are refused here as `signature`: aws-lc-rs caps PKCS#1 verification
 //!   at 8192 bits. Registration of such a key succeeds in both.
+//!
+//! * An Ed25519 public key of small order (the identity, the points of
+//!   order 2, 4 and 8, in any encoding) is refused as `cose_key`, at
+//!   registration and at every assertion. Python accepts it, and such a key
+//!   "verifies" an all-zero signature over any message.
 //!
 //! Pure: no storage, no configuration, no clock.
 
@@ -368,6 +373,12 @@ pub fn cose_public_key_value(key: &Cbor) -> Result<(i64, PublicKey)> {
             };
             if !py_int_eq(kty, 1) || !py_int_eq(key.label(-1), 6) {
                 return invalid("cose_alg_mismatch");
+            }
+            // Stricter than Python, which accepts these: a small-order key
+            // verifies a degenerate signature over any message, and aws-lc
+            // refuses some of its encodings on one platform and not another.
+            if ed25519_small_order(x) {
+                return invalid("cose_key");
             }
             PublicKey::EdDsa(x.to_vec())
         }
@@ -904,6 +915,47 @@ pub fn verify_registration(input: &RegistrationInput<'_>) -> Result<Registration
         alg,
         sign_count: parsed.sign_count,
     })
+}
+
+/// The encodings of the Ed25519 points of small order, sign bit cleared
+/// (libsodium's `has_small_order` blocklist): 0 (order 4), 1 (order 1), the
+/// two points of order 8, p - 1 (order 2), and p and p + 1, the
+/// non-canonical spellings of 0 and 1.
+const ED25519_SMALL_ORDER: [[u8; 32]; 7] = [
+    [0; 32],
+    {
+        let mut one = [0; 32];
+        one[0] = 1;
+        one
+    },
+    [
+        0x26, 0xe8, 0x95, 0x8f, 0xc2, 0xb2, 0x27, 0xb0, 0x45, 0xc3, 0xf4, 0x89, 0xf2, 0xef, 0x98,
+        0xf0, 0xd5, 0xdf, 0xac, 0x05, 0xd3, 0xc6, 0x33, 0x39, 0xb1, 0x38, 0x02, 0x88, 0x6d, 0x53,
+        0xfc, 0x05,
+    ],
+    [
+        0xc7, 0x17, 0x6a, 0x70, 0x3d, 0x4d, 0xd8, 0x4f, 0xba, 0x3c, 0x0b, 0x76, 0x0d, 0x10, 0x67,
+        0x0f, 0x2a, 0x20, 0x53, 0xfa, 0x2c, 0x39, 0xcc, 0xc6, 0x4e, 0xc7, 0xfd, 0x77, 0x92, 0xac,
+        0x03, 0x7a,
+    ],
+    high_ff(0xec),
+    high_ff(0xed),
+    high_ff(0xee),
+];
+
+/// `b, 0xff * 30, 0x7f`: p - 1, p and p + 1 for `b` = 0xec, 0xed, 0xee.
+const fn high_ff(first: u8) -> [u8; 32] {
+    let mut out = [0xff; 32];
+    out[0] = first;
+    out[31] = 0x7f;
+    out
+}
+
+/// A small-order Ed25519 point in any encoding (the sign bit is ignored).
+fn ed25519_small_order(x: &[u8]) -> bool {
+    ED25519_SMALL_ORDER
+        .iter()
+        .any(|bad| x.len() == 32 && x[..31] == bad[..31] && (x[31] & 0x7f) == bad[31])
 }
 
 #[cfg(test)]
