@@ -288,6 +288,11 @@ mod tests {
             assert_eq!(status, StatusCode::UNAUTHORIZED, "{host}: {body}");
             assert!(body.contains("authentication_required"), "{body}");
         }
+        // A malformed binding gets its own refusal first.
+        let (status, body) =
+            initialize(&app, &[("host", "127.0.0.1:8765"), ("x-pl-bank", "bank")]).await;
+        assert_eq!(status, StatusCode::CONFLICT, "{body}");
+        assert!(body.contains("bank_identity_mismatch"), "{body}");
     }
 
     #[tokio::test]
@@ -340,6 +345,59 @@ mod tests {
             ];
             let (status, _, body) = send(&app, "POST", "/mcp", &headers, PING).await;
             assert_eq!(status, want, "{host}: {body}");
+        }
+        // Its stream and its DELETE too; the refused DELETE leaves it open.
+        let evil = ("host", "evil.example:1");
+        let session = ("mcp-session-id", sid.as_str());
+        let stream = [evil, session, ("accept", "text/event-stream")];
+        let (status, _, _) = send(&app, "GET", "/mcp", &stream, "").await;
+        assert_eq!(status, StatusCode::MISDIRECTED_REQUEST);
+        let (status, _, _) = send(&app, "DELETE", "/mcp", &[evil, session], "").await;
+        assert_eq!(status, StatusCode::MISDIRECTED_REQUEST);
+        let ping = [good, JSON, ("accept", ACCEPT), session];
+        let (status, _, body) = send(&app, "POST", "/mcp", &ping, PING).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+    }
+
+    #[tokio::test]
+    async fn the_first_host_counts_and_the_port_is_matched_by_prefix() {
+        // As the SDK does: Starlette's `headers.get` takes the first Host, and
+        // `_validate_host` / `_validate_origin` compare a prefix ending in the
+        // colon. No browser sends a Host or Origin with a non-numeric port.
+        let app = app(None);
+        for (extra, want) in [
+            (
+                vec![("host", "127.0.0.1:8765"), ("host", "evil.example:1")],
+                StatusCode::OK,
+            ),
+            (
+                vec![("host", "evil.example:1"), ("host", "127.0.0.1:8765")],
+                StatusCode::MISDIRECTED_REQUEST,
+            ),
+            (
+                vec![
+                    ("host", "127.0.0.1:8765"),
+                    ("origin", "http://localhost:3000"),
+                    ("origin", "http://evil.example"),
+                ],
+                StatusCode::OK,
+            ),
+            (
+                vec![
+                    ("host", "127.0.0.1:8765"),
+                    ("origin", "http://evil.example"),
+                    ("origin", "http://localhost:3000"),
+                ],
+                StatusCode::FORBIDDEN,
+            ),
+            (vec![("host", "127.0.0.1:notaport")], StatusCode::OK),
+            (
+                vec![("host", "127.0.0.1:8765"), ("origin", "http://localhost:x")],
+                StatusCode::OK,
+            ),
+        ] {
+            let (status, body) = initialize(&app, &extra).await;
+            assert_eq!(status, want, "{extra:?}: {body}");
         }
     }
 }

@@ -138,7 +138,7 @@ def tokenless_report():
 
 def test_tokenless_corpus_declares_no_difference():
     import mcp_ci
-    assert mcp_ci.TOKENLESS_RESPONSES == 49
+    assert mcp_ci.TOKENLESS_RESPONSES == 66
     assert mcp_ci.TOKENLESS_MUTANTS == ("mcp-bare-host", "mcp-any-origin", "mcp-era-skips-security")
     mcp_ci.check_tokenless(tokenless_report())
     for change in ("diff", "short", "unserved"):
