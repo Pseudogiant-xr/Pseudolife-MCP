@@ -2115,12 +2115,23 @@ def probe_endpoint_cause(base_url: str, timeout: float = 3.0) -> tuple[str, str]
 
 
 def _host_resolves(hostname: str) -> bool:
+    """False only on a definitive not-found answer (``EAI_NONAME``, or
+    ``EAI_NODATA`` where the platform has it) or a name that cannot be
+    encoded for a lookup at all (an empty or over-long label raises
+    ``UnicodeError``); a temporary failure cannot be judged and counts as
+    resolving, so a resolver hiccup never skips a working fallback."""
     import socket
+    not_found = {getattr(socket, n) for n in ("EAI_NONAME", "EAI_NODATA")
+                 if hasattr(socket, n)}
     try:
         socket.getaddrinfo(hostname, None)
         return True
-    except OSError:
+    except socket.gaierror as e:
+        return e.errno not in not_found
+    except UnicodeError:
         return False
+    except OSError:
+        return True
 
 
 # host -> (resolves, monotonic stamp): dream status is polled by the
@@ -2132,25 +2143,80 @@ _RESOLVES_TTL = 60.0
 # logs the misconfiguration once rather than once per dream.
 _fallback_skip_warned: set[str] = set()
 
+# What an unresolvable fallback means, by what the builder does with it:
+# skipped (auto mode with a usable primary) or still dialled (fallback mode,
+# or auto mode with no usable primary, where skipping would let an empty
+# extraction acknowledge the backlog).
 FALLBACK_UNRESOLVED = (
     "the dream fallback does not resolve from the daemon, so it is never used "
     "and dreams fail whenever the primary is down: remove the fallback "
     "(PSEUDOLIFE_DREAM_FALLBACK_BASE_URL/_MODEL, or the Console's Extractor "
     "panel) or start the extractor it names")
+FALLBACK_UNRESOLVED_DIALLED = (
+    "the dream fallback does not resolve from the daemon and dreams are sent "
+    "to it, so they fail: start the extractor it names, or point the "
+    "fallback (PSEUDOLIFE_DREAM_FALLBACK_BASE_URL/_MODEL, or the Console's "
+    "Extractor panel) at one that runs")
+
+
+def _primary_usable(r: dict) -> bool:
+    """Whether ``build_extractor`` would build a real primary (URL and
+    model), not the no-op extractor."""
+    return bool(r["primary_url"] and r["primary_model"])
+
+
+def fallback_warning(r: dict) -> str | None:
+    """The status and startup text for a configured fallback whose host
+    does not resolve, worded by what the mode does with it; None when it
+    resolves, is unused (``primary`` mode) or is not configured."""
+    if not (r["fallback_url"] and r["fallback_model"]) or r["mode"] == "primary":
+        return None
+    if _url_resolves(r["fallback_url"]):
+        return None
+    if r["mode"] == "auto" and _primary_usable(r):
+        return FALLBACK_UNRESOLVED
+    return FALLBACK_UNRESOLVED_DIALLED
+
+
+def _url_host(url: str) -> str | None:
+    """``urllib.parse.urlsplit(url).hostname``, by hand so the Rust daemon
+    can mirror it exactly: the authority after ``//`` up to ``/?#``, the
+    userinfo before its last ``@`` dropped, the bracketed IPv6 literal or
+    the text before the first ``:``, lowercased; None when empty."""
+    if "://" not in url:
+        return None
+    netloc = url.split("://", 1)[1]
+    for sep in "/?#":
+        netloc = netloc.split(sep, 1)[0]
+    netloc = netloc.rpartition("@")[2]
+    if "[" in netloc:
+        host = netloc.partition("[")[2].partition("]")[0]
+    else:
+        host = netloc.partition(":")[0]
+    return host.lower() or None
+
+
+def _proxied(url: str) -> bool:
+    """Whether a proxy environment variable applies to ``url``'s scheme
+    (``<scheme>_proxy`` or ``all_proxy``, either case, non-empty). urllib
+    and reqwest both send through it without resolving the host here, so
+    local DNS cannot judge the host. ``no_proxy`` is not consulted: a
+    configured proxy is enough to not judge."""
+    import os
+    scheme = url.split("://", 1)[0].lower() if "://" in url else ""
+    names = [f"{scheme}_proxy", "all_proxy"] if scheme else ["all_proxy"]
+    return any(os.environ.get(n) or os.environ.get(n.upper()) for n in names)
 
 
 def _url_resolves(url: str) -> bool:
-    """Whether ``url``'s host resolves from here, cached for
-    ``_RESOLVES_TTL``. Any lookup failure counts as not resolving; a URL
-    with no host cannot be judged and counts as resolving."""
+    """Whether ``url``'s host resolves from here, cached per host for
+    ``_RESOLVES_TTL``. Only a definitive not-found counts as not resolving
+    (:func:`_host_resolves`); a URL with no host, or one a proxy carries,
+    cannot be judged and counts as resolving."""
     import time
-    from urllib.parse import urlsplit
 
-    try:
-        host = urlsplit(url).hostname
-    except ValueError:
-        host = None
-    if not host:
+    host = _url_host(url)
+    if not host or _proxied(url):
         return True
     now = time.monotonic()
     hit = _resolves_cache.get(host)
@@ -2159,6 +2225,17 @@ def _url_resolves(url: str) -> bool:
     ok = _host_resolves(host)
     _resolves_cache[host] = (ok, now)
     return ok
+
+
+def _redacted_url(url: str) -> str:
+    """``url`` with any userinfo replaced, for a log line or a warning (the
+    Rust daemon's ``redact_url``)."""
+    if "://" not in url:
+        return url
+    scheme, rest = url.split("://", 1)
+    end = min((i for i in (rest.find(c) for c in "/?#") if i >= 0), default=len(rest))
+    at = rest[:end].rfind("@")
+    return url if at < 0 else f"{scheme}://<redacted>{rest[at:]}"
 
 
 _HOST_GATEWAY_NAME = "host.docker.internal"
@@ -2190,8 +2267,9 @@ def startup_extractor_warnings(cfg) -> list[str]:
             "PSEUDOLIFE_DREAM_FALLBACK_BASE_URL/_MODEL to keep the in-stack "
             "sidecar as automatic fallback; verify with "
             'memory_dream(action="status").')
-    if has_fallback and not _url_resolves(r["fallback_url"]):
-        out.append(f"dream fallback {r['fallback_url']}: {FALLBACK_UNRESOLVED}.")
+    unresolved = fallback_warning(r)
+    if unresolved:
+        out.append(f"dream fallback {_redacted_url(r['fallback_url'])}: {unresolved}.")
     if has_fallback and r["primary_url"] == r["fallback_url"]:
         out.append(
             f"dream primary and fallback are the same endpoint "
@@ -2325,16 +2403,19 @@ def build_extractor_with_fallback(cfg) -> tuple["DreamExtractor", str]:
     # DNS failure).
     probe = {"reason": cause[0], "error": cause[1],
              "fallback_resolves": _url_resolves(r["fallback_url"])}
-    if not probe["fallback_resolves"]:
+    if not probe["fallback_resolves"] and _primary_usable(r):
         # A fallback that cannot resolve is a misconfiguration, not a
         # transient fault: it is never dialled, and the dream runs on the
-        # primary, whose own failure (or success) is first-hand.
+        # primary, whose own failure (or success) is first-hand. Only with
+        # a usable primary: the no-op extractor's empty extraction would
+        # acknowledge the backlog, where a failed fallback holds it.
         if r["fallback_url"] not in _fallback_skip_warned:
             _fallback_skip_warned.add(r["fallback_url"])
             logger.warning("dream primary extractor %s failed its probe (%s) and %s; "
-                           "dreams run on the primary", r["primary_url"], cause[1],
-                           FALLBACK_UNRESOLVED.replace(
-                               "the dream fallback", f"the fallback {r['fallback_url']}", 1))
+                           "dreams run on the primary", _redacted_url(r["primary_url"]),
+                           cause[1], FALLBACK_UNRESOLVED.replace(
+                               "the dream fallback",
+                               f"the fallback {_redacted_url(r['fallback_url'])}", 1))
         extractor = build_extractor(cfg)
         extractor.primary_probe = probe
         return extractor, "primary"
@@ -2367,9 +2448,7 @@ def _status_extractor_fields(cfg, last_dream_extractor) -> dict:
         "primary_model_served": served,
         "fallback_url": r["fallback_url"] if has_fallback else None,
         "fallback_model": r["fallback_model"] if has_fallback else None,
-        "fallback_warning": (FALLBACK_UNRESOLVED
-                             if has_fallback and not _url_resolves(r["fallback_url"])
-                             else None),
+        "fallback_warning": fallback_warning(r),
         "extractor_source": getattr(cfg, "extractor_source", "env"),
         "model_override": getattr(cfg, "extractor_model_override", None),
         "reasoning_effort": getattr(cfg, "extractor_reasoning_effort",

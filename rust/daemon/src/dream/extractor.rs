@@ -2013,9 +2013,11 @@ pub async fn build_extractor_with_fallback_using(
         error,
         fallback_resolves: url_resolves(fallback_url).await,
     };
-    if !probe.fallback_resolves {
+    if !probe.fallback_resolves && r.has_primary() {
         // A fallback that cannot resolve is a misconfiguration, not a
         // transient fault: never dialled; the dream runs on the primary.
+        // Only with a usable primary: the no-op extractor's empty
+        // extraction would acknowledge the backlog.
         static WARNED: std::sync::OnceLock<Mutex<std::collections::HashSet<String>>> =
             std::sync::OnceLock::new();
         let first = WARNED
@@ -2186,25 +2188,98 @@ fn resolves_cache() -> &'static ResolvesCache {
 /// cached per host for a minute; any lookup failure counts as not
 /// resolving, a URL with no host as resolving.
 pub async fn url_resolves(url: &str) -> bool {
-    let Some(host) = reqwest::Url::parse(url)
-        .ok()
-        .and_then(|u| u.host_str().map(|h| h.trim_matches(['[', ']']).to_string()))
-        .filter(|h| !h.is_empty())
-    else {
+    let Some(host) = url_host(url) else {
         return true;
     };
+    if proxied(url, &process_env) {
+        return true;
+    }
     if let Some((ok, at)) = resolves_cache().lock().expect("resolves cache").get(&host)
         && at.elapsed().as_secs_f64() < RESOLVES_TTL
     {
         return *ok;
     }
     let started = Instant::now();
-    let ok = tokio::net::lookup_host((host.as_str(), 0)).await.is_ok();
+    let ok = match tokio::net::lookup_host((host.as_str(), 0)).await {
+        Ok(_) => true,
+        Err(e) => !definitely_not_found(&e),
+    };
     resolves_cache()
         .lock()
         .expect("resolves cache")
         .insert(host, (ok, started));
     ok
+}
+
+/// `_host_resolves`' definitive not-found (`memory/dream.py`):
+/// `EAI_NONAME` / `EAI_NODATA`. Windows reports them as WSA codes
+/// (`WSAHOST_NOT_FOUND`, `WSANO_DATA`); Unix std reports
+/// `gai_strerror`'s text (glibc, musl, macOS wordings). Anything else is a
+/// temporary failure that cannot be judged.
+fn definitely_not_found(e: &std::io::Error) -> bool {
+    if cfg!(windows) && matches!(e.raw_os_error(), Some(11001 | 11004)) {
+        return true;
+    }
+    let text = e.to_string();
+    [
+        "Name or service not known",
+        "No address associated with hostname",
+        "Name does not resolve",
+        "nodename nor servname provided",
+    ]
+    .iter()
+    .any(|w| text.contains(w))
+}
+
+/// `_url_host` (`memory/dream.py`): `urlsplit(url).hostname` by hand.
+fn url_host(url: &str) -> Option<String> {
+    let (_, rest) = url.split_once("://")?;
+    let netloc = &rest[..rest.find(['/', '?', '#']).unwrap_or(rest.len())];
+    let netloc = netloc.rsplit_once('@').map_or(netloc, |(_, h)| h);
+    let host = match netloc.split_once('[') {
+        Some((_, after)) => after.split_once(']').map_or(after, |(h, _)| h),
+        None => netloc.split_once(':').map_or(netloc, |(h, _)| h),
+    };
+    Some(host.to_lowercase()).filter(|h| !h.is_empty())
+}
+
+/// `_proxied` (`memory/dream.py`): a `<scheme>_proxy` or `all_proxy`
+/// variable, either case, non-empty.
+fn proxied(url: &str, env: &dyn Fn(&str) -> Option<String>) -> bool {
+    let scheme = url.split_once("://").map(|(s, _)| s.to_lowercase());
+    let mut names = Vec::new();
+    if let Some(s) = scheme.filter(|s| !s.is_empty()) {
+        names.push(format!("{s}_proxy"));
+    }
+    names.push("all_proxy".into());
+    let set = |n: &str| env(n).is_some_and(|v| !v.is_empty());
+    names.iter().any(|n| set(n) || set(&n.to_uppercase()))
+}
+
+/// `FALLBACK_UNRESOLVED_DIALLED` (`memory/dream.py`).
+pub const FALLBACK_UNRESOLVED_DIALLED: &str = "the dream fallback does not resolve from the \
+     daemon and dreams are sent to it, so they fail: start the extractor it names, or point \
+     the fallback (PSEUDOLIFE_DREAM_FALLBACK_BASE_URL/_MODEL, or the Console's Extractor panel) \
+     at one that runs";
+
+/// `fallback_warning` (`memory/dream.py`): the text for a configured
+/// fallback that does not resolve, by what the mode does with it.
+pub async fn fallback_warning(r: &Endpoints) -> Option<&'static str> {
+    if !r.has_fallback() || r.mode == "primary" {
+        return None;
+    }
+    if url_resolves(r.fallback_url.as_deref().unwrap_or("")).await {
+        return None;
+    }
+    Some(fallback_warning_text(&r.mode, r.has_primary()))
+}
+
+fn fallback_warning_text(mode: &str, primary_usable: bool) -> &'static str {
+    if mode == "auto" && primary_usable {
+        FALLBACK_UNRESOLVED
+    } else {
+        FALLBACK_UNRESOLVED_DIALLED
+    }
 }
 
 type ServedCache = Mutex<HashMap<String, (Option<String>, Instant)>>;
@@ -2284,11 +2359,7 @@ pub async fn status_extractor_fields(
             None
         }),
     );
-    let fallback_warning = match r.fallback_url.as_deref() {
-        Some(url) if has_fallback && !url_resolves(url).await => Some(FALLBACK_UNRESOLVED),
-        _ => None,
-    };
-    m.insert("fallback_warning".into(), json!(fallback_warning));
+    m.insert("fallback_warning".into(), json!(fallback_warning(&r).await));
     m.insert("extractor_source".into(), json!(cfg.extractor_source));
     m.insert("model_override".into(), json!(cfg.extractor_model_override));
     m.insert(
@@ -2937,10 +3008,57 @@ mod tests {
             ("login_expired", "/models HTTP 401".into())
         );
         assert!(health_status_token("login_required"));
+        assert_eq!(
+            probe_answer_cause("/health", 503, &[b'x'; 5000]).1,
+            "/health HTTP 503"
+        );
         assert!(!health_status_token("_x"));
         assert!(!health_status_token(""));
         assert!(!health_status_token(&"a".repeat(33)));
         assert!(health_status_token(&"a".repeat(32)));
+    }
+
+    /// `_url_host`, `_proxied` and the warning wording
+    /// (`tests/test_extractor_fallback.py`'s review-fix cases).
+    #[test]
+    fn fallback_resolution_helpers_match_python() {
+        for (url, host) in [
+            (
+                "http://pseudolife-extractor:8081/v1",
+                Some("pseudolife-extractor"),
+            ),
+            ("http://User:Pass@Host.Example:1/v1", Some("host.example")),
+            ("http://[::1]:8/v1", Some("::1")),
+            ("http:///v1", None),
+            ("http://h:99999/v1", Some("h")),
+            ("pseudolife-extractor:8081", None),
+        ] {
+            assert_eq!(url_host(url).as_deref(), host, "{url}");
+        }
+        let env_with = |var: &'static str| {
+            move |n: &str| (n == var).then(|| "http://proxy.example:3128".to_string())
+        };
+        for var in ["HTTP_PROXY", "http_proxy", "ALL_PROXY"] {
+            assert!(proxied("http://f:1/v1", &env_with(var)), "{var}");
+        }
+        assert!(!proxied("http://f:1/v1", &env_with("HTTPS_PROXY")));
+        assert!(!proxied("http://f:1/v1", &|_: &str| Some(String::new())));
+        assert_eq!(fallback_warning_text("auto", true), FALLBACK_UNRESOLVED);
+        assert_eq!(
+            fallback_warning_text("auto", false),
+            FALLBACK_UNRESOLVED_DIALLED
+        );
+        assert_eq!(
+            fallback_warning_text("fallback", true),
+            FALLBACK_UNRESOLVED_DIALLED
+        );
+        let refused = std::io::Error::from(std::io::ErrorKind::ConnectionRefused);
+        assert!(!definitely_not_found(&refused));
+        if cfg!(windows) {
+            assert!(definitely_not_found(&std::io::Error::from_raw_os_error(
+                11001
+            )));
+        }
     }
 
     #[test]

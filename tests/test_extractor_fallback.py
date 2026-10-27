@@ -118,6 +118,11 @@ def test_probe_unreachable_is_down():
 
 _REFUSED = ("extractor_unreachable", "connection refused")
 
+from pseudolife_memory.memory import dream as _dream  # noqa: E402
+
+# The real lookup, kept before the hermetic fixture below patches it.
+_REAL_HOST_RESOLVES = _dream._host_resolves
+
 
 @pytest.fixture(autouse=True)
 def _fresh_resolution_cache(monkeypatch):
@@ -722,3 +727,123 @@ def test_startup_warns_when_the_fallback_does_not_resolve(monkeypatch):
              fb="http://pseudolife-extractor:8081/v1"))
     said = [w for w in warnings if "does not resolve" in w]
     assert len(said) == 1 and "remove the fallback" in said[0]
+
+
+# ── review fixes for 5599ae3a (Codex P1/P2, Opus 1-4) ──────────────────
+
+def test_a_fallback_only_setup_still_dials_an_unresolvable_fallback(monkeypatch):
+    # Codex P1 / Opus 1: with no usable primary, skipping the fallback chose
+    # the no-op extractor, whose empty extraction acknowledged the pulled
+    # backlog. The dream must dial the fallback, fail and hold instead.
+    from pseudolife_memory.memory import dream as d
+    monkeypatch.setattr(d, "_host_resolves", lambda h: False)
+    cfg = DreamConfig(extractor_source="config", extractor_mode="auto",
+                      fallback_base_url="http://pseudolife-extractor:8081/v1",
+                      fallback_model="m2")
+    ext, which = d.build_extractor_with_fallback(cfg)
+    assert which == "fallback" and ext.base_url == "http://pseudolife-extractor:8081/v1"
+    assert ext.primary_probe["fallback_resolves"] is False
+
+
+def test_a_primary_without_a_model_is_not_usable(monkeypatch):
+    from pseudolife_memory.memory import dream as d
+    monkeypatch.setattr(d, "probe_endpoint_cause", lambda *a, **k: _REFUSED)
+    monkeypatch.setattr(d, "_probe_retry_delay", 0.0)
+    monkeypatch.setattr(d, "_host_resolves", lambda h: False)
+    cfg = DreamConfig(extractor_source="config", extractor_mode="auto",
+                      extractor_base_url="http://p:1/v1", extractor_model=None,
+                      fallback_base_url="http://pseudolife-extractor:8081/v1",
+                      fallback_model="m2")
+    ext, which = d.build_extractor_with_fallback(cfg)
+    assert which == "fallback"
+
+
+@pytest.mark.parametrize("host", ["a..b", "x" * 64 + ".example"])
+def test_a_malformed_host_is_judged_not_raised(host):
+    # Opus 2: getaddrinfo raises UnicodeError (idna) for these; it reached
+    # dream_status and the sweep unguarded.
+    assert _REAL_HOST_RESOLVES(host) in (True, False)
+
+
+@pytest.mark.parametrize("err, resolves", [
+    ("EAI_NONAME", False),      # a definitive not-found answer
+    ("EAI_AGAIN", True),        # temporary: cannot judge, so not skipped
+])
+def test_only_a_definitive_not_found_counts(monkeypatch, err, resolves):
+    import socket
+
+    from pseudolife_memory.memory import dream as d
+    code = getattr(socket, err)
+
+    def _gai(*a, **k):
+        raise socket.gaierror(code, err)
+    monkeypatch.setattr(d.socket if hasattr(d, "socket") else socket, "getaddrinfo", _gai)
+    assert _REAL_HOST_RESOLVES("pseudolife-extractor") is resolves
+
+
+@pytest.mark.parametrize("var", ["HTTP_PROXY", "http_proxy", "ALL_PROXY"])
+def test_a_proxied_fallback_is_never_judged_by_local_dns(monkeypatch, var):
+    # Codex P2 / Opus 3: urllib and reqwest reach a proxied host without
+    # resolving it here.
+    from pseudolife_memory.memory import dream as d
+    for name in ("HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy",
+                 "ALL_PROXY", "all_proxy"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv(var, "http://proxy.example:3128")
+
+    def _boom(h):
+        raise AssertionError("no DNS judgement behind a proxy")
+    monkeypatch.setattr(d, "_host_resolves", _boom)
+    assert d._url_resolves("http://pseudolife-extractor:8081/v1") is True
+
+
+@pytest.mark.parametrize("url, host", [
+    ("http://pseudolife-extractor:8081/v1", "pseudolife-extractor"),
+    ("http://User:Pass@Host.Example:1/v1", "host.example"),
+    ("http://[::1]:8/v1", "::1"),
+    ("http:///v1", None),
+    ("http://h:99999/v1", "h"),
+])
+def test_url_host_matches_urlsplit(url, host):
+    from urllib.parse import urlsplit
+
+    from pseudolife_memory.memory import dream as d
+    assert urlsplit(url).hostname == host == d._url_host(url)
+
+
+@pytest.mark.parametrize("mode, primary, want", [
+    ("auto", True, "never used"),
+    ("auto", False, "dreams are sent to it"),
+    ("fallback", True, "dreams are sent to it"),
+    ("primary", True, None),
+])
+def test_the_fallback_warning_says_what_the_mode_does(monkeypatch, mode, primary, want):
+    # Opus 4: "never used" is true only where the builder skips it.
+    from pseudolife_memory.memory import dream as d
+    monkeypatch.setattr(d, "probe_endpoint", lambda *a, **k: True)
+    monkeypatch.setattr(d, "_host_resolves", lambda h: False)
+    cfg = DreamConfig(extractor_source="config", extractor_mode=mode,
+                      extractor_base_url="http://p:1/v1" if primary else None,
+                      extractor_model="m" if primary else None,
+                      fallback_base_url="http://pseudolife-extractor:8081/v1",
+                      fallback_model="m2")
+    warning = d._status_extractor_fields(cfg, None)["fallback_warning"]
+    assert (warning is None) if want is None else (want in warning)
+    startup = [w for w in d.startup_extractor_warnings(cfg) if "does not resolve" in w]
+    assert (startup == []) if want is None else (want in startup[0])
+
+
+def test_logged_urls_are_redacted(monkeypatch, caplog):
+    import logging
+
+    from pseudolife_memory.memory import dream as d
+    monkeypatch.setattr(d, "probe_endpoint_cause", lambda *a, **k: _REFUSED)
+    monkeypatch.setattr(d, "_probe_retry_delay", 0.0)
+    monkeypatch.setattr(d, "_host_resolves", lambda h: False)
+    cfg = _cfg("http://p:1/v1", fb="http://user:secret@fallback.example:8081/v1")
+    with caplog.at_level(logging.WARNING, logger="pseudolife_memory.memory.dream"):
+        d.build_extractor_with_fallback(cfg)
+        d.startup_extractor_warnings(cfg)
+    text = "\n".join(r.getMessage() for r in caplog.records) + "\n".join(
+        d.startup_extractor_warnings(cfg))
+    assert "secret" not in text and "fallback.example" in text

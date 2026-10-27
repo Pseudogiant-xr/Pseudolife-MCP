@@ -690,13 +690,17 @@ stall record and reports it:
   `last_error` names both, for example
   `primary /health HTTP 503 (login_required); fallback unreachable (gaierror)`.
   A fallback that served names the primary's cause in `last_error`.
-- **A fallback that does not resolve** (a sidecar this stack does not run,
-  say) is a misconfiguration, not a network fault. It is never dialled:
-  the dream runs on the primary, and `last_error` ends `fallback does not
-  resolve`. The daemon logs it once at startup and once when a dream first
-  skips it. `memory_dream(action="status")` carries it as
-  `fallback_warning`, with the fix: remove the fallback, or start the
-  extractor it names.
+- **A fallback that does not resolve** (DNS answers "not found", say for a
+  sidecar this stack does not run) is a misconfiguration, not a network
+  fault. In `auto` mode with a usable primary it is never dialled: the
+  dream runs on the primary, and `last_error` ends `fallback does not
+  resolve`. With no usable primary, or in `fallback` mode, it is still
+  dialled, so the dream fails and holds its batch. A temporary DNS failure,
+  or a fallback reached through a proxy (`http_proxy`, `https_proxy`,
+  `all_proxy`), is never judged. `memory_dream(action="status")` carries
+  it as `fallback_warning`, saying what the mode does with it and the fix:
+  remove the fallback, or start the extractor it names. The Python daemon
+  also logs it once at startup and once when a dream first skips it.
 - **Where it shows.** `memory_dream(action="status")` carries `stall` (null
   while dreams are served) and `last_stall`; `/health` reports
   `extractor: "stalled"` with a `stall` sub-object while `status` stays
