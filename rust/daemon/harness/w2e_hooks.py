@@ -24,10 +24,11 @@ DREAM_CONFIG = ("memory:\n  lessons:\n    enabled: false\n    infer_outcomes: fa
                 "  dream:\n    enabled: false\n    stall_notice: false\n")
 DREAM_NOTES = ["The billing export runs nightly at 02:00.",
                "Priya maintains the billing export."]
-DREAM_CLAIMS = [
-    {"entity": "Billing Export", "attribute": "schedule", "value": "nightly at 02:00", "source": 1},
-    {"entity": "Priya", "attribute": "maintains", "value": "billing export", "source": 2},
-]
+# No claims: the dream still calls the model and commits its run (the
+# trigger is what is compared), and writes no fact whose embedding each side
+# computes for itself (two embedders agree only to the measured tolerance,
+# which holds on the calibration host, not on every host).
+DREAM_CLAIMS: list[dict] = []
 DREAM_SETTLE = {"quiet_s": 3.0, "timeout_s": 120.0}
 
 OPS = ("hook",)
@@ -151,12 +152,15 @@ def register(h) -> dict[str, dict]:
         },
         # The close's dream trigger, against a stub extractor. An empty
         # close fires nothing (a dream would extract session A's notes and
-        # call the model); a close with entries fires one dream, whose
-        # requests and committed run are compared.
+        # call the model, and acknowledge them); a close with entries fires
+        # one dream, whose requests are compared and which acknowledges the
+        # pending notes on both sides.
         "hook-session-end-dream": {
             "config": DREAM_CONFIG,
             "extractor": {"model": "stub-model",
-                          "replies": h.batch_replies(DREAM_NOTES, DREAM_CLAIMS)},
+                          # Each reply answers once, on each side, by the end.
+                          "replies": [{**r, "times": 1}
+                                      for r in h.batch_replies(DREAM_NOTES, DREAM_CLAIMS)]},
             "extractor_all_used": True,
             "seed": [
                 seed_start("dream-a"),
@@ -166,9 +170,9 @@ def register(h) -> dict[str, dict]:
             ],
             "ops": [
                 {**end("dream-b"), "settle": dict(DREAM_SETTLE),
-                 "expect": ["SELECT NOT EXISTS (SELECT 1 FROM dream_runs)"]},
+                 "expect": ["SELECT EXISTS (SELECT 1 FROM entries WHERE dream_state = 'pending')"]},
                 {**end("dream-a"), "settle": dict(DREAM_SETTLE),
-                 "expect": ["SELECT EXISTS (SELECT 1 FROM dream_runs WHERE status = 'committed')"]},
+                 "expect": ["SELECT NOT EXISTS (SELECT 1 FROM entries WHERE dream_state = 'pending')"]},
             ],
         },
         # The separate policy hook. Arms by SHA-256 of the session id:
