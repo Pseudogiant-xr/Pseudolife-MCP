@@ -573,30 +573,30 @@ The Rust column, after Status, says what the Rust daemon answers on master after
 |---|---|---:|---|---|---|
 | GET | /api/stats | 3 | deferred | 501 | 501 (`w2d-console-projections`, W2-D); declared case in `daemon/harness/run.py`; CLI, shim and eval callers only, no Console caller on master `2092e7b1`: CUTOVER.md proposal A (D9) moves it to the CLI batches |
 | GET | /api/overview | 3 | deferred | 501 | 501 (`w2d-console-projections`, W2-D) |
-| GET | /api/facts | 3 | deferred | 501 | 501 (`w2d-console-projections`, W2-D) |
-| GET | /api/facts/history | 3 | deferred | 501 | 501 (`w2d-console-projections`, W2-D) |
+| GET | /api/facts | 3 | deferred | served | `read/console.rs`; `daemon/harness/w2d_console.py live` (`console-reads`, `console-reads-demote`, on `w2e.py`'s engine) compares status and body and the full bank after each call; recorded Linux dev-box run cited in the PR, until a published nightly run (B13, D11) covers it: the cap and its coercions, contenders, `entity_id`, `source_entries`, stale demotion |
+| GET | /api/facts/history | 3 | deferred | served | `read/console.rs`; `daemon/harness/w2d_console.py live` (`console-reads`, `console-reads-demote`, on `w2e.py`'s engine) compares status and body and the full bank after each call; recorded Linux dev-box run cited in the PR, until a published nightly run (B13, D11) covers it: scalar and set slots, absent parameters echoed as null |
 | POST | /api/facts/resolve | 4 | deferred | 501 | 501 (writes, W2-E) |
 | POST | /api/facts/set | 4 | deferred | 501 | 501 (writes, W2-E); declared case in `daemon/harness/run.py` |
 | POST | /api/facts/forget | 4 | deferred | 501 | 501 (writes, W2-E) |
-| GET | /api/world | 3 | deferred | 501 | 501 (`w2d-console-projections`, W2-D) |
-| GET | /api/lessons | 3 | deferred | 501 | 501 (`w2d-console-projections`, W2-D) |
+| GET | /api/world | 3 | deferred | served | `read/console.rs`; `daemon/harness/w2d_console.py live` (`console-reads`, `console-reads-demote`, on `w2e.py`'s engine) compares status and body and the full bank after each call; recorded Linux dev-box run cited in the PR, until a published nightly run (B13, D11) covers it: the cap, stale demotion |
+| GET | /api/lessons | 3 | deferred | served | `read/console.rs`; `daemon/harness/w2d_console.py live` (`console-reads`, `console-reads-demote`, on `w2e.py`'s engine) compares status and body and the full bank after each call; recorded Linux dev-box run cited in the PR, until a published nightly run (B13, D11) covers it: the 100000-row service cap, then the route's, re-verify annotations |
 | GET | /api/briefing | 3 | deferred | 501 | 501 (`w2d-briefing-hooks`, W2-D); CLI, shim and eval callers only, no Console caller on master `2092e7b1`: already batch B3's, CUTOVER.md proposal A (D9) leaves it there |
 | GET | /api/agents | 3 | deferred | partly | The coordination view (`?view=coordination`, `board/http.rs`) is served and compared by the board harness's `console` scenario (recorded run as for the coordination actions below); the default view answers 501 (`w2d-board-projections`, W2-F) |
-| GET | /api/episodes | 3 | deferred | 501 | 501 (`w2d-console-projections`, W2-D) |
-| GET | /api/episodes/summary | 3 | deferred | 501 | 501 (`w2d-console-projections`, W2-D) |
+| GET | /api/episodes | 3 | deferred | served | `read/console.rs`; `daemon/harness/w2d_console.py live` (`console-reads`, `console-reads-demote`, on `w2e.py`'s engine) compares status and body and the full bank after each call; recorded Linux dev-box run cited in the PR, until a published nightly run (B13, D11) covers it: newest first, the cap, a negative cap |
+| GET | /api/episodes/summary | 3 | deferred | served | `read/console.rs`; `daemon/harness/w2d_console.py live` (`console-reads`, `console-reads-demote`, on `w2e.py`'s engine) compares status and body and the full bank after each call; recorded Linux dev-box run cited in the PR, until a published nightly run (B13, D11) covers it: uncompacted `recent_entries`, an absent id |
 | POST | /api/episode/start | 4 | deferred | 501 | 501 (writes, W2-E); CLI, shim and eval callers only, no Console caller on master `2092e7b1`: CUTOVER.md proposal A (D9) moves it to the CLI batches |
 | POST | /api/episode/end | 4 | deferred | 501 | 501 (writes, W2-E); CLI, shim and eval callers only, no Console caller on master `2092e7b1`: CUTOVER.md proposal A (D9) moves it to the CLI batches |
 | POST | /api/episodes/prune | 4 | deferred | served | `routes/episodes.rs`; `daemon/harness/w2e.py live --only episode-curation` (`w2e_episodes.py`) compares status and body and the normalized bank after each call, plus an unkeyed store after the prune for where the current episode points |
 | POST | /api/episodes/rename | 4 | deferred | served | `routes/episodes.rs`; the `episode-curation` scenario, as above, including the missing-`id` 405, the empty-title answer and Python's exception texts for non-string fields; `memory_episode_summary` reads back the restamped resident entries |
 | POST | /api/episodes/merge | 4 | deferred | served | `routes/episodes.rs`; the `episode-curation` scenario, as above: a new rollup, a merge into an existing episode, the outcome-signal and entry retarget, open and unknown sources, and the refusals; a probe compares the exact spans of seeded episodes (the bank comparison normalizes episode clocks) and `memory_episode_summary` reads back the resident entries. Declared: a non-string `hint` on a new rollup (`daemon/divergences.md`) |
-| GET | /api/recent | 3 | deferred | 501 | 501 (`w2d-console-projections`, W2-D) |
+| GET | /api/recent | 3 | deferred | served | `read/console.rs`; `daemon/harness/w2d_console.py live` (`console-reads`, `console-reads-demote`, on `w2e.py`'s engine) compares status and body and the full bank after each call; recorded Linux dev-box run cited in the PR, until a published nightly run (B13, D11) covers it: `n=50`, each filter, normalized tags, a negative `n` |
 | GET | /api/search | 3 | ported | served | `read/search_route.rs`; `daemon/harness/w2d_search.py live`: recorded Linux run, 11 scenarios, 118 cases, zero response and bank-state differences ([W2-D evidence](daemon/FORWARD-w2d.md)); hosted CI runs only the offline controls. The reference pool since B7's second Rust PR: `daemon/harness/w2e.py live` `documents-search-*` scenarios (recorded Linux run cited in that PR). Declared: `explain` refused (MCP-SEARCH-EXPLAIN), resident-only access counts |
 | GET | /api/trace | 3 | deferred | 501 | 501 (`w2d-console-projections`, W2-D) |
 | GET | /api/recall | 3 | deferred | 501 | 501 (`w2d-recall-graph`, W3-H) |
-| GET | /api/chain | 3 | deferred | 501 | 501 (`w2d-console-projections`, W2-D) |
-| GET | /api/entry | 3 | deferred | 501 | 501 (`w2d-console-projections`, W2-D) |
+| GET | /api/chain | 3 | deferred | served | `read/console.rs`; `daemon/harness/w2d_console.py live` (`console-reads`, `console-reads-demote`, on `w2e.py`'s engine) compares status and body and the full bank after each call; recorded Linux dev-box run cited in the PR, until a published nightly run (B13, D11) covers it: the limit at 1, 0 and negative (PostgreSQL's refusal once a node exists) |
+| GET | /api/entry | 3 | deferred | served | `read/console.rs`; `daemon/harness/w2d_console.py live` (`console-reads`, `console-reads-demote`, on `w2e.py`'s engine) compares status and body and the full bank after each call; recorded Linux dev-box run cited in the PR, until a published nightly run (B13, D11) covers it: the access-count bump and retrieval credit, a superseded entry, the faded answer without MCP's note |
 | POST | /api/reinforce | 4 | deferred | 501 | 501 (writes, W2-E) |
-| GET | /api/sources | 3 | deferred | 501 | 501 (`w2d-console-projections`, W2-D) |
+| GET | /api/sources | 3 | deferred | served | `read/console.rs`; `daemon/harness/w2d_console.py live` (`console-reads`, `console-reads-demote`, on `w2e.py`'s engine) compares status and body and the full bank after each call; recorded Linux dev-box run cited in the PR, until a published nightly run (B13, D11) covers it |
 | GET | /api/graph | 3 | deferred | 501 | 501 (`w2d-recall-graph`, W3-H) |
 | GET | /api/graph/projects | 3 | deferred | 501 | 501 (`w2d-recall-graph`, W3-H) |
 | GET | /api/graph/digest | 3 | deferred | 501 | 501 (`w2d-recall-graph`, W3-H) |
@@ -626,7 +626,7 @@ The Rust column, after Status, says what the Rust daemon answers on master after
 | POST | /api/graph/reject-entity-proposal | 4 | deferred | 501 | 501 (graph and review writes, W3-H) |
 | GET | /api/dream/status | 3 | deferred | 501 | 501 (`w2d-recall-graph`, W3-H) |
 | POST | /api/dream/run | 4 | deferred | 501 | 501 (dream, W3-H) |
-| GET | /api/consolidation | 3 | deferred | 501 | 501 (`w2d-console-projections`, W2-D) |
+| GET | /api/consolidation | 3 | deferred | served | `read/console.rs`; `daemon/harness/w2d_console.py live` (`console-reads`, `console-reads-demote`, on `w2e.py`'s engine) compares status and body and the full bank after each call; recorded Linux dev-box run cited in the PR, until a published nightly run (B13, D11) covers it: no anchor, query and episode anchors, `top_k` 0 and negative |
 | POST | /api/consolidate | 4 | deferred | 501 | 501 (writes, W2-E) |
 | POST | /api/delete | 4 | deferred | 501 | 501 (writes, W2-E) |
 | POST | /api/supersede | 4 | deferred | 501 | 501 (writes, W2-E) |

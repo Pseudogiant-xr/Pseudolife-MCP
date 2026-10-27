@@ -178,119 +178,186 @@ fn mcp_memory_consolidation_candidates<'a>(
             .unwrap_or(0.6);
         let min_cluster_size = count_arg(a, "min_cluster_size", 2);
         let max_clusters = count_arg(a, "max_clusters", 10);
-        let svc = &app.service;
-        let ready = svc.ensure_init().await.map_err(internal)?;
-        let _ws = ready.write.lock().await;
-
-        let query_anchor = query.as_deref().is_some_and(|q| !q.is_empty());
-        let episode_anchor = episode.as_deref().is_some_and(|e| !e.is_empty());
-        if !query_anchor && !episode_anchor {
-            return Ok(json!({"query": null, "episode": null, "count": 0, "clusters": []}));
-        }
-        let qv = if query_anchor {
-            let embedder = ready.embedder.clone();
-            let q = query.clone().unwrap_or_default();
-            let cache = svc.config.embedding.cache_size;
-            Some(
-                tokio::task::spawn_blocking(move || {
-                    crate::read::embed_cache::encode_query(&embedder, &q, cache)
-                })
-                .await
-                .map_err(internal)?
-                .map_err(internal)?,
-            )
-        } else {
-            None
-        };
-
-        // The pool and the clustering run on the blocking pool, as the search
-        // route's ranking does; `Ready.write` keeps the bank's indexes stable.
-        let pool_args = PoolArgs {
-            query: query.clone(),
-            episode: episode.clone(),
-            sources,
-            tags,
-            top_k,
-        };
-        // The anchor's `retrieve` reads the reference pool too: its chunks
-        // are dropped as unaddressable, but they count against the
-        // reranker's candidate budget.
-        let refs = match &qv {
-            Some(q) => {
-                let (q, mem) = (q.clone(), &svc.config.memory);
-                crate::txn::with_client(ready.storage.client(), |db| async move {
-                    Ok::<_, tokio_postgres::Error>(
-                        crate::documents::reference_pool(db, &q, mem).await,
-                    )
-                })
-                .await
-                .unwrap_or_else(|e| {
-                    eprintln!("reference pool skipped: {e}");
-                    Vec::new()
-                })
-            }
-            None => Vec::new(),
-        };
-        let (r2, cfg) = (ready.clone(), svc.config.memory.clone());
-        let mut candidates =
-            tokio::task::spawn_blocking(move || pool(&r2, &cfg, qv.as_deref(), &pool_args, &refs))
-                .await
-                .map_err(internal)?;
-
-        // Filter unavailable rows individually; a read failure keeps them.
-        if !candidates.is_empty() && !crate::mutants::active("mcp-consolidation-unverified") {
-            let ids: Vec<i64> = {
-                let bank = ready.bank.read().expect("bank lock");
-                candidates
-                    .iter()
-                    .map(|&(i, _)| bank.entries[i].id)
-                    .collect()
-            };
-            let lookup = {
-                let ids = &ids;
-                crate::txn::with_client(ready.storage.client(), |c| async move {
-                    c.query("SELECT id FROM entries WHERE id = ANY($1)", &[ids])
-                        .await
-                })
-                .await
-            };
-            match lookup {
-                Ok(rows) => {
-                    let present: HashSet<i64> = rows.iter().map(|r| r.get(0)).collect();
-                    candidates = candidates
-                        .into_iter()
-                        .zip(ids)
-                        .filter(|(_, id)| present.contains(id))
-                        .map(|(c, _)| c)
-                        .collect();
-                }
-                Err(e) => {
-                    eprintln!("consolidation candidates unverified, storage read failed: {e}");
-                }
-            }
-        }
-        candidates.truncate(top_k);
-
-        let r2 = ready.clone();
-        let rendered = tokio::task::spawn_blocking(move || {
-            render(
-                &r2,
-                &candidates,
+        let ready = app.service.ensure_init().await.map_err(internal)?;
+        candidates(
+            &app.service,
+            &ready,
+            CandidateArgs {
+                query,
+                episode,
+                sources,
+                tags,
+                top_k: i64::try_from(top_k).unwrap_or(i64::MAX),
                 min_cohesion,
                 min_cluster_size,
                 max_clusters,
-            )
-        })
+            },
+        )
         .await
-        .map_err(internal)?
-        .map_err(internal)?;
-        Ok(json!({
-            "query": query,
-            "episode": episode,
-            "count": rendered.len(),
-            "clusters": rendered,
-        }))
     })
+}
+
+/// `service.consolidation_candidates`' arguments, as its callers bind them.
+pub(crate) struct CandidateArgs {
+    pub(crate) query: Option<String>,
+    pub(crate) episode: Option<String>,
+    /// `set(x) if x else None`: callers pass `None` for an empty list.
+    pub(crate) sources: Option<Vec<String>>,
+    pub(crate) tags: Option<Vec<String>>,
+    /// Python's integer as given (the MCP binder admits only positive ones;
+    /// `GET /api/consolidation` passes any): the query anchor's `retrieve`
+    /// reads 0 as `memory.top_k`, and the pool keeps `candidates[:top_k]`.
+    pub(crate) top_k: i64,
+    pub(crate) min_cohesion: f64,
+    pub(crate) min_cluster_size: usize,
+    pub(crate) max_clusters: usize,
+}
+
+/// `service.consolidation_candidates`: the anchor's actionable candidates,
+/// verified against the bank, clustered.
+pub(crate) async fn candidates(
+    svc: &crate::service::Service,
+    ready: &std::sync::Arc<Ready>,
+    args: CandidateArgs,
+) -> Result<Value, ToolError> {
+    let CandidateArgs {
+        query,
+        episode,
+        sources,
+        tags,
+        top_k,
+        min_cohesion,
+        min_cluster_size,
+        max_clusters,
+    } = args;
+    let _ws = ready.write.lock().await;
+
+    let query_anchor = query.as_deref().is_some_and(|q| !q.is_empty());
+    let episode_anchor = episode.as_deref().is_some_and(|e| !e.is_empty());
+    if !query_anchor && !episode_anchor {
+        return Ok(json!({"query": null, "episode": null, "count": 0, "clusters": []}));
+    }
+    // `retrieve`'s `k = top_k or self.config.top_k`; a negative width
+    // fails there as it does on `GET /api/search`.
+    let retrieve_k = match top_k {
+        0 => svc.config.memory.top_k.max(0) as usize,
+        n if n < 0 => {
+            if query_anchor {
+                return Err(internal("top_k must not be negative"));
+            }
+            0
+        }
+        n => usize::try_from(n).unwrap_or(usize::MAX),
+    };
+    let qv = if query_anchor {
+        let embedder = ready.embedder.clone();
+        let q = query.clone().unwrap_or_default();
+        let cache = svc.config.embedding.cache_size;
+        Some(
+            tokio::task::spawn_blocking(move || {
+                crate::read::embed_cache::encode_query(&embedder, &q, cache)
+            })
+            .await
+            .map_err(internal)?
+            .map_err(internal)?,
+        )
+    } else {
+        None
+    };
+
+    // The pool and the clustering run on the blocking pool, as the search
+    // route's ranking does; `Ready.write` keeps the bank's indexes stable.
+    let pool_args = PoolArgs {
+        query: query.clone(),
+        episode: episode.clone(),
+        sources,
+        tags,
+        top_k: retrieve_k,
+    };
+    // The anchor's `retrieve` reads the reference pool too: its chunks
+    // are dropped as unaddressable, but they count against the
+    // reranker's candidate budget.
+    let refs = match &qv {
+        Some(q) => {
+            let (q, mem) = (q.clone(), &svc.config.memory);
+            crate::txn::with_client(ready.storage.client(), |db| async move {
+                Ok::<_, tokio_postgres::Error>(crate::documents::reference_pool(db, &q, mem).await)
+            })
+            .await
+            .unwrap_or_else(|e| {
+                eprintln!("reference pool skipped: {e}");
+                Vec::new()
+            })
+        }
+        None => Vec::new(),
+    };
+    let (r2, cfg) = (ready.clone(), svc.config.memory.clone());
+    let mut candidates =
+        tokio::task::spawn_blocking(move || pool(&r2, &cfg, qv.as_deref(), &pool_args, &refs))
+            .await
+            .map_err(internal)?;
+
+    // Filter unavailable rows individually; a read failure keeps them.
+    if !candidates.is_empty() && !crate::mutants::active("mcp-consolidation-unverified") {
+        let ids: Vec<i64> = {
+            let bank = ready.bank.read().expect("bank lock");
+            candidates
+                .iter()
+                .map(|&(i, _)| bank.entries[i].id)
+                .collect()
+        };
+        let lookup = {
+            let ids = &ids;
+            crate::txn::with_client(ready.storage.client(), |c| async move {
+                c.query("SELECT id FROM entries WHERE id = ANY($1)", &[ids])
+                    .await
+            })
+            .await
+        };
+        match lookup {
+            Ok(rows) => {
+                let present: HashSet<i64> = rows.iter().map(|r| r.get(0)).collect();
+                candidates = candidates
+                    .into_iter()
+                    .zip(ids)
+                    .filter(|(_, id)| present.contains(id))
+                    .map(|(c, _)| c)
+                    .collect();
+            }
+            Err(e) => {
+                eprintln!("consolidation candidates unverified, storage read failed: {e}");
+            }
+        }
+    }
+    // `candidates[:top_k]`: a negative bound drops that many from the end.
+    let keep = if top_k >= 0 {
+        usize::try_from(top_k).unwrap_or(usize::MAX)
+    } else {
+        candidates
+            .len()
+            .saturating_sub(usize::try_from(top_k.unsigned_abs()).unwrap_or(usize::MAX))
+    };
+    candidates.truncate(keep);
+
+    let r2 = ready.clone();
+    let rendered = tokio::task::spawn_blocking(move || {
+        render(
+            &r2,
+            &candidates,
+            min_cohesion,
+            min_cluster_size,
+            max_clusters,
+        )
+    })
+    .await
+    .map_err(internal)?
+    .map_err(internal)?;
+    Ok(json!({
+        "query": query,
+        "episode": episode,
+        "count": rendered.len(),
+        "clusters": rendered,
+    }))
 }
 
 /// The pool's anchor and filters, as bound.
