@@ -817,8 +817,19 @@ mod tests {
             result["lease_until"].as_f64().unwrap() >= attached["lease_until"].as_f64().unwrap()
         );
         drop(board);
-        let storage = service.inner.lock().await.storage.take().unwrap();
-        service.update(|s| s.storage = None);
+        // The dropped send's initialization task still runs once the mutex is
+        // free; a later call queues behind it (tokio's mutex is fair), so it
+        // has finished, and whatever it published is dropped, before cleanup.
+        let _ = service.ensure_init().await;
+        let storage = {
+            let mut inner = service.inner.lock().await;
+            inner.ready = None;
+            inner.storage.take().unwrap()
+        };
+        service.update(|s| {
+            s.storage = None;
+            s.startup = None;
+        });
         Arc::try_unwrap(storage)
             .ok()
             .expect("storage released")
