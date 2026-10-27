@@ -56,6 +56,13 @@ pub struct Board {
     pub(crate) principals: Arc<PrincipalStore>,
     /// The daemon's own board address, registered by its first notice.
     pub(crate) daemon_identity: Mutex<Option<(String, String)>>,
+    /// Test seam: a send's first attempt waits on this after it took its
+    /// ready service and before it stamps (`clock_retry_tests`).
+    #[cfg(test)]
+    pub(crate) stamp_gate: Mutex<Option<tokio::sync::oneshot::Receiver<()>>>,
+    /// Test seam: how many sends took the clock retry.
+    #[cfg(test)]
+    pub(crate) clock_retries: std::sync::atomic::AtomicUsize,
 }
 
 type StoreCall<'a> = Pin<Box<dyn Future<Output = Result<serde_json::Value>> + Send + 'a>>;
@@ -88,6 +95,10 @@ impl Board {
             service,
             principals,
             daemon_identity: Mutex::new(None),
+            #[cfg(test)]
+            stamp_gate: Mutex::new(None),
+            #[cfg(test)]
+            clock_retries: Default::default(),
         }
     }
 

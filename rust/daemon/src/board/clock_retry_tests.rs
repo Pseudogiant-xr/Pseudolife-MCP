@@ -271,10 +271,12 @@ async fn a_send_after_a_half_open_writer_session_is_delivered() {
     let (service, board) = service(&proxied, &dsn, &config);
     let (headers, to) = agents(&board).await;
     let side = direct(&dsn).await;
-    // The first call opens the session; the second verifies it (a fresh
-    // session has never been probed), so the check stays fresh for the next
-    // second.
-    service.ensure_init().await.unwrap();
+    // A real probe now (the probe timestamp forgotten first), so the session
+    // check stays fresh for the next second and only the retry's forced
+    // reprobe can find the dead session.
+    let ready = service.ensure_init().await.unwrap();
+    ready.storage.forget_probe();
+    drop(ready);
     let ready = service.ensure_init().await.unwrap();
     let pid = backend_pid(&ready.storage).await;
     let before = ready.storage.lease_epoch();
@@ -288,8 +290,13 @@ async fn a_send_after_a_half_open_writer_session_is_delivered() {
     let sent = board
         .dispatch("send", send(&to, "half-open"), &headers, "default")
         .await;
-    let sent = sent.expect("the dead session is replaced and the mail sent");
+    let sent = sent.expect("the retry reprobes, reconnects and sends");
     assert_eq!(sent["state"], "queued");
+    assert_eq!(
+        board.clock_retries.load(Ordering::SeqCst),
+        1,
+        "the first attempt was fenced"
+    );
     assert_eq!(count(&side, "coordination_messages").await, messages + 1);
     let now = service.ensure_init().await.unwrap().storage.lease_epoch();
     assert!(
@@ -336,21 +343,37 @@ async fn a_send_recovers_once_from_a_reconnect_after_it_took_its_stamp() {
     let pid = backend_pid(&ready.storage).await;
     let before = ready.storage.lease_epoch();
     drop(ready);
-    // Hold the coordination lock: the send takes its ready service, then waits.
-    let held = board.conn.lock().await;
+    // The send takes its ready service, then waits at the gate before it
+    // stamps.
+    let (release, gate) = tokio::sync::oneshot::channel();
+    *board.stamp_gate.lock().unwrap() = Some(gate);
     let mut sending =
         Box::pin(board.dispatch("send", send(&to, "reconnected"), &headers, "default"));
-    for _ in 0..50 {
+    for _ in 0..10_000 {
+        if board.stamp_gate.lock().unwrap().is_none() {
+            break;
+        }
         assert!(futures::FutureExt::now_or_never(sending.as_mut()).is_none());
         tokio::task::yield_now().await;
     }
-    // Meanwhile another call reconnects (every reconnect moves the epoch).
+    assert!(
+        board.stamp_gate.lock().unwrap().is_none(),
+        "the send never reached its stamp"
+    );
+    assert!(futures::FutureExt::now_or_never(sending.as_mut()).is_none());
+    // Meanwhile another call reconnects (every reconnect moves the epoch), so
+    // the ready service the send holds is stale.
     terminate(&side, pid).await;
     let after = service.ensure_init().await.unwrap().storage.lease_epoch();
     assert!(after > before);
-    drop(held);
+    release.send(()).unwrap();
     let sent = sending
         .await
         .expect("the first attempt is fenced, the retry sends");
     assert_eq!(sent["state"], "queued");
+    assert_eq!(
+        board.clock_retries.load(Ordering::SeqCst),
+        1,
+        "the first attempt was fenced"
+    );
 }

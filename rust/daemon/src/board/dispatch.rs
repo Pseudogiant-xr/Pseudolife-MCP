@@ -252,6 +252,9 @@ impl Board {
             // the cached session check stale: reprobe even inside its probe
             // interval and run `_ensure_init`, then make one fresh attempt.
             Err(BoardError::ClockChanged) if action == "send" => {
+                #[cfg(test)]
+                self.clock_retries
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 self.service
                     .refresh_writer_session()
                     .await
@@ -435,6 +438,13 @@ impl Board {
         let ready = if action == "send" {
             drop(conn);
             let ready = self.full_tier().await?;
+            #[cfg(test)]
+            {
+                let gate = self.stamp_gate.lock().expect("stamp gate").take();
+                if let Some(gate) = gate {
+                    let _ = gate.await;
+                }
+            }
             conn = self.conn.lock().await;
             Some(ready)
         } else {
