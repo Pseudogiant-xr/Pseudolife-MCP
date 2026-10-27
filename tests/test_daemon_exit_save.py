@@ -2,15 +2,12 @@
 
 ``mcp_server`` registers the exit save with ``atexit``, but uvicorn (0.29
 and later) re-raises a captured SIGTERM after its graceful shutdown, with
-the default handler restored, so a daemon outside a container died without
+the default handler restored, so a daemon that is not PID 1 died without
 running atexit handlers: every change since the last autosave (the
 ``cms_counters`` row, access counts, dirty cortex/world/lesson slots) was
-lost on each stop. And a client holding its streamable-HTTP stream open kept
-uvicorn waiting for that connection forever, so a ``docker stop`` ended in
-SIGKILL before any save. The save now runs from the app's lifespan shutdown,
-which uvicorn reaches before the re-raise and, with a bounded graceful
-shutdown, even while a stream stays open; atexit stays as the fallback, and
-the save runs once.
+lost on each stop. The save now runs from the app's lifespan shutdown, which
+uvicorn reaches before the re-raise; atexit stays as the fallback, and the
+save runs once.
 
 The subprocess tests start a real ``pseudolife-mcp serve`` on a bank of
 their own (so the bank outlives the daemon and its ``cms_counters`` row can
@@ -163,9 +160,9 @@ def test_sigterm_runs_the_exit_save(tmp_path):
 
 @posix_only
 def test_sigterm_saves_while_a_client_holds_its_event_stream_open(tmp_path):
-    """A connected shim keeps the session's GET event stream open. Without a
-    bounded graceful shutdown uvicorn waited for that connection forever,
-    and ``docker stop`` ended in SIGKILL with nothing saved."""
+    """A connected shim keeps the session's GET event stream open, the usual
+    state of a daemon being stopped. The stream must not keep the shutdown
+    from reaching the save (sse-starlette ends it on uvicorn's shutdown)."""
     before, after, returncode, stderr = _sigterm_after_a_store(
         tmp_path, "exitsavestream", hold_stream=True)
     assert before == 0, "an autosave wrote the row first: the test proves nothing"

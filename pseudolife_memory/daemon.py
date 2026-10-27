@@ -479,6 +479,39 @@ def moved_refusal(environ) -> str | None:
             f"true) and remove {marker}.")
 
 
+_SHUTDOWN_DONE = ("lifespan.shutdown.complete", "lifespan.shutdown.failed")
+
+
+def save_on_lifespan_shutdown(app, save):
+    """Wrap the ASGI ``app`` so ``save`` runs when its lifespan shuts down.
+
+    uvicorn (0.29 and later) re-raises a captured SIGTERM after its graceful
+    shutdown, with the default handler restored, and that exits without
+    running atexit handlers: the atexit exit save never ran when SIGTERM
+    stopped a daemon that is not PID 1 (a pip install, a shim-spawned
+    daemon; a container's PID 1 drops the re-raised signal and exits
+    normally). The lifespan shutdown runs before that re-raise. ``save`` runs once the wrapped app has shut down (the MCP
+    session manager stopped, so no tool call is mid-write), and before
+    uvicorn hears it finished, on a worker thread: it takes the service
+    lock.
+    """
+    import asyncio
+
+    async def wrapped(scope, receive, send):
+        if scope["type"] != "lifespan":
+            await app(scope, receive, send)
+            return
+
+        async def send_after_save(message):
+            if message["type"] in _SHUTDOWN_DONE:
+                await asyncio.to_thread(save)
+            await send(message)
+
+        await app(scope, receive, send_after_save)
+
+    return wrapped
+
+
 def run_daemon(host: str | None = None, port: int | None = None) -> None:
     """Entry point for ``pseudolife-mcp serve``. Blocks until shutdown."""
     import uvicorn
@@ -624,6 +657,7 @@ def run_daemon(host: str | None = None, port: int | None = None) -> None:
         mcp_server.build_streamable_http_app(), token, _health,
         mcp_server.service, token_map=token_map,
     )
+    app = save_on_lifespan_shutdown(app, mcp_server.flush_on_exit)
     logger.info("daemon: listening on %s:%s (auth=%s, principals=%d, "
                 "storage=%s) — console at /ui/",
                 host, port, auth_configured, len(token_map),
