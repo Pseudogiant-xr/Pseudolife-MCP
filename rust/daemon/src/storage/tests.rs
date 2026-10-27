@@ -296,13 +296,25 @@ async fn kill_writer(s: &Storage, dsn: &str) {
     c.execute("SELECT pg_terminate_backend($1)", &[&pid])
         .await
         .unwrap();
-    drop(c);
-    let _ = t.await;
-    let deadline = Instant::now() + Duration::from_secs(5);
-    while !s.client().is_closed() {
-        assert!(Instant::now() < deadline, "the killed session never closed");
+    // Until the backend has gone, lease and all, and the client knows.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let alive: i64 = c
+            .query_one(
+                "SELECT count(*) FROM pg_stat_activity WHERE pid = $1",
+                &[&pid],
+            )
+            .await
+            .unwrap()
+            .get(0);
+        if alive == 0 && s.client().is_closed() {
+            break;
+        }
+        assert!(Instant::now() < deadline, "the killed session never ended");
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
+    drop(c);
+    let _ = t.await;
 }
 
 fn handover_message(from: i64, to: i64) -> String {
@@ -423,6 +435,52 @@ async fn db_reconnect_refused_while_another_writer_holds_the_lease() {
         fresh.resident_invalidated(),
         Some(handover_message(e1, e1 + 1))
     );
+    drop(s);
+    fresh.close().await;
+}
+
+#[tokio::test]
+async fn db_unreachable_reconnect_is_tolerated_and_retried_after_its_window() {
+    let Some(dsn) = test_dsn() else { return };
+    let _guard = DB.lock().await;
+    let mut s = Storage::open(&dsn).await.expect("open");
+    let e1 = s.lease_epoch();
+    kill_writer(&s, &dsn).await;
+    // The server is unreachable: port 1 on loopback refuses at once.
+    let reachable = std::mem::replace(
+        &mut s.base,
+        parse_dsn("postgresql://nobody@127.0.0.1:1/pl_cf_w1a_none").unwrap(),
+    );
+    assert!(
+        s.verify_writer_session()
+            .await
+            .expect("tolerated")
+            .is_none()
+    );
+    let failure = s
+        .session
+        .lock()
+        .unwrap()
+        .reconnect_error
+        .clone()
+        .expect("recorded");
+    assert!(failure.starts_with("reconnect failed: "), "{failure}");
+    // Reachable again, but inside the window no attempt is made.
+    s.base = reachable;
+    assert!(
+        s.verify_writer_session()
+            .await
+            .expect("tolerated")
+            .is_none()
+    );
+    tokio::time::sleep(RECONNECT_RETRY).await;
+    let fresh = s
+        .verify_writer_session()
+        .await
+        .expect("verify after the window")
+        .expect("replaced");
+    assert_eq!(fresh.lease_epoch(), e1 + 1);
+    assert_eq!(fresh.resident_invalidated(), None);
     drop(s);
     fresh.close().await;
 }

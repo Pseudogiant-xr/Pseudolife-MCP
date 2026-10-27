@@ -132,6 +132,14 @@ pub struct Service {
     /// service (the dream pass spawns), and the stall notice the board.
     handle: std::sync::OnceLock<std::sync::Weak<Service>>,
     board: std::sync::OnceLock<std::sync::Weak<crate::board::Board>>,
+    /// `MemoryService._hlc`: one clock for the process, which a rehydrate
+    /// reseeds but never replaces, so it never runs backwards.
+    hlc: Arc<std::sync::Mutex<crate::hlc::Clock>>,
+    /// The dream's process state (`_dream_run_guard`, the stall tracker, the
+    /// lesson cursors, the alias memo, the last extractor): service
+    /// attributes in Python, kept across a rehydrate, so a pass still
+    /// running over a superseded ready service keeps its single flight.
+    dream_run: Arc<crate::dream::run::RunState>,
 }
 
 impl Service {
@@ -163,6 +171,8 @@ impl Service {
             snap: RwLock::new(Snapshot::default()),
             handle: std::sync::OnceLock::new(),
             board: std::sync::OnceLock::new(),
+            hlc: Arc::default(),
+            dream_run: Arc::default(),
         }
     }
 
@@ -398,9 +408,9 @@ impl Service {
                     cortex: Arc::new(crate::stores::cortex::SharedCortex::new(cortex)),
                     world: Arc::new(crate::stores::world::SharedWorld::new(world)),
                     lessons: Arc::new(crate::stores::lessons::SharedLessons::new(lessons)),
-                    hlc: Arc::new(std::sync::Mutex::new(crate::hlc::Clock::default())),
+                    hlc: self.hlc.clone(),
                     dream: Arc::new(tokio::sync::Mutex::new(Default::default())),
-                    dream_run: Default::default(),
+                    dream_run: self.dream_run.clone(),
                 });
                 inner.ready = Some(ready.clone());
                 // Python publishes every loaded store before the late reseed.
@@ -456,6 +466,17 @@ impl Service {
             return Ok(());
         };
         let fresh = Arc::new(fresh);
+        if fresh.resident_invalidated().is_some()
+            && !crate::mutants::active("writer-board-clock-kept")
+            && let Some(board) = self.board()
+        {
+            // `_coordination_hlc_epoch = None` (service.py:1420): the board's
+            // own clock never saw the other writer's high-water mark, and the
+            // replacement's epoch would let a send past the epoch fence. Mark
+            // it unseeded before any caller can see that epoch, so the next
+            // send reseeds from the bank.
+            board.hlc.lock().expect("hlc lock").seeded = false;
+        }
         inner.storage = Some(fresh.clone());
         if let Some(ready) = inner.ready.take() {
             inner.ready = Some(Arc::new(ready.over(fresh.clone())));
@@ -466,11 +487,14 @@ impl Service {
 
     /// `_rehydrate_if_bank_changed_hands` (service.py:1381-1438): another
     /// writer held the bank while this process was disconnected, so its
-    /// resident stores may predate that writer's changes. Drop them all
-    /// (the ready service holds every one, with the active-session pointer,
-    /// the tombstones, the deferred roots and the dream's batch failures)
-    /// so the rest of `_ensure_init` hydrates afresh, then lift the
-    /// storage's refusal. A reconnect with no other writer flags nothing.
+    /// resident stores may predate that writer's changes. Drop them (the
+    /// ready service holds the bank, the canonical stores, the episode write
+    /// state with the active-session pointer, tombstones, deferred roots and
+    /// entity-kind cache, and the dream's acknowledgement tracking) so the
+    /// rest of `_ensure_init` hydrates afresh, reset the dream's batch
+    /// failures, then lift the storage's refusal. The process clock and the
+    /// rest of the dream's process state stay, as in Python. A reconnect
+    /// with no other writer flags nothing.
     fn rehydrate_if_bank_changed_hands(&self, inner: &mut Inner) {
         let Some(storage) = inner.storage.clone() else {
             return;
@@ -480,6 +504,7 @@ impl Service {
         };
         eprintln!("{reason}: dropping the resident stores and re-reading the bank before serving");
         inner.ready = None;
+        self.dream_run.forget_batch_failures();
         self.update(|s| s.startup = None);
         storage.acknowledge_rehydration();
     }
@@ -603,9 +628,14 @@ impl crate::background::Duties for Service {
 
     fn reap(&self, idle_seconds: f64) -> crate::background::Duty<'_> {
         Box::pin(async move {
-            let ready = self.ensure_init_inner().await?;
+            self.ensure_init_inner().await?;
             // All session mutation is serialized with service operations.
             let _service_lock = self.inner.lock().await;
+            // The ready service current under the lock: a rehydrate between
+            // the two locks replaced the one init returned.
+            let Some(ready) = _service_lock.ready.clone() else {
+                return Ok(());
+            };
             let mut write = ready.write.lock().await;
             let sessions = &mut write.log;
             let entries: Vec<_> = ready
@@ -1200,6 +1230,14 @@ mod tests {
             dsn.clone(),
             false,
         ));
+        // The board's own clock, which a handover must unseed.
+        let board = Arc::new(crate::board::Board::new(
+            service.config.coordination.clone(),
+            dsn.clone(),
+            service.clone(),
+            Arc::new(crate::auth::PrincipalStore::new()),
+        ));
+        service.install(&board);
         let helper = |args: &[&str]| {
             let mut command =
                 std::process::Command::new(std::env::var("PL_PGS_WRITER_PYTHON").unwrap());
@@ -1224,6 +1262,8 @@ mod tests {
                 .ok()
                 .map(|row| row.get(0))
         }
+        // Ends the writer's backend and waits until it has gone, lease and
+        // all, so a second writer never waits on a dying session.
         async fn kill(storage: &Storage, dsn: &str) {
             let pid = backend_pid(storage).await.expect("a live session to kill");
             let (side, task) = crate::storage::connect(
@@ -1235,87 +1275,118 @@ mod tests {
             side.execute("SELECT pg_terminate_backend($1)", &[&pid])
                 .await
                 .unwrap();
-            drop(side);
-            let _ = task.await;
-            let deadline = Instant::now() + Duration::from_secs(5);
-            while !storage.client().is_closed() {
-                assert!(Instant::now() < deadline, "the killed session never closed");
+            let deadline = Instant::now() + Duration::from_secs(10);
+            loop {
+                let alive: i64 = side
+                    .query_one(
+                        "SELECT count(*) FROM pg_stat_activity WHERE pid = $1",
+                        &[&pid],
+                    )
+                    .await
+                    .unwrap()
+                    .get(0);
+                if alive == 0 && storage.client().is_closed() {
+                    break;
+                }
+                assert!(Instant::now() < deadline, "the killed session never ended");
                 tokio::time::sleep(Duration::from_millis(20)).await;
             }
+            drop(side);
+            let _ = task.await;
         }
         // Past `_SESSION_PROBE_INTERVAL`, so Python's arm probes too.
         let past_probe = || tokio::time::sleep(Duration::from_millis(1100));
+        // One phase's answer, compared with the resident stores the previous
+        // successful phase served.
+        let observe =
+            |result: Result<Arc<Ready>, String>, pid_before: Option<i32>, before: Arc<Ready>| {
+                let service = service.clone();
+                async move {
+                    let storage = service.snapshot().storage.expect("storage");
+                    let ping = match storage.ping().await {
+                        Ok(()) => "ok".to_string(),
+                        Err(e) => format!("error: {e}"),
+                    };
+                    let (ok, error, same, replaced, served) = match result {
+                        Ok(ready) => {
+                            let pid = backend_pid(&ready.storage).await;
+                            let same = json!({
+                                "bank": Arc::ptr_eq(&before.bank, &ready.bank),
+                                "world": Arc::ptr_eq(&before.world, &ready.world),
+                                "cortex": Arc::ptr_eq(&before.cortex, &ready.cortex),
+                            });
+                            // The process clock and the dream's process state
+                            // outlive every rehydrate, as Python's service
+                            // attributes do.
+                            assert!(Arc::ptr_eq(&before.hlc, &ready.hlc));
+                            assert!(Arc::ptr_eq(&before.dream_run, &ready.dream_run));
+                            let replaced = json!(pid.is_some() && pid != pid_before);
+                            (true, Value::Null, same, replaced, ready)
+                        }
+                        Err(e) => (false, json!(e), Value::Null, Value::Null, before),
+                    };
+                    let observed = json!({
+                        "ok": ok, "error": error, "same_as_before": same,
+                        "session_replaced": replaced,
+                        "epoch": storage.lease_epoch(), "health_db": ping,
+                        "resident_invalidated": storage.resident_invalidated(),
+                    });
+                    (observed, served)
+                }
+            };
+        let seeded = || board.hlc.lock().unwrap().seeded;
         let first = service.ensure_init().await.expect("initial init");
-        let first_pid = backend_pid(&first.storage).await;
-        let observe = |result: Result<Arc<Ready>, String>, pid_before: Option<i32>| {
-            let service = service.clone();
-            let first = first.clone();
-            async move {
-                let storage = service.snapshot().storage.expect("storage");
-                let ping = match storage.ping().await {
-                    Ok(()) => "ok".to_string(),
-                    Err(e) => format!("error: {e}"),
-                };
-                let (ok, error, same, pid_changed) = match result {
-                    Ok(ready) => {
-                        let pid = backend_pid(&ready.storage).await;
-                        let same = json!({
-                            "bank": Arc::ptr_eq(&first.bank, &ready.bank),
-                            "startup": Arc::ptr_eq(&first.startup, &ready.startup),
-                            "cortex": Arc::ptr_eq(&first.cortex, &ready.cortex),
-                        });
-                        (
-                            true,
-                            Value::Null,
-                            same,
-                            json!(pid.is_some() && pid != pid_before),
-                        )
-                    }
-                    Err(e) => (false, json!(e), Value::Null, Value::Null),
-                };
-                json!({
-                    "ok": ok, "error": error, "same_as_first": same,
-                    "session_replaced": pid_changed,
-                    "epoch": storage.lease_epoch(), "health_db": ping,
-                    "resident_invalidated": storage.resident_invalidated(),
-                })
-            }
-        };
-        let mut phases = vec![json!({
-            "phase": "initial",
-            "observed": observe(Ok(first.clone()), first_pid).await,
-        })];
+        let pid = backend_pid(&first.storage).await;
+        let (observed, mut current) = observe(Ok(first.clone()), pid, first.clone()).await;
+        drop(first);
+        let mut phases = vec![json!({"phase": "initial", "observed": observed})];
         run_helper(&["--dump-db", "initial"]);
 
         // Death with no other writer: the next call reconnects and keeps
-        // the resident copy.
-        kill(&first.storage, &dsn).await;
+        // the resident copy, and the board keeps its seeded clock.
+        board.hlc.lock().unwrap().seeded = true;
+        let pid = backend_pid(&current.storage).await;
+        kill(&current.storage, &dsn).await;
         past_probe().await;
         let result = service.ensure_init().await;
-        phases.push(json!({"phase": "death", "observed": observe(result, first_pid).await}));
+        let (observed, next) = observe(result, pid, current).await;
+        current = next;
+        assert!(
+            seeded(),
+            "a reconnect with no other writer keeps the board clock"
+        );
+        phases.push(json!({"phase": "death", "observed": observed}));
         run_helper(&["--dump-db", "death"]);
 
         // Another writer held the bank in the gap: the reconnect flags the
-        // handover and the service re-reads the bank before serving.
-        let before = backend_pid(&service.snapshot().storage.unwrap()).await;
-        kill(&service.snapshot().storage.unwrap(), &dsn).await;
+        // handover, the board clock must reseed before its next send, and
+        // the service re-reads the bank before serving.
+        let pid = backend_pid(&current.storage).await;
+        kill(&current.storage, &dsn).await;
         run_helper(&["--other-writer"]);
         past_probe().await;
         let result = service.ensure_init().await;
-        phases.push(json!({"phase": "handover", "observed": observe(result, before).await}));
+        let (observed, next) = observe(result, pid, current).await;
+        current = next;
+        assert!(!seeded(), "a handover must unseed the board clock");
+        phases.push(json!({"phase": "handover", "observed": observed}));
         run_helper(&["--dump-db", "handover"]);
 
         // Another writer still holds the lease: refused, and /health says so
         // while it is there; once it leaves and the retry window passes the
         // next call reconnects and re-reads the bank.
-        let before = backend_pid(&service.snapshot().storage.unwrap()).await;
-        kill(&service.snapshot().storage.unwrap(), &dsn).await;
+        let pid = backend_pid(&current.storage).await;
+        kill(&current.storage, &dsn).await;
         let gate = PathBuf::from(std::env::var("PL_PGS_WRITER_GATE").unwrap());
         let ready_file = gate.with_extension("ready");
         std::fs::write(&gate, b"hold").unwrap();
         let mut holder = helper(&["--hold-lease"]).spawn().unwrap();
         let deadline = Instant::now() + Duration::from_secs(60);
         while !ready_file.exists() {
+            assert!(
+                holder.try_wait().unwrap().is_none(),
+                "the lease holder exited before taking the lease"
+            );
             assert!(
                 Instant::now() < deadline,
                 "the lease holder never took the lease"
@@ -1324,13 +1395,17 @@ mod tests {
         }
         past_probe().await;
         let result = service.ensure_init().await;
-        phases.push(json!({"phase": "held", "observed": observe(result, before).await}));
+        let (observed, next) = observe(result, pid, current).await;
+        current = next;
+        phases.push(json!({"phase": "held", "observed": observed}));
         std::fs::remove_file(&gate).unwrap();
         assert!(holder.wait().unwrap().success(), "lease holder failed");
         run_helper(&["--dump-db", "held"]);
         tokio::time::sleep(Duration::from_millis(5100)).await;
         let result = service.ensure_init().await;
-        phases.push(json!({"phase": "released", "observed": observe(result, before).await}));
+        let (observed, next) = observe(result, pid, current).await;
+        current = next;
+        phases.push(json!({"phase": "released", "observed": observed}));
         run_helper(&["--dump-db", "released"]);
 
         std::fs::write(
@@ -1338,7 +1413,8 @@ mod tests {
             serde_json::to_vec(&json!({"phases": phases})).unwrap(),
         )
         .unwrap();
-        drop(first);
+        drop(current);
+        drop(board);
         let storage = {
             let mut inner = service.inner.lock().await;
             inner.ready = None;

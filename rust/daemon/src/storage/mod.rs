@@ -167,6 +167,11 @@ enum Reopen {
     Unreachable(String),
     /// Any other error, which Python lets propagate to the caller.
     Failed(String),
+    /// A failure after the lease was won (reading or bumping the epoch).
+    /// Python has already cleared `_reconnect_error` by then, so nothing
+    /// is cached: an operational one is tolerated and the next call
+    /// reconnects again, any other propagates.
+    AfterLease { message: String, operational: bool },
 }
 
 impl From<tokio_postgres::Error> for Reopen {
@@ -788,22 +793,27 @@ impl Storage {
     /// reconnect hits an error Python does not catch here.
     ///
     /// Python skips the probe while a transaction pins its connection
-    /// (`_pinned`); here that is [`crate::txn::try_hold`] failing, and its
-    /// guard keeps any transaction from starting until this returns.
+    /// (`_pinned`); here that is [`crate::txn::try_hold`] failing (any
+    /// transaction or statement group) or a dropped transaction still open,
+    /// and the guard keeps one from starting mid-probe. A session already
+    /// closed needs no guard: its replacement is a new client.
     pub async fn verify_writer_session(&self) -> Result<Option<Storage>, String> {
-        let Some(_hold) = crate::txn::try_hold() else {
-            return Ok(None);
-        };
         if crate::mutants::active("writer-no-reconnect") {
             return Ok(None);
         }
-        let closed = self.client.is_closed();
-        let fresh = matches!(self.session.lock().unwrap().ok_at,
-            Some(at) if at.elapsed() < SESSION_PROBE_INTERVAL);
-        if !closed && (fresh || crate::txn::recovery_pending()) {
-            return Ok(None);
-        }
-        if !closed {
+        if !self.client.is_closed() {
+            let fresh = matches!(self.session.lock().unwrap().ok_at,
+                Some(at) if at.elapsed() < SESSION_PROBE_INTERVAL);
+            if fresh {
+                return Ok(None);
+            }
+            // Probe only while nothing else uses the shared, pipelined client.
+            let Some(_hold) = crate::txn::try_hold() else {
+                return Ok(None);
+            };
+            if crate::txn::recovery_pending() {
+                return Ok(None);
+            }
             match self.client.batch_execute("SELECT 1").await {
                 Ok(()) => {
                     self.session.lock().unwrap().ok_at = Some(Instant::now());
@@ -842,7 +852,7 @@ impl Storage {
                 return Ok(None);
             }
         }
-        eprintln!("postgres connection lost (closed=True broken=False); reconnecting");
+        eprintln!("postgres connection lost; reconnecting");
         match self.reopen().await {
             Ok(fresh) => Ok(Some(fresh)),
             Err(Reopen::LeaseHeld(m)) => {
@@ -856,6 +866,16 @@ impl Storage {
                 state.reconnect_error = Some(format!("reconnect failed: {m}"));
                 state.reconnect_retry_at = Some(Instant::now() + RECONNECT_RETRY);
                 Ok(None)
+            }
+            Err(Reopen::AfterLease {
+                operational: true, ..
+            }) => {
+                self.session.lock().unwrap().reconnect_error = None;
+                Ok(None)
+            }
+            Err(Reopen::AfterLease { message, .. }) => {
+                self.session.lock().unwrap().reconnect_error = None;
+                Err(message)
             }
             Err(Reopen::Failed(m)) => Err(m),
         }
@@ -879,8 +899,12 @@ impl Storage {
                 Err(LeaseError::Held(m)) => return Err(Reopen::LeaseHeld(m)),
                 Err(LeaseError::Db(e)) => return Err(e.into()),
             }
-            let found = read_lease_epoch(&client).await?;
-            let epoch = bump_lease_epoch_raw(&client).await?;
+            let after_lease = |e: tokio_postgres::Error| Reopen::AfterLease {
+                operational: operational(&e),
+                message: error_text(&e),
+            };
+            let found = read_lease_epoch(&client).await.map_err(after_lease)?;
+            let epoch = bump_lease_epoch_raw(&client).await.map_err(after_lease)?;
             Ok::<_, Reopen>((found, epoch))
         };
         let (found, epoch) = match built.await {

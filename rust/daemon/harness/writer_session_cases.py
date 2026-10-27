@@ -61,7 +61,7 @@ NOOP_CALLBACKS = (
 PAST_PROBE = 1.1
 # Past _LEASE_RETRY_SECONDS (5 s).
 PAST_LEASE_RETRY = 5.1
-MUTANTS = ("writer-no-reconnect", "writer-epoch-unchecked")
+MUTANTS = ("writer-no-reconnect", "writer-epoch-unchecked", "writer-board-clock-kept")
 
 
 def _dsn() -> str:
@@ -115,10 +115,17 @@ def helper(*args):
 
 def kill(storage):
     """End the writer session from a side connection, as a server restart
-    would. psycopg learns of it only on the next use."""
+    would, and wait until its backend (and lease) has gone. psycopg learns
+    of it only on the next use."""
     pid = storage._conn.info.backend_pid
     with psycopg.connect(_dsn(), autocommit=True) as side:
         side.execute("SELECT pg_terminate_backend(%s)", (pid,))
+        deadline = time.monotonic() + 10
+        while side.execute("SELECT count(*) FROM pg_stat_activity WHERE pid = %s",
+                           (pid,)).fetchone()[0]:
+            if time.monotonic() > deadline:
+                raise RuntimeError("the killed session never ended")
+            time.sleep(0.02)
 
 
 def oracle_cell(seed_only=False):
@@ -148,7 +155,8 @@ def oracle_cell(seed_only=False):
     try:
         with patch("pseudolife_memory.curation_safety.recover_slot_curation", return_value=None):
             service._ensure_init()
-            first = (service._cms, service._world, service._cortex)
+            # The resident stores the previous successful phase served.
+            before = [(service._cms, service._world, service._cortex)]
 
             def observe(phase, call, pid_before, dump=True):
                 try:
@@ -157,16 +165,18 @@ def oracle_cell(seed_only=False):
                     ok, error_text, same, replaced = False, str(error), None, None
                 else:
                     ok, error_text = True, None
-                    same = {"bank": service._cms is first[0], "startup": service._world is first[1],
-                            "cortex": service._cortex is first[2]}
+                    bank, world, cortex = before[0]
+                    same = {"bank": service._cms is bank, "world": service._world is world,
+                            "cortex": service._cortex is cortex}
                     replaced = service._storage._conn.info.backend_pid != pid_before
+                    before[0] = (service._cms, service._world, service._cortex)
                 try:
                     service._storage.ping()
                     ping = "ok"
                 except Exception as error:
                     ping = f"error: {error}"
                 phases.append({"phase": phase, "observed": {
-                    "ok": ok, "error": error_text, "same_as_first": same, "session_replaced": replaced,
+                    "ok": ok, "error": error_text, "same_as_before": same, "session_replaced": replaced,
                     "epoch": service._storage._lease_epoch, "health_db": ping,
                     "resident_invalidated": service._storage.resident_invalidated}})
                 if dump:
@@ -175,6 +185,7 @@ def oracle_cell(seed_only=False):
             pid = service._storage._conn.info.backend_pid
             observe("initial", lambda: None, pid)
 
+            pid = service._storage._conn.info.backend_pid
             kill(service._storage)
             time.sleep(PAST_PROBE)
             observe("death", service._ensure_init, pid)
@@ -275,16 +286,17 @@ def expectations(result):
         differences.extend(dbstate.diff(value, phases[phase][key], f"/{phase}/{key}"))
 
     e0 = phases["initial"]["epoch"]
-    kept = dict.fromkeys(("bank", "startup", "cortex"), True)
-    dropped = dict.fromkeys(("bank", "startup", "cortex"), False)
+    # Each against the stores the previous successful phase served.
+    kept = dict.fromkeys(("bank", "world", "cortex"), True)
+    dropped = dict.fromkeys(("bank", "world", "cortex"), False)
     for phase in ("death", "handover", "released"):
         expect(phase, "ok", True)
         expect(phase, "session_replaced", True)
         expect(phase, "health_db", "ok")
         expect(phase, "resident_invalidated", None)
-    expect("death", "same_as_first", kept)
+    expect("death", "same_as_before", kept)
     expect("death", "epoch", e0 + 1)
-    expect("handover", "same_as_first", dropped)
+    expect("handover", "same_as_before", dropped)
     expect("handover", "epoch", e0 + 3)
     expect("held", "ok", False)
     expect("held", "epoch", e0 + 3)
@@ -293,7 +305,7 @@ def expectations(result):
         differences.append("/held/error: expected the writer-lease refusal")
     if phases["held"]["health_db"] != f"error: {phases['held']['error']}":
         differences.append("/held/health_db: expected the same refusal while the holder is there")
-    expect("released", "same_as_first", dropped)
+    expect("released", "same_as_before", dropped)
     expect("released", "epoch", e0 + 5)
     return differences
 
