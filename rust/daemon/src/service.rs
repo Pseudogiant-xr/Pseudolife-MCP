@@ -310,7 +310,6 @@ impl Service {
     /// session check stale, so reprobe the writer session even inside its
     /// probe interval (`_session_ok_at = 0.0`) and run `_ensure_init`, both
     /// under the service lock, before the caller's one fresh attempt.
-    #[allow(dead_code)] // B5's W2F-CLOCK-RETRY send retry is its caller.
     pub async fn refresh_writer_session(self: &Arc<Self>) -> Result<Arc<Ready>, String> {
         let me = self.clone();
         tokio::spawn(async move { me.init(true).await })

@@ -248,9 +248,16 @@ impl Board {
             .dispatch_once(action, params.clone(), headers, principal)
             .await
         {
-            // The retry's `full_tier` runs `_ensure_init` again (W2F-CLOCK-RETRY:
-            // without Python's forced writer-session reprobe).
+            // The mailbox transaction rolled back. An epoch mismatch proves
+            // the cached session check stale: reprobe even inside its probe
+            // interval and run `_ensure_init`, then make one fresh attempt.
             Err(BoardError::ClockChanged) if action == "send" => {
+                if !crate::mutants::active("clock-retry-no-reprobe") {
+                    self.service
+                        .refresh_writer_session()
+                        .await
+                        .map_err(BoardError::Internal)?;
+                }
                 self.dispatch_once(action, params, headers, principal).await
             }
             other => other,
