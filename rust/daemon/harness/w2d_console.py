@@ -159,10 +159,16 @@ READ_SEED = [
     set_remove("Team", "members", "alice"),
     # A contested set slot that keeps two live members: its contender is
     # parked against the slot, so both member rows carry the flag and the
-    # overview counts one contested slot, not two rows.
+    # overview counts one contested slot, not two rows. No tool parks one
+    # on a set slot (only the assistant-origin guard does, which the set
+    # tools do not expose), so the contender is a row copied from a member,
+    # hydrated by both daemons.
     set_add("Infra", "hosts", "alpha"),
-    set_add("Infra", "hosts", "beta"),
     set_add("Infra", "hosts", "3 spare nodes"),
+    sql("CREATE TEMP TABLE parked AS SELECT * FROM facts WHERE entity_norm = 'infra' "
+        "AND value = 'alpha'; UPDATE parked SET id = nextval(pg_get_serial_sequence("
+        "'facts', 'id')), value = 'gamma', value_norm = NULL, kind = 'scalar', "
+        "status = 'contested'; INSERT INTO facts SELECT * FROM parked", after_stop=True),
     tool("memory_alias", entity="auth tokens", alias="bearer tokens"),
     tool("memory_graph_relate", src="blue-green pipeline", relation="uses", dst="Jenkins"),
     trace_sql("Alpha deploys go through the blue-green pipeline.", "blue-green-pipeline",
