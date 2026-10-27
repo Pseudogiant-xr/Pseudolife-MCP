@@ -319,6 +319,7 @@ statuses and every row the board writes; the free list is at the end.
 | Item | Python | Rust | Why |
 |---|---|---|---|
 | Unicode tables for names, labels, lease names and excerpts (NFKD, combining marks, casefold, category C, alphanumerics) | the production oracle is python:3.12-slim (Unicode 15.0); the local oracle is CPython 3.11 (Unicode 14.0) | the crates' Unicode tables | the canonical shapes are ASCII plus the listed confusables; only code points whose properties differ between versions behave differently (ruling d, 2026-10-09) |
+| A malformed `meta.coordination_hlc_highwater` when a send initializes the service | `_reseed_hlc` raises `ValueError`, so `400 invalid_request` | `500 coordination_unavailable` (every other initialization failure answers it on both) | only a corrupted bank holds one; the daemon's not-ready reason names it |
 | Lone surrogates in a JSON body | `json.loads` accepts `"\ud800"`, then a field check refuses it with that field's code | `400 invalid_json` | Rust strings cannot hold one; no producer sends one |
 | #639: a `no_path` receipt can still ring a Codex doorbell | rings | rings (ported as is) | deferred until after cutover by decision; ported, not fixed |
 | `lease` with an explicit `"ttl": null` | depends on state: `reserved_lease`, an auth refusal, 200 for a caller already queued, a 500 from the NOT NULL column, or `invalid_request` from `now + None` | `400 invalid_request` before any check | no producer sends a null ttl; the shim and the MCP tool always send an int (Opus review, finding 2) |

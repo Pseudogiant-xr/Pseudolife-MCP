@@ -54,8 +54,10 @@ on both arms identically (the audit log is hashed and stays as written).
 
 Linux runs go to the slice's lane box with its own test PostgreSQL on
 127.0.0.1:5434 (`PSEUDOLIFE_TEST_PG_HOST_PORT`, `PSEUDOLIFE_TEST_PG_LOGIN_FILE`);
-the Rust daemon needs no ONNX model for the board. Both daemons must expose `db: ok` before the first step; the Python oracle
-also finishes embedding warmup (the runner waits for these tiers).
+both daemons need the embedding model (`ORT_DYLIB_PATH`, `PSEUDOLIFE_DAEMON_ONNX_DIR` and the
+reranker directory for the Rust arm), because a `send` ticks the service clock, which only the
+initialized service holds (W2F-SHARED-HLC). Both daemons must expose `db: ok` and finish embedding
+warmup before the first step (the runner waits for these tiers).
 
 
 The completion run uses the original supplied oracle recordings, preserved
@@ -85,9 +87,10 @@ reseed a restart runs reads back from the board's stored high-water mark.
 CI runs `test_norm.py` and `test_run.py` on Linux and Windows; the existing
 daemon checks compile the board unconditionally and build the `mutants` feature.
 The live corpus and eight controls currently run on the development test service.
-Hosted live coverage remains a follow-up: the proven runner warms the Python
-arm with a cached model, while a portable offline fixture has not yet been
-integrated and validated for this board runner. The original timing-sensitive
+Hosted live coverage remains a follow-up: the proven runner warms both arms
+with a cached model, while a portable offline fixture has not yet been
+integrated and validated for this board runner (`board.boundary --shared-clock`
+uses the four-dimension fixture for its one Cargo test). The original timing-sensitive
 goldens remain strict failing evidence, not CI expectations.
 
 The foundation `tokens` scenario now compares the implemented board routes;

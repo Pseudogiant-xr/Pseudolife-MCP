@@ -6,8 +6,10 @@ use super::error::{BoardError, Result};
 use super::mail::{MAINTAINER_ORIGIN, SendArgs};
 use super::store::{DAEMON_PRINCIPAL, MAINTAINER_PRINCIPAL};
 use super::{Board, lease};
+use crate::service::Ready;
 use serde_json::{Map, Value, json};
 use std::collections::HashMap;
+use std::sync::Arc;
 
 /// `_PARAMETERS`, in sorted action order.
 pub const ACTIONS: [&str; 15] = [
@@ -394,32 +396,46 @@ impl Board {
         }
         self.ensure_tier().await?;
         let mut conn = self.conn.lock().await;
-        let client = conn.client().await?;
-        if action == "context" {
-            return self
-                .store
-                .context(
-                    client,
-                    principal,
-                    params.get("agent_id").and_then(Value::as_str),
-                    params.get("nonce").and_then(Value::as_str),
-                    params.get("read_only") == Some(&Value::Bool(true)),
-                )
-                .await;
-        }
-        if let Some(binding) = binding {
-            let context = self
-                .store
-                .context(client, principal, None, None, false)
-                .await?;
-            let found = (
-                context["bank_id"].as_str().unwrap_or("").to_string(),
-                context["principal"].as_str().unwrap_or("").to_string(),
-            );
-            if binding != found {
-                return Err(BoardError::code("bank_identity_mismatch"));
+        {
+            let client = conn.client().await?;
+            if action == "context" {
+                return self
+                    .store
+                    .context(
+                        client,
+                        principal,
+                        params.get("agent_id").and_then(Value::as_str),
+                        params.get("nonce").and_then(Value::as_str),
+                        params.get("read_only") == Some(&Value::Bool(true)),
+                    )
+                    .await;
+            }
+            if let Some(binding) = binding {
+                let context = self
+                    .store
+                    .context(client, principal, None, None, false)
+                    .await?;
+                let found = (
+                    context["bank_id"].as_str().unwrap_or("").to_string(),
+                    context["principal"].as_str().unwrap_or("").to_string(),
+                );
+                if binding != found {
+                    return Err(BoardError::code("bank_identity_mismatch"));
+                }
             }
         }
+        // Only send needs the full service, paid after the cheap refusals
+        // above and, as Python takes it, outside the coordination lock: a
+        // cold daemon's initialization must not hold every other board call.
+        let ready = if action == "send" {
+            drop(conn);
+            let ready = self.full_tier().await?;
+            conn = self.conn.lock().await;
+            Some(ready)
+        } else {
+            None
+        };
+        let client = conn.client().await?;
         if matches!(action, "register" | "send" | "heartbeat") {
             let due = {
                 let at = self.pruned_at.lock().expect("prune clock");
@@ -543,7 +559,7 @@ impl Board {
                     .await?
             }
             "send" => {
-                let (hlc, epoch) = self.tick().await?;
+                let (hlc, epoch) = stamp(ready.as_deref().expect("send holds the full tier"));
                 self.store
                     .send(
                         client,
@@ -671,19 +687,13 @@ impl Board {
             .map_err(BoardError::Internal)
     }
 
-    /// A send's HLC stamp and the writer epoch it must see: the service
-    /// clock (`service._hlc.tick()`), after `_ensure_tier(full=True)`, so
-    /// board and memory writes share one ordering authority and the stamp
-    /// outranks every reseeded high-water mark. The epoch is the published
-    /// storage's, which a writer-session reconnect replaces.
-    pub(crate) async fn tick(&self) -> Result<(String, i64)> {
-        let ready = self
-            .service
+    /// `_ensure_tier(full=True)`: the initialized service, whose clock is
+    /// reseeded (a pending reseed runs here), for a send's stamp.
+    pub(crate) async fn full_tier(&self) -> Result<Arc<Ready>> {
+        self.service
             .ensure_init()
             .await
-            .map_err(BoardError::Internal)?;
-        let (phys, logical) = ready.tick_hlc();
-        Ok((format!("{phys}:{logical}"), ready.storage.lease_epoch()))
+            .map_err(BoardError::Internal)
     }
 
     /// `_acknowledge_page`: acknowledge the page a receive returned, in the
@@ -742,4 +752,15 @@ impl Board {
         }
         Ok(())
     }
+}
+
+/// A send's HLC stamp and the writer epoch it must see: the service clock's
+/// next tick (`service._hlc.tick()`), so board and memory writes share one
+/// order and the stamp outranks every reseeded high-water mark, with the
+/// epoch of the same ready service's storage. After a handover that service
+/// is stale and so is its epoch, so the database refuses the send
+/// (`ClockChanged`) instead of committing a stamp below the other writer's.
+pub(crate) fn stamp(ready: &Ready) -> (String, i64) {
+    let (phys, logical) = ready.tick_hlc();
+    (format!("{phys}:{logical}"), ready.storage.lease_epoch())
 }
