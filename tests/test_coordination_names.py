@@ -565,3 +565,55 @@ def test_lease_holders_and_waiters_carry_the_board_name(store):
     lease = next(l for l in store.list_leases()["leases"] if l["name"] == "full-suite")
     assert lease["holder"]["name"] == "Holder session"
     assert [w["name"] for w in lease["queue"]] == [f"codex {waiter['agent_id'][:8]}"]
+
+
+IGNORING = "ignoring case, spacing, punctuation and look-alike letters"
+CONTAINS_MAINTAINER = (f"the name contains the reserved word 'maintainer' ({IGNORING}); "
+                       "choose a name without it")
+
+
+@pytest.mark.parametrize("bad,detail", [
+    # The 2026-10-27 report: answered only "invalid_name: the call was refused."
+    ("Rust B2a/B2d maintainer/config", CONTAINS_MAINTAINER),
+    ("domain tainer", CONTAINS_MAINTAINER),  # spacing ignored
+    ("maintaner", f"the name reads as the reserved word 'maintainer' ({IGNORING}, within one "
+                  "letter); choose another name"),
+    ("Daemon", f"the name reads as the reserved word 'daemon' ({IGNORING}, within one letter); "
+               "choose another name"),
+    ("pass key", f"the name reads as the reserved word 'passkey' ({IGNORING}); "
+                 "choose another name"),
+    ("VERIFIED", f"the name reads as the reserved word 'verified' ({IGNORING}); "
+                 "choose another name"),
+    ("board\u200bnames", "the name holds a control or format character (Unicode category C, "
+                         "such as a zero-width or bidi mark); remove it"),
+])
+def test_a_refused_name_says_which_rule_it_broke(store, bad, detail):
+    agent = store.register("alice", episode="sess-why")
+    beat = _attached(store, agent)
+    for call in (lambda: store.register("alice", name=bad),
+                 lambda: store.update(*creds(agent), name=bad),
+                 lambda: store.heartbeat(*creds(agent), **beat, name=bad)):
+        with pytest.raises(CoordinationError) as refused:
+            call()
+        assert (refused.value.code, refused.value.detail, refused.value.param) == (
+            "invalid_name", detail, "name")
+
+
+@pytest.mark.parametrize("name", ["Rust B2a/B2d config", "daemon watcher", "verifier",
+                                  "passkeys", "main config", "maintaner review"])
+def test_the_near_miss_names_beside_the_reserved_words_are_accepted(store, name):
+    agent = store.register("alice", name=name)
+    assert _row(store, agent)[:2] == (name, "agent")
+
+
+def test_a_refused_label_says_which_word_it_reads_as(store):
+    with pytest.raises(CoordinationError) as refused:
+        store.register("alice", label="maintainer-bot")
+    assert (refused.value.code, refused.value.detail, refused.value.param) == (
+        "invalid_label", f"the label contains the reserved word 'maintainer' ({IGNORING}); "
+        "choose a label without it", "label")
+    with pytest.raises(CoordinationError) as refused:
+        store.register("alice", label="Daemn")
+    assert refused.value.detail == (f"the label reads as the reserved word 'daemon' ({IGNORING}, "
+                                    "within one letter); choose another label")
+    assert store.register("alice", label="claude-code")["label"] == "claude-code"

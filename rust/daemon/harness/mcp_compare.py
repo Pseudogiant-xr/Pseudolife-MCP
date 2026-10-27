@@ -466,6 +466,12 @@ def _stub_tools(port):
     return out
 
 
+# Recorded in place of the ping an opening request refused by the allowlist
+# leaves nothing to send, so each probe records two responses either way and a
+# mutant changes values, never the sequence length (report_complete).
+NO_SESSION = {"skipped": "no session"}
+
+
 def rebinding(port):
     """Tokenless installs keep the SDK's loopback Host/Origin allowlist."""
     out = []
@@ -486,6 +492,8 @@ def rebinding(port):
             out.append(norm(request(port, "POST", ping, JSON_HDRS + extra
                                     + [("mcp-session-id", sid), ("mcp-protocol-version", PROTOCOL)])))
             request(port, "DELETE", None, [("Host", f"127.0.0.1:{port}"), ("mcp-session-id", sid)])
+        else:
+            out.append(NO_SESSION)
     good = [("Host", f"127.0.0.1:{port}")]
     r = request(port, "POST", init_body(), JSON_HDRS + good)
     sid = header(r, "mcp-session-id")
@@ -500,6 +508,69 @@ def rebinding(port):
     out.append(norm(request(port, "DELETE", None, [("Host", "evil.example:1")])))
     out.append(norm(request(port, "POST", b"x", [("Host", "evil.example:1"),
                                                  ("Content-Type", "text/plain")])))
+    return out
+
+
+def rebinding_edges(port):
+    """The allowlist's edges: the near misses on each side of it, the order
+    of its checks against the router, the stateless era and bound identity."""
+    out = []
+    ping = {"jsonrpc": "2.0", "id": 9, "method": "ping"}
+    good, evil = ("Host", f"127.0.0.1:{port}"), ("Host", "evil.example:1")
+
+    def opening(extra):
+        r = request(port, "POST", init_body(), JSON_HDRS + extra)
+        out.append(norm(r))
+        sid = header(r, "mcp-session-id")
+        if r["status"] == 200 and sid:
+            out.append(norm(request(port, "POST", ping, JSON_HDRS + extra
+                                    + [("mcp-session-id", sid), ("mcp-protocol-version", PROTOCOL)])))
+            request(port, "DELETE", None, [good, ("mcp-session-id", sid)])
+        else:
+            out.append(NO_SESSION)
+
+    for extra in ([evil, ("Origin", "http://evil.example")],   # Host before Origin
+                  [("Host", "LOCALHOST:1")], [("Host", "localhost.evil.example:1")],
+                  [good, ("Origin", "null")],
+                  [good, ("Origin", "http://localhost.evil.example:1")],
+                  # The SDK matches a prefix, so any text after the colon passes;
+                  # no browser sends a Host or Origin like these.
+                  [("Host", "127.0.0.1:notaport")],
+                  [good, ("Origin", "http://localhost:x")],
+                  # Duplicate Host headers: the first one counts.
+                  [good, evil], [evil, good]):
+        opening(extra)
+    # The era serves only its no-envelope refusal (divergences.md), so these
+    # carry no `_meta`.
+    era = ("mcp-protocol-version", "2099-01-01")
+    for extra in ([evil, era], [good, ("Origin", "http://evil.example"), era], [good, era]):
+        out.append(norm(request(port, "POST", ping, JSON_HDRS + extra)))
+    # An open install refuses a bound identity before the transport, whatever the Host.
+    bound = [("X-PL-Bank", "bank"), ("X-PL-Principal", "default")]
+    for host in (good, evil):
+        out.append(norm(request(port, "POST", init_body(), JSON_HDRS + [host] + bound)))
+    # A malformed binding gets its own refusal first.
+    out.append(norm(request(port, "POST", init_body(), JSON_HDRS + [good, bound[0]])))
+    # The router answers before the transport runs its check.
+    import http.client
+    for path in ("/mcp/", "/mcp/x"):
+        c = http.client.HTTPConnection("127.0.0.1", port, timeout=30)
+        c.putrequest("GET", path, skip_host=True, skip_accept_encoding=True)
+        c.putheader(*evil)
+        c.endheaders()
+        r = c.getresponse()
+        out.append(norm({"status": r.status, "headers": [(k.lower(), v) for k, v in r.getheaders()],
+                         "body": r.read()}))
+        c.close()
+    # A live session is checked on its stream and its DELETE too; the foreign
+    # DELETE must leave the session usable.
+    r = request(port, "POST", init_body(), JSON_HDRS + [good])
+    sid = ("mcp-session-id", header(r, "mcp-session-id") or "none")
+    out.append(norm(request(port, "GET", None, [evil, sid, ("Accept", "text/event-stream")])))
+    out.append(norm(request(port, "DELETE", None, [evil, sid])))
+    out.append(norm(request(port, "POST", ping, JSON_HDRS + [good, sid,
+                                                             ("mcp-protocol-version", PROTOCOL)])))
+    request(port, "DELETE", None, [good, sid])
     return out
 
 
@@ -615,10 +686,13 @@ CASE_RESPONSE_COUNTS = {
     'stream_reconnect': 3, 'init_gate': 21, 'body_limit': 6,
     'messages': 13, 'concurrent': 8, 'transport': 21, 'paths': 7, 'tool_binding': 71,
     'bound_identity': 19,
-    'rebinding': 24, 'open_lists': 6, 'config_lists': 10,
+    'rebinding': 31, 'rebinding_edges': 29, 'open_lists': 6, 'config_lists': 10,
 }
+TOKENLESS_CASES = (rebinding, rebinding_edges, open_lists)
+# The tokenless corpus: three cases and no stub probe.
+TOKENLESS_RESPONSES = sum(CASE_RESPONSE_COUNTS[c.__name__] for c in TOKENLESS_CASES)
 if "--tokenless" in sys.argv:
-    CASES = [rebinding, open_lists]
+    CASES = list(TOKENLESS_CASES)
 if "--config2" in sys.argv:
     CASES = [config_lists]
 
@@ -690,11 +764,23 @@ def sanity(data, diffs):
         if got != want_bound:
             diffs.append(f"sanity bound_identity: statuses {got} != {want_bound}")
     if "rebinding" in data:
-        statuses = sorted({r["status"] for r in data["rebinding"]})
+        statuses = sorted({r["status"] for r in data["rebinding"] if "status" in r})
         # 400: a POST's Content-Type is checked before Host; 404: an unknown
         # session id is answered before the Host check.
         if statuses != [200, 400, 403, 404, 421]:
             diffs.append(f"sanity rebinding: statuses {statuses}")
+    if "rebinding_edges" in data:
+        got = [r.get("status") for r in data["rebinding_edges"]]
+        # Host before Origin; the near misses on each side (the prefix rule
+        # admits any port text; the first of two Hosts counts); the stateless
+        # era checks first; a binding refuses before the transport; the
+        # router answers first; a live session's stream and DELETE are
+        # checked, and the refused DELETE leaves it usable.
+        x = None  # NO_SESSION: the opening was refused
+        want_edges = [421, x, 421, x, 421, x, 403, x, 403, x, 200, 200, 200, 200, 200, 200, 421, x,
+                      421, 403, 400, 401, 401, 409, 307, 404, 421, 421, 200]
+        if got != want_edges:
+            diffs.append(f"sanity rebinding_edges: statuses {got} != {want_edges}")
 
 
 def diff_case(name, a, b, diffs):
@@ -726,7 +812,7 @@ def check_stubs(py_stub, rust_stub, diffs, served):
 def recording_errors(data, cases=None):
     """Require a complete, failure-free oracle corpus before saving goldens."""
     names = {case.__name__ for case in (CASES if cases is None else cases)}
-    side_config = names in ({'config_lists'}, {'rebinding', 'open_lists'})
+    side_config = names in ({'config_lists'}, {c.__name__ for c in TOKENLESS_CASES})
     expected = names if side_config else names | {'stub_tools'}
     if not isinstance(data, dict):
         return ['record must be an object']
@@ -753,7 +839,7 @@ def recording_errors(data, cases=None):
                  for response in stubs.values()):
             errors.append('stub_tools: oracle call failed')
     total = sum(len(value) for value in data.values() if isinstance(value, (list, dict)))
-    expected_total = (10 if names == {'config_lists'} else 30 if side_config
+    expected_total = (10 if names == {'config_lists'} else TOKENLESS_RESPONSES if side_config
                       else CORPUS_RESPONSES)
     if total != expected_total:
         errors.append(f'corpus: {total} responses, expected {expected_total}')
