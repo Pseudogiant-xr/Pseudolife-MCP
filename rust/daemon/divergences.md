@@ -11,7 +11,6 @@ side must answer exactly `501 {"error": "not_implemented", "path": P}`.
 | Surface | Python behaviour | Owner |
 |---|---|---|
 | Every Console route in `harness/goldens/routes.json` other than `GET /api/search`, the coordination view of `GET /api/agents`, `POST /api/daemon-notice` and `POST /api/episodes/rename`, `/merge` and `/prune`, after all gates | the handler's answer | W2-D (reads), W2-E (writes), W2-F (board, maintainer) |
-| Tokenless MCP Host/Origin rebinding policy | SDK transport policy before tool dispatch | **CUTOVER BLOCKER — W2-G**; tokenless MCP stays unmounted (501) until this gate is accepted. Authenticated bound-identity checks are served (spec.md M18) |
 | `/api/hook/session-start`, `memory-policy` (any caller) | briefing and memory-policy text | W2-D |
 | Authorized `memory-changes` and `session-end` after its gates | change note and episode close | W2-E |
 | `POST /api/pair` after a valid body on an authenticated install | the 2-slot redemption gate (`RedemptionGate`, 429 `rate_limited`), invocation of the implemented `principals::redeem` store transaction plus immediate `PrincipalStore::add`, the failure-budget refund on success, and 503 `pairing_unavailable` on a store error | HTTP-SECURITY / CLI-PAIRING (the gate wraps only `principal_store.redeem`, `web/api.py:378-393`) |
@@ -86,9 +85,17 @@ and 5, GETs declaring 9999999 bytes: the added `Connection: close` on the
 413); `mcp_ci.py` declares exactly those. Indices 0, 2 and 3, which used to
 differ the same way, now match.
 
-**MCP-TOKENLESS-GUARD:** the Host/Origin helper exists inside the transport,
-but the production tokenless mount still returns 501 before reaching it.
-This slice does not enable tokenless MCP or claim live rebinding parity.
+**MCP-TOKENLESS-GUARD** is closed (B6, under D3): tokenless `/mcp` is
+served behind the SDK's loopback Host/Origin allowlist (spec.md M4), checked
+on every request, the stateless era's included. `mcp_ci.py` compares the
+tokenless corpus (`rebinding`, `rebinding_edges`, `open_lists`) with Python,
+legitimate near misses beside each refusal, with no declared difference,
+and catches `mcp-bare-host`, `mcp-any-origin` and `mcp-era-skips-security`.
+The corpus runs on Linux; on both OSes the `routes/mcp.rs` tests run the
+same Host and Origin cases in-process against the Python answers they
+pin (the near misses, duplicate headers, the prefix rule, the stateless era,
+bound identity, router order and a live session's POST, GET and DELETE), and
+the W1-A `tokenless` golden compares `GET /mcp` with Python's recorded 406.
 **MCP-BOUND-IDENTITY** is closed: an authenticated `/mcp` request carrying
 `X-PL-Bank` / `X-PL-Principal` is checked against the bearer's W2-F board
 context before the MCP layer (spec.md M18); the live `bound_identity` case
@@ -100,7 +107,7 @@ compares 19 requests with Python and the `mcp-binding-open` mutant is caught.
 | MCP-HTTP1-ONLY | the current daemon listener serves HTTP/1 | the Rust listener enables Axum's `http1` feature only; SSE uses `Connection: keep-alive`, which must be removed before any HTTP/2 listener is enabled | HTTP/2 transport deferred |
 | MCP-SEALED-REQUEST-STATE | `tools/call`, `prompts/get` and `resources/read` unseal a non-null `requestState` before validation/dispatch; a valid server-minted token may resume a multi-round exchange | this slice never mints round-trip state and refuses every non-null token with -32602 `Invalid or expired requestState`, before readiness or tier changes; null remains absent | multi-round state issuance and authenticated unsealing are deferred with the unserved tool bodies; untrusted tokens cannot invoke a body |
 | MCP-REQUEST-CANCELLATION | `notifications/cancelled` cancels the matching in-flight response; a legacy response stream settles with -32800 | cancellation notifications receive 202 but are discarded; any matching request still in flight later emits its ordinary response. Currently `memory_toolset` blocked by a backpressured GET notification stream exposes this window | W2-G follow-up: add per-session request tracking and response cancellation separately from disconnect-surviving write bodies; no bank tool body is enabled here |
-| The 2026-07-28 stateless era (an `MCP-Protocol-Version` header outside the handshake versions, `_meta` envelopes, `subscriptions/listen`) | served | only the no-envelope refusal (400, -32602) | W2-G (follow-up); the shims and doctor use the handshake era, but README documents direct `--transport http` clients |
+| The 2026-07-28 stateless era (an `MCP-Protocol-Version` header outside the handshake versions, `_meta` envelopes, `subscriptions/listen`) | served | the transport checks (spec.md M4), then only the no-envelope refusal (400, -32602) | W2-G (follow-up); the shims and doctor use the handshake era, but README documents direct `--transport http` clients |
 | A bearer revoked between the gate and dispatch | JSON-RPC -32004 `unauthorized` (or -32003 `principals_unavailable`) | never: the principal is resolved once, at the gate | free (no race window) |
 | `Last-Event-ID` on GET (replay) | the SDK's replay path with no event store | ignored | non-canonical |
 | JSON-RPC message validation: batches, non-object messages, ids that are not integers or strings | pydantic union validation | 400 -32602 with a fixed message (the text after `Validation error: ` is free) | non-canonical |
