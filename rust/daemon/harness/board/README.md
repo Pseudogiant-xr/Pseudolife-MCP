@@ -12,7 +12,7 @@ python -m board.run golden  --rust-bin PATH [--only NAME ...]
 python -m board.run mutants --rust-bin PATH_BUILT_WITH_--features_mutants
 python -m pytest board/test_norm.py board/test_run.py
 python -m board.boundary
-python -m board.boundary --clock
+python -m board.boundary --shared-clock
 python -m board.boundary --json-keys
 ```
 
@@ -76,9 +76,11 @@ port 5434, then explicitly runs the otherwise ignored Cargo regression: a
 registered, attached agent must heartbeat while full initialization holds the
 service mutex after publishing storage. The normal Cargo suite also covers a
 PostgreSQL server that accepts TCP but never completes authentication. With
-`--clock`, the fixture stores a canonical fact one hour ahead, makes its
-high-water query time out, and requires no mail commit until seeding can retry
-successfully above that stored clock.
+`--shared-clock` (W2F-SHARED-HLC) it also writes the offline four-dimension
+embedding fixture and its config, initializes the full service, and requires
+board sends to take the service clock's next tick: above a stamp only that
+clock holds, strictly between memory ticks on either side, and below what the
+reseed a restart runs reads back from the board's stored high-water mark.
 
 CI runs `test_norm.py` and `test_run.py` on Linux and Windows; the existing
 daemon checks compile the board unconditionally and build the `mutants` feature.
