@@ -555,3 +555,25 @@ def test_health_keeps_other_failures_as_cli_error(stdout, stderr):
     code, body = _health_answer(_failing(stdout=stdout, stderr=stderr))
     assert (code, body["status"]) == (503, "cli_error")
     assert "fix" not in body
+
+
+def test_a_sign_in_failure_after_long_warnings_is_still_named():
+    # Codex review of bc1176d8: classifying the bounded text lost a sign-in
+    # message that followed more than one stream's worth of warnings.
+    noise = b"warning: something unrelated happened. " * 20
+    code, body = _health_answer(_failing(stderr=noise + b"Not logged in. Run `codex login`."))
+    assert (code, body["status"]) == (503, "login_required")
+    assert "codex login" in body["detail"]
+
+
+def test_health_names_the_api_key_sign_in_fix():
+    code, body = _health_answer(_failing(stderr=b"Incorrect API key provided: sk-...xyz."))
+    assert (code, body["status"]) == (503, "login_required")
+    assert "--with-api-key" in body["fix"]
+
+
+def test_chat_says_when_stdout_had_only_non_error_events():
+    with pytest.raises(RuntimeError) as e:
+        _failing(stdout=b'{"type":"thread.started"}\n{"type":"turn.started"}\n').chat("sys", "hi")
+    assert "no output on stdout or stderr" not in str(e.value)
+    assert "2 JSON events" in str(e.value)

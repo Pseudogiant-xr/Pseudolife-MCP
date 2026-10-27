@@ -81,27 +81,48 @@ DEFAULT_CLI = Path(os.environ.get("PSEUDOLIFE_SHIM_CLAUDE_CLI")
 _FENCE_RE = re.compile(r"^\s*```(?:json)?\s*(.*?)\s*```\s*$", re.DOTALL)
 # Windows CreateProcess caps the command line at 32767 chars; leave margin.
 _MAX_ARGV_SYSTEM = 24000
-# Characters kept from EACH stream of a failed call, so a flood on one
-# cannot push the other's message out of the /health detail.
+# Characters kept from each stream of a failed call, so a flood on one
+# cannot push the other's message out of the /health detail; a stream
+# that printed alone gets both shares.
 _STREAM_DETAIL_MAX = 240
 # The CLI's own messages for a missing or expired sign-in (2026-10-27 live:
 # "Failed to authenticate: OAuth session expired and could not be
 # refreshed"; the API-key form ends "Please run /login"). Matched only on a
 # failed call's output, never on a reply.
 _SIGN_IN_RE = re.compile(
-    r"oauth|failed to authenticate|authentication_error|not logged in"
-    r"|please run /login|invalid api key|\bunauthori[sz]ed\b|\b401\b",
+    r"failed to authenticate|authentication_error|authentication_failed"
+    r"|oauth (?:token|session)|not logged in|please run /login"
+    r"|please log ?in again|invalid api key|\bunauthori[sz]ed\b|api error: 401\b",
     re.IGNORECASE)
 SIGN_IN_FIX = ("sign in to the Claude CLI on the shim host: run `claude auth "
                "login` as the user the shim runs as; /health recovers within "
                "5 minutes, no restart needed")
 
 
-def _cli_output(stdout: bytes, stderr: bytes) -> str:
+class CliCallFailed(RuntimeError):
+    """A failed CLI call. ``sign_in`` is whether its FULL output named a
+    sign-in failure, decided before the message was bounded: a CLI that
+    prints warnings first would otherwise push the cause out of the text."""
+
+    def __init__(self, message: str, sign_in: bool):
+        super().__init__(message)
+        self.sign_in = sign_in
+
+
+def _bounded(text: str, limit: int) -> str:
+    """``text`` cut to ``limit``, keeping its start and its end, where a
+    CLI prints its error after any warnings."""
+    if len(text) <= limit:
+        return text
+    head = limit // 3
+    return f"{text[:head]} ... {text[-(limit - head - 5):]}"
+
+
+def _cli_failure(prefix: str, stdout: bytes, stderr: bytes) -> CliCallFailed:
     """What a failed ``claude -p`` call said, from both streams, each
     bounded. The CLI prints a failed sign-in on stdout (as a JSON result
     under ``--output-format json``), so reading stderr alone lost it."""
-    parts = []
+    streams = []
     for name, raw in (("stdout", stdout), ("stderr", stderr)):
         text = (raw or b"").decode("utf-8", "replace").strip()
         if not text:
@@ -113,17 +134,21 @@ def _cli_output(stdout: bytes, stderr: bytes) -> str:
                 obj = None
             if isinstance(obj, dict) and (obj.get("result") or obj.get("error")):
                 text = str(obj.get("result") or obj.get("error"))
-        text = " ".join(text.split())
-        if len(text) > _STREAM_DETAIL_MAX:
-            text = text[:_STREAM_DETAIL_MAX - 3] + "..."
-        parts.append(f"{name}: {text}")
-    return "; ".join(parts) or "(no output on stdout or stderr)"
+        streams.append((name, " ".join(text.split())))
+    limit = 2 * _STREAM_DETAIL_MAX // max(len(streams), 1)
+    detail = ("; ".join(f"{name}: {_bounded(text, limit)}" for name, text in streams)
+              or "(no output on stdout or stderr)")
+    return CliCallFailed(f"{prefix}: {detail}", bool(_SIGN_IN_RE.search(
+        " ".join(text for _, text in streams))))
 
 
-def health_status(detail: str) -> dict:
+def health_status(detail: str, sign_in: bool | None = None) -> dict:
     """The 503 body for a failed health check: ``login_required`` with the
-    fix when the CLI's message is a sign-in failure, else ``cli_error``."""
-    if _SIGN_IN_RE.search(detail):
+    fix when the CLI's message is a sign-in failure, else ``cli_error``.
+    ``sign_in`` None decides from ``detail`` itself."""
+    if sign_in is None:
+        sign_in = bool(_SIGN_IN_RE.search(detail))
+    if sign_in:
         return {"status": "login_required", "detail": detail, "fix": SIGN_IN_FIX}
     return {"status": "cli_error", "detail": detail}
 
@@ -466,6 +491,7 @@ class ClaudeCli:
         self.calls = 0
         self._health_ok: bool | None = None
         self._health_detail = ""
+        self._health_body: dict = {"status": "ok"}
         self._health_at = 0.0
         self._health_refreshing = False
 
@@ -552,11 +578,12 @@ class ClaudeCli:
             t0 = time.monotonic()
             rc, stdout, stderr = self._run(cmd, user.encode("utf-8"))
         if rc != 0:
-            raise RuntimeError(f"claude -p rc={rc}: {_cli_output(stdout, stderr)}")
+            raise _cli_failure(f"claude -p rc={rc}", stdout, stderr)
         out = json.loads(stdout.decode("utf-8", "replace"))
         if out.get("is_error"):
-            raise RuntimeError(
-                f"claude -p error result: {str(out.get('result'))[:400]}")
+            result = str(out.get("result"))
+            raise CliCallFailed(f"claude -p error result: {result[:400]}",
+                                bool(_SIGN_IN_RE.search(result)))
         reply = (out.get("result") or "").strip()
         m = _FENCE_RE.match(reply)
         if m:
@@ -569,6 +596,11 @@ class ClaudeCli:
     _HEALTH_TTL = 300.0  # one trivial CLI call per 5 min keeps /health honest
 
     def health(self) -> tuple[bool, str]:
+        """``(ok, detail)`` of :meth:`health_answer`."""
+        ok, body = self.health_answer()
+        return ok, body.get("detail", "")
+
+    def health_answer(self) -> tuple[bool, dict]:
         """Real usability check: a trivial completion so a logged-out or
         broken CLI turns /health into 503 (the daemon's fallback probe treats
         that as primary-down). Stale-while-revalidate (2026-07-19): the check
@@ -576,27 +608,33 @@ class ClaudeCli:
         refresh on cache expiry made every post-idle probe time out, so
         dreams silently fell back on a healthy shim (3/3 that day). A stale
         cache answers instantly with the last verdict and refreshes in a
-        background thread; only an empty cache blocks (startup warms it)."""
+        background thread; only an empty cache blocks (startup warms it).
+        The body is cached with the verdict, so a status never pairs with
+        another refresh's detail."""
         now = time.monotonic()
         if self._health_ok is None:
             return self._health_refresh()
-        ok, detail = self._health_ok, self._health_detail  # pre-refresh verdict
+        ok, body = self._health_ok, self._health_body  # pre-refresh verdict
         if (now - self._health_at >= self._HEALTH_TTL
                 and not self._health_refreshing):
             self._health_refreshing = True
             threading.Thread(target=self._health_refresh, daemon=True).start()
-        return ok, detail
+        return ok, body
 
-    def _health_refresh(self) -> tuple[bool, str]:
+    def _health_refresh(self) -> tuple[bool, dict]:
         try:
             try:
                 self.chat("", "Reply with exactly: OK")
-                self._health_ok, self._health_detail = True, ""
+                ok, body = True, {"status": "ok"}
             except Exception as e:  # noqa: BLE001 — any failure means unusable
-                # Room for both streams' bounded output (_cli_output).
-                self._health_ok, self._health_detail = False, str(e)[:600]
+                # Room for both streams' bounded output (_cli_failure).
+                ok, body = False, health_status(str(e)[:600],
+                                                getattr(e, "sign_in", None))
+            self._health_body = body
+            self._health_detail = body.get("detail", "")
+            self._health_ok = ok
             self._health_at = time.monotonic()
-            return self._health_ok, self._health_detail
+            return ok, body
         finally:
             self._health_refreshing = False
 
@@ -616,11 +654,8 @@ def make_handler(cli: ClaudeCli):
 
         def do_GET(self):
             if self.path == "/health":
-                ok, detail = cli.health()
-                if ok:
-                    self._json(200, {"status": "ok"})
-                else:
-                    self._json(503, health_status(detail))
+                ok, body = cli.health_answer()
+                self._json(200 if ok else 503, body)
             elif self.path in ("/v1/models", "/models"):
                 self._json(200, {"object": "list", "data": [
                     {"id": m, "object": "model"}

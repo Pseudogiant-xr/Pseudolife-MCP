@@ -480,3 +480,43 @@ def test_health_keeps_other_cli_failures_as_cli_error(message):
     assert (code, body["status"]) == (503, "cli_error")
     assert message.decode()[:20] in body["detail"]
     assert "fix" not in body
+
+
+def test_a_sign_in_failure_after_long_warnings_is_still_named():
+    # Codex review of bc1176d8: classifying the bounded text lost a sign-in
+    # message that followed more than one stream's worth of warnings.
+    noise = b"warning: something unrelated happened. " * 20
+    code, body = _health_answer(_failing_cli(stdout=noise + _EXPIRED))
+    assert (code, body["status"]) == (503, "login_required")
+    # The bound keeps the stream's end, where the CLI prints its error.
+    assert "could not be refreshed" in body["detail"]
+
+
+@pytest.mark.parametrize("message", [
+    b"authentication_failed",
+    b"Your organization does not have access to Claude. Please login again.",
+    b"OAuth token has expired. Please obtain a new token or refresh your existing token.",
+    b"API Error: 401 {\"type\":\"error\",\"error\":{\"type\":\"authentication_error\"}}",
+])
+def test_health_maps_more_sign_in_messages(message):
+    code, body = _health_answer(_failing_cli(stdout=message))
+    assert (code, body["status"]) == (503, "login_required")
+
+
+@pytest.mark.parametrize("message", [
+    # Reviewer near misses on bc1176d8: a number field equal to 401 in a
+    # JSON result with no message, and a 403 that names OAuth but that no
+    # sign-in fixes.
+    b'{"type":"result","subtype":"error_during_execution","is_error":true,"duration_ms":401}',
+    b'API Error: 403 {"type":"error","error":{"type":"permission_error",'
+    b'"message":"OAuth authentication is currently not supported."}}',
+])
+def test_health_does_not_call_these_a_sign_in_failure(message):
+    code, body = _health_answer(_failing_cli(stdout=message))
+    assert (code, body["status"]) == (503, "cli_error")
+
+
+def test_a_lone_stream_gets_both_streams_budget():
+    with pytest.raises(RuntimeError) as e:
+        _failing_cli(stderr=b"a" * 400 + b"END").chat("sys", "hi")
+    assert "a" * 400 + "END" in str(e.value)
