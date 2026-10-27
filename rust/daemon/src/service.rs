@@ -777,6 +777,24 @@ mod tests {
         // Initialization owns this same mutex throughout embedding and hydration,
         // after ensure_storage has published the usable storage snapshot.
         let initializing = service.inner.lock().await;
+        // A send waits for the full service (its stamp is the service clock's),
+        // outside the board's lock, so it holds up no other board call.
+        let send = board.dispatch(
+            "send",
+            params(
+                json!({"to": registered["agent_id"], "text": "waits for init",
+                "request_id": "paused-init"}),
+            ),
+            &headers,
+            "default",
+        );
+        tokio::pin!(send);
+        assert!(
+            tokio::time::timeout(Duration::from_millis(300), &mut send)
+                .await
+                .is_err(),
+            "a send must wait for the full service"
+        );
         let heartbeat = tokio::time::timeout(
             Duration::from_secs(2),
             board.dispatch(
@@ -788,6 +806,7 @@ mod tests {
             ),
         )
         .await;
+        drop(send);
         drop(initializing);
         let result = heartbeat
             .expect("heartbeat waited behind full service initialization")
@@ -1219,22 +1238,10 @@ mod tests {
         let result = service.ensure_init().await;
         let (observed, next) = observe(result, pid, current).await;
         current = next;
+        // The other writer left a board clock mark in 2100 (the helper's
+        // OTHER_WRITER_HLC); only the reseed can put the next tick past it.
         assert!(!current.startup.clock_state().hlc_reseed_pending);
-        let mark: Option<Value> = current
-            .storage
-            .client()
-            .query_opt(
-                "SELECT value FROM meta WHERE key = 'coordination_hlc_highwater'",
-                &[],
-            )
-            .await
-            .unwrap()
-            .map(|row| row.get(0));
-        if let Some((phys, logical)) =
-            mark.and_then(|v| Some((v.get(0)?.as_i64()?, v.get(1)?.as_i64()?)))
-        {
-            assert!(current.tick_hlc() > (phys, logical));
-        }
+        assert!(current.tick_hlc() > (4_102_444_800_000, 3));
         phases.push(json!({"phase": "handover", "observed": observed}));
         run_helper(&["--dump-db", "handover"]);
 

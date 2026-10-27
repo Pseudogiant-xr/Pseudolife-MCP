@@ -82,10 +82,21 @@ def dump_phase(phase):
     (output / f"{phase}.json").write_text(json.dumps(dbstate.dump(dsn), allow_nan=False), encoding="utf-8")
 
 
+# The board clock mark the second writer leaves (2100-01-01 UTC): both arms
+# must reseed past it before their next stamp. Fixed, so the dumps agree.
+OTHER_WRITER_HLC = [4102444800000, 3]
+
+
 def other_writer():
-    """A second writer takes the bank's lease and leaves at once."""
+    """A second writer takes the bank's lease, leaves a board clock mark far
+    ahead of the wall clock (as its board sends would), and leaves."""
+    from pseudolife_memory.storage.coordination import HLC_META_KEY
     from pseudolife_memory.storage.postgres import PostgresStorage
-    PostgresStorage(_dsn()).close()
+    storage = PostgresStorage(_dsn())
+    try:
+        storage.set_meta(HLC_META_KEY, OTHER_WRITER_HLC)
+    finally:
+        storage.close()
 
 
 def hold_lease():
