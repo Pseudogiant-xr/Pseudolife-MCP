@@ -162,54 +162,46 @@ landed, reruns its targeted tests, and re-applies the label. If no member
 merges cleanly, no batch is built, the collisions are reported at once and
 the local branch is deleted.
 
-The producer census gets the same treatment, because the local full suite
-does not run CI's census check. CI's Rust jobs run `python
-rust/producer_census.py --ci-check`, and it fails only when the census is
-stale *and* the diff from master touches the census inputs (the census
+The producer census (`rust/producer-census.json`) is derived data: `python
+rust/producer_census.py` writes it from the tracked files it scans. A pull
+request that committed a regenerated census went stale whenever master
+changed any of those files, and had to merge master forward and regenerate
+before a batch would take it (#960 and #974 three times each on
+2026-10-26). So no pull request regenerates it. After merging the members,
+`build` runs the batch head's census script and, when the census changed,
+commits it as the batch's one generated commit (`Regenerate the producer
+census for this batch`), touching only that file; no member is edited.
+This is the one exception to "nothing is fixed inside a batch"
+(maintainer, 2026-10-27). The batch pull request names that commit under
+`## Producer census` and lists any trusted manual shape the new census
+withdrew because a member changed its source (`manual_drift`), since no
+member's own diff shows it; review those and refresh their fingerprints in
+a follow-up pull request (`rust/producer-census.md`).
+
+CI's Rust jobs run `python rust/producer_census.py --ci-check`. It fails a
+stale census on an `integrate/*` pull request whatever its diff, and on a
+master push or merge group whose diff changes the census inputs (the census
 module's `CURRENCY_INPUTS`: the census, its script and the port inventory).
-Elsewhere, drift is only reported. After merging, `build` runs that check on
-the batch head with a pull request event naming the batch's base. If the
-check would fail, the members whose own diff changes those inputs (the
-census changers) usually carry a census regenerated on master, which the
-other members' changes staled. So `build` first merges the census changers
-alone and runs the check. If it passes, it merges the batch again without
-the other members whose own diff touches a path the census hashes, and
-runs the check once more. Those paths are what master's census module
-lists in the batch tree (so an added file counts), what master's census
-hashes (so a deleted one counts) and what each changer's census hashes
-(since a changer may widen the scopes). A member that conflicted with one
-of those merges once it is left out, so each trial head is searched again
-and its own such members are left out too, until the check passes or a
-trial finds none; one that changes the census inputs itself counts as a
-census changer, never a waiter, and leaves with them if the check fails. If the check passes, that head is the batch: the members
-left out are listed in the batch pull request under `## Waiting (no action
-needed)`, get no comment, keep their label and join the next batch, where
-CI only reports the census because their diffs leave its inputs alone. A
-member touching only paths the census does not hash, such as
-`ops/tool.sh.bak` beside a hashed `ops/tool.sh`, stays in. Nothing bounds
-the wait: while census changers keep arriving, a member can wait batch
-after batch, and the operator then builds one batch without the changer
-(for example by removing the changer's label for that one build).
+An ordinary pull request's drift is only reported, so master moving never
+turns a member's own CI red. A batch whose census `build` regenerated
+changes the census, so the master push that merges it checks it again.
 
-If either check fails, `build` drops the census changers instead, naming
-the others that change the inputs too, and merges the rest again from
-master. `open` comments on and unlabels each dropped changer, as it does
-after a conflict. Its author merges master forward once master holds the
-rest of the batch, regenerates the census with `python
-rust/producer_census.py`, reruns its targeted tests and re-applies the
-label. A census that is stale while no member touches its inputs is printed
-as report-only and left alone, as CI leaves it. Before the push, `open`
-runs the same check and refuses if it would fail, so a plan built without
-it cannot reach CI.
+If the census script fails on the batch head, `build` drops the members
+whose own diff changes the census inputs, naming the failure, and merges
+the rest again from master; `open` comments on and unlabels each, as after a
+conflict. If no member changes the inputs, or the script still fails
+without them, `build` refuses and names where to look: master, this
+machine or a member's head. Before
+the push, `open` runs CI's check on the batch head and refuses if it would
+fail, so a plan built without the regeneration cannot reach CI.
 
-That check runs the batch head's census script, which is member code, so
-`build` (including `--dry-run`) executes it on this machine, as the full
-suite will. It runs with only the environment Python and git need to start,
-without tokens such as `GH_TOKEN`. The list of inputs and of hashed paths
-is read from master's copy of the script and from the committed census
-files, parsed as data, so no member code runs inside `ops/integrate.py`
-itself. A member that changes the script changes one of the inputs, so it
-is caught either way. With no census on master there is no check.
+The census script is member code, so `build` (including `--dry-run`)
+executes it on this machine, as the full suite will. It runs with only the
+environment Python and git need to start, without tokens such as
+`GH_TOKEN`. The list of inputs is read from master's copy of the script and
+the drift from the committed census files, parsed as data, so no member
+code runs inside `ops/integrate.py` itself. With no census on master
+nothing is regenerated.
 
 The script never resolves a conflict (it merges with `rerere` off, so a
 remembered resolution is not replayed either) and never force-pushes. If
@@ -229,8 +221,9 @@ the push or `gh pr create` fails, nothing is commented on and rerunning
    its batch's local suite, and was caught only by a reviewer's targeted
    run. `build` prints the command (`RUST_HARNESS` in `ops/integrate.py`):
    the pytest steps of `rust.yml`'s `rust` job plus the eval shard's
-   `pytest rust/ci`, with CI's census-currency deselect, since `build`
-   already runs CI's census verdict. These need no built Rust binary; the
+   `pytest rust/ci`; census currency is not among them, since `build`
+   regenerates the census and `open` runs CI's verdict. These need no built
+   Rust binary; the
    parity shards' other harness files drive the release candidates and stay
    CI's. Run it natively from the batch checkout (a targeted run, about
    140 s on Windows; `rust/ci/test_workflow.py` needs `pwsh`) in any
@@ -242,7 +235,8 @@ the push or `gh pr create` fails, nothing is commented on and rerunning
    the members, then the half that fails, until one member is left. Drop
    that culprit with a comment on its pull request and remove its label,
    switch back to `origin/master`, remove the local batch branch and build
-   again. Nothing is fixed inside a batch.
+   again. Nothing is fixed inside a batch; the generated census commit is
+   not a fix.
 
    Some failures only hosted CI shows, because the batch is the first full
    run its members get: the Windows and macOS lite lanes, parity shards,
@@ -256,7 +250,9 @@ the push or `gh pr create` fails, nothing is commented on and rerunning
 4. CI on the batch pull request is the combined check of its members and
    their only full CI; no member is ever merged directly. If master moves
    before the merge, merge it forward only under the `merge-forward`
-   skill's exceptions; otherwise close the batch and build the next one.
+   skill's exceptions, regenerating the producer census in the merge
+   commit as the skill says (CI gates every batch on its currency);
+   otherwise close the batch and build the next one.
 5. The batch pull request gets the usual review pass before the merge
    click and the ruleset's approving review. Its members were reviewed on
    their own, so the batch review checks that its members and merged heads
