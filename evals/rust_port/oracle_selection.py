@@ -33,6 +33,10 @@ CARGO_PACKAGES = {
 DOCUMENTS = {
     "CHANGELOG.md", "CONTRIBUTING.md", "README.md", "SECURITY.md",
     "llms.txt", "llms-full.txt", "docs/atlas/atlas.json",
+    # Data no harness reads: a cut changes plugin/release.json, which the
+    # census hashes, so `ops/integrate.py build` regenerates it in the cut's
+    # batch (CI checks that census against the batch head separately).
+    "rust/producer-census.json",
 }
 
 

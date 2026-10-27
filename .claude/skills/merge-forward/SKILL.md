@@ -28,13 +28,18 @@ these must hold:
    CodeQL and both `Parity` gates. The merge-forward commit is the only
    commit pushed since, since nothing is fixed inside a batch.
 2. **The two sides share no file except docs-only files** (as CLAUDE.md's
-   "Docs-only changes" defines them). Compute it, don't eyeball it:
+   "Docs-only changes" defines them) and `rust/producer-census.json`, the
+   census both sides' batches regenerate (item 3). Compute it, don't eyeball it:
    `base=$(git merge-base <previous head> origin/master)`. Master's set is
    `git diff --name-only $base..origin/master`; the PR's set is
    `git diff --name-only $base...<previous head>`.
 3. **No hand resolution outside docs:** `git show --remerge-diff
    --name-only <merge commit>` lists only docs-only files. `llms-full.txt`
    is regenerated with `python ops/gen_llms_txt.py`, never hand-merged.
+   `rust/producer-census.json` is regenerated with `python
+   rust/producer_census.py` in the merge commit whenever the merge changes a
+   file it scans (`--check` must then exit 0), never hand-merged; CI gates
+   every batch and the master push on its currency.
 4. **Neither side changes shared ground:** `pyproject.toml`, lock files or
    `.github/workflows/`; `tests/conftest.py`, fixtures or imported test
    helpers; schema, DDL or migrations; generated outputs

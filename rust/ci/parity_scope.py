@@ -192,6 +192,10 @@ def reached(path: str) -> tuple[str, ...]:
         area = rest[0]
         if path.endswith(".md") and area != "cli_harness":
             return ()  # documents the port; no harness reads it
+        if path == "rust/producer-census.json":
+            # Data no harness reads, which `ops/integrate.py build` commits
+            # to most batches; reaching every suite would widen each of them.
+            return ()
         if len(rest) == 1:
             # Cargo files, the toolchain pin and the evidence JSON.
             return ALL
