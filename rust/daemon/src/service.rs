@@ -144,9 +144,9 @@ pub struct Service {
     /// attributes in Python, kept across a rehydrate, so a pass still
     /// running over a superseded ready service keeps its single flight.
     dream_run: Arc<crate::dream::run::RunState>,
-    /// `/health`'s last `dream_tracking_error` code, for a read that finds
-    /// the tracking state busy.
-    pub(crate) health_tracking_code: std::sync::Mutex<Option<String>>,
+    /// `/health`'s last `dream_tracking_error` code and the tracking state
+    /// it was read from (its address), for a read that finds it busy.
+    pub(crate) health_tracking_code: std::sync::Mutex<Option<(usize, Option<String>)>>,
 }
 
 impl Service {

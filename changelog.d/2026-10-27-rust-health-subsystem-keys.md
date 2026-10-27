@@ -3,7 +3,8 @@
   stalled dream extractor, a bank about to start deleting old memories and
   a failed dream-tracking start were invisible there. It now reports them
   as Python does: `extractor` reads `"stalled"` with a `stall` record
-  (reason and times only) once two live dreams in a row fail, a fallback
+  (reason and times only) once two dreams in a row fail, a run sets
+  aside every memory it pulled, or a due backlog goes unserved, a fallback
   that serves instead of the primary keeps `"configured"` with the record,
   `capacity_warning: true` appears when the last band is 80% full, and
   `dream_tracking_error` names the failure's code. None of them changes

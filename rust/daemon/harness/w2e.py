@@ -334,6 +334,8 @@ GENERIC = re.compile(r"^session - \d{4}-\d{2}-\d{2} \d{2}:\d{2}$")
 # detached from its connection, so only the shutdown drain can observe it.
 MUTANTS = ["store-tags-raw", "store-skip-session-episode", "store-no-hint", "store-surprise-raw",
            "mcp-store-no-session",
+           # /health's subsystem keys: caught by the health-* scenarios.
+           "health-no-stall", "health-no-capacity-warning",
            # memory_fact_set (spec FS1-FS12): caught by the fact-set-* scenarios.
            "mcp-fact-set-no-supersede", "mcp-fact-set-no-confirm-reinforce",
            "mcp-fact-set-no-correction-signal", "mcp-fact-set-no-entity-mint",
@@ -3608,7 +3610,7 @@ SCENARIOS.update({
         ],
     },
     # Two runs the fallback served open a warning stall ("configured" plus
-    # the record); the primary's recovery closes it (no record).
+    # the record); a third keeps it open and counts it.
     "health-stall-fallback": {
         "config": HEALTH_DREAM_CONFIG,
         "extractor": FALLBACK_EXTRACTOR,

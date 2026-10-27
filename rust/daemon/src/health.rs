@@ -5,6 +5,7 @@ use crate::service::Service;
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 use std::path::Path;
+use std::sync::Arc;
 
 /// `SCHEMA_META_VERSION` (`storage/schema.py:20`).
 pub const SCHEMA: i64 = crate::storage::schema::SCHEMA_META_VERSION;
@@ -264,17 +265,22 @@ fn open_stall(svc: &Service) -> Option<Map<String, Value>> {
 
 /// `_dream_tracking_error`'s code (the text before the first colon; the
 /// detail can carry a DSN). Read without waiting: while a dream action holds
-/// the tracking state, the last code read stands in.
+/// the tracking state, the last code read from the same ready service stands
+/// in, and nothing when that read came from a ready service since replaced.
 fn dream_tracking_error(svc: &Service, ready: Option<&crate::service::Ready>) -> Option<String> {
     let mut last = svc.health_tracking_code.lock().expect("tracking code lock");
-    if let Some(ready) = ready
-        && let Ok(tracking) = ready.dream.try_lock()
-    {
-        *last = tracking.error_code().map(|(code, _)| code);
-    } else if ready.is_none() {
+    let Some(ready) = ready else {
         *last = None;
+        return None;
+    };
+    let source = Arc::as_ptr(&ready.dream) as usize;
+    if let Ok(tracking) = ready.dream.try_lock() {
+        *last = Some((source, tracking.error_code().map(|(code, _)| code)));
     }
-    last.clone()
+    match &*last {
+        Some((from, code)) if *from == source => code.clone(),
+        _ => None,
+    }
 }
 
 /// `capacity_warning` from the ready service's resident bank.
@@ -378,7 +384,7 @@ pub async fn payload(svc: &Service, principals: &crate::auth::PrincipalStore) ->
     // `extractor` and `stall` never touch `status`: a bank whose dreams
     // stopped is still serving, and a 503 would have the healthcheck
     // restart it.
-    let stall = open_stall(svc);
+    let stall = open_stall(svc).filter(|_| !crate::mutants::active("health-no-stall"));
     let extractor = extractor(c, stall.as_ref());
     p.insert("extractor".into(), json!(extractor));
     if let Some(s) = stall
@@ -406,7 +412,7 @@ pub async fn payload(svc: &Service, principals: &crate::auth::PrincipalStore) ->
     if let Some(code) = dream_tracking_error(svc, ready) {
         p.insert("dream_tracking_error".into(), json!(code));
     }
-    if capacity_warning(svc, ready) {
+    if capacity_warning(svc, ready) && !crate::mutants::active("health-no-capacity-warning") {
         p.insert("capacity_warning".into(), json!(true));
     }
     let memory = memory_headroom(Path::new("/sys/fs/cgroup"), Path::new("/proc/self"));
