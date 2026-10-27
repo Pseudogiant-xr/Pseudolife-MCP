@@ -69,6 +69,45 @@ DEFAULT_CLI = Path(os.environ.get("PSEUDOLIFE_SHIM_CODEX_CLI")
                    or shutil.which("codex") or "codex")
 # A fenced reply ("```json\n...\n```") would fail the extractor's json.loads.
 _FENCE_RE = re.compile(r"^\s*```(?:json)?\s*(.*?)\s*```\s*$", re.DOTALL)
+# Characters kept from EACH stream of a failed call, so a flood on one
+# cannot push the other's message out of the /health detail.
+_STREAM_DETAIL_MAX = 240
+# The CLI's own messages for a missing or expired sign-in ("Not logged in.
+# Run `codex login`.", a 401 or an access token that could not be
+# refreshed). Matched only on a failed call's output, never on a reply.
+_SIGN_IN_RE = re.compile(
+    r"not logged in|codex login|\bunauthori[sz]ed\b|\b401\b|token_expired"
+    r"|token (?:has )?expired|could not be refreshed",
+    re.IGNORECASE)
+SIGN_IN_FIX = ("sign in to the Codex CLI on the shim host: run `codex login` "
+               "as the user the shim runs as; /health recovers within the "
+               "health TTL (5 minutes by default), no restart needed")
+
+
+def _cli_output(stdout: bytes, stderr: bytes) -> str:
+    """What a failed ``codex exec`` call said, from both streams, each
+    bounded. Stdout's JSON event lines are left to :func:`_parse_reply`;
+    its plain lines are kept, since a pre-turn failure may print there."""
+    parts = []
+    for name, raw in (("stdout", stdout), ("stderr", stderr)):
+        lines = (raw or b"").decode("utf-8", "replace").splitlines()
+        if name == "stdout":
+            lines = [ln for ln in lines if not ln.strip().startswith("{")]
+        text = " ".join(" ".join(lines).split())
+        if not text:
+            continue
+        if len(text) > _STREAM_DETAIL_MAX:
+            text = text[:_STREAM_DETAIL_MAX - 3] + "..."
+        parts.append(f"{name}: {text}")
+    return "; ".join(parts) or "(no output on stdout or stderr)"
+
+
+def health_status(detail: str) -> dict:
+    """The 503 body for a failed health check: ``login_required`` with the
+    fix when the CLI's message is a sign-in failure, else ``cli_error``."""
+    if _SIGN_IN_RE.search(detail):
+        return {"status": "login_required", "detail": detail, "fix": SIGN_IN_FIX}
+    return {"status": "cli_error", "detail": detail}
 
 
 def resolve_model(requested: str | None, default: str) -> str:
@@ -291,8 +330,9 @@ class CodexCli:
                                      user.encode("utf-8"))
         if rc != 0:
             # Prefer a STRUCTURED reason; a stream with no agent_message
-            # carries no reason at all, so stderr stays the diagnostic.
-            detail = err.decode("utf-8", "replace")[:400]
+            # carries no reason at all, so the CLI's own text on stderr and
+            # stdout stays the diagnostic.
+            detail = _cli_output(out, err)
             try:
                 _parse_reply(out.decode("utf-8", "replace"))
             except CodexTurnFailed as e:
@@ -337,7 +377,8 @@ class CodexCli:
                 self.chat("Reply with exactly: OK", "ping")
                 self._health_ok, self._health_detail = True, ""
             except Exception as e:  # noqa: BLE001 — any failure means unusable
-                self._health_ok, self._health_detail = False, str(e)[:300]
+                # Room for both streams' bounded output (_cli_output).
+                self._health_ok, self._health_detail = False, str(e)[:600]
             self._health_at = time.monotonic()
             return self._health_ok, self._health_detail
         finally:
@@ -363,7 +404,7 @@ def make_handler(cli: CodexCli):
                 if ok:
                     self._json(200, {"status": "ok"})
                 else:
-                    self._json(503, {"status": "cli_error", "detail": detail})
+                    self._json(503, health_status(detail))
             elif self.path in ("/v1/models", "/models"):
                 self._json(200, {"object": "list", "data": [
                     {"id": m, "object": "model"}

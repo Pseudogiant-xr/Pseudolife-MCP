@@ -486,3 +486,72 @@ def test_reuse_address_is_dropped_only_on_windows():
     assert shim.ShimHTTPServer.allow_reuse_address is (os.name != "nt")
     src = Path(shim.__file__).read_text(encoding="utf-8")
     assert "ShimHTTPServer((args.host, args.port)" in src
+
+
+# ── a failed CLI call keeps the CLI's own words (2026-10-27) ──────────────
+#
+# The Claude shim's /health once answered `claude -p rc=1: ` for an expired
+# login because the CLI's message was on the stream it did not read; the
+# Codex shim reads both streams too and names the sign-in fix.
+
+
+def _failing(stdout=b"", stderr=b"", rc=1):
+    cli = shim.CodexCli(Path("codex"), "m", 30.0)
+    _stub_run(cli, rc=rc, stdout=stdout, stderr=stderr)
+    return cli
+
+
+def test_chat_keeps_a_plain_stdout_message_when_stderr_is_empty():
+    with pytest.raises(RuntimeError, match="Not logged in"):
+        _failing(stdout=b"Not logged in. Run `codex login`.\n").chat("sys", "hi")
+
+
+def test_chat_with_no_output_says_so():
+    with pytest.raises(RuntimeError, match="no output on stdout or stderr"):
+        _failing().chat("sys", "hi")
+
+
+def test_chat_detail_is_bounded_per_stream():
+    with pytest.raises(RuntimeError) as e:
+        _failing(stdout=b"x" * 5000, stderr=b"the real cause").chat("sys", "hi")
+    assert "the real cause" in str(e.value) and len(str(e.value)) < 700
+
+
+def _health_answer(cli):
+    import json
+    import urllib.error
+    import urllib.request
+
+    srv = shim.ThreadingHTTPServer(("127.0.0.1", 0), shim.make_handler(cli))
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        url = f"http://127.0.0.1:{srv.server_address[1]}/health"
+        try:
+            with urllib.request.urlopen(url) as resp:
+                return resp.status, json.loads(resp.read())
+        except urllib.error.HTTPError as err:
+            return err.code, json.loads(err.read())
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
+@pytest.mark.parametrize("stdout,stderr", [
+    (b"", b"Not logged in. Run `codex login`."),
+    (b'{"type":"error","message":"401 Unauthorized: token_expired"}', b""),
+    (b"", b"Your access token could not be refreshed. Please log out and sign in again."),
+])
+def test_health_names_the_sign_in_fix(stdout, stderr):
+    code, body = _health_answer(_failing(stdout=stdout, stderr=stderr))
+    assert (code, body["status"]) == (503, "login_required")
+    assert "codex login" in body["fix"] and "shim host" in body["fix"]
+
+
+@pytest.mark.parametrize("stdout,stderr", [
+    (b'{"type":"turn.failed","error":{"message":"usage limit reached"}}', b""),
+    (b"", b"error: unexpected argument '--catalog-in'"),
+])
+def test_health_keeps_other_failures_as_cli_error(stdout, stderr):
+    code, body = _health_answer(_failing(stdout=stdout, stderr=stderr))
+    assert (code, body["status"]) == (503, "cli_error")
+    assert "fix" not in body

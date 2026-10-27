@@ -81,6 +81,51 @@ DEFAULT_CLI = Path(os.environ.get("PSEUDOLIFE_SHIM_CLAUDE_CLI")
 _FENCE_RE = re.compile(r"^\s*```(?:json)?\s*(.*?)\s*```\s*$", re.DOTALL)
 # Windows CreateProcess caps the command line at 32767 chars; leave margin.
 _MAX_ARGV_SYSTEM = 24000
+# Characters kept from EACH stream of a failed call, so a flood on one
+# cannot push the other's message out of the /health detail.
+_STREAM_DETAIL_MAX = 240
+# The CLI's own messages for a missing or expired sign-in (2026-10-27 live:
+# "Failed to authenticate: OAuth session expired and could not be
+# refreshed"; the API-key form ends "Please run /login"). Matched only on a
+# failed call's output, never on a reply.
+_SIGN_IN_RE = re.compile(
+    r"oauth|failed to authenticate|authentication_error|not logged in"
+    r"|please run /login|invalid api key|\bunauthori[sz]ed\b|\b401\b",
+    re.IGNORECASE)
+SIGN_IN_FIX = ("sign in to the Claude CLI on the shim host: run `claude auth "
+               "login` as the user the shim runs as; /health recovers within "
+               "5 minutes, no restart needed")
+
+
+def _cli_output(stdout: bytes, stderr: bytes) -> str:
+    """What a failed ``claude -p`` call said, from both streams, each
+    bounded. The CLI prints a failed sign-in on stdout (as a JSON result
+    under ``--output-format json``), so reading stderr alone lost it."""
+    parts = []
+    for name, raw in (("stdout", stdout), ("stderr", stderr)):
+        text = (raw or b"").decode("utf-8", "replace").strip()
+        if not text:
+            continue
+        if name == "stdout":
+            try:
+                obj = json.loads(text)
+            except ValueError:
+                obj = None
+            if isinstance(obj, dict) and (obj.get("result") or obj.get("error")):
+                text = str(obj.get("result") or obj.get("error"))
+        text = " ".join(text.split())
+        if len(text) > _STREAM_DETAIL_MAX:
+            text = text[:_STREAM_DETAIL_MAX - 3] + "..."
+        parts.append(f"{name}: {text}")
+    return "; ".join(parts) or "(no output on stdout or stderr)"
+
+
+def health_status(detail: str) -> dict:
+    """The 503 body for a failed health check: ``login_required`` with the
+    fix when the CLI's message is a sign-in failure, else ``cli_error``."""
+    if _SIGN_IN_RE.search(detail):
+        return {"status": "login_required", "detail": detail, "fix": SIGN_IN_FIX}
+    return {"status": "cli_error", "detail": detail}
 
 
 def _kill_tree(proc: subprocess.Popen) -> None:
@@ -507,9 +552,7 @@ class ClaudeCli:
             t0 = time.monotonic()
             rc, stdout, stderr = self._run(cmd, user.encode("utf-8"))
         if rc != 0:
-            raise RuntimeError(
-                f"claude -p rc={rc}: "
-                f"{stderr.decode('utf-8', 'replace')[:400]}")
+            raise RuntimeError(f"claude -p rc={rc}: {_cli_output(stdout, stderr)}")
         out = json.loads(stdout.decode("utf-8", "replace"))
         if out.get("is_error"):
             raise RuntimeError(
@@ -550,7 +593,8 @@ class ClaudeCli:
                 self.chat("", "Reply with exactly: OK")
                 self._health_ok, self._health_detail = True, ""
             except Exception as e:  # noqa: BLE001 — any failure means unusable
-                self._health_ok, self._health_detail = False, str(e)[:300]
+                # Room for both streams' bounded output (_cli_output).
+                self._health_ok, self._health_detail = False, str(e)[:600]
             self._health_at = time.monotonic()
             return self._health_ok, self._health_detail
         finally:
@@ -576,7 +620,7 @@ def make_handler(cli: ClaudeCli):
                 if ok:
                     self._json(200, {"status": "ok"})
                 else:
-                    self._json(503, {"status": "cli_error", "detail": detail})
+                    self._json(503, health_status(detail))
             elif self.path in ("/v1/models", "/models"):
                 self._json(200, {"object": "list", "data": [
                     {"id": m, "object": "model"}
