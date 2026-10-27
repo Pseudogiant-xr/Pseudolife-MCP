@@ -76,6 +76,16 @@ def test_version_cut_uses_new_identity_on_pr_and_push_without_followup(release, 
     assert select_release(root, head, followup)["oracle_head"] == head
 
 
+def test_a_cut_carrying_the_batch_regenerated_census_is_still_a_release(release):
+    # A cut changes plugin/release.json, which the producer census hashes, so
+    # `ops/integrate.py build` adds a regenerated census to the cut's batch.
+    root, base, _ = release
+    write(root, "rust/producer-census.json", '{"input_sha256": {}}\n')
+    head = commit(root)
+    assert select_release(root, base, head)["release_cut"] == {
+        "base_version": "0.18.0", "version": "0.18.1"}
+
+
 def test_local_runtime_identity_is_not_tied_to_historical_inventory(release):
     root, base, _ = release
     check_identity(SimpleNamespace(ROOT=root, PHASE1_ORACLE=base))
@@ -100,6 +110,9 @@ def test_local_runtime_identity_is_not_tied_to_historical_inventory(release):
     ("rust/Cargo.lock", '[[package]]\nname = "pseudolife-stdio"\nversion = "0.18.1"\n[[package]]\nname = "new"\nversion = "1.0.0"\n'),
     ("docs/helper.py", "print('new executable input')\n"),
     ("evals/rust_port/instrument.py", "print('changed instrument')\n"),
+    # Near misses beside the generated census: its inventory and other data.
+    ("rust/contract-inventory.json", '{"tools": []}\n'),
+    ("rust/producer-census.json.bak", "{}\n"),
 ])
 def test_behavior_or_unknown_changes_keep_the_merge_base(release, path, text):
     root, base, _ = release
@@ -136,7 +149,8 @@ def test_removed_contract_source_blocks_release_selection(release, path):
     assert select_release(root, base, head)["oracle_head"] == base
 
 
-@pytest.mark.parametrize("path", ["pyproject.toml", "ops/docker-compose.yml", "README.md"])
+@pytest.mark.parametrize("path", ["pyproject.toml", "ops/docker-compose.yml", "README.md",
+                                  "rust/producer-census.json"])
 def test_executable_metadata_or_documentation_blocks_release_selection(release, path):
     root, base, _ = release
     if not (root / path).exists():
