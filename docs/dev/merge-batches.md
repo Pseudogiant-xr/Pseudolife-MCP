@@ -304,6 +304,12 @@ nothing, and a rerun of `merge` after the merge went through only
 confirms the members and finishes. Check that each member's branch is
 gone; delete a leftover by hand.
 
+Once the batch has merged, each member's owner whose session has nothing
+left stacked on its branch runs `python ops/prune_worktrees.py --mine
+--apply` from its own worktree. It removes that worktree and its build
+cache only if every safety check passes, and otherwise refuses, changing
+nothing ([worktree-retention.md](worktree-retention.md)).
+
 A batch whose head moved after `open` (a merge-forward under the
 `merge-forward` skill included) is refused, because its head is not the
 one the suite passed on. Merging it under that skill's exceptions is an
