@@ -114,12 +114,11 @@ def scenarios(w) -> dict:
                            f"WHERE {COMPACTION_SLOT} AND status = 'superseded'",
                            after_stop=True)],
             "ops": [
-                # Until the sweep has compacted (a cold start loads models
-                # first); a side that never compacts times out and the
-                # expect query answers false.
-                {"op": "sleep", "s": 1,
-                 "settle": {"quiet_s": 1.0, "timeout_s": 60.0,
-                            "until": f"SELECT count(*) = 2 FROM facts WHERE {COMPACTION_SLOT}"},
+                # Both daemons settled before the first op, so the 1 s sweep
+                # has ticked several times by now. No ``until``: a mutant
+                # that never compacts must answer a diff (the ``expect``),
+                # not time the settle out.
+                {"op": "sleep", "s": 6,
                  "expect": [f"SELECT count(*) = 2 FROM facts WHERE {COMPACTION_SLOT}",
                             f"SELECT count(*) = 1 FROM facts WHERE {COMPACTION_SLOT} "
                             "AND status = 'current'"]},
