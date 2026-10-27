@@ -23,7 +23,11 @@ pub(super) async fn route(req: &mut Request<'_>) -> Option<Response> {
         ("GET", "/api/config") => {
             let svc = &req.app.service;
             Some(
-                match crate::config_io::read_config(&svc.config, &svc.data_dir) {
+                match crate::config_io::read_config(
+                    &svc.config,
+                    &crate::config_io::process_env,
+                    &svc.data_dir,
+                ) {
                     Ok(body) => json_response(200, &body),
                     // An exception `read_config` lets escape: the generic
                     // handler's 500 with its text.

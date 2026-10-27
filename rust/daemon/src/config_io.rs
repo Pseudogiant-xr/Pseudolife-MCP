@@ -278,6 +278,12 @@ fn bound(v: &Value) -> Num {
     }
 }
 
+/// A JSON number written as an integer, which `json.loads` makes an `int`
+/// however long it is.
+fn is_int_literal(n: &serde_json::Number) -> bool {
+    !n.to_string().contains(['.', 'e', 'E'])
+}
+
 /// A JSON number as Python's `json.loads` holds it.
 fn json_num(n: &serde_json::Number) -> Num {
     let v = Value::Number(n.clone());
@@ -401,6 +407,10 @@ fn py_int(value: &Value) -> Result<i128, Refused> {
 fn py_float(value: &Value) -> Result<f64, Refused> {
     match value {
         Value::Bool(b) => Ok(f64::from(u8::from(*b))),
+        // `float(int)` past the float range.
+        Value::Number(n) if is_int_literal(n) && json_num(n).f().is_infinite() => Err(
+            Refused::Overflow("int too large to convert to float".into()),
+        ),
         Value::Number(n) => Ok(json_num(n).f()),
         Value::String(s) => crate::dream::extractor::py_float_str(s).ok_or_else(|| {
             Refused::Value(format!(
@@ -441,11 +451,18 @@ fn py_lower(s: &str) -> String {
 
 // ── read_config ────────────────────────────────────────────────────────────
 
+/// The process environment, as the routes read it.
+pub(crate) type Env<'a> = &'a dyn Fn(&str) -> Option<String>;
+
+pub(crate) fn process_env(name: &str) -> Option<String> {
+    std::env::var(name).ok()
+}
+
 /// `config_path_for`: `PSEUDOLIFE_MCP_CONFIG` when set and non-empty, else
 /// `<data_dir>/config.yaml`, as `str(Path(...))` prints it.
-pub(crate) fn config_path_for(data_dir: &Path) -> String {
-    match std::env::var("PSEUDOLIFE_MCP_CONFIG") {
-        Ok(env) if !env.is_empty() => crate::documents::py_path(&env).shown,
+pub(crate) fn config_path_for(env: Env, data_dir: &Path) -> String {
+    match env("PSEUDOLIFE_MCP_CONFIG") {
+        Some(path) if !path.is_empty() => crate::documents::py_path(&path).shown,
         _ => {
             let dir = crate::documents::py_path(&data_dir.to_string_lossy()).shown;
             let joined = if dir == "." {
@@ -501,8 +518,8 @@ fn node_value(node: &Node) -> Value {
 /// `read_config`: every knob with its running value, grouped in first-seen
 /// order. `Err` carries the text of an exception `read_config` lets escape
 /// (an infinite saved value for an int knob), which the route answers 500.
-pub(crate) fn read_config(cfg: &Config, data_dir: &Path) -> Result<Value, String> {
-    let config_path = config_path_for(data_dir);
+pub(crate) fn read_config(cfg: &Config, env: Env, data_dir: &Path) -> Result<Value, String> {
+    let config_path = config_path_for(env, data_dir);
     let saved = saved_file(&config_path);
     let mut groups: Vec<(String, Vec<Value>)> = Vec::new();
     for knob in knobs() {

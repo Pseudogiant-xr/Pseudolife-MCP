@@ -41,7 +41,7 @@ COERCE = [
     ("memory.retrieval_log.retention_days", [365, 365.0, 0.5, 3651, "١٢"]),
     ("memory.search_confidence_floor", [0.5, 1, 2, -0.1, "0.3", " 1e-1 ", "nan",
                                         "inf", "-Infinity", "1_0.5", "x", None,
-                                        False, [0.1], INF]),
+                                        False, [0.1], INF, 10 ** 400]),
     ("memory.dream.idle_seconds", [600, 1e-05, 0.0]),
     ("memory.dream.literal_gate", ["enforce", "Enforce", "bogus", None, 1, True,
                                    ["enforce"], "it's"]),

@@ -14,6 +14,12 @@ fn input(v: &Value) -> Value {
     }
 }
 
+/// No environment: the tests never read (or overwrite) the user's own
+/// `PSEUDOLIFE_MCP_CONFIG` file.
+fn no_env(_: &str) -> Option<String> {
+    None
+}
+
 fn scratch(name: &str) -> std::path::PathBuf {
     let dir = std::env::temp_dir().join(format!("pl-config-io-{}-{name}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
@@ -69,14 +75,14 @@ fn read_config_serves_the_running_values_and_restart_knobs_saved_values() {
         let name = case["name"].as_str().unwrap();
         let dir = scratch(name);
         std::fs::write(dir.join("config.yaml"), case["saved"].as_str().unwrap()).unwrap();
-        let got = read_config(&cfg, &dir);
+        let got = read_config(&cfg, &no_env, &dir);
         match case.get("ok") {
             Some(want) => {
                 let mut got = got.expect(name);
                 let path = got.as_object_mut().unwrap().shift_remove("config_path");
                 assert_eq!(
                     path,
-                    Some(json!(config_path_for(&dir))),
+                    Some(json!(config_path_for(&no_env, &dir))),
                     "{name}: config_path"
                 );
                 assert_eq!(dumps(&got), dumps(want), "{name}");
@@ -92,12 +98,18 @@ fn read_config_serves_the_running_values_and_restart_knobs_saved_values() {
 fn config_path_follows_pathlib() {
     let dir = std::path::Path::new(".");
     // `Path(".") / "config.yaml"`.
-    if std::env::var("PSEUDOLIFE_MCP_CONFIG").map_or(true, |v| v.is_empty()) {
-        assert_eq!(config_path_for(dir), "config.yaml");
-        #[cfg(not(windows))]
-        assert_eq!(
-            config_path_for(std::path::Path::new("/data//x/./")),
-            "/data/x/config.yaml"
-        );
-    }
+    assert_eq!(config_path_for(&no_env, dir), "config.yaml");
+    #[cfg(not(windows))]
+    assert_eq!(
+        config_path_for(&no_env, std::path::Path::new("/data//x/./")),
+        "/data/x/config.yaml"
+    );
+    // Set and non-empty wins; empty falls back (config_io's truthiness).
+    let set = |v: &'static str| move |_: &str| Some(v.to_string());
+    #[cfg(not(windows))]
+    assert_eq!(
+        config_path_for(&set("/etc//pl/c.yaml"), dir),
+        "/etc/pl/c.yaml"
+    );
+    assert_eq!(config_path_for(&set(""), dir), "config.yaml");
 }
