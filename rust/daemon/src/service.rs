@@ -17,39 +17,62 @@ const RETRY_BASE_S: f64 = 5.0;
 const RETRY_MAX_S: f64 = 60.0;
 
 /// What a request needs once init has completed.
+///
+/// A reconnect that keeps the bank (no other writer in the gap) republishes
+/// the same resident state over the new session ([`Ready::over`]), so every
+/// field but `storage` is shared between the two.
 pub struct Ready {
     /// The writer session, for the write-path slices.
-    #[allow(dead_code)]
     pub storage: Arc<Storage>,
     pub embedder: Arc<Embedder>,
     pub bank: Arc<std::sync::RwLock<Bank>>,
     /// Lock order: Service.inner, then write, then the storage writer.
     /// Stores and background reaping share this episode state and lock.
-    pub write: tokio::sync::Mutex<crate::episodes::WriteState>,
+    pub write: Arc<tokio::sync::Mutex<crate::episodes::WriteState>>,
     pub writes: crate::store::WriteTasks,
     /// Complete durable startup inputs for the read/write slices.
     #[allow(dead_code)] // W2-D/E adopt these inputs when their stores land.
     pub startup: Arc<StartupState>,
     /// The resident cortex; `fact_set.rs` writes it under `write`.
-    pub cortex: crate::stores::cortex::SharedCortex,
+    pub cortex: Arc<crate::stores::cortex::SharedCortex>,
     /// The resident world cortex (`world_tools.rs` writes it under `write`).
-    pub world: crate::stores::world::SharedWorld,
+    pub world: Arc<crate::stores::world::SharedWorld>,
     /// The resident lesson store (`memory_forget` retires lessons under
     /// `write`; the dream's synthesis is not ported).
-    pub lessons: crate::stores::lessons::SharedLessons,
+    pub lessons: Arc<crate::stores::lessons::SharedLessons>,
     /// The service hybrid logical clock (`MemoryService._hlc`).
-    pub hlc: std::sync::Mutex<crate::hlc::Clock>,
+    pub hlc: Arc<std::sync::Mutex<crate::hlc::Clock>>,
     /// The dream's acknowledgement state (`dream::service`). Lock order:
     /// `write`, then this.
-    pub dream: tokio::sync::Mutex<crate::dream::service::Tracking>,
+    pub dream: Arc<tokio::sync::Mutex<crate::dream::service::Tracking>>,
     /// The dream pass's process-local state (`dream::run::RunState`): the
     /// single-flight guard, the per-batch failure counter, the alias-name
     /// memo, the stall tracker and the last extractor record. Never held
     /// across an await that takes `write`.
-    pub dream_run: crate::dream::run::RunState,
+    pub dream_run: Arc<crate::dream::run::RunState>,
 }
 
 impl Ready {
+    /// The same resident state over a replacement writer session: what
+    /// `PostgresStorage.conn` gives its owner after a reconnect that found
+    /// no other writer (the resident copy is still the bank's).
+    fn over(&self, storage: Arc<Storage>) -> Ready {
+        Ready {
+            storage,
+            embedder: self.embedder.clone(),
+            bank: self.bank.clone(),
+            write: self.write.clone(),
+            writes: self.writes.clone(),
+            startup: self.startup.clone(),
+            cortex: self.cortex.clone(),
+            world: self.world.clone(),
+            lessons: self.lessons.clone(),
+            hlc: self.hlc.clone(),
+            dream: self.dream.clone(),
+            dream_run: self.dream_run.clone(),
+        }
+    }
+
     /// `self._hlc.tick()`, with the clock re-seeded first from the stored
     /// high-water mark as `_reseed_hlc` seeds it (`service.py:1642-1669`).
     /// Observing the same mark again is a no-op, and the mark changes only
@@ -272,9 +295,31 @@ impl Service {
             .map_err(|e| format!("initialization task failed: {e}"))?
     }
 
+    /// The board's clock retry (`coordination.dispatch`, its
+    /// `CoordinationClockChanged` arm): an epoch mismatch proves the cached
+    /// session check stale, so reprobe the writer session even inside its
+    /// probe interval (`_session_ok_at = 0.0`) and run `_ensure_init`, both
+    /// under the service lock, before the caller's one fresh attempt.
+    #[allow(dead_code)] // B5's W2F-CLOCK-RETRY send retry is its caller.
+    pub async fn refresh_writer_session(self: &Arc<Self>) -> Result<Arc<Ready>, String> {
+        let me = self.clone();
+        tokio::spawn(async move { me.init(true).await })
+            .await
+            .map_err(|e| format!("initialization task failed: {e}"))?
+    }
+
     /// `_ensure_init`, cold and fast paths.
     pub(crate) async fn ensure_init_inner(&self) -> Result<Arc<Ready>, String> {
+        self.init(false).await
+    }
+
+    async fn init(&self, reprobe: bool) -> Result<Arc<Ready>, String> {
         let mut inner = self.inner.lock().await;
+        if reprobe && let Some(storage) = &inner.storage {
+            storage.forget_probe();
+        }
+        self.verify_writer_session(&mut inner).await?;
+        self.rehydrate_if_bank_changed_hands(&mut inner);
         if let Some(r) = &inner.ready {
             if crate::mutants::active("startup-clock-reloads")
                 && r.startup.clock_state().hlc_reseed_pending
@@ -347,14 +392,14 @@ impl Service {
                     storage,
                     embedder,
                     bank: Arc::new(std::sync::RwLock::new(bank)),
-                    write: tokio::sync::Mutex::new(write),
+                    write: Arc::new(tokio::sync::Mutex::new(write)),
                     writes: self.writes.clone(),
                     startup: Arc::new(startup),
-                    cortex: crate::stores::cortex::SharedCortex::new(cortex),
-                    world: crate::stores::world::SharedWorld::new(world),
-                    lessons: crate::stores::lessons::SharedLessons::new(lessons),
-                    hlc: std::sync::Mutex::new(crate::hlc::Clock::default()),
-                    dream: tokio::sync::Mutex::new(Default::default()),
+                    cortex: Arc::new(crate::stores::cortex::SharedCortex::new(cortex)),
+                    world: Arc::new(crate::stores::world::SharedWorld::new(world)),
+                    lessons: Arc::new(crate::stores::lessons::SharedLessons::new(lessons)),
+                    hlc: Arc::new(std::sync::Mutex::new(crate::hlc::Clock::default())),
+                    dream: Arc::new(tokio::sync::Mutex::new(Default::default())),
                     dream_run: Default::default(),
                 });
                 inner.ready = Some(ready.clone());
@@ -396,6 +441,47 @@ impl Service {
                 Err(reason)
             }
         }
+    }
+
+    /// `_ensure_init`'s first step, `storage.verify_writer_session()`: a
+    /// replaced session is published everywhere the old one was (the
+    /// service, `/health`'s snapshot and, with the same resident state, the
+    /// ready service). Only a lease another writer holds, or an error
+    /// Python does not catch there, fails the call.
+    async fn verify_writer_session(&self, inner: &mut Inner) -> Result<(), String> {
+        let Some(storage) = inner.storage.clone() else {
+            return Ok(());
+        };
+        let Some(fresh) = storage.verify_writer_session().await? else {
+            return Ok(());
+        };
+        let fresh = Arc::new(fresh);
+        inner.storage = Some(fresh.clone());
+        if let Some(ready) = inner.ready.take() {
+            inner.ready = Some(Arc::new(ready.over(fresh.clone())));
+        }
+        self.update(|s| s.storage = Some(fresh));
+        Ok(())
+    }
+
+    /// `_rehydrate_if_bank_changed_hands` (service.py:1381-1438): another
+    /// writer held the bank while this process was disconnected, so its
+    /// resident stores may predate that writer's changes. Drop them all
+    /// (the ready service holds every one, with the active-session pointer,
+    /// the tombstones, the deferred roots and the dream's batch failures)
+    /// so the rest of `_ensure_init` hydrates afresh, then lift the
+    /// storage's refusal. A reconnect with no other writer flags nothing.
+    fn rehydrate_if_bank_changed_hands(&self, inner: &mut Inner) {
+        let Some(storage) = inner.storage.clone() else {
+            return;
+        };
+        let Some(reason) = storage.resident_invalidated() else {
+            return;
+        };
+        eprintln!("{reason}: dropping the resident stores and re-reading the bank before serving");
+        inner.ready = None;
+        self.update(|s| s.startup = None);
+        storage.acknowledge_rehydration();
     }
 
     /// `_refuse_on_stale_hydrated_dims`'s message.
@@ -1076,6 +1162,188 @@ mod tests {
             inner.ready = None;
             inner.storage = None;
         }
+        service.update(|snapshot| {
+            snapshot.storage = None;
+            snapshot.startup = None;
+        });
+        drop(service);
+        Arc::try_unwrap(storage)
+            .ok()
+            .expect("fixture owns the writer session")
+            .close()
+            .await;
+    }
+
+    /// The Rust arm of `harness/writer_session_cases.py`: the writer
+    /// session dies, is replaced, changes hands and is refused, through the
+    /// real service's `_ensure_init` path. The harness supplies the bank,
+    /// the second writer (`--other-writer`, `--hold-lease`) and the
+    /// per-phase database dumps, identically for the Python arm.
+    #[tokio::test]
+    async fn db_writer_session_phases() {
+        let Ok(dsn) = std::env::var("PL_PGS_WRITER_DSN") else {
+            return;
+        };
+        let parsed = crate::storage::parse_dsn(&dsn).unwrap();
+        assert!(
+            parsed
+                .get_dbname()
+                .is_some_and(|name| name.starts_with("pl_cf_pgs_"))
+        );
+        let config_path = PathBuf::from(std::env::var("PL_PGS_WRITER_CONFIG").unwrap());
+        let config = crate::config::load(&config_path).unwrap();
+        let env = DaemonEnv::from_env(&|_| None).unwrap();
+        let service = Arc::new(Service::new(
+            config,
+            env,
+            config_path.parent().unwrap().to_path_buf(),
+            dsn.clone(),
+            false,
+        ));
+        let helper = |args: &[&str]| {
+            let mut command =
+                std::process::Command::new(std::env::var("PL_PGS_WRITER_PYTHON").unwrap());
+            command.arg(std::env::var("PL_PGS_WRITER_SCRIPT").unwrap());
+            command.args(args);
+            command
+        };
+        let run_helper = |args: &[&str]| {
+            let out = helper(args).output().unwrap();
+            assert!(
+                out.status.success(),
+                "writer helper {args:?} failed: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        };
+        // `None` once the session is dead: a call served over it.
+        async fn backend_pid(storage: &Storage) -> Option<i32> {
+            storage
+                .client()
+                .query_one("SELECT pg_backend_pid()", &[])
+                .await
+                .ok()
+                .map(|row| row.get(0))
+        }
+        async fn kill(storage: &Storage, dsn: &str) {
+            let pid = backend_pid(storage).await.expect("a live session to kill");
+            let (side, task) = crate::storage::connect(
+                &crate::storage::parse_dsn(dsn).unwrap(),
+                Duration::from_secs(10),
+            )
+            .await
+            .unwrap();
+            side.execute("SELECT pg_terminate_backend($1)", &[&pid])
+                .await
+                .unwrap();
+            drop(side);
+            let _ = task.await;
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while !storage.client().is_closed() {
+                assert!(Instant::now() < deadline, "the killed session never closed");
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        }
+        // Past `_SESSION_PROBE_INTERVAL`, so Python's arm probes too.
+        let past_probe = || tokio::time::sleep(Duration::from_millis(1100));
+        let first = service.ensure_init().await.expect("initial init");
+        let first_pid = backend_pid(&first.storage).await;
+        let observe = |result: Result<Arc<Ready>, String>, pid_before: Option<i32>| {
+            let service = service.clone();
+            let first = first.clone();
+            async move {
+                let storage = service.snapshot().storage.expect("storage");
+                let ping = match storage.ping().await {
+                    Ok(()) => "ok".to_string(),
+                    Err(e) => format!("error: {e}"),
+                };
+                let (ok, error, same, pid_changed) = match result {
+                    Ok(ready) => {
+                        let pid = backend_pid(&ready.storage).await;
+                        let same = json!({
+                            "bank": Arc::ptr_eq(&first.bank, &ready.bank),
+                            "startup": Arc::ptr_eq(&first.startup, &ready.startup),
+                            "cortex": Arc::ptr_eq(&first.cortex, &ready.cortex),
+                        });
+                        (
+                            true,
+                            Value::Null,
+                            same,
+                            json!(pid.is_some() && pid != pid_before),
+                        )
+                    }
+                    Err(e) => (false, json!(e), Value::Null, Value::Null),
+                };
+                json!({
+                    "ok": ok, "error": error, "same_as_first": same,
+                    "session_replaced": pid_changed,
+                    "epoch": storage.lease_epoch(), "health_db": ping,
+                    "resident_invalidated": storage.resident_invalidated(),
+                })
+            }
+        };
+        let mut phases = vec![json!({
+            "phase": "initial",
+            "observed": observe(Ok(first.clone()), first_pid).await,
+        })];
+        run_helper(&["--dump-db", "initial"]);
+
+        // Death with no other writer: the next call reconnects and keeps
+        // the resident copy.
+        kill(&first.storage, &dsn).await;
+        past_probe().await;
+        let result = service.ensure_init().await;
+        phases.push(json!({"phase": "death", "observed": observe(result, first_pid).await}));
+        run_helper(&["--dump-db", "death"]);
+
+        // Another writer held the bank in the gap: the reconnect flags the
+        // handover and the service re-reads the bank before serving.
+        let before = backend_pid(&service.snapshot().storage.unwrap()).await;
+        kill(&service.snapshot().storage.unwrap(), &dsn).await;
+        run_helper(&["--other-writer"]);
+        past_probe().await;
+        let result = service.ensure_init().await;
+        phases.push(json!({"phase": "handover", "observed": observe(result, before).await}));
+        run_helper(&["--dump-db", "handover"]);
+
+        // Another writer still holds the lease: refused, and /health says so
+        // while it is there; once it leaves and the retry window passes the
+        // next call reconnects and re-reads the bank.
+        let before = backend_pid(&service.snapshot().storage.unwrap()).await;
+        kill(&service.snapshot().storage.unwrap(), &dsn).await;
+        let gate = PathBuf::from(std::env::var("PL_PGS_WRITER_GATE").unwrap());
+        let ready_file = gate.with_extension("ready");
+        std::fs::write(&gate, b"hold").unwrap();
+        let mut holder = helper(&["--hold-lease"]).spawn().unwrap();
+        let deadline = Instant::now() + Duration::from_secs(60);
+        while !ready_file.exists() {
+            assert!(
+                Instant::now() < deadline,
+                "the lease holder never took the lease"
+            );
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        past_probe().await;
+        let result = service.ensure_init().await;
+        phases.push(json!({"phase": "held", "observed": observe(result, before).await}));
+        std::fs::remove_file(&gate).unwrap();
+        assert!(holder.wait().unwrap().success(), "lease holder failed");
+        run_helper(&["--dump-db", "held"]);
+        tokio::time::sleep(Duration::from_millis(5100)).await;
+        let result = service.ensure_init().await;
+        phases.push(json!({"phase": "released", "observed": observe(result, before).await}));
+        run_helper(&["--dump-db", "released"]);
+
+        std::fs::write(
+            std::env::var("PL_PGS_WRITER_OUT").unwrap(),
+            serde_json::to_vec(&json!({"phases": phases})).unwrap(),
+        )
+        .unwrap();
+        drop(first);
+        let storage = {
+            let mut inner = service.inner.lock().await;
+            inner.ready = None;
+            inner.storage.take().unwrap()
+        };
         service.update(|snapshot| {
             snapshot.storage = None;
             snapshot.startup = None;
