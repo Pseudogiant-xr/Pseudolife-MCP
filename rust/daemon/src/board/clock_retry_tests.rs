@@ -202,8 +202,14 @@ async fn half_open_proxy(upstream: std::net::SocketAddr) -> (u16, Cuts) {
                     tokio::select! {
                         _ = close.changed() => break,
                         read = sr.read(&mut buf) => {
-                            let Ok(n) = read else { break };
+                            let n = read.unwrap_or(0);
                             if n == 0 {
+                                // The server side ended. A cut connection
+                                // stays open to its client until the
+                                // client writes (the half-open session).
+                                if down.load(Ordering::SeqCst) {
+                                    let _ = close.changed().await;
+                                }
                                 break;
                             }
                             if !down.load(Ordering::SeqCst) && cw.write_all(&buf[..n]).await.is_err() {
