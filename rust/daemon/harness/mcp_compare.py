@@ -540,9 +540,11 @@ def rebinding_edges(port):
                   # Duplicate Host headers: the first one counts.
                   [good, evil], [evil, good]):
         opening(extra)
+    # The era serves only its no-envelope refusal (divergences.md), so these
+    # carry no `_meta`.
     era = ("mcp-protocol-version", "2099-01-01")
     for extra in ([evil, era], [good, ("Origin", "http://evil.example"), era], [good, era]):
-        out.append(norm(request(port, "POST", init_body(), JSON_HDRS + extra)))
+        out.append(norm(request(port, "POST", ping, JSON_HDRS + extra)))
     # An open install refuses a bound identity before the transport, whatever the Host.
     bound = [("X-PL-Bank", "bank"), ("X-PL-Principal", "default")]
     for host in (good, evil):
