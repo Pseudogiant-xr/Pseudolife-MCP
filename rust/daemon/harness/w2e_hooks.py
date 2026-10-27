@@ -466,8 +466,8 @@ def register(h) -> dict[str, dict]:
                 # Guarded: no header, so the active-session pointer's.
                 episode_end({}),
                 # As if the reaper had closed it: its registration reads idle.
-                h.sql("UPDATE client_sessions SET end_reason = 'idle' "
-                      "WHERE session_key = 'es-ptr'"),
+                h.external("UPDATE client_sessions SET end_reason = 'idle' "
+                           "WHERE session_key = 'es-ptr'"),
                 # Guarded again: the pointer's session has nothing open, and
                 # the guarded path stamps nothing (still idle).
                 episode_end({}),
