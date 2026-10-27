@@ -727,8 +727,11 @@ stall record and reports it:
 
 On a headless daemon host, an expired CLI login is the expected cause: log
 the CLI in again on that host (`claude auth login`, or `codex login` for
-the Codex shim). The shim's health check recovers within its TTL and the
-next sweep's dream closes the stall.
+the Codex shim). The shim's own `/health` says so: it answers 503 with
+`"status": "login_required"`, the CLI's message in `detail` and the command
+in `fix` (any other CLI failure is `"status": "cli_error"` with the CLI's
+own output from stdout and stderr in `detail`). The shim's health check
+recovers within its TTL and the next sweep's dream closes the stall.
 
 ## Session digests (opt-in) — one prose memory per closed session
 
