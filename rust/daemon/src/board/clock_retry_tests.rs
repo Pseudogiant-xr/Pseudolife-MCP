@@ -143,16 +143,31 @@ async fn terminate(client: &tokio_postgres::Client, pid: i32) {
     panic!("the terminated session never ended");
 }
 
-/// A loopback TCP proxy to `upstream`. Once `cut` is set it forwards
-/// nothing more either way and closes the client's socket at the client's
-/// next write: an idle connection then looks open to its client (a half-open
-/// TCP session, as after a server restart with no FIN), and only a probe's
-/// write reveals it.
-async fn half_open_proxy(upstream: std::net::SocketAddr) -> (u16, Arc<AtomicBool>) {
+/// The connections a [`half_open_proxy`] has accepted, each with its own
+/// cut flag.
+#[derive(Clone, Default)]
+struct Cuts(Arc<std::sync::Mutex<Vec<Arc<AtomicBool>>>>);
+
+impl Cuts {
+    /// Cut every connection open now; later ones forward normally, so a
+    /// reconnect through the proxy works.
+    fn cut_open(&self) {
+        for flag in self.0.lock().unwrap().iter() {
+            flag.store(true, Ordering::SeqCst);
+        }
+    }
+}
+
+/// A loopback TCP proxy to `upstream`. A cut connection forwards nothing
+/// more either way and closes the client's socket at the client's next
+/// write: while idle it looks open to its client (a half-open TCP session,
+/// as after a server restart with no FIN), and only a probe's write reveals
+/// it.
+async fn half_open_proxy(upstream: std::net::SocketAddr) -> (u16, Cuts) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
-    let cut = Arc::new(AtomicBool::new(false));
-    let switch = cut.clone();
+    let cuts = Cuts::default();
+    let registry = cuts.clone();
     tokio::spawn(async move {
         loop {
             let Ok((client, _)) = listener.accept().await else {
@@ -164,6 +179,8 @@ async fn half_open_proxy(upstream: std::net::SocketAddr) -> (u16, Arc<AtomicBool
             let (mut cr, mut cw) = client.into_split();
             let (mut sr, mut sw) = server.into_split();
             let (closed, mut close) = tokio::sync::watch::channel(false);
+            let switch = Arc::new(AtomicBool::new(false));
+            registry.0.lock().unwrap().push(switch.clone());
             let up = switch.clone();
             tokio::spawn(async move {
                 let mut buf = vec![0u8; 16384];
@@ -200,7 +217,7 @@ async fn half_open_proxy(upstream: std::net::SocketAddr) -> (u16, Arc<AtomicBool
             });
         }
     });
-    (port, cut)
+    (port, cuts)
 }
 
 /// Another writer takes the bank's lease (its epoch moves) and leaves.
@@ -216,7 +233,7 @@ async fn other_writer(dsn: &str) {
 async fn a_send_heals_a_half_open_writer_session_on_its_retry() {
     let (dsn, config) = fixture();
     let upstream = "127.0.0.1:5434".parse().unwrap();
-    let (port, cut) = half_open_proxy(upstream).await;
+    let (port, cuts) = half_open_proxy(upstream).await;
     let proxied = dsn.replacen(":5434", &format!(":{port}"), 1);
     assert_ne!(proxied, dsn, "the fixture DSN names its port");
     let (service, board) = service(&proxied, &dsn, &config);
@@ -230,7 +247,7 @@ async fn a_send_heals_a_half_open_writer_session_on_its_retry() {
     drop(ready);
     // Inside the probe interval: the session dies unseen and another writer
     // holds the bank for a moment, so the epoch the board captured is stale.
-    cut.store(true, Ordering::SeqCst);
+    cuts.cut_open();
     terminate(&side, pid).await;
     other_writer(&dsn).await;
     let messages = count(&side, "coordination_messages").await;
