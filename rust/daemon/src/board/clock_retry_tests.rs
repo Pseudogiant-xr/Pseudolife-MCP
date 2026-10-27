@@ -266,8 +266,10 @@ async fn a_send_heals_a_half_open_writer_session_on_its_retry() {
     let (service, board) = service(&proxied, &dsn, &config);
     let (headers, to) = agents(&board).await;
     let side = direct(&dsn).await;
-    // A real probe now, so the session check is fresh for the next second.
-    tokio::time::sleep(Duration::from_millis(1100)).await;
+    // The first call opens the session; the second verifies it (a fresh
+    // session has never been probed), so the check stays fresh for the next
+    // second.
+    service.ensure_init().await.unwrap();
     let ready = service.ensure_init().await.unwrap();
     let pid = backend_pid(&ready.storage).await;
     let before = ready.storage.lease_epoch();
