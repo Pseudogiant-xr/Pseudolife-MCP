@@ -280,13 +280,19 @@ async fn a_send_after_a_half_open_writer_session_is_delivered() {
     let ready = service.ensure_init().await.unwrap();
     let pid = backend_pid(&ready.storage).await;
     let before = ready.storage.lease_epoch();
+    let session = ready.storage.clone();
+    let probed = std::time::Instant::now();
     drop(ready);
     // Inside the probe interval: the session dies unseen and another writer
     // holds the bank for a moment, so the epoch the board captured is stale.
     cuts.cut_open();
+    eprintln!("DIAG cut: closed={} {:?}", session.client().is_closed(), probed.elapsed());
     terminate(&side, pid).await;
+    eprintln!("DIAG terminated: closed={} {:?}", session.client().is_closed(), probed.elapsed());
     other_writer(&side).await;
+    eprintln!("DIAG other writer: closed={} {:?}", session.client().is_closed(), probed.elapsed());
     let messages = count(&side, "coordination_messages").await;
+    drop(session);
     let sent = board
         .dispatch("send", send(&to, "half-open"), &headers, "default")
         .await;
