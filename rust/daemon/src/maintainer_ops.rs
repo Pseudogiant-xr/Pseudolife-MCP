@@ -356,7 +356,7 @@ async fn is_sent(c: &Client, message_id: Option<&Value>) -> Outcome<bool> {
 /// `_secret`: the MAC key, inserted the first time it is needed.
 async fn secret(c: &Client) -> Outcome<Vec<u8>> {
     let mut fresh = [0u8; 32];
-    getrandom::fill(&mut fresh).expect("system randomness");
+    getrandom::fill(&mut fresh).map_err(|_| refuse("coordination_unavailable", "randomness"))?;
     c.execute(
         "INSERT INTO meta (key,value) VALUES ($1,$2) ON CONFLICT (key) DO NOTHING",
         &[&SECRET_META_KEY, &json!(hex::encode(fresh))],
@@ -384,7 +384,7 @@ async fn issue(
     now: f64,
 ) -> Outcome<(String, String)> {
     let mut nonce = [0u8; 16];
-    getrandom::fill(&mut nonce).expect("system randomness");
+    getrandom::fill(&mut nonce).map_err(|_| refuse("coordination_unavailable", "randomness"))?;
     fields.insert("purpose".into(), json!(purpose));
     fields.insert("nonce".into(), json!(hex::encode(nonce)));
     fields.insert(

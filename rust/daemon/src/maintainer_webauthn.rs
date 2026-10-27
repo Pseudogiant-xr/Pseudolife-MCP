@@ -220,7 +220,8 @@ fn cbor_item(data: &[u8], mut pos: usize, depth: usize) -> Result<(Cbor, usize)>
             if value > remaining {
                 return invalid("cbor_truncated");
             }
-            let mut items = Vec::with_capacity(value as usize);
+            // Grown as items parse: a claimed count reserves nothing.
+            let mut items = Vec::new();
             for _ in 0..value {
                 let (item, next) = cbor_item(data, pos, depth + 1)?;
                 items.push(item);
@@ -232,7 +233,7 @@ fn cbor_item(data: &[u8], mut pos: usize, depth: usize) -> Result<(Cbor, usize)>
             if value > remaining / 2 {
                 return invalid("cbor_truncated");
             }
-            let mut pairs = Vec::with_capacity(value as usize);
+            let mut pairs = Vec::new();
             let mut keys = BTreeSet::new();
             for _ in 0..value {
                 let (key, next) = cbor_item(data, pos, depth + 1)?;
