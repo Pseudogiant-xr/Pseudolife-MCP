@@ -82,6 +82,21 @@ where
         .await
 }
 
+/// `PostgresStorage._pinned()` for the writer-session probe: `None` while a
+/// transaction or statement group holds the writer, else a guard that keeps
+/// one from starting until the probe (or its reconnect) has finished, so the
+/// probe never lands inside another caller's transaction on the shared,
+/// pipelined client.
+pub fn try_hold() -> Option<tokio::sync::MutexGuard<'static, ()>> {
+    TX.try_lock().ok()
+}
+
+/// A dropped transaction is still open on the writer session: the next
+/// [`run`] rolls it back first. A probe then would run inside it.
+pub fn recovery_pending() -> bool {
+    OPEN.load(Ordering::SeqCst)
+}
+
 /// `set_meta` (`storage/postgres.py:2722`): one upsert of a JSON value.
 pub async fn set_meta(
     client: &Client,

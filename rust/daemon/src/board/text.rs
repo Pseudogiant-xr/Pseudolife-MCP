@@ -200,20 +200,56 @@ const NAME_RULES: [(&str, bool, usize); 4] = [
     ("verified", false, 0),
 ];
 
-/// `reserved_name`.
-pub fn reserved_name(value: &str) -> bool {
+/// `reserved_word`: the reserved word `value` reads as, if any, and whether
+/// its skeleton contains it (else it spells it within the rule's edits).
+pub fn reserved_word(value: &str) -> Option<(&'static str, bool)> {
     let sk = skeleton(value);
     let len = py_len(&sk);
     for (word, contained, allowance) in NAME_RULES {
         if contained && sk.contains(word) {
-            return true;
+            return Some((word, true));
         }
         if len.abs_diff(word.len()) <= allowance && edits(&sk, word) <= allowance {
-            return true;
+            return Some((word, false));
         }
     }
-    false
+    None
 }
+
+/// `reserved_name`.
+pub fn reserved_name(value: &str) -> bool {
+    reserved_word(value).is_some()
+}
+
+/// `reserved_detail`: why a `field` reading as `word` is refused, and what
+/// to do instead, worded for the rule that matched. It names the reserved
+/// word, never the refused text.
+pub fn reserved_detail(field: &str, (word, contained): (&str, bool)) -> String {
+    let ignoring = "ignoring case, spacing, punctuation and look-alike letters";
+    if contained {
+        return format!(
+            "the {field} contains the reserved word '{word}' ({ignoring}); choose a {field} without it"
+        );
+    }
+    let allowance = NAME_RULES
+        .iter()
+        .find(|(w, _, _)| *w == word)
+        .map_or(0, |(_, _, edits)| *edits);
+    let near = if allowance > 0 {
+        ", within one letter"
+    } else {
+        ""
+    };
+    format!(
+        "the {field} reads as the reserved word '{word}' ({ignoring}{near}); choose another {field}"
+    )
+}
+
+/// `CONTROL_NAME_DETAIL`.
+pub const CONTROL_NAME_DETAIL: &str = concat!(
+    "the name holds a control or format character (Unicode category C, ",
+    "such as a zero-width or bidi mark); remove it"
+);
 
 /// `PREVIEW_EXCERPT`.
 pub const PREVIEW_EXCERPT: usize = 100;
