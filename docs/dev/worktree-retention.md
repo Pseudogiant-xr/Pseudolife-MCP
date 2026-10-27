@@ -158,7 +158,9 @@ The output is a table: each candidate, its verdict, its size and the first
 failing check. Totals follow, with the reasons things were kept. The exit
 code is 0 on success, including when there is nothing to do and when
 candidates are refused one by one. It is 1 for an owner-mode refusal, a
-failed `git worktree remove`, a cache deleted only in part (the rest is
+failed `git worktree remove`, a worktree git unregistered but could not
+fully delete (a file held open on Windows; the leftover path is named and
+its ledger line says `complete: false`), a cache deleted only in part (the rest is
 left in a `.<name>.retention-*` dir beside it, named in the output), or a
 ledger that could not be written. It is 2 for a refused run (failed
 fetch, bad repo or bad config). Config values are type-checked: roots

@@ -735,3 +735,36 @@ def test_process_listing_sees_this_process():
     procs = prune.list_processes()
     assert procs is not None, "this platform's process listing failed"
     assert os.getpid() in {pid for pid, _, _ in procs}
+
+
+def test_unregistered_with_leftover_files_is_partial_not_removed(env, monkeypatch):
+    """git can unregister a worktree yet leave files behind (a file held
+    open on Windows); no later sweep can see them, so it is reported."""
+    wt = env.add("done")
+    real_git = prune.git
+
+    def leaves_a_file(cwd, *args, **kw):
+        proc = real_git(cwd, *args, **kw)
+        if args[:2] == ("worktree", "remove") and proc.returncode == 0:
+            wt.mkdir(exist_ok=True)
+            (wt / "README.md").write_text("held\n", encoding="utf-8")
+            return subprocess.CompletedProcess(args, 255, "", "error: failed to delete")
+        return proc
+
+    monkeypatch.setattr(prune, "git", leaves_a_file)
+    rc, out = run(env, "--apply")
+    assert rc == 1, out
+    assert "files remain" in out and "partial" in out
+    assert [line["complete"] for line in env.ledger_lines()] == [False]
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="only Windows refuses to delete an open file")
+def test_windows_open_file_leaves_a_partial_owner_removal(env, monkeypatch):
+    wt = env.add("mine", age=False)
+    cache = env.cache("mine-target", age=False)
+    monkeypatch.chdir(wt)
+    with open(wt / "README.md", encoding="utf-8"):
+        rc, out = run(env, "--mine", "--cache-dir", str(cache), "--apply", roots=False)
+    assert rc == 1, out
+    assert "files remain" in out
+    assert cache.exists(), "a partial removal must not go on to the cache"

@@ -682,14 +682,24 @@ def registered_entry(repo: str, path: str) -> Worktree | None:
     return next((w for w in list_worktrees(repo) if norm(w.path) == n), None)
 
 
-def remove_worktree(main: str, path: str) -> str | None:
-    """Plain ``git worktree remove``: None once git has unregistered it,
-    else the error. git unregisters a worktree but fails when a process
-    holds its folder as the cwd; that leaves a folder, not a failure."""
+def remove_worktree(main: str, path: str) -> tuple[bool, str | None]:
+    """Plain ``git worktree remove``. Returns (unregistered, error).
+
+    git can unregister a worktree yet fail to delete it: a process holding
+    the folder as its cwd leaves it empty, which is done; a file held open
+    leaves files behind, which no later sweep can see, so that is an error
+    even though the worktree is gone from git's list."""
     proc = git(main, "worktree", "remove", path)
-    if proc.returncode == 0 or registered_entry(main, path) is None:
-        return None
-    return f"git worktree remove failed: {proc.stderr.strip() or proc.returncode}"
+    if registered_entry(main, path) is not None:
+        return False, f"git worktree remove failed: {proc.stderr.strip() or proc.returncode}"
+    try:
+        leftovers = os.listdir(path) if os.path.isdir(path) else []
+    except OSError:
+        leftovers = ["?"]
+    if leftovers:
+        return True, (f"unregistered, but files remain in {path} "
+                      f"({proc.stderr.strip() or 'held open'}); delete them by hand")
+    return True, None
 
 
 def own_worktree(start: str) -> str | None:
@@ -800,14 +810,14 @@ def run_sweep(args, cfg: dict) -> int:
                 again.failure = f"changed since scan: {again.failure}"
                 rows.append((again, "keep"))
                 continue
-            err = remove_worktree(registered[0], again.path)
+            gone, err = remove_worktree(registered[0], again.path)
+            if gone and not ledger_write(args.ledger, again, "sweep", {"complete": err is None}):
+                rc = 1
             if err:
                 again.failure = err
-                rows.append((again, "failed"))
+                rows.append((again, "partial" if gone else "failed"))
                 rc = 1
                 continue
-            if not ledger_write(args.ledger, again, "sweep"):
-                rc = 1
             rows.append((again, "removed"))
         else:
             again = evaluate_cache(v.path, grace_days=cgrace, now=time.time(),
@@ -975,13 +985,13 @@ def run_owner(args, cfg: dict) -> int:
         said.append(f"checkout {own} belongs to its harness and was left in place")
     else:
         os.chdir(main)               # a process cannot remove the dir it sits in
-        err = remove_worktree(main, own)
-        if err:
-            print(f"refused: {err}. The worktree is still registered and the cache "
-                  "was not touched.")
-            return 1
-        if not ledger_write(args.ledger, tree, "owner"):
+        gone, err = remove_worktree(main, own)
+        if gone and not ledger_write(args.ledger, tree, "owner", {"complete": err is None}):
             rc = 1
+        if err:
+            state = ("" if gone else " The worktree is still registered;")
+            print(f"refused: {err}.{state} The cache was not touched.")
+            return 1
         line = f"removed worktree {own}"
         if tree.branch:
             line += f" (branch {tree.branch} kept)"
