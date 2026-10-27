@@ -437,6 +437,10 @@ def START_WORLD(h) -> list[dict]:  # noqa: N802 (a seed list built with w2e's he
                     retrieved_at=1.0),
         h.world_set("Node.js", "active LTS", "22", confidence=0.5,
                     source_url="https://nodejs.org/en/about/previous-releases"),
+        # Ties PostgreSQL's confidence; the case-folded entity order puts it
+        # first, and the cut of three then drops Node.js.
+        h.world_set("apache httpd", "license", "Apache-2.0", confidence=0.95,
+                    freshness_class="evergreen", source_url="https://httpd.apache.org/"),
     ]
 
 
@@ -451,9 +455,12 @@ def _lesson_sql(task: str, aspect: str, text: str, pol: str, outcome: str, statu
 
 
 START_SQL = [
-    # Sorted by task: Benchmarks, Code Review, Deploy Pipeline (avoid, and
-    # stale: its fact is newer), Release (a correction); avoid-first keeps
-    # Deploy Pipeline, Release, Benchmarks.
+    # Sorted by case-folded task: apple workflow, Benchmarks, Code Review,
+    # Deploy Pipeline (avoid, and stale: its fact is newer), Release (a
+    # correction); avoid-first keeps Deploy Pipeline, Release, apple
+    # workflow (a case-sensitive sort would keep Benchmarks instead).
+    _lesson_sql("apple workflow", "approach", "Batch the small edits.", "+", "success",
+                "current", 1700000050),
     _lesson_sql("Deploy Pipeline", "pitfall", "Avoid deploying on a stale cache.", "-",
                 "failure", "current", 1700000000),
     _lesson_sql("Code Review", "approach", "Read the Python oracle before signing off.", "+",
@@ -481,5 +488,7 @@ START_SQL = [
     "WHERE a.display = 'Alpha Service' AND b.display = 'Beta Service'",
 ]
 
-CUSTOM_SHORT = "Prefer small PRs.\n\nAlways cite the tested head."
+# Written as Windows text: Python's text mode turns CRLF and a lone CR into
+# newlines before the paragraphs split.
+CUSTOM_SHORT = "Prefer small PRs.\r\n\r\nAlways cite\rthe tested head."
 CUSTOM_LONG = "\n\n".join(f"Rule {i}: " + "keep this paragraph whole " * 12 for i in range(20))

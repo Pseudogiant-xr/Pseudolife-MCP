@@ -581,10 +581,15 @@ pub async fn hook_session_start(app: &App, q: SessionStartQuery<'_>) -> String {
     // Everything past the notices reads the bank, and only for an
     // authorized caller; a bank that cannot open leaves those parts out, as
     // Python's raised reads do.
-    let ready = if authorized {
+    // A resumed or compacted start with no session id reads nothing but the
+    // stall tracker, which Python keeps without opening the bank.
+    let needs_bank = q.session_id.is_some_and(|s| !s.is_empty()) || !is_continued(q.source);
+    let ready = if !authorized {
+        None
+    } else if needs_bank {
         app.service.ensure_init().await.ok()
     } else {
-        None
+        app.service.ready_if_initialized().await
     };
     if authorized && let Some(ready) = &ready {
         let stall = crate::briefing::dream_stall_line(&crate::briefing::current_stall(ready));
@@ -721,6 +726,79 @@ mod tests {
         assert!(!launcher_shape(&long));
         let fits = format!("/{}/pseudolife-mcp", "a".repeat(250));
         assert!(launcher_shape(&fits));
+    }
+
+    /// `version_notice`, `hooks_notice` and `all_update_commands` with
+    /// command `pl`, computed in Python at daemon version 0.19.0.
+    #[test]
+    fn notices_follow_python() {
+        assert_eq!(DAEMON_VERSION, "0.19.0", "recompute these from Python");
+        let plugin_cmds = "pl update --clients-only --tag 0.19.0, or in Claude Code /plugin \
+                           marketplace update pseudolife-mcp, then /plugin update \
+                           pseudolife-memory@pseudolife-mcp";
+        let daemon_cmds = "pl update, or from a checkout git pull, then ops/update.ps1 or \
+                           ops/update.sh";
+        assert_eq!(
+            version_notice(Some("0.1.0"), "pl"),
+            format!(
+                "Pseudolife-MCP: plugin 0.1.0 and daemon 0.19.0 differ — update the plugin \
+                 ({plugin_cmds}) and start a new session; until then its hooks may lack what \
+                 the daemon serves."
+            )
+        );
+        assert_eq!(
+            version_notice(Some("99.0.0"), "pl"),
+            format!(
+                "Pseudolife-MCP: plugin 99.0.0 and daemon 0.19.0 differ — update the daemon \
+                 ({daemon_cmds}); until then the plugin may call what the daemon does not serve."
+            )
+        );
+        for equal_or_unordered in ["0.19.0.dev1", "abc"] {
+            assert_eq!(
+                version_notice(Some(equal_or_unordered), "pl"),
+                format!(
+                    "Pseudolife-MCP: plugin {equal_or_unordered} and daemon 0.19.0 differ — \
+                     update the older one: plugin via {plugin_cmds}; daemon via {daemon_cmds}."
+                )
+            );
+        }
+        for silent in ["0.19.0", "", "bad version!", &"1".repeat(33)] {
+            assert_eq!(version_notice(Some(silent), "pl"), "", "{silent:?}");
+        }
+        assert_eq!(version_notice(None, "pl"), "");
+
+        let release = "pl update --clients-only --tag 0.19.0, or from a checkout git pull, \
+                       then ops/update.ps1 -All on Windows or ops/update.sh --all";
+        let checkout = "in the checkout this daemon was built from: git pull, then \
+                        ops/update.ps1 -All on Windows or ops/update.sh --all (on a release \
+                        install: pl update --clients-only --tag 0.19.0)";
+        assert_eq!(all_update_commands("pl", false), release);
+        assert_eq!(all_update_commands("pl", true), checkout);
+        let (d, b) = ("a".repeat(64), "b".repeat(64));
+        let hooks = |cmds: &str| {
+            format!(
+                "Pseudolife-MCP: plugin 0.19.0 matches the daemon's version but its hooks \
+                 differ from the daemon's copy — run {cmds} to refresh the plugin cache and \
+                 shim, then start a new session."
+            )
+        };
+        let v = Some("0.19.0");
+        assert_eq!(
+            hooks_notice(v, Some(&b), Some(&d), "pl", false),
+            hooks(release)
+        );
+        assert_eq!(
+            hooks_notice(v, Some(&b), Some(&d), "pl", true),
+            hooks(checkout)
+        );
+        assert_eq!(hooks_notice(v, Some(&d), Some(&d), "pl", false), "");
+        assert_eq!(
+            hooks_notice(Some("0.1.0"), Some(&b), Some(&d), "pl", false),
+            ""
+        );
+        let upper = "B".repeat(64);
+        assert_eq!(hooks_notice(v, Some(&upper), Some(&d), "pl", false), "");
+        assert_eq!(hooks_notice(v, Some(&b), None, "pl", false), "");
     }
 
     #[test]

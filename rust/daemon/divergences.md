@@ -140,7 +140,6 @@ binding"). What it cannot or does not reproduce:
 | Key | Python | Rust | Owner |
 |---|---|---|---|
 | `version` | the package version | the crate version | free until cutover (W3-J) |
-| Release update offer in session-start briefing | newest-release offer prepended to the hook response | checker and offer formatter implemented; hook consumption awaits its handler | W2-D (hook) / W3-I (release check) |
 | `stall`, `migration_partial`, `dream_tracking_error`, `capacity_warning`, `lesson_reconciliation_required`, `persist_errors > 0` | subsystem state | never emitted | W2-E, W3-H, W3-I |
 | `embedder.backend`/`dtype` | `torch` with a dtype, or `onnx` with null | `onnx`, null | backend choice, not a contract |
 | `memory` byte counts | live | live (same reader); compared by `source` only | values are process-specific |
@@ -504,6 +503,7 @@ The SessionStart hook, the SessionEnd close, the memory-policy hook and the memo
 | Item | Python | Rust | Owner / why |
 |---|---|---|---|
 | The maintainer's delegate's reminder line on `memory-changes` (`?agent=`), after the cursor and any note | `coordination.delegate_reminder`: one line when the agent is the project's delegate | never added: the delegate lookup, and the coordination-start brief that uses it, are not ported | the board batch (B5); a non-delegate agent gets the same answer on both |
+| The daemon version the session-start notices compare and print | the package version (PEP 440: a pre-release reads `0.20.0rc1`) | the crate version (semver: `0.20.0-rc1`) | inherits `version` ("free until cutover") above; the strings are equal for every final release, and a pre-release cut would print a false "plugin and daemon differ" notice on each Rust session until the daemon reports the package version (W3-J / the release procedure) |
 | The hooks notice on session-start when `PSEUDOLIFE_PLUGIN_DIR` is unset | the daemon's hooks digest falls back to `plugin/` beside the package, so a plugin of the daemon's version with other hooks gets the notice | no digest, so no notice | inherits "Plugin dir for `hooks_digest`" above: the images set the variable, and so does a checkout run |
 
 ## Document store (B7): document_ingest and document_search (2026-10-25)

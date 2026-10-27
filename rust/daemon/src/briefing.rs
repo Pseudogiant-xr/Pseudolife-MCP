@@ -395,13 +395,19 @@ fn review_queue_line_inner(block: &Value) -> Option<String> {
 /// `dream_stall_line(stall)`: one line while dreams are stalled (or the
 /// fallback is serving), else empty. Never fails.
 pub fn dream_stall_line(stall: &Value) -> String {
+    dream_stall_line_with(stall, crate::dream::run::local_minute)
+}
+
+/// `dream_stall_line` with the local-minute formatter given (the tests pin
+/// it; the host's time zone would otherwise move the expected text).
+fn dream_stall_line_with(stall: &Value, minute: impl Fn(f64) -> String) -> String {
     let Some(record) = stall.as_object().filter(|s| !s.is_empty()) else {
         return String::new();
     };
     let Some(since) = record.get("since").and_then(Value::as_f64) else {
         return String::new();
     };
-    let since = crate::dream::run::local_minute(since);
+    let since = minute(since);
     if since.is_empty() {
         return String::new();
     }
@@ -836,6 +842,42 @@ mod tests {
             .map(|r| r["lesson"].as_str().unwrap().to_string())
             .collect();
         assert_eq!(got, ["b", "c", "a"]);
+    }
+
+    #[test]
+    fn stall_lines_follow_python() {
+        // `memory/dream.py` `dream_stall_line` with `_local_minute` replaced
+        // by the same stub, computed in Python.
+        let minute = |ts: f64| format!("<minute {ts}>");
+        let line = |v: Value| dream_stall_line_with(&v, minute);
+        assert_eq!(
+            line(json!({"since": 100.0, "reason": "login_expired"})),
+            "Pseudolife-MCP: dreams stalled since <minute 100> (login_expired): the extractor \
+             CLI's login expired; re-run `claude auth login` (or `codex login`) on the daemon host."
+        );
+        assert_eq!(
+            line(json!({"since": 7, "reason": "extractor_unreachable"})),
+            "Pseudolife-MCP: dreams stalled since <minute 7> (extractor_unreachable): check the \
+             extractor endpoint is up and reachable from the daemon."
+        );
+        assert_eq!(
+            line(json!({"since": 1.5, "reason": "served_by_fallback"})),
+            "Pseudolife-MCP: dream primary extractor down since <minute 1.5> (served_by_fallback): \
+             the primary is down and the fallback is serving; check the primary extractor."
+        );
+        for unknown in [
+            json!({"since": 2.0, "reason": "something-new"}),
+            json!({"since": 2.0}),
+        ] {
+            assert_eq!(
+                line(unknown),
+                "Pseudolife-MCP: dreams stalled since <minute 2> (extractor_error): the \
+                 extractor answers with errors; check its log."
+            );
+        }
+        for none in [json!({"reason": "login_expired"}), json!({}), Value::Null] {
+            assert_eq!(line(none), "");
+        }
     }
 
     #[test]
