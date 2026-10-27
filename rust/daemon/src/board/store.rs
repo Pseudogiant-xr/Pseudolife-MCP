@@ -605,14 +605,15 @@ impl Store {
     /// `_check_label`: only a set label is checked.
     fn check_label(principal: &str, label: Option<&Value>) -> Result<()> {
         if let Some(Value::String(label)) = label
-            && let Some(word) = text::reserved_word(label)
+            && let Some(reserved) = text::reserved_word(label)
             && !(RESERVED_SENDERS.contains(&principal)
                 && text::casefold(text::py_strip(label)) == principal)
         {
-            return Err(
-                BoardError::detail("invalid_label", text::reserved_detail("label", word))
-                    .with_param("label"),
-            );
+            return Err(BoardError::detail(
+                "invalid_label",
+                text::reserved_detail("label", reserved),
+            )
+            .with_param("label"));
         }
         Ok(())
     }
@@ -625,11 +626,12 @@ impl Store {
                 BoardError::detail("invalid_name", text::CONTROL_NAME_DETAIL).with_param("name"),
             );
         }
-        if let Some(word) = text::reserved_word(name) {
-            return Err(
-                BoardError::detail("invalid_name", text::reserved_detail("name", word))
-                    .with_param("name"),
-            );
+        if let Some(reserved) = text::reserved_word(name) {
+            return Err(BoardError::detail(
+                "invalid_name",
+                text::reserved_detail("name", reserved),
+            )
+            .with_param("name"));
         }
         refuse_secret(name, "name")?;
         Ok(text::py_strip(name).to_string())
@@ -2170,38 +2172,36 @@ mod tests {
     fn a_refused_name_or_label_says_which_rule_it_broke() {
         // tests/test_coordination_names.py, byte for byte: the 2026-10-27
         // report answered only "invalid_name: the call was refused."
-        let maintainer = "the name contains the reserved word 'maintainer' (look-alike letters \
-                          and one-letter changes count); choose a name without it";
+        let ign = "ignoring case, spacing, punctuation and look-alike letters";
+        let contains = format!(
+            "the name contains the reserved word 'maintainer' ({ign}); choose a name without it"
+        );
+        let reads = |word: &str, near: &str| {
+            format!(
+                "the name reads as the reserved word '{word}' ({ign}{near}); choose another name"
+            )
+        };
         for (bad, detail) in [
-            ("Rust B2a/B2d maintainer/config", maintainer),
-            ("maintaner", maintainer),
-            (
-                "Daemon",
-                "the name reads as the reserved word 'daemon' (look-alike letters and \
-                 one-letter changes count); choose another name",
-            ),
-            (
-                "VERIFIED",
-                "the name reads as the reserved word 'verified' (look-alike letters count); \
-                 choose another name",
-            ),
-            (
-                "board\u{200b}names",
-                "the name holds a control or format character (Unicode category C, such as a \
-                 zero-width or bidi mark); remove it",
-            ),
+            ("Rust B2a/B2d maintainer/config", contains.clone()),
+            ("domain tainer", contains.clone()),
+            ("maintaner", reads("maintainer", ", within one letter")),
+            ("Daemon", reads("daemon", ", within one letter")),
+            ("pass key", reads("passkey", "")),
+            ("VERIFIED", reads("verified", "")),
+            ("board\u{200b}names", text::CONTROL_NAME_DETAIL.to_string()),
         ] {
             let got = refusal(Store::check_name(&json!(bad)).unwrap_err());
             assert_eq!(
                 got,
-                (
-                    "invalid_name".into(),
-                    Some(detail.into()),
-                    Some("name".into())
-                ),
+                ("invalid_name".into(), Some(detail), Some("name".into())),
                 "{bad}"
             );
         }
+        assert_eq!(
+            text::CONTROL_NAME_DETAIL,
+            "the name holds a control or format character (Unicode category C, such as a \
+             zero-width or bidi mark); remove it"
+        );
         for near_miss in [
             "Rust B2a/B2d config",
             "daemon watcher",
@@ -2212,17 +2212,21 @@ mod tests {
         ] {
             assert_eq!(Store::check_name(&json!(near_miss)).unwrap(), near_miss);
         }
-        let got = refusal(Store::check_label("alice", Some(&json!("maintainer-bot"))).unwrap_err());
+        let label = |l: &str| refusal(Store::check_label("alice", Some(&json!(l))).unwrap_err());
         assert_eq!(
-            got,
+            label("maintainer-bot"),
             (
                 "invalid_label".into(),
-                Some(
-                    "the label contains the reserved word 'maintainer' (look-alike letters and \
-                     one-letter changes count); choose a label without it"
-                        .into()
-                ),
+                Some(format!(
+                    "the label contains the reserved word 'maintainer' ({ign}); choose a label without it"
+                )),
                 Some("label".into())
+            )
+        );
+        assert_eq!(
+            label("Daemn").1.unwrap(),
+            format!(
+                "the label reads as the reserved word 'daemon' ({ign}, within one letter); choose another label"
             )
         );
         assert!(Store::check_label("alice", Some(&json!("claude-code"))).is_ok());

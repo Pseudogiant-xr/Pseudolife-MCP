@@ -567,19 +567,24 @@ def test_lease_holders_and_waiters_carry_the_board_name(store):
     assert [w["name"] for w in lease["queue"]] == [f"codex {waiter['agent_id'][:8]}"]
 
 
-MAINTAINER_NAME = ("the name contains the reserved word 'maintainer' (look-alike letters and "
-                   "one-letter changes count); choose a name without it")
+IGNORING = "ignoring case, spacing, punctuation and look-alike letters"
+CONTAINS_MAINTAINER = (f"the name contains the reserved word 'maintainer' ({IGNORING}); "
+                       "choose a name without it")
 
 
 @pytest.mark.parametrize("bad,detail", [
     # The 2026-10-27 report: answered only "invalid_name: the call was refused."
-    ("Rust B2a/B2d maintainer/config", MAINTAINER_NAME),
-    ("maintaner", MAINTAINER_NAME),  # one letter off the whole name
-    ("Daemon", "the name reads as the reserved word 'daemon' (look-alike letters and "
-               "one-letter changes count); choose another name"),
-    ("VERIFIED", "the name reads as the reserved word 'verified' (look-alike letters count); "
+    ("Rust B2a/B2d maintainer/config", CONTAINS_MAINTAINER),
+    ("domain tainer", CONTAINS_MAINTAINER),  # spacing ignored
+    ("maintaner", f"the name reads as the reserved word 'maintainer' ({IGNORING}, within one "
+                  "letter); choose another name"),
+    ("Daemon", f"the name reads as the reserved word 'daemon' ({IGNORING}, within one letter); "
+               "choose another name"),
+    ("pass key", f"the name reads as the reserved word 'passkey' ({IGNORING}); "
                  "choose another name"),
-    ("board​names", "the name holds a control or format character (Unicode category C, "
+    ("VERIFIED", f"the name reads as the reserved word 'verified' ({IGNORING}); "
+                 "choose another name"),
+    ("board\u200bnames", "the name holds a control or format character (Unicode category C, "
                          "such as a zero-width or bidi mark); remove it"),
 ])
 def test_a_refused_name_says_which_rule_it_broke(store, bad, detail):
@@ -605,6 +610,10 @@ def test_a_refused_label_says_which_word_it_reads_as(store):
     with pytest.raises(CoordinationError) as refused:
         store.register("alice", label="maintainer-bot")
     assert (refused.value.code, refused.value.detail, refused.value.param) == (
-        "invalid_label", "the label contains the reserved word 'maintainer' (look-alike letters "
-        "and one-letter changes count); choose a label without it", "label")
+        "invalid_label", f"the label contains the reserved word 'maintainer' ({IGNORING}); "
+        "choose a label without it", "label")
+    with pytest.raises(CoordinationError) as refused:
+        store.register("alice", label="Daemn")
+    assert refused.value.detail == (f"the label reads as the reserved word 'daemon' ({IGNORING}, "
+                                    "within one letter); choose another label")
     assert store.register("alice", label="claude-code")["label"] == "claude-code"
