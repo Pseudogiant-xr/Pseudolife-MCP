@@ -8,13 +8,19 @@ import subprocess
 import sys
 import time
 
-from mcp_compare import CORPUS_RESPONSES, UNSERVED
+from mcp_compare import CORPUS_RESPONSES, TOKENLESS_CASES, TOKENLESS_RESPONSES, UNSERVED
 from mcp_run import mutant_caught
 from mcp_validation_sweep import EXPECTED_COERCION_CASES
 
 HERE = Path(__file__).resolve().parent
 MUTANTS = ("mcp-tier-flip", "mcp-toolset-floor", "mcp-sse-no-session", "mcp-no-hint",
            "mcp-binding-open", "mcp-keep-failed-opening", "mcp-delete-keeps-session")
+# The tokenless corpus (the loopback Host/Origin allowlist, D3) declares no
+# difference. It runs on Linux only: the allowlist is a header check with no
+# Windows-specific path, and the Rust job's in-process tests in
+# `routes/mcp.rs` run it on both OSes without a daemon pair (D6, #862).
+TOKENLESS_MUTANTS = ("mcp-bare-host", "mcp-any-origin", "mcp-era-skips-security")
+TOKENLESS_PLATFORMS = ("linux",)
 
 
 # Declared differences (divergences.md), by name, as the strict corpus reports them.
@@ -49,6 +55,14 @@ def check_baseline(report):
         assert py == want_py, name
         assert rs == want_rs, name
     assert seen == REFUSAL_CLOSE
+
+
+def check_tokenless(report):
+    """The tokenless corpus matches the oracle exactly."""
+    summary = report["summary"]
+    assert (summary["responses"], summary["cases"], summary["diffs"]) == (
+        TOKENLESS_RESPONSES, len(TOKENLESS_CASES) + 1, 0), summary
+    assert summary["unserved_checked"] == [] and report["diffs"] == []
 
 
 def check_coercion_report(report):
@@ -107,6 +121,18 @@ def main(argv=None):
     report = json.loads((target / "mutant-mcp-no-hint.json").read_text(encoding="utf-8"))
     check_baseline(report)
     assert not mutant_caught(1, report, baseline)
+    if sys.platform in TOKENLESS_PLATFORMS:
+        tokenless_file = run("tokenless", args.default_bin, ["--tokenless"], 0) / "compare.json"
+        tokenless = json.loads(tokenless_file.read_text(encoding="utf-8"))
+        check_tokenless(tokenless)
+        print(f"tokenless baseline: {TOKENLESS_RESPONSES} responses, zero differences", flush=True)
+        for mutant in TOKENLESS_MUTANTS:
+            target = run(f"tokenless-{mutant}", args.mutant_bin,
+                         ["--tokenless", "--mutant", mutant, "--baseline", str(tokenless_file)], 0)
+            report = json.loads((target / f"mutant-{mutant}.json").read_text(encoding="utf-8"))
+            assert mutant_caught(1, report, tokenless), mutant
+    else:
+        print(f"tokenless corpus: runs on {', '.join(TOKENLESS_PLATFORMS)} only", flush=True)
     results["seconds"] = round(time.monotonic() - started, 1)
     (out / "summary.json").write_text(json.dumps(results, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(results), flush=True)
