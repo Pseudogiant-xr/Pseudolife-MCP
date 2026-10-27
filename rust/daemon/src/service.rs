@@ -779,34 +779,35 @@ mod tests {
         let initializing = service.inner.lock().await;
         // A send waits for the full service (its stamp is the service clock's),
         // outside the board's lock, so it holds up no other board call.
-        let send = board.dispatch(
-            "send",
-            params(
-                json!({"to": registered["agent_id"], "text": "waits for init",
-                "request_id": "paused-init"}),
-            ),
-            &headers,
-            "default",
-        );
-        tokio::pin!(send);
-        assert!(
-            tokio::time::timeout(Duration::from_millis(300), &mut send)
-                .await
-                .is_err(),
-            "a send must wait for the full service"
-        );
-        let heartbeat = tokio::time::timeout(
-            Duration::from_secs(2),
-            board.dispatch(
-                "heartbeat",
-                params(json!({"attachment_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                "generation": attached["generation"], "active": true})),
+        let heartbeat = {
+            let send = board.dispatch(
+                "send",
+                params(
+                    json!({"to": registered["agent_id"], "text": "waits for init",
+                    "request_id": "paused-init"}),
+                ),
                 &headers,
                 "default",
-            ),
-        )
-        .await;
-        drop(send);
+            );
+            tokio::pin!(send);
+            assert!(
+                tokio::time::timeout(Duration::from_millis(300), &mut send)
+                    .await
+                    .is_err(),
+                "a send must wait for the full service"
+            );
+            tokio::time::timeout(
+                Duration::from_secs(2),
+                board.dispatch(
+                    "heartbeat",
+                    params(json!({"attachment_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "generation": attached["generation"], "active": true})),
+                    &headers,
+                    "default",
+                ),
+            )
+            .await
+        };
         drop(initializing);
         let result = heartbeat
             .expect("heartbeat waited behind full service initialization")
