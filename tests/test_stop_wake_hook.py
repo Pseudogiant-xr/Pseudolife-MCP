@@ -133,8 +133,11 @@ def _read_seen(tmp_path, key=None):
 
 
 def _start(env, payload=None):
+    # The hook writes UTF-8 whatever the locale; Python's default text
+    # encoding on Windows is the ANSI code page (cp1252), which would
+    # decode a non-ASCII message as mojibake.
     process = subprocess.Popen([bash_exe(), str(HOOK)], stdin=subprocess.PIPE,
-                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env, text=True)
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env, encoding="utf-8")
     process.stdin.write(payload or _payload())
     process.stdin.close()
     STARTED.append(process)
