@@ -280,3 +280,207 @@ async fn db_open_once_for_state_compare() {
     s.check_search_path().await.expect("search_path");
     s.close().await;
 }
+
+// ---- writer-session probe and reconnect (postgres.py `conn`, verify) ----
+
+/// Ends `s`'s writer session from a side connection, as a PostgreSQL restart
+/// or an idle-session kill would, and waits until the client has seen it.
+async fn kill_writer(s: &Storage, dsn: &str) {
+    let pid: i32 = s
+        .client()
+        .query_one("SELECT pg_backend_pid()", &[])
+        .await
+        .unwrap()
+        .get(0);
+    let (c, t) = side_client(dsn).await;
+    c.execute("SELECT pg_terminate_backend($1)", &[&pid])
+        .await
+        .unwrap();
+    // Until the backend has gone, lease and all, and the client knows.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let alive: i64 = c
+            .query_one(
+                "SELECT count(*) FROM pg_stat_activity WHERE pid = $1",
+                &[&pid],
+            )
+            .await
+            .unwrap()
+            .get(0);
+        if alive == 0 && s.client().is_closed() {
+            break;
+        }
+        assert!(Instant::now() < deadline, "the killed session never ended");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    drop(c);
+    let _ = t.await;
+}
+
+fn handover_message(from: i64, to: i64) -> String {
+    format!(
+        "another writer held this bank while this process was disconnected \
+         (lease epoch {from} -> {to}); its resident copy may be stale, so \
+         nothing is served or saved until it re-reads the bank"
+    )
+}
+
+#[tokio::test]
+async fn db_live_writer_session_is_kept() {
+    let Some(dsn) = test_dsn() else { return };
+    let _guard = DB.lock().await;
+    let s = Storage::open(&dsn).await.expect("open");
+    s.forget_probe();
+    assert!(s.verify_writer_session().await.expect("verify").is_none());
+    s.close().await;
+}
+
+#[tokio::test]
+async fn db_dead_writer_session_reconnects_without_a_handover() {
+    let Some(dsn) = test_dsn() else { return };
+    let _guard = DB.lock().await;
+    let s = Storage::open(&dsn).await.expect("open");
+    let e1 = s.lease_epoch();
+    kill_writer(&s, &dsn).await;
+    let fresh = s
+        .verify_writer_session()
+        .await
+        .expect("verify")
+        .expect("a dead session is replaced");
+    assert_eq!(fresh.lease_epoch(), e1 + 1, "the reconnect bumps the epoch");
+    assert_eq!(fresh.resident_invalidated(), None, "no other writer ran");
+    fresh
+        .client()
+        .batch_execute("SELECT 1")
+        .await
+        .expect("live");
+    fresh.ping().await.expect("ping");
+    // The replacement holds the lease: a second writer is still refused.
+    assert!(matches!(
+        Storage::open(&dsn).await,
+        Err(OpenError::LeaseHeld(_))
+    ));
+    drop(s);
+    fresh.close().await;
+}
+
+#[tokio::test]
+async fn db_reconnect_after_another_writer_flags_the_handover() {
+    let Some(dsn) = test_dsn() else { return };
+    let _guard = DB.lock().await;
+    let s = Storage::open(&dsn).await.expect("open");
+    let e1 = s.lease_epoch();
+    kill_writer(&s, &dsn).await;
+    let other = Storage::open(&dsn)
+        .await
+        .expect("another writer takes the bank");
+    assert_eq!(other.lease_epoch(), e1 + 1);
+    other.close().await;
+    let fresh = s
+        .verify_writer_session()
+        .await
+        .expect("verify")
+        .expect("replaced");
+    assert_eq!(fresh.lease_epoch(), e1 + 2);
+    let message = handover_message(e1, e1 + 1);
+    assert_eq!(
+        fresh.resident_invalidated().as_deref(),
+        Some(message.as_str())
+    );
+    // /health reports it until the owner has re-read the bank.
+    assert_eq!(fresh.ping().await, Err(message));
+    fresh.acknowledge_rehydration();
+    assert_eq!(fresh.resident_invalidated(), None);
+    fresh.ping().await.expect("ping after the re-read");
+    drop(s);
+    fresh.close().await;
+}
+
+#[tokio::test]
+async fn db_reconnect_refused_while_another_writer_holds_the_lease() {
+    let Some(dsn) = test_dsn() else { return };
+    let _guard = DB.lock().await;
+    let s = Storage::open(&dsn).await.expect("open");
+    let e1 = s.lease_epoch();
+    kill_writer(&s, &dsn).await;
+    let other = Storage::open(&dsn)
+        .await
+        .expect("another writer takes the bank");
+    let refused = s.verify_writer_session().await.err().expect("refused");
+    let dbname = parse_dsn(&dsn).unwrap().get_dbname().unwrap().to_string();
+    assert!(
+        refused.starts_with(&format!(
+            "another process holds the writer lease on bank '{dbname}': backend pid "
+        )),
+        "{refused}"
+    );
+    // ping reports the lost lease while its holder is there.
+    assert_eq!(s.ping().await, Err(refused.clone()));
+    // Inside the retry window the cached refusal answers at once, without
+    // another lease wait (_LEASE_WAIT is 2 s).
+    let started = Instant::now();
+    assert_eq!(s.verify_writer_session().await.err(), Some(refused));
+    assert!(started.elapsed() < Duration::from_millis(1500));
+    other.close().await;
+    // The holder left: ping no longer reports the old refusal.
+    s.ping().await.expect("ping once the holder is gone");
+    tokio::time::sleep(LEASE_RETRY).await;
+    let fresh = s
+        .verify_writer_session()
+        .await
+        .expect("verify after the window")
+        .expect("replaced");
+    assert_eq!(fresh.lease_epoch(), e1 + 2);
+    assert_eq!(
+        fresh.resident_invalidated(),
+        Some(handover_message(e1, e1 + 1))
+    );
+    drop(s);
+    fresh.close().await;
+}
+
+#[tokio::test]
+async fn db_unreachable_reconnect_is_tolerated_and_retried_after_its_window() {
+    let Some(dsn) = test_dsn() else { return };
+    let _guard = DB.lock().await;
+    let mut s = Storage::open(&dsn).await.expect("open");
+    let e1 = s.lease_epoch();
+    kill_writer(&s, &dsn).await;
+    // The server is unreachable: port 1 on loopback refuses at once.
+    let reachable = std::mem::replace(
+        &mut s.base,
+        parse_dsn("postgresql://nobody@127.0.0.1:1/pl_cf_w1a_none").unwrap(),
+    );
+    assert!(
+        s.verify_writer_session()
+            .await
+            .expect("tolerated")
+            .is_none()
+    );
+    let failure = s
+        .session
+        .lock()
+        .unwrap()
+        .reconnect_error
+        .clone()
+        .expect("recorded");
+    assert!(failure.starts_with("reconnect failed: "), "{failure}");
+    // Reachable again, but inside the window no attempt is made.
+    s.base = reachable;
+    assert!(
+        s.verify_writer_session()
+            .await
+            .expect("tolerated")
+            .is_none()
+    );
+    tokio::time::sleep(RECONNECT_RETRY).await;
+    let fresh = s
+        .verify_writer_session()
+        .await
+        .expect("verify after the window")
+        .expect("replaced");
+    assert_eq!(fresh.lease_epoch(), e1 + 1);
+    assert_eq!(fresh.resident_invalidated(), None);
+    drop(s);
+    fresh.close().await;
+}
