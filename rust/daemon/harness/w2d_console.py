@@ -836,14 +836,14 @@ CHALLENGE_OPS = [
 def challenge_scenarios() -> dict[str, dict]:
     seed = [store("A note."), *MAINTAINER_SEED, *CHALLENGE_SEED]
     return {
-        "console-maintainer-challenge": {
+        "console-challenge": {
             "config": MAINTAINER_CONFIG,
             "seed": [*seed, SEED_SECRET],
             "ops": CHALLENGE_OPS,
         },
         # No passkey yet: the bootstrap enrolment is the one purpose open,
         # and its MAC key is made on first use (each side its own).
-        "console-maintainer-challenge-bootstrap": {
+        "console-challenge-bootstrap": {
             "config": MAINTAINER_CONFIG,
             "seed": [store("A note."), *CHALLENGE_SEED],
             "ops": [
