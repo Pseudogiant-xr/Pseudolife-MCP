@@ -45,6 +45,7 @@ mod lesson_tools;
 mod lesson_write;
 mod linger;
 mod maintainer_ops;
+mod maintainer_webauthn;
 mod maintenance;
 mod mcp;
 mod meta_filter;
