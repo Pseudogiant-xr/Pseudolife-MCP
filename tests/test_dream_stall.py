@@ -971,3 +971,20 @@ def test_the_remedy_never_raises_on_a_strange_record():
     from pseudolife_memory.memory.dream import dream_stall_line
     line = dream_stall_line(_signed_out_stall(provider=["claude"]))
     assert line.startswith("Pseudolife-MCP: dreams stalled since ")
+
+
+def test_an_all_quarantined_sign_in_failure_keeps_the_identity(monkeypatch):
+    # Codex review of 42e1ac0b: a one-memory backlog's isolation pass
+    # reports pulled 1, quarantined 1 and the login_expired error without
+    # extractor_failed; the tracker counts it a failure, so the probe must too.
+    from pseudolife_memory.memory import dream as d
+    cause = d.ProbeCause("login_expired", "/health HTTP 503 (login_required)",
+                         provider="claude", shim_user="svc")
+    monkeypatch.setattr(d, "probe_endpoint_cause", lambda *a, **k: cause)
+    svc = _fallback_service("primary")
+    svc.dream_run = lambda extractor, *, limit=None: {
+        "pulled": 1, "claims": 0, "quarantined": 1,
+        "extractor_error": {"reason": "login_expired", "error": "HTTP 500"}}
+    svc.dream_run_auto()
+    svc.dream_run_auto()
+    assert svc.dream_stall_state()["stall"]["provider"] == "claude"

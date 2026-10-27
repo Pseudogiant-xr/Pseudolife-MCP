@@ -1352,8 +1352,8 @@ pseudolife-mcp-daemon`).
   reaching it; the `stall` sub-object gives the reason and times. For
   `stall.reason` `login_expired`, the extractor CLI is signed out (or a
   hosted endpoint rejected its key): sign it in again on the machine
-  running the CLI shim (`stall.shim_host` when that is not the daemon's
-  machine) by running `claude`, then `/login` (or `codex login`). See
+  running the CLI shim (`stall.shim_remote` is true when that is not the
+  daemon's machine) by running `claude`, then `/login` (or `codex login`). See
   [When dreaming stalls](docs/guide/dreaming.md#when-dreaming-stalls).
 - **Lite daemon refuses to start on Windows** with a message about the data
   path: the embedded Postgres runtime needs an **ASCII-only** data
@@ -3740,8 +3740,10 @@ you work on.
     same.
   - The briefing, the board notice and the Console always use the generic
     words.
-  - `/health` is unauthenticated, so it carries the provider and a remote
-    shim's host but never the user.
+  - `/health` is unauthenticated, so it carries the provider and, for a
+    shim on another machine, only `"shim_remote": true`, never its host or
+    the user; doctor then says "the machine running the CLI shim, not the
+    daemon's".
 - **Recovery.** While the shim's cached verdict is a sign-in failure, it
   re-checks every 30 seconds, so the notice clears soon after you sign in.
   Other failures keep the 5-minute pace. The next sweep's dream then closes

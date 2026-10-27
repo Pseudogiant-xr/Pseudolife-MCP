@@ -2690,6 +2690,39 @@
   {
    "record": {
     "since": 1700000000.0,
+    "reason": "login_expired",
+    "provider": "codex",
+    "shim_remote": true
+   },
+   "where": null,
+   "offset": 0,
+   "line": "Pseudolife-MCP: dreams stalled since 2023-11-14 22:13+00:00 (login_expired): the Codex CLI is signed out on the machine running the CLI shim, not the daemon's; sign it in there: run `codex login`."
+  },
+  {
+   "record": {
+    "since": 1700000000.0,
+    "reason": "login_expired",
+    "provider": "codex",
+    "shim_remote": true
+   },
+   "where": null,
+   "offset": 39600,
+   "line": "Pseudolife-MCP: dreams stalled since 2023-11-15 09:13+11:00 (login_expired): the Codex CLI is signed out on the machine running the CLI shim, not the daemon's; sign it in there: run `codex login`."
+  },
+  {
+   "record": {
+    "since": 1700000000.0,
+    "reason": "login_expired",
+    "provider": "codex",
+    "shim_remote": true
+   },
+   "where": null,
+   "offset": -19800,
+   "line": "Pseudolife-MCP: dreams stalled since 2023-11-14 16:43-05:30 (login_expired): the Codex CLI is signed out on the machine running the CLI shim, not the daemon's; sign it in there: run `codex login`."
+  },
+  {
+   "record": {
+    "since": 1700000000.0,
     "reason": "something_new"
    },
    "where": null,

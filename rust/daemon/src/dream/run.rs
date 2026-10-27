@@ -242,6 +242,10 @@ fn signed_out_remedy(
     // named by its own host, whatever `where_` says of the daemon.
     let place = match record.get("shim_host").and_then(Value::as_str) {
         Some(host) if !host.is_empty() => format!("the machine running the CLI shim ({host})"),
+        // `/health` carries only `shim_remote` (no host) for doctor.
+        _ if record.get("shim_remote") == Some(&Value::Bool(true)) => {
+            "the machine running the CLI shim, not the daemon's".to_string()
+        }
         _ => where_
             .filter(|w| !w.is_empty())
             .unwrap_or(DAEMON_MACHINE)

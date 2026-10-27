@@ -8,6 +8,6 @@
 - **Field plumbing.**
   - The CLI shims' `login_required` `/health` answer names its `provider` and OS `user`, to whoever can reach the shim (loopback or the Docker bridge by default).
   - The daemon carries `provider`, `shim_user` and `shim_host` in the stall record.
-  - The daemon's unauthenticated `/health` stall object carries the provider and a remote shim's host, never the user.
+  - The daemon's unauthenticated `/health` stall object carries the provider and, for a shim on another machine, `shim_remote: true`, never its host or the user.
 - **Faster recovery.** While a shim's cached health verdict is a sign-in failure, it re-checks every 30 seconds instead of every 5 minutes, so the notice clears soon after the user signs in. Other failures keep the 5-minute pace.
 - **Rust daemon.** It mirrors the stall record's fields, the signed-out and generic wording, the primary-mode identity probe and `stall_line`. Its session-start hook is being ported separately with this line's contract.

@@ -761,8 +761,10 @@ you work on.
     same.
   - The briefing, the board notice and the Console always use the generic
     words.
-  - `/health` is unauthenticated, so it carries the provider and a remote
-    shim's host but never the user.
+  - `/health` is unauthenticated, so it carries the provider and, for a
+    shim on another machine, only `"shim_remote": true`, never its host or
+    the user; doctor then says "the machine running the CLI shim, not the
+    daemon's".
 - **Recovery.** While the shim's cached verdict is a sign-in failure, it
   re-checks every 30 seconds, so the notice clears soon after you sign in.
   Other failures keep the 5-minute pace. The next sweep's dream then closes

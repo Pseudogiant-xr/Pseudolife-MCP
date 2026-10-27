@@ -2574,9 +2574,14 @@ def _signed_out_remedy(record: dict, reason: str, where: str | None) -> str | No
     serving = ", so the fallback is serving" if reason == "served_by_fallback" else ""
     # The sign-in lives where the shim runs: a shim on another machine is
     # named by its own host, whatever ``where`` says of the daemon.
+    # /health carries only ``shim_remote`` (no host) for doctor.
     shim_host = record.get("shim_host")
-    place = (f"the machine running the CLI shim ({shim_host})"
-             if isinstance(shim_host, str) and shim_host else where or DAEMON_MACHINE)
+    if isinstance(shim_host, str) and shim_host:
+        place = f"the machine running the CLI shim ({shim_host})"
+    elif record.get("shim_remote") is True:
+        place = "the machine running the CLI shim, not the daemon's"
+    else:
+        place = where or DAEMON_MACHINE
     return (f"the {_PROVIDER_NAMES[provider]} CLI is signed out on "
             f"{place}{serving}; sign it in there{as_user}: "
             f"{_PROVIDER_SIGN_IN[provider]}")
@@ -2589,8 +2594,14 @@ def signed_out_probe(cfg, result: dict) -> dict | None:
     builder's probe carries them. None otherwise, or when the answer names
     no provider."""
     err = result.get("extractor_error") or {}
-    if (not result.get("extractor_failed") or result.get("hold_phase") == "write"
-            or err.get("reason") != "login_expired"):
+    pulled = result.get("pulled") or 0
+    # The tracker's failure rule: a held extraction (not a write hold), or a
+    # run whose per-memory retry set aside every memory it pulled.
+    if result.get("extractor_failed"):
+        failed = result.get("hold_phase") != "write"
+    else:
+        failed = pulled > 0 and (result.get("quarantined") or 0) >= pulled
+    if not failed or err.get("reason") != "login_expired":
         return None
     url = resolve_endpoints(cfg)["primary_url"]
     cause = probe_endpoint_cause(url) if url else None

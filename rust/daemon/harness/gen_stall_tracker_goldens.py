@@ -161,6 +161,9 @@ LINE_RECORDS = [
     ({"since": 1700000000.0, "reason": "login_expired", "provider": "claude",
       "shim_user": "svc", "shim_host": "gpu-box.example"},
      "the machine running the Pseudolife daemon (box.example)"),
+    # doctor's record from /health: a remote shim without its host.
+    ({"since": 1700000000.0, "reason": "login_expired", "provider": "codex",
+      "shim_remote": True}, None),
     ({"since": 1700000000.0, "reason": "something_new"}, None),
     ({}, None),
 ]

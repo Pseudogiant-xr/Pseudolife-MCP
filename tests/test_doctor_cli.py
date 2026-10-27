@@ -479,3 +479,10 @@ def test_doctor_reports_dream_health(monkeypatch, capsys):
         doctor_cli.run_doctor()
     report = json.loads(capsys.readouterr().out)
     assert "Claude Code CLI is signed out on the machine running the Pseudolife daemon" in report["dreams"]
+
+
+def test_doctor_says_a_remote_shim_without_its_host():
+    health = {"status": "ok", "extractor": "stalled", "stall": {
+        **_SIGNED_OUT_HEALTH["stall"], "shim_remote": True}}
+    line = doctor_cli.dream_health_line(health, "http://box.example:8765")
+    assert "signed out on the machine running the CLI shim, not the daemon's" in line

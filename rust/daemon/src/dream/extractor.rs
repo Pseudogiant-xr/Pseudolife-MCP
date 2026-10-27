@@ -2107,16 +2107,27 @@ pub async fn signed_out_probe(
     cfg: &DreamConfig,
     result: &Map<String, Value>,
 ) -> Option<PrimaryProbe> {
-    let failed = result
+    // The tracker's failure rule: a held extraction (not a write hold), or
+    // a run whose per-memory retry set aside every memory it pulled.
+    let held = result
         .get("extractor_failed")
         .is_some_and(|v| v.as_bool().unwrap_or(false) || v.as_i64().is_some_and(|n| n != 0));
-    let write_hold = result.get("hold_phase").and_then(Value::as_str) == Some("write");
+    let pulled = result.get("pulled").and_then(Value::as_i64).unwrap_or(0);
+    let quarantined = result
+        .get("quarantined")
+        .and_then(Value::as_i64)
+        .unwrap_or(0);
+    let failed = if held {
+        result.get("hold_phase").and_then(Value::as_str) != Some("write")
+    } else {
+        pulled > 0 && quarantined >= pulled
+    };
     let reason = result
         .get("extractor_error")
         .and_then(Value::as_object)
         .and_then(|e| e.get("reason"))
         .and_then(Value::as_str);
-    if !failed || write_hold || reason != Some("login_expired") {
+    if !failed || reason != Some("login_expired") {
         return None;
     }
     let r = resolve_endpoints(cfg);
