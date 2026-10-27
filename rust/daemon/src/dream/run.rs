@@ -26,7 +26,7 @@ use std::sync::{Arc, Mutex};
 
 use serde_json::{Map, Value, json};
 
-use super::extractor::{Claim, Event, ExtractFailure, Extracted, Extractor};
+use super::extractor::{Claim, Event, ExtractFailure, Extracted, Extractor, PrimaryProbe};
 use super::gates;
 use crate::config::DreamConfig;
 use crate::episodes::Caller;
@@ -273,19 +273,31 @@ impl StallTracker {
         self.stall = Some(m);
     }
 
-    /// `record(result, served_by_fallback=...)`.
-    pub fn record(&mut self, result: &Map<String, Value>, served_by_fallback: bool) {
-        self.record_at(result, served_by_fallback, now());
+    /// `record(result, served_by_fallback=..., primary_probe=...)`.
+    pub fn record(
+        &mut self,
+        result: &Map<String, Value>,
+        served_by_fallback: bool,
+        primary_probe: Option<&PrimaryProbe>,
+    ) {
+        self.record_at(result, served_by_fallback, primary_probe, now());
     }
 
-    fn record_at(&mut self, result: &Map<String, Value>, served_by_fallback: bool, now: f64) {
+    fn record_at(
+        &mut self,
+        result: &Map<String, Value>,
+        served_by_fallback: bool,
+        primary_probe: Option<&PrimaryProbe>,
+        now: f64,
+    ) {
         if truthy(result.get("skipped")) || truthy(result.get("error")) {
             return;
         }
         let pulled = result.get("pulled").and_then(Value::as_i64).unwrap_or(0);
         let err = result.get("extractor_error").and_then(Value::as_object);
         let field = |k: &str| err.and_then(|e| e.get(k));
-        let (reason, error) = if truthy(result.get("extractor_failed")) {
+        let mut failed = true;
+        let (mut reason, mut error) = if truthy(result.get("extractor_failed")) {
             if result.get("hold_phase").and_then(Value::as_str) == Some("write") {
                 return;
             }
@@ -305,9 +317,13 @@ impl StallTracker {
                 text_or(field("error"), "every pulled memory failed extraction"),
             )
         } else if served_by_fallback {
+            failed = false;
             (
                 "served_by_fallback".to_string(),
-                "primary health probe failed".to_string(),
+                match primary_probe {
+                    Some(p) => format!("primary {}", p.error),
+                    None => "primary health probe failed".to_string(),
+                },
             )
         } else if pulled > 0 {
             self.succeed(now);
@@ -315,6 +331,15 @@ impl StallTracker {
         } else {
             return;
         };
+        if let (true, Some(p)) = (failed, primary_probe) {
+            if served_by_fallback {
+                // The fallback failed too: the primary's cause stays named.
+                reason = p.reason.clone();
+                error = format!("primary {}; fallback {error}", p.error);
+            } else if !p.fallback_resolves {
+                error = format!("primary {error}; fallback does not resolve");
+            }
+        }
         self.failures += 1;
         if self.first_failure_at.is_none() {
             self.first_failure_at = Some(now);
@@ -1743,7 +1768,7 @@ pub async fn run_auto(
     limit: Option<i64>,
 ) -> Result<Value, ToolError> {
     let cfg = &svc.config.dream;
-    let (extractor, which) = match super::extractor::build_extractor_with_fallback(cfg).await {
+    let (extractor, which, probe) = match super::extractor::build_extractor_with_fallback(cfg).await {
         Ok(x) => x,
         Err(e) => return Ok(json!({"error": e, "pulled": 0, "claims": 0})),
     };
@@ -1762,7 +1787,7 @@ pub async fn run_auto(
         .stall
         .lock()
         .expect("stall tracker")
-        .record(&result, which == "fallback" && !forced);
+        .record(&result, which == "fallback" && !forced, probe.as_ref());
     super::ticks::stall_notify(svc, &ready).await;
     Ok(Value::Object(result))
 }

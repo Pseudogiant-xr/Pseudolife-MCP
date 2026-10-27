@@ -6,7 +6,7 @@
 
 use serde_json::{Map, Value};
 
-use super::{StallTracker, minute_at_offset, stall_notice_text_with};
+use super::{PrimaryProbe, StallTracker, minute_at_offset, stall_notice_text_with};
 
 const GOLDEN: &str = include_str!("../../harness/goldens/stall-tracker.json");
 
@@ -41,7 +41,12 @@ fn every_sequence_matches_python_step_by_step() {
             let args = step["args"].as_array().unwrap();
             let got = match step["op"].as_str().unwrap() {
                 "record" => {
-                    t.record_at(&obj(&args[0]), args[1].as_bool().unwrap(), now);
+                    let probe = args.get(2).filter(|p| !p.is_null()).map(|p| PrimaryProbe {
+                        reason: p["reason"].as_str().unwrap().to_string(),
+                        error: p["error"].as_str().unwrap().to_string(),
+                        fallback_resolves: p["fallback_resolves"].as_bool().unwrap(),
+                    });
+                    t.record_at(&obj(&args[0]), args[1].as_bool().unwrap(), probe.as_ref(), now);
                     Value::Null
                 }
                 "overdue" => {
