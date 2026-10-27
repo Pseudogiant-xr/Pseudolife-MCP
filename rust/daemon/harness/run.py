@@ -354,6 +354,11 @@ def normalize_response(resp: dict, path: str, declared: list[str], *, golden: bo
         resp["json"] = normalize_health(resp["json"], declared, golden=golden)
     if urllib.parse.unquote(path.split("?")[0]) == "/api/search" and isinstance(resp.get("json"), dict):
         resp["json"] = normalize_search(resp["json"])
+    if (urllib.parse.unquote(path.split("?")[0]) == "/api/config" and isinstance(resp.get("json"), dict)
+            and isinstance(resp["json"].get("config_path"), str)
+            and re.fullmatch(r".+[\\/]data[\\/]config\.yaml", resp["json"]["config_path"])):
+        # Each side's own home (a recorded golden's is scrubbed).
+        resp["json"]["config_path"] = "<home>/data/config.yaml"
     if "json" in resp and isinstance(resp["json"], dict) and resp["status"] in (400, 500):
         err = resp["json"].get("error")
         if isinstance(err, str) and err.startswith("memory bank not ready: "):
@@ -598,7 +603,7 @@ def gate_cases(auth: tuple[str, str] | None) -> list[dict]:
         case("api agents coordination view", "GET", "/api/agents?view=coordination", a),
         case("api agents coordination view POST", "POST", "/api/agents?view=coordination", a),
         case("api known GET (not ported)", "GET", "/api/stats", a, declared="W2-D: stats"),
-        case("api config GET (not ported)", "GET", "/api/config", a, declared="W2-D: config read"),
+        case("api config GET", "GET", "/api/config", a),
         case("hook unknown under /api/hook", "GET", "/api/hook/nope", a),
         case("hook memory-changes wrong verb", "POST", "/api/hook/memory-changes", a),
         case("hook session-end wrong verb", "GET", "/api/hook/session-end", a),

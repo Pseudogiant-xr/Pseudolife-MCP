@@ -11,6 +11,7 @@ mod background_sessions;
 mod bank;
 mod board;
 mod config;
+mod config_io;
 mod consolidation_tools;
 mod contradiction;
 mod correction_tools;

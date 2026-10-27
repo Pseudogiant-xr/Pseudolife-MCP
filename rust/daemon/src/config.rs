@@ -11,7 +11,7 @@
 // Wired by main in W1-A.
 #![allow(dead_code)]
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::fmt;
 use std::path::{Path, PathBuf};
 
@@ -32,6 +32,10 @@ pub struct Config {
     pub coordination: CoordinationConfig,
     pub updates: UpdatesConfig,
     pub dream: DreamConfig,
+    /// The dotted leaves config.yaml set when it was loaded, as YAML typed
+    /// them (`_user_yaml_leaves`, with values). Python's dataclasses keep a
+    /// set value uncoerced, and `/api/config` serves the running value.
+    pub user_leaves: JsonMap<String, Value>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1000,6 +1004,7 @@ impl Default for Config {
             updates: UpdatesConfig::default(),
             dream: DreamConfig::default(),
             time: TimeConfig::default(),
+            user_leaves: JsonMap::new(),
         }
     }
 }
@@ -1194,7 +1199,7 @@ impl DaemonEnv {
 /// keys (`<<`) are applied when the mapping closes, as PyYAML's
 /// `flatten_mapping` does.
 #[derive(Debug, Clone, PartialEq)]
-enum Node {
+pub(crate) enum Node {
     Null,
     Bool(bool),
     Int(i64),
@@ -1235,7 +1240,7 @@ impl Node {
 }
 
 /// A YAML value as JSON, for a setting served as configured.
-fn node_json(node: &Node) -> Value {
+pub(crate) fn node_json(node: &Node) -> Value {
     match node {
         Node::Null => Value::Null,
         Node::Bool(b) => Value::from(*b),
@@ -1514,7 +1519,7 @@ fn non_printable(c: char) -> bool {
 /// `yaml.safe_load(text)`: `None` for an empty stream, refused on a syntax
 /// error, more than one document, an unknown tag or a non-printable
 /// character.
-fn safe_load(text: &str) -> Result<Option<Node>, String> {
+pub(crate) fn safe_load(text: &str) -> Result<Option<Node>, String> {
     if let Some((offset, c)) = text.char_indices().find(|(_, c)| non_printable(*c)) {
         return Err(format!(
             "unacceptable character #x{:04x} at offset {offset}",
@@ -1537,9 +1542,9 @@ fn safe_load(text: &str) -> Result<Option<Node>, String> {
 }
 
 /// `_user_yaml_leaves`: dotted leaf keys of the document (string keys only;
-/// no other key type can spell a key the overlay tests).
-fn yaml_leaves(node: &Node) -> HashSet<String> {
-    fn walk(node: &Node, prefix: &str, out: &mut HashSet<String>) {
+/// no other key type can spell a key the overlay tests), with their values.
+fn yaml_leaves(node: &Node) -> JsonMap<String, Value> {
+    fn walk(node: &Node, prefix: &str, out: &mut JsonMap<String, Value>) {
         match node {
             Node::Map(entries) if !entries.is_empty() => {
                 for (k, v) in entries {
@@ -1549,12 +1554,12 @@ fn yaml_leaves(node: &Node) -> HashSet<String> {
                 }
             }
             _ if !prefix.is_empty() => {
-                out.insert(prefix[..prefix.len() - 1].to_string());
+                out.insert(prefix[..prefix.len() - 1].to_string(), node_json(node));
             }
             _ => {}
         }
     }
-    let mut out = HashSet::new();
+    let mut out = JsonMap::new();
     walk(node, "", &mut out);
     out
 }
@@ -1783,7 +1788,7 @@ fn load_str(text: &str) -> Result<Config, ConfigError> {
         }
     };
     let leaves = yaml_leaves(&raw);
-    let user_set = |key: &str| leaves.contains(key);
+    let user_set = |key: &str| leaves.contains_key(key);
 
     let mut config = Config::default();
 
@@ -2297,6 +2302,7 @@ fn load_str(text: &str) -> Result<Config, ConfigError> {
     {
         config.time.relative_age = v.truthy();
     }
+    config.user_leaves = leaves;
     Ok(config)
 }
 
@@ -3014,7 +3020,11 @@ mod tests {
             "1: 2\n",
             "memory_policy:\n",
         ] {
-            assert_eq!(cfg(text), Config::default(), "{text:?}");
+            let loaded = Config {
+                user_leaves: JsonMap::new(),
+                ..cfg(text)
+            };
+            assert_eq!(loaded, Config::default(), "{text:?}");
         }
     }
 
