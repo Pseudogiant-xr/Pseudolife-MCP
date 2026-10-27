@@ -95,6 +95,17 @@ pub struct RunState {
     pub(super) lesson_selected: Mutex<Option<(f64, i64)>>,
 }
 
+impl RunState {
+    /// `_rehydrate_if_bank_changed_hands` resets `_dream_batch_failures`
+    /// (service.py:1435) and keeps the rest of the dream's process state.
+    pub fn forget_batch_failures(&self) {
+        self.batch_failures
+            .lock()
+            .expect("batch failures lock")
+            .clear();
+    }
+}
+
 /// Releases the single-flight guard however the pass ends.
 struct Flight<'a>(&'a AtomicBool);
 

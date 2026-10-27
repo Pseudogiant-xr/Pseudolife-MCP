@@ -584,20 +584,45 @@ def _edits(a: str, b: str) -> int:
     return row[-1]
 
 
-def reserved_name(value) -> bool:
-    """Whether ``value`` reads as a reserved word (``RESERVED_NAMES``): its
-    skeleton contains or comes near one, as ``NAME_RULES`` says."""
+def reserved_word(value) -> tuple[str, bool] | None:
+    """The reserved word (``RESERVED_NAMES``) ``value`` reads as, if any, and
+    whether its skeleton contains it (else it spells it, within the rule's
+    edits), as ``NAME_RULES`` says."""
     if not isinstance(value, str):
-        return False
+        return None
     skeleton = _skeleton(value)
     for word, rule in NAME_RULES.items():
         if rule["contained"] and word in skeleton:
-            return True
+            return word, True
         # Lengths further apart than the allowance cannot be within it.
         if (abs(len(skeleton) - len(word)) <= rule["edits"]
                 and _edits(skeleton, word) <= rule["edits"]):
-            return True
-    return False
+            return word, False
+    return None
+
+
+def reserved_name(value) -> bool:
+    """Whether ``value`` reads as a reserved word."""
+    return reserved_word(value) is not None
+
+
+def reserved_detail(field: str, word: str, contained: bool) -> str:
+    """Why a ``field`` (``name`` or ``label``) reading as ``word`` is refused,
+    and what to do instead: the refusal's public detail, worded for the rule
+    that matched (``reserved_word``). It names the reserved word, never the
+    refused text."""
+    ignoring = "ignoring case, spacing, punctuation and look-alike letters"
+    if contained:
+        return (f"the {field} contains the reserved word '{word}' ({ignoring}); "
+                f"choose a {field} without it")
+    near = ", within one letter" if NAME_RULES[word]["edits"] else ""
+    return (f"the {field} reads as the reserved word '{word}' ({ignoring}{near}); "
+            f"choose another {field}")
+
+
+# A client name's other refusal, beside the reserved words.
+CONTROL_NAME_DETAIL = ("the name holds a control or format character (Unicode category C, "
+                       "such as a zero-width or bidi mark); remove it")
 
 
 def message_origin(row) -> dict:
@@ -1417,9 +1442,11 @@ class CoordinationStore:
         2026-10-04 review); a reserved sender keeps its own name. Checked
         only when a label is set, so an older row keeps working."""
         label = fields.get("label")
-        if reserved_name(label) and not (
+        reserved = reserved_word(label)
+        if reserved is not None and not (
                 principal in RESERVED_SENDERS and label.strip().casefold() == principal):
-            raise CoordinationError("invalid_label")
+            raise CoordinationError("invalid_label", reserved_detail("label", *reserved),
+                                    param="label")
 
     @staticmethod
     def _check_name(name):
@@ -1431,8 +1458,12 @@ class CoordinationStore:
         reserved-word check reads past them, so one could make a name
         render as a reserved word (review of 2026-10-05)."""
         _string(name, MAX_NAME, "name")
-        if any(unicodedata.category(c)[0] == "C" for c in name) or reserved_name(name):
-            raise CoordinationError("invalid_name")
+        if any(unicodedata.category(c)[0] == "C" for c in name):
+            raise CoordinationError("invalid_name", CONTROL_NAME_DETAIL, param="name")
+        reserved = reserved_word(name)
+        if reserved is not None:
+            raise CoordinationError("invalid_name", reserved_detail("name", *reserved),
+                                    param="name")
         _refuse_secret(name, "name")
         return name.strip()
 
