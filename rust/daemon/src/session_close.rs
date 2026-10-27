@@ -33,7 +33,7 @@ impl EpisodeLog {
 }
 
 /// `_episode_entry_counts`: resident entries per episode, digests excluded.
-fn entry_counts(ready: &Ready) -> HashMap<String, usize> {
+pub(crate) fn entry_counts(ready: &Ready) -> HashMap<String, usize> {
     let bank = ready.bank.read().expect("bank lock");
     let mut counts = HashMap::new();
     for e in &bank.entries {

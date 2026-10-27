@@ -144,20 +144,72 @@ pub(crate) async fn route(
                 params.get("source").map(String::as_str),
             ))
         }
-        // session-start: its body (the briefing) belongs to a later slice.
+        // The plugin's SessionStart context; 200 always. The policy text is
+        // public; an unauthorized caller's session id and source are dropped
+        // (they could otherwise mint or hijack the active-session pointer),
+        // while the version handshake still reaches it.
+        "/api/hook/session-start" => {
+            let principal = match resolve(app, h) {
+                Resolved::Principal(name) => Some(name),
+                Resolved::None | Resolved::Unavailable => None,
+            };
+            let params = parse_query(raw_query);
+            let get = |k: &str| params.get(k).map(String::as_str);
+            let authorized = principal.is_some();
+            let text = crate::session_hook::hook_session_start(
+                app,
+                crate::session_hook::SessionStartQuery {
+                    principal: principal.as_deref(),
+                    session_id: get("session_id").filter(|_| authorized),
+                    source: get("source").filter(|_| authorized),
+                    plugin_version: get("plugin_version"),
+                    plugin_hooks_digest: get("plugin_hooks_digest"),
+                    launcher: get("launcher"),
+                },
+            )
+            .await;
+            hook_text(&text)
+        }
         _ => not_implemented(path),
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::http::tests::{assert_declared_501, authed_request, mcp_refusal_app};
+    use crate::http::tests::{authed_request, mcp_refusal_app};
 
-    /// The hook answers still owned by later slices.
+    async fn text_of(path: &str) -> (u16, String) {
+        let response = crate::http::handle(
+            axum::extract::State(mcp_refusal_app()),
+            authed_request("GET", path, None),
+        )
+        .await;
+        let status = response.status().as_u16();
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        (status, String::from_utf8(body.to_vec()).unwrap())
+    }
+
+    /// With no bank to open, session-start still answers 200 with the
+    /// public policy text, after any version notice, as Python's raised
+    /// reads leave it.
     #[tokio::test]
-    async fn unserved_hooks_answer_the_declared_501() {
-        let app = mcp_refusal_app();
-        assert_declared_501(&app, authed_request("GET", "/api/hook/session-start", None)).await;
+    async fn session_start_without_a_bank_serves_the_policy_text() {
+        let (status, body) = text_of("/api/hook/session-start?session_id=s&source=startup").await;
+        assert_eq!(status, 200);
+        assert!(body.starts_with("## Memory at session start\n"), "{body}");
+        let (_, body) = text_of("/api/hook/session-start?plugin_version=0.0.1").await;
+        assert!(
+            body.starts_with("Pseudolife-MCP: plugin 0.0.1 and daemon "),
+            "{body}"
+        );
+        assert!(body.contains("\n\n## Memory at session start\n"), "{body}");
+        let (_, body) = text_of("/api/hook/session-start?session_id=s&source=resume").await;
+        assert!(
+            body.starts_with("Pseudolife-MCP: resumed session, so the startup memory briefing"),
+            "{body}"
+        );
     }
 
     /// With the default `compact` policy the separate hook serves nothing.

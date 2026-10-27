@@ -1,25 +1,44 @@
-"""Hook scenarios for the write-path harness (``w2e.py``): the SessionEnd
-close (``POST /api/hook/session-end``) and the separate memory-policy hook
-(``GET /api/hook/memory-policy``), CUTOVER B3.
+"""Hook scenarios for the write-path harness (``w2e.py``): the SessionStart
+hook (``GET /api/hook/session-start``), the SessionEnd close (``POST
+/api/hook/session-end``), the separate memory-policy hook (``GET
+/api/hook/memory-policy``) and the per-turn memory-change note (``GET
+/api/hook/memory-changes``), CUTOVER B3.
 
 ``w2e.py`` registers ``register(sys.modules[__name__])`` and dispatches the
 ``hook`` op here: one request with the bearer unless ``"auth": false``,
 answered as ``{"isError", "status", "headers", "value"}``, so the status,
 the content type and cache policy, and the body (JSON by value, text by
 bytes) are all compared. ``"@root:<key>:<n>"`` in a JSON body resolves per
-side as ``w2e.resolve_args`` does.
+side as ``w2e.resolve_args`` does. In a session-start answer the episode
+handle (12 hex characters of a random id) is named by the episode it
+resolves to on that side, so the two answers compare by what they point at.
+The ``write_file`` home op writes a file into each side's data directory
+(the daemon-side ``hook-instructions.md``).
 """
 from __future__ import annotations
 
 import json
 import re
 import time
+import tomllib
+from pathlib import Path
 
 # Deliberate breaks (``--features mutants``) these scenarios must catch.
 MUTANTS = ["session-end-no-client-stamp", "session-end-keeps-empty",
            "session-end-clears-foreign", "session-end-no-dream", "policy-arm-shifted",
            "changes-counts-own-session", "changes-from-open-leaf",
-           "changes-cursor-echoes-since", "changes-counts-superseded"]
+           "changes-cursor-echoes-since", "changes-counts-superseded",
+           "session-start-no-registration", "session-start-no-pointer",
+           "session-start-no-briefing", "briefing-no-avoid-first",
+           "briefing-recap-includes-open"]
+
+HOME_OPS = ("write_file",)
+
+# Both daemons report the package version (Python from its installed
+# metadata, Rust from its crate); the version notices are asked about it.
+VERSION = tomllib.loads(
+    (Path(__file__).resolve().parents[3] / "pyproject.toml").read_text(encoding="utf-8")
+)["project"]["version"]
 
 # The session-end dream: everything but extraction off, and no sweep dream,
 # so only the close's own trigger can dream.
@@ -84,9 +103,56 @@ def run(op: dict, port: int, dsn: str, harness) -> dict:
     value = r.get("json", r.get("bytes"))
     if op.get("cursor"):
         value = _cursor(value, port, before, after)
+    if op.get("handles"):
+        value = _handles(value, dsn)
     return {"isError": r["status"] != 200, "status": r["status"],
             "headers": {k: r["headers"].get(k) for k in _HEADERS},
             "value": value}
+
+
+# The session-start advertisement's handle: the first 12 characters of the
+# episode id the registration returned.
+_HANDLE = re.compile(r'Session episode: ([0-9a-f]{12}) — pass episode="([0-9a-f]{12})"')
+
+
+def _handles(value, dsn: str):
+    """Name each advertised handle by the episode it resolves to on this
+    side: its session key and, for a sub-episode, its title (a root's title
+    is the minute it opened). A handle that resolves to no episode, or to
+    more than one, stays visible as a difference."""
+    if not isinstance(value, str):
+        return value
+    import psycopg
+
+    def name(m):
+        if m.group(1) != m.group(2):
+            return m.group(0) + " <handles disagree>"
+        with psycopg.connect(dsn, autocommit=True) as conn:
+            rows = conn.execute(
+                "SELECT session_key, parent_id IS NULL, title FROM episodes WHERE id LIKE %s",
+                (m.group(1) + "%",)).fetchall()
+        if len(rows) != 1:
+            return f"{m.group(0)} <{len(rows)} episodes>"
+        key, root, title = rows[0]
+        label = f"<episode {key}: {'root' if root else title}>"
+        return f'Session episode: {label} — pass episode="{label}"'
+
+    return _HANDLE.sub(name, value)
+
+
+def home_op(op: dict, home: Path) -> dict:
+    """``write_file``: ``op["text"]`` (or nothing, to remove it) as
+    ``op["name"]`` in the side's data directory."""
+    path = home / "data" / op["name"]
+    if op.get("text") is None:
+        path.unlink(missing_ok=True)
+    else:
+        path.write_bytes(op["text"].encode("utf-8"))
+    return {"isError": False, "value": None}
+
+
+def write_file(name: str, text: str | None) -> dict:
+    return {"op": "write_file", "name": name, "text": text}
 
 
 def hook(method: str, path: str, body: dict | None = None, auth: bool = True) -> dict:
@@ -102,6 +168,11 @@ def end(session_id) -> dict:
 
 def policy(query: str = "", auth: bool = True) -> dict:
     return hook("GET", "/api/hook/memory-policy" + (f"?{query}" if query else ""), auth=auth)
+
+
+def session_start(query: str = "", auth: bool = True) -> dict:
+    return {**hook("GET", "/api/hook/session-start" + (f"?{query}" if query else ""), auth=auth),
+            "handles": True}
 
 
 def changes(query: str = "", auth: bool = True) -> dict:
@@ -302,4 +373,142 @@ def register(h) -> dict[str, dict]:
                 changes("session_id=mc-a", auth=False),
             ],
         },
+        # The SessionStart hook over a bank with lessons (avoid-first, one
+        # stale against a newer fact, one superseded), world facts (one
+        # stale), a closed session, a session the reaper closed a minute
+        # ago with a session digest, and a merge proposal pending for 30
+        # days with the judges off. Each answer is compared byte for byte
+        # (the handle by the episode it names), and the registration, the
+        # pointer and the reopened root by bank state.
+        "hook-session-start": {
+            "config": START_CONFIG,
+            "seed": [
+                h.store("A plain note the seeded lessons copy their embedding from."),
+                h.relate("Alpha Service", "depends-on", "Beta Service"),
+                h.fact("Deploy Pipeline", "owner", "the platform team"),
+                *START_WORLD(h),
+                seed_start("ss-old"),
+                h.store("A note in the old session about the release train.", [h.sess("ss-old")]),
+                h.store("A second note in the old session.", [h.sess("ss-old")]),
+                {"op": "http", "method": "POST", "path": "/api/hook/session-end",
+                 "body": {"session_id": "ss-old"}},
+                seed_start("ss-r"),
+                h.store("A note in session R about the hook port.", [h.sess("ss-r")]),
+                *[h.sql(q, after_stop=True) for q in START_SQL],
+            ],
+            "ops": [
+                # A fresh start: the hooks notice (same version, other
+                # hooks), the review-queue line, the handle, the compact
+                # policy and the briefing (lessons, the recap of R with its
+                # digest, world facts); the session registers and takes
+                # the pointer.
+                session_start(f"session_id=ss-a&source=startup&plugin_version={VERSION}"
+                              f"&plugin_hooks_digest={'0' * 64}"),
+                # A resume: the handle again (the same root), a pointer line,
+                # no review-queue line; the registration appends its start.
+                session_start("session_id=ss-a&source=resume"),
+                # A compaction from inside a sub-task: the handle names the
+                # open leaf, and the daemon-side instructions follow.
+                h.ep_start("ss-a sub-task", [h.sess("ss-a")]),
+                write_file("hook-instructions.md", CUSTOM_SHORT),
+                session_start("session_id=ss-a&source=compact"),
+                # A new session with oversized instructions: whole paragraphs
+                # within their share, then the partial warning.
+                write_file("hook-instructions.md", CUSTOM_LONG),
+                session_start("session_id=ss-b&source=startup"),
+                write_file("hook-instructions.md", None),
+                # The reaped session comes back: its root reopens, its
+                # registration's close clears, and the recap moves to the
+                # old session.
+                session_start("session_id=ss-r&source=startup"),
+                # Version notices: plugin older (and an unauthorized caller,
+                # whose session id is dropped: nothing registers), newer
+                # with a launcher path to quote, and equal by number.
+                session_start("session_id=ss-z&plugin_version=0.1.0", auth=False),
+                session_start("plugin_version=99.0.0"
+                              "&launcher=C:/Program%20Files/pl/pseudolife-mcp.exe"),
+                session_start(f"plugin_version={VERSION}.dev1&launcher=relative/pseudolife-mcp"),
+                # Authorized with no session id: nothing registers.
+                session_start("source=startup"),
+                h.ep_summary("@root:ss-a:32"),
+            ],
+        },
+        # A cold bank and the A/B arms: sess-a gets compact (policy and
+        # onboarding), sess-b full_separate_hook (onboarding only), sess-c
+        # none (the handle alone). Each registration records its variant.
+        "hook-session-start-cold": {
+            "config": ("memory_policy:\n  variant: compact\n"
+                       "  ab_arms: [none, compact, full_separate_hook]\n"),
+            "seed": [],
+            "ops": [
+                session_start("session_id=sess-a&source=startup"),
+                session_start("session_id=sess-b&source=startup"),
+                session_start("session_id=sess-c&source=startup"),
+                session_start("session_id=sess-c&source=compact"),
+            ],
+        },
     }
+
+
+START_CONFIG = ("memory:\n  dream:\n    enabled: false\n    extractor_mode: fallback\n"
+                "  deep_dream:\n    judges_enabled: false\n    review_queue_alert_pending: 1\n")
+
+
+def START_WORLD(h) -> list[dict]:  # noqa: N802 (a seed list built with w2e's helpers)
+    return [
+        h.world_set("Rust", "latest stable version", "1.91.0", confidence=0.9,
+                    source_url="https://blog.rust-lang.org/2026/09/18/Rust-1.91.0/",
+                    freshness_class="slow"),
+        h.world_set("PostgreSQL", "license", "PostgreSQL License", confidence=0.95,
+                    freshness_class="evergreen",
+                    source_url="https://www.postgresql.org/about/licence/"),
+        h.world_set("Python", "latest version", "3.13.0", source_url="https://www.python.org/",
+                    retrieved_at=1.0),
+        h.world_set("Node.js", "active LTS", "22", confidence=0.5,
+                    source_url="https://nodejs.org/en/about/previous-releases"),
+    ]
+
+
+def _lesson_sql(task: str, aspect: str, text: str, pol: str, outcome: str, status: str,
+                at: int) -> str:
+    return ("INSERT INTO lessons (entity, attribute, entity_norm, attribute_norm, value, "
+            "polarity, outcome, status, confidence, origin, support, provenance, "
+            "asserted_at, last_confirmed, embedding) SELECT "
+            f"'{task}', '{aspect}', '{task.lower()}', '{aspect}', '{text}', '{pol}', "
+            f"'{outcome}', '{status}', 0.8, 'agent', '[]', '[]', {at}, {at}, embedding "
+            "FROM entries WHERE text = 'A plain note the seeded lessons copy their embedding from.'")
+
+
+START_SQL = [
+    # Sorted by task: Benchmarks, Code Review, Deploy Pipeline (avoid, and
+    # stale: its fact is newer), Release (a correction); avoid-first keeps
+    # Deploy Pipeline, Release, Benchmarks.
+    _lesson_sql("Deploy Pipeline", "pitfall", "Avoid deploying on a stale cache.", "-",
+                "failure", "current", 1700000000),
+    _lesson_sql("Code Review", "approach", "Read the Python oracle before signing off.", "+",
+                "success", "current", 1700000100),
+    _lesson_sql("Release", "approach", "Cut the release from master.", "+", "correction",
+                "current", 1700000200),
+    _lesson_sql("Benchmarks", "approach", "Pin the interpreter before recording goldens.",
+                "+", "success", "current", 1700000300),
+    _lesson_sql("Archive", "approach", "A superseded lesson.", "+", "success", "superseded",
+                1700000400),
+    # The reaper closed R a minute ago (inside the resume window).
+    "UPDATE episodes SET ended_at = extract(epoch from now()) - 60 "
+    "WHERE session_key = 'ss-r' AND ended_at IS NULL",
+    "UPDATE client_sessions SET ended_at = extract(epoch from now()) - 60, "
+    "end_reason = 'idle' WHERE session_key = 'ss-r'",
+    # R's session digest: a header line, then the body the recap shows.
+    "INSERT INTO entries (band, text, embedding, ts, source, episode_id, episode_title) "
+    "SELECT band, 'Session digest: ss-r' || chr(10) || 'Worked through the hook port "
+    "and its   harness.', embedding, ts + 1, 'digest', episode_id, episode_title "
+    "FROM entries WHERE text = 'A note in session R about the hook port.'",
+    # A merge proposal pending for 30 days.
+    "INSERT INTO entity_proposals (kind, entity_id, into_id, score, reason, status, "
+    "created_at) SELECT 'merge', a.id, b.id, 0.7, 'harness', 'pending', "
+    "extract(epoch from now()) - 30 * 86400 FROM entities a, entities b "
+    "WHERE a.display = 'Alpha Service' AND b.display = 'Beta Service'",
+]
+
+CUSTOM_SHORT = "Prefer small PRs.\n\nAlways cite the tested head."
+CUSTOM_LONG = "\n\n".join(f"Rule {i}: " + "keep this paragraph whole " * 12 for i in range(20))

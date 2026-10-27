@@ -678,7 +678,7 @@ class Tokens(Scenario):
             case("hook subagent unauthorized", "POST", "/api/hook/subagent"),
             case("hook session-end unauthorized", "POST", "/api/hook/session-end"),
             case("hook session-end over 16K", "POST", "/api/hook/session-end", [auth, ("Content-Type", "application/json")], b"{\"x\":\"" + b"a" * 17000 + b"\"}"),
-            case("hook session-start", "GET", "/api/hook/session-start", declared="W2-D/W1-B: briefing text"),
+            case("hook session-start", "GET", "/api/hook/session-start"),
             case("hook memory-changes authorized", "GET", "/api/hook/memory-changes", [auth]),
             case("pair valid shape, unknown code", "POST", "/api/pair", [("Content-Type", "application/json")],
                  json.dumps({"code": "ABCD-EFGH-JKMN", "token_sha256": "b" * 64}).encode(),

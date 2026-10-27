@@ -5813,6 +5813,7 @@ import w2e_hooks  # noqa: E402
 
 SCENARIOS.update(w2e_hooks.register(sys.modules[__name__]))
 MUTANTS += w2e_hooks.MUTANTS
+HOME_OPS += w2e_hooks.HOME_OPS
 
 
 def restart_sides(op: dict, scn: dict, procs: dict, homes: dict, envs: dict,
@@ -5883,6 +5884,8 @@ def home_op(op: dict, home: Path) -> dict:
     with its name's shape, the file count and every table's columns and rows
     (CLOCK columns null-or-not, rows as a sorted set); ``block_snapshots``:
     a plain file where the directory goes, so the snapshot write fails."""
+    if op["op"] in w2e_hooks.HOME_OPS:
+        return w2e_hooks.home_op(op, home)
     snaps = home / "data" / "graph_snapshots"
     if op["op"] == "block_snapshots":
         snaps.write_text("blocked", encoding="utf-8")

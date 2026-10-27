@@ -1,0 +1,7 @@
+Your memory bank is EMPTY — this session is where it starts. Seed it as you
+work: name the session (`memory_session_title`), store two or three durable
+facts about the current project (`memory_store`), set one canonical value
+you'll want back (`memory_fact_set`), and log the first `memory_outcome`
+when something works or fails. The dream consolidates whatever you capture
+into facts, a knowledge graph, and lessons — a seeded bank compounds; an
+empty one stays empty.

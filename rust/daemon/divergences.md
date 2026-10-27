@@ -12,7 +12,6 @@ side must answer exactly `501 {"error": "not_implemented", "path": P}`.
 |---|---|---|
 | Every Console route in `harness/goldens/routes.json` other than `GET /api/search`, the coordination view of `GET /api/agents`, `POST /api/daemon-notice` and `POST /api/episodes/rename`, `/merge` and `/prune`, after all gates | the handler's answer | W2-D (reads), W2-E (writes), W2-F (board, maintainer) |
 | Tokenless MCP Host/Origin rebinding policy | SDK transport policy before tool dispatch | **CUTOVER BLOCKER — W2-G**; tokenless MCP stays unmounted (501) until this gate is accepted. Authenticated bound-identity checks are served (spec.md M18) |
-| `/api/hook/session-start` (any caller) | briefing text | W2-D (B3) |
 | `POST /api/pair` after a valid body on an authenticated install | the 2-slot redemption gate (`RedemptionGate`, 429 `rate_limited`), invocation of the implemented `principals::redeem` store transaction plus immediate `PrincipalStore::add`, the failure-budget refund on success, and 503 `pairing_unavailable` on a store error | HTTP-SECURITY / CLI-PAIRING (the gate wraps only `principal_store.redeem`, `web/api.py:378-393`) |
 | Stored callers' POST `/api/config` and `/api/daemon-notice` gate | HTTP already returns 403 `operator_principal_required` by stored-name inference; method-aware source policy is implemented for HTTP-SECURITY to consume with `resolve_detailed` | HTTP-SECURITY |
 
@@ -219,7 +218,7 @@ existing gates. The route inventory is `harness/goldens/routes.json`.
 |---|---|---|
 | `w2d-console-projections` | `/api/stats`, `/api/overview`, `/api/facts`, `/api/facts/history`, `/api/world`, `/api/lessons`, `/api/episodes`, `/api/episodes/summary`, `/api/recent`, `/api/trace`, `/api/chain`, `/api/entry`, `/api/sources`, `/api/consolidation`, `/api/config` | Their service projections, parameter/error contracts and read side effects have no differential coverage in this search increment. W2-D follow-up must port and prove them individually; shared hydration alone is not their implementation. |
 | `w2d-standalone-canonical-search` | The `/api` entry points for cortex lookup/candidates, world search and lesson search | Only the cortex block attached to `/api/search` is wired over `/api`. The MCP tools (`memory_fact_get`, `memory_world_search`, `memory_lesson_search` with its telemetry) are served; the `/api` return shapes remain W2-D follow-up work. |
-| `w2d-briefing-hooks` | `/api/briefing`, `/api/hook/session-start` | Briefing composition and session-start registration/policy logging are not implemented here; depend on W2-E session writes. W2-D owns the projections, W2-E the writes. |
+| `w2d-briefing-hooks` | `/api/briefing` | The briefing composition is served (`briefing.rs`, which the session-start hook uses); the route answers 501 until the CLI batch B10f serves it over that composition, with the coordination block from the board. |
 | `w2d-recall-graph` | `/api/recall`; `/api/graph`, `/api/graph/projects`, `/api/graph/digest`, `/api/graph/communities`, `/api/graph/path`, `/api/graph/review`, `/api/graph/proposal-evidence`, `/api/wiki`, `/api/graph/entity-provenance`, `/api/curation/duplicates`, `/api/curation/retired`, `/api/dream/status` | The MCP tools `memory_recall` and `memory_graph` are served (spec "memory_recall over MCP", "memory_graph over MCP"); their REST routes, the review/curation recovery and the dream projections are later W3-H work. |
 | `w2d-board-projections` | `/api/agents` outside the coordination view, `/api/maintainer`, `/api/maintainer/sent`, `/api/maintainer/inbox` | Principal-scoped board/maintainer reads and their transaction boundaries belong to W2-F. The coordination view is supplied by W2-F in this batch; the other listed projections remain deferred. |
 | `w2d-tokenizer-runtime` | Other SentenceTransformers tokenization semantics | The inherited embedder follows the ST 5.3.0 / transformers 4.57.6 contract in `spec-embedding.md`. ST 5.7.0 changes padded-query cortex scores; supporting that runtime is deferred rather than changing the oracle output or score tolerance. Evidence records the actual runtime versions. |
@@ -500,11 +499,12 @@ goldens.
 
 ### Hooks (2026-10-25)
 
-The SessionEnd close, the memory-policy hook and the memory-change note (`routes/hook.rs`).
+The SessionStart hook, the SessionEnd close, the memory-policy hook and the memory-change note (`routes/hook.rs`).
 
 | Item | Python | Rust | Owner / why |
 |---|---|---|---|
 | The maintainer's delegate's reminder line on `memory-changes` (`?agent=`), after the cursor and any note | `coordination.delegate_reminder`: one line when the agent is the project's delegate | never added: the delegate lookup, and the coordination-start brief that uses it, are not ported | the board batch (B5); a non-delegate agent gets the same answer on both |
+| The hooks notice on session-start when `PSEUDOLIFE_PLUGIN_DIR` is unset | the daemon's hooks digest falls back to `plugin/` beside the package, so a plugin of the daemon's version with other hooks gets the notice | no digest, so no notice | inherits "Plugin dir for `hooks_digest`" above: the images set the variable, and so does a checkout run |
 
 ## Document store (B7): document_ingest and document_search (2026-10-25)
 
