@@ -596,11 +596,37 @@ impl Service {
     /// row is the one thing these saves add. A failed write is logged and
     /// retried by the next autosave, as in Python.
     async fn save_counters(&self, always: bool) -> Result<(), String> {
-        let inner = self.inner.lock().await;
+        let mut inner = self.inner.lock().await;
+        if inner.ready.is_none() {
+            return Ok(());
+        }
+        // Python's save heals a dead writer session inside its storage call
+        // (`PostgresStorage.conn`); here the save verifies it first. A lease
+        // another writer holds, or a bank that changed hands (whose stores
+        // the re-read drops), leaves nothing this process may save.
+        if let Err(e) = self.verify_writer_session(&mut inner).await {
+            self.counters_pending
+                .store(true, std::sync::atomic::Ordering::SeqCst);
+            eprintln!("counters save failed: {e}");
+            return Ok(());
+        }
+        self.rehydrate_if_bank_changed_hands(&mut inner);
         let Some(ready) = inner.ready.clone() else {
             return Ok(());
         };
         if crate::mutants::active("counters-save-off") {
+            return Ok(());
+        }
+        // A `weights.pt` awaiting the Python import: a fresh row would be
+        // newer than the file, and `_load_counters` keeps the newer row and
+        // sets the file aside, so writing one here would lose the counters
+        // the import exists to recover.
+        if self
+            .counters_import
+            .lock()
+            .expect("counters import lock")
+            .is_some()
+        {
             return Ok(());
         }
         let fp = crate::counters::fingerprint(&ready);

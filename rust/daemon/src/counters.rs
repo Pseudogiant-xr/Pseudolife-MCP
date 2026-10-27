@@ -189,8 +189,11 @@ pub async fn put(client: &Client, row: &Row) -> Result<(), tokio_postgres::Error
 /// A pre-v57 `weights.pt` (or its `.bak`) beside a bank with no counters
 /// row: the counters it holds would be lost if this daemon saved fresh ones
 /// over them. Python's `_load_counters` imports it; this daemon reports the
-/// step instead (D2, read as the maintainer's coordinator ruled on
-/// 2026-10-27). `None` once the row exists or no such file is there.
+/// step instead (D2, as the maintainer confirmed on 2026-10-27: cortex
+/// `rust-cutover-decision-D2 / weights-pt-import`). While it is pending
+/// nothing writes the row, since a fresh row would be newer than the file
+/// and the import would then keep it. `None` once the row exists or no such
+/// file is there.
 pub fn pending_import(save_dir: &Path, has_row: bool) -> Option<String> {
     if has_row {
         return None;
