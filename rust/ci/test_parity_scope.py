@@ -35,6 +35,9 @@ def test_an_unreadable_or_empty_pull_request_diff_runs_every_suite(files):
     # Python tests, the Console bundle, other workflows and docs: the floor.
     (["tests/test_shim.py", "CHANGELOG.md", "changelog.d/2026-10-20-x.md"], set()),
     (["frontend/src/App.tsx", ".github/workflows/ci.yml", "rust/PARITY.md", "rust/daemon/divergences.md"], set()),
+    # The producer census is data no harness reads; `ops/integrate.py build`
+    # commits it to every batch whose members change what it scans.
+    (["rust/producer-census.json"], set()),
     # A row, its golden or its spec reaches the shard that runs it.
     (["rust/cli_harness/rows/doctor.py"], {"w1c-doctor"}),
     (["rust/cli_harness/goldens/test_login.linux.json"], {"w1c-connection"}),
@@ -68,7 +71,7 @@ def test_a_pull_request_runs_the_floor_and_what_it_reaches(files, extra):
 @pytest.mark.parametrize("path", [
     ".github/workflows/rust.yml", "rust/ci/coverage_plan.py", "rust/ci/parity_scope.py",
     "rust/Cargo.lock", "rust/rust-toolchain.toml", "rust/shared/float_repr.rs",
-    "rust/daemon/harness/run.py", "rust/producer-census.json",
+    "rust/daemon/harness/run.py",
     "evals/rust_port/oracle_selection.py", "evals/rust_port/phase1_oracle.py",
     "pseudolife_memory/cli/doctor.py", "plugin/hooks/session-start.sh", "ops/Dockerfile.pg",
     "pyproject.toml", "uv.lock", "examples/hooks.py", "something/new.rs", "Rust/daemon/src/x.rs",
@@ -157,6 +160,44 @@ def test_is_docs_agrees_with_the_scope_jobs_regex_path_by_path():
     assert len(verdicts) == len(paths)
     for path, verdict in zip(paths, verdicts):
         assert parity_scope.is_docs(path) == (verdict == "docs"), path
+
+
+@pytest.mark.parametrize("files, rust", [
+    (["docs/guide/x.md"], "false"),
+    # ops/integrate.py build regenerates the census whenever a batch changes
+    # a scanned doc; that alone must not cost a docs-only batch the skip.
+    (["docs/guide/x.md", "rust/producer-census.json"], "false"),
+    # Near misses: the census alone, or beside code, still runs Rust.
+    (["rust/producer-census.json"], "true"),
+    (["docs/guide/x.md", "rust/producer-census.json", "rust/shim/src/main.rs"], "true"),
+    (["docs/guide/x.md", "rust/contract-inventory.json"], "true"),
+])
+def test_the_scope_job_skips_rust_for_docs_and_their_regenerated_census(tmp_path, files, rust):
+    # The scope step itself, run by pwsh on a pull request whose head commit
+    # changes `files`.
+    import os
+    import subprocess
+    step = next(s for s in raw_workflow()["jobs"]["scope"]["steps"] if s.get("id") == "scope")
+    def git(*args):
+        subprocess.run(["git", "-c", "user.name=Scope fixture", "-c", "user.email=scope@example.com",
+                        *args], cwd=tmp_path, check=True, capture_output=True)
+    git("init", "-q")
+    (tmp_path / "base.txt").write_text("base\n", encoding="utf-8")
+    git("add", "-A")
+    git("commit", "-qm", "base")
+    for path in files:
+        (tmp_path / path).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / path).write_text("changed\n", encoding="utf-8")
+    git("add", "-A")
+    git("commit", "-qm", "head")
+    output = tmp_path / "github-output.txt"
+    result = subprocess.run(["pwsh", "-NoProfile", "-NonInteractive", "-Command", step["run"]],
+                            cwd=tmp_path, capture_output=True, text=True,
+                            env=dict(os.environ, EVENT_NAME="pull_request",
+                                     HEAD_REF="integrate/2026-10-27-batch-1",
+                                     GITHUB_OUTPUT=str(output)))
+    assert result.returncode == 0, result.stderr
+    assert f"rust={rust}" in output.read_text(encoding="utf-8-sig").split()
 
 
 def test_the_documentation_rule_is_the_scope_jobs():
