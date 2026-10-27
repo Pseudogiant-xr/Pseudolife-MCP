@@ -66,7 +66,12 @@ pub async fn memory_changes_since(
         let bank = ready.bank.read().expect("bank lock");
         bank.entries
             .iter()
-            .filter(|e| e.source == "status" && e.superseded_at.is_none() && e.ts > since)
+            .filter(|e| {
+                e.source == "status"
+                    && (e.superseded_at.is_none()
+                        || crate::mutants::active("changes-counts-superseded"))
+                    && e.ts > since
+            })
             .filter(|e| {
                 let owner = e
                     .episode_id

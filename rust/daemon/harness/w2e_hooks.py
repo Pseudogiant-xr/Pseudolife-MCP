@@ -18,9 +18,15 @@ import time
 # Deliberate breaks (``--features mutants``) these scenarios must catch.
 MUTANTS = ["session-end-no-client-stamp", "session-end-keeps-empty",
            "session-end-clears-foreign", "policy-arm-shifted", "changes-counts-own-session",
-           "changes-from-open-leaf", "changes-cursor-echoes-since"]
+           "changes-from-open-leaf", "changes-cursor-echoes-since",
+           "changes-counts-superseded"]
 
 OPS = ("hook",)
+
+# A status note whose excerpt exercises the JSON quoting (ensure_ascii=False),
+# Python's str.split whitespace (U+001F included) and the 160-character cut.
+MC_LONG_NOTE = ('Status from session C: the café said "ship it" \\ then\x1fpaused,   and\n'
+                + "the release notes still need a pass over every section " * 4)
 
 _HEADERS = ("content-type", "cache-control")
 
@@ -210,6 +216,15 @@ def register(h) -> dict[str, dict]:
                 h.store("A plain note, not a status.", [h.sess("mc-b")]),
                 h.store("Status from another session, newer:   the deploy\n is done.",
                         [h.sess("mc-b")], source="status"),
+                # The newest current note is the excerpt: quotes, a
+                # backslash, non-ASCII, U+001F and runs of whitespace,
+                # past 160 characters. A newer note superseded by SQL is
+                # neither counted nor shown.
+                h.store(MC_LONG_NOTE, [h.sess("mc-c")], source="status"),
+                h.store("Status from session C, withdrawn.", [h.sess("mc-c")], source="status"),
+                h.sql("UPDATE entries SET superseded_at = ts + 1, "
+                      "superseded_by_text = 'Withdrawn.' "
+                      "WHERE text = 'Status from session C, withdrawn.'", after_stop=True),
                 # mc-a's open sub-episode starts after those notes: a first
                 # turn counts from the session's root, not this leaf.
                 h.ep_start("mc-a sub-task", [h.sess("mc-a")]),
