@@ -31,8 +31,23 @@ const REDEMPTION_SLOTS: usize = 2;
 /// redemption task that outlives a disconnected request keeps them.
 #[derive(Clone, Default)]
 pub(crate) struct PairLimiter {
-    failures: Arc<Mutex<VecDeque<Instant>>>,
+    failures: Arc<Mutex<Failures>>,
     in_flight: Arc<AtomicUsize>,
+}
+
+/// The window's attempts, each with its own id, so a refund gives back that
+/// attempt even when two were counted in the same clock tick.
+#[derive(Default)]
+struct Failures {
+    next: u64,
+    attempts: VecDeque<Attempt>,
+}
+
+/// One counted attempt (`FailureLimiter.reserve`'s stamp).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct Attempt {
+    id: u64,
+    at: Instant,
 }
 
 /// One redemption's place in the gate, given back when dropped
@@ -47,28 +62,34 @@ impl Drop for Slot {
 
 impl PairLimiter {
     /// `FailureLimiter.reserve`: count one attempt, or None when spent.
-    fn reserve(&self) -> Option<Instant> {
-        let mut q = self.failures.lock().expect("pair limiter");
+    fn reserve(&self) -> Option<Attempt> {
+        let mut f = self.failures.lock().expect("pair limiter");
         let now = Instant::now();
-        while q
+        while f
+            .attempts
             .front()
-            .is_some_and(|t| now.duration_since(*t) >= PAIR_WINDOW)
+            .is_some_and(|a| now.duration_since(a.at) >= PAIR_WINDOW)
         {
-            q.pop_front();
+            f.attempts.pop_front();
         }
-        if q.len() >= PAIR_FAILURES_PER_WINDOW {
+        if f.attempts.len() >= PAIR_FAILURES_PER_WINDOW {
             return None;
         }
-        q.push_back(now);
-        Some(now)
+        f.next += 1;
+        let attempt = Attempt {
+            id: f.next,
+            at: now,
+        };
+        f.attempts.push_back(attempt);
+        Some(attempt)
     }
 
     /// `FailureLimiter.refund`: give back an attempt that succeeded or never
     /// reached the store (one already aged out is gone).
-    fn refund(&self, stamp: Instant) {
-        let mut q = self.failures.lock().expect("pair limiter");
-        if let Some(i) = q.iter().position(|t| *t == stamp) {
-            q.remove(i);
+    fn refund(&self, attempt: Attempt) {
+        let mut f = self.failures.lock().expect("pair limiter");
+        if let Some(i) = f.attempts.iter().position(|a| a.id == attempt.id) {
+            f.attempts.remove(i);
         }
     }
 
@@ -85,7 +106,7 @@ impl PairLimiter {
 
     #[cfg(test)]
     fn attempts(&self) -> usize {
-        self.failures.lock().expect("pair limiter").len()
+        self.failures.lock().expect("pair limiter").attempts.len()
     }
 
     #[cfg(test)]
@@ -102,7 +123,7 @@ impl PairLimiter {
 async fn redeem_owned<F>(
     limiter: PairLimiter,
     store: Arc<PrincipalStore>,
-    attempt: Instant,
+    attempt: Attempt,
     slot: Slot,
     redemption: F,
 ) -> Result<Option<StoredPrincipal>, String>
@@ -300,12 +321,34 @@ mod tests {
         assert!(limiter.reserve().is_none());
     }
 
-    /// The test app's bank is unreachable: a valid pairing reaches the store,
-    /// answers `503 pairing_unavailable`, and keeps its attempt (only a
-    /// success or a full gate gives it back).
+    /// An authenticated app whose board opens connections to `dsn`.
+    fn app_with_bank(dsn: &str) -> Arc<App> {
+        let base = mcp_refusal_app();
+        let board = Arc::new(crate::board::Board::new(
+            base.service.config.coordination.clone(),
+            dsn.into(),
+            base.service.clone(),
+            base.store.clone(),
+        ));
+        Arc::new(App::new(
+            base.service.clone(),
+            crate::auth::EnvTokens {
+                single: Some("fixture-token".into()),
+                map: vec![],
+            },
+            base.store.clone(),
+            None,
+            board,
+        ))
+    }
+
+    /// The store cannot be reached (here its DSN does not even parse, so no
+    /// socket is opened): a valid pairing reaches the store, answers `503
+    /// pairing_unavailable`, and keeps its attempt (only a success or a full
+    /// gate gives it back).
     #[tokio::test]
     async fn a_store_failure_is_pairing_unavailable_and_keeps_its_attempt() {
-        let app = mcp_refusal_app();
+        let app = app_with_bank("not a connection string");
         let (status, body) = post(&app).await;
         assert_eq!(
             (status, body),
@@ -347,17 +390,16 @@ mod tests {
                 Ok(Some(row))
             },
         ));
-        assert!(
-            tokio::time::timeout(Duration::from_millis(50), &mut wait)
-                .await
-                .is_err()
-        );
+        // One poll starts the redemption's task; it then waits on `released`.
+        assert!(futures::FutureExt::now_or_never(wait.as_mut()).is_none());
         drop(wait); // the client went away
         release.send(()).unwrap();
         let hash = laptop().token_hash.unwrap();
-        let deadline = Instant::now() + Duration::from_secs(5);
-        while store.lookup(&hash).is_none() {
-            assert!(Instant::now() < deadline, "the redemption never published");
+        // The test runtime has one thread: the task runs while this yields.
+        for _ in 0..1000 {
+            if store.lookup(&hash).is_some() {
+                break;
+            }
             tokio::task::yield_now().await;
         }
         assert_eq!(store.lookup(&hash).as_deref(), Some("laptop"));

@@ -781,7 +781,10 @@ class Pairing(Scenario):
                                                        replace=False, **options)
                 self.codes[name] = invite["code"]
             conn.execute("UPDATE principals SET code_expires_at = 1 WHERE principal = 'old'")
-            principal_store.revoke(conn, "gone")
+            # Revoked with its code still in place (``revoke`` clears the code
+            # too, which would make this the unknown-code case): only the
+            # redemption's own ``revoked_at IS NULL`` refuses it.
+            conn.execute("UPDATE principals SET revoked_at = 1 WHERE principal = 'gone'")
 
     def _redeem(self, label, name, token, code=None):
         import hashlib
@@ -802,7 +805,7 @@ class Pairing(Scenario):
             self._redeem("environment name", "alice", "other"),
             self._redeem("token hash already held", "held", "laptop"),
             self._redeem("unspent after the conflict", "held", "held"),
-            case("the conflict's token is unknown", "GET", "/api/nope", [bearer(self.TOKENS["other"])]),
+            case("no refusal paired its token", "GET", "/api/nope", [bearer(self.TOKENS["other"])]),
         ]
 
     def normalize_db(self, state: dict, before: dict, side: str) -> dict:
@@ -817,7 +820,8 @@ class Pairing(Scenario):
             for row in table["rows"]:
                 value = row[at]
                 if was.get(json.dumps(row[0])) is None and isinstance(value, (int, float)) \
-                        and not isinstance(value, bool) and value == value:
+                        and not isinstance(value, bool) and value == value \
+                        and abs(value) != float("inf"):
                     row[at] = "<paired_at>"
         return state
 
