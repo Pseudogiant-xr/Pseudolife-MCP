@@ -35,6 +35,9 @@ def test_an_unreadable_or_empty_pull_request_diff_runs_every_suite(files):
     # Python tests, the Console bundle, other workflows and docs: the floor.
     (["tests/test_shim.py", "CHANGELOG.md", "changelog.d/2026-10-20-x.md"], set()),
     (["frontend/src/App.tsx", ".github/workflows/ci.yml", "rust/PARITY.md", "rust/daemon/divergences.md"], set()),
+    # The producer census is data no harness reads; `ops/integrate.py build`
+    # commits it to every batch whose members change what it scans.
+    (["rust/producer-census.json"], set()),
     # A row, its golden or its spec reaches the shard that runs it.
     (["rust/cli_harness/rows/doctor.py"], {"w1c-doctor"}),
     (["rust/cli_harness/goldens/test_login.linux.json"], {"w1c-connection"}),
@@ -68,7 +71,7 @@ def test_a_pull_request_runs_the_floor_and_what_it_reaches(files, extra):
 @pytest.mark.parametrize("path", [
     ".github/workflows/rust.yml", "rust/ci/coverage_plan.py", "rust/ci/parity_scope.py",
     "rust/Cargo.lock", "rust/rust-toolchain.toml", "rust/shared/float_repr.rs",
-    "rust/daemon/harness/run.py", "rust/producer-census.json",
+    "rust/daemon/harness/run.py",
     "evals/rust_port/oracle_selection.py", "evals/rust_port/phase1_oracle.py",
     "pseudolife_memory/cli/doctor.py", "plugin/hooks/session-start.sh", "ops/Dockerfile.pg",
     "pyproject.toml", "uv.lock", "examples/hooks.py", "something/new.rs", "Rust/daemon/src/x.rs",

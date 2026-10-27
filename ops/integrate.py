@@ -23,13 +23,13 @@ runs on the batch head before any CI, with the Python tests under rust/ the
 suite does not collect (`RUST_HARNESS`). `open` then checks the suite passed
 on that exact head, records both results, pushes the branch, opens the batch pull request, and
 comments on each dropped member naming what it collided with (removing its
-label). When the batch head would fail CI's producer census check
-(`rust/producer_census.py --ci-check`), the members whose own diff touches
-a path the census hashes wait for the next batch, keeping their label, if
-that leaves a head that passes with the census changers (the members whose
-own diff changes the census inputs) in it; otherwise the census changers
-are dropped like a conflict. Nothing resolves a conflict and
-nothing force-pushes. `merge` merges the batch pull request `open` published,
+label). `build` then regenerates the producer census
+(`rust/producer-census.json`) on the batch head with the head's own
+`rust/producer_census.py` and commits it as the batch's one generated
+commit when it changed, so no member ever regenerates it; when the script
+fails there, the members whose own diff changes the census inputs are
+dropped like a conflict. Nothing resolves a conflict, no member is edited
+and nothing force-pushes. `merge` merges the batch pull request `open` published,
 with a merge commit, only while its head is the built head, every check on
 it finished without a failure and master has not moved past it; every merge
 is an admin bypass, so this is the check GitHub does not make. Needs git
@@ -68,20 +68,21 @@ BATCH_RE = re.compile(r"^integrate/(\d{4}-\d{2}-\d{2})-batch-(\d+)$")
 MARKER_RE = r"^(<<<<<<<|>>>>>>>)( |$)"
 CENSUS = "rust/producer_census.py"
 CENSUS_JSON = "rust/producer-census.json"
+# The subject of the batch's one generated commit (see _regenerate_census).
+CENSUS_SUBJECT = "Regenerate the producer census for this batch"
 # The Python tests under rust/ that the local full suite never collects
 # (pytest's testpaths is tests/) and that need no built Rust binary: the
 # pytest steps of rust.yml's `rust` job plus the eval parity shard's
 # `pytest rust/ci`. #877 broke rust/daemon/harness/test_w2e_lifecycle.py and
-# passed its batch's local suite this way (2026-10-21). The census currency
-# test is deselected as CI deselects it: `build` runs CI's own verdict,
-# `producer_census.py --ci-check`. 767 tests, about 140 s natively on
-# Windows (2026-10-21).
+# passed its batch's local suite this way (2026-10-21). Census currency is
+# not among them: `build` regenerates the census and `open` runs CI's own
+# verdict, `producer_census.py --ci-check`. 767 tests, about 140 s natively
+# on Windows (2026-10-21).
 RUST_HARNESS = (
     "rust/test_contract_inventory.py", "rust/test_producer_census.py",
     "rust/daemon/harness/test_w2e_lifecycle.py",
     "rust/daemon/harness/board/test_norm.py", "rust/daemon/harness/board/test_run.py",
     "rust/ci",
-    "--deselect", "rust/test_producer_census.py::test_committed_census_matches_current_tree",
 )
 RUST_HARNESS_COMMAND = "python -m pytest -q -p no:cacheprovider " + " ".join(RUST_HARNESS)
 
@@ -136,7 +137,6 @@ class Dropped:
     comment: bool = True
     commented: bool = False
     unlabelled: bool = False
-    waiting: bool = False   # held back for the census; listed apart, never commented
 
 
 @dataclass
@@ -149,6 +149,8 @@ class Plan:
     merged: list[Member] = field(default_factory=list)
     dropped: list[Dropped] = field(default_factory=list)
     markers: list[str] = field(default_factory=list)
+    census_commit: str = ""   # the generated census commit, when there is one
+    census_drift: list[str] = field(default_factory=list)   # manual shapes it withdrew
 
     @property
     def title(self) -> str:
@@ -175,6 +177,8 @@ class Plan:
             return None
         raw = json.loads(path.read_text(encoding="utf-8"))
         raw["merged"] = [Member(**m) for m in raw["merged"]]
+        for d in raw["dropped"]:
+            d.pop("waiting", None)   # census waiters, from plans built before 2026-10-27
         raw["dropped"] = [Dropped(Member(**d.pop("member")), **d) for d in raw["dropped"]]
         return Plan(**raw)
 
@@ -441,7 +445,12 @@ def _census_module(base_sha: str):
         path.write_text(shown.stdout, encoding="utf-8")
         spec = importlib.util.spec_from_file_location("_batch_producer_census", path)
         module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
+        try:
+            spec.loader.exec_module(module)
+        except (Exception, SystemExit) as exc:
+            raise Refusal(f"{BASE}'s own {CENSUS} fails to load ({exc!r}); the census "
+                          f"is broken on {BASE} itself, so fix it there before "
+                          "building") from None
     return module
 
 
@@ -453,112 +462,102 @@ def _census_inputs(base_sha: str) -> set[str] | None:
     return None if module is None else set(module.CURRENCY_INPUTS)
 
 
-def _census_keys(rev: str) -> set[str]:
-    """The paths the census committed at `rev` hashes (its `input_sha256`
-    keys), parsed as data; empty when it has none."""
+def _census_drift(rev: str) -> set[str]:
+    """The paths whose trusted manual shapes the census committed at `rev`
+    withdrew (its `manual_drift`), parsed as data; empty when it has none."""
     shown = git("show", f"{rev}:{CENSUS_JSON}", check=False)
     if shown.returncode != 0:
         return set()
     try:
-        hashes = json.loads(shown.stdout).get("input_sha256")
+        drift = json.loads(shown.stdout).get("manual_drift")
     except (ValueError, AttributeError, RecursionError):
         return set()
-    return set(hashes) if isinstance(hashes, dict) else set()
+    if not isinstance(drift, list):
+        return set()
+    return {d["path"] for d in drift
+            if isinstance(d, dict) and isinstance(d.get("path"), str)}
 
 
-def _census_hashed(root: Path, base_sha: str, changers: list[Member]) -> set[str]:
-    """Every path whose change can make the census stale on the batch head
-    checked out at `root`: what master's census module hashes in this tree
-    (its producer_paths, which only lists tracked files, and its
-    CONTRACT_SOURCES), so a member adding a scanned file counts; what
-    master's committed census hashes, so a member deleting one counts; and
-    what each census changer's committed census hashes, since a changer may
-    widen the census's scopes. Only master's code runs in this process."""
-    module = _census_module(base_sha)
-    paths = set(getattr(module, "CONTRACT_SOURCES", ()))
-    producer_paths = getattr(module, "producer_paths", None)
-    if producer_paths is not None:
-        try:
-            paths |= set(producer_paths(root))
-        except subprocess.CalledProcessError as exc:
-            raise Refusal(f"listing the census's files on the batch head failed ({exc}); "
-                          f"check `git ls-files` works in {root}, then build again") from None
-    for rev in (base_sha, *(m.sha for m in changers)):
-        paths |= _census_keys(rev)
-    return paths
-
-
-def _census_ci_fails(root: Path, base_sha: str) -> bool:
-    """Would CI's producer census check fail on HEAD as a pull request on
-    `base_sha`? Runs the step CI runs, `rust/producer_census.py --ci-check`,
-    with a pull request event naming that base, so the census module itself
-    decides: drift is fatal only when the diff from the base touches its
-    CURRENCY_INPUTS, and otherwise only reported."""
+def _census_run(root: Path, *args: str, event: dict | None = None
+                ) -> subprocess.CompletedProcess:
+    """Run the batch head's census script, member code, with only the
+    environment Python and git need (CENSUS_ENV) and, for `--ci-check`, the
+    GitHub event CI would give it."""
+    env = {k: v for k, v in os.environ.items() if k.upper() in CENSUS_ENV}
     with tempfile.TemporaryDirectory() as tmp:
-        event = Path(tmp) / "event.json"
-        event.write_text(json.dumps({"pull_request": {"base": {"sha": base_sha}}}),
-                         encoding="utf-8")
-        env = {k: v for k, v in os.environ.items() if k.upper() in CENSUS_ENV}
-        proc = _run([sys.executable, CENSUS, "--ci-check"], check=False, cwd=root,
-                    env={**env, "GITHUB_EVENT_PATH": str(event)})
+        if event is not None:
+            path = Path(tmp) / "event.json"
+            path.write_text(json.dumps(event), encoding="utf-8")
+            env["GITHUB_EVENT_PATH"] = str(path)
+        return _run([sys.executable, CENSUS, *args], check=False, cwd=root, env=env)
+
+
+def _census_ci_fails(root: Path, plan: Plan) -> bool:
+    """Would CI's producer census check fail on HEAD, the batch's pull
+    request? Runs the step CI runs, `rust/producer_census.py --ci-check`,
+    with the event of a pull request from the batch branch on its base,
+    which CI gates on census currency whatever the diff."""
+    event = {"pull_request": {"base": {"sha": plan.base_sha}, "head": {"ref": plan.branch}}}
+    proc = _census_run(root, "--ci-check", event=event)
     if proc.returncode == 1 and "producer census is stale" in proc.stderr:
         return True
     if proc.returncode != 0:
         raise Refusal(f"`python {CENSUS} --ci-check` failed ({proc.returncode}) on "
-                      f"the batch head: {proc.stderr.strip() or proc.stdout.strip()}\n"
-                      f"Run `python {CENSUS} --ci-check` on {REMOTE}/{BASE} first: "
-                      "if it fails there too the cause is master or this machine. "
-                      "Otherwise run it on each member's head; the one that breaks "
-                      "it would fail CI the same way, so tell its author and leave "
-                      "it out of the next build")
-    if "report only" in proc.stdout:
-        print("  producer census is stale on the batch head (report only, as in "
-              "CI: no member changes its inputs)")
+                      f"the batch head: {proc.stderr.strip() or proc.stdout.strip()}")
     return False
 
 
-def _census_culprits(plan: Plan) -> list[tuple[Member, list[str]]]:
-    """The census changers on HEAD, the merged members whose own diff
-    changes the census inputs, when CI's census check would fail there
-    (they are what makes it fatal); none when it passes (or master or HEAD
-    has no census)."""
+def _census_failure(proc: subprocess.CompletedProcess) -> str:
+    """The census script's failure in one line: its last output line."""
+    lines = (proc.stderr.strip() or proc.stdout.strip()).splitlines()
+    text = lines[-1].strip() if lines else ""
+    return f"exit {proc.returncode}" + (f": {text[:300]}" if text else "")
+
+
+def _regenerate_census(plan: Plan) -> str | None:
+    """Regenerate the producer census on HEAD with the head's own script and
+    commit it as the batch's one generated commit when it changed: derived
+    data, so no member is edited and no member ever has to regenerate it
+    (#960 and #974 each went stale three times on 2026-10-26 doing so).
+    Returns the script's failure, leaving HEAD as it was, or None."""
     root = Path(_out("rev-parse", "--show-toplevel"))
-    inputs = _census_inputs(plan.base_sha)
-    if (inputs is None or not (root / CENSUS).is_file()
-            or not _census_ci_fails(root, plan.base_sha)):
-        return []
-    culprits = [(m, sorted(_changed(m.sha, plan.base_sha) & inputs)) for m in plan.merged]
-    culprits = [(m, files) for m, files in culprits if files]
-    if not culprits:
-        raise Refusal(f"CI's producer census check would fail on the batch head, but "
-                      f"no member's own diff changes {', '.join(sorted(inputs))}; "
-                      f"check `python {CENSUS} --ci-check` by hand")
-    return culprits
+    if not (root / CENSUS).is_file():
+        return f"the batch head has no {CENSUS}"
+    proc = _census_run(root)
+    if proc.returncode != 0:
+        git("reset", "-q", "--hard", "HEAD")
+        return _census_failure(proc)
+    changed = _out("diff", "--name-only", "HEAD").splitlines()
+    if not changed:
+        return None
+    if changed != [CENSUS_JSON]:
+        git("reset", "-q", "--hard", "HEAD")
+        raise Refusal(f"`python {CENSUS}` on the batch head changed "
+                      f"{', '.join(changed)}, not only {CENSUS_JSON}; "
+                      "nothing was committed. Find the member that made it do so "
+                      "(run it on each member's head) and leave it out of the next build")
+    git("commit", "-q", "-m", CENSUS_SUBJECT, "-m",
+        f"Generated by `python {CENSUS}` on the batch head, as `ops/integrate.py "
+        "build` does for every batch; no member was edited.", "--", CENSUS_JSON)
+    if _census_ci_fails(root, plan):
+        raise Refusal(f"the census `python {CENSUS}` just wrote on the batch head is "
+                      "already stale by its own `--ci-check`, so the script does not "
+                      "reproduce its output; fix that on master before building")
+    plan.census_commit = _out("rev-parse", "HEAD")
+    plan.census_drift = sorted(_census_drift("HEAD") - _census_drift(plan.base_sha))
+    print(f"  regenerated the producer census in {plan.census_commit[:12]}")
+    return None
 
 
-def _census_reason(member: Member, files: list[str], culprits: list[Member]) -> str:
+def _census_reason(member: Member, files: list[str], failure: str,
+                   culprits: list[Member]) -> str:
     others = [f"#{m.number}" for m in culprits if m is not member]
     also = (f"; {' and '.join(others)} also change{'s' if len(others) == 1 else ''} "
             "them and left this batch too" if others else "")
-    return (f"changes the producer census inputs ({', '.join(files)}) while the "
-            "committed census is stale on the batch head, so CI's census check "
-            f"(`python {CENSUS} --ci-check`) would fail{also}; once {BASE} holds "
-            f"the rest of the batch, merge {BASE} forward, regenerate the census "
-            f"with `python {CENSUS}`, rerun its targeted tests, then re-apply the label")
-
-
-def _and(names: list[str]) -> str:
-    return " and ".join(filter(None, [", ".join(names[:-1]), names[-1]]))
-
-
-def _waiting_reason(files: list[str], changers: list[Member], label: str) -> str:
-    who = _and([f"#{m.number}" for m in changers])
-    return (f"changes {', '.join(files)}, which the producer census hashes, and the "
-            f"census committed by {who} is current only without it, so CI's census "
-            f"check (`python {CENSUS} --ci-check`) would fail on the batch head; it "
-            f"needs no action and keeps its `{label}` label, so it joins the next "
-            f"batch, whose CI only reports the census since this diff leaves the "
-            "census inputs alone")
+    return (f"changes the producer census inputs ({', '.join(files)}), and "
+            f"`python {CENSUS}` fails on the batch head ({failure}){also}; make it run "
+            f"on this branch merged with {BASE}, rerun its targeted tests, then "
+            "re-apply the label")
 
 
 def _remerge(plan: Plan, members: list[Member], dropped: list[Dropped],
@@ -569,106 +568,39 @@ def _remerge(plan: Plan, members: list[Member], dropped: list[Dropped],
     _merge_members(plan, [m for m in members if m.number not in out])
 
 
-def _census_waiters(plan: Plan, members: list[Member], dropped: list[Dropped],
-                    culprits: list[tuple[Member, list[str]]]
-                    ) -> tuple[list[Dropped], list[tuple[Member, list[str]]]]:
-    """With the census check failing on the full batch head, keep the
-    census changers and leave out instead the other members whose own diff
-    touches a path the census hashes: their CI never gates on the census,
-    so they lose nothing by waiting, while a dropped changer must
-    regenerate its census. Only when the changers' census passes without
-    the other members, and the batch without those waiters passes too;
-    then HEAD is that batch and the waiters are returned (keeping their
-    label). A member a waiter had kept out (a conflict with it) merges in
-    that trial, so each trial head is searched again and its own waiters
-    join, until the check passes or a trial finds none. Such a member whose
-    own diff changes the census inputs is a census changer, never a waiter:
-    it joins the changers, whose census currency CI enforces. Returns the
-    waiters and the census changers found; with no waiters the trial heads
-    are left for the caller to reset and the changers are the ones to drop."""
-    culprits = list(culprits)
-    changers = [m for m, _ in culprits]
-    numbers = {m.number for m in changers}
-    inputs = _census_inputs(plan.base_sha) or set()
-    root = Path(_out("rev-parse", "--show-toplevel"))
-    before = {d.member.number for d in dropped}
-    order = {m.number: i for i, m in enumerate(members)}
-
-    def revealed() -> None:
-        """Add the merged members on HEAD that change the census inputs and
-        were not known as census changers (a conflict had kept them out)."""
-        found = [(m, sorted(_changed(m.sha, plan.base_sha) & inputs))
-                 for m in plan.merged if m.number not in numbers]
-        found = [(m, f) for m, f in found if f]
-        for m, _ in found:
-            print(f"  #{m.number} changes the census inputs too; it is a census changer")
-        culprits.extend(found)
-        culprits.sort(key=lambda c: order[c[0].number])
-        changers[:] = [m for m, _ in culprits]
-        numbers.update(m.number for m, _ in found)
-
-    def touching() -> dict[int, list[str]]:
-        """The merged non-changers on HEAD whose own diff touches a hashed path."""
-        hashed = _census_hashed(root, plan.base_sha, changers)
-        found = {m.number: sorted(_changed(m.sha, plan.base_sha) & hashed)
-                 for m in plan.merged if m.number not in numbers}
-        return {n: files for n, files in found.items() if files}
-
-    files = touching()
-    if not files:
-        return [], culprits
-    print("  checking the census changers' census without the other members")
-    _remerge(plan, members, dropped, {m.number for m in members} - numbers)
-    if ({m.number for m in plan.merged} != numbers
-            or _census_ci_fails(root, plan.base_sha)):
-        print("  it fails without them too, so the census changers leave")
-        return [], culprits
-    while True:
-        # Label order, so the reasons and the output are deterministic.
-        waiters = [Dropped(m, _waiting_reason(files[m.number], changers, plan.label),
-                           comment=False, waiting=True)
-                   for m in members if m.number in files]
-        print("  merging again without " + ", ".join(f"#{n}" for n in sorted(files))
-              + ", which touch paths the census hashes")
-        _remerge(plan, members, dropped + waiters, before | set(files))
-        if not numbers <= {m.number for m in plan.merged}:
-            break
-        if not _census_ci_fails(root, plan.base_sha):
-            for d in waiters:
-                print(f"  waiting #{d.member.number}: {d.reason}")
-            return waiters, culprits
-        revealed()
-        more = touching()
-        if not more:
-            break
-        files.update(more)
-    print("  the census still fails without them, so the census changers leave")
-    return [], culprits
-
-
 def _merge_batch(plan: Plan, members: list[Member]) -> None:
-    """Merge the members; while CI's census check would fail on the head,
-    leave out the members that stale the census changers' census (see
-    `_census_waiters`) or, when that does not cure it, the census changers,
-    and merge the rest again from the base. Nothing is fixed inside a batch."""
+    """Merge the members, then regenerate the producer census on the head
+    (see `_regenerate_census`). When the head's census script fails, the
+    members whose own diff changes the census inputs leave and the rest
+    merge again from the base. Nothing else is added inside a batch."""
     members = _release_cut_alone(plan, members)
     cut_drops = list(plan.dropped)
-    census_drops: list[Dropped] = []
     _merge_members(plan, members)
-    while culprits := _census_culprits(plan):
-        waiters, culprits = _census_waiters(plan, members, cut_drops + census_drops,
-                                            culprits)
-        if waiters:
-            # HEAD is the batch without them; the loop's check confirms it.
-            census_drops += waiters
-            continue
-        left = [m for m, _ in culprits]
-        for m, files in culprits:
-            census_drops.append(Dropped(m, _census_reason(m, files, left)))
-            print(f"  dropped #{m.number}: {census_drops[-1].reason}")
-        out = {d.member.number for d in census_drops}
-        print("  merging again without " + ", ".join(f"#{n}" for n in sorted(out)))
-        _remerge(plan, members, cut_drops + census_drops, out)
+    inputs = _census_inputs(plan.base_sha)
+    if inputs is None or not plan.merged:
+        return    # with no census on master there is nothing to keep current
+    failure = _regenerate_census(plan)
+    if failure is None:
+        return
+    culprits = [(m, sorted(_changed(m.sha, plan.base_sha) & inputs)) for m in plan.merged]
+    culprits = [(m, files) for m, files in culprits if files]
+    if not culprits:
+        raise Refusal(f"`python {CENSUS}` fails on the batch head ({failure}), and no "
+                      f"member's own diff changes {', '.join(sorted(inputs))}. Run it on "
+                      f"{REMOTE}/{BASE}: if it fails there too, the cause is master or "
+                      "this machine; otherwise run it on each member's head and leave "
+                      "out the one that breaks it")
+    left = [m for m, _ in culprits]
+    drops = [Dropped(m, _census_reason(m, files, failure, left)) for m, files in culprits]
+    for d in drops:
+        print(f"  dropped #{d.member.number}: {d.reason}")
+    out = {m.number for m in left}
+    print("  merging again without " + ", ".join(f"#{n}" for n in sorted(out)))
+    _remerge(plan, members, cut_drops + drops, out)
+    if plan.merged and (failure := _regenerate_census(plan)) is not None:
+        raise Refusal(f"`python {CENSUS}` still fails on the batch head ({failure}) "
+                      "without the members that change its inputs; run it on "
+                      f"{REMOTE}/{BASE} and on each member's head to find the cause")
 
 
 def _new_markers(base_sha: str) -> list[str]:
@@ -698,14 +630,20 @@ def body(plan: Plan, suite: str | None = None, harness: str | None = None) -> st
     for m in plan.merged:
         lines.append(f"| #{m.number} {_cell(m.title)} | `{m.sha}` | {m.url} "
                      f"({m.review.lower().replace('_', ' ')}) | {m.checks} |")
-    dropped = [d for d in plan.dropped if not d.waiting]
-    waiting = [d for d in plan.dropped if d.waiting]
-    if dropped:
+    if plan.dropped:
         lines += ["", "## Dropped", ""]
-        lines += [f"- #{d.member.number}: {d.reason}" for d in dropped]
-    if waiting:
-        lines += ["", "## Waiting (no action needed)", ""]
-        lines += [f"- #{d.member.number}: {d.reason}" for d in waiting]
+        lines += [f"- #{d.member.number}: {d.reason}" for d in plan.dropped]
+    if plan.census_commit:
+        lines += ["", "## Producer census", "",
+                  f"`{plan.census_commit}` regenerates `{CENSUS_JSON}` for this head "
+                  f"with `python {CENSUS}`, the batch's one generated commit: the "
+                  "census is derived data that `build` keeps current, so no member "
+                  "regenerates it and no member was edited."]
+        if plan.census_drift:
+            lines += ["", "Trusted manual shapes withdrawn because a member changed "
+                      "their source: " + ", ".join(f"`{p}`" for p in plan.census_drift)
+                      + ". Review each construction and refresh its `MANUAL_SHA256` "
+                      "fingerprint in a follow-up pull request (`rust/producer-census.md`)."]
     if plan.markers:
         lines += ["", "## Warning: conflict markers", "",
                   "These files carry conflict markers that master does not; "
@@ -721,7 +659,7 @@ def body(plan: Plan, suite: str | None = None, harness: str | None = None) -> st
         "`integrate/*` runs only the fast lanes.",
         "- A red batch is bisected locally (master plus half the members); the "
         f"culprit is dropped with a comment and loses `{plan.label}`, and nothing "
-        "is fixed inside the batch.",
+        "is fixed inside the batch (the generated census commit is not a fix).",
     ]
     return "\n".join(lines) + "\n"
 
@@ -910,15 +848,13 @@ def open_(args: argparse.Namespace) -> int:
             raise Refusal(f"{REMOTE}/{BASE} moved since {branch} was built; switch "
                           f"back with `git switch --detach {REMOTE}/{BASE}`, remove "
                           "the local branch and build again")
-        # `build` drops these already; this catches a plan built without it.
-        culprits = _census_culprits(plan)
-        if culprits:
-            who = ", ".join(f"#{m.number} ({', '.join(files)})" for m, files in culprits)
+        # `build` regenerates the census; this catches a plan built without it.
+        if (_census_inputs(plan.base_sha) is not None
+                and _census_ci_fails(Path(_out("rev-parse", "--show-toplevel")), plan)):
             raise Refusal(f"CI's producer census check would fail on {plan.head[:12]}: "
-                          f"the census is stale and its inputs are changed by {who}. "
-                          f"Nothing is fixed inside a batch: switch back with `git "
-                          f"switch --detach {REMOTE}/{BASE}`, remove the local branch "
-                          "and build again, which leaves out the members that break it")
+                          "the census is stale on the batch head. Switch back with "
+                          f"`git switch --detach {REMOTE}/{BASE}`, remove the local "
+                          "branch and build again, which regenerates it")
         _refuse_red_members(plan)
     if url is None:
         try:

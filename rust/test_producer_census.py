@@ -10,10 +10,6 @@ census = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(census)
 
 
-def test_committed_census_matches_current_tree():
-    assert json.loads(census.OUTPUT.read_text(encoding="utf-8")) == census.snapshot()
-
-
 def test_tools_preserve_false_null_and_omitted_parameters():
     calls = census.tool_calls('memory_search(query="topic", rerank=False, sources=None)', "examples/demo.py")
     assert calls[0]["shape"]["parameters"] == {
@@ -381,7 +377,7 @@ def test_current_tree_census_has_real_producer_floors():
     assert not any(p["location"].rsplit(":", 1)[0] in drifted for p in manual)
 
 
-def test_ci_reports_source_drift_but_gates_census_changes(tmp_path):
+def test_ci_gates_batches_and_census_changes_never_ordinary_pull_requests(tmp_path):
     subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
     (tmp_path / "examples").mkdir()
     (tmp_path / "rust").mkdir()
@@ -396,15 +392,25 @@ def test_ci_reports_source_drift_but_gates_census_changes(tmp_path):
     commit()
     base = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=tmp_path, text=True).strip()
     event = tmp_path / "event.json"
-    event.write_text(json.dumps({"before": base}), encoding="utf-8")
+    def required(payload):
+        event.write_text(json.dumps(payload), encoding="utf-8")
+        return census.ci_currency_required(tmp_path, {"GITHUB_EVENT_PATH": str(event)})
+    def pull(ref):
+        return {"pull_request": {"base": {"sha": base}, "head": {"ref": ref}}}
     doc.write_text('memory_stats(); memory_search(query="new")', encoding="utf-8")
     commit()
-    assert not census.ci_currency_required(tmp_path, {"GITHUB_EVENT_PATH": str(event)})
+    assert not required({"before": base})
+    assert not required(pull("fix/some-change"))
+    # An integration batch's census must be current whatever its diff, since
+    # `ops/integrate.py build` regenerates it on the batch head.
+    assert required(pull("integrate/2026-10-27-batch-1"))
     generated.write_text('{"regenerated": true}', encoding="utf-8")
     commit()
-    assert census.ci_currency_required(tmp_path, {"GITHUB_EVENT_PATH": str(event)})
-    # A queued merge group gates on its own range, like a pull request.
-    event.write_text(json.dumps({"merge_group": {"base_sha": base}}), encoding="utf-8")
-    assert census.ci_currency_required(tmp_path, {"GITHUB_EVENT_PATH": str(event)})
-    event.write_text(json.dumps({"before": "f" * 40}), encoding="utf-8")
-    assert not census.ci_currency_required(tmp_path, {"GITHUB_EVENT_PATH": str(event)})
+    assert required({"before": base})
+    # A queued merge group gates on its own range, like a master push.
+    assert required({"merge_group": {"base_sha": base}})
+    # An ordinary pull request only reports, even when it changes the census:
+    # master moving under it can never make its own CI fail.
+    assert not required(pull("fix/some-change"))
+    assert not required({"pull_request": {"base": {"sha": base}}})
+    assert not required({"before": "f" * 40})

@@ -21,11 +21,19 @@ squash merges. Modified tracked files and newly staged producers are included;
 untracked and ignored scratch files are excluded using `git ls-files`. A changed
 tracked file, contract or extraction result makes the currency test fail.
 
-Parser tests gate every Rust CI run. Currency also gates when the census script,
-generated JSON or contract inventory changes; other source drift is checked and
-reported without blocking unrelated port PRs. `--ci-check` selects that policy
-from the GitHub event's changed-file range. `--check` always fails on stale data.
-Regenerate before consuming the census in a port slice.
+Do not commit a regenerated census in a pull request: `python ops/integrate.py
+build` regenerates it on every integration batch head as one generated commit,
+so master's copy stays current, and a pull request carrying its own copy went
+stale whenever master changed a scanned file (`docs/dev/merge-batches.md`). A
+pull request changing the script or the inventory may still commit one to show
+the effect in review; the batch overwrites it either way.
+
+Parser tests gate every Rust CI run. Currency gates on integration batch pull
+requests (`integrate/*`) whatever they change, and on master pushes and merge
+groups that change the census script, generated JSON or contract inventory; an
+ordinary pull request's drift is checked and reported, never blocking.
+`--ci-check` selects that policy from the GitHub event. `--check` always fails
+on stale data. Regenerate locally before consuming the census in a port slice.
 
 `surface` has one entry for every inventory item, plus individual config fields.
 IDs are `tool:memory_search`, `route:GET /api/search`, `cli:backup`,

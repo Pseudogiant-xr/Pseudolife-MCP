@@ -1014,14 +1014,22 @@ def snapshot(root: Path = ROOT) -> dict:
 
 
 def ci_currency_required(root: Path = ROOT, env: dict | None = None) -> bool:
-    """Gate currency for census/inventory changes; other input drift is a report."""
+    """Gate currency on integration batches and on census/inventory changes
+    reaching master; an ordinary pull request's drift is only a report.
+
+    `ops/integrate.py build` regenerates the census on every batch head, so
+    an ordinary pull request never needs to: gating it on currency made it
+    stale whenever master changed any hashed file."""
     env = os.environ if env is None else env
     event_path = env.get("GITHUB_EVENT_PATH")
     if not event_path:
         return False
     event = json.loads(Path(event_path).read_text(encoding="utf-8"))
-    base = (event.get("pull_request", {}).get("base", {}).get("sha")
-            or event.get("merge_group", {}).get("base_sha") or event.get("before"))
+    pull = event.get("pull_request")
+    if pull is not None:
+        head = (pull.get("head") or {}).get("ref")
+        return isinstance(head, str) and head.startswith("integrate/")
+    base = event.get("merge_group", {}).get("base_sha") or event.get("before")
     if not isinstance(base, str) or not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", base) or not base.strip("0"):
         return False  # A manual dispatch has no changed-file range; still report currency.
     try:
@@ -1036,7 +1044,7 @@ def ci_currency_required(root: Path = ROOT, env: dict | None = None) -> bool:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--check", action="store_true", help="fail if the committed census is stale")
-    parser.add_argument("--ci-check", action="store_true", help="check currency; gate only census/inventory changes from the GitHub event")
+    parser.add_argument("--ci-check", action="store_true", help="check currency; gate only integration batches and census/inventory changes reaching master")
     args = parser.parse_args()
     result = snapshot()
     if args.check or args.ci_check:
