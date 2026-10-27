@@ -747,3 +747,139 @@ def test_dream_run_auto_hands_the_probe_to_the_tracker(monkeypatch):
     stall = svc.dream_stall_state()["stall"]
     assert stall["reason"] == "login_expired"
     assert stall["last_error"].startswith("primary /health HTTP 503")
+
+
+# ── a signed-out provider, named where it lives (2026-10-27 maintainer) ──
+#
+# "We need a way to easily tell a user that their provider is signed out on
+# the location where their bank and dream extractor live." The shim names
+# the provider and its OS user; the stall record carries them; every
+# surface says which CLI, on which machine, as whom, and the one command.
+
+SIGNED_OUT = {"reason": "login_expired", "error": "/health HTTP 503 (login_required)",
+              "provider": "claude", "shim_user": "svc", "fallback_resolves": True}
+
+
+def test_a_signed_out_probe_carries_provider_and_user_into_the_stall():
+    t, clock = _tracker()
+    dns = _failed("extractor_unreachable", "unreachable (gaierror)")
+    t.record(dns, served_by_fallback=True, primary_probe=SIGNED_OUT)
+    clock.t += 600
+    t.record(dns, served_by_fallback=True, primary_probe=SIGNED_OUT)
+    stall = t.snapshot()["stall"]
+    assert stall["provider"] == "claude" and stall["shim_user"] == "svc"
+
+
+def test_a_probe_without_identity_adds_no_keys():
+    # The stall-tracker goldens' records keep their five keys.
+    t, clock = _tracker()
+    t.record(_failed(), served_by_fallback=True, primary_probe=LOGIN_PROBE)
+    clock.t += 600
+    t.record(_failed(), served_by_fallback=True, primary_probe=LOGIN_PROBE)
+    assert list(t.snapshot()["stall"]) == ["since", "reason", "consecutive_failures",
+                                           "last_error", "last_success_at"]
+
+
+def test_identity_is_carried_only_for_a_sign_in_failure():
+    t, clock = _tracker()
+    probe = {**SIGNED_OUT, "reason": "extractor_error",
+             "error": "/health HTTP 503 (cli_error)"}
+    t.record(_failed(), served_by_fallback=True, primary_probe=probe)
+    clock.t += 600
+    t.record(_failed(), served_by_fallback=True, primary_probe=probe)
+    assert "provider" not in t.snapshot()["stall"]
+
+
+def test_a_served_fallback_keeps_the_identity_too():
+    t, clock = _tracker()
+    t.record(OK, served_by_fallback=True, primary_probe=SIGNED_OUT)
+    clock.t += 600
+    t.record(OK, served_by_fallback=True, primary_probe=SIGNED_OUT)
+    stall = t.snapshot()["stall"]
+    assert stall["reason"] == "served_by_fallback" and stall["provider"] == "claude"
+
+
+def _signed_out_stall(**over):
+    return {"since": 1_792_891_234.0, "reason": "login_expired", "consecutive_failures": 2,
+            "last_error": "x", "last_success_at": None, "provider": "claude",
+            "shim_user": "svc", **over}
+
+
+def test_the_line_names_provider_place_user_and_command():
+    from pseudolife_memory.memory.dream import dream_stall_line
+    line = dream_stall_line(_signed_out_stall())
+    assert line.startswith("Pseudolife-MCP: dreams stalled since ")
+    assert line.count("dreams stalled") == 1
+    assert "the Claude Code CLI is signed out on the machine running the Pseudolife daemon" in line
+    assert "as svc" in line and "`claude`, then `/login`" in line
+
+
+def test_the_line_says_this_machine_when_told_so():
+    from pseudolife_memory.memory.dream import dream_stall_line
+    line = dream_stall_line(_signed_out_stall(), where="this machine")
+    assert "signed out on this machine" in line
+
+
+def test_the_codex_line_names_codex_login_and_no_user_when_unknown():
+    from pseudolife_memory.memory.dream import dream_stall_line
+    line = dream_stall_line(_signed_out_stall(provider="codex", shim_user=None))
+    assert "the Codex CLI is signed out" in line and "`codex login`" in line
+    assert " as " not in line.split("signed out", 1)[1].split(":", 1)[0]
+
+
+def test_a_served_fallback_line_names_the_sign_in_too():
+    from pseudolife_memory.memory.dream import dream_stall_line
+    line = dream_stall_line(_signed_out_stall(reason="served_by_fallback"))
+    assert line.startswith("Pseudolife-MCP: dream primary extractor down since ")
+    assert "Claude Code CLI is signed out" in line and "fallback" in line
+
+
+def test_the_board_notice_names_the_sign_in():
+    from pseudolife_memory.memory.dream import dream_stall_notice_text
+    text = dream_stall_notice_text("begin", _signed_out_stall())
+    assert "Claude Code CLI is signed out on the machine running the Pseudolife daemon" in text
+    assert "`claude`, then `/login`" in text
+
+
+def test_records_without_a_provider_keep_todays_text():
+    from pseudolife_memory.memory.dream import dream_stall_line, dream_stall_notice_text
+    old = {k: v for k, v in _signed_out_stall().items() if k not in ("provider", "shim_user")}
+    assert "claude auth login" in dream_stall_line(old)
+    assert "claude auth login" in dream_stall_notice_text("begin", old)
+
+
+@pytest.mark.parametrize("host, where", [
+    ("127.0.0.1:8765", "this machine"),
+    ("localhost:8765", "this machine"),
+    ("[::1]:8765", "this machine"),
+    ("Box.Example:8765", "the machine running the Pseudolife daemon (box.example)"),
+    ("evil host\nInjected", None),
+    (None, None),
+])
+def test_the_hook_names_where_the_daemon_runs_from_the_host_header(host, where):
+    from pseudolife_memory.web.session_hook import stall_where
+    assert stall_where(host) == where
+
+
+class _SignedOutFails:
+    primary_probe = SIGNED_OUT
+
+    def extract(self, texts, vocab, known_facts=None):
+        raise ExtractorError("extract failed: <urlopen error [Errno -2] Name or service not known>")
+
+
+def test_dream_status_carries_the_stall_notice(svc, monkeypatch):
+    from pseudolife_memory.memory import dream as d
+
+    monkeypatch.setattr(d, "build_extractor_with_fallback",
+                        lambda cfg: (_SignedOutFails(), "fallback"))
+    svc.store("the relay port is 4001", source="notes")
+    assert svc.dream_status()["stall_notice"] is None
+    svc.dream_run_auto()
+    svc.dream_run_auto()
+    status = svc.dream_status()
+    assert status["stall"]["provider"] == "claude"
+    assert status["stall_notice"].startswith("Pseudolife-MCP: dreams stalled since ")
+    assert "Claude Code CLI is signed out" in status["stall_notice"]
+    keys = list(status)
+    assert keys.index("stall_notice") == keys.index("last_stall") + 1

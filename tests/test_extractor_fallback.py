@@ -847,3 +847,50 @@ def test_logged_urls_are_redacted(monkeypatch, caplog):
     text = "\n".join(r.getMessage() for r in caplog.records) + "\n".join(
         d.startup_extractor_warnings(cfg))
     assert "secret" not in text and "fallback.example" in text
+
+
+# ── the signed-out shim's identity rides on the probe (PR 3) ─────────────
+
+def test_probe_cause_carries_a_signed_out_shims_provider_and_user():
+    from pseudolife_memory.memory import dream as d
+    body = (b'{"status": "login_required", "detail": "x", "fix": "y", '
+            b'"provider": "claude", "user": "svc-user"}')
+    with _answering(503, body) as base:
+        cause = d.probe_endpoint_cause(base)
+    assert cause == ("login_expired", "/health HTTP 503 (login_required)")
+    assert (cause.provider, cause.shim_user) == ("claude", "svc-user")
+
+
+@pytest.mark.parametrize("body", [
+    # identity only for a sign-in answer, and only of the fixed shapes
+    b'{"status": "cli_error", "provider": "claude", "user": "svc"}',
+    b'{"status": "login_required", "provider": "other", "user": "svc"}',
+])
+def test_probe_cause_drops_identity_outside_its_shape(body):
+    from pseudolife_memory.memory import dream as d
+    with _answering(503, body) as base:
+        cause = d.probe_endpoint_cause(base)
+    assert getattr(cause, "provider", None) is None
+
+
+@pytest.mark.parametrize("user, kept", [
+    ("svc-user", "svc-user"), ("DOMAIN\\\\alice", "DOMAIN\\alice"),
+    ("a b", None), ("x" * 65, None), ("", None),
+])
+def test_probe_cause_keeps_only_a_username_shaped_user(user, kept):
+    from pseudolife_memory.memory import dream as d
+    body = ('{"status": "login_required", "provider": "codex", "user": "%s"}' % user).encode()
+    with _answering(503, body) as base:
+        cause = d.probe_endpoint_cause(base)
+    assert cause.provider == "codex" and cause.shim_user == kept
+
+
+def test_builder_puts_the_identity_on_the_probe(monkeypatch):
+    from pseudolife_memory.memory import dream as d
+    cause = d.ProbeCause("login_expired", "/health HTTP 503 (login_required)",
+                         provider="claude", shim_user="svc")
+    monkeypatch.setattr(d, "probe_endpoint_cause", lambda *a, **k: cause)
+    monkeypatch.setattr(d, "_probe_retry_delay", 0.0)
+    ext, which = d.build_extractor_with_fallback(_cfg("http://p:1/v1", fb="http://f:2/v1"))
+    assert ext.primary_probe["provider"] == "claude"
+    assert ext.primary_probe["shim_user"] == "svc"
