@@ -4,6 +4,11 @@
 //! it either recovers once or refuses with nothing written. Run through
 //! `python -m board.boundary --clock-retry` (a disposable bank on the test
 //! PostgreSQL and the offline embedding fixture).
+//!
+//! The half-open case is delivered with or without the forced reprobe: the
+//! send's own initialization already writes to the session, and that write
+//! reveals it. The reprobe follows Python's retry; no case here shows it
+//! changing an outcome.
 
 use crate::board::Board;
 use crate::config::DaemonEnv;
@@ -257,7 +262,7 @@ async fn other_writer(client: &tokio_postgres::Client) {
 
 #[tokio::test]
 #[ignore = "requires a disposable board database through board.boundary --clock-retry"]
-async fn a_send_heals_a_half_open_writer_session_on_its_retry() {
+async fn a_send_after_a_half_open_writer_session_is_delivered() {
     let (dsn, config) = fixture();
     let upstream = "127.0.0.1:5434".parse().unwrap();
     let (port, cuts) = half_open_proxy(upstream).await;
@@ -283,7 +288,7 @@ async fn a_send_heals_a_half_open_writer_session_on_its_retry() {
     let sent = board
         .dispatch("send", send(&to, "half-open"), &headers, "default")
         .await;
-    let sent = sent.expect("the retry reprobes, reconnects and sends");
+    let sent = sent.expect("the dead session is replaced and the mail sent");
     assert_eq!(sent["state"], "queued");
     assert_eq!(count(&side, "coordination_messages").await, messages + 1);
     let now = service.ensure_init().await.unwrap().storage.lease_epoch();

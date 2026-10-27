@@ -252,12 +252,10 @@ impl Board {
             // the cached session check stale: reprobe even inside its probe
             // interval and run `_ensure_init`, then make one fresh attempt.
             Err(BoardError::ClockChanged) if action == "send" => {
-                if !crate::mutants::active("clock-retry-no-reprobe") {
-                    self.service
-                        .refresh_writer_session()
-                        .await
-                        .map_err(BoardError::Internal)?;
-                }
+                self.service
+                    .refresh_writer_session()
+                    .await
+                    .map_err(BoardError::Internal)?;
                 self.dispatch_once(action, params, headers, principal).await
             }
             other => other,
