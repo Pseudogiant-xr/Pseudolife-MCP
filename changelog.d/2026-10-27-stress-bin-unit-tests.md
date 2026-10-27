@@ -1,0 +1,3 @@
+### Added (2026-10-27 — stress loops can run a binary target's unit tests)
+
+- A `mode=stress` cargo selection can now name a binary target's unit tests as `cargo:<package>/bin/<name>[::<test>]`, for example `cargo:pseudolife-daemon/bin/pseudolife-daemon::background::tests::shutdown_ends_within_its_deadlines_when_work_is_stuck`. The daemon is a binary crate with no library, so an integration test cannot reach its internals, and a timing-sensitive test of them is a unit test that the 20 clean hosted `windows-latest` runs rule could not loop before. The archive is built with `--bin <name>`, and the run filters and checks the evidence by nextest's binary id `<package>::bin/<name>`.

@@ -66,8 +66,42 @@ def test_a_selection_can_name_cargo_integration_test_binaries(selection, parsed)
     "cargo:pseudolife-stdio/board tests/test_a.py", "tests/test_a.py cargo:pseudolife-stdio/board",
 ])
 def test_a_malformed_or_mixed_cargo_selection_is_refused(selection):
-    with pytest.raises(ValueError, match=r"cargo:<package>/<test binary>\[::<test>\]"):
+    with pytest.raises(ValueError, match=r"cargo:<package>/\[bin/\]<test binary>\[::<test>\]"):
         stress.parse(selection)
+
+
+DAEMON_BIN = "pseudolife-daemon/bin/pseudolife-daemon"
+SHUTDOWN = "background::tests::shutdown_ends_within_its_deadlines_when_work_is_stuck"
+
+
+def test_a_selection_can_name_a_binary_targets_unit_tests():
+    # A binary crate has no library for an integration test to import, so its
+    # timing-sensitive tests are unit tests in the bin target's test binary.
+    assert stress.parse(f"cargo:{DAEMON_BIN}::{SHUTDOWN}") == ("cargo", [f"{DAEMON_BIN}::{SHUTDOWN}"])
+    assert stress.cargo_item(f"{DAEMON_BIN}::{SHUTDOWN}") == (
+        "pseudolife-daemon", "bin/pseudolife-daemon", SHUTDOWN)
+
+
+@pytest.mark.parametrize("selection", [
+    "cargo:pseudolife-daemon/bin/", "cargo:pseudolife-daemon/bin/../x", "cargo:pseudolife-daemon/bin/bin/x",
+    "cargo:pseudolife-daemon/lib/x", "cargo:pseudolife-daemon/bin//x", "cargo:pseudolife-daemon/bin/X",
+])
+def test_a_malformed_bin_selection_is_refused(selection):
+    with pytest.raises(ValueError, match=r"cargo:<package>/\[bin/\]<test binary>"):
+        stress.parse(selection)
+
+
+def test_a_bin_item_is_archived_with_bin_and_filtered_by_nextests_binary_id(tmp_path):
+    names = [f"{DAEMON_BIN}::{SHUTDOWN}", "pseudolife-daemon/pdfium_provision"]
+    # nextest names a bin target's test binary <package>::bin/<name>.
+    assert stress.filterset(names) == (
+        f"(binary_id(=pseudolife-daemon::bin/pseudolife-daemon) & test(={SHUTDOWN}))"
+        " | (binary_id(=pseudolife-daemon::pdfium_provision))")
+    argv = stress.archive_command(names, tmp_path / "a.tar.zst")
+    assert [argv[i + 1] for i, a in enumerate(argv) if a == "--bin"] == ["pseudolife-daemon"]
+    assert [argv[i + 1] for i, a in enumerate(argv) if a == "--test"] == ["pdfium_provision"]
+    assert argv[argv.index("-E") + 1] == (
+        "binary_id(=pseudolife-daemon::bin/pseudolife-daemon) | binary_id(=pseudolife-daemon::pdfium_provision)")
 
 
 def test_cargo_items_become_one_nextest_filterset():
@@ -191,6 +225,17 @@ def test_a_cargo_iteration_needs_every_selected_test_to_run_and_pass(tmp_path, n
     (tmp_path / "junit.xml").write_text(nextest_junit(suites), encoding="utf-8")
     found = stress.evidence("cargo", names, tmp_path)
     assert found.startswith(note) and bool(found) == bool(note), found
+
+
+def test_a_bin_items_evidence_reads_its_binary_id_suite(tmp_path):
+    suite = "pseudolife-daemon::bin/pseudolife-daemon"
+    (tmp_path / "junit.xml").write_text(nextest_junit({suite: [("other", FILTERED), (SHUTDOWN, "")]}),
+                                        encoding="utf-8")
+    assert stress.evidence("cargo", [f"{DAEMON_BIN}::{SHUTDOWN}"], tmp_path) == ""
+    # The integration-test binary of the same name is not the bin target's.
+    (tmp_path / "junit.xml").write_text(nextest_junit({"pseudolife-daemon::pseudolife-daemon": [(SHUTDOWN, "")]}),
+                                        encoding="utf-8")
+    assert stress.evidence("cargo", [f"{DAEMON_BIN}::{SHUTDOWN}"], tmp_path).startswith("no test ran for")
 
 
 def test_a_cargo_iteration_without_a_junit_report_is_no_evidence(tmp_path):
@@ -687,7 +732,7 @@ def test_a_cargo_iteration_gets_the_rust_jobs_setup_and_not_the_parity_lanes():
 def test_the_selection_input_lists_every_kind():
     description = raw_workflow().get("on", raw_workflow().get(True))["workflow_dispatch"]["inputs"]["selection"][
         "description"]
-    for kind in ("row:<row>[/<case>]", "scenario:<run.py scenario>", "cargo:<package>/<test binary>[::<test>]",
+    for kind in ("row:<row>[/<case>]", "scenario:<run.py scenario>", stress.CARGO_FORM,
                  "pytest node ids"):
         assert kind in description, kind
 
