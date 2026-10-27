@@ -1,0 +1,3 @@
+### Added (2026-10-27 — the Rust daemon serves the maintainer's Console status, sent mail and inbox)
+
+- The Rust daemon now answers `GET /api/maintainer`, `/api/maintainer/sent` and `/api/maintainer/inbox`, which returned 501 `not_implemented`, behind the same gate as the Python daemon. The gate refuses an open install, a principal not admitted to the board or the reserved `maintainer` principal, a board that is off, and a `coordination.maintainer` origin that is unset or not exactly the passkey host's HTTPS origin (409 `maintainer_https_required` with the rule that failed). The status lists the passkeys, whether a key can sign, the live delegate and coordinator roles with whether maintainer mail reaches each holder, and the recent key changes.
