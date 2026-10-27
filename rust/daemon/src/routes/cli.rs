@@ -75,16 +75,18 @@ fn principal(req: &Request<'_>) -> Option<String> {
 
 /// Run a write to completion in its own task: Python's handler runs on a
 /// worker thread a disconnecting client cannot stop.
-async fn detached<F, Fut>(ready: &Arc<Ready>, body: F) -> Result<Value, String>
+async fn detached<F, Fut>(ready: &Arc<Ready>, body: F) -> Response
 where
     F: FnOnce(Arc<Ready>) -> Fut,
     Fut: std::future::Future<Output = Result<Value, String>> + Send + 'static,
 {
-    ready
-        .writes
-        .spawn(body(ready.clone()))
-        .await
-        .map_err(|e| format!("episode task failed: {e}"))?
+    match ready.writes.spawn(body(ready.clone())).await {
+        Ok(Ok(v)) => json_response(200, &v),
+        // The body's own errors are Python's `ValueError`s (an unparsable
+        // session window): 400 with the message, as `web/api.py` answers.
+        Ok(Err(e)) => refused(e),
+        Err(e) => raised(format!("episode task failed: {e}")),
+    }
 }
 
 /// `episode_start_session(b.get("session_key"), b.get("title") or
@@ -108,7 +110,7 @@ async fn episode_start(req: &mut Request<'_>) -> Response {
         Ok(ready) => ready,
         Err(e) => return raised(e),
     };
-    let result = detached(&ready, move |ready| async move {
+    detached(&ready, move |ready| async move {
         let reg = crate::session_register::Registration {
             via: crate::session_register::RegisteredVia::Api,
             principal: principal.as_deref(),
@@ -118,11 +120,7 @@ async fn episode_start(req: &mut Request<'_>) -> Response {
             .await
             .map(Value::Object)
     })
-    .await;
-    match result {
-        Ok(v) => json_response(200, &v),
-        Err(e) => raised(e),
-    }
+    .await
 }
 
 /// `episode_end_session(b.get("session_key"), run_dream=bool(b.get(
@@ -153,6 +151,28 @@ async fn episode_end(req: &mut Request<'_>) -> Response {
             .flatten(),
     };
     let app = req.app;
+    let unowned = || json!({"closed": null, "reason": "no owned open session"});
+    let guarded = explicit.is_none();
+    // `_resolve_writer` runs before the service initializes: the header,
+    // else the active-session pointer (held only once the bank is open),
+    // else the transport session.
+    let key = match explicit {
+        Some(k) => k,
+        None => {
+            let resolved = match caller.header_session.as_ref().filter(|s| !s.is_empty()) {
+                Some(h) => Ok(Some(h.clone())),
+                None => match app.service.ready_if_initialized().await {
+                    Some(ready) => ready.write.lock().await.resolve_session(&caller),
+                    None => Ok(caller.transport_session.clone().filter(|s| !s.is_empty())),
+                },
+            };
+            match resolved {
+                Ok(Some(k)) => k,
+                Ok(None) => return json_response(200, &unowned()),
+                Err(e) => return refused(e),
+            }
+        }
+    };
     let ready = match app.service.ensure_init().await {
         Ok(ready) => ready,
         Err(e) => return raised(e),
@@ -165,34 +185,17 @@ async fn episode_end(req: &mut Request<'_>) -> Response {
         .iter()
         .map(|b| b.name.clone())
         .collect();
-    let unowned = || json!({"closed": null, "reason": "no owned open session"});
-    let guarded = explicit.is_none();
-    let key = match explicit {
-        Some(k) => k,
-        None => {
-            let resolved = ready.write.lock().await.resolve_session(&caller);
-            match resolved {
-                Ok(Some(k)) => k,
-                Ok(None) => return json_response(200, &unowned()),
-                Err(e) => return raised(e),
-            }
-        }
-    };
     let service = app.service.clone();
-    let result = detached(&ready, move |ready| async move {
+    detached(&ready, move |ready| async move {
+        let stamp = !guarded || crate::mutants::active("episode-end-stamps-guarded");
         let (result, fire, found) =
-            crate::session_close::close_session(&ready, &key, run_dream, &band_order, !guarded)
-                .await;
-        if fire {
+            crate::session_close::close_session(&ready, &key, run_dream, &band_order, stamp).await;
+        if fire && !crate::mutants::active("episode-end-no-dream") {
             service.fire_session_dream();
         }
         Ok(if guarded && !found { unowned() } else { result })
     })
-    .await;
-    match result {
-        Ok(v) => json_response(200, &v),
-        Err(e) => raised(e),
-    }
+    .await
 }
 
 #[cfg(test)]

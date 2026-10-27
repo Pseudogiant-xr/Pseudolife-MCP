@@ -30,7 +30,8 @@ MUTANTS = ["session-end-no-client-stamp", "session-end-keeps-empty",
            "changes-cursor-echoes-since", "changes-counts-superseded",
            "session-start-no-registration", "session-start-no-pointer",
            "session-start-no-briefing", "briefing-no-avoid-first",
-           "briefing-recap-includes-open", "episode-end-ignores-header"]
+           "briefing-recap-includes-open", "episode-end-ignores-header",
+           "episode-end-stamps-guarded", "episode-end-no-dream"]
 
 HOME_OPS = ("write_file",)
 
@@ -53,6 +54,11 @@ DREAM_NOTES = ["The billing export runs nightly at 02:00.",
 # which holds on the calibration host, not on every host).
 DREAM_CLAIMS: list[dict] = []
 DREAM_SETTLE = {"quiet_s": 3.0, "timeout_s": 120.0}
+# cli-episode-end-dream's notes, in store order: the first in cd-1, the
+# others in cd-2; the one dream pulls all three.
+CLI_DREAM_NOTES = ["The invoice job retries three times.",
+                   "Marta reviews the invoice job's alerts.",
+                   "The invoice job runs on the batch cluster."]
 
 OPS = ("hook",)
 
@@ -161,6 +167,9 @@ def changes(query: str = "", auth: bool = True) -> dict:
 
 
 def register(h) -> dict[str, dict]:
+    # cli-episode-routes stamps a registration behind the daemons' backs,
+    # as the idle reaper would have.
+    h.EXTERNAL_WRITES.add("cli-episode-routes")
     start = "/api/hook/session-start?source=startup&session_id="
     seed_start = lambda key: {"op": "http", "method": "GET", "path": start + key}  # noqa: E731
     return {
@@ -456,8 +465,42 @@ def register(h) -> dict[str, dict]:
                 episode_end({}, headers=[("X-PL-Session", "es-b")]),
                 # Guarded: no header, so the active-session pointer's.
                 episode_end({}),
-                # Guarded again: the pointer's session has nothing open.
+                # As if the reaper had closed it: its registration reads idle.
+                h.sql("UPDATE client_sessions SET end_reason = 'idle' "
+                      "WHERE session_key = 'es-ptr'"),
+                # Guarded again: the pointer's session has nothing open, and
+                # the guarded path stamps nothing (still idle).
                 episode_end({}),
+                # The same key, explicit: nothing open, the end is stamped.
+                episode_end({"session_key": "es-ptr"}),
+            ],
+        },
+        # The route's session-end dream, against a stub extractor: a close
+        # with run_dream falsy fires nothing (the notes stay pending); a
+        # close with entries fires one dream, whose requests are compared
+        # and which acknowledges every pending note on both sides.
+        "cli-episode-end-dream": {
+            "config": DREAM_CONFIG,
+            "extractor": {"model": "stub-model",
+                          "replies": [{**r, "times": 1}
+                                      for r in h.batch_replies(CLI_DREAM_NOTES, DREAM_CLAIMS)]},
+            "extractor_all_used": True,
+            "seed": [
+                {"op": "http", "method": "POST", "path": "/api/episode/start",
+                 "body": {"session_key": "cd-1", "title": "First"}},
+                h.store(CLI_DREAM_NOTES[0], [h.sess("cd-1")], source="conversation"),
+                {"op": "http", "method": "POST", "path": "/api/episode/start",
+                 "body": {"session_key": "cd-2", "title": "Second"}},
+                h.store(CLI_DREAM_NOTES[1], [h.sess("cd-2")], source="conversation"),
+                h.store(CLI_DREAM_NOTES[2], [h.sess("cd-2")], source="conversation"),
+            ],
+            "ops": [
+                {**episode_end({"session_key": "cd-1", "run_dream": 0}),
+                 "settle": dict(DREAM_SETTLE),
+                 "expect": ["SELECT EXISTS (SELECT 1 FROM entries WHERE dream_state = 'pending')"]},
+                {**episode_end({"session_key": "cd-2"}), "settle": dict(DREAM_SETTLE),
+                 "expect": ["SELECT NOT EXISTS (SELECT 1 FROM entries "
+                            "WHERE dream_state = 'pending')"]},
             ],
         },
         # A cold bank and the A/B arms: sess-a gets compact (policy and
