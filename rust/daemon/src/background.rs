@@ -167,21 +167,63 @@ impl Background {
         true
     }
 
+    /// Stop the background tasks, then run the final save, each within its
+    /// share of the exit budget ([`JOIN_DEADLINE`], [`SAVE_DEADLINE`]).
     pub async fn shutdown(&self, duties: &dyn Duties) {
+        self.shutdown_within(duties, JOIN_DEADLINE, SAVE_DEADLINE)
+            .await
+    }
+
+    /// [`Background::shutdown`] with explicit deadlines. A task still running
+    /// at its deadline is no longer waited for (it ends with the process); a
+    /// final save still running at its deadline is abandoned, and its open
+    /// transaction rolls back when the session closes at exit.
+    pub async fn shutdown_within(&self, duties: &dyn Duties, join: Duration, save: Duration) {
         self.stop.send_replace(true);
         let handles = std::mem::take(&mut *self.tasks.lock().expect("background tasks"));
+        let deadline = tokio::time::Instant::now() + join;
+        let mut left = 0;
         for handle in handles {
-            if let Err(e) = handle.await {
-                eprintln!("background task failed: {e}");
+            match tokio::time::timeout_at(deadline, handle).await {
+                Ok(Ok(())) => {}
+                Ok(Err(e)) => eprintln!("background task failed: {e}"),
+                Err(_) => left += 1,
             }
         }
-        if self.durability_started.load(Ordering::SeqCst)
-            && let Err(e) = duties.autosave().await
-        {
-            eprintln!("exit flush failed: {e}");
+        if left > 0 {
+            eprintln!(
+                "shutdown: {left} background task(s) still running after {:.1}s; leaving them to the exit",
+                join.as_secs_f64()
+            );
+        }
+        if self.durability_started.load(Ordering::SeqCst) {
+            match tokio::time::timeout(save, duties.autosave()).await {
+                Ok(Ok(())) => {}
+                Ok(Err(e)) => eprintln!("exit flush failed: {e}"),
+                Err(_) => eprintln!(
+                    "exit flush failed: not finished within {:.1}s (the database may be unresponsive)",
+                    save.as_secs_f64()
+                ),
+            }
         }
     }
 }
+
+/// The exit budget, stage by stage. Python sets none (uvicorn waits for
+/// open requests, then the atexit save runs, however long each takes); the
+/// container stops it anyway after Docker's default 10 s stop grace, since
+/// `ops/docker-compose.yml` sets no `stop_grace_period`. These stages fit in
+/// 9 s of that grace, so the final save gets its turn before the kill:
+/// open HTTP requests (a board wait can park for up to 30 s) 3 s, admitted
+/// writes 3 s, background tasks 1.5 s, the final save 1.5 s. Not measured:
+/// a store over a healthy database takes a fraction of a second, and work
+/// still running at a deadline is left to the exit, never cancelled, so a
+/// store's eviction and insert (two transactions, in both daemons) are cut
+/// no earlier than the kill would cut them.
+pub const HTTP_DRAIN: Duration = Duration::from_secs(3);
+pub const WRITES_DRAIN: Duration = Duration::from_secs(3);
+pub const JOIN_DEADLINE: Duration = Duration::from_millis(1500);
+pub const SAVE_DEADLINE: Duration = Duration::from_millis(1500);
 
 async fn periodic<F>(mut stop: watch::Receiver<bool>, seconds: f64, name: &str, mut callback: F)
 where
@@ -227,6 +269,52 @@ mod tests {
             assert_eq!(seconds(Some(raw), 30.0), Ok(expected), "{raw:?}");
         }
         assert_eq!(seconds(None, 30.0), Ok(30.0));
+    }
+
+    /// A save stuck on an unresponsive database, and a task that ignores
+    /// the stop signal: shutdown still ends within its deadlines.
+    struct Stuck {
+        saves: AtomicUsize,
+    }
+    impl Duties for Stuck {
+        fn sweep(&self, _stop: watch::Receiver<bool>) -> Duty<'_> {
+            Box::pin(async { Ok(()) })
+        }
+        fn autosave(&self) -> Duty<'_> {
+            Box::pin(async {
+                self.saves.fetch_add(1, Ordering::SeqCst);
+                std::future::pending::<()>().await;
+                Ok(())
+            })
+        }
+        fn warmup(&self, _stop: watch::Receiver<bool>) -> Duty<'_> {
+            Box::pin(async { Ok(()) })
+        }
+        fn reap(&self, _: f64) -> Duty<'_> {
+            Box::pin(async { Ok(()) })
+        }
+    }
+
+    #[tokio::test]
+    async fn shutdown_ends_within_its_deadlines_when_work_is_stuck() {
+        let background = Background::default();
+        background.durability_started.store(true, Ordering::SeqCst);
+        background.push(tokio::spawn(std::future::pending::<()>()));
+        let stuck = Stuck {
+            saves: AtomicUsize::new(0),
+        };
+        let (join, save) = (Duration::from_millis(100), Duration::from_millis(100));
+        let started = tokio::time::Instant::now();
+        tokio::time::timeout(
+            Duration::from_secs(10),
+            background.shutdown_within(&stuck, join, save),
+        )
+        .await
+        .expect("shutdown must not wait forever on stuck work");
+        // The final save was attempted, and the whole shutdown fit in the
+        // two deadlines (with scheduling slack).
+        assert_eq!(stuck.saves.load(Ordering::SeqCst), 1);
+        assert!(started.elapsed() < join + save + Duration::from_secs(2));
     }
 
     #[derive(Default)]

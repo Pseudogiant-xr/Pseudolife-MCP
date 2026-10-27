@@ -334,19 +334,49 @@ fn main() {
             }
         };
         eprintln!("daemon: listening on {host}:{port} (auth={auth_configured})");
-        let code = match axum::serve(serving_listener(listener), router)
-            .with_graceful_shutdown(shutdown_signal())
-            .await
-        {
-            Ok(()) => 0,
-            Err(e) => {
-                eprintln!("serve: {e}");
-                1
+        // Graceful: stop accepting, let open requests finish. A request still
+        // open `HTTP_DRAIN` after the signal (a parked board wait, a client
+        // that never reads) is closed; stores it admitted run on in their
+        // own tracked tasks, which the next stage waits for.
+        let (signalled, mut on_signal) = tokio::sync::watch::channel(false);
+        let serve = std::future::IntoFuture::into_future(
+            axum::serve(serving_listener(listener), router).with_graceful_shutdown(async move {
+                shutdown_signal().await;
+                let _ = signalled.send(true);
+            }),
+        );
+        let http_deadline = async move {
+            let _ = on_signal.wait_for(|signalled| *signalled).await;
+            tokio::time::sleep(crate::background::HTTP_DRAIN).await;
+        };
+        let code = tokio::select! {
+            served = serve => match served {
+                Ok(()) => 0,
+                Err(e) => {
+                    eprintln!("serve: {e}");
+                    1
+                }
+            },
+            () = http_deadline => {
+                eprintln!(
+                    "shutdown: open requests still running after {:.1}s; closing them",
+                    crate::background::HTTP_DRAIN.as_secs_f64()
+                );
+                0
             }
         };
-        // HTTP admission has stopped. Detached stores must finish before
-        // background shutdown performs the final persistence callback.
-        service.writes.drain().await;
+        // HTTP admission has stopped. Admitted stores finish before the
+        // final save, within their share of the exit budget; one stuck on an
+        // unresponsive database is left to the exit, never cancelled.
+        if tokio::time::timeout(crate::background::WRITES_DRAIN, service.writes.drain())
+            .await
+            .is_err()
+        {
+            eprintln!(
+                "shutdown: admitted writes still running after {:.1}s; leaving them to the exit",
+                crate::background::WRITES_DRAIN.as_secs_f64()
+            );
+        }
         background.shutdown(service.as_ref()).await;
         code
     });
