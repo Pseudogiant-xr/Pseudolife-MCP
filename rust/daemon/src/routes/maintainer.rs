@@ -1,6 +1,7 @@
 //! The maintainer routes and `/api/config`, behind the operator gate. The
-//! three maintainer reads (`read/maintainer.rs`) and `/api/config`
-//! (`config_io.rs`, after `http.rs`'s operator gate) are served; the
+//! three maintainer reads (`read/maintainer.rs`), `POST
+//! /api/maintainer/challenge` (`maintainer_ops.rs`) and `/api/config`
+//! (`config_io.rs`, after `http.rs`'s operator gate) are served; the other
 //! maintainer POSTs are not yet.
 
 use super::console::Request;
@@ -13,6 +14,7 @@ pub(super) const SERVED: &[(&str, &str)] = &[
     ("GET", "/api/maintainer"),
     ("GET", "/api/maintainer/sent"),
     ("GET", "/api/maintainer/inbox"),
+    ("POST", "/api/maintainer/challenge"),
     ("GET", "/api/config"),
     ("POST", "/api/config"),
 ];
@@ -21,6 +23,10 @@ pub(super) async fn route(req: &mut Request<'_>) -> Option<Response> {
     match (req.method, req.path) {
         ("GET", path) if crate::read::maintainer::PATHS.contains(&path) => {
             Some(crate::read::maintainer::route(req.app, path, req.params, req.headers).await)
+        }
+        ("POST", path) if crate::maintainer_ops::PATHS.contains(&path) => {
+            let body = std::mem::take(&mut req.body);
+            Some(crate::maintainer_ops::route(req.app, path, req.headers, body).await)
         }
         ("GET", "/api/config") => {
             let svc = &req.app.service;
