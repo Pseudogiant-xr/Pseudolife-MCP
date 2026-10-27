@@ -19,6 +19,9 @@ pub mod store;
 pub mod text;
 pub mod wake;
 
+#[cfg(test)]
+mod clock_tests;
+
 // The shim's byte-exact credential-shape guard and its pinned CPython 3.11
 // Unicode tables, compiled into this crate from the same source files.
 #[path = "../../../shim/src/cli/lease/operator/secrets.rs"]
