@@ -80,7 +80,16 @@ ANALYZER_SEED_SQL = (
 # against Python's tracker in src/dream/stall_tests.rs.
 MUTANTS = ["mcp-sweep-no-auto-dream",         # sweep-dream-auto
            "mcp-sweep-no-deep-tick",          # sweep-deep-tick
-           "mcp-sweep-analyzer-no-cursor"]    # sweep-analyzer-tick
+           "mcp-sweep-analyzer-no-cursor",    # sweep-analyzer-tick
+           "compaction-off"]                  # sweep-compaction
+
+# Compaction on a one-second sweep with dreams off (the retrieval log, on by
+# default, keeps the sweep running in both daemons): one slot keeps its
+# newest superseded version, the two older ones go.
+COMPACTION_CONFIG = ("memory:\n  dream:\n    enabled: false\n    sweep_interval_seconds: 1\n"
+                     "  compaction:\n    enabled: true\n    keep_per_slot: 1\n"
+                     "    min_age_days: 30\n")
+COMPACTION_SLOT = "entity_norm = 'compaction host' AND attribute_norm = 'os'"
 
 
 def scenarios(w) -> dict:
@@ -90,6 +99,29 @@ def scenarios(w) -> dict:
     fail = {"kind": "claims", "user": w.numbered(STALL_NOTES), "status": 503,
             "body": json.dumps({"error": "upstream failure"})}
     return {
+        # Compaction (memory/compaction.py): four versions of one slot, the
+        # three superseded ones backdated 100 days after the seed; with
+        # keep_per_slot 1 the sweep purges the two oldest from the resident
+        # store and, through the per-slot sync, from the bank. The current
+        # value and the newest superseded one stay.
+        "sweep-compaction": {
+            "config": COMPACTION_CONFIG,
+            "seed": [w.fact("Compaction Host", "OS", "Debian 9"),
+                     w.fact("Compaction Host", "OS", "Debian 10"),
+                     w.fact("Compaction Host", "OS", "Debian 11"),
+                     w.fact("Compaction Host", "OS", "Debian 12"),
+                     w.sql("UPDATE facts SET superseded_at = superseded_at - 100 * 86400 "
+                           f"WHERE {COMPACTION_SLOT} AND status = 'superseded'",
+                           after_stop=True)],
+            "ops": [
+                {"op": "sleep", "s": 4,
+                 "expect": [f"SELECT count(*) = 2 FROM facts WHERE {COMPACTION_SLOT}",
+                            f"SELECT count(*) = 1 FROM facts WHERE {COMPACTION_SLOT} "
+                            "AND status = 'current'"]},
+                w.fact_get("Compaction Host", "OS"),
+                w.history("Compaction Host", "OS"),
+            ],
+        },
         # The automatic dream: the trigger fires once the third note makes
         # the batch, the sweep dreams it, the cursor and the run row land.
         "sweep-dream-auto": {

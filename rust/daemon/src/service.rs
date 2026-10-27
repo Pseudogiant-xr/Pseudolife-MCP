@@ -509,6 +509,51 @@ impl Service {
         storage.acknowledge_rehydration();
     }
 
+    /// `compact_superseded` (service.py:5832-5866), on the sweep tick: purge
+    /// old superseded and retired versions from the three canonical stores
+    /// (per slot the newest `memory.compaction.keep_per_slot` non-live
+    /// records stay, the rest go once older than `min_age_days`), then save
+    /// each store that changed through its per-slot sync, which deletes the
+    /// purged rows. Under the write lock, as every canonical write is, so no
+    /// write sees the records shift under it. A failed save is logged and
+    /// counted (`persist_errors`); the slots stay dirty for the next save.
+    async fn compact_superseded(&self, ready: &Ready) {
+        if crate::mutants::active("compaction-off") {
+            return;
+        }
+        let m = &self.config.memory;
+        let (keep, min_age) = (m.compaction_keep_per_slot, m.compaction_min_age_days);
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs_f64())
+            .unwrap_or(0.0);
+        let _write = ready.write.lock().await;
+        let facts = ready.cortex.write(|s| s.compact(keep, min_age, now));
+        if facts > 0
+            && let Err(e) = crate::fact_set::save_cortex(self, ready).await
+        {
+            eprintln!("compaction: cortex save failed: {e:?}");
+        }
+        let world_facts = ready.world.write(|s| s.compact(keep, min_age, now));
+        if world_facts > 0
+            && let Err(e) = crate::world_tools::save_world(self, ready).await
+        {
+            eprintln!("compaction: world cortex save failed: {e:?}");
+        }
+        let lessons = ready.lessons.write(|s| s.compact(keep, min_age, now));
+        if lessons > 0
+            && let Err(e) = crate::forget_tools::save_lessons(self, ready).await
+        {
+            eprintln!("compaction: lesson store save failed: {e:?}");
+        }
+        let total = facts + world_facts + lessons;
+        if total > 0 {
+            eprintln!(
+                "compaction purged {{'facts': {facts}, 'world_facts': {world_facts}, 'lessons': {lessons}, 'total': {total}}}"
+            );
+        }
+    }
+
     /// `_refuse_on_stale_hydrated_dims`'s message.
     fn stale_dims_message(&self, s: &crate::bank::StaleDims, dim: usize) -> String {
         let dims: Vec<String> = s.dims.iter().map(|d| d.to_string()).collect();
@@ -574,9 +619,8 @@ impl crate::background::Duties for Service {
     fn sweep(&self, stop: tokio::sync::watch::Receiver<bool>) -> crate::background::Duty<'_> {
         Box::pin(async move {
             if self.config.memory.compaction_enabled {
-                self.ensure_init_inner().await?;
-                // The current reader has no canonical resident stores.
-                // W2-E connects compaction_victims and its slot-rewrite API.
+                let ready = self.ensure_init_inner().await?;
+                self.compact_superseded(&ready).await;
             }
             let inner = self.inner.lock().await;
             let Some(storage) = &inner.storage else {

@@ -259,6 +259,38 @@ impl CortexStore {
         &self.records
     }
 
+    /// `compact_store` over the cortex (`memory/compaction.py`): purge old
+    /// non-live records (superseded, retired, removed set members), rebuild
+    /// the indexes and mark the purged slots dirty, with any slot the
+    /// rebuild's self-healing demoted. Returns the purge count.
+    pub(crate) fn compact(&mut self, keep: i64, min_age_days: f64, now: f64) -> usize {
+        let before = self.records.len();
+        let purged = crate::maintenance::compact_records(
+            &mut self.records,
+            |r| crate::maintenance::CompactRecord {
+                entity_norm: &r.entity_norm,
+                attribute_norm: &r.attribute_norm,
+                status: &r.status,
+                superseded_at: r.superseded_at,
+                asserted_at: r.asserted_at,
+            },
+            keep,
+            min_age_days,
+            now,
+        );
+        let count = before - self.records.len();
+        if count == 0 {
+            return 0;
+        }
+        let demoted = self.reindex();
+        for i in demoted {
+            let key = self.records[i].key().clone();
+            self.dirty_slots.insert(key);
+        }
+        self.dirty_slots.extend(purged);
+        count
+    }
+
     /// `_reindex_current` (`memory/cortex.py:1797`): rebuild the indexes and
     /// self-heal duplicate live scalars (keep the most recently confirmed,
     /// demote the rest to `superseded`). Returns the demoted record indexes;
@@ -686,6 +718,47 @@ pub(crate) mod tests {
         assert_eq!(got[0]["score"], serde_json::Value::Null);
         assert_eq!(got[2]["entity"], "laptop");
         assert_eq!(got[2]["score"], serde_json::json!(1.0));
+    }
+
+    /// `compact_store` over the cortex: per slot the newest `keep` non-live
+    /// records stay, older ones past the cutoff go; current records and
+    /// other slots are untouched; the purged slots are dirty and the
+    /// indexes follow the shifted records.
+    #[test]
+    fn compaction_purges_old_non_live_records_and_marks_their_slots() {
+        let day = 86400.0;
+        let now = 100.0 * day;
+        let old = |value: &str, superseded_days_ago: f64| {
+            let mut r = rec("Server", "OS", value);
+            r.status = "superseded".into();
+            r.superseded_at = Some(now - superseded_days_ago * day);
+            r
+        };
+        let mut store = CortexStore {
+            records: vec![
+                old("Debian 9", 90.0),
+                old("Debian 10", 80.0),
+                old("Debian 11", 70.0),
+                old("Debian 11.5", 5.0),
+                rec("Server", "OS", "Debian 12"),
+                rec("Laptop", "OS", "Fedora"),
+            ],
+            ..Default::default()
+        };
+        store.reindex();
+        let purged = store.compact(2, 30.0, now);
+        // Kept: the two newest non-live (11.5 and 11); 10 and 9 are old.
+        assert_eq!(purged, 2);
+        let values: Vec<&str> = store.records.iter().map(|r| r.value.as_str()).collect();
+        assert_eq!(values, ["Debian 11", "Debian 11.5", "Debian 12", "Fedora"]);
+        let server = ("server".to_string(), "os".to_string());
+        assert!(store.dirty_slots.contains(&server));
+        assert_eq!(store.dirty_slots.len(), 1, "only the purged slot");
+        assert_eq!(store.current[&server], 2, "the index follows the shift");
+        // A second pass finds nothing.
+        store.dirty_slots.clear();
+        assert_eq!(store.compact(2, 30.0, now), 0);
+        assert!(store.dirty_slots.is_empty());
     }
 
     pub(crate) fn rec(entity: &str, attribute: &str, value: &str) -> CortexRecord {
