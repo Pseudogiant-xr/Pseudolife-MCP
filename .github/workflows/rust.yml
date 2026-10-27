@@ -85,8 +85,12 @@ jobs:
     # and the Parity gate then fail (closed) and the run needs a rerun. On
     # 2026-10-16 a CLAUDE.md-only PR
     # (#782) queued the whole ~33-job matrix behind the account's 20-job cap.
-    # No hosted step here reads docs outside rust/: the producer census only
-    # reports docs drift, and the W2-D docs seed runs locally, not in CI.
+    # No hosted step here reads docs outside rust/, and the W2-D docs seed
+    # runs locally, not in CI. The producer census does scan docs, so
+    # ops/integrate.py build commits a regenerated rust/producer-census.json
+    # to a batch that changes them; beside docs that file still counts as
+    # docs-only, and the master push that merges the batch (which runs the
+    # Rust job) checks its currency.
     #
     # Master pushes (2026-10-24): a batch merges with a merge commit whose
     # tree is its head's (ops/integrate.py merge refuses otherwise), so
@@ -152,7 +156,10 @@ jobs:
             $files = @(git diff --no-renames --name-only $base HEAD)
             if ($LASTEXITCODE -eq 0 -and $files.Count -gt 0) {
               $files | Write-Output
-              if (@($files | Where-Object { $_ -cnotmatch $docs }).Count -eq 0) { $rust = 'false' }
+              # The producer census ops/integrate.py build regenerates for
+              # changed docs keeps a docs-only diff docs-only; alone, it runs.
+              $code = @($files | Where-Object { $_ -cnotmatch $docs -and $_ -cne 'rust/producer-census.json' })
+              if ($code.Count -eq 0 -and @($files | Where-Object { $_ -cmatch $docs }).Count -gt 0) { $rust = 'false' }
               if ($ordinary -and @($files | Where-Object { $_ -cmatch $ciInputs }).Count -eq 0) { $full = 'false' }
             }
           }
@@ -245,7 +252,7 @@ jobs:
         run: |
           python -m pip install pytest pyyaml "psycopg[binary]" psutil
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python -m pytest -q rust/test_contract_inventory.py rust/test_producer_census.py rust/daemon/harness/test_w2e_lifecycle.py -k 'not committed_census_matches_current_tree'
+          python -m pytest -q rust/test_contract_inventory.py rust/test_producer_census.py rust/daemon/harness/test_w2e_lifecycle.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python rust/producer_census.py --ci-check
           exit $LASTEXITCODE
