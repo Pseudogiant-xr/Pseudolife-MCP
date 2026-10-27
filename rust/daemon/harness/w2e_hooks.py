@@ -17,9 +17,22 @@ import time
 
 # Deliberate breaks (``--features mutants``) these scenarios must catch.
 MUTANTS = ["session-end-no-client-stamp", "session-end-keeps-empty",
-           "session-end-clears-foreign", "policy-arm-shifted", "changes-counts-own-session",
-           "changes-from-open-leaf", "changes-cursor-echoes-since",
-           "changes-counts-superseded"]
+           "session-end-clears-foreign", "session-end-no-dream", "policy-arm-shifted",
+           "changes-counts-own-session", "changes-from-open-leaf",
+           "changes-cursor-echoes-since", "changes-counts-superseded"]
+
+# The session-end dream: everything but extraction off, and no sweep dream,
+# so only the close's own trigger can dream.
+DREAM_CONFIG = ("memory:\n  lessons:\n    enabled: false\n    infer_outcomes: false\n"
+                "  graph_insight:\n    enabled: false\n"
+                "  dream:\n    enabled: false\n    stall_notice: false\n")
+DREAM_NOTES = ["The billing export runs nightly at 02:00.",
+               "Priya maintains the billing export."]
+DREAM_CLAIMS = [
+    {"entity": "Billing Export", "attribute": "schedule", "value": "nightly at 02:00", "source": 1},
+    {"entity": "Priya", "attribute": "maintains", "value": "billing export", "source": 2},
+]
+DREAM_SETTLE = {"quiet_s": 3.0, "timeout_s": 120.0}
 
 OPS = ("hook",)
 
@@ -141,6 +154,9 @@ def register(h) -> dict[str, dict]:
                 h.store("The release checklist for the next version covers the installer, "
                         "the shim and the plugin cache.", [h.sess("end-g")], source="proj-g"),
                 h.store("Status: halfway through.", [h.sess("end-g")], source="status"),
+                # H: an empty root with an empty sub-episode, pruned whole.
+                seed_start("end-h"),
+                h.ep_start("H sub-task", [h.sess("end-h")]),
                 seed_start("end-d"),
                 h.store("A note in session D.", [h.sess("end-d")]),
                 h.session_title("Session D, named by its agent", [h.sess("end-d")]),
@@ -162,6 +178,8 @@ def register(h) -> dict[str, dict]:
                 # Titled from the signal source and the cut first entry.
                 end("end-g"),
                 h.ep_summary("@root:end-g:32"),
+                # Empty root and sub-episode: both deleted.
+                end("end-h"),
                 # Named by its agent: kept; it owns the pointer, which clears.
                 end("end-d"),
                 h.ep_summary("@root:end-d:32"),
@@ -173,6 +191,28 @@ def register(h) -> dict[str, dict]:
                 end(True),
                 # With no pointer an unkeyed episode start opens a root.
                 h.ep_start("Started after the ends"),
+            ],
+        },
+        # The close's dream trigger, against a stub extractor. An empty
+        # close fires nothing (a dream would extract session A's notes and
+        # call the model); a close with entries fires one dream, whose
+        # requests and committed run are compared.
+        "hook-session-end-dream": {
+            "config": DREAM_CONFIG,
+            "extractor": {"model": "stub-model",
+                          "replies": h.batch_replies(DREAM_NOTES, DREAM_CLAIMS)},
+            "extractor_all_used": True,
+            "seed": [
+                seed_start("dream-a"),
+                h.store(DREAM_NOTES[0], [h.sess("dream-a")], source="conversation"),
+                h.store(DREAM_NOTES[1], [h.sess("dream-a")], source="conversation"),
+                seed_start("dream-b"),
+            ],
+            "ops": [
+                {**end("dream-b"), "settle": dict(DREAM_SETTLE),
+                 "expect": ["SELECT NOT EXISTS (SELECT 1 FROM dream_runs)"]},
+                {**end("dream-a"), "settle": dict(DREAM_SETTLE),
+                 "expect": ["SELECT EXISTS (SELECT 1 FROM dream_runs WHERE status = 'committed')"]},
             ],
         },
         # The separate policy hook. Arms by SHA-256 of the session id:

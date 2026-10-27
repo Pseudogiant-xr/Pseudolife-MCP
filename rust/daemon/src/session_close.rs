@@ -47,9 +47,10 @@ fn entry_counts(ready: &Ready) -> HashMap<String, usize> {
 }
 
 /// `_end_client_session_locked`: stamp the close on the key's registration
-/// row (no row, no write), naming the closed root when there is one.
+/// row (no row, no write), naming the closed root when there is one. An
+/// empty key stamps nothing.
 async fn end_client_session(ready: &Ready, key: &str, root: Option<(&str, Option<f64>)>) {
-    if crate::mutants::active("session-end-no-client-stamp") {
+    if key.is_empty() || crate::mutants::active("session-end-no-client-stamp") {
         return;
     }
     let ids = json!(root.map(|(id, _)| vec![id]).unwrap_or_default());
@@ -231,14 +232,17 @@ pub async fn hook_session_end(app: &crate::http::App, session_id: &Value) {
         .collect();
     let r2 = ready.clone();
     let task = ready.writes.spawn(async move {
-        // Python clears the pointer even when the close raised.
+        // Python clears the pointer even when the close, or the dream
+        // trigger inside it, raised.
         let (r3, k2) = (r2.clone(), key.clone());
-        let close =
-            tokio::spawn(async move { episode_end_session(&r3, &k2, true, &band_order).await });
-        match close.await {
-            Ok((_, true)) => service.fire_session_dream(),
-            Ok(_) => {}
-            Err(e) => eprintln!("session-end episode close failed: {e}"),
+        let close = tokio::spawn(async move {
+            let (_, fire) = episode_end_session(&r3, &k2, true, &band_order).await;
+            if fire && !crate::mutants::active("session-end-no-dream") {
+                service.fire_session_dream();
+            }
+        });
+        if let Err(e) = close.await {
+            eprintln!("session-end episode close failed: {e}");
         }
         clear_active_session(&r2, &key).await;
     });
