@@ -54,6 +54,7 @@ pub(crate) fn knobs() -> &'static [Knob] {
     })
 }
 
+#[cfg(test)]
 pub(crate) fn knob(path: &str) -> Option<&'static Knob> {
     knobs().iter().find(|k| k.path() == path)
 }
