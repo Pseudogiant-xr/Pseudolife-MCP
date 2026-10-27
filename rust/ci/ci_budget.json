@@ -161,7 +161,7 @@
       "fixtures": "defc5e07c5ac3f94",
       "candidate": "77b0c5fa6b2afcbf",
       "candidate-harness": "ab479a8fc85283e7",
-      "parity-checks": "dc6efde1c2658559",
+      "parity-checks": "993e8c4b05b30fc5",
       "daemon-image": "cf93a3a209618bdc",
       "parity": "4c39a489bf4b1642"
     },
@@ -180,6 +180,11 @@
         "job": "scope",
         "fingerprint": "96dd91911ecc126e",
         "reason": "Classification only: a regenerated producer census beside docs keeps a docs-only diff docs-only; same steps, same minutes"
+      },
+      {
+        "job": "parity-checks",
+        "fingerprint": "993e8c4b05b30fc5",
+        "reason": "#1013 adds one pytest file (test_config_knobs_golden.py, about 5 s on Windows: it imports the service module) to the existing Offline W2-D search harness regressions step; no new job, shard or setup"
       }
     ]
   },
