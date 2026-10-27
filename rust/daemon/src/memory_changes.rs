@@ -213,7 +213,7 @@ pub async fn hook_memory_changes(
     let ready = match app.service.ensure_init().await {
         Ok(ready) => ready,
         Err(e) => {
-            eprintln!("memory-change note failed for session_id={session_id:?}: {e}");
+            eprintln!("memory-change note failed: {e}");
             return String::new();
         }
     };
@@ -221,7 +221,7 @@ pub async fn hook_memory_changes(
     let changes = match memory_changes_since(&ready, start, key).await {
         Ok(changes) => changes,
         Err(e) => {
-            eprintln!("memory-change note failed for session_id={session_id:?}: {e}");
+            eprintln!("memory-change note failed: {e}");
             return String::new();
         }
     };
