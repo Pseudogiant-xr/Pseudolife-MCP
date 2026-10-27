@@ -725,13 +725,39 @@ stall record and reports it:
   `memory.dream.stall_notice: false` to turn them off; with the board off
   or without Postgres they are skipped.
 
-On a headless daemon host, an expired CLI login is the expected cause: log
-the CLI in again on that host (`claude auth login`, or `codex login` for
-the Codex shim). The shim's own `/health` says so: it answers 503 with
-`"status": "login_required"`, the CLI's message in `detail` and the command
-in `fix` (any other CLI failure is `"status": "cli_error"` with the CLI's
-own output from stdout and stderr in `detail`). The shim's health check
-recovers within its TTL and the next sweep's dream closes the stall.
+On a headless daemon host, an expired CLI login is the expected cause. The
+sign-in lives on the machine running the CLI shim, which in the stock Docker
+setup is the machine running the Pseudolife daemon, not necessarily the one
+you work on.
+
+- **The shim.** Its own `/health` answers 503 with `"status":
+  "login_required"`. The body carries the CLI's message in `detail`, the
+  `provider` (`claude` or `codex`), the shim's OS `user`, and the command in
+  `fix`. Any other CLI failure is `"status": "cli_error"`, with the CLI's own
+  output from stdout and stderr in `detail`.
+- **The stall record.** The daemon carries the provider and user into the
+  record (`provider`, `shim_user`).
+- **Every surface names the sign-in.** That means the session-start line,
+  `pseudolife-mcp briefing`, the board notice, the Console (the Observatory
+  and the Dreamer card) and `pseudolife-mcp doctor`. Each says which CLI is
+  signed out, on which machine, as which user, and the one command, for
+  example:
+
+  ```text
+  Pseudolife-MCP: dreams stalled since 2026-10-27 03:01+11:00 (login_expired): the Claude Code CLI is signed out on this machine; sign it in there as svc: run `claude`, then `/login`.
+  ```
+- **Which machine the line names.**
+  - The session-start line reads it from the address the session reaches
+    the daemon at: "this machine" for a loopback address, else "the machine
+    running the Pseudolife daemon (<host>)".
+  - Doctor uses its own daemon URL the same way.
+  - The briefing, the board notice and the Console say "the machine running
+    the Pseudolife daemon".
+  - `/health` is unauthenticated, so it carries the provider but never the
+    user.
+- **Recovery.** While the shim's cached verdict is a failure it re-checks
+  every 30 seconds, so the notice clears soon after you sign in. The next
+  sweep's dream then closes the stall.
 
 ## Session digests (opt-in) — one prose memory per closed session
 

@@ -1,5 +1,6 @@
 <script lang="ts">
   import HeroArt from "../components/HeroArt.svelte";
+  import InlineCode from "../components/insight/InlineCode.svelte";
   import ErrorState from "../components/ErrorState.svelte";
   import ConsolidationDrawer from "../components/observatory/ConsolidationDrawer.svelte";
   import ObservatoryDetails from "../components/observatory/ObservatoryDetails.svelte";
@@ -33,7 +34,7 @@
     shortId,
     words,
   } from "../lib/format";
-  import { describeDreamRun } from "../lib/dream";
+  import { describeDreamRun, stallNotice } from "../lib/dream";
   import { confirm } from "../lib/overlay.svelte";
   import { loadBoard, refresh, store, ui } from "../lib/state.svelte";
 
@@ -48,6 +49,8 @@
   // The stall tracker counts a dream the fallback served as a soft stall:
   // dreams still run, so it is a warning, not "failing".
   const fallbackStall = $derived(dream?.stall?.reason === "served_by_fallback");
+  // The daemon's own stall line (cause and fix), shown as it wrote it.
+  const notice = $derived(stallNotice(dream));
   const loop = $derived(ov?.loop);
   const health = $derived(ov?.health);
   const rq = $derived(dream?.review_queue);
@@ -390,6 +393,7 @@
           <span class="status-pill {status.tone}"><span class="dot {status.tone}" aria-hidden="true"></span>{status.text}</span>
         {/if}
         <h2 id="hero-title" class="headline">{ov ? headline : "Reading the bank."}</h2>
+        {#if notice}<p class="warn-line" role="status"><InlineCode text={notice} /></p>{/if}
         {#if summary}<p class="summary">{summary}</p>{/if}
         {#if chips.length}
           <div class="chips">
@@ -735,6 +739,13 @@
     font-weight: 600;
     line-height: 1.1;
     letter-spacing: -0.03em;
+  }
+  .warn-line {
+    font-size: 13.5px;
+    line-height: 1.5;
+    color: var(--warn);
+    max-width: 560px;
+    overflow-wrap: anywhere;
   }
   .summary {
     font-size: 15px;

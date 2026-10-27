@@ -6,7 +6,9 @@
 
 use serde_json::{Map, Value};
 
-use super::{PrimaryProbe, StallTracker, minute_at_offset, stall_notice_text_with};
+use super::{
+    PrimaryProbe, StallTracker, minute_at_offset, stall_line_with, stall_notice_text_with,
+};
 
 const GOLDEN: &str = include_str!("../../harness/goldens/stall-tracker.json");
 
@@ -45,6 +47,8 @@ fn every_sequence_matches_python_step_by_step() {
                         reason: p["reason"].as_str().unwrap().to_string(),
                         error: p["error"].as_str().unwrap().to_string(),
                         fallback_resolves: p["fallback_resolves"].as_bool().unwrap(),
+                        provider: p.get("provider").and_then(Value::as_str).map(String::from),
+                        shim_user: p.get("shim_user").and_then(Value::as_str).map(String::from),
                     });
                     t.record_at(
                         &obj(&args[0]),
@@ -100,5 +104,19 @@ fn every_notice_text_matches_python_at_fixed_offsets() {
             |ts| minute_at_offset(ts, offset),
         );
         assert_eq!(text, case["text"].as_str().unwrap(), "{case}");
+    }
+}
+
+/// `dream_stall_line(stall, where)`: the session-start line and
+/// `dream_status`' `stall_notice`, signed-out records included.
+#[test]
+fn every_stall_line_matches_python_at_fixed_offsets() {
+    for case in golden()["lines"].as_array().unwrap() {
+        let offset = i32::try_from(case["offset"].as_i64().unwrap()).unwrap();
+        let record = obj(&case["record"]);
+        let line = stall_line_with(Some(&record), case["where"].as_str(), |ts| {
+            minute_at_offset(ts, offset)
+        });
+        assert_eq!(line, case["line"].as_str().unwrap(), "{case}");
     }
 }

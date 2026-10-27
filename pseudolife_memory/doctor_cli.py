@@ -324,6 +324,29 @@ def _wake_report(health: dict | None) -> dict:
     return report
 
 
+def dream_health_line(health: dict | None, daemon_url: str) -> str:
+    """Dream health from the daemon's ``/health``: ``ok``, ``unknown`` (no
+    answer), or the session-start hook's stall line. A signed-out extractor
+    CLI is named on the machine this client reaches the daemon at ("this
+    machine" for a loopback URL, else the URL's host). ``/health`` never
+    carries the shim's user, so the line says to sign in there without
+    one."""
+    if not isinstance(health, dict):
+        return "unknown"
+    stall = health.get("stall")
+    if not isinstance(stall, dict):
+        return "ok"
+    from urllib.parse import urlsplit
+
+    from pseudolife_memory.memory.dream import dream_stall_line
+    from pseudolife_memory.web.session_hook import stall_where
+    try:
+        netloc = urlsplit(daemon_url).netloc.rpartition("@")[2]
+    except ValueError:
+        netloc = ""
+    return dream_stall_line(stall, where=stall_where(netloc)) or "ok"
+
+
 def _codex_hooks_line(health: dict) -> str:
     """Whether Codex's hook copy is the daemon's scripts: the line the
     re-approval steps say to verify (``codex_hooks = current``)."""
@@ -600,6 +623,9 @@ def run_doctor() -> None:
     try:
         health = probe_health(_daemon_url(), timeout=min(args.timeout, 2))
         report["daemon_status"] = health.get("status") if health else "unreachable"
+        # Dream health is a degradation, not a connection failure: it is
+        # reported, and never fails the report on its own.
+        report["dreams"] = dream_health_line(health, _daemon_url())
         if not health or health.get("status") != "ok":
             if board["state"] == "unauthorized":
                 report["error"] = "BearerRejected"

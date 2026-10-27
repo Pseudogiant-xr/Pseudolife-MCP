@@ -128,6 +128,10 @@ pub struct StallTracker {
     /// named a hard stall.
     last_notice_at: Option<f64>,
     announced_hard: Option<bool>,
+    /// Which CLI is signed out and as which OS user (a shim's
+    /// `login_required` answer, via the primary probe).
+    provider: Option<String>,
+    shim_user: Option<String>,
 }
 
 /// `DreamStallTracker.OVERDUE_SWEEPS`.
@@ -204,7 +208,73 @@ fn minute_at_offset(ts: f64, offset_seconds: i32) -> String {
     }
 }
 
-/// `dream_stall_notice_text(kind, record)` (`memory/dream.py:2353-2363`).
+/// `DAEMON_MACHINE` (`memory/dream.py`).
+pub(crate) const DAEMON_MACHINE: &str = "the machine running the Pseudolife daemon";
+
+/// `_signed_out_remedy` (`memory/dream.py`): which CLI is signed out, on
+/// which machine, as which OS user, and the one command; only for a record
+/// the probe filled from a shim's `login_required` answer.
+fn signed_out_remedy(
+    record: &Map<String, Value>,
+    reason: &str,
+    where_: Option<&str>,
+) -> Option<String> {
+    let (name, sign_in) = match record.get("provider").and_then(Value::as_str)? {
+        "claude" => ("Claude Code", "run `claude`, then `/login`"),
+        "codex" => ("Codex", "run `codex login`"),
+        _ => return None,
+    };
+    if reason != "login_expired" && reason != "served_by_fallback" {
+        return None;
+    }
+    let as_user = match record.get("shim_user").and_then(Value::as_str) {
+        Some(u) if !u.is_empty() => format!(" as {u}"),
+        _ => String::new(),
+    };
+    let serving = if reason == "served_by_fallback" {
+        ", so the fallback is serving"
+    } else {
+        ""
+    };
+    let place = where_.filter(|w| !w.is_empty()).unwrap_or(DAEMON_MACHINE);
+    Some(format!(
+        "the {name} CLI is signed out on {place}{serving}; sign it in there{as_user}: {sign_in}"
+    ))
+}
+
+/// `dream_stall_line(stall, where)` (`memory/dream.py`): the one line a
+/// session start, the briefing and `dream_status`' `stall_notice` show
+/// while dreams are stalled (or the fallback is serving), else `""`.
+pub(crate) fn stall_line(stall: Option<&Map<String, Value>>, where_: Option<&str>) -> String {
+    stall_line_with(stall, where_, local_minute)
+}
+
+fn stall_line_with(
+    stall: Option<&Map<String, Value>>,
+    where_: Option<&str>,
+    minute: impl Fn(f64) -> String,
+) -> String {
+    let Some(stall) = stall.filter(|s| !s.is_empty()) else {
+        return String::new();
+    };
+    let Some(since) = stall.get("since").and_then(Value::as_f64) else {
+        return String::new();
+    };
+    let reason = stall_reason(stall);
+    let head = if reason == "served_by_fallback" {
+        "dream primary extractor down"
+    } else {
+        "dreams stalled"
+    };
+    let remedy = signed_out_remedy(stall, &reason, where_)
+        .unwrap_or_else(|| stall_remedy(&reason).to_string());
+    format!(
+        "Pseudolife-MCP: {head} since {} ({reason}): {remedy}.",
+        minute(since)
+    )
+}
+
+/// `dream_stall_notice_text(kind, record)` (`memory/dream.py`).
 pub(crate) fn stall_notice_text(kind: &str, record: &Map<String, Value>) -> String {
     stall_notice_text_with(kind, record, local_minute)
 }
@@ -228,7 +298,8 @@ fn stall_notice_text_with(
     } else {
         "stalled"
     };
-    let remedy = stall_remedy(&reason);
+    let remedy = signed_out_remedy(record, &reason, None)
+        .unwrap_or_else(|| stall_remedy(&reason).to_string());
     let mut chars = remedy.chars();
     let first = chars
         .next()
@@ -270,6 +341,11 @@ impl StallTracker {
         m.insert("consecutive_failures".into(), json!(self.failures));
         m.insert("last_error".into(), json!(self.last_error));
         m.insert("last_success_at".into(), json!(self.last_success_at));
+        // Only when known, so a record without them keeps its five keys.
+        if let Some(provider) = self.provider.as_deref().filter(|p| !p.is_empty()) {
+            m.insert("provider".into(), json!(provider));
+            m.insert("shim_user".into(), json!(self.shim_user));
+        }
         self.stall = Some(m);
     }
 
@@ -346,6 +422,11 @@ impl StallTracker {
         }
         self.reason = Some(reason);
         self.last_error = Some(error);
+        let signed_out = primary_probe.filter(|p| {
+            p.provider.as_deref().is_some_and(|s| !s.is_empty()) && p.reason == "login_expired"
+        });
+        self.provider = signed_out.and_then(|p| p.provider.clone());
+        self.shim_user = signed_out.and_then(|p| p.shim_user.clone());
         if self.stall.is_some() || self.failures >= 2 {
             let since = self
                 .stall
@@ -364,6 +445,8 @@ impl StallTracker {
         self.first_failure_at = None;
         self.reason = None;
         self.last_error = None;
+        self.provider = None;
+        self.shim_user = None;
         self.due_since = None;
         if let Some(mut stall) = self.stall.take() {
             stall.insert("recovered_at".into(), json!(now));

@@ -44,3 +44,16 @@ export function describeDreamRun(r: DreamRunResult): DreamOutcome {
   const by = r.extractor ? ` with the ${r.extractor} extractor` : "";
   return { tone: "ok", message: `The dream finished${by}: ${parts.join(", ")}.` };
 }
+
+/**
+ * The daemon's stall notice (GET /api/dream/status `stall_notice`), the line
+ * the session-start hook shows: the daemon writes the whole sentence, remedy
+ * included, so the Console only decides whether to show it. Anything but a
+ * non-empty string reads as no notice.
+ */
+export function stallNotice(d: { stall_notice?: unknown } | null | undefined): string | null {
+  const n = d?.stall_notice;
+  if (typeof n !== "string") return null;
+  const t = n.trim();
+  return t ? t : null;
+}

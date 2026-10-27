@@ -435,3 +435,44 @@ def test_doctor_skips_the_maintainer_check_while_the_board_is_off(monkeypatch, c
         doctor_cli.run_doctor()
     report = json.loads(capsys.readouterr().out)
     assert report["maintainer_passkeys"]["state"] == "not_checked"
+
+
+# ── dream health: a signed-out extractor CLI, named where it lives ────────
+# (2026-10-27 maintainer request; doctor reads the unauthenticated /health,
+# whose stall object carries the provider but never the shim's user.)
+
+_SIGNED_OUT_HEALTH = {"status": "ok", "extractor": "stalled", "stall": {
+    "since": 1_700_000_000.0, "reason": "login_expired", "consecutive_failures": 3,
+    "last_success_at": None, "provider": "claude"}}
+
+
+@pytest.mark.parametrize("url, where", [
+    ("http://127.0.0.1:8765", "signed out on this machine"),
+    ("http://box.example:8765", "signed out on the machine running the Pseudolife daemon (box.example)"),
+])
+def test_doctor_names_a_signed_out_cli_where_the_daemon_runs(url, where):
+    line = doctor_cli.dream_health_line(_SIGNED_OUT_HEALTH, url)
+    assert "Claude Code CLI is" in line and where in line
+    assert "`claude`, then `/login`" in line
+
+
+def test_doctor_dream_health_is_ok_without_a_stall():
+    assert doctor_cli.dream_health_line({"status": "ok", "extractor": "configured"},
+                                        "http://127.0.0.1:8765") == "ok"
+    assert doctor_cli.dream_health_line(None, "http://127.0.0.1:8765") == "unknown"
+
+
+def test_doctor_reports_dream_health(monkeypatch, capsys):
+    monkeypatch.setattr(sys, "argv", ["pseudolife-mcp", "doctor"])
+    monkeypatch.setattr(shim, "_require_mcp_sdk_v2", lambda: None)
+    monkeypatch.setattr(shim, "probe_health", lambda *a, **kw: {**_SIGNED_OUT_HEALTH, "version": "1"})
+    monkeypatch.setattr(shim, "_daemon_url", lambda: "http://127.0.0.1:8765")
+    monkeypatch.setattr(doctor_cli, "_windows", lambda: False)
+    monkeypatch.setattr(doctor_cli, "_board_probe", lambda timeout: {"state": "disabled", "line": "off"})
+    monkeypatch.setattr(doctor_cli, "_codex_hooks_line", lambda health: "current")
+    monkeypatch.setattr(doctor_cli, "_handshake", AsyncMock(return_value={
+        "instructions_present": True, "tool_count": 3, "tools_missing_annotations": []}))
+    with pytest.raises(SystemExit):
+        doctor_cli.run_doctor()
+    report = json.loads(capsys.readouterr().out)
+    assert "Claude Code CLI is signed out on this machine" in report["dreams"]

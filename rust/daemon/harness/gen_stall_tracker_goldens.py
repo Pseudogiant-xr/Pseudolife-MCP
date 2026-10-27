@@ -48,6 +48,7 @@ PRIMARY_500 = {"pulled": 3, "extractor_failed": True,
 LOGIN_PROBE = {"reason": "login_expired", "error": "/health HTTP 503 (login_required)",
                "fallback_resolves": True}
 SKIP_PROBE = {**LOGIN_PROBE, "fallback_resolves": False}
+SIGNED_OUT_PROBE = {**LOGIN_PROBE, "provider": "claude", "shim_user": "svc"}
 
 # (op, args...) steps; "at" advances the fake clock to an absolute time.
 SEQUENCES = {
@@ -99,6 +100,14 @@ SEQUENCES = {
         ("at", 30.0), ("record", QUARANTINED, True, LOGIN_PROBE), ("take", 3600.0),
         ("at", 40.0), ("record", OK, False), ("take", 3600.0),
     ],
+    "signed-out-identity": [
+        ("at", 0.0), ("record", FALLBACK_DNS, True, SIGNED_OUT_PROBE),
+        ("at", 10.0), ("record", FALLBACK_DNS, True, SIGNED_OUT_PROBE),
+        ("take", 3600.0), ("mark", "begin"),
+        ("at", 20.0), ("record", OK, True, SIGNED_OUT_PROBE),
+        ("at", 30.0), ("record", FAIL, False), ("take", 3600.0),
+        ("at", 40.0), ("record", OK, False), ("take", 3600.0),
+    ],
     "skipped-fallback-runs-on-the-primary": [
         ("at", 0.0), ("record", PRIMARY_500, False, SKIP_PROBE),
         ("at", 10.0), ("record", PRIMARY_500, False, SKIP_PROBE),
@@ -124,6 +133,29 @@ TEXT_RECORDS = [
     ("begin", {"since": 1700000000.0, "reason": "served_by_fallback"}),
     ("begin", {"since": 1700000000.0, "reason": None}),
     ("clear", {"since": 1700000000.0, "reason": "extractor_error", "recovered_at": 1700003599.5}),
+    # The signed-out notice (2026-10-27): a shim's provider and user.
+    ("begin", {"since": 1700000000.0, "reason": "login_expired", "provider": "claude",
+               "shim_user": "svc"}),
+    ("begin", {"since": 1700000000.0, "reason": "served_by_fallback", "provider": "codex",
+               "shim_user": None}),
+    ("begin", {"since": 1700000000.0, "reason": "extractor_error", "provider": "claude",
+               "shim_user": "svc"}),
+    ("begin", {"since": 1700000000.0, "reason": "login_expired", "provider": "other",
+               "shim_user": "svc"}),
+]
+# ``dream_stall_line(stall, where)``: the session-start line and
+# dream_status's ``stall_notice``.
+LINE_RECORDS = [
+    ({"since": 1792891234.9, "reason": "extractor_unreachable"}, None),
+    ({"since": 1700000000.0, "reason": "served_by_fallback"}, None),
+    ({"since": 1700000000.0, "reason": "login_expired", "provider": "claude",
+      "shim_user": "svc"}, None),
+    ({"since": 1700000000.0, "reason": "login_expired", "provider": "claude",
+      "shim_user": "svc"}, "this machine"),
+    ({"since": 1700000000.0, "reason": "served_by_fallback", "provider": "codex",
+      "shim_user": None}, "the machine running the Pseudolife daemon (box.example)"),
+    ({"since": 1700000000.0, "reason": "something_new"}, None),
+    ({}, None),
 ]
 
 
@@ -155,16 +187,26 @@ def run(steps):
     return out
 
 
-def text_at(kind, record, offset):
-    """``dream_stall_notice_text`` with the zone fixed at ``offset``."""
+def _at_offset(offset, render):
+    """``render()`` with ``_local_minute``'s zone fixed at ``offset``."""
     zone = timezone(timedelta(seconds=offset))
     saved = dream_mod._local_minute
     dream_mod._local_minute = lambda ts: datetime.fromtimestamp(
         float(ts), tz=zone).isoformat(sep=" ", timespec="minutes")
     try:
-        return dream_mod.dream_stall_notice_text(kind, record)
+        return render()
     finally:
         dream_mod._local_minute = saved
+
+
+def text_at(kind, record, offset):
+    """``dream_stall_notice_text`` with the zone fixed at ``offset``."""
+    return _at_offset(offset, lambda: dream_mod.dream_stall_notice_text(kind, record))
+
+
+def line_at(record, where, offset):
+    """``dream_stall_line`` with the zone fixed at ``offset``."""
+    return _at_offset(offset, lambda: dream_mod.dream_stall_line(record, where=where))
 
 
 def main() -> int:
@@ -172,6 +214,8 @@ def main() -> int:
         "sequences": {name: run(steps) for name, steps in SEQUENCES.items()},
         "texts": [{"kind": k, "record": r, "offset": off, "text": text_at(k, r, off)}
                   for k, r in TEXT_RECORDS for off in OFFSETS],
+        "lines": [{"record": r, "where": w, "offset": off, "line": line_at(r, w, off)}
+                  for r, w in LINE_RECORDS for off in OFFSETS],
     }
     TARGET.write_text(json.dumps(golden, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
     print(f"wrote {TARGET.relative_to(REPO)}: {len(golden['sequences'])} sequences, "
