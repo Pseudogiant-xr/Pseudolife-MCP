@@ -61,13 +61,30 @@ struct Scalar {
 impl Scalar {
     fn new(tag: &'static str, value: String) -> Self {
         // Serializer.serialize_node: the quoted form always resolves to str.
-        let implicit = (resolve(&value) == tag, tag == TAG_STR);
+        // A string this daemon's own start-up loader would read as another
+        // type (`1e5`, `0o17`) is never plain, so a rewrite never changes
+        // what the next start reads (a declared byte difference).
+        let plain = resolve(&value) == tag && !(tag == TAG_STR && boot_reads_other_type(&value));
+        let implicit = (plain, tag == TAG_STR);
         Self {
             tag,
             text: value.chars().collect(),
             implicit,
         }
     }
+}
+
+/// The daemon's start-up loader (`config::resolve_scalar`, YAML 1.2) reads
+/// this plain text as something other than a string.
+pub(super) fn boot_reads_other_type(text: &str) -> bool {
+    !matches!(
+        crate::config::resolve_scalar(
+            text.to_string(),
+            yaml_rust2::scanner::TScalarStyle::Plain,
+            None
+        ),
+        Ok(Node::Str(_))
+    )
 }
 
 /// SafeRepresenter for scalar nodes; `None` for collections.
@@ -108,47 +125,14 @@ fn represent_float(f: f64) -> String {
     if f == f64::NEG_INFINITY {
         return "-.inf".to_owned();
     }
-    let value = python_float_repr(f).to_ascii_lowercase();
+    // Python's `repr`, shared with the JSON writer (CPython's tie rules).
+    let value = crate::pyjson::float_repr(f).to_ascii_lowercase();
     // `repr(1e17)` is `1e+17`, which is not a valid YAML 1.1 float.
     if !value.contains('.') && value.contains('e') {
         value.replacen('e', ".0e", 1)
     } else {
         value
     }
-}
-
-/// Python's `repr(float)` for finite values: shortest round-trip digits,
-/// exponent form when the decimal exponent is below -4 or at least 16.
-fn python_float_repr(f: f64) -> String {
-    // `{:e}` yields the shortest round-trip digits as `d[.ddd]e[-]x`.
-    let sci = format!("{:e}", f.abs());
-    let (mantissa, exp) = sci
-        .split_once('e')
-        .expect("LowerExp always has an exponent");
-    let exp: i32 = exp.parse().expect("LowerExp exponent is an integer");
-    let digits: String = mantissa.chars().filter(|c| *c != '.').collect();
-    let sign = if f.is_sign_negative() { "-" } else { "" };
-    let ndigits = digits.len() as i32;
-    // Position of the decimal point relative to the digit string.
-    let decpt = exp + 1;
-    let body = if !(-4..16).contains(&exp) {
-        let (lead, rest) = digits.split_at(1);
-        let frac = if rest.is_empty() {
-            String::new()
-        } else {
-            format!(".{rest}")
-        };
-        let exp_sign = if exp < 0 { '-' } else { '+' };
-        format!("{lead}{frac}e{exp_sign}{:02}", exp.unsigned_abs())
-    } else if decpt <= 0 {
-        format!("0.{}{digits}", "0".repeat((-decpt) as usize))
-    } else if decpt < ndigits {
-        let (int, frac) = digits.split_at(decpt as usize);
-        format!("{int}.{frac}")
-    } else {
-        format!("{digits}{}.0", "0".repeat((decpt - ndigits) as usize))
-    };
-    format!("{sign}{body}")
 }
 
 /// BaseResolver.resolve for a scalar with `implicit=(True, False)`, using the

@@ -14,6 +14,12 @@ fn input(v: &Value) -> Value {
     }
 }
 
+/// No environment: the tests never read (or overwrite) the user's own
+/// `PSEUDOLIFE_MCP_CONFIG` file.
+fn no_env(_: &str) -> Option<String> {
+    None
+}
+
 fn scratch(name: &str) -> std::path::PathBuf {
     let dir = std::env::temp_dir().join(format!("pl-config-io-{}-{name}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
@@ -69,14 +75,14 @@ fn read_config_serves_the_running_values_and_restart_knobs_saved_values() {
         let name = case["name"].as_str().unwrap();
         let dir = scratch(name);
         std::fs::write(dir.join("config.yaml"), case["saved"].as_str().unwrap()).unwrap();
-        let got = read_config_with(&cfg, &dir, &HashSet::new());
+        let got = read_config_with(&cfg, &no_env, &dir, &HashSet::new());
         match case.get("ok") {
             Some(want) => {
                 let mut got = got.expect(name);
                 let path = got.as_object_mut().unwrap().shift_remove("config_path");
                 assert_eq!(
                     path,
-                    Some(json!(config_path_for(&dir))),
+                    Some(json!(config_path_for(&no_env, &dir))),
                     "{name}: config_path"
                 );
                 assert_eq!(dumps(&got), dumps(want), "{name}");
@@ -106,12 +112,41 @@ fn a_knob_saved_through_this_process_shows_its_saved_value() {
             .clone()
     };
     let mut pending = HashSet::new();
-    let before = top_k(&read_config_with(&cfg, &dir, &pending).unwrap());
+    let before = top_k(&read_config_with(&cfg, &no_env, &dir, &pending).unwrap());
     assert_eq!(before.get("saved"), None, "not restart, not pending");
     pending.insert("memory.top_k".to_string());
-    let after = top_k(&read_config_with(&cfg, &dir, &pending).unwrap());
+    let after = top_k(&read_config_with(&cfg, &no_env, &dir, &pending).unwrap());
     assert_eq!(after["value"], json!(8));
     assert_eq!(after["saved"], json!(12));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_pending_live_knob_never_escapes_an_overflow() {
+    // Python coerces only a restart knob's saved value, so an infinite
+    // value under a live knob saved here is shown as no `saved`, not 500.
+    let dir = scratch("pending-overflow");
+    std::fs::write(dir.join("config.yaml"), "memory:\n  top_k: .inf\n").unwrap();
+    let pending: HashSet<String> = ["memory.top_k".to_string()].into();
+    let got = read_config_with(&Config::default(), &no_env, &dir, &pending).expect("200");
+    let knob = got["groups"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|g| g["knobs"].as_array().unwrap().iter())
+        .find(|k| k["path"] == "memory.top_k")
+        .unwrap();
+    assert_eq!(knob.get("saved"), None);
+    // A restart knob's overflow is Python's 500.
+    std::fs::write(
+        dir.join("config.yaml"),
+        "memory:\n  reranker:\n    top_n: .inf\n",
+    )
+    .unwrap();
+    assert_eq!(
+        read_config_with(&Config::default(), &no_env, &dir, &HashSet::new()),
+        Err("cannot convert float infinity to integer".into())
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -119,19 +154,44 @@ fn a_knob_saved_through_this_process_shows_its_saved_value() {
 fn config_path_follows_pathlib() {
     let dir = std::path::Path::new(".");
     // `Path(".") / "config.yaml"`.
-    if std::env::var("PSEUDOLIFE_MCP_CONFIG").map_or(true, |v| v.is_empty()) {
-        assert_eq!(config_path_for(dir), "config.yaml");
-        #[cfg(not(windows))]
-        assert_eq!(
-            config_path_for(std::path::Path::new("/data//x/./")),
-            "/data/x/config.yaml"
-        );
+    assert_eq!(config_path_for(&no_env, dir), "config.yaml");
+    #[cfg(not(windows))]
+    assert_eq!(
+        config_path_for(&no_env, std::path::Path::new("/data//x/./")),
+        "/data/x/config.yaml"
+    );
+    // Set and non-empty wins; empty falls back (config_io's truthiness).
+    let set = |v: &'static str| move |_: &str| Some(v.to_string());
+    #[cfg(not(windows))]
+    assert_eq!(
+        config_path_for(&set("/etc//pl/c.yaml"), dir),
+        "/etc/pl/c.yaml"
+    );
+    assert_eq!(config_path_for(&set(""), dir), "config.yaml");
+}
+
+/// Python rewrites these; this daemon refuses them, file untouched (the
+/// declared rows: no exact rewrite of a timestamp, a shared node or an
+/// integer past 64 bits here).
+fn refused_here(name: &str) -> Option<&'static str> {
+    match name {
+        "timestamp-in-file" => Some(yaml_load::UNWRITABLE),
+        "shared-anchor" => Some(yaml_load::SHARED),
+        "big-int-in-file" => Some(yaml_load::BIG_INT),
+        _ => None,
     }
 }
 
-/// Python rewrites these; this daemon refuses them (declared divergence
-/// `config-write-restart-only`: a timestamp has no exact rewrite here).
-const REFUSED_HERE: &[&str] = &["timestamp-in-file"];
+/// The file this daemon writes where it quotes a string its own start-up
+/// loader would read as another type (declared byte difference).
+fn quoted_here(name: &str) -> Option<&'static str> {
+    match name {
+        "boot-ambiguous-string" => {
+            Some("memory:\n  dream:\n    fallback_model: '0o17'\n    extractor_model: '1e5'\n")
+        }
+        _ => None,
+    }
+}
 
 #[test]
 fn write_config_matches_python() {
@@ -145,7 +205,7 @@ fn write_config_matches_python() {
             std::fs::write(&cfg, text).unwrap();
         }
         let pending = Mutex::new(HashSet::new());
-        let got = write_config_with(&dir, &case["patch"], &pending);
+        let got = write_config_with(&no_env, &dir, &case["patch"], &pending);
         let unchanged = || {
             assert_eq!(
                 std::fs::read_to_string(&cfg).ok().as_deref(),
@@ -153,17 +213,16 @@ fn write_config_matches_python() {
                 "{name}: a refusal leaves the file as it was"
             );
         };
-        if REFUSED_HERE.contains(&name) {
-            assert_eq!(
-                got,
-                Err(WriteError::Failed(yaml_load::UNWRITABLE.into())),
-                "{name}"
-            );
+        if let Some(reason) = refused_here(name) {
+            assert_eq!(got, Err(WriteError::Failed(reason.into())), "{name}");
             unchanged();
         } else if let Some(want) = case.get("ok") {
             let answer = got.unwrap_or_else(|e| panic!("{name}: {e:?}"));
             let file = std::fs::read_to_string(&cfg).unwrap().replace("\r\n", "\n");
-            assert_eq!(file, want["file"].as_str().unwrap(), "{name}: file");
+            let want_file = quoted_here(name).unwrap_or_else(|| want["file"].as_str().unwrap());
+            assert_eq!(file, want_file, "{name}: file");
+            // This daemon starts on what it wrote.
+            crate::config::load(&cfg).unwrap_or_else(|e| panic!("{name}: boot refuses: {e}"));
             // Every patched knob needs a restart here, in patch order.
             assert_eq!(answer["applied"], json!([]), "{name}");
             let strs = |v: &Value| -> Vec<String> {
@@ -182,7 +241,7 @@ fn write_config_matches_python() {
             assert_eq!(a, b, "{name}: Python's applied and restart_required");
             assert_eq!(
                 answer["config_path"],
-                json!(config_path_for(&dir)),
+                json!(config_path_for(&no_env, &dir)),
                 "{name}"
             );
             match answer["backup"].as_str() {

@@ -1313,6 +1313,9 @@ struct Loader {
     anchors: HashMap<usize, Node>,
     error: Option<String>,
     resolve: Option<ScalarResolver>,
+    /// Refuse an alias to a mapping or list with this text (a rewrite
+    /// cannot keep the shared node).
+    collection_alias: Option<&'static str>,
 }
 
 fn unknown_tag(tag: &Tag) -> String {
@@ -1470,6 +1473,19 @@ impl Loader {
                     .get(&id)
                     .cloned()
                     .ok_or_else(|| "found undefined alias".to_string())?;
+                // A merge of a mapping of scalars copies them, so nothing is
+                // shared; any other alias to a collection shares it.
+                let merged_scalars = matches!(
+                    self.stack.last(),
+                    Some(Frame::Map(_, Some(Node::MergeKey), _))
+                ) && matches!(&node, Node::Map(pairs)
+                    if pairs.iter().all(|(_, v)| !matches!(v, Node::Seq(_) | Node::Map(_))));
+                if let Some(refusal) = self.collection_alias
+                    && matches!(node, Node::Seq(_) | Node::Map(_))
+                    && !merged_scalars
+                {
+                    return Err(refusal.to_string());
+                }
                 self.complete(node, 0);
             }
             Event::Scalar(value, style, anchor, tag) => {
@@ -1529,15 +1545,24 @@ fn non_printable(c: char) -> bool {
 /// error, more than one document, an unknown tag or a non-printable
 /// character.
 pub(crate) fn safe_load(text: &str) -> Result<Option<Node>, String> {
-    load_with(text, None)
+    load_with(text, None, None)
 }
 
-/// [`safe_load`] with another scalar resolver.
-pub(crate) fn safe_load_with(text: &str, resolve: ScalarResolver) -> Result<Option<Node>, String> {
-    load_with(text, Some(resolve))
+/// [`safe_load`] with another scalar resolver, refusing an alias to a
+/// mapping or list with `collection_alias` when given.
+pub(crate) fn safe_load_with(
+    text: &str,
+    resolve: ScalarResolver,
+    collection_alias: Option<&'static str>,
+) -> Result<Option<Node>, String> {
+    load_with(text, Some(resolve), collection_alias)
 }
 
-fn load_with(text: &str, resolve: Option<ScalarResolver>) -> Result<Option<Node>, String> {
+fn load_with(
+    text: &str,
+    resolve: Option<ScalarResolver>,
+    collection_alias: Option<&'static str>,
+) -> Result<Option<Node>, String> {
     if let Some((offset, c)) = text.char_indices().find(|(_, c)| non_printable(*c)) {
         return Err(format!(
             "unacceptable character #x{:04x} at offset {offset}",
@@ -1547,6 +1572,7 @@ fn load_with(text: &str, resolve: Option<ScalarResolver>) -> Result<Option<Node>
     let text = text.strip_prefix('\u{feff}').unwrap_or(text);
     let mut loader = Loader {
         resolve,
+        collection_alias,
         ..Loader::default()
     };
     let mut parser = Parser::new_from_str(text);

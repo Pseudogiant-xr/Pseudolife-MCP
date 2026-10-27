@@ -107,29 +107,67 @@ fn decode(v: &Value) -> Node {
     }
 }
 
+/// A string the start-up loader reads as another type somewhere in the tree.
+fn holds_boot_ambiguous_str(node: &Node) -> bool {
+    match node {
+        Node::Str(s) => boot_reads_other_type(s) && resolve(s) == TAG_STR,
+        Node::Seq(items) => items.iter().any(holds_boot_ambiguous_str),
+        Node::Map(pairs) => pairs
+            .iter()
+            .any(|(k, v)| holds_boot_ambiguous_str(k) || holds_boot_ambiguous_str(v)),
+        _ => false,
+    }
+}
+
+/// Equal as loaded trees, NaN equal to NaN.
+fn same_tree(a: &Node, b: &Node) -> bool {
+    match (a, b) {
+        (Node::Float(x), Node::Float(y)) => {
+            x.to_bits() == y.to_bits() || (x.is_nan() && y.is_nan())
+        }
+        (Node::Seq(x), Node::Seq(y)) => {
+            x.len() == y.len() && x.iter().zip(y).all(|(p, q)| same_tree(p, q))
+        }
+        (Node::Map(x), Node::Map(y)) => {
+            x.len() == y.len()
+                && x.iter()
+                    .zip(y)
+                    .all(|((k, v), (l, w))| same_tree(k, l) && same_tree(v, w))
+        }
+        _ => a == b,
+    }
+}
+
 #[test]
 fn matches_pyyaml_byte_for_byte() {
     let doc: Value = serde_json::from_str(GOLDEN).expect("yaml-dump golden");
     let vectors = doc["vectors"].as_array().expect("vectors");
-    let mut failures = Vec::new();
+    let (mut exact, mut quoted, mut failures) = (0, 0, Vec::new());
     for (index, vector) in vectors.iter().enumerate() {
         let expected = vector["expected"].as_str().expect("expected");
-        let actual = safe_dump(&decode(&vector["input"]));
-        if actual != expected {
-            failures.push(format!(
-                "#{index} {}\n  expected {expected:?}\n  actual   {actual:?}",
-                vector["name"]
-            ));
+        let input = decode(&vector["input"]);
+        let actual = safe_dump(&input);
+        if actual == expected {
+            exact += 1;
+            continue;
         }
+        // The declared difference: a string the start-up loader would read
+        // as another type is quoted. PyYAML still reads the same tree back.
+        let reread = crate::config_io::yaml_load::load_reading(&actual);
+        if holds_boot_ambiguous_str(&input)
+            && matches!(&reread, Ok(Some(tree)) if same_tree(tree, &input))
+        {
+            quoted += 1;
+            continue;
+        }
+        failures.push(format!(
+            "#{index} {}\n  expected {expected:?}\n  actual   {actual:?}",
+            vector["name"]
+        ));
     }
-    println!(
-        "{} of {} vectors match",
-        vectors.len() - failures.len(),
-        vectors.len()
-    );
     assert!(
         failures.is_empty(),
-        "{} mismatches:\n{}",
+        "{} mismatches ({exact} exact, {quoted} quoted for the start-up loader):\n{}",
         failures.len(),
         failures
             .iter()
@@ -138,11 +176,36 @@ fn matches_pyyaml_byte_for_byte() {
             .collect::<Vec<_>>()
             .join("\n")
     );
+    // Most vectors are byte-exact; the quoting exception stays narrow.
+    assert!(
+        exact > 1100 && quoted < 60,
+        "{exact} exact, {quoted} quoted"
+    );
+}
+
+#[test]
+fn floats_follow_the_cpython_repr_table() {
+    // CPython 3.11 `repr` of 5,358 finite doubles, rounding ties included.
+    let table = include_str!("../../../shim/tests/cli_audit_float_repr.tsv");
+    let mut checked = 0;
+    for line in table.lines().filter(|line| !line.starts_with('#')) {
+        let (bits, repr) = line.split_once('\t').expect("bits TAB repr");
+        let value = f64::from_bits(u64::from_str_radix(bits, 16).expect("hex bits"));
+        let repr = repr.to_ascii_lowercase();
+        let want = if !repr.contains('.') && repr.contains('e') {
+            repr.replacen('e', ".0e", 1)
+        } else {
+            repr
+        };
+        assert_eq!(represent_float(value), want, "{bits}");
+        checked += 1;
+    }
+    assert!(checked > 5000, "{checked}");
 }
 
 #[test]
 fn config_yaml_loads_as_pyyaml_reads_it() {
-    use crate::config_io::yaml_load::{UNWRITABLE, load_reading, load_rewriting};
+    use crate::config_io::yaml_load::{BIG_INT, UNWRITABLE, load_reading, load_rewriting};
     let doc: Value = serde_json::from_str(GOLDEN).expect("yaml-dump golden");
     let loads = doc["loads"].as_array().expect("loads");
     assert!(loads.len() >= 19);
@@ -154,6 +217,10 @@ fn config_yaml_loads_as_pyyaml_reads_it() {
                 reading.is_err() && rewriting.is_err(),
                 "{text:?}: {reading:?}"
             );
+        } else if case.get("big_int").is_some() {
+            // Read as the nearest float for `saved`; a rewrite refuses.
+            assert_eq!(rewriting, Err(BIG_INT.to_string()), "{text:?}");
+            assert!(reading.is_ok(), "{text:?}: {reading:?}");
         } else if case.get("unwritable").is_some() {
             assert_eq!(rewriting, Err(UNWRITABLE.to_string()), "{text:?}");
             assert!(reading.is_ok(), "{text:?}: {reading:?}");

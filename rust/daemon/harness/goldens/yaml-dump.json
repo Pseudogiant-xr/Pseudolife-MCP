@@ -2092,13 +2092,13 @@
 "expected": "key=value\n...\n"
 },
 {
-"name": "str:'C:\\\\Users\\\\x'",
+"name": "str:'C:\\\\data\\\\x'",
 "dumper": "safe",
 "input": {
 "t": "str",
-"v": "C:\\Users\\x"
+"v": "C:\\data\\x"
 },
-"expected": "C:\\Users\\x\n...\n"
+"expected": "C:\\data\\x\n...\n"
 },
 {
 "name": "str:'/abs/path'",
@@ -5583,6 +5583,15 @@
 "bits": "3ff0000000000001"
 },
 "expected": "1.0000000000000002\n...\n"
+},
+{
+"name": "float:1000000000000000.2",
+"dumper": "safe",
+"input": {
+"t": "float",
+"bits": "430c6bf526340002"
+},
+"expected": "1000000000000000.2\n...\n"
 },
 {
 "name": "float-map",
@@ -22140,7 +22149,7 @@
 },
 {
 "text": "big: 99999999999999999999\n",
-"error": true
+"big_int": true
 },
 {
 "text": "e: =\n",

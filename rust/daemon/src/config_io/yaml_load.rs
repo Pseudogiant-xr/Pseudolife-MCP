@@ -19,13 +19,25 @@ use crate::config::{Node, resolve_scalar, safe_load_with};
 
 /// For `_saved_file`: a timestamp keeps its text.
 pub(crate) fn load_reading(text: &str) -> Result<Option<Node>, String> {
-    safe_load_with(text, |v, style, tag| construct(v, style, tag, false))
+    safe_load_with(text, |v, style, tag| construct(v, style, tag, false), None)
 }
 
 /// For `write_config`: a timestamp or binary value refuses the rewrite.
 pub(crate) fn load_rewriting(text: &str) -> Result<Option<Node>, String> {
-    safe_load_with(text, |v, style, tag| construct(v, style, tag, true))
+    safe_load_with(
+        text,
+        |v, style, tag| construct(v, style, tag, true),
+        Some(SHARED),
+    )
 }
+
+/// A mapping or list shared through a YAML anchor and alias: PyYAML loads
+/// one object and a patch through either path changes both, which a
+/// rewrite of copies cannot keep.
+pub(crate) const SHARED: &str = "config.yaml shares a mapping or list through a YAML anchor and alias, which this daemon cannot rewrite; edit config.yaml on the daemon host instead";
+
+/// An integer past 64 bits, which this tree cannot hold.
+pub(crate) const BIG_INT: &str = "config.yaml holds an integer past 64 bits, which this daemon cannot rewrite; edit config.yaml on the daemon host instead";
 
 /// The value this daemon cannot write back as Python would.
 pub(crate) const UNWRITABLE: &str = "config.yaml holds a YAML timestamp or binary value, \
@@ -59,7 +71,12 @@ fn construct(
             "no" | "false" | "off" => Ok(Node::Bool(false)),
             _ => Err(bad()),
         },
-        TAG_INT => construct_int(&value).map(Node::Int),
+        TAG_INT => match construct_int(&value) {
+            Ok(i) => Ok(Node::Int(i)),
+            Err(_) if rewriting => Err(BIG_INT.into()),
+            // The read only coerces knob values: the nearest float.
+            Err(e) => big_int_float(&value).map(Node::Float).ok_or(e),
+        },
         TAG_FLOAT => construct_float(&value).map(Node::Float).ok_or_else(bad),
         TAG_MERGE => Ok(Node::MergeKey),
         TAG_TIMESTAMP if rewriting => Err(UNWRITABLE.into()),
@@ -99,6 +116,12 @@ fn construct_int(text: &str) -> Result<i64, String> {
         .map(|m| if negative { -m } else { m })
         .and_then(|v| i64::try_from(v).ok())
         .ok_or_else(|| format!("config.yaml holds an integer out of range: {text}"))
+}
+
+/// An integer `construct_int` cannot hold, as the float nearest it.
+fn big_int_float(text: &str) -> Option<f64> {
+    let digits: String = text.chars().filter(|&c| c != '_').collect();
+    digits.parse::<f64>().ok().filter(|f| f.is_finite())
 }
 
 /// `construct_yaml_float`; `None` where Python's `float()` raises.

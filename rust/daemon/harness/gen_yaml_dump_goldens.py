@@ -197,7 +197,7 @@ plain_or_not = [
     "a\u2028b", "a\u2029b", "\ufeff", "\ufeffa", "\u2603", "\u00ff\u0100", "\x00",
     "\x01", "\x07\x08\x0b\x0c\x1b", "\x7f", "\x1f", "back\\slash", "\\", "quote\"d",
     "http://127.0.0.1:8080/v1", "https://example.com/a?b=c#frag", "claude-sonnet-4-5",
-    "gpt-4o-mini", "a: b: c", "key=value", "C:\\Users\\x", "/abs/path", "~/home",
+    "gpt-4o-mini", "a: b: c", "key=value", "C:\\data\\x", "/abs/path", "~/home",
     "~a", "a~", "1a", "1 2", "1.5 x", "-1a", "0x1Fz", "123abc", "e5", "+a", ".a", "a.",
     "a-", "a?", "a:", "a,", "a[", "a]", "a{", "a}", "-\n", "x\n\ny\n", " \n", "\n ",
     "trailing  \n", "line1\nline2\nline3", "a\n\n\nb",
@@ -269,7 +269,8 @@ floats = [0.0, -0.0, 1e-05, 1e16, 1.5, 0.1, 3.0, 1e300, float("nan"), float("inf
           float("-inf"), 123456789.123, 0.0001, 0.00012, 1234567890123456.0,
           12345678901234567.0, 1e15, 9999999999999998.0, 1e-4, 1e-7, 1.5e-10, 2.5e+20,
           -1e-05, 5e-324, 2.2250738585072014e-308, 1.7976931348623157e308, 0.3, 2.0 / 3,
-          1 / 3, 100.0, 1e22, 1e21, -123.456, 4.35, 0.1 + 0.2, 1.0000000000000002]
+          1 / 3, 100.0, 1e22, 1e21, -123.456, 4.35, 0.1 + 0.2, 1.0000000000000002,
+          1000000000000000.2]
 for f in floats:
     add("float:" + repr(f), F(f))
 add("float-map", {"x": 1.5, "nan": float("nan"), "neg": -0.0})
@@ -448,7 +449,7 @@ def load_case(text):
     if unwritable(value):
         return {"text": text, "unwritable": True}
     if too_big(value):
-        return {"text": text, "error": True}
+        return {"text": text, "big_int": True}
     return {"text": text, "tree": None if value is None else auto(value)}
 
 

@@ -1539,6 +1539,12 @@
    "text": "memory.search_confidence_floor: must be finite"
   },
   {
+   "path": "memory.search_confidence_floor",
+   "input": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000,
+   "error": "OverflowError",
+   "text": "int too large to convert to float"
+  },
+  {
    "path": "memory.dream.idle_seconds",
    "input": 600,
    "ok": 600.0
@@ -6403,6 +6409,62 @@
     "backup": true,
     "paths": [
      "memory.top_k"
+    ]
+   }
+  },
+  {
+   "name": "shared-anchor",
+   "before": "defaults: &d\n  top_k: 5\nmemory: *d\n",
+   "patch": {
+    "memory.top_k": 9
+   },
+   "ok": {
+    "file": "defaults: &id001\n  top_k: 9\nmemory: *id001\n",
+    "backup": true,
+    "paths": [
+     "memory.top_k"
+    ]
+   }
+  },
+  {
+   "name": "merge-alias",
+   "before": "base: &b\n  x: 1\nmemory:\n  <<: *b\n  top_k: 4\n",
+   "patch": {
+    "memory.top_k": 9
+   },
+   "ok": {
+    "file": "base:\n  x: 1\nmemory:\n  x: 1\n  top_k: 9\n",
+    "backup": true,
+    "paths": [
+     "memory.top_k"
+    ]
+   }
+  },
+  {
+   "name": "big-int-in-file",
+   "before": "other: 99999999999999999999999\n",
+   "patch": {
+    "memory.top_k": 9
+   },
+   "ok": {
+    "file": "other: 99999999999999999999999\nmemory:\n  top_k: 9\n",
+    "backup": true,
+    "paths": [
+     "memory.top_k"
+    ]
+   }
+  },
+  {
+   "name": "boot-ambiguous-string",
+   "before": "memory:\n  dream:\n    fallback_model: '0o17'\n",
+   "patch": {
+    "memory.dream.extractor_model": "1e5"
+   },
+   "ok": {
+    "file": "memory:\n  dream:\n    fallback_model: 0o17\n    extractor_model: 1e5\n",
+    "backup": true,
+    "paths": [
+     "memory.dream.extractor_model"
     ]
    }
   }

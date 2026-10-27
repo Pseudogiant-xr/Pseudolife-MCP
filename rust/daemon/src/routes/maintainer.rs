@@ -25,7 +25,11 @@ pub(super) async fn route(req: &mut Request<'_>) -> Option<Response> {
         ("GET", "/api/config") => {
             let svc = &req.app.service;
             Some(
-                match crate::config_io::read_config(&svc.config, &svc.data_dir) {
+                match crate::config_io::read_config(
+                    &svc.config,
+                    &crate::config_io::process_env,
+                    &svc.data_dir,
+                ) {
                     Ok(body) => json_response(200, &body),
                     // An exception `read_config` lets escape: the generic
                     // handler's 500 with its text.
@@ -41,7 +45,11 @@ pub(super) async fn route(req: &mut Request<'_>) -> Option<Response> {
                 _ => serde_json::Value::Object(body),
             };
             Some(
-                match crate::config_io::write_config(&req.app.service.data_dir, &patch) {
+                match crate::config_io::write_config(
+                    &crate::config_io::process_env,
+                    &req.app.service.data_dir,
+                    &patch,
+                ) {
                     Ok(answer) => json_response(200, &answer),
                     Err(crate::config_io::WriteError::Invalid(text)) => {
                         json_response(400, &serde_json::json!({"error": text}))

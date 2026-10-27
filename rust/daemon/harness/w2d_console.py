@@ -69,8 +69,11 @@ MUTANTS = ["console-facts-no-contender", "console-sources-by-name", "console-cha
 
 OPS = ("get", "post")
 
-# Knob paths a ``post`` saved, by ``track`` (filled from the Python side's
-# successful answers).
+# Knob paths a ``post`` saved and the Python daemon applied live, by
+# ``track``: only those read differently on the two sides afterwards (a
+# restart knob shows its ``saved`` value on both). Rust's ``applied`` is
+# always empty, so only the Python side's answers fill it; a rerun of the
+# same scenario (mutants) refills it with the same paths.
 SAVED: dict[str, set] = {}
 
 
@@ -97,7 +100,6 @@ def run_post(op: dict, port: int) -> dict:
     value = r.get("json", r.get("bytes"))
     if r["status"] == 200 and op.get("track") and isinstance(value, dict):
         SAVED.setdefault(op["track"], set()).update(value.get("applied", []))
-        SAVED[op["track"]].update(value.get("restart_required", []))
     return {"isError": r["status"] != 200, "status": r["status"], "value": value}
 
 
@@ -180,8 +182,8 @@ def config_write_answers(py: dict, rs: dict) -> list[str]:
 
 
 def next_start_values(py: dict, rs: dict, saved: set) -> list[str]:
-    """``GET /api/config`` after a save: each saved knob by the value its
-    next start uses, which Python applied live and Rust shows as ``saved``."""
+    """``GET /api/config`` after a save: each knob Python applied live by
+    the value its next start uses, which Rust shows as ``saved``."""
     out = []
     knobs = {}
     for side, r in (("python", py), ("rust", rs)):

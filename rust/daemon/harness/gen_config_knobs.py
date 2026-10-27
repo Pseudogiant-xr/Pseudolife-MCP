@@ -41,7 +41,7 @@ COERCE = [
     ("memory.retrieval_log.retention_days", [365, 365.0, 0.5, 3651, "١٢"]),
     ("memory.search_confidence_floor", [0.5, 1, 2, -0.1, "0.3", " 1e-1 ", "nan",
                                         "inf", "-Infinity", "1_0.5", "x", None,
-                                        False, [0.1], INF]),
+                                        False, [0.1], INF, 10 ** 400]),
     ("memory.dream.idle_seconds", [600, 1e-05, 0.0]),
     ("memory.dream.literal_gate", ["enforce", "Enforce", "bogus", None, 1, True,
                                    ["enforce"], "it's"]),
@@ -186,6 +186,11 @@ WRITES = [
     ("scalar-document", "hello\n", {"memory.top_k": 9}),
     ("falsy-document", "0\n", {"memory.top_k": 9}),
     ("timestamp-in-file", "built: 2026-10-27\n", {"memory.top_k": 9}),
+    ("shared-anchor", "defaults: &d\n  top_k: 5\nmemory: *d\n", {"memory.top_k": 9}),
+    ("merge-alias", "base: &b\n  x: 1\nmemory:\n  <<: *b\n  top_k: 4\n", {"memory.top_k": 9}),
+    ("big-int-in-file", "other: 99999999999999999999999\n", {"memory.top_k": 9}),
+    ("boot-ambiguous-string", "memory:\n  dream:\n    fallback_model: '0o17'\n",
+     {"memory.dream.extractor_model": "1e5"}),
 ]
 
 
