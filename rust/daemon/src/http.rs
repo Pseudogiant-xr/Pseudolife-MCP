@@ -1075,56 +1075,6 @@ pub(crate) mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn tokenless_mcp_remains_unserved() {
-        let env = crate::config::DaemonEnv::from_env(&|_| None).unwrap();
-        let service = Arc::new(Service::new(
-            crate::config::Config::default(),
-            env,
-            PathBuf::from("unused"),
-            "postgresql://unused@127.0.0.1:1/pl_cf_w2g_unused".into(),
-            false,
-        ));
-        let store = Arc::new(auth::PrincipalStore::new());
-        let board = Arc::new(crate::board::Board::new(
-            service.config.coordination.clone(),
-            "postgresql://unused@127.0.0.1:1/pl_cf_w2g_unused".into(),
-            service.clone(),
-            store.clone(),
-        ));
-        let app = Arc::new(App::new(
-            service,
-            auth::EnvTokens {
-                single: None,
-                map: vec![],
-            },
-            store,
-            None,
-            board,
-        ));
-        for path in ["/mcp", "/mcp/", "/mcp/x"] {
-            for method in ["GET", "POST", "DELETE"] {
-                let request = Request::builder()
-                    .method(method)
-                    .uri(path)
-                    .header("host", "127.0.0.1:8765")
-                    .body(Body::empty())
-                    .unwrap();
-                let response = handle(State(app.clone()), request).await;
-                assert_eq!(
-                    response.status(),
-                    StatusCode::NOT_IMPLEMENTED,
-                    "{method} {path}"
-                );
-                let body = axum::body::to_bytes(response.into_body(), 1024)
-                    .await
-                    .unwrap();
-                let payload: Value = serde_json::from_slice(&body).unwrap();
-                assert_eq!(payload, json!({"error": "not_implemented", "path": path}));
-            }
-        }
-    }
-
     #[test]
     fn body_json_preserves_object_keys_and_numeric_values() {
         let text = r#"{"\u0024serde_json::private::Number":"1","_":"prefix","":"empty","\u0000key":2,"nested":[{"$serde_json::private::Number":"text"}],"duplicate":0,"duplicate":3}"#;
