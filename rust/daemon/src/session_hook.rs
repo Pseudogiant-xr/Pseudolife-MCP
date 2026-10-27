@@ -698,7 +698,7 @@ mod tests {
     fn launcher_paths_follow_the_python_shape() {
         // `_LAUNCHER_SHAPE.fullmatch`, checked in Python.
         for ok in [
-            "C:\\Users\\me\\AppData\\Local\\pseudolife-mcp\\bin\\pseudolife-mcp.exe",
+            "D:\\Tools\\Pseudolife (x64)\\bin\\pseudolife-mcp.exe",
             "/home/me/.local/bin/pseudolife-mcp",
             "//pseudolife-mcp",
             "C:/x y/pseudolife-mcp",
