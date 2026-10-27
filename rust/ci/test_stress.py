@@ -227,6 +227,18 @@ def test_a_cargo_iteration_needs_every_selected_test_to_run_and_pass(tmp_path, n
     assert found.startswith(note) and bool(found) == bool(note), found
 
 
+def test_a_whole_bin_and_one_of_its_tests_archive_the_bin_once(tmp_path):
+    names = [DAEMON_BIN, f"{DAEMON_BIN}::{SHUTDOWN}"]
+    assert stress.parse(" ".join(f"cargo:{n}" for n in names)) == ("cargo", names)
+    assert stress.cargo_item(DAEMON_BIN) == ("pseudolife-daemon", "bin/pseudolife-daemon", None)
+    argv = stress.archive_command(names, tmp_path / "a.tar.zst")
+    assert [argv[i + 1] for i, a in enumerate(argv) if a == "--bin"] == ["pseudolife-daemon"]
+    assert "--test" not in argv
+    assert stress.filterset(names) == ("(binary_id(=pseudolife-daemon::bin/pseudolife-daemon))"
+                                       " | (binary_id(=pseudolife-daemon::bin/pseudolife-daemon)"
+                                       f" & test(={SHUTDOWN}))")
+
+
 def test_a_bin_items_evidence_reads_its_binary_id_suite(tmp_path):
     suite = "pseudolife-daemon::bin/pseudolife-daemon"
     (tmp_path / "junit.xml").write_text(nextest_junit({suite: [("other", FILTERED), (SHUTDOWN, "")]}),
