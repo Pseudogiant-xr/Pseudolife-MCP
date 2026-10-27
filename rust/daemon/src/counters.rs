@@ -204,8 +204,8 @@ pub fn pending_import(save_dir: &Path, has_row: bool) -> Option<String> {
         .find(|p| p.exists())?;
     Some(format!(
         "{} holds this bank's CMS counters, which the Rust daemon cannot import; \
-         start the Python daemon (0.19 or later) once on this bank to import them \
-         into cms_counters, then restart this daemon",
+         start a Python daemon at schema 57 or later (a release after 0.19.0) once \
+         on this bank to import them into cms_counters, then restart this daemon",
         found.display()
     ))
 }

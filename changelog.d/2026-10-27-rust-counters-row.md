@@ -10,6 +10,7 @@
 - A bank whose counters still sit in an old `memory_state/weights.pt`
   (from a Python release before schema 57) is not imported by the Rust
   daemon, which does not read that file format. It logs this once and
-  `/health` shows `counters_import_required` with the step: start the
-  Python daemon once on that bank. The cutover's update step will do that
+  `/health` shows `counters_import_required` with the step: start a
+  Python daemon at schema 57 or later (a release after 0.19.0) once on
+  that bank. The cutover's update step will do that
   before switching a host to the Rust daemon.
