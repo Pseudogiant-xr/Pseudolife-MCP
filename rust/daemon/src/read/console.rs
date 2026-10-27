@@ -144,6 +144,11 @@ pub(crate) async fn route(
 ) -> Response {
     let ready = match app.service.ensure_init().await {
         Ok(r) => r,
+        // `_overview` reaches the bank only inside each `_safe` layer, so a
+        // failed init serves every layer's default, not a 500.
+        Err(_) if path == "/api/overview" => {
+            return json_response(200, &overview_defaults(&app.service));
+        }
         Err(e) => return json_response(500, &json!({"error": e})),
     };
     // The body runs to completion in its own task: Python's handler runs on
@@ -318,13 +323,7 @@ async fn overview(svc: &Arc<Service>, ready: &Ready) -> Value {
     }
     let world_stale = world.iter().filter(|w| truthy(w.get("stale"))).count();
     let count_of = |v: &Value, key: &str| v.get(key).and_then(Value::as_array).map_or(0, Vec::len);
-    let health = json!({
-        "status": "ok",
-        "schema": crate::health::SCHEMA,
-        "storage": "postgres",
-        "writer_id": crate::mcp::identity::env_writer().unwrap_or_else(|| "unknown".into()),
-        "persist_errors": svc.persist_errors.load(std::sync::atomic::Ordering::Relaxed),
-    });
+    let health = overview_health(svc);
     json!({
         "health": health,
         "counts": {
@@ -346,6 +345,33 @@ async fn overview(svc: &Arc<Service>, ready: &Ready) -> Value {
         "stats": stats,
         "dream": dream,
         "loop": loop_health,
+    })
+}
+
+/// `ConsoleRoutes._health`: the overview's health block (no bank read).
+fn overview_health(svc: &Service) -> Value {
+    json!({
+        "status": "ok",
+        "schema": crate::health::SCHEMA,
+        "storage": "postgres",
+        "writer_id": crate::mcp::identity::env_writer().unwrap_or_else(|| "unknown".into()),
+        "persist_errors": svc.persist_errors.load(std::sync::atomic::Ordering::Relaxed),
+    })
+}
+
+/// `_overview` when every layer's `_safe` read raised (the bank never
+/// initialized): the health block, zero counts and each layer's default.
+fn overview_defaults(svc: &Service) -> Value {
+    json!({
+        "health": overview_health(svc),
+        "counts": {
+            "entries": 0, "facts": 0, "facts_contested": 0, "facts_by_origin": {},
+            "world": 0, "world_stale": 0, "lessons": 0, "episodes": 0,
+            "sources": 0, "tags": 0,
+        },
+        "stats": {},
+        "dream": {},
+        "loop": {"available": false},
     })
 }
 
@@ -423,11 +449,6 @@ fn count_client_sessions(
         .filter(|c| c.len() == 1 && claims.get(c[0]) == Some(&1))
         .count();
     hooks.len() + others.len() - merged
-}
-
-/// Python's `round(x, 2)`.
-fn round2(x: f64) -> f64 {
-    format!("{x:.2}").parse().unwrap_or(x)
 }
 
 /// `service.loop_health(window_days)` (`service.py:5495-5519`) over
@@ -528,7 +549,7 @@ async fn loop_health(svc: &Service, ready: &Ready, window_days: i64) -> anyhow::
         h;
     let rate = |n: Option<i64>| -> Value {
         match (n, sessions) {
-            (Some(n), s) if s > 0 => json!(round2(n as f64 / s as f64)),
+            (Some(n), s) if s > 0 => json!(crate::read::stats::py_round(n as f64 / s as f64, 2)),
             _ => Value::Null,
         }
     };
@@ -875,11 +896,25 @@ mod tests {
         assert!(!hook_session_key("not-a-uuid"));
     }
 
+    #[tokio::test]
+    async fn overview_defaults_follow_safe() {
+        let app = crate::http::tests::mcp_refusal_app();
+        let v = overview_defaults(&app.service);
+        assert_eq!(v["counts"]["facts_contested"], json!(0));
+        assert_eq!(v["counts"]["facts_by_origin"], json!({}));
+        assert_eq!(v["loop"], json!({"available": false}));
+        assert_eq!(v["stats"], json!({}));
+        assert_eq!(v["dream"], json!({}));
+        assert_eq!(v["health"]["status"], json!("ok"));
+        let keys: Vec<&String> = v.as_object().unwrap().keys().collect();
+        assert_eq!(keys, ["health", "counts", "stats", "dream", "loop"]);
+    }
+
     #[test]
-    fn round2_rounds_like_python() {
-        assert_eq!(round2(2.0 / 3.0), 0.67);
-        assert_eq!(round2(0.125), 0.12);
-        assert_eq!(round2(1.0), 1.0);
+    fn rates_round_like_python() {
+        assert_eq!(crate::read::stats::py_round(2.0 / 3.0, 2), 0.67);
+        assert_eq!(crate::read::stats::py_round(0.125, 2), 0.12);
+        assert_eq!(crate::read::stats::py_round(1.0, 2), 1.0);
     }
 
     #[test]

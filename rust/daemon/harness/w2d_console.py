@@ -157,6 +157,12 @@ READ_SEED = [
     set_add("Team", "members", "alice"),
     set_add("Team", "members", "bob"),
     set_remove("Team", "members", "alice"),
+    # A contested set slot that keeps two live members: its contender is
+    # parked against the slot, so both member rows carry the flag and the
+    # overview counts one contested slot, not two rows.
+    set_add("Infra", "hosts", "alpha"),
+    set_add("Infra", "hosts", "beta"),
+    set_add("Infra", "hosts", "3 spare nodes"),
     tool("memory_alias", entity="auth tokens", alias="bearer tokens"),
     tool("memory_graph_relate", src="blue-green pipeline", relation="uses", dst="Jenkins"),
     trace_sql("Alpha deploys go through the blue-green pipeline.", "blue-green-pipeline",

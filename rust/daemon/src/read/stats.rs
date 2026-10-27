@@ -76,7 +76,7 @@ fn mcp_memory_stats<'a>(app: &'a crate::http::App, _call: ToolCall<'a>) -> ToolF
 
 /// Python `round(x, n)`: correctly rounded from the exact binary value,
 /// ties to even.
-fn py_round(x: f64, n: usize) -> f64 {
+pub(crate) fn py_round(x: f64, n: usize) -> f64 {
     format!("{x:.n$}").parse().unwrap_or(x)
 }
 
