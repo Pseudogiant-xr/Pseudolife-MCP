@@ -96,11 +96,26 @@ def protected_temp_roots() -> list[str]:
 
 
 def harness_managed(path: str) -> bool:
-    parts = [p.lower() for p in Path(path).parts]
-    for a, b in HARNESS_MARKERS:
-        if any(parts[i] == a and parts[i + 1] == b for i in range(len(parts) - 1)):
+    """Checked on the path as given and as resolved, so a harness dir that
+    is itself a link to a configured root still counts as the harness's."""
+    temps = protected_temp_roots()
+    for form in {os.path.normcase(os.path.abspath(path)), norm(path)}:
+        parts = [p.lower() for p in Path(form).parts]
+        for a, b in HARNESS_MARKERS:
+            if any(parts[i] == a and parts[i + 1] == b for i in range(len(parts) - 1)):
+                return True
+        if any(is_under(form, norm(root)) for root in temps):
             return True
-    return any(is_under(path, norm(root)) for root in protected_temp_roots())
+    return False
+
+
+def too_broad(path: str) -> bool:
+    """A drive root, the home dir or one of its ancestors: never a root or
+    a cache dir, whatever the configuration says."""
+    path = norm(path)
+    home = norm(Path.home())
+    return (path == norm(os.path.splitdrive(path)[0] + os.sep) or path == os.sep
+            or is_under(home, path))
 
 
 def whitelisted(rel: str) -> bool:
@@ -140,6 +155,13 @@ def scan(root: str, *, skip_mtime=lambda rel: False) -> Scan:
     every symlink or reparse point. Any OSError fails closed."""
     out = Scan()
     base = _long(root)
+    # A POSIX mount (bind or other) is a plain dir to lstat; a different
+    # device fails closed. Windows mount points are reparse points already.
+    try:
+        root_dev = os.lstat(base).st_dev if sys.platform != "win32" else None
+    except OSError as exc:
+        out.error = f".: {exc.strerror or exc}"
+        return out
     stack = [("", base)]
     while stack:
         rel_dir, abs_dir = stack.pop()
@@ -160,6 +182,9 @@ def scan(root: str, *, skip_mtime=lambda rel: False) -> Scan:
                 out.links.append(rel)
                 continue
             if stat.S_ISDIR(st.st_mode):
+                if root_dev is not None and st.st_dev != root_dev:
+                    out.links.append(f"{rel} (mount point)")
+                    continue
                 stack.append((rel, entry.path))
                 continue
             out.bytes += st.st_size
@@ -355,8 +380,17 @@ def cargo_pins(places: list[str], exclude: list[str]) -> dict[str, str]:
     pins: dict[str, str] = {}
     configs = []
     for place in places:
-        for name in ("config.toml", "config"):
-            configs.append(os.path.join(place, ".cargo", name))
+        # The place itself and one level down: this repo's cargo workspace
+        # lives in rust/, so rust/.cargo/config.toml is a real pin site.
+        dirs = [place]
+        try:
+            with os.scandir(place) as it:
+                dirs += [e.path for e in it if e.is_dir(follow_symlinks=False)]
+        except OSError:
+            pass
+        for d in dirs:
+            for name in ("config.toml", "config"):
+                configs.append(os.path.join(d, ".cargo", name))
     cargo_home = os.environ.get("CARGO_HOME") or os.path.join(Path.home(), ".cargo")
     configs += [os.path.join(cargo_home, "config.toml"), os.path.join(cargo_home, "config")]
     for cfg in configs:
@@ -390,7 +424,7 @@ def list_processes() -> list[tuple[int, int, str]] | None:
                 return None
             script = ("[Console]::OutputEncoding=[Text.Encoding]::UTF8; "
                       "Get-CimInstance Win32_Process | ForEach-Object { "
-                      "'{0}`t{1}`t{2}' -f $_.ProcessId, $_.ParentProcessId, "
+                      "\"{0}`t{1}`t{2}\" -f $_.ProcessId, $_.ParentProcessId, "
                       "($_.CommandLine -replace '[\\r\\n]', ' ') }")
             proc = subprocess.run([shell, "-NoProfile", "-NonInteractive", "-Command", script],
                                   capture_output=True, text=True, encoding="utf-8",
@@ -513,12 +547,29 @@ def delete_cache(path: str) -> str | None:
     try:
         shutil.rmtree(_long(trash))
     except OSError as exc:
-        return (f"deleted in part; the rest stays at {trash} for the next sweep: "
-                f"{exc.strerror or exc}")
+        return f"deleted in part; the rest stays at {trash}: {exc.strerror or exc}"
     return None
 
 
 # --- config, ledger, output ------------------------------------------------
+
+def _strip_comment(line: str) -> str:
+    """Cut a ``#`` comment, but not a ``#`` inside a quoted string."""
+    quote, escaped = None, False
+    for i, ch in enumerate(line):
+        if quote:
+            if escaped:
+                escaped = False
+            elif ch == "\\" and quote == '"':
+                escaped = True
+            elif ch == quote:
+                quote = None
+        elif ch in "\"'":
+            quote = ch
+        elif ch == "#":
+            return line[:i]
+    return line
+
 
 def _parse_toml(text: str) -> dict:
     try:
@@ -529,7 +580,7 @@ def _parse_toml(text: str) -> dict:
     # Python 3.10: the flat subset this file uses (key = string | number | [strings]).
     out: dict = {}
     for n, raw in enumerate(text.splitlines(), 1):
-        line = raw.split("#", 1)[0].strip() if not raw.strip().startswith(("'", '"')) else raw
+        line = _strip_comment(raw).strip()
         if not line:
             continue
         key, sep, value = line.partition("=")
@@ -562,19 +613,37 @@ def load_config(path: Path) -> dict:
     unknown = set(data) - KNOWN_KEYS
     if unknown:
         raise Refusal(f"{path}: unknown keys {sorted(unknown)}; known: {sorted(KNOWN_KEYS)}")
+    for key in ("worktree_roots", "cache_roots"):
+        value = data.get(key, [])
+        if not isinstance(value, list) or not all(isinstance(v, str) and v for v in value):
+            raise Refusal(f'{path}: {key} must be a list of paths, e.g. {key} = ["<dir>"]')
+    if not isinstance(data.get("repo", ""), str):
+        raise Refusal(f'{path}: repo must be a path string, e.g. repo = "<checkout>"')
+    for key in ("worktree_grace_days", "cache_grace_days"):
+        value = data.get(key, 0)
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or value < 0:
+            raise Refusal(f"{path}: {key} must be a number of days, 0 or more")
     return data
 
 
-def ledger_write(ledger: Path, v: Verdict, mode: str, extra: dict | None = None) -> None:
-    ledger.parent.mkdir(parents=True, exist_ok=True)
+def ledger_write(ledger: Path, v: Verdict, mode: str, extra: dict | None = None) -> bool:
+    """Append one line; False (after saying so) if the ledger is unwritable,
+    since the removal itself has already happened."""
     line = {"time": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "mode": mode, "kind": v.kind,
             "path": v.path, "bytes": v.bytes,
             "newest_mtime": time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime(v.newest))
             if v.newest else None,
             "head": v.head, "branch": v.branch, "checks": v.passed}
     line.update(extra or {})
-    with ledger.open("a", encoding="utf-8") as fh:
-        fh.write(json.dumps(line) + "\n")
+    try:
+        ledger.parent.mkdir(parents=True, exist_ok=True)
+        with ledger.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(line) + "\n")
+    except OSError as exc:
+        print(f"warning: removed {v.path} but could not write the ledger {ledger}: "
+              f"{exc.strerror or exc}; record it by hand: {json.dumps(line)}")
+        return False
+    return True
 
 
 def human(n: int) -> str:
@@ -608,6 +677,21 @@ def print_table(rows: list[tuple[Verdict, str]]) -> None:
 
 # --- modes -----------------------------------------------------------------
 
+def registered_entry(repo: str, path: str) -> Worktree | None:
+    n = norm(path)
+    return next((w for w in list_worktrees(repo) if norm(w.path) == n), None)
+
+
+def remove_worktree(main: str, path: str) -> str | None:
+    """Plain ``git worktree remove``: None once git has unregistered it,
+    else the error. git unregisters a worktree but fails when a process
+    holds its folder as the cwd; that leaves a folder, not a failure."""
+    proc = git(main, "worktree", "remove", path)
+    if proc.returncode == 0 or registered_entry(main, path) is None:
+        return None
+    return f"git worktree remove failed: {proc.stderr.strip() or proc.returncode}"
+
+
 def own_worktree(start: str) -> str | None:
     proc = git(start, "rev-parse", "--show-toplevel")
     return proc.stdout.strip() if proc.returncode == 0 else None
@@ -634,8 +718,12 @@ def run_sweep(args, cfg: dict) -> int:
     def usable(roots: list[str]) -> list[str]:
         out = []
         for root in roots:
-            if harness_managed(norm(root)):
+            if harness_managed(root):
                 print(f"note: {root} is harness-managed; its contents are left alone")
+                continue
+            if too_broad(root):
+                print(f"note: {root} is a drive root or the home dir (or above it); "
+                      "never used as a root")
                 continue
             out.append(norm(root))
         return out
@@ -657,7 +745,7 @@ def run_sweep(args, cfg: dict) -> int:
                 left["main"] += 1
             elif p in here:
                 left["runs from here"] += 1
-            elif harness_managed(p):
+            elif harness_managed(wt.path):
                 left["harness-managed"] += 1
             elif not any(is_under(p, r) and p != r for r in wt_norm):
                 left["outside roots"] += 1
@@ -669,16 +757,20 @@ def run_sweep(args, cfg: dict) -> int:
     else:
         left["outside roots"] = max(len(worktrees) - 1, 0)
 
-    places = sorted(set(registered + [norm(c) for r in wt_norm if os.path.isdir(r)
-                                      for c in _children(r)]))
-    pins = cargo_pins(places, exclude=[]) if cache_norm else {}
-    main_path = registered[0] if registered else norm(repo)
+    def current_pins() -> dict[str, str]:
+        now_registered = [norm(w.path) for w in list_worktrees(repo)]
+        places = sorted(set(now_registered + [norm(c) for r in wt_norm if os.path.isdir(r)
+                                              for c in _children(r)]))
+        return cargo_pins(places, exclude=[])
+
+    pins = current_pins() if cache_norm else {}
     for root in cache_norm:
         if not os.path.isdir(root):
             print(f"note: cache root {root} does not exist")
             continue
-        if any(is_under(r, root) for r in registered) or is_under(main_path, root):
-            print(f"note: cache root {root} contains a git worktree; skipped entirely")
+        if any(is_under(r, root) or is_under(root, r) for r in registered):
+            print(f"note: cache root {root} contains or sits inside a git worktree; "
+                  "skipped entirely")
             continue
         if harness_managed(root):
             continue
@@ -697,22 +789,29 @@ def run_sweep(args, cfg: dict) -> int:
             rows.append((v, "would remove"))
             continue
         if v.kind == "worktree":
-            again = evaluate_worktree(repo, targets[i], grace_days=wgrace, now=time.time())
+            fresh = registered_entry(repo, targets[i].path)   # catches a lock taken since
+            if fresh is None:
+                v.failure = "no longer registered"
+                rows.append((v, "keep"))
+                continue
+            again = evaluate_worktree(repo, fresh, grace_days=wgrace, now=time.time())
             again.passed.insert(0, "not-main-or-self")
             if not again.ok:
                 again.failure = f"changed since scan: {again.failure}"
                 rows.append((again, "keep"))
                 continue
-            proc = git(registered[0], "worktree", "remove", again.path)
-            if proc.returncode:
-                again.failure = f"git worktree remove failed: {proc.stderr.strip()}"
+            err = remove_worktree(registered[0], again.path)
+            if err:
+                again.failure = err
                 rows.append((again, "failed"))
                 rc = 1
                 continue
-            ledger_write(args.ledger, again, "sweep")
+            if not ledger_write(args.ledger, again, "sweep"):
+                rc = 1
             rows.append((again, "removed"))
         else:
-            again = evaluate_cache(v.path, grace_days=cgrace, now=time.time(), pins=pins)
+            again = evaluate_cache(v.path, grace_days=cgrace, now=time.time(),
+                                   pins=current_pins())
             if not again.ok:
                 again.failure = f"changed since scan: {again.failure}"
                 rows.append((again, "keep"))
@@ -722,8 +821,13 @@ def run_sweep(args, cfg: dict) -> int:
                 again.failure = err
                 rows.append((again, "keep"))
                 continue
-            ledger_write(args.ledger, again, "sweep", {"complete": err is None})
-            again.note = err
+            if not ledger_write(args.ledger, again, "sweep", {"complete": err is None}):
+                rc = 1
+            if err:
+                again.failure = err
+                rows.append((again, "partial"))
+                rc = 1
+                continue
             rows.append((again, "removed"))
     if args.apply and wt_roots:
         git(registered[0], "worktree", "prune")
@@ -745,7 +849,7 @@ def _totals(rows, left, applied: bool, swept_worktrees) -> None:
     done = "removed" if applied else "would remove"
     for kind in ("worktree", "cache"):
         mine = [(v, verdict) for v, verdict in rows if v.kind == kind]
-        go = [v for v, verdict in mine if verdict in ("removed", "would remove")]
+        go = [v for v, verdict in mine if verdict in ("removed", "would remove", "partial")]
         print(f"{kind}s: {len(mine)} candidates, {len(go)} {done}, "
               f"{len(mine) - len(go)} kept, {human(sum(v.bytes for v in go))}")
     reasons: dict[str, int] = {}
@@ -781,7 +885,7 @@ def run_owner(args, cfg: dict) -> int:
         theirs = git(args.repo, "rev-parse", "--path-format=absolute", "--git-common-dir")
         if theirs.returncode or norm(theirs.stdout.strip()) != norm(common.stdout.strip()):
             raise Refusal(f"--repo {args.repo} is not the repository of {own}")
-    harness = harness_managed(nown)
+    harness = harness_managed(own)
     fetch(main)
     now = time.time()
     tree = evaluate_worktree(main, entry, grace_days=None, now=now)
@@ -804,16 +908,27 @@ def run_owner(args, cfg: dict) -> int:
         cache_dir = os.path.abspath(cache_dir)
         ncache = norm(cache_dir)
         registered = [norm(w.path) for w in worktrees]
+        holders = sorted((r for r in registered if is_under(ncache, r)), key=len)
+        holder = holders[-1] if holders else None     # the innermost worktree
         if not os.path.isdir(cache_dir):
             print(f"note: cache dir {cache_dir} does not exist; nothing to clean there")
             cache_dir = None
+        elif too_broad(cache_dir):
+            raise Refusal(f"{cache_dir} is a drive root or the home dir (or above it); "
+                          "pass your own cache slice with --cache-dir")
         elif any(is_under(r, ncache) for r in cache_roots):
             raise Refusal(f"{cache_dir} is or contains a configured cache root, shared "
                           "with other work; pass your own slice with --cache-dir")
-        elif any(is_under(r, ncache) for r in registered) or ncache in (
-                norm(Path.home()), norm(os.path.splitdrive(ncache)[0] + os.sep)):
-            raise Refusal(f"{cache_dir} contains a worktree or is a home or drive root; "
+        elif any(is_under(r, ncache) for r in registered):
+            raise Refusal(f"{cache_dir} contains a git worktree; "
                           "pass your own cache slice with --cache-dir")
+        elif holder is not None and holder != nown:
+            raise Refusal(f"{cache_dir} is inside another worktree ({holder}); "
+                          "a cache dir must be your own")
+        elif holder == nown and not whitelisted(
+                os.path.relpath(ncache, nown).replace(os.sep, "/")):
+            raise Refusal(f"{cache_dir} is inside your worktree but is not a cache path "
+                          "(rust/target, __pycache__, ...)")
         else:
             places = [r for r in registered if r != nown]
             pins = cargo_pins(places, exclude=[nown])
@@ -838,7 +953,11 @@ def run_owner(args, cfg: dict) -> int:
             print(plan[0])
         return 0
 
-    # Re-check immediately before acting.
+    # Re-check immediately before acting, from a fresh worktree listing.
+    entry = registered_entry(main, own)
+    if entry is None:
+        print(f"refused: {own} is no longer a registered worktree. Nothing was changed.")
+        return 1
     tree = evaluate_worktree(main, entry, grace_days=None, now=time.time())
     tree.passed.insert(0, "not-main")
     if cache is not None:
@@ -851,36 +970,43 @@ def run_owner(args, cfg: dict) -> int:
         print(f"refused: {reason}. Nothing was changed.")
         return 1
 
-    said = []
+    said, rc = [], 0
     if harness:
         said.append(f"checkout {own} belongs to its harness and was left in place")
     else:
         os.chdir(main)               # a process cannot remove the dir it sits in
-        proc = git(main, "worktree", "remove", own)
-        if proc.returncode and os.path.isdir(os.path.join(own, ".git")):
-            print(f"refused: git worktree remove failed: {proc.stderr.strip()}. "
-                  "The worktree is still registered; nothing else was changed.")
+        err = remove_worktree(main, own)
+        if err:
+            print(f"refused: {err}. The worktree is still registered and the cache "
+                  "was not touched.")
             return 1
-        ledger_write(args.ledger, tree, "owner")
+        if not ledger_write(args.ledger, tree, "owner"):
+            rc = 1
         line = f"removed worktree {own}"
         if tree.branch:
             line += f" (branch {tree.branch} kept)"
         if os.path.exists(own):
-            line += "; an empty folder remains while a process holds it as its cwd"
+            line += "; its folder remains while a process holds it as its cwd"
         said.append(line)
-    if cache is not None:
+    if cache is not None and not os.path.exists(cache.path):
+        said.append(f"cache {cache.path} went with the worktree")
+    elif cache is not None:
         err = delete_cache(cache.path)
         if err and err.startswith("in use"):
             said.append(f"cache {cache.path} {err}")
+            rc = 1
         else:
-            ledger_write(args.ledger, cache, "owner", {"complete": err is None})
+            if not ledger_write(args.ledger, cache, "owner", {"complete": err is None}):
+                rc = 1
+            if err:
+                rc = 1
             said.append(f"removed cache {cache.path} ({human(cache.bytes)})"
                         + (f"; {err}" if err else "")
                         + (f"; {cache.note}" if cache.note else ""))
     else:
         said.append("no cache dir given (--cache-dir or CARGO_TARGET_DIR)")
     print("; ".join(said))
-    return 0
+    return rc
 
 
 def parse_args(argv: list[str] | None) -> argparse.Namespace:

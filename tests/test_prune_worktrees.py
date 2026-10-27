@@ -583,3 +583,155 @@ def test_owner_mode_refuses_main_worktree(env, monkeypatch):
     assert rc != 0
     assert "main worktree" in out
     assert (env.repo / "README.md").exists()
+
+
+# --- review fixes ----------------------------------------------------------
+
+def test_owner_mode_refuses_a_cache_dir_inside_another_worktree(env, monkeypatch):
+    wt = env.add("mine", age=False)
+    sibling = env.add("sibling", age=False)
+    (sibling / "notes.txt").write_text("uncommitted\n", encoding="utf-8")
+    monkeypatch.chdir(wt)
+    for target in (sibling, sibling / "rust", env.repo / "rust"):
+        rc, out = run(env, "--mine", "--cache-dir", str(target), "--apply", roots=False)
+        assert rc != 0, out
+        assert "worktree" in out
+    assert (sibling / "notes.txt").exists() and (sibling / "rust" / "Cargo.toml").exists()
+    assert (env.repo / "rust" / "Cargo.toml").exists()
+    assert env.registered(wt) and env.ledger_lines() == []
+
+
+def test_owner_mode_accepts_its_own_rust_target(env, tmp_path, monkeypatch):
+    harness = tmp_path / "home" / ".t3" / "worktrees" / "proj"
+    harness.mkdir(parents=True)
+    wt = env.add("t3-own", root=harness, age=False)
+    target = wt / "rust" / "target"
+    (target / "debug").mkdir(parents=True)
+    (target / "debug" / "x.rlib").write_bytes(b"x")
+    monkeypatch.chdir(wt)
+    rc, out = run(env, "--mine", "--cache-dir", str(wt / "rust"), "--apply", roots=False)
+    assert rc != 0 and "not a cache path" in out
+    rc, out = run(env, "--mine", "--cache-dir", str(target), "--apply", roots=False)
+    assert rc == 0, out
+    assert not target.exists() and (wt / "rust" / "Cargo.toml").exists()
+
+
+def test_owner_mode_failed_remove_is_a_refusal(env, monkeypatch):
+    wt = env.add("mine", age=False)
+    cache = env.cache("mine-target", age=False)
+    real_git = prune.git
+
+    def failing(cwd, *args, **kw):
+        if args[:2] == ("worktree", "remove"):
+            return subprocess.CompletedProcess(args, 1, "", "fatal: simulated failure")
+        return real_git(cwd, *args, **kw)
+
+    monkeypatch.setattr(prune, "git", failing)
+    monkeypatch.chdir(wt)
+    rc, out = run(env, "--mine", "--cache-dir", str(cache), "--apply", roots=False)
+    assert rc == 1, out
+    assert "simulated failure" in out
+    assert env.registered(wt) and cache.exists()
+    assert env.ledger_lines() == []
+
+
+def test_sweep_failed_remove_exits_nonzero(env, monkeypatch):
+    wt = env.add("done")
+    real_git = prune.git
+
+    def failing(cwd, *args, **kw):
+        if args[:2] == ("worktree", "remove"):
+            return subprocess.CompletedProcess(args, 1, "", "fatal: simulated failure")
+        return real_git(cwd, *args, **kw)
+
+    monkeypatch.setattr(prune, "git", failing)
+    rc, out = run(env, "--apply")
+    assert rc == 1, out
+    assert env.registered(wt) and env.ledger_lines() == []
+
+
+def test_sweep_recheck_sees_a_lock_taken_after_the_scan(env, monkeypatch):
+    wt = env.add("done")
+    real = prune.evaluate_worktree
+    calls = []
+
+    def lock_after_first(repo, w, **kw):
+        verdict = real(repo, w, **kw)
+        if not calls:
+            _git(env.repo, "worktree", "lock", str(wt))
+        calls.append(1)
+        return verdict
+
+    monkeypatch.setattr(prune, "evaluate_worktree", lock_after_first)
+    rc, out = run(env, "--apply")
+    assert rc == 0, out
+    assert wt.exists() and "locked" in out
+
+
+def test_sweep_recheck_sees_a_pin_added_after_the_scan(env, monkeypatch):
+    cache = env.cache("soon-pinned")
+    holder = env.add("holder", unmerged=True)
+    real = prune.evaluate_cache
+    calls = []
+
+    def pin_after_first(path, **kw):
+        verdict = real(path, **kw)
+        if not calls:
+            (holder / "rust" / ".cargo").mkdir(parents=True)
+            (holder / "rust" / ".cargo" / "config.toml").write_text(
+                f"[build]\ntarget-dir = {json.dumps(str(cache))}\n", encoding="utf-8")
+        calls.append(1)
+        return verdict
+
+    monkeypatch.setattr(prune, "evaluate_cache", pin_after_first)
+    rc, out = run(env, "--apply")
+    assert rc == 0, out
+    assert cache.exists() and "pinned" in out
+
+
+def test_pin_in_a_workspace_subdir_counts(env):
+    cache = env.cache("rust-pinned")
+    holder = env.add("holder", unmerged=True)
+    (holder / "rust" / ".cargo").mkdir(parents=True)
+    (holder / "rust" / ".cargo" / "config.toml").write_text(
+        f"[build]\ntarget-dir = {json.dumps(str(cache))}\n", encoding="utf-8")
+    rc, out = run(env, "--apply")
+    assert rc == 0, out
+    assert cache.exists() and "pinned" in out
+
+
+def test_config_roots_must_be_lists(env):
+    env.add("done")
+    env.config.write_text(f"cache_roots = {json.dumps(str(env.cache_root))}\n",
+                          encoding="utf-8")
+    rc, out = run(env, "--apply", roots=False)
+    assert rc == 2
+    assert "must be a list" in out
+
+
+def test_drive_root_and_home_ancestors_are_never_roots(env, tmp_path, monkeypatch):
+    home = tmp_path / "home" / "user"
+    home.mkdir(parents=True)
+    monkeypatch.setattr(prune.Path, "home", classmethod(lambda cls: home))
+    stray = tmp_path / "home" / "old-tool"
+    stray.mkdir()
+    (stray / "f").write_text("x", encoding="utf-8")
+    _backdate(stray)
+    rc, out = run(env, "--apply", "--cache-root", str(tmp_path / "home"), roots=False)
+    assert rc == 0, out
+    assert stray.exists()
+    assert "never used as a root" in out
+
+
+def test_toml_fallback_keeps_hash_inside_quotes():
+    assert prune._strip_comment('repo = "C:/a#b"  # note').strip() == 'repo = "C:/a#b"'
+    assert prune._strip_comment("x = 'a#b' # c").strip() == "x = 'a#b'"
+    assert prune._strip_comment('x = "a\\"#b" # c').strip() == 'x = "a\\"#b"'
+
+
+def test_process_listing_sees_this_process():
+    """Unmocked: the Windows listing once printed a literal backtick-t, so
+    every row failed to parse and the owner-mode process check never ran."""
+    procs = prune.list_processes()
+    assert procs is not None, "this platform's process listing failed"
+    assert os.getpid() in {pid for pid, _, _ in procs}

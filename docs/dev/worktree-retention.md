@@ -34,8 +34,11 @@ python ops/prune_worktrees.py --mine --cache-dir <dir> --apply
   line. Where the process list cannot be read, that check is skipped and
   the output says so.
 - Any failed check refuses the whole run, names the reason and changes
-  nothing. A cache dir that is, or contains, a configured cache root, a
-  worktree, the home dir or a drive root is refused too.
+  nothing. The cache dir is refused, too, when it is or contains a
+  configured cache root, contains a worktree, sits inside another
+  worktree (the main checkout included), sits inside your own worktree
+  anywhere but a cache path such as `rust/target`, or is a drive root, the
+  home dir or one of its ancestors.
 - The removal runs from the main worktree (`git -C <main> worktree remove
   <own path>`), because a worktree cannot remove itself while a shell sits
   in it. If your shell still holds the folder as its working directory, an
@@ -91,14 +94,22 @@ An immediate subdir of a cache root is deleted only when all of these hold:
 
 - no file under it was written within `--cache-grace-days` (default 7);
 - nothing under it is a symlink or reparse point;
-- no `.cargo/config.toml` pins it as `target-dir`. The files checked are
-  those in every registered worktree, in each immediate child of a
-  worktree root, and in the cargo home;
-- it can be renamed aside before deletion. A held lock, such as a running
-  cargo build, makes that fail, and the dir is skipped: no retry, no
-  force.
+- no `.cargo/config.toml` pins it as `target-dir`. The files checked sit
+  at the top of, and one level into, every registered worktree and each
+  immediate child of a worktree root (so `rust/.cargo/config.toml`
+  counts), plus the cargo home's. Pins are read again just before each
+  deletion;
+- it can be renamed aside before deletion. On Windows, a file held open,
+  such as by a running cargo build, makes that fail, and the dir is
+  skipped: no retry, no force. Linux and macOS allow the rename, so there
+  the idle period (sweep) and the process check (owner mode) are the
+  protection.
 
-A cache root that contains a git worktree is skipped whole.
+A cache dir that holds a POSIX mount point is refused like a link.
+
+A cache root that contains a git worktree, or sits inside one, is skipped
+whole. A drive root, the home dir or any of its ancestors is never used as
+a root, whatever the configuration says.
 
 ### Never touched
 
@@ -146,9 +157,12 @@ global scope keeps every worktree. Unset it with `git -C <worktree> config
 The output is a table: each candidate, its verdict, its size and the first
 failing check. Totals follow, with the reasons things were kept. The exit
 code is 0 on success, including when there is nothing to do and when
-candidates are refused one by one. It is 1 for an owner-mode refusal or a
-failed `git worktree remove`, and 2 for a refused run (failed fetch, bad
-repo or bad config).
+candidates are refused one by one. It is 1 for an owner-mode refusal, a
+failed `git worktree remove`, a cache deleted only in part (the rest is
+left in a `.<name>.retention-*` dir beside it, named in the output), or a
+ledger that could not be written. It is 2 for a refused run (failed
+fetch, bad repo or bad config). Config values are type-checked: roots
+must be lists of paths.
 
 Every removal appends one JSON line to
 `~/.pseudolife-mcp/retention-ledger.jsonl`. The line holds `time`, `mode`
