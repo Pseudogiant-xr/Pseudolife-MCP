@@ -19,18 +19,9 @@ MUTANTS = ["session-end-no-client-stamp", "session-end-keeps-empty",
 
 # The session-end dream: everything but extraction off, and no sweep dream,
 # so only the close's own trigger can dream.
-DREAM_CONFIG = ("memory:
-  lessons:
-    enabled: false
-    infer_outcomes: false
-"
-                "  graph_insight:
-    enabled: false
-"
-                "  dream:
-    enabled: false
-    stall_notice: false
-")
+DREAM_CONFIG = ("memory:\n  lessons:\n    enabled: false\n    infer_outcomes: false\n"
+                "  graph_insight:\n    enabled: false\n"
+                "  dream:\n    enabled: false\n    stall_notice: false\n")
 DREAM_NOTES = ["The billing export runs nightly at 02:00.",
                "Priya maintains the billing export."]
 DREAM_CLAIMS = [
