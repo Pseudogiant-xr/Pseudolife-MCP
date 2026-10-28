@@ -31,7 +31,8 @@ MUTANTS = ["session-end-no-client-stamp", "session-end-keeps-empty",
            "session-start-no-registration", "session-start-no-pointer",
            "session-start-no-briefing", "briefing-no-avoid-first",
            "briefing-recap-includes-open", "episode-end-ignores-header",
-           "episode-end-stamps-guarded", "episode-end-no-dream"]
+           "episode-end-stamps-guarded", "episode-end-no-dream",
+           "briefing-route-no-coordination"]
 
 HOME_OPS = ("write_file",)
 
@@ -148,6 +149,13 @@ def policy(query: str = "", auth: bool = True) -> dict:
 
 def session_start(query: str = "", auth: bool = True) -> dict:
     return hook("GET", "/api/hook/session-start" + (f"?{query}" if query else ""), auth=auth)
+
+
+def briefing(query: str = "", headers=()) -> dict:
+    op = hook("GET", "/api/briefing" + (f"?{query}" if query else ""))
+    if headers:
+        op["headers"] = [list(h) for h in headers]
+    return op
 
 
 def episode_start(body: dict) -> dict:
@@ -503,6 +511,38 @@ def register(h) -> dict[str, dict]:
                             "WHERE dream_state = 'pending')"]},
             ],
         },
+        # GET /api/briefing (B10f): the whole briefing as JSON over the
+        # session-start seeds, plus the graph digest's unsure items and two
+        # open sessions for the coordination section. The caps parse as
+        # Python's int() and slice ([:-1] drops the last), and the caller's
+        # own X-PL-Session is left out of its peers.
+        "cli-briefing": {
+            "config": START_CONFIG,
+            "seed": [
+                h.store("A plain note the seeded lessons copy their embedding from."),
+                h.relate("Alpha Service", "depends-on", "Beta Service"),
+                h.fact("Deploy Pipeline", "owner", "the platform team"),
+                *START_WORLD(h),
+                seed_start("ss-old"),
+                h.store("A note in the old session about the release train.", [h.sess("ss-old")]),
+                {"op": "http", "method": "POST", "path": "/api/hook/session-end",
+                 "body": {"session_id": "ss-old"}},
+                seed_start("ss-r"),
+                h.store("A note in session R about the hook port.", [h.sess("ss-r")]),
+                seed_start("peer-a"),
+                h.store("Peer A is working on the installer.", [h.sess("peer-a")]),
+                h.session_title("Installer   work\nfor `release`", [h.sess("peer-a")]),
+                seed_start("peer-b"),
+                h.store("Peer B is reviewing.", [h.sess("peer-b")]),
+                *[h.sql(q, after_stop=True) for q in START_SQL + [GRAPH_DIGEST_SQL]],
+            ],
+            "ops": [
+                briefing(""),
+                briefing("max_unsure=1&max_lessons=-1&max_world=0"),
+                briefing("max_unsure=abc&max_lessons=&max_world=+2"),
+                briefing("", headers=[("X-PL-Session", "peer-a")]),
+            ],
+        },
         # A cold bank and the A/B arms: sess-a gets compact (policy and
         # onboarding), sess-b full_separate_hook (onboarding only), sess-c
         # none (the handle alone). Each registration records its variant.
@@ -552,6 +592,19 @@ def _lesson_sql(task: str, aspect: str, text: str, pol: str, outcome: str, statu
             f"'{outcome}', '{status}', 0.8, 'agent', '[]', '[]', {at}, {at}, embedding "
             "FROM entries WHERE text = 'A plain note the seeded lessons copy their embedding from.'")
 
+
+# The graph digest the dream's insight pass would leave: two surprises (one
+# with a reason, one with defaults), a question, and a blank question.
+GRAPH_DIGEST_SQL = (
+    "INSERT INTO meta (key, value) VALUES ('graph_digest', '"
+    + json.dumps({"computed_at": 1700000000.5,
+                  "surprises": [{"src": "Alpha Service", "dst": "Beta  Service",
+                                 "relation": "depends-on", "why": "rare\nbridge"},
+                                {"src": None, "dst": "Gamma", "relation": "", "why": ""}],
+                  "questions": [{"question": "Is Alpha still on the old cluster?"},
+                                {"question": ""}]}).replace("'", "''")
+    + "') ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
+)
 
 START_SQL = [
     # Sorted by case-folded task: apple workflow, Benchmarks, Code Review,

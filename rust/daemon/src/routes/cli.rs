@@ -1,8 +1,7 @@
-//! The routes the CLI calls (`web/routes.py:148-165`): `POST
-//! /api/episode/start` (`episode_start_session`) and `POST /api/episode/end`
-//! (`episode_end_session`). `GET /api/briefing` follows once the board's
-//! awareness is reusable for its coordination section (it answers 501
-//! until then); `/api/stats`, which `move` calls, is batch B10d's.
+//! The routes the CLI calls (`web/routes.py:148-165`): `GET /api/briefing`
+//! (`session_briefing`), `POST /api/episode/start` (`episode_start_session`)
+//! and `POST /api/episode/end` (`episode_end_session`). `/api/stats`, which
+//! `move` calls, is batch B10d's.
 //!
 //! The bodies arrive as Python's route lambdas read them. A field Python
 //! would carry into an episode or a registration as some other type than a
@@ -18,11 +17,15 @@ use std::sync::Arc;
 
 /// The Console registrations this family serves in full.
 #[cfg(test)]
-pub(super) const SERVED: &[(&str, &str)] =
-    &[("POST", "/api/episode/start"), ("POST", "/api/episode/end")];
+pub(super) const SERVED: &[(&str, &str)] = &[
+    ("GET", "/api/briefing"),
+    ("POST", "/api/episode/start"),
+    ("POST", "/api/episode/end"),
+];
 
 pub(super) async fn route(req: &mut Request<'_>) -> Option<Response> {
     match (req.method, req.path) {
+        ("GET", "/api/briefing") => Some(briefing(req).await),
         ("POST", "/api/episode/start") => Some(episode_start(req).await),
         ("POST", "/api/episode/end") => Some(episode_end(req).await),
         _ => None,
@@ -32,6 +35,62 @@ pub(super) async fn route(req: &mut Request<'_>) -> Option<Response> {
 /// Python's answer to a handler that raised: 500 with the exception text.
 fn raised(e: impl std::fmt::Display) -> Response {
     json_response(500, &json!({"error": e.to_string()}))
+}
+
+/// `_i(q, key, default)`: `int()` of the value, the default when it is
+/// absent, empty or not an integer.
+fn query_int(req: &Request<'_>, key: &str, default: i64) -> i64 {
+    req.params
+        .get(key)
+        .filter(|v| !v.is_empty())
+        .and_then(|v| crate::read::search_route::py_int(v))
+        .unwrap_or(default)
+}
+
+/// The last value of a header, its bytes read as latin-1, as `web/api.py`
+/// decodes them.
+fn last_header(req: &Request<'_>, name: &str) -> Option<String> {
+    req.headers
+        .get_all(name)
+        .iter()
+        .next_back()
+        .map(|v| v.as_bytes().iter().map(|&b| b as char).collect())
+}
+
+/// `session_briefing(max_unsure=_i(q, "max_unsure", 3), max_lessons=...,
+/// max_world=...)`: the full briefing as JSON, with the dream-stall and
+/// review-queue lines in its markdown, and, while coordination is enabled,
+/// the caller's view of the other open sessions (`coordination_awareness`
+/// with the session from the request's own `X-PL-Session`, never the shared
+/// pointer).
+async fn briefing(req: &mut Request<'_>) -> Response {
+    let app = req.app;
+    let ready = match app.service.ensure_init().await {
+        Ok(ready) => ready,
+        Err(e) => return raised(e),
+    };
+    let coordination =
+        if app.board.config.enabled && !crate::mutants::active("briefing-route-no-coordination") {
+            let session = last_header(req, "x-pl-session");
+            match crate::board::mcp::awareness(app, req.headers, session.as_deref(), None).await {
+                Ok(v) => Some(v),
+                Err(e) => return refused(e),
+            }
+        } else {
+            None
+        };
+    let opts = crate::briefing::BriefingOptions {
+        max_unsure: query_int(req, "max_unsure", 3),
+        max_lessons: query_int(req, "max_lessons", 3),
+        max_world: query_int(req, "max_world", 3),
+        coordination,
+        include_dream_stall: true,
+        include_review_queue: true,
+    };
+    match crate::briefing::session_briefing(&ready, &app.service.config, &opts).await {
+        Ok(out) => json_response(200, &Value::Object(out)),
+        Err(e) => raised(e),
+    }
 }
 
 /// `type(v).__name__` for a value loaded from JSON.
@@ -136,13 +195,7 @@ async fn episode_end(req: &mut Request<'_>) -> Response {
     let run_dream = body
         .get("run_dream")
         .is_none_or(crate::board::store::py_truthy);
-    let last = |name: &str| {
-        req.headers
-            .get_all(name)
-            .iter()
-            .next_back()
-            .map(|v| v.as_bytes().iter().map(|&b| b as char).collect::<String>())
-    };
+    let last = |name: &str| last_header(req, name);
     let caller = crate::episodes::Caller {
         header_session: last("x-pl-session")
             .filter(|_| !crate::mutants::active("episode-end-ignores-header")),
