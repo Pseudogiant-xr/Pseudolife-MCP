@@ -118,7 +118,9 @@ if ! getent ahosts localhost. >/dev/null; then
   grep -qE '^hosts:.*[[:space:]]myhostname([[:space:]]|$)' /etc/nsswitch.conf \
     || sed -i -E 's/^(hosts:[[:space:]]+files)([[:space:]]|$)/\1 myhostname\2/' /etc/nsswitch.conf
 fi
-resolved=$(getent ahosts localhost. | awk '{print $1}' | sort -u | paste -sd' ' -)
+# getent exits 2 for a name it cannot resolve; under pipefail that would end
+# the script here, before the message below names the fix.
+resolved=$({ getent ahosts localhost. || true; } | awk '{print $1}' | sort -u | paste -sd' ' -)
 case " $resolved " in
   *" 127.0.0.1 "*) echo "localhost. -> $resolved" ;;
   *) echo "localhost. does not resolve to 127.0.0.1 (got: ${resolved:-nothing}); check the hosts line of /etc/nsswitch.conf" >&2; exit 1 ;;
@@ -621,7 +623,7 @@ UNIT
 systemctl daemon-reload
 systemctl enable --now pseudolife-parity-cleanup.timer >/dev/null 2>&1
 systemctl start pseudolife-parity-cleanup.service
-journalctl -u pseudolife-parity-cleanup.service -n 1 -o cat --no-pager
+journalctl -u pseudolife-parity-cleanup.service -n 30 -o cat --no-pager | grep '^runner_cleanup' | tail -n 1 || true
 
 if [ ${#missing[@]} -gt 0 ]; then
   echo "not registered yet: ${missing[*]}; rerun with RUNNER_TOKEN set"

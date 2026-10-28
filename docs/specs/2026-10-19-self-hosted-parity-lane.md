@@ -367,8 +367,11 @@ What it adds to the manual procedure:
   box's loopback, and a W1-C shard's disposable cluster can take 5433, so
   the eval shard met another job's server and failed on its password. Each
   runner's `.env` sets `PSEUDOLIFE_TEST_PG_HOST_PORT=127.0.0.1:9`, a port
-  an unprivileged account cannot listen on. A shard that starts its own
-  cluster (`lease_ci.py`) still overrides it through `GITHUB_ENV`.
+  an unprivileged Linux account cannot listen on. A shard that starts its
+  own cluster (`lease_ci.py`) still overrides it through `GITHUB_ENV`.
+  Every reader of the variable was checked on 2026-10-28: a refusal on
+  port 9 reads exactly like nothing on 5433, and no golden holds the
+  address.
 - **Bounded disk use** (added 2026-10-28; see "Disk use" below). The
   job-started hook ends with a cleanup pass for its runner, and an hourly
   timer runs one for what the runners share. The script installs
@@ -410,18 +413,23 @@ does the trimming:
 - It runs as the runner account, never root. Every path it touches is the
   account's own, so a link a job planted cannot redirect a removal.
 - It checks that each path lies under the directory it was meant for, and
-  never follows a link.
+  never follows a link. On Windows a junction counts as a link.
 - It removes only what the next job rebuilds or downloads again. A cache
   over its cap is removed whole.
 
 | What | Cap | When |
 |---|---|---|
-| A runner's checkout (`_work/<repo>/<repo>`), contents only | 4 GB for the runner's `_work` | Before each of that runner's jobs |
+| A runner's checkout (`_work/<repo>/<repo>`), contents only | 4 GB for the checkouts | Before each of that runner's jobs |
 | A runner's `_diag` logs | Older than 14 days | Before each job |
 | A runner's pip, Hugging Face, uv, cargo registry and cargo git caches, and rustup | 2, 3, 3, 2, 1 and 2 GB | Before each job |
-| The account's rootless Docker | Exited containers after 24 h; images other than `pseudolife-pg:18` after 7 days; build cache after 7 days and above 3 GB | Hourly |
+| The account's rootless Docker | Exited containers after 24 h; images other than `pseudolife-pg:18` built over 7 days ago; build cache after 7 days and above 3 GB | Hourly |
 | The account's own entries in `/tmp` | Older than 1 day | Hourly |
 | uv's cache | `uv cache prune` | Hourly |
+
+An image's age is its build date, not when it reached the box, so a
+pulled image built over a week ago goes at the next pass. Today the box
+holds no such image: the `w1c-connection` shard's base image survives only
+as layers of `pseudolife-pg:18`.
 
 With under 25 GB free on the work drive, every cap counts as zero. Three
 runners at their caps plus the shared caches come to about 50 GB of the
@@ -437,7 +445,8 @@ before and after, each path removed with its size and reason, and any
 errors. The before-job pass writes to that runner's HOME, the hourly pass
 to the account's HOME. The file rotates at 1 MB, and
 `journalctl -u pseudolife-parity-cleanup` shows the hourly summary. A
-failed removal is logged and never fails the job.
+failed removal is logged and never fails the job. A pass that hits an
+unexpected error stops early, and its line records the error.
 
 Measured on 2026-10-28, before the first pass: a 196 GB volume, 115 GB
 used, 72 GB free. The runner account held about 16 GB: checkouts of
@@ -737,9 +746,12 @@ Settled by the maintainer on 2026-10-24:
   gets none for now: its disk is the hypervisor's old spinning one, and it
   stays free to reproduce Windows CI failures.
 - **7, persistent runners** with the job-started hook.
+- **10, persistent Rust build cache:** not needed, settled on 2026-10-28
+  on the measurement under option 10 below: no parity shard compiles.
+  Revisit if a shard starts compiling.
 - **11, offline machines:** the watcher above.
 
-Still open: 5, 6, 8, 9 and 10. The original options follow.
+Still open: 5, 6, 8 and 9. The original options follow.
 
 1. **Fork PR workflow approval**: "Require approval for all external
    contributors", set and verified before any runner is registered. This
@@ -789,10 +801,13 @@ Still open: 5, 6, 8, 9 and 10. The original options follow.
 
     The lane's longer wall time comes from running 17 shards on 3 runners,
     and from artifact downloads: 213 s on the box against 29 s hosted,
-    summed over the shards. A persistent target would also keep a finished
+    summed over the shards. The two downloads every shard makes (23 MB and
+    15 MB) took a median 11 s and 9 s on the box, about 2 MB/s, against 1-2 s
+    hosted. That fits a long-latency path from the homelab to GitHub's
+    artifact storage; the path itself was not measured. A persistent target would also keep a finished
     job's `$CARGO_TARGET_DIR/mutant-src` (`rust/cli_harness/mutants.py`) for
-    the next job to find. Recommended: settle as "not needed until a shard
-    compiles".
+    the next job to find. Settled on 2026-10-28 as not needed; revisit if a
+    shard starts compiling.
 11. **Offline-machine handling**: accept that an offline listed runner
     turns nightlies "cancelled" until it is taken out of the variable (as
     designed), or ask for a watcher that does that automatically.

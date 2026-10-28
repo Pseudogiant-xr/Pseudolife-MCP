@@ -127,10 +127,20 @@ def test_every_pass_is_logged_and_the_log_rotates(cleanup, tmp_path, monkeypatch
     assert capsys.readouterr().out.count("runner_cleanup runner 1: freed") == 2
 
 
-def test_a_failure_never_fails_the_job(cleanup, tmp_path, monkeypatch, capsys):
+def test_a_failure_never_fails_the_job_and_is_logged(cleanup, tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(cleanup, "runner_pass", lambda *args: 1 / 0)
-    assert cleanup.main(["--runner", str(tmp_path), "--home", str(tmp_path)]) == 0
-    assert "ZeroDivisionError" in capsys.readouterr().err
+    records = run(cleanup, "--runner", str(tmp_path), "--home", str(tmp_path), "--log", str(tmp_path / "log"))
+    assert records[0]["errors"] == ["pass ended early: ZeroDivisionError: division by zero"]
+    assert "1 errors" in capsys.readouterr().out
+
+
+def test_the_work_cap_counts_only_the_checkouts(cleanup, tmp_path):
+    # The starting job's actions and temp files cannot be freed, so they
+    # never push the checkout over its cap.
+    runner, home = runner_tree(tmp_path)
+    write(runner / "_work" / "_actions" / "big", 500)
+    run(cleanup, "--runner", str(runner), "--home", str(home), "--log", str(tmp_path / "log"), "--floor-gb", "0")
+    assert (runner / "_work" / "Repo" / "Repo" / "src" / "a.py").exists()
 
 
 @pytest.mark.skipif(not hasattr(os, "getuid"), reason="the shared temp pass is Linux only")
@@ -169,6 +179,22 @@ def test_docker_spares_the_pinned_image(cleanup, tmp_path, monkeypatch, floor, r
     assert sorted(call[2] for call in calls if call[:2] == ("image", "rm")) == removed
     prunes = [call for call in calls if call[:2] == ("builder", "prune")]
     assert all("--all" in call for call in prunes) and len(prunes) == 2
+
+
+def test_a_failed_image_listing_removes_no_image_and_says_so(cleanup, tmp_path, monkeypatch):
+    calls: list[tuple[str, ...]] = []
+
+    def docker(*args):
+        calls.append(args)
+        failed = args[:2] == ("image", "ls")
+        return subprocess.CompletedProcess(args, 1 if failed else 0, "", "daemon gone" if failed else "")
+
+    monkeypatch.setattr(cleanup, "docker", docker)
+    monkeypatch.setattr(cleanup.shutil, "which", lambda name: "docker" if name == "docker" else None)
+    records = run(cleanup, "--shared", "--temp", str(tmp_path / "none"), "--disk", str(tmp_path),
+                  "--log", str(tmp_path / "log"), "--floor-gb", str(10 ** 18))
+    assert not [call for call in calls if call[:2] == ("image", "rm")]
+    assert records[0]["errors"] == ["docker image ls: daemon gone"]
 
 
 def test_the_script_runs_standalone_with_the_standard_library(tmp_path):
