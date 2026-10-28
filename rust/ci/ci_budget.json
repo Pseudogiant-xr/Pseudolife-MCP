@@ -251,6 +251,11 @@
         "job": "test-lite-windows",
         "fingerprint": "01f3aa5029dd38ce",
         "reason": "adds tests/test_runner_cleanup.py (19 cases, under 1 s locally); no new setup or step"
+      },
+      {
+        "job": "test-lite-windows",
+        "fingerprint": "01f3aa5029dd38ce",
+        "reason": "adds tests/test_runner_cleanup.py (22 cases, under 1 s locally); no new setup or step"
       }
     ]
   }

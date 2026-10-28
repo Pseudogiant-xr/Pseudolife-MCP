@@ -155,6 +155,40 @@ def test_the_shared_pass_removes_only_the_accounts_old_temp_entries(cleanup, tmp
     assert not old.parent.exists() and new.exists()
 
 
+def test_without_a_posix_owner_the_temp_pass_removes_nothing(cleanup, tmp_path, monkeypatch):
+    # Windows has no cheap owner check, and a shared temp directory holds
+    # other accounts' files, so there the pass leaves temp alone.
+    temp = tmp_path / "tmp"
+    old = write(temp / "someone-elses" / "x", age_days=2)
+    os.utime(old.parent, (time.time() - 2 * 86400,) * 2)
+    monkeypatch.delattr(cleanup.os, "getuid", raising=False)
+    monkeypatch.setattr(cleanup.shutil, "which", lambda name: None)
+    run(cleanup, "--shared", "--temp", str(temp), "--disk", str(tmp_path), "--log", str(tmp_path / "log"), "--floor-gb", "0")
+    assert old.exists()
+
+
+@pytest.mark.skipif(not hasattr(os, "getuid") or os.getuid() == 0,
+                    reason="needs POSIX permissions that bind the account (root ignores them)")
+def test_an_unreadable_checkout_listing_is_logged_and_the_pass_goes_on(cleanup, tmp_path):
+    runner, home = runner_tree(tmp_path)
+    write(home / ".cache" / "pip" / "big", 200)
+    repo = runner / "_work" / "Repo"
+    repo.chmod(0)
+    try:
+        records = run(cleanup, "--runner", str(runner), "--home", str(home), "--log", str(tmp_path / "log"),
+                      "--floor-gb", "0")
+    finally:
+        repo.chmod(0o755)
+    assert any(error.startswith(f"{repo}: ") and "Permission denied" in error for error in records[0]["errors"])
+    assert not (home / ".cache" / "pip").exists()
+
+
+def test_a_pass_that_cannot_start_makes_its_log_directory(cleanup, tmp_path):
+    log = tmp_path / "not-yet" / "log"
+    assert cleanup.main(["--runner", str(tmp_path / "gone"), "--home", str(tmp_path), "--log", str(log)]) == 0
+    assert json.loads(log.read_text(encoding="utf-8"))["errors"][0].startswith("pass did not start: ")
+
+
 def docker_stub(cleanup, monkeypatch, images: list[str]) -> list[tuple[str, ...]]:
     calls: list[tuple[str, ...]] = []
 

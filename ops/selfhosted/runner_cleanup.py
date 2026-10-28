@@ -110,6 +110,28 @@ def size(path: Path) -> int:
     return total
 
 
+def files(root: Path) -> list[Path]:
+    """Every file under root, never walking through a link."""
+    found, stack = [], [root]
+    while stack:
+        try:
+            listing = list(os.scandir(stack.pop()))
+        except OSError:
+            continue
+        for entry in listing:
+            try:
+                info = entry.stat(follow_symlinks=False)
+            except OSError:
+                continue
+            if is_link(info):
+                continue
+            if stat.S_ISDIR(info.st_mode):
+                stack.append(Path(entry.path))
+            else:
+                found.append(Path(entry.path))
+    return sorted(found)
+
+
 def age_days(path: Path, now: float) -> float:
     try:
         return (now - path.lstat().st_mtime) / DAY
@@ -139,12 +161,13 @@ class Pass:
             if not isinstance(error, FileNotFoundError):
                 self.errors.append(f"{path}: {error}")
             return
+        if is_link(info) and not removable_link(info):
+            self.errors.append(f"{path}: a reparse point that is not a link; left alone")
+            return
         freed = size(path)
         if not self.dry_run:
             try:
                 if is_link(info):
-                    if not removable_link(info):
-                        raise OSError("a reparse point that is not a link; left alone")
                     # The link itself, never its target (unlink removes a junction too).
                     path.unlink()
                 elif stat.S_ISDIR(info.st_mode):
@@ -180,26 +203,6 @@ class Pass:
                 f"{len(self.errors)} errors")
 
 
-def checkouts(work: Path) -> list[Path]:
-    """Each checkout (_work/<repo>/<repo>). The names starting with "_" (the
-    job's temp directory, the actions it downloaded, the workspace mapping)
-    belong to the starting job already and are never listed."""
-    found = []
-    try:
-        repos = sorted(work.iterdir()) if work.is_dir() else []
-    except OSError:
-        return found
-    for repo in repos:
-        try:
-            if repo.name.startswith("_") or is_link(repo.lstat()) or not repo.is_dir():
-                continue
-            found += [checkout for checkout in sorted(repo.iterdir())
-                      if not is_link(checkout.lstat()) and checkout.is_dir()]
-        except OSError:
-            continue
-    return found
-
-
 def entries(directory: Path, cleanup: Pass) -> list[Path]:
     """A directory's entries; one that cannot be listed is logged and skipped,
     so the rest of the pass still runs."""
@@ -210,8 +213,31 @@ def entries(directory: Path, cleanup: Pass) -> list[Path]:
         return []
 
 
+def real_directory(path: Path, cleanup: Pass) -> bool:
+    try:
+        info = path.lstat()
+    except OSError as error:
+        cleanup.errors.append(f"{path}: {error}")
+        return False
+    return stat.S_ISDIR(info.st_mode) and not is_link(info)
+
+
+def checkouts(work: Path, cleanup: Pass) -> list[Path]:
+    """Each checkout (_work/<repo>/<repo>). The names starting with "_" (the
+    job's temp directory, the actions it downloaded, the workspace mapping)
+    belong to the starting job already and are never listed."""
+    if not work.is_dir():
+        return []
+    found = []
+    for repo in entries(work, cleanup):
+        if repo.name.startswith("_") or not real_directory(repo, cleanup):
+            continue
+        found += [checkout for checkout in entries(repo, cleanup) if real_directory(checkout, cleanup)]
+    return found
+
+
 def runner_pass(runner: Path, home: Path, cleanup: Pass, now: float) -> None:
-    found = checkouts(runner / "_work")
+    found = checkouts(runner / "_work", cleanup)
     # Only what is inside each checkout: the runner made the directory for
     # this job and its first step runs there.
     if sum(size(checkout) for checkout in found) > cleanup.cap(WORK_CAP_GB):
@@ -219,8 +245,8 @@ def runner_pass(runner: Path, home: Path, cleanup: Pass, now: float) -> None:
             for entry in entries(checkout, cleanup):
                 cleanup.remove(entry, "checkout over its cap", checkout)
     diag = runner / "_diag"
-    for entry in sorted(diag.rglob("*")) if diag.is_dir() else []:
-        if entry.is_file() and age_days(entry, now) > DIAG_DAYS:
+    for entry in files(diag) if diag.is_dir() else []:
+        if age_days(entry, now) > DIAG_DAYS:
             cleanup.remove(entry, f"diagnostic log older than {DIAG_DAYS} days", diag)
     for relative, gb in HOME_CACHES.items():
         path = home / relative
@@ -337,6 +363,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"runner_cleanup {mode}: {text}; nothing was removed", file=sys.stderr)
         if options.log is not None:
             try:
+                options.log.parent.mkdir(parents=True, exist_ok=True)
                 with options.log.open("a", encoding="utf-8") as handle:
                     handle.write(json.dumps({"time": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                                              "mode": mode, "removed": [],
