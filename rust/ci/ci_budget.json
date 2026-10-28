@@ -237,7 +237,7 @@
       "lock-resolve": "83bcc6b654896c6d",
       "test": "ac414107d3d9c71d",
       "test-lite-linux": "44e2a8f2c01baeab",
-      "test-lite-windows": "01f3aa5029dd38ce",
+      "test-lite-windows": "a2b45040f3d4b0cb",
       "test-lite-macos": "dc361f58439e1e1e",
       "frontend": "b1b6a1a1278f2e60"
     },
@@ -261,6 +261,11 @@
         "job": "test-lite-windows",
         "fingerprint": "01f3aa5029dd38ce",
         "reason": "adds tests/test_runner_cleanup.py (23 cases, under 1 s locally); no new setup or step"
+      },
+      {
+        "job": "test-lite-windows",
+        "fingerprint": "a2b45040f3d4b0cb",
+        "reason": "adds tests/test_runner_cleanup.py (23 cases) and tests/test_selfhosted_windows_scripts.py (4 cases, about 4 s locally); no new setup or step"
       }
     ]
   }

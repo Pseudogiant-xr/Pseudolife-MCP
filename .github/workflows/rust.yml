@@ -26,6 +26,13 @@ on:
         description: 'Required for ci and wait-mail: full reviewed commit ID, equal to the dispatched master head'
         type: string
         required: false
+      # A machine's trial (docs/specs/2026-10-19-self-hosted-parity-lane.md):
+      # its runner is online but the watcher keeps it out of the variable, so
+      # nightlies never route to it until one dispatched run has passed there.
+      selfhosted_runners:
+        description: 'ci only: the self-hosted machines this run uses, as JSON such as ["windows"], instead of PARITY_SELFHOSTED_RUNNERS'
+        type: string
+        required: false
       # Stress (rust/ci/stress.py): before a new live parity row or a
       # timing-sensitive test joins a required lane, it must pass 20 clean
       # hosted windows-latest runs (CLAUDE.md). Each iteration is its own
@@ -1479,14 +1486,14 @@ jobs:
     # PARITY_SELFHOSTED_RUNNERS lists the registered runners (JSON, such as
     # ["linux", "windows"]); a job for an unregistered label would queue for
     # a day.
-    if: ${{ !cancelled() && (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'ci')) && vars.PARITY_SELFHOSTED_RUNNERS != '' && needs.candidate.result == 'success' && needs.candidate-harness.result == 'success' && needs.fixtures.result == 'success' }}
+    if: ${{ !cancelled() && (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'ci')) && (inputs.selfhosted_runners != '' || vars.PARITY_SELFHOSTED_RUNNERS != '') && needs.candidate.result == 'success' && needs.candidate-harness.result == 'success' && needs.fixtures.result == 'success' }}
     name: Parity self-hosted / ${{ matrix.runner }} / ${{ matrix.suite }}
     needs: [scope, candidate, candidate-harness, fixtures]
     continue-on-error: true
     strategy:
       fail-fast: false
       matrix:
-        runner: ${{ fromJSON(vars.PARITY_SELFHOSTED_RUNNERS || '["off"]') }}
+        runner: ${{ fromJSON(inputs.selfhosted_runners || vars.PARITY_SELFHOSTED_RUNNERS || '["off"]') }}
         # Every suite the nightly and manual CI select, less the hosted-only
         # composites (h5-light), whose parts each runner runs on its own:
         # rust/ci/parity_scope.py's selfhosted output.

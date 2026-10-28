@@ -150,3 +150,45 @@ def test_a_write_that_finds_no_variable_fails(monkeypatch, method):
     monkeypatch.setattr(watch.urllib.request, "urlopen", refuse)
     with pytest.raises(watch.ApiError):
         watch.github("token", "https://api.example.com")(method, VARIABLE_PATH, None)
+
+
+# --- the allowlist: an online machine is listed only once it is allowed ---
+
+def test_an_online_machine_outside_the_allowlist_is_never_listed(tmp_path, capsys):
+    # A new machine's runner comes online for its trial dispatch before it
+    # may take nightly jobs (docs/specs/2026-10-19-self-hosted-parity-lane.md).
+    fake = FakeGitHub([runner("a", "online", "pseudolife-parity-linux"),
+                       runner("b", "online", "pseudolife-parity-windows")], value='["linux", "windows"]')
+    allowed = tmp_path / "machines"
+    allowed.write_text("# machines the nightly may route to\nlinux\n\n", encoding="utf-8")
+    argv = ["--state-file", str(tmp_path / "state.json"), "--repository", REPO, "--machines-file", str(allowed)]
+    assert watch.main(argv, call=fake) == 0
+    assert fake.value == '["linux"]'
+    allowed.write_text("linux\nwindows\n", encoding="utf-8")
+    assert watch.main(argv, call=fake) == 0
+    assert json.loads(fake.value) == ["linux", "windows"]
+
+
+def test_an_empty_allowlist_switches_the_lane_off(tmp_path, capsys):
+    fake = FakeGitHub([runner("a", "online", "pseudolife-parity-linux")], value='["linux"]')
+    allowed = tmp_path / "machines"
+    allowed.write_text("", encoding="utf-8")
+    assert watch.main(["--state-file", str(tmp_path / "s.json"), "--repository", REPO,
+                       "--machines-file", str(allowed)], call=fake) == 0
+    assert fake.value is None
+
+
+def test_without_an_allowlist_file_every_machine_counts(tmp_path, capsys):
+    fake = FakeGitHub([runner("b", "online", "pseudolife-parity-windows")])
+    assert watch.main(["--state-file", str(tmp_path / "s.json"), "--repository", REPO,
+                       "--machines-file", str(tmp_path / "absent")], call=fake) == 0
+    assert fake.value == '["windows"]'
+
+
+def test_an_unreadable_allowlist_changes_nothing(tmp_path, capsys):
+    fake = FakeGitHub([runner("a", "online", "pseudolife-parity-linux")], value='["linux"]')
+    allowed = tmp_path / "machines"
+    allowed.mkdir()
+    assert watch.main(["--state-file", str(tmp_path / "s.json"), "--repository", REPO,
+                       "--machines-file", str(allowed)], call=fake) == 1
+    assert fake.writes == [] and "nothing changed" in capsys.readouterr().err

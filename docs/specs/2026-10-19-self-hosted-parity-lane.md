@@ -10,7 +10,11 @@ has no runner; its shards stay on hosted runners.
 On 2026-10-28 the first week's failures were traced to the box, not the
 code under test, and fixed ("The first week's failures"); the lane's disk
 use got caps and a logged cleanup ("Disk use"). The comparison week
-restarts from the first clean nightly after those fixes (Rollout).
+restarts from the first clean nightly after those fixes (Rollout). The
+same day the Windows dev VM moved to the NVMe pool, its C: was grown to
+200 GB, and it got one runner ("Setting up the Windows dev VM"). That
+runner is online but stays out of the nightly list until a dispatched
+trial passes on it ("Trying a new machine").
 
 ## Problem
 
@@ -385,6 +389,79 @@ free; the root engine's images were not visible. The three runners came
 online. Untested until the first nightly: the shards themselves on this
 box (glibc, the tool-cache Python, `docker build` under rootless Docker).
 
+## Setting up the Windows dev VM (scripted, 2026-10-28)
+
+`ops/selfhosted/setup-windows-runner.ps1`, run in an elevated PowerShell 7
+on the VM from a checkout, does the Windows procedure below and hardens it
+the way the Linux script does. Rerunning it is safe:
+
+```powershell
+setup-windows-runner.ps1 -RunnerUser <runner-user> -SuiteUser <suite-user> `
+  -Lease full-suite@<machine> -Version <x.y.z> -Sha256 <hex>
+# then, to register, with RUNNER_TOKEN set from a registration token
+# (pipe it in on stdin; it must not reach a command line or a log).
+```
+
+- **One runner, as a local account that is not an administrator**
+  (decision 4, amended). The account's password is random. It is
+  generated in the script and passed to `config.cmd --windowslogonpassword`,
+  the only non-interactive way to register a service account; that command
+  line is readable by the VM's administrators while it runs. The password
+  is never written down, and a rerun that has to register again sets a new
+  one. `config.cmd` grants the account the right to log on as a service,
+  installs the runner as that account's service, and starts it.
+- **No LAN.** An outbound Windows Firewall rule for the account's SID
+  blocks private, link-local, CGNAT (Tailscale), multicast and broadcast
+  addresses, over IPv4 and IPv6. The script checks that every firewall
+  profile is on and that the rule names the account and every range.
+  Whether the rule binds the account's traffic cannot be tried from an SSH
+  session: a process started with another account's credentials there dies
+  at start (0xC0000142). The job-started hook therefore proves it before
+  every job. As the account, it connects to the LAN gateway and needs the
+  firewall's own refusal (WSAEACCES, 10013); anything else fails the job.
+  The suite user's run of the same hook was refused with "connected", the
+  negative control. Windows Firewall does not filter loopback, so unlike
+  on Linux, services listening on the VM's loopback stay reachable to
+  jobs.
+- **sshd refuses the account** (`DenyUsers`, written first in
+  `sshd_config` and checked with `sshd -t`), since a job can write the
+  account's `authorized_keys`.
+- **Administrators own every file the runner's setup later reads or
+  runs.** `C:\actions-runner` is administrators-only. The tools under it
+  are readable and executable by the account but not writable: the lease
+  gate's `pseudolife-mcp`, installed with `uv tool`, and a Python 3.11 for
+  the cleanup. So are the hooks. A runner is registered from a fresh
+  extraction, and only then does the account get its directory. `.env`
+  and `.path` are written by the script, which refuses to write through a
+  link planted in their place. The runner's `PATH` names only those tools
+  and system directories.
+- **The suite lock directory**: traverse-only on the suite user's profile
+  and its `.pseudolife-mcp`, read on the lock directory. The runner's
+  `.env` names that directory and the VM's lease, `full-suite@<machine>`.
+- **Disk**: the same `runner_cleanup.py` caps, run from the job-started
+  hook (its POSIX-only `/tmp` pass does not apply). C: had 92 GB free
+  after the grow, well above the 25 GB floor. The account's profile, where
+  `lease_ci.py`'s clusters and pg0's bundle live, is on C: too.
+- **No private bench address**: one runner shares no loopback with another
+  job, so the Linux `PSEUDOLIFE_TEST_PG_HOST_PORT` override is not needed.
+  `localhost.` resolves to loopback on Windows as it is.
+
+**Yielding to reproduction work.** The VM's first job is reproducing
+Windows CI failures (CLAUDE.md "Dev machines"). Reproduction work there
+holds the VM's suite lease for its whole length, so the runner's gate
+waits for it:
+
+```powershell
+pseudolife-mcp lease run full-suite@<machine> -- <the reproduction loop>
+# or, for a loop already running:
+pseudolife-mcp lease hold full-suite@<machine> --while-pid <pid>
+```
+
+A `lease check` reads such a hold as held from the release that carries
+PR #1024. Before that, the gate saw only a full suite's own lock, so a
+hold made the lane yield only through the board, which the runner cannot
+read.
+
 ## The first week's failures (2026-10-25 to 2026-10-27)
 
 Over the three nightlies, hosted runners passed 59 of 59 shards and the
@@ -479,14 +556,34 @@ read and write", stored readable by the watcher's account only:
 `setup-runner-watch.sh --token < <token file>`. Until it is stored the
 timer's runs are skipped.
 
+### Trying a new machine
+
+`ops/selfhosted/setup-runner-watch.sh --machines linux,windows` writes the
+watcher's allowlist (`/etc/pseudolife-runner-watch/machines`). An online
+machine outside the list is never put in the variable, so a new machine's
+runner can come online before nightlies may route to it. Without the file,
+every online machine counts.
+
+A trial run names the machine itself, through a dispatch input that only
+`mode=ci` dispatches have:
+
+```bash
+gh workflow run rust.yml --ref master -f mode=ci -f frozen_head=<master head> \
+  -f selfhosted_runners='["windows"]'
+```
+
+Once a trial passes, `setup-runner-watch.sh --machines linux,windows` adds
+the machine, and the next nightly routes to it. Since 2026-10-28 the list
+is `linux`, and the Windows runner waits for its trial.
+
 What it cannot do: jobs already queued for a machine that then goes down
 stay queued. GitHub has no API to cancel one job of a run, so the
 nightly's next run still cancels them ("Switching the lane on").
 
 ## Commands for the maintainer
 
-These are the manual steps behind the script above, and still the procedure
-for the Windows dev VM. On Linux, use the script: these steps lack its
+These are the manual steps behind the scripts above, kept as the reference
+for what they do. On Linux, use the script: these steps lack its
 hardening (the egress table, the lock directory mount in place of the
 search ACL on the suite user's home, and units that root writes itself
 rather than running `svc.sh` from the account's directory). Use the runner release currently listed at
@@ -742,9 +839,16 @@ Settled by the maintainer on 2026-10-24:
 - **3, Docker:** rootless Docker for that account.
 - **4, runners per machine:** three on the sibling Linux box, whose disk
   was grown by 30 GB for them. One check rarely keeps more than one or two
-  of its 8 cores busy; memory and disk are the limits. The Windows dev VM
-  gets none for now: its disk is the hypervisor's old spinning one, and it
-  stays free to reproduce Windows CI failures.
+  of its 8 cores busy; memory and disk are the limits. Amended on
+  2026-10-28: the Windows dev VM gets one runner, a trial.
+  - The VM moved off the spinning disk to the NVMe pool.
+  - The maintainer chose to grow its disk rather than add a second one:
+    scsi0 went from 120 to 200 GB, and C: was extended over the deleted
+    recovery partition. BitLocker was turned off and WinRE re-enabled on
+    C:, with a snapshot kept until the VM checked healthy.
+  - The runner yields to the VM's suite lease, which reproduction work
+    holds ("Yielding to reproduction work").
+  - It joins the nightly only after a dispatched trial passes.
 - **7, persistent runners** with the job-started hook.
 - **10, persistent Rust build cache:** not needed, settled on 2026-10-28
   on the measurement under option 10 below: no parity shard compiles.

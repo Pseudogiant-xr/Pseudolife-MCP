@@ -12,7 +12,12 @@ variable and corrects it:
   update restart does not drop it;
 - no machine listed means the variable is deleted, which switches the lane
   off (``[]`` would fail the matrix instead);
-- any API error changes nothing and exits 1 with one line saying why.
+- with ``--machines-file``, only the machines it names (one per line, ``#``
+  comments allowed) are listed, so a new machine's runner can be online for
+  a trial dispatch before nightly jobs may route to it; a missing file
+  allows every machine, an empty one none;
+- any API error, or an allowlist that cannot be read, changes nothing and
+  exits 1 with one line saying why.
 
 It prints one line when it changes the variable and nothing otherwise. Run it
 every few minutes from a machine that is not itself a runner, since a machine
@@ -115,15 +120,33 @@ def listed(online: set[str], last_seen: dict[str, float], now: float, grace_seco
     return sorted(machine for machine, seen in last_seen.items() if now - seen <= grace_seconds)
 
 
-def reconcile(call: Call, repository: str, state_file: Path, grace_seconds: float, now: float) -> str | None:
+def allowed_machines(path: Path | None) -> set[str] | None:
+    """The allowlist's machines, or None (every machine) when it does not exist."""
+    if path is None:
+        return None
+    try:
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return None
+    except (OSError, UnicodeDecodeError) as error:
+        raise ApiError(f"cannot read --machines-file {path}: {getattr(error, 'strerror', None) or error}") from error
+    return {line.split("#", 1)[0].strip() for line in text.splitlines()} - {""}
+
+
+def reconcile(call: Call, repository: str, state_file: Path, grace_seconds: float, now: float,
+              allowed: set[str] | None = None) -> str | None:
     """Correct the variable. Returns the line describing the change, if any."""
     online = online_machines(call, repository)
+    if allowed is not None:
+        online &= allowed
     try:
         last_seen = json.loads(state_file.read_text(encoding="utf-8"))
         if not isinstance(last_seen, dict):
             last_seen = {}
     except (OSError, ValueError):
         last_seen = {}
+    if allowed is not None:
+        last_seen = {machine: seen for machine, seen in last_seen.items() if machine in allowed}
     wanted = listed(online, last_seen, now, grace_seconds)
     value = current_value(call, repository)
     change = None
@@ -161,6 +184,9 @@ def main(argv: list[str] | None = None, call: Call | None = None) -> int:
                         help="where each machine's last online time is kept")
     parser.add_argument("--grace-minutes", type=float, default=10.0)
     parser.add_argument("--repository", default=REPOSITORY)
+    parser.add_argument("--machines-file", type=Path,
+                        help="only the machines named here (one per line) are listed; "
+                             "a missing file allows every machine")
     options = parser.parse_args(argv)
     if call is None:
         try:
@@ -174,7 +200,9 @@ def main(argv: list[str] | None = None, call: Call | None = None) -> int:
             return 1
         call = github(token)
     try:
-        change = reconcile(call, options.repository, options.state_file, options.grace_minutes * 60, time.time())
+        allowed = allowed_machines(options.machines_file)
+        change = reconcile(call, options.repository, options.state_file, options.grace_minutes * 60, time.time(),
+                           allowed)
     except ApiError as error:
         print(f"runner_watch: {error}; nothing changed", file=sys.stderr)
         return 1
