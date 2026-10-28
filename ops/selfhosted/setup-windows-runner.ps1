@@ -119,8 +119,8 @@ $ruleName = "pseudolife-parity-runner-egress-$([guid]::NewGuid().ToString('n'))"
 New-NetFirewallRule -Name $ruleName -DisplayName "$group`: no LAN for $RunnerUser" -Group $group -Direction Outbound `
     -Action Block -Profile Any -RemoteAddress $blocked -LocalUser "D:(A;;CC;;;$sid)" | Out-Null
 $old | Remove-NetFirewallRule
-foreach ($profile in Get-NetFirewallProfile) {
-    if (-not $profile.Enabled) { Fail "the $($profile.Name) firewall profile is off, so the egress rule would not apply; turn it on and rerun" }
+foreach ($firewallProfile in Get-NetFirewallProfile) {
+    if (-not $firewallProfile.Enabled) { Fail "the $($firewallProfile.Name) firewall profile is off, so the egress rule would not apply; turn it on and rerun" }
 }
 
 # The rule as Windows holds it: this account's SID in its user filter and the
@@ -195,7 +195,11 @@ $env:UV_CACHE_DIR = Join-Path $Root 'cache\uv'
 # uv may take an interpreter in the administrator's own profile, which the
 # account cannot read.
 & $uv python install --quiet 3.11
-$python = & $uv python find 3.11 --managed-python
+# From the tools directory with no virtual environment set, so no project or
+# venv can answer for the managed interpreter.
+Push-Location $tools
+$venv = $env:VIRTUAL_ENV; Remove-Item Env:VIRTUAL_ENV -ErrorAction SilentlyContinue
+try { $python = & $uv python find 3.11 --managed-python --no-project } finally { Pop-Location; if ($venv) { $env:VIRTUAL_ENV = $venv } }
 if (-not $python -or -not (Test-Path -LiteralPath $python) -or -not $python.StartsWith($tools, [StringComparison]::OrdinalIgnoreCase)) {
     Fail "uv did not provide Python 3.11 under $tools"
 }
@@ -208,6 +212,36 @@ Copy-Item -LiteralPath (Join-Path $here 'runner_cleanup.py') -Destination (Join-
 $hook = Join-Path $Root 'hooks\job-started.ps1'
 (Get-Content -LiteralPath (Join-Path $here 'windows-job-started.ps1') -Raw).Replace('@PYTHON@', $python) |
     Set-Content -LiteralPath $hook -Encoding utf8NoBOM -NoNewline
+
+# The runner's .env and .path: written before registration, so the hook is
+# configured from the service's first start, and again after. The account
+# may change the runner directory, so they are written in an
+# administrators-only directory and renamed into place: a rename replaces
+# whatever entry a job left there (a link, a hard link to another file)
+# instead of writing through it. A renamed file keeps its source directory's
+# permissions, so the account is granted read on each staged file first.
+function Write-RunnerConfig {
+    $userProfile = (Get-CimInstance Win32_UserProfile | Where-Object { $_.SID -eq $sid }).LocalPath
+    if (-not $userProfile) { $userProfile = "C:\Users\$RunnerUser" }
+    $script:profileDir = $userProfile
+    $script:envText = @(
+        "PSEUDOLIFE_PARITY_LEASE=$Lease",
+        "PSEUDOLIFE_PARITY_LOCK_DIR=$locks",
+        "PSEUDOLIFE_PARITY_RUNNER_DIR=$dir",
+        "ACTIONS_RUNNER_HOOK_JOB_STARTED=$hook",
+        "PIP_CACHE_DIR=$userProfile\.cache\pip",
+        "UV_CACHE_DIR=$userProfile\.cache\uv",
+        "HF_HOME=$userProfile\.cache\huggingface") -join "`n"
+    $script:pathText = @($env:UV_TOOL_BIN_DIR, 'C:\Program Files\PowerShell\7', 'C:\Program Files\Git\cmd',
+        "$env:SystemRoot\System32", $env:SystemRoot, "$env:SystemRoot\System32\Wbem",
+        "$env:SystemRoot\System32\WindowsPowerShell\v1.0", "$env:SystemRoot\System32\OpenSSH") -join ';'
+    foreach ($pair in @(@('.env', $script:envText), @('.path', $script:pathText))) {
+        $staged = Join-Path $Root "cache\$Name$($pair[0]).new"
+        Set-Content -LiteralPath $staged -Value $pair[1] -Encoding utf8NoBOM -NoNewline
+        Grant $staged @('/grant', "*${sid}:(R)")
+        [IO.File]::Move($staged, (Join-Path $dir $pair[0]), $true)
+    }
+}
 
 Say '== runner'
 $zip = Join-Path $Root "cache\actions-runner-win-x64-$Version.zip"
@@ -232,6 +266,7 @@ if (-not (Test-Path -LiteralPath (Join-Path $dir '.runner'))) {
     if (Test-Path -LiteralPath $dir) { Remove-Item -LiteralPath $dir -Recurse -Force }
     New-Item -ItemType Directory -Path $dir | Out-Null
     Expand-Archive -LiteralPath $zip -DestinationPath $dir
+    Write-RunnerConfig
     if (-not $password) {
         $password = New-RunnerPassword
         Set-LocalUser -Name $RunnerUser -Password (ConvertTo-SecureString $password -AsPlainText -Force)
@@ -248,33 +283,15 @@ if (-not (Test-Path -LiteralPath (Join-Path $dir '.runner'))) {
         $password = $null
     }
     # The service account runs and updates the runner, so it gets the directory.
-    & icacls $dir /grant "*${sid}:(OI)(CI)M" | Out-Null
+    Grant $dir @('/grant', "*${sid}:(OI)(CI)M")
 }
-$profileDir = (Get-CimInstance Win32_UserProfile | Where-Object { $_.SID -eq $sid }).LocalPath
-if (-not $profileDir) { $profileDir = "C:\Users\$RunnerUser" }
-$envText = @"
-PSEUDOLIFE_PARITY_LEASE=$Lease
-PSEUDOLIFE_PARITY_LOCK_DIR=$locks
-PSEUDOLIFE_PARITY_RUNNER_DIR=$dir
-ACTIONS_RUNNER_HOOK_JOB_STARTED=$hook
-PIP_CACHE_DIR=$profileDir\.cache\pip
-UV_CACHE_DIR=$profileDir\.cache\uv
-HF_HOME=$profileDir\.cache\huggingface
-"@
 $before = (Get-Content -LiteralPath (Join-Path $dir '.env') -Raw -ErrorAction SilentlyContinue) + (Get-Content -LiteralPath (Join-Path $dir '.path') -Raw -ErrorAction SilentlyContinue)
-$pathText = (@($env:UV_TOOL_BIN_DIR, 'C:\Program Files\PowerShell\7', 'C:\Program Files\Git\cmd',
-    "$env:SystemRoot\System32", $env:SystemRoot, "$env:SystemRoot\System32\Wbem",
-    "$env:SystemRoot\System32\WindowsPowerShell\v1.0", "$env:SystemRoot\System32\OpenSSH") -join ';')
-# The account may change the runner directory, so .env and .path are written
-# in an administrators-only directory and renamed into place: a rename
-# replaces whatever entry a job left there (a link, a hard link to another
-# file) instead of writing through it.
-foreach ($pair in @(@('.env', $envText), @('.path', $pathText))) {
-    $staged = Join-Path $Root "cache\$Name$($pair[0]).new"
-    Set-Content -LiteralPath $staged -Value $pair[1] -Encoding utf8NoBOM -NoNewline
-    [IO.File]::Move($staged, (Join-Path $dir $pair[0]), $true)
-}
+Write-RunnerConfig
 $after = $envText + $pathText
+foreach ($file in '.env', '.path') {
+    $acl = (& icacls (Join-Path $dir $file)) -join ' '
+    if ($acl -notmatch [regex]::Escape($RunnerUser)) { Fail "$RunnerUser cannot read $dir\$file ($acl)" }
+}
 $svc = Get-Service -Name $service -ErrorAction SilentlyContinue
 if (-not $svc) { Fail "the runner service $service is missing; remove $dir\.runner and rerun with RUNNER_TOKEN" }
 if ($NoStart) {

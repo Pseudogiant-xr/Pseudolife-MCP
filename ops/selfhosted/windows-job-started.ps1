@@ -17,14 +17,15 @@ $me = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
 # IPv6). Anything else fails the job, since the machine would then expose its
 # LAN.
 function Connect-Probe([string] $address, [int] $port) {
-    $client = [Net.Sockets.TcpClient]::new([Net.IPAddress]::Parse($address).AddressFamily)
+    $client = $null
     try {
+        $client = [Net.Sockets.TcpClient]::new([Net.IPAddress]::Parse($address).AddressFamily)
         if ($client.ConnectAsync($address, $port).Wait(8000)) { 'connected' } else { 'timed out' }
     } catch {
         $inner = $_.Exception
         while ($inner.InnerException) { $inner = $inner.InnerException }
         if ($inner -is [Net.Sockets.SocketException]) { "socket error $($inner.ErrorCode)" } else { $inner.Message }
-    } finally { $client.Dispose() }
+    } finally { if ($client) { $client.Dispose() } }
 }
 $probes = @()
 $gateway = (Get-NetRoute -DestinationPrefix '0.0.0.0/0' -ErrorAction SilentlyContinue | Sort-Object RouteMetric | Select-Object -First 1).NextHop

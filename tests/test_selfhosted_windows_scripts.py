@@ -70,3 +70,16 @@ def test_the_runner_password_survives_cmd():
     passwords = result.stdout.split()
     assert len(passwords) == 300 and len(set(passwords)) == 300, result.stderr
     assert all(re.fullmatch(r"[A-Za-z0-9]{40}", password) for password in passwords)
+
+
+def test_the_runner_config_is_readable_by_the_account_after_its_rename():
+    # A renamed file keeps its source directory's permissions: staged in an
+    # administrators-only directory, .env and .path were unreadable to the
+    # runner account (and so was the hook setting) until read was granted
+    # before the rename. Registration writes them before config.cmd starts
+    # the service.
+    text = SETUP.read_text(encoding="utf-8")
+    body = re.search(r"^function Write-RunnerConfig \{.*?^\}\n", text, re.S | re.M).group(0)
+    assert body.index('Grant $staged @(\'/grant\', "*${sid}:(R)")') < body.index("[IO.File]::Move(")
+    registration = text[text.index("Expand-Archive -LiteralPath $zip"):text.index("& .\config.cmd")]
+    assert "Write-RunnerConfig" in registration
