@@ -306,15 +306,25 @@ async fn a_send_during_a_bank_handover_stamps_past_the_other_writer() {
     );
     drop(published);
 
+    let waits = || board.tier_waits.load(std::sync::atomic::Ordering::SeqCst);
+    let before = waits();
     let mut sending = Box::pin(board.dispatch("send", send("handover"), &headers, "default"));
     let mut early = None;
-    for _ in 0..50 {
+    for _ in 0..1000 {
         early = futures::FutureExt::now_or_never(sending.as_mut());
-        if early.is_some() {
+        if early.is_some() || waits() > before {
             break;
         }
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
     }
+    // Reached while the initialization still holds the gate: the send
+    // declined the republished ready service and waits behind it.
+    assert_eq!(
+        waits(),
+        before + 1,
+        "the send took the published ready service"
+    );
+    assert!(early.is_none(), "the send finished inside the handover");
     release.send(()).ok();
     init.await.unwrap().expect("the handover's initialization");
     let result = match early {

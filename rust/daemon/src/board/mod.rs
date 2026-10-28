@@ -57,6 +57,10 @@ pub struct Board {
     pub(crate) principals: Arc<PrincipalStore>,
     /// The daemon's own board address, registered by its first notice.
     pub(crate) daemon_identity: Mutex<Option<(String, String)>>,
+    /// Test seam: how many full-tier calls declined the published ready
+    /// service and waited for the initialization.
+    #[cfg(test)]
+    pub(crate) tier_waits: std::sync::atomic::AtomicUsize,
 }
 
 type StoreCall<'a> = Pin<Box<dyn Future<Output = Result<serde_json::Value>> + Send + 'a>>;
@@ -90,6 +94,8 @@ impl Board {
             service,
             principals,
             daemon_identity: Mutex::new(None),
+            #[cfg(test)]
+            tier_waits: Default::default(),
         }
     }
 
