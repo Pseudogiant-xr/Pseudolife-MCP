@@ -14,6 +14,7 @@ mod config;
 mod consolidation_tools;
 mod contradiction;
 mod correction_tools;
+mod counters;
 mod documents;
 mod dream;
 mod embed;
