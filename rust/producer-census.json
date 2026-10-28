@@ -293,7 +293,7 @@
     "plugin/hooks/user-prompt-submit.sh": "39c583c145c97e9c0fea6a9b36ea9c2e879a1bd4733a6362a493d4a194750ba9",
     "plugin/release.json": "2720f3c4439435ec60acd5215418b1dc2d705af039273a92f4dc8169529b54a8",
     "pseudolife_memory/coordination.py": "8f171a2ca10c6c4887cb3503ea6dcc76c9a11602460b24a9ff59fe64a2f17e82",
-    "pseudolife_memory/mcp_server.py": "06c2481953719a829ce8cf312e7eb890c180de04956e332c9e94ac3416fdc66a",
+    "pseudolife_memory/mcp_server.py": "f1fe502a040f0dfa6e651e64aa2a79e82140af77f3680f187e8dda91c81acb3a",
     "pseudolife_memory/utils/config.py": "9e8cda2a3aee96fe725a9c64d30fabda01ffac69e03a65418e5cc72a291efce4",
     "pseudolife_memory/web/api.py": "deb35259f0dfd306f4877bf36d1d52aba59e2c3d950590c28a1797bded938d67",
     "pseudolife_memory/web/routes.py": "ea742529395f85091eebb03d60e8f7e6561be3f7c70c7e40d8949f6fe8bf23f2",
