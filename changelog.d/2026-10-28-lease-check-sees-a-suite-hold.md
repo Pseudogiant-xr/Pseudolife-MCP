@@ -1,0 +1,2 @@
+### Fixed (2026-10-28 — `lease check` sees a hold of this machine's suite lease)
+- `pseudolife-mcp lease check full-suite[@<machine>]` now reads the lease as held while `lease hold` or `lease run` holds it on this machine. Those take the lease's own lock file, but for a suite lease the check probed only the test suite's `full-suite.lock`. Without a board bearer (a self-hosted parity runner's yield gate, for one), a machine reserved for reproduction work with `lease hold full-suite@<machine> --while-pid <pid>` read as free.

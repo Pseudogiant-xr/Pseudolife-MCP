@@ -1239,6 +1239,34 @@ def test_check_of_the_full_suite_probes_the_suite_lock_and_names_its_holder(
     assert _run(["check", "full-suite"], daemon) == 0
 
 
+@pytest.mark.parametrize("name, lease_file", [("full-suite", None), ("full-suite@box", "full-suite@box\n")])
+def test_check_of_this_machines_suite_lease_sees_a_hold_of_it(
+        lease_env, default_suite_lease_env, monkeypatch, capsys, name, lease_file):
+    # `lease hold full-suite@<machine>` (a reproduction loop reserving the
+    # machine) takes the lease's own lock, not the suite's full-suite.lock.
+    # Without a board bearer, as on a self-hosted runner's yield gate, check
+    # read that machine as free while it was held (found 2026-10-28).
+    monkeypatch.setenv("PSEUDOLIFE_SUITE_LOCK_DIR", str(lease_env))
+    lease_env.mkdir(parents=True, exist_ok=True)
+    if lease_file:
+        (lease_env / "full-suite.lease").write_text(lease_file, encoding="utf-8")
+    (lease_env / "full-suite.lock").touch()
+    hold = os_lock.OsLock(lease_env / os_lock.lock_file_name(name))
+    assert hold.acquire()
+    daemon = FakeDaemon()
+    try:
+        assert _run(["check", name, "--json"], daemon) == 1
+        report = json.loads(capsys.readouterr().out)
+    finally:
+        hold.release()
+    assert report["held"] is True
+    assert report["local"] == {"file": os_lock.lock_file_name(name), "state": "held"}
+    assert _run(["check", name, "--json"], daemon) == 0
+    report = json.loads(capsys.readouterr().out)
+    # Free again: the suite's own lock file is what a free report names.
+    assert report["local"] == {"file": "full-suite.lock", "state": "free"}
+
+
 def test_check_of_another_machines_suite_lease_ignores_this_machines_lock(
         lease_env, default_suite_lease_env, capsys):
     # Each machine mirrors its suite under its own name (full-suite, or

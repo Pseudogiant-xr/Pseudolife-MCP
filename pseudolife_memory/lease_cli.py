@@ -1420,6 +1420,15 @@ def _local_state(name: str) -> dict:
                 if key in holder:
                     record[key] = holder[key]
         return record
+    # `lease hold` / `lease run` of this machine's suite lease (a reproduction
+    # loop reserving the machine) take the lease's own lock beside the suite's,
+    # which a check without the board would otherwise read as free.
+    try:
+        reserved = os_lock.probe(directory / os_lock.lock_file_name(name))
+    except OSError:
+        reserved = None
+    if reserved:
+        return {"file": os_lock.lock_file_name(name), "state": "held"}
     return seen or {"file": SUITE_LOCK_FILE, "state": None}
 
 
