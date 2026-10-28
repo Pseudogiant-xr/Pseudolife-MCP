@@ -80,15 +80,18 @@ difference and no scenario errors; a process failure or timeout is not a catch.
 
 ## Remaining boundaries
 
-- W2-G owns MCP SDK Host/Origin/DNS rebinding and bound-identity validation.
-  This remains a cutover blocker. Admitted `/mcp` and `/mcp/*` remain unmounted
-  501; the corpus probes front-gate 401/503 on those paths and never substitutes
-  501 for a Python security refusal. MCP-MOUNT remains deferred.
+- The MCP SDK's Host/Origin (DNS-rebinding) check and bound-identity validation
+  belong to the MCP surface, not this front layer: spec.md M4 and M18. Tokenless
+  `/mcp` is served behind that check (B6, under D3) and compared by `mcp_ci.py`'s
+  tokenless corpus; this corpus probes only the front-gate 401/503 on `/mcp` and
+  `/mcp/*`.
 - Credential-bearing outbound redirect refusal remains deferred to W3-H/W2-D
   (`utils/no_redirect.py`). HTTP-STATIC's relative root 307 provides no evidence
   for that refusal.
-- Durable principal snapshots, revocation, stale recovery, pairing writes,
-  detailed authentication source and admission helper integration remain in
-  PRINCIPALS-V53 and PR #688. This layer does not duplicate their implementation.
+- Durable principal snapshots, revocation, stale recovery, detailed
+  authentication source and admission helper integration remain in
+  PRINCIPALS-V53 and PR #688. Pairing writes are served behind `/api/pair`
+  (spec.md BK4; `run.py`'s `pairing` scenario). This layer does not duplicate
+  their implementation.
 - Bracket-malformed Origin refusal statuses are compared on both arms; no
   further CPython URL incidental compatibility is added.

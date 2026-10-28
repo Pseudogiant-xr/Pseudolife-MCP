@@ -106,7 +106,7 @@ labels, for the next batch.
 ```bash
 python ops/integrate.py status
 python ops/integrate.py build --dry-run
-python ops/integrate.py build
+python ops/integrate.py build            # with the Rust compile check when rust/ changed
 PSEUDOLIFE_SUITE_WHERE=local pwsh ops/remote-suite.ps1 > <log> 2>&1
 python -m pytest -q -p no:cacheprovider <the RUST_HARNESS paths build prints> > <log> 2>&1
 python ops/integrate.py open --suite ~/.pseudolife-mcp/suite-results/<run>.json \
@@ -125,10 +125,12 @@ python ops/integrate.py merge   # once its CI is green and it has its review
   leaves the checkout on that branch. It pushes nothing, so no CI has
   started, and leaves the drop comments to `open` (unless no batch forms,
   below); its plan waits in the worktree's git
-  directory for `open`.
+  directory for `open`. When the batch changes anything under `rust/`, it
+  last runs the Rust compile check (below) and exits 1 if that fails.
 - **`--dry-run`** does the same merges on a detached HEAD, prints the plan,
   the body and the comments `open` would post, then switches back; it
-  creates, pushes and comments on nothing.
+  creates, pushes and comments on nothing, and only says whether `build`
+  would run the Rust compile check.
 - **`open`** publishes a built batch once the local full suite passed on
   it. `--suite` takes the result JSON `ops/remote-suite.ps1` writes and
   refuses unless it tested exactly the batch head and exited 0;
@@ -139,7 +141,9 @@ python ops/integrate.py merge   # once its CI is green and it has its review
   `--harness-note` takes the Rust harness run's result in words (next
   section); it must name the head's short sha and state pytest's
   `<count> passed` with no failed or error count, and the body records it
-  beside the suite as not checked. Before the push `open` also re-reads each
+  beside the suite as not checked. Before the push `open` refuses a plan whose Rust compile
+  check failed or did not run, or that predates the check, and records a
+  pass in the body. It also re-reads each
   member's own CI and refuses if one turned red since `build`, naming it:
   rebuild, and it sits out. If any step after the push fails, rerunning `open` with the same
   arguments resumes on the batch's own pull request without repeating a
@@ -203,6 +207,44 @@ the drift from the committed census files, parsed as data, so no member
 code runs inside `ops/integrate.py` itself. With no census on master
 nothing is regenerated.
 
+Neither the full suite nor the Rust harness run compiles Rust, so two
+members that each compile alone can break the batch together: on
+2026-10-28 #991 changed `record()`'s signature, #994 called it the old way,
+and batch #1017 failed hosted CI with E0061. So when the batch diff against
+master changes anything under `rust/` (which holds every workspace Cargo
+file) other than the generated census, `build` runs CI's own compile step on
+the batch head, `cargo check --workspace --all-targets --locked` from
+`rust/` (where rustup reads `rust-toolchain.toml`), after the census. It
+took 48 s cold and under a second warm on the maintainer's Windows host.
+A failure drops nothing and leaves the branch and plan as they are, and
+`open` refuses the plan. cargo's output cannot tell the batch from the machine (a lock file two
+members left inconsistent fails like a download; a missing linker or
+exhausted memory prints "could not compile"), so the refusal sends you to
+master first: run the same command on `origin/master`. If it fails there
+too, the cause is master or this machine (cargo's network, disk, linker or
+memory): fix that and build again. Otherwise it is a red batch, bisected
+like a red suite ("Validating it", step 3). A check that could not start
+(no `cargo` on `PATH`) or was interrupted is refused the same way, as not
+run. Once the batch pull request is open, `open` resumes it whatever its
+plan says. Notes:
+
+- It honours `CARGO_TARGET_DIR`, so point that at the machine's shared
+  target directory to keep it warm; a cold check in a fresh worktree
+  otherwise fills its own `rust/target`, so mind the 8 GB free-disk floor.
+  If another cargo holds that directory, the check waits for its lock
+  ("Blocking waiting for file lock").
+- It runs member build scripts and proc macros, as the full suite runs
+  member code, with the operator's environment minus credential-shaped
+  variables, as the census script runs without tokens: names with `TOKEN`,
+  `SECRET`, `PASSWORD`, `CREDENTIAL`, `AUTH`, `DSN` or `DATABASE_URL`, or
+  ending in `KEY`, `KEY_ID` or `PAT`, and any value with credentials in a
+  URL (a database DSN with its password, or a proxy with one).
+- It compiles default features on this machine's platform only. Feature- and
+  platform-gated code, clippy and fmt stay CI's, as do the crates under
+  `evals/rust_port/` (outside the workspace) and a non-`rust/` change that
+  breaks an `include_str!` there (`ops/requirements.lock.txt`,
+  `tests/cli_audit_float_repr.tsv`).
+
 The script never resolves a conflict (it merges with `rerere` off, so a
 remembered resolution is not replayed either) and never force-pushes. If
 the push or `gh pr create` fails, nothing is commented on and rerunning
@@ -231,7 +273,8 @@ the push or `gh pr create` fails, nothing is commented on and rerunning
    --no-project --python 3.11 --with mcp==2.2.0 --with pytest --with
    psycopg --with psutil --with httpx --with pyyaml python -m pytest ...`,
    and pass its result to `open --harness-note`.
-3. A red suite or harness run is bisected locally: test master plus half
+3. A red suite, harness run or Rust compile check is bisected locally:
+   test master plus half
    the members, then the half that fails, until one member is left. Drop
    that culprit with a comment on its pull request and remove its label,
    switch back to `origin/master`, remove the local batch branch and build
