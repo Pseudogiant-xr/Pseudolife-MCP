@@ -766,5 +766,71 @@ def test_windows_open_file_leaves_a_partial_owner_removal(env, monkeypatch):
     with open(wt / "README.md", encoding="utf-8"):
         rc, out = run(env, "--mine", "--cache-dir", str(cache), "--apply", roots=False)
     assert rc == 1, out
-    assert "files remain" in out
+    assert "partial:" in out and "files remain" in out
     assert cache.exists(), "a partial removal must not go on to the cache"
+    assert [(l["mode"], l["kind"], l["complete"]) for l in env.ledger_lines()] == [
+        ("owner", "worktree", False)]
+
+
+def _remove_then(leave):
+    """A git wrapper whose `worktree remove` really runs, then leaves
+    something behind and reports git's error exit, as a held cwd or file
+    does on Windows."""
+    real_git = prune.git
+
+    def wrapped(cwd, *args, **kw):
+        proc = real_git(cwd, *args, **kw)
+        if args[:2] == ("worktree", "remove") and proc.returncode == 0:
+            leave(Path(args[2]))
+            return subprocess.CompletedProcess(args, 255, "", "error: failed to delete")
+        return proc
+    return wrapped
+
+
+def test_only_empty_folders_left_counts_as_removed(env, monkeypatch):
+    """A shell sitting in <wt>/rust leaves empty folders, not files."""
+    wt = env.add("done")
+    monkeypatch.setattr(prune, "git", _remove_then(
+        lambda path: (path / "rust" / "deeper").mkdir(parents=True)))
+    rc, out = run(env, "--apply")
+    assert rc == 0, out
+    assert "files remain" not in out
+    assert [line["complete"] for line in env.ledger_lines()] == [True]
+
+
+def test_owner_mode_partial_is_reported_as_partial_not_refused(env, monkeypatch):
+    wt = env.add("mine", age=False)
+    cache = env.cache("mine-target", age=False)
+
+    def leave(path):
+        path.mkdir(exist_ok=True)
+        (path / "held.txt").write_text("x", encoding="utf-8")
+
+    monkeypatch.setattr(prune, "git", _remove_then(leave))
+    monkeypatch.chdir(wt)
+    rc, out = run(env, "--mine", "--cache-dir", str(cache), "--apply", roots=False)
+    assert rc == 1, out
+    assert out.startswith("partial:") and "refused" not in out
+    assert cache.exists()
+    assert [(l["mode"], l["complete"]) for l in env.ledger_lines()] == [("owner", False)]
+
+
+def test_listing_failure_after_remove_is_reported_not_raised(env, monkeypatch):
+    """The re-list after `git worktree remove` failing must not abort the
+    run with a traceback or a whole-run refusal after something changed."""
+    env.add("done")
+    env.cache("old-slice")
+    real = prune.registered_entry
+    calls = []
+
+    def fails_after_the_recheck(repo, path):
+        calls.append(path)
+        if len(calls) == 1:            # the sweep's recheck before removal
+            return real(repo, path)
+        raise prune.Refusal("`git worktree list` failed: simulated")
+
+    monkeypatch.setattr(prune, "registered_entry", fails_after_the_recheck)
+    rc, out = run(env, "--apply")
+    assert rc == 1, out
+    assert "did not finish cleanly" in out
+    assert "APPLY" in out and "caches: 1 candidates, 1 removed" in out

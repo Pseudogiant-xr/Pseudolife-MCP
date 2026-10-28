@@ -41,9 +41,12 @@ python ops/prune_worktrees.py --mine --cache-dir <dir> --apply
   home dir or one of its ancestors.
 - The removal runs from the main worktree (`git -C <main> worktree remove
   <own path>`), because a worktree cannot remove itself while a shell sits
-  in it. If your shell still holds the folder as its working directory, an
-  empty folder remains until the shell exits; git has already unregistered
-  the worktree.
+  in it. If your shell still holds the folder (or one inside it) as its
+  working directory, empty folders remain until the shell exits; git has
+  already unregistered the worktree, and that counts as removed. If git
+  unregistered it but files remain (one held open on Windows), the run
+  prints `partial:` with the first leftover, exits 1 and leaves the cache
+  alone.
 - A checkout under `.t3/worktrees`, `.claude/worktrees` or
   `.codex/worktrees` belongs to its harness. Owner mode leaves it in place
   and cleans only the cache dir.
@@ -76,7 +79,8 @@ just before the removal.
    `__pycache__/`, `.pytest_cache/`, `rust/target/`, `*.egg-info/`,
    `.mypy_cache/` or `.ruff_cache/`. Any other ignored path refuses the
    removal and is reported. An eval log under `local/data/` is the case
-   this check exists for, and `.venv/` is refused the same way.
+   this check exists for, and `.venv/` is refused the same way (on Linux
+   and macOS a venv holds symlinks, so check 2 reports it first).
 4. **Idle.** Nothing outside the cache whitelist was written within
    `--worktree-grace-days` (default 3). The same holds for the worktree's
    `HEAD` and `index` in its git admin dir. Workers reuse one worktree
@@ -171,7 +175,8 @@ must be lists of paths.
 Every removal appends one JSON line to
 `~/.pseudolife-mcp/retention-ledger.jsonl`. The line holds `time`, `mode`
 (`sweep` or `owner`), `kind`, `path`, `bytes`, `newest_mtime`, `head` and
-`branch` (worktrees), the `checks` passed and, for caches, `complete`. That
+`branch` (worktrees), the `checks` passed and `complete` (false when
+files were left behind). That
 is the path, size and reason the disk rule asks for. A dry run writes
 nothing.
 

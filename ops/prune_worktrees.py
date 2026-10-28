@@ -688,20 +688,42 @@ def remove_worktree(main: str, path: str) -> tuple[bool, str | None]:
     """Plain ``git worktree remove``. Returns (unregistered, error).
 
     git can unregister a worktree yet fail to delete it: a process holding
-    the folder as its cwd leaves it empty, which is done; a file held open
-    leaves files behind, which no later sweep can see, so that is an error
-    even though the worktree is gone from git's list."""
-    proc = git(main, "worktree", "remove", path)
-    if registered_entry(main, path) is not None:
-        return False, f"git worktree remove failed: {proc.stderr.strip() or proc.returncode}"
+    a folder in it as its cwd leaves empty folders, which is done; a file
+    held open leaves files behind, which no later sweep can see, so that is
+    an error even though the worktree is gone from git's list."""
     try:
-        leftovers = os.listdir(path) if os.path.isdir(path) else []
-    except OSError:
-        leftovers = ["?"]
-    if leftovers:
-        return True, (f"unregistered, but files remain in {path} "
-                      f"({proc.stderr.strip() or 'held open'}); delete them by hand")
+        # Deleting a large rust/target on Windows can outlast the default
+        # timeout, and a kill mid-delete leaves a half-deleted worktree.
+        proc = git(main, "worktree", "remove", path, timeout=3600)
+        entry = registered_entry(main, path)
+    except (Refusal, subprocess.TimeoutExpired) as exc:
+        return False, f"git worktree remove did not finish cleanly: {exc}"
+    if entry is not None:
+        return False, f"git worktree remove failed: {proc.stderr.strip() or proc.returncode}"
+    left = leftover_file(path)
+    if left:
+        return True, (f"unregistered, but files remain in {path} (first: {left}; "
+                      f"{proc.stderr.strip() or 'held open'}); delete them by hand")
     return True, None
+
+
+def leftover_file(path: str) -> str | None:
+    """The first non-directory entry left under ``path``, or None when only
+    empty folders (or nothing) remain."""
+    if not os.path.lexists(path):
+        return None
+    s = scan(path)
+    if s.error:
+        return s.error
+    if s.links:
+        return s.links[0]
+    try:
+        for _dirpath, _dirs, files in os.walk(_long(path)):
+            if files:
+                return os.path.join(_dirpath, files[0])
+    except OSError as exc:
+        return str(exc)
+    return None
 
 
 def own_worktree(start: str) -> str | None:
@@ -861,16 +883,18 @@ def _totals(rows, left, applied: bool, swept_worktrees) -> None:
     done = "removed" if applied else "would remove"
     for kind in ("worktree", "cache"):
         mine = [(v, verdict) for v, verdict in rows if v.kind == kind]
-        go = [v for v, verdict in mine if verdict in ("removed", "would remove", "partial")]
+        go = [v for v, verdict in mine if verdict in ("removed", "would remove")]
+        partial = sum(verdict == "partial" for _, verdict in mine)
         print(f"{kind}s: {len(mine)} candidates, {len(go)} {done}, "
-              f"{len(mine) - len(go)} kept, {human(sum(v.bytes for v in go))}")
+              + (f"{partial} partial (see rows), " if partial else "")
+              + f"{len(mine) - len(go) - partial} kept, {human(sum(v.bytes for v in go))}")
     reasons: dict[str, int] = {}
     for v, verdict in rows:
-        if verdict in ("keep", "failed"):
+        if verdict in ("keep", "failed", "partial"):
             key = re.sub(r"[:(].*", "", v.failure or "").strip()
             reasons[key] = reasons.get(key, 0) + 1
     if reasons:
-        print("kept because: " + ", ".join(f"{k}: {n}" for k, n in
+        print("not removed because: " + ", ".join(f"{k}: {n}" for k, n in
                                            sorted(reasons.items(), key=lambda kv: -kv[1])))
     print("left alone: " + ", ".join(f"{k}: {n}" for k, n in left.items()))
     if applied and swept_worktrees:
@@ -990,9 +1014,13 @@ def run_owner(args, cfg: dict) -> int:
         gone, err = remove_worktree(main, own)
         if gone and not ledger_write(args.ledger, tree, "owner", {"complete": err is None}):
             rc = 1
+        if err and gone:
+            print(f"partial: {err}. git no longer lists the worktree; the cache was "
+                  "not touched.")
+            return 1
         if err:
-            state = ("" if gone else " The worktree is still registered;")
-            print(f"refused: {err}.{state} The cache was not touched.")
+            print(f"refused: {err}. The worktree is still registered and the cache was "
+                  "not touched.")
             return 1
         line = f"removed worktree {own}"
         if tree.branch:
