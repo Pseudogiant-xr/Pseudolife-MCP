@@ -19,19 +19,45 @@ use crate::txn;
 #[derive(Clone, Default)]
 pub struct WriteTasks {
     tasks: tokio_util::task::TaskTracker,
+    /// Set at shutdown, once open requests are no longer waited for: a
+    /// write submitted after it is refused rather than started, since the
+    /// exit could cut it part way. Held while a write is admitted, so none
+    /// slips in after the drain began.
+    closed: std::sync::Arc<std::sync::RwLock<bool>>,
 }
 
 impl WriteTasks {
+    /// Run `task` as an admitted write. Once admission has closed, the task
+    /// never runs and the caller's handle answers cancelled.
     pub fn spawn<F>(&self, task: F) -> tokio::task::JoinHandle<F::Output>
     where
         F: std::future::Future + Send + 'static,
         F::Output: Send + 'static,
     {
+        let closed = self.closed.read().expect("write admission lock");
+        if *closed {
+            eprintln!("write refused: the daemon is shutting down");
+            let refused = tokio::spawn(std::future::pending::<F::Output>());
+            refused.abort();
+            return refused;
+        }
         self.tasks.spawn(task)
     }
 
     pub async fn drain(&self) {
         self.tasks.close();
+        self.tasks.wait().await;
+    }
+
+    /// Refuse every write submitted from now on (shutdown).
+    pub fn close_admission(&self) {
+        *self.closed.write().expect("write admission lock") = true;
+        self.tasks.close();
+    }
+
+    /// Until every admitted write has finished (after [`Self::drain`] or
+    /// [`Self::close_admission`]).
+    pub async fn wait(&self) {
         self.tasks.wait().await;
     }
 }
@@ -687,6 +713,44 @@ async fn store_body(
         }
     }
     Ok(Value::Object(out))
+}
+
+#[cfg(test)]
+mod admission_tests {
+    use super::WriteTasks;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    #[tokio::test]
+    async fn a_write_after_admission_closes_is_refused_and_never_runs() {
+        let writes = WriteTasks::default();
+        writes.close_admission();
+        let ran = Arc::new(AtomicBool::new(false));
+        let flag = ran.clone();
+        let refused = writes
+            .spawn(async move {
+                flag.store(true, Ordering::SeqCst);
+            })
+            .await;
+        assert!(refused.is_err_and(|e| e.is_cancelled()));
+        tokio::task::yield_now().await;
+        assert!(!ran.load(Ordering::SeqCst), "a refused write must not run");
+        writes.drain().await;
+    }
+
+    #[tokio::test]
+    async fn a_write_admitted_before_the_close_still_drains() {
+        let writes = WriteTasks::default();
+        let (go, wait) = tokio::sync::oneshot::channel::<()>();
+        let admitted = writes.spawn(async move {
+            let _ = wait.await;
+            7
+        });
+        writes.close_admission();
+        go.send(()).unwrap();
+        writes.drain().await;
+        assert_eq!(admitted.await.unwrap(), 7);
+    }
 }
 
 #[cfg(test)]
