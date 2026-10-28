@@ -169,7 +169,10 @@ with open(os.environ["FAKE_CARGO_LOG"], "a", encoding="utf-8") as log:
     log.write(json.dumps({"argv": sys.argv[1:], "cwd": os.getcwd(),
                           "env": dict(os.environ)}) + "\\n")
 code = int(os.environ.get("FAKE_CARGO_EXIT", "0"))
-if code:
+if code and os.environ.get("FAKE_CARGO_OFFLINE"):
+    sys.stderr.write("    Updating crates.io index\\n"
+                     "error: failed to download from `https://index.crates.io/`\\n")
+elif code:
     sys.stderr.write("    Checking pseudolife-daemon v0.19.0\\n"
                      "error[E0061]: this function takes 3 arguments but 2 arguments "
                      "were supplied\\n   --> daemon/src/health.rs:42:9\\n"
@@ -217,6 +220,7 @@ def world(tmp_path, monkeypatch):
     fake_cargo.write_text(_FAKE_CARGO, encoding="utf-8")
     monkeypatch.setenv("FAKE_CARGO_LOG", str(cargo_log))
     monkeypatch.delenv("FAKE_CARGO_EXIT", raising=False)
+    monkeypatch.delenv("FAKE_CARGO_OFFLINE", raising=False)
     monkeypatch.setattr(integrate, "RUST_CHECK",
                         (sys.executable, str(fake_cargo), "check", "--workspace",
                          "--all-targets", "--locked"), raising=False)
@@ -1148,14 +1152,93 @@ def test_the_rust_check_uses_cargo_target_dir_and_no_tokens(world, capsys, monke
     monkeypatch.setenv("GH_TOKEN", "secret-gh")
     monkeypatch.setenv("PSEUDOLIFE_MCP_TOKEN", "secret-daemon")
     monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "secret-aws")
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "secret-aws-id")
+    monkeypatch.setenv("PSEUDOLIFE_MCP_DATABASE_URL",
+                       "postgresql://pseudolife:hunter2@127.0.0.1:5432/pseudolife")
+    monkeypatch.setenv("SOME_SERVICE", "https://user:hunter2@example.com/x")
+    # Near misses the toolchain needs, which must survive.
+    monkeypatch.setenv("CARGO_HOME", str(tmp_path / "cargo-home"))
+    monkeypatch.setenv("RUSTUP_TOOLCHAIN", "1.94.0")
+    monkeypatch.setenv("CARGO_REGISTRIES_CRATES_IO_PROTOCOL", "sparse")
+    monkeypatch.setenv("HTTPS_PROXY", "http://proxy.example.com:3128")
 
     assert _build() == 0, capsys.readouterr()
 
     (call,) = world.cargo_calls()
-    assert call["env"]["CARGO_TARGET_DIR"] == str(target)
-    assert not {"GH_TOKEN", "PSEUDOLIFE_MCP_TOKEN", "AWS_SECRET_ACCESS_KEY"} & set(call["env"])
-    # The toolchain and linker still find what they need.
-    assert call["env"]["PATH"]
+    env = call["env"]
+    assert env["CARGO_TARGET_DIR"] == str(target)
+    assert not {"GH_TOKEN", "PSEUDOLIFE_MCP_TOKEN", "AWS_SECRET_ACCESS_KEY", "AWS_ACCESS_KEY_ID",
+                "PSEUDOLIFE_MCP_DATABASE_URL", "SOME_SERVICE"} & set(env)
+    assert not any("hunter2" in value for value in env.values())
+    # The toolchain, the linker and the network still find what they need.
+    assert env["PATH"] and env["CARGO_HOME"] == str(tmp_path / "cargo-home")
+    assert env["RUSTUP_TOOLCHAIN"] == "1.94.0"
+    assert env["CARGO_REGISTRIES_CRATES_IO_PROTOCOL"] == "sparse"
+    assert env["HTTPS_PROXY"] == "http://proxy.example.com:3128"
+    assert env["CARGO_TERM_COLOR"] == "never"
+
+
+def test_a_failed_check_sends_the_operator_to_master_before_bisecting(world, capsys,
+                                                                     monkeypatch):
+    # cargo's words cannot tell the batch from the machine: a lock file two
+    # members left inconsistent fails like a download, and a missing linker
+    # prints "could not compile". Master decides, as for the census.
+    _rust_member(world)
+    monkeypatch.setenv("FAKE_CARGO_EXIT", "101")
+    monkeypatch.setenv("FAKE_CARGO_OFFLINE", "1")
+
+    assert _build() == 1
+    captured = capsys.readouterr()
+    out = captured.out + captured.err
+
+    base = _git(world.work, "rev-parse", "origin/master")
+    assert _plan(world)["rust_check"].startswith("failed")
+    assert "failed to download" in out
+    assert f"origin/master ({base[:12]})" in out and "this machine" in out
+    assert "bisect" in out
+
+    monkeypatch.delenv("FAKE_CARGO_EXIT")
+    assert _open(world) == 2
+    assert "this machine" in capsys.readouterr().err
+    assert world.remote_branches() == [] and world.gh.mutations() == []
+
+
+def test_an_interrupted_check_still_leaves_a_plan_open_refuses(world, capsys, monkeypatch):
+    _rust_member(world)
+
+    def interrupted(plan):
+        raise KeyboardInterrupt
+
+    real = integrate._rust_check
+    monkeypatch.setattr(integrate, "_rust_check", interrupted)
+    with pytest.raises(KeyboardInterrupt):
+        _build()
+    monkeypatch.setattr(integrate, "_rust_check", real)
+    capsys.readouterr()
+
+    assert _plan(world)["rust_check"].startswith("not run")
+    assert _open(world) == 2
+    assert "did not run" in capsys.readouterr().err
+    assert world.remote_branches() == [] and world.gh.mutations() == []
+
+
+def test_open_resumes_a_batch_opened_from_a_plan_before_the_rust_check(world, capsys):
+    # A plan from before the check whose batch pull request is already open
+    # (a failure after the push) still finishes; only an unpublished one
+    # must build again.
+    _three_with_a_collision(world)
+    world.gh.fail_comments = 1
+    assert _build() == 0
+    assert _open(world) == 2      # pushed and opened, the drop comment failed
+    path = Path(_git(world.work, "rev-parse", "--git-path",
+                     f"integrate-plans/{DATE}-batch-1.json"))
+    raw = json.loads((world.work / path).read_text(encoding="utf-8"))
+    del raw["rust_check"]
+    (world.work / path).write_text(json.dumps(raw), encoding="utf-8")
+    capsys.readouterr()
+
+    assert _open(world) == 0, capsys.readouterr()
+    assert len(world.gh.bodies("comment")) == 2   # the failed try, then the comment
 
 
 def test_a_dry_run_names_the_rust_check_without_running_it(world, capsys):
@@ -1280,6 +1363,9 @@ def test_the_batch_regenerates_a_census_its_members_staled(world, capsys):
     assert world.gh.bodies("comment") == [] and world.gh.bodies("edit") == []
     (_, create_body), = world.gh.bodies("create")
     assert "## Producer census" in create_body and sha in create_body
+    # The generated census alone is no Rust change: nothing to compile.
+    assert world.cargo_calls() == []
+    assert "changes nothing under `rust/`" in create_body
 
 
 def test_a_member_whose_census_master_staled_still_lands(world, capsys):

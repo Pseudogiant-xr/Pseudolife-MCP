@@ -141,9 +141,9 @@ python ops/integrate.py merge   # once its CI is green and it has its review
   `--harness-note` takes the Rust harness run's result in words (next
   section); it must name the head's short sha and state pytest's
   `<count> passed` with no failed or error count, and the body records it
-  beside the suite as not checked. `open` refuses a plan whose Rust compile
+  beside the suite as not checked. Before the push `open` refuses a plan whose Rust compile
   check failed or did not run, or that predates the check, and records a
-  pass in the body. Before the push `open` also re-reads each
+  pass in the body. It also re-reads each
   member's own CI and refuses if one turned red since `build`, naming it:
   rebuild, and it sits out. If any step after the push fails, rerunning `open` with the same
   arguments resumes on the batch's own pull request without repeating a
@@ -211,22 +211,34 @@ Neither the full suite nor the Rust harness run compiles Rust, so two
 members that each compile alone can break the batch together: on
 2026-10-28 #991 changed `record()`'s signature, #994 called it the old way,
 and batch #1017 failed hosted CI with E0061. So when the batch diff against
-master changes anything under `rust/`, which holds every workspace Cargo
-file, `build` runs CI's own compile step on the batch head, `cargo check
---workspace --all-targets --locked` from `rust/` (where rustup reads
-`rust-toolchain.toml`), after the census. It took 48 s cold and under a
-second warm on the maintainer's Windows host. A failure drops nothing and
-leaves the branch and plan as they are: it is a red batch, bisected like a
-red suite ("Validating it", step 3), and `open` refuses the plan; so does a
-check that could not run (no `cargo` on `PATH`). Notes:
+master changes anything under `rust/` (which holds every workspace Cargo
+file) other than the generated census, `build` runs CI's own compile step on
+the batch head, `cargo check --workspace --all-targets --locked` from
+`rust/` (where rustup reads `rust-toolchain.toml`), after the census. It
+took 48 s cold and under a second warm on the maintainer's Windows host.
+A failure drops nothing and leaves the branch and plan as they are, and
+`open` refuses the plan. cargo's output cannot tell the batch from the machine (a lock file two
+members left inconsistent fails like a download; a missing linker or
+exhausted memory prints "could not compile"), so the refusal sends you to
+master first: run the same command on `origin/master`. If it fails there
+too, the cause is master or this machine (cargo's network, disk, linker or
+memory): fix that and build again. Otherwise it is a red batch, bisected
+like a red suite ("Validating it", step 3). A check that could not start
+(no `cargo` on `PATH`) or was interrupted is refused the same way, as not
+run. Once the batch pull request is open, `open` resumes it whatever its
+plan says. Notes:
 
 - It honours `CARGO_TARGET_DIR`, so point that at the machine's shared
-  target directory to keep it warm. If another cargo holds that directory,
-  the check waits for its lock ("Blocking waiting for file lock").
+  target directory to keep it warm; a cold check in a fresh worktree
+  otherwise fills its own `rust/target`, so mind the 8 GB free-disk floor.
+  If another cargo holds that directory, the check waits for its lock
+  ("Blocking waiting for file lock").
 - It runs member build scripts and proc macros, as the full suite runs
   member code, with the operator's environment minus credential-shaped
-  variables (names with `TOKEN`, `SECRET`, `PASSWORD`, `CREDENTIAL` or
-  ending in `KEY`), as the census script runs without tokens.
+  variables, as the census script runs without tokens: names with `TOKEN`,
+  `SECRET`, `PASSWORD`, `CREDENTIAL`, `AUTH`, `DSN` or `DATABASE_URL`, or
+  ending in `KEY`, `KEY_ID` or `PAT`, and any value with credentials in a
+  URL (a database DSN with its password, or a proxy with one).
 - It compiles default features on this machine's platform only. Feature- and
   platform-gated code, clippy and fmt stay CI's, as do the crates under
   `evals/rust_port/` (outside the workspace) and a non-`rust/` change that
