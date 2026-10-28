@@ -406,8 +406,8 @@ def cargo_pins(places: list[str], exclude: list[str]) -> dict[str, str]:
             text = Path(cfg).read_text(encoding="utf-8")
         except UnicodeDecodeError:
             # Not UTF-8 (a PowerShell 5 `>` writes UTF-16): a pin we cannot
-            # read could protect any cache, so every cache is kept;
-            # worktrees are unaffected.
+            # read could protect any cache, so every cache is kept (a sweep
+            # still removes worktrees; an owner run with a cache dir refuses).
             pins[UNREADABLE_PIN] = ", ".join(filter(None, (pins.get(UNREADABLE_PIN), cfg)))
             continue
         except OSError:
@@ -514,8 +514,8 @@ def evaluate_cache(path: str, *, grace_days: float | None, now: float,
         return v
     if UNREADABLE_PIN in pins:
         v.failure = (f"pin config unreadable: not UTF-8, re-save as UTF-8: "
-                     f"{pins[UNREADABLE_PIN]} (owner mode: rerun without a cache dir "
-                     "to remove only the worktree)")
+                     f"{pins[UNREADABLE_PIN]} (owner mode: rerun with no --cache-dir and "
+                     "CARGO_TARGET_DIR unset to remove only the worktree)")
         return v
     for pin, cfg in pins.items():
         if is_under(pin, npath) or is_under(npath, pin):

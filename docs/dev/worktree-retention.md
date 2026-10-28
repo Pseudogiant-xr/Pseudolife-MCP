@@ -190,8 +190,8 @@ values are type-checked: roots must be lists of paths. A
 `.cargo/config.toml` that is not UTF-8 (PowerShell 5's `>` writes UTF-16)
 keeps every cache, since its pin cannot be read, and names each file to
 re-save. In a sweep, worktrees are unaffected. In owner mode the cache
-check fails, so the whole run refuses; rerun without a cache dir to remove
-only the worktree.
+check fails, so the whole run refuses; to remove only the worktree, rerun
+with no `--cache-dir` and with `CARGO_TARGET_DIR` unset.
 
 Every removal appends one JSON line to
 `~/.pseudolife-mcp/retention-ledger.jsonl`. The line holds `time`, `mode`

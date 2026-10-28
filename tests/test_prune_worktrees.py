@@ -952,6 +952,7 @@ def test_owner_mode_with_an_unreadable_pin_config_changes_nothing(env, monkeypat
     rc, out = run(env, "--mine", "--cache-dir", str(cache), "--apply", roots=False)
     assert rc == 1, out
     assert "pin config unreadable" in out
+    assert "no --cache-dir and CARGO_TARGET_DIR unset" in out, "the way out is named"
     assert env.registered(wt) and cache.exists() and env.ledger_lines() == []
 
 
