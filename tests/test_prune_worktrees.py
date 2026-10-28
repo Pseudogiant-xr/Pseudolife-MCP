@@ -866,7 +866,11 @@ def test_persistent_listing_failure_fails_rows_not_the_run(env, monkeypatch):
     assert rc == 1, out
     assert not wt.exists()
     assert "APPLY" in out and "could not finish" in out
-    assert [line["kind"] for line in env.ledger_lines()] == ["worktree"]
+    rows = [line for line in out.splitlines() if line.startswith(("worktree ", "cache "))]
+    assert rows[0].split()[1] == "unknown", "the removal already done is still shown"
+    assert rows[1].split()[1] == "failed"
+    assert "1 unknown (see rows)" in out and "1 failed (see rows)" in out
+    assert [(l["kind"], l["state"]) for l in env.ledger_lines()] == [("worktree", "unknown")]
 
 
 def test_leftover_file_under_empty_folders_is_partial(env, monkeypatch):
@@ -896,3 +900,61 @@ def test_leftover_link_is_partial(env, tmp_path, monkeypatch):
         pytest.skip("this platform could not create a junction or symlink")
     assert rc == 1, out
     assert "first: link" in out
+
+
+def test_owner_mode_unknown_state_leaves_the_cache(env, monkeypatch):
+    wt = env.add("mine", age=False)
+    cache = env.cache("mine-target", age=False)
+    real = prune.registered_entry
+    calls = []
+
+    def fails_after_the_recheck(repo, path):
+        calls.append(path)
+        if len(calls) == 1:
+            return real(repo, path)
+        raise prune.Refusal("`git worktree list` failed: simulated")
+
+    monkeypatch.setattr(prune, "registered_entry", fails_after_the_recheck)
+    monkeypatch.chdir(wt)
+    rc, out = run(env, "--mine", "--cache-dir", str(cache), "--apply", roots=False)
+    assert rc == 1, out
+    assert out.startswith("unknown:") and cache.exists()
+    assert [(l["mode"], l["complete"], l["state"]) for l in env.ledger_lines()] == [
+        ("owner", False, "unknown")]
+
+
+def test_cargo_config_that_is_not_utf8_refuses_cache_deletion(env):
+    cache = env.cache("old-slice")
+    holder = env.add("holder", unmerged=True)
+    (holder / ".cargo").mkdir()
+    (holder / ".cargo" / "config.toml").write_text(
+        f"[build]\ntarget-dir = {json.dumps(str(cache))}\n", encoding="utf-16")
+    rc, out = run(env, "--apply")
+    assert rc == 2, out
+    assert "not UTF-8" in out and cache.exists()
+
+
+def test_far_future_mtime_does_not_crash_the_ledger(env, monkeypatch):
+    wt = env.add("mine", age=False)
+    monkeypatch.chdir(wt)
+    future = 4e10                     # past year 3000: Windows localtime refuses it
+    os.utime(wt / "README.md", (future, future))
+    rc, out = run(env, "--mine", "--apply", roots=False)
+    assert rc == 0, out
+    assert not env.registered(wt)
+    assert len(env.ledger_lines()) == 1, "the removal must be recorded, not crash"
+
+
+def test_failed_prune_is_reported(env, monkeypatch):
+    env.add("done")
+    real_git = prune.git
+
+    def prune_fails(cwd, *args, **kw):
+        if args[:2] == ("worktree", "prune"):
+            return subprocess.CompletedProcess(args, 1, "", "fatal: simulated prune failure")
+        return real_git(cwd, *args, **kw)
+
+    monkeypatch.setattr(prune, "git", prune_fails)
+    rc, out = run(env, "--apply")
+    assert rc == 1, out
+    assert "simulated prune failure" in out and "ran git worktree prune" not in out

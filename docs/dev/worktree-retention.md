@@ -166,25 +166,37 @@ global scope keeps every worktree. Unset it with `git -C <worktree> config
 ## Ledger and output
 
 The output is a table: each candidate, its verdict, its size and the first
-failing check. Totals follow, with the reasons things were kept. The exit
-code is 0 on success, including when there is nothing to do and when
-candidates are refused one by one. It is 1 for an owner-mode refusal, a
-failed `git worktree remove`, a worktree git unregistered but could not
-fully delete (a file held open on Windows; the leftover path is named and
-its ledger line says `complete: false`), a cache deleted only in part (the rest is
-left in a `.<name>.retention-*` dir beside it, named in the output), or a
-ledger that could not be written. It is 2 for a refused run (failed
-fetch, bad repo or bad config). Config values are type-checked: roots
-must be lists of paths.
+failing check. Totals follow, counting removed, partial, unknown, failed
+and kept rows, with the reasons rows were not removed. The exit code is 0
+on success, including when there is nothing to do and when candidates are
+refused one by one. It is 1 when any row ends in one of these:
+
+- an owner-mode refusal;
+- a failed `git worktree remove`;
+- a **partial** removal: git unregistered the worktree but could not
+  delete every file (one held open on Windows), and the first leftover is
+  named;
+- an **unknown** outcome: git's worktree list could not be read after the
+  removal, so the script does not guess. Owner mode prints `unknown:`; a
+  sweep shows `unknown` in the verdict column;
+- a row whose git call failed or timed out. In a sweep that fails only
+  that row, and every row is still printed;
+- a cache deleted only in part (the rest stays in a `.<name>.retention-*`
+  dir beside it, named in the output);
+- a failed `git worktree prune`, or a ledger that could not be written.
+
+It is 2 for a refused run (failed fetch, bad repo, bad config, or a
+`.cargo/config.toml` that is not UTF-8, whose pins can't be read). Config
+values are type-checked: roots must be lists of paths.
 
 Every removal appends one JSON line to
 `~/.pseudolife-mcp/retention-ledger.jsonl`. The line holds `time`, `mode`
 (`sweep` or `owner`), `kind`, `path`, `bytes`, `newest_mtime`, `head` and
-`branch` (worktrees), the `checks` passed and `complete` (false when
-files were left behind, with `state` set to `partial` or `unknown`). In a
-sweep, a git failure on one row fails that row and the run carries on. That
-is the path, size and reason the disk rule asks for. A dry run writes
-nothing.
+`branch` (worktrees), the `checks` passed and `complete`. `complete` is
+true only for a confirmed full removal. Otherwise `state` says why:
+`partial` (files were left behind) or `unknown` (the outcome could not be
+confirmed). That is the path, size and reason the disk rule asks for. A
+dry run writes nothing.
 
 ## The weekly Scheduled Task (Windows)
 

@@ -247,7 +247,7 @@ def admin_dir(wt: str) -> str | None:
     dotgit = os.path.join(wt, ".git")
     try:
         text = Path(dotgit).read_text(encoding="utf-8")
-    except OSError:
+    except (OSError, UnicodeDecodeError):
         return None
     if not text.startswith("gitdir:"):
         return None
@@ -403,6 +403,11 @@ def cargo_pins(places: list[str], exclude: list[str]) -> dict[str, str]:
             continue
         try:
             text = Path(cfg).read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            # Not UTF-8 (a PowerShell 5 `>` writes UTF-16): a pin we cannot
+            # read could protect any cache, so no cache is deleted.
+            raise Refusal(f"{cfg} is not UTF-8, so its target-dir pin cannot be read; "
+                          "re-save it as UTF-8") from None
         except OSError:
             continue
         for m in _TARGET_DIR.finditer(text):
@@ -613,7 +618,7 @@ def load_config(path: Path) -> dict:
         return {}
     try:
         data = _parse_toml(path.read_text(encoding="utf-8"))
-    except (ValueError, OSError) as exc:
+    except (ValueError, OSError, UnicodeDecodeError) as exc:
         raise Refusal(f"cannot read {path}: {exc}") from exc
     unknown = set(data) - KNOWN_KEYS
     if unknown:
@@ -634,10 +639,15 @@ def load_config(path: Path) -> dict:
 def ledger_write(ledger: Path, v: Verdict, mode: str, extra: dict | None = None) -> bool:
     """Append one line; False (after saying so) if the ledger is unwritable,
     since the removal itself has already happened."""
+    try:
+        # A file dated past what the OS can format (year 3000+ on Windows)
+        # must not crash the run after the removal already happened.
+        newest = (time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime(v.newest))
+                  if v.newest else None)
+    except (OSError, OverflowError, ValueError):
+        newest = None
     line = {"time": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "mode": mode, "kind": v.kind,
-            "path": v.path, "bytes": v.bytes,
-            "newest_mtime": time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime(v.newest))
-            if v.newest else None,
+            "path": v.path, "bytes": v.bytes, "newest_mtime": newest,
             "head": v.head, "branch": v.branch, "checks": v.passed}
     line.update(extra or {})
     try:
@@ -645,7 +655,8 @@ def ledger_write(ledger: Path, v: Verdict, mode: str, extra: dict | None = None)
         with ledger.open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(line) + "\n")
     except OSError as exc:
-        print(f"warning: removed {v.path} but could not write the ledger {ledger}: "
+        what = "removed" if line.get("complete", True) else f"acted on ({line.get('state')})"
+        print(f"warning: {what} {v.path} but could not write the ledger {ledger}: "
               f"{exc.strerror or exc}; record it by hand: {json.dumps(line)}")
         return False
     return True
@@ -818,6 +829,7 @@ def run_sweep(args, cfg: dict) -> int:
 
     rows: list[tuple[Verdict, str]] = []
     ledger_ok = [True]
+    pruned_note = None
 
     def record(v: Verdict, extra: dict) -> None:
         if not ledger_write(args.ledger, v, "sweep", extra):
@@ -870,14 +882,18 @@ def run_sweep(args, cfg: dict) -> int:
         verdict in ("failed", "partial", "unknown") for _, verdict in rows) else 1
     if args.apply and wt_roots:
         try:
-            git(registered[0], "worktree", "prune")
+            pruned = git(registered[0], "worktree", "prune")
+            pruned_note = (None if pruned.returncode == 0 else
+                           f"git worktree prune failed: {pruned.stderr.strip()}")
         except subprocess.TimeoutExpired:
-            print("warning: git worktree prune timed out")
+            pruned_note = "git worktree prune timed out"
+        if pruned_note:
+            print(f"warning: {pruned_note}")
             rc = 1
 
     print("APPLY" if args.apply else "DRY RUN (pass --apply to remove)")
     print_table(rows)
-    _totals(rows, left, args.apply, wt_roots)
+    _totals(rows, left, args.apply, bool(wt_roots) and pruned_note is None)
     return rc
 
 
@@ -893,10 +909,12 @@ def _totals(rows, left, applied: bool, swept_worktrees) -> None:
     for kind in ("worktree", "cache"):
         mine = [(v, verdict) for v, verdict in rows if v.kind == kind]
         go = [v for v, verdict in mine if verdict in ("removed", "would remove")]
-        partial = sum(verdict in ("partial", "unknown") for _, verdict in mine)
-        print(f"{kind}s: {len(mine)} candidates, {len(go)} {done}, "
-              + (f"{partial} partial (see rows), " if partial else "")
-              + f"{len(mine) - len(go) - partial} kept, {human(sum(v.bytes for v in go))}")
+        counts = {state: sum(verdict == state for _, verdict in mine)
+                  for state in ("partial", "unknown", "failed")}
+        odd = "".join(f"{n} {state} (see rows), " for state, n in counts.items() if n)
+        kept = len(mine) - len(go) - sum(counts.values())
+        print(f"{kind}s: {len(mine)} candidates, {len(go)} {done}, {odd}"
+              f"{kept} kept, {human(sum(v.bytes for v in go))}")
     reasons: dict[str, int] = {}
     for v, verdict in rows:
         if verdict in ("keep", "failed", "partial", "unknown"):
