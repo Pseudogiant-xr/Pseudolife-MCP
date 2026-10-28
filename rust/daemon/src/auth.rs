@@ -154,7 +154,6 @@ impl PrincipalStore {
         }
     }
 
-    #[cfg_attr(not(feature = "principal-harness"), allow(dead_code))]
     pub fn excluded_names(&self) -> Vec<String> {
         self.shadowed.clone()
     }
@@ -181,7 +180,6 @@ impl PrincipalStore {
     }
 
     /// A committed redemption replaces the old hash, without renewing freshness.
-    #[cfg_attr(not(feature = "principal-harness"), allow(dead_code))]
     pub fn add(&self, row: StoredPrincipal) {
         let Some(row) = normalize_stored(row) else {
             return;

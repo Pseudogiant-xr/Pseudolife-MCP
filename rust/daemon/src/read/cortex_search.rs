@@ -286,7 +286,7 @@ pub fn record_to_dict_age(
 }
 
 /// `_contender_fields` (`service.py:347`).
-fn contender_fields(d: &mut Map<String, Value>, conts: &[&CortexRecord]) {
+pub(crate) fn contender_fields(d: &mut Map<String, Value>, conts: &[&CortexRecord]) {
     match conts.first() {
         None => {
             d.insert("contested".into(), json!(false));

@@ -63,10 +63,10 @@ fn mcp_memory_recent<'a>(app: &'a crate::http::App, call: ToolCall<'a>) -> ToolF
     })
 }
 
-struct Filters {
-    sources: Option<Vec<String>>,
-    episodes: Option<Vec<String>>,
-    tags: Option<Vec<String>>,
+pub(crate) struct Filters {
+    pub(crate) sources: Option<Vec<String>>,
+    pub(crate) episodes: Option<Vec<String>>,
+    pub(crate) tags: Option<Vec<String>>,
 }
 
 impl Filters {
@@ -104,7 +104,7 @@ impl Filters {
 /// Entries are examined band by band, as Python walks `cms.bands`, so a
 /// failing tag is the one Python meets first (new stores sit at the end of
 /// the vector but in the first band).
-fn recent(
+pub(crate) fn recent(
     bank: &Bank,
     n: usize,
     filters: &Filters,
@@ -182,10 +182,10 @@ struct EntryRow {
 }
 
 /// `memory_get` (mcp_server.py:1518-1539) over `service.get_entry`
-/// (service.py:6088-6138).
+/// (service.py:6088-6138): the faded answer gains `_FADED_NOTE`, and a
+/// superseded entry `replaced_by` in place of the raw supersession keys.
 fn mcp_memory_get<'a>(app: &'a crate::http::App, call: ToolCall<'a>) -> ToolFuture<'a> {
     Box::pin(async move {
-        let internal = |e: anyhow::Error| ToolError::Internal(e);
         let ready = app
             .service
             .ensure_init()
@@ -196,111 +196,18 @@ fn mcp_memory_get<'a>(app: &'a crate::http::App, call: ToolCall<'a>) -> ToolFutu
         let Some(id) = call.args.get("entry_id").and_then(Value::as_i64) else {
             return Ok(faded());
         };
-        let db = ready.storage.client();
-        // The read and its bump in one transaction, the row locked: Python
-        // holds the service lock across both, so a concurrent get answers
-        // the count after this one's bump, never the same count.
-        let bump = !crate::mutants::active("mcp-get-no-db-bump");
-        let row = crate::txn::run(db, |db| async move {
-            let r = db
-                .query_opt(
-                    "SELECT id, text, source, reinforcements, explicit_reinforcements, \
-                     access_count, superseded_at, superseded_by_text FROM entries WHERE id = $1 \
-                     FOR UPDATE",
-                    &[&id],
-                )
-                .await?;
-            if r.is_some() && bump {
-                db.execute(
-                    "UPDATE entries SET access_count = access_count + 1 WHERE id = $1",
-                    &[&id],
-                )
-                .await?;
-            }
-            Ok::<_, anyhow::Error>(r.map(|r| EntryRow {
-                id: r.get(0),
-                text: r.get(1),
-                source: r.get(2),
-                reinforcements: r.get(3),
-                explicit_reinforcements: r.get(4),
-                access_count: r.get(5),
-                superseded_at: r.get(6),
-                superseded_by_text: r.get(7),
-            }))
-        })
-        .await
-        .map_err(internal)?;
-        let Some(row) = row else {
-            return Ok(faded());
-        };
-        // The resident copy follows the database bump.
-        {
-            let bank = ready.bank.read().expect("bank lock");
-            if let Some(e) = bank.entries.iter().find(|e| e.id == id) {
-                e.access_count
-                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            }
-        }
-        let facts = crate::txn::with_client(db, |db| async move {
-            Ok::<_, anyhow::Error>(
-                db.query(
-                    "SELECT f.entity, f.attribute, f.value FROM facts f \
-                     JOIN memory_traces t ON f.entity_norm = t.entity_norm \
-                     AND f.attribute_norm = t.attribute_norm \
-                     WHERE t.entry_id = $1 AND f.status = 'current' \
-                     ORDER BY f.entity_norm, f.attribute_norm",
-                    &[&id],
-                )
-                .await?
-                .iter()
-                .map(|r| {
-                    json!({"entity": r.get::<_, String>(0), "attribute": r.get::<_, String>(1),
-                           "value": r.get::<_, String>(2)})
-                })
-                .collect::<Vec<Value>>(),
-            )
-        })
-        .await
-        .map_err(internal)?;
-        let cfg = &app.service.config.memory;
-        if cfg.retrieval_log_enabled && !crate::mutants::active("mcp-get-no-use-credit") {
-            let window = cfg.retrieval_log_use_window_seconds;
-            let (header, transport) = (
-                call.ident.header_session.clone(),
-                call.ident.transport_session.clone(),
-            );
-            // `_record_retrieval_use`: never raises.
-            if let Err(e) = crate::txn::run(db, |db| async move {
-                credit_retrieval_use(db, id, header, transport, window, "get").await
-            })
+        let session = (
+            call.ident.header_session.clone(),
+            call.ident.transport_session.clone(),
+        );
+        let Value::Object(mut out) = get_entry(&app.service, &ready, id, session)
             .await
-            {
-                crate::read::stats::record_retrieval_log_error();
-                eprintln!("retrieval-use label failed: {e:#}");
-            }
-        }
-        let mut out = serde_json::Map::new();
-        out.insert("found".into(), json!(true));
-        out.insert("entry_id".into(), json!(row.id));
-        out.insert("text".into(), json!(row.text));
-        out.insert("source".into(), json!(row.source));
-        out.insert("reinforcements".into(), json!(row.reinforcements));
-        out.insert(
-            "explicit_reinforcements".into(),
-            json!(row.explicit_reinforcements),
-        );
-        // +1 for the bump just applied.
-        out.insert(
-            "access_count".into(),
-            json!(i64::from(row.access_count) + 1),
-        );
-        out.insert("consolidated_into".into(), Value::Array(facts));
-        if let Some(at) = row.superseded_at {
-            out.insert("superseded".into(), json!(true));
-            out.insert("superseded_at".into(), json!(at));
-            out.insert("superseded_by_text".into(), json!(row.superseded_by_text));
-            let bank = ready.bank.read().expect("bank lock");
-            annotate_row_supersession(&bank, id, row.superseded_by_text.as_deref(), &mut out);
+            .map_err(ToolError::Internal)?
+        else {
+            unreachable!("get_entry answers an object");
+        };
+        if out.get("found") == Some(&Value::Bool(false)) {
+            return Ok(faded());
         }
         // The MCP layer: `replaced_by` when there is a successor text, and the
         // raw supersession keys never served.
@@ -320,6 +227,115 @@ fn mcp_memory_get<'a>(app: &'a crate::http::App, call: ToolCall<'a>) -> ToolFutu
         }
         Ok(Value::Object(out))
     })
+}
+
+/// `service.get_entry` (service.py:6210-6260): the stored row and the
+/// current facts it formed, bumping its access count (row and resident
+/// copy) and crediting the caller's latest retrieval event that served it
+/// (`session`: the `X-PL-Session` header, then the transport session).
+/// `{"found": false, "faded": true}` for an unknown id.
+pub(crate) async fn get_entry(
+    svc: &crate::service::Service,
+    ready: &crate::service::Ready,
+    id: i64,
+    session: (Option<String>, Option<String>),
+) -> anyhow::Result<Value> {
+    let db = ready.storage.client();
+    // The read and its bump in one transaction, the row locked: Python
+    // holds the service lock across both, so a concurrent get answers
+    // the count after this one's bump, never the same count.
+    let bump = !crate::mutants::active("mcp-get-no-db-bump");
+    let row = crate::txn::run(db, |db| async move {
+        let r = db
+            .query_opt(
+                "SELECT id, text, source, reinforcements, explicit_reinforcements,                  access_count, superseded_at, superseded_by_text FROM entries WHERE id = $1                  FOR UPDATE",
+                &[&id],
+            )
+            .await?;
+        if r.is_some() && bump {
+            db.execute(
+                "UPDATE entries SET access_count = access_count + 1 WHERE id = $1",
+                &[&id],
+            )
+            .await?;
+        }
+        Ok::<_, anyhow::Error>(r.map(|r| EntryRow {
+            id: r.get(0),
+            text: r.get(1),
+            source: r.get(2),
+            reinforcements: r.get(3),
+            explicit_reinforcements: r.get(4),
+            access_count: r.get(5),
+            superseded_at: r.get(6),
+            superseded_by_text: r.get(7),
+        }))
+    })
+    .await?;
+    let Some(row) = row else {
+        return Ok(json!({"found": false, "faded": true}));
+    };
+    // The resident copy follows the database bump.
+    {
+        let bank = ready.bank.read().expect("bank lock");
+        if let Some(e) = bank.entries.iter().find(|e| e.id == id) {
+            e.access_count
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
+    let facts = crate::txn::with_client(db, |db| async move {
+        Ok::<_, anyhow::Error>(
+            db.query(
+                "SELECT f.entity, f.attribute, f.value FROM facts f                  JOIN memory_traces t ON f.entity_norm = t.entity_norm                  AND f.attribute_norm = t.attribute_norm                  WHERE t.entry_id = $1 AND f.status = 'current'                  ORDER BY f.entity_norm, f.attribute_norm",
+                &[&id],
+            )
+            .await?
+            .iter()
+            .map(|r| {
+                json!({"entity": r.get::<_, String>(0), "attribute": r.get::<_, String>(1),
+                       "value": r.get::<_, String>(2)})
+            })
+            .collect::<Vec<Value>>(),
+        )
+    })
+    .await?;
+    let cfg = &svc.config.memory;
+    if cfg.retrieval_log_enabled && !crate::mutants::active("mcp-get-no-use-credit") {
+        let window = cfg.retrieval_log_use_window_seconds;
+        let (header, transport) = session;
+        // `_record_retrieval_use`: never raises.
+        if let Err(e) = crate::txn::run(db, |db| async move {
+            credit_retrieval_use(db, id, header, transport, window, "get").await
+        })
+        .await
+        {
+            crate::read::stats::record_retrieval_log_error();
+            eprintln!("retrieval-use label failed: {e:#}");
+        }
+    }
+    let mut out = serde_json::Map::new();
+    out.insert("found".into(), json!(true));
+    out.insert("entry_id".into(), json!(row.id));
+    out.insert("text".into(), json!(row.text));
+    out.insert("source".into(), json!(row.source));
+    out.insert("reinforcements".into(), json!(row.reinforcements));
+    out.insert(
+        "explicit_reinforcements".into(),
+        json!(row.explicit_reinforcements),
+    );
+    // +1 for the bump just applied.
+    out.insert(
+        "access_count".into(),
+        json!(i64::from(row.access_count) + 1),
+    );
+    out.insert("consolidated_into".into(), Value::Array(facts));
+    if let Some(at) = row.superseded_at {
+        out.insert("superseded".into(), json!(true));
+        out.insert("superseded_at".into(), json!(at));
+        out.insert("superseded_by_text".into(), json!(row.superseded_by_text));
+        let bank = ready.bank.read().expect("bank lock");
+        annotate_row_supersession(&bank, id, row.superseded_by_text.as_deref(), &mut out);
+    }
+    Ok(Value::Object(out))
 }
 
 /// `credit_retrieval_use` (storage/postgres.py:2200) for a dereference

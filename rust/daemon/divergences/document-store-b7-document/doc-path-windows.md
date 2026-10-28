@@ -1,0 +1,3 @@
+| Item | Python | Rust | Why / owner |
+|---|---|---|---|
+| **DOC-PATH-WINDOWS:** the oracle's CPython version | `PureWindowsPath` as the running CPython parses it: 3.11 and 3.12 disagree on paths that start with two separators (`//`, `//srv`, `//srv//x`) and on drive-like first parts (`1:foo`) | CPython 3.12's parse (`ntpath.splitroot`), the daemon image's version, ported literally; the goldens come from 3.12 and the generator refuses another version | a lite install on Windows runs the user's own CPython, so a 3.11 Python daemon there shows those paths differently in a refusal or a default `source` |

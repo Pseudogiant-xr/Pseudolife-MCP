@@ -1,0 +1,3 @@
+| Name | Disposition and evidence | Remaining gate |
+|---|---|---|
+| W2F-CLOCK-RETRY | After a send detects an epoch change, Python clears the cached session-probe timestamp and calls `_ensure_init()` under the service lock before retrying. Rust only marks the board clock unseeded, reloads its high-water value and retries with the existing storage lease epoch. The database epoch check still refuses the stale write, but the retry cannot heal the writer session. | **Cutover blocker:** integrate W2-E writer-session refresh and prove a changed-epoch send either recovers once or refuses without a partial write. |

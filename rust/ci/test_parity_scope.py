@@ -35,6 +35,8 @@ def test_an_unreadable_or_empty_pull_request_diff_runs_every_suite(files):
     # Python tests, the Console bundle, other workflows and docs: the floor.
     (["tests/test_shim.py", "CHANGELOG.md", "changelog.d/2026-10-20-x.md"], set()),
     (["frontend/src/App.tsx", ".github/workflows/ci.yml", "rust/PARITY.md", "rust/daemon/divergences.md"], set()),
+    (["rust/daemon/divergences/coordination-board-completion-w2/w2f-pairing-http.md",
+      "rust/daemon/harness/run_scenarios/README.md"], set()),
     # The producer census is data no harness reads; `ops/integrate.py build`
     # commits it to every batch whose members change what it scans.
     (["rust/producer-census.json"], set()),
