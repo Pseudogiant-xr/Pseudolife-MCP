@@ -98,6 +98,10 @@ pub struct Snapshot {
     /// clock reseed: `/health` `ready` reads its live reseed flag
     /// (`MemoryService.coordination_tier_ready`).
     pub startup: Option<Arc<crate::startup::StartupState>>,
+    /// The ready service, published with `startup`: `/health` reads the
+    /// resident bank and the dream's tracking state from it, as Python
+    /// reads `svc._cms` and `svc._dream_tracking_error`, without the lock.
+    pub ready: Option<Arc<Ready>>,
 }
 
 #[derive(Default)]
@@ -140,6 +144,17 @@ pub struct Service {
     /// attributes in Python, kept across a rehydrate, so a pass still
     /// running over a superseded ready service keeps its single flight.
     dream_run: Arc<crate::dream::run::RunState>,
+    /// `/health`'s last `dream_tracking_error` code and the tracking state
+    /// it was read from (its address), for a read that finds it busy.
+    pub(crate) health_tracking_code: std::sync::Mutex<Option<(usize, Option<String>)>>,
+    /// The counters the row carries that this daemon does not maintain.
+    counters_carry: std::sync::Mutex<crate::counters::Carry>,
+    /// `_last_saved_fingerprint`; `None` until a save (or after a re-read).
+    last_saved: std::sync::Mutex<Option<crate::counters::Fingerprint>>,
+    /// `_counters_save_pending`: the last counters write failed.
+    counters_pending: std::sync::atomic::AtomicBool,
+    /// A `weights.pt` the bank has no counters row for (`/health`).
+    pub(crate) counters_import: std::sync::Mutex<Option<String>>,
 }
 
 impl Service {
@@ -173,6 +188,11 @@ impl Service {
             board: std::sync::OnceLock::new(),
             hlc: Arc::default(),
             dream_run: Arc::default(),
+            health_tracking_code: std::sync::Mutex::new(None),
+            counters_carry: Default::default(),
+            last_saved: std::sync::Mutex::new(None),
+            counters_pending: std::sync::atomic::AtomicBool::new(false),
+            counters_import: std::sync::Mutex::new(None),
         }
     }
 
@@ -181,6 +201,12 @@ impl Service {
     pub fn install(self: &Arc<Self>, board: &Arc<crate::board::Board>) {
         let _ = self.handle.set(Arc::downgrade(self));
         let _ = self.board.set(Arc::downgrade(board));
+    }
+
+    /// The dream's process state (`/health` reads the stall tracker here,
+    /// without the service lock).
+    pub fn dream_run(&self) -> &Arc<crate::dream::run::RunState> {
+        &self.dream_run
     }
 
     /// The owned service, once installed.
@@ -343,7 +369,11 @@ impl Service {
                         .await
                         .map_err(|error| format!("{error:#}"))?;
                     let startup = r.startup.clone();
-                    self.update(|s| s.startup = Some(startup));
+                    let published = r.clone();
+                    self.update(|s| {
+                        s.startup = Some(startup);
+                        s.ready = Some(published);
+                    });
                 }
                 return Ok(r.clone());
             }
@@ -386,6 +416,13 @@ impl Service {
             cortex.configure(&self.config.memory.cortex, &startup.metadata);
             let world = crate::stores::world::hydrate(storage.client()).await?;
             let lessons = crate::stores::lessons::hydrate(storage.client()).await?;
+            // `_load_counters`: a failed read fails the build, since serving
+            // on and autosaving fresh counters would overwrite the real ones.
+            let counters = crate::counters::get(storage.client())
+                .await
+                .map_err(|e| anyhow::anyhow!("counters row read failed: {e}"))?;
+            let mut write = write;
+            self.load_counters(&mut write, counters.as_ref());
             Ok::<_, anyhow::Error>((bank, startup, write, cortex, world, lessons))
         }
         .await;
@@ -423,7 +460,11 @@ impl Service {
                 // Published only now, as Python's flag stays pending until
                 // the reseed: `ready` never leads the clock.
                 let startup = ready.startup.clone();
-                self.update(|s| s.startup = Some(startup));
+                let published = ready.clone();
+                self.update(|s| {
+                    s.startup = Some(startup);
+                    s.ready = Some(published);
+                });
                 Ok(ready)
             }
             Err(e) => {
@@ -478,10 +519,18 @@ impl Service {
             board.hlc.lock().expect("hlc lock").seeded = false;
         }
         inner.storage = Some(fresh.clone());
-        if let Some(ready) = inner.ready.take() {
-            inner.ready = Some(Arc::new(ready.over(fresh.clone())));
-        }
-        self.update(|s| s.storage = Some(fresh));
+        let republished = inner
+            .ready
+            .take()
+            .map(|ready| Arc::new(ready.over(fresh.clone())));
+        inner.ready = republished.clone();
+        self.update(|s| {
+            s.storage = Some(fresh);
+            // Only a ready service `/health` already sees is republished.
+            if s.ready.is_some() {
+                s.ready = republished;
+            }
+        });
         Ok(())
     }
 
@@ -505,8 +554,124 @@ impl Service {
         eprintln!("{reason}: dropping the resident stores and re-reading the bank before serving");
         inner.ready = None;
         self.dream_run.forget_batch_failures();
-        self.update(|s| s.startup = None);
+        self.update(|s| {
+            s.startup = None;
+            s.ready = None;
+        });
         storage.acknowledge_rehydration();
+    }
+
+    /// `_load_counters` (service.py:1487-1545) for a bank this daemon reads:
+    /// the row's counters merged over the fresh ones. A pre-v57 `weights.pt`
+    /// beside a bank with no row is reported (logged once, and `/health`
+    /// names the import step) and never read: the Python daemon imports it.
+    fn load_counters(
+        &self,
+        ws: &mut crate::episodes::WriteState,
+        row: Option<&crate::counters::Row>,
+    ) {
+        *self.last_saved.lock().expect("last saved lock") = None;
+        let mut carry = crate::counters::Carry::default();
+        if row.is_none() {
+            // A freshly built CMS's `reset_counters`: the tier counters are
+            // process statics, so a re-read of a row-less bank zeroes them.
+            crate::read::stats::restore_tier(0, Vec::new());
+        }
+        if let Some(row) = row {
+            let applied = crate::counters::apply(row, std::mem::take(&mut ws.surprise_history));
+            ws.interaction_count = applied.interaction_count;
+            ws.surprise_history = applied.surprise_history;
+            crate::read::stats::restore_tier(applied.tier_queries, applied.tier_hits);
+            carry = applied.carry;
+        }
+        *self.counters_carry.lock().expect("counters carry lock") = carry;
+        let pending =
+            crate::counters::pending_import(&self.data_dir.join("memory_state"), row.is_some());
+        let mut reported = self.counters_import.lock().expect("counters import lock");
+        if pending.is_some() && *reported != pending {
+            eprintln!("{}", pending.as_deref().unwrap_or_default());
+        }
+        *reported = pending;
+    }
+
+    /// `_persist_all`'s counters arm for `autosave_if_changed`: only when the
+    /// bank or cortex changed since the last save, or the last counters
+    /// write failed. Entries, access
+    /// counts and the canonical stores write through here, so the counters
+    /// row is the one thing these saves add. A failed write is logged and
+    /// retried by the next autosave, as in Python.
+    async fn save_counters(&self) -> Result<(), String> {
+        let mut inner = self.inner.lock().await;
+        if inner.ready.is_none() {
+            return Ok(());
+        }
+        // Python's save heals a dead writer session inside its storage call
+        // (`PostgresStorage.conn`); here the save verifies it first. A lease
+        // another writer holds, or a bank that changed hands (whose stores
+        // the re-read drops), leaves nothing this process may save.
+        if let Err(e) = self.verify_writer_session(&mut inner).await {
+            self.counters_pending
+                .store(true, std::sync::atomic::Ordering::SeqCst);
+            eprintln!("counters save failed: {e}");
+            return Ok(());
+        }
+        self.rehydrate_if_bank_changed_hands(&mut inner);
+        let Some(ready) = inner.ready.clone() else {
+            return Ok(());
+        };
+        if crate::mutants::active("counters-save-off") {
+            return Ok(());
+        }
+        // A `weights.pt` awaiting the Python import: a fresh row would be
+        // newer than the file, and `_load_counters` keeps the newer row and
+        // sets the file aside, so writing one here would lose the counters
+        // the import exists to recover.
+        if self
+            .counters_import
+            .lock()
+            .expect("counters import lock")
+            .is_some()
+        {
+            return Ok(());
+        }
+        let fp = crate::counters::fingerprint(&ready);
+        let pending = self
+            .counters_pending
+            .load(std::sync::atomic::Ordering::SeqCst);
+        if !pending && *self.last_saved.lock().expect("last saved lock") == Some(fp) {
+            return Ok(());
+        }
+        let row = {
+            let ws = ready.write.lock().await;
+            let bands: Vec<String> = self
+                .config
+                .memory
+                .band_specs
+                .iter()
+                .map(|b| b.name.clone())
+                .collect();
+            crate::counters::state(
+                &self.config.memory.preset,
+                &bands,
+                ws.interaction_count,
+                &ws.surprise_history,
+                crate::read::stats::tier_state(),
+                &self.counters_carry.lock().expect("counters carry lock"),
+            )
+        };
+        match crate::counters::put(ready.storage.client(), &row).await {
+            Ok(()) => self
+                .counters_pending
+                .store(false, std::sync::atomic::Ordering::SeqCst),
+            Err(e) => {
+                self.counters_pending
+                    .store(true, std::sync::atomic::Ordering::SeqCst);
+                eprintln!("counters save failed: {}", crate::storage::error_text(&e));
+            }
+        }
+        *self.last_saved.lock().expect("last saved lock") = Some(fp);
+        drop(inner);
+        Ok(())
     }
 
     /// `_refuse_on_stale_hydrated_dims`'s message.
@@ -538,6 +703,10 @@ impl Service {
             }
             match self.ensure_init_inner().await {
                 Ok(ready) => {
+                    // `_last_saved_fingerprint` right after init (service.py
+                    // 6359-6361): an idle start never writes the counters.
+                    *self.last_saved.lock().expect("last saved lock") =
+                        Some(crate::counters::fingerprint(&ready));
                     crate::read::search_route::warmup_probe(self, &ready).await;
                     return;
                 }
@@ -610,13 +779,11 @@ impl crate::background::Duties for Service {
             crate::dream::ticks::sweep(self, &ready, &stop).await
         })
     }
+    /// `autosave_if_changed` (service.py:3687-3700), from the autosave loop
+    /// and at a clean exit (`mcp_server._flush_on_exit`): only what changed
+    /// since the last save, so an idle or read-only run writes nothing.
     fn autosave(&self) -> crate::background::Duty<'_> {
-        Box::pin(async {
-            // The current read-only bank has no unsaved mutable state.
-            // W2-E supplies the changed-state persistence operation when
-            // its writer lands; scheduling and exit ownership live here.
-            Ok(())
-        })
+        Box::pin(self.save_counters())
     }
 
     fn warmup(&self, stop: tokio::sync::watch::Receiver<bool>) -> crate::background::Duty<'_> {
