@@ -1,0 +1,3 @@
+| Item | Python | Rust | Owner / why |
+|---|---|---|---|
+| A pre-v57 `memory_state/weights.pt` beside a bank with no counters row | imported once into the row (`torch.load`), the file renamed `*.imported` | never read (D2: no port of the `.pt` format): logged once, `/health` `counters_import_required` names the step (start a Python daemon at schema 57 or later once on that bank), and the counters count from zero in memory until then, with no row written (a fresh row would be newer than the file, and the import would keep it instead) | declared (B4, D2 as the maintainer confirmed 2026-10-27); B11's update runs that import before switching a host |

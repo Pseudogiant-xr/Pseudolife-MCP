@@ -1,0 +1,3 @@
+| Item | Python | Rust | Owner / why |
+|---|---|---|---|
+| The order of the inverse-derived edges that mirror asserted edges | `derive_edges` walks its inverse rule over a set of `(src, relation, dst)` tuples, so their order follows the per-process string hash | ordered by their source edge's relation, source and target (the read model's rule) | the "Colliding inverse provenance" row above: the harness compares them as a multiset in their slots. Asserted edges, transitive edges and the mirrors of transitive edges keep their exact order; an inverse edge only mirrors a pair already in the adjacency, so paths do not depend on it |
