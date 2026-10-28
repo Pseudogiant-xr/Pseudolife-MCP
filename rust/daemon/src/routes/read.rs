@@ -18,6 +18,7 @@ pub(super) const SERVED: &[(&str, &str)] = &[
     ("GET", "/api/episodes"),
     ("GET", "/api/episodes/summary"),
     ("GET", "/api/consolidation"),
+    ("GET", "/api/overview"),
 ];
 
 pub(super) async fn route(req: &mut Request<'_>) -> Option<Response> {
