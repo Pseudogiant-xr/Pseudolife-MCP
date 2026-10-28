@@ -1,0 +1,3 @@
+| Name | Disposition and evidence | Remaining gate |
+|---|---|---|
+| W2F-CONSOLE-STARTUP | Both implementations return `available: false, reason: not_initialized` before storage exists. Golden replay previously started after the first HTTP health response while only the live Python arm waited for warmup. The runner now waits for `db: ok` on both arms, and for Python's embedding warmup before the scenario; Console remains read-only and does not initialize the bank. | Runner regression covers both modes; the original Console recording is retained in the completion evidence. Cold-start Console behavior remains unchanged. |

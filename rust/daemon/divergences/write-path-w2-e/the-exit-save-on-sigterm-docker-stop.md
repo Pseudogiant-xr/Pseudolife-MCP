@@ -1,0 +1,3 @@
+| Item | Python | Rust | Owner / why |
+|---|---|---|---|
+| The exit save on SIGTERM (`docker stop`) | never runs: uvicorn (0.29 and later) re-raises the captured SIGTERM after its graceful shutdown, and SIGTERM's default action ends the process without `atexit`, so `_flush_on_exit` is skipped and the counters changed since the last autosave (up to 30 s) are lost; on SIGINT it runs | runs, gated like autosave, on SIGTERM and SIGINT alike | declared (B4): Rust keeps what Python loses; the Python behaviour is a bug reported to the coordinator. `w2e.py`'s `counters-*` scenarios compare autosave, not the exit |
