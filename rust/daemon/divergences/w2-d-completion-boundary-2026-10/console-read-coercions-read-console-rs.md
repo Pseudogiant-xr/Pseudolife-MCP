@@ -1,0 +1,3 @@
+| Named divergence | Omitted surface | Reason / owner |
+|---|---|---|
+| Console read coercions (`read/console.rs`): an integer query value in non-ASCII digits (`limit=٣`), or past i64 as `/api/chain`'s `limit` | `int()` takes any Unicode decimal digit; an unbounded `limit` reaches the chain's SQL, which PostgreSQL refuses once the entity has a node (`bigint out of range`) | non-ASCII digits are not a number (the route default), as on `/api/search`; an integer past i64 saturates, so every row cap reads it as Python does, and the chain's LIMIT is `i64::MAX` (its events, not the refusal) | non-canonical input (the delegate ruling of 2026-10-09 above) |

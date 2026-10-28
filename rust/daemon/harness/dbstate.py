@@ -31,8 +31,10 @@ NONDETERMINISTIC: dict[tuple[str, str], str] = {}
 # and no rows, and is a declared divergence in rust/daemon/divergences.md;
 # the porting batch deletes its entry and proves the rows instead.
 UNPORTED_ROWS: dict[str, str] = {
-    # Python's autosave and clean-exit flush write the counters row (D2,
-    # schema v57); Rust's are no-ops until B4.
+    # Both daemons' autosave and clean-exit flush write the counters row (D2,
+    # schema v57; Rust since B4), each on its own autosave clock, so a
+    # per-step dump cannot compare it. w2e.py's counters scenarios compare the
+    # row at fixed points instead (its `counters` op).
     "cms_counters": "B4",
 }
 

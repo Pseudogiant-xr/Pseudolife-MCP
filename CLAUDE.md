@@ -227,7 +227,8 @@ current merge ref, except as the `merge-forward` skill allows):
   failed (pending is fine, since the batch's CI is its members' CI),
   built whenever none is open and one is ready, a lone PR or release cut
   as a batch of one) passes the local WSL full
-  suite and the `rust/` harness run `build` prints on its head before
+  suite, the `rust/` harness run `build` prints and, when it changes
+  `rust/`, the `cargo check` `build` runs on its head before
   `ops/integrate.py open` pushes it, because since #846 that costs less
   than one CI run and the suite never collects `rust/`; nothing
   is fixed inside a batch (a conflicting member, or the culprit a red

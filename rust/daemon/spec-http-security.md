@@ -88,8 +88,10 @@ difference and no scenario errors; a process failure or timeout is not a catch.
 - Credential-bearing outbound redirect refusal remains deferred to W3-H/W2-D
   (`utils/no_redirect.py`). HTTP-STATIC's relative root 307 provides no evidence
   for that refusal.
-- Durable principal snapshots, revocation, stale recovery, pairing writes,
-  detailed authentication source and admission helper integration remain in
-  PRINCIPALS-V53 and PR #688. This layer does not duplicate their implementation.
+- Durable principal snapshots, revocation, stale recovery, detailed
+  authentication source and admission helper integration remain in
+  PRINCIPALS-V53 and PR #688. Pairing writes are served behind `/api/pair`
+  (spec.md BK4; `run.py`'s `pairing` scenario). This layer does not duplicate
+  their implementation.
 - Bracket-malformed Origin refusal statuses are compared on both arms; no
   further CPython URL incidental compatibility is added.

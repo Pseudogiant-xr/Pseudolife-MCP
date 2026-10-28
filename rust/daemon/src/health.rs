@@ -5,6 +5,7 @@ use crate::service::Service;
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 use std::path::Path;
+use std::sync::Arc;
 
 /// `SCHEMA_META_VERSION` (`storage/schema.py:20`).
 pub const SCHEMA: i64 = crate::storage::schema::SCHEMA_META_VERSION;
@@ -212,17 +213,117 @@ fn build_json(b: &BuildStamp) -> Value {
     json!({"git_sha": b.git_sha, "dirty": b.dirty, "built_at": b.built_at, "source": b.source})
 }
 
-fn extractor(config: &Config) -> &'static str {
-    if !config.dream.enabled {
+/// `CAPACITY_WARNING_FRACTION` (memory/cms.py:162).
+const CAPACITY_WARNING_FRACTION: f64 = 0.8;
+/// `_MEMORY_WARNING_INTERVAL_S` (daemon.py:34).
+const MEMORY_WARNING_INTERVAL: std::time::Duration = std::time::Duration::from_secs(600);
+
+/// `cms.capacity_warning()`'s truth (cms.py:2805-2840): the last band holds
+/// at least `CAPACITY_WARNING_FRACTION` of its `max_entries`. Only the last
+/// band: an earlier one that fills demotes its evictee and loses nothing.
+pub fn capacity_flag(last_band_size: usize, capacity: usize) -> bool {
+    capacity > 0 && last_band_size as f64 / capacity as f64 >= CAPACITY_WARNING_FRACTION
+}
+
+/// `_extractor_status` (daemon.py:99-141): a configured extractor that live
+/// dreams stopped reaching reads `"stalled"`; the fallback serving for the
+/// primary is a warning, not a stall, so it stays `"configured"`.
+pub fn extractor_status(
+    enabled: bool,
+    configured: bool,
+    stall: Option<&Map<String, Value>>,
+) -> &'static str {
+    if !enabled {
         return "disabled";
     }
-    let env = |k: &str| std::env::var(k).ok();
-    if config.dream.extractor_configured(&env) {
-        // No stall tracker in this slice: a configured extractor is never "stalled".
-        "configured"
-    } else {
-        "none"
+    if !configured {
+        return "none";
     }
+    match stall {
+        Some(s) if s.get("reason").and_then(Value::as_str) != Some("served_by_fallback") => {
+            "stalled"
+        }
+        _ => "configured",
+    }
+}
+
+/// The `stall` sub-object (daemon.py:295-296): this probe is
+/// unauthenticated, so only the reason and times, never the error text.
+pub fn stall_fields(stall: &Map<String, Value>) -> Value {
+    let mut out = Map::new();
+    for key in ["since", "reason", "consecutive_failures", "last_success_at"] {
+        out.insert(key.into(), stall.get(key).cloned().unwrap_or(Value::Null));
+    }
+    Value::Object(out)
+}
+
+/// `_dream_stall`: the open stall record, read without the service lock.
+fn open_stall(svc: &Service) -> Option<Map<String, Value>> {
+    let tracker = svc.dream_run().stall.lock().ok()?;
+    tracker.snapshot().0.as_object().cloned()
+}
+
+/// `_dream_tracking_error`'s code (the text before the first colon; the
+/// detail can carry a DSN). Read without waiting: while a dream action holds
+/// the tracking state, the last code read from the same ready service stands
+/// in, and nothing when that read came from a ready service since replaced.
+fn dream_tracking_error(svc: &Service, ready: Option<&crate::service::Ready>) -> Option<String> {
+    let mut last = svc.health_tracking_code.lock().expect("tracking code lock");
+    let Some(ready) = ready else {
+        *last = None;
+        return None;
+    };
+    let source = Arc::as_ptr(&ready.dream) as usize;
+    if let Ok(tracking) = ready.dream.try_lock() {
+        *last = Some((source, tracking.error_code().map(|(code, _)| code)));
+    }
+    match &*last {
+        Some((from, code)) if *from == source => code.clone(),
+        _ => None,
+    }
+}
+
+/// `capacity_warning` from the ready service's resident bank.
+fn capacity_warning(svc: &Service, ready: Option<&crate::service::Ready>) -> bool {
+    let (Some(ready), Some(last)) = (ready, svc.config.memory.band_specs.last()) else {
+        return false;
+    };
+    let Ok(bank) = ready.bank.read() else {
+        return false;
+    };
+    let size = bank.entries.iter().filter(|e| e.band == last.name).count();
+    capacity_flag(size, last.max_entries)
+}
+
+/// `_warn_near_memory_limit`: at most once per `MEMORY_WARNING_INTERVAL`.
+fn warn_near_memory_limit(memory: &Value) {
+    static LAST: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
+    let mut last = LAST.lock().expect("memory warning lock");
+    if last.is_some_and(|at| at.elapsed() < MEMORY_WARNING_INTERVAL) {
+        return;
+    }
+    *last = Some(std::time::Instant::now());
+    let events = &memory["events"];
+    let shown = |k: &str| {
+        events
+            .get(k)
+            .map_or_else(|| "n/a".to_string(), |v| v.to_string())
+    };
+    eprintln!(
+        "daemon memory is near its limit: working set {:.0}% of {} MiB (memory.events max={} \
+         oom_kill={}). An OOM kill restarts the daemon; raise PSEUDOLIFE_DAEMON_MEM_LIMIT or \
+         find the growth.",
+        100.0 * memory["used_fraction"].as_f64().unwrap_or(0.0),
+        memory["limit_bytes"].as_i64().unwrap_or(0) / (1 << 20),
+        shown("max"),
+        shown("oom_kill"),
+    );
+}
+
+fn extractor(config: &Config, stall: Option<&Map<String, Value>>) -> &'static str {
+    let env = |k: &str| std::env::var(k).ok();
+    let configured = config.dream.enabled && config.dream.extractor_configured(&env);
+    extractor_status(config.dream.enabled, configured, stall)
 }
 
 /// `readiness.pending`: the unfinished startup stages, in `STAGES` order.
@@ -280,7 +381,18 @@ pub async fn payload(svc: &Service, principals: &crate::auth::PrincipalStore) ->
             "unattended_daemon": c.updates.unattended_daemon,
         }),
     );
-    p.insert("extractor".into(), json!(extractor(c)));
+    // `extractor` and `stall` never touch `status`: a bank whose dreams
+    // stopped is still serving, and a 503 would have the healthcheck
+    // restart it.
+    let stall = open_stall(svc).filter(|_| !crate::mutants::active("health-no-stall"));
+    let extractor = extractor(c, stall.as_ref());
+    p.insert("extractor".into(), json!(extractor));
+    if let Some(s) = stall
+        .as_ref()
+        .filter(|_| matches!(extractor, "stalled" | "configured"))
+    {
+        p.insert("stall".into(), stall_fields(s));
+    }
     if let Some(d) = hooks_digest(svc.env.plugin_dir.as_deref()) {
         p.insert("hooks_digest".into(), json!(d));
     }
@@ -293,10 +405,32 @@ pub async fn payload(svc: &Service, principals: &crate::auth::PrincipalStore) ->
         p.insert("status".into(), json!("degraded"));
         p.insert("not_ready".into(), json!(r));
     }
-    p.insert(
-        "memory".into(),
-        memory_headroom(Path::new("/sys/fs/cgroup"), Path::new("/proc/self")),
-    );
+    // `migration_partial` and `lesson_reconciliation_required` have no
+    // producer here yet (divergences.md, "/health"). The two below, like
+    // them, never touch `status`.
+    let ready = snap.ready.as_deref();
+    if let Some(code) = dream_tracking_error(svc, ready) {
+        p.insert("dream_tracking_error".into(), json!(code));
+    }
+    if capacity_warning(svc, ready) && !crate::mutants::active("health-no-capacity-warning") {
+        p.insert("capacity_warning".into(), json!(true));
+    }
+    // Rust only (D2): a pre-v57 `weights.pt` this daemon cannot import sits
+    // beside a bank with no counters row; the text names the step. Never
+    // `degraded`: the daemon serves, only the counters wait for the import.
+    if let Some(step) = svc
+        .counters_import
+        .lock()
+        .expect("counters import lock")
+        .clone()
+    {
+        p.insert("counters_import_required".into(), json!(step));
+    }
+    let memory = memory_headroom(Path::new("/sys/fs/cgroup"), Path::new("/proc/self"));
+    if memory["near_limit"] == json!(true) {
+        warn_near_memory_limit(&memory);
+    }
+    p.insert("memory".into(), memory);
     if let Some(e) = &snap.embedder {
         p.insert("embedder".into(), e.clone());
     }
@@ -381,6 +515,101 @@ mod tests {
         );
         let keys: Vec<&String> = p.as_object().unwrap().keys().collect();
         assert_eq!(keys[keys.len() - 2..], ["ready", "pending"]);
+    }
+
+    #[test]
+    fn capacity_flag_is_the_last_band_at_eighty_percent() {
+        assert!(!capacity_flag(3, 5));
+        assert!(capacity_flag(4, 5), "4 of 5 is exactly 80%");
+        assert!(capacity_flag(5, 5));
+        assert!(capacity_flag(6, 5));
+        assert!(!capacity_flag(41, 52));
+        assert!(capacity_flag(42, 52));
+        assert!(!capacity_flag(0, 0), "a band with no capacity never warns");
+    }
+
+    fn stall_after(results: &[(Value, bool)]) -> Map<String, Value> {
+        let mut tracker = crate::dream::run::StallTracker::default();
+        for (result, fallback) in results {
+            tracker.record(result.as_object().unwrap(), *fallback);
+        }
+        tracker
+            .snapshot()
+            .0
+            .as_object()
+            .cloned()
+            .expect("an open stall")
+    }
+
+    #[test]
+    fn a_hard_stall_reads_stalled_and_a_fallback_one_configured() {
+        let failed = json!({"pulled": 1, "extractor_failed": true,
+            "extractor_error": {"reason": "http_503", "error": "upstream failure"}});
+        let hard = stall_after(&[(failed.clone(), false), (failed, false)]);
+        assert_eq!(extractor_status(true, true, Some(&hard)), "stalled");
+        let served = json!({"pulled": 1});
+        let soft = stall_after(&[(served.clone(), true), (served, true)]);
+        assert_eq!(soft["reason"], json!("served_by_fallback"));
+        assert_eq!(extractor_status(true, true, Some(&soft)), "configured");
+        assert_eq!(extractor_status(true, true, None), "configured");
+        assert_eq!(extractor_status(true, false, Some(&hard)), "none");
+        assert_eq!(extractor_status(false, true, Some(&hard)), "disabled");
+    }
+
+    #[test]
+    fn the_stall_object_is_only_the_reason_and_times() {
+        let failed = json!({"pulled": 1, "extractor_failed": true,
+            "extractor_error": {"reason": "http_503", "error": "secret upstream detail"}});
+        let record = stall_after(&[(failed.clone(), false), (failed, false)]);
+        let fields = stall_fields(&record);
+        let keys: Vec<&String> = fields.as_object().unwrap().keys().collect();
+        assert_eq!(
+            keys,
+            ["since", "reason", "consecutive_failures", "last_success_at"]
+        );
+        assert_eq!(fields["reason"], json!("http_503"));
+        assert_eq!(fields["consecutive_failures"], json!(2));
+        assert_eq!(fields["last_success_at"], Value::Null);
+        assert!(fields["since"].is_number());
+        // A record missing a key still answers it, as `stall.get(key)`.
+        let mut partial = Map::new();
+        partial.insert("reason".into(), json!("x"));
+        assert_eq!(
+            stall_fields(&partial),
+            json!({"since": null, "reason": "x", "consecutive_failures": null, "last_success_at": null})
+        );
+    }
+
+    #[tokio::test]
+    async fn payload_reports_an_open_stall_after_the_extractor_in_python_order() {
+        let mut config = Config::default();
+        config.dream.enabled = true;
+        config.dream.extractor_source = "config".into();
+        config.dream.extractor_base_url = Some("http://127.0.0.1:9/v1".into());
+        config.dream.extractor_model = Some("stub-model".into());
+        let env = crate::config::DaemonEnv::from_env(&|_| None).unwrap();
+        let service = Service::new(
+            config,
+            env,
+            std::path::PathBuf::from("__stall_test_without_storage__"),
+            String::new(),
+            false,
+        );
+        let failed = json!({"pulled": 1, "extractor_failed": true,
+            "extractor_error": {"reason": "http_503", "error": "upstream failure"}});
+        {
+            let mut stall = service.dream_run().stall.lock().unwrap();
+            stall.record(failed.as_object().unwrap(), false);
+            stall.record(failed.as_object().unwrap(), false);
+        }
+        let p = payload(&service, &crate::auth::PrincipalStore::new()).await;
+        assert_eq!(p["extractor"], json!("stalled"));
+        assert_eq!(p["stall"]["reason"], json!("http_503"));
+        let keys: Vec<&String> = p.as_object().unwrap().keys().collect();
+        let at = |k: &str| keys.iter().position(|x| *x == k).unwrap();
+        assert_eq!(at("stall"), at("extractor") + 1);
+        // Never `degraded`: a stalled dream is no reason for a 503.
+        assert_eq!(p["status"], json!("ok"));
     }
 
     #[test]
