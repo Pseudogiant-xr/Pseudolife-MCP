@@ -449,10 +449,11 @@ setup-windows-runner.ps1 -RunnerUser <runner-user> -SuiteUser <suite-user> `
   are readable and executable by the account but not writable: the lease
   gate's `pseudolife-mcp`, installed with `uv tool`, and a Python 3.11 for
   the cleanup. So are the hooks. A runner is registered from a fresh
-  extraction, and only then does the account get its directory. `.env`
-  and `.path` are written by the script, which refuses to write through a
-  link planted in their place. The runner's `PATH` names only those tools
-  and system directories.
+  extraction, and only then does the account get its directory. `.env` is
+  staged in an administrators-only directory, granted read for the
+  account, and renamed into place, so a link or hard link a job planted is
+  replaced, not written through. The runner's `PATH`, set in `.env`, names
+  only those tools and system directories.
 - **The suite lock directory**: traverse-only on the suite user's profile
   and its `.pseudolife-mcp`, read on the lock directory. The runner's
   `.env` names that directory and the VM's lease, `full-suite@<machine>`.
@@ -488,24 +489,42 @@ internet:
 
 **The hypervisor filter**, `ops/selfhosted/setup-vm-egress-filter.sh --vmid
 <id>`, run as root on the hypervisor:
-- **Mechanism.** A bridge-family nftables table that matches only frames
-  entering from the VM's tap interface, loaded by its own systemd unit
-  before guests start. It is stateless on purpose: a conntrack match in the
-  bridge family would turn on bridge conntrack for every guest. Proxmox's
-  own firewall was the alternative, but enabling it flips the datacenter
-  switch and routes every guest's bridged traffic, the live bank and game
-  servers included, through the host's iptables. Neither happens here.
-- **What the VM may still send:**
+- **Mechanism.** A bridge-family nftables table, loaded by its own systemd
+  unit before guests start, that matches only frames entering from the
+  VM's tap interfaces.
+  - It hooks the bridge's `prerouting`, so it sees every frame before the
+    bridge decides between forwarding it and delivering it to the
+    hypervisor itself. Review found that a `forward` hook would miss frames
+    sent to the firewall bridge's own MAC, which the host can hand out in an
+    ARP reply (`arp_ignore=0`).
+  - It is stateless on purpose: a conntrack match in the bridge family would
+    turn on bridge conntrack for every guest.
+  - Proxmox's own firewall was the alternative. Enabling it flips the
+    datacenter switch and routes every guest's bridged traffic, the live
+    bank and game servers included, through the host's iptables. Neither
+    happens here.
+  - A hookscript on the VM refuses to start it while the table is not
+    loaded, so a failed load at boot, or a flushed table, never runs it
+    unfiltered. The unit has no stop action; the rollback is the script's
+    `--remove`. The hookscript lives in the `local` storage's snippets,
+    which the script enables (one content type on that storage; no guest
+    is affected).
+- **What the VM may still send**, and only from its own NICs' MAC addresses
+  (in the Ethernet header and in ARP), so it cannot impersonate another
+  host on the bridge:
   - ARP and IPv6 neighbour discovery; the rest of IPv6 is dropped, so the
     VM keeps no IPv6 path (decision: robust against a change of the ISP's
     prefix);
-  - DHCP to the LAN's server;
-  - its sshd's replies, so inbound SSH works;
+  - DHCP to the broadcast address or the LAN's server only (the
+    hypervisor's default gateway, or `--dhcp-server`);
+  - its sshd's replies, matched by source port 22 and refused if they carry
+    a bare SYN, so they can never open a connection;
   - ICMP replies and errors;
-  - anything to a public IPv4 address.
-- **What is dropped:** private, link-local, CGNAT and multicast/broadcast
-  IPv4 destinations. Dropped, not refused: the kernel offers no `reject` in
-  a bridge forward chain.
+  - plain IPv4 to a public address.
+- **What is dropped:** every other frame. That means private, link-local,
+  CGNAT and multicast/broadcast IPv4 destinations, and anything that is not
+  plain IPv4, IPv6 or ARP (a VLAN tag, PPPoE, a raw type). Dropped, not
+  refused: the kernel offers no `reject` in a bridge chain before routing.
 - **Where the filter is:** the hypervisor's datacenter and node firewalls
   stayed off and no other guest gained a rules file. `bridge-nf-call-*`
   stayed 0, and neither `br_netfilter` nor `nf_conntrack_bridge` was loaded.
@@ -513,12 +532,16 @@ internet:
   host state (firewall files, the guests' NIC flags, the iptables and nft
   rulesets, the bridge sysctls) was saved on the hypervisor before the
   change.
-- **Allow rules** beyond the internet: DHCP to the LAN's server (UDP 68 to
-  67), the VM's sshd replies (TCP source port 22), ICMP echo-reply,
-  destination-unreachable and time-exceeded, ARP, and IPv6 neighbour and
-  router solicitation and advertisement. Nothing else on the LAN is
-  allowed, because the inventory found nothing the dev workflow needs
-  there.
+- **Allow rules** beyond the internet:
+  - DHCP to the broadcast address or the LAN's server (UDP 68 to 67);
+  - the VM's sshd replies (TCP source port 22, never a bare SYN);
+  - ICMP echo-reply, destination-unreachable and time-exceeded;
+  - ARP from the VM's own MACs;
+  - IPv6 neighbour solicitation and advertisement, and router
+    solicitation.
+
+  Nothing else on the LAN is allowed, because the inventory found nothing
+  the dev workflow needs there.
 
 **The tailnet rule.** The hypervisor cannot see inside the tailnet's
 encrypted traffic. So the setup script adds outbound rules for every
@@ -528,8 +551,16 @@ account on the VM, on the Tailscale adapter only (decision 2026-10-29):
 - nothing at all to the addresses given in `-TailnetDeny`, which names the
   live bank's host, an argument so that no address is in the tree.
 
-Inbound SSH over the tailnet keeps working. What it does not cover: BITS or
-WebDAV to a tailnet host on another port.
+Inbound SSH over the tailnet keeps working. A rerun without `-TailnetDeny`
+keeps the hosts already denied (`-ClearTailnetDeny` removes them), and
+`-TailnetDeny` on a machine without a Tailscale adapter is refused.
+
+What the tailnet rule does not cover:
+- system services that reach a tailnet host on other ports: BITS or WebDAV
+  to another port, SMB on an alternate TCP port or over QUIC (UDP 443), the
+  print spooler;
+- the LAN's services through the router's public address (hairpin NAT to
+  port-forwarded game servers), which are internet-facing anyway.
 
 **Proof** (2026-10-29), `ops/selfhosted/windows-egress-proof.ps1`, against a
 temporary listener on the sibling Linux dev box. The listener logged every
@@ -554,6 +585,14 @@ accept for the VM's two addresses, removed afterwards with the listener.
 What was not shown: a positive BITS or WebDAV baseline. BITS refuses a
 network logon, and WebClient did not come up in the probe, so for those two
 the evidence is the listener's silence and the drop counters.
+
+**The runner's PATH.** On Windows the runner reads its `.env` itself but
+never `.path`; only the Linux wrappers read that. The first trial dispatch
+(run 40705118218, 2026-10-29) failed every Windows shard at the gate,
+because `pseudolife-mcp` was missing from PATH. The setup script now writes
+PATH into `.env` and removes the unused `.path`. That same run proved the
+hook's positive case as the runner account: "egress: refused to this
+account by the firewall (10013): the LAN gateway, IPv6".
 
 **Yielding to reproduction work.** The VM's first job is reproducing
 Windows CI failures (CLAUDE.md "Dev machines"). Reproduction work there
@@ -836,10 +875,10 @@ ACTIONS_RUNNER_HOOK_JOB_STARTED=C:\actions-runner\job-started.ps1
 icacls C:\actions-runner /grant "<runner-user>:(OI)(CI)M"
 ```
 
-`config.cmd` records the elevated shell's `PATH` in
-`C:\actions-runner\.path`, which does not include the runner account's
-tools. Append `;C:\Users\<runner-user>\.local\bin` to the single line in
-that file, then restart the runner service so it reads `.env` and `.path`.
+The Windows runner reads `.env` but not `.path` (found 2026-10-29), so the
+runner account's tools go on a `PATH=` line in `.env`, with
+`C:\Users\<runner-user>\.local\bin` first. Restart the runner service so
+it reads `.env`.
 
 `C:\actions-runner\job-started.ps1` does the same job as the Linux hook:
 

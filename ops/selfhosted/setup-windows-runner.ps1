@@ -50,8 +50,10 @@ param(
     [switch] $NoStart,
     # Tailnet addresses no account on this machine may reach at all (the
     # live bank's host, say); the tailnet's SMB and HTTP ports are closed to
-    # every account regardless.
-    [string[]] $TailnetDeny = @()
+    # every account regardless. Omitted, a rerun keeps the addresses already
+    # denied; -ClearTailnetDeny removes them.
+    [string[]] $TailnetDeny,
+    [switch] $ClearTailnetDeny
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -151,13 +153,22 @@ Say '== the tailnet, for every account'
 # working (maintainer decision, 2026-10-29).
 $tailnetGroup = 'Pseudolife parity runner tailnet'
 $tailnetRanges = @('100.64.0.0/10', 'fd7a:115c:a1e0::/48')
+$oldTailnet = @(Get-NetFirewallRule -Group $tailnetGroup -ErrorAction SilentlyContinue)
+if ($ClearTailnetDeny) {
+    $TailnetDeny = @()
+} elseif ($null -eq $TailnetDeny) {
+    # A rerun without the argument keeps the hosts already denied, so it
+    # never silently reopens them.
+    $TailnetDeny = @($oldTailnet | Where-Object Name -like 'pseudolife-tailnet-deny-*' |
+        Get-NetFirewallAddressFilter | ForEach-Object RemoteAddress | Where-Object { $_ -ne 'Any' })
+}
 foreach ($address in $TailnetDeny) {
     if (-not [Net.IPAddress]::TryParse($address, [ref] $null)) { Fail "-TailnetDeny $address is not an IP address" }
 }
 if (-not (Get-NetAdapter -Name 'Tailscale' -ErrorAction SilentlyContinue)) {
+    if ($TailnetDeny.Count) { Fail "-TailnetDeny names tailnet hosts, but this machine has no adapter named Tailscale; nothing more was changed" }
     Say 'no Tailscale adapter here; no tailnet rule'
 } else {
-    $oldTailnet = @(Get-NetFirewallRule -Group $tailnetGroup -ErrorAction SilentlyContinue)
     $stamp = [guid]::NewGuid().ToString('n')
     New-NetFirewallRule -Name "pseudolife-tailnet-ports-$stamp" -DisplayName "$tailnetGroup`: no SMB or HTTP over the tailnet" `
         -Group $tailnetGroup -Direction Outbound -Action Block -Profile Any -InterfaceAlias 'Tailscale' -Protocol TCP `
@@ -247,7 +258,7 @@ $hook = Join-Path $Root 'hooks\job-started.ps1'
 (Get-Content -LiteralPath (Join-Path $here 'windows-job-started.ps1') -Raw).Replace('@PYTHON@', $python) |
     Set-Content -LiteralPath $hook -Encoding utf8NoBOM -NoNewline
 
-# The runner's .env and .path: written before registration, so the hook is
+# The runner's .env: written before registration, so the hook is
 # configured from the service's first start, and again after. The account
 # may change the runner directory, so they are written in an
 # administrators-only directory and renamed into place: a rename replaces
@@ -258,7 +269,14 @@ function Write-RunnerConfig {
     $userProfile = (Get-CimInstance Win32_UserProfile | Where-Object { $_.SID -eq $sid }).LocalPath
     if (-not $userProfile) { $userProfile = "C:\Users\$RunnerUser" }
     $script:profileDir = $userProfile
+    # On Windows the runner reads .env itself but never .path (only the Linux
+    # wrappers do; found 2026-10-29, when every trial job's gate missed
+    # pseudolife-mcp), so PATH goes in .env.
+    $path = @($env:UV_TOOL_BIN_DIR, 'C:\Program Files\PowerShell\7', 'C:\Program Files\Git\cmd',
+        "$env:SystemRoot\System32", $env:SystemRoot, "$env:SystemRoot\System32\Wbem",
+        "$env:SystemRoot\System32\WindowsPowerShell\v1.0", "$env:SystemRoot\System32\OpenSSH") -join ';'
     $script:envText = @(
+        "PATH=$path",
         "PSEUDOLIFE_PARITY_LEASE=$Lease",
         "PSEUDOLIFE_PARITY_LOCK_DIR=$locks",
         "PSEUDOLIFE_PARITY_RUNNER_DIR=$dir",
@@ -266,14 +284,14 @@ function Write-RunnerConfig {
         "PIP_CACHE_DIR=$userProfile\.cache\pip",
         "UV_CACHE_DIR=$userProfile\.cache\uv",
         "HF_HOME=$userProfile\.cache\huggingface") -join "`n"
-    $script:pathText = @($env:UV_TOOL_BIN_DIR, 'C:\Program Files\PowerShell\7', 'C:\Program Files\Git\cmd',
-        "$env:SystemRoot\System32", $env:SystemRoot, "$env:SystemRoot\System32\Wbem",
-        "$env:SystemRoot\System32\WindowsPowerShell\v1.0", "$env:SystemRoot\System32\OpenSSH") -join ';'
-    foreach ($pair in @(@('.env', $script:envText), @('.path', $script:pathText))) {
-        $staged = Join-Path $Root "cache\$Name$($pair[0]).new"
-        Set-Content -LiteralPath $staged -Value $pair[1] -Encoding utf8NoBOM -NoNewline
-        Grant $staged @('/grant', "*${sid}:(R)")
-        [IO.File]::Move($staged, (Join-Path $dir $pair[0]), $true)
+    $staged = Join-Path $Root "cache\$Name.env.new"
+    Set-Content -LiteralPath $staged -Value $script:envText -Encoding utf8NoBOM -NoNewline
+    Grant $staged @('/grant', "*${sid}:(R)")
+    [IO.File]::Move($staged, (Join-Path $dir '.env'), $true)
+    # A .path an earlier version wrote is unused; it goes, so nobody edits it.
+    $old = Join-Path $dir '.path'
+    if ((Test-Path -LiteralPath $old) -and -not ((Get-Item -LiteralPath $old -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+        Remove-Item -LiteralPath $old -Force
     }
 }
 
@@ -319,10 +337,10 @@ if (-not (Test-Path -LiteralPath (Join-Path $dir '.runner'))) {
     # The service account runs and updates the runner, so it gets the directory.
     Grant $dir @('/grant', "*${sid}:(OI)(CI)M")
 }
-$before = (Get-Content -LiteralPath (Join-Path $dir '.env') -Raw -ErrorAction SilentlyContinue) + (Get-Content -LiteralPath (Join-Path $dir '.path') -Raw -ErrorAction SilentlyContinue)
+$before = Get-Content -LiteralPath (Join-Path $dir '.env') -Raw -ErrorAction SilentlyContinue
 Write-RunnerConfig
-$after = $envText + $pathText
-foreach ($file in '.env', '.path') {
+$after = $envText
+foreach ($file in @('.env')) {
     $acl = (& icacls (Join-Path $dir $file)) -join ' '
     if ($acl -notmatch [regex]::Escape($RunnerUser)) { Fail "$RunnerUser cannot read $dir\$file ($acl)" }
 }

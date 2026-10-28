@@ -81,6 +81,8 @@ def test_the_runner_config_is_readable_by_the_account_after_its_rename():
     text = SETUP.read_text(encoding="utf-8")
     body = re.search(r"^function Write-RunnerConfig \{.*?^\}\n", text, re.S | re.M).group(0)
     assert body.index('Grant $staged @(\'/grant\', "*${sid}:(R)")') < body.index("[IO.File]::Move(")
+    # The Windows runner reads .env but not .path, so PATH lives in .env.
+    assert '"PATH=$path",' in body
     registration = text[text.index("Expand-Archive -LiteralPath $zip"):text.index("& .\config.cmd")]
     assert "Write-RunnerConfig" in registration
 
@@ -104,19 +106,30 @@ def test_the_hypervisor_filter_script_parses():
     assert result.returncode == 0, result.stderr.decode("utf-8", "replace")
 
 
-def test_the_hypervisor_filter_touches_only_the_vms_tap_and_keeps_no_state():
-    # Stateless and keyed to one tap interface: a bridge-family ct match
-    # would conntrack every guest's frames, and the Proxmox firewall would put
-    # every guest through the host's iptables (2026-10-29).
+def test_the_hypervisor_filter_touches_only_the_vms_taps_and_keeps_no_state():
+    # Stateless and keyed to the VM's taps: a bridge-family ct match would
+    # conntrack every guest's frames, and the Proxmox firewall would put every
+    # guest through the host's iptables (2026-10-29). Prerouting, so frames
+    # the bridge delivers to the hypervisor itself are filtered too (review
+    # finding: a forward hook missed them).
     text = FILTER.read_text(encoding="utf-8")
     block = text[text.index('cat > "$file.new" <<NFT'):text.index("\nNFT\n")]
     ruleset = "\n".join(line for line in block.splitlines() if not line.strip().startswith("#"))
-    assert 'iifname "$tap" jump from_vm' in ruleset and 'tap="tap${vmid}i0"' in text
+    assert "type filter hook prerouting priority -300; policy accept;" in ruleset
+    assert 'iifname "tap${vmid}i*" jump from_vm' in ruleset and "hook forward" not in ruleset
     assert " ct " not in ruleset and "reject" not in ruleset
-    assert "ether type ip6 counter drop" in ruleset
-    # The kernel offers no reject in a bridge forward chain (measured).
-    assert 'ip daddr { $private } counter drop' in ruleset
+    # Only the VM's own MACs, and nothing but ARP, ND and plain IPv4 passes.
+    assert "ether saddr != { $macs } counter drop" in ruleset
+    assert "arp saddr ether != { $macs } counter drop" in ruleset
+    assert ruleset.index("ether type ip6 counter drop") < ruleset.index("ether type != ip counter drop")
+    # sshd replies only, never a SYN; DHCP to the broadcast address or the server.
+    assert "tcp sport 22 tcp flags & (syn | ack) != syn accept" in ruleset
+    assert "ip daddr { 255.255.255.255, $dhcp_server } udp sport 68 udp dport 67 accept" in ruleset
+    assert "ip daddr { $private } counter drop" in ruleset
     ranges = re.search(r'^private="(.*)"$', text, re.M).group(1).replace('""', "")
     assert ranges.split(", ") == ["10.0" ".0.0/8", "172.16" ".0.0/12", "192.168" ".0.0/16", "169.254.0.0/16",
                                   "100.64.0.0/10"]
-    assert "--remove" in text and "ExecStop=/usr/sbin/nft delete table bridge $table" in text
+    # A stop never unfilters (the rollback is --remove), and the VM refuses
+    # to start without its table.
+    assert "ExecStop=" not in text.split("No ExecStop:")[0].split("[Service]")[-1]
+    assert '! /usr/sbin/nft list table bridge $table' in text and 'qm set "$vmid" --hookscript' in text
