@@ -3,7 +3,8 @@
 //! `ContinuumMemorySystem.stats` (memory/cms.py:2811-2875).
 //!
 //! The process-local counters live here as statics: like Python's, they
-//! start at zero with the process and count only what this process did.
+//! start at zero with the process, except the tier counters, which an
+//! initialization restores from the bank's `cms_counters` row (B4).
 
 use crate::mcp::dispatch::{ToolCall, ToolError, ToolFn, ToolFuture};
 use serde_json::{Map, Value, json};
@@ -43,6 +44,23 @@ pub fn record_query<'a>(hit_bands: impl IntoIterator<Item = &'a str>) {
     for band in hit_bands {
         *tier.hits.entry(band.to_string()).or_insert(0) += 1;
     }
+}
+
+/// `_tier_queries` and `_tier_hits` for the `cms_counters` row
+/// (`counters_state`, autosave and the exit flush).
+pub fn tier_state() -> (u64, BTreeMap<String, u64>) {
+    let tier = TIER.lock().expect("tier lock");
+    (tier.queries, tier.hits.clone())
+}
+
+/// `reset_counters` then `apply_counters` for the tier counters, as a
+/// freshly built CMS restores them: the row's query count and per-band hits
+/// (a current band the row does not name counts from zero, which
+/// `counters::state` writes).
+pub fn restore_tier(queries: u64, hits: impl IntoIterator<Item = (String, u64)>) {
+    let mut tier = TIER.lock().expect("tier lock");
+    tier.queries = queries;
+    tier.hits = hits.into_iter().collect();
 }
 
 /// `_on_band_evict` for the last band (cms.py:2748).
