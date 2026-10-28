@@ -1,0 +1,3 @@
+| Item | Python | Rust | Owner / why |
+|---|---|---|---|
+| `surprise_history`, `interaction_count` and the other CMS counters | written to the `cms_counters` row by autosave and the clean-exit flush (schema v57, D2), and restored from it at startup | the same row, written and restored the same way; `logical_turn_count` and `consolidation_events`, which this daemon does not maintain yet, are carried from the row unchanged instead of zeroed | closed (B4): `w2e.py` `counters-*`; the per-step dumps keep `cms_counters` row-less (`dbstate.UNPORTED_ROWS`), since each daemon's autosave clock is its own |

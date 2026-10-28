@@ -1,0 +1,3 @@
+| Item | Remaining behavior | Owner / reason |
+|---|---|---|
+| Canonical writes | `memory_fact_set` (spec FS1-FS12: HLC ticking, contenders, supersession, the per-slot save), `memory_set_add` / `memory_set_remove` (spec SA1-SA11: conversion, dedup, the aggregate guard, the cap, removal) and `memory_fact_resolve` (spec FR1-FR8: contender promotion and retirement) are served, and so are world facts (`memory_world_set`, spec WD1-WD12) and the forget of facts, world facts and lessons (`memory_forget`, spec FG1-FG16); slot extraction here is a pure text operation, not a canonical write | the world and lesson stores' restore and console reads (no served MCP tool reaches them) |
