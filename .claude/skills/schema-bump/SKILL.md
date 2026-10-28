@@ -55,7 +55,7 @@ The Rust plan hashes the whole file, so even a comment change needs this.
     <exe>` reuses a built test binary. Inspect the golden's diff, then run
     it again without `--record-goldens` to check.
 
-## C. A schema bump also moves the Rust parity pin (`rust/PARITY.md`)
+## C. A schema bump also moves the Rust parity pin (the register, `rust/parity/`)
 
 11. **The shim's transfer schema literals** in
     `rust/shim/src/cli/transfer/{export,import}.rs` and `transfer.rs`

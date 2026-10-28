@@ -1,0 +1,12 @@
+## Complete Console registration checklist
+
+Shared source: pseudolife_memory/web/routes.py (`ConsoleRoutes`: the 72 registrations that `rust/daemon/harness/goldens/routes.json` records and `rust/daemon/src/routes.rs` embeds), plus `POST /api/pair`, which web/api.py serves ahead of the bearer gate. Python oracle pools: test_web.py and test_web_hardening.py. Every registration needs additive real HTTP normal/error/parameter/default/identity probes; POST rows also compare durable effects. GET rows that depend on later mutable subsystems still require their response contract in phase 3; writes are phase 4.
+
+The Rust column, after Status, says what the Rust daemon answers on master after the shared gates: `served` (a Rust handler), `partly` (the named part is served, the rest answers 501) or `501` (the declared `not_implemented` refusal; `daemon/divergences.md`, "Routes whose handlers belong to later slices" and "W2-D completion boundary"). Status keeps the register's evidence rule, the one the MCP checklist above uses: `ported` needs the Rust body and a recorded differential run that compared its answers and bank effects with Python's. The Evidence cell says where that run happened. A `served` row still `deferred` means "served, evidence pending": since 2026-10-25 the three episode curation routes and since 2026-10-27 the Console reads of `read/console.rs`, whose differential runs are local until a published nightly run (B13, D11) covers them. Audited at `98c5d6bf` (2026-10-19): of the 72 `ConsoleRoutes`, 2 are served, 1 partly and 69 answer 501, and `POST /api/pair` is partly served.
+
+| Method | Path | Phase | Status | Rust | Evidence |
+|---|---|---:|---|---|---|
+
+Hook paths (web/api.py; phase 4; oracle test_web.py/test_session_identity.py; cross-reference HOOKS and the methods in the hook acceptance checklist): session-start, memory-policy, memory-changes, session-end, coordination-start, park-gate, woke, subagent, all under /api/hook/.
+
+Coordination action rows (coordination.py; phase 4 with phase-1 shim clients): context, register, update, agents, lease, release, leases, attach, heartbeat, detach, send, receive, history, ack, attempt, all under /api/coordination/. Compare each action's parameter whitelist, required fields, principal/instance rules, status and public error codes. Unknown actions fail; receive alone accepts wait_seconds under the bounded hub contract.

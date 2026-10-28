@@ -1,0 +1,3 @@
+| Row | Phase | Behavior to preserve and Python source | Existing test pool and boundary | Status |
+|---|---:|---|---|---|
+| ONNX-PREREQUISITE | 3 | pyproject.toml onnx-extra comment says bit-identical embeddings; docs/guide/configuration.md says default Qwen has no supplied ONNX artifact. Packaging/docs disagreement remains unchanged here; phase 3 requires identified same graph/tokenizer, measured error and maintainer docs resolution before accepting embedding parity. | `test_onnx_artifacts.py`, `test_onnx_model_provision.py`, `test_embedding_backend.py` I/A; W3 measured existing fp32 export with accepted bounds (see daemon/spec-embedding.md); default artifact provisioning remains W3-J cutover blocker | deferred |
