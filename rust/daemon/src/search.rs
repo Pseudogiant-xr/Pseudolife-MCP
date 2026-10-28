@@ -126,12 +126,6 @@ fn not_superseded_digest(e: &Entry) -> bool {
     !(e.source == "digest" && e.superseded_at.is_some())
 }
 
-/// A `REAL` column as psycopg hands it to Python: the float of its shortest
-/// decimal text (`0.42048538`), not the exact widening of the f32.
-pub fn py_real(x: f32) -> f64 {
-    format!("{x}").parse().unwrap_or(x as f64)
-}
-
 /// `_recency_weight` (cms.py:2878).
 fn recency_weight(now: f64, ts: f64, half_life: f64) -> f64 {
     let age = (now - ts).max(0.0);
@@ -272,7 +266,14 @@ pub fn rank(
                     obj(json!({
                         "channel": "dense", "dense": score, "recency": recency,
                         "recency_boost": boost, "source_mult": src,
-                        "supersession_mult": sup, "surprise": py_real(e.surprise),
+                        "supersession_mult": sup,
+                        // `float(surprise)`: the entry's double (what a store
+                        // computed, or the REAL text a hydration parsed), not its
+                        // f32 rounding. The harness tolerates per-side surprise
+                        // noise, so the unit test
+                        // `a_served_components_surprise_is_the_entry_value_not_its_f32`
+                        // is this line's guard.
+                        "surprise": e.surprise_value,
                         "band": name, "band_depth": depth,
                     })),
                 );
@@ -1934,5 +1935,22 @@ mod tests {
             served(&r),
             [Item::Entry(1), Item::Entry(0), Item::Reference(0)]
         );
+    }
+
+    #[test]
+    fn a_served_components_surprise_is_the_entry_value_not_its_f32() {
+        // `comps["surprise"] = float(surprise)`: the entry's double, the
+        // value a store computed (`1 - max_sim`) or the REAL text a
+        // hydration parsed, never its f32 rounding.
+        let mut e = entry(1, "a", "x", false);
+        e.surprise_value = 0.6854406297206879;
+        e.surprise = e.surprise_value as f32;
+        let bank = Bank {
+            dim: DIM,
+            entries: vec![e],
+            matrix: unit(0.9),
+        };
+        let r = rank(&bank, &unit(1.0), &params("", 3), None, &[], Some(3));
+        assert_eq!(r.comps["a"]["surprise"], json!(0.6854406297206879));
     }
 }
