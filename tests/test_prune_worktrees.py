@@ -815,9 +815,10 @@ def test_owner_mode_partial_is_reported_as_partial_not_refused(env, monkeypatch)
     assert [(l["mode"], l["complete"]) for l in env.ledger_lines()] == [("owner", False)]
 
 
-def test_listing_failure_after_remove_is_reported_not_raised(env, monkeypatch):
-    """The re-list after `git worktree remove` failing must not abort the
-    run with a traceback or a whole-run refusal after something changed."""
+def test_listing_failure_after_remove_is_unknown_and_recorded(env, monkeypatch):
+    """git's list failing after a removal leaves the outcome unknown: it is
+    reported and recorded as such, not called failed or removed, and the
+    rest of the run still reports."""
     env.add("done")
     env.cache("old-slice")
     real = prune.registered_entry
@@ -832,5 +833,66 @@ def test_listing_failure_after_remove_is_reported_not_raised(env, monkeypatch):
     monkeypatch.setattr(prune, "registered_entry", fails_after_the_recheck)
     rc, out = run(env, "--apply")
     assert rc == 1, out
-    assert "did not finish cleanly" in out
-    assert "APPLY" in out and "caches: 1 candidates, 1 removed" in out
+    assert "could not be read" in out
+    assert "caches: 1 candidates, 1 removed" in out
+    tree = next(line for line in env.ledger_lines() if line["kind"] == "worktree")
+    assert tree["complete"] is False and tree["state"] == "unknown"
+
+
+def test_persistent_listing_failure_fails_rows_not_the_run(env, monkeypatch):
+    """Once `git worktree list` keeps failing, later rows fail one by one;
+    the run still prints every row, including the removal already done."""
+    wt = env.add("done")
+    env.cache("old-slice")
+    real = prune.list_worktrees
+    removed = []
+
+    def breaks_after_removal(repo):
+        if removed:
+            raise prune.Refusal("`git worktree list` failed: simulated")
+        return real(repo)
+
+    real_git = prune.git
+
+    def note_removal(cwd, *args, **kw):
+        proc = real_git(cwd, *args, **kw)
+        if args[:2] == ("worktree", "remove"):
+            removed.append(args[2])
+        return proc
+
+    monkeypatch.setattr(prune, "list_worktrees", breaks_after_removal)
+    monkeypatch.setattr(prune, "git", note_removal)
+    rc, out = run(env, "--apply")
+    assert rc == 1, out
+    assert not wt.exists()
+    assert "APPLY" in out and "could not finish" in out
+    assert [line["kind"] for line in env.ledger_lines()] == ["worktree"]
+
+
+def test_leftover_file_under_empty_folders_is_partial(env, monkeypatch):
+    env.add("done")
+
+    def leave(path):
+        (path / "a" / "b").mkdir(parents=True)
+        (path / "a" / "b" / "held.bin").write_bytes(b"x")
+
+    monkeypatch.setattr(prune, "git", _remove_then(leave))
+    rc, out = run(env, "--apply")
+    assert rc == 1, out
+    assert "held.bin" in out and "partial" in out
+
+
+def test_leftover_link_is_partial(env, tmp_path, monkeypatch):
+    env.add("done")
+    made = []
+
+    def leave(path):
+        path.mkdir(exist_ok=True)
+        made.append(_junction(path / "link", tmp_path / "link-target"))
+
+    monkeypatch.setattr(prune, "git", _remove_then(leave))
+    rc, out = run(env, "--apply")
+    if not made[0]:
+        pytest.skip("this platform could not create a junction or symlink")
+    assert rc == 1, out
+    assert "first: link" in out

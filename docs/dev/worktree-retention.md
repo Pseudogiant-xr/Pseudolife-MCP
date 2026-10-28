@@ -46,7 +46,12 @@ python ops/prune_worktrees.py --mine --cache-dir <dir> --apply
   already unregistered the worktree, and that counts as removed. If git
   unregistered it but files remain (one held open on Windows), the run
   prints `partial:` with the first leftover, exits 1 and leaves the cache
-  alone.
+  alone. If git's worktree list can't be read afterwards, it prints
+  `unknown:` rather than guess, and the ledger line says `state:
+  unknown`.
+- `git worktree remove` may take up to an hour on a large `rust/target`.
+  Run `--mine --apply` where a short tool timeout won't kill it midway
+  (in the background, or with a long timeout).
 - A checkout under `.t3/worktrees`, `.claude/worktrees` or
   `.codex/worktrees` belongs to its harness. Owner mode leaves it in place
   and cleans only the cache dir.
@@ -176,7 +181,8 @@ Every removal appends one JSON line to
 `~/.pseudolife-mcp/retention-ledger.jsonl`. The line holds `time`, `mode`
 (`sweep` or `owner`), `kind`, `path`, `bytes`, `newest_mtime`, `head` and
 `branch` (worktrees), the `checks` passed and `complete` (false when
-files were left behind). That
+files were left behind, with `state` set to `partial` or `unknown`). In a
+sweep, a git failure on one row fails that row and the run carries on. That
 is the path, size and reason the disk rule asks for. A dry run writes
 nothing.
 

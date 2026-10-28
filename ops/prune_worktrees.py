@@ -148,6 +148,7 @@ class Scan:
     newest: float = 0.0          # newest mtime of a non-whitelisted file
     links: list[str] = field(default_factory=list)
     error: str | None = None
+    first_file: str | None = None
 
 
 def scan(root: str, *, skip_mtime=lambda rel: False) -> Scan:
@@ -188,6 +189,8 @@ def scan(root: str, *, skip_mtime=lambda rel: False) -> Scan:
                 stack.append((rel, entry.path))
                 continue
             out.bytes += st.st_size
+            if out.first_file is None:
+                out.first_file = rel
             if not skip_mtime(rel):
                 out.newest = max(out.newest, st.st_mtime)
     return out
@@ -684,46 +687,46 @@ def registered_entry(repo: str, path: str) -> Worktree | None:
     return next((w for w in list_worktrees(repo) if norm(w.path) == n), None)
 
 
-def remove_worktree(main: str, path: str) -> tuple[bool, str | None]:
-    """Plain ``git worktree remove``. Returns (unregistered, error).
+def remove_worktree(main: str, path: str) -> tuple[str, str | None]:
+    """Plain ``git worktree remove``. Returns (state, error), state one of
+    removed, partial, failed or unknown.
 
     git can unregister a worktree yet fail to delete it: a process holding
-    a folder in it as its cwd leaves empty folders, which is done; a file
-    held open leaves files behind, which no later sweep can see, so that is
-    an error even though the worktree is gone from git's list."""
+    a folder in it as its cwd leaves empty folders, which is removed; a
+    file held open leaves files behind, which no later sweep can see, so
+    that is partial. When git's list cannot be read afterwards the state
+    is unknown, never assumed either way."""
+    proc = None
     try:
         # Deleting a large rust/target on Windows can outlast the default
         # timeout, and a kill mid-delete leaves a half-deleted worktree.
         proc = git(main, "worktree", "remove", path, timeout=3600)
+        detail = proc.stderr.strip() or f"exit {proc.returncode}"
+    except subprocess.TimeoutExpired:
+        detail = "timed out after an hour; some files may already be gone"
+    try:
         entry = registered_entry(main, path)
     except (Refusal, subprocess.TimeoutExpired) as exc:
-        return False, f"git worktree remove did not finish cleanly: {exc}"
+        return "unknown", (f"git worktree remove ran ({detail}) but git's worktree list "
+                           f"could not be read ({exc}); check `git worktree list` and {path}")
     if entry is not None:
-        return False, f"git worktree remove failed: {proc.stderr.strip() or proc.returncode}"
+        return "failed", f"git worktree remove failed: {detail}"
     left = leftover_file(path)
     if left:
-        return True, (f"unregistered, but files remain in {path} (first: {left}; "
-                      f"{proc.stderr.strip() or 'held open'}); delete them by hand")
-    return True, None
+        return "partial", (f"unregistered, but files remain in {path} (first: {left}; "
+                           f"{detail if proc is None or proc.returncode else 'held open'}); "
+                           "delete them by hand")
+    return "removed", None
 
 
 def leftover_file(path: str) -> str | None:
-    """The first non-directory entry left under ``path``, or None when only
-    empty folders (or nothing) remain."""
+    """The first file, link or unreadable entry left under ``path`` (one
+    lstat walk, never following a link), or None when only empty folders
+    or nothing remain."""
     if not os.path.lexists(path):
         return None
     s = scan(path)
-    if s.error:
-        return s.error
-    if s.links:
-        return s.links[0]
-    try:
-        for _dirpath, _dirs, files in os.walk(_long(path)):
-            if files:
-                return os.path.join(_dirpath, files[0])
-    except OSError as exc:
-        return str(exc)
-    return None
+    return s.error or (s.links[0] if s.links else None) or s.first_file
 
 
 def own_worktree(start: str) -> str | None:
@@ -814,57 +817,63 @@ def run_sweep(args, cfg: dict) -> int:
             verdicts.append(evaluate_cache(child, grace_days=cgrace, now=now, pins=pins))
 
     rows: list[tuple[Verdict, str]] = []
-    rc = 0
+    ledger_ok = [True]
+
+    def record(v: Verdict, extra: dict) -> None:
+        if not ledger_write(args.ledger, v, "sweep", extra):
+            ledger_ok[0] = False
+
+    def apply_worktree(wt: Worktree, v: Verdict) -> tuple[Verdict, str]:
+        fresh = registered_entry(repo, wt.path)          # catches a lock taken since
+        if fresh is None:
+            v.failure = "no longer registered"
+            return v, "keep"
+        again = evaluate_worktree(repo, fresh, grace_days=wgrace, now=time.time())
+        again.passed.insert(0, "not-main-or-self")
+        if not again.ok:
+            again.failure = f"changed since scan: {again.failure}"
+            return again, "keep"
+        state, err = remove_worktree(registered[0], again.path)
+        if state != "failed":
+            record(again, {"complete": state == "removed"}
+                   | ({} if state == "removed" else {"state": state}))
+        again.failure = err
+        return again, state
+
+    def apply_cache(v: Verdict) -> tuple[Verdict, str]:
+        again = evaluate_cache(v.path, grace_days=cgrace, now=time.time(), pins=current_pins())
+        if not again.ok:
+            again.failure = f"changed since scan: {again.failure}"
+            return again, "keep"
+        err = delete_cache(v.path)
+        if err and err.startswith("in use"):
+            again.failure = err
+            return again, "keep"
+        record(again, {"complete": err is None})
+        again.failure = err
+        return again, "partial" if err else "removed"
+
     for i, v in enumerate(verdicts):
         if not v.ok:
             rows.append((v, "keep"))
-            continue
-        if not args.apply:
+        elif not args.apply:
             rows.append((v, "would remove"))
-            continue
-        if v.kind == "worktree":
-            fresh = registered_entry(repo, targets[i].path)   # catches a lock taken since
-            if fresh is None:
-                v.failure = "no longer registered"
-                rows.append((v, "keep"))
-                continue
-            again = evaluate_worktree(repo, fresh, grace_days=wgrace, now=time.time())
-            again.passed.insert(0, "not-main-or-self")
-            if not again.ok:
-                again.failure = f"changed since scan: {again.failure}"
-                rows.append((again, "keep"))
-                continue
-            gone, err = remove_worktree(registered[0], again.path)
-            if gone and not ledger_write(args.ledger, again, "sweep", {"complete": err is None}):
-                rc = 1
-            if err:
-                again.failure = err
-                rows.append((again, "partial" if gone else "failed"))
-                rc = 1
-                continue
-            rows.append((again, "removed"))
         else:
-            again = evaluate_cache(v.path, grace_days=cgrace, now=time.time(),
-                                   pins=current_pins())
-            if not again.ok:
-                again.failure = f"changed since scan: {again.failure}"
-                rows.append((again, "keep"))
-                continue
-            err = delete_cache(v.path)
-            if err and err.startswith("in use"):
-                again.failure = err
-                rows.append((again, "keep"))
-                continue
-            if not ledger_write(args.ledger, again, "sweep", {"complete": err is None}):
-                rc = 1
-            if err:
-                again.failure = err
-                rows.append((again, "partial"))
-                rc = 1
-                continue
-            rows.append((again, "removed"))
+            try:
+                rows.append(apply_worktree(targets[i], v) if v.kind == "worktree"
+                            else apply_cache(v))
+            except (Refusal, subprocess.TimeoutExpired) as exc:
+                # One row's git failure must not hide the rows already done.
+                v.failure = f"could not finish: {exc}"
+                rows.append((v, "failed"))
+    rc = 0 if ledger_ok[0] and not any(
+        verdict in ("failed", "partial", "unknown") for _, verdict in rows) else 1
     if args.apply and wt_roots:
-        git(registered[0], "worktree", "prune")
+        try:
+            git(registered[0], "worktree", "prune")
+        except subprocess.TimeoutExpired:
+            print("warning: git worktree prune timed out")
+            rc = 1
 
     print("APPLY" if args.apply else "DRY RUN (pass --apply to remove)")
     print_table(rows)
@@ -884,13 +893,13 @@ def _totals(rows, left, applied: bool, swept_worktrees) -> None:
     for kind in ("worktree", "cache"):
         mine = [(v, verdict) for v, verdict in rows if v.kind == kind]
         go = [v for v, verdict in mine if verdict in ("removed", "would remove")]
-        partial = sum(verdict == "partial" for _, verdict in mine)
+        partial = sum(verdict in ("partial", "unknown") for _, verdict in mine)
         print(f"{kind}s: {len(mine)} candidates, {len(go)} {done}, "
               + (f"{partial} partial (see rows), " if partial else "")
               + f"{len(mine) - len(go) - partial} kept, {human(sum(v.bytes for v in go))}")
     reasons: dict[str, int] = {}
     for v, verdict in rows:
-        if verdict in ("keep", "failed", "partial"):
+        if verdict in ("keep", "failed", "partial", "unknown"):
             key = re.sub(r"[:(].*", "", v.failure or "").strip()
             reasons[key] = reasons.get(key, 0) + 1
     if reasons:
@@ -1011,16 +1020,21 @@ def run_owner(args, cfg: dict) -> int:
         said.append(f"checkout {own} belongs to its harness and was left in place")
     else:
         os.chdir(main)               # a process cannot remove the dir it sits in
-        gone, err = remove_worktree(main, own)
-        if gone and not ledger_write(args.ledger, tree, "owner", {"complete": err is None}):
+        state, err = remove_worktree(main, own)
+        if state != "failed" and not ledger_write(
+                args.ledger, tree, "owner",
+                {"complete": state == "removed"} | ({} if state == "removed" else {"state": state})):
             rc = 1
-        if err and gone:
+        if state == "partial":
             print(f"partial: {err}. git no longer lists the worktree; the cache was "
                   "not touched.")
             return 1
-        if err:
-            print(f"refused: {err}. The worktree is still registered and the cache was "
-                  "not touched.")
+        if state == "unknown":
+            print(f"unknown: {err}. The cache was not touched.")
+            return 1
+        if state == "failed":
+            print(f"failed: {err}. git still lists the worktree; the cache was not "
+                  "touched.")
             return 1
         line = f"removed worktree {own}"
         if tree.branch:
