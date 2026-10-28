@@ -47,7 +47,11 @@ param(
     [string] $PseudolifeSpec = 'pseudolife-mcp',
     # Bring the configuration up to date but leave the service stopped and
     # set to start manually: the runner takes no job until it is started.
-    [switch] $NoStart
+    [switch] $NoStart,
+    # Tailnet addresses no account on this machine may reach at all (the
+    # live bank's host, say); the tailnet's SMB and HTTP ports are closed to
+    # every account regardless.
+    [string[]] $TailnetDeny = @()
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -135,6 +139,36 @@ if ($users -notmatch [regex]::Escape($sid)) { Fail "the egress rule does not nam
 if ($remote.Count -lt $blocked.Count) { Fail "the egress rule holds $($remote.Count) of $($blocked.Count) ranges; nothing more was changed" }
 foreach ($dir in $Root, (Join-Path $Root 'hooks')) {
     if (-not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir | Out-Null }
+}
+
+Say '== the tailnet, for every account'
+# The hypervisor cannot see inside the tailnet's encrypted traffic, and the
+# per-user rule above misses connections Windows makes for a user through
+# system services (the kernel's SMB client, BITS, WebDAV). So on the
+# Tailscale adapter, for every account on this machine: no SMB, NetBIOS or
+# HTTP(S)/WebDAV to any tailnet address, and nothing at all to the
+# -TailnetDeny addresses. Outbound only: inbound SSH over the tailnet keeps
+# working (maintainer decision, 2026-10-29).
+$tailnetGroup = 'Pseudolife parity runner tailnet'
+$tailnetRanges = @('100.64.0.0/10', 'fd7a:115c:a1e0::/48')
+foreach ($address in $TailnetDeny) {
+    if (-not [Net.IPAddress]::TryParse($address, [ref] $null)) { Fail "-TailnetDeny $address is not an IP address" }
+}
+if (-not (Get-NetAdapter -Name 'Tailscale' -ErrorAction SilentlyContinue)) {
+    Say 'no Tailscale adapter here; no tailnet rule'
+} else {
+    $oldTailnet = @(Get-NetFirewallRule -Group $tailnetGroup -ErrorAction SilentlyContinue)
+    $stamp = [guid]::NewGuid().ToString('n')
+    New-NetFirewallRule -Name "pseudolife-tailnet-ports-$stamp" -DisplayName "$tailnetGroup`: no SMB or HTTP over the tailnet" `
+        -Group $tailnetGroup -Direction Outbound -Action Block -Profile Any -InterfaceAlias 'Tailscale' -Protocol TCP `
+        -RemotePort @(139, 445, 80, 443) -RemoteAddress $tailnetRanges | Out-Null
+    if ($TailnetDeny.Count) {
+        New-NetFirewallRule -Name "pseudolife-tailnet-deny-$stamp" -DisplayName "$tailnetGroup`: no traffic to named tailnet hosts" `
+            -Group $tailnetGroup -Direction Outbound -Action Block -Profile Any -InterfaceAlias 'Tailscale' `
+            -RemoteAddress $TailnetDeny | Out-Null
+    }
+    $oldTailnet | Remove-NetFirewallRule
+    Say "tailnet rules: $(@(Get-NetFirewallRule -Group $tailnetGroup).Count) (denied hosts: $($TailnetDeny.Count))"
 }
 
 Say '== sshd refuses the account'

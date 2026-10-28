@@ -266,6 +266,11 @@
         "job": "test-lite-windows",
         "fingerprint": "a2b45040f3d4b0cb",
         "reason": "adds tests/test_runner_cleanup.py (23 cases) and tests/test_selfhosted_windows_scripts.py (4 cases, about 4 s locally); no new setup or step"
+      },
+      {
+        "job": "test-lite-windows",
+        "fingerprint": "a2b45040f3d4b0cb",
+        "reason": "adds tests/test_runner_cleanup.py (23 cases) and tests/test_selfhosted_windows_scripts.py (9 cases, about 4 s locally); no new setup or step"
       }
     ]
   }

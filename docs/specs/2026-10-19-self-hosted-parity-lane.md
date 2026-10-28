@@ -433,18 +433,14 @@ setup-windows-runner.ps1 -RunnerUser <runner-user> -SuiteUser <suite-user> `
   The suite user's run of the same hook was refused with "connected", the
   negative control.
 
-  What a per-user rule cannot cover (found by review on 2026-10-28; the
-  maintainer is deciding between filtering the VM at the hypervisor,
-  machine-wide rules, or accepting it):
+  A per-user rule cannot cover everything:
   - Windows makes some connections on a user's behalf through system
     services, which a rule keyed on the user does not match: SMB
     (`\\<host>\share`, opened by the kernel), BITS, and WebDAV through
-    the WebClient service. A job could reach LAN hosts that way.
+    the WebClient service. The hypervisor filter and the tailnet rule
+    below close those paths.
   - Windows Firewall does not filter loopback, so unlike on Linux,
     services listening on the VM's loopback stay reachable to jobs.
-
-  Until that is decided, the runner's service is stopped and set to
-  Manual, so it takes no job.
 - **sshd refuses the account** (`DenyUsers`, written first in
   `sshd_config` and checked with `sshd -t`), since a job can write the
   account's `authorized_keys`.
@@ -470,6 +466,94 @@ setup-windows-runner.ps1 -RunnerUser <runner-user> -SuiteUser <suite-user> `
 - **No private bench address**: one runner shares no loopback with another
   job, so the Linux `PSEUDOLIFE_TEST_PG_HOST_PORT` override is not needed.
   `localhost.` resolves to loopback on Windows as it is.
+
+### The Windows dev VM's network filter (2026-10-29)
+
+The maintainer chose to filter the VM at the hypervisor (decision 2026-10-29),
+with three choices made after the network inventory below.
+
+**Inventory** (read-only, 2026-10-29), the VM's network use beyond the
+internet:
+- Inbound SSH from the maintainer's machine, over the LAN and over the
+  tailnet.
+- DHCP from the LAN's router (the VM has no reservation) and IPv6
+  neighbour discovery.
+- Tailscale: the VM is a tailnet node. Its peers include the live bank's
+  host and the hypervisor.
+- Nothing else on the LAN:
+  - DNS goes to public resolvers;
+  - the Windows Time service is not running;
+  - no proxy, no SMB mappings or connections;
+  - no Pseudolife daemon or board configuration, so no lease mirror.
+
+**The hypervisor filter**, `ops/selfhosted/setup-vm-egress-filter.sh --vmid
+<id>`, run as root on the hypervisor:
+- **Mechanism.** A bridge-family nftables table that matches only frames
+  entering from the VM's tap interface, loaded by its own systemd unit
+  before guests start. It is stateless on purpose: a conntrack match in the
+  bridge family would turn on bridge conntrack for every guest. Proxmox's
+  own firewall was the alternative, but enabling it flips the datacenter
+  switch and routes every guest's bridged traffic, the live bank and game
+  servers included, through the host's iptables. Neither happens here.
+- **What the VM may still send:**
+  - ARP and IPv6 neighbour discovery; the rest of IPv6 is dropped, so the
+    VM keeps no IPv6 path (decision: robust against a change of the ISP's
+    prefix);
+  - DHCP to the LAN's server;
+  - its sshd's replies, so inbound SSH works;
+  - ICMP replies and errors;
+  - anything to a public IPv4 address.
+- **What is dropped:** private, link-local, CGNAT and multicast/broadcast
+  IPv4 destinations. Dropped, not refused: the kernel offers no `reject` in
+  a bridge forward chain.
+- **Where the filter is:** the hypervisor's datacenter and node firewalls
+  stayed off and no other guest gained a rules file. `bridge-nf-call-*`
+  stayed 0, and neither `br_netfilter` nor `nf_conntrack_bridge` was loaded.
+- **Rollback:** `setup-vm-egress-filter.sh --vmid <id> --remove`. The prior
+  host state (firewall files, the guests' NIC flags, the iptables and nft
+  rulesets, the bridge sysctls) was saved on the hypervisor before the
+  change.
+- **Allow rules** beyond the internet: DHCP to the LAN's server (UDP 68 to
+  67), the VM's sshd replies (TCP source port 22), ICMP echo-reply,
+  destination-unreachable and time-exceeded, ARP, and IPv6 neighbour and
+  router solicitation and advertisement. Nothing else on the LAN is
+  allowed, because the inventory found nothing the dev workflow needs
+  there.
+
+**The tailnet rule.** The hypervisor cannot see inside the tailnet's
+encrypted traffic. So the setup script adds outbound rules for every
+account on the VM, on the Tailscale adapter only (decision 2026-10-29):
+- no SMB, NetBIOS or HTTP(S)/WebDAV (TCP 139, 445, 80, 443) to any tailnet
+  address;
+- nothing at all to the addresses given in `-TailnetDeny`, which names the
+  live bank's host, an argument so that no address is in the tree.
+
+Inbound SSH over the tailnet keeps working. What it does not cover: BITS or
+WebDAV to a tailnet host on another port.
+
+**Proof** (2026-10-29), `ops/selfhosted/windows-egress-proof.ps1`, against a
+temporary listener on the sibling Linux dev box. The listener logged every
+connection's source address. The box's own input firewall got a temporary
+accept for the VM's two addresses, removed afterwards with the listener.
+- **The suite user, before the filter:** the kernel's SMB client reached
+  the listener, and the hypervisor's link-local web UI answered over IPv6.
+- **The suite user, after:** the listener saw nothing; IPv6 timed out; the
+  live bank's tailnet port was refused locally; DNS and github.com worked.
+- **The runner account, after** (through a one-shot scheduled task: an SSH
+  session cannot start a process as another account, and BITS needs a
+  batch logon, so the account got "log on as a batch job" for that run
+  only, then the original list was restored and checked):
+  - SMB to the LAN and to a tailnet host, a BITS transfer and a WebDAV
+    request never reached the listener;
+  - IPv6 was refused by the per-user rule;
+  - DNS and github.com worked;
+  - the hypervisor's drop counters rose meanwhile.
+- **SSH** to the VM from the maintainer's machine worked before and after,
+  over the LAN and the tailnet.
+
+What was not shown: a positive BITS or WebDAV baseline. BITS refuses a
+network logon, and WebClient did not come up in the probe, so for those two
+the evidence is the listener's silence and the drop counters.
 
 **Yielding to reproduction work.** The VM's first job is reproducing
 Windows CI failures (CLAUDE.md "Dev machines"). Reproduction work there

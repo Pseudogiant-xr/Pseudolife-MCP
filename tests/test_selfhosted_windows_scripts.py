@@ -83,3 +83,40 @@ def test_the_runner_config_is_readable_by_the_account_after_its_rename():
     assert body.index('Grant $staged @(\'/grant\', "*${sid}:(R)")') < body.index("[IO.File]::Move(")
     registration = text[text.index("Expand-Archive -LiteralPath $zip"):text.index("& .\config.cmd")]
     assert "Write-RunnerConfig" in registration
+
+
+FILTER = OPS / "setup-vm-egress-filter.sh"
+PROOF = OPS / "windows-egress-proof.ps1"
+
+
+@needs_pwsh
+def test_the_egress_proof_parses():
+    result = pwsh("$errors = $null; [System.Management.Automation.Language.Parser]::ParseFile("
+                  f"'{PROOF}', [ref]$null, [ref]$errors) | Out-Null; $errors | ForEach-Object {{ $_.ToString() }}")
+    assert result.returncode == 0 and result.stdout.strip() == "", result.stdout + result.stderr
+
+
+@pytest.mark.skipif(shutil.which("bash") is None, reason="bash is not installed")
+def test_the_hypervisor_filter_script_parses():
+    # On stdin: a Windows path does not survive every bash's argument handling.
+    # Bytes, so Windows' text mode adds no carriage returns.
+    result = subprocess.run(["bash", "-n"], input=FILTER.read_bytes(), capture_output=True, timeout=60)
+    assert result.returncode == 0, result.stderr.decode("utf-8", "replace")
+
+
+def test_the_hypervisor_filter_touches_only_the_vms_tap_and_keeps_no_state():
+    # Stateless and keyed to one tap interface: a bridge-family ct match
+    # would conntrack every guest's frames, and the Proxmox firewall would put
+    # every guest through the host's iptables (2026-10-29).
+    text = FILTER.read_text(encoding="utf-8")
+    block = text[text.index('cat > "$file.new" <<NFT'):text.index("\nNFT\n")]
+    ruleset = "\n".join(line for line in block.splitlines() if not line.strip().startswith("#"))
+    assert 'iifname "$tap" jump from_vm' in ruleset and 'tap="tap${vmid}i0"' in text
+    assert " ct " not in ruleset and "reject" not in ruleset
+    assert "ether type ip6 counter drop" in ruleset
+    # The kernel offers no reject in a bridge forward chain (measured).
+    assert 'ip daddr { $private } counter drop' in ruleset
+    ranges = re.search(r'^private="(.*)"$', text, re.M).group(1).replace('""', "")
+    assert ranges.split(", ") == ["10.0" ".0.0/8", "172.16" ".0.0/12", "192.168" ".0.0/16", "169.254.0.0/16",
+                                  "100.64.0.0/10"]
+    assert "--remove" in text and "ExecStop=/usr/sbin/nft delete table bridge $table" in text
