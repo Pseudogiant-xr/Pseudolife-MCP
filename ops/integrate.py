@@ -28,7 +28,11 @@ label). `build` then regenerates the producer census
 `rust/producer_census.py` and commits it as the batch's one generated
 commit when it changed, so no member ever regenerates it; when the script
 fails there, the members whose own diff changes the census inputs are
-dropped like a conflict. Nothing resolves a conflict, no member is edited
+dropped like a conflict. When the batch changes anything under rust/,
+`build` last runs CI's compile step there (`RUST_CHECK`), since neither the
+suite nor the harness run compiles Rust; a failure drops nothing, keeps the
+branch for bisecting and is recorded in the plan, and `open` refuses it.
+Nothing resolves a conflict, no member is edited
 and nothing force-pushes. `merge` merges the batch pull request `open` published,
 with a merge commit, only while its head is the built head, every check on
 it finished without a failure and master has not moved past it; every merge
@@ -85,6 +89,24 @@ RUST_HARNESS = (
     "rust/ci",
 )
 RUST_HARNESS_COMMAND = "python -m pytest -q -p no:cacheprovider " + " ".join(RUST_HARNESS)
+# Neither the full suite nor the harness run compiles Rust, so two members
+# that each compile alone can still break the batch: #991 changed record()'s
+# signature, #994 called it the old way, and batch #1017 failed hosted CI
+# with E0061 (2026-10-28). `build` runs CI's own compile step (the `Rust`
+# job's `cargo check --locked --all-targets`) from rust/, where rustup reads
+# rust-toolchain.toml, whenever the batch changes anything under rust/,
+# which holds every workspace Cargo file. 48 s cold, under 1 s warm, on the
+# maintainer's Windows host (2026-10-28). Clippy and fmt stay CI's.
+RUST_CHECK_DIR = "rust"
+RUST_CHECK_COMMAND = "cargo check --workspace --all-targets --locked"
+RUST_CHECK = tuple(RUST_CHECK_COMMAND.split())
+# The check runs member build scripts and proc macros, so credential-shaped
+# variables are withheld, as from the census script. The rest passes
+# through (CARGO_TARGET_DIR, the toolchain's and the linker's variables),
+# since an allowlist would break builds on hosts it was not written on; it
+# still runs as the operator, as the full suite does.
+SECRET_ENV_RE = re.compile(r"TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|(^|_)(API_)?KEY$",
+                           re.IGNORECASE)
 
 
 class Refusal(Exception):
@@ -151,6 +173,9 @@ class Plan:
     markers: list[str] = field(default_factory=list)
     census_commit: str = ""   # the generated census commit, when there is one
     census_drift: list[str] = field(default_factory=list)   # manual shapes it withdrew
+    # `passed` or `not needed`, which `open` accepts, or `failed: ...` or
+    # `not run: ...`; empty for a plan built before the check existed.
+    rust_check: str = ""
 
     @property
     def title(self) -> str:
@@ -622,9 +647,68 @@ def _new_markers(base_sha: str) -> list[str]:
     return sorted(files("HEAD") - files(base_sha))
 
 
+def _touches_rust(base_sha: str, head: str) -> bool:
+    changed = _out("diff", "--name-only", "--no-renames", base_sha, head).splitlines()
+    return any(path.startswith(RUST_CHECK_DIR + "/") for path in changed)
+
+
+def _rust_check(plan: Plan) -> tuple[str, str]:
+    """Run RUST_CHECK on the batch head when the batch changes anything
+    under rust/. Returns the plan's record and cargo's errors to print."""
+    if not _touches_rust(plan.base_sha, plan.head):
+        return "not needed", ""
+    root = Path(_out("rev-parse", "--show-toplevel"))
+    if not (root / RUST_CHECK_DIR / "Cargo.toml").is_file():
+        return f"not run: the batch head has no {RUST_CHECK_DIR}/Cargo.toml", ""
+    env = {k: v for k, v in os.environ.items() if not SECRET_ENV_RE.search(k)}
+    print(f"  running `{RUST_CHECK_COMMAND}` in {RUST_CHECK_DIR}/ on {plan.head[:12]}")
+    try:
+        proc = _run(list(RUST_CHECK), check=False, cwd=root / RUST_CHECK_DIR, env=env)
+    except Refusal as exc:
+        return f"not run: {exc}", ""
+    if proc.returncode == 0:
+        return "passed", ""
+    lines = proc.stderr.strip().splitlines()
+    errors = [line for line in lines if line.startswith("error")]
+    first = errors[0].strip() if errors else f"exit {proc.returncode}"
+    start = lines.index(errors[0]) if errors else max(len(lines) - 40, 0)
+    return f"failed: {first[:300]}", "\n".join(lines[start:start + 60])
+
+
+RUST_CHECK_OK = ("passed", "not needed")
+
+
+def _rust_check_refusal(plan: Plan) -> str:
+    """Why `open` refuses this plan's Rust compile check result."""
+    again = (f"switch back with `git switch --detach {REMOTE}/{BASE}`, remove the "
+             "local branch and build again")
+    if not plan.rust_check:
+        return (f"{plan.branch} was built before `build` ran the Rust compile check "
+                f"(`{RUST_CHECK_COMMAND}`); {again}")
+    if plan.rust_check.startswith("failed"):
+        return (f"the batch does not compile at {plan.head[:12]}: `{RUST_CHECK_COMMAND}` "
+                f"in {RUST_CHECK_DIR}/ {plan.rust_check}. It is a red batch and nothing "
+                "is fixed inside it: bisect it (docs/dev/merge-batches.md, \"Validating "
+                "it\", step 3), drop the culprit with a comment and remove its label, "
+                f"then {again}")
+    return (f"the Rust compile check did not run at {plan.head[:12]} "
+            f"({plan.rust_check.removeprefix('not run: ')}), and the batch changes "
+            f"{RUST_CHECK_DIR}/. Put rustup's cargo on PATH, then {again}")
+
+
 def _cell(text: str) -> str:
     """A pull request title made safe for one Markdown table cell."""
     return " ".join(text.split()).replace("|", "\\|").replace("`", "'")
+
+
+def _rust_check_cell(plan: Plan) -> str:
+    """The body's Rust compile check result; `open` publishes only these two
+    (a failure's cargo output, with this machine's paths, never reaches it)."""
+    if plan.rust_check == "passed":
+        return f"passed at `{plan.head}`, run by `build`"
+    if plan.rust_check == "not needed":
+        return f"not needed, the batch changes nothing under `{RUST_CHECK_DIR}/`"
+    return "<run by `build`>"
 
 
 def body(plan: Plan, suite: str | None = None, harness: str | None = None) -> str:
@@ -668,6 +752,8 @@ def body(plan: Plan, suite: str | None = None, harness: str | None = None) -> st
         f"- Local full suite: {suite or '<filled in by `open`>'}",
         f"- Rust harness Python tests (`{RUST_HARNESS_COMMAND}`, which the full "
         f"suite does not collect): {harness or '<filled in by `open`>'}",
+        f"- Rust compile check (`{RUST_CHECK_COMMAND}` in `{RUST_CHECK_DIR}/`, which "
+        f"neither run above compiles): {_rust_check_cell(plan)}",
         "- CI: this pull request's run is the combined check of its members, "
         "and their first full one: a pull request from any branch but "
         "`integrate/*` runs only the fast lanes.",
@@ -732,12 +818,28 @@ def build(args: argparse.Namespace) -> int:
         _report_drops(plan, None, args.dry_run)
         return 0
     if args.dry_run:
-        print(f"\nwould build {plan.branch}, then after the suite open:\n"
+        rust = (f"would run `{RUST_CHECK_COMMAND}` in {RUST_CHECK_DIR}/ on the batch head"
+                if _touches_rust(base_sha, plan.head) else
+                f"no Rust compile check: the batch changes nothing under {RUST_CHECK_DIR}/")
+        print(f"\n{rust}\nwould build {plan.branch}, then after the suite open:\n"
               f"  {plan.title}\n\n{body(plan)}")
         _report_drops(plan, None, True)
         return 0
+    # After the census, on the branch it leaves: a failure drops nothing and
+    # keeps the branch for bisecting, and `open` refuses the plan.
+    plan.rust_check, errors = _rust_check(plan)
     plan.save()
-    print(f"\nbuilt {plan.branch} at {plan.head[:12]}; nothing is pushed, so no CI "
+    if plan.rust_check not in RUST_CHECK_OK:
+        if errors:
+            print(errors, file=sys.stderr)
+        print(f"\nbuilt {plan.branch} at {plan.head[:12]}, and nothing is pushed.\n"
+              f"integrate: {_rust_check_refusal(plan)}. Skip the suite on this head.",
+              file=sys.stderr)
+        return 1
+    rust = (f"passed at {plan.head[:8]}" if plan.rust_check == "passed" else
+            f"not needed, nothing under {RUST_CHECK_DIR}/ changed")
+    print(f"\nRust compile check (`{RUST_CHECK_COMMAND}` in {RUST_CHECK_DIR}/): {rust}.")
+    print(f"built {plan.branch} at {plan.head[:12]}; nothing is pushed, so no CI "
           "has started. Next, on this checkout:\n"
           "  1. PSEUDOLIFE_SUITE_WHERE=local pwsh ops/remote-suite.ps1   "
           "(the local WSL full suite; writes ~/.pseudolife-mcp/suite-results/*.json)\n"
@@ -839,6 +941,8 @@ def open_(args: argparse.Namespace) -> int:
     if head != plan.head:
         raise Refusal(f"{branch} moved from {plan.head[:12]} to {head[:12]} after "
                       "build; nothing is fixed inside a batch, so rebuild it")
+    if plan.rust_check not in RUST_CHECK_OK:
+        raise Refusal(_rust_check_refusal(plan))
     open_prs = _open_batches()
     others = [(n, name) for n, name, _, _ in open_prs if name != plan.branch]
     if others:
