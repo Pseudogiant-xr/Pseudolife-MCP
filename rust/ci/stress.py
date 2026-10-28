@@ -66,11 +66,13 @@ STATIC_PREFIXES = ("body-", "security-", "static-")
 # These need the debug build's loopback-bind override, which only the rust
 # job builds, and a stress loop runs no rust job.
 REMOTE_BIND = {"trust-bind", "security-remote-open", "security-remote-auth"}
-# A cargo item: package and integration test binary, optionally one test by
-# its libtest path (module::test).
-CARGO = re.compile(r"cargo:([a-z0-9][a-z0-9_-]{0,63})/([a-z0-9][a-z0-9_-]{0,63})"
+# A cargo item: package and test binary, optionally one test by its libtest
+# path (module::test). The binary is an integration test, or bin/<name> for a
+# binary target's unit tests (a binary crate has no library for an
+# integration test to import), named as nextest's binary id names it.
+CARGO = re.compile(r"cargo:([a-z0-9][a-z0-9_-]{0,63})/((?:bin/)?[a-z0-9][a-z0-9_-]{0,63})"
                    r"(?:::([A-Za-z_][A-Za-z0-9_]*(?:::[A-Za-z_][A-Za-z0-9_]*)*))?")
-CARGO_FORM = "cargo:<package>/<test binary>[::<test>]"
+CARGO_FORM = "cargo:<package>/[bin/]<test binary>[::<test>]"
 # The Rust workspace; nextest reads rust/.config/nextest.toml from it.
 WORKSPACE = Path("rust")
 
@@ -104,7 +106,8 @@ def parse(selection: str) -> tuple[str, list[str]]:
 
 
 def cargo_item(name: str) -> tuple[str, str, str | None]:
-    """A parsed cargo item's (package, test binary, test or None)."""
+    """A parsed cargo item's (package, test binary, test or None); a binary
+    target's test binary keeps its bin/ prefix, as in nextest's binary id."""
     package, _, rest = name.partition("/")
     binary, _, test = rest.partition("::")
     return package, binary, test or None
@@ -131,7 +134,8 @@ def archive_command(names: list[str], archive: Path) -> list[str]:
     for package in dict.fromkeys(package for package, _, _ in items):
         argv += ["-p", package]
     for binary in dict.fromkeys(binary for _, binary, _ in items):
-        argv += ["--test", binary]
+        target, _, name = binary.rpartition("/")
+        argv += ["--bin" if target == "bin" else "--test", name]
     return argv + ["-E", filterset(names, binaries_only=True), "--archive-file", str(archive)]
 
 
