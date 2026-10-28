@@ -1,0 +1,3 @@
+| Item | Python | Rust | Why / owner |
+|---|---|---|---|
+| **DOC-WINDOWS-DEVICES:** a Windows device name (`NUL`, `CON`) or another non-directory special file on Windows | `exists()` is true and `stat` says what it is: `not_a_regular_file: NUL is a character device` (or `a FIFO` for a named pipe) | `NUL` and `CON` fail Rust's `metadata` (os error 1, 87), so `exists()` raises: `internal_error`; another special file is `not_a_regular_file: … is not a regular file` (Rust's Windows metadata names no device kind) | both refuse without reading; only the text and the error class differ. Linux names every kind as Python does (macOS takes the same calls, untested) |

@@ -1,0 +1,3 @@
+| Item | Python | Rust | Owner / why |
+|---|---|---|---|
+| A read racing a relate or an alias | waits on the service lock, so it sees the call's commits all or none | the write tools hold the writer lock, but two reads of the graph do not take it (`memory_fact_get`'s entity resolution, `memory_history`'s graph load): between a relate's node mints and its edge commit, they can see a minted node without its edge (`memory_lesson_search` holds the lock) | the read slices' lock-free reads; Python commits each store call on its own too, so a crash between them leaves the same partial state on both |

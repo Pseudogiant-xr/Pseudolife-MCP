@@ -48,6 +48,9 @@ pub struct Board {
     pub(crate) store: Store,
     /// The coordination lock and the board's own connection.
     pub(crate) conn: tokio::sync::Mutex<db::Conn>,
+    /// The bank's DSN, for calls that open a connection of their own
+    /// (pairing's redemption, `principal_store.redeem`).
+    pub(crate) dsn: String,
     pub(crate) pruned_at: Mutex<Option<Instant>>,
     pub(crate) hub: hub::Hub,
     pub(crate) service: Arc<Service>,
@@ -80,7 +83,8 @@ impl Board {
                 maintainer_principals: config.maintainer_principals.clone(),
             },
             config,
-            conn: tokio::sync::Mutex::new(db::Conn::new(dsn)),
+            conn: tokio::sync::Mutex::new(db::Conn::new(dsn.clone())),
+            dsn,
             pruned_at: Mutex::new(None),
             hub: hub::Hub::default(),
             service,
