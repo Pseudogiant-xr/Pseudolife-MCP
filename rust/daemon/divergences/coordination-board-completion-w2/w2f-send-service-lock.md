@@ -1,3 +1,0 @@
-| Name | Disposition and evidence | Remaining gate |
-|---|---|---|
-| W2F-SEND-SERVICE-LOCK | On an initialized Python service a send checks readiness without the service lock (`coordination_tier_ready`) and does not probe the writer session itself. A Rust send awaits `Service::ensure_init`, which takes the service mutex on every call, so it queues behind the reaper, a sweep's pruning or an init retry as memory calls do, and runs the writer-session probe at most once a second. It waits outside the board's own lock, so other board calls are not held up. | Latency only, no other behaviour; closes with a lock-free publication of the ready service in `service.rs` (asked of B4). |
