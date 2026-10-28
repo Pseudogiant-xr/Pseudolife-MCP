@@ -183,6 +183,23 @@ def test_an_unreadable_checkout_listing_is_logged_and_the_pass_goes_on(cleanup, 
     assert not (home / ".cache" / "pip").exists()
 
 
+@pytest.mark.skipif(not hasattr(os, "getuid") or os.getuid() == 0,
+                    reason="needs POSIX permissions that bind the account (root ignores them)")
+def test_an_unreadable_runner_directory_still_lets_the_home_caches_go(cleanup, tmp_path):
+    # Probing _work inside an unsearchable runner directory raises
+    # PermissionError; the pass logs it and trims the HOME caches anyway.
+    runner, home = runner_tree(tmp_path)
+    write(home / ".cache" / "pip" / "big", 200)
+    runner.chmod(0)
+    try:
+        records = run(cleanup, "--runner", str(runner), "--home", str(home), "--log", str(tmp_path / "log"),
+                      "--floor-gb", "0", "--disk", str(tmp_path))
+    finally:
+        runner.chmod(0o755)
+    assert any(error.startswith(f"{runner / '_work'}: ") for error in records[0]["errors"])
+    assert not (home / ".cache" / "pip").exists()
+
+
 def test_a_pass_that_cannot_start_makes_its_log_directory(cleanup, tmp_path):
     log = tmp_path / "not-yet" / "log"
     assert cleanup.main(["--runner", str(tmp_path / "gone"), "--home", str(tmp_path), "--log", str(log)]) == 0

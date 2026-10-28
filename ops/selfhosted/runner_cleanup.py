@@ -214,8 +214,13 @@ def entries(directory: Path, cleanup: Pass) -> list[Path]:
 
 
 def real_directory(path: Path, cleanup: Pass) -> bool:
+    """A directory that is not a link. A missing one is quietly false; one
+    that cannot be read is logged (Path.is_dir lets PermissionError through
+    on Python 3.11, which would end the pass)."""
     try:
         info = path.lstat()
+    except FileNotFoundError:
+        return False
     except OSError as error:
         cleanup.errors.append(f"{path}: {error}")
         return False
@@ -226,7 +231,7 @@ def checkouts(work: Path, cleanup: Pass) -> list[Path]:
     """Each checkout (_work/<repo>/<repo>). The names starting with "_" (the
     job's temp directory, the actions it downloaded, the workspace mapping)
     belong to the starting job already and are never listed."""
-    if not work.is_dir():
+    if not real_directory(work, cleanup):
         return []
     found = []
     for repo in entries(work, cleanup):
@@ -245,7 +250,7 @@ def runner_pass(runner: Path, home: Path, cleanup: Pass, now: float) -> None:
             for entry in entries(checkout, cleanup):
                 cleanup.remove(entry, "checkout over its cap", checkout)
     diag = runner / "_diag"
-    for entry in files(diag) if diag.is_dir() else []:
+    for entry in files(diag) if real_directory(diag, cleanup) else []:
         if age_days(entry, now) > DIAG_DAYS:
             cleanup.remove(entry, f"diagnostic log older than {DIAG_DAYS} days", diag)
     for relative, gb in HOME_CACHES.items():
@@ -320,7 +325,7 @@ def shared_pass(cleanup: Pass, now: float, temp: Path, extra: dict) -> None:
     # which only a POSIX owner check can tell apart: Windows skips this part.
     if hasattr(os, "getuid"):
         mine = os.getuid()
-        for entry in entries(temp, cleanup) if temp.is_dir() else []:
+        for entry in entries(temp, cleanup) if real_directory(temp, cleanup) else []:
             try:
                 owner = entry.lstat().st_uid
             except OSError:
