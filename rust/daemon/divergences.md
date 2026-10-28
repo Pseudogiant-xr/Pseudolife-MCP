@@ -149,7 +149,13 @@ binding"). What it cannot or does not reproduce:
 |---|---|---|---|
 | `version` | the package version | the crate version | free until cutover (W3-J) |
 | Release update offer in session-start briefing | newest-release offer prepended to the hook response | checker and offer formatter implemented; hook consumption awaits its handler | W2-D (hook) / W3-I (release check) |
-| `stall`, `migration_partial`, `dream_tracking_error`, `capacity_warning`, `lesson_reconciliation_required`, `persist_errors > 0` | subsystem state | never emitted | W2-E, W3-H, W3-I |
+| `stall` (with `extractor: "stalled"`), `dream_tracking_error`, `capacity_warning` | subsystem state, none touching `status` | the same keys and values, read without the service lock, in Python's order (unit-tested in `health.rs`) | closed (B4): `harness/w2e.py` `health-stall`, `health-stall-fallback`, `health-capacity`, `health-tracking-error` compare the values live, with the `health-no-stall` and `health-no-capacity-warning` mutants |
+| `capacity_warning` and `dream_tracking_error` while the clock reseed keeps failing | read from the stores once they load, before the late reseed | absent until the reseed succeeds, because the ready service reaches `/health` only then | declared (B4): `/health` is `ready: false` in that window either way |
+| `dream_tracking_error` after a rehydrate | kept until the next initialization re-reads tracking | absent until the re-read ready service's first dream call reads tracking again | declared (B4): the error belongs to the bank the stores were read from |
+| `capacity_warning` with a repeated custom band name | counts the last band's own entries | counts every entry of that name, as `memory_stats` does (its repeated-name row in this file) | declared (B4) |
+| `dream_tracking_error` before the first dream call | set at startup, when the dream's acknowledgement state is read | set at the first dream call, which is when Rust reads that state (the lazy tracking init above) | declared (B4): follows the tracking-init divergence (W3-H) |
+| `migration_partial`, `lesson_reconciliation_required` | a legacy `.pt` import stopped part-way; an uncertain lesson commit latched | never emitted: Rust has no legacy import yet and no lesson latch (both declared elsewhere in this file) | the legacy import (B9, D1); the lesson latch row below |
+| `persist_errors > 0` | counts every failed durable save | counts the dream's failed writes only, until autosave exists | B4 autosave |
 | `embedder.backend`/`dtype` | `torch` with a dtype, or `onnx` with null | `onnx`, null | backend choice, not a contract |
 | `memory` byte counts | live | live (same reader); compared by `source` only | values are process-specific |
 
