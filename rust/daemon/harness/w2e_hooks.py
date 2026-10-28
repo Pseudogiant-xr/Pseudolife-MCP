@@ -540,8 +540,22 @@ def register(h) -> dict[str, dict]:
                 briefing(""),
                 briefing("max_unsure=1&max_lessons=-1&max_world=0"),
                 briefing("max_unsure=abc&max_lessons=&max_world=+2"),
+                # Python's ints are unbounded: past i64 a cap keeps
+                # everything (or nothing), and Unicode digits read as digits.
+                briefing("max_lessons=99999999999999999999&max_world=-99999999999999999999"
+                         "&max_unsure=-99999999999999999999"),
+                briefing("max_lessons=%D9%A1&max_world=%EF%BC%92&max_unsure=1_0"),
                 briefing("", headers=[("X-PL-Session", "peer-a")]),
             ],
+        },
+        # Coordination off: no coordination key and no peers section.
+        "cli-briefing-no-coordination": {
+            "config": START_CONFIG + "coordination:\n  enabled: false\n",
+            "seed": [
+                seed_start("peer-c"),
+                h.store("Peer C is working.", [h.sess("peer-c")]),
+            ],
+            "ops": [briefing("")],
         },
         # A cold bank and the A/B arms: sess-a gets compact (policy and
         # onboarding), sess-b full_separate_hook (onboarding only), sess-c

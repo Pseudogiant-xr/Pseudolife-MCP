@@ -37,13 +37,16 @@ fn raised(e: impl std::fmt::Display) -> Response {
     json_response(500, &json!({"error": e.to_string()}))
 }
 
-/// `_i(q, key, default)`: `int()` of the value, the default when it is
-/// absent, empty or not an integer.
+/// `_i(q, key, default)`: `int()` of the value (Unicode digits and
+/// underscores as Python reads them), the default when it is absent, empty
+/// or not an integer. Python's ints are unbounded, so a cap past `i64`
+/// saturates: as a slice bound it keeps everything, or nothing.
 fn query_int(req: &Request<'_>, key: &str, default: i64) -> i64 {
     req.params
         .get(key)
         .filter(|v| !v.is_empty())
-        .and_then(|v| crate::read::search_route::py_int(v))
+        .and_then(|v| crate::dream::extractor::py_int_str(v))
+        .map(|n| n.clamp(i128::from(i64::MIN), i128::from(i64::MAX)) as i64)
         .unwrap_or(default)
 }
 
@@ -72,6 +75,8 @@ async fn briefing(req: &mut Request<'_>) -> Response {
     let coordination =
         if app.board.config.enabled && !crate::mutants::active("briefing-route-no-coordination") {
             let session = last_header(req, "x-pl-session");
+            // `awareness` refuses only a limit below 1, and this route passes
+            // none, as Python's call can raise only for that.
             match crate::board::mcp::awareness(app, req.headers, session.as_deref(), None).await {
                 Ok(v) => Some(v),
                 Err(e) => return refused(e),
