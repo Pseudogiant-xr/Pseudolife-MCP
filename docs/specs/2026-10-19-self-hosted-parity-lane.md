@@ -616,9 +616,33 @@ site-packages, which the seeded interpreter loads, and its PowerShell
 profile, which the `pwsh` shell loads. So a job can still leave code that
 the next job runs, as on any persistent runner. This is why the lane runs
 only code from people with write access ("Never fork code"). The cleanup
-hook runs its Python
-with `-I`, so that code never runs in the hook. Shards created after the
-fix ran past setup-python in the same run.
+hook runs its Python with `-I`, so that code never runs in the hook.
+Shards created after the fix ran past setup-python in the same run.
+
+**The judges' oracle daemon.** In that run, three of the four Windows
+shards created after the tool-cache fix passed: w1c-pairing, h5-w1a and
+h5-graph-mutants. The fourth, judges, failed with "disposable daemon
+exited during startup" and nothing more, because the daemon's log is
+removed with its temporary directory. The Linux side passed 16 of 17
+shards; the 17th, w1c-connection, is the harness fix in #1022.
+
+The cause was reproduced on the VM as the runner account.
+`import mcp` needs `pywintypes`, which pywin32 makes importable only
+through `pywin32.pth`. The oracle runtime reached the shard's own venv
+through bare path lines in `phase1_dependencies.pth`, and a bare path
+does not run that directory's `.pth` files. A hosted shard installs into
+the interpreter's own site-packages, a real site directory, so it never
+failed there. #1033 fixes the runtime (`site.addsitedir`) and makes a
+parity daemon's startup error carry the end of its log. The judge then
+passed as the runner account, with 0 differences.
+
+The trial is re-run once #1033 is on master; until then the machine stays
+off the allowlist.
+
+| Trial | Run | Windows passed | Stopped by |
+| --- | --- | --- | --- |
+| 1 | 40705118218 | 0 of 17 | the gate: PATH missing from `.env` |
+| 2 | 40748991561 | 3 of 17 | 13 at setup-python; judges at the oracle daemon (#1033) |
 
 **Yielding to reproduction work.** The VM's first job is reproducing
 Windows CI failures (CLAUDE.md "Dev machines"). Reproduction work there
