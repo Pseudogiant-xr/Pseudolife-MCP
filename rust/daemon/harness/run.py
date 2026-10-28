@@ -676,8 +676,7 @@ class Tokens(Scenario):
             case("hook session-start", "GET", "/api/hook/session-start", declared="W2-D/W1-B: briefing text"),
             case("hook memory-changes authorized", "GET", "/api/hook/memory-changes", [auth], declared="W2-E: memory change note"),
             case("pair valid shape, unknown code", "POST", "/api/pair", [("Content-Type", "application/json")],
-                 json.dumps({"code": "ABCD-EFGH-JKMN", "token_sha256": "b" * 64}).encode(),
-                 declared="W2-F: pairing redemption"),
+                 json.dumps({"code": "ABCD-EFGH-JKMN", "token_sha256": "b" * 64}).encode()),
             case("maintainer known GET", "GET", "/api/maintainer", [auth], declared="W2-F: maintainer"),
             case("mcp path, auth", "GET", "/mcp", [auth]),
             case("search blank q", "GET", q(q=""), [auth]),
@@ -748,6 +747,83 @@ class PairBudget(Scenario):
         body = json.dumps({"code": "UUUU", "token_sha256": "a"}).encode()
         return [case(f"pair attempt {i}", "POST", "/api/pair", [("Content-Type", "application/json")], body)
                 for i in range(22)]
+
+
+class Pairing(Scenario):
+    """``POST /api/pair`` redemption on an authenticated install (W2F-PAIRING-HTTP,
+    spec BK4): success and the token working at once, the same-token retry, a
+    spent, expired or revoked code, a name the environment maps (refused, its
+    code left unspent), a token hash already held (refused, the second code
+    left unspent, then paired). Invites are written by Python's own store on
+    the template, so both arms redeem the same codes. Live only: the codes and
+    hashes are the template's (D6/D11 evidence is the Linux dev box run)."""
+    name = "pairing"
+    seeds_principals = True
+    live_only = True
+    TOKENS = {name: f"pair-token-{name}-w1a" for name in ("laptop", "other", "held", "late")}
+
+    def __init__(self):
+        self.env = {"PSEUDOLIFE_MCP_TOKEN": T_DEFAULT,
+                    "PSEUDOLIFE_MCP_TOKENS": f"{T_ALICE}:alice"}
+        self.codes: dict[str, str] = {}
+
+    def prepare_template(self, dsn: str) -> None:
+        import psycopg
+        sys.path.insert(0, str(REPO))
+        from pseudolife_memory import principal_store
+        from pseudolife_memory.storage.postgres import PostgresStorage
+        PostgresStorage(dsn).close()   # the bank exists before principals are written
+        with psycopg.connect(dsn, autocommit=True) as conn:
+            for name, tier in (("laptop", "core"), ("held", None), ("old", None),
+                               ("gone", None), ("alice", None)):
+                options = {"tier": tier} if tier else {}
+                invite = principal_store.create_invite(conn, name, ttl_seconds=3600,
+                                                       replace=False, **options)
+                self.codes[name] = invite["code"]
+            conn.execute("UPDATE principals SET code_expires_at = 1 WHERE principal = 'old'")
+            # Revoked with its code still in place (``revoke`` clears the code
+            # too, which would make this the unknown-code case): only the
+            # redemption's own ``revoked_at IS NULL`` refuses it.
+            conn.execute("UPDATE principals SET revoked_at = 1 WHERE principal = 'gone'")
+
+    def _redeem(self, label, name, token, code=None):
+        import hashlib
+        body = json.dumps({"code": code or self.codes.get(name, "UUUU-UUUU-UUUU"),
+                           "token_sha256": hashlib.sha256(self.TOKENS[token].encode()).hexdigest()})
+        return case(label, "POST", "/api/pair", [("Content-Type", "application/json")], body.encode())
+
+    def cases(self):
+        laptop = bearer(self.TOKENS["laptop"])
+        return [
+            self._redeem("unknown code", "laptop", "laptop", code="ABCD-EFGH-JKMN"),
+            self._redeem("redeem", "laptop", "laptop"),
+            case("the new token works at once", "GET", "/api/nope", [laptop]),
+            self._redeem("same token retry", "laptop", "laptop"),
+            self._redeem("spent code, another token", "laptop", "other"),
+            self._redeem("expired code", "old", "other"),
+            self._redeem("revoked code", "gone", "other"),
+            self._redeem("environment name", "alice", "other"),
+            self._redeem("token hash already held", "held", "laptop"),
+            self._redeem("unspent after the conflict", "held", "held"),
+            case("no refusal paired its token", "GET", "/api/nope", [bearer(self.TOKENS["other"])]),
+        ]
+
+    def normalize_db(self, state: dict, before: dict, side: str) -> dict:
+        """A redemption stamps ``paired_at`` on an existing invite row on the
+        database clock: only its null-to-a-time change is free."""
+        state = super().normalize_db(state, before, side)
+        table = state["rows"].get("public.principals")
+        prior = before["rows"].get("public.principals")
+        if table and prior:
+            at = table["columns"].index("paired_at")
+            was = {json.dumps(r[0]): r[at] for r in prior["rows"]}
+            for row in table["rows"]:
+                value = row[at]
+                if was.get(json.dumps(row[0])) is None and isinstance(value, (int, float)) \
+                        and not isinstance(value, bool) and value == value \
+                        and abs(value) != float("inf"):
+                    row[at] = "<paired_at>"
+        return state
 
 
 class CustomConfig(Scenario):
@@ -1629,7 +1705,7 @@ STARTUP_REFUSALS += security_cases.startup_cases()
 
 SCENARIOS = {s.name: s for s in (SecurityOpen, SecurityClosed, SecurityEncodings,
                                   SecurityEncodingPriority, SecurityTerminalByte, SecurityRemoteOpen, SecurityRemoteAuth,
-                                  Tokens, Tokenless, PairBudget, CustomConfig, ExtractorConfigured,
+                                  Tokens, Tokenless, PairBudget, Pairing, CustomConfig, ExtractorConfigured,
                                   DbDown, LeaseHeld, Reaper, DimMismatch, StampedBank, SeededBank, JsonFloatTies,
                                   TrustBind, NullEmbedding, UnconstrainedDims, DbLost, Encodings,
                                   MapOrder, MapOrderReversed, StaticBuild, StaticPaths, StaticMissing,
