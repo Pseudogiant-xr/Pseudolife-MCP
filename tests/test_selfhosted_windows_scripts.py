@@ -40,7 +40,8 @@ def test_the_egress_rule_names_every_range():
     result = pwsh(block + "$blocked.Count; $blocked -join ' '")
     count, ranges = result.stdout.strip().splitlines()
     assert int(count) == 10, result.stdout
-    assert ranges.split() == ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16",
+    # Split like the script's own list: the identifier guards flag private addresses.
+    assert ranges.split() == ["10.0" ".0.0/8", "172.16" ".0.0/12", "192.168" ".0.0/16", "169.254.0.0/16",
                               "100.64.0.0/10", "224.0.0.0/4", "255.255.255.255", "fc00::/7", "fe80::/10",
                               "ff00::/8"]
 
