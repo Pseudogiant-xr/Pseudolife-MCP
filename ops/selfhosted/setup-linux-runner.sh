@@ -24,8 +24,15 @@
 # - <n> runners under that account, each with its own HOME, so one job's
 #   start hook never removes another job's PostgreSQL directories;
 # - Python 3.11 in a shared tool cache, because actions/setup-python ships
-#   builds for Ubuntu only.
+#   builds for Ubuntu only;
+# - the trailing-dot name localhost. resolving to loopback, as it does on a
+#   hosted runner, because the W1-C rows reach a "remote" fixture daemon
+#   through it;
+# - bounded disk use: a cleanup pass before every job and an hourly one for
+#   what the runners share (ops/selfhosted/runner_cleanup.py).
 set -euo pipefail
+here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+[ -f "$here/runner_cleanup.py" ] || { echo "run this from a checkout: runner_cleanup.py must be beside it" >&2; exit 1; }
 
 REPO_URL=https://github.com/Pseudogiant-xr/Pseudolife-MCP
 LABEL=pseudolife-parity-linux
@@ -91,9 +98,31 @@ run_as() { env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin LANG=C.UTF-8 runuser -u "$r
 
 echo "== packages"
 apt-get update -qq
-DEBIAN_FRONTEND=noninteractive apt-get install -y -qq uidmap slirp4netns dbus-user-session acl nftables curl locales >/dev/null
+DEBIAN_FRONTEND=noninteractive apt-get install -y -qq uidmap slirp4netns dbus-user-session acl nftables curl locales \
+  libnss-myhostname python3 >/dev/null
 locales=$(locale -a)
 grep -qi '^en_US.utf8$' <<<"$locales" || { sed -i 's/^# *en_US.UTF-8/en_US.UTF-8/' /etc/locale.gen; locale-gen; }
+
+echo "== localhost. resolves to loopback"
+# The W1-C connect and pair rows reach a fixture daemon "on another machine"
+# as http://localhost.:<port>, which the resolver must answer with loopback
+# (rust/cli_harness/rows/connect.py). Hosted Ubuntu's systemd-resolved does;
+# a Debian box with "hosts: files dns" asks its public resolver, which does
+# not, and both arms fail the same way (found 2026-10-28). nss-myhostname
+# answers localhost and localhost. locally, for every account on the box.
+# Debian's package adds itself to the hosts line when it installs; a line
+# it left alone gets it after "files".
+if ! getent ahosts localhost. >/dev/null; then
+  grep -q '^hosts:' /etc/nsswitch.conf || { echo "/etc/nsswitch.conf has no hosts line" >&2; exit 1; }
+  [ -e /etc/nsswitch.conf.before-parity-runner ] || cp -p /etc/nsswitch.conf /etc/nsswitch.conf.before-parity-runner
+  grep -qE '^hosts:.*[[:space:]]myhostname([[:space:]]|$)' /etc/nsswitch.conf \
+    || sed -i -E 's/^(hosts:[[:space:]]+files)([[:space:]]|$)/\1 myhostname\2/' /etc/nsswitch.conf
+fi
+resolved=$(getent ahosts localhost. | awk '{print $1}' | sort -u | paste -sd' ' -)
+case " $resolved " in
+  *" 127.0.0.1 "*) echo "localhost. -> $resolved" ;;
+  *) echo "localhost. does not resolve to 127.0.0.1 (got: ${resolved:-nothing}); check the hosts line of /etc/nsswitch.conf" >&2; exit 1 ;;
+esac
 
 echo "== account"
 if ! id "$runner_user" >/dev/null 2>&1; then
@@ -431,13 +460,15 @@ if [ ! -f "$tarball" ]; then
 fi
 hook=$LIB/job-started.sh
 install -d -m 0755 -o root -g root "$RUNNERS"
+install -m 0644 -o root -g root "$here/runner_cleanup.py" "$LIB/runner_cleanup.py"
 cat > "$hook.part" <<'HOOK'
 #!/usr/bin/env bash
 # Remove the previous job's PostgreSQL data directories under this runner's
 # own HOME. It stops only a postgres owned by this account whose working
 # directory is the cluster's own data directory (a postmaster runs in its
 # data directory), so a reused PID belonging to another runner's cluster
-# is left alone.
+# is left alone. Then trim this runner's checkout and caches against their
+# caps (runner_cleanup.py; it never fails the job).
 set -u
 me=$(id -un)
 for dir in "$HOME"/pl-cli-lease-postgres-*/; do
@@ -453,6 +484,10 @@ for dir in "$HOME"/pl-cli-lease-postgres-*/; do
   done < <(find "$dir" -maxdepth 4 -name postmaster.pid)
   rm -rf -- "$dir"
 done
+if [ -n "${PSEUDOLIFE_PARITY_RUNNER_DIR:-}" ]; then
+  /usr/bin/python3 -I /usr/local/lib/pseudolife-parity-runner/runner_cleanup.py \
+    --runner "$PSEUDOLIFE_PARITY_RUNNER_DIR" --home "$HOME" --log "$HOME/parity-cleanup.jsonl"
+fi
 exit 0
 HOOK
 chmod 0755 "$hook.part"
@@ -489,6 +524,14 @@ HOME=$home
 PSEUDOLIFE_PARITY_LEASE=$lease
 PSEUDOLIFE_PARITY_LOCK_DIR=$runner_locks
 ACTIONS_RUNNER_HOOK_JOB_STARTED=$hook
+PSEUDOLIFE_PARITY_RUNNER_DIR=$dir
+# The tests' default bench address (127.0.0.1:5433) is where a hosted job
+# finds nothing and skips its optional real-PostgreSQL controls. Here the
+# runners share one loopback, and another job's disposable cluster can hold
+# 5433 (the eval shard failed on one, 2026-10-25/26), so the default is a
+# port nothing can listen on. A shard that starts its own cluster
+# (lease_ci.py) overrides this through GITHUB_ENV.
+PSEUDOLIFE_TEST_PG_HOST_PORT=127.0.0.1:9
 AGENT_TOOLSDIRECTORY=$toolcache
 RUNNER_TOOL_CACHE=$toolcache
 DOCKER_HOST=unix:///run/user/$runner_uid/docker.sock
@@ -540,6 +583,46 @@ UNIT
     echo "runner $prefix-$index: unchanged"
   fi
 done
+
+echo "== disk cleanup for what the runners share"
+# Hourly, as the account and only with the egress table loaded, like every
+# other process of the account: its rootless Docker (the pinned image
+# spared), its old entries in /tmp, and uv's cache. Each pass appends one
+# JSON line to the log; journalctl -u pseudolife-parity-cleanup shows the
+# summary line.
+cat > /etc/systemd/system/pseudolife-parity-cleanup.service <<UNIT
+[Unit]
+Description=Trim the parity runner account's shared caches (runner_cleanup.py)
+After=pseudolife-runner-egress.service user@$runner_uid.service
+BindsTo=pseudolife-runner-egress.service
+
+[Service]
+Type=oneshot
+ExecStartPre=+/usr/sbin/nft list table inet pseudolife_runner_egress
+User=$runner_user
+Environment=HOME=$runner_home XDG_RUNTIME_DIR=/run/user/$runner_uid DOCKER_HOST=unix:///run/user/$runner_uid/docker.sock
+Environment=PATH=$runner_home/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/usr/bin/python3 -I $LIB/runner_cleanup.py --shared --disk $RUNNERS --temp /tmp --log $runner_home/parity-cleanup.jsonl
+Nice=10
+IOSchedulingClass=idle
+UNIT
+cat > /etc/systemd/system/pseudolife-parity-cleanup.timer <<UNIT
+[Unit]
+Description=Hourly trim of the parity runner account's shared caches
+
+[Timer]
+OnCalendar=hourly
+RandomizedDelaySec=5min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+UNIT
+systemctl daemon-reload
+systemctl enable --now pseudolife-parity-cleanup.timer >/dev/null 2>&1
+systemctl start pseudolife-parity-cleanup.service
+journalctl -u pseudolife-parity-cleanup.service -n 1 -o cat --no-pager
+
 if [ ${#missing[@]} -gt 0 ]; then
   echo "not registered yet: ${missing[*]}; rerun with RUNNER_TOKEN set"
 fi

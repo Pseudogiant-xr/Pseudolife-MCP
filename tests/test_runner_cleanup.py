@@ -1,0 +1,179 @@
+"""ops/selfhosted/runner_cleanup.py: what the parity runners' disk cleanup
+removes, what it never touches, and that it logs every pass."""
+
+from __future__ import annotations
+
+import importlib.util
+import json
+import os
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+import pytest
+
+SCRIPT = Path(__file__).resolve().parent.parent / "ops" / "selfhosted" / "runner_cleanup.py"
+
+
+@pytest.fixture
+def cleanup(monkeypatch):
+    spec = importlib.util.spec_from_file_location("runner_cleanup", SCRIPT)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    # Caps in bytes rather than gigabytes, so a few small files exceed them.
+    monkeypatch.setattr(module, "GB", 1)
+    monkeypatch.setattr(module, "HOME_CACHES", {".cache/pip": 100, ".rustup": 100})
+    monkeypatch.setattr(module, "WORK_CAP_GB", 100)
+    return module
+
+
+def write(path: Path, size: int = 10, age_days: float = 0) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"x" * size)
+    if age_days:
+        then = time.time() - age_days * 86400
+        os.utime(path, (then, then))
+    return path
+
+
+def runner_tree(tmp_path: Path) -> tuple[Path, Path]:
+    runner, home = tmp_path / "runners" / "1", tmp_path / "homes" / "1"
+    write(runner / "_work" / "Repo" / "Repo" / "src" / "a.py")
+    write(runner / "_work" / "_temp" / "_runner_file_commands" / "set_env")
+    write(runner / "_work" / "_actions" / "actions" / "checkout" / "index.js")
+    write(runner / "_diag" / "Worker_new.log")
+    write(runner / "_diag" / "Worker_old.log", age_days=30)
+    write(home / ".cache" / "pip" / "wheel")
+    write(home / ".rustup" / "toolchains" / "rustc")
+    return runner, home
+
+
+def run(cleanup, *argv) -> list[dict]:
+    log = Path(argv[argv.index("--log") + 1])
+    assert cleanup.main(list(argv)) == 0
+    return [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
+
+
+def test_a_runner_under_its_caps_loses_only_old_diagnostic_logs(cleanup, tmp_path):
+    runner, home = runner_tree(tmp_path)
+    log = tmp_path / "cleanup.jsonl"
+    records = run(cleanup, "--runner", str(runner), "--home", str(home), "--log", str(log), "--floor-gb", "0")
+    assert [Path(item["path"]).name for item in records[0]["removed"]] == ["Worker_old.log"]
+    assert (runner / "_diag" / "Worker_new.log").exists()
+    assert (home / ".cache" / "pip" / "wheel").exists()
+    assert (runner / "_work" / "Repo" / "Repo" / "src" / "a.py").exists()
+    assert records[0]["mode"] == "runner 1" and not records[0]["aggressive"]
+
+
+def test_a_cache_over_its_cap_is_removed_whole_and_only_it(cleanup, tmp_path):
+    runner, home = runner_tree(tmp_path)
+    write(home / ".cache" / "pip" / "big", 200)
+    run(cleanup, "--runner", str(runner), "--home", str(home), "--log", str(tmp_path / "log"), "--floor-gb", "0")
+    assert not (home / ".cache" / "pip").exists()
+    assert (home / ".rustup" / "toolchains" / "rustc").exists()
+
+
+def test_an_oversized_work_directory_keeps_what_the_starting_job_already_uses(cleanup, tmp_path):
+    runner, home = runner_tree(tmp_path)
+    write(runner / "_work" / "Repo" / "Repo" / "rust" / "target" / "big", 200)
+    run(cleanup, "--runner", str(runner), "--home", str(home), "--log", str(tmp_path / "log"), "--floor-gb", "0")
+    checkout = runner / "_work" / "Repo" / "Repo"
+    # The checkout's contents go; the directory the first step runs in stays.
+    assert checkout.is_dir() and not any(checkout.iterdir())
+    assert (runner / "_work" / "_temp" / "_runner_file_commands" / "set_env").exists()
+    assert (runner / "_work" / "_actions" / "actions" / "checkout" / "index.js").exists()
+
+
+def test_below_the_floor_every_cap_is_zero(cleanup, tmp_path):
+    runner, home = runner_tree(tmp_path)
+    records = run(cleanup, "--runner", str(runner), "--home", str(home), "--log", str(tmp_path / "log"),
+                  "--floor-gb", str(10 ** 18))
+    assert records[0]["aggressive"]
+    assert not (home / ".cache" / "pip").exists() and not (home / ".rustup").exists()
+    assert not any((runner / "_work" / "Repo" / "Repo").iterdir())
+    assert (runner / "_work" / "_temp" / "_runner_file_commands" / "set_env").exists()
+
+
+def test_a_dry_run_reports_and_removes_nothing(cleanup, tmp_path):
+    runner, home = runner_tree(tmp_path)
+    records = run(cleanup, "--runner", str(runner), "--home", str(home), "--log", str(tmp_path / "log"),
+                  "--floor-gb", str(10 ** 18), "--dry-run")
+    assert records[0]["dry_run"] and len(records[0]["removed"]) >= 4
+    assert all(Path(item["path"]).exists() for item in records[0]["removed"])
+
+
+@pytest.mark.skipif(os.name == "nt", reason="symlinks need a privilege on Windows")
+def test_a_planted_link_never_redirects_a_removal(cleanup, tmp_path):
+    runner, home = runner_tree(tmp_path)
+    outside = write(tmp_path / "elsewhere" / "pip" / "precious", 200)
+    (home / ".cache" / "pip" / "wheel").unlink()
+    (home / ".cache" / "pip").rmdir()
+    (home / ".cache").rmdir()
+    (home / ".cache").symlink_to(tmp_path / "elsewhere")
+    records = run(cleanup, "--runner", str(runner), "--home", str(home), "--log", str(tmp_path / "log"), "--floor-gb", "0")
+    assert outside.exists()
+    assert any("is not under" in error for error in records[0]["errors"])
+
+
+def test_every_pass_is_logged_and_the_log_rotates(cleanup, tmp_path, monkeypatch, capsys):
+    runner, home = runner_tree(tmp_path)
+    log = tmp_path / "cleanup.jsonl"
+    monkeypatch.setattr(cleanup, "LOG_LIMIT", 10)
+    run(cleanup, "--runner", str(runner), "--home", str(home), "--log", str(log), "--floor-gb", "0")
+    run(cleanup, "--runner", str(runner), "--home", str(home), "--log", str(log), "--floor-gb", "0")
+    assert log.with_name("cleanup.jsonl.1").exists()
+    assert len(log.read_text(encoding="utf-8").splitlines()) == 1
+    assert capsys.readouterr().out.count("runner_cleanup runner 1: freed") == 2
+
+
+def test_a_failure_never_fails_the_job(cleanup, tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(cleanup, "runner_pass", lambda *args: 1 / 0)
+    assert cleanup.main(["--runner", str(tmp_path), "--home", str(tmp_path)]) == 0
+    assert "ZeroDivisionError" in capsys.readouterr().err
+
+
+@pytest.mark.skipif(not hasattr(os, "getuid"), reason="the shared temp pass is Linux only")
+def test_the_shared_pass_removes_only_the_accounts_old_temp_entries(cleanup, tmp_path, monkeypatch):
+    temp = tmp_path / "tmp"
+    old = write(temp / "pl-cf-testlogin-1" / "x", age_days=2)
+    old.parent.touch()
+    os.utime(old.parent, (time.time() - 2 * 86400,) * 2)
+    new = write(temp / "pl-cf-testlogin-2" / "x")
+    monkeypatch.setattr(cleanup.shutil, "which", lambda name: None)
+    run(cleanup, "--shared", "--temp", str(temp), "--disk", str(tmp_path), "--log", str(tmp_path / "log"), "--floor-gb", "0")
+    assert not old.parent.exists() and new.exists()
+
+
+def docker_stub(cleanup, monkeypatch, images: list[str]) -> list[tuple[str, ...]]:
+    calls: list[tuple[str, ...]] = []
+
+    def docker(*args):
+        calls.append(args)
+        out = "\n".join(images) if args[:2] == ("image", "ls") else "Images 1GB"
+        return subprocess.CompletedProcess(args, 0, out, "")
+
+    monkeypatch.setattr(cleanup, "docker", docker)
+    monkeypatch.setattr(cleanup.shutil, "which", lambda name: "docker" if name == "docker" else None)
+    return calls
+
+
+@pytest.mark.parametrize("floor, removed", [("0", ["old1"]), (str(10 ** 18), ["new1", "old1"])])
+def test_docker_spares_the_pinned_image(cleanup, tmp_path, monkeypatch, floor, removed):
+    stamp = lambda days: time.strftime("%Y-%m-%d %H:%M:%S +0000 UTC", time.gmtime(time.time() - days * 86400))
+    calls = docker_stub(cleanup, monkeypatch, [
+        f"pin1 pseudolife-pg:18 {stamp(30)}", f"old1 pgvector/pgvector:pg18 {stamp(30)}",
+        f"new1 other:latest {stamp(1)}"])
+    run(cleanup, "--shared", "--temp", str(tmp_path / "none"), "--disk", str(tmp_path),
+        "--log", str(tmp_path / "log"), "--floor-gb", floor)
+    assert sorted(call[2] for call in calls if call[:2] == ("image", "rm")) == removed
+    prunes = [call for call in calls if call[:2] == ("builder", "prune")]
+    assert all("--all" in call for call in prunes) and len(prunes) == 2
+
+
+def test_the_script_runs_standalone_with_the_standard_library(tmp_path):
+    runner, home = runner_tree(tmp_path)
+    result = subprocess.run([sys.executable, "-I", str(SCRIPT), "--runner", str(runner), "--home", str(home),
+                             "--log", str(tmp_path / "log"), "--dry-run"], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.startswith("runner_cleanup runner 1: would free")

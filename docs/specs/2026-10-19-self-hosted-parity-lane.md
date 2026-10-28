@@ -7,6 +7,11 @@ dev box: three runners, rootless Docker, no LAN access, and a watcher that
 keeps the repository variable on the online runners. The Windows dev VM
 has no runner; its shards stay on hosted runners.
 
+On 2026-10-28 the first week's failures were traced to the box, not the
+code under test, and fixed ("The first week's failures"); the lane's disk
+use got caps and a logged cleanup ("Disk use"). The comparison week
+restarts from the first clean nightly after those fixes (Rollout).
+
 ## Problem
 
 The Rust workflow's parity shards wait a long time for hosted runners. Most
@@ -119,8 +124,7 @@ per machine, and no saturating work beside one). The gate step:
 2. Requires the machine's own `pseudolife-mcp` on the runner's `PATH`. The
    machine's installed release decides, not the code under test, and it
    answers before any checkout or install.
-3. Fails if the work drive has under 8 GB free (CLAUDE.md "Disk space").
-4. Runs `pseudolife-mcp lease check --json <lease>`, with
+3. Runs `pseudolife-mcp lease check --json <lease>`, with
    `PSEUDOLIFE_SUITE_LEASE` and `PSEUDOLIFE_SUITE_LOCK_DIR` set for that
    one process only. The shard's tests never see them.
    - Exit 0 (free): run the shard.
@@ -136,11 +140,19 @@ The runner holds no board credential, so the check reads the OS lock
 alone. That is the lease's own truth for a process-held suite: the board
 mirror only reflects it.
 
-`rust/ci/test_workflow.py` runs the gate script under `pwsh` with a stub
-CLI. It covers free, held-then-free, yield, check failure, missing lock
-file, the Windows host's bare `full-suite` lease, missing lock directory,
-missing CLI and low disk. Each guard was disabled once and its test was
-seen to fail.
+A step before it, *Check the runner's free disk*, fails the job when the
+work drive has under 8 GB free (CLAUDE.md "Disk space"), names the floor
+and this spec's "Disk use", and writes the free figure into the job
+summary on every shard. Until 2026-10-28 the check sat inside the gate, so
+a full disk failed a step called "Yield to this machine's full suite": all
+14 such failures of the 2026-10-27 nightly were the disk floor, with 6 GB
+free.
+
+`rust/ci/test_workflow.py` runs both scripts under `pwsh`, the gate with a
+stub CLI. It covers free, held-then-free, yield, check failure, missing
+lock file, the Windows host's bare `full-suite` lease, missing lock
+directory, missing CLI, and the disk step's pass and refusal. Each guard
+was disabled once and its test was seen to fail.
 
 What the gate does not cover, by design:
 
@@ -336,6 +348,31 @@ What it adds to the manual procedure:
   `actions/setup-python` ships builds for Ubuntu only, so the script copies
   a standalone CPython 3.11 build from `uv` into the cache layout
   `setup-python` looks up first.
+- **`localhost.` resolves to loopback** (added 2026-10-28). The W1-C
+  connect and pair rows reach their "remote" fixture daemon as
+  `http://localhost.:<port>`. The trailing dot makes the candidate treat
+  the URL as another machine, and the resolver must still answer with
+  loopback. Hosted Ubuntu's systemd-resolved does. A Debian box with
+  `hosts: files dns` asks its public resolver instead, which does not. The
+  script installs `libnss-myhostname` and adds `myhostname` after `files`
+  on the `hosts` line of `/etc/nsswitch.conf`, keeping the original as
+  `nsswitch.conf.before-parity-runner`. It refuses unless
+  `getent ahosts localhost.` then answers 127.0.0.1. This changes name
+  lookup for every account on the box, but only for `localhost`, the box's
+  own name and `_gateway`.
+- **A private default test-PostgreSQL address per runner** (added
+  2026-10-28). Tests that find no `PSEUDOLIFE_TEST_PG_HOST_PORT` probe
+  `127.0.0.1:5433`. On a hosted runner nothing answers there, and the eval
+  shard's optional real-PostgreSQL controls skip. Three runners share the
+  box's loopback, and a W1-C shard's disposable cluster can take 5433, so
+  the eval shard met another job's server and failed on its password. Each
+  runner's `.env` sets `PSEUDOLIFE_TEST_PG_HOST_PORT=127.0.0.1:9`, a port
+  an unprivileged account cannot listen on. A shard that starts its own
+  cluster (`lease_ci.py`) still overrides it through `GITHUB_ENV`.
+- **Bounded disk use** (added 2026-10-28; see "Disk use" below). The
+  job-started hook ends with a cleanup pass for its runner, and an hourly
+  timer runs one for what the runners share. The script installs
+  `runner_cleanup.py` beside the hook, so run it from a checkout.
 
 Verified on the box on 2026-10-24 as `<runner-user>`: the hypervisor's
 address and a Tailscale address were refused, from the account and from a
@@ -344,6 +381,76 @@ unreadable and its lock directory readable; `lease check` read the lock as
 free; the root engine's images were not visible. The three runners came
 online. Untested until the first nightly: the shards themselves on this
 box (glibc, the tool-cache Python, `docker build` under rootless Docker).
+
+## The first week's failures (2026-10-25 to 2026-10-27)
+
+Over the three nightlies, hosted runners passed 59 of 59 shards and the
+self-hosted lane passed 27 of 51 (11, 13 and 3 of 17). Every failure traced
+to the box, none to the code under test:
+
+| Shards | Failed step | Cause | Fix |
+|---|---|---|---|
+| 14 on 10-27, 2 on 10-25 | Yield to this machine's full suite | The 8 GB disk floor. The old 130 GB disk had 6–7 GB free; the suite user's files held about 90 GB of it | On 2026-10-28 the box moved to a 200 GB NVMe volume (72 GB free). The disk check is now its own step, and the lane's own use is capped ("Disk use") |
+| `w1c-connect`, `w1c-pairing`, every night | CLI W1-C differential harness | `localhost.` did not resolve on the box, so neither arm reached the "remote" fixture daemon. The live pass matched only because both arms failed alike (those cases took 1.5 s, against 2.0 s for the others). The golden replay runs Rust alone, so it showed the failure | nss-myhostname (setup script) |
+| `w1c-connection`, every night | CLI W1-C differential harness | The pg0 bundle's libxml2 needs the bundled ICU (`libicuuc.so.70`) and has no RUNPATH. pg0 puts the bundle's `lib` on `LD_LIBRARY_PATH` for its own servers, but the test-login row ran `initdb` directly, and Debian 13 ships ICU 76. The output went to DEVNULL, so the log said only "exit status 1" | `rust/cli_harness/rows/_cluster.py` runs the bundle's programs with that loader path and reports a failed `initdb`'s error output |
+| `eval`, 10-25 and 10-26 | Run every eval harness test | Six real-PostgreSQL controls probed the default `127.0.0.1:5433`. A concurrent W1-C shard's disposable cluster listened there (its `lease_ci.py` got 5433), and the controls failed on its password. The shard passed on 10-27, when every other shard stopped at the disk floor before starting a cluster | A per-runner default address that nothing listens on (setup script) |
+
+Reproduced on the box as the runner account on 2026-10-28:
+
+- `getent` and Python's `getaddrinfo` both failed on `localhost.`.
+- `initdb` failed with `libicuuc.so.70: cannot open shared object file`,
+  and succeeded with the bundle's `lib` on `LD_LIBRARY_PATH`.
+
+## Disk use
+
+The box's disk is shared with the suite user, so the lane's own use has
+caps rather than only the 8 GB floor. `ops/selfhosted/runner_cleanup.py`
+does the trimming:
+
+- It runs as the runner account, never root. Every path it touches is the
+  account's own, so a link a job planted cannot redirect a removal.
+- It checks that each path lies under the directory it was meant for, and
+  never follows a link.
+- It removes only what the next job rebuilds or downloads again. A cache
+  over its cap is removed whole.
+
+| What | Cap | When |
+|---|---|---|
+| A runner's checkout (`_work/<repo>/<repo>`), contents only | 4 GB for the runner's `_work` | Before each of that runner's jobs |
+| A runner's `_diag` logs | Older than 14 days | Before each job |
+| A runner's pip, Hugging Face, uv, cargo registry and cargo git caches, and rustup | 2, 3, 3, 2, 1 and 2 GB | Before each job |
+| The account's rootless Docker | Exited containers after 24 h; images other than `pseudolife-pg:18` after 7 days; build cache after 7 days and above 3 GB | Hourly |
+| The account's own entries in `/tmp` | Older than 1 day | Hourly |
+| uv's cache | `uv cache prune` | Hourly |
+
+With under 25 GB free on the work drive, every cap counts as zero. Three
+runners at their caps plus the shared caches come to about 50 GB of the
+box's 200 GB.
+
+The before-job pass runs at the end of the job-started hook. By then the
+runner has made the job's temp directory and downloaded its actions, so
+the pass leaves every name starting with `_` alone. It empties the
+checkout but keeps the directory, because the first step runs there.
+
+Each pass appends one JSON line to `parity-cleanup.jsonl`: free space
+before and after, each path removed with its size and reason, and any
+errors. The before-job pass writes to that runner's HOME, the hourly pass
+to the account's HOME. The file rotates at 1 MB, and
+`journalctl -u pseudolife-parity-cleanup` shows the hourly summary. A
+failed removal is logged and never fails the job.
+
+Measured on 2026-10-28, before the first pass: a 196 GB volume, 115 GB
+used, 72 GB free. The runner account held about 16 GB: checkouts of
+0.8–1.1 GB, pip 0.5 GB and rustup 0.6 GB per runner, Hugging Face 1.2 GB on
+one runner, a 5.8 GB uv tool environment, 0.7 GB of Docker image and
+0.7 GB of build cache. Everything was under its cap, so the first passes
+removed nothing. The suite user's files (about 90 GB) are outside the
+lane's caps and reach.
+
+Freed blocks return to the hypervisor's thin pool through its daily
+`pct fstrim` of every running container. On 2026-10-28 the box's volume
+moved to the NVMe thin pool, then 16% full, so the 82% overcommit noted on
+2026-10-24 no longer applies.
 
 ## The watcher (decision 11)
 
@@ -669,6 +776,23 @@ Still open: 5, 6, 8, 9 and 10. The original options follow.
     remove the cold-build bias from the comparison. Not in the first PR:
     harness steps read `rust/target` paths directly, so it needs its own
     check.
+
+    Measured on 2026-10-28: no parity shard compiles, hosted or
+    self-hosted, so there is no cold build to warm.
+    - The 17 self-hosted shard logs of the 2026-10-26 nightly hold no
+      cargo build.
+    - Schema and startup parity run with `--no-build` on the fixtures job's
+      binaries, and the W2-D checks take under a second.
+    - `which_comparison.py` has no caller.
+    - The eval and cli shards' toolchain and cache steps take 8 seconds at
+      most.
+
+    The lane's longer wall time comes from running 17 shards on 3 runners,
+    and from artifact downloads: 213 s on the box against 29 s hosted,
+    summed over the shards. A persistent target would also keep a finished
+    job's `$CARGO_TARGET_DIR/mutant-src` (`rust/cli_harness/mutants.py`) for
+    the next job to find. Recommended: settle as "not needed until a shard
+    compiles".
 11. **Offline-machine handling**: accept that an offline listed runner
     turns nightlies "cancelled" until it is taken out of the variable (as
     designed), or ask for a watcher that does that automatically.
