@@ -344,11 +344,8 @@ def evaluate_worktree(repo: str, wt: Worktree, *, grace_days: float | None,
         v.failure = f"merge check failed: {anc.stderr.strip()}"
         return v
     v.passed.append("merged")
-    problem = status_problem(path)
-    if problem:
-        v.failure = problem
-        return v
-    v.passed.append("clean")
+    # Links before status: git also lists an untracked symlink as a change,
+    # and the link is the reason that matters (a followed link loses data).
     s = scan(path, skip_mtime=whitelisted)
     v.bytes = s.bytes
     v.newest = max(s.newest, admin_newest)
@@ -359,6 +356,11 @@ def evaluate_worktree(repo: str, wt: Worktree, *, grace_days: float | None,
         v.failure = f"reparse point or symlink: {s.links[0]}"
         return v
     v.passed.append("no-reparse-points")
+    problem = status_problem(path)
+    if problem:
+        v.failure = problem
+        return v
+    v.passed.append("clean")
     if grace_days is None:
         v.passed.append("grace-skipped-owner")
     elif now - v.newest < grace_days * DAY:

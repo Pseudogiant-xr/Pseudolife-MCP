@@ -65,16 +65,18 @@ just before the removal.
    for detached HEADs. A HEAD with commits not on master is never removed,
    even if its branch is pushed. If the fetch fails, the whole run is
    refused rather than trusting stale refs.
-2. **Clean.** `git status --porcelain --ignored=matching` shows no tracked
+2. **No links.** Nothing under the tree is a symlink or reparse point
+   (Windows junctions included), found by an lstat walk that never follows
+   a link. `git worktree remove --force` once followed a junction and
+   deleted the data behind it. This runs before the status check, because
+   git also lists an untracked symlink as a change and the link is the
+   reason that matters.
+3. **Clean.** `git status --porcelain --ignored=matching` shows no tracked
    or untracked change. Every ignored path is a known cache:
    `__pycache__/`, `.pytest_cache/`, `rust/target/`, `*.egg-info/`,
    `.mypy_cache/` or `.ruff_cache/`. Any other ignored path refuses the
    removal and is reported. An eval log under `local/data/` is the case
    this check exists for, and `.venv/` is refused the same way.
-3. **No links.** Nothing under the tree is a symlink or reparse point
-   (Windows junctions included), found by an lstat walk that never follows
-   a link. `git worktree remove --force` once followed a junction and
-   deleted the data behind it.
 4. **Idle.** Nothing outside the cache whitelist was written within
    `--worktree-grace-days` (default 3). The same holds for the worktree's
    `HEAD` and `index` in its git admin dir. Workers reuse one worktree
