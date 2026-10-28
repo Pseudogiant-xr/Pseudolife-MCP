@@ -138,5 +138,19 @@ async fn board_sends_tick_the_service_clock() {
     let mut restarted = crate::hlc::Clock::default();
     restarted.observe(high.0, high.1);
     assert!(restarted.tick() > (future, 10));
+
+    // On a served daemon a send never queues behind the service mutex
+    // (`coordination_tier_ready`, W2F-SEND-SERVICE-LOCK): it takes the
+    // published ready service, whose clock is reseeded.
+    drop(ready);
+    let held = service.hold_service_lock().await;
+    let sent = tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        board.dispatch("send", send("unlocked"), &headers, "default"),
+    )
+    .await;
+    drop(held);
+    let sent = sent.expect("a send waited behind the service mutex");
+    assert_eq!(sent.unwrap()["state"], "queued");
     drop(board);
 }

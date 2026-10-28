@@ -703,8 +703,20 @@ impl Board {
     }
 
     /// `_ensure_tier(full=True)`: the initialized service, whose clock is
-    /// reseeded (a pending reseed runs here), for a send's stamp.
+    /// reseeded, for a send's stamp. On a served daemon it is the published
+    /// ready service, read without the service mutex (`_tier_ready`'s
+    /// `coordination_tier_ready`: initialized, no reseed pending), so a send
+    /// never queues behind an initialization retry, the reaper or a sweep;
+    /// otherwise `_ensure_init` under the mutex, which runs a pending reseed.
+    /// Like Python's lock-free path it does not probe the writer session; a
+    /// send its stale session fences is retried after a forced reprobe.
     pub(crate) async fn full_tier(&self) -> Result<Arc<Ready>> {
+        if let Some(ready) = self.service.snapshot().ready
+            && !ready.startup.clock_state().hlc_reseed_pending
+            && !crate::mutants::active("board-full-tier-locks")
+        {
+            return Ok(ready);
+        }
         self.service
             .ensure_init()
             .await

@@ -3,7 +3,8 @@
 //! `ContinuumMemorySystem.stats` (memory/cms.py:2811-2875).
 //!
 //! The process-local counters live here as statics: like Python's, they
-//! start at zero with the process and count only what this process did.
+//! start at zero with the process, except the tier counters, which an
+//! initialization restores from the bank's `cms_counters` row (B4).
 
 use crate::mcp::dispatch::{ToolCall, ToolError, ToolFn, ToolFuture};
 use serde_json::{Map, Value, json};
@@ -45,6 +46,23 @@ pub fn record_query<'a>(hit_bands: impl IntoIterator<Item = &'a str>) {
     }
 }
 
+/// `_tier_queries` and `_tier_hits` for the `cms_counters` row
+/// (`counters_state`, autosave and the exit flush).
+pub fn tier_state() -> (u64, BTreeMap<String, u64>) {
+    let tier = TIER.lock().expect("tier lock");
+    (tier.queries, tier.hits.clone())
+}
+
+/// `reset_counters` then `apply_counters` for the tier counters, as a
+/// freshly built CMS restores them: the row's query count and per-band hits
+/// (a current band the row does not name counts from zero, which
+/// `counters::state` writes).
+pub fn restore_tier(queries: u64, hits: impl IntoIterator<Item = (String, u64)>) {
+    let mut tier = TIER.lock().expect("tier lock");
+    tier.queries = queries;
+    tier.hits = hits.into_iter().collect();
+}
+
 /// `_on_band_evict` for the last band (cms.py:2748).
 pub fn record_true_drop() {
     TRUE_DROPS.fetch_add(1, Ordering::Relaxed);
@@ -67,7 +85,7 @@ pub fn mcp_tools() -> Vec<(&'static str, ToolFn)> {
 /// `memory_stats` (mcp_server.py:1423-1428): `service.stats()` as is.
 fn mcp_memory_stats<'a>(app: &'a crate::http::App, _call: ToolCall<'a>) -> ToolFuture<'a> {
     Box::pin(async move {
-        stats(app)
+        stats(&app.service)
             .await
             .map(Value::Object)
             .map_err(ToolError::Internal)
@@ -76,7 +94,7 @@ fn mcp_memory_stats<'a>(app: &'a crate::http::App, _call: ToolCall<'a>) -> ToolF
 
 /// Python `round(x, n)`: correctly rounded from the exact binary value,
 /// ties to even.
-fn py_round(x: f64, n: usize) -> f64 {
+pub(crate) fn py_round(x: f64, n: usize) -> f64 {
     format!("{x:.n$}").parse().unwrap_or(x)
 }
 
@@ -184,13 +202,11 @@ fn capacity_warning(name: &str, size: usize, capacity: usize) -> Value {
 }
 
 /// `service.stats()`: the CMS block, then the Postgres block.
-async fn stats(app: &crate::http::App) -> anyhow::Result<Map<String, Value>> {
-    let ready = app
-        .service
-        .ensure_init()
-        .await
-        .map_err(|e| anyhow::anyhow!(e))?;
-    let cfg = &app.service.config.memory;
+pub(crate) async fn stats(
+    svc: &std::sync::Arc<crate::service::Service>,
+) -> anyhow::Result<Map<String, Value>> {
+    let ready = svc.ensure_init().await.map_err(|e| anyhow::anyhow!(e))?;
+    let cfg = &svc.config.memory;
     let specs = &cfg.band_specs;
     let Some(last) = specs.last() else {
         anyhow::bail!("no memory bands configured");

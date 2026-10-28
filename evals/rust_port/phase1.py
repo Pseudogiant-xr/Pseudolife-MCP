@@ -15,6 +15,7 @@ from .stdio_judge import (StdioPolicy, judge_with_evidence, eof_policy, judge_se
                           retain_stderr, verifies_frozen_capture, READINESS_WAIT_RULE, readiness_wait_evidence)
 from .processes import owned_process
 from .phase1_receipts import command_identity, pytest_outcomes, candidate_identity, candidate_bindings
+from .phase1_receipts import PINNED_NODE_ID_OPTIONS
 from .phase1_receipts import reusable_python_process_receipt
 from .phase1_receipts import receipt_status
 
@@ -31,7 +32,7 @@ def process_tests(command, root, output):
     if output.exists() or report.exists():
         raise FileExistsError("process-test evidence paths must be new")
     argv = module_command("pytest", root, ["-p", "evals.rust_port.pytest_plugin", "-q",
-            "--junitxml", str(report.resolve()), "-o", "junit_logging=no",
+            *PINNED_NODE_ID_OPTIONS, "--junitxml", str(report.resolve()), "-o", "junit_logging=no",
             "--port-stdio-json", json.dumps(command), *nodes])
     import os
     with owned_process(argv, cwd=root, env=dict(os.environ), stdin=subprocess.DEVNULL) as process:

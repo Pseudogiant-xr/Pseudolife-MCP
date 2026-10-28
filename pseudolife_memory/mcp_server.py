@@ -3183,7 +3183,24 @@ def _wire_transport_tiering() -> None:
 _wire_transport_tiering()
 
 
-def _flush_on_exit() -> None:
+_exit_flush_lock = threading.Lock()
+_exit_flush_done = False
+
+
+def flush_on_exit() -> None:
+    """The exit save, at most once per process.
+
+    Two paths reach it: the HTTP daemon's lifespan shutdown
+    (daemon.save_on_lifespan_shutdown), and atexit. A daemon that survives
+    uvicorn's re-raised SIGTERM (PID 1 in a container drops it) or stops on
+    SIGINT reaches both. A save that raised counts as done: it is logged,
+    not retried.
+    """
+    global _exit_flush_done
+    with _exit_flush_lock:
+        if _exit_flush_done:
+            return
+        _exit_flush_done = True
     # Gated, not unconditional: only persist if THIS process mutated state.
     # An idle/read-only subprocess exiting must never clobber a sibling
     # process's newer writes to the shared cms_state.pt.
@@ -3229,8 +3246,10 @@ def start_background_durability() -> None:
     # Durability: flush unsaved state on clean exit. SIGKILL cannot be
     # caught — bounded loss is covered by the periodic autosave (and in
     # storage mode entries are transactional anyway; only weights ride
-    # the cadence).
-    atexit.register(_flush_on_exit)
+    # the cadence). atexit alone misses SIGTERM in the HTTP daemon: uvicorn
+    # re-raises it with the default handler, which exits without running
+    # atexit, so run_daemon also saves from the lifespan shutdown.
+    atexit.register(flush_on_exit)
     _interval = float(os.environ.get("PSEUDOLIFE_MCP_AUTOSAVE_SECONDS", "30"))
     threading.Thread(
         target=_autosave_loop, args=(_interval,), daemon=True, name="pl-autosave"

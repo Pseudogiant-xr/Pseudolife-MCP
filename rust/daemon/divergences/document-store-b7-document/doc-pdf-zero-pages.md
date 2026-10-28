@@ -1,0 +1,3 @@
+| Item | Python | Rust | Why / owner |
+|---|---|---|---|
+| **DOC-PDF-ZERO-PAGES:** the reason in `Failed to load document (PDFium: …)` for a PDF that loads but has no pages | `FPDF_GetLastError` after the load: whatever an earlier PDFium call left there in this process (`Success` when fresh, then `Data format error` after a damaged file, for example) | the same call, but the ingest runs on a blocking-pool thread, and on Windows PDFium's last error is per thread, so the earlier calls it reflects differ | PDFium does not reset the code on a successful load, so the text depends on each daemon's history of calls, not on the file; only the refusal itself and its prefix are fixed (`a_zero_page_document_that_loads_still_fails_as_pypdfium2_fails_it`) |
