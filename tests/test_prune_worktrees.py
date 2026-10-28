@@ -923,21 +923,48 @@ def test_owner_mode_unknown_state_leaves_the_cache(env, monkeypatch):
         ("owner", False, "unknown")]
 
 
-def test_cargo_config_that_is_not_utf8_refuses_cache_deletion(env):
-    cache = env.cache("old-slice")
-    holder = env.add("holder", unmerged=True)
+def _utf16_pin(holder: Path, cache: Path) -> None:
     (holder / ".cargo").mkdir()
     (holder / ".cargo" / "config.toml").write_text(
         f"[build]\ntarget-dir = {json.dumps(str(cache))}\n", encoding="utf-16")
+
+
+def test_cargo_config_that_is_not_utf8_keeps_caches_not_worktrees(env):
+    """A pin that cannot be read could protect any cache, so every cache is
+    kept; it says nothing about worktrees, which still go."""
+    cache = env.cache("old-slice")
+    done = env.add("done")
+    _utf16_pin(env.add("holder", unmerged=True), cache)
     rc, out = run(env, "--apply")
-    assert rc == 2, out
-    assert "not UTF-8" in out and cache.exists()
+    assert rc == 0, out
+    assert "pin config unreadable" in out and cache.exists()
+    assert not done.exists()
+
+
+def test_owner_mode_with_an_unreadable_pin_config_changes_nothing(env, monkeypatch):
+    wt = env.add("mine", age=False)
+    cache = env.cache("mine-target", age=False)
+    _utf16_pin(env.add("holder", unmerged=True), cache)
+    monkeypatch.chdir(wt)
+    rc, out = run(env, "--mine", "--cache-dir", str(cache), "--apply", roots=False)
+    assert rc == 1, out
+    assert "pin config unreadable" in out
+    assert env.registered(wt) and cache.exists() and env.ledger_lines() == []
 
 
 def test_far_future_mtime_does_not_crash_the_ledger(env, monkeypatch):
     wt = env.add("mine", age=False)
     monkeypatch.chdir(wt)
-    future = 4e10                     # past year 3000: Windows localtime refuses it
+    real_localtime = prune.time.localtime
+
+    def refuses_far_future(secs=None):
+        # Windows refuses times past year 3000; reproduce that everywhere.
+        if secs is not None and secs > 3.3e10:
+            raise OSError(22, "Invalid argument")
+        return real_localtime() if secs is None else real_localtime(secs)
+
+    monkeypatch.setattr(prune.time, "localtime", refuses_far_future)
+    future = 4e10
     os.utime(wt / "README.md", (future, future))
     rc, out = run(env, "--mine", "--apply", roots=False)
     assert rc == 0, out
@@ -958,3 +985,17 @@ def test_failed_prune_is_reported(env, monkeypatch):
     rc, out = run(env, "--apply")
     assert rc == 1, out
     assert "simulated prune failure" in out and "ran git worktree prune" not in out
+
+
+def test_partial_cache_delete_is_recorded_as_partial(env, monkeypatch):
+    env.cache("old-slice")
+
+    def stops_midway(path, *a, **kw):
+        raise PermissionError(5, "Access is denied", str(path))
+
+    monkeypatch.setattr(prune.shutil, "rmtree", stops_midway)
+    rc, out = run(env, "--apply")
+    assert rc == 1, out
+    assert "deleted in part" in out and "1 partial (see rows)" in out
+    assert [(l["kind"], l["complete"], l["state"]) for l in env.ledger_lines()] == [
+        ("cache", False, "partial")]

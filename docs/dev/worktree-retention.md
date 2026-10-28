@@ -185,9 +185,11 @@ refused one by one. It is 1 when any row ends in one of these:
   dir beside it, named in the output);
 - a failed `git worktree prune`, or a ledger that could not be written.
 
-It is 2 for a refused run (failed fetch, bad repo, bad config, or a
-`.cargo/config.toml` that is not UTF-8, whose pins can't be read). Config
-values are type-checked: roots must be lists of paths.
+It is 2 for a refused run (failed fetch, bad repo or bad config). Config
+values are type-checked: roots must be lists of paths. A
+`.cargo/config.toml` that is not UTF-8 (PowerShell 5's `>` writes UTF-16)
+keeps every cache, since its pin cannot be read, and names the file to
+re-save; worktrees are unaffected.
 
 Every removal appends one JSON line to
 `~/.pseudolife-mcp/retention-ledger.jsonl`. The line holds `time`, `mode`

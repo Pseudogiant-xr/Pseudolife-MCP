@@ -61,6 +61,7 @@ DEFAULT_LEDGER = STATE_DIR / "retention-ledger.jsonl"
 KEEP_FILE = ".pseudolife-keep"
 KEEP_CONFIG = "pseudolife.keep"
 MASTER = "refs/remotes/origin/master"
+UNREADABLE_PIN = "<unreadable pin config>"   # never a real path, so never matches one
 
 # Ignored paths a removable worktree may hold: rebuildable caches only.
 CACHE_COMPONENTS = {"__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache"}
@@ -405,9 +406,10 @@ def cargo_pins(places: list[str], exclude: list[str]) -> dict[str, str]:
             text = Path(cfg).read_text(encoding="utf-8")
         except UnicodeDecodeError:
             # Not UTF-8 (a PowerShell 5 `>` writes UTF-16): a pin we cannot
-            # read could protect any cache, so no cache is deleted.
-            raise Refusal(f"{cfg} is not UTF-8, so its target-dir pin cannot be read; "
-                          "re-save it as UTF-8") from None
+            # read could protect any cache, so every cache is kept;
+            # worktrees are unaffected.
+            pins[UNREADABLE_PIN] = cfg
+            continue
         except OSError:
             continue
         for m in _TARGET_DIR.finditer(text):
@@ -509,6 +511,10 @@ def evaluate_cache(path: str, *, grace_days: float | None, now: float,
         return v
     if is_link(st):
         v.failure = "reparse point or symlink: the cache dir itself"
+        return v
+    if UNREADABLE_PIN in pins:
+        v.failure = (f"pin config unreadable: {pins[UNREADABLE_PIN]} is not UTF-8 "
+                     "(re-save it as UTF-8)")
         return v
     for pin, cfg in pins.items():
         if is_under(pin, npath) or is_under(npath, pin):
@@ -618,7 +624,7 @@ def load_config(path: Path) -> dict:
         return {}
     try:
         data = _parse_toml(path.read_text(encoding="utf-8"))
-    except (ValueError, OSError, UnicodeDecodeError) as exc:
+    except (ValueError, OSError) as exc:     # UnicodeDecodeError is a ValueError
         raise Refusal(f"cannot read {path}: {exc}") from exc
     unknown = set(data) - KNOWN_KEYS
     if unknown:
@@ -861,7 +867,7 @@ def run_sweep(args, cfg: dict) -> int:
         if err and err.startswith("in use"):
             again.failure = err
             return again, "keep"
-        record(again, {"complete": err is None})
+        record(again, {"complete": True} if err is None else {"complete": False, "state": "partial"})
         again.failure = err
         return again, "partial" if err else "removed"
 
@@ -1068,7 +1074,8 @@ def run_owner(args, cfg: dict) -> int:
             said.append(f"cache {cache.path} {err}")
             rc = 1
         else:
-            if not ledger_write(args.ledger, cache, "owner", {"complete": err is None}):
+            if not ledger_write(args.ledger, cache, "owner", {"complete": True} if err is None
+                                else {"complete": False, "state": "partial"}):
                 rc = 1
             if err:
                 rc = 1
