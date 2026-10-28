@@ -91,6 +91,22 @@ def test_the_runner_config_is_readable_by_the_account_after_its_rename():
     assert "Write-RunnerConfig" in registration
 
 
+def test_the_runner_finds_python_in_a_seeded_tool_cache():
+    # actions/setup-python's installer needs administrator rights the account
+    # lacks (second trial dispatch, run 40748991561), so setup seeds the
+    # cache it looks in, and the .env points the runner at that cache.
+    text = SETUP.read_text(encoding="utf-8")
+    body = re.search(r"^function Write-RunnerConfig \{.*?^\}\n", text, re.S | re.M).group(0)
+    assert '"RUNNER_TOOL_CACHE=$toolcache",' in body
+    assert '"AGENT_TOOLSDIRECTORY=$toolcache",' in body
+    seeding = text[text.index("$toolcache = Join-Path $Root 'toolcache'"):text.index("& $uv tool install")]
+    assert '$seed = Join-Path $toolcache "Python\\$full\\x64"' in seeding
+    assert 'New-Item -ItemType File -Path "$seed.complete"' in seeding
+    # Read and execute only: one job cannot change the interpreter the next uses.
+    assert "Grant $toolcache @('/grant', \"*${sid}:(OI)(CI)(RX)\")" in seeding
+    assert text.index("$toolcache = Join-Path") < text.index("function Write-RunnerConfig")
+
+
 FILTER = OPS / "setup-vm-egress-filter.sh"
 PROOF = OPS / "windows-egress-proof.ps1"
 

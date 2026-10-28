@@ -248,6 +248,24 @@ try { $python = & $uv python find 3.11 --managed-python --no-project } finally {
 if (-not $python -or -not (Test-Path -LiteralPath $python) -or -not $python.StartsWith($tools, [StringComparison]::OrdinalIgnoreCase)) {
     Fail "uv did not provide Python 3.11 under $tools"
 }
+# actions/setup-python installs a missing version with an installer that
+# needs administrator rights, which the account lacks (every shard of the
+# second trial dispatch, run 40748991561, stopped there), so the managed
+# Python is copied into the tool cache here, read-only to the account.
+$toolcache = Join-Path $Root 'toolcache'
+$full = (& $python -c 'import platform; print(platform.python_version())').Trim()
+$seed = Join-Path $toolcache "Python\$full\x64"
+if (-not (Test-Path -LiteralPath "$seed.complete")) {
+    if (Test-Path -LiteralPath $seed) { Remove-Item -LiteralPath $seed -Recurse -Force }
+    New-Item -ItemType Directory -Path $seed | Out-Null
+    Copy-Item -Path (Join-Path (Split-Path -Parent $python) '*') -Destination $seed -Recurse
+    $marker = Join-Path $seed 'Lib\EXTERNALLY-MANAGED'
+    if (Test-Path -LiteralPath $marker) { Remove-Item -LiteralPath $marker }
+    New-Item -ItemType File -Path "$seed.complete" | Out-Null
+}
+Grant $toolcache @('/grant', "*${sid}:(OI)(CI)(RX)")
+& (Join-Path $seed 'python.exe') -c 'import ssl, venv'
+if ($LASTEXITCODE -ne 0) { Fail "the tool-cache Python in $seed does not run" }
 & $uv tool install --quiet --upgrade --python $python $PseudolifeSpec
 if ($LASTEXITCODE -ne 0) { Fail "uv tool install $PseudolifeSpec failed" }
 $gate = Join-Path $env:UV_TOOL_BIN_DIR 'pseudolife-mcp.exe'
@@ -279,6 +297,8 @@ function Write-RunnerConfig {
         "$env:SystemRoot\System32\WindowsPowerShell\v1.0", "$env:SystemRoot\System32\OpenSSH") -join ';'
     $script:envText = @(
         "PATH=$path",
+        "AGENT_TOOLSDIRECTORY=$toolcache",
+        "RUNNER_TOOL_CACHE=$toolcache",
         "PSEUDOLIFE_PARITY_LEASE=$Lease",
         "PSEUDOLIFE_PARITY_LOCK_DIR=$locks",
         "PSEUDOLIFE_PARITY_RUNNER_DIR=$dir",

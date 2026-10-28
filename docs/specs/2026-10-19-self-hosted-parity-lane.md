@@ -603,6 +603,17 @@ PATH into `.env` and removes the unused `.path`. That same run proved the
 hook's positive case as the runner account: "egress: refused to this
 account by the firewall (10013): the LAN gateway, IPv6".
 
+**The runner's Python.** The second trial dispatch (run 40748991561,
+2026-10-29) got every Windows shard past the gate. The shards then stopped
+at `actions/setup-python`, whose Windows installer needs administrator
+rights that the account does not have. The setup script now copies its
+managed Python 3.11 into `C:\actions-runner\toolcache` and names that
+directory in `.env` (`RUNNER_TOOL_CACHE`, `AGENT_TOOLSDIRECTORY`), the way
+the Linux setup seeds its tool cache. The account may read and run the
+cache but not change it, so one job cannot alter the interpreter the next
+job uses. Shards created after the fix ran past setup-python in the same
+run.
+
 **Yielding to reproduction work.** The VM's first job is reproducing
 Windows CI failures (CLAUDE.md "Dev machines"). Reproduction work there
 holds the VM's suite lease for its whole length, so the runner's gate
@@ -934,7 +945,8 @@ design could not test without a machine:
   sibling box. An older glibc there fails them at exec.
 - `actions/setup-python` installs 3.11 into the runner's tool cache.
   - On a Linux distribution other than Ubuntu, pre-seed the tool cache.
-  - On Windows, run the first install with enough rights to write it.
+  - On Windows, pre-seed it too: the installer needs administrator
+    rights (settled, "The runner's Python").
 - The gate step prints "free" and the lease name.
 - `lease check` sees a held lock: start a full suite on that machine, then
   dispatch, and the gate should wait.
