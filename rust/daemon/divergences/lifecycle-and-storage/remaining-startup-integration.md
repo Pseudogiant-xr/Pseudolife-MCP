@@ -1,0 +1,3 @@
+| Item | Python | Rust | Owner |
+|---|---|---|---|
+| Remaining startup integration | CMS and canonical stores, dream tracking (writes `meta.dream_ack_secret_v1`), legacy import, HLC reseed and warmup search | complete entry seating, episodes, canonical loader inputs, resident cortex and identity metadata attach to cached Ready after all required loads; late HLC failure retains those stores with a pending flag and blocks returning Ready until clock-only retry succeeds; W2-D runs the warmup search; typed cortex currently reloads facts rather than adopting StartupState | W2-D/E (store adoption and clock ticking), W3-H (dream tracking), W3-J (legacy/file import) |
