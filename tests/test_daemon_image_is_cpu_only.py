@@ -209,7 +209,7 @@ def test_image_installs_declared_dependencies_with_constraints(monkeypatch):
     assert calls[0][3:6] == ["install", "-c", "/app/requirements.lock.txt"]
     assert calls[0][6:] == (project["dependencies"] +
                             project["optional-dependencies"]["onnx"] +
-                            ["setuptools==83.0.0"])
+                            ["setuptools==84.2.1"])
     assert "pip check" in dockerfile
     assert "PIP_NO_CACHE_DIR=0" not in dockerfile
     assert "env -u PIP_NO_CACHE_DIR" in dockerfile
