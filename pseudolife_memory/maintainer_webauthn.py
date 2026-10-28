@@ -7,8 +7,8 @@ Every rule here is stricter than a general library's defaults on purpose
 (spec 2026-10-02-maintainer-wake-design.md, "Assertion and registration
 verification"): duplicate JSON keys, ``crossOrigin: true``, any
 ``topOrigin``, indefinite-length or trailing CBOR, an alg that does not match
-its key type, RSA-PSS, short RSA moduli and a missing UV flag are all
-refused.
+its key type, RSA-PSS, short RSA moduli, an Ed25519 key of small order and
+a missing UV flag are all refused.
 
 Every failure raises :class:`AssertionInvalid`, whose ``check`` names the
 rule that failed for the daemon log; callers answer ``assertion_invalid``
@@ -168,6 +168,27 @@ def cbor_loads(data: bytes):
 _COSE_LABELS = {ALG_ES256: {1, 3, -1, -2, -3}, ALG_EDDSA: {1, 3, -1, -2},
                 ALG_RS256: {1, 3, -1, -2}}
 
+# The encodings of the Ed25519 points of small order, sign bit cleared
+# (libsodium's ``has_small_order`` blocklist): 0 (order 4), 1 (the identity),
+# the two points of order 8, p - 1 (order 2), and p and p + 1, the
+# non-canonical spellings of 0 and 1. Such a key "verifies" a degenerate
+# signature (R of small order, S = 0) over any message, and OpenSSL loads
+# every one of them (cryptography 48, checked 2026-10-28).
+_ED25519_SMALL_ORDER = frozenset({
+    bytes(32),
+    b"\x01" + bytes(31),
+    bytes.fromhex("26e8958fc2b227b045c3f489f2ef98f0d5dfac05d3c63339b13802886d53fc05"),
+    bytes.fromhex("c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac037a"),
+    b"\xec" + b"\xff" * 30 + b"\x7f",
+    b"\xed" + b"\xff" * 30 + b"\x7f",
+    b"\xee" + b"\xff" * 30 + b"\x7f",
+})
+
+
+def _ed25519_small_order(x: bytes) -> bool:
+    """A small-order Ed25519 point in any encoding (the sign bit is ignored)."""
+    return x[:31] + bytes([x[31] & 0x7F]) in _ED25519_SMALL_ORDER
+
 
 def cose_public_key(cose):
     """``(alg, public key)`` from a COSE_Key map (or its CBOR bytes). The
@@ -193,6 +214,10 @@ def cose_public_key(cose):
             x = key.get(-2)
             if kty != 1 or key.get(-1) != 6 or not isinstance(x, bytes) or len(x) != 32:
                 raise AssertionInvalid("cose_alg_mismatch")
+            # Refused here, so a key stored before this check existed is
+            # refused at every assertion too.
+            if _ed25519_small_order(x):
+                raise AssertionInvalid("cose_key")
             public = ed25519.Ed25519PublicKey.from_public_bytes(x)
         else:
             n, e = key.get(-1), key.get(-2)

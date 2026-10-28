@@ -1,0 +1,3 @@
+| Item | Python | Rust | Owner / why |
+|---|---|---|---|
+| Betweenness above `betweenness_sample` nodes (200) | 200 sources sampled with seed 42, rescaled | exact at every size (`betweenness_sample` read, not used) | Option B's betweenness choice: exact Brandes is O(V·E), measured at 0.6 s for 5,000 entities and 10,000 edges (release build, 2026-10-25, `graph_insight_bank_scale_timing`), run outside the writer lock, and it agrees bit for bit with Python wherever Python is exact; above the sample the god nodes and bridges can differ by Python's sampling error (god-node sets inside the seed envelope above) |

@@ -74,7 +74,7 @@ impl Tracking {
         self.display_cursor()
     }
 
-    fn error_code(&self) -> Option<(String, String)> {
+    pub(crate) fn error_code(&self) -> Option<(String, String)> {
         self.error
             .as_ref()
             .map(|e| (e.split(':').next().unwrap_or(e).to_string(), e.clone()))
