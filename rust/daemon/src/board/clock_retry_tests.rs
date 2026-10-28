@@ -5,13 +5,15 @@
 //! `python -m board.boundary --clock-retry` (a disposable bank on the test
 //! PostgreSQL and the offline embedding fixture).
 //!
-//! The recover-once case reaches the retry (a stale ready service is fenced,
-//! then the retry sends); so does the refusal. The half-open case is a
-//! delivery check only: through this proxy the client still learns of the
-//! killed session within milliseconds, so the send's first check reconnects
-//! and the retry never runs. The half-open window the forced reprobe exists
-//! for (a session dead but not yet seen closed) is not reproduced here, so no
-//! case shows the reprobe changing an outcome; it follows Python's retry.
+//! The recover-once and half-open cases each reach the retry (the send's
+//! first attempt stamps from the published ready service without probing
+//! the session, is fenced, and the retry sends); with the retry switched off
+//! both fail with `ClockChanged`. Through this proxy the client still sees
+//! the killed session closed within milliseconds, so a plain `ensure_init`
+//! on the retry would also reconnect: the half-open window the forced
+//! reprobe exists for (a session dead but not yet seen closed) is not
+//! reproduced, and no case shows the reprobe itself changing an outcome; it
+//! follows Python's retry.
 
 use crate::board::Board;
 use crate::config::DaemonEnv;
@@ -295,6 +297,11 @@ async fn a_send_after_a_half_open_writer_session_is_delivered() {
         .await;
     let sent = sent.expect("the dead session is replaced and the mail sent");
     assert_eq!(sent["state"], "queued");
+    assert_eq!(
+        board.clock_retries.load(Ordering::SeqCst),
+        1,
+        "the first attempt was fenced"
+    );
     assert_eq!(count(&side, "coordination_messages").await, messages + 1);
     let now = service.ensure_init().await.unwrap().storage.lease_epoch();
     assert!(
