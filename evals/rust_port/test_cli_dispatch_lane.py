@@ -114,6 +114,23 @@ def test_cli_dispatch_includes_exact_admitted_hooks_without_duplicates(monkeypat
     assert cli_dispatch.selected_nodes() == sorted(historical | subprocess_nodes)
 
 
+def test_every_pinned_cli_node_collects_under_the_installed_pytest(tmp_path):
+    """The dispatch argv must select each pinned id, whatever pytest names it."""
+    import json
+    import os
+    import sys
+    from evals.rust_port.provenance import ROOT
+    nodes = cli_dispatch.selected_nodes()
+    argv = cli_dispatch.pytest_argv(ROOT, tmp_path / "collect.junit.xml", nodes,
+                                    extra=["--collect-only", "-p", "no:cacheprovider"])
+    env = {**os.environ, "PSEUDOLIFE_PORT_CLI_JSON": json.dumps(
+        [sys.executable, "-m", "pseudolife_memory.cli"])}
+    result = subprocess.run(argv, cwd=ROOT, env=env, capture_output=True, text=True,
+                            encoding="utf-8", timeout=300)
+    assert result.returncode == 0, result.stdout[-4000:] + result.stderr[-4000:]
+    assert set(nodes) <= set(result.stdout.splitlines()), result.stdout[-4000:]
+
+
 @pytest.mark.parametrize("drift", [None, "package", "distribution", "origin", "python"])
 @pytest.mark.parametrize("version", ["0.17.0", "0.17.1+pin"])
 def test_cli_dispatch_runtime_requires_the_selected_pin(tmp_path, monkeypatch, drift, version):
