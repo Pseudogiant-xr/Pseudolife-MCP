@@ -398,31 +398,53 @@ the way the Linux script does. Rerunning it is safe:
 ```powershell
 setup-windows-runner.ps1 -RunnerUser <runner-user> -SuiteUser <suite-user> `
   -Lease full-suite@<machine> -Version <x.y.z> -Sha256 <hex>
-# then, to register, with RUNNER_TOKEN set from a registration token
-# (pipe it in on stdin; it must not reach a command line or a log).
+# then, to register, with RUNNER_TOKEN set in its environment. Over SSH, a
+# wrapper reads the token from stdin into that variable, so the token
+# reaches no command line, file or log:
+#   gh api -X POST repos/<owner>/<repo>/actions/runners/registration-token --jq .token |
+#     ssh <vm> pwsh -NoProfile -File <wrapper>
 ```
 
 - **One runner, as a local account that is not an administrator**
-  (decision 4, amended). The account's password is random. It is
-  generated in the script and passed to `config.cmd --windowslogonpassword`,
-  the only non-interactive way to register a service account; that command
-  line is readable by the VM's administrators while it runs. The password
+  (decision 4, amended). The account's password is random: 40 letters and
+  digits, because `config.cmd` is a batch file, and `cmd.exe` strips `^` and
+  expands `%` and `!`. It is generated in the script and passed to
+  `config.cmd --windowslogonpassword`, the only non-interactive way to
+  register a service account. That command line is readable by the VM's
+  administrators while it runs, and by the event log if process-creation
+  auditing is on. The password
   is never written down, and a rerun that has to register again sets a new
   one. `config.cmd` grants the account the right to log on as a service,
   installs the runner as that account's service, and starts it.
-- **No LAN.** An outbound Windows Firewall rule for the account's SID
-  blocks private, link-local, CGNAT (Tailscale), multicast and broadcast
-  addresses, over IPv4 and IPv6. The script checks that every firewall
-  profile is on and that the rule names the account and every range.
+- **No LAN, for the account's own connections.** An outbound Windows
+  Firewall rule for the account's SID blocks private, link-local, CGNAT
+  (Tailscale), multicast and broadcast IPv4 addresses, and all of IPv6. The
+  VM has a global IPv6 address on the LAN's prefix, which no private range
+  covers, so IPv6 is blocked outright, as on Linux. A rerun adds the new
+  rule before removing the old one, so a running job is never unfiltered.
+  The script checks that every firewall profile is on and that the rule
+  names the account and every range.
   Whether the rule binds the account's traffic cannot be tried from an SSH
   session: a process started with another account's credentials there dies
   at start (0xC0000142). The job-started hook therefore proves it before
   every job. As the account, it connects to the LAN gateway and needs the
-  firewall's own refusal (WSAEACCES, 10013); anything else fails the job.
+  firewall's own refusal (WSAEACCES, 10013), and the same for a public IPv6
+  address when the VM has an IPv6 route; anything else fails the job.
   The suite user's run of the same hook was refused with "connected", the
-  negative control. Windows Firewall does not filter loopback, so unlike
-  on Linux, services listening on the VM's loopback stay reachable to
-  jobs.
+  negative control.
+
+  What a per-user rule cannot cover (found by review on 2026-10-28; the
+  maintainer is deciding between filtering the VM at the hypervisor,
+  machine-wide rules, or accepting it):
+  - Windows makes some connections on a user's behalf through system
+    services, which a rule keyed on the user does not match: SMB
+    (`\\<host>\share`, opened by the kernel), BITS, and WebDAV through
+    the WebClient service. A job could reach LAN hosts that way.
+  - Windows Firewall does not filter loopback, so unlike on Linux,
+    services listening on the VM's loopback stay reachable to jobs.
+
+  Until that is decided, the runner's service is stopped and set to
+  Manual, so it takes no job.
 - **sshd refuses the account** (`DenyUsers`, written first in
   `sshd_config` and checked with `sshd -t`), since a job can write the
   account's `authorized_keys`.
@@ -439,7 +461,10 @@ setup-windows-runner.ps1 -RunnerUser <runner-user> -SuiteUser <suite-user> `
   and its `.pseudolife-mcp`, read on the lock directory. The runner's
   `.env` names that directory and the VM's lease, `full-suite@<machine>`.
 - **Disk**: the same `runner_cleanup.py` caps, run from the job-started
-  hook (its POSIX-only `/tmp` pass does not apply). C: had 92 GB free
+  hook (its POSIX-only `/tmp` pass does not apply). The runner's `.env`
+  points pip's, uv's and Hugging Face's caches into the account's
+  `.cache`, where those caps apply; their Windows defaults would sit under
+  `%LOCALAPPDATA%`, outside them. C: had 92 GB free
   after the grow, well above the 25 GB floor. The account's profile, where
   `lease_ci.py`'s clusters and pg0's bundle live, is on C: too.
 - **No private bench address**: one runner shares no loopback with another
@@ -571,6 +596,11 @@ A trial run names the machine itself, through a dispatch input that only
 gh workflow run rust.yml --ref master -f mode=ci -f frozen_head=<master head> \
   -f selfhosted_runners='["windows"]'
 ```
+
+A trial shares the manual-CI concurrency group, which cancels in
+progress: it cancels a `mode=ci` dispatch already running on master, such
+as merge evidence, and the next one cancels it. Check `gh run list
+--workflow rust.yml --event workflow_dispatch` first.
 
 Once a trial passes, `setup-runner-watch.sh --machines linux,windows` adds
 the machine, and the next nightly routes to it. Since 2026-10-28 the list

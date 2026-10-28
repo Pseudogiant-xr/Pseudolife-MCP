@@ -153,7 +153,8 @@ def reconcile(call: Call, repository: str, state_file: Path, grace_seconds: floa
     if not wanted:
         if value is not None:
             call("DELETE", f"/repos/{repository}/actions/variables/{VARIABLE}", None)
-            change = f"{VARIABLE} deleted (was {value}): no parity runner online"
+            reason = "no allowed parity runner online" if allowed is not None else "no parity runner online"
+            change = f"{VARIABLE} deleted (was {value}): {reason}"
     else:
         text = json.dumps(wanted)
         if value is None:

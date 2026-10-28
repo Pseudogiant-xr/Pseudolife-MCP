@@ -53,7 +53,10 @@ fi
 
 if [ "${1:-}" = "--machines" ]; then
   [ -d "$CONFIG" ] || { echo "install the watcher first (run without --machines)" >&2; exit 1; }
-  list=${2-}
+  # The list is required, so a forgotten argument never empties it; '' is
+  # the explicit way to allow no machine.
+  [ $# -ge 2 ] || { echo "--machines needs a list such as linux,windows (or '' for none); nothing changed" >&2; exit 2; }
+  list=$2
   if [[ -n "$list" && ! "$list" =~ ^[a-z0-9-]+(,[a-z0-9-]+)*$ ]]; then
     echo "--machines takes a comma-separated list of machine names such as linux,windows (or '' for none); nothing changed" >&2
     exit 2

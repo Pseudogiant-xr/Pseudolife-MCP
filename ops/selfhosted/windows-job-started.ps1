@@ -12,25 +12,33 @@ $ErrorActionPreference = 'Continue'
 $me = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
 
 # The account's LAN block must bind before any job code runs: a connection to
-# the LAN gateway is refused by the firewall itself (WSAEACCES, 10013).
-# Anything else fails the job, since the machine would then expose its LAN.
-$gateway = (Get-NetRoute -DestinationPrefix '0.0.0.0/0' -ErrorAction SilentlyContinue | Sort-Object RouteMetric | Select-Object -First 1).NextHop
-$egress = 'no default gateway'
-if ($gateway) {
-    $client = [Net.Sockets.TcpClient]::new()
+# the LAN gateway is refused by the firewall itself (WSAEACCES, 10013), and so
+# is any IPv6 one when the machine has an IPv6 route (the rule blocks all of
+# IPv6). Anything else fails the job, since the machine would then expose its
+# LAN.
+function Connect-Probe([string] $address, [int] $port) {
+    $client = [Net.Sockets.TcpClient]::new([Net.IPAddress]::Parse($address).AddressFamily)
     try {
-        $egress = if ($client.ConnectAsync($gateway, 53).Wait(8000)) { 'connected' } else { 'timed out' }
+        if ($client.ConnectAsync($address, $port).Wait(8000)) { 'connected' } else { 'timed out' }
     } catch {
         $inner = $_.Exception
         while ($inner.InnerException) { $inner = $inner.InnerException }
-        $egress = if ($inner -is [Net.Sockets.SocketException]) { "socket error $($inner.ErrorCode)" } else { $inner.Message }
+        if ($inner -is [Net.Sockets.SocketException]) { "socket error $($inner.ErrorCode)" } else { $inner.Message }
     } finally { $client.Dispose() }
 }
-if ($egress -ne 'socket error 10013') {
-    Write-Output "The runner account reached the LAN gateway ($egress), so its firewall rule does not bind; the job is refused. Rerun ops/selfhosted/setup-windows-runner.ps1 on this machine."
-    exit 1
+$probes = @()
+$gateway = (Get-NetRoute -DestinationPrefix '0.0.0.0/0' -ErrorAction SilentlyContinue | Sort-Object RouteMetric | Select-Object -First 1).NextHop
+$probes += , @('the LAN gateway', $(if ($gateway) { Connect-Probe $gateway 53 } else { 'no default gateway' }))
+if (Get-NetRoute -DestinationPrefix '::/0' -ErrorAction SilentlyContinue) {
+    $probes += , @('IPv6', (Connect-Probe '2606:4700:4700::1111' 443))
 }
-Write-Output 'egress: the LAN gateway is refused to this account (10013)'
+foreach ($probe in $probes) {
+    if ($probe[1] -ne 'socket error 10013') {
+        Write-Output "The runner account reached $($probe[0]) ($($probe[1])), so its firewall rule does not bind; the job is refused. Rerun ops/selfhosted/setup-windows-runner.ps1 on this machine."
+        exit 1
+    }
+}
+Write-Output "egress: refused to this account by the firewall (10013): $(($probes | ForEach-Object { $_[0] }) -join ', ')"
 foreach ($dir in Get-ChildItem -LiteralPath $HOME -Directory -Force -Filter 'pl-cli-lease-postgres-*' -ErrorAction SilentlyContinue) {
     if ($dir.Attributes -band [IO.FileAttributes]::ReparsePoint) { continue }
     foreach ($pidfile in Get-ChildItem -LiteralPath $dir.FullName -Recurse -Depth 3 -File -Filter postmaster.pid -ErrorAction SilentlyContinue) {

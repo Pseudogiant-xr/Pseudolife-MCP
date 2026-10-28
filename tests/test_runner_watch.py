@@ -176,6 +176,7 @@ def test_an_empty_allowlist_switches_the_lane_off(tmp_path, capsys):
     assert watch.main(["--state-file", str(tmp_path / "s.json"), "--repository", REPO,
                        "--machines-file", str(allowed)], call=fake) == 0
     assert fake.value is None
+    assert "no allowed parity runner online" in capsys.readouterr().out
 
 
 def test_without_an_allowlist_file_every_machine_counts(tmp_path, capsys):

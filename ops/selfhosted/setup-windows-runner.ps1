@@ -44,7 +44,10 @@ param(
     [string] $Root = 'C:\actions-runner',
     # What `uv tool install` installs for the lease gate: the release by
     # default; a git URL gives a fix that is merged but not yet released.
-    [string] $PseudolifeSpec = 'pseudolife-mcp'
+    [string] $PseudolifeSpec = 'pseudolife-mcp',
+    # Bring the configuration up to date but leave the service stopped and
+    # set to start manually: the runner takes no job until it is started.
+    [switch] $NoStart
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -69,12 +72,17 @@ if (-not $uv) { Fail 'install uv for the administrator running this script first
 $suiteHome = (Get-CimInstance Win32_UserProfile | Where-Object { $_.LocalPath -match "\\$([regex]::Escape($SuiteUser))$" }).LocalPath
 if (-not $suiteHome) { Fail "-SuiteUser $SuiteUser has no profile on this machine" }
 if ($RunnerUser -eq $SuiteUser) { Fail '-RunnerUser must be an account of its own, not the suite user' }
+# ValidatePattern ignores case; sshd's DenyUsers and the hash comparison do not.
+if ($RunnerUser -cnotmatch '^[a-z][a-z0-9-]{0,19}$') { Fail '-RunnerUser must be lowercase letters, digits and hyphens' }
+if ($Sha256 -cnotmatch '^[0-9a-f]{64}$') { Fail '-Sha256 must be 64 lowercase hex digits' }
 
 # A password nobody knows, made from the system's random source. It lives in
 # this process only, and reaches config.cmd on its command line, which only
-# administrators of this machine can read while it runs.
+# administrators of this machine can read while it runs. Letters and digits
+# only: config.cmd is a batch file, and cmd.exe strips ^ and expands % and !
+# on the way through (40 characters of 62 is 238 bits).
 function New-RunnerPassword {
-    $alphabet = [char[]]'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!#%*+-=?@^_'
+    $alphabet = [char[]]'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
     $bytes = [byte[]]::new(40)
     [Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
     -join ($bytes | ForEach-Object { $alphabet[$_ % $alphabet.Length] })
@@ -97,13 +105,20 @@ Say "== egress: no LAN for $RunnerUser"
 # The private ranges, each written in two parts: the tree's identifier guard
 # (tests/test_release_ux.py) flags private addresses, and these generic blocks
 # are none.
-# Parenthesised: in PowerShell ',' binds tighter than '+'.
+# Parenthesised: in PowerShell ',' binds tighter than '+'. All of IPv6 is
+# blocked, as on Linux: a LAN with a global prefix (this VM has one) is
+# otherwise reachable by its global addresses. The firewall refuses ::/0, so
+# it is written as its two halves. Loopback is never filtered.
 $blocked = @(('10.0' + '.0.0/8'), ('172.16' + '.0.0/12'), ('192.168' + '.0.0/16'), '169.254.0.0/16', '100.64.0.0/10',
-    '224.0.0.0/4', '255.255.255.255', 'fc00::/7', 'fe80::/10', 'ff00::/8')
+    '224.0.0.0/4', '255.255.255.255', '::/1', '8000::/1')
 $group = 'Pseudolife parity runner'
-Get-NetFirewallRule -Group $group -ErrorAction SilentlyContinue | Remove-NetFirewallRule
-New-NetFirewallRule -DisplayName "$group`: no LAN for $RunnerUser" -Group $group -Direction Outbound -Action Block `
-    -Profile Any -RemoteAddress $blocked -LocalUser "D:(A;;CC;;;$sid)" | Out-Null
+# The new rule goes in before the old one goes, so a job running during a
+# rerun is never unfiltered; a failure here leaves the old rule in place.
+$old = @(Get-NetFirewallRule -Group $group -ErrorAction SilentlyContinue)
+$ruleName = "pseudolife-parity-runner-egress-$([guid]::NewGuid().ToString('n'))"
+New-NetFirewallRule -Name $ruleName -DisplayName "$group`: no LAN for $RunnerUser" -Group $group -Direction Outbound `
+    -Action Block -Profile Any -RemoteAddress $blocked -LocalUser "D:(A;;CC;;;$sid)" | Out-Null
+$old | Remove-NetFirewallRule
 foreach ($profile in Get-NetFirewallProfile) {
     if (-not $profile.Enabled) { Fail "the $($profile.Name) firewall profile is off, so the egress rule would not apply; turn it on and rerun" }
 }
@@ -113,7 +128,7 @@ foreach ($profile in Get-NetFirewallProfile) {
 # be tried from here (a process started with another account's credentials
 # from an SSH session dies at start, 0xC0000142), so the job-started hook
 # proves it before every job and fails the job if it does not.
-$rule = Get-NetFirewallRule -Group $group
+$rule = Get-NetFirewallRule -Name $ruleName
 $users = ($rule | Get-NetFirewallSecurityFilter).LocalUser
 $remote = @(($rule | Get-NetFirewallAddressFilter).RemoteAddress)
 if ($users -notmatch [regex]::Escape($sid)) { Fail "the egress rule does not name $RunnerUser ($users); nothing more was changed" }
@@ -152,11 +167,14 @@ $named = (Get-Content -LiteralPath $leaseFile -TotalCount 1).Trim()
 if ($named -ne $Lease) { Say "note: $leaseFile names $named, not $Lease; the runner uses $Lease" }
 $lock = Join-Path $locks 'full-suite.lock'
 if (-not (Test-Path -LiteralPath $lock)) { New-Item -ItemType File -Path $lock | Out-Null }
+function Grant([string] $path, [string[]] $grant) {
+    & icacls $path @grant | Out-Null
+    if ($LASTEXITCODE -ne 0) { Fail "icacls $path $($grant -join ' ') failed ($LASTEXITCODE)" }
+}
 # Traverse only on the two directories above, read on the lock directory.
-& icacls $suiteHome /grant "*${sid}:(X)" | Out-Null
-& icacls (Join-Path $suiteHome '.pseudolife-mcp') /grant "*${sid}:(X)" | Out-Null
-& icacls $locks /grant "*${sid}:(OI)(CI)(RX)" | Out-Null
-if ($LASTEXITCODE -ne 0) { Fail "icacls could not grant $RunnerUser read access to $locks" }
+Grant $suiteHome @('/grant', "*${sid}:(X)")
+Grant (Join-Path $suiteHome '.pseudolife-mcp') @('/grant', "*${sid}:(X)")
+Grant $locks @('/grant', "*${sid}:(OI)(CI)(RX)")
 
 Say "== tools (administrators only; $RunnerUser may run, not change)"
 $tools = Join-Path $Root 'tools'
@@ -165,19 +183,24 @@ foreach ($dir in $Root, $tools, (Join-Path $Root 'hooks'), (Join-Path $Root 'cac
 }
 # The root: administrators and SYSTEM in full, everyone else nothing, then
 # read and execute for the account on what it runs.
-& icacls $Root /inheritance:r /grant:r '*S-1-5-32-544:(OI)(CI)F' '*S-1-5-18:(OI)(CI)F' | Out-Null
-& icacls $Root /grant "*${sid}:(RX)" | Out-Null
-& icacls $tools /grant "*${sid}:(OI)(CI)(RX)" | Out-Null
-& icacls (Join-Path $Root 'hooks') /grant "*${sid}:(OI)(CI)(RX)" | Out-Null
+Grant $Root @('/inheritance:r', '/grant:r', '*S-1-5-32-544:(OI)(CI)F', '*S-1-5-18:(OI)(CI)F')
+Grant $Root @('/grant', "*${sid}:(RX)")
+Grant $tools @('/grant', "*${sid}:(OI)(CI)(RX)")
+Grant (Join-Path $Root 'hooks') @('/grant', "*${sid}:(OI)(CI)(RX)")
 $env:UV_TOOL_DIR = Join-Path $tools 'uv-tools'
 $env:UV_TOOL_BIN_DIR = Join-Path $tools 'bin'
 $env:UV_PYTHON_INSTALL_DIR = Join-Path $tools 'python'
 $env:UV_CACHE_DIR = Join-Path $Root 'cache\uv'
-& $uv tool install --quiet --upgrade --python 3.11 $PseudolifeSpec
-if ($LASTEXITCODE -ne 0) { Fail "uv tool install $PseudolifeSpec failed" }
+# The managed Python first, and the tool bound to it by path: left to choose,
+# uv may take an interpreter in the administrator's own profile, which the
+# account cannot read.
 & $uv python install --quiet 3.11
 $python = & $uv python find 3.11 --managed-python
-if (-not $python -or -not (Test-Path -LiteralPath $python)) { Fail 'uv did not provide Python 3.11 under the tools directory' }
+if (-not $python -or -not (Test-Path -LiteralPath $python) -or -not $python.StartsWith($tools, [StringComparison]::OrdinalIgnoreCase)) {
+    Fail "uv did not provide Python 3.11 under $tools"
+}
+& $uv tool install --quiet --upgrade --python $python $PseudolifeSpec
+if ($LASTEXITCODE -ne 0) { Fail "uv tool install $PseudolifeSpec failed" }
 $gate = Join-Path $env:UV_TOOL_BIN_DIR 'pseudolife-mcp.exe'
 & $gate lease check --help | Out-Null
 if ($LASTEXITCODE -ne 0) { Fail "$gate does not run" }
@@ -229,29 +252,37 @@ if (-not (Test-Path -LiteralPath (Join-Path $dir '.runner'))) {
 }
 $profileDir = (Get-CimInstance Win32_UserProfile | Where-Object { $_.SID -eq $sid }).LocalPath
 if (-not $profileDir) { $profileDir = "C:\Users\$RunnerUser" }
-# .env and .path are written by an administrator into a directory the account
-# may change, so a link planted in their place is refused, not followed.
-foreach ($file in '.env', '.path') {
-    $path = Join-Path $dir $file
-    $item = Get-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
-    if ($item -and ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) { Fail "$path is a link; remove it and rerun" }
-}
 $envText = @"
 PSEUDOLIFE_PARITY_LEASE=$Lease
 PSEUDOLIFE_PARITY_LOCK_DIR=$locks
 PSEUDOLIFE_PARITY_RUNNER_DIR=$dir
 ACTIONS_RUNNER_HOOK_JOB_STARTED=$hook
+PIP_CACHE_DIR=$profileDir\.cache\pip
+UV_CACHE_DIR=$profileDir\.cache\uv
+HF_HOME=$profileDir\.cache\huggingface
 "@
 $before = (Get-Content -LiteralPath (Join-Path $dir '.env') -Raw -ErrorAction SilentlyContinue) + (Get-Content -LiteralPath (Join-Path $dir '.path') -Raw -ErrorAction SilentlyContinue)
 $pathText = (@($env:UV_TOOL_BIN_DIR, 'C:\Program Files\PowerShell\7', 'C:\Program Files\Git\cmd',
     "$env:SystemRoot\System32", $env:SystemRoot, "$env:SystemRoot\System32\Wbem",
     "$env:SystemRoot\System32\WindowsPowerShell\v1.0", "$env:SystemRoot\System32\OpenSSH") -join ';')
-Set-Content -LiteralPath (Join-Path $dir '.env') -Value $envText -Encoding utf8NoBOM -NoNewline
-Set-Content -LiteralPath (Join-Path $dir '.path') -Value $pathText -Encoding utf8NoBOM -NoNewline
+# The account may change the runner directory, so .env and .path are written
+# in an administrators-only directory and renamed into place: a rename
+# replaces whatever entry a job left there (a link, a hard link to another
+# file) instead of writing through it.
+foreach ($pair in @(@('.env', $envText), @('.path', $pathText))) {
+    $staged = Join-Path $Root "cache\$Name$($pair[0]).new"
+    Set-Content -LiteralPath $staged -Value $pair[1] -Encoding utf8NoBOM -NoNewline
+    [IO.File]::Move($staged, (Join-Path $dir $pair[0]), $true)
+}
 $after = $envText + $pathText
 $svc = Get-Service -Name $service -ErrorAction SilentlyContinue
 if (-not $svc) { Fail "the runner service $service is missing; remove $dir\.runner and rerun with RUNNER_TOKEN" }
-if ($before -ne $after -or $svc.Status -ne 'Running') {
+if ($NoStart) {
+    Stop-Service -Name $service
+    Set-Service -Name $service -StartupType Manual
+    Say "runner $Name`: $((Get-Service -Name $service).Status), start type Manual (-NoStart)"
+} elseif ($before -ne $after -or $svc.Status -ne 'Running') {
+    Set-Service -Name $service -StartupType AutomaticDelayedStart
     Restart-Service -Name $service
     Say "runner $Name`: $((Get-Service -Name $service).Status) (restarted)"
 } else {

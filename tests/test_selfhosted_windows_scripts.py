@@ -39,11 +39,12 @@ def test_the_egress_rule_names_every_range():
     block = re.search(r"^\$blocked = @\(.*?\)\n", text, re.S | re.M).group(0)
     result = pwsh(block + "$blocked.Count; $blocked -join ' '")
     count, ranges = result.stdout.strip().splitlines()
-    assert int(count) == 10, result.stdout
-    # Split like the script's own list: the identifier guards flag private addresses.
+    assert int(count) == 9, result.stdout
+    # Split like the script's own list: the identifier guards flag private
+    # addresses. All of IPv6, as on Linux (the firewall takes it as two
+    # halves, not ::/0): a LAN's global prefix is no private range.
     assert ranges.split() == ["10.0" ".0.0/8", "172.16" ".0.0/12", "192.168" ".0.0/16", "169.254.0.0/16",
-                              "100.64.0.0/10", "224.0.0.0/4", "255.255.255.255", "fc00::/7", "fe80::/10",
-                              "ff00::/8"]
+                              "100.64.0.0/10", "224.0.0.0/4", "255.255.255.255", "::/1", "8000::/1"]
 
 
 @pytest.mark.skipif(os.name != "nt" or PWSH is None, reason="the hook's egress check reads Windows routes")
@@ -57,3 +58,15 @@ def test_the_hook_refuses_a_job_for_an_account_the_firewall_does_not_bind(tmp_pa
                             capture_output=True, text=True, timeout=120, env=env)
     assert result.returncode == 1, result.stdout + result.stderr
     assert "so its firewall rule does not bind; the job is refused" in result.stdout
+
+
+@needs_pwsh
+def test_the_runner_password_survives_cmd():
+    # config.cmd is a batch file: cmd.exe strips ^ and expands % and !, so a
+    # password holding one registers the service with a different password.
+    text = SETUP.read_text(encoding="utf-8")
+    function = re.search(r"^function New-RunnerPassword \{.*?^\}\n", text, re.S | re.M).group(0)
+    result = pwsh(function + "1..300 | ForEach-Object { New-RunnerPassword }")
+    passwords = result.stdout.split()
+    assert len(passwords) == 300 and len(set(passwords)) == 300, result.stderr
+    assert all(re.fullmatch(r"[A-Za-z0-9]{40}", password) for password in passwords)
