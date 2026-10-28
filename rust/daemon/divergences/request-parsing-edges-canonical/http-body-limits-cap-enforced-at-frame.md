@@ -1,0 +1,3 @@
+| Item | Python | Rust |
+|---|---|---|
+| HTTP-BODY-LIMITS: cap enforced at frame granularity | uvicorn sends the selected early response immediately, keeps the connection alive when permitted and discards unread body data after the response | Rust also answers at once and discards afterwards, but for at most 8 MiB more within 250 ms; a body read to its end keeps the connection, otherwise it closes after the answer through the lingering close, and an unread Expect body or a declared length past the budget is announced with `Connection: close` (MCP-REFUSAL-CLEANUP above). Polling stops at the discard budget or a failed read, with one in-flight frame and Hyper's final drop poll able to overshoot; a slow body can outlast the deliberate deadline |

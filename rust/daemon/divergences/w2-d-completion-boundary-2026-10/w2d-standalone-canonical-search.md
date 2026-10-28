@@ -1,0 +1,3 @@
+| Named divergence | Omitted surface | Reason / owner |
+|---|---|---|
+| `w2d-standalone-canonical-search` | None (closed 2026-10-27) | Python has no such `/api` entry point: no `ConsoleRoutes` registration (`web/routes.py`) and no `web/api.py` branch calls `cortex_lookup`, `cortex_candidates`, `world_search` or `lesson_search`; the only `/api` use of the canonical search is the cortex block inside `GET /api/search`, which is served. The four reads are reachable only as the MCP tools `memory_fact_get`, `memory_world_search` and `memory_lesson_search`, all served. Nothing is omitted, so the row is closed rather than ported (D10 adds no Python route). |

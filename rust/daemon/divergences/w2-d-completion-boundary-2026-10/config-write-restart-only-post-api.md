@@ -1,0 +1,3 @@
+| Named divergence | Omitted surface | Reason / owner |
+|---|---|---|
+| `config-write-restart-only`: `POST /api/config` on a live knob | `write_config` sets the running config for every knob not marked restart (`applied`), so the next read and the daemon's behaviour change at once | the patch is validated and config.yaml written exactly as Python writes it, but nothing is applied to the running daemon: every patched knob answers `restart_required` (`applied` is `[]`), and `GET /api/config` shows each one's `saved` value until the next start | behaviour with a caller (the Console's settings editor), so it must close before G2: live-apply needs each setting's reader to take a runtime value, the B4 follow-up the B2d config answer (2026-10-27) names |
