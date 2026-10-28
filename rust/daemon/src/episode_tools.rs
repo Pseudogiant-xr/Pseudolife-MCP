@@ -333,7 +333,7 @@ fn mcp_memory_episode_summary<'a>(app: &'a crate::http::App, call: ToolCall<'a>)
             return Ok(json!({"found": false, "id": id}));
         };
         let bank = ready.bank.read().expect("bank lock");
-        let out = episode_summary(&bank, &ep, &band_order).map_err(ToolError::Invalid)?;
+        let out = episode_summary(&bank, &ep, &band_order, true).map_err(ToolError::Invalid)?;
         drop(bank);
         drop(ws);
         Ok(out)
@@ -390,16 +390,18 @@ impl Counter {
     }
 }
 
-/// `service.episode_summary` with the MCP compaction: the episode, how many
-/// resident entries attribute to it, their tag and source distributions
-/// (`(-count, key)` order) and the newest twenty (by timestamp, a stable
-/// sort over Python's band-by-band walk) as `_compact_entry` with
-/// supersession annotated over every resident entry. A list or dict tag
-/// fails as Python's dict key does.
-fn episode_summary(
+/// `service.episode_summary`: the episode, how many resident entries
+/// attribute to it, their tag and source distributions (`(-count, key)`
+/// order) and the newest twenty (by timestamp, a stable sort over Python's
+/// band-by-band walk) as `_entry_to_dict` with supersession annotated over
+/// every resident entry; `compact` applies the MCP layer's `_compact_entry`
+/// (`GET /api/episodes/summary` serves the service dict). A list or dict
+/// tag fails as Python's dict key does.
+pub(crate) fn episode_summary(
     bank: &crate::bank::Bank,
     ep: &Episode,
     band_order: &[String],
+    compact: bool,
 ) -> Result<Value, String> {
     let rank = |band: &str| {
         band_order
@@ -449,7 +451,12 @@ fn episode_summary(
     );
     out.insert(
         "recent_entries".into(),
-        Value::Array(served.iter().map(|(_, d)| compact_entry(d, None)).collect()),
+        Value::Array(
+            served
+                .into_iter()
+                .map(|(_, d)| if compact { compact_entry(&d, None) } else { d })
+                .collect(),
+        ),
     );
     Ok(Value::Object(out))
 }
@@ -496,7 +503,7 @@ mod tests {
             ],
             matrix: vec![],
         };
-        let out = episode_summary(&bank, &episode("e"), &["working".into()]).unwrap();
+        let out = episode_summary(&bank, &episode("e"), &["working".into()], true).unwrap();
         let keys: Vec<&String> = out.as_object().unwrap().keys().collect();
         assert_eq!(
             keys,
@@ -546,7 +553,7 @@ mod tests {
             matrix: vec![],
         };
         assert_eq!(
-            episode_summary(&bank, &episode("e"), &["working".into()]).unwrap_err(),
+            episode_summary(&bank, &episode("e"), &["working".into()], true).unwrap_err(),
             "unhashable type: 'list'"
         );
     }
@@ -561,7 +568,7 @@ mod tests {
             entries,
             matrix: vec![],
         };
-        let out = episode_summary(&bank, &episode("e"), &["working".into()]).unwrap();
+        let out = episode_summary(&bank, &episode("e"), &["working".into()], true).unwrap();
         assert_eq!(out["entry_count"], 25);
         assert_eq!(out["recent_entries"].as_array().unwrap().len(), RECENT_CAP);
         assert_eq!(out["recent_entries"][0]["id"], 24);

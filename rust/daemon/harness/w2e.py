@@ -334,6 +334,10 @@ GENERIC = re.compile(r"^session - \d{4}-\d{2}-\d{2} \d{2}:\d{2}$")
 # detached from its connection, so only the shutdown drain can observe it.
 MUTANTS = ["store-tags-raw", "store-skip-session-episode", "store-no-hint", "store-surprise-raw",
            "mcp-store-no-session",
+           # /health's subsystem keys: caught by the health-* scenarios.
+           "health-no-stall", "health-no-capacity-warning",
+           # The counters row: caught by the counters-* scenarios.
+           "counters-save-off",
            # memory_fact_set (spec FS1-FS12): caught by the fact-set-* scenarios.
            "mcp-fact-set-no-supersede", "mcp-fact-set-no-confirm-reinforce",
            "mcp-fact-set-no-correction-signal", "mcp-fact-set-no-entity-mint",
@@ -3075,6 +3079,61 @@ def dream(action, **kw) -> dict:
     return tool("memory_dream", action=action, **kw)
 
 
+# /health's conditional subsystem keys (daemon.py:284-365) and `status`, as
+# one answer: each key's value, or "<absent>" where the payload omits it; a
+# stall record's clocks keep only null-or-not. The rest of the payload is
+# the w1a harness's (run.py).
+HEALTH_KEYS = ("status", "extractor", "stall", "migration_partial", "dream_tracking_error",
+               "capacity_warning", "lesson_reconciliation_required")
+
+
+def health() -> dict:
+    return {"op": "health"}
+
+
+# The cms_counters row (D2): read as the running daemons' autosave left
+# it, or, with `stop`, after both daemons have stopped (the harness's stop:
+# SIGTERM on Linux, a kill on Windows). dbstate dumps the table without rows
+# everywhere else, since each daemon's autosave clock is its own.
+def counters(stop: bool = False) -> dict:
+    return {"op": "counters", "stop": stop}
+
+
+COUNTERS_COLUMNS = ("preset_name", "interaction_count", "logical_turn_count", "tier_queries",
+                    "tier_hits", "surprise_history", "consolidation_events", "updated_at")
+# The surprises in the history: the stores' own surprise tolerance.
+COUNTERS_SURPRISE_TOL = 1e-5
+
+
+def counters_rows(dsns: dict) -> tuple[dict, dict]:
+    """Both sides' rows, ``updated_at`` as null-or-not, and each band's
+    surprise history as its length once every value agrees within
+    ``COUNTERS_SURPRISE_TOL`` (raw on both sides otherwise, so it differs)."""
+    import psycopg
+    rows = {}
+    for side in ("python", "rust"):
+        with psycopg.connect(dsns[side], autocommit=True) as conn:
+            r = conn.execute(f"SELECT {', '.join(COUNTERS_COLUMNS)} FROM cms_counters "
+                             "WHERE id = 1").fetchone()
+        rows[side] = None if r is None else dict(zip(COUNTERS_COLUMNS, r))
+    py, rs = rows["python"], rows["rust"]
+    for row in (py, rs):
+        if row is not None:
+            row["updated_at"] = _clock(row["updated_at"])
+    if py and rs and isinstance(py["surprise_history"], dict) \
+            and isinstance(rs["surprise_history"], dict) \
+            and set(py["surprise_history"]) == set(rs["surprise_history"]):
+        close = all(
+            len(py["surprise_history"][b]) == len(rs["surprise_history"][b])
+            and all(abs(a - c) <= COUNTERS_SURPRISE_TOL
+                    for a, c in zip(py["surprise_history"][b], rs["surprise_history"][b]))
+            for b in py["surprise_history"])
+        if close:
+            for row in (py, rs):
+                row["surprise_history"] = {b: len(v) for b, v in row["surprise_history"].items()}
+    return {"isError": False, "value": py}, {"isError": False, "value": rs}
+
+
 # A tool argument naming the last commit_token this side answered.
 PULL_TOKEN = "@pull_token"
 
@@ -3404,6 +3463,13 @@ MUTANTS += w2e_graph_insight.MUTANTS
 # embedded record and then the rest alphabetically, and no near-tie can
 # reorder them.
 DREAM_RUN_QUIET = DREAM_RUN_CONFIG + "    alias_candidate_min_cosine: 0\n"
+# The counters scenarios: no dreams, no reaping, nothing else writing.
+COUNTERS_CONFIG = "memory:\n  dream:\n    enabled: false\n"
+# DREAM_RUN_QUIET with dreams enabled (/health reads "disabled" otherwise)
+# and the sweep a day away, so no automatic dream joins the manual ones.
+HEALTH_DREAM_CONFIG = DREAM_RUN_QUIET.replace(
+    "    enabled: false\n    stall_notice: false\n",
+    "    enabled: true\n    stall_notice: false\n    sweep_interval_seconds: 86400\n")
 
 
 def batch_replies(texts, claims=(), events=(), relations=()) -> list[dict]:
@@ -3571,6 +3637,119 @@ SCENARIOS.update({
             dream("runs"),
             fact_get("Ops Board", "owner"),
             fact_get("Staging Database", "engine"),
+        ],
+    },
+    # The counters row (D2), written by autosave and read back at start: two
+    # stores and a search autosave the row; a restart reads it back; one more
+    # store autosaves the sum (interaction 3, not 1). The exits write nothing
+    # comparable: Python's exit save never runs on SIGTERM (uvicorn re-raises
+    # it; divergences.md), and Rust's, gated like autosave, finds nothing
+    # changed since the last autosave, so the row stands on both sides.
+    "counters-restore": {
+        "live_only": "autosave writes on each daemon's own clock; compared live",
+        "config": COUNTERS_CONFIG,
+        "env": {"PSEUDOLIFE_MCP_AUTOSAVE_SECONDS": "1"},
+        "seed": [],
+        "ops": [
+            store("The counters note about the build cache.", source="pseudolife-mcp"),
+            store("The counters note about the token rotation.", source="pseudolife-mcp"),
+            search("build cache"),
+            {"op": "sleep", "s": 3},
+            counters(),
+            {"op": "restart", "config": COUNTERS_CONFIG},
+            counters(),
+            store("The counters note after the restart.", source="pseudolife-mcp"),
+            {"op": "sleep", "s": 3},
+            counters(),
+            # No search after the restart: its logged retrieval event carries
+            # a hydrated entry's surprise that differs in the 7th digit
+            # between the daemons, a read-path difference outside this row.
+            counters(stop=True),
+        ],
+    },
+    # Autosave: a store changes the bank, so the next autosave writes the row;
+    # a search alone does not, so neither autosave nor the (equally gated)
+    # exit save writes its query count: the row keeps the pre-search count.
+    "counters-autosave": {
+        "live_only": "autosave writes on each daemon's own clock; compared live",
+        "config": COUNTERS_CONFIG,
+        "env": {"PSEUDOLIFE_MCP_AUTOSAVE_SECONDS": "1"},
+        "seed": [],
+        "ops": [
+            store("The autosave note about the deploy window.", source="pseudolife-mcp"),
+            {"op": "sleep", "s": 3},
+            counters(),
+            search("deploy window"),
+            {"op": "sleep", "s": 3},
+            counters(),
+            counters(stop=True),
+        ],
+    },
+    # /health's conditional keys. Dreams on, with the sweep a day away so
+    # only the manual runs below dream: two failed extractions open a hard
+    # stall ("stalled" plus the stall record), a status call reads it.
+    "health-stall": {
+        "config": HEALTH_DREAM_CONFIG,
+        "extractor": OUTAGE_EXTRACTOR,
+        "seed": [fact("Health Host", "OS", "Debian 12")],
+        "ops": [
+            *[store(t, source="conversation") for t in OUTAGE_NOTES],
+            health(),
+            dream("run"),
+            health(),
+            dream("run"),
+            health(),
+            dream("status"),
+        ],
+    },
+    # Two runs the fallback served open a warning stall ("configured" plus
+    # the record); a third keeps it open and counts it.
+    "health-stall-fallback": {
+        "config": HEALTH_DREAM_CONFIG,
+        "extractor": FALLBACK_EXTRACTOR,
+        "extractor_fallback": True,
+        "extractor_keys": {"primary": "sk-w2e-primary-0001", "fallback": "sk-w2e-fallback-0002"},
+        "seed": [fact("Fallback Host", "OS", "Debian 12")],
+        "ops": [
+            store(FALLBACK_NOTES[0], source="conversation"),
+            dream("run"),
+            store(FALLBACK_NOTES[1], source="conversation"),
+            dream("run"),
+            health(),
+            store(FALLBACK_NOTES[2], source="conversation"),
+            dream("run"),
+            health(),
+        ],
+    },
+    # A one-band bank of five: no flag at three, the flag at four (exactly
+    # 80%) and when full; never `degraded`.
+    "health-capacity": {
+        "live_only": "compared live against the Python daemon; no golden recorded",
+        "config": "memory:\n  miras:\n    preset: custom\n    bands:\n      - name: flat\n        max_entries: 5\n",
+        "seed": [],
+        "ops": [
+            store("Capacity note one about the deploy checklist."),
+            store("Capacity note two about rotating the bearer tokens."),
+            store("Capacity note three about the weather in Hobart."),
+            health(),
+            store("Capacity note four about lunch plans."),
+            health(),
+            store("Capacity note five about the index rebuild."),
+            store("Capacity note six about the backup window."),
+            health(),
+        ],
+    },
+    # A corrupt dream acknowledgement secret: dream tracking refuses (a
+    # dream-only degradation), /health names the code, status stays ok.
+    # Rust initializes tracking at the first dream call, so one comes first.
+    "health-tracking-error": {
+        "config": DREAM_RUN_QUIET,
+        "seed": [fact("Tracking Host", "OS", "Debian 12"),
+                 sql("UPDATE meta SET value = '\"not-a-secret\"'::jsonb "
+                     "WHERE key = 'dream_ack_secret_v1'", after_stop=True)],
+        "ops": [
+            dream("status"),
+            health(),
         ],
     },
     "dream-run-outage": {
@@ -5434,15 +5613,21 @@ def graph_answer_free(v) -> None:
 # SCORE_TOL (scores and fusion inputs rest on the embeddings).
 EVENT_FLOAT_KEYS = {"score", "dense", "ce", "bm25", "slot", "recency", "margin"}
 EVENT_SCORE_TOL = 2e-4
+# A served entry's ``surprise``: an entry each side stored itself holds its
+# own surprise (``1 - max_sim`` over its own embeddings), so the logged value
+# compares as a stored surprise does, within the measured ``surprise_abs``.
+EVENT_SURPRISE_TOL = json.loads(TOLERANCE_FILE.read_text(encoding="utf-8"))["surprise_abs"]
 
 
 def _float_pair_free(x, y) -> None:
     if isinstance(x, dict) and isinstance(y, dict):
         for k in x.keys() & y.keys():
             a, b = x[k], y[k]
-            if (k in EVENT_FLOAT_KEYS and isinstance(a, (int, float)) and isinstance(b, (int, float))
-                    and not isinstance(a, bool) and not isinstance(b, bool)
-                    and abs(a - b) <= EVENT_SCORE_TOL):
+            numbers = (isinstance(a, (int, float)) and isinstance(b, (int, float))
+                       and not isinstance(a, bool) and not isinstance(b, bool))
+            if numbers and k == "surprise" and abs(a - b) <= EVENT_SURPRISE_TOL:
+                x[k] = y[k] = "<surprise>"
+            elif numbers and k in EVENT_FLOAT_KEYS and abs(a - b) <= EVENT_SCORE_TOL:
                 x[k] = y[k] = f"<{k}>"
             else:
                 _float_pair_free(a, b)
@@ -5787,6 +5972,15 @@ def run_op(op: dict, port: int, mcp: Mcp, dsn: str) -> dict | None:
         return {"isError": False, "value": None}
     if op["op"] in w2e_episodes.OPS:
         return w2e_episodes.run(op, port, dsn, sys.modules[__name__])
+    if op["op"] == "health":
+        r = w1a.call(port, "GET", "/health", [AUTH], None)
+        body = r.get("json") if isinstance(r.get("json"), dict) else {}
+        value = {k: body.get(k, "<absent>") for k in HEALTH_KEYS}
+        if isinstance(value["stall"], dict):
+            value["stall"] = {k: _clock(v) if k in DREAM_CLOCK_KEYS else v
+                              for k, v in value["stall"].items()}
+        # A degraded payload answers 503; the status key carries it.
+        return {"isError": r["status"] not in (200, 503), "value": value}
     if op["op"] == "http":
         body = json.dumps(op["body"]).encode() if "body" in op else None
         hdrs = [AUTH] + ([("Content-Type", "application/json")] if body else [])
@@ -6071,6 +6265,11 @@ def _run_live(name: str, scn: dict, tag: str, binary: Path, root: Path, record: 
                 elif op["op"] == "restart":
                     clients = restart_sides(op, scn, procs, homes, envs, stubs, binary)
                     py = rs = {"isError": False, "value": None}
+                elif op["op"] == "counters":
+                    if op["stop"]:
+                        for d in procs.values():
+                            d.stop()
+                    py, rs = counters_rows(dsns)
                 else:
                     py = run_op(with_pull_token(op, tokens["python"]), procs["python"].port,
                                 clients["python"], dsns["python"])
@@ -6256,6 +6455,28 @@ def run_golden(name: str, binary: Path, root: Path, tol: dict, owned: list[str])
         close_stubs(stubs)
     return {"scenario": name, "steps": steps, "stats": stats}
 
+
+# A search over entries each side stored itself, before and after a
+# restart: the served components' surprise is each side's own (the
+# in-process double, then the hydrated REAL), compared within
+# EVENT_SURPRISE_TOL (found by B4's restart scenario, 2026-10-27).
+RESTART_QUERY = "which port does the bench Postgres use"
+SCENARIOS.update({
+    "search-after-restart": {
+        "config": None,
+        "seed": [],
+        "ops": [
+            store("The bench Postgres listens on port 5434 on the dev box."),
+            store("The live bank's Postgres container is never used for tests."),
+            dict(search(RESTART_QUERY, top_k=2), expect=[
+                f"SELECT count(*) = 1 FROM retrieval_events WHERE query_text = '{RESTART_QUERY}'"]),
+            # A restart writes some config: the default board setting, unchanged.
+            {"op": "restart", "config": "coordination:\n  enabled: true\n"},
+            dict(search(RESTART_QUERY, top_k=2), expect=[
+                f"SELECT count(*) = 2 FROM retrieval_events WHERE query_text = '{RESTART_QUERY}'"]),
+        ],
+    },
+})
 
 import w2e_episodes  # noqa: E402
 

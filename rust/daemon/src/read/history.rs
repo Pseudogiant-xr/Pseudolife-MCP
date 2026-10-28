@@ -65,7 +65,7 @@ fn mcp_memory_history<'a>(app: &'a crate::http::App, call: ToolCall<'a>) -> Tool
 }
 
 /// `service.chain`'s default `limit`.
-const CHAIN_LIMIT: usize = 20;
+const CHAIN_LIMIT: i64 = 20;
 /// `(en.get("text") or "")[:160]`: an entry event's summary length.
 const ENTRY_SUMMARY_CHARS: usize = 160;
 
@@ -74,7 +74,11 @@ const ENTRY_SUMMARY_CHARS: usize = 160;
 /// its graph node's canonical and aliases; the node's source entries; its
 /// live edges; current lessons whose task or `about` names it), sorted
 /// stably by time and cut to the last `limit`.
-async fn chain(ready: &crate::service::Ready, entity: &str, limit: usize) -> anyhow::Result<Value> {
+pub(crate) async fn chain(
+    ready: &crate::service::Ready,
+    entity: &str,
+    limit: i64,
+) -> anyhow::Result<Value> {
     let not_found = || json!({"found": false, "entity": entity, "count": 0, "events": []});
     let name = crate::board::text::py_strip(entity);
     if name.is_empty() {
@@ -129,7 +133,9 @@ async fn chain(ready: &crate::service::Ready, entity: &str, limit: usize) -> any
     drop(cortex);
     // 2 + 3. source entries and edges need the graph node.
     if let Some(id) = node.get("id").and_then(Value::as_i64) {
-        let lim = limit as i64;
+        // Python passes `limit` to the SQL as is: a negative one fails
+        // there (PostgreSQL refuses a negative LIMIT), once a node exists.
+        let lim = limit;
         let rows = crate::txn::with_client(db, |c| async move {
             c.query(
                 "SELECT DISTINCT en.id, en.band, en.source, en.ts, en.text, en.episode_title \
@@ -215,7 +221,8 @@ async fn chain(ready: &crate::service::Ready, entity: &str, limit: usize) -> any
         return Ok(not_found());
     }
     events.sort_by(|x, y| x.0.total_cmp(&y.0));
-    let keep = limit.max(1);
+    // `events[-max(1, int(limit)):]`.
+    let keep = usize::try_from(limit.max(1)).unwrap_or(usize::MAX);
     let events: Vec<Value> = events
         .split_off(events.len().saturating_sub(keep))
         .into_iter()
@@ -240,7 +247,7 @@ fn tx_or_asserted(r: &CortexRecord) -> f64 {
 
 /// `service.history`: a set slot's member events, or the slot's versions,
 /// oldest first, filtered to `cutoff` when given (echoed as `as_of`).
-fn history(
+pub(crate) fn history(
     store: &CortexStore,
     entity: &str,
     attribute: &str,
