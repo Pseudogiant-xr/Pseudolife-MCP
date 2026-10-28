@@ -12,7 +12,7 @@
     "docs/cortex-mcp-spec.md": "43fba1fe5e5cd3710f59d7e99b414f7b78ea15eaa70b620b23716f3fae308d32",
     "docs/dev/ci-budget.md": "4167e11e4e6c9ce2d50b1c702e6f73d630276516aaf84152e370e3e71a909731",
     "docs/dev/dev-machines.md": "135cb4cbd97e7b34fddbc858df6e0d53e131fb2ec0589e7f3ce26026670dc0a1",
-    "docs/dev/merge-batches.md": "84d6da0db1621364d28b16e11e1d576c30c90c9bfd63f9775f2c79856141d8e7",
+    "docs/dev/merge-batches.md": "649451e07e637bd537987901b5ca13784db72b615528b485cfd91282b5178792",
     "docs/evidence/rust-stream-c-episode-20261009.json": "6dda143104a5b745eb322041190496caa9af3b61a219620c41633f6477d15079",
     "docs/guide/agent-isolation.md": "465b0c24a386ae3a92bf1a3d46e01114db061dc6ddd4a68836512fd191ff23f4",
     "docs/guide/benchmarks.md": "577a6a8230de0d57351e3e57262bb2b5385b27e6292bfc131c21c3522330fb97",
@@ -241,7 +241,7 @@
     "ops/install-shim-autostart.sh": "6f32b1c2ebd688546fdfd1837a3b6445d3195db99e9668c0360d13582c248888",
     "ops/install.ps1": "88264a10cb50a0f2b6348201e8befc46b271d06c2cdb8ea559a2a2591eaac565",
     "ops/install.sh": "7aad5c81dc204ace2adf3557a53ac5efff556152a71470b38a564fb1ae613866",
-    "ops/integrate.py": "bfdc9005fbf0680fc10c6cf3103e6205daad203d678c0e3e390c7315078681f9",
+    "ops/integrate.py": "6004e6a3b67621249809188522def31b01e9dd9683a9532dbe558f73ea6f3461",
     "ops/measure_reverify_population.py": "413ff8baa0e0b25b8a727b6bead248df753d4d26e7c697aa6a0542b68715cfa5",
     "ops/migrate-pg18.ps1": "a2a8bd96ab754249395a9d42b26bfd8e6b5ecf8d6da1cd72383ebf745c0acde8",
     "ops/migrate_drop_age.py": "bad14579affef14699a3e1898afd4ba6326944f5db1e9b5c0486ee2b23153eac",
@@ -293,7 +293,7 @@
     "plugin/hooks/user-prompt-submit.sh": "39c583c145c97e9c0fea6a9b36ea9c2e879a1bd4733a6362a493d4a194750ba9",
     "plugin/release.json": "2720f3c4439435ec60acd5215418b1dc2d705af039273a92f4dc8169529b54a8",
     "pseudolife_memory/coordination.py": "8f171a2ca10c6c4887cb3503ea6dcc76c9a11602460b24a9ff59fe64a2f17e82",
-    "pseudolife_memory/mcp_server.py": "06c2481953719a829ce8cf312e7eb890c180de04956e332c9e94ac3416fdc66a",
+    "pseudolife_memory/mcp_server.py": "f1fe502a040f0dfa6e651e64aa2a79e82140af77f3680f187e8dda91c81acb3a",
     "pseudolife_memory/utils/config.py": "9e8cda2a3aee96fe725a9c64d30fabda01ffac69e03a65418e5cc72a291efce4",
     "pseudolife_memory/web/api.py": "deb35259f0dfd306f4877bf36d1d52aba59e2c3d950590c28a1797bded938d67",
     "pseudolife_memory/web/routes.py": "ea742529395f85091eebb03d60e8f7e6561be3f7c70c7e40d8949f6fe8bf23f2",
@@ -39729,7 +39729,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/dev/merge-batches.md:215",
+          "location": "docs/dev/merge-batches.md:257",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -39759,7 +39759,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/integrate.py:742",
+          "location": "ops/integrate.py:867",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -65400,12 +65400,12 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/dev/merge-batches.md:264",
+      "location": "docs/dev/merge-batches.md:30",
       "reason": "forwarded parameters"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/dev/merge-batches.md:30",
+      "location": "docs/dev/merge-batches.md:307",
       "reason": "forwarded parameters"
     },
     {

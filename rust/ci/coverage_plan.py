@@ -47,6 +47,13 @@ EXCEPTIONS = {
         'windows': {},
     },
     'w1a_selections': {},
+    'daemon_scenarios': {
+        'pairing': 'Live only (B5, W2F-PAIRING-HTTP): it redeems invites Python seeds on the '
+                   'template, so its codes and token hashes exist only for that run; the evidence '
+                   'is a Linux dev-box live run (D6/D11). Pairing refusals stay in CI through '
+                   'pair-budget, body-pair-budget and the security corpus, and the routes/pair.rs '
+                   'tests cover the two-slot gate, refunds and disconnect ownership on both OSes.',
+    },
     'cli_mutants': {
         'linux': {
             'connect-config-not-private': 'Survived Linux 2026-10-11; the file is already created with private POSIX mode before make_private.',

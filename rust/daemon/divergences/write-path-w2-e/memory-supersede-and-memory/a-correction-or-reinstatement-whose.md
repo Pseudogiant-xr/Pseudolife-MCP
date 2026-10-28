@@ -1,0 +1,3 @@
+| Item | Python | Rust | Owner / why |
+|---|---|---|---|
+| A correction or reinstatement whose outcome is unknown (the lock session or connection lost around `COMMIT`) | `PendingCorrectionRecovery` / `PendingEntryReinstatementRecovery` classify the durable state under fresh locks and publish whichever outcome committed; ordinary reads wait behind the recovery | a failed transaction rolls back and the resident bank is unchanged; a commit whose answer was lost leaves the row changed and the resident bank stale until restart, and the call answers `internal_error` | the lifecycle increment, with the store path's own commit-unknown handling (`Entry insert fails after eviction` above); failure path only |
