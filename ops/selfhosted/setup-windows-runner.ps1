@@ -297,8 +297,13 @@ function Write-RunnerConfig {
     $path = @($env:UV_TOOL_BIN_DIR, 'C:\Program Files\PowerShell\7', 'C:\Program Files\Git\cmd', 'C:\Program Files\Git\bin',
         "$env:SystemRoot\System32", $env:SystemRoot, "$env:SystemRoot\System32\Wbem",
         "$env:SystemRoot\System32\WindowsPowerShell\v1.0", "$env:SystemRoot\System32\OpenSSH") -join ';'
+    # The tests' default bench address (127.0.0.1:5433) is where a hosted job
+    # finds nothing and skips its optional real-PostgreSQL controls. Here the
+    # suite user's test server may hold it, and the firewall does not filter
+    # loopback, so the default is a port nothing listens on, as on Linux.
     $script:envText = @(
         "PATH=$path",
+        "PSEUDOLIFE_TEST_PG_HOST_PORT=127.0.0.1:9",
         "AGENT_TOOLSDIRECTORY=$toolcache",
         "RUNNER_TOOL_CACHE=$toolcache",
         "PSEUDOLIFE_PARITY_LEASE=$Lease",

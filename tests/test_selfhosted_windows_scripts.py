@@ -85,6 +85,8 @@ def test_the_runner_config_is_readable_by_the_account_after_its_rename():
     assert body.index('Grant $staged @(\'/grant\', "*${sid}:(R)")') < body.index("[IO.File]::Move(")
     # The Windows runner reads .env but not .path, so PATH lives in .env.
     assert '"PATH=$path",' in body
+    # No default test address reaches the suite user's server on loopback.
+    assert '"PSEUDOLIFE_TEST_PG_HOST_PORT=127.0.0.1:9",' in body
     # That PATH replaces the service's own, so Git Bash must be on it, ahead
     # of System32's WSL bash.exe (Codex review of 3de68d9c).
     text_path = body[body.index("$path = @("):body.index("-join ';'")]
