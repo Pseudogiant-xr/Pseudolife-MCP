@@ -23,6 +23,8 @@ def main() -> int:
     group.add_argument("--json-keys", action="store_true", help="exercise reserved JSON keys in capabilities")
     group.add_argument("--shared-clock", action="store_true",
                        help="board sends on the service clock, interleaved with memory ticks")
+    group.add_argument("--handover", action="store_true",
+                       help="a send while the bank changes hands waits for the reseed")
     args = parser.parse_args()
     if args.json_keys:
         test = "service::tests::board_json_capabilities_roundtrip"
@@ -30,6 +32,8 @@ def main() -> int:
         raise SystemExit("--clock retired: the board ticks the service clock; run --shared-clock")
     elif args.shared_clock:
         test = "board::clock_tests::board_sends_tick_the_service_clock"
+    elif args.handover:
+        test = "board::clock_tests::a_send_during_a_bank_handover_stamps_past_the_other_writer"
     else:
         test = "service::tests::board_heartbeat_during_paused_initialization"
     if pg.HOST_PORT != "127.0.0.1:5434":
@@ -39,7 +43,7 @@ def main() -> int:
         dsn = pg.create(name)
         env = dict(os.environ, PL_W2F_BOARD_DSN=dsn)
         with tempfile.TemporaryDirectory(prefix="pl-w2f-boundary-") as scratch:
-            if args.shared_clock:
+            if args.shared_clock or args.handover:
                 env.update(_fixture_service(Path(scratch)))
             result = subprocess.run([
                 "cargo", "test", "--locked", "--manifest-path", str(REPO / "rust" / "Cargo.toml"),
