@@ -155,6 +155,11 @@ pub struct Service {
     counters_pending: std::sync::atomic::AtomicBool,
     /// A `weights.pt` the bank has no counters row for (`/health`).
     pub(crate) counters_import: std::sync::Mutex<Option<String>>,
+    /// Test seam: an initialization waits here, still holding the service
+    /// mutex, between verifying the writer session and the rehydrate that
+    /// follows (taken, so the test sees it was reached).
+    #[cfg(test)]
+    pub(crate) verify_gate: std::sync::Mutex<Option<tokio::sync::oneshot::Receiver<()>>>,
 }
 
 impl Service {
@@ -193,6 +198,8 @@ impl Service {
             last_saved: std::sync::Mutex::new(None),
             counters_pending: std::sync::atomic::AtomicBool::new(false),
             counters_import: std::sync::Mutex::new(None),
+            #[cfg(test)]
+            verify_gate: std::sync::Mutex::new(None),
         }
     }
 
@@ -361,6 +368,13 @@ impl Service {
             storage.forget_probe();
         }
         self.verify_writer_session(&mut inner).await?;
+        #[cfg(test)]
+        {
+            let gate = self.verify_gate.lock().unwrap().take();
+            if let Some(gate) = gate {
+                let _ = gate.await;
+            }
+        }
         self.rehydrate_if_bank_changed_hands(&mut inner);
         if let Some(r) = &inner.ready {
             if crate::mutants::active("startup-clock-reloads")
