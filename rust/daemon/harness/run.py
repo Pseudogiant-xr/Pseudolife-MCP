@@ -11,7 +11,10 @@ clients read, and the body by value (JSON) or by bytes (text), after the
 declared normalizers below. After every scenario it dumps both banks
 (``dbstate``) and diffs them. Declared divergences are cases whose Rust side
 must answer exactly ``501 {"error": "not_implemented", "path": P}``; they are
-counted, never silently passed. ``--record`` writes the oracle's normalized
+counted, never silently passed. Declarations are one file each under
+``declared/`` and new scenario families one module each under
+``run_scenarios/``, so pull requests adding or closing different ones never
+edit the same lines (``run_scenarios/README.md``). ``--record`` writes the oracle's normalized
 answers and bank states to ``goldens/`` so ``golden`` can check the Rust side
 without a Python daemon. ``mutants`` runs each deliberate break compiled into
 a ``--features mutants`` build and requires every one to produce a diff.
@@ -26,6 +29,7 @@ from __future__ import annotations
 import argparse
 import copy
 import http.client
+import importlib.util
 import json
 import os
 import re
@@ -63,10 +67,38 @@ DB_DECLARED = [
     ("row", "meta", "curation_listing_spelling_v2", "the listing-spelling carry-over stamps the clock (W2-E)"),
     ("warmup", "retrieval_events", None, "one warmup probe and its sequence increment (W2-D telemetry)"),
 ]
-# /health keys only Python can emit (each is conditional there): no Rust
-# producer yet. `stall`, `dream_tracking_error` and `capacity_warning` are
-# emitted by both since B4 (w2e.py's health-* scenarios).
-HEALTH_DECLARED_ONLY_PYTHON = {"migration_partial", "lesson_reconciliation_required"}
+# Declarations, one file each so that pull requests closing different ones
+# never edit the same lines; the PR that serves a route or emits a key deletes
+# its file. declared/cases/<slug>.json, {"case", "declared"}: a route case
+# (by name) of gate_cases, Tokens or Tokenless whose Rust side must answer 501.
+# declared/health/<key>.json, {"key"}: a /health key only Python can emit,
+# owned by a later slice (each is conditional there).
+DECLARED = HERE / "declared"
+
+
+def declaration_slug(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
+
+
+def load_declarations(kind: str, field: str, directory: Path = DECLARED) -> dict[str, dict]:
+    """``directory/kind/*.json`` by ``field``; each file is named for it."""
+    found: dict[str, dict] = {}
+    for path in sorted((directory / kind).glob("*.json")):
+        entry = json.loads(path.read_text(encoding="utf-8"))
+        missing = {field, *(("declared",) if kind == "cases" else ())} - set(entry)
+        if missing:
+            raise ValueError(f"{path}: missing {sorted(missing)}; see run_scenarios/README.md")
+        name = entry[field]
+        if path.stem != declaration_slug(name):
+            raise ValueError(f"{path}: {field} {name!r} belongs in {declaration_slug(name)}.json")
+        if name in found:
+            raise ValueError(f"{path}: {field} {name!r} is declared twice")
+        found[name] = entry
+    return found
+
+
+DECLARED_CASES = {name: e["declared"] for name, e in load_declarations("cases", "case").items()}
+HEALTH_DECLARED_ONLY_PYTHON = set(load_declarations("health", "key"))
 NOT_IMPLEMENTED = "not_implemented"
 MUTANTS = ["del-unescaped", "auth-candidate-order", "serde-json-writer", "skip-relation-seed", "skip-lease-epoch", "drop-alter-tail", "pair-ignores-origin",
            "health-omits-db", "route-405-as-404", "body-limit-off", "tokenless-maintainer-open",
@@ -345,6 +377,18 @@ def snapshot_clock_valid(resp: dict) -> bool:
             and type(value) in (int, float) and window[0] <= value <= window[1])
 
 
+# Per-route response scrubs registered by run_scenarios/ modules
+# (register_response_scrub), by unquoted path without the query.
+RESPONSE_SCRUBS: dict = {}
+
+
+def register_response_scrub(path: str, scrub) -> None:
+    """Normalize every answer for ``path`` with ``scrub(resp) -> resp``."""
+    if path in RESPONSE_SCRUBS:
+        raise ValueError(f"a response scrub for {path} is already registered")
+    RESPONSE_SCRUBS[path] = scrub
+
+
 def normalize_response(resp: dict, path: str, declared: list[str], *, golden: bool = False) -> dict:
     resp = json.loads(json.dumps(resp))
     if path == "/api/agents?view=coordination" and snapshot_clock_valid(resp):
@@ -355,6 +399,9 @@ def normalize_response(resp: dict, path: str, declared: list[str], *, golden: bo
         resp["json"] = normalize_health(resp["json"], declared, golden=golden)
     if urllib.parse.unquote(path.split("?")[0]) == "/api/search" and isinstance(resp.get("json"), dict):
         resp["json"] = normalize_search(resp["json"])
+    scrub = RESPONSE_SCRUBS.get(urllib.parse.unquote(path.split("?")[0]))
+    if scrub is not None:
+        resp = scrub(resp)
     if "json" in resp and isinstance(resp["json"], dict) and resp["status"] in (400, 500):
         err = resp["json"].get("error")
         if isinstance(err, str) and err.startswith("memory bank not ready: "):
@@ -555,6 +602,20 @@ def case(name, method, path, headers=(), body=None, declared=None):
             "body": body, "declared": declared}
 
 
+def with_declared(cases: list[dict]) -> list[dict]:
+    """Mark the cases ``declared/cases/`` names (DECLARED_CASES)."""
+    for c in cases:
+        if c["declared"] is None and c["name"] in DECLARED_CASES:
+            c["declared"] = DECLARED_CASES[c["name"]]
+    return cases
+
+
+def stale_declared_cases() -> list[str]:
+    """Declared case names no case list has any more (renamed or removed)."""
+    names = {c["name"] for scn in (Tokens(), Tokenless()) for c in scn.cases()}
+    return sorted(set(DECLARED_CASES) - names)
+
+
 def gate_cases(auth: tuple[str, str] | None) -> list[dict]:
     a = [auth] if auth else []
     js = ("Content-Type", "application/json")
@@ -588,8 +649,7 @@ def gate_cases(auth: tuple[str, str] | None) -> list[dict]:
         case("api POST json array", "POST", "/api/nope", a + [js], b"[1,2]"),
         case("api POST json charset param", "POST", "/api/nope", a + [("Content-Type", "Application/JSON ; charset=utf-8")], b"{}"),
         case("api POST over control limit", "POST", "/api/nope", a + [js], b"{" + b" " * (256 * 1024) + b"}"),
-        case("api POST at text limit path", "POST", "/api/facts/set", a + [js], b"{\"x\": \"" + b"a" * (300 * 1024) + b"\"}",
-             declared="W2-E: facts/set handler"),
+        case("api POST at text limit path", "POST", "/api/facts/set", a + [js], b"{\"x\": \"" + b"a" * (300 * 1024) + b"\"}"),
         case("api POST invalid utf-8", "POST", "/api/nope", a + [js], b"{\"x\": \"\xff\"}"),
         case("api POST coordination invalid utf-8", "POST", "/api/coordination/receive", a + [js], b"{\"x\": \"\xff\"}"),
         case("api GET coordination", "GET", "/api/coordination/receive", a),
@@ -598,8 +658,8 @@ def gate_cases(auth: tuple[str, str] | None) -> list[dict]:
         case("api maintainer wrong verb", "GET", "/api/maintainer/send", a),
         case("api agents coordination view", "GET", "/api/agents?view=coordination", a),
         case("api agents coordination view POST", "POST", "/api/agents?view=coordination", a),
-        case("api known GET (not ported)", "GET", "/api/stats", a, declared="W2-D: stats"),
-        case("api config GET (not ported)", "GET", "/api/config", a, declared="W2-D: config read"),
+        case("api known GET (not ported)", "GET", "/api/stats", a),
+        case("api config GET (not ported)", "GET", "/api/config", a),
         case("hook unknown under /api/hook", "GET", "/api/hook/nope", a),
         case("hook memory-changes wrong verb", "POST", "/api/hook/memory-changes", a),
         case("hook session-end wrong verb", "GET", "/api/hook/session-end", a),
@@ -619,7 +679,7 @@ def gate_cases(auth: tuple[str, str] | None) -> list[dict]:
         case("pair bad hash", "POST", "/api/pair", [js], json.dumps({"code": "ABCD-EFGH-JKMN", "token_sha256": "A" * 64}).encode()),
         case("mcp path, no auth", "GET", "/mcp"),
     ]
-    return c
+    return with_declared(c)
 
 
 class Tokens(Scenario):
@@ -664,7 +724,7 @@ class Tokens(Scenario):
             case("revoked stored principal", "GET", "/api/nope", [bearer("stored-dave-token-w1a")]),
             case("stored principal POST /api/config", "POST", "/api/config", [bearer("stored-carol-token-w1a")]),
             case("stored principal POST /api/daemon-notice", "POST", "/api/daemon-notice", [bearer("stored-carol-token-w1a")]),
-            case("env principal POST /api/config", "POST", "/api/config", [auth], declared="W2-D: config write"),
+            case("env principal POST /api/config", "POST", "/api/config", [auth]),
             case("duplicate authorization, valid last", "GET", "/api/nope", [bearer("junk"), auth]),
             case("duplicate authorization, valid first", "GET", "/api/nope", [auth, bearer("junk")]),
             case("browser gate off with token", "GET", "/api/nope", [auth, ("Origin", "http://evil.example")]),
@@ -674,11 +734,11 @@ class Tokens(Scenario):
             case("hook subagent unauthorized", "POST", "/api/hook/subagent"),
             case("hook session-end unauthorized", "POST", "/api/hook/session-end"),
             case("hook session-end over 16K", "POST", "/api/hook/session-end", [auth, ("Content-Type", "application/json")], b"{\"x\":\"" + b"a" * 17000 + b"\"}"),
-            case("hook session-start", "GET", "/api/hook/session-start", declared="W2-D/W1-B: briefing text"),
-            case("hook memory-changes authorized", "GET", "/api/hook/memory-changes", [auth], declared="W2-E: memory change note"),
+            case("hook session-start", "GET", "/api/hook/session-start"),
+            case("hook memory-changes authorized", "GET", "/api/hook/memory-changes", [auth]),
             case("pair valid shape, unknown code", "POST", "/api/pair", [("Content-Type", "application/json")],
                  json.dumps({"code": "ABCD-EFGH-JKMN", "token_sha256": "b" * 64}).encode()),
-            case("maintainer known GET", "GET", "/api/maintainer", [auth], declared="W2-F: maintainer"),
+            case("maintainer known GET", "GET", "/api/maintainer", [auth]),
             case("mcp path, auth", "GET", "/mcp", [auth]),
             case("search blank q", "GET", q(q=""), [auth]),
             case("search unknown band", "GET", q(q="memory", band="nope"), [auth]),
@@ -694,7 +754,7 @@ class Tokens(Scenario):
             case("coordination hub (authenticated)", "POST", "/api/coordination/receive",
                  [auth, ("Content-Type", "application/json")], b"{}"),
         ]
-        return c
+        return with_declared(c)
 
 
 class Tokenless(Scenario):
@@ -717,7 +777,7 @@ class Tokenless(Scenario):
             case("tokenless maintainer", "GET", "/api/maintainer", []),
             case("tokenless maintainer POST", "POST", "/api/maintainer/send", []),
             case("tokenless agents coordination", "GET", "/api/agents?view=coordination", []),
-            case("tokenless hook woke authorized", "POST", "/api/hook/woke", [], declared="W2-F: woke marker"),
+            case("tokenless hook woke authorized", "POST", "/api/hook/woke", []),
             case("tokenless mcp", "GET", "/mcp", [("Host", "127.0.0.1:1")]),
             case("origin: unclosed IPv6 bracket", "GET", "/api/nope", [("Origin", "http://[::1")]),
             case("origin: bracketed name", "GET", "/api/nope", [("Origin", "http://[localhost]")]),
@@ -736,7 +796,7 @@ class Tokenless(Scenario):
             case("tokenless board check-in", "GET", "/api/hook/coordination-start"),
             case("DEL in a query echoed back", "GET", "/api/search?q=%7F"),
         ]
-        return c
+        return with_declared(c)
 
 
 class PairBudget(Scenario):
@@ -1717,6 +1777,29 @@ SCENARIOS.update(register_background_sessions(sys.modules[__name__]))
 from background_maintenance import register as register_background_maintenance
 SCENARIOS.update(register_background_maintenance(sys.modules[__name__]))
 
+RUN_SCENARIOS = HERE / "run_scenarios"
+
+
+def load_scenario_families(directory: Path = RUN_SCENARIOS, registered: dict | None = None) -> dict[str, type]:
+    """Each ``directory/*.py`` module's ``register(harness)`` scenarios, by
+    file name then the order register returns them (run_scenarios/README.md);
+    a name already in ``registered`` (default SCENARIOS) is refused."""
+    registered = SCENARIOS if registered is None else registered
+    found: dict[str, type] = {}
+    for path in sorted(directory.glob("*.py")):
+        spec = importlib.util.spec_from_file_location(f"run_scenarios.{path.stem}", path)
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module   # dataclasses and pickling look a module up by name
+        spec.loader.exec_module(module)
+        for scn in module.register(sys.modules[__name__]):
+            if scn.name in registered or scn.name in found:
+                raise ValueError(f"{path.name}: scenario {scn.name!r} is already registered")
+            found[scn.name] = scn
+    return found
+
+
+SCENARIOS.update(load_scenario_families())
+
 
 # ---- running ---------------------------------------------------------------------------
 
@@ -2207,6 +2290,9 @@ def main() -> int:
         GOLDENS.mkdir(parents=True, exist_ok=True)
     args.rust_bin = args.rust_bin.resolve()  # the daemon's cwd is its disposable home
     root = daemons.scratch_root()
+    stale = stale_declared_cases()
+    if stale:
+        ap.error(f"declared/cases/ names cases no scenario has: {stale}; delete or rename their files")
     names = args.only or list(SCENARIOS) + ["refusals"]
     unknown = [n for n in names if n not in SCENARIOS and n not in {"refusals", "security-refusals"}]
     if unknown or not names:
