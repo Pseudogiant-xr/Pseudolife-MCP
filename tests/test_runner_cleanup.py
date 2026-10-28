@@ -203,3 +203,19 @@ def test_the_script_runs_standalone_with_the_standard_library(tmp_path):
                              "--log", str(tmp_path / "log"), "--dry-run"], capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
     assert result.stdout.startswith("runner_cleanup runner 1: would free")
+
+
+@pytest.mark.skipif(os.name != "nt", reason="directory junctions are Windows only")
+def test_a_junction_is_neither_measured_through_nor_emptied(cleanup, tmp_path):
+    # A job can make a junction without any privilege; it counts as a link.
+    runner, home = runner_tree(tmp_path)
+    outside = write(tmp_path / "elsewhere" / "precious", 500)
+    junction = home / ".cache" / "pip" / "into-elsewhere"
+    made = subprocess.run(["cmd", "/c", "mklink", "/J", str(junction), str(outside.parent)],
+                          capture_output=True, text=True)
+    assert made.returncode == 0, made.stdout + made.stderr
+    assert cleanup.size(home / ".cache" / "pip") == 10
+    write(home / ".cache" / "pip" / "big", 200)
+    run(cleanup, "--runner", str(runner), "--home", str(home), "--log", str(tmp_path / "log"), "--floor-gb", "0")
+    assert not (home / ".cache" / "pip").exists()
+    assert outside.read_bytes() == b"x" * 500
