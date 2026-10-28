@@ -6,7 +6,8 @@
 # installs from BEFORE applying this file as a constraint; the pin here is
 # what stops pip re-resolving torch out from under that install.
 #
-#   *** setuptools and torch are COUPLED. Bump them together or not at all. ***
+#   *** setuptools and torch are COUPLED: setuptools must stay inside the ***
+#   *** pinned torch's own setuptools range; re-check it on every bump.   ***
 #
 # 2026-08-02: torch 2.12.0+cpu -> 2.13.0+cpu and setuptools 78.1.1 -> 83.0.0
 # bumped TOGETHER for Dependabot alerts #6/#7 (setuptools MANIFEST.in
@@ -172,7 +173,8 @@ scipy==1.18.0
 sentence-transformers==5.6.0
 # COUPLED to torch's own setuptools requirement (2.13.0: >=77.0.3, no ceiling)
 # — see the coupling note in the header. A pin outside the pinned torch's range
-# makes pip swap the image's CPU torch for the CUDA build.
+# makes the constrained install unresolvable (CI's lock-resolve job and the
+# image build fail). ops/Dockerfile.daemon's step 2 pins it too; move both.
 setuptools==84.2.1
 shellingham==1.5.4
 six==1.17.0

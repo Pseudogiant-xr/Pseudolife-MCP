@@ -1,7 +1,7 @@
 ### Security (2026-10-28 — setuptools 84.2.1 and filelock 4.2.1 in the daemon image)
 - The daemon image's pinned dependencies (`ops/requirements.lock.txt`) move
   setuptools from 83.0.0 to 84.2.1 (Dependabot alert #60, low: a Windows
-  path escape through a wheel's `namespace_packages.txt` during legacy egg
+  path escape through a wheel's `namespace_packages.txt` during legacy wheel
   installation, GHSA-xmj3-9gf7-h52w), in the lock and in
   `ops/Dockerfile.daemon`'s explicit pin. torch 2.13.0 requires only
   `setuptools>=77.0.3`, so the CPU torch pin is unaffected.

@@ -23,7 +23,9 @@ updates:
       # setuptools security fix for alert #60. A setuptools bump past a
       # future torch ceiling still fails CI
       # (tests/test_daemon_image_is_cpu_only.py and the lock-resolve job);
-      # see the coupling note in ops/requirements.lock.txt.
+      # see the coupling note in ops/requirements.lock.txt. A setuptools
+      # PR also needs ops/Dockerfile.daemon's step-2 pin and the two tests
+      # that name it moved by hand, since Dependabot edits only the lock.
       # transformers is HELD below 4.58 by optimum-onnx's own metadata:
       # optimum-onnx (the ONNX embedding backend the image ships as its
       # default) declares `transformers<4.58`, and pip installs the daemon

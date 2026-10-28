@@ -121,6 +121,22 @@ def test_dockerfile_torch_pin_matches_the_lockfile() -> None:
     )
 
 
+def test_dockerfile_setuptools_pin_matches_the_lockfile() -> None:
+    """Step 2 names setuptools explicitly beside the lock constraint, so a bump
+    of one file alone (Dependabot edits only the lock) makes the install
+    unresolvable; this names the two sites instead of a bare pip conflict."""
+    dockerfile = _DOCKERFILE.read_text(encoding="utf-8")
+    match = re.search(r"'setuptools==([^']+)'", dockerfile)
+    assert match, "ops/Dockerfile.daemon's step 2 no longer pins setuptools"
+    lock_pin = _lock_pins()["setuptools"]
+    assert match.group(1) == lock_pin, (
+        f"ops/Dockerfile.daemon's step 2 installs setuptools=={match.group(1)} "
+        f"but ops/requirements.lock.txt pins setuptools=={lock_pin}. Move both "
+        f"together, with the step-2 argv in tests/test_daemon_image_is_cpu_only.py "
+        f"and tests/test_check_lock_resolves.py."
+    )
+
+
 def test_ci_pins_the_same_torch_as_the_image() -> None:
     """Three files name a torch version — the Dockerfile, the lockfile, and
     CI (which installs CPU torch first "mirroring the daemon image"). A CI
