@@ -187,7 +187,9 @@ def test_a_failed_image_listing_removes_no_image_and_says_so(cleanup, tmp_path, 
     def docker(*args):
         calls.append(args)
         failed = args[:2] == ("image", "ls")
-        return subprocess.CompletedProcess(args, 1 if failed else 0, "", "daemon gone" if failed else "")
+        # A failed listing's partial output names an old image all the same.
+        out = "old1 other:latest 2000-01-01 00:00:00 +0000 UTC" if failed else ""
+        return subprocess.CompletedProcess(args, 1 if failed else 0, out, "daemon gone" if failed else "")
 
     monkeypatch.setattr(cleanup, "docker", docker)
     monkeypatch.setattr(cleanup.shutil, "which", lambda name: "docker" if name == "docker" else None)
@@ -195,6 +197,27 @@ def test_a_failed_image_listing_removes_no_image_and_says_so(cleanup, tmp_path, 
                   "--log", str(tmp_path / "log"), "--floor-gb", str(10 ** 18))
     assert not [call for call in calls if call[:2] == ("image", "rm")]
     assert records[0]["errors"] == ["docker image ls: daemon gone"]
+
+
+@pytest.mark.parametrize("hours_old, removed", [(7 * 24 + 8, True), (7 * 24 - 8, False)])
+def test_an_images_age_counts_its_time_zone(cleanup, tmp_path, monkeypatch, hours_old, removed):
+    # Shown in the client's zone (+10:00 here). Read as UTC, or with the
+    # offset's sign flipped, an image 7 days 8 hours old would look 10 or
+    # 20 hours younger and stay.
+    built = time.time() - hours_old * 3600
+    local = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(built + 10 * 3600)) + " +1000 AEST"
+    calls = docker_stub(cleanup, monkeypatch, [f"img1 other:latest {local}"])
+    run(cleanup, "--shared", "--temp", str(tmp_path / "none"), "--disk", str(tmp_path),
+        "--log", str(tmp_path / "log"), "--floor-gb", "0")
+    assert [call[2] for call in calls if call[:2] == ("image", "rm")] == (["img1"] if removed else [])
+
+
+def test_a_pass_that_cannot_start_is_still_logged(cleanup, tmp_path, capsys):
+    log = tmp_path / "log"
+    assert cleanup.main(["--runner", str(tmp_path / "gone"), "--home", str(tmp_path), "--log", str(log)]) == 0
+    record = json.loads(log.read_text(encoding="utf-8"))
+    assert record["mode"] == "runner gone" and record["errors"][0].startswith("pass did not start: ")
+    assert "nothing was removed" in capsys.readouterr().err
 
 
 def test_the_script_runs_standalone_with_the_standard_library(tmp_path):
@@ -219,3 +242,20 @@ def test_a_junction_is_neither_measured_through_nor_emptied(cleanup, tmp_path):
     run(cleanup, "--runner", str(runner), "--home", str(home), "--log", str(tmp_path / "log"), "--floor-gb", "0")
     assert not (home / ".cache" / "pip").exists()
     assert outside.read_bytes() == b"x" * 500
+
+
+@pytest.mark.skipif(os.name != "nt", reason="directory junctions are Windows only")
+def test_a_junction_in_a_checkout_goes_and_its_target_stays(cleanup, tmp_path):
+    # Here the cleanup removes the junction itself, not CPython's rmtree.
+    runner, home = runner_tree(tmp_path)
+    outside = write(tmp_path / "elsewhere" / "precious", 500)
+    checkout = runner / "_work" / "Repo" / "Repo"
+    write(checkout / "big", 200)
+    junction = checkout / "into-elsewhere"
+    made = subprocess.run(["cmd", "/c", "mklink", "/J", str(junction), str(outside.parent)],
+                          capture_output=True, text=True)
+    assert made.returncode == 0, made.stdout + made.stderr
+    records = run(cleanup, "--runner", str(runner), "--home", str(home), "--log", str(tmp_path / "log"),
+                  "--floor-gb", "0")
+    assert not os.path.lexists(junction) and outside.read_bytes() == b"x" * 500
+    assert {"path": str(junction), "bytes": 0, "why": "checkout over its cap"} in records[0]["removed"]

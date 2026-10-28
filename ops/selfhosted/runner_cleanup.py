@@ -14,7 +14,8 @@ files. Two passes:
   downloaded its actions by then, so those are never touched.
 - ``--shared`` runs from a timer and trims what no single runner owns: the
   account's rootless Docker (sparing the pinned images), its leftovers in
-  the system temp directory, and uv's cache.
+  the system temp directory (POSIX only: they are told apart by owner), and
+  uv's cache.
 
 A cache over its cap is removed whole (pip, Hugging Face, cargo, rustup and
 uv rebuild what the next job needs). With less than ``--floor-gb`` free on
@@ -67,10 +68,17 @@ FLOOR_GB = 25
 
 
 def is_link(info: os.stat_result) -> bool:
-    """A symlink, or on Windows any reparse point (a junction counts as a
-    directory to is_dir(follow_symlinks=False))."""
+    """A symlink, or on Windows any reparse point, which is never walked
+    through (a junction counts as a directory to is_dir(follow_symlinks=False))."""
     return stat.S_ISLNK(info.st_mode) or bool(
         getattr(info, "st_file_attributes", 0) & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0))
+
+
+def removable_link(info: os.stat_result) -> bool:
+    """A link this tool may delete itself: a symlink or a Windows junction.
+    Any other reparse point (a cloud placeholder, say) is left alone."""
+    tags = (getattr(stat, "IO_REPARSE_TAG_SYMLINK", None), getattr(stat, "IO_REPARSE_TAG_MOUNT_POINT", None))
+    return stat.S_ISLNK(info.st_mode) or getattr(info, "st_reparse_tag", None) in tags
 
 
 def size(path: Path) -> int:
@@ -135,11 +143,10 @@ class Pass:
         if not self.dry_run:
             try:
                 if is_link(info):
-                    # The link itself; a Windows directory junction goes with rmdir.
-                    try:
-                        path.unlink()
-                    except (IsADirectoryError, PermissionError):
-                        os.rmdir(path)
+                    if not removable_link(info):
+                        raise OSError("a reparse point that is not a link; left alone")
+                    # The link itself, never its target (unlink removes a junction too).
+                    path.unlink()
                 elif stat.S_ISDIR(info.st_mode):
                     shutil.rmtree(path)
                 else:
@@ -178,12 +185,29 @@ def checkouts(work: Path) -> list[Path]:
     job's temp directory, the actions it downloaded, the workspace mapping)
     belong to the starting job already and are never listed."""
     found = []
-    for repo in sorted(work.iterdir()) if work.is_dir() else []:
-        if repo.name.startswith("_") or is_link(repo.lstat()) or not repo.is_dir():
+    try:
+        repos = sorted(work.iterdir()) if work.is_dir() else []
+    except OSError:
+        return found
+    for repo in repos:
+        try:
+            if repo.name.startswith("_") or is_link(repo.lstat()) or not repo.is_dir():
+                continue
+            found += [checkout for checkout in sorted(repo.iterdir())
+                      if not is_link(checkout.lstat()) and checkout.is_dir()]
+        except OSError:
             continue
-        found += [checkout for checkout in sorted(repo.iterdir())
-                  if not is_link(checkout.lstat()) and checkout.is_dir()]
     return found
+
+
+def entries(directory: Path, cleanup: Pass) -> list[Path]:
+    """A directory's entries; one that cannot be listed is logged and skipped,
+    so the rest of the pass still runs."""
+    try:
+        return sorted(directory.iterdir())
+    except OSError as error:
+        cleanup.errors.append(f"{directory}: {error}")
+        return []
 
 
 def runner_pass(runner: Path, home: Path, cleanup: Pass, now: float) -> None:
@@ -192,7 +216,7 @@ def runner_pass(runner: Path, home: Path, cleanup: Pass, now: float) -> None:
     # this job and its first step runs there.
     if sum(size(checkout) for checkout in found) > cleanup.cap(WORK_CAP_GB):
         for checkout in found:
-            for entry in sorted(checkout.iterdir()):
+            for entry in entries(checkout, cleanup):
                 cleanup.remove(entry, "checkout over its cap", checkout)
     diag = runner / "_diag"
     for entry in sorted(diag.rglob("*")) if diag.is_dir() else []:
@@ -208,13 +232,16 @@ def docker(*args: str) -> subprocess.CompletedProcess:
     return subprocess.run(["docker", *args], capture_output=True, text=True, timeout=600)
 
 
-def docker_pass(cleanup: Pass, now: float) -> dict:
+def docker_pass(cleanup: Pass, now: float, extra: dict) -> None:
+    """Trim rootless Docker, recording what it ran in extra as it goes."""
     if shutil.which("docker") is None:
-        return {"docker": "absent"}
+        extra["docker"] = "absent"
+        return
     before = docker("system", "df", "--format", "{{.Type}} {{.Size}}")
     if before.returncode:
         cleanup.errors.append("docker system df: " + before.stderr.strip()[-300:])
-        return {}
+        return
+    extra["docker_before"] = before.stdout.split("\n")
     steps = [("container", "prune", "--force", "--filter", "until=24h")]
     # An image's age is its build date (CreatedAt), not when it reached this
     # machine: a pulled image that was built over a week ago goes at the next
@@ -247,7 +274,7 @@ def docker_pass(cleanup: Pass, now: float) -> dict:
     # (ops/prune-build-cache.sh, 2026-08-06).
     steps.append(("builder", "prune", "--all", "--force", "--max-used-space",
                   str(int(cleanup.cap(BUILD_CACHE_GB)))))
-    ran = []
+    ran = extra["docker_steps"] = []
     for step in steps:
         if cleanup.dry_run:
             ran.append(" ".join(step))
@@ -258,27 +285,26 @@ def docker_pass(cleanup: Pass, now: float) -> dict:
             cleanup.errors.append(f"docker {' '.join(step)}: {result.stderr.strip()[-300:]}")
         ran.append(" ".join(step))
     after = docker("system", "df", "--format", "{{.Type}} {{.Size}}")
-    return {"docker_before": before.stdout.split("\n"), "docker_after": after.stdout.split("\n"),
-            "docker_steps": ran}
+    extra["docker_after"] = after.stdout.split("\n")
 
 
-def shared_pass(cleanup: Pass, now: float, temp: Path) -> dict:
-    extra = docker_pass(cleanup, now)
-    # The system temp directory is shared, so only the account's own entries;
-    # on Windows each account has its own temp directory and no owner check.
-    mine = os.getuid() if hasattr(os, "getuid") else None
-    for entry in sorted(temp.iterdir()) if temp.is_dir() else []:
-        try:
-            owner = entry.lstat().st_uid
-        except OSError:
-            continue
-        if (mine is None or owner == mine) and age_days(entry, now) > TEMP_DAYS:
-            cleanup.remove(entry, f"temporary file older than {TEMP_DAYS} day", temp)
+def shared_pass(cleanup: Pass, now: float, temp: Path, extra: dict) -> None:
+    docker_pass(cleanup, now, extra)
+    # The system temp directory is shared, so only the account's own entries,
+    # which only a POSIX owner check can tell apart: Windows skips this part.
+    if hasattr(os, "getuid"):
+        mine = os.getuid()
+        for entry in entries(temp, cleanup) if temp.is_dir() else []:
+            try:
+                owner = entry.lstat().st_uid
+            except OSError:
+                continue
+            if owner == mine and age_days(entry, now) > TEMP_DAYS:
+                cleanup.remove(entry, f"temporary file older than {TEMP_DAYS} day", temp)
     if shutil.which("uv") and not cleanup.dry_run:
         result = subprocess.run(["uv", "cache", "prune"], capture_output=True, text=True, timeout=600)
         if result.returncode:
             cleanup.errors.append("uv cache prune: " + result.stderr.strip()[-300:])
-    return extra
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -303,18 +329,27 @@ def main(argv: list[str] | None = None) -> int:
     disk = options.disk or options.runner or Path.home()
     # A cleanup never fails the job: an unexpected error ends the pass early,
     # and the pass is still logged with it.
+    mode = "runner " + options.runner.name if options.runner else "shared"
     try:
-        cleanup = Pass("runner " + options.runner.name if options.runner else "shared",
-                       disk, options.floor_gb, options.dry_run)
+        cleanup = Pass(mode, disk, options.floor_gb, options.dry_run)
     except Exception as error:  # noqa: BLE001
-        print(f"runner_cleanup: {type(error).__name__}: {error}; nothing was removed", file=sys.stderr)
+        text = f"{type(error).__name__}: {error}"
+        print(f"runner_cleanup {mode}: {text}; nothing was removed", file=sys.stderr)
+        if options.log is not None:
+            try:
+                with options.log.open("a", encoding="utf-8") as handle:
+                    handle.write(json.dumps({"time": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                                             "mode": mode, "removed": [],
+                                             "errors": [f"pass did not start: {text}"]}) + "\n")
+            except OSError:
+                pass
         return 0
     extra: dict = {}
     try:
         if options.runner:
             runner_pass(options.runner, options.home, cleanup, now)
         else:
-            extra = shared_pass(cleanup, now, options.temp)
+            shared_pass(cleanup, now, options.temp, extra)
     except Exception as error:  # noqa: BLE001
         cleanup.errors.append(f"pass ended early: {type(error).__name__}: {error}")
     try:
