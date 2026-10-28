@@ -863,8 +863,17 @@ pub async fn status(ready: &Ready, config: &Config) -> Result<Value, ToolError> 
         }
         tracker.snapshot()
     };
+    let notice = super::run::stall_line(stall.as_object(), None);
     out.insert("stall".into(), stall);
     out.insert("last_stall".into(), last_stall);
+    out.insert(
+        "stall_line".into(),
+        if notice.is_empty() {
+            Value::Null
+        } else {
+            json!(notice)
+        },
+    );
     out.extend(super::extractor::status_extractor_fields(cfg, last_dream_extractor.as_ref()).await);
     if let Some((code, detail)) = error {
         out.insert("error".into(), json!(code));

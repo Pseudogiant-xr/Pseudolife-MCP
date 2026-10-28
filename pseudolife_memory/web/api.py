@@ -548,7 +548,8 @@ def build_console_app(
                     return hook_session_start(service, session_id, source, authorized,
                                               plugin_version=plugin_version,
                                               plugin_hooks_digest=plugin_hooks_digest,
-                                              launcher=launcher)
+                                              launcher=launcher,
+                                              host=headers.get("host"))
                 finally:
                     unbind_request_headers(binding)
             text = await asyncio.get_running_loop().run_in_executor(None, start_hook)

@@ -607,3 +607,39 @@ def test_a_refresh_publishes_verdict_and_body_together():
         release.set()
         t.join(10)
     assert cli.health_answer() == (True, {"status": "ok"})
+
+
+# ── who to sign in, and a fast recovery (2026-10-27 maintainer request) ──
+
+
+def test_a_sign_in_failure_names_the_provider_and_the_shims_user(monkeypatch):
+    monkeypatch.setattr(shim.getpass, "getuser", lambda: "svc-user")
+    code, body = _health_answer(_failing(stderr=b"Not logged in. Run `codex login`."))
+    assert (code, body["status"]) == (503, "login_required")
+    assert body["provider"] == "codex" and body["user"] == "svc-user"
+    assert "as svc-user" in body["fix"] and "codex login" in body["fix"]
+
+
+def test_other_failures_carry_no_sign_in_fields():
+    code, body = _health_answer(_failing(stderr=b"error: unexpected argument '--x'"))
+    assert body["status"] == "cli_error"
+    assert "provider" not in body and "user" not in body
+
+
+@pytest.mark.parametrize("ttl, status, age, refreshes", [
+    (300.0, "login_required", 31.0, True),
+    (300.0, "login_required", 29.0, False),
+    (300.0, "cli_error", 31.0, False),   # only a sign-in failure is re-checked sooner
+    (300.0, "ok", 31.0, False),
+    (10.0, "login_required", 11.0, True),    # a TTL below 30 s keeps its own pace
+])
+def test_a_sign_in_failure_is_rechecked_sooner(monkeypatch, ttl, status, age, refreshes):
+    cli = shim.CodexCli(Path("codex"), "m", 30.0, health_ttl=ttl)
+    cli._health_snapshot = (status == "ok", {"status": status})
+    cli._health_at = time.monotonic() - age
+    started = []
+    monkeypatch.setattr(shim.threading, "Thread",
+                        lambda target, daemon: type("T", (), {
+                            "start": lambda self: started.append(target)})())
+    cli.health_answer()
+    assert bool(started) is refreshes

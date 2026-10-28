@@ -2002,16 +2002,25 @@ pub async fn build_extractor_with_fallback_using(
     }
     let cause = match r.primary_url.as_deref().filter(|u| !u.is_empty()) {
         Some(url) => probe_primary(url, retry_delay).await,
-        None => Some(("extractor_error", "no primary endpoint".to_string())),
+        None => Some(ProbeCause::plain(
+            "extractor_error",
+            "no primary endpoint".to_string(),
+        )),
     };
-    let Some((reason, error)) = cause else {
+    let Some(cause) = cause else {
         return Ok((build_extractor_with(cfg, env), "primary", None));
     };
     let fallback_url = r.fallback_url.as_deref().unwrap_or("");
     let probe = PrimaryProbe {
-        reason: reason.to_string(),
-        error,
+        reason: cause.reason.to_string(),
+        error: cause.error,
         fallback_resolves: url_resolves(fallback_url).await,
+        shim_host: cause
+            .provider
+            .as_ref()
+            .and_then(|_| shim_host(r.primary_url.as_deref())),
+        provider: cause.provider,
+        shim_user: cause.shim_user,
     };
     if !probe.fallback_resolves && r.has_primary() {
         // A fallback that cannot resolve is a misconfiguration, not a
@@ -2059,6 +2068,80 @@ pub struct PrimaryProbe {
     pub reason: String,
     pub error: String,
     pub fallback_resolves: bool,
+    /// A signed-out shim's provider and OS user (its `login_required`
+    /// answer), for the signed-out notice.
+    pub provider: Option<String>,
+    pub shim_user: Option<String>,
+    /// The primary shim's host when it runs on another machine than the
+    /// daemon's (`_shim_host`).
+    pub shim_host: Option<String>,
+}
+
+/// `loopback_host` (`memory/dream.py`): `localhost` or a loopback IP
+/// literal, IPv4-mapped included.
+fn loopback_host(host: &str) -> bool {
+    if host == "localhost" {
+        return true;
+    }
+    match host.parse::<std::net::IpAddr>() {
+        Ok(std::net::IpAddr::V4(ip)) => ip.is_loopback(),
+        Ok(std::net::IpAddr::V6(ip)) => {
+            ip.is_loopback() || ip.to_ipv4_mapped().is_some_and(|v4| v4.is_loopback())
+        }
+        Err(_) => false,
+    }
+}
+
+/// `_shim_host` (`memory/dream.py`): the primary shim's host when it runs
+/// on another machine than the daemon's; `host.docker.internal` and
+/// loopback are the daemon's own machine.
+fn shim_host(primary_url: Option<&str>) -> Option<String> {
+    let host = url_host(primary_url.unwrap_or(""))?;
+    (host != "host.docker.internal" && !loopback_host(&host)).then_some(host)
+}
+
+/// `signed_out_probe` (`memory/dream.py`): after a primary dream no
+/// auto-mode probe chose failed with `login_expired`, ask the primary's
+/// `/health` once for the signed-out shim's provider and user.
+pub async fn signed_out_probe(
+    cfg: &DreamConfig,
+    result: &Map<String, Value>,
+) -> Option<PrimaryProbe> {
+    // The tracker's failure rule: a held extraction (not a write hold), or
+    // a run whose per-memory retry set aside every memory it pulled.
+    let held = result
+        .get("extractor_failed")
+        .is_some_and(|v| v.as_bool().unwrap_or(false) || v.as_i64().is_some_and(|n| n != 0));
+    let pulled = result.get("pulled").and_then(Value::as_i64).unwrap_or(0);
+    let quarantined = result
+        .get("quarantined")
+        .and_then(Value::as_i64)
+        .unwrap_or(0);
+    let failed = if held {
+        result.get("hold_phase").and_then(Value::as_str) != Some("write")
+    } else {
+        pulled > 0 && quarantined >= pulled
+    };
+    let reason = result
+        .get("extractor_error")
+        .and_then(Value::as_object)
+        .and_then(|e| e.get("reason"))
+        .and_then(Value::as_str);
+    if !failed || reason != Some("login_expired") {
+        return None;
+    }
+    let r = resolve_endpoints(cfg);
+    let url = r.primary_url.as_deref().filter(|u| !u.is_empty())?;
+    let cause = probe_endpoint_cause(url, 3.0).await?;
+    let provider = cause.provider?;
+    Some(PrimaryProbe {
+        reason: cause.reason.to_string(),
+        error: cause.error,
+        fallback_resolves: true,
+        provider: Some(provider),
+        shim_user: cause.shim_user,
+        shim_host: shim_host(Some(url)),
+    })
 }
 
 /// The extractor, which endpoint it is, and the failed primary probe that
@@ -2114,31 +2197,77 @@ fn health_status_token(token: &str) -> bool {
 /// or a shim's `"status": "login_required"`, else `extractor_error`; the
 /// error names the path, the HTTP status and a status token of the fixed
 /// shape, read from the first `_AUTH_BODY_PEEK` bytes of the answer.
-fn probe_answer_cause(path: &str, code: u16, body: &[u8]) -> (&'static str, String) {
+fn probe_answer_cause(path: &str, code: u16, body: &[u8]) -> ProbeCause {
     let peek = &body[..body.len().min(4096)];
-    let status = crate::mcp::py_loads::loads(&String::from_utf8_lossy(peek))
-        .and_then(|v| v.as_object()?.get("status")?.as_str().map(String::from))
+    let answer = crate::mcp::py_loads::loads(&String::from_utf8_lossy(peek));
+    let obj = answer.as_ref().and_then(Value::as_object);
+    let status = obj
+        .and_then(|o| o.get("status")?.as_str().map(String::from))
         .filter(|s| health_status_token(s));
     let error = match &status {
         Some(s) => format!("{path} HTTP {code} ({s})"),
         None => format!("{path} HTTP {code}"),
     };
-    let login = matches!(code, 401 | 403) || status.as_deref() == Some("login_required");
-    (
-        if login {
+    let login_required = status.as_deref() == Some("login_required");
+    let provider = obj
+        .filter(|_| login_required)
+        .and_then(|o| o.get("provider")?.as_str())
+        .filter(|p| matches!(*p, "claude" | "codex"))
+        .map(String::from);
+    let shim_user = obj
+        .filter(|_| provider.is_some())
+        .and_then(|o| o.get("user")?.as_str())
+        .filter(|u| shim_user_shape(u))
+        .map(String::from);
+    let login = matches!(code, 401 | 403) || login_required;
+    ProbeCause {
+        reason: if login {
             "login_expired"
         } else {
             "extractor_error"
         },
         error,
-    )
+        provider,
+        shim_user,
+    }
+}
+
+/// `_SHIM_USER_RE` (`memory/dream.py`): an OS user name's shape, a Windows
+/// `DOMAIN\user` included.
+fn shim_user_shape(user: &str) -> bool {
+    (1..=64).contains(&user.len())
+        && user
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '\\' | '-'))
+}
+
+/// `ProbeCause` (`memory/dream.py`): a failed probe's reason and error,
+/// with a signed-out shim's `provider` and `shim_user` when its answer was
+/// `login_required` and of the fixed shapes.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ProbeCause {
+    pub reason: &'static str,
+    pub error: String,
+    pub provider: Option<String>,
+    pub shim_user: Option<String>,
+}
+
+impl ProbeCause {
+    fn plain(reason: &'static str, error: String) -> Self {
+        ProbeCause {
+            reason,
+            error,
+            provider: None,
+            shim_user: None,
+        }
+    }
 }
 
 /// `probe_endpoint_cause` (`memory/dream.py`): `None` when the endpoint is
-/// alive, else `(reason, error)` in the dream-stall vocabulary.
+/// alive, else the cause in the dream-stall vocabulary.
 /// `GET {root}/health` (any trailing `/v1` stripped); a 404 there retries
 /// `GET {base}/models`. Only HTTP 200 counts.
-pub async fn probe_endpoint_cause(base_url: &str, timeout: f64) -> Option<(&'static str, String)> {
+pub async fn probe_endpoint_cause(base_url: &str, timeout: f64) -> Option<ProbeCause> {
     let base = base_url.trim_end_matches('/');
     let root = base.strip_suffix("/v1").unwrap_or(base);
     for (path, url) in [
@@ -2148,19 +2277,25 @@ pub async fn probe_endpoint_cause(base_url: &str, timeout: f64) -> Option<(&'sta
         match get(&url, timeout).await {
             Ok((200, _)) => return None,
             Ok((status, _)) if (200..300).contains(&status) => {
-                return Some(("extractor_error", format!("{path} HTTP {status}")));
+                return Some(ProbeCause::plain(
+                    "extractor_error",
+                    format!("{path} HTTP {status}"),
+                ));
             }
             Ok((404, _)) if path == "/health" => continue,
             Ok((status, body)) => return Some(probe_answer_cause(path, status, &body)),
-            Err(raised) => return Some(raised.label("probe", false).classify()),
+            Err(raised) => {
+                let (reason, error) = raised.label("probe", false).classify();
+                return Some(ProbeCause::plain(reason, error));
+            }
         }
     }
-    Some(("extractor_error", "no answer".into()))
+    Some(ProbeCause::plain("extractor_error", "no answer".into()))
 }
 
 /// `_probe_primary` (`memory/dream.py`): the primary's probe cause
 /// (`None`: healthy), with one retry after the delay.
-pub async fn probe_primary(url: &str, delay: f64) -> Option<(&'static str, String)> {
+pub async fn probe_primary(url: &str, delay: f64) -> Option<ProbeCause> {
     probe_endpoint_cause(url, 3.0).await?;
     if let Ok(d) = Duration::try_from_secs_f64(delay) {
         tokio::time::sleep(d).await;
@@ -2986,14 +3121,18 @@ mod tests {
     /// 401/403 or `login_required` reads as a sign-in failure.
     #[test]
     fn probe_answer_cause_matches_python() {
+        let pair = |path: &str, code: u16, body: &[u8]| {
+            let c = probe_answer_cause(path, code, body);
+            (c.reason, c.error)
+        };
         let signed_out = br#"{"status": "login_required", "detail": "OAuth session expired"}"#;
         assert_eq!(
-            probe_answer_cause("/health", 503, signed_out),
+            pair("/health", 503, signed_out),
             ("login_expired", "/health HTTP 503 (login_required)".into())
         );
         let other = br#"{"status": "cli_error", "detail": "/home/someone/secret"}"#;
         assert_eq!(
-            probe_answer_cause("/health", 503, other),
+            pair("/health", 503, other),
             ("extractor_error", "/health HTTP 503 (cli_error)".into())
         );
         for body in [
@@ -3002,23 +3141,72 @@ mod tests {
             br#"{"detail": "OAuth session expired"}"#,
         ] {
             assert_eq!(
-                probe_answer_cause("/health", 503, body),
+                pair("/health", 503, body),
                 ("extractor_error", "/health HTTP 503".into())
             );
         }
         assert_eq!(
-            probe_answer_cause("/models", 401, b"{}"),
+            pair("/models", 401, b"{}"),
             ("login_expired", "/models HTTP 401".into())
         );
         assert!(health_status_token("login_required"));
-        assert_eq!(
-            probe_answer_cause("/health", 503, &[b'x'; 5000]).1,
-            "/health HTTP 503"
-        );
+        assert_eq!(pair("/health", 503, &[b'x'; 5000]).1, "/health HTTP 503");
         assert!(!health_status_token("_x"));
         assert!(!health_status_token(""));
         assert!(!health_status_token(&"a".repeat(33)));
         assert!(health_status_token(&"a".repeat(32)));
+    }
+
+    /// The signed-out shim's identity (`test_extractor_fallback.py`'s
+    /// identity cases): only for `login_required`, only of the fixed shapes.
+    #[test]
+    fn probe_answer_identity_matches_python() {
+        let id = |body: &str| {
+            let c = probe_answer_cause("/health", 503, body.as_bytes());
+            (c.provider, c.shim_user)
+        };
+        let some = |s: &str| Some(s.to_string());
+        assert_eq!(
+            id(r#"{"status": "login_required", "provider": "claude", "user": "svc-user"}"#),
+            (some("claude"), some("svc-user"))
+        );
+        assert_eq!(
+            id(r#"{"status": "cli_error", "provider": "claude", "user": "svc"}"#),
+            (None, None)
+        );
+        assert_eq!(
+            id(r#"{"status": "login_required", "provider": "other", "user": "svc"}"#),
+            (None, None)
+        );
+        for (user, kept) in [
+            // JSON `DOMAIN\\alice` is the user DOMAIN\alice.
+            (r"DOMAIN\\alice", some(r"DOMAIN\alice")),
+            ("a b", None),
+            (&*"x".repeat(65), None),
+            ("", None),
+        ] {
+            let body =
+                format!(r#"{{"status": "login_required", "provider": "codex", "user": "{user}"}}"#);
+            assert_eq!(id(&body), (some("codex"), kept), "{user}");
+        }
+    }
+
+    /// `_shim_host` and `loopback_host` (`test_extractor_fallback.py`'s
+    /// shim-host cases): the daemon's own machine is no named host.
+    #[test]
+    fn shim_host_matches_python() {
+        for (url, host) in [
+            ("http://host.docker.internal:8082/v1", None),
+            ("http://127.0.0.1:8082/v1", None),
+            ("http://localhost:8082/v1", None),
+            ("http://[::1]:8082/v1", None),
+            ("http://[::ffff:127.0.0.1]:8082/v1", None),
+            ("http://gpu-box.example:8082/v1", Some("gpu-box.example")),
+            ("http://127.example.com:8082/v1", Some("127.example.com")),
+        ] {
+            assert_eq!(shim_host(Some(url)).as_deref(), host, "{url}");
+        }
+        assert_eq!(shim_host(None), None);
     }
 
     /// `_url_host`, `_proxied` and the warning wording

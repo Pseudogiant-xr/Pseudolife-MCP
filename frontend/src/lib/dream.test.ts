@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { describeDreamRun } from "./dream";
+import { describeDreamRun, stallNotice } from "./dream";
+import { splitBackticks } from "./insight";
 
 // Shapes from service_dream.dream_run: _held() returns no error and no
 // skipped, only extractor_failed with the phase and the extractor's error.
@@ -43,5 +44,31 @@ describe("describeDreamRun", () => {
     expect(describeDreamRun({ error: "dream_in_progress" }).tone).toBe("danger");
     expect(describeDreamRun({ skipped: "already_running" }).message).toContain("already running");
     expect(describeDreamRun({ pulled: 0 }).message).toContain("Nothing was waiting");
+  });
+});
+
+// GET /api/dream/status and /api/overview's dream block carry stall_line:
+// the daemon's rendered line while dreams are stalled, else null.
+describe("stallNotice", () => {
+  const NOTICE =
+    "Pseudolife-MCP: dreams stalled since 2026-10-27 03:01+11:00 (login_expired): the Claude Code CLI is signed out on the machine running the Pseudolife daemon; sign it in there as svc: run `claude`, then `/login`.";
+
+  it("shows the daemon's notice verbatim", () => {
+    expect(stallNotice({ stall_line: NOTICE })).toBe(NOTICE);
+  });
+
+  it("shows nothing for a null, missing, blank or non-string notice", () => {
+    expect(stallNotice({ stall_line: null })).toBeNull();
+    expect(stallNotice({})).toBeNull();
+    expect(stallNotice(undefined)).toBeNull();
+    expect(stallNotice(null)).toBeNull();
+    expect(stallNotice({ stall_line: "" })).toBeNull();
+    expect(stallNotice({ stall_line: "   " })).toBeNull();
+    expect(stallNotice({ stall_line: 42 })).toBeNull();
+  });
+
+  it("renders the notice's backticked commands as inline code", () => {
+    const code = splitBackticks(stallNotice({ stall_line: NOTICE })).filter((s) => s.code);
+    expect(code.map((s) => s.text)).toEqual(["claude", "/login"]);
   });
 });

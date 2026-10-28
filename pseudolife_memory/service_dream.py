@@ -102,6 +102,13 @@ class DreamStallTracker:
         # that turns into a hard stall is still announced at once.
         self.last_notice_at: float | None = None
         self.announced_hard: bool | None = None
+        # Which CLI is signed out and as which OS user (a shim's
+        # login_required answer, via the primary probe), so every surface
+        # can name the sign-in; None otherwise.
+        self.provider: str | None = None
+        self.shim_user: str | None = None
+        # The shim's host when it runs on another machine than the daemon.
+        self.shim_host: str | None = None
 
     @staticmethod
     def _hard(record: dict) -> bool:
@@ -115,6 +122,11 @@ class DreamStallTracker:
                       "consecutive_failures": self.failures,
                       "last_error": self.last_error,
                       "last_success_at": self.last_success_at}
+        # Only when known, so a record without them keeps its five keys.
+        if self.provider:
+            self.stall["provider"] = self.provider
+            self.stall["shim_user"] = self.shim_user
+            self.stall["shim_host"] = self.shim_host
 
     def record(self, result: dict, *, served_by_fallback: bool,
                primary_probe: dict | None = None) -> None:
@@ -162,6 +174,11 @@ class DreamStallTracker:
             if self.first_failure_at is None:
                 self.first_failure_at = now
             self.reason, self.last_error = reason, error
+            signed_out = bool(primary_probe and primary_probe.get("provider")
+                              and primary_probe["reason"] == "login_expired")
+            self.provider = primary_probe["provider"] if signed_out else None
+            self.shim_user = primary_probe.get("shim_user") if signed_out else None
+            self.shim_host = primary_probe.get("shim_host") if signed_out else None
             if self.stall is not None or self.failures >= self.FAILURES_TO_STALL:
                 self._open(self.stall["since"] if self.stall else self.first_failure_at)
 
@@ -169,6 +186,7 @@ class DreamStallTracker:
         self.last_success_at = now
         self.failures = 0
         self.first_failure_at = self.reason = self.last_error = None
+        self.provider = self.shim_user = self.shim_host = None
         self.due_since = None
         if self.stall is not None:
             self.last_stall = {**self.stall, "recovered_at": now}
@@ -2955,13 +2973,20 @@ class DreamOps:
         }
         result = self.dream_run(extractor, limit=limit)
         result["extractor"] = which
+        probe = getattr(extractor, "primary_probe", None)
+        if probe is None and which == "primary":
+            # No auto-mode probe ran (primary mode, or no fallback): a
+            # sign-in failure asks the shim's /health once, so the
+            # installer's claude-only/openai-only modes name who to sign in.
+            from pseudolife_memory.memory.dream import signed_out_probe
+            probe = signed_out_probe(self.config.memory.dream, result)
         # A fallback dream counts against the primary only when the probe
         # chose it (auto mode); a forced fallback is the operator's choice.
         from pseudolife_memory.memory.dream import resolve_endpoints
         forced = resolve_endpoints(self.config.memory.dream)["mode"] == "fallback"
         _stall_tracker(self).record(
             result, served_by_fallback=which == "fallback" and not forced,
-            primary_probe=getattr(extractor, "primary_probe", None))
+            primary_probe=probe)
         notify = getattr(self, "dream_stall_notify", None)
         if notify is not None:
             notify()
@@ -3108,7 +3133,7 @@ class DreamOps:
                                   would_fire=would_fire,
                                   interval=tracker.sweep_interval)
         stall_state = tracker.snapshot()
-        from pseudolife_memory.memory.dream import _status_extractor_fields
+        from pseudolife_memory.memory.dream import _status_extractor_fields, dream_stall_line
         result = {"backlog": backlog, "idle_seconds": idle,
                 "dream_cursor": cursor, "would_fire": would_fire,
                 "infer_outcomes": {"pending": infer_pending,
@@ -3127,6 +3152,10 @@ class DreamOps:
                 # DreamStallTracker. ``last_stall`` is the latest closed one.
                 "stall": stall_state["stall"],
                 "last_stall": stall_state["last_stall"],
+                # The stall line itself (the session-start line's text, the
+                # daemon's machine named generically), so the Console shows
+                # the same words and the one fix without its own copy.
+                "stall_line": dream_stall_line(stall_state["stall"]) or None,
                 **_status_extractor_fields(
                     cfg, getattr(self, "_last_dream_extractor", None))}
         if self._dream_tracking_error:

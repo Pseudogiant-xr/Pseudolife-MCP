@@ -708,7 +708,7 @@ stall record and reports it:
   and `pseudolife-mcp briefing` open with one line, for example:
 
   ```text
-  Pseudolife-MCP: dreams stalled since 2026-09-28 09:10+00:00 (login_expired): the extractor CLI's login expired; re-run `claude auth login` (or `codex login`) on the daemon host.
+  Pseudolife-MCP: dreams stalled since 2026-09-28 09:10+00:00 (login_expired): the extractor CLI is signed out on the machine running the CLI shim; sign it in there: run `claude`, then `/login` (or `codex login`).
   ```
 - **On the board.** The daemon posts, as the reserved sender `daemon`, one
   message to every attached, non-idle session when a stall begins and one
@@ -725,13 +725,50 @@ stall record and reports it:
   `memory.dream.stall_notice: false` to turn them off; with the board off
   or without Postgres they are skipped.
 
-On a headless daemon host, an expired CLI login is the expected cause: log
-the CLI in again on that host (`claude auth login`, or `codex login` for
-the Codex shim). The shim's own `/health` says so: it answers 503 with
-`"status": "login_required"`, the CLI's message in `detail` and the command
-in `fix` (any other CLI failure is `"status": "cli_error"` with the CLI's
-own output from stdout and stderr in `detail`). The shim's health check
-recovers within its TTL and the next sweep's dream closes the stall.
+On a headless daemon host, an expired CLI login is the expected cause. The
+sign-in lives on the machine running the CLI shim, which in the stock Docker
+setup is the machine running the Pseudolife daemon, not necessarily the one
+you work on.
+
+- **The shim.** Its own `/health` answers 503 with `"status":
+  "login_required"`. The body carries the CLI's message in `detail`, the
+  `provider` (`claude` or `codex`), the shim's OS `user` (left out when it is
+  not a plain user name), and the command in `fix`. That endpoint has no
+  authentication, so the user name is visible to anything that can reach the
+  shim: loopback, or the Docker bridge, by default. Any other CLI failure is
+  `"status": "cli_error"`, with the CLI's own output from stdout and stderr
+  in `detail`.
+- **The stall record.** The daemon carries the provider and user into the
+  record (`provider`, `shim_user`), plus `shim_host` when the primary shim
+  runs on another machine. In `primary` mode, where no auto-mode probe runs,
+  a dream that fails with `login_expired` asks the shim's `/health` once.
+- **Every surface names the sign-in.** That means the session-start line,
+  `pseudolife-mcp briefing`, the board notice, the Console (the Observatory
+  and the Dreamer card), `pseudolife-mcp doctor` and `memory_dream(action=
+  "status")`'s `stall_line`. Each says which CLI is signed out, where, as
+  which user, and the one command, for example:
+
+  ```text
+  Pseudolife-MCP: dreams stalled since 2026-10-27 03:01+11:00 (login_expired): the Claude Code CLI is signed out on the machine running the Pseudolife daemon (box.example); sign it in there as svc: run `claude`, then `/login`.
+  ```
+- **Which machine the line names.**
+  - A shim on another machine than the daemon is named by its own host:
+    "the machine running the CLI shim (<host>)".
+  - Otherwise the session-start line names the daemon's machine by the
+    address the session reaches it at, and doctor does the same with its own
+    daemon URL. A loopback address gets the generic "the machine running the
+    Pseudolife daemon", because an SSH tunnel to a remote daemon looks the
+    same.
+  - The briefing, the board notice and the Console always use the generic
+    words.
+  - `/health` is unauthenticated, so it carries the provider and, for a
+    shim on another machine, only `"shim_remote": true`, never its host or
+    the user; doctor then says "the machine running the CLI shim, not the
+    daemon's".
+- **Recovery.** While the shim's cached verdict is a sign-in failure, it
+  re-checks every 30 seconds, so the notice clears soon after you sign in.
+  Other failures keep the 5-minute pace. The next sweep's dream then closes
+  the stall.
 
 ## Session digests (opt-in) — one prose memory per closed session
 

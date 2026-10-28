@@ -2064,26 +2064,55 @@ def probe_endpoint(base_url: str, timeout: float = 3.0) -> bool:
 # into a cause, which can carry paths or prompts (the
 # ``classify_extractor_error`` rule).
 _HEALTH_STATUS_RE = re.compile(r"[a-z][a-z_]{0,31}")
+# A signed-out shim's identity (its ``login_required`` answer's
+# ``provider`` and ``user``): the providers the stall line can name, and an
+# OS user name's shape (a Windows ``DOMAIN\\user`` included).
+_SHIM_PROVIDERS = ("claude", "codex")
+_SHIM_USER_RE = re.compile(r"[A-Za-z0-9._\\-]{1,64}")
 
 
-def _probe_answer_cause(exc, path: str) -> tuple[str, str]:
+class ProbeCause(tuple):
+    """A failed probe's ``(reason, error)``, still equal to that pair, with
+    the signed-out shim's ``provider`` and ``shim_user`` as attributes
+    (None unless its answer was ``login_required`` and of the fixed
+    shapes)."""
+
+    def __new__(cls, reason: str, error: str, provider: str | None = None,
+                shim_user: str | None = None):
+        cause = super().__new__(cls, (reason, error))
+        cause.provider = provider
+        cause.shim_user = shim_user
+        return cause
+
+
+def _probe_answer_cause(exc, path: str) -> ProbeCause:
     """``(reason, error)`` for a probe's HTTP error answer: ``login_expired``
     for 401/403 or a shim's ``"status": "login_required"`` (the exact
     signal the shims document), else ``extractor_error``; the error names
-    the path, the HTTP status and a status token of the fixed shape."""
+    the path, the HTTP status and a status token of the fixed shape. A
+    ``login_required`` answer's ``provider`` and ``user`` ride along when
+    they have their fixed shapes."""
     import json
 
-    status = None
+    status = provider = user = None
     try:
         obj = json.loads((exc.read(_AUTH_BODY_PEEK) or b"").decode("utf-8", "replace"))
-        token = obj.get("status") if isinstance(obj, dict) else None
+        if not isinstance(obj, dict):
+            obj = {}
+        token = obj.get("status")
         if isinstance(token, str) and _HEALTH_STATUS_RE.fullmatch(token):
             status = token
+        if status == "login_required" and obj.get("provider") in _SHIM_PROVIDERS:
+            provider = obj["provider"]
+            raw_user = obj.get("user")
+            if isinstance(raw_user, str) and _SHIM_USER_RE.fullmatch(raw_user):
+                user = raw_user
     except Exception:  # noqa: BLE001 — a hint, never an error
-        status = None
+        status = provider = user = None
     error = f"{path} HTTP {exc.code}" + (f" ({status})" if status else "")
     login = exc.code in (401, 403) or status == "login_required"
-    return ("login_expired" if login else "extractor_error"), error
+    return ProbeCause("login_expired" if login else "extractor_error", error,
+                      provider=provider, shim_user=user)
 
 
 def probe_endpoint_cause(base_url: str, timeout: float = 3.0) -> tuple[str, str] | None:
@@ -2405,6 +2434,10 @@ def build_extractor_with_fallback(cfg) -> tuple["DreamExtractor", str]:
     # DNS failure).
     probe = {"reason": cause[0], "error": cause[1],
              "fallback_resolves": _url_resolves(r["fallback_url"])}
+    if getattr(cause, "provider", None):
+        probe["provider"] = cause.provider
+        probe["shim_user"] = cause.shim_user
+        probe["shim_host"] = _shim_host(r["primary_url"])
     if not probe["fallback_resolves"] and _primary_usable(r):
         # A fallback that cannot resolve is a misconfiguration, not a
         # transient fault: it is never dialled, and the dream runs on the
@@ -2497,8 +2530,9 @@ def classify_extractor_error(exc: BaseException) -> tuple[str, str]:
 # What the operator does about each stall reason: one clause each, shared by
 # the session-start line, the briefing and the board notice.
 _STALL_REMEDIES = {
-    "login_expired": ("the extractor CLI's login expired; re-run `claude auth login` "
-                      "(or `codex login`) on the daemon host"),
+    "login_expired": ("the extractor CLI is signed out on the machine running the "
+                      "CLI shim; sign it in there: run `claude`, then `/login` (or "
+                      "`codex login`)"),
     "extractor_unreachable": "check the extractor endpoint is up and reachable from the daemon",
     "extractor_error": "the extractor answers with errors; check its log",
     "served_by_fallback": ("the primary is down and the fallback is serving; check the "
@@ -2521,9 +2555,94 @@ def _local_minute(ts) -> str:
         sep=" ", timespec="minutes")
 
 
-def dream_stall_line(stall: dict | None) -> str:
+# A signed-out extractor CLI, named where it lives (2026-10-27 maintainer
+# request): which CLI, on which machine, as which OS user, and the one
+# command. Only for a record the probe filled from a shim's
+# ``login_required`` answer (``provider``); others keep the remedy above.
+_PROVIDER_NAMES = {"claude": "Claude Code", "codex": "Codex"}
+_PROVIDER_SIGN_IN = {"claude": "run `claude`, then `/login`", "codex": "run `codex login`"}
+DAEMON_MACHINE = "the machine running the Pseudolife daemon"
+
+
+def _signed_out_remedy(record: dict, reason: str, where: str | None) -> str | None:
+    provider = record.get("provider")
+    if (not isinstance(provider, str) or provider not in _PROVIDER_NAMES
+            or reason not in ("login_expired", "served_by_fallback")):
+        return None
+    user = record.get("shim_user")
+    as_user = f" as {user}" if isinstance(user, str) and user else ""
+    serving = ", so the fallback is serving" if reason == "served_by_fallback" else ""
+    # The sign-in lives where the shim runs: a shim on another machine is
+    # named by its own host, whatever ``where`` says of the daemon.
+    # /health carries only ``shim_remote`` (no host) for doctor.
+    shim_host = record.get("shim_host")
+    if isinstance(shim_host, str) and shim_host:
+        place = f"the machine running the CLI shim ({shim_host})"
+    elif record.get("shim_remote") is True:
+        place = "the machine running the CLI shim, not the daemon's"
+    else:
+        place = where or DAEMON_MACHINE
+    return (f"the {_PROVIDER_NAMES[provider]} CLI is signed out on "
+            f"{place}{serving}; sign it in there{as_user}: "
+            f"{_PROVIDER_SIGN_IN[provider]}")
+
+
+def signed_out_probe(cfg, result: dict) -> dict | None:
+    """After a primary dream that no auto-mode probe chose (primary mode, or
+    no fallback) failed with ``login_expired``: ask the primary's /health
+    once for the signed-out shim's provider and user, as the auto-mode
+    builder's probe carries them. None otherwise, or when the answer names
+    no provider."""
+    err = result.get("extractor_error") or {}
+    pulled = result.get("pulled") or 0
+    # The tracker's failure rule: a held extraction (not a write hold), or a
+    # run whose per-memory retry set aside every memory it pulled.
+    if result.get("extractor_failed"):
+        failed = result.get("hold_phase") != "write"
+    else:
+        failed = pulled > 0 and (result.get("quarantined") or 0) >= pulled
+    if not failed or err.get("reason") != "login_expired":
+        return None
+    url = resolve_endpoints(cfg)["primary_url"]
+    cause = probe_endpoint_cause(url) if url else None
+    if not cause or not getattr(cause, "provider", None):
+        return None
+    return {"reason": cause[0], "error": cause[1], "fallback_resolves": True,
+            "provider": cause.provider, "shim_user": cause.shim_user,
+            "shim_host": _shim_host(url)}
+
+
+def loopback_host(host: str) -> bool:
+    """``localhost`` or a loopback IP literal (``127.0.0.0/8``, ``::1``, an
+    IPv4-mapped ``::ffff:127.x``); a name that merely starts with ``127.``
+    is not one."""
+    import ipaddress
+    if host == "localhost":
+        return True
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    mapped = getattr(ip, "ipv4_mapped", None)
+    return ip.is_loopback or bool(mapped and mapped.is_loopback)
+
+
+def _shim_host(primary_url: str | None) -> str | None:
+    """The primary shim's host when it runs on another machine than the
+    daemon's, else None: ``host.docker.internal`` (the Docker host the
+    daemon runs on) and loopback addresses are the daemon's own machine."""
+    host = _url_host(primary_url or "")
+    if not host or host == _HOST_GATEWAY_NAME or loopback_host(host):
+        return None
+    return host
+
+
+def dream_stall_line(stall: dict | None, where: str | None = None) -> str:
     """The one line a session start and the briefing show while dreams are
-    stalled (or the fallback is serving), else ''. Never raises."""
+    stalled (or the fallback is serving), else ''. ``where`` names the
+    daemon's machine as the reader sees it (the session-start hook's
+    :func:`~pseudolife_memory.web.session_hook.stall_where`); None says
+    ``DAEMON_MACHINE``. Never raises."""
     if not stall:
         return ""
     try:
@@ -2533,7 +2652,8 @@ def dream_stall_line(stall: dict | None) -> str:
     reason = _stall_reason(stall)
     head = ("dream primary extractor down" if reason == "served_by_fallback"
             else "dreams stalled")
-    return f"Pseudolife-MCP: {head} since {since} ({reason}): {stall_remedy(reason)}."
+    remedy = _signed_out_remedy(stall, reason, where) or stall_remedy(reason)
+    return f"Pseudolife-MCP: {head} since {since} ({reason}): {remedy}."
 
 
 def dream_stall_notice_text(kind: str, record: dict) -> str:
@@ -2545,7 +2665,7 @@ def dream_stall_notice_text(kind: str, record: dict) -> str:
         return (f"Dream extraction recovered at {_local_minute(record['recovered_at'])} "
                 f"(was {reason} since {since}).")
     head = "degraded" if reason == "served_by_fallback" else "stalled"
-    remedy = stall_remedy(reason)
+    remedy = _signed_out_remedy(record, reason, None) or stall_remedy(reason)
     return f"Dream extraction {head} since {since}: {reason}. {remedy[0].upper()}{remedy[1:]}."
 
 
