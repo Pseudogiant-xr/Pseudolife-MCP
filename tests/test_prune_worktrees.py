@@ -935,9 +935,12 @@ def test_cargo_config_that_is_not_utf8_keeps_caches_not_worktrees(env):
     cache = env.cache("old-slice")
     done = env.add("done")
     _utf16_pin(env.add("holder", unmerged=True), cache)
+    _utf16_pin(env.add("holder2", unmerged=True), cache)
     rc, out = run(env, "--apply")
     assert rc == 0, out
     assert "pin config unreadable" in out and cache.exists()
+    for name in ("holder", "holder2"):
+        assert f"{name}{os.sep}.cargo" in out, f"every unreadable file is named: {name}"
     assert not done.exists()
 
 
@@ -969,7 +972,8 @@ def test_far_future_mtime_does_not_crash_the_ledger(env, monkeypatch):
     rc, out = run(env, "--mine", "--apply", roots=False)
     assert rc == 0, out
     assert not env.registered(wt)
-    assert len(env.ledger_lines()) == 1, "the removal must be recorded, not crash"
+    assert [line["newest_mtime"] for line in env.ledger_lines()] == [None], (
+        "the removal must be recorded, not crash")
 
 
 def test_failed_prune_is_reported(env, monkeypatch):

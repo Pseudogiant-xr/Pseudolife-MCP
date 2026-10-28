@@ -408,7 +408,7 @@ def cargo_pins(places: list[str], exclude: list[str]) -> dict[str, str]:
             # Not UTF-8 (a PowerShell 5 `>` writes UTF-16): a pin we cannot
             # read could protect any cache, so every cache is kept;
             # worktrees are unaffected.
-            pins[UNREADABLE_PIN] = cfg
+            pins[UNREADABLE_PIN] = ", ".join(filter(None, (pins.get(UNREADABLE_PIN), cfg)))
             continue
         except OSError:
             continue
@@ -513,8 +513,9 @@ def evaluate_cache(path: str, *, grace_days: float | None, now: float,
         v.failure = "reparse point or symlink: the cache dir itself"
         return v
     if UNREADABLE_PIN in pins:
-        v.failure = (f"pin config unreadable: {pins[UNREADABLE_PIN]} is not UTF-8 "
-                     "(re-save it as UTF-8)")
+        v.failure = (f"pin config unreadable: not UTF-8, re-save as UTF-8: "
+                     f"{pins[UNREADABLE_PIN]} (owner mode: rerun without a cache dir "
+                     "to remove only the worktree)")
         return v
     for pin, cfg in pins.items():
         if is_under(pin, npath) or is_under(npath, pin):
