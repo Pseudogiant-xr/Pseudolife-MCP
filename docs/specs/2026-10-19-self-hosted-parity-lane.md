@@ -464,9 +464,17 @@ setup-windows-runner.ps1 -RunnerUser <runner-user> -SuiteUser <suite-user> `
   `%LOCALAPPDATA%`, outside them. C: had 92 GB free
   after the grow, well above the 25 GB floor. The account's profile, where
   `lease_ci.py`'s clusters and pg0's bundle live, is on C: too.
-- **No private bench address**: one runner shares no loopback with another
-  job, so the Linux `PSEUDOLIFE_TEST_PG_HOST_PORT` override is not needed.
-  `localhost.` resolves to loopback on Windows as it is.
+- **The default bench address points nowhere** (`PSEUDOLIFE_TEST_PG_HOST_PORT=127.0.0.1:9`
+  in `.env`, as on Linux, since 2026-10-29). One runner shares no
+  loopback with another job, but the suite user's test server may hold
+  the default address while a suite runs. The firewall does not filter
+  loopback, so without this a shard's optional real-PostgreSQL controls
+  could reach that server. Windows has no privileged ports, so nothing
+  stops an account from listening on 9. Nothing on the VM did when this
+  was set, and the optional "Simple TCP/IP Services" feature, which uses
+  it, is not installed. Shards that start their own cluster override the
+  address through `GITHUB_ENV`. `localhost.` resolves to loopback on
+  Windows as it is.
 
 ### The Windows dev VM's network filter (2026-10-29)
 
