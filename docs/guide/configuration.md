@@ -613,8 +613,11 @@ holder, such as a session that claimed the lease with `memory_agents`, a
 `lease run`, or a hold from WSL or another machine or account, counts as held
 until it is released or lapses, since no local lock can speak for it.
 For `full-suite` it probes the test suite's own lock (`full-suite.lock` and its
-slots, with the holder record's pid, worktree and start time), since that file,
-not `lease-full-suite.lock`, is the truth for a full run. A run with
+slots, with the holder record's pid, worktree and start time), since that file
+is the truth for a full run. It also reads the lease's own lock
+(`lease-full-suite.lock`, or `lease-full-suite_<machine>-<hash>.lock` for
+`full-suite@<machine>`), so `lease hold` or `lease run` of the suite lease
+reserving the machine, for reproduction work say, reads as held too. A run with
 `PSEUDOLIFE_SUITE_LOCK=off` takes no lock, so no check sees it.
 
 Given a command after `--`, the check is the gate itself: it prints the same

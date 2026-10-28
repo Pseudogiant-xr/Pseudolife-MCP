@@ -1267,6 +1267,27 @@ def test_check_of_this_machines_suite_lease_sees_a_hold_of_it(
     assert report["local"] == {"file": "full-suite.lock", "state": "free"}
 
 
+@pytest.mark.parametrize("held_in", ["lease directory", "suite directory"])
+def test_check_finds_a_suite_lease_hold_in_either_lock_directory(
+        lease_env, tmp_path, monkeypatch, capsys, held_in):
+    # `hold` locks in the lease lock directory; a runner's gate points
+    # PSEUDOLIFE_SUITE_LOCK_DIR at the suite user's. Either place counts.
+    suite_dir = tmp_path / "suite"
+    suite_dir.mkdir()
+    monkeypatch.setenv("PSEUDOLIFE_SUITE_LOCK_DIR", str(suite_dir))
+    monkeypatch.delenv("PSEUDOLIFE_SUITE_LEASE", raising=False)
+    lease_env.mkdir(parents=True, exist_ok=True)
+    (suite_dir / "full-suite.lock").touch()
+    place = lease_env if held_in == "lease directory" else suite_dir
+    hold = os_lock.OsLock(place / os_lock.lock_file_name("full-suite"))
+    assert hold.acquire()
+    try:
+        assert _run(["check", "full-suite", "--json"], FakeDaemon()) == 1
+    finally:
+        hold.release()
+    assert json.loads(capsys.readouterr().out)["local"]["state"] == "held"
+
+
 def test_check_of_another_machines_suite_lease_ignores_this_machines_lock(
         lease_env, default_suite_lease_env, capsys):
     # Each machine mirrors its suite under its own name (full-suite, or
