@@ -610,9 +610,15 @@ rights that the account does not have. The setup script now copies its
 managed Python 3.11 into `C:\actions-runner\toolcache` and names that
 directory in `.env` (`RUNNER_TOOL_CACHE`, `AGENT_TOOLSDIRECTORY`), the way
 the Linux setup seeds its tool cache. The account may read and run the
-cache but not change it, so one job cannot alter the interpreter the next
-job uses. Shards created after the fix ran past setup-python in the same
-run.
+cache's files but not change them. That does not isolate jobs from each
+other. The account's profile persists between jobs, and so do its user
+site-packages, which the seeded interpreter loads, and its PowerShell
+profile, which the `pwsh` shell loads. So a job can still leave code that
+the next job runs, as on any persistent runner. This is why the lane runs
+only code from people with write access ("Never fork code"). The cleanup
+hook runs its Python
+with `-I`, so that code never runs in the hook. Shards created after the
+fix ran past setup-python in the same run.
 
 **Yielding to reproduction work.** The VM's first job is reproducing
 Windows CI failures (CLAUDE.md "Dev machines"). Reproduction work there

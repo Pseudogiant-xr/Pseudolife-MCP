@@ -251,7 +251,9 @@ if (-not $python -or -not (Test-Path -LiteralPath $python) -or -not $python.Star
 # actions/setup-python installs a missing version with an installer that
 # needs administrator rights, which the account lacks (every shard of the
 # second trial dispatch, run 40748991561, stopped there), so the managed
-# Python is copied into the tool cache here, read-only to the account.
+# Python is copied into the tool cache here. Its files are read-only to the
+# account, but its user site-packages are not, so this does not isolate jobs
+# from each other (see the spec).
 $toolcache = Join-Path $Root 'toolcache'
 $full = (& $python -c 'import platform; print(platform.python_version())').Trim()
 $seed = Join-Path $toolcache "Python\$full\x64"

@@ -103,8 +103,14 @@ def test_the_runner_finds_python_in_a_seeded_tool_cache():
     assert '"AGENT_TOOLSDIRECTORY=$toolcache",' in body
     seeding = text[text.index("$toolcache = Join-Path $Root 'toolcache'"):text.index("& $uv tool install")]
     assert '$seed = Join-Path $toolcache "Python\\$full\\x64"' in seeding
-    assert 'New-Item -ItemType File -Path "$seed.complete"' in seeding
-    # Read and execute only: one job cannot change the interpreter the next uses.
+    # The version directory must be full semver (3.11.17): @actions/tool-cache
+    # skips a "3.11" directory, and setup-python falls back to its installer.
+    assert "$full = (& $python -c 'import platform; print(platform.python_version())').Trim()" in seeding
+    # The marker last, so a copy cut short is redone on the next run.
+    marker = seeding.index('New-Item -ItemType File -Path "$seed.complete"')
+    assert seeding.index("Copy-Item") < marker
+    assert seeding.index("Remove-Item -LiteralPath $seed -Recurse") < seeding.index("Copy-Item")
+    # Read and execute only on the cache's files.
     assert "Grant $toolcache @('/grant', \"*${sid}:(OI)(CI)(RX)\")" in seeding
     assert text.index("$toolcache = Join-Path") < text.index("function Write-RunnerConfig")
 
