@@ -39,7 +39,7 @@ on:
       # job on a fresh runner, reusing this run's candidate build; a cargo
       # selection's test binaries are built once, by stress-build.
       selection:
-        description: 'Stress only: row:<row>[/<case>], scenario:<run.py scenario>, cargo:<package>/<test binary>[::<test>] (space-separated), or pytest node ids'
+        description: 'Stress only: row:<row>[/<case>], scenario:<run.py scenario>, cargo:<package>/[bin/]<test binary>[::<test>] (space-separated), or pytest node ids'
         type: string
         required: false
       iterations:

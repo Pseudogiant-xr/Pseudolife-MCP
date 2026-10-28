@@ -1,0 +1,3 @@
+| Item | Python | Rust | Owner / why |
+|---|---|---|---|
+| An apply's lock windows (read snapshot, snapshot file, apply writes, stamp and re-read) | the service lock is released between them and for the computation; a concurrent edit there is tolerated (supersede, merge and rescore are no-ops on a changed row) | the writer lock is held from the read snapshot to the end of the apply, the computation (steps A and B, snippets, merge enrichment, curation listings, and the closing re-enrichment) on a blocking thread meanwhile; a dry run matches Python (the lock for the read snapshot, released for the computation, taken again for the orphan census) | no write can interleave with an apply; with no concurrent writer the two are identical |
