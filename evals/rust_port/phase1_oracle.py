@@ -50,7 +50,8 @@ def prepare(destination):
     # the system site-packages: pywin32 makes pywintypes importable only
     # through one, and a self-hosted shard's packages sit in its own venv
     # (the Windows judges' daemon failed `import mcp`, run 40748991561).
-    lines = [f"import site; site.addsitedir({path!r})" for path in dependencies]
+    # ascii(): site.py reads .pth files in the locale's encoding, not UTF-8.
+    lines = [f"import site; site.addsitedir({ascii(path)})" for path in dependencies]
     (Path(site) / "phase1_dependencies.pth").write_text("\n".join(lines) + "\n", encoding="utf-8")
     subprocess.run([str(python), "-m", "pip", "install", "--no-index", "--no-deps",
                     "--no-build-isolation", "-e", str(source)], cwd=source, check=True,

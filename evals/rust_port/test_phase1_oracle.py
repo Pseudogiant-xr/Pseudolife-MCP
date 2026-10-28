@@ -82,13 +82,15 @@ def test_preparation_rejects_an_import_from_another_checkout(preparation):
         phase1_oracle.prepare(preparation.destination)
 
 
-def test_dependency_locations_keep_their_own_pth_files(preparation, tmp_path, monkeypatch):
+@pytest.mark.parametrize("venv", ["shard-venv", "shard-venv-café"])
+def test_dependency_locations_keep_their_own_pth_files(preparation, tmp_path, monkeypatch, venv):
     # pywin32 makes pywintypes importable through pywin32.pth in its
     # site-packages. A bare path line adds a directory without reading its
     # .pth files, so on a self-hosted runner, whose packages sit in a
     # per-shard venv rather than the interpreter's own site-packages, the
     # oracle daemon failed `import mcp` on Windows (run 40748991561).
-    dependency = tmp_path / "shard-venv" / "site-packages"
+    # A non-ASCII location too: site.py reads a .pth in the locale's encoding.
+    dependency = tmp_path / venv / "site-packages"
     extra = tmp_path / "extra"
     dependency.mkdir(parents=True)
     extra.mkdir()
