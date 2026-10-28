@@ -1,0 +1,3 @@
+| Item | Python | Rust | Owner |
+|---|---|---|---|
+| Reconnect after a lost session | heals on next use, rechecks the lease epoch | the same: `_ensure_init` replaces a dead session (`Storage::verify_writer_session`), wins the lease back, rechecks the epoch and keeps the resident copy, or re-reads the bank after a handover; the same lease and reconnect retry windows, the same lease refusal and handover texts; the process clock and the dream's process state survive the re-read and the dream's batch failures reset, as in Python | closed (B4): `harness/writer_session_cases.py` compares both services through death, handover, held lease and release, with two caught mutants |
