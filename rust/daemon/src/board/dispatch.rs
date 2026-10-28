@@ -248,9 +248,14 @@ impl Board {
             .dispatch_once(action, params.clone(), headers, principal)
             .await
         {
-            // The retry's `full_tier` runs `_ensure_init` again (W2F-CLOCK-RETRY:
-            // without Python's forced writer-session reprobe).
+            // `_ensure_init` before the one retry, which then stamps from the
+            // ready service it publishes (W2F-CLOCK-RETRY: without Python's
+            // forced writer-session reprobe).
             Err(BoardError::ClockChanged) if action == "send" => {
+                self.service
+                    .ensure_init()
+                    .await
+                    .map_err(BoardError::Internal)?;
                 self.dispatch_once(action, params, headers, principal).await
             }
             other => other,
@@ -694,11 +699,25 @@ impl Board {
     /// never queues behind an initialization retry, the reaper or a sweep;
     /// otherwise `_ensure_init` under the mutex, which runs a pending reseed.
     /// Like Python's lock-free path it does not probe the writer session; a
-    /// send its stale session fences is retried after a forced reprobe.
+    /// send its stale session fences is retried after `_ensure_init`.
+    ///
+    /// A ready service over a session that found another writer held the
+    /// bank is not taken: it carries that session's lease epoch, which the
+    /// mailbox fence accepts, with the clock seeded before that writer's
+    /// high-water mark, until the rehydrate drops it. Python fences on
+    /// `_coordination_hlc_epoch`, which the handover clears; here the send
+    /// waits for the initialization, whose reseed passes the mark. The
+    /// second read closes the gap where the rehydrate acknowledged the
+    /// handover after the first.
     pub(crate) async fn full_tier(&self) -> Result<Arc<Ready>> {
         if let Some(ready) = self.service.snapshot().ready
             && !ready.startup.clock_state().hlc_reseed_pending
-            && !crate::mutants::active("board-full-tier-locks")
+            && ready.storage.resident_invalidated().is_none()
+            && self
+                .service
+                .snapshot()
+                .ready
+                .is_some_and(|now| Arc::ptr_eq(&now, &ready))
         {
             return Ok(ready);
         }
