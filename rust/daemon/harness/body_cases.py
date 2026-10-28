@@ -110,8 +110,7 @@ def cases(case, auth):
 def view_cases(case):
     out = [case("open board " + q, "GET", "/api/agents?" + q) for q in
            ("view=coordination", "view=&view=coordination", "view=default&view=coordination")]
-    out += [case("open default " + q, "GET", "/api/agents?" + q,
-                 declared="W2-D/F: agents handler") for q in
+    out += [case("open default " + q, "GET", "/api/agents?" + q) for q in
             ("view=coordination&view=", "view=coordination&view=default", "view=Coordination")]
     out += [case("open board POST", "POST", "/api/agents?view=coordination"),
             case("open board POST JSON before admission", "POST", "/api/agents?view=coordination",

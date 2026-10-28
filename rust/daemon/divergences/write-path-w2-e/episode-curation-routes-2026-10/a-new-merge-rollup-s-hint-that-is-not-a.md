@@ -1,0 +1,3 @@
+| Item | Python | Rust | Owner / why |
+|---|---|---|---|
+| A new merge rollup's `hint` that is not a string or null | kept in memory as sent; the episode write-through then stores PostgreSQL's text form of a value psycopg can adapt, or fails on one it cannot (a dict), and that failure leaves the merged entries and outcome signals pointing at an episode row never written (until a later write-through) | refused before any change: 500 `hint must be a string, not '<type>'` | Python's answer is a bank inconsistency, not a contract; every documented caller sends a string. Behaviour with no caller (D7) |
