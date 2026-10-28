@@ -1,6 +1,7 @@
 //! Slice W2-D: the search and read routes (spec.md, section "W2-D").
 
 pub mod chronicle;
+pub mod console;
 pub mod cortex_search;
 pub mod embed_cache;
 pub mod fact_get;

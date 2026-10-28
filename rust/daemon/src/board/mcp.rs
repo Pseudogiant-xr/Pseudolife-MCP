@@ -238,7 +238,10 @@ fn mcp_memory_agents<'a>(app: &'a crate::http::App, call: ToolCall<'a>) -> ToolF
                 if agent.is_none_or(|v| v.is_empty())
                     && !crate::mutants::active("mcp-agents-no-awareness")
                 {
-                    return Ok(awareness(app, &call).await);
+                    let session = call.ident.header_session.as_deref();
+                    return Ok(awareness(app, &call.ident.headers, session, None)
+                        .await
+                        .expect("no limit: nothing to refuse"));
                 }
                 dispatch(app, &call, "agents", present(a, &["project", "task"])).await
             }
@@ -306,9 +309,18 @@ fn mcp_memory_agents<'a>(app: &'a crate::http::App, call: ToolCall<'a>) -> ToolF
     })
 }
 
-/// `MemoryService.coordination_awareness`: open sessions other than the
-/// caller's, from resident episode state, without initializing the bank.
-async fn awareness(app: &crate::http::App, call: &ToolCall<'_>) -> Value {
+/// `MemoryService.coordination_awareness(session_id, limit)`: open
+/// sessions other than the caller's (`session`, its `X-PL-Session`), from
+/// resident episode state, without initializing the bank. The caller's
+/// bearer (in `headers`) must be admitted. `limit` caps the peers below
+/// `coordination.awareness_limit` and 20; one below 1 is Python's
+/// `ValueError` text (`Err`), checked after the enabled switch, as there.
+pub(crate) async fn awareness(
+    app: &crate::http::App,
+    headers: &axum::http::HeaderMap,
+    session: Option<&str>,
+    limit: Option<i64>,
+) -> Result<Value, String> {
     let cfg = &app.board.config;
     let mut result = Map::new();
     result.insert("enabled".into(), json!(cfg.enabled));
@@ -316,19 +328,25 @@ async fn awareness(app: &crate::http::App, call: &ToolCall<'_>) -> Value {
     result.insert("peers".into(), json!([]));
     result.insert("truncated".into(), json!(false));
     if !cfg.enabled {
-        return Value::Object(result);
+        return Ok(Value::Object(result));
+    }
+    if limit.is_some_and(|l| l < 1) && !crate::mutants::active("console-agents-no-limit-refusal") {
+        return Err("awareness limit must be a positive integer".into());
     }
     // `_request_principal`: None (not admitted) without an authenticated one.
-    let principal = super::http::authenticated_principal(app, &header_dict(&call.ident.headers));
+    let principal = super::http::authenticated_principal(app, &header_dict(headers));
     if !principal.is_ok_and(|p| app.board.admitted(&p)) {
         result.insert("reason".into(), json!("principal_not_allowed"));
-        return Value::Object(result);
+        return Ok(Value::Object(result));
     }
-    let cap = cfg.awareness_limit.clamp(0, 20) as usize;
-    let session = call.ident.header_session.as_deref();
+    // `min(cfg.awareness_limit, limit, 20)`.
+    let mut cap = cfg.awareness_limit.clamp(0, 20) as usize;
+    if let Some(l) = limit.filter(|_| !crate::mutants::active("console-agents-ignore-limit")) {
+        cap = cap.min(usize::try_from(l.max(0)).unwrap_or(usize::MAX));
+    }
     let Some(ready) = app.service.ready_if_initialized().await else {
         result.insert("reason".into(), json!("not_initialized"));
-        return Value::Object(result);
+        return Ok(Value::Object(result));
     };
     let ws = ready.write.lock().await;
     let log = &ws.log;
@@ -420,5 +438,5 @@ async fn awareness(app: &crate::http::App, call: &ToolCall<'_>) -> Value {
         .collect();
     result.insert("peers".into(), Value::Array(peers));
     result.insert("available".into(), json!(true));
-    Value::Object(result)
+    Ok(Value::Object(result))
 }

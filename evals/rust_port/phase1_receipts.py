@@ -34,6 +34,14 @@ def command_identity(command, root):
             "public_cli_module": command[1:] == ["-m", "pseudolife_memory.cli"]}
 
 
+# Pinned node ids must name the same items under every pytest. pytest 9.2.0
+# renamed auto-generated ids for str/bytes parameters over 100 characters to
+# argname+index by default (2026-10-28: the "x" * 129 session id became
+# [session_id2-cli], so the judges shard selected nothing and exited 4).
+# "legacy" keeps the escaped value; older pytest only warns about the option.
+PINNED_NODE_ID_OPTIONS = ("-o", "parametrize_long_str_id_strategy=legacy")
+
+
 def pytest_outcomes(report, nodes):
     """A zero exit with missing, duplicate, skipped or errored nodes is not a pass."""
     if not Path(report).is_file():

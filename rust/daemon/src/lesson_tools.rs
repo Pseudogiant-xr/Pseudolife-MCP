@@ -86,7 +86,7 @@ fn cortex_change_index(store: &CortexStore) -> HashMap<String, f64> {
 /// whose facts changed after the lesson was asserted or confirmed gains
 /// `re_verify` and its reason. No change index means no annotation (and
 /// no graph lookup).
-async fn annotate_staleness(
+pub(crate) async fn annotate_staleness(
     db: &tokio_postgres::Client,
     store: &CortexStore,
     rows: &mut [Map<String, Value>],

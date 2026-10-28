@@ -216,7 +216,7 @@ async fn rename(ready: &Arc<Ready>, id: Value, title: String) -> Result<Value, F
 }
 
 /// `_episode_entry_counts`: resident entries per episode, digests excluded.
-fn entry_counts(ready: &Ready) -> std::collections::HashMap<String, usize> {
+pub(crate) fn entry_counts(ready: &Ready) -> std::collections::HashMap<String, usize> {
     let bank = ready.bank.read().expect("bank lock");
     let mut counts = std::collections::HashMap::new();
     for e in &bank.entries {
