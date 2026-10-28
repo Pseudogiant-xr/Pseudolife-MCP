@@ -295,6 +295,84 @@ def test_eddsa_needs_okp_and_ed25519():
     _refused("cose_alg_mismatch", cose_public_key, cbor(ed))
 
 
+def _ff(first: int) -> bytes:
+    return bytes([first]) + b"\xff" * 30 + b"\x7f"
+
+
+# libsodium's has_small_order list, sign bit clear: 0 (order 4), 1 (the
+# identity), the two points of order 8, p - 1 (order 2), and p and p + 1, the
+# non-canonical spellings of 0 and 1.
+SMALL_ORDER = [
+    bytes(32), b"\x01" + bytes(31),
+    bytes.fromhex("26e8958fc2b227b045c3f489f2ef98f0d5dfac05d3c63339b13802886d53fc05"),
+    bytes.fromhex("c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac037a"),
+    _ff(0xec), _ff(0xed), _ff(0xee),
+]
+SMALL_ORDER_KEYS = [x[:31] + bytes([x[31] | sign]) for x in SMALL_ORDER for sign in (0, 0x80)]
+
+
+def _ed_cose(x: bytes) -> bytes:
+    return cbor({1: 1, 3: -8, -1: 6, -2: x})
+
+
+def _small_order_id(x: bytes) -> str:
+    return f"{x[:2].hex()}..{x[31]:02x}"
+
+
+def test_the_small_order_list_is_exactly_the_points_of_order_dividing_8():
+    # Independent of the module: decode each y and check 8 * P is the identity.
+    p = 2 ** 255 - 19
+    d = -121665 * pow(121666, -1, p) % p
+    sqrt_m1 = pow(2, (p - 1) // 4, p)
+
+    def add(a, b):
+        (x1, y1), (x2, y2) = a, b
+        t = d * x1 * x2 * y1 * y2 % p
+        return ((x1 * y2 + x2 * y1) * pow(1 + t, -1, p) % p,
+                (y1 * y2 + x1 * x2) * pow(1 - t, -1, p) % p)
+
+    for enc in SMALL_ORDER:
+        y = int.from_bytes(enc, "little") % p
+        u, v = (y * y - 1) % p, (d * y * y + 1) % p
+        x = u * pow(v, 3, p) * pow(u * pow(v, 7, p), (p - 5) // 8, p) % p
+        if v * x * x % p != u:
+            x = x * sqrt_m1 % p
+        assert v * x * x % p == u, enc.hex()
+        point = (x, y)
+        for _ in range(3):
+            point = add(point, point)
+        assert point == (0, 1), enc.hex()
+
+
+@pytest.mark.parametrize("x", SMALL_ORDER_KEYS, ids=_small_order_id)
+def test_a_small_order_ed25519_key_is_refused(x):
+    _refused("cose_key", cose_public_key, _ed_cose(x))
+
+
+@pytest.mark.parametrize("x", SMALL_ORDER_KEYS, ids=_small_order_id)
+def test_a_small_order_ed25519_key_cannot_register(x):
+    auth = SoftAuthenticator(-8)
+    _refused("cose_key", _register, auth.register(CHALLENGE, cose=_ed_cose(x)))
+
+
+@pytest.mark.parametrize("x", SMALL_ORDER_KEYS, ids=_small_order_id)
+def test_a_stored_small_order_key_verifies_nothing(x):
+    # A key enrolled before the refusal existed: R = identity, S = 0 is a
+    # valid EdDSA signature over any message for several of these keys.
+    auth = SoftAuthenticator(-8)
+    forged = auth.assertion(CHALLENGE, signature=b"\x01" + bytes(63))
+    _refused("cose_key", _assert, auth, forged, key=_ed_cose(x))
+
+
+@pytest.mark.parametrize("sign_bit", [0, 0x80])
+def test_an_ordinary_ed25519_key_with_either_sign_bit_registers_and_asserts(sign_bit):
+    auth = SoftAuthenticator(-8)
+    while auth.cose_map()[-2][31] & 0x80 != sign_bit:
+        auth = SoftAuthenticator(-8)
+    reg = _register(auth.register(CHALLENGE))
+    assert _assert(auth, auth.assertion(CHALLENGE), key=reg.public_key).sign_count == 0
+
+
 def test_a_cose_key_with_a_string_label_is_refused():
     key = dict(SoftAuthenticator(-7).cose_map())
     key["x"] = 1
