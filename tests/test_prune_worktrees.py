@@ -962,13 +962,17 @@ def test_far_future_mtime_does_not_crash_the_ledger(env, monkeypatch):
     real_localtime = prune.time.localtime
 
     def refuses_far_future(secs=None):
-        # Windows refuses times past year 3000; reproduce that everywhere.
-        if secs is not None and secs > 3.3e10:
+        # Windows refuses times past year 3000; reproduce that refusal
+        # everywhere, for anything past 2100 (4102444800).
+        if secs is not None and secs > 4102444800:
             raise OSError(22, "Invalid argument")
         return real_localtime() if secs is None else real_localtime(secs)
 
     monkeypatch.setattr(prune.time, "localtime", refuses_far_future)
-    future = 4e10
+    # Year 2255: every filesystem stores it intact. ext4 and APFS clamp a
+    # larger value such as 4e10 to 2262, so the file's real mtime would
+    # depend on the CI runner's filesystem.
+    future = 9e9
     os.utime(wt / "README.md", (future, future))
     rc, out = run(env, "--mine", "--apply", roots=False)
     assert rc == 0, out
