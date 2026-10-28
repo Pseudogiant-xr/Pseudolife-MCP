@@ -14,7 +14,8 @@ from .cli_corpus import corpus
 from . import pytest_plugin
 from .harness import (Policy, capture_platform, compare, execute, isolated_env,
                       replay, write_new)
-from .phase1_receipts import candidate_identity, command_identity, pytest_outcomes
+from .phase1_receipts import (PINNED_NODE_ID_OPTIONS, candidate_identity, command_identity,
+                              pytest_outcomes)
 from .processes import owned_process
 from .provenance import module_command, require_import_root, runtime_metadata
 from .stdio_capture import require_phase1_source
@@ -26,6 +27,12 @@ def selected_nodes():
     return sorted(mapped | set(pytest_plugin.CLI_SUBPROCESS_NODES) | pytest_plugin.CLI_HOOK_NODES)
 
 
+def pytest_argv(root, report, nodes, extra=()):
+    return module_command("pytest", root, ["-p", "evals.rust_port.pytest_plugin", "-q",
+            *PINNED_NODE_ID_OPTIONS, "--junitxml", str(report.resolve()),
+            "-o", "junit_logging=no", *extra, *nodes])
+
+
 def process_tests(command, root, directory, label):
     nodes = selected_nodes()
     identity = command_identity(command, root)
@@ -35,8 +42,7 @@ def process_tests(command, root, directory, label):
         raise FileExistsError("CLI process-test evidence paths must be new")
     env = isolated_env(directory / f"{label}-home")
     env["PSEUDOLIFE_PORT_CLI_JSON"] = json.dumps(command)
-    argv = module_command("pytest", root, ["-p", "evals.rust_port.pytest_plugin", "-q",
-            "--junitxml", str(report.resolve()), "-o", "junit_logging=no", *nodes])
+    argv = pytest_argv(root, report, nodes)
     with owned_process(argv, cwd=root, env=env, stdin=subprocess.DEVNULL) as process:
         stdout, stderr = process.communicate(timeout=120)
     log.write_bytes(stdout + stderr)

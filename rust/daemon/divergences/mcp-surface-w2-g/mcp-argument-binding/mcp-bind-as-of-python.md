@@ -1,0 +1,3 @@
+| Name | Python | Rust | Why |
+|---|---|---|---|
+| MCP-BIND-AS-OF-PYTHON | `fromisoformat` follows the running interpreter: CPython 3.14 reads `T24:00` and refuses `12:30:45:67`, where 3.11 and 3.12.13 (the production base image, measured) do the opposite. `timestamp()` on a naive instant late on 9999-12-31 fails east of UTC (Tokyo refuses `9999-12-31T23:59`). On Windows a naive instant before 1970 raises OSError, which escapes `_check_as_of` | CPython 3.11/3.12's parser, and `timestamp()` as in UTC on Linux, the container default | the daemon runs in a Linux container; a local time zone east of UTC is not configured there |
