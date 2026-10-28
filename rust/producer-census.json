@@ -19,7 +19,7 @@
     "docs/guide/comparison.md": "841d814e64e6d2aa2385d7d0bdf3069e9ec216bea0e43adf1c286d18810e9bab",
     "docs/guide/configuration.md": "85f781b7276b6b85985f8a1ecf1c526171aededa3d1678883cd3ebebc45d696c",
     "docs/guide/coordination-recovery.md": "04425509736ec7e40beb4bc46e7810d32ee0a68d791a969b77876c945ab5cb79",
-    "docs/guide/dreaming.md": "e5441589848ee5485baa06db04761110172fd1170b4b2dc4a6a1f734db4859ab",
+    "docs/guide/dreaming.md": "b80dbc4211e9873e823e97bba7395f2a0ae5f8cbbe24835aa9086991df4e44ea",
     "docs/guide/episodes.md": "547f36bb2469f3ae352107374ba63ebbeecb3929be344730af9c7501d8802f49",
     "docs/guide/memory-model.md": "6e342e6dd6f9b997e1ab9660190dac32bb3f9ef83f8830f098d414685b1834c0",
     "docs/guide/providers.md": "755967b36f1b4fe65a189b925a9df8f7c0244025270746fc9cc002966d793d16",
@@ -293,7 +293,7 @@
     "plugin/hooks/user-prompt-submit.sh": "39c583c145c97e9c0fea6a9b36ea9c2e879a1bd4733a6362a493d4a194750ba9",
     "plugin/release.json": "2720f3c4439435ec60acd5215418b1dc2d705af039273a92f4dc8169529b54a8",
     "pseudolife_memory/coordination.py": "8f171a2ca10c6c4887cb3503ea6dcc76c9a11602460b24a9ff59fe64a2f17e82",
-    "pseudolife_memory/mcp_server.py": "06c2481953719a829ce8cf312e7eb890c180de04956e332c9e94ac3416fdc66a",
+    "pseudolife_memory/mcp_server.py": "f1fe502a040f0dfa6e651e64aa2a79e82140af77f3680f187e8dda91c81acb3a",
     "pseudolife_memory/utils/config.py": "9e8cda2a3aee96fe725a9c64d30fabda01ffac69e03a65418e5cc72a291efce4",
     "pseudolife_memory/web/api.py": "deb35259f0dfd306f4877bf36d1d52aba59e2c3d950590c28a1797bded938d67",
     "pseudolife_memory/web/routes.py": "ea742529395f85091eebb03d60e8f7e6561be3f7c70c7e40d8949f6fe8bf23f2",
@@ -1284,7 +1284,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:1215",
+          "location": "docs/guide/dreaming.md:1234",
           "shape": {
             "argv_source": "briefing",
             "channel": "argv",
@@ -1295,7 +1295,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:689",
+          "location": "docs/guide/dreaming.md:708",
           "shape": {
             "argv_source": "briefing",
             "channel": "argv",
@@ -9299,7 +9299,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:1207",
+          "location": "docs/guide/dreaming.md:1226",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -9315,7 +9315,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:1285",
+          "location": "docs/guide/dreaming.md:1304",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -9331,7 +9331,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:1290",
+          "location": "docs/guide/dreaming.md:1309",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -9347,7 +9347,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:927",
+          "location": "docs/guide/dreaming.md:946",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -9363,7 +9363,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:934",
+          "location": "docs/guide/dreaming.md:953",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -9624,7 +9624,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:927",
+          "location": "docs/guide/dreaming.md:946",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -9770,7 +9770,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:934",
+          "location": "docs/guide/dreaming.md:953",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -9985,7 +9985,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:1290",
+          "location": "docs/guide/dreaming.md:1309",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -10006,7 +10006,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:1285",
+          "location": "docs/guide/dreaming.md:1304",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -10083,7 +10083,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:1207",
+          "location": "docs/guide/dreaming.md:1226",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -10469,7 +10469,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:1256",
+          "location": "docs/guide/dreaming.md:1275",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -10533,7 +10533,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:591",
+          "location": "docs/guide/dreaming.md:592",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -10549,7 +10549,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:697",
+          "location": "docs/guide/dreaming.md:716",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -10565,7 +10565,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:706",
+          "location": "docs/guide/dreaming.md:725",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -10581,7 +10581,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:719",
+          "location": "docs/guide/dreaming.md:738",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -10597,7 +10597,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:772",
+          "location": "docs/guide/dreaming.md:791",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -10613,7 +10613,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:779",
+          "location": "docs/guide/dreaming.md:798",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -10629,7 +10629,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:785",
+          "location": "docs/guide/dreaming.md:804",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -10645,7 +10645,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:872",
+          "location": "docs/guide/dreaming.md:891",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -10661,7 +10661,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:913",
+          "location": "docs/guide/dreaming.md:932",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -11693,7 +11693,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:872",
+          "location": "docs/guide/dreaming.md:891",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -11706,7 +11706,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:913",
+          "location": "docs/guide/dreaming.md:932",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -11813,7 +11813,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:719",
+          "location": "docs/guide/dreaming.md:738",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -12194,7 +12194,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:591",
+          "location": "docs/guide/dreaming.md:592",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -12763,7 +12763,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:779",
+          "location": "docs/guide/dreaming.md:798",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -12857,7 +12857,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:1256",
+          "location": "docs/guide/dreaming.md:1275",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -12904,7 +12904,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:772",
+          "location": "docs/guide/dreaming.md:791",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -12959,7 +12959,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:706",
+          "location": "docs/guide/dreaming.md:725",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -12980,7 +12980,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:697",
+          "location": "docs/guide/dreaming.md:716",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -13035,7 +13035,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:785",
+          "location": "docs/guide/dreaming.md:804",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -14467,7 +14467,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:611",
+          "location": "docs/guide/dreaming.md:612",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -15618,7 +15618,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:611",
+          "location": "docs/guide/dreaming.md:612",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -24841,7 +24841,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:510",
+          "location": "docs/guide/dreaming.md:511",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -25085,7 +25085,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:521",
+          "location": "docs/guide/dreaming.md:522",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -25296,7 +25296,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:560",
+          "location": "docs/guide/dreaming.md:561",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -25914,7 +25914,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:512",
+          "location": "docs/guide/dreaming.md:513",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -25961,7 +25961,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:507",
+          "location": "docs/guide/dreaming.md:508",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -25974,7 +25974,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:522",
+          "location": "docs/guide/dreaming.md:523",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -27623,7 +27623,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:937",
+          "location": "docs/guide/dreaming.md:956",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -27670,7 +27670,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:969",
+          "location": "docs/guide/dreaming.md:988",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -41493,7 +41493,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:1215",
+          "location": "docs/guide/dreaming.md:1234",
           "shape": {
             "channel": "query",
             "complete": false,
@@ -43477,7 +43477,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:1118",
+          "location": "docs/guide/dreaming.md:1137",
           "shape": {
             "channel": "query",
             "complete": false,
@@ -47448,7 +47448,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:1112",
+          "location": "docs/guide/dreaming.md:1131",
           "shape": {
             "channel": "body",
             "complete": false,
@@ -49182,7 +49182,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:1314",
+          "location": "docs/guide/dreaming.md:1333",
           "shape": {
             "channel": "parameters",
             "complete": true,
@@ -49261,7 +49261,7 @@
       "producers": [
         {
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:1311",
+          "location": "docs/guide/dreaming.md:1330",
           "shape": {
             "channel": "parameters",
             "complete": true,
@@ -49691,7 +49691,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:1148",
+          "location": "docs/guide/dreaming.md:1167",
           "shape": {
             "channel": "parameters",
             "complete": true,
@@ -49712,7 +49712,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:1264",
+          "location": "docs/guide/dreaming.md:1283",
           "shape": {
             "channel": "parameters",
             "complete": true,
@@ -49775,7 +49775,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:614",
+          "location": "docs/guide/dreaming.md:615",
           "shape": {
             "channel": "parameters",
             "complete": true,
@@ -49796,7 +49796,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:616",
+          "location": "docs/guide/dreaming.md:617",
           "shape": {
             "channel": "parameters",
             "complete": true,
@@ -49817,7 +49817,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:650",
+          "location": "docs/guide/dreaming.md:651",
           "shape": {
             "channel": "parameters",
             "complete": true,
@@ -49859,7 +49859,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:685",
+          "location": "docs/guide/dreaming.md:700",
           "shape": {
             "channel": "parameters",
             "complete": true,
@@ -49880,7 +49880,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:751",
+          "location": "docs/guide/dreaming.md:704",
           "shape": {
             "channel": "parameters",
             "complete": true,
@@ -49894,28 +49894,7 @@
             ],
             "parameters": {
               "action": {
-                "literal": "runs"
-              }
-            }
-          }
-        },
-        {
-          "evidence": "documented",
-          "location": "docs/guide/dreaming.md:757",
-          "shape": {
-            "channel": "parameters",
-            "complete": true,
-            "omitted_optional": [
-              "apply",
-              "commit_token",
-              "cursor",
-              "limit",
-              "run_id",
-              "snippets"
-            ],
-            "parameters": {
-              "action": {
-                "literal": "rollback"
+                "literal": "status"
               }
             }
           }
@@ -49943,7 +49922,49 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:809",
+          "location": "docs/guide/dreaming.md:770",
+          "shape": {
+            "channel": "parameters",
+            "complete": true,
+            "omitted_optional": [
+              "apply",
+              "commit_token",
+              "cursor",
+              "limit",
+              "run_id",
+              "snippets"
+            ],
+            "parameters": {
+              "action": {
+                "literal": "runs"
+              }
+            }
+          }
+        },
+        {
+          "evidence": "documented",
+          "location": "docs/guide/dreaming.md:776",
+          "shape": {
+            "channel": "parameters",
+            "complete": true,
+            "omitted_optional": [
+              "apply",
+              "commit_token",
+              "cursor",
+              "limit",
+              "run_id",
+              "snippets"
+            ],
+            "parameters": {
+              "action": {
+                "literal": "rollback"
+              }
+            }
+          }
+        },
+        {
+          "evidence": "documented",
+          "location": "docs/guide/dreaming.md:828",
           "shape": {
             "channel": "parameters",
             "complete": true,
@@ -49965,7 +49986,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:894",
+          "location": "docs/guide/dreaming.md:913",
           "shape": {
             "channel": "parameters",
             "complete": true,
@@ -49986,7 +50007,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:922",
+          "location": "docs/guide/dreaming.md:941",
           "shape": {
             "channel": "parameters",
             "complete": true,
@@ -51045,7 +51066,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:791",
+          "location": "docs/guide/dreaming.md:810",
           "shape": {
             "channel": "parameters",
             "complete": true,
@@ -52222,7 +52243,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:1249",
+          "location": "docs/guide/dreaming.md:1268",
           "shape": {
             "channel": "parameters",
             "complete": false,
@@ -52421,7 +52442,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:1236",
+          "location": "docs/guide/dreaming.md:1255",
           "shape": {
             "channel": "parameters",
             "complete": true,
@@ -52444,7 +52465,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:1239",
+          "location": "docs/guide/dreaming.md:1258",
           "shape": {
             "channel": "parameters",
             "complete": true,
@@ -53323,7 +53344,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:767",
+          "location": "docs/guide/dreaming.md:786",
           "shape": {
             "channel": "parameters",
             "complete": true,
@@ -54996,7 +55017,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:1339",
+          "location": "docs/guide/dreaming.md:1358",
           "shape": {
             "channel": "parameters",
             "complete": false,
@@ -56416,7 +56437,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:766",
+          "location": "docs/guide/dreaming.md:785",
           "shape": {
             "channel": "parameters",
             "complete": true,
@@ -57105,7 +57126,7 @@
       "dynamic": "unresolved",
       "evidence": "documented",
       "kind": "environment",
-      "location": "docs/guide/dreaming.md:983",
+      "location": "docs/guide/dreaming.md:1002",
       "name": "PSEUDOLIFE_JUDGE_THIRD_API_KEY",
       "shape": {
         "channel": "environment",
@@ -60489,7 +60510,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "docs/guide/dreaming.md:550",
+      "location": "docs/guide/dreaming.md:551",
       "method": null,
       "name": "/health",
       "shape": {
@@ -60503,7 +60524,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "docs/guide/dreaming.md:686",
+      "location": "docs/guide/dreaming.md:688",
       "method": null,
       "name": "/health",
       "shape": {
@@ -60517,7 +60538,35 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "docs/guide/dreaming.md:711",
+      "location": "docs/guide/dreaming.md:691",
+      "method": null,
+      "name": "/health",
+      "shape": {
+        "channel": "body",
+        "complete": false,
+        "expression": "Request helper, URL suffix or body requires resolution at this location.",
+        "parameters": {}
+      }
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "unverified",
+      "kind": "route",
+      "location": "docs/guide/dreaming.md:705",
+      "method": null,
+      "name": "/health",
+      "shape": {
+        "channel": "body",
+        "complete": false,
+        "expression": "Request helper, URL suffix or body requires resolution at this location.",
+        "parameters": {}
+      }
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "unverified",
+      "kind": "route",
+      "location": "docs/guide/dreaming.md:730",
       "method": null,
       "name": "/health",
       "shape": {
@@ -67897,6 +67946,12 @@
     },
     {
       "dynamic": "unresolved",
+      "location": "docs/guide/dreaming.md:1002",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:environment:PSEUDOLIFE_JUDGE_THIRD_API_KEY"
+    },
+    {
+      "dynamic": "unresolved",
       "location": "docs/guide/dreaming.md:107",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_DREAM_TIMEOUT_SECONDS"
@@ -67909,13 +67964,13 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:1112",
+      "location": "docs/guide/dreaming.md:1131",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "route:POST /api/graph/rejudge"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:1118",
+      "location": "docs/guide/dreaming.md:1137",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "route:GET /api/graph/proposal-evidence"
     },
@@ -67933,67 +67988,67 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:1207",
+      "location": "docs/guide/dreaming.md:1226",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:DeepDreamConfig"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:1207",
+      "location": "docs/guide/dreaming.md:1226",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:DeepDreamConfig.review_queue_alert_pending"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:1215",
+      "location": "docs/guide/dreaming.md:1234",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "route:GET /api/briefing"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:1249",
+      "location": "docs/guide/dreaming.md:1268",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "tool:memory_graph_review"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:1256",
+      "location": "docs/guide/dreaming.md:1275",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:DreamConfig"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:1256",
+      "location": "docs/guide/dreaming.md:1275",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:DreamConfig.retype_quarantined_max"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:1285",
+      "location": "docs/guide/dreaming.md:1304",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:DeepDreamConfig"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:1285",
+      "location": "docs/guide/dreaming.md:1304",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:DeepDreamConfig.max_support_overlap"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:1290",
+      "location": "docs/guide/dreaming.md:1309",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:DeepDreamConfig"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:1290",
+      "location": "docs/guide/dreaming.md:1309",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:DeepDreamConfig.max_fallback_mentions"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:1339",
+      "location": "docs/guide/dreaming.md:1358",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "tool:memory_search"
     },
@@ -68107,54 +68162,54 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:507",
+      "location": "docs/guide/dreaming.md:508",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_DREAM_FALLBACK_BASE_URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:510",
+      "location": "docs/guide/dreaming.md:511",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_DREAM_API_KEY"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:512",
+      "location": "docs/guide/dreaming.md:513",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_DREAM_FALLBACK_API_KEY"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:521",
+      "location": "docs/guide/dreaming.md:522",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_DREAM_BASE_URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:522",
+      "location": "docs/guide/dreaming.md:523",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_DREAM_FALLBACK_BASE_URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:550",
+      "location": "docs/guide/dreaming.md:551",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:563",
+      "location": "docs/guide/dreaming.md:564",
       "reason": "forwarded parameters"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:591",
+      "location": "docs/guide/dreaming.md:592",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:DreamConfig"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:591",
+      "location": "docs/guide/dreaming.md:592",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:DreamConfig.extractor_reasoning_effort"
     },
@@ -68165,13 +68220,13 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:611",
+      "location": "docs/guide/dreaming.md:612",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:MemoryConfig"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:611",
+      "location": "docs/guide/dreaming.md:612",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:MemoryConfig.dream"
     },
@@ -68187,164 +68242,176 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:685",
-      "reason": "forwarded parameters"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:686",
+      "location": "docs/guide/dreaming.md:688",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:694",
+      "location": "docs/guide/dreaming.md:691",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:route:/health"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/guide/dreaming.md:704",
       "reason": "forwarded parameters"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:697",
+      "location": "docs/guide/dreaming.md:705",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:route:/health"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/guide/dreaming.md:713",
+      "reason": "forwarded parameters"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/guide/dreaming.md:716",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:DreamConfig"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:697",
+      "location": "docs/guide/dreaming.md:716",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:DreamConfig.stall_repeat_hours"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:706",
+      "location": "docs/guide/dreaming.md:725",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:DreamConfig"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:706",
+      "location": "docs/guide/dreaming.md:725",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:DreamConfig.stall_notice"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:711",
+      "location": "docs/guide/dreaming.md:730",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:719",
+      "location": "docs/guide/dreaming.md:738",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:DreamConfig"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:719",
+      "location": "docs/guide/dreaming.md:738",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:DreamConfig.digest_enabled"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:757",
+      "location": "docs/guide/dreaming.md:776",
       "reason": "forwarded parameters"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:772",
+      "location": "docs/guide/dreaming.md:791",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:DreamConfig"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:772",
+      "location": "docs/guide/dreaming.md:791",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:DreamConfig.runs_keep"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:779",
+      "location": "docs/guide/dreaming.md:798",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:DreamConfig"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:779",
+      "location": "docs/guide/dreaming.md:798",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:DreamConfig.quarantine_low_trust"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:785",
+      "location": "docs/guide/dreaming.md:804",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:DreamConfig"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:785",
+      "location": "docs/guide/dreaming.md:804",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:DreamConfig.trusted_sources"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:791",
+      "location": "docs/guide/dreaming.md:810",
       "reason": "forwarded parameters"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:872",
+      "location": "docs/guide/dreaming.md:891",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:DreamConfig"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:872",
+      "location": "docs/guide/dreaming.md:891",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:DreamConfig.chronicle"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:897",
+      "location": "docs/guide/dreaming.md:916",
       "reason": "forwarded parameters"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:913",
+      "location": "docs/guide/dreaming.md:932",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:DreamConfig"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:913",
+      "location": "docs/guide/dreaming.md:932",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:DreamConfig.chronicle"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:927",
+      "location": "docs/guide/dreaming.md:946",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:DeepDreamConfig"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:927",
+      "location": "docs/guide/dreaming.md:946",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:DeepDreamConfig.auto_min_new_entities"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:934",
+      "location": "docs/guide/dreaming.md:953",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:DeepDreamConfig"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:934",
+      "location": "docs/guide/dreaming.md:953",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:DeepDreamConfig.judge_mode"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:937",
+      "location": "docs/guide/dreaming.md:956",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_JUDGE_API_KEY"
     },
@@ -68362,15 +68429,9 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:969",
+      "location": "docs/guide/dreaming.md:988",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_JUDGE_SECOND_API_KEY"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:983",
-      "reason": "Unknown or forwarded inventory target/shape.",
-      "surface": "inventory-gap:environment:PSEUDOLIFE_JUDGE_THIRD_API_KEY"
     },
     {
       "dynamic": "unresolved",
