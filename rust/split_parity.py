@@ -49,6 +49,8 @@ ENTRY_LIMIT = 40
 # the measurement table's platforms): the key takes the next cell too.
 TWO_CELL_KEYS = ("Method", "Platform")
 TABLE_SEPARATOR = re.compile(r"\|(\s*:?-+:?\s*\|)+")
+LINK = re.compile(r"\]\(([^)\s]+)\)")
+EXTERNAL = re.compile(r"[a-zA-Z][a-zA-Z0-9+.-]*:|/")
 CONFLICT = re.compile(r"^(<{7}|={7}|>{7})( |$)", re.M)
 OURS_LABEL, BASE_LABEL, THEIRS_LABEL = "PARITY.md", "merge base", "parity/"
 
@@ -77,6 +79,8 @@ rust/PARITY.md`), run `python rust/split_parity.py`, then `git add -A
 rust/PARITY.md rust/parity`. The script applies the branch's own changes
 three-way against the directory and restores this pointer; a file both
 sides changed on the same lines gets conflict markers to resolve by hand.
+Merge, don't rebase: the script needs the merge base. A stack forward-merges
+bottom-up, each layer merging the forward-merged layer below it.
 """
 
 
@@ -157,7 +161,8 @@ def add_row(section: dict, head: str, sep: str, row: str, where: str) -> None:
     name = row_name(head, row)
     text = f"{head}\n{sep}\n{row}\n"
     if section["entries"].get(name, text) != text:
-        raise LedgerError(f"{where}: two rows would be {name}.md; start one with other words")
+        raise LedgerError(f"{where}: two rows would be {name}.md; start one with other words "
+                          "(if one row is listed twice, edit both copies or delete one)")
     section["entries"][name] = text
 
 
@@ -199,9 +204,13 @@ def parse_ledger(text: str) -> dict:
     ledger: dict = {}
     path: tuple[str, ...] | None = None
     body: list[str] = []
+    preamble: list[str] = []
     for line in text.split("\n"):
         heading = re.match(r"(#{2,})\s+(.*\S)\s*$", line)
         if heading:
+            if path is None and any(l.strip() for l in preamble if l.rstrip() != TITLE.rstrip()):
+                raise LedgerError("PARITY.md holds text between its title and the first section, "
+                                  "which has no file under parity/; move it into a section")
             if path is not None:
                 parse_section_body(path, body, ledger)
             level, title = len(heading.group(1)), heading.group(2)
@@ -214,12 +223,66 @@ def parse_ledger(text: str) -> dict:
             body = []
         elif path is not None:
             body.append(line)
+        else:
+            preamble.append(line)
     if path is not None:
         parse_section_body(path, body, ledger)
     dirs = [section_parts(p) for p in ledger]
     if len(set(dirs)) != len(dirs):
         raise LedgerError("two section headings would share a directory; reword one's opening words")
     return ledger
+
+
+# ---- links ------------------------------------------------------------------------------
+# The single file's links are relative to rust/ and its `#anchor` links name
+# its headings. A file under parity/ sits one directory deeper per heading
+# level, and a heading is a directory there, so files() rewrites both and
+# load_dir() reads them back: the structure, and so the rendered register,
+# keep the single file's links.
+
+def anchor(heading: str) -> str:
+    """GitHub's anchor for a heading."""
+    return re.sub(r"[^\w\- ]", "", heading.lower()).replace(" ", "-")
+
+
+def anchor_dirs(paths) -> dict[str, str]:
+    """{heading anchor: its directory under parity/, with a trailing slash}."""
+    out: dict[str, str] = {}
+    for path in paths:
+        out.setdefault(anchor(path[-1]), "/".join(section_parts(path)) + "/")
+    return out
+
+
+def relocate(text: str, depth: int, anchors: dict[str, str]) -> str:
+    """The single file's links as seen from a file ``depth`` headings deep."""
+    def move(match: re.Match) -> str:
+        target = match.group(1)
+        if EXTERNAL.match(target):
+            return match.group(0)
+        if target.startswith("#"):
+            directory = anchors.get(target[1:])
+            return f"]({'../' * depth}{directory})" if directory else match.group(0)
+        return f"]({'../' * (depth + 1)}{target})"
+    return LINK.sub(move, text)
+
+
+def restore(text: str, depth: int, anchors: dict[str, str], where: Path) -> str:
+    """relocate's inverse; a relative link that is neither form is refused."""
+    headings = {directory: name for name, directory in anchors.items()}
+    up = "../" * (depth + 1)
+
+    def back(match: re.Match) -> str:
+        target = match.group(1)
+        if EXTERNAL.match(target) or target.startswith("#"):
+            return match.group(0)
+        inside = target[len("../" * depth):] if target.startswith("../" * depth) else None
+        if inside in headings:
+            return f"](#{headings[inside]})"
+        if target.startswith(up):
+            return f"]({target[len(up):]})"
+        raise LedgerError(f"{where}: link {target!r} must be written relative to this file "
+                          f"({up}{target}), or as {'../' * depth}<section>/ for a section")
+    return LINK.sub(back, text)
 
 
 # ---- the directory form -----------------------------------------------------------------
@@ -235,25 +298,37 @@ def section_text(path: tuple[str, ...], section_blocks: list[str]) -> str:
 
 def files(ledger: dict) -> dict[str, str]:
     """The directory form as {path under parity/: text}."""
+    anchors = anchor_dirs(ledger)
     out = {}
     for path, section in ledger.items():
         directory = "/".join(section_parts(path))
-        out[f"{directory}/{SECTION_FILE}"] = section_text(path, section["blocks"])
+        out[f"{directory}/{SECTION_FILE}"] = relocate(section_text(path, section["blocks"]),
+                                                      len(path), anchors)
         for name, text in section["entries"].items():
-            out[f"{directory}/{name}.md"] = text
+            out[f"{directory}/{name}.md"] = relocate(text, len(path), anchors)
     return out
 
 
-def read_section_file(file: Path, depth: int) -> tuple[str, list[str]]:
-    text = file.read_text(encoding="utf-8")
+def read_text(file: Path) -> str:
+    """A file's text with a byte-order mark dropped and its trailing blank
+    lines cut to one newline, refusing conflict markers."""
+    text = file.read_text(encoding="utf-8-sig")
     if CONFLICT.search(text):
         raise LedgerError(f"{file}: unresolved conflict markers")
+    return text.rstrip("\n") + "\n"
+
+
+def read_section_file(file: Path, text: str, depth: int) -> tuple[str, list[str]]:
     lines = text.split("\n")
-    heading = re.fullmatch(r"(#{2,}) (.*\S)", lines[0])
+    heading = re.fullmatch(r"(#{2,}) (.*\S)\s*", lines[0])
     if not heading or len(heading.group(1)) != depth + 1:
         raise LedgerError(f"{file}: the first line must be a level-{depth + 1} heading")
     section_blocks = []
     for block in blocks(lines[1:]):
+        if any(re.match(r"#{2,}\s", line) for line in block):
+            raise LedgerError(f"{file}: a heading starts a section, which is a directory: a ### "
+                              f"section is a directory inside this one with its own {SECTION_FILE}, "
+                              "a ## section one beside it")
         if block[0].startswith("|") and (len(block) != 2 or not is_header(block)):
             raise LedgerError(f"{file}: a table here is its header and separator lines only; "
                               "each row is its own file")
@@ -264,10 +339,7 @@ def read_section_file(file: Path, depth: int) -> tuple[str, list[str]]:
     return heading.group(2), section_blocks
 
 
-def read_entry(item: Path, section_blocks: list[str]) -> tuple[str, str]:
-    text = item.read_text(encoding="utf-8")
-    if CONFLICT.search(text):
-        raise LedgerError(f"{item}: unresolved conflict markers")
+def read_entry(item: Path, text: str, section_blocks: list[str]) -> tuple[str, str]:
     lines = text.split("\n")
     if (len(lines) != 4 or lines[3] or not all(line.startswith("|") for line in lines[:3])
             or not is_header(lines[:2]) or TABLE_SEPARATOR.fullmatch(lines[2].strip())):
@@ -289,17 +361,21 @@ def load_dir(root: Path | None = None) -> dict:
     ledger: dict = {}
     if not root.is_dir():
         return ledger
+    found: dict = {}                      # {path: (section file, its text, [(entry, text)])}
 
     def walk(directory: Path, parent: tuple[str, ...]) -> None:
         marker = directory / SECTION_FILE
         if not marker.is_file():
             raise LedgerError(f"{directory}: a section directory needs {SECTION_FILE}")
-        title, section_blocks = read_section_file(marker, len(parent) + 1)
-        path = parent + (title,)
-        if slug(title, SECTION_LIMIT) != directory.name:
-            raise LedgerError(f"{directory}: heading {title!r} belongs in "
-                              f"{slug(title, SECTION_LIMIT)!r}")
-        section = ledger.setdefault(path, {"blocks": section_blocks, "entries": {}})
+        text = read_text(marker)
+        heading = re.match(r"(#{2,}) (.*\S)\s*\n", text)
+        if not heading:
+            raise LedgerError(f"{marker}: the first line must be a level-{len(parent) + 2} heading")
+        path = parent + (heading.group(2),)
+        if slug(path[-1], SECTION_LIMIT) != directory.name:
+            raise LedgerError(f"{directory}: heading {path[-1]!r} belongs in "
+                              f"{slug(path[-1], SECTION_LIMIT)!r}")
+        entries = found.setdefault(path, (marker, text, []))[2]
         for item in sorted(directory.iterdir()):
             if item.is_dir():
                 if len(path) >= 2:
@@ -308,13 +384,19 @@ def load_dir(root: Path | None = None) -> dict:
             elif item.name != SECTION_FILE:
                 if item.suffix != ".md":
                     raise LedgerError(f"{item}: entries are .md files")
-                name, text = read_entry(item, section_blocks)
-                section["entries"][name] = text
+                entries.append((item, read_text(item)))
 
     for top in sorted(root.iterdir()):
         if not top.is_dir():
             raise LedgerError(f"{top}: only section directories belong in {root.name}/")
         walk(top, ())
+    anchors = anchor_dirs(found)
+    for path, (marker, text, entries) in found.items():
+        _, section_blocks = read_section_file(marker, restore(text, len(path), anchors, marker), len(path))
+        section = ledger.setdefault(path, {"blocks": section_blocks, "entries": {}})
+        for item, raw in entries:
+            name, entry = read_entry(item, restore(raw, len(path), anchors, item), section_blocks)
+            section["entries"][name] = entry
     return ledger
 
 
@@ -354,6 +436,11 @@ def merge_base() -> str | None:
         return None
     base = git("merge-base", "HEAD", "MERGE_HEAD")
     return base.strip() if base else None
+
+
+def register_unmerged() -> bool:
+    """Whether git left PARITY.md unmerged (a merge, rebase or cherry-pick)."""
+    return bool(git("ls-files", "-u", "--", LEDGER_GIT_PATH.split("/", 1)[1]))
 
 
 def base_ledger(rev: str) -> dict | None:
@@ -406,6 +493,11 @@ def convert(ours: dict, base: dict | None, root: Path | None = None) -> list[str
     markers."""
     root = ROOT_DIR if root is None else root
     have_files = disk_files(root)
+    marked = [f"{root.name}/{rel}" for rel, text in have_files.items() if CONFLICT.search(text)]
+    if marked:
+        raise LedgerError("these files still hold the conflict markers of an earlier run; resolve "
+                          "them first (merging into them again would nest the markers): "
+                          + ", ".join(marked))
     if base is None and have_files:
         raise LedgerError(
             "parity/ already holds the register and no merge base is known, so converting "
@@ -433,17 +525,23 @@ def convert(ours: dict, base: dict | None, root: Path | None = None) -> list[str
         else:
             write(file, conflict_text(want, have))
             conflicts.append(f"{root.name}/{rel}")
-    # Directories the branch emptied go; one left with rows but no section
-    # file (master removed the section the branch changed) is a conflict.
+    # Directories the branch emptied go. One left with rows but no section
+    # file is a conflict: one side removed or renamed the section while the
+    # other changed or added the rows still in it.
     if root.is_dir():
         for directory in sorted((d for d in root.rglob("*") if d.is_dir()), key=lambda d: -len(d.parts)):
-            left = {p.name for p in directory.iterdir()}
+            left = sorted(p.name for p in directory.iterdir())
             if not left:
                 directory.rmdir()
             elif SECTION_FILE not in left:
-                rel = f"{directory.relative_to(root).as_posix()}/{SECTION_FILE}"
-                write(directory / SECTION_FILE, conflict_text(want_files.get(rel), None))
-                conflicts.append(f"{root.name}/{rel}")
+                where = directory.relative_to(root).as_posix()
+                rows = [f"{root.name}/{where}/{name}" for name in left if name.endswith(".md")]
+                note = ("(this section is gone on one side, but these rows are still here: "
+                        + ", ".join(rows) + "; move them to the section's new directory or "
+                        "delete them, then delete this directory)\n")
+                write(directory / SECTION_FILE, conflict_text(want_files.get(f"{where}/{SECTION_FILE}"), note))
+                conflicts.append(f"{root.name}/{where}/{SECTION_FILE}")
+                conflicts.extend(row for row in rows if row not in conflicts)
     return conflicts
 
 
@@ -476,9 +574,18 @@ def main(argv: list[str] | None = None) -> int:
         if args.render:
             sys.stdout.write(render(load_dir(ROOT_DIR)))
             return 0
+        converted = False
         if not args.check:
             ours = parse_ledger(LEDGER.read_text(encoding="utf-8")) if LEDGER.is_file() else {}
+            if not ours and register_unmerged():
+                raise LedgerError(
+                    "PARITY.md is the pointer, but git left it unmerged, so the single-file side's "
+                    "changes are not in the working tree. Check out that side, then rerun: "
+                    "`git checkout --ours rust/PARITY.md` when merging master into a branch that "
+                    "edits the single file, `--theirs` when the single-file side is being merged "
+                    "in (or in a rebase). Nothing changed")
             if ours:
+                converted = True
                 rev = args.base or (None if args.full else merge_base())
                 base = base_ledger(rev) if rev else None
                 if base is None and not args.full:
@@ -504,6 +611,9 @@ def main(argv: list[str] | None = None) -> int:
                     return 1
             LEDGER.write_text(STUB, encoding="utf-8", newline="\n")
         problems = check(ROOT_DIR, LEDGER)
+        if problems and converted:
+            print("the merged register does not load (did one side change a table's header while "
+                  "the other changed its rows?); fix these by hand:", file=sys.stderr)
         for problem in problems:
             print(problem, file=sys.stderr)
         return 1 if problems else 0

@@ -1,8 +1,8 @@
 ## CLI-EPISODE closure (2026-10-09)
 
-The [CLI differential harness](cli_harness/README.md) closes CLI-EPISODE. The
+The [CLI differential harness](../../cli_harness/README.md) closes CLI-EPISODE. The
 canonical inputs are the mode-only legacy hook commands with the host's
-SessionStart/SessionEnd JSON on stdin ([spec](cli_harness/specs/CLI-EPISODE.md)).
+SessionStart/SessionEnd JSON on stdin ([spec](../../cli_harness/specs/CLI-EPISODE.md)).
 Twenty-six wire cases run both CLIs against a fixture daemon and compare exit,
 streams and each request exactly, the POSTed JSON body byte for byte, with the
 `episode-title-minute` rule letting only the title's minute vary inside each

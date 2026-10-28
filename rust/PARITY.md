@@ -24,3 +24,5 @@ rust/PARITY.md`), run `python rust/split_parity.py`, then `git add -A
 rust/PARITY.md rust/parity`. The script applies the branch's own changes
 three-way against the directory and restores this pointer; a file both
 sides changed on the same lines gets conflict markers to resolve by hand.
+Merge, don't rebase: the script needs the merge base. A stack forward-merges
+bottom-up, each layer merging the forward-merged layer below it.

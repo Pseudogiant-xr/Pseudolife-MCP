@@ -44,10 +44,10 @@ diagnostic. Failure controls must
 compare every durable row, raw stream and local file; no row or time field is
 dropped. Transport loss around COMMIT needs an actual outcome/rollback control
 before acceptance; preparation is not a guarantee about an unobserved commit.
-[Operator closure](#cli-lease-operator-closure-2026-10-10) partially answers
+[Operator closure](../cli-lease-operator-closure-2026/) partially answers
 it with server-side aborts at COMMIT; a transport cut is not yet reproduced.
 
-The additive [operator fixture plan](../evals/rust_port/lease_operator_cases.json)
+The additive [operator fixture plan](../../../evals/rust_port/lease_operator_cases.json)
 pins the first missing-row whole-command cell, queue/reserved/revocation,
 rollback, secret-boundary and container/refusal controls. Held-row comparisons
 use `fixed-clock-replay` with the same clock seam in both arms and exact audit

@@ -1,6 +1,6 @@
 ## Retained wait-mail evidence boundary (2026-10-09)
 
-The [ring-admission receipt](evidence/wait-mail-ring219.json) records completed
+The [ring-admission receipt](../../evidence/wait-mail-ring219.json) records completed
 Windows/Linux cells at `33f55402`, with images built at `57c720ef`; it does not
 certify a new ec697 runtime. Long-ring and bad-reason pairs retain exit 3 and
 unchanged files; Unicode delivery retains exit 0 and its existing named clock

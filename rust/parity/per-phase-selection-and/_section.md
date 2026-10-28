@@ -1,6 +1,6 @@
 ## Per-phase selection and acceptance gaps
 
-The delegated 2026-10-07 [episode wire disposition](PORTING.md#narrow-episode-wire-disposition)
+The delegated 2026-10-07 [episode wire disposition](../../PORTING.md#narrow-episode-wire-disposition)
 names `http-field-name-case-insensitive` and the 57-ID-only
 `episode-absent-accept-wildcard`. Referer must match absence through the health
 client implementation, with no normalization. Duplicate/case-colliding fields
@@ -31,12 +31,12 @@ Accept presence and Referer; the receipt instrument's parsed dictionaries do
 not establish complete raw HTTP/TLS/proxy equality.
 
 Episode preparation integrates exact master `0b46bb8e2010cf0e428dd650b98cedb165ad3d75`.
-The [prepared episode policy entries](PORTING.md#prepared-episode-policy-instances)
+The [prepared episode policy entries](../../PORTING.md#prepared-episode-policy-instances)
 name the refusal, title-minute and separate direct group-12 instances;
-[the case ledger](../evals/rust_port/episode_policy_cases.json) retains all
+[the case ledger](../../../evals/rust_port/episode_policy_cases.json) retains all
 57 outside-policy raw-header case IDs per OS. Both episode modes remain
 deferred. Static checker tests do not rebind historical receipts or establish
-runtime acceptance. New [episode executable nodes](../evals/rust_port/test_episode_executable.py) launch the candidate
+runtime acceptance. New [episode executable nodes](../../../evals/rust_port/test_episode_executable.py) launch the candidate
 when explicitly configured in the both-OS hosted lane; that wiring has not yet
 run on the prepared head. The original ten in-process episode/title nodes and
 all existing eval assertions remain unchanged.

@@ -2,8 +2,8 @@
 
 The shared CLI differential harness verifies native `lease check`,
 `lease list` and `lease run` over their canonical producer shapes. Its
-[66-case row](cli_harness/rows/lease.py) and
-[specification](cli_harness/specs/CLI-LEASE-core.md) compare live and golden
+[66-case row](../../cli_harness/rows/lease.py) and
+[specification](../../cli_harness/specs/CLI-LEASE-core.md) compare live and golden
 observations on Windows and local WSL/Linux. Exit codes, both streams,
 filesystem bytes and modes, decoded HTTP JSON and intermediate coordination
 table rows and sequence positions remain exact except for the three named rules in the spec:

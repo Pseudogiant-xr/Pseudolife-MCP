@@ -37,7 +37,7 @@ checkpoint `96356249`, hold/break/delegate/designate returned exit 1 with
 `deferred in this candidate`; the later Phase 4 implementation supersedes those
 implementation deferrals. Windows unlock and Ctrl-C receipts at final7e are
 historical execution evidence. Actual b3 Windows unlock/release and Ctrl-C
-checks are recorded in the [reduced-runtime bundle](../evals/results/rust-phase2d-lease-b3e36f70/README.md);
+checks are recorded in the [reduced-runtime bundle](../../../evals/results/rust-phase2d-lease-b3e36f70/README.md);
 hosted acceptance and fresh review remain pending.
 Neither CLI-LEASE-core nor full CLI-LEASE is promoted by this reduction.
 
@@ -57,7 +57,7 @@ the separately named parse refusal above. Stdout failures use
 exit 70 and large list exit 1 behavior and partial-output/effect checks.
 These diagnostic substitutions do not waive unrelated output, state or exit
 mismatches. Actual b3 receipts and exact producing inputs/APIs are in the
-[reduced-runtime bundle](../evals/results/rust-phase2d-lease-b3e36f70/README.md).
+[reduced-runtime bundle](../../../evals/results/rust-phase2d-lease-b3e36f70/README.md).
 It preserves Linux raw exits 1/0 for only list-expected-extreme and
 list-waiter-extreme under the existing two-ID rule, with exact JSON companions
 and rejecting controls. The complete raw receipt SHA256 bindings are in

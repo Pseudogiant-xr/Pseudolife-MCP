@@ -183,13 +183,68 @@ def test_converting_with_no_base_over_the_directory_is_refused(tmp_path):
     assert snapshot(root) == files
 
 
-def run_main(monkeypatch, tmp_path, ledger_text, argv, base=None):
+def run_main(monkeypatch, tmp_path, ledger_text, argv, base=None, unmerged=False):
     ledger = tmp_path / "PARITY.md"
     ledger.write_text(ledger_text, encoding="utf-8", newline="\n")
     monkeypatch.setattr(sp, "LEDGER", ledger)
     monkeypatch.setattr(sp, "ROOT_DIR", tmp_path / "parity")
     monkeypatch.setattr(sp, "merge_base", lambda: base)
+    monkeypatch.setattr(sp, "register_unmerged", lambda: unmerged)
     return sp.main(argv)
+
+
+def test_the_pointer_left_unmerged_is_refused_not_taken_as_nothing_to_do(monkeypatch, tmp_path, capsys):
+    # A rebase, or the wrong side taken in a merge, leaves the pointer in the
+    # working tree and the branch's single file only in the index.
+    assert run_main(monkeypatch, tmp_path, BASE, ["--full"]) == 0
+    files = snapshot(tmp_path / "parity")
+    assert run_main(monkeypatch, tmp_path, sp.STUB, [], unmerged=True) == 1
+    assert "git left it unmerged" in capsys.readouterr().err
+    assert snapshot(tmp_path / "parity") == files
+
+
+def test_text_between_the_title_and_the_first_section_is_refused():
+    with pytest.raises(sp.LedgerError, match="between its title and the first section"):
+        sp.parse_ledger(BASE.replace("# Behaviour parity register\n", "# Behaviour parity register\n\nAn intro.\n"))
+
+
+def test_a_heading_inside_a_section_file_is_refused_with_the_layout(tmp_path):
+    root = converted(tmp_path)
+    section = root / "parity-rows/_section.md"
+    section.write_text(section.read_text(encoding="utf-8") + "\n### A new subsection\n\nText.\n",
+                       encoding="utf-8", newline="\n")
+    with pytest.raises(sp.LedgerError, match="a heading starts a section, which is a directory"):
+        sp.load_dir(root)
+
+
+def test_a_byte_order_mark_and_trailing_blank_lines_are_accepted(tmp_path):
+    root = converted(tmp_path)
+    entry = root / "parity-rows/pg-hydrate.md"
+    entry.write_text("﻿" + entry.read_text(encoding="utf-8") + "\n\n", encoding="utf-8", newline="\n")
+    heading = root / "parity-rows/_section.md"
+    heading.write_text(heading.read_text(encoding="utf-8").replace("## Parity rows\n", "## Parity rows  \n"),
+                       encoding="utf-8", newline="\n")
+    assert sp.load_dir(root) == sp.parse_ledger(BASE)
+
+
+def test_markers_an_earlier_run_left_are_refused_before_merging_again(tmp_path):
+    root = converted(tmp_path)
+    entry = root / "parity-rows/pg-hydrate.md"
+    entry.write_text(sp.conflict_text("a\n", "b\n"), encoding="utf-8", newline="\n")
+    ours = BASE.replace("| PG-HYDRATE | 3 | ported |", "| PG-HYDRATE | 4 | ported |")
+    with pytest.raises(sp.LedgerError, match="parity/parity-rows/pg-hydrate.md"):
+        sp.convert(sp.parse_ledger(ours), sp.parse_ledger(BASE), root)
+
+
+def test_rows_master_added_to_a_section_the_branch_renamed_are_named(tmp_path):
+    root = converted(tmp_path)
+    (root / "parity-rows/new-row.md").write_text(
+        "| Row | Phase | Status |\n|---|---|---|\n| NEW-ROW | 4 | deferred |\n", encoding="utf-8", newline="\n")
+    ours = BASE.replace("## Parity rows", "## Rows of the register")
+    conflicts = sp.convert(sp.parse_ledger(ours), sp.parse_ledger(BASE), root)
+    assert conflicts == ["parity/parity-rows/_section.md", "parity/parity-rows/new-row.md"]
+    assert "parity/parity-rows/new-row.md" in (root / "parity-rows/_section.md").read_text(encoding="utf-8")
+    assert (root / "rows-of-the-register/pg-hydrate.md").is_file()
 
 
 def test_the_script_outside_a_merge_refuses_and_names_the_merge(monkeypatch, tmp_path, capsys):
@@ -259,6 +314,55 @@ def test_two_tables_one_section_with_one_header_are_refused():
                          "| Method | Path | Phase | Status | Rust |\n|---|---|---|---|---|\n| PUT | /api/x | 4 | deferred | 501 |")
     with pytest.raises(sp.LedgerError, match="share a header"):
         sp.parse_ledger(twice)
+
+
+LINKED = BASE.replace(
+    "Intro prose before the table.",
+    "Intro prose: [the harness](cli_harness/README.md), [evidence](../evals/x.json), "
+    "[the checklist](#complete-console-registration-checklist), [a hook](#hook-producer-reduction), "
+    "[elsewhere](#no-such-heading) and [docs](https://example.com/a#b).").replace(
+    "| PG-HYDRATE | 3 | ported |", "| PG-HYDRATE | 3 | ported ([spec](daemon/spec.md#x)) |")
+
+
+def test_links_are_written_relative_to_each_file_and_read_back(tmp_path):
+    root = converted(tmp_path, LINKED)
+    files = snapshot(root)
+    section = files["parity-rows/_section.md"]
+    assert "[the harness](../../cli_harness/README.md)" in section
+    assert "[evidence](../../../evals/x.json)" in section
+    assert "[the checklist](../complete-console-registration/)" in section
+    assert "[a hook](../low-priority-observations/hook-producer-reduction/)" in section
+    assert "[elsewhere](#no-such-heading)" in section and "(https://example.com/a#b)" in section
+    assert "([spec](../../daemon/spec.md#x))" in files["parity-rows/pg-hydrate.md"]
+    # The structure and the rendered register keep the single file's links.
+    ledger = sp.load_dir(root)
+    assert ledger == sp.parse_ledger(LINKED)
+    assert "[the harness](cli_harness/README.md)" in sp.render(ledger)
+
+
+def test_a_nested_section_climbs_one_level_further(tmp_path):
+    text = BASE.replace("| hook-a | deferred |", "| hook-a | deferred ([row](cli_harness/x.py), [up](#parity-rows)) |")
+    root = converted(tmp_path, text)
+    entry = snapshot(root)["low-priority-observations/hook-producer-reduction/hook-a.md"]
+    assert "([row](../../../cli_harness/x.py), [up](../../parity-rows/))" in entry
+    assert sp.load_dir(root) == sp.parse_ledger(text)
+
+
+def test_a_link_written_relative_to_rust_in_a_row_file_is_refused_with_the_fix(tmp_path):
+    root = converted(tmp_path)
+    entry = root / "parity-rows/pg-hydrate.md"
+    entry.write_text(entry.read_text(encoding="utf-8").replace("| ported |", "| ported [x](daemon/spec.md) |"),
+                     encoding="utf-8", newline="\n")
+    with pytest.raises(sp.LedgerError, match=r"relative to this file \(\.\./\.\./daemon/spec\.md\)"):
+        sp.load_dir(root)
+
+
+def test_a_forward_merge_of_a_linked_row_keeps_its_links(tmp_path):
+    root = converted(tmp_path, LINKED)
+    ours = LINKED.replace("| PG-HYDRATE | 3 | ported ([spec]", "| PG-HYDRATE | 4 | ported ([spec]")
+    assert sp.convert(sp.parse_ledger(ours), sp.parse_ledger(LINKED), root) == []
+    text = (root / "parity-rows/pg-hydrate.md").read_text(encoding="utf-8")
+    assert text.endswith("| PG-HYDRATE | 4 | ported ([spec](../../daemon/spec.md#x)) |\n")
 
 
 def test_a_name_is_the_key_cells_opening_words():

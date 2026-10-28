@@ -1,7 +1,7 @@
 ### Recorded episode producer correspondence (2026-10-09)
 
 The completed Windows and Linux scripted cells are consolidated in the
-[episode evidence receipt](../docs/evidence/rust-stream-c-episode-20261009.json).
+[episode evidence receipt](../../../../docs/evidence/rust-stream-c-episode-20261009.json).
 Each OS records 14 of 16 prepared IDs, 16 pairs, 32 CLI arms, 52 HTTP requests
 and 104 synthetic comparator rejects; redirect sinks received zero requests.
 The two source-vote IDs remain UNRUN through the real daemon and persisted

@@ -1,6 +1,6 @@
 ## Stream D retained cell scope (2026-10-08)
 
-The [historical cell receipt](../evals/results/rust-stream-d-historical-cells-20261009.json)
+The [historical cell receipt](../../../evals/results/rust-stream-d-historical-cells-20261009.json)
 binds completed doorbell cells to their exact e122/ec697 sources, per-OS
 images, actual producing receipts and immutable oracle3c. The 17 pairs,
 34 genuine arms and 72 original rejected controls are historical evidence;

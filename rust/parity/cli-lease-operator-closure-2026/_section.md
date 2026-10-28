@@ -1,6 +1,6 @@
 ## CLI-LEASE operator closure (2026-10-10)
 
-The [operator row](cli_harness/rows/lease_operator.py) closes the remainder
+The [operator row](../../cli_harness/rows/lease_operator.py) closes the remainder
 with 37 Windows and 36 local WSL/Linux live and golden matches. It verifies
 hold lifetime, local contention and mirror renewal; break's missing/free/held
 states and FIFO handoff; delegate replacement, coordinator handoff, recipient
@@ -39,7 +39,7 @@ grant's fence `nextval`), and both arms do so identically. Two mutants that
 report success after a swallowed audit failure or an ignored COMMIT result
 are caught, and two more that report a lost COMMIT answer as certain, or a
 refused COMMIT as unknown. This partially answers the COMMIT-loss outcome/rollback
-requirement of the [break preparation](#phase-4-offline-break-source-preparation):
+requirement of the [break preparation](../phase-4-offline-break-source/):
 in each case the server rolled back. The refused cases get a definite
 answer (an ERROR); the ended session gets none the client can trust, which
 is why both arms report its outcome as unknown.
@@ -56,7 +56,7 @@ existing Parity matrix runs these controls and operator live/golden comparisons
 after its disposable PostgreSQL preparation; closing-head CI and independent
 review are required before merge.
 
-The [specification](cli_harness/specs/CLI-LEASE.md) declares the retained
+The [specification](../../cli_harness/specs/CLI-LEASE.md) declares the retained
 `phase4-embedded-pg-deferred` refusal, safe native PostgreSQL diagnostics and
 native signal lifecycle. External DSNs and retained container transport are
 admitted. The original Python in-process tests remain oracle baselines. Full

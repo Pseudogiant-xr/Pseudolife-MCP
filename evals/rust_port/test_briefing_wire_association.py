@@ -1,6 +1,6 @@
 """Narrow controls for the recorded hook HTTP dispositions."""
 import copy
-import sys
+import importlib.util
 from pathlib import Path
 
 import pytest
@@ -19,8 +19,10 @@ def observation(headers):
 def test_accept_ids_are_exactly_the_recorded_hook_ledger():
     assert len(ACCEPT_CASE_IDS) == 53
     assert ACCEPT_CASE_IDS == {case["id"] for case in cases()}
-    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "rust"))
-    import split_parity
+    path = Path(__file__).resolve().parents[2] / "rust/split_parity.py"
+    spec = importlib.util.spec_from_file_location("split_parity_register", path)
+    split_parity = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(split_parity)
     register = split_parity.register_text()
     for name in ACCEPT_CASE_IDS:
         assert f"`{name}`" in register

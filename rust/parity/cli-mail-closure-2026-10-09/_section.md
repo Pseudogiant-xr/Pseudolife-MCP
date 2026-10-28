@@ -1,9 +1,9 @@
 ## CLI-MAIL closure (2026-10-09)
 
-The contract-first [CLI differential harness](cli_harness/README.md) closes
+The contract-first [CLI differential harness](../../cli_harness/README.md) closes
 CLI-MAIL. It runs `python -m pseudolife_memory.cli wait-mail` and the native
 binary on each canonical case (the argv shapes in the
-[spec](cli_harness/specs/CLI-MAIL.md)) in the same disposable home, with state
+[spec](../../cli_harness/specs/CLI-MAIL.md)) in the same disposable home, with state
 seeded through the coordination adapter's own writers, and compares exit,
 both streams, every file under the home (with POSIX mode bits) and the
 waiter's `.wait-armed` listener record, observed once it has armed. All

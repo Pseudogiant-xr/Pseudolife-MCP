@@ -1,6 +1,6 @@
 ## Lease final7e bounded evidence and extreme-text exit rule
 
-[The public evidence bundle](../evals/results/rust-phase2d-lease-7e6927b7/README.md)
+[The public evidence bundle](../../../evals/results/rust-phase2d-lease-7e6927b7/README.md)
 binds executed `7e6927b7b72db62569281d3477dc8e8924c82292`, tree
 `34b24d60d854e28448079bfc0c8e8eea83551d47`, to the actual debug images,
 genuine pinned Python, successful-child own windows/repeat/controls, exact
@@ -25,7 +25,7 @@ historical extreme-text exception expectations; raw observations are preserved.
 
 Per-cell raw response/expected hashes, actual exits, fixture bytes, original
 instrument bindings and cleanup are in `policy-evidence.json`/`policy-inputs.json`
-in the bundle. The new additive [evals/rust_port/test_lease_extreme_list_exit_policy.py](../evals/rust_port/test_lease_extreme_list_exit_policy.py)
+in the bundle. The new additive [evals/rust_port/test_lease_extreme_list_exit_policy.py](../../../evals/rust_port/test_lease_extreme_list_exit_policy.py)
 rejects unrelated list exit differences and malformed/no traceback; the current
 checker also replays all 32 captured cells and rejects 32 wrong-exit controls
 offline. No old test file or assertion is changed.

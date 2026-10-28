@@ -1,9 +1,9 @@
 ## CLI-HOOK closure (2026-10-09)
 
-The [CLI differential harness](cli_harness/README.md) closes CLI-HOOK for
+The [CLI differential harness](../../cli_harness/README.md) closes CLI-HOOK for
 `briefing`, `prompt-hook` and `doorbell-prompt-seen`; episode start/end moved
 to the separate deferred CLI-EPISODE row. Each canonical case (the
-[spec](cli_harness/specs/CLI-HOOK.md)) runs both CLIs against a fixture
+[spec](../../cli_harness/specs/CLI-HOOK.md)) runs both CLIs against a fixture
 daemon serving the real routes' shapes, with identical reply bytes per arm,
 and compares exit, streams, files and each request on the wire: method,
 target, body and every header field exact by case-insensitive name (the
