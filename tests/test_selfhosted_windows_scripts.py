@@ -11,6 +11,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.ops_harness import BASH
+
 OPS = Path(__file__).resolve().parent.parent / "ops" / "selfhosted"
 SETUP = OPS / "setup-windows-runner.ps1"
 HOOK = OPS / "windows-job-started.ps1"
@@ -87,7 +89,7 @@ def test_the_runner_config_is_readable_by_the_account_after_its_rename():
     # of System32's WSL bash.exe (Codex review of 3de68d9c).
     text_path = body[body.index("$path = @("):body.index("-join ';'")]
     assert text_path.index("Git\\bin") < text_path.index("System32")
-    registration = text[text.index("Expand-Archive -LiteralPath $zip"):text.index("& .\config.cmd")]
+    registration = text[text.index("Expand-Archive -LiteralPath $zip"):text.index(r"& .\config.cmd")]
     assert "Write-RunnerConfig" in registration
 
 
@@ -118,11 +120,14 @@ def test_the_egress_proof_parses():
     assert result.returncode == 0 and result.stdout.strip() == "", result.stdout + result.stderr
 
 
-@pytest.mark.skipif(shutil.which("bash") is None, reason="bash is not installed")
+@pytest.mark.skipif(BASH is None, reason="bash (Git Bash on Windows) is not installed")
 def test_the_hypervisor_filter_script_parses():
-    # On stdin: a Windows path does not survive every bash's argument handling.
-    # Bytes, so Windows' text mode adds no carriage returns.
-    result = subprocess.run(["bash", "-n"], input=FILTER.read_bytes(), capture_output=True, timeout=60)
+    # Git Bash on Windows: System32's bash.exe is the WSL launcher, which on a
+    # hosted runner has no distribution and prints an install hint instead
+    # (stress run 40711199777). On stdin: a Windows path does not survive
+    # every bash's argument handling. Bytes, so Windows' text mode adds no
+    # carriage returns.
+    result = subprocess.run([BASH, "-n"], input=FILTER.read_bytes(), capture_output=True, timeout=60)
     assert result.returncode == 0, result.stderr.decode("utf-8", "replace")
 
 
