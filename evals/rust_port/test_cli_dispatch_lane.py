@@ -117,13 +117,12 @@ def test_cli_dispatch_includes_exact_admitted_hooks_without_duplicates(monkeypat
 def test_every_pinned_cli_node_collects_under_the_installed_pytest(tmp_path):
     """The dispatch argv must select each pinned id, whatever pytest names it."""
     import json
-    import os
     import sys
     from evals.rust_port.provenance import ROOT
     nodes = cli_dispatch.selected_nodes()
     argv = cli_dispatch.pytest_argv(ROOT, tmp_path / "collect.junit.xml", nodes,
                                     extra=["--collect-only", "-p", "no:cacheprovider"])
-    env = {**os.environ, "PSEUDOLIFE_PORT_CLI_JSON": json.dumps(
+    env = {**cli_dispatch.isolated_env(tmp_path / "home"), "PSEUDOLIFE_PORT_CLI_JSON": json.dumps(
         [sys.executable, "-m", "pseudolife_memory.cli"])}
     result = subprocess.run(argv, cwd=ROOT, env=env, capture_output=True, text=True,
                             encoding="utf-8", timeout=300)
