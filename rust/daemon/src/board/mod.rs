@@ -66,6 +66,10 @@ pub struct Board {
     /// Test seam: how many sends took the clock retry.
     #[cfg(test)]
     pub(crate) clock_retries: std::sync::atomic::AtomicUsize,
+    /// Test seam: how many full-tier calls declined the published ready
+    /// service and waited for the initialization.
+    #[cfg(test)]
+    pub(crate) tier_waits: std::sync::atomic::AtomicUsize,
 }
 
 type StoreCall<'a> = Pin<Box<dyn Future<Output = Result<serde_json::Value>> + Send + 'a>>;
@@ -103,6 +107,8 @@ impl Board {
             stamp_gate: Mutex::new(None),
             #[cfg(test)]
             clock_retries: Default::default(),
+            #[cfg(test)]
+            tier_waits: Default::default(),
         }
     }
 

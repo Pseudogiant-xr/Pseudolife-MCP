@@ -731,6 +731,9 @@ impl Board {
         {
             return Ok(ready);
         }
+        #[cfg(test)]
+        self.tier_waits
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         self.service
             .ensure_init()
             .await
