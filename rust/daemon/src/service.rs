@@ -324,6 +324,13 @@ impl Service {
         self.inner.lock().await.ready.clone()
     }
 
+    /// Test seam: hold the service mutex, as an initialization, the reaper
+    /// or a sweep does, until the guard is dropped.
+    #[cfg(test)]
+    pub(crate) async fn hold_service_lock(&self) -> impl Sized + '_ {
+        self.inner.lock().await
+    }
+
     pub async fn ensure_init(self: &Arc<Self>) -> Result<Arc<Ready>, String> {
         let me = self.clone();
         tokio::spawn(async move { me.ensure_init_inner().await })
