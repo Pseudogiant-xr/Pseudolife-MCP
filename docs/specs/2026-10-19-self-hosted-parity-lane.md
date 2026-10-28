@@ -542,6 +542,15 @@ internet:
 
   Nothing else on the LAN is allowed, because the inventory found nothing
   the dev workflow needs there.
+- **Residual: address claims in ARP and neighbour advertisements.** The
+  filter pins the VM's MACs but not the IP addresses its ARP replies and
+  neighbour advertisements claim. So the VM could still announce another
+  host's address on the bridge. Pinning the IP is not safe while the VM's
+  DHCP address has no reservation, because a changed lease would cut the VM
+  off. Sending such frames takes raw link-layer access, which on Windows
+  needs an administrator, and the runner account is not one. The residual
+  therefore lies with the VM's administrators, not its jobs. A DHCP
+  reservation would let the filter pin the address too.
 
 **The tailnet rule.** The hypervisor cannot see inside the tailnet's
 encrypted traffic. So the setup script adds outbound rules for every

@@ -83,6 +83,10 @@ def test_the_runner_config_is_readable_by_the_account_after_its_rename():
     assert body.index('Grant $staged @(\'/grant\', "*${sid}:(R)")') < body.index("[IO.File]::Move(")
     # The Windows runner reads .env but not .path, so PATH lives in .env.
     assert '"PATH=$path",' in body
+    # That PATH replaces the service's own, so Git Bash must be on it, ahead
+    # of System32's WSL bash.exe (Codex review of 3de68d9c).
+    text_path = body[body.index("$path = @("):body.index("-join ';'")]
+    assert text_path.index("Git\\bin") < text_path.index("System32")
     registration = text[text.index("Expand-Archive -LiteralPath $zip"):text.index("& .\config.cmd")]
     assert "Write-RunnerConfig" in registration
 

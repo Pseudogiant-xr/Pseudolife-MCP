@@ -272,7 +272,9 @@ function Write-RunnerConfig {
     # On Windows the runner reads .env itself but never .path (only the Linux
     # wrappers do; found 2026-10-29, when every trial job's gate missed
     # pseudolife-mcp), so PATH goes in .env.
-    $path = @($env:UV_TOOL_BIN_DIR, 'C:\Program Files\PowerShell\7', 'C:\Program Files\Git\cmd',
+    # Git's bin before System32: the shards' `shell: bash` steps (the Rust
+    # toolchain action's) need Git Bash, not System32's WSL bash.exe.
+    $path = @($env:UV_TOOL_BIN_DIR, 'C:\Program Files\PowerShell\7', 'C:\Program Files\Git\cmd', 'C:\Program Files\Git\bin',
         "$env:SystemRoot\System32", $env:SystemRoot, "$env:SystemRoot\System32\Wbem",
         "$env:SystemRoot\System32\WindowsPowerShell\v1.0", "$env:SystemRoot\System32\OpenSSH") -join ';'
     $script:envText = @(
