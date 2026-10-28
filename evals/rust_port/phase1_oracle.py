@@ -46,7 +46,12 @@ def prepare(destination):
     # Reuse its dependency locations; installation below changes this runtime only.
     dependencies = [str(Path(path).resolve()) for path in sys.path
                     if Path(path).is_dir() and Path(path).name in ("site-packages", "dist-packages")]
-    (Path(site) / "phase1_dependencies.pth").write_text("\n".join(dependencies) + "\n", encoding="utf-8")
+    # Each as a site directory, so its own .pth files run too, as they do for
+    # the system site-packages: pywin32 makes pywintypes importable only
+    # through one, and a self-hosted shard's packages sit in its own venv
+    # (the Windows judges' daemon failed `import mcp`, run 40748991561).
+    lines = [f"import site; site.addsitedir({path!r})" for path in dependencies]
+    (Path(site) / "phase1_dependencies.pth").write_text("\n".join(lines) + "\n", encoding="utf-8")
     subprocess.run([str(python), "-m", "pip", "install", "--no-index", "--no-deps",
                     "--no-build-isolation", "-e", str(source)], cwd=source, check=True,
                    stdout=subprocess.DEVNULL)

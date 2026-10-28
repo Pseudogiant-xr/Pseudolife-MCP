@@ -1,11 +1,16 @@
 """Oracle preparation validates real metadata against the selected source."""
 import json
 from pathlib import Path
+import subprocess
+import sys
 from types import SimpleNamespace
 
 import pytest
 
 from evals.rust_port import phase1_oracle
+
+# The fixture replaces subprocess.run for the module under test.
+REAL_RUN = subprocess.run
 
 
 @pytest.fixture
@@ -75,3 +80,24 @@ def test_preparation_rejects_an_import_from_another_checkout(preparation):
     preparation.source_matches = False
     with pytest.raises(RuntimeError, match="selected checkout/version"):
         phase1_oracle.prepare(preparation.destination)
+
+
+def test_dependency_locations_keep_their_own_pth_files(preparation, tmp_path, monkeypatch):
+    # pywin32 makes pywintypes importable through pywin32.pth in its
+    # site-packages. A bare path line adds a directory without reading its
+    # .pth files, so on a self-hosted runner, whose packages sit in a
+    # per-shard venv rather than the interpreter's own site-packages, the
+    # oracle daemon failed `import mcp` on Windows (run 40748991561).
+    dependency = tmp_path / "shard-venv" / "site-packages"
+    extra = tmp_path / "extra"
+    dependency.mkdir(parents=True)
+    extra.mkdir()
+    (extra / "pl_nested_pth_marker.py").write_text("VALUE = 1\n", encoding="utf-8")
+    (dependency / "nested.pth").write_text(str(extra) + "\n", encoding="utf-8")
+    monkeypatch.syspath_prepend(str(dependency))
+    phase1_oracle.prepare(preparation.destination)
+    site = tmp_path / "site-packages"
+    probe = REAL_RUN([sys.executable, "-I", "-c",
+                      f"import site; site.addsitedir({str(site)!r}); import pl_nested_pth_marker"],
+                     capture_output=True, text=True, timeout=60)
+    assert probe.returncode == 0, probe.stderr
