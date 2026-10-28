@@ -28,19 +28,6 @@ const KNOWN_DIVERGENCES: &[(&str, &str)] = &[
     ("client_data/depth/2047-arrays", "client_data_json"),
     // RS256 above aws-lc-rs's 8192-bit cap: OpenSSL verifies it.
     ("assert/rs8704/valid", "signature"),
-    // Small-order Ed25519 keys, which Python accepts (and which verify a
-    // degenerate signature over any message), are refused as `cose_key`.
-    ("cose/eddsa-x-zero", "cose_key"),
-    ("cose/eddsa-x-identity", "cose_key"),
-    ("cose/eddsa-x-noncanon-identity", "cose_key"),
-    ("register/eddsa-edge/key-zero", "cose_key"),
-    ("register/eddsa-edge/key-identity", "cose_key"),
-    ("register/eddsa-edge/key-noncanon-identity", "cose_key"),
-    ("assert/eddsa-edge/identity-key-zero-sig", "cose_key"),
-    ("assert/eddsa-edge/identity-key-s-l", "cose_key"),
-    ("assert/eddsa-edge/noncanonical-identity-key", "cose_key"),
-    ("assert/eddsa-edge/noncanonical-identity-r", "cose_key"),
-    ("assert/eddsa-edge/zero-key", "cose_key"),
 ];
 
 fn hex(value: &Value) -> Vec<u8> {

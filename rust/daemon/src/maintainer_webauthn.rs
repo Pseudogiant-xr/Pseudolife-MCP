@@ -25,11 +25,6 @@
 //!   but are refused here as `signature`: aws-lc-rs caps PKCS#1 verification
 //!   at 8192 bits. Registration of such a key succeeds in both.
 //!
-//! * An Ed25519 public key of small order (the identity, the points of
-//!   order 2, 4 and 8, in any encoding) is refused as `cose_key`, at
-//!   registration and at every assertion. Python accepts it, and such a key
-//!   "verifies" an all-zero signature over any message.
-//!
 //! Pure: no storage, no configuration, no clock.
 
 // The enrolment and signed-action routes (B2d D2 to D4) call it.
@@ -375,9 +370,9 @@ pub fn cose_public_key_value(key: &Cbor) -> Result<(i64, PublicKey)> {
             if !py_int_eq(kty, 1) || !py_int_eq(key.label(-1), 6) {
                 return invalid("cose_alg_mismatch");
             }
-            // Stricter than Python, which accepts these: a small-order key
-            // verifies a degenerate signature over any message, and aws-lc
-            // refuses some of its encodings on one platform and not another.
+            // `_ed25519_small_order`: such a key verifies a degenerate
+            // signature over any message (and aws-lc alone refuses some of
+            // its encodings on one platform and not another).
             if ed25519_small_order(x) {
                 return invalid("cose_key");
             }

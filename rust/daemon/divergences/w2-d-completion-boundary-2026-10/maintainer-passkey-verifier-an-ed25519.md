@@ -1,3 +1,0 @@
-| Named divergence | Omitted surface | Reason / owner |
-|---|---|---|
-| Maintainer passkey verifier: an Ed25519 public key of small order (the identity, the points of order 2, 4 and 8, in any encoding) | `cose_public_key` accepts it at registration and at every assertion; such a key verifies an all-zero signature over any message, so once enrolled anyone could sign as it | refused as `cose_key` (libsodium's `has_small_order` list), at registration and at every assertion; aws-lc alone refused some of these encodings on Linux and not on Windows | stricter on purpose; no authenticator makes such a key, and a Python fix is the maintainer's call (D10) |
