@@ -5613,15 +5613,21 @@ def graph_answer_free(v) -> None:
 # SCORE_TOL (scores and fusion inputs rest on the embeddings).
 EVENT_FLOAT_KEYS = {"score", "dense", "ce", "bm25", "slot", "recency", "margin"}
 EVENT_SCORE_TOL = 2e-4
+# A served entry's ``surprise``: an entry each side stored itself holds its
+# own surprise (``1 - max_sim`` over its own embeddings), so the logged value
+# compares as a stored surprise does, within the measured ``surprise_abs``.
+EVENT_SURPRISE_TOL = json.loads(TOLERANCE_FILE.read_text(encoding="utf-8"))["surprise_abs"]
 
 
 def _float_pair_free(x, y) -> None:
     if isinstance(x, dict) and isinstance(y, dict):
         for k in x.keys() & y.keys():
             a, b = x[k], y[k]
-            if (k in EVENT_FLOAT_KEYS and isinstance(a, (int, float)) and isinstance(b, (int, float))
-                    and not isinstance(a, bool) and not isinstance(b, bool)
-                    and abs(a - b) <= EVENT_SCORE_TOL):
+            numbers = (isinstance(a, (int, float)) and isinstance(b, (int, float))
+                       and not isinstance(a, bool) and not isinstance(b, bool))
+            if numbers and k == "surprise" and abs(a - b) <= EVENT_SURPRISE_TOL:
+                x[k] = y[k] = "<surprise>"
+            elif numbers and k in EVENT_FLOAT_KEYS and abs(a - b) <= EVENT_SCORE_TOL:
                 x[k] = y[k] = f"<{k}>"
             else:
                 _float_pair_free(a, b)
@@ -6442,6 +6448,28 @@ def run_golden(name: str, binary: Path, root: Path, tol: dict, owned: list[str])
         close_stubs(stubs)
     return {"scenario": name, "steps": steps, "stats": stats}
 
+
+# A search over entries each side stored itself, before and after a
+# restart: the served components' surprise is each side's own (the
+# in-process double, then the hydrated REAL), compared within
+# EVENT_SURPRISE_TOL (found by B4's restart scenario, 2026-10-27).
+RESTART_QUERY = "which port does the bench Postgres use"
+SCENARIOS.update({
+    "search-after-restart": {
+        "config": None,
+        "seed": [],
+        "ops": [
+            store("The bench Postgres listens on port 5434 on the dev box."),
+            store("The live bank's Postgres container is never used for tests."),
+            dict(search(RESTART_QUERY, top_k=2), expect=[
+                f"SELECT count(*) = 1 FROM retrieval_events WHERE query_text = '{RESTART_QUERY}'"]),
+            # A restart writes some config: the default board setting, unchanged.
+            {"op": "restart", "config": "coordination:\n  enabled: true\n"},
+            dict(search(RESTART_QUERY, top_k=2), expect=[
+                f"SELECT count(*) = 2 FROM retrieval_events WHERE query_text = '{RESTART_QUERY}'"]),
+        ],
+    },
+})
 
 import w2e_episodes  # noqa: E402
 
