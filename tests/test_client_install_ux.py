@@ -766,7 +766,8 @@ def test_installers_wire_claude_desktop_through_the_shared_register_script() -> 
 # is "command not found" on a new install and the old pipx package on an
 # upgraded one. The line names the launcher by its path until PATH finds it.
 
-def _update_line_bash(tmp_path: Path, *, on_path: bool, client_only: bool) -> str:
+def _update_line_bash(tmp_path: Path, *, on_path: bool, client_only: bool,
+                      pairing_hint_url: str = "") -> str:
     from tests.test_codex_hooks import bash_exe
     launcher = tmp_path / "launcher dir" / "pseudolife-mcp"
     launcher.parent.mkdir(parents=True, exist_ok=True)
@@ -777,6 +778,7 @@ def _update_line_bash(tmp_path: Path, *, on_path: bool, client_only: bool) -> st
     script = f"""set -eu
 SHIM_PATH="$(cygpath -u '{win}' 2>/dev/null || printf '%s' '{win}')"
 CLIENT_ONLY='{"1" if client_only else ""}'
+PAIRING_HINT_URL='{pairing_hint_url}'
 PATH='/usr/bin:/bin'
 if [ '{"yes" if on_path else "no"}' = yes ]; then PATH="$(dirname "$SHIM_PATH"):$PATH"; fi
 {block}
@@ -801,7 +803,8 @@ def test_install_sh_update_line_on_a_client_only_install_moves_the_clients(tmp_p
     assert "ops/update.sh --all" not in out
 
 
-def _update_line_ps1(tmp_path: Path, *, on_path: bool, client_only: bool) -> str:
+def _update_line_ps1(tmp_path: Path, *, on_path: bool, client_only: bool,
+                     pairing_hint_url: str = "") -> str:
     pwsh = shutil.which("pwsh")
     if not pwsh:
         pytest.skip("pwsh not available")
@@ -816,7 +819,8 @@ def _update_line_ps1(tmp_path: Path, *, on_path: bool, client_only: bool) -> str
     if not on_path:
         env["PATH"] = os.pathsep.join(p for p in env["PATH"].split(os.pathsep)
                                       if not (Path(p) / launcher.name).exists())
-    script = block + f"\nWrite-UpdateLine -ShimPath '{path}' -ClientOnly:${'true' if client_only else 'false'}\n"
+    script = block + (f"\nWrite-UpdateLine -ShimPath '{path}' -ClientOnly:${'true' if client_only else 'false'}"
+                      f" -PairingHintUrl '{pairing_hint_url}'\n")
     proc = subprocess.run([pwsh, "-NoProfile", "-Command", script], capture_output=True, text=True,
                           timeout=60, env=env)
     assert proc.returncode == 0, proc.stderr
@@ -835,6 +839,56 @@ def test_install_ps1_update_line_on_a_client_only_install_moves_the_clients(tmp_
     out = _update_line_ps1(tmp_path, on_path=False, client_only=True)
     assert re.search(r"launcher dir[\\/]pseudolife-mcp(\.exe)?\"? update --clients-only", out), out
     assert "update.ps1 -All" not in out
+
+
+# A client given a raw token against a daemon on another machine (the
+# preflight's PAIRING_HINT_URL) is told, beside the update line and with the
+# same full shim path, how to give the machine its own principal; the line
+# says plainly when it does not apply (a paired machine, or a token no other
+# machine uses), so a rerun there is not told something false.
+_PAIRING_REASON = "rotating it breaks both and neither can be revoked alone"
+_HINT_URL = "http://100.64.0.2:8765"
+
+
+def _hint_lines(out: str) -> list[str]:
+    return [line for line in out.splitlines() if "invite <name>" in line]
+
+
+def _after_update_line(out: str, hint: str) -> bool:
+    lines = out.splitlines()
+    update = [i for i, line in enumerate(lines) if "update --clients-only" in line]
+    return bool(update) and lines.index(hint) == update[0] + 1
+
+
+def test_install_sh_pairing_hint_names_the_launcher_beside_the_update_line(tmp_path: Path) -> None:
+    out = _update_line_bash(tmp_path, on_path=False, client_only=True, pairing_hint_url=_HINT_URL)
+    [hint] = _hint_lines(out)
+    assert _PAIRING_REASON in hint and "nothing to do" in hint
+    assert re.search(r'"[^"]*launcher dir/pseudolife-mcp" connect http://100\.64\.0\.2:8765 --read-code',
+                     hint), hint
+    assert _after_update_line(out, hint), out
+    on = _update_line_bash(tmp_path, on_path=True, client_only=True, pairing_hint_url=_HINT_URL)
+    [hint] = _hint_lines(on)
+    assert f" pseudolife-mcp connect {_HINT_URL} --read-code" in hint and "launcher dir" not in hint
+
+
+def test_install_sh_prints_no_pairing_hint_without_a_raw_remote_token(tmp_path: Path) -> None:
+    assert _hint_lines(_update_line_bash(tmp_path, on_path=False, client_only=True)) == []
+    assert _hint_lines(_update_line_bash(tmp_path, on_path=False, client_only=False)) == []
+
+
+def test_install_ps1_pairing_hint_names_the_launcher_beside_the_update_line(tmp_path: Path) -> None:
+    out = _update_line_ps1(tmp_path, on_path=False, client_only=True, pairing_hint_url=_HINT_URL)
+    [hint] = _hint_lines(out)
+    assert _PAIRING_REASON in hint and "nothing to do" in hint
+    assert re.search(r"launcher dir[\\/]pseudolife-mcp(\.exe)?\"? connect http://100\.64\.0\.2:8765 --read-code",
+                     hint), hint
+    assert _after_update_line(out, hint), out
+
+
+def test_install_ps1_prints_no_pairing_hint_without_a_raw_remote_token(tmp_path: Path) -> None:
+    assert _hint_lines(_update_line_ps1(tmp_path, on_path=False, client_only=True)) == []
+    assert _hint_lines(_update_line_ps1(tmp_path, on_path=False, client_only=False)) == []
 
 
 def test_the_client_only_notes_point_at_the_update_command() -> None:

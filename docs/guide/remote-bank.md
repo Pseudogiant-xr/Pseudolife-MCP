@@ -205,11 +205,10 @@ Plain HTTP is acceptable only inside a private network you trust.
 
 Two commands give another machine its own identity on the bank, with no
 daemon restart and no token travelling between machines. This is the way
-to add every machine other than the daemon's host. Copying a token there
-instead works, but a token copied from another machine is shared: rotating
-it breaks every copy, and you cannot revoke one machine without the
-others. On the daemon host, after [exposing
-it](#expose-the-daemon-with-one-command):
+to add every machine other than the daemon's host. Copying another
+machine's token there instead works, but if two machines use one token,
+rotating it breaks both and neither can be revoked alone. On the daemon
+host, after [exposing it](#expose-the-daemon-with-one-command):
 
 ```bash
 pseudolife-mcp invite laptop            # prints a code such as 7K3Q-M9XA-2PDF
@@ -360,8 +359,8 @@ pasted where it asks for the token), or, where the shim is installed, run
 --read-code` to also re-point the clients already registered ([Adding a
 machine](#adding-a-machine-invite-and-pair)). Pairing writes the token
 file for you. A token pasted or copied from the daemon's environment still
-works as the fallback, and the installer then says once that pairing is
-recommended.
+works as the fallback, and the installer's closing lines then say how to
+pair if another machine uses the same token.
 
 ### The token file
 
@@ -476,8 +475,12 @@ ops/install.sh --client-only --daemon-url <url> --client codex --token-file ~/.p
 ops\install.ps1 -ClientOnly -DaemonUrl <url> -Client claude -TokenFile <path> -ReadToken
 ```
 
-A run given a token that way, against a daemon on another machine, prints
-one line recommending pairing instead; it changes nothing and asks nothing.
+A run given a token that way, against a daemon on another machine, ends
+with one line beside the update command: if another machine uses this same
+token, give each its own with `invite` and `connect --read-code` (named
+with the installed shim's full path); a machine already paired, or given a
+token no other machine uses, has nothing to do. It changes nothing and asks
+nothing.
 
 If per-client attribution on the board does not matter, one shared principal
 and one token file for every client on the machine is fine too.

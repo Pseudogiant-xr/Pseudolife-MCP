@@ -58,9 +58,9 @@
 #   prefer -PairingCode).
 # -PairingCode <code>: client-only, recommended - a pairing code from
 #   pseudolife-mcp invite <name> on the daemon's host, instead of a token, so
-#   this machine gets its own principal. A token copied from another machine
-#   is shared: rotating it breaks every copy, and you cannot revoke one
-#   machine without the others. The installed shim's pair creates the
+#   this machine gets its own principal. If two machines use one token,
+#   rotating it breaks both and neither can be revoked alone. The installed
+#   shim's pair creates the
 #   -TokenFile (default ~/.pseudolife-mcp/<client>.token;
 #   it must not exist yet). An interactive run also takes a code pasted
 #   where it asks for the token, which keeps it off the command line (and
@@ -392,9 +392,13 @@ function Show-ClientOnlyNotes {
   This machine is a client only: the daemon, its bank and its dream
   extractor run on the other host, and nothing here starts, stops or
   upgrades them.
-  - A new token there: write it into the token file here. The shims and
-    the Claude Code hooks read that file on every call. Codex keeps its
-    own copy in ~/.codex/pseudolife/token: write it there too.
+  - Its token revoked or replaced there: a machine paired with invite
+    pairs again (pseudolife-mcp invite <name> --replace on the daemon
+    host, then connect <url> --read-code here, run as the update command
+    below is), which also re-points Codex. Only a client using a token
+    from the daemon's environment writes the new token into its
+    token file here (the shims and the Claude Code hooks read it on
+    every call), and into Codex's own copy in ~/.codex/pseudolife/token.
   - A daemon upgrade there: run the update command below with
     --clients-only here, so the shim matches the daemon.
 '@
@@ -849,7 +853,7 @@ function Invoke-ClientOnlyPreflight {
     }
     if (-not $script:TokenFile) { $script:TokenFile = "$env:PSEUDOLIFE_MCP_TOKEN_FILE" }
     if (-not $script:TokenFile) {
-        Write-Host "client-only install: pass -TokenFile <path> (or set PSEUDOLIFE_MCP_TOKEN_FILE) naming the file that holds the remote daemon's bearer token, and -ReadToken to create it, or -PairingCode <code> to pair. The installer never mints one for a remote daemon$clientOnlyVia"
+        Write-Host "client-only install: pass -PairingCode <code> (from pseudolife-mcp invite <name> on the daemon's host) to pair this machine, or, as the fallback, -TokenFile <path> (or set PSEUDOLIFE_MCP_TOKEN_FILE) naming the file that holds the remote daemon's bearer token, with -ReadToken to create it. The installer never mints one for a remote daemon$clientOnlyVia"
         exit 2
     }
     $script:TokenFile = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($script:TokenFile)
@@ -899,7 +903,7 @@ function Invoke-ClientOnlyPreflight {
     } else {
         $tokenItem = Get-Item -LiteralPath $script:TokenFile -Force -ErrorAction SilentlyContinue
         if (-not $tokenItem -or $tokenItem.PSIsContainer -or $tokenItem.Length -eq 0) {
-            throw "client-only install: the token file is missing or empty: $($script:TokenFile). Create it with -ReadToken, or write the daemon's token into it owner-only, then re-run"
+            throw "client-only install: the token file is missing or empty: $($script:TokenFile). Pair this machine instead: remove it if it is empty, then re-run with -PairingCode <code> from pseudolife-mcp invite <name> on the daemon's host; or, as the fallback, create it with -ReadToken or write the daemon's token into it owner-only, then re-run"
         }
         Assert-ClientTokenFile
     }
@@ -928,10 +932,13 @@ function Invoke-ClientOnlyPreflight {
         }
     }
     Step "Daemon answered at $DaemonUrl/health."
-    # A token file is accepted, but another machine's copied token is shared
-    # (docs/guide/remote-bank.md). Not on loopback: the daemon's own host.
+    # A raw token against another machine's daemon may be one another machine
+    # also holds (docs/guide/remote-bank.md): the update line names pairing at
+    # the end of the run, with the installed shim's path. Not for a pairing
+    # code, nor on loopback (the daemon's own host, or an SSH tunnel).
+    $script:pairingHintUrl = ""
     if (-not $script:PairingCode -and -not (Test-LoopbackUrl $DaemonUrl)) {
-        Step "If this token was copied from another machine, it is shared: rotating it breaks every copy, and you cannot revoke one machine without the others. Give this machine its own: run pseudolife-mcp invite <name> on the daemon's host, then pseudolife-mcp connect $DaemonUrl --read-code here."
+        $script:pairingHintUrl = "$DaemonUrl"
     }
 }
 # <<< client-only preflight <<<
@@ -3216,7 +3223,7 @@ if (-not $ClientOnly) { Invoke-MaintainerSetupOffer }
 # The installers do not put the shim launcher's directory on PATH, so a bare
 # `pseudolife-mcp` finds an older pipx install, or nothing: name the shim this
 # run installed by its path until PATH finds it.
-function Write-UpdateLine([string]$ShimPath, [switch]$ClientOnly) {
+function Write-UpdateLine([string]$ShimPath, [switch]$ClientOnly, [string]$PairingHintUrl = "") {
     $updCmd = "pseudolife-mcp"
     $updPath = ""
     if ($ShimPath) {
@@ -3230,12 +3237,15 @@ function Write-UpdateLine([string]$ShimPath, [switch]$ClientOnly) {
     }
     if ($ClientOnly) {
         Write-Host "Update this machine's clients later with one command, no checkout needed: $updCmd update --clients-only (installs the daemon's release as a new shim runtime and refreshes the plugin cache; the daemon is updated on its own host)$updPath."
+        if ($PairingHintUrl) {
+            Write-Host "If another machine uses this same token, rotating it breaks both and neither can be revoked alone: give each machine its own with pseudolife-mcp invite <name> on the daemon's host and $updCmd connect $PairingHintUrl --read-code here. A machine paired with invite, or given a token no other machine uses, already has its own: nothing to do."
+        }
     } else {
         Write-Host "Update later with one command, no checkout needed: $updCmd update (--check reports whether a newer release exists)$updPath; from this checkout, ops\update.ps1 -All does the same after a git pull."
     }
 }
 # <<< update line <<<
-Write-UpdateLine -ShimPath $script:shimInstallPath -ClientOnly:([bool]$ClientOnly)
+Write-UpdateLine -ShimPath $script:shimInstallPath -ClientOnly:([bool]$ClientOnly) -PairingHintUrl "$script:pairingHintUrl"
 if ($Tunnel) {
     if (-not $script:shimInstallPath) {
         throw "Secure MCP Tunnel setup needs the installed shim; repair its installation, then run pseudolife-mcp tunnel setup."

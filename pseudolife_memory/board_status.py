@@ -18,8 +18,10 @@ _REASONS = {
                 "(coordination.enabled)",
     "authentication_required": "the daemon has no bearer token configured; set "
                                "PSEUDOLIFE_MCP_TOKEN in ops/.env and redeploy",
-    "unauthorized": "the daemon rejected this token; re-run the installer so the "
-                    "client token file matches ops/.env",
+    "unauthorized": "the daemon rejected this token; on the daemon's own host, re-run "
+                    "the installer so the client token file matches ops/.env; on another "
+                    "machine, run `pseudolife-mcp invite <name> --replace` on the daemon "
+                    "host, then `pseudolife-mcp connect <url> --read-code` here",
     "principal_not_allowed": "this token's principal is not in "
                              "coordination.allowed_principals; list it there, or invite "
                              "this machine with `pseudolife-mcp invite <machine>` on the "
