@@ -1,0 +1,3 @@
+| Row | Phase | Behavior to preserve and Python source | Existing test pool and boundary | Status |
+|---|---:|---|---|---|
+| SHIM-DAEMON-LAUNCH | 1 | Explicit interpreter or JSON serve argv replaces Python `sys.executable`; missing configuration uses no-spawn waiting with a truthful named explanation. Malformed explicit argv emits `INVALID_SERVE_COMMAND_NOTE` before health and disables fallback spawning. `lifecycle.rs` | `nonboard_spawn_policy.rs`, `nonboard_startup.rs`; Phase 2b b implemented with original isolated-tree targeted proof in `phase2b-fixes-evidence.json`; current integrated-head acceptance pending in PORT-STATE.md | ported-with-substitution |

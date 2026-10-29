@@ -26,13 +26,14 @@ from types import SimpleNamespace
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[2]
 sys.path.insert(0, str(REPO))
-os.environ["PL_HARNESS_SLICE"] = "prn"
 import psycopg
 import dbstate
-import pgdisposable as pg
+import pgdisposable
 from pseudolife_memory import principal_store as oracle
 from pseudolife_memory import principals as identities
 from pseudolife_memory.storage.schema import PRINCIPALS_SCHEMA_SQL, SCHEMA_SQL
+
+pg = pgdisposable.Slice("prn")
 
 
 def operator_post_paths():
@@ -189,10 +190,11 @@ def prefix_mutant_control():
         raise AssertionError("disposable admission mutant anchor changed")
     for predicate in ("name.startswith(PREFIX[:-2])", "name.startswith(PREFIX)"):
         mutant = source.replace(original, "if not " + predicate + ":")
-        namespace = {"__file__": pg.__file__}
+        namespace = {"__file__": pgdisposable.__file__}
         exec(compile(mutant, "<disposable-admission-mutant>", "exec"), namespace)
         try:
-            prefix_admission_controls(namespace["_check"])
+            # The mutant admits under this harness's slice, not the launcher's.
+            prefix_admission_controls(lambda name: namespace["_check"](name, pg))
         except AssertionError as exc:
             if str(exc) != "near-miss disposable prefix admitted":
                 raise

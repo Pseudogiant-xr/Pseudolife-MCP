@@ -46,10 +46,6 @@ def test_each_model_calling_recall_has_its_reply_in_turn():
 def import_w2e(monkeypatch):
     import importlib
 
-    import pgdisposable as pg
-    # w2e changes the shared name admission on import (test_w2e_lifecycle's
-    # fixture): restore it afterwards for the other harness test files.
-    monkeypatch.setattr(pg, "DISPOSABLE_NAME", pg.DISPOSABLE_NAME)
     return importlib.import_module("w2e")
 
 

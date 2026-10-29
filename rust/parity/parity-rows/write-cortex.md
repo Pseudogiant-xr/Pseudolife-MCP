@@ -1,0 +1,3 @@
+| Row | Phase | Behavior to preserve and Python source | Existing test pool and boundary | Status |
+|---|---:|---|---|---|
+| WRITE-CORTEX | 4 | HLC authority, scalar/set slots, contenders/promotions, provenance trust, freshness/stale, labels, canonical and world/lesson histories and engrams. `hlc.py`, `cortex.py`, `world_cortex.py`, `lessons.py`, `freshness.py`, `labels.py` | `test_hlc.py`, `test_cortex_sets.py`, `test_cortex_contenders.py`, `test_cortex_promotion.py`, `test_assistant_provenance.py`, `test_contender_stamps.py`, `test_freshness.py`, `test_label_pair.py`, `test_lessons_storage.py`, `test_entity_provenance.py` I/DB | deferred |

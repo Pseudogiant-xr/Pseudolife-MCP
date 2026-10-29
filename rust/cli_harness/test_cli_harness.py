@@ -1866,3 +1866,57 @@ def test_real_daemon_retries_a_503_whose_body_is_cut_off():
         assert len(seen) >= 2
     finally:
         listener.close()
+
+
+# --- the test-login row's throwaway clusters run the pg0 bundle's programs ---
+
+def _bundle(tmp_path, monkeypatch):
+    from cli_harness.rows import _cluster  # noqa: PLC0415 (binds a port at import)
+    installation = tmp_path / ".pg0" / "installation"
+    (installation / "18.1.0" / "bin").mkdir(parents=True)
+    monkeypatch.setattr(_cluster, "PG0", installation)
+    return _cluster, installation / "18.1.0"
+
+
+@pytest.mark.parametrize("platform, inherited", [("linux", "/elsewhere"), ("linux", None), ("win32", "/elsewhere")])
+def test_bundle_programs_load_the_bundles_own_libraries(tmp_path, monkeypatch, platform, inherited):
+    # The bundle's libxml2 needs its ICU and has no RUNPATH, so on a host
+    # without that ICU initdb failed to start postgres (Debian 13 runners).
+    _cluster, bundle = _bundle(tmp_path, monkeypatch)
+    seen = {}
+    monkeypatch.setattr(_cluster.sys, "platform", platform)
+    if inherited is None:
+        monkeypatch.delenv("LD_LIBRARY_PATH", raising=False)
+    else:
+        monkeypatch.setenv("LD_LIBRARY_PATH", inherited)
+    monkeypatch.setattr(_cluster.subprocess, "run", lambda cmd, **kw: seen.update(kw))
+    _cluster._run([_cluster._bin("initdb"), "-D", "data"])
+    path = seen["env"].get("LD_LIBRARY_PATH")
+    if platform == "linux":
+        assert path.split(os.pathsep) == [str(bundle / "lib"), *([inherited] if inherited else [])]
+    else:
+        assert path == inherited
+
+
+def test_programs_outside_the_bundle_keep_the_loader_path(tmp_path, monkeypatch):
+    _cluster, _ = _bundle(tmp_path, monkeypatch)
+    seen = {}
+    monkeypatch.setattr(_cluster.sys, "platform", "linux")
+    monkeypatch.delenv("LD_LIBRARY_PATH", raising=False)
+    monkeypatch.setattr(_cluster.subprocess, "run", lambda cmd, **kw: seen.update(kw))
+    _cluster._run([sys.executable, "-c", "pass"])
+    assert "LD_LIBRARY_PATH" not in seen["env"]
+
+
+def test_a_failed_initdb_says_why(tmp_path, monkeypatch):
+    # The failure used to read "returned non-zero exit status 1" alone.
+    import subprocess  # noqa: PLC0415
+    _cluster, _ = _bundle(tmp_path, monkeypatch)
+    failing = [sys.executable, "-c", "import sys; sys.stderr.write('libicuuc.so.70: cannot open'); sys.exit(1)"]
+    with pytest.raises(subprocess.CalledProcessError,
+                       match=r"Its error output: libicuuc\.so\.70: cannot open$"):
+        _cluster._run(failing, report=True)
+    # pg_ctl's server would hold a pipe open, so only initdb's output is kept.
+    with pytest.raises(subprocess.CalledProcessError) as quiet:
+        _cluster._run(failing)
+    assert quiet.value.stderr is None and "Its error output" not in str(quiet.value)

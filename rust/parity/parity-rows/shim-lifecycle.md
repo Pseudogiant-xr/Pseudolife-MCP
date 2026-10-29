@@ -1,0 +1,3 @@
+| Row | Phase | Behavior to preserve and Python source | Existing test pool and boundary | Status |
+|---|---:|---|---|---|
+| SHIM-LIFECYCLE | 1/5 | Canonical origin validation, discovery/probe, explicit local spawn/reuse, truthful no-spawn waiting, ownership, child exit and recovery, version notices. Spawn is ported-with-substitution through an explicit command or the NO_SPAWN path; installer-backed client updates are deferred to the install-path decision in Phase 5. `shim.py`, `daemon_url.py`, `runtimes.py` | `test_shim.py` P/I; `test_shim_transport_recovery.py`, `test_connection_loss_recovery.py`, `test_shim_runtimes.py` mixed; Phase 2b b/e isolated proof in `phase2b-fixes-evidence.json`; final integrated-head acceptance pending | ported-with-substitution |
