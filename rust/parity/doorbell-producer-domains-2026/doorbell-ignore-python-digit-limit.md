@@ -1,0 +1,3 @@
+| Named substitution | Producer and supported domain | Refusal and controls |
+| --- | --- | --- |
+| `doorbell-ignore-python-digit-limit` | External metadata may contain ignored integers; fixed pending fields have separate numeric admission. Ignored integer tokens have no Python environment digit limit within the existing 65536-byte stdin / 8192-character pending caps. | An otherwise valid input writes the normal nonce-plus-LF marker and lock regardless of `PYTHONINTMAXSTRDIGITS`; 640/641/4300/4301/5001/65000-digit stdin and large pending-extra controls retain the raw Python outcome separately. |

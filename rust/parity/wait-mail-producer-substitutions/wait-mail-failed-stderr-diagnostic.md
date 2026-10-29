@@ -1,0 +1,3 @@
+| Input/output | Producer | Declared native substitution |
+|---|---|---|
+| `wait-mail-failed-stderr`: Diagnostic writes | Caller-owned stderr descriptors. | A failed checked diagnostic write exits 120. Failure of the initial delivery announcement occurs before stdout, seen advance or ledger append. If the seen-advance failure diagnostic itself cannot be written after successful stdout, exit 120 occurs with the mail already delivered and before ledger append; the native marker advance failed, while concurrent producers may still change the marker. An unchecked stdout-failure diagnostic retains direct exit 2. These are declared native substitutions. |

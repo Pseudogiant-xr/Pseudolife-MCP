@@ -1,0 +1,3 @@
+| Row | Phase | Behavior to preserve and Python source | Existing test pool and boundary | Status |
+|---|---:|---|---|---|
+| BOARD-STORE | 4 | All 15 actions, FIFO durable leases, nonce/request dedup, mailbox authorization/clock/retention/redaction/hash chain, bank identity/recovery. `coordination.py`, `storage/coordination.py`, `private_state.py` | `test_coordination_integration.py`, `test_coordination_storage.py`, `test_coordination_tools.py`, `test_coordination_auth.py`, `test_coordination_audit.py`, `test_coordination_clock.py`, `test_coordination_recovery.py`, `test_coordination_secrets.py`, `test_coordination_multi_ack.py`, `test_coordination_mail_continuity.py` I/DB/mixed | deferred |

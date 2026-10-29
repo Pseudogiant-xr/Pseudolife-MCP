@@ -1,0 +1,3 @@
+| Named substitution | Producer and supported domain | Refusal and controls |
+| --- | --- | --- |
+| `doorbell-standard-json` | UTF-8 host-hook forwarding and the shim's fixed-scalar pending writer. Reject NaN, Infinity, overflowing float tokens and lone surrogate escapes anywhere, including keys, ignored extras and overwritten duplicate values; valid escaped surrogate pairs remain supported. | Exit 0, empty streams, zero daemon requests. Invalid stdin creates no new files; invalid pending preserves pending/receipt bytes after the ordinary lock may be created. Token and whole-input controls are prepared. |
