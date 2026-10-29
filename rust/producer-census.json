@@ -10,9 +10,9 @@
     "docs/atlas/atlas.html": "a6b4c8f505d05c9c176fc7eb24b72e47b186c0c8e172ce61ac07cdf5e4cc94cb",
     "docs/atlas/atlas.json": "012025653c5e133c785f44c66b1a14719858fa714a150233fceeef2bc401d8e2",
     "docs/cortex-mcp-spec.md": "43fba1fe5e5cd3710f59d7e99b414f7b78ea15eaa70b620b23716f3fae308d32",
-    "docs/dev/ci-budget.md": "4167e11e4e6c9ce2d50b1c702e6f73d630276516aaf84152e370e3e71a909731",
+    "docs/dev/ci-budget.md": "21fed3dc7ba96010612ab32bb8335927d12c67150a5dbd019411f8dbaf931ba3",
     "docs/dev/dev-machines.md": "135cb4cbd97e7b34fddbc858df6e0d53e131fb2ec0589e7f3ce26026670dc0a1",
-    "docs/dev/merge-batches.md": "649451e07e637bd537987901b5ca13784db72b615528b485cfd91282b5178792",
+    "docs/dev/merge-batches.md": "4dcf503cf7ad2563f7a03104a03b76e4a509c0b7481ca4839a7a3eb575d4d480",
     "docs/evidence/rust-stream-c-episode-20261009.json": "6dda143104a5b745eb322041190496caa9af3b61a219620c41633f6477d15079",
     "docs/guide/agent-isolation.md": "465b0c24a386ae3a92bf1a3d46e01114db061dc6ddd4a68836512fd191ff23f4",
     "docs/guide/benchmarks.md": "577a6a8230de0d57351e3e57262bb2b5385b27e6292bfc131c21c3522330fb97",
@@ -102,7 +102,7 @@
     "docs/specs/2026-09-11-agent-coordination-plan.md": "eee81d94951271ef0d7a94c87f52291b917ef893f325aafc4bb1466cbfa1dad6",
     "docs/specs/2026-09-12-codex-coordination.md": "bc53ec0d2cc117c9e1140227c377d9e9010d9fad5e0c217715ea40d63bf351be",
     "docs/specs/2026-10-14-delegate-mode-design.md": "fe5bf5edf1e4b96fc7684b8aca4716fe450bc52b2aa9fdcb83dc461d3af50071",
-    "docs/specs/2026-10-19-merge-queue.md": "90b30d5a94a696c4eeb36d5618242babc349914e629b405d5fffc8343a65100b",
+    "docs/specs/2026-10-19-merge-queue.md": "181217265899601a4205b0afd352a6ef8d94e4d56188216f47b965ef38bb7009",
     "docs/specs/2026-10-19-self-hosted-parity-lane.md": "e8f7b36b5e767e82823d8cdd31156b11d35e978c524014958d212a5c075edfe7",
     "docs/specs/2026-10-20-suite-ci-optimization-plan.md": "5dd06d09718ddc4059b5744000959b99d1da4171c98bea281527fa9c44e3eb83",
     "docs/superpowers/plans/2026-06-25-cortex-console-v2-phase0.md": "131e2b6577abedcfb73428ba2d2e53686a73334c1a2cf6b789ebb05b5ce0a7f9",
@@ -241,7 +241,7 @@
     "ops/install-shim-autostart.sh": "6f32b1c2ebd688546fdfd1837a3b6445d3195db99e9668c0360d13582c248888",
     "ops/install.ps1": "88264a10cb50a0f2b6348201e8befc46b271d06c2cdb8ea559a2a2591eaac565",
     "ops/install.sh": "7aad5c81dc204ace2adf3557a53ac5efff556152a71470b38a564fb1ae613866",
-    "ops/integrate.py": "6004e6a3b67621249809188522def31b01e9dd9683a9532dbe558f73ea6f3461",
+    "ops/integrate.py": "aedd86cf4d53de93122cd42abfc09d4294b3bde0d56ea51e0236e7640a04267d",
     "ops/measure_reverify_population.py": "413ff8baa0e0b25b8a727b6bead248df753d4d26e7c697aa6a0542b68715cfa5",
     "ops/migrate-pg18.ps1": "a2a8bd96ab754249395a9d42b26bfd8e6b5ecf8d6da1cd72383ebf745c0acde8",
     "ops/migrate_drop_age.py": "bad14579affef14699a3e1898afd4ba6326944f5db1e9b5c0486ee2b23153eac",
@@ -39728,7 +39728,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/dev/merge-batches.md:110",
+          "location": "docs/dev/merge-batches.md:138",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -39743,7 +39743,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/dev/merge-batches.md:257",
+          "location": "docs/dev/merge-batches.md:285",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -39773,7 +39773,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/integrate.py:867",
+          "location": "ops/integrate.py:918",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -65550,12 +65550,17 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/dev/merge-batches.md:30",
+      "location": "docs/dev/merge-batches.md:29",
       "reason": "forwarded parameters"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/dev/merge-batches.md:307",
+      "location": "docs/dev/merge-batches.md:335",
+      "reason": "forwarded parameters"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/dev/merge-batches.md:42",
       "reason": "forwarded parameters"
     },
     {
