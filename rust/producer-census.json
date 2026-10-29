@@ -20,7 +20,7 @@
     "docs/guide/comparison.md": "841d814e64e6d2aa2385d7d0bdf3069e9ec216bea0e43adf1c286d18810e9bab",
     "docs/guide/configuration.md": "c3fe81b4e52147343ca4aa920de6ba873bc43382c5dbf0fdc16b248cf23dbc2c",
     "docs/guide/coordination-recovery.md": "04425509736ec7e40beb4bc46e7810d32ee0a68d791a969b77876c945ab5cb79",
-    "docs/guide/dreaming.md": "b80dbc4211e9873e823e97bba7395f2a0ae5f8cbbe24835aa9086991df4e44ea",
+    "docs/guide/dreaming.md": "8af52d03632b29d60e54b34d7501cc14439b79512a4723cc4c13a4b22e733b7b",
     "docs/guide/episodes.md": "547f36bb2469f3ae352107374ba63ebbeecb3929be344730af9c7501d8802f49",
     "docs/guide/memory-model.md": "6e342e6dd6f9b997e1ab9660190dac32bb3f9ef83f8830f098d414685b1834c0",
     "docs/guide/providers.md": "755967b36f1b4fe65a189b925a9df8f7c0244025270746fc9cc002966d793d16",
@@ -204,8 +204,8 @@
     "docs/superpowers/specs/2026-10-02-expose-invite-move-design.md": "ff9661609e29787f664dcf071fa54e86101e446521112d3d1b09e9ed050a7588",
     "docs/superpowers/specs/2026-10-02-maintainer-wake-design.md": "6dfb0154ffc3ef98e925ea95faf9b74ace6ec6f55ce7d4388e953eca7b03b620",
     "docs/superpowers/specs/2026-10-04-board-roles-passkey.md": "5d68cb05bcdd0c5a7ebc5697cb11a07bb824c2aa22ed41e1b640173753099ee7",
-    "evals/claude_shim.py": "145252e5c931fadf679fd6c30a9ad04e1388ab1adb55c012dc192096f5678a81",
-    "evals/codex_shim.py": "25b0b36c899a8b6caa67039be46348c233419559072cd95b002a507df5465d02",
+    "evals/claude_shim.py": "a56f3dec2cf89e96ff0faf9ab753d4b5bedbe3f684745daff3d909e6b3d2d780",
+    "evals/codex_shim.py": "7be0b929dddc8c735f75b2d38c390e188d74d86b2173dd6bb93c2e224a846ed5",
     "examples/.mcp.json": "f18025ee2238d455f8ea46b606d6191b8d896314e6851247e93ad10ede06d829",
     "examples/CLAUDE.memory.md": "69daba1ff5dddcff208948de0e56fef3faef1968515d47bf9165f7304270e98a",
     "examples/commands/dream.md": "a3482ef8ab9589d36e4b2368e3416e0497f51eaef83e0a29e2eff777af3c2129",
@@ -303,11 +303,11 @@
     "pseudolife_memory/coordination.py": "8f171a2ca10c6c4887cb3503ea6dcc76c9a11602460b24a9ff59fe64a2f17e82",
     "pseudolife_memory/mcp_server.py": "f1fe502a040f0dfa6e651e64aa2a79e82140af77f3680f187e8dda91c81acb3a",
     "pseudolife_memory/utils/config.py": "9e8cda2a3aee96fe725a9c64d30fabda01ffac69e03a65418e5cc72a291efce4",
-    "pseudolife_memory/web/api.py": "deb35259f0dfd306f4877bf36d1d52aba59e2c3d950590c28a1797bded938d67",
+    "pseudolife_memory/web/api.py": "9c060f7c4f03053394720eae9e1ef2655b47cbc736f9232332209585671824aa",
     "pseudolife_memory/web/routes.py": "ea742529395f85091eebb03d60e8f7e6561be3f7c70c7e40d8949f6fe8bf23f2",
     "pseudolife_memory/web/static/assets/Geist-LICENSE.txt": "930853ee1daa68554d9e35c8a9175affb74f699fad9a5da6ee5ebe76379d9137",
-    "pseudolife_memory/web/static/assets/index-9XuDbQle.js": "7cf7c52b032a918f31a195790f8c79ea1f48c35d20f3c686f258795c34d3aa54",
-    "pseudolife_memory/web/static/index.html": "9442d01e8ccea48a842e02b62745a7f8b8ddcd25a1e7d8c37a9f538ae5ec9389",
+    "pseudolife_memory/web/static/assets/index-UOOf7jxh.js": "acd72812071a6418df99b1f67f5cf91ecc65d10f35875c3ca390b09aa6b9e5f5",
+    "pseudolife_memory/web/static/index.html": "58ebd5eb5df668bf07460408d51d32d458d67954aa6c46cc3c22b92fa84e27d3",
     "pseudolife_memory/web/static/theme.js": "f2399e3aaa94b61d639937aab791511ef83efb27276330b82324a21be9eea17e",
     "rust/contract-inventory.json": "27555edf13a3f8c27cae2c68fa0cf6e5d11f5695fe3ecb28563a6cb97f1d09cc",
     "rust/shim/src/argv.rs": "0273c36c6b105f38ec77692a9835868bf9695dd31920cdda3b98926f9dfbf5bb",
@@ -355,7 +355,7 @@
     "rust/shim/src/cli/doctor/agent.rs": "44df340db0d21a1a14f44b068247db7413266bf27eeaf97ca900e2b2cc1be760",
     "rust/shim/src/cli/doctor/clients.rs": "3c3ee85797e10a38cb39f699f3d0d916ecdab242dc55c77262f0d7578ee5b0b1",
     "rust/shim/src/cli/doctor/handshake.rs": "54c580f0063e838fab86da2c716894648a425a213697d444509aa100d12a53a0",
-    "rust/shim/src/cli/doctor/mod.rs": "a2d024fbcf4001d0beb665de274e26e52e69e63773c66d02d1e3b1c0a97ec97f",
+    "rust/shim/src/cli/doctor/mod.rs": "00437cd81e9c3a04a43c99b235611eaa8c6ee71634a9b4d2533fff3c8aec044b",
     "rust/shim/src/cli/doctor/probes.rs": "5d4c92927d659fad297466ba4d6cae34915aed86d3a9a36c885df1b74ec1d316",
     "rust/shim/src/cli/doctor/pyenv.rs": "ea917b55dcce04ca82e5612413d73c2a9d19d334de87e421ea412b3d96a9ede3",
     "rust/shim/src/cli/doctor/pyjson.rs": "4a60384b4a0d3329c5b95de68d860d846f44acb67b35a79d64d248719dd57d1e",
@@ -1292,7 +1292,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:1234",
+          "location": "docs/guide/dreaming.md:1271",
           "shape": {
             "argv_source": "briefing",
             "channel": "argv",
@@ -1304,6 +1304,17 @@
         {
           "evidence": "documented",
           "location": "docs/guide/dreaming.md:708",
+          "shape": {
+            "argv_source": "briefing",
+            "channel": "argv",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {}
+          }
+        },
+        {
+          "evidence": "documented",
+          "location": "docs/guide/dreaming.md:746",
           "shape": {
             "argv_source": "briefing",
             "channel": "argv",
@@ -2295,6 +2306,17 @@
                 "expression": "value not established"
               }
             }
+          }
+        },
+        {
+          "evidence": "documented",
+          "location": "docs/guide/dreaming.md:747",
+          "shape": {
+            "argv_source": "doctor",
+            "channel": "argv",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {}
           }
         },
         {
@@ -5860,7 +5882,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/doctor/mod.rs:546",
+          "location": "rust/shim/src/cli/doctor/mod.rs:562",
           "shape": {
             "argv_source": "update --clients-only --tag {daemon_version} (the daemon's release as a new shim runtime beside the running one; from a checkout: python ops/update_clients.py --only shim; no session has to close), or update the daemon with pseudolife-mcp update; then start a new session and retry.\"",
             "channel": "argv",
@@ -9337,7 +9359,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:1226",
+          "location": "docs/guide/dreaming.md:1263",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -9353,7 +9375,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:1304",
+          "location": "docs/guide/dreaming.md:1341",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -9369,7 +9391,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:1309",
+          "location": "docs/guide/dreaming.md:1346",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -9385,7 +9407,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:946",
+          "location": "docs/guide/dreaming.md:983",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -9401,7 +9423,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:953",
+          "location": "docs/guide/dreaming.md:990",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -9662,7 +9684,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:946",
+          "location": "docs/guide/dreaming.md:983",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -9808,7 +9830,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:953",
+          "location": "docs/guide/dreaming.md:990",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -10023,7 +10045,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:1309",
+          "location": "docs/guide/dreaming.md:1346",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -10044,7 +10066,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:1304",
+          "location": "docs/guide/dreaming.md:1341",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -10121,7 +10143,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:1226",
+          "location": "docs/guide/dreaming.md:1263",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -10507,7 +10529,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:1275",
+          "location": "docs/guide/dreaming.md:1312",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -10619,7 +10641,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:738",
+          "location": "docs/guide/dreaming.md:775",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -10635,7 +10657,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:791",
+          "location": "docs/guide/dreaming.md:828",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -10651,7 +10673,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:798",
+          "location": "docs/guide/dreaming.md:835",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -10667,7 +10689,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:804",
+          "location": "docs/guide/dreaming.md:841",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -10683,23 +10705,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:891",
-          "shape": {
-            "channel": "config",
-            "complete": false,
-            "omitted_optional": null,
-            "parameters": {
-              "chronicle": {
-                "expression": "field reference"
-              }
-            }
-          },
-          "usage": "reference"
-        },
-        {
-          "dynamic": "unresolved",
-          "evidence": "documented",
-          "location": "docs/guide/dreaming.md:932",
+          "location": "docs/guide/dreaming.md:928",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -10722,6 +10728,22 @@
             "omitted_optional": null,
             "parameters": {
               "sweep_interval_seconds": {
+                "expression": "field reference"
+              }
+            }
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "documented",
+          "location": "docs/guide/dreaming.md:969",
+          "shape": {
+            "channel": "config",
+            "complete": false,
+            "omitted_optional": null,
+            "parameters": {
+              "chronicle": {
                 "expression": "field reference"
               }
             }
@@ -11731,7 +11753,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:891",
+          "location": "docs/guide/dreaming.md:928",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -11744,7 +11766,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:932",
+          "location": "docs/guide/dreaming.md:969",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -11851,7 +11873,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:738",
+          "location": "docs/guide/dreaming.md:775",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -12801,7 +12823,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:798",
+          "location": "docs/guide/dreaming.md:835",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -12895,7 +12917,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:1275",
+          "location": "docs/guide/dreaming.md:1312",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -12942,7 +12964,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:791",
+          "location": "docs/guide/dreaming.md:828",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -13073,7 +13095,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:804",
+          "location": "docs/guide/dreaming.md:841",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -27661,7 +27683,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:956",
+          "location": "docs/guide/dreaming.md:993",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -27708,7 +27730,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:988",
+          "location": "docs/guide/dreaming.md:1025",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -29050,7 +29072,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/doctor/mod.rs:352",
+          "location": "rust/shim/src/cli/doctor/mod.rs:367",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -34114,7 +34136,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-9XuDbQle.js:2",
+          "location": "pseudolife_memory/web/static/assets/index-UOOf7jxh.js:2",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -34127,7 +34149,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-9XuDbQle.js:3",
+          "location": "pseudolife_memory/web/static/assets/index-UOOf7jxh.js:3",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -34231,7 +34253,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/doctor/mod.rs:356",
+          "location": "rust/shim/src/cli/doctor/mod.rs:371",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -34244,7 +34266,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/doctor/mod.rs:359",
+          "location": "rust/shim/src/cli/doctor/mod.rs:374",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -35132,7 +35154,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-9XuDbQle.js:2",
+          "location": "pseudolife_memory/web/static/assets/index-UOOf7jxh.js:2",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -36465,7 +36487,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/doctor/mod.rs:355",
+          "location": "rust/shim/src/cli/doctor/mod.rs:370",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -36478,7 +36500,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/doctor/mod.rs:358",
+          "location": "rust/shim/src/cli/doctor/mod.rs:373",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -38329,7 +38351,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "evals/claude_shim.py:76",
+          "location": "evals/claude_shim.py:77",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -38342,7 +38364,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "evals/claude_shim.py:78",
+          "location": "evals/claude_shim.py:79",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -38389,7 +38411,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "evals/codex_shim.py:66",
+          "location": "evals/codex_shim.py:67",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -38402,7 +38424,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "evals/codex_shim.py:68",
+          "location": "evals/codex_shim.py:69",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -41580,7 +41602,7 @@
       "producers": [
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-9XuDbQle.js:2",
+          "location": "pseudolife_memory/web/static/assets/index-UOOf7jxh.js:2",
           "shape": {
             "channel": "query",
             "complete": true,
@@ -41617,7 +41639,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:1234",
+          "location": "docs/guide/dreaming.md:1271",
           "shape": {
             "channel": "query",
             "complete": false,
@@ -41893,7 +41915,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-9XuDbQle.js:20",
+          "location": "pseudolife_memory/web/static/assets/index-UOOf7jxh.js:20",
           "shape": {
             "channel": "query",
             "complete": true,
@@ -41971,7 +41993,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-9XuDbQle.js:26",
+          "location": "pseudolife_memory/web/static/assets/index-UOOf7jxh.js:26",
           "shape": {
             "channel": "query",
             "complete": true,
@@ -41981,7 +42003,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-9XuDbQle.js:4",
+          "location": "pseudolife_memory/web/static/assets/index-UOOf7jxh.js:4",
           "shape": {
             "channel": "query",
             "complete": true,
@@ -42047,7 +42069,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-9XuDbQle.js:4",
+          "location": "pseudolife_memory/web/static/assets/index-UOOf7jxh.js:4",
           "shape": {
             "channel": "query",
             "complete": true,
@@ -42090,7 +42112,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-9XuDbQle.js:20",
+          "location": "pseudolife_memory/web/static/assets/index-UOOf7jxh.js:20",
           "shape": {
             "channel": "query",
             "complete": true,
@@ -42188,7 +42210,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-9XuDbQle.js:26",
+          "location": "pseudolife_memory/web/static/assets/index-UOOf7jxh.js:26",
           "shape": {
             "channel": "query",
             "complete": true,
@@ -42286,7 +42308,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-9XuDbQle.js:4",
+          "location": "pseudolife_memory/web/static/assets/index-UOOf7jxh.js:4",
           "shape": {
             "channel": "query",
             "complete": true,
@@ -42394,7 +42416,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-9XuDbQle.js:25",
+          "location": "pseudolife_memory/web/static/assets/index-UOOf7jxh.js:25",
           "shape": {
             "channel": "query",
             "complete": true,
@@ -42439,7 +42461,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-9XuDbQle.js:25",
+          "location": "pseudolife_memory/web/static/assets/index-UOOf7jxh.js:25",
           "shape": {
             "channel": "query",
             "complete": true,
@@ -42484,14 +42506,14 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-9XuDbQle.js:5",
+          "location": "pseudolife_memory/web/static/assets/index-UOOf7jxh.js:5",
           "shape": {
             "channel": "query",
             "complete": true,
             "omitted_optional": [],
             "parameters": {
               "limit": {
-                "expression": "of"
+                "expression": "hf"
               }
             }
           }
@@ -42571,7 +42593,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-9XuDbQle.js:16",
+          "location": "pseudolife_memory/web/static/assets/index-UOOf7jxh.js:16",
           "shape": {
             "channel": "query",
             "complete": true,
@@ -42588,7 +42610,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-9XuDbQle.js:5",
+          "location": "pseudolife_memory/web/static/assets/index-UOOf7jxh.js:5",
           "shape": {
             "channel": "query",
             "complete": true,
@@ -42993,7 +43015,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-9XuDbQle.js:16",
+          "location": "pseudolife_memory/web/static/assets/index-UOOf7jxh.js:16",
           "shape": {
             "channel": "query",
             "complete": true,
@@ -43158,7 +43180,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-9XuDbQle.js:21",
+          "location": "pseudolife_memory/web/static/assets/index-UOOf7jxh.js:21",
           "shape": {
             "channel": "query",
             "complete": true,
@@ -43211,7 +43233,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-9XuDbQle.js:20",
+          "location": "pseudolife_memory/web/static/assets/index-UOOf7jxh.js:20",
           "shape": {
             "channel": "query",
             "complete": true,
@@ -43347,7 +43369,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-9XuDbQle.js:12",
+          "location": "pseudolife_memory/web/static/assets/index-UOOf7jxh.js:12",
           "shape": {
             "channel": "query",
             "complete": true,
@@ -43563,7 +43585,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-9XuDbQle.js:16",
+          "location": "pseudolife_memory/web/static/assets/index-UOOf7jxh.js:16",
           "shape": {
             "channel": "query",
             "complete": true,
@@ -43573,7 +43595,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-9XuDbQle.js:20",
+          "location": "pseudolife_memory/web/static/assets/index-UOOf7jxh.js:20",
           "shape": {
             "channel": "query",
             "complete": true,
@@ -43601,7 +43623,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:1137",
+          "location": "docs/guide/dreaming.md:1174",
           "shape": {
             "channel": "query",
             "complete": false,
@@ -43907,7 +43929,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-9XuDbQle.js:16",
+          "location": "pseudolife_memory/web/static/assets/index-UOOf7jxh.js:16",
           "shape": {
             "channel": "query",
             "complete": true,
@@ -43921,7 +43943,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-9XuDbQle.js:20",
+          "location": "pseudolife_memory/web/static/assets/index-UOOf7jxh.js:20",
           "shape": {
             "channel": "query",
             "complete": true,
@@ -43942,7 +43964,7 @@
       "method": "GET",
       "parameters": [],
       "optional_parameters": [],
-      "parameter_source": "pseudolife_memory/web/api.py:664",
+      "parameter_source": "pseudolife_memory/web/api.py:665",
       "producers": [
         {
           "dynamic": "unresolved",
@@ -44122,7 +44144,7 @@
         "session_id",
         "since"
       ],
-      "parameter_source": "pseudolife_memory/web/api.py:588",
+      "parameter_source": "pseudolife_memory/web/api.py:589",
       "producers": [
         {
           "dynamic": "unresolved",
@@ -44192,7 +44214,7 @@
         "session_id",
         "source"
       ],
-      "parameter_source": "pseudolife_memory/web/api.py:566",
+      "parameter_source": "pseudolife_memory/web/api.py:567",
       "producers": [
         {
           "dynamic": "unresolved",
@@ -44246,7 +44268,7 @@
         "agent",
         "since"
       ],
-      "parameter_source": "pseudolife_memory/web/api.py:699",
+      "parameter_source": "pseudolife_memory/web/api.py:700",
       "producers": [
         {
           "dynamic": "unresolved",
@@ -44597,14 +44619,14 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-9XuDbQle.js:5",
+          "location": "pseudolife_memory/web/static/assets/index-UOOf7jxh.js:5",
           "shape": {
             "channel": "query",
             "complete": true,
             "omitted_optional": [],
             "parameters": {
               "limit": {
-                "expression": "of"
+                "expression": "hf"
               }
             }
           }
@@ -44659,7 +44681,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-9XuDbQle.js:2",
+          "location": "pseudolife_memory/web/static/assets/index-UOOf7jxh.js:2",
           "shape": {
             "channel": "query",
             "complete": true,
@@ -44752,7 +44774,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-9XuDbQle.js:12",
+          "location": "pseudolife_memory/web/static/assets/index-UOOf7jxh.js:12",
           "shape": {
             "channel": "query",
             "complete": true,
@@ -44811,7 +44833,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-9XuDbQle.js:2",
+          "location": "pseudolife_memory/web/static/assets/index-UOOf7jxh.js:2",
           "shape": {
             "channel": "query",
             "complete": true,
@@ -44831,7 +44853,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-9XuDbQle.js:4",
+          "location": "pseudolife_memory/web/static/assets/index-UOOf7jxh.js:4",
           "shape": {
             "channel": "query",
             "complete": true,
@@ -44910,7 +44932,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-9XuDbQle.js:4",
+          "location": "pseudolife_memory/web/static/assets/index-UOOf7jxh.js:4",
           "shape": {
             "channel": "query",
             "complete": true,
@@ -44990,7 +45012,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-9XuDbQle.js:4",
+          "location": "pseudolife_memory/web/static/assets/index-UOOf7jxh.js:4",
           "shape": {
             "channel": "query",
             "complete": true,
@@ -45093,7 +45115,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-9XuDbQle.js:4",
+          "location": "pseudolife_memory/web/static/assets/index-UOOf7jxh.js:4",
           "shape": {
             "channel": "query",
             "complete": true,
@@ -45339,7 +45361,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-9XuDbQle.js:16",
+          "location": "pseudolife_memory/web/static/assets/index-UOOf7jxh.js:16",
           "shape": {
             "channel": "query",
             "complete": true,
@@ -45397,14 +45419,14 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-9XuDbQle.js:5",
+          "location": "pseudolife_memory/web/static/assets/index-UOOf7jxh.js:5",
           "shape": {
             "channel": "query",
             "complete": true,
             "omitted_optional": [],
             "parameters": {
               "limit": {
-                "expression": "of"
+                "expression": "hf"
               }
             }
           }
@@ -45561,7 +45583,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-9XuDbQle.js:26",
+          "location": "pseudolife_memory/web/static/assets/index-UOOf7jxh.js:26",
           "shape": {
             "channel": "body",
             "complete": true,
@@ -45650,7 +45672,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-9XuDbQle.js:2",
+          "location": "pseudolife_memory/web/static/assets/index-UOOf7jxh.js:2",
           "shape": {
             "channel": "body",
             "complete": true,
@@ -45901,7 +45923,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-9XuDbQle.js:2",
+          "location": "pseudolife_memory/web/static/assets/index-UOOf7jxh.js:2",
           "shape": {
             "channel": "body",
             "complete": true,
@@ -46573,7 +46595,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-9XuDbQle.js:5",
+          "location": "pseudolife_memory/web/static/assets/index-UOOf7jxh.js:5",
           "shape": {
             "channel": "body",
             "complete": true,
@@ -46619,7 +46641,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-9XuDbQle.js:5",
+          "location": "pseudolife_memory/web/static/assets/index-UOOf7jxh.js:5",
           "shape": {
             "channel": "body",
             "complete": true,
@@ -46714,7 +46736,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-9XuDbQle.js:5",
+          "location": "pseudolife_memory/web/static/assets/index-UOOf7jxh.js:5",
           "shape": {
             "channel": "body",
             "complete": false,
@@ -46776,7 +46798,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-9XuDbQle.js:2",
+          "location": "pseudolife_memory/web/static/assets/index-UOOf7jxh.js:2",
           "shape": {
             "channel": "body",
             "complete": true,
@@ -46891,7 +46913,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-9XuDbQle.js:2",
+          "location": "pseudolife_memory/web/static/assets/index-UOOf7jxh.js:2",
           "shape": {
             "channel": "body",
             "complete": true,
@@ -46943,7 +46965,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-9XuDbQle.js:2",
+          "location": "pseudolife_memory/web/static/assets/index-UOOf7jxh.js:2",
           "shape": {
             "channel": "body",
             "complete": true,
@@ -47082,7 +47104,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-9XuDbQle.js:2",
+          "location": "pseudolife_memory/web/static/assets/index-UOOf7jxh.js:2",
           "shape": {
             "channel": "body",
             "complete": true,
@@ -47114,7 +47136,7 @@
       "producers": [
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-9XuDbQle.js:2",
+          "location": "pseudolife_memory/web/static/assets/index-UOOf7jxh.js:2",
           "shape": {
             "channel": "body",
             "complete": true,
@@ -47245,7 +47267,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-9XuDbQle.js:2",
+          "location": "pseudolife_memory/web/static/assets/index-UOOf7jxh.js:2",
           "shape": {
             "channel": "body",
             "complete": true,
@@ -47273,7 +47295,7 @@
       "producers": [
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-9XuDbQle.js:2",
+          "location": "pseudolife_memory/web/static/assets/index-UOOf7jxh.js:2",
           "shape": {
             "channel": "body",
             "complete": true,
@@ -47290,7 +47312,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-9XuDbQle.js:2",
+          "location": "pseudolife_memory/web/static/assets/index-UOOf7jxh.js:2",
           "shape": {
             "channel": "body",
             "complete": true,
@@ -47408,7 +47430,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-9XuDbQle.js:2",
+          "location": "pseudolife_memory/web/static/assets/index-UOOf7jxh.js:2",
           "shape": {
             "channel": "body",
             "complete": true,
@@ -47488,7 +47510,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-9XuDbQle.js:2",
+          "location": "pseudolife_memory/web/static/assets/index-UOOf7jxh.js:2",
           "shape": {
             "channel": "body",
             "complete": true,
@@ -47540,7 +47562,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-9XuDbQle.js:2",
+          "location": "pseudolife_memory/web/static/assets/index-UOOf7jxh.js:2",
           "shape": {
             "channel": "body",
             "complete": true,
@@ -47572,7 +47594,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:1131",
+          "location": "docs/guide/dreaming.md:1168",
           "shape": {
             "channel": "body",
             "complete": false,
@@ -47583,7 +47605,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-9XuDbQle.js:20",
+          "location": "pseudolife_memory/web/static/assets/index-UOOf7jxh.js:20",
           "shape": {
             "channel": "body",
             "complete": true,
@@ -47614,7 +47636,7 @@
       "producers": [
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-9XuDbQle.js:2",
+          "location": "pseudolife_memory/web/static/assets/index-UOOf7jxh.js:2",
           "shape": {
             "channel": "body",
             "complete": true,
@@ -47747,7 +47769,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-9XuDbQle.js:2",
+          "location": "pseudolife_memory/web/static/assets/index-UOOf7jxh.js:2",
           "shape": {
             "channel": "body",
             "complete": true,
@@ -47778,7 +47800,7 @@
       "optional_parameters": [
         "session_id"
       ],
-      "parameter_source": "pseudolife_memory/web/api.py:623",
+      "parameter_source": "pseudolife_memory/web/api.py:624",
       "producers": [
         {
           "construction_source": "plugin/hooks/session-end.sh:270",
@@ -47901,7 +47923,7 @@
         "event",
         "type"
       ],
-      "parameter_source": "pseudolife_memory/web/api.py:751",
+      "parameter_source": "pseudolife_memory/web/api.py:752",
       "producers": [
         {
           "dynamic": "unresolved",
@@ -48015,7 +48037,7 @@
       "optional_parameters": [
         "agent"
       ],
-      "parameter_source": "pseudolife_memory/web/api.py:726",
+      "parameter_source": "pseudolife_memory/web/api.py:727",
       "producers": [
         {
           "dynamic": "unresolved",
@@ -49306,7 +49328,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:1333",
+          "location": "docs/guide/dreaming.md:1370",
           "shape": {
             "channel": "parameters",
             "complete": true,
@@ -49385,7 +49407,7 @@
       "producers": [
         {
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:1330",
+          "location": "docs/guide/dreaming.md:1367",
           "shape": {
             "channel": "parameters",
             "complete": true,
@@ -49815,7 +49837,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:1167",
+          "location": "docs/guide/dreaming.md:1204",
           "shape": {
             "channel": "parameters",
             "complete": true,
@@ -49836,7 +49858,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:1283",
+          "location": "docs/guide/dreaming.md:1320",
           "shape": {
             "channel": "parameters",
             "complete": true,
@@ -50025,6 +50047,27 @@
         },
         {
           "evidence": "documented",
+          "location": "docs/guide/dreaming.md:747",
+          "shape": {
+            "channel": "parameters",
+            "complete": true,
+            "omitted_optional": [
+              "apply",
+              "commit_token",
+              "cursor",
+              "limit",
+              "run_id",
+              "snippets"
+            ],
+            "parameters": {
+              "action": {
+                "literal": "status"
+              }
+            }
+          }
+        },
+        {
+          "evidence": "documented",
           "location": "docs/guide/dreaming.md:77",
           "shape": {
             "channel": "parameters",
@@ -50046,7 +50089,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:770",
+          "location": "docs/guide/dreaming.md:807",
           "shape": {
             "channel": "parameters",
             "complete": true,
@@ -50067,7 +50110,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:776",
+          "location": "docs/guide/dreaming.md:813",
           "shape": {
             "channel": "parameters",
             "complete": true,
@@ -50088,7 +50131,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:828",
+          "location": "docs/guide/dreaming.md:865",
           "shape": {
             "channel": "parameters",
             "complete": true,
@@ -50110,7 +50153,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:913",
+          "location": "docs/guide/dreaming.md:950",
           "shape": {
             "channel": "parameters",
             "complete": true,
@@ -50131,7 +50174,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:941",
+          "location": "docs/guide/dreaming.md:978",
           "shape": {
             "channel": "parameters",
             "complete": true,
@@ -51190,7 +51233,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:810",
+          "location": "docs/guide/dreaming.md:847",
           "shape": {
             "channel": "parameters",
             "complete": true,
@@ -52367,7 +52410,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:1268",
+          "location": "docs/guide/dreaming.md:1305",
           "shape": {
             "channel": "parameters",
             "complete": false,
@@ -52566,7 +52609,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:1255",
+          "location": "docs/guide/dreaming.md:1292",
           "shape": {
             "channel": "parameters",
             "complete": true,
@@ -52589,7 +52632,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:1258",
+          "location": "docs/guide/dreaming.md:1295",
           "shape": {
             "channel": "parameters",
             "complete": true,
@@ -53468,7 +53511,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:786",
+          "location": "docs/guide/dreaming.md:823",
           "shape": {
             "channel": "parameters",
             "complete": true,
@@ -55141,7 +55184,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:1358",
+          "location": "docs/guide/dreaming.md:1395",
           "shape": {
             "channel": "parameters",
             "complete": false,
@@ -56561,7 +56604,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:785",
+          "location": "docs/guide/dreaming.md:822",
           "shape": {
             "channel": "parameters",
             "complete": true,
@@ -57250,7 +57293,7 @@
       "dynamic": "unresolved",
       "evidence": "documented",
       "kind": "environment",
-      "location": "docs/guide/dreaming.md:1002",
+      "location": "docs/guide/dreaming.md:1039",
       "name": "PSEUDOLIFE_JUDGE_THIRD_API_KEY",
       "shape": {
         "channel": "environment",
@@ -58614,7 +58657,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "cli",
-      "location": "rust/shim/src/cli/doctor/mod.rs:567",
+      "location": "rust/shim/src/cli/doctor/mod.rs:583",
       "name": "mcp",
       "shape": {
         "argv_source": "mcp ; reinstall there if stale, then retry.\"",
@@ -60088,7 +60131,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "route",
-      "location": "pseudolife_memory/web/static/assets/index-9XuDbQle.js:3",
+      "location": "pseudolife_memory/web/static/assets/index-UOOf7jxh.js:3",
       "method": "POST",
       "name": "/api/maintainer/cancel",
       "shape": {
@@ -60102,7 +60145,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "route",
-      "location": "pseudolife_memory/web/static/assets/index-9XuDbQle.js:3",
+      "location": "pseudolife_memory/web/static/assets/index-UOOf7jxh.js:3",
       "method": "POST",
       "name": "/api/maintainer/challenge",
       "shape": {
@@ -60116,7 +60159,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "route",
-      "location": "pseudolife_memory/web/static/assets/index-9XuDbQle.js:3",
+      "location": "pseudolife_memory/web/static/assets/index-UOOf7jxh.js:3",
       "method": "POST",
       "name": "/api/maintainer/enrol",
       "shape": {
@@ -60130,7 +60173,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "route",
-      "location": "pseudolife_memory/web/static/assets/index-9XuDbQle.js:3",
+      "location": "pseudolife_memory/web/static/assets/index-UOOf7jxh.js:3",
       "method": "POST",
       "name": "/api/maintainer/enrol",
       "shape": {
@@ -60144,7 +60187,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "route",
-      "location": "pseudolife_memory/web/static/assets/index-9XuDbQle.js:3",
+      "location": "pseudolife_memory/web/static/assets/index-UOOf7jxh.js:3",
       "method": "POST",
       "name": "/api/maintainer/repudiate",
       "shape": {
@@ -60158,7 +60201,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "route",
-      "location": "pseudolife_memory/web/static/assets/index-9XuDbQle.js:3",
+      "location": "pseudolife_memory/web/static/assets/index-UOOf7jxh.js:3",
       "method": "POST",
       "name": "/api/maintainer/revoke",
       "shape": {
@@ -60172,7 +60215,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "route",
-      "location": "pseudolife_memory/web/static/assets/index-9XuDbQle.js:3",
+      "location": "pseudolife_memory/web/static/assets/index-UOOf7jxh.js:3",
       "method": "POST",
       "name": "/api/maintainer/role",
       "shape": {
@@ -60186,7 +60229,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "route",
-      "location": "pseudolife_memory/web/static/assets/index-9XuDbQle.js:3",
+      "location": "pseudolife_memory/web/static/assets/index-UOOf7jxh.js:3",
       "method": "POST",
       "name": "/api/maintainer/send",
       "shape": {
@@ -60760,7 +60803,35 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "docs/guide/dreaming.md:730",
+      "location": "docs/guide/dreaming.md:733",
+      "method": null,
+      "name": "/health",
+      "shape": {
+        "channel": "body",
+        "complete": false,
+        "expression": "Request helper, URL suffix or body requires resolution at this location.",
+        "parameters": {}
+      }
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "unverified",
+      "kind": "route",
+      "location": "docs/guide/dreaming.md:744",
+      "method": null,
+      "name": "/health",
+      "shape": {
+        "channel": "body",
+        "complete": false,
+        "expression": "Request helper, URL suffix or body requires resolution at this location.",
+        "parameters": {}
+      }
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "unverified",
+      "kind": "route",
+      "location": "docs/guide/dreaming.md:764",
       "method": null,
       "name": "/health",
       "shape": {
@@ -64739,7 +64810,7 @@
     {
       "evidence": "static",
       "kind": "route",
-      "location": "pseudolife_memory/web/static/assets/index-9XuDbQle.js:3",
+      "location": "pseudolife_memory/web/static/assets/index-UOOf7jxh.js:3",
       "method": "GET",
       "name": "/api/maintainer",
       "shape": {
@@ -64751,7 +64822,7 @@
     {
       "evidence": "static",
       "kind": "route",
-      "location": "pseudolife_memory/web/static/assets/index-9XuDbQle.js:3",
+      "location": "pseudolife_memory/web/static/assets/index-UOOf7jxh.js:3",
       "method": "GET",
       "name": "/api/maintainer/inbox",
       "shape": {
@@ -64767,7 +64838,7 @@
     {
       "evidence": "static",
       "kind": "route",
-      "location": "pseudolife_memory/web/static/assets/index-9XuDbQle.js:3",
+      "location": "pseudolife_memory/web/static/assets/index-UOOf7jxh.js:3",
       "method": "GET",
       "name": "/api/maintainer/sent",
       "shape": {
@@ -68209,7 +68280,13 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:1002",
+      "location": "docs/guide/dreaming.md:1025",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_JUDGE_SECOND_API_KEY"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/guide/dreaming.md:1039",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_JUDGE_THIRD_API_KEY"
     },
@@ -68227,18 +68304,6 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:1131",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "route:POST /api/graph/rejudge"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:1137",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "route:GET /api/graph/proposal-evidence"
-    },
-    {
-      "dynamic": "unresolved",
       "location": "docs/guide/dreaming.md:115",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:DreamConfig"
@@ -68251,67 +68316,79 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:1226",
+      "location": "docs/guide/dreaming.md:1168",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "route:POST /api/graph/rejudge"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/guide/dreaming.md:1174",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "route:GET /api/graph/proposal-evidence"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/guide/dreaming.md:1263",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:DeepDreamConfig"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:1226",
+      "location": "docs/guide/dreaming.md:1263",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:DeepDreamConfig.review_queue_alert_pending"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:1234",
+      "location": "docs/guide/dreaming.md:1271",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "route:GET /api/briefing"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:1268",
+      "location": "docs/guide/dreaming.md:1305",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "tool:memory_graph_review"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:1275",
+      "location": "docs/guide/dreaming.md:1312",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:DreamConfig"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:1275",
+      "location": "docs/guide/dreaming.md:1312",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:DreamConfig.retype_quarantined_max"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:1304",
+      "location": "docs/guide/dreaming.md:1341",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:DeepDreamConfig"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:1304",
+      "location": "docs/guide/dreaming.md:1341",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:DeepDreamConfig.max_support_overlap"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:1309",
+      "location": "docs/guide/dreaming.md:1346",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:DeepDreamConfig"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:1309",
+      "location": "docs/guide/dreaming.md:1346",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:DeepDreamConfig.max_fallback_mentions"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:1358",
+      "location": "docs/guide/dreaming.md:1395",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "tool:memory_search"
     },
@@ -68557,126 +68634,96 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:730",
+      "location": "docs/guide/dreaming.md:733",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:738",
+      "location": "docs/guide/dreaming.md:744",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:route:/health"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/guide/dreaming.md:764",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:route:/health"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/guide/dreaming.md:775",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:DreamConfig"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:738",
+      "location": "docs/guide/dreaming.md:775",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:DreamConfig.digest_enabled"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:776",
+      "location": "docs/guide/dreaming.md:813",
       "reason": "forwarded parameters"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:791",
+      "location": "docs/guide/dreaming.md:828",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:DreamConfig"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:791",
+      "location": "docs/guide/dreaming.md:828",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:DreamConfig.runs_keep"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:798",
+      "location": "docs/guide/dreaming.md:835",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:DreamConfig"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:798",
+      "location": "docs/guide/dreaming.md:835",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:DreamConfig.quarantine_low_trust"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:804",
+      "location": "docs/guide/dreaming.md:841",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:DreamConfig"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:804",
+      "location": "docs/guide/dreaming.md:841",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:DreamConfig.trusted_sources"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:810",
+      "location": "docs/guide/dreaming.md:847",
       "reason": "forwarded parameters"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:891",
+      "location": "docs/guide/dreaming.md:928",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:DreamConfig"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:891",
+      "location": "docs/guide/dreaming.md:928",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:DreamConfig.chronicle"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:916",
+      "location": "docs/guide/dreaming.md:953",
       "reason": "forwarded parameters"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:932",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "config:DreamConfig"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:932",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "config:DreamConfig.chronicle"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:946",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "config:DeepDreamConfig"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:946",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "config:DeepDreamConfig.auto_min_new_entities"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:953",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "config:DeepDreamConfig"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:953",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "config:DeepDreamConfig.judge_mode"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:956",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_JUDGE_API_KEY"
     },
     {
       "dynamic": "unresolved",
@@ -68692,9 +68739,45 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:988",
+      "location": "docs/guide/dreaming.md:969",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_JUDGE_SECOND_API_KEY"
+      "surface": "config:DreamConfig"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/guide/dreaming.md:969",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "config:DreamConfig.chronicle"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/guide/dreaming.md:983",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "config:DeepDreamConfig"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/guide/dreaming.md:983",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "config:DeepDreamConfig.auto_min_new_entities"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/guide/dreaming.md:990",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "config:DeepDreamConfig"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/guide/dreaming.md:990",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "config:DeepDreamConfig.judge_mode"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/guide/dreaming.md:993",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_JUDGE_API_KEY"
     },
     {
       "dynamic": "unresolved",
@@ -78599,7 +78682,7 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "evals/claude_shim.py:410",
+      "location": "evals/claude_shim.py:432",
       "reason": "forwarded parameters"
     },
     {
@@ -78610,13 +78693,13 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "evals/claude_shim.py:76",
+      "location": "evals/claude_shim.py:77",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_SHIM_CLAUDE_CLI"
     },
     {
       "dynamic": "unresolved",
-      "location": "evals/claude_shim.py:78",
+      "location": "evals/claude_shim.py:79",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_SHIM_CLAUDE_CLI"
     },
@@ -78633,13 +78716,13 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "evals/codex_shim.py:66",
+      "location": "evals/codex_shim.py:67",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_SHIM_CODEX_CLI"
     },
     {
       "dynamic": "unresolved",
-      "location": "evals/codex_shim.py:68",
+      "location": "evals/codex_shim.py:69",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_SHIM_CODEX_CLI"
     },
@@ -83693,158 +83776,158 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "pseudolife_memory/web/static/assets/index-9XuDbQle.js:1",
+      "location": "pseudolife_memory/web/static/assets/index-UOOf7jxh.js:1",
       "reason": "forwarded parameters, request target supplied dynamically or external"
     },
     {
       "dynamic": "unresolved",
-      "location": "pseudolife_memory/web/static/assets/index-9XuDbQle.js:10",
+      "location": "pseudolife_memory/web/static/assets/index-UOOf7jxh.js:10",
       "reason": "forwarded parameters, built URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "pseudolife_memory/web/static/assets/index-9XuDbQle.js:12",
+      "location": "pseudolife_memory/web/static/assets/index-UOOf7jxh.js:12",
       "reason": "built URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "pseudolife_memory/web/static/assets/index-9XuDbQle.js:15",
+      "location": "pseudolife_memory/web/static/assets/index-UOOf7jxh.js:15",
       "reason": "forwarded parameters"
     },
     {
       "dynamic": "unresolved",
-      "location": "pseudolife_memory/web/static/assets/index-9XuDbQle.js:16",
+      "location": "pseudolife_memory/web/static/assets/index-UOOf7jxh.js:16",
       "reason": "forwarded parameters, built URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "pseudolife_memory/web/static/assets/index-9XuDbQle.js:18",
+      "location": "pseudolife_memory/web/static/assets/index-UOOf7jxh.js:18",
       "reason": "forwarded parameters"
     },
     {
       "dynamic": "unresolved",
-      "location": "pseudolife_memory/web/static/assets/index-9XuDbQle.js:2",
+      "location": "pseudolife_memory/web/static/assets/index-UOOf7jxh.js:2",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
     },
     {
       "dynamic": "unresolved",
-      "location": "pseudolife_memory/web/static/assets/index-9XuDbQle.js:2",
+      "location": "pseudolife_memory/web/static/assets/index-UOOf7jxh.js:2",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKENS"
     },
     {
       "dynamic": "unresolved",
-      "location": "pseudolife_memory/web/static/assets/index-9XuDbQle.js:2",
+      "location": "pseudolife_memory/web/static/assets/index-UOOf7jxh.js:2",
       "reason": "forwarded parameters, built URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "pseudolife_memory/web/static/assets/index-9XuDbQle.js:20",
+      "location": "pseudolife_memory/web/static/assets/index-UOOf7jxh.js:20",
       "reason": "forwarded parameters, built URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "pseudolife_memory/web/static/assets/index-9XuDbQle.js:21",
-      "reason": "forwarded parameters, built URL"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "pseudolife_memory/web/static/assets/index-9XuDbQle.js:25",
-      "reason": "forwarded parameters, built URL"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "pseudolife_memory/web/static/assets/index-9XuDbQle.js:26",
+      "location": "pseudolife_memory/web/static/assets/index-UOOf7jxh.js:21",
       "reason": "built URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "pseudolife_memory/web/static/assets/index-9XuDbQle.js:3",
+      "location": "pseudolife_memory/web/static/assets/index-UOOf7jxh.js:25",
+      "reason": "forwarded parameters, built URL"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "pseudolife_memory/web/static/assets/index-UOOf7jxh.js:26",
+      "reason": "built URL"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "pseudolife_memory/web/static/assets/index-UOOf7jxh.js:3",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
     },
     {
       "dynamic": "unresolved",
-      "location": "pseudolife_memory/web/static/assets/index-9XuDbQle.js:3",
+      "location": "pseudolife_memory/web/static/assets/index-UOOf7jxh.js:3",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/api/maintainer/cancel"
     },
     {
       "dynamic": "unresolved",
-      "location": "pseudolife_memory/web/static/assets/index-9XuDbQle.js:3",
+      "location": "pseudolife_memory/web/static/assets/index-UOOf7jxh.js:3",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/api/maintainer/challenge"
     },
     {
       "dynamic": "unresolved",
-      "location": "pseudolife_memory/web/static/assets/index-9XuDbQle.js:3",
+      "location": "pseudolife_memory/web/static/assets/index-UOOf7jxh.js:3",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/api/maintainer/enrol"
     },
     {
       "dynamic": "unresolved",
-      "location": "pseudolife_memory/web/static/assets/index-9XuDbQle.js:3",
+      "location": "pseudolife_memory/web/static/assets/index-UOOf7jxh.js:3",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/api/maintainer/repudiate"
     },
     {
       "dynamic": "unresolved",
-      "location": "pseudolife_memory/web/static/assets/index-9XuDbQle.js:3",
+      "location": "pseudolife_memory/web/static/assets/index-UOOf7jxh.js:3",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/api/maintainer/revoke"
     },
     {
       "dynamic": "unresolved",
-      "location": "pseudolife_memory/web/static/assets/index-9XuDbQle.js:3",
+      "location": "pseudolife_memory/web/static/assets/index-UOOf7jxh.js:3",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/api/maintainer/role"
     },
     {
       "dynamic": "unresolved",
-      "location": "pseudolife_memory/web/static/assets/index-9XuDbQle.js:3",
+      "location": "pseudolife_memory/web/static/assets/index-UOOf7jxh.js:3",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/api/maintainer/send"
     },
     {
       "dynamic": "unresolved",
-      "location": "pseudolife_memory/web/static/assets/index-9XuDbQle.js:3",
+      "location": "pseudolife_memory/web/static/assets/index-UOOf7jxh.js:3",
       "reason": "forwarded parameters, built URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "pseudolife_memory/web/static/assets/index-9XuDbQle.js:30",
+      "location": "pseudolife_memory/web/static/assets/index-UOOf7jxh.js:30",
       "reason": "forwarded parameters"
     },
     {
       "dynamic": "unresolved",
-      "location": "pseudolife_memory/web/static/assets/index-9XuDbQle.js:38",
+      "location": "pseudolife_memory/web/static/assets/index-UOOf7jxh.js:38",
       "reason": "forwarded parameters"
     },
     {
       "dynamic": "unresolved",
-      "location": "pseudolife_memory/web/static/assets/index-9XuDbQle.js:4",
-      "reason": "built URL"
+      "location": "pseudolife_memory/web/static/assets/index-UOOf7jxh.js:4",
+      "reason": "forwarded parameters, built URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "pseudolife_memory/web/static/assets/index-9XuDbQle.js:42",
+      "location": "pseudolife_memory/web/static/assets/index-UOOf7jxh.js:42",
       "reason": "forwarded parameters"
     },
     {
       "dynamic": "unresolved",
-      "location": "pseudolife_memory/web/static/assets/index-9XuDbQle.js:5",
+      "location": "pseudolife_memory/web/static/assets/index-UOOf7jxh.js:5",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "route:POST /api/facts/set"
     },
     {
       "dynamic": "unresolved",
-      "location": "pseudolife_memory/web/static/assets/index-9XuDbQle.js:5",
+      "location": "pseudolife_memory/web/static/assets/index-UOOf7jxh.js:5",
       "reason": "forwarded parameters, built URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "pseudolife_memory/web/static/assets/index-9XuDbQle.js:9",
+      "location": "pseudolife_memory/web/static/assets/index-UOOf7jxh.js:9",
       "reason": "forwarded parameters"
     },
     {
@@ -84612,43 +84695,43 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/mod.rs:352",
+      "location": "rust/shim/src/cli/doctor/mod.rs:367",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_DAEMON_URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/mod.rs:355",
+      "location": "rust/shim/src/cli/doctor/mod.rs:370",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/mod.rs:356",
+      "location": "rust/shim/src/cli/doctor/mod.rs:371",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/mod.rs:358",
+      "location": "rust/shim/src/cli/doctor/mod.rs:373",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/mod.rs:359",
+      "location": "rust/shim/src/cli/doctor/mod.rs:374",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/mod.rs:546",
+      "location": "rust/shim/src/cli/doctor/mod.rs:562",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:update"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/mod.rs:567",
+      "location": "rust/shim/src/cli/doctor/mod.rs:583",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:cli:mcp"
     },

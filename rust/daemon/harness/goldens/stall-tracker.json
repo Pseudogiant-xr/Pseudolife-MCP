@@ -1525,6 +1525,254 @@
     }
    }
   ],
+  "signed-out-identity": [
+   {
+    "op": "record",
+    "args": [
+     {
+      "pulled": 3,
+      "extractor_failed": true,
+      "extractor_error": {
+       "reason": "extractor_unreachable",
+       "error": "unreachable (gaierror)"
+      }
+     },
+     true,
+     {
+      "reason": "login_expired",
+      "error": "/health HTTP 503 (login_required)",
+      "fallback_resolves": true,
+      "provider": "claude",
+      "shim_user": "svc",
+      "shim_host": "gpu-box.example"
+     }
+    ],
+    "now": 0.0,
+    "got": null,
+    "snapshot": {
+     "stall": null,
+     "last_stall": null
+    }
+   },
+   {
+    "op": "record",
+    "args": [
+     {
+      "pulled": 3,
+      "extractor_failed": true,
+      "extractor_error": {
+       "reason": "extractor_unreachable",
+       "error": "unreachable (gaierror)"
+      }
+     },
+     true,
+     {
+      "reason": "login_expired",
+      "error": "/health HTTP 503 (login_required)",
+      "fallback_resolves": true,
+      "provider": "claude",
+      "shim_user": "svc",
+      "shim_host": "gpu-box.example"
+     }
+    ],
+    "now": 10.0,
+    "got": null,
+    "snapshot": {
+     "stall": {
+      "since": 0.0,
+      "reason": "login_expired",
+      "consecutive_failures": 2,
+      "last_error": "primary /health HTTP 503 (login_required); fallback unreachable (gaierror)",
+      "last_success_at": null,
+      "provider": "claude",
+      "shim_user": "svc",
+      "shim_host": "gpu-box.example"
+     },
+     "last_stall": null
+    }
+   },
+   {
+    "op": "take",
+    "args": [
+     3600.0
+    ],
+    "now": 10.0,
+    "got": [
+     "begin",
+     {
+      "since": 0.0,
+      "reason": "login_expired",
+      "consecutive_failures": 2,
+      "last_error": "primary /health HTTP 503 (login_required); fallback unreachable (gaierror)",
+      "last_success_at": null,
+      "provider": "claude",
+      "shim_user": "svc",
+      "shim_host": "gpu-box.example"
+     }
+    ],
+    "snapshot": {
+     "stall": {
+      "since": 0.0,
+      "reason": "login_expired",
+      "consecutive_failures": 2,
+      "last_error": "primary /health HTTP 503 (login_required); fallback unreachable (gaierror)",
+      "last_success_at": null,
+      "provider": "claude",
+      "shim_user": "svc",
+      "shim_host": "gpu-box.example"
+     },
+     "last_stall": null
+    }
+   },
+   {
+    "op": "mark",
+    "args": [
+     "begin"
+    ],
+    "now": 10.0,
+    "got": null,
+    "snapshot": {
+     "stall": {
+      "since": 0.0,
+      "reason": "login_expired",
+      "consecutive_failures": 2,
+      "last_error": "primary /health HTTP 503 (login_required); fallback unreachable (gaierror)",
+      "last_success_at": null,
+      "provider": "claude",
+      "shim_user": "svc",
+      "shim_host": "gpu-box.example"
+     },
+     "last_stall": null
+    }
+   },
+   {
+    "op": "record",
+    "args": [
+     {
+      "pulled": 3
+     },
+     true,
+     {
+      "reason": "login_expired",
+      "error": "/health HTTP 503 (login_required)",
+      "fallback_resolves": true,
+      "provider": "claude",
+      "shim_user": "svc",
+      "shim_host": "gpu-box.example"
+     }
+    ],
+    "now": 20.0,
+    "got": null,
+    "snapshot": {
+     "stall": {
+      "since": 0.0,
+      "reason": "served_by_fallback",
+      "consecutive_failures": 3,
+      "last_error": "primary /health HTTP 503 (login_required)",
+      "last_success_at": null,
+      "provider": "claude",
+      "shim_user": "svc",
+      "shim_host": "gpu-box.example"
+     },
+     "last_stall": null
+    }
+   },
+   {
+    "op": "record",
+    "args": [
+     {
+      "pulled": 3,
+      "extractor_failed": true,
+      "extractor_error": {
+       "reason": "extractor_unreachable",
+       "error": "connection refused"
+      }
+     },
+     false
+    ],
+    "now": 30.0,
+    "got": null,
+    "snapshot": {
+     "stall": {
+      "since": 0.0,
+      "reason": "extractor_unreachable",
+      "consecutive_failures": 4,
+      "last_error": "connection refused",
+      "last_success_at": null
+     },
+     "last_stall": null
+    }
+   },
+   {
+    "op": "take",
+    "args": [
+     3600.0
+    ],
+    "now": 30.0,
+    "got": null,
+    "snapshot": {
+     "stall": {
+      "since": 0.0,
+      "reason": "extractor_unreachable",
+      "consecutive_failures": 4,
+      "last_error": "connection refused",
+      "last_success_at": null
+     },
+     "last_stall": null
+    }
+   },
+   {
+    "op": "record",
+    "args": [
+     {
+      "pulled": 3
+     },
+     false
+    ],
+    "now": 40.0,
+    "got": null,
+    "snapshot": {
+     "stall": null,
+     "last_stall": {
+      "since": 0.0,
+      "reason": "extractor_unreachable",
+      "consecutive_failures": 4,
+      "last_error": "connection refused",
+      "last_success_at": null,
+      "recovered_at": 40.0
+     }
+    }
+   },
+   {
+    "op": "take",
+    "args": [
+     3600.0
+    ],
+    "now": 40.0,
+    "got": [
+     "clear",
+     {
+      "since": 0.0,
+      "reason": "extractor_unreachable",
+      "consecutive_failures": 4,
+      "last_error": "connection refused",
+      "last_success_at": null,
+      "recovered_at": 40.0
+     }
+    ],
+    "snapshot": {
+     "stall": null,
+     "last_stall": {
+      "since": 0.0,
+      "reason": "extractor_unreachable",
+      "consecutive_failures": 4,
+      "last_error": "connection refused",
+      "last_success_at": null,
+      "recovered_at": 40.0
+     }
+    }
+   }
+  ],
   "skipped-fallback-runs-on-the-primary": [
    {
     "op": "record",
@@ -1949,7 +2197,7 @@
     "reason": "login_expired"
    },
    "offset": 0,
-   "text": "Dream extraction stalled since 2026-10-25 01:21+00:00: login_expired. The extractor CLI's login expired; re-run `claude auth login` (or `codex login`) on the daemon host."
+   "text": "Dream extraction stalled since 2026-10-25 01:21+00:00: login_expired. The extractor CLI is signed out on the machine running the CLI shim; sign it in there: run `claude`, then `/login` (or `codex login`)."
   },
   {
    "kind": "repeat",
@@ -1958,7 +2206,7 @@
     "reason": "login_expired"
    },
    "offset": 39600,
-   "text": "Dream extraction stalled since 2026-10-25 12:21+11:00: login_expired. The extractor CLI's login expired; re-run `claude auth login` (or `codex login`) on the daemon host."
+   "text": "Dream extraction stalled since 2026-10-25 12:21+11:00: login_expired. The extractor CLI is signed out on the machine running the CLI shim; sign it in there: run `claude`, then `/login` (or `codex login`)."
   },
   {
    "kind": "repeat",
@@ -1967,7 +2215,7 @@
     "reason": "login_expired"
    },
    "offset": -19800,
-   "text": "Dream extraction stalled since 2026-10-24 19:51-05:30: login_expired. The extractor CLI's login expired; re-run `claude auth login` (or `codex login`) on the daemon host."
+   "text": "Dream extraction stalled since 2026-10-24 19:51-05:30: login_expired. The extractor CLI is signed out on the machine running the CLI shim; sign it in there: run `claude`, then `/login` (or `codex login`)."
   },
   {
    "kind": "escalate",
@@ -2079,6 +2327,443 @@
    },
    "offset": -19800,
    "text": "Dream extraction recovered at 2023-11-14 17:43-05:30 (was extractor_error since 2023-11-14 16:43-05:30)."
+  },
+  {
+   "kind": "begin",
+   "record": {
+    "since": 1700000000.0,
+    "reason": "login_expired",
+    "provider": "claude",
+    "shim_user": "svc"
+   },
+   "offset": 0,
+   "text": "Dream extraction stalled since 2023-11-14 22:13+00:00: login_expired. The Claude Code CLI is signed out on the machine running the Pseudolife daemon; sign it in there as svc: run `claude`, then `/login`."
+  },
+  {
+   "kind": "begin",
+   "record": {
+    "since": 1700000000.0,
+    "reason": "login_expired",
+    "provider": "claude",
+    "shim_user": "svc"
+   },
+   "offset": 39600,
+   "text": "Dream extraction stalled since 2023-11-15 09:13+11:00: login_expired. The Claude Code CLI is signed out on the machine running the Pseudolife daemon; sign it in there as svc: run `claude`, then `/login`."
+  },
+  {
+   "kind": "begin",
+   "record": {
+    "since": 1700000000.0,
+    "reason": "login_expired",
+    "provider": "claude",
+    "shim_user": "svc"
+   },
+   "offset": -19800,
+   "text": "Dream extraction stalled since 2023-11-14 16:43-05:30: login_expired. The Claude Code CLI is signed out on the machine running the Pseudolife daemon; sign it in there as svc: run `claude`, then `/login`."
+  },
+  {
+   "kind": "begin",
+   "record": {
+    "since": 1700000000.0,
+    "reason": "served_by_fallback",
+    "provider": "codex",
+    "shim_user": null
+   },
+   "offset": 0,
+   "text": "Dream extraction degraded since 2023-11-14 22:13+00:00: served_by_fallback. The Codex CLI is signed out on the machine running the Pseudolife daemon, so the fallback is serving; sign it in there: run `codex login`."
+  },
+  {
+   "kind": "begin",
+   "record": {
+    "since": 1700000000.0,
+    "reason": "served_by_fallback",
+    "provider": "codex",
+    "shim_user": null
+   },
+   "offset": 39600,
+   "text": "Dream extraction degraded since 2023-11-15 09:13+11:00: served_by_fallback. The Codex CLI is signed out on the machine running the Pseudolife daemon, so the fallback is serving; sign it in there: run `codex login`."
+  },
+  {
+   "kind": "begin",
+   "record": {
+    "since": 1700000000.0,
+    "reason": "served_by_fallback",
+    "provider": "codex",
+    "shim_user": null
+   },
+   "offset": -19800,
+   "text": "Dream extraction degraded since 2023-11-14 16:43-05:30: served_by_fallback. The Codex CLI is signed out on the machine running the Pseudolife daemon, so the fallback is serving; sign it in there: run `codex login`."
+  },
+  {
+   "kind": "begin",
+   "record": {
+    "since": 1700000000.0,
+    "reason": "extractor_error",
+    "provider": "claude",
+    "shim_user": "svc"
+   },
+   "offset": 0,
+   "text": "Dream extraction stalled since 2023-11-14 22:13+00:00: extractor_error. The extractor answers with errors; check its log."
+  },
+  {
+   "kind": "begin",
+   "record": {
+    "since": 1700000000.0,
+    "reason": "extractor_error",
+    "provider": "claude",
+    "shim_user": "svc"
+   },
+   "offset": 39600,
+   "text": "Dream extraction stalled since 2023-11-15 09:13+11:00: extractor_error. The extractor answers with errors; check its log."
+  },
+  {
+   "kind": "begin",
+   "record": {
+    "since": 1700000000.0,
+    "reason": "extractor_error",
+    "provider": "claude",
+    "shim_user": "svc"
+   },
+   "offset": -19800,
+   "text": "Dream extraction stalled since 2023-11-14 16:43-05:30: extractor_error. The extractor answers with errors; check its log."
+  },
+  {
+   "kind": "begin",
+   "record": {
+    "since": 1700000000.0,
+    "reason": "login_expired",
+    "provider": "other",
+    "shim_user": "svc"
+   },
+   "offset": 0,
+   "text": "Dream extraction stalled since 2023-11-14 22:13+00:00: login_expired. The extractor CLI is signed out on the machine running the CLI shim; sign it in there: run `claude`, then `/login` (or `codex login`)."
+  },
+  {
+   "kind": "begin",
+   "record": {
+    "since": 1700000000.0,
+    "reason": "login_expired",
+    "provider": "other",
+    "shim_user": "svc"
+   },
+   "offset": 39600,
+   "text": "Dream extraction stalled since 2023-11-15 09:13+11:00: login_expired. The extractor CLI is signed out on the machine running the CLI shim; sign it in there: run `claude`, then `/login` (or `codex login`)."
+  },
+  {
+   "kind": "begin",
+   "record": {
+    "since": 1700000000.0,
+    "reason": "login_expired",
+    "provider": "other",
+    "shim_user": "svc"
+   },
+   "offset": -19800,
+   "text": "Dream extraction stalled since 2023-11-14 16:43-05:30: login_expired. The extractor CLI is signed out on the machine running the CLI shim; sign it in there: run `claude`, then `/login` (or `codex login`)."
+  },
+  {
+   "kind": "begin",
+   "record": {
+    "since": 1700000000.0,
+    "reason": "login_expired",
+    "provider": "claude",
+    "shim_user": "svc",
+    "shim_host": "gpu-box.example"
+   },
+   "offset": 0,
+   "text": "Dream extraction stalled since 2023-11-14 22:13+00:00: login_expired. The Claude Code CLI is signed out on the machine running the CLI shim (gpu-box.example); sign it in there as svc: run `claude`, then `/login`."
+  },
+  {
+   "kind": "begin",
+   "record": {
+    "since": 1700000000.0,
+    "reason": "login_expired",
+    "provider": "claude",
+    "shim_user": "svc",
+    "shim_host": "gpu-box.example"
+   },
+   "offset": 39600,
+   "text": "Dream extraction stalled since 2023-11-15 09:13+11:00: login_expired. The Claude Code CLI is signed out on the machine running the CLI shim (gpu-box.example); sign it in there as svc: run `claude`, then `/login`."
+  },
+  {
+   "kind": "begin",
+   "record": {
+    "since": 1700000000.0,
+    "reason": "login_expired",
+    "provider": "claude",
+    "shim_user": "svc",
+    "shim_host": "gpu-box.example"
+   },
+   "offset": -19800,
+   "text": "Dream extraction stalled since 2023-11-14 16:43-05:30: login_expired. The Claude Code CLI is signed out on the machine running the CLI shim (gpu-box.example); sign it in there as svc: run `claude`, then `/login`."
+  }
+ ],
+ "lines": [
+  {
+   "record": {
+    "since": 1792891234.9,
+    "reason": "extractor_unreachable"
+   },
+   "where": null,
+   "offset": 0,
+   "line": "Pseudolife-MCP: dreams stalled since 2026-10-25 01:20+00:00 (extractor_unreachable): check the extractor endpoint is up and reachable from the daemon."
+  },
+  {
+   "record": {
+    "since": 1792891234.9,
+    "reason": "extractor_unreachable"
+   },
+   "where": null,
+   "offset": 39600,
+   "line": "Pseudolife-MCP: dreams stalled since 2026-10-25 12:20+11:00 (extractor_unreachable): check the extractor endpoint is up and reachable from the daemon."
+  },
+  {
+   "record": {
+    "since": 1792891234.9,
+    "reason": "extractor_unreachable"
+   },
+   "where": null,
+   "offset": -19800,
+   "line": "Pseudolife-MCP: dreams stalled since 2026-10-24 19:50-05:30 (extractor_unreachable): check the extractor endpoint is up and reachable from the daemon."
+  },
+  {
+   "record": {
+    "since": 1700000000.0,
+    "reason": "served_by_fallback"
+   },
+   "where": null,
+   "offset": 0,
+   "line": "Pseudolife-MCP: dream primary extractor down since 2023-11-14 22:13+00:00 (served_by_fallback): the primary is down and the fallback is serving; check the primary extractor."
+  },
+  {
+   "record": {
+    "since": 1700000000.0,
+    "reason": "served_by_fallback"
+   },
+   "where": null,
+   "offset": 39600,
+   "line": "Pseudolife-MCP: dream primary extractor down since 2023-11-15 09:13+11:00 (served_by_fallback): the primary is down and the fallback is serving; check the primary extractor."
+  },
+  {
+   "record": {
+    "since": 1700000000.0,
+    "reason": "served_by_fallback"
+   },
+   "where": null,
+   "offset": -19800,
+   "line": "Pseudolife-MCP: dream primary extractor down since 2023-11-14 16:43-05:30 (served_by_fallback): the primary is down and the fallback is serving; check the primary extractor."
+  },
+  {
+   "record": {
+    "since": 1700000000.0,
+    "reason": "login_expired",
+    "provider": "claude",
+    "shim_user": "svc"
+   },
+   "where": null,
+   "offset": 0,
+   "line": "Pseudolife-MCP: dreams stalled since 2023-11-14 22:13+00:00 (login_expired): the Claude Code CLI is signed out on the machine running the Pseudolife daemon; sign it in there as svc: run `claude`, then `/login`."
+  },
+  {
+   "record": {
+    "since": 1700000000.0,
+    "reason": "login_expired",
+    "provider": "claude",
+    "shim_user": "svc"
+   },
+   "where": null,
+   "offset": 39600,
+   "line": "Pseudolife-MCP: dreams stalled since 2023-11-15 09:13+11:00 (login_expired): the Claude Code CLI is signed out on the machine running the Pseudolife daemon; sign it in there as svc: run `claude`, then `/login`."
+  },
+  {
+   "record": {
+    "since": 1700000000.0,
+    "reason": "login_expired",
+    "provider": "claude",
+    "shim_user": "svc"
+   },
+   "where": null,
+   "offset": -19800,
+   "line": "Pseudolife-MCP: dreams stalled since 2023-11-14 16:43-05:30 (login_expired): the Claude Code CLI is signed out on the machine running the Pseudolife daemon; sign it in there as svc: run `claude`, then `/login`."
+  },
+  {
+   "record": {
+    "since": 1700000000.0,
+    "reason": "login_expired",
+    "provider": "claude",
+    "shim_user": "svc"
+   },
+   "where": "this machine",
+   "offset": 0,
+   "line": "Pseudolife-MCP: dreams stalled since 2023-11-14 22:13+00:00 (login_expired): the Claude Code CLI is signed out on this machine; sign it in there as svc: run `claude`, then `/login`."
+  },
+  {
+   "record": {
+    "since": 1700000000.0,
+    "reason": "login_expired",
+    "provider": "claude",
+    "shim_user": "svc"
+   },
+   "where": "this machine",
+   "offset": 39600,
+   "line": "Pseudolife-MCP: dreams stalled since 2023-11-15 09:13+11:00 (login_expired): the Claude Code CLI is signed out on this machine; sign it in there as svc: run `claude`, then `/login`."
+  },
+  {
+   "record": {
+    "since": 1700000000.0,
+    "reason": "login_expired",
+    "provider": "claude",
+    "shim_user": "svc"
+   },
+   "where": "this machine",
+   "offset": -19800,
+   "line": "Pseudolife-MCP: dreams stalled since 2023-11-14 16:43-05:30 (login_expired): the Claude Code CLI is signed out on this machine; sign it in there as svc: run `claude`, then `/login`."
+  },
+  {
+   "record": {
+    "since": 1700000000.0,
+    "reason": "served_by_fallback",
+    "provider": "codex",
+    "shim_user": null
+   },
+   "where": "the machine running the Pseudolife daemon (box.example)",
+   "offset": 0,
+   "line": "Pseudolife-MCP: dream primary extractor down since 2023-11-14 22:13+00:00 (served_by_fallback): the Codex CLI is signed out on the machine running the Pseudolife daemon (box.example), so the fallback is serving; sign it in there: run `codex login`."
+  },
+  {
+   "record": {
+    "since": 1700000000.0,
+    "reason": "served_by_fallback",
+    "provider": "codex",
+    "shim_user": null
+   },
+   "where": "the machine running the Pseudolife daemon (box.example)",
+   "offset": 39600,
+   "line": "Pseudolife-MCP: dream primary extractor down since 2023-11-15 09:13+11:00 (served_by_fallback): the Codex CLI is signed out on the machine running the Pseudolife daemon (box.example), so the fallback is serving; sign it in there: run `codex login`."
+  },
+  {
+   "record": {
+    "since": 1700000000.0,
+    "reason": "served_by_fallback",
+    "provider": "codex",
+    "shim_user": null
+   },
+   "where": "the machine running the Pseudolife daemon (box.example)",
+   "offset": -19800,
+   "line": "Pseudolife-MCP: dream primary extractor down since 2023-11-14 16:43-05:30 (served_by_fallback): the Codex CLI is signed out on the machine running the Pseudolife daemon (box.example), so the fallback is serving; sign it in there: run `codex login`."
+  },
+  {
+   "record": {
+    "since": 1700000000.0,
+    "reason": "login_expired",
+    "provider": "claude",
+    "shim_user": "svc",
+    "shim_host": "gpu-box.example"
+   },
+   "where": "the machine running the Pseudolife daemon (box.example)",
+   "offset": 0,
+   "line": "Pseudolife-MCP: dreams stalled since 2023-11-14 22:13+00:00 (login_expired): the Claude Code CLI is signed out on the machine running the CLI shim (gpu-box.example); sign it in there as svc: run `claude`, then `/login`."
+  },
+  {
+   "record": {
+    "since": 1700000000.0,
+    "reason": "login_expired",
+    "provider": "claude",
+    "shim_user": "svc",
+    "shim_host": "gpu-box.example"
+   },
+   "where": "the machine running the Pseudolife daemon (box.example)",
+   "offset": 39600,
+   "line": "Pseudolife-MCP: dreams stalled since 2023-11-15 09:13+11:00 (login_expired): the Claude Code CLI is signed out on the machine running the CLI shim (gpu-box.example); sign it in there as svc: run `claude`, then `/login`."
+  },
+  {
+   "record": {
+    "since": 1700000000.0,
+    "reason": "login_expired",
+    "provider": "claude",
+    "shim_user": "svc",
+    "shim_host": "gpu-box.example"
+   },
+   "where": "the machine running the Pseudolife daemon (box.example)",
+   "offset": -19800,
+   "line": "Pseudolife-MCP: dreams stalled since 2023-11-14 16:43-05:30 (login_expired): the Claude Code CLI is signed out on the machine running the CLI shim (gpu-box.example); sign it in there as svc: run `claude`, then `/login`."
+  },
+  {
+   "record": {
+    "since": 1700000000.0,
+    "reason": "login_expired",
+    "provider": "codex",
+    "shim_remote": true
+   },
+   "where": null,
+   "offset": 0,
+   "line": "Pseudolife-MCP: dreams stalled since 2023-11-14 22:13+00:00 (login_expired): the Codex CLI is signed out on the machine running the CLI shim, not the daemon's; sign it in there: run `codex login`."
+  },
+  {
+   "record": {
+    "since": 1700000000.0,
+    "reason": "login_expired",
+    "provider": "codex",
+    "shim_remote": true
+   },
+   "where": null,
+   "offset": 39600,
+   "line": "Pseudolife-MCP: dreams stalled since 2023-11-15 09:13+11:00 (login_expired): the Codex CLI is signed out on the machine running the CLI shim, not the daemon's; sign it in there: run `codex login`."
+  },
+  {
+   "record": {
+    "since": 1700000000.0,
+    "reason": "login_expired",
+    "provider": "codex",
+    "shim_remote": true
+   },
+   "where": null,
+   "offset": -19800,
+   "line": "Pseudolife-MCP: dreams stalled since 2023-11-14 16:43-05:30 (login_expired): the Codex CLI is signed out on the machine running the CLI shim, not the daemon's; sign it in there: run `codex login`."
+  },
+  {
+   "record": {
+    "since": 1700000000.0,
+    "reason": "something_new"
+   },
+   "where": null,
+   "offset": 0,
+   "line": "Pseudolife-MCP: dreams stalled since 2023-11-14 22:13+00:00 (extractor_error): the extractor answers with errors; check its log."
+  },
+  {
+   "record": {
+    "since": 1700000000.0,
+    "reason": "something_new"
+   },
+   "where": null,
+   "offset": 39600,
+   "line": "Pseudolife-MCP: dreams stalled since 2023-11-15 09:13+11:00 (extractor_error): the extractor answers with errors; check its log."
+  },
+  {
+   "record": {
+    "since": 1700000000.0,
+    "reason": "something_new"
+   },
+   "where": null,
+   "offset": -19800,
+   "line": "Pseudolife-MCP: dreams stalled since 2023-11-14 16:43-05:30 (extractor_error): the extractor answers with errors; check its log."
+  },
+  {
+   "record": {},
+   "where": null,
+   "offset": 0,
+   "line": ""
+  },
+  {
+   "record": {},
+   "where": null,
+   "offset": 39600,
+   "line": ""
+  },
+  {
+   "record": {},
+   "where": null,
+   "offset": -19800,
+   "line": ""
   }
  ]
 }

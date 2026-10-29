@@ -208,6 +208,21 @@ fn caps(health: Option<&Map<String, Value>>) -> Value {
     Value::Object(out)
 }
 
+/// `dream_health_line(health, daemon_url)`: `unknown` with no `/health`
+/// answer, `no stall reported` for any answer without a stall object (an
+/// empty `{}` included, as Python's `isinstance(health, dict)` admits it).
+/// A stall object needs the session-start hook's stall line and where its
+/// extractor runs; that answer only the Python doctor gives, so it defers.
+fn dreams(health: Option<&Map<String, Value>>) -> Res<Value> {
+    match health {
+        None => Ok(json!("unknown")),
+        Some(health) => match health.get("stall") {
+            Some(Value::Object(_)) => Err(Defer),
+            _ => Ok(json!("no stall reported")),
+        },
+    }
+}
+
 fn coordination_snapshot(
     health: Option<&Map<String, Value>>,
     board_state: &str,
@@ -461,6 +476,7 @@ async fn diagnose(args: &Args) -> Res<(Value, bool)> {
         }
         Some(_) => return Err(Defer),
     }
+    put(&mut report, "dreams", dreams(health.as_ref())?);
     let mut tools_present = None;
     if status != Some(json!("ok")) {
         if board_state == "unauthorized" {
@@ -643,6 +659,33 @@ mod tests {
             Value::Object(passkeys),
             json!({"ok": false, "git_bash": "bash.exe", "error": "MaintainerPasskeysInvalid",
                    "recovery": "fix passkeys"})
+        );
+    }
+
+    #[test]
+    fn the_dreams_line_follows_dream_health_line_and_defers_a_stall() {
+        let line = |health: Option<Value>| {
+            let map = health.map(report);
+            dreams(map.as_ref()).ok()
+        };
+        assert_eq!(line(None), Some(json!("unknown")));
+        assert_eq!(line(Some(json!({}))), Some(json!("no stall reported")));
+        assert_eq!(
+            line(Some(json!({"status": "ok"}))),
+            Some(json!("no stall reported"))
+        );
+        for stall in [json!(null), json!("stalled"), json!([]), json!(1)] {
+            assert_eq!(
+                line(Some(json!({"status": "ok", "stall": stall}))),
+                Some(json!("no stall reported"))
+            );
+        }
+        assert_eq!(line(Some(json!({"status": "ok", "stall": {}}))), None);
+        assert_eq!(
+            line(Some(
+                json!({"status": "ok", "stall": {"kind": "signed_out"}})
+            )),
+            None
         );
     }
 

@@ -4,6 +4,7 @@
   // override and the reasoning effort. Each pick POSTs a one-knob patch at
   // once (no confirm, as in the classic console), and is refused while the
   // knob editor below holds unsaved edits so the two never interleave.
+  import InlineCode from "../insight/InlineCode.svelte";
   import { softError } from "../../lib/api/client";
   import { configApi, type DreamerStatus } from "../../lib/api/config";
   import {
@@ -19,6 +20,7 @@
     primaryHealth,
     primaryModel,
   } from "../../lib/dreamer";
+  import { stallNotice } from "../../lib/dream";
   import { actionError } from "../../lib/errors";
   import { fmtDateTime, fmtRelative } from "../../lib/format";
   import { toast } from "../../lib/overlay.svelte";
@@ -41,6 +43,8 @@
   const health = $derived(primaryHealth(status));
   const last = $derived(status.last_dream_extractor ?? null);
   const note = $derived(model ? modelNote(model) : "");
+  // The daemon's own stall line (cause and fix), shown as it wrote it.
+  const notice = $derived(stallNotice(status));
 
   let custom = $state("");
   // Prefill the field with a hand-typed override whenever the status changes.
@@ -86,6 +90,8 @@
     <h2 id="dreamer-title" class="panel-title">Dreamer</h2>
     <span class="meta">Which model consolidates memories</span>
   </div>
+
+  {#if notice}<p class="warn-line" role="status"><InlineCode text={notice} /></p>{/if}
 
   <dl class="facts">
     <div>
@@ -216,6 +222,12 @@
     flex-direction: column;
     gap: 18px;
     padding: 22px 24px;
+  }
+  .warn-line {
+    font-size: 12.5px;
+    line-height: 1.5;
+    color: var(--warn);
+    overflow-wrap: anywhere;
   }
   .facts {
     margin: 0;

@@ -294,6 +294,15 @@ def _build_health_payload(svc, token_present: bool) -> dict:
     if stall is not None:
         payload["stall"] = {key: stall.get(key) for key in (
             "since", "reason", "consecutive_failures", "last_success_at")}
+        # Which CLI is signed out, and whether its shim runs on another
+        # machine than the daemon, so doctor can say where to sign in. The
+        # shim's host and OS user stay on the authenticated surfaces
+        # (dream_status, the hook, the briefing): an internal hostname does
+        # not belong on an unauthenticated probe (security review, 42e1ac0b).
+        if stall.get("provider"):
+            payload["stall"]["provider"] = stall["provider"]
+            if stall.get("shim_host"):
+                payload["stall"]["shim_remote"] = True
     # The hook scripts this daemon was built with, so a cached plugin at the
     # same version but with different hooks can be told apart (2026-09-21).
     # Absent from a bare pip install, which ships no plugin tree.
