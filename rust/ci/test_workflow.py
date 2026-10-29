@@ -1421,6 +1421,7 @@ def test_rust_job_fits_a_cold_cache_and_bounds_the_override_builds():
 # --- self-hosted comparison lane (docs/specs/2026-10-19-self-hosted-parity-lane.md) ---
 
 SELF_HOSTED = "runner.environment == 'self-hosted'"
+DISK_STEP = "Check the runner's free disk"
 GATE_STEP = "Yield to this machine's full suite"
 VENV_STEP = "Give the shard its own Python environment"
 
@@ -1488,9 +1489,10 @@ def test_both_lanes_upload_under_distinct_names():
 
 def test_self_hosted_only_steps_leave_the_hosted_shard_unchanged():
     steps = workflow()["jobs"]["parity-checks"]["steps"]
-    gate = steps[0]
+    disk, gate = steps[0], steps[1]
+    assert disk["name"] == DISK_STEP and disk["if"] == SELF_HOSTED
     assert gate["name"] == GATE_STEP and gate["if"] == SELF_HOSTED
-    assert steps[1]["uses"] == "actions/checkout@v4"
+    assert steps[2]["uses"] == "actions/checkout@v4"
     venv = next(step for step in steps if step.get("name") == VENV_STEP)
     assert venv["if"] == SELF_HOSTED
     setup = next(step for step in steps if step.get("uses") == "actions/setup-python@v5")
@@ -1503,7 +1505,7 @@ def test_self_hosted_only_steps_leave_the_hosted_shard_unchanged():
     cache = next(step for step in steps if step.get("uses") == "Swatinem/rust-cache@v2")
     assert cache["with"]["save-if"] == "${{ runner.environment != 'self-hosted' }}"
     added = [step for step in steps if SELF_HOSTED in step.get("if", "")]
-    assert [step["name"] for step in added] == [GATE_STEP, VENV_STEP]
+    assert [step["name"] for step in added] == [DISK_STEP, GATE_STEP, VENV_STEP]
 
 
 GATE_STUBS = r'''$ErrorActionPreference = 'stop'
@@ -1529,12 +1531,11 @@ function pseudolife-mcp {
     ("the host's lease", [[0, "free"]], {"PSEUDOLIFE_PARITY_LEASE": "full-suite"}, False, 0, 0),
     ("no lock directory", [[0, "free"]], {"PSEUDOLIFE_PARITY_LOCK_DIR": ""}, False, 0, 0),
     ("no cli", [[0, "free"]], {"PL_NO_CLI": "1"}, False, 0, 0),
-    ("disk below the floor", [[0, "free"]], {"PARITY_MIN_FREE_GB": "1000000"}, False, 0, 0),
 ])
 def test_selfhosted_gate_runs_only_on_a_free_lease(tmp_path, case, sequence, overrides,
                                                    accepted, calls, sleeps):
     import os
-    gate = workflow()["jobs"]["parity-checks"]["steps"][0]
+    gate = next(step for step in workflow()["jobs"]["parity-checks"]["steps"] if step.get("name") == GATE_STEP)
     log, summary = tmp_path / "calls.log", tmp_path / "summary.md"
     log.write_text("", encoding="utf-8")
     env = dict(os.environ, PL_LOG=str(log), PL_SEQUENCE=json.dumps(sequence),
@@ -1542,8 +1543,6 @@ def test_selfhosted_gate_runs_only_on_a_free_lease(tmp_path, case, sequence, ove
                PSEUDOLIFE_PARITY_LEASE="full-suite@fixture",
                PSEUDOLIFE_PARITY_LOCK_DIR=str(tmp_path / "locks"),
                **workflow()["jobs"]["parity-selfhosted"]["env"])
-    # Only the low-disk case may depend on this machine's free space.
-    env["PARITY_MIN_FREE_GB"] = "0"
     env.pop("PSEUDOLIFE_SUITE_LEASE", None)
     env.pop("PSEUDOLIFE_SUITE_LOCK_DIR", None)
     env.update(overrides)
@@ -1558,6 +1557,26 @@ def test_selfhosted_gate_runs_only_on_a_free_lease(tmp_path, case, sequence, ove
         assert line == f"call lease check --json full-suite@fixture | full-suite@fixture | {tmp_path / 'locks'}"
     yielded = summary.exists() and "Yielded" in summary.read_text(encoding="utf-8")
     assert yielded == (case == "yields")
+
+
+@pytest.mark.parametrize("floor, accepted", [("0", True), ("1000000", False)])
+def test_selfhosted_disk_check_names_a_full_disk_before_the_lease(tmp_path, floor, accepted):
+    import os
+    disk = workflow()["jobs"]["parity-checks"]["steps"][0]
+    assert disk["name"] == DISK_STEP
+    summary = tmp_path / "summary.md"
+    env = dict(os.environ, GITHUB_WORKSPACE=str(tmp_path), GITHUB_STEP_SUMMARY=str(summary),
+               **workflow()["jobs"]["parity-selfhosted"]["env"])
+    env["PARITY_MIN_FREE_GB"] = floor
+    result = subprocess.run(["pwsh", "-NoProfile", "-NonInteractive", "-Command",
+                             "$ErrorActionPreference = 'stop'\n" + disk["run"]],
+                            env=env, capture_output=True, text=True)
+    assert (result.returncode == 0) == accepted, result.stdout + result.stderr
+    # Every shard records its free disk, the comparison week's disk figure.
+    assert f"GB free on the runner's work drive (floor {floor} GB)" in summary.read_text(encoding="utf-8")
+    if not accepted:
+        assert "so the shard did not run" in result.stderr + result.stdout
+        assert '"Disk use"' in result.stderr + result.stdout
 
 
 # --- the required gate holds only deterministic Windows work ---
@@ -1753,9 +1772,9 @@ def pytest_lines(script):
 
 def test_parity_shards_record_their_runner():
     steps = workflow()["jobs"]["parity-checks"]["steps"]
-    facts = steps[2]
+    facts = steps[3]
     assert facts["name"] == FACTS_STEP and "if" not in facts and facts["shell"] == "pwsh"
-    assert steps[1]["uses"] == "actions/checkout@v4"
+    assert steps[2]["uses"] == "actions/checkout@v4"
 
 
 def test_parity_pytest_runs_name_failures_and_keep_reports():

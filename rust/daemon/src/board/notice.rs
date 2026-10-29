@@ -63,7 +63,8 @@ impl Board {
         if !self.config.enabled {
             return None;
         }
-        self.service.storage_tier().await.ok()?;
+        // `_ensure_tier(full=True)` before the coordination lock.
+        let ready = self.full_tier().await.ok()?;
         let mut conn = self.conn.lock().await;
         let client = conn.client().await.ok()?;
         for attempt in 0..2 {
@@ -87,7 +88,7 @@ impl Board {
                     i
                 }
             };
-            let (hlc, epoch) = self.tick().await.ok()?;
+            let (hlc, epoch) = super::dispatch::stamp(&ready);
             let to = json!("all");
             let body = json!(text);
             let request_id = json!(uuid_hex());

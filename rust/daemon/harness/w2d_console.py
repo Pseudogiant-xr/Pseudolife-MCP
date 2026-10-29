@@ -2,8 +2,9 @@
 (oracle) against the Rust daemon over ``GET /api/facts``,
 ``/api/facts/history``, ``/api/world``, ``/api/lessons``, ``/api/sources``,
 ``/api/recent``, ``/api/chain``, ``/api/entry``, ``/api/episodes``,
-``/api/episodes/summary``, ``/api/consolidation``, ``/api/overview`` and
-``/api/agents``' default view.
+``/api/episodes/summary``, ``/api/consolidation``, ``/api/overview``,
+``/api/agents``' default view and the maintainer reads ``/api/maintainer``,
+``/sent`` and ``/inbox`` (the maintainer's board state is seeded as rows).
 
 usage:
   python w2d_console.py live    --rust-bin PATH [--only NAME ...] [--out FILE]
@@ -42,7 +43,8 @@ MUTANTS = ["console-facts-no-contender", "console-sources-by-name", "console-cha
            "console-episodes-unsorted", "mcp-get-no-db-bump", "mcp-get-no-use-credit",
            "mcp-recent-oldest-first", "mcp-consolidation-unsorted",
            "console-overview-contested-rows", "console-agents-no-limit-refusal",
-           "console-agents-ignore-limit"]
+           "console-agents-ignore-limit", "maintainer-gate-open", "maintainer-config-unchecked",
+           "maintainer-available-any-key", "maintainer-roles-any-grant"]
 
 OPS = ("get",)
 
@@ -352,7 +354,144 @@ def scenarios() -> dict[str, dict]:
     }
 
 
-SCENARIOS = scenarios()
+MAINTAINER_CONFIG = ("coordination:\n  maintainer:\n    rp_id: console.example.com\n"
+                     "    origin: https://console.example.com:8443\n")
+NOW = "extract(epoch from now())"
+
+
+def _agent(agent_id: str, principal: str, label: str, **cols) -> dict:
+    names = ["agent_id", "principal", "label", "created_at", "last_activity", *cols]
+    values = [f"'{agent_id}'", f"'{principal}'", f"'{label}'", NOW, NOW,
+              *[str(v) for v in cols.values()]]
+    return sql(f"INSERT INTO coordination_agents ({', '.join(names)}) "
+               f"VALUES ({', '.join(values)})")
+
+
+def _message(mid: str, sender: str, recipient: str, sender_principal: str, text: str,
+             at: float, seq: int, **cols) -> dict:
+    names = ["message_id", "sender_agent_id", "recipient_agent_id", "sender_principal", "text",
+             "request_id", "fingerprint", "recipient_sequence", "created_at", "expires_at", *cols]
+    values = [f"'{mid}'", f"'{sender}'", f"'{recipient}'", f"'{sender_principal}'", f"'{text}'",
+              f"'req-{mid}'", f"'fp-{mid}'", str(seq), f"{NOW} - {at}", f"{NOW} + 86400",
+              *[str(v) for v in cols.values()]]
+    return sql(f"INSERT INTO coordination_messages ({', '.join(names)}) "
+               f"VALUES ({', '.join(values)})")
+
+
+def _event(event: str, actor: str, payload: str, *, principal: str = "", agent_id: str = "",
+           ago: float = 0) -> dict:
+    return sql("INSERT INTO coordination_events (seq, event, actor, principal, agent_id, payload, "
+               "created_at, prev_hash, hash) SELECT COALESCE(MAX(seq), 0) + 1, "
+               f"'{event}', '{actor}', '{principal}', '{agent_id}', '{payload}', {NOW} - {ago}, "
+               "'seed', 'seed' FROM coordination_events")
+
+
+def _lease(name: str, holder: str, fence: int) -> dict:
+    return sql("INSERT INTO coordination_leases (name, holder_agent_id, holder_principal, fence, "
+               f"acquired_at, expires_at) VALUES ('{name}', '{holder}', 'default', {fence}, "
+               f"{NOW}, {NOW} + 3600)")
+
+
+def _passkey(cid: str, state: str, active_from: str, created: int, label: str) -> dict:
+    return sql("INSERT INTO maintainer_passkeys (credential_id, public_key, alg, label, "
+               f"enrolled_by, state, active_from, created_at) VALUES ('{cid}', '\\x00', -7, "
+               f"'{label}', 'bootstrap', '{state}', {active_from}, {created})")
+
+
+# The maintainer's board state, as rows (the reads verify no audit chain
+# and hold no resident copy): passkeys in each state, the maintainer's
+# address and two sessions, its sent mail and the replies, a granted and an
+# unrecorded delegate hold, a coordinator, and key-change records (one
+# with a payload that is not an object, which the listing skips).
+MAINTAINER_SEED = [
+    _passkey("cred-active-0001", "active", "0", 100, "laptop"),
+    _passkey("cred-pending-0002", "pending", "NULL", 200, "phone"),
+    _passkey("cred-revoked-0003", "revoked", "0", 300, "old key"),
+    _agent("maint-0001", "maintainer", "maintainer", status="'maintainer'"),
+    _agent("agent-alpha-0001", "default", "alpha session",
+           attachment_id="'att-1'", lease_until=f"{NOW} + 600", wake_enabled="true"),
+    _agent("agent-beta-0002", "default", "beta session"),
+    _message("m-sent-1", "maint-0001", "agent-alpha-0001", "maintainer", "Please rebase.", 30, 1,
+             origin="'maintainer'", maintainer_proof="'{\"label\": \"laptop\"}'::jsonb",
+             wake="'{\"decision\": \"rung\"}'::jsonb"),
+    _message("m-sent-2", "maint-0001", "agent-beta-0002", "maintainer", "Hold the deploy.", 20, 1,
+             origin="'maintainer'", repudiated_at=f"{NOW} - 5"),
+    _message("m-reply-1", "agent-alpha-0001", "maint-0001", "default", "Rebased.", 10, 1,
+             reply_to="'m-sent-1'"),
+    _message("m-reply-2", "agent-beta-0002", "maint-0001", "default", "Holding.", 5, 2,
+             acknowledged_at=f"{NOW} - 1"),
+    _lease("delegate:Pseudolife-MCP", "agent-alpha-0001", 3),
+    _event("lease_delegate", "operator", '{"name": "delegate:Pseudolife-MCP", "fence": 3}',
+           agent_id="agent-alpha-0001"),
+    _lease("delegate:Other", "agent-beta-0002", 1),
+    _lease("coordinator:Pseudolife-MCP", "agent-beta-0002", 2),
+    _event("maintainer_key", "daemon", '{"change": "enrolled", "credential_id": '
+           '"cred-active-0001", "label": "laptop", "by": "bootstrap", "path": "console"}',
+           principal="default", ago=50),
+    _event("maintainer_key", "operator", '[1, 2]', ago=40),
+    _event("maintainer_key", "operator", '{"change": "revoked", "credential_id": '
+           '"cred-revoked-0003", "by": "host", "path": "host", "revoked": "cred-revoked-0003"}',
+           ago=30),
+]
+
+MAINTAINER_GETS = [
+    get("/api/maintainer"),
+    get("/api/maintainer/sent"),
+    get("/api/maintainer/sent", limit=1),
+    get("/api/maintainer/sent", limit=0),
+    get("/api/maintainer/sent", limit="x"),
+    get("/api/maintainer/inbox"),
+    get("/api/maintainer/inbox", limit=999),
+]
+
+
+def maintainer_scenarios() -> dict[str, dict]:
+    return {
+        # The near-miss legitimate caller: an admitted bearer on a board
+        # with a usable passkey origin.
+        "console-maintainer": {
+            "config": MAINTAINER_CONFIG,
+            "seed": [store("A note before the maintainer reads."), *MAINTAINER_SEED],
+            "ops": [
+                *MAINTAINER_GETS,
+                # A key whose quarantine has not passed signs nothing. One
+                # fixed future stamp (2100-01-01): this op runs on each bank
+                # separately, so a clock read here would differ per side.
+                sql("UPDATE maintainer_passkeys SET active_from = 4102444800 "
+                    "WHERE credential_id = 'cred-active-0001'"),
+                get("/api/maintainer"),
+            ],
+        },
+        # Refused: no maintainer origin configured (409 with the rule).
+        "console-maintainer-unset": {
+            "config": None,
+            "seed": [store("A note.")],
+            "ops": [get("/api/maintainer"), get("/api/maintainer/sent")],
+        },
+        "console-maintainer-bad-origin": {
+            "config": ("coordination:\n  maintainer:\n    rp_id: console.example.com\n"
+                       "    origin: https://console.example.com:443\n"),
+            "seed": [store("A note.")],
+            "ops": [get("/api/maintainer/inbox")],
+        },
+        # Refused: the bearer's principal is not admitted to the board.
+        "console-maintainer-not-admitted": {
+            "config": MAINTAINER_CONFIG.replace(
+                "coordination:\n", "coordination:\n  allowed_principals: [someone-else]\n"),
+            "seed": [store("A note.")],
+            "ops": [get("/api/maintainer"), get("/api/maintainer/inbox")],
+        },
+        # Refused: the board is off.
+        "console-maintainer-board-off": {
+            "config": MAINTAINER_CONFIG.replace("coordination:\n",
+                                                "coordination:\n  enabled: false\n"),
+            "seed": [store("A note.")],
+            "ops": [get("/api/maintainer")],
+        },
+    }
+
+
+SCENARIOS = {**scenarios(), **maintainer_scenarios()}
 
 
 def install() -> None:

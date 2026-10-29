@@ -116,14 +116,19 @@ class DreamStallTracker:
                       "last_error": self.last_error,
                       "last_success_at": self.last_success_at}
 
-    def record(self, result: dict, *, served_by_fallback: bool) -> None:
-        """Account one ``dream_run_auto`` result."""
+    def record(self, result: dict, *, served_by_fallback: bool,
+               primary_probe: dict | None = None) -> None:
+        """Account one ``dream_run_auto`` result. ``primary_probe`` is the
+        auto-mode builder's failed primary probe (``reason``, ``error``,
+        ``fallback_resolves``), if any: when the fallback served, its cause
+        is the primary's, and a fallback that failed too cannot hide it."""
         if result.get("skipped") or result.get("error"):
             return
         pulled = result.get("pulled") or 0
         with self._lock:
             now = self.clock()
             err = result.get("extractor_error") or {}
+            failed = True
             if result.get("extractor_failed"):
                 if result.get("hold_phase") == "write":
                     return              # the database, not the extractor
@@ -136,12 +141,23 @@ class DreamStallTracker:
                 reason = err.get("reason") or "extractor_error"
                 error = err.get("error") or "every pulled memory failed extraction"
             elif served_by_fallback:
-                reason, error = "served_by_fallback", "primary health probe failed"
+                failed = False
+                reason = "served_by_fallback"
+                error = (f"primary {primary_probe['error']}" if primary_probe
+                         else "primary health probe failed")
             elif pulled > 0:
                 self._succeed(now)
                 return
             else:
                 return
+            if failed and primary_probe:
+                if served_by_fallback:
+                    # The fallback failed too (2026-10-27: an unresolvable
+                    # sidecar's DNS error hid a signed-out primary).
+                    reason = primary_probe["reason"]
+                    error = f"primary {primary_probe['error']}; fallback {error}"
+                elif not primary_probe.get("fallback_resolves", True):
+                    error = f"primary {error}; fallback does not resolve"
             self.failures += 1
             if self.first_failure_at is None:
                 self.first_failure_at = now
@@ -2944,7 +2960,8 @@ class DreamOps:
         from pseudolife_memory.memory.dream import resolve_endpoints
         forced = resolve_endpoints(self.config.memory.dream)["mode"] == "fallback"
         _stall_tracker(self).record(
-            result, served_by_fallback=which == "fallback" and not forced)
+            result, served_by_fallback=which == "fallback" and not forced,
+            primary_probe=getattr(extractor, "primary_probe", None))
         notify = getattr(self, "dream_stall_notify", None)
         if notify is not None:
             notify()

@@ -317,8 +317,7 @@ def start(kind: str, scn: S.Scenario, binary: Path, root: Path, dsn: str, tag: s
         if os.environ.get("PSEUDOLIFE_DAEMON_MUTANT"):
             env["PSEUDOLIFE_DAEMON_MUTANT"] = os.environ["PSEUDOLIFE_DAEMON_MUTANT"]
         d = daemons.rust_daemon(binary, home, port, env)
-    # The board's own tiers come after (wait_ready below): the Rust arm
-    # deliberately needs only storage, so init may never finish here.
+    # The board's own tiers come after (wait_ready below).
     return d.start(240, stages=("principals",))
 
 
@@ -355,10 +354,10 @@ def run_scenario(scn: S.Scenario, binary: Path, root: Path, mode: str, record: b
             cleanup.callback(procs[side].stop)
             arms[side] = Arm(side, procs[side], dsn, retention_days)
         for side, proc in procs.items():
-            # Both arms need storage before read-only Console snapshots.
-            # Python also finishes embedding warmup, which holds its service
-            # lock; the Rust board intentionally needs only the storage tier.
-            wait_ready(proc.port, require_embedder=side == "python" or getattr(scn, "needs_bank", False))
+            # Both arms finish initializing: a send ticks the service clock,
+            # which only the initialized service holds (W2F-SHARED-HLC), and
+            # Python's embedding warmup holds its service lock.
+            wait_ready(proc.port)
         recorded = {"responses": {}, "states": {}}
         for i, step in enumerate(scn.steps()):
             out = {side: arms[side].run(step) for side in sides}

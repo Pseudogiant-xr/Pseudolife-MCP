@@ -52,7 +52,7 @@ fn s_param(q: &HashMap<String, String>, key: &str) -> Option<String> {
 /// `_i(params, key, default)`: `int(v)`, else the default. Python's
 /// integers are unbounded; one past i64 saturates, which every bound here
 /// reads the same way (all rows, or none).
-fn i_param(q: &HashMap<String, String>, key: &str, default: i64) -> i64 {
+pub(crate) fn i_param(q: &HashMap<String, String>, key: &str, default: i64) -> i64 {
     q.get(key)
         .filter(|v| !v.is_empty())
         .and_then(|v| py_int(v).or_else(|| saturated_int(v)))

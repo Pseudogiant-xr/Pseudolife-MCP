@@ -669,6 +669,21 @@ jobs:
       # its own prefix so both lanes can upload the same outcomes.
       PARITY_ARTIFACT_PREFIX: ''
     steps: &parity_steps
+      # Self-hosted only: CLAUDE.md "Disk space" keeps heavy work off a drive
+      # with under 8 GB free. A step of its own, so a full disk is named as
+      # one: every failure the 2026-10-27 nightly blamed on the yield step
+      # was this check (6 GB free).
+      - name: Check the runner's free disk
+        if: runner.environment == 'self-hosted'
+        shell: pwsh
+        run: |
+          $freeGb = [math]::Floor([IO.DriveInfo]::new($env:GITHUB_WORKSPACE).AvailableFreeSpace / 1GB)
+          $facts = "$freeGb GB free on the runner's work drive (floor $env:PARITY_MIN_FREE_GB GB)"
+          Write-Output $facts
+          if ($env:GITHUB_STEP_SUMMARY) { $facts | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append }
+          if ($freeGb -lt [int]$env:PARITY_MIN_FREE_GB) {
+            throw "Only $freeGb GB free on the runner's work drive, under the $env:PARITY_MIN_FREE_GB GB floor, so the shard did not run. The machine's cleanup log says what it freed (docs/specs/2026-10-19-self-hosted-parity-lane.md, `"Disk use`"); free space on that drive, then rerun."
+          }
       # Self-hosted only (docs/specs/2026-10-19-self-hosted-parity-lane.md):
       # the runner's own configuration names this machine's full-suite lease
       # and lock directory; the tree never names a machine. Runs before
@@ -684,11 +699,6 @@ jobs:
           }
           if (-not (Get-Command pseudolife-mcp -ErrorAction SilentlyContinue)) {
             throw 'pseudolife-mcp is not on the runner PATH; install it for the runner user with: uv tool install pseudolife-mcp'
-          }
-          # CLAUDE.md "Disk space": no heavy work below 8 GB free.
-          $freeGb = [math]::Floor([IO.DriveInfo]::new($env:GITHUB_WORKSPACE).AvailableFreeSpace / 1GB)
-          if ($freeGb -lt [int]$env:PARITY_MIN_FREE_GB) {
-            throw "Only $freeGb GB free on the runner's work drive; the floor is $env:PARITY_MIN_FREE_GB GB"
           }
           # The lease check reads these two for this process only, never the shard's tests.
           $env:PSEUDOLIFE_SUITE_LEASE = $lease

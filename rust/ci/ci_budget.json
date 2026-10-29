@@ -161,7 +161,7 @@
       "fixtures": "defc5e07c5ac3f94",
       "candidate": "77b0c5fa6b2afcbf",
       "candidate-harness": "ab479a8fc85283e7",
-      "parity-checks": "dc6efde1c2658559",
+      "parity-checks": "76658076fa1ea57e",
       "daemon-image": "cf93a3a209618bdc",
       "parity": "4c39a489bf4b1642"
     },
@@ -180,6 +180,11 @@
         "job": "scope",
         "fingerprint": "96dd91911ecc126e",
         "reason": "Classification only: a regenerated producer census beside docs keeps a docs-only diff docs-only; same steps, same minutes"
+      },
+      {
+        "job": "parity-checks",
+        "fingerprint": "76658076fa1ea57e",
+        "reason": "adds one self-hosted-only step (the free-disk check moved out of the lease gate); it is skipped on hosted runners, so no hosted minutes change"
       },
       {
         "job": "scope",
@@ -237,11 +242,31 @@
       "lock-resolve": "83bcc6b654896c6d",
       "test": "ac414107d3d9c71d",
       "test-lite-linux": "44e2a8f2c01baeab",
-      "test-lite-windows": "c02e5b0ebea51aa2",
+      "test-lite-windows": "01f3aa5029dd38ce",
       "test-lite-macos": "dc361f58439e1e1e",
       "frontend": "b1b6a1a1278f2e60"
     },
     "accepted": [
+      {
+        "job": "test-lite-windows",
+        "fingerprint": "01f3aa5029dd38ce",
+        "reason": "adds tests/test_runner_cleanup.py (15 cases, under 1 s locally); no new setup or step"
+      },
+      {
+        "job": "test-lite-windows",
+        "fingerprint": "01f3aa5029dd38ce",
+        "reason": "adds tests/test_runner_cleanup.py (19 cases, under 1 s locally); no new setup or step"
+      },
+      {
+        "job": "test-lite-windows",
+        "fingerprint": "01f3aa5029dd38ce",
+        "reason": "adds tests/test_runner_cleanup.py (22 cases, under 1 s locally); no new setup or step"
+      },
+      {
+        "job": "test-lite-windows",
+        "fingerprint": "01f3aa5029dd38ce",
+        "reason": "adds tests/test_runner_cleanup.py (23 cases, under 1 s locally); no new setup or step"
+      },
       {
         "job": "scope",
         "fingerprint": "3954688b694461a6",
