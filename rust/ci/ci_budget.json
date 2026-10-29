@@ -242,8 +242,8 @@
       "lock-resolve": "83bcc6b654896c6d",
       "test": "ac414107d3d9c71d",
       "test-lite-linux": "44e2a8f2c01baeab",
-      "test-lite-windows": "01f3aa5029dd38ce",
-      "test-lite-macos": "dc361f58439e1e1e",
+      "test-lite-windows": "931a46f2dd7a6c48",
+      "test-lite-macos": "2abde9b5cf74fc3d",
       "frontend": "b1b6a1a1278f2e60"
     },
     "accepted": [
@@ -271,6 +271,16 @@
         "job": "scope",
         "fingerprint": "3954688b694461a6",
         "reason": "2026-10-29: the classify step drops the CI-input grep; no new step, command or fetch, so its minutes hold"
+      },
+      {
+        "job": "test-lite-windows",
+        "fingerprint": "931a46f2dd7a6c48",
+        "reason": "adds tests/test_prune_worktrees.py and tests/test_ops_install_worktree_retention.py to the one pytest step, beside tests/test_runner_cleanup.py from master: no new job, shard or setup step; about +1 minute of test time (both files ran in 57s natively on Windows 2026-10-27), keeping runner minutes near 62 of the 67 limit; re-measure from the next batch run"
+      },
+      {
+        "job": "test-lite-macos",
+        "fingerprint": "2abde9b5cf74fc3d",
+        "reason": "adds tests/test_prune_worktrees.py to the one pytest step: no new job, shard or setup step; about +1 minute of test time (the file ran in 52s natively on Windows 2026-10-27), keeping runner minutes near 62 of the 67 limit; re-measure from the next batch run"
       }
     ]
   }

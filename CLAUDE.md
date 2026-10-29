@@ -381,6 +381,10 @@ bank ("dev machines homelab"), never in the tree.
   and tell the maintainer or your launching session; others' worktrees,
   evidence and caches are not yours, and removing a merged branch's cache
   (by its owner or with the maintainer's go) is recorded (path, size, why).
+- **When all of a session's work has merged and nothing is stacked on it,**
+  it runs `python ops/prune_worktrees.py --mine --apply` before it ends,
+  which removes its own worktree and build cache only if every safety
+  check passes (`docs/dev/worktree-retention.md`).
 - **Watchers include disk:** each heartbeat over a long run reports free
   disk.
 
