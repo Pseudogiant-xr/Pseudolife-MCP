@@ -159,7 +159,7 @@ def test_a_grant_warns_when_the_grantee_has_no_live_listener(svc):
     out, _ = role(svc, auth, "grant-delegate", project="p", agent_id=deaf["agent_id"], hold=HOUR)
     assert (out["reachable"], out["reason"]) == (False, "wake_disabled")
     assert out["warning"] == coordination_store.UNREACHABLE_WARNING.format(
-        role="delegate", reason=coordination_store.UNREACHABLE_REASONS["wake_disabled"])
+        role="conductor", reason=coordination_store.UNREACHABLE_REASONS["wake_disabled"])
     out, _ = role(svc, auth, "grant-delegate", project="p", agent_id=live["agent_id"], hold=HOUR)
     assert (out["reachable"], out["reason"]) == (True, None) and "warning" not in out
     out, _ = role(svc, auth, "assign-coordinator", project="p", agent_id=deaf["agent_id"],

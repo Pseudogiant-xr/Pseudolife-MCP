@@ -18,7 +18,7 @@ pub const DELEGATE_PREFIX: &str = "delegate:";
 const ROLE_ACTORS: [&str; 2] = ["operator", "maintainer"];
 const WAKE_SERVE_REPEAT: f64 = 25.0;
 const LEASE_CLEAR_GRACE: f64 = 60.0;
-const DONE_REOPEN_BY: &str = "urgent mail from the maintainer, the maintainer's delegate for the project, \
+const DONE_REOPEN_BY: &str = "urgent mail from the maintainer, the maintainer's conductor for the project, \
      or the park's named clearer";
 const WITHHELD_RETRY: &str = "urgent=true, or clears=<its park_needs>, rings this park";
 pub const FALLBACK_CODEX: &str = "Mail is queued for receive on the thread's next turn and rings once its Codex \

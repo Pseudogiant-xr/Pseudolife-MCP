@@ -27,7 +27,7 @@
   } = $props();
 
   const uid = $props.id();
-  const roleName = $derived(kind === "delegate" ? "your delegate" : "the coordinator");
+  const roleName = $derived(kind === "delegate" ? "your conductor" : "the coordinator");
   let text = $state("");
   let sending = $state(false);
 
@@ -111,7 +111,7 @@
     class="textarea"
     rows="2"
     placeholder={kind === "delegate"
-      ? "Tell your delegate what to do next"
+      ? "Tell your conductor what to do next"
       : "Ask the coordinator to queue, assign or chase something"}
     bind:value={text}
     aria-invalid={tooLong}

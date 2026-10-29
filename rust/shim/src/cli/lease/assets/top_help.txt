@@ -13,7 +13,7 @@ positional arguments:
                         -- COMMAND, run it only when free
     list                show the board's leases and the local lock files
     break               (operator) free a lease whatever its holder says
-    delegate            (operator) make one session the maintainer's delegate
+    delegate            (operator) make one session the maintainer's conductor
                         for a project
 
 options:

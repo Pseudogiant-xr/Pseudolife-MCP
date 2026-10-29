@@ -59,7 +59,12 @@ fn unknown_mode_uses_python_quotes_and_exit_two() {
 
 #[test]
 fn recognized_deferred_modes_are_not_reported_as_python_unknown_modes() {
-    for mode in ["maintainer", "test-login", "delegate-watch"] {
+    for mode in [
+        "maintainer",
+        "test-login",
+        "conductor-watch",
+        "delegate-watch",
+    ] {
         let output = Command::new(env!("CARGO_BIN_EXE_pseudolife-stdio"))
             .arg(mode)
             .output()

@@ -20,4 +20,4 @@ If a test, a tool or a process fails in a way that has nothing to do with your c
 
 ## Waiting and delivery
 
-A park does not arm a listener. Claude Code's Stop hook listens while the session is open; Codex uses its doorbell. Otherwise say `next-turn-only`. `done` stays reachable: urgent mail from the maintainer, the maintainer's delegate for the project or the named clearer reopens it. `rung` means an armed path, not action. On `no_path`, follow its `fallback_paths` (Claude Desktop `send_message` starts a turn, also when the board is down); otherwise tell the maintainer when urgent.
+A park does not arm a listener. Claude Code's Stop hook listens while the session is open; Codex uses its doorbell. Otherwise say `next-turn-only`. `done` stays reachable: urgent mail from the maintainer, the maintainer's conductor for the project or the named clearer reopens it. `rung` means an armed path, not action. On `no_path`, follow its `fallback_paths` (Claude Desktop `send_message` starts a turn, also when the board is down); otherwise tell the maintainer when urgent.

@@ -47,7 +47,7 @@ The shipped configuration is deliberately conservative:
   authentication — anything that can make a loopback-looking request to a
   tokenless daemon can read the bank.
   The maintainer actions under `/api/maintainer` (a board message sent as
-  the maintainer, withdrawing a sent message, a delegate or coordinator
+  the maintainer, withdrawing a sent message, a conductor or coordinator
   role change, adding a passkey (after the first, which the one-time
   enrolment code admits), cancelling or revoking one) need more than the bearer: each is
   signed with the maintainer's WebAuthn passkey, user verification
