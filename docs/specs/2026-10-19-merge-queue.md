@@ -48,10 +48,10 @@ pins the names.)
   = head) applies when the group's whole range is a release cut.
 - **Producer census and daemon image.** Both take the group's
   `merge_group.base_sha` as the comparison base, as they take a PR's base.
-- **Concurrency.** Each queue entry runs on its own branch ref
-  (`gh-readonly-queue/master/...`). Its runs therefore never share a
-  concurrency group with a pull request or a master push. No PR push can
-  cancel a queue run, and a queue run cancels nothing.
+- **Concurrency.** Each queue run gets a concurrency group of its own (its
+  run id; since 2026-10-29 only an ordinary pull request shares a group,
+  with its own later pushes). No PR push can cancel a queue run, and a
+  queue run cancels nothing.
 
 ### The required Parity gate
 

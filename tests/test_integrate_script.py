@@ -566,6 +566,21 @@ def test_open_refuses_when_a_members_own_ci_went_red_after_build(world, capsys):
     assert world.remote_branches() == [] and world.gh.mutations() == []
 
 
+def test_open_takes_a_member_whose_own_ci_was_cancelled_after_build(world, capsys):
+    # The near miss of the test above: a cancelled run is no known failure.
+    sha10 = world.pr(10, {"b.txt": "b\n"})
+    sha11 = world.pr(11, {"c.txt": "c\n"})
+    world.gh.add(10, sha10)
+    world.gh.add(11, sha11, statusCheckRollup=[{"status": "IN_PROGRESS", "conclusion": None}])
+    assert _build() == 0
+    capsys.readouterr()
+    world.gh.ready[1]["statusCheckRollup"] = [{"status": "COMPLETED", "conclusion": "CANCELLED"}]
+
+    assert _open(world) == 0, capsys.readouterr()
+
+    assert world.remote_branches() == [f"integrate/{DATE}-batch-1"]
+
+
 def test_conflict_markers_a_member_committed_are_flagged_in_the_body(world, capsys):
     sha10 = world.pr(10, {"b.txt": "<<<<<<< HEAD\nours\n=======\ntheirs\n>>>>>>> x\n"})
     sha11 = world.pr(11, {"c.txt": "c\n"})
@@ -616,7 +631,10 @@ def test_status_lists_each_labelled_pr_and_its_mergeability(world, capsys):
     [{"state": "PENDING"}],                            # a pending StatusContext
     [],                                                # no checks yet
     [{"status": "COMPLETED", "conclusion": "SUCCESS"}],  # green
-], ids=["in-progress", "status-pending", "none", "green"])
+    [{"status": "COMPLETED", "conclusion": "CANCELLED"}],  # superseded or cancelled
+    [{"status": "COMPLETED", "conclusion": "SUCCESS"},
+     {"status": "COMPLETED", "conclusion": "CANCELLED"}],
+], ids=["in-progress", "status-pending", "none", "green", "cancelled", "partly-cancelled"])
 def test_a_member_whose_own_ci_is_not_red_joins_the_batch(world, capsys, rollup):
     # The batch's CI is its members' CI, so a member waits on no run of its own.
     sha10 = world.pr(10, {"b.txt": "b\n"})
@@ -1636,7 +1654,15 @@ def test_a_census_too_deep_to_parse_lists_no_drift(world):
     ([{"status": "QUEUED", "conclusion": ""}], "pending"),
     ([{"status": "IN_PROGRESS", "conclusion": None},
       {"status": "COMPLETED", "conclusion": "FAILURE"}], "failing"),
-    ([{"status": "COMPLETED", "conclusion": "CANCELLED"}], "failing"),
+    # A cancelled run (superseded, or cancelled because only batches run the
+    # heavy lanes) gave no verdict: not green, but no known failure either.
+    ([{"status": "COMPLETED", "conclusion": "CANCELLED"}], "cancelled"),
+    ([{"status": "COMPLETED", "conclusion": "SUCCESS"},
+      {"status": "COMPLETED", "conclusion": "CANCELLED"}], "cancelled"),
+    ([{"status": "IN_PROGRESS", "conclusion": None},
+      {"status": "COMPLETED", "conclusion": "CANCELLED"}], "pending"),
+    ([{"status": "COMPLETED", "conclusion": "CANCELLED"},
+      {"status": "COMPLETED", "conclusion": "FAILURE"}], "failing"),
     ([{"status": "COMPLETED", "conclusion": "TIMED_OUT"}], "failing"),
 ])
 def test_ci_rollup_summary(rollup, expected):

@@ -224,8 +224,13 @@ MEMBER_POLL_SECONDS = 10
 _sleep = time.sleep
 _clock = time.monotonic
 
-FAILED = {"FAILURE", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED",
-          "STARTUP_FAILURE", "ERROR"}
+# Conclusions that are a known failure on a member's own head. CANCELLED is
+# not one: a superseded run, or one cancelled because only batches spend the
+# heavy lanes (maintainer, 2026-10-29), gave no verdict, and the batch's CI
+# is its members' CI. `merge` still counts a cancelled batch check as red
+# (PASSING, above).
+FAILED = {"FAILURE", "TIMED_OUT", "ACTION_REQUIRED", "STARTUP_FAILURE", "ERROR"}
+CANCELLED = "CANCELLED"
 
 
 def _check_state(check: dict) -> str:
@@ -234,17 +239,20 @@ def _check_state(check: dict) -> str:
 
 
 def _checks(rollup: list[dict] | None) -> str:
-    """One word for a head's CI: green, pending, failing or none."""
+    """One word for a head's CI: green, pending, cancelled, failing or none.
+    Only `failing` keeps a member out of a batch."""
     if not rollup:
         return "none"
-    pending = False
+    pending = cancelled = False
     for check in rollup:
         state = _check_state(check)
         if state in FAILED:
             return "failing"
-        if _unfinished(check):
+        if state == CANCELLED:
+            cancelled = True
+        elif _unfinished(check):
             pending = True
-    return "pending" if pending else "green"
+    return "pending" if pending else "cancelled" if cancelled else "green"
 
 
 def _unfinished(check: dict) -> bool:
@@ -374,8 +382,9 @@ def _collision(member: Member, conflicted: list[str], merged: list[Member],
 def _not_ready(m: Member) -> str | None:
     """Why a labelled pull request sits this batch out, keeping its label.
 
-    Its own CI need not be green: the batch's CI is its CI, so pending or
-    absent checks admit it. A failing head is a known failure and waits."""
+    Its own CI need not be green: the batch's CI is its CI, so pending,
+    cancelled or absent checks admit it. A failing head is a known failure
+    and waits."""
     if m.draft:
         return "is a draft"
     if m.checks == "failing":

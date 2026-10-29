@@ -18,15 +18,27 @@ Each change waits for hosted CI once, on its batch:
   `rust.yml`: `Scope`, the `Rust` job (format, clippy, builds, nextest),
   the disposable-image check and the `Parity` gate; the candidate, harness
   candidate and fixtures builds and the parity matrix are skipped. Both `scope` jobs decide this from
-  `github.head_ref` (an absent one runs everything). An ordinary pull
-  request that changes CI or dependency inputs (`.github/workflows/`,
-  `pyproject.toml`, a lock file, the Rust toolchain pin) or whose diff
-  cannot be read runs as a batch would, so a workflow edit is tested by the
-  lanes it changes before it can switch them off. The required `test`
+  `github.head_ref` (an absent one runs everything), whatever the pull
+  request changes; only one whose diff cannot be read runs as a batch
+  would. The required `test`
   check reports its skip, which GitHub counts as success, and the required
   `Parity / <os>` gate runs and accepts the skipped candidate and parity
   jobs only on a pull request its `scope` marked not full; the `Rust` job
-  must still pass.
+  must still pass. A newer push to an ordinary pull request cancels its
+  in-flight runs of both workflows.
+- **A pull request that edits CI or dependency inputs**
+  (`.github/workflows/`, `pyproject.toml`, a lock file, the Rust toolchain
+  pin) is ordinary too, since 2026-10-29 (maintainer: only batches spend
+  the heavy lanes). It used to run every lane on its own head, so that a
+  workflow edit could not switch off its own check. That run used the
+  edited workflow as well, so it never stopped such an edit; what it gave
+  was a run of the edited lanes before master, and the batch gives the
+  same: its pull request runs the edited workflow, on a head containing the
+  edit, and a batch is the only way to master. Review is what catches an
+  edit that makes a check pass vacuously, then as now. On 2026-10-28 such
+  pull requests ran 43 `rust.yml` jobs per push (#1006, #1013, #1014, #1016,
+  #1022, #1025, #1026), and batch #1031 sat queued for over an hour behind
+  them under the account's 20-job hosted limit.
 - **A batch pull request** (from `integrate/*`) runs everything its diff
   needs, exactly as every pull request did before 2026-10-21 (the
   Rust-only and documentation-only scope skips still apply).
@@ -56,6 +68,15 @@ Each change waits for hosted CI once, on its batch:
   is the full backstop for everything a master push skipped, and since
   2026-10-24 the only automatic run of the non-gating Windows `cli-live`
   job (`parity-live`).
+- **Never cancelled:** batch runs, master pushes, the nightly, manual and
+  stress runs and merge groups each get a concurrency group of their own
+  (their run id), so neither a newer push nor a newer run cancels them,
+  running or pending. Only an ordinary pull request's runs are superseded.
+- **CodeQL** runs as GitHub's default setup, a repository setting with no
+  branch filter, so it still analyses every pull request push (four jobs,
+  the Rust one about 8 minutes). It is not a required check. Limiting it to
+  batches, master and its weekly run needs the maintainer to switch the
+  repository to an advanced-setup workflow.
 
 ## Joining a batch
 
@@ -76,8 +97,11 @@ GitHub approvals, but `status` shows the review decision. It does check
 CI, only for a known failure: a labelled pull request whose current head
 has a failing check sits the batch out without a comment and keeps its
 label, and joins a later batch once a rerun of the failed job passes or a
-push replaces that head. Pending,
-green or no checks all admit it.
+push replaces that head. Pending, cancelled,
+green or no checks all admit it: a cancelled run (superseded by a newer
+push, or cancelled because only batches spend the heavy lanes) gave no
+verdict. `merge` still counts a cancelled check on the batch itself as
+red.
 
 Why not wait for green on the member's own head: on 2026-10-20/21 four
 things held batches up (#877 broke only against a newer master; an
