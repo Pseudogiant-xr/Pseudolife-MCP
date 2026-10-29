@@ -157,7 +157,7 @@
     },
     "fingerprints": {
       "scope": "d10e8ec27d84d0e9",
-      "rust": "7e31d77eff2ceb0b",
+      "rust": "59cc6066e4ac1f82",
       "fixtures": "defc5e07c5ac3f94",
       "candidate": "77b0c5fa6b2afcbf",
       "candidate-harness": "ab479a8fc85283e7",
@@ -190,6 +190,11 @@
         "job": "scope",
         "fingerprint": "d10e8ec27d84d0e9",
         "reason": "2026-10-29: the classify step drops the CI-input regex match; no new step, command or fetch, so its minutes hold"
+      },
+      {
+        "job": "rust",
+        "fingerprint": "59cc6066e4ac1f82",
+        "reason": "adds rust/daemon/harness/test_pgdisposable_slices.py to the existing harness pytest step: no new job, shard or setup step; the file runs 50 tests in 1.45s on a Windows desktop (2026-10-29), so the measured minutes hold"
       }
     ]
   },
