@@ -12,7 +12,8 @@
     "docs/cortex-mcp-spec.md": "43fba1fe5e5cd3710f59d7e99b414f7b78ea15eaa70b620b23716f3fae308d32",
     "docs/dev/ci-budget.md": "21fed3dc7ba96010612ab32bb8335927d12c67150a5dbd019411f8dbaf931ba3",
     "docs/dev/dev-machines.md": "135cb4cbd97e7b34fddbc858df6e0d53e131fb2ec0589e7f3ce26026670dc0a1",
-    "docs/dev/merge-batches.md": "4dcf503cf7ad2563f7a03104a03b76e4a509c0b7481ca4839a7a3eb575d4d480",
+    "docs/dev/merge-batches.md": "8c2c530427fef0d3f5c5eacf653508422770055eda882ab4effd9d6ff9708688",
+    "docs/dev/worktree-retention.md": "23464a303672be4f546ecbf7c8e357c41c4bd2c684202e05cfebec6df78d7355",
     "docs/evidence/rust-stream-c-episode-20261009.json": "6dda143104a5b745eb322041190496caa9af3b61a219620c41633f6477d15079",
     "docs/guide/agent-isolation.md": "465b0c24a386ae3a92bf1a3d46e01114db061dc6ddd4a68836512fd191ff23f4",
     "docs/guide/benchmarks.md": "577a6a8230de0d57351e3e57262bb2b5385b27e6292bfc131c21c3522330fb97",
@@ -239,6 +240,7 @@
     "ops/install-hook.sh": "c5942d45d9fff70b854ee2e97531fc7b594450df59b00f2a2bbcea33fadaea7c",
     "ops/install-shim-autostart.ps1": "87b5da0355343e797ce7895d4b2cc8725ccd0ac21f2cce346cf4967a6efc0646",
     "ops/install-shim-autostart.sh": "6f32b1c2ebd688546fdfd1837a3b6445d3195db99e9668c0360d13582c248888",
+    "ops/install-worktree-retention.ps1": "1ff8d9a77f2cca9a19e38c89d85959a2d4ce03400e73eda3b8c79f1dabf52d29",
     "ops/install.ps1": "88264a10cb50a0f2b6348201e8befc46b271d06c2cdb8ea559a2a2591eaac565",
     "ops/install.sh": "7aad5c81dc204ace2adf3557a53ac5efff556152a71470b38a564fb1ae613866",
     "ops/integrate.py": "aedd86cf4d53de93122cd42abfc09d4294b3bde0d56ea51e0236e7640a04267d",
@@ -254,6 +256,7 @@
     "ops/prune-build-cache.sh": "28a1b21db8fd25e92a0d4f8575aba71adaf83d8b3d1c1788717586427bafbac0",
     "ops/prune-rollbacks.ps1": "d4652ccdfda2dad5f57c526f75f58a0d88c1de6407b442e369d18d9ccfab6e69",
     "ops/prune-rollbacks.sh": "8c126a14674839c891048cab020d9bf637c09387e516f08e9614067eddbe78e5",
+    "ops/prune_worktrees.py": "f6d640160c7e48a60890e029046bbc83ddc39d3d167b05873e928babe2766bc3",
     "ops/pytest_retry_once.py": "213f6297068459a9296bbba26fc7e4d19fbce78b85819e61b70349b7e86b5e2a",
     "ops/register_claude_desktop.py": "a653438874cb1af0ec859083239ba35adc5e74747d3aceae055640f80ee37534",
     "ops/remote-suite.ps1": "003e04513c035f0252d7dcc5646e59ec0fe49591c84b833a4a754349553187e1",
@@ -81277,6 +81280,21 @@
       "location": "ops/plugin_marketplace.py:8",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:update"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/prune_worktrees.py:240",
+      "reason": "request target supplied dynamically or external"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/prune_worktrees.py:790",
+      "reason": "request target supplied dynamically or external"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/prune_worktrees.py:959",
+      "reason": "request target supplied dynamically or external"
     },
     {
       "dynamic": "unresolved",
