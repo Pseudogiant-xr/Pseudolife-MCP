@@ -86,7 +86,8 @@ class ActivityRecorder:
     at least ``interval`` seconds ago (or never), so each principal and
     prefix is written at most once per interval. :meth:`take` empties the
     pending batch and starts the interval; :meth:`give_back` returns a batch
-    whose write failed, merged with what arrived meanwhile."""
+    whose write failed, merged with what arrived meanwhile, within the same
+    prefix cap."""
 
     def __init__(self, *, wall: Callable[[], float] | None = None,
                  clock: Callable[[], float] | None = None,
@@ -141,13 +142,20 @@ class ActivityRecorder:
             for name, at in batch.seen.items():
                 if pending.seen.get(name, at) <= at:
                     pending.seen[name] = at
-            for prefix, (count, first, last) in batch.rejected.items():
+            # The cap holds here too: a prefix already pending merges; another
+            # is added, in prefix order, only while under the cap, and its
+            # refusals are counted as dropped otherwise, so repeated failed
+            # writes cannot grow the batch past it.
+            for prefix in sorted(batch.rejected):
+                count, first, last = batch.rejected[prefix]
                 newer = pending.rejected.get(prefix)
-                if newer is None:
-                    pending.rejected[prefix] = (count, first, last)
-                else:
+                if newer is not None:
                     pending.rejected[prefix] = (count + newer[0], min(first, newer[1]),
                                                 max(last, newer[2]))
+                elif len(pending.rejected) < self._max_rejected:
+                    pending.rejected[prefix] = (count, first, last)
+                else:
+                    pending.dropped += count
             pending.dropped += batch.dropped
 
     def flush(self, conn) -> bool:

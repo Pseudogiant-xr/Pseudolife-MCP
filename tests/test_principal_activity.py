@@ -135,6 +135,34 @@ def test_distinct_refused_prefixes_are_capped_per_batch(clocks):
     assert batch.dropped == 2
 
 
+def test_a_given_back_batch_respects_the_prefix_cap(clocks):
+    """Review 2026-10-30: take() empties the batch, new prefixes refill it to
+    the cap, and a failed write merged both without the cap, so repeated
+    failures grew memory without bound. Merging back keeps prefixes already
+    pending, adds others in prefix order while under the cap, and counts
+    the rest (their refusals) as dropped."""
+    recorder = activity.ActivityRecorder(wall=lambda: clocks.wall, clock=lambda: clocks.mono,
+                                         max_rejected=3)
+    refusals = 0
+    for attempt in range(5):
+        for i in range(3):
+            recorder.rejected(f"{attempt}000000{i}")
+            refusals += 1
+        recorder.rejected(f"{attempt}0000000")         # a second refusal of the first
+        refusals += 1
+        if attempt:
+            recorder.give_back(failed)                 # the last write failed meanwhile
+        failed = recorder.take()
+        assert len(failed.rejected) <= 3, (attempt, sorted(failed.rejected))
+    recorder.give_back(failed)
+    pending = recorder.take()
+    assert len(pending.rejected) == 3
+    # Every refusal is accounted for: recorded or dropped.
+    assert sum(r[0] for r in pending.rejected.values()) + pending.dropped == refusals
+    # A prefix already pending keeps its place; the rest compete in prefix order.
+    assert sorted(pending.rejected) == ["40000000", "40000001", "40000002"]
+
+
 def test_the_gate_notes_environment_and_stored_successes_only(recorder, clocks):
     activity.note(recorder, "Bearer x", "laptop", SOURCE_STORE)
     activity.note(recorder, "Bearer y", "desk", SOURCE_ENVIRONMENT)

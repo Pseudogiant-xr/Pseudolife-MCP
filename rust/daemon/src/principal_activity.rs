@@ -183,7 +183,8 @@ impl Recorder {
         Some(std::mem::take(&mut state.pending))
     }
 
-    /// A batch whose write failed, merged with what arrived meanwhile.
+    /// A batch whose write failed, merged with what arrived meanwhile, within
+    /// the same prefix cap.
     pub fn give_back(&self, batch: Batch) {
         let mut state = self.state.lock().unwrap();
         let pending = &mut state.pending;
@@ -193,14 +194,16 @@ impl Recorder {
                 *slot = at;
             }
         }
+        // The cap holds here too (prefix order: a BTreeMap iterates sorted):
+        // a prefix already pending merges, another is added only while under
+        // the cap, and its refusals are counted as dropped otherwise.
         for (prefix, (count, first, last)) in batch.rejected {
-            match pending.rejected.get_mut(&prefix) {
-                None => {
-                    pending.rejected.insert(prefix, (count, first, last));
-                }
-                Some(newer) => {
-                    *newer = (count + newer.0, first.min(newer.1), last.max(newer.2));
-                }
+            if let Some(newer) = pending.rejected.get_mut(&prefix) {
+                *newer = (count + newer.0, first.min(newer.1), last.max(newer.2));
+            } else if pending.rejected.len() < self.max_rejected {
+                pending.rejected.insert(prefix, (count, first, last));
+            } else {
+                pending.dropped += count;
             }
         }
         pending.dropped += batch.dropped;

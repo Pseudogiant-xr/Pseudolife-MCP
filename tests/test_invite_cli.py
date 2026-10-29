@@ -196,7 +196,10 @@ class _Docker:
         if cmd[:2] == ["docker", "inspect"]:
             return subprocess.CompletedProcess(cmd, 0, "true\n" if self.running else "false\n", "")
         if "pseudolife-mcp-postgres" in cmd:
-            return subprocess.CompletedProcess(cmd, self.psql["code"], self.psql["stdout"], "")
+            stdout = self.psql["stdout"]
+            if isinstance(stdout, list):     # one answer per psql call, in order
+                stdout = stdout.pop(0)
+            return subprocess.CompletedProcess(cmd, self.psql["code"], stdout, "")
         if "--version-check" in cmd:
             if self.version is None:
                 return subprocess.CompletedProcess(cmd, 2, "", "unknown mode 'invite'")
@@ -282,12 +285,13 @@ def test_a_stopped_daemon_container_revokes_through_postgres(docker, capsys):
 
 def test_a_stopped_daemon_container_lists_through_postgres(docker, capsys):
     docker.running = False
-    docker.psql["stdout"] = json.dumps({
+    docker.psql["stdout"] = ["t\n", json.dumps({
         "principals": [["laptop", "core", True, True, False, None, 1.0, 2.0, None, 3.0, 2.5, True],
                        ["codex", None, None, False, False, None, None, None, None, 3.0, 2.0, False]],
-        "rejected": [["ab12cd34", 3, 1.0, 2.0]]}) + "\n"
+        "rejected": [["ab12cd34", 3, 1.0, 2.0]]}) + "\n"]
     code, out, _err = _run(capsys, "--list", "--json")
     report = json.loads(out)
+    assert docker.inputs[-2:] == [invite_cli.ACTIVITY_SQL + "\n", invite_cli.LIST_SQL + "\n"]
     assert code == 0 and [(r["principal"], r["state"], r["last_seen_at"])
                           for r in report["principals"]] == [("codex", "environment", 2.0),
                                                               ("laptop", "paired", 2.5)]
@@ -374,3 +378,45 @@ def test_the_list_says_when_no_token_was_refused(bank, capsys):
     _run(capsys, "laptop")
     code, out, _err = _run(capsys, "--list")
     assert code == 0 and out.rstrip().endswith("no refused tokens recorded")
+
+
+def _psql_on(pg_url):
+    """``_psql`` answered by the bench database, as ``psql -tA`` prints one
+    value: a failed statement exits 3, as ``ON_ERROR_STOP`` does."""
+    import psycopg
+
+    def run(sql):
+        try:
+            with psycopg.connect(pg_url, autocommit=True) as conn:
+                value = conn.execute(sql).fetchone()[0]
+        except psycopg.Error as exc:
+            return subprocess.CompletedProcess(["psql"], 3, "", type(exc).__name__)
+        text = (json.dumps(value) if isinstance(value, (dict, list))
+                else {True: "t", False: "f"}.get(value, str(value)))
+        return subprocess.CompletedProcess(["psql"], 0, text + "\n", "")
+    return run
+
+
+@pytest.mark.parametrize("v58", [True, False], ids=["v58-bank", "pre-v58-bank"])
+def test_a_stopped_container_lists_through_postgres_on_any_bank(bank, pg_url, env, capsys, v58):
+    """Review 2026-10-30: with the daemon container stopped, --list ran the
+    v58 SQL, which a v53-v57 bank refuses ("psql ... failed (exit 3)")."""
+    import psycopg
+    _run(capsys, "laptop")
+    with psycopg.connect(pg_url, autocommit=True) as conn:
+        if v58:
+            conn.execute("INSERT INTO principal_activity VALUES ('laptop', 6.0)")
+            conn.execute("INSERT INTO rejected_bearers VALUES ('ab12cd34', 2, 1.0, 4.0)")
+        else:
+            conn.execute("DROP TABLE principal_activity, rejected_bearers")
+    env.delenv("PSEUDOLIFE_MCP_DATABASE_URL")
+    env.setattr(invite_cli, "docker_available", lambda: True)
+    env.setattr(invite_cli, "_daemon_running", lambda: False)
+    env.setattr(invite_cli, "_psql", _psql_on(pg_url))
+    code, out, err = _run(capsys, "--list", "--json")
+    assert code == 0, err
+    report = json.loads(out)
+    assert [(r["principal"], r["state"], r["last_seen_at"]) for r in report["principals"]] == [
+        ("laptop", "pending", 6.0 if v58 else None)]
+    assert report["rejected"] == ([{"hash_prefix": "ab12cd34", "rejections": 2,
+                                    "first_seen_at": 1.0, "last_seen_at": 4.0}] if v58 else [])

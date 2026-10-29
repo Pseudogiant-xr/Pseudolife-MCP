@@ -7,7 +7,8 @@ Every expected value comes from the real Python recorder in this checkout,
 driven by fake wall and monotonic clocks through scripted sequences: the
 first write due at once, the once-a-minute hold, repeat successes keeping
 the latest time, refusals counting with first and last times, a failed write
-given back and merged, the per-batch prefix cap, the gate's outcome rules
+given back and merged, the per-batch prefix cap (also when a failed write
+is given back over a refilled batch), the gate's outcome rules
 (open mode, environment, store, no bearer, another scheme) and the prefix of
 a latin-1 header carrying UTF-8.
 
@@ -61,6 +62,16 @@ CAPPED = {
         ("rejected", "00000001"), ("rejected", "00000002"), ("rejected", "00000003"),
         ("rejected", "00000004"), ("rejected", "00000005"), ("rejected", "00000001"),
         ("take",), ("log",)]),
+    # Review 2026-10-30: a failed write given back while new prefixes
+    # refilled the batch stays within the cap; the rest count as dropped.
+    "give-back-cap": (3, [
+        ("rejected", "00000003"), ("rejected", "00000001"), ("rejected", "00000002"),
+        ("take",), ("tick", 1.0),
+        ("rejected", "10000002"), ("rejected", "10000001"), ("rejected", "10000001"),
+        ("give_back",), ("take",), ("log",), ("tick", 1.0),
+        ("rejected", "20000001"), ("rejected", "20000002"), ("rejected", "20000003"),
+        ("rejected", "00000002"),
+        ("give_back",), ("tick", 60.0), ("due",), ("take",), ("log",)]),
     "log-names-five": (100, [("rejected", f"0000000{i}") for i in range(1, 8) for _ in range(i)]
                        + [("take",), ("log",)]),
 }

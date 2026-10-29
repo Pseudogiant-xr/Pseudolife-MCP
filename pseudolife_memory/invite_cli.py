@@ -93,6 +93,15 @@ LIST_SQL = (
     "'rejected', (SELECT coalesce(json_agg(json_build_array(hash_prefix, rejections, "
     "first_seen_at, last_seen_at) ORDER BY last_seen_at DESC, hash_prefix), '[]'::json) "
     "FROM public.rejected_bearers));")
+# A bank before v58 has no activity tables: its list is the stored rows
+# with no times and no refused tokens (principal_store.LIST_SQL_V53).
+ACTIVITY_SQL = "SELECT to_regclass('public.principal_activity') IS NOT NULL;"
+LIST_SQL_V53 = (
+    "SELECT json_build_object("
+    "'principals', (SELECT coalesce(json_agg(json_build_array(principal, tier, board, "
+    f"token_hash IS NOT NULL, code_hash IS NOT NULL, code_expires_at, created_at, paired_at, "
+    f"revoked_at, {_NOW_SQL}, NULL::double precision, TRUE) ORDER BY principal), '[]'::json) "
+    "FROM public.principals), 'rejected', '[]'::json);")
 BANK_SQL = "SELECT value #>> '{}' FROM public.meta WHERE key = 'coordination_bank_id';"
 DEFAULT_PORT = expose_cli.DEFAULT_PORT
 # Stored principals arrive with schema v53.
@@ -473,6 +482,13 @@ def _through_postgres(args, report: _Report) -> int:
                                 "--bank")
         if refusal:
             return report.fail(EXIT_REFUSED, refusal)
+    if args.list:
+        # Which list the bank holds: the v58 one needs principal_activity.
+        probe = _psql(ACTIVITY_SQL)
+        if probe.returncode != 0:
+            return by_hand(f"psql in {POSTGRES_CONTAINER} failed (exit {probe.returncode})")
+        if (probe.stdout or "").strip().splitlines()[-1:] != ["t"]:
+            sql = LIST_SQL_V53
     proc = _psql(sql)
     if proc.returncode != 0:
         return by_hand(f"psql in {POSTGRES_CONTAINER} failed (exit {proc.returncode})")

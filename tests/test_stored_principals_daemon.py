@@ -130,15 +130,25 @@ def test_a_used_code_is_refused_with_the_same_body(daemon, paired):
 
 def test_the_daemon_records_last_seen_and_refused_prefixes_without_the_token(daemon, paired):
     """Schema v58: the gate notes each outcome in memory and the refresher
-    writes it within a refresh (the first write is not held back)."""
+    writes it when due. The module's daemon may have written moments ago
+    (earlier tests' requests), so the next write can be a whole flush
+    interval away, then lands on the next refresh tick: the deadline is that
+    worst case plus a margin, and the poll returns as soon as the rows are
+    there."""
     import hashlib
+
+    from pseudolife_memory.principal_activity import FLUSH_INTERVAL_S
+    from pseudolife_memory.principal_store import REFRESH_INTERVAL_S
     refused = "fixture-refused-token-" + secrets.token_hex(8)
     assert _http(daemon["url"] + "/api/stats", token=paired)[0] == 200
     assert _http(daemon["url"] + "/api/stats", token=ENV_TOKEN)[0] == 200
     for _ in range(3):
         assert _http(daemon["url"] + "/api/stats", token=refused)[0] == 401
     prefix = hashlib.sha256(refused.encode()).hexdigest()[:8]
-    deadline = time.monotonic() + 40
+    # Worst case: a write began just before these requests, so the next is
+    # due FLUSH_INTERVAL_S later and runs at the refresh tick after that;
+    # 15 s covers the refresh itself and a loaded host.
+    deadline = time.monotonic() + FLUSH_INTERVAL_S + REFRESH_INTERVAL_S + 15
     seen, rejected = {}, []
     with psycopg.connect(daemon["db"], autocommit=True) as conn:
         while time.monotonic() < deadline:

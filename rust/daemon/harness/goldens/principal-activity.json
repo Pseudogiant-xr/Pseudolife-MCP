@@ -515,6 +515,171 @@
    ]
   },
   {
+   "name": "give-back-cap",
+   "max_rejected": 3,
+   "steps": [
+    [
+     "rejected",
+     "00000003"
+    ],
+    [
+     "rejected",
+     "00000001"
+    ],
+    [
+     "rejected",
+     "00000002"
+    ],
+    [
+     "take"
+    ],
+    [
+     "tick",
+     1.0
+    ],
+    [
+     "rejected",
+     "10000002"
+    ],
+    [
+     "rejected",
+     "10000001"
+    ],
+    [
+     "rejected",
+     "10000001"
+    ],
+    [
+     "give_back"
+    ],
+    [
+     "take"
+    ],
+    [
+     "log"
+    ],
+    [
+     "tick",
+     1.0
+    ],
+    [
+     "rejected",
+     "20000001"
+    ],
+    [
+     "rejected",
+     "20000002"
+    ],
+    [
+     "rejected",
+     "20000003"
+    ],
+    [
+     "rejected",
+     "00000002"
+    ],
+    [
+     "give_back"
+    ],
+    [
+     "tick",
+     60.0
+    ],
+    [
+     "due"
+    ],
+    [
+     "take"
+    ],
+    [
+     "log"
+    ]
+   ],
+   "expect": [
+    null,
+    null,
+    null,
+    {
+     "seen": {},
+     "rejected": {
+      "00000001": [
+       1,
+       1800000000.0,
+       1800000000.0
+      ],
+      "00000002": [
+       1,
+       1800000000.0,
+       1800000000.0
+      ],
+      "00000003": [
+       1,
+       1800000000.0,
+       1800000000.0
+      ]
+     },
+     "dropped": 0
+    },
+    null,
+    null,
+    null,
+    null,
+    null,
+    {
+     "seen": {},
+     "rejected": {
+      "00000001": [
+       1,
+       1800000000.0,
+       1800000000.0
+      ],
+      "10000001": [
+       2,
+       1800000001.0,
+       1800000001.0
+      ],
+      "10000002": [
+       1,
+       1800000001.0,
+       1800000001.0
+      ]
+     },
+     "dropped": 2
+    },
+    "refused 6 bearer token(s) since the last report, by SHA-256 prefix: 10000001 x2, 00000001 x1, 10000002 x1, plus 2 past the 1000-prefix cap. `pseudolife-mcp doctor` on a client prints its own token's prefix; `pseudolife-mcp invite --list` shows them all",
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    true,
+    {
+     "seen": {},
+     "rejected": {
+      "20000001": [
+       1,
+       1800000002.0,
+       1800000002.0
+      ],
+      "20000002": [
+       1,
+       1800000002.0,
+       1800000002.0
+      ],
+      "20000003": [
+       1,
+       1800000002.0,
+       1800000002.0
+      ]
+     },
+     "dropped": 7
+    },
+    "refused 10 bearer token(s) since the last report, by SHA-256 prefix: 20000001 x1, 20000002 x1, 20000003 x1, plus 7 past the 1000-prefix cap. `pseudolife-mcp doctor` on a client prints its own token's prefix; `pseudolife-mcp invite --list` shows them all"
+   ]
+  },
+  {
    "name": "log-names-five",
    "max_rejected": 100,
    "steps": [

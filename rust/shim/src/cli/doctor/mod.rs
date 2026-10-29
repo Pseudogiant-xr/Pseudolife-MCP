@@ -142,10 +142,6 @@ fn no_proxy_environment() -> Res<()> {
     Ok(())
 }
 
-/// A bearer every client of the run sends alike: printable ASCII. urllib
-/// (board, maintainer) would send Latin-1, but the handshake's Python shim
-/// (httpx) and the --agent-state check cannot encode it, so anything
-/// beyond ASCII defers; DEL is a header value reqwest refuses.
 /// `principal_activity.token_hash_prefix`: the first 8 hex of the SHA-256
 /// of the token's UTF-8.
 fn token_hash_prefix(token: &str) -> String {
@@ -157,6 +153,10 @@ fn token_hash_prefix(token: &str) -> String {
         .collect()
 }
 
+/// A bearer every client of the run sends alike: printable ASCII. urllib
+/// (board, maintainer) would send Latin-1, but the handshake's Python shim
+/// (httpx) and the --agent-state check cannot encode it, so anything
+/// beyond ASCII defers; DEL is a header value reqwest refuses.
 fn sendable(token: &str) -> bool {
     token.bytes().all(|byte| (0x20..0x7f).contains(&byte))
 }
