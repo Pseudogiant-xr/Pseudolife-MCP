@@ -10,7 +10,11 @@ has no runner; its shards stay on hosted runners.
 On 2026-10-28 the first week's failures were traced to the box, not the
 code under test, and fixed ("The first week's failures"); the lane's disk
 use got caps and a logged cleanup ("Disk use"). The comparison week
-restarts from the first clean nightly after those fixes (Rollout).
+restarts from the first clean nightly after those fixes (Rollout). The
+same day the Windows dev VM moved to the NVMe pool, its C: was grown to
+200 GB, and it got one runner ("Setting up the Windows dev VM"). That
+runner is online but stays out of the nightly list until a dispatched
+trial passes on it ("Trying a new machine").
 
 ## Problem
 
@@ -385,6 +389,285 @@ free; the root engine's images were not visible. The three runners came
 online. Untested until the first nightly: the shards themselves on this
 box (glibc, the tool-cache Python, `docker build` under rootless Docker).
 
+## Setting up the Windows dev VM (scripted, 2026-10-28)
+
+`ops/selfhosted/setup-windows-runner.ps1`, run in an elevated PowerShell 7
+on the VM from a checkout, does the Windows procedure below and hardens it
+the way the Linux script does. Rerunning it is safe:
+
+```powershell
+setup-windows-runner.ps1 -RunnerUser <runner-user> -SuiteUser <suite-user> `
+  -Lease full-suite@<machine> -Version <x.y.z> -Sha256 <hex>
+# then, to register, with RUNNER_TOKEN set in its environment. Over SSH, a
+# wrapper reads the token from stdin into that variable, so the token
+# reaches no command line, file or log:
+#   gh api -X POST repos/<owner>/<repo>/actions/runners/registration-token --jq .token |
+#     ssh <vm> pwsh -NoProfile -File <wrapper>
+```
+
+- **One runner, as a local account that is not an administrator**
+  (decision 4, amended). The account's password is random: 40 letters and
+  digits, because `config.cmd` is a batch file, and `cmd.exe` strips `^` and
+  expands `%` and `!`. It is generated in the script and passed to
+  `config.cmd --windowslogonpassword`, the only non-interactive way to
+  register a service account. That command line is readable by the VM's
+  administrators while it runs, and by the event log if process-creation
+  auditing is on. The password
+  is never written down, and a rerun that has to register again sets a new
+  one. `config.cmd` grants the account the right to log on as a service,
+  installs the runner as that account's service, and starts it.
+- **No LAN, for the account's own connections.** An outbound Windows
+  Firewall rule for the account's SID blocks private, link-local, CGNAT
+  (Tailscale), multicast and broadcast IPv4 addresses, and all of IPv6. The
+  VM has a global IPv6 address on the LAN's prefix, which no private range
+  covers, so IPv6 is blocked outright, as on Linux. A rerun adds the new
+  rule before removing the old one, so a running job is never unfiltered.
+  The script checks that every firewall profile is on and that the rule
+  names the account and every range.
+  Whether the rule binds the account's traffic cannot be tried from an SSH
+  session: a process started with another account's credentials there dies
+  at start (0xC0000142). The job-started hook therefore proves it before
+  every job. As the account, it connects to the LAN gateway and needs the
+  firewall's own refusal (WSAEACCES, 10013), and the same for a public IPv6
+  address when the VM has an IPv6 route; anything else fails the job.
+  The suite user's run of the same hook was refused with "connected", the
+  negative control.
+
+  A per-user rule cannot cover everything:
+  - Windows makes some connections on a user's behalf through system
+    services, which a rule keyed on the user does not match: SMB
+    (`\\<host>\share`, opened by the kernel), BITS, and WebDAV through
+    the WebClient service. The hypervisor filter and the tailnet rule
+    below close those paths.
+  - Windows Firewall does not filter loopback, so unlike on Linux,
+    services listening on the VM's loopback stay reachable to jobs.
+- **sshd refuses the account** (`DenyUsers`, written first in
+  `sshd_config` and checked with `sshd -t`), since a job can write the
+  account's `authorized_keys`.
+- **Administrators own every file the runner's setup later reads or
+  runs.** `C:\actions-runner` is administrators-only. The tools under it
+  are readable and executable by the account but not writable: the lease
+  gate's `pseudolife-mcp`, installed with `uv tool`, and a Python 3.11 for
+  the cleanup. So are the hooks. A runner is registered from a fresh
+  extraction, and only then does the account get its directory. `.env` is
+  staged in an administrators-only directory, granted read for the
+  account, and renamed into place, so a link or hard link a job planted is
+  replaced, not written through. The runner's `PATH`, set in `.env`, names
+  only those tools and system directories.
+- **The suite lock directory**: traverse-only on the suite user's profile
+  and its `.pseudolife-mcp`, read on the lock directory. The runner's
+  `.env` names that directory and the VM's lease, `full-suite@<machine>`.
+- **Disk**: the same `runner_cleanup.py` caps, run from the job-started
+  hook (its POSIX-only `/tmp` pass does not apply). The runner's `.env`
+  points pip's, uv's and Hugging Face's caches into the account's
+  `.cache`, where those caps apply; their Windows defaults would sit under
+  `%LOCALAPPDATA%`, outside them. C: had 92 GB free
+  after the grow, well above the 25 GB floor. The account's profile, where
+  `lease_ci.py`'s clusters and pg0's bundle live, is on C: too.
+- **The default bench address points nowhere** (`PSEUDOLIFE_TEST_PG_HOST_PORT=127.0.0.1:9`
+  in `.env`, as on Linux, since 2026-10-29). One runner shares no
+  loopback with another job, but the suite user's test server may hold
+  the default address while a suite runs. The firewall does not filter
+  loopback, so without this a shard's optional real-PostgreSQL controls
+  could reach that server. Windows has no privileged ports, so nothing
+  stops an account from listening on 9. Nothing on the VM did when this
+  was set, and the optional "Simple TCP/IP Services" feature, which uses
+  it, is not installed. Shards that start their own cluster override the
+  address through `GITHUB_ENV`. `localhost.` resolves to loopback on
+  Windows as it is.
+
+### The Windows dev VM's network filter (2026-10-29)
+
+The maintainer chose to filter the VM at the hypervisor (decision 2026-10-29),
+with three choices made after the network inventory below.
+
+**Inventory** (read-only, 2026-10-29), the VM's network use beyond the
+internet:
+- Inbound SSH from the maintainer's machine, over the LAN and over the
+  tailnet.
+- DHCP from the LAN's router (the VM has no reservation) and IPv6
+  neighbour discovery.
+- Tailscale: the VM is a tailnet node. Its peers include the live bank's
+  host and the hypervisor.
+- Nothing else on the LAN:
+  - DNS goes to public resolvers;
+  - the Windows Time service is not running;
+  - no proxy, no SMB mappings or connections;
+  - no Pseudolife daemon or board configuration, so no lease mirror.
+
+**The hypervisor filter**, `ops/selfhosted/setup-vm-egress-filter.sh --vmid
+<id>`, run as root on the hypervisor:
+- **Mechanism.** A bridge-family nftables table, loaded by its own systemd
+  unit before guests start, that matches only frames entering from the
+  VM's tap interfaces.
+  - It hooks the bridge's `prerouting`, so it sees every frame before the
+    bridge decides between forwarding it and delivering it to the
+    hypervisor itself. Review found that a `forward` hook would miss frames
+    sent to the firewall bridge's own MAC, which the host can hand out in an
+    ARP reply (`arp_ignore=0`).
+  - It is stateless on purpose: a conntrack match in the bridge family would
+    turn on bridge conntrack for every guest.
+  - Proxmox's own firewall was the alternative. Enabling it flips the
+    datacenter switch and routes every guest's bridged traffic, the live
+    bank and game servers included, through the host's iptables. Neither
+    happens here.
+  - A hookscript on the VM refuses to start it while the table is not
+    loaded, so a failed load at boot, or a flushed table, never runs it
+    unfiltered. The unit has no stop action; the rollback is the script's
+    `--remove`. The hookscript lives in the `local` storage's snippets,
+    which the script enables (one content type on that storage; no guest
+    is affected).
+- **What the VM may still send**, and only from its own NICs' MAC addresses
+  (in the Ethernet header and in ARP), so it cannot impersonate another
+  host on the bridge:
+  - ARP and IPv6 neighbour discovery; the rest of IPv6 is dropped, so the
+    VM keeps no IPv6 path (decision: robust against a change of the ISP's
+    prefix);
+  - DHCP to the broadcast address or the LAN's server only (the
+    hypervisor's default gateway, or `--dhcp-server`);
+  - its sshd's replies, matched by source port 22 and refused if they carry
+    a bare SYN, so they can never open a connection;
+  - ICMP replies and errors;
+  - plain IPv4 to a public address.
+- **What is dropped:** every other frame. That means private, link-local,
+  CGNAT and multicast/broadcast IPv4 destinations, and anything that is not
+  plain IPv4, IPv6 or ARP (a VLAN tag, PPPoE, a raw type). Dropped, not
+  refused: the kernel offers no `reject` in a bridge chain before routing.
+- **Where the filter is:** the hypervisor's datacenter and node firewalls
+  stayed off and no other guest gained a rules file. `bridge-nf-call-*`
+  stayed 0, and neither `br_netfilter` nor `nf_conntrack_bridge` was loaded.
+- **Rollback:** `setup-vm-egress-filter.sh --vmid <id> --remove`. The prior
+  host state (firewall files, the guests' NIC flags, the iptables and nft
+  rulesets, the bridge sysctls) was saved on the hypervisor before the
+  change.
+- **Allow rules** beyond the internet:
+  - DHCP to the broadcast address or the LAN's server (UDP 68 to 67);
+  - the VM's sshd replies (TCP source port 22, never a bare SYN);
+  - ICMP echo-reply, destination-unreachable and time-exceeded;
+  - ARP from the VM's own MACs;
+  - IPv6 neighbour solicitation and advertisement, and router
+    solicitation.
+
+  Nothing else on the LAN is allowed, because the inventory found nothing
+  the dev workflow needs there.
+- **Residual: address claims in ARP and neighbour advertisements.** The
+  filter pins the VM's MACs but not the IP addresses its ARP replies and
+  neighbour advertisements claim. So the VM could still announce another
+  host's address on the bridge. Pinning the IP is not safe while the VM's
+  DHCP address has no reservation, because a changed lease would cut the VM
+  off. Sending such frames takes raw link-layer access, which on Windows
+  needs an administrator, and the runner account is not one. The residual
+  therefore lies with the VM's administrators, not its jobs. A DHCP
+  reservation would let the filter pin the address too.
+
+**The tailnet rule.** The hypervisor cannot see inside the tailnet's
+encrypted traffic. So the setup script adds outbound rules for every
+account on the VM, on the Tailscale adapter only (decision 2026-10-29):
+- no SMB, NetBIOS or HTTP(S)/WebDAV (TCP 139, 445, 80, 443) to any tailnet
+  address;
+- nothing at all to the addresses given in `-TailnetDeny`, which names the
+  live bank's host, an argument so that no address is in the tree.
+
+Inbound SSH over the tailnet keeps working. A rerun without `-TailnetDeny`
+keeps the hosts already denied (`-ClearTailnetDeny` removes them), and
+`-TailnetDeny` on a machine without a Tailscale adapter is refused.
+
+What the tailnet rule does not cover:
+- system services that reach a tailnet host on other ports: BITS or WebDAV
+  to another port, SMB on an alternate TCP port or over QUIC (UDP 443), the
+  print spooler;
+- the LAN's services through the router's public address (hairpin NAT to
+  port-forwarded game servers), which are internet-facing anyway.
+
+**Proof** (2026-10-29), `ops/selfhosted/windows-egress-proof.ps1`, against a
+temporary listener on the sibling Linux dev box. The listener logged every
+connection's source address. The box's own input firewall got a temporary
+accept for the VM's two addresses, removed afterwards with the listener.
+- **The suite user, before the filter:** the kernel's SMB client reached
+  the listener, and the hypervisor's link-local web UI answered over IPv6.
+- **The suite user, after:** the listener saw nothing; IPv6 timed out; the
+  live bank's tailnet port was refused locally; DNS and github.com worked.
+- **The runner account, after** (through a one-shot scheduled task: an SSH
+  session cannot start a process as another account, and BITS needs a
+  batch logon, so the account got "log on as a batch job" for that run
+  only, then the original list was restored and checked):
+  - SMB to the LAN and to a tailnet host, a BITS transfer and a WebDAV
+    request never reached the listener;
+  - IPv6 was refused by the per-user rule;
+  - DNS and github.com worked;
+  - the hypervisor's drop counters rose meanwhile.
+- **SSH** to the VM from the maintainer's machine worked before and after,
+  over the LAN and the tailnet.
+
+What was not shown: a positive BITS or WebDAV baseline. BITS refuses a
+network logon, and WebClient did not come up in the probe, so for those two
+the evidence is the listener's silence and the drop counters.
+
+**The runner's PATH.** On Windows the runner reads its `.env` itself but
+never `.path`; only the Linux wrappers read that. The first trial dispatch
+(run 40705118218, 2026-10-29) failed every Windows shard at the gate,
+because `pseudolife-mcp` was missing from PATH. The setup script now writes
+PATH into `.env` and removes the unused `.path`. That same run proved the
+hook's positive case as the runner account: "egress: refused to this
+account by the firewall (10013): the LAN gateway, IPv6".
+
+**The runner's Python.** The second trial dispatch (run 40748991561,
+2026-10-29) got every Windows shard past the gate. The shards then stopped
+at `actions/setup-python`, whose Windows installer needs administrator
+rights that the account does not have. The setup script now copies its
+managed Python 3.11 into `C:\actions-runner\toolcache` and names that
+directory in `.env` (`RUNNER_TOOL_CACHE`, `AGENT_TOOLSDIRECTORY`), the way
+the Linux setup seeds its tool cache. The account may read and run the
+cache's files but not change them. That does not isolate jobs from each
+other. The account's profile persists between jobs, and so do its user
+site-packages, which the seeded interpreter loads, and its PowerShell
+profile, which the `pwsh` shell loads. So a job can still leave code that
+the next job runs, as on any persistent runner. This is why the lane runs
+only code from people with write access ("Never fork code"). The cleanup
+hook runs its Python with `-I`, so that code never runs in the hook.
+Shards created after the fix ran past setup-python in the same run.
+
+**The judges' oracle daemon.** In that run, three of the four Windows
+shards created after the tool-cache fix passed: w1c-pairing, h5-w1a and
+h5-graph-mutants. The fourth, judges, failed with "disposable daemon
+exited during startup" and nothing more, because the daemon's log is
+removed with its temporary directory. The Linux side passed 16 of 17
+shards; the 17th, w1c-connection, is the harness fix in #1022.
+
+The cause was reproduced on the VM as the runner account.
+`import mcp` needs `pywintypes`, which pywin32 makes importable only
+through `pywin32.pth`. The oracle runtime reached the shard's own venv
+through bare path lines in `phase1_dependencies.pth`, and a bare path
+does not run that directory's `.pth` files. A hosted shard installs into
+the interpreter's own site-packages, a real site directory, so it never
+failed there. #1033 fixes the runtime (`site.addsitedir`) and makes a
+parity daemon's startup error carry the end of its log. The judge then
+passed as the runner account, with 0 differences.
+
+The trial is re-run once #1033 is on master; until then the machine stays
+off the allowlist.
+
+| Trial | Run | Windows passed | Stopped by |
+| --- | --- | --- | --- |
+| 1 | 40705118218 | 0 of 17 | the gate: PATH missing from `.env` |
+| 2 | 40748991561 | 3 of 17 | 13 at setup-python; judges at the oracle daemon (#1033) |
+
+**Yielding to reproduction work.** The VM's first job is reproducing
+Windows CI failures (CLAUDE.md "Dev machines"). Reproduction work there
+holds the VM's suite lease for its whole length, so the runner's gate
+waits for it:
+
+```powershell
+pseudolife-mcp lease run full-suite@<machine> -- <the reproduction loop>
+# or, for a loop already running:
+pseudolife-mcp lease hold full-suite@<machine> --while-pid <pid>
+```
+
+A `lease check` reads such a hold as held from the release that carries
+PR #1024. Before that, the gate saw only a full suite's own lock, so a
+hold made the lane yield only through the board, which the runner cannot
+read.
+
 ## The first week's failures (2026-10-25 to 2026-10-27)
 
 Over the three nightlies, hosted runners passed 59 of 59 shards and the
@@ -479,14 +762,39 @@ read and write", stored readable by the watcher's account only:
 `setup-runner-watch.sh --token < <token file>`. Until it is stored the
 timer's runs are skipped.
 
+### Trying a new machine
+
+`ops/selfhosted/setup-runner-watch.sh --machines linux,windows` writes the
+watcher's allowlist (`/etc/pseudolife-runner-watch/machines`). An online
+machine outside the list is never put in the variable, so a new machine's
+runner can come online before nightlies may route to it. Without the file,
+every online machine counts.
+
+A trial run names the machine itself, through a dispatch input that only
+`mode=ci` dispatches have:
+
+```bash
+gh workflow run rust.yml --ref master -f mode=ci -f frozen_head=<master head> \
+  -f selfhosted_runners='["windows"]'
+```
+
+A trial shares the manual-CI concurrency group, which cancels in
+progress: it cancels a `mode=ci` dispatch already running on master, such
+as merge evidence, and the next one cancels it. Check `gh run list
+--workflow rust.yml --event workflow_dispatch` first.
+
+Once a trial passes, `setup-runner-watch.sh --machines linux,windows` adds
+the machine, and the next nightly routes to it. Since 2026-10-28 the list
+is `linux`, and the Windows runner waits for its trial.
+
 What it cannot do: jobs already queued for a machine that then goes down
 stay queued. GitHub has no API to cancel one job of a run, so the
 nightly's next run still cancels them ("Switching the lane on").
 
 ## Commands for the maintainer
 
-These are the manual steps behind the script above, and still the procedure
-for the Windows dev VM. On Linux, use the script: these steps lack its
+These are the manual steps behind the scripts above, kept as the reference
+for what they do. On Linux, use the script: these steps lack its
 hardening (the egress table, the lock directory mount in place of the
 search ACL on the suite user's home, and units that root writes itself
 rather than running `svc.sh` from the account's directory). Use the runner release currently listed at
@@ -625,10 +933,10 @@ ACTIONS_RUNNER_HOOK_JOB_STARTED=C:\actions-runner\job-started.ps1
 icacls C:\actions-runner /grant "<runner-user>:(OI)(CI)M"
 ```
 
-`config.cmd` records the elevated shell's `PATH` in
-`C:\actions-runner\.path`, which does not include the runner account's
-tools. Append `;C:\Users\<runner-user>\.local\bin` to the single line in
-that file, then restart the runner service so it reads `.env` and `.path`.
+The Windows runner reads `.env` but not `.path` (found 2026-10-29), so the
+runner account's tools go on a `PATH=` line in `.env`, with
+`C:\Users\<runner-user>\.local\bin` first. Restart the runner service so
+it reads `.env`.
 
 `C:\actions-runner\job-started.ps1` does the same job as the Linux hook:
 
@@ -675,7 +983,8 @@ design could not test without a machine:
   sibling box. An older glibc there fails them at exec.
 - `actions/setup-python` installs 3.11 into the runner's tool cache.
   - On a Linux distribution other than Ubuntu, pre-seed the tool cache.
-  - On Windows, run the first install with enough rights to write it.
+  - On Windows, pre-seed it too: the installer needs administrator
+    rights (settled, "The runner's Python").
 - The gate step prints "free" and the lease name.
 - `lease check` sees a held lock: start a full suite on that machine, then
   dispatch, and the gate should wait.
@@ -742,9 +1051,16 @@ Settled by the maintainer on 2026-10-24:
 - **3, Docker:** rootless Docker for that account.
 - **4, runners per machine:** three on the sibling Linux box, whose disk
   was grown by 30 GB for them. One check rarely keeps more than one or two
-  of its 8 cores busy; memory and disk are the limits. The Windows dev VM
-  gets none for now: its disk is the hypervisor's old spinning one, and it
-  stays free to reproduce Windows CI failures.
+  of its 8 cores busy; memory and disk are the limits. Amended on
+  2026-10-28: the Windows dev VM gets one runner, a trial.
+  - The VM moved off the spinning disk to the NVMe pool.
+  - The maintainer chose to grow its disk rather than add a second one:
+    scsi0 went from 120 to 200 GB, and C: was extended over the deleted
+    recovery partition. BitLocker was turned off and WinRE re-enabled on
+    C:, with a snapshot kept until the VM checked healthy.
+  - The runner yields to the VM's suite lease, which reproduction work
+    holds ("Yielding to reproduction work").
+  - It joins the nightly only after a dispatched trial passes.
 - **7, persistent runners** with the job-started hook.
 - **10, persistent Rust build cache:** not needed, settled on 2026-10-28
   on the measurement under option 10 below: no parity shard compiles.

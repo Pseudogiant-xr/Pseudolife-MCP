@@ -566,6 +566,8 @@ jobs:
         #   test): schema pins and doctor, cheap and platform-sensitive.
         # - test_runner_cleanup: the parity runners' disk cleanup treats a
         #   directory junction as a link, which only Windows can make.
+        # - test_selfhosted_windows_scripts: the Windows parity runner's hook
+        #   refuses a job when the account's LAN block does not bind.
         env:
           PSEUDOLIFE_REQUIRE_TEST_POSTGRES: "1"
         run: >-
@@ -582,6 +584,7 @@ jobs:
           tests/test_prune_worktrees.py
           tests/test_ops_install_worktree_retention.py
           tests/test_runner_cleanup.py
+          tests/test_selfhosted_windows_scripts.py
           tests/test_tunnel_profiles.py
           tests/test_tunnel_service.py
           tests/test_tunnel_cli.py

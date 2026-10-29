@@ -252,7 +252,7 @@
       "lock-resolve": "83bcc6b654896c6d",
       "test": "ac414107d3d9c71d",
       "test-lite-linux": "44e2a8f2c01baeab",
-      "test-lite-windows": "931a46f2dd7a6c48",
+      "test-lite-windows": "4c14277e515e1711",
       "test-lite-macos": "2abde9b5cf74fc3d",
       "frontend": "b1b6a1a1278f2e60"
     },
@@ -291,6 +291,11 @@
         "job": "test-lite-macos",
         "fingerprint": "2abde9b5cf74fc3d",
         "reason": "adds tests/test_prune_worktrees.py to the one pytest step: no new job, shard or setup step; about +1 minute of test time (the file ran in 52s natively on Windows 2026-10-27), keeping runner minutes near 62 of the 67 limit; re-measure from the next batch run"
+      },
+      {
+        "job": "test-lite-windows",
+        "fingerprint": "4c14277e515e1711",
+        "reason": "adds tests/test_selfhosted_windows_scripts.py (9 cases, about 4 s locally) to the one pytest step beside master's runner-cleanup and worktree-retention files; no new setup or step"
       }
     ]
   }

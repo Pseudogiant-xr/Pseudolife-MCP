@@ -36,6 +36,24 @@ pub struct Config {
     /// them (`_user_yaml_leaves`, with values). Python's dataclasses keep a
     /// set value uncoerced, and `/api/config` serves the running value.
     pub user_leaves: JsonMap<String, Value>,
+    pub memory_policy: MemoryPolicyConfig,
+}
+
+/// `MemoryPolicyConfig` (utils/config.py:1371-1408): the standing memory
+/// policy the session-start hooks serve, and an optional A/B arm list.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MemoryPolicyConfig {
+    pub variant: String,
+    pub ab_arms: Vec<String>,
+}
+
+impl Default for MemoryPolicyConfig {
+    fn default() -> Self {
+        MemoryPolicyConfig {
+            variant: "compact".into(),
+            ab_arms: Vec::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -691,6 +709,8 @@ impl Config {
             "memory.dream.fallback_base_url": d.fallback_base_url,
             "memory.dream.fallback_model": d.fallback_model,
             "memory.dream.extractor_model_override": d.extractor_model_override,
+            "memory_policy.variant": self.memory_policy.variant,
+            "memory_policy.ab_arms": self.memory_policy.ab_arms,
         });
         let map = dump.as_object_mut().expect("config dump object");
         map.insert(
@@ -1005,6 +1025,7 @@ impl Default for Config {
             dream: DreamConfig::default(),
             time: TimeConfig::default(),
             user_leaves: JsonMap::new(),
+            memory_policy: MemoryPolicyConfig::default(),
         }
     }
 }
@@ -2335,9 +2356,11 @@ fn load_str(text: &str) -> Result<Config, ConfigError> {
     if let Some(c) = section(entries, "coordination", "")? {
         config.coordination = read_coordination(c)?;
     }
-    // Validated only; a non-mapping is kept unvalidated by Python (exact).
+    // A non-mapping is kept unvalidated by Python (exact); its readers then
+    // fall back to `compact`, as the default here does.
     if let Some(Node::Map(policy)) = lookup(entries, "memory_policy") {
         validate_memory_policy(policy)?;
+        config.memory_policy = read_memory_policy(policy);
     }
     if let Some(u) = section(entries, "updates", "")? {
         config.updates = read_updates(u)?;
@@ -2870,6 +2893,24 @@ fn validate_memory_policy(p: &[(Node, Node)]) -> Result<(), ConfigError> {
         }
     }
     Ok(())
+}
+
+/// The fields of a validated `memory_policy` mapping.
+fn read_memory_policy(p: &[(Node, Node)]) -> MemoryPolicyConfig {
+    let mut out = MemoryPolicyConfig::default();
+    if let Some(Node::Str(v)) = lookup(p, "variant") {
+        out.variant = v.clone();
+    }
+    if let Some(Node::Seq(items)) = lookup(p, "ab_arms") {
+        out.ab_arms = items
+            .iter()
+            .filter_map(|n| match n {
+                Node::Str(s) => Some(s.clone()),
+                _ => None,
+            })
+            .collect();
+    }
+    out
 }
 
 /// `UpdatesConfig.__post_init__` (utils/config.py:1628-1633).
