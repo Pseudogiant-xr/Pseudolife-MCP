@@ -29,41 +29,38 @@ and the baked model already.
 > end-to-end, so it is written here as a direction, not a recipe. Verify it
 > on a scratch bank before trusting it with a real one.
 
-## Step 0 — ChromaDB reference-bank pre-flight
+## Step 0 — ingested documents: nothing to do, but expect the first start to take longer
 
 `ops/migrate_embeddings.py` only touches Postgres (`entries` / `facts` /
-`world_facts` / `lessons`). The ChromaDB **reference bank** (`document_ingest`
-/ `document_search`, path `/data/chromadb` inside the daemon container) is a
-separate embedding store this migration does not cover.
+`world_facts` / `lessons`). Ingested documents (`document_ingest` /
+`document_search`) are not among them, and need nothing from you.
+
+Since schema v57 documents live in the bank's `reference_chunks` table, not
+in a ChromaDB store. The dimension guard refuses a 384-d bank before
+`reference_chunks` is created, so the table first appears at
+`vector(1024)`, after this migration. A pre-v57 ChromaDB store in the
+daemon's data directory (`/data/chromadb` inside the daemon container) is
+copied into it at the first start after the migration:
+
+- Chunks still carrying 384-d MiniLM vectors are **embedded again** from
+  their text with the daemon's current model, so a large document store
+  makes that first start take longer; the daemon log reports progress per
+  page (`chromadb document import: N of M chunks done`) and a final
+  `imported N document chunk(s) from the chromadb store` line.
+- The copy is idempotent and resumable: each page commits on its own, a
+  start cut short carries on where it stopped, and the bank is marked
+  (`reference_chroma_import` in `meta`) only once every chunk is in it.
+  A failed import never fails the start: it is logged as an ERROR,
+  documents are not searchable until it succeeds, and the next start
+  retries.
+- The store is read from a scratch copy and never written or deleted; once
+  the import line appears it is no longer read.
+
+To know whether to expect that import time, check whether a store exists:
 
 ```
 docker exec pseudolife-mcp-daemon ls -la /data/chromadb
 ```
-
-- **Empty or missing** — nothing to migrate; proceed. Note that the
-  `reference_bank` collection existing is not by itself "has data": a Chroma
-  collection pins its embedding dimension on its **first add**, not at
-  creation, so an empty collection carries `dimension = NULL` and will simply
-  pin itself to 1024 on the first post-migration ingest. Check the row count,
-  not the collection's existence:
-
-  ```
-  docker exec pseudolife-mcp-daemon python -c "import sqlite3; c = sqlite3.connect('/data/chromadb/chroma.sqlite3'); print(c.execute('select name, dimension from collections').fetchall()); print(c.execute('select count(*) from embeddings').fetchone())"
-  ```
-
-- **Has data** (a non-zero embedding count / a non-NULL `dimension`) —
-  **STOP and reassess before continuing.** Documents ingested under MiniLM's
-  384-d vectors don't become 1024-d just because the daemon's default embedder
-  changes, and both `document_ingest` and `document_search` use the daemon's
-  live embedder — so after the swap the reference bank is queried with **1024-d**
-  vectors against a collection pinned at 384. That failure is **loud, not
-  silent**: `search_documents` hands the query vector straight to Chroma with
-  no `try`/`except`, so Chroma raises a dimension-mismatch error and the
-  `document_search` call fails outright (the same applies to the next
-  `document_ingest`). Loud is better than wrong, but it is still a broken
-  tool until you act. This runbook has no answer for a populated reference
-  bank; decide (recreate the collection and re-ingest, or leave the sidecar on
-  the old model) before going further.
 
 ## Step 0b — STOP if you have customised `embedding:` in `config.yaml`
 
