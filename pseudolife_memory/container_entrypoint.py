@@ -6,6 +6,7 @@ override, as the backup/restore scripts already do.
 """
 
 import os
+import stat
 import sys
 from pathlib import Path
 
@@ -18,6 +19,23 @@ def _change_owner(name: str, fd: int) -> None:
         os.chown(name, UID, GID, dir_fd=fd, follow_symlinks=False)
 
 
+def _migrate_directory(fd: int) -> None:
+    # fwalk may suppress DirEntry metadata failures even with onerror set.
+    # Explicit listdir/stat calls propagate every failure before exec.
+    for name in os.listdir(fd):
+        metadata = os.stat(name, dir_fd=fd, follow_symlinks=False)
+        if stat.S_ISDIR(metadata.st_mode):
+            child = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+            try:
+                _migrate_directory(child)
+            finally:
+                os.close(child)
+        else:
+            _change_owner(name, fd)
+    if os.fstat(fd).st_uid == 0:
+        os.fchown(fd, UID, GID)
+
+
 def migrate_state() -> None:
     """Transfer root-owned legacy state without following directory links.
 
@@ -27,14 +45,7 @@ def migrate_state() -> None:
     """
     fd = os.open(STATE_DIR, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     try:
-        def refuse(error: OSError) -> None:
-            raise error
-
-        for _, dirs, files, directory in os.fwalk(
-                ".", topdown=False, follow_symlinks=False, dir_fd=fd, onerror=refuse):
-            for name in dirs + files:
-                _change_owner(name, directory)
-            _change_owner(".", directory)
+        _migrate_directory(fd)
     finally:
         os.close(fd)
 

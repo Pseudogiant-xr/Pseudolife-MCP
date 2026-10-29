@@ -5,6 +5,8 @@ from pathlib import Path
 
 import pytest
 
+_HAS_DIRECTORY_FDS = os.listdir in os.supports_fd and os.open in os.supports_dir_fd
+
 
 def test_bootstrap_drops_groups_gid_uid_before_exec(monkeypatch):
     from pseudolife_memory import container_entrypoint as entry
@@ -73,7 +75,7 @@ def test_only_root_owned_entries_are_transferred_without_dereferencing(monkeypat
     assert calls == [(("link", 10001, 10001), {"dir_fd": 7, "follow_symlinks": False})]
 
 
-@pytest.mark.skipif(not hasattr(os, "fwalk"), reason="Linux container filesystem API")
+@pytest.mark.skipif(not _HAS_DIRECTORY_FDS, reason="descriptor-relative filesystem API")
 def test_ownership_migration_does_not_follow_symlinks(tmp_path, monkeypatch):
     from pseudolife_memory import container_entrypoint as entry
 
@@ -104,13 +106,61 @@ def test_image_uses_the_privilege_dropping_entrypoint():
         assert "no-new-privileges:true" in compose
 
 
-@pytest.mark.skipif(not hasattr(os, "fwalk"), reason="Linux container filesystem API")
+@pytest.mark.skipif(not _HAS_DIRECTORY_FDS, reason="descriptor-relative filesystem API")
 def test_walk_errors_are_not_silently_ignored(tmp_path, monkeypatch):
     from pseudolife_memory import container_entrypoint as entry
 
     monkeypatch.setattr(entry, "STATE_DIR", tmp_path)
     def inaccessible(*args, **kwargs):
-        kwargs["onerror"](PermissionError("unreadable state subtree"))
-    monkeypatch.setattr(os, "fwalk", inaccessible)
+        raise PermissionError("unreadable state subtree")
+    monkeypatch.setattr(os, "listdir", inaccessible)
     with pytest.raises(PermissionError, match="unreadable state subtree"):
+        entry.migrate_state()
+
+
+@pytest.mark.skipif(not _HAS_DIRECTORY_FDS, reason="descriptor-relative filesystem API")
+def test_real_traversal_propagates_per_entry_metadata_errors(tmp_path, monkeypatch):
+    """fwalk can hide a DirEntry classification error without calling onerror.
+
+    Inject the same metadata fault through both DirEntry and explicit stat,
+    so replacing fwalk with strict descriptor traversal must still refuse.
+    """
+    import errno
+    from pseudolife_memory import container_entrypoint as entry
+
+    (tmp_path / "broken").touch()
+    monkeypatch.setattr(entry, "STATE_DIR", tmp_path)
+    scan, stat = os.scandir, os.stat
+
+    def fault():
+        raise OSError(errno.EIO, "metadata I/O failure")
+
+    class BrokenEntry:
+        name = "broken"
+        def is_dir(self, *a, **kw):
+            fault()
+        def is_symlink(self, *a, **kw):
+            fault()
+
+    class Entries:
+        def __init__(self, path):
+            self.entries = scan(path)
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            self.entries.close()
+        def __iter__(self):
+            return self
+        def __next__(self):
+            item = next(self.entries)
+            return BrokenEntry() if item.name == "broken" else item
+
+    def strict_stat(path, *a, **kw):
+        if path == "broken":
+            fault()
+        return stat(path, *a, **kw)
+
+    monkeypatch.setattr(os, "scandir", Entries)
+    monkeypatch.setattr(os, "stat", strict_stat)
+    with pytest.raises(OSError, match="metadata I/O failure"):
         entry.migrate_state()
