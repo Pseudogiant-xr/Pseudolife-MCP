@@ -682,7 +682,9 @@ mod tests {
         }
         assert_eq!(line(Some(json!({"status": "ok", "stall": {}}))), None);
         assert_eq!(
-            line(Some(json!({"status": "ok", "stall": {"kind": "signed_out"}}))),
+            line(Some(
+                json!({"status": "ok", "stall": {"kind": "signed_out"}})
+            )),
             None
         );
     }
