@@ -415,7 +415,7 @@
     "rust/shim/src/cli/transfer.rs": "35eea9f4ab378a2b23a28d3d7d6ef00c79341f66e28f92a3ce7fec64df603b6c",
     "rust/shim/src/cli/transfer/export.rs": "30c438bfcf355207e008db09de6b24733e4d86a49d18c056bcb86b8b5247b649",
     "rust/shim/src/cli/transfer/export_help.txt": "665910581b4428fcd8c23c4e868ddd86fb6612a09f4bc519c758ab60c0da1452",
-    "rust/shim/src/cli/transfer/import.rs": "3b08b6fc57445d214d5266cea97bdb45417efbf25700c529c8482ac766565e69",
+    "rust/shim/src/cli/transfer/import.rs": "b8bebb3e9654d84769b4b58676486eb5f4967ec23aad0d45b2b93183dd05dd2e",
     "rust/shim/src/cli/transfer/import_help.txt": "a535c9fb6e748c614155806ab8264f2006d3152695b2a079547574362fde0236",
     "rust/shim/src/cli/transfer/json.rs": "266af9e82893edb6dec7d8cf7be03194df07800ad74b1089760b2058fa9a4b56",
     "rust/shim/src/cli/transfer/sql.rs": "faeeb860b38a10be0a29158c06630d814b0339df350d015611bccd62976fb717",
