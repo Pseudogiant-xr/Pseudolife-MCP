@@ -58,6 +58,10 @@ UNIT_NAME = "pseudolife-update"
 # is never the one replaced or removed by mistake.
 CLIENT_TASK_NAME = "Pseudolife Client Update"
 CLIENT_UNIT_NAME = "pseudolife-client-update"
+# The variables that move the shim runtime layout or the data dir: carried
+# into the client's systemd unit when set where --schedule ran.
+CLIENT_LAYOUT_ENV = ("PSEUDOLIFE_SHIM_RUNTIMES", "PSEUDOLIFE_SHIM_LAUNCHER", "XDG_DATA_HOME",
+                     "PSEUDOLIFE_MCP_DATA_DIR")
 LOG_NAME = "unattended-update.log"
 BOARD_LABEL = "unattended update"
 NOTICE_LIMIT = 4000
@@ -350,13 +354,17 @@ def _run_clients(update) -> int:
         raise UpdateError(f"the daemon at {o.daemon_url} reports no version on /health; nothing was changed", 2)
     # /health is unauthenticated and the version becomes a pip requirement:
     # only a plain release number, never a pre-release or requirement syntax.
-    if not re.fullmatch(r"\d+(?:\.\d+){1,3}", daemon):
+    if not _cli.plain_release(daemon):
         raise UpdateError(f"the daemon at {o.daemon_url} reports the version {daemon[:64]!r} on /health, which is "
                           f"not a plain release number (N.N.N); the unattended client run installs only those. "
                           f"Nothing was changed", 2)
     own = _client_version()
     update.report.current, update.report.target = own, daemon
-    if version_key(own) and version_key(own) >= version_key(daemon):
+    # A run that installed the shim but failed a later step (the plugin
+    # cache, the Codex step) leaves this marker, so the next run repeats the
+    # steps for that release instead of calling the machine current.
+    incomplete = data_dir() / f"client-update.{daemon}.incomplete"
+    if version_key(own) and version_key(own) >= version_key(daemon) and not incomplete.exists():
         update.step(f"current: this machine's shim runs {own} and the daemon on {host} {daemon}; nothing to do")
         update.report.exit_code = 3
         return 3
@@ -373,14 +381,21 @@ def _run_clients(update) -> int:
         # already installed the daemon's release.
         own = _client_version()
         update.report.current = own
-        if version_key(own) and version_key(own) >= version_key(daemon):
+        if version_key(own) and version_key(own) >= version_key(daemon) and not incomplete.exists():
             update.step(f"current: this machine's shim already runs {own} (another update moved it); nothing to do")
             update.report.exit_code = 3
             return 3
         update.refuse_checkout_shadow(daemon)
         update.step(f"the daemon on {host} runs {daemon} and this machine's shim {own}: updating this machine's "
                     f"clients to {daemon} unattended")
+        if incomplete.exists():
+            update.step(f"the last client run for {daemon} did not finish every step; repeating them")
         update.clients(None, f"pseudolife-mcp=={daemon}", health)
+        if update.report.ok:
+            incomplete.unlink(missing_ok=True)
+        else:
+            incomplete.parent.mkdir(parents=True, exist_ok=True)
+            incomplete.write_text(f"{own}\n", encoding="utf-8")
     finally:
         lock.release()
     if not update.report.ok:
@@ -622,8 +637,11 @@ def _schedule_clients(update, hour: int, minute: int, platform: str) -> int:
     else:
         unit_dir = _systemd_dir()
         unit_dir.mkdir(parents=True, exist_ok=True)
+        # A client installed under overridden layout variables must run under
+        # them too, or the scheduled run does not find its own shim runtime.
+        layout = [f'Environment="{key}={os.environ[key]}"' for key in CLIENT_LAYOUT_ENV if os.environ.get(key)]
         service = "\n".join(["[Unit]", "Description=Pseudolife-MCP unattended client update", "",
-                             "[Service]", "Type=oneshot", f"ExecStart={shown}",
+                             "[Service]", "Type=oneshot", *layout, f"ExecStart={shown}",
                              # 3 = current, 4 = held off: not failures of the unit.
                              "SuccessExitStatus=3 4", ""])
         timer = "\n".join(["[Unit]", "Description=Pseudolife-MCP unattended client update (daily)", "",
@@ -661,8 +679,10 @@ def unschedule(update, platform: str = sys.platform) -> int:
             update.step(f"no scheduled task '{TASK_NAME}' or '{CLIENT_TASK_NAME}' is registered; nothing to remove")
     elif platform.startswith("linux"):
         unit_dir = _systemd_dir()
-        run_cli(["systemctl", "--user", "disable", "--now", f"{UNIT_NAME}.timer"])
+        daemon = any((unit_dir / f"{UNIT_NAME}.{kind}").exists() for kind in ("timer", "service"))
         client = any((unit_dir / f"{CLIENT_UNIT_NAME}.{kind}").exists() for kind in ("timer", "service"))
+        if daemon:
+            run_cli(["systemctl", "--user", "disable", "--now", f"{UNIT_NAME}.timer"])
         if client:
             run_cli(["systemctl", "--user", "disable", "--now", f"{CLIENT_UNIT_NAME}.timer"])
         for name in (f"{UNIT_NAME}.timer", f"{UNIT_NAME}.service",
@@ -676,9 +696,13 @@ def unschedule(update, platform: str = sys.platform) -> int:
             (data_dir() / "unattended-update.token").unlink()
         except FileNotFoundError:
             pass
-        update.step(f"removed {UNIT_NAME}.timer and its service from {unit_dir}")
+        if daemon:
+            update.step(f"removed {UNIT_NAME}.timer and its service from {unit_dir}")
         if client:
             update.step(f"removed {CLIENT_UNIT_NAME}.timer and its service from {unit_dir}")
+        if not (daemon or client):
+            update.step(f"no {UNIT_NAME}.timer or {CLIENT_UNIT_NAME}.timer is installed under {unit_dir}; "
+                        f"nothing to remove")
     else:
         raise UpdateError("nothing to remove on this platform", 2)
     return 0

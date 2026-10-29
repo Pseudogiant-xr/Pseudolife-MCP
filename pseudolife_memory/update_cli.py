@@ -195,6 +195,15 @@ def create_test_login(argv: list[str]) -> dict:
     return {"exit": code, "error": "the test-login command printed no report", "changes": []}
 
 
+def plain_release(version: object) -> bool:
+    """Whether ``version`` is a plain release number (``N.N`` up to
+    ``N.N.N.N``, ASCII digits only). A daemon's ``/health`` is
+    unauthenticated and its version becomes a pip requirement, so a client
+    update installs only these: never a pre-release, a local version or
+    requirement syntax."""
+    return isinstance(version, str) and re.fullmatch(r"[0-9]+(?:\.[0-9]+){1,3}", version) is not None
+
+
 def _on_shim_runtime() -> bool:
     """Whether this interpreter runs from one of the side-by-side shim
     runtimes (``pseudolife_memory.runtimes``): such a runtime holds no
@@ -656,7 +665,11 @@ class Update:
                               f"run pseudolife-mcp update on {host}, where it runs. Nothing was changed", 2)
         health = self.daemon_health()
         daemon_version = (health or {}).get("version")
-        daemon_version = daemon_version if isinstance(daemon_version, str) and version_key(daemon_version) else None
+        if isinstance(daemon_version, str) and daemon_version and not plain_release(daemon_version) and not self.o.tag:
+            raise UpdateError(f"the daemon at {self.o.daemon_url} reports the version {daemon_version[:64]!r} on /health, "
+                              f"which is not a plain release number (N.N.N), so it is not installed as one. Name the "
+                              f"release with --tag <version>. Nothing was changed", 2)
+        daemon_version = daemon_version if plain_release(daemon_version) else None
         target = self.o.tag or daemon_version or self.target_version()
         self.report.mode = "clients"
         self.report.current, self.report.target = daemon_version, target

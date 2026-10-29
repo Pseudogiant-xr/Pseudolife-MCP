@@ -313,6 +313,31 @@ def test_the_unattended_run_releases_the_lock_on_every_exit_path(world, board, c
 REMOTE = "http://10.0.0.7:8765"
 
 
+def test_a_client_run_that_failed_a_step_repeats_the_steps_next_time(world, board, monkeypatch, tmp_path):
+    """The shim installed but the plugin step failed: the next run must
+    repeat the steps for that release, not call the machine current
+    because its shim already matches (Codex review, 2026-10-30)."""
+    _client(world, monkeypatch)
+    sources = []
+
+    def run_steps(steps, *, source, **kw):
+        sources.append(source)
+        if len(sources) == 1:            # the shim lands; the plugin step fails
+            meta = world.tmp / "rt" / "000001" / "runtime.json"
+            meta.write_text(json.dumps({"version": "0.15.1", "source": "pseudolife-mcp==0.15.1",
+                                        "source_commit": None}), encoding="utf-8")
+        ok = len(sources) > 1
+        return {"shim": {"state": "installed:0.15.1", "detail": "ok"},
+                "plugin": {"state": "refreshed:0.15.1" if ok else "failed", "detail": "fixture"},
+                "codex": {"state": "current", "detail": "ok"}, "ok": ok}
+
+    monkeypatch.setattr(client_updates, "run_steps", run_steps)
+    assert up.main(["--unattended", "--daemon-url", REMOTE]) == up.CLIENT_STEP_FAILED
+    assert up.main(["--unattended", "--daemon-url", REMOTE]) == 0       # repeated although the shim matches
+    assert up.main(["--unattended", "--daemon-url", REMOTE]) == 3       # now current
+    assert sources == ["pseudolife-mcp==0.15.1"] * 2
+
+
 def _client(world, monkeypatch, *, runtime="0.15.0", daemon="0.15.1"):
     """A client-only machine: no daemon container, the command runs from a
     shim runtime at ``runtime``, the daemon at REMOTE answers ``daemon``
@@ -336,8 +361,7 @@ def test_a_client_machine_follows_the_daemons_release_unattended(world, board, c
                         "daemon_digest": "d" * 64, "reinstall": False}]
     out = capsys.readouterr().out
     assert "10.0.0.7" in out and "0.15.0" in out and "0.15.1" in out
-    assert world.docker_calls() == ["inspect -f {{.Id}} pseudolife-daemon"] or \
-        not any(c.startswith(("pull", "tag", "compose", "exec")) for c in world.docker_calls())
+    assert not any(c.startswith(("pull", "tag", "compose", "exec")) for c in world.docker_calls())
     assert board["notices"] == []
     log = _log(tmp_path)
     assert "updated this machine's clients unattended from 0.15.0 to 0.15.1" in log
@@ -372,7 +396,7 @@ def test_a_client_machine_installs_only_a_plain_release_number_the_daemon_report
     requirement: anything but a plain release number (a pre-release, a
     local version, requirement syntax) is refused, never installed."""
     for reported in ("0.16.0rc1", "0.16.0+local", "0.16.0; python_version>'0'", "0.16.0 @ https://example.com/x.whl",
-                     "0.16.0 --index-url https://example.com", "0.16"):
+                     "0.16.0 --index-url https://example.com", "١٦.٠", "0.16"):
         _client(world, monkeypatch, daemon=reported)
         code = up.main(["--unattended", "--daemon-url", REMOTE])
         shutil.rmtree(tmp_path / "rt")
@@ -723,6 +747,33 @@ def test_unschedule_removes_the_client_job_too(scheduler, tmp_path, monkeypatch)
     assert scheduler == [["schtasks", "/Query", "/TN", uu.TASK_NAME],
                          ["schtasks", "/Query", "/TN", uu.CLIENT_TASK_NAME],
                          ["schtasks", "/Delete", "/F", "/TN", uu.CLIENT_TASK_NAME]]
+
+
+def test_unschedule_on_linux_names_only_what_it_removed(scheduler, tmp_path, monkeypatch, capsys):
+    """A client-only box has no daemon job: --unschedule must not say it
+    removed one, and with neither job installed it says so in one line."""
+    update = _client_machine(scheduler, monkeypatch, tmp_path)
+    uu.schedule(update, "03:30", platform="linux")
+    scheduler.clear()
+    capsys.readouterr()
+    assert uu.unschedule(update, platform="linux") == 0
+    out = capsys.readouterr().out
+    assert f"removed {uu.CLIENT_UNIT_NAME}.timer" in out and f"removed {uu.UNIT_NAME}.timer" not in out
+    assert ["systemctl", "--user", "disable", "--now", f"{uu.UNIT_NAME}.timer"] not in scheduler
+    assert uu.unschedule(update, platform="linux") == 0
+    out = capsys.readouterr().out
+    assert "nothing to remove" in out and "removed" not in out
+
+
+def test_the_client_timer_carries_the_layout_it_was_scheduled_under(scheduler, tmp_path, monkeypatch):
+    """A client installed under an overridden layout keeps it in the unit,
+    or the scheduled run would not recognise its own shim runtime."""
+    update = _client_machine(scheduler, monkeypatch, tmp_path)
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "custom-data"))
+    assert uu.schedule(update, "03:30", platform="linux") == 0
+    service = (tmp_path / "xdg" / "systemd" / "user" / f"{uu.CLIENT_UNIT_NAME}.service").read_text(encoding="utf-8")
+    assert f'Environment="XDG_DATA_HOME={tmp_path / "custom-data"}"' in service
+    assert service.index("Environment=") < service.index("ExecStart=")
 
 
 def test_unschedule_removes_the_task_or_the_timer(scheduler, tmp_path, monkeypatch):

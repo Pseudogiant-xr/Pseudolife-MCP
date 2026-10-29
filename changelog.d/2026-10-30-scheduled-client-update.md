@@ -17,3 +17,11 @@
   answer, naming `--daemon-url`. `--unschedule` removes whichever job the
   machine has. A pip install that is not a shim runtime is still refused,
   and its refusal now says why.
+- A client update installs only a plain release number from the daemon's
+  unauthenticated `/health` (ASCII digits, `N.N` to `N.N.N.N`), in the
+  scheduled run and in an attended `update --clients-only` alike; anything
+  else is refused, and the attended run names `--tag <version>` to install a
+  release anyway. A scheduled run that installed the shim but failed a later
+  step repeats the steps at its next run instead of reporting the machine
+  current, and the client timer keeps any shim-layout variables it was
+  scheduled under.
