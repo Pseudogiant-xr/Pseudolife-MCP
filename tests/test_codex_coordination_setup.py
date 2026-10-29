@@ -469,6 +469,27 @@ def test_runtime_defaults_cli_reports_failure_without_transport_details(
     assert "private transport detail" not in json.dumps(report)
 
 
+
+def test_runtime_defaults_names_a_missing_module(tmp_path, monkeypatch, capsys):
+    """A helper run under a Python without one of its modules says which."""
+    @setup.hooks.contextmanager
+    def codex(*args, **kwargs):
+        yield object()
+
+    def missing(*args):
+        raise ModuleNotFoundError("No module named 'anyio'", name="anyio")
+
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path))
+    monkeypatch.setattr(setup.hooks, "resolve_codex", lambda: "fixture-codex")
+    monkeypatch.setattr(setup.hooks, "codex", codex)
+    monkeypatch.setattr(setup, "configure_runtime_defaults", missing)
+    monkeypatch.setattr(sys, "argv", ["setup-codex-coordination.py", "--runtime-defaults"])
+
+    assert setup.main() == 1
+    report = json.loads(capsys.readouterr().out)
+    assert report["recovery"] == ("Check the Codex runtime and configuration "
+                                  "(ModuleNotFoundError: anyio); no transport details are displayed.")
+
 def test_private_backup_runs_without_third_party_packages(tmp_path):
     """Installers run this helper under the system python3, which need not
     have the daemon's dependencies: on a fresh Debian client the runtime

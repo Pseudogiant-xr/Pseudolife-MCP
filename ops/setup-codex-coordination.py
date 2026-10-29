@@ -381,7 +381,10 @@ def main():
     except Exception as error:
         # The type names the failure (a missing module, a refused connection)
         # without its message, which can carry transport details.
-        report = {"status": "needs-configuration", "recovery": f"Check the Codex runtime and configuration ({type(error).__name__}); no transport details are displayed."}
+        kind = type(error).__name__
+        if isinstance(error, ModuleNotFoundError) and error.name:
+            kind += f": {error.name}"  # the missing module, never a transport detail
+        report = {"status": "needs-configuration", "recovery": f"Check the Codex runtime and configuration ({kind}); no transport details are displayed."}
     print(json.dumps(report, indent=2))
     return 1 if report["status"] == "needs-configuration" else 0
 
