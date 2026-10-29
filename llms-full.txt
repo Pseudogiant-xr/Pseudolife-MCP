@@ -11336,8 +11336,9 @@ token file and the agent's registration.
 
 Pair it: run `pseudolife-mcp invite <name>` on the daemon host, then give
 the code to the installer below (`--pairing-code` / `-PairingCode`, or
-pasted where it asks for the token), or run `pseudolife-mcp connect <url>
---read-code` where the shim is installed ([Adding a
+pasted where it asks for the token), or, where the shim is installed, run
+`pseudolife-mcp pair <url> --read-code`, or `pseudolife-mcp connect <url>
+--read-code` to also re-point the clients already registered ([Adding a
 machine](#adding-a-machine-invite-and-pair)). Pairing writes the token
 file for you. A token pasted or copied from the daemon's environment still
 works as the fallback, and the installer then says once that pairing is
