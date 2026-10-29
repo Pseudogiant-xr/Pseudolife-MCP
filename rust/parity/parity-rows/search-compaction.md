@@ -1,0 +1,3 @@
+| Row | Phase | Behavior to preserve and Python source | Existing test pool and boundary | Status |
+|---|---:|---|---|---|
+| SEARCH-COMPACTION | 3 | `memory_search` compact payload uses `memory.mcp.entry_text_chars` (600 default), literal `truncated: true` only when own text is clipped; verbose bypasses compaction. `replaced_by` is {id, at, preview, verified, current}, preview 120 chars; null id/date and false current remain distinct. Full text available via memory_get. `mcp_server.py:_compact_entry`, `_replaced_by` | `test_mcp_server.py`, `test_superseded_visibility.py` I; compact/verbose/successor wire corpus pending | deferred |

@@ -1,0 +1,3 @@
+| Row | Phase | Behavior to preserve and Python source | Existing test pool and boundary | Status |
+|---|---:|---|---|---|
+| CLI-MAINTAINER-TRANSPORT | 4/5 | `maintainer setup` (daemon health, Docker and Tailscale detection, config write and restart), help, `--poll`, the lite tier's embedded bank and the daemon-container re-run (no or empty DSN), and listings whose local times the native zone cannot reproduce (`TZ` set; on Windows outside the current year or near a DST change). `maintainer_cli.py`, `maintainer_setup.py` | `test_maintainer_setup.py` remains the oracle; native defers by name before any effect. Blockers: native embedded_pg and container transport, the interactive setup flow, CPython's C-runtime zone rules | deferred |
