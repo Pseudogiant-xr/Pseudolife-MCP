@@ -103,3 +103,67 @@ def test_a_failed_step_stops_the_run_unless_it_is_a_recorded_blocker():
     assert log.steps[-1] == {"step": "blocked path", "ok": False, "why": "known"}
     with pytest.raises(rehearse.Failed, match="must hold"):
         log.step("must hold", False)
+
+
+@pytest.mark.parametrize("refuses,preserves_stamp", [(True, True), (False, True), (True, False)])
+def test_newer_bank_checks_finish_on_refusal_and_reject_unsafe_starts(
+        monkeypatch, tmp_path, refuses, preserves_stamp):
+    from types import SimpleNamespace
+
+    state = SimpleNamespace(stamp=rehearse.SCHEMA_META_VERSION, facts={}, entries=[], ready=True)
+
+    class Mcp:
+        def call(self, tool, arguments):
+            if tool == "memory_store":
+                state.entries.append(arguments["text"])
+            elif tool == "memory_fact_set":
+                state.facts[arguments["entity"], arguments["attribute"]] = arguments["value"]
+            return {"isError": False, "value": {}}
+
+    class Bank:
+        def __init__(self, *args):
+            self.dsn, self.port = "fixture", 1234
+
+        def start(self, kind, *, refused=False):
+            newer = state.stamp > rehearse.SCHEMA_META_VERSION
+            refusing = newer and (kind == "rust" or refuses)
+            if refusing and not refused:
+                raise rehearse.Failed("a correctly refusing daemon never becomes ready")
+            state.ready = not refusing
+            if newer and kind == "python" and not preserves_stamp:
+                state.stamp = rehearse.SCHEMA_META_VERSION
+            log_path = tmp_path / f"{kind}.log"
+            log_path.write_text("schema is newer than this build" if refusing else "ready")
+            return SimpleNamespace(log=log_path, proc=SimpleNamespace(poll=lambda: None))
+
+        def stop(self):
+            return 0
+
+        def mcp(self):
+            return Mcp()
+
+    class Connection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def execute(self, statement, parameters):
+            assert statement.startswith("UPDATE meta SET value")
+            state.stamp = int(parameters[0])
+
+    import psycopg
+
+    monkeypatch.setattr(psycopg, "connect", lambda *a, **k: Connection())
+    monkeypatch.setattr(rehearse, "Bank", Bank)
+    monkeypatch.setattr(rehearse, "_meta", lambda dsn: {"schema_version": state.stamp})
+    monkeypatch.setattr(rehearse, "_fact", lambda m, e, a: state.facts.get((e, a)))
+    monkeypatch.setattr(rehearse, "_found", lambda m, q, text: text in state.entries)
+    monkeypatch.setattr(rehearse.h.w1a, "call", lambda *a, **k: {"json": {"ready": state.ready}})
+    clock = iter(range(0, 1000, 30))
+    monkeypatch.setattr(rehearse, "time", SimpleNamespace(monotonic=lambda: next(clock), sleep=lambda s: None))
+    log = rehearse.Log()
+    rehearse.bank_leg(tmp_path, tmp_path / "daemon", log, [], None, 1234)
+    step = next(s for s in log.steps if s["step"] == "the Python daemon leaves a newer build's stamp alone")
+    assert step["ok"] is (refuses and preserves_stamp)

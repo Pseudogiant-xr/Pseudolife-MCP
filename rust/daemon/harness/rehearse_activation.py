@@ -20,8 +20,7 @@ the Rust daemon reads those rows, writes its own and restarts; a call goes
 through the registered client path (launcher -> Rust shim -> Rust daemon);
 the Python daemon starts again and reads what Rust wrote. ``meta.
 schema_version`` is read after every start. Then a newer stamp is written by
-hand: the Rust daemon must refuse it, and the Python daemon is expected to
-leave it alone (today it stamps it down: a recorded, failing expectation).
+hand: both daemons must refuse it without becoming ready or changing it.
 
     python rust/daemon/harness/rehearse_activation.py \
         --rust-shim <pseudolife-stdio[.exe]> --rust-daemon <pseudolife-daemon-static[.exe]> \
@@ -447,6 +446,17 @@ def _found(m, query: str, text: str) -> bool:
     return any(text in (e.get("text") or "") for e in entries)
 
 
+def _wait_refusal(bank, daemon):
+    deadline, log_text, health = time.monotonic() + 60, "", {}
+    while time.monotonic() < deadline:
+        log_text = daemon.log.read_text(errors="replace")
+        health = h.w1a.call(bank.port, "GET", "/health").get("json") or {}
+        if "is newer than this build" in log_text or daemon.proc.poll() is not None:
+            break
+        time.sleep(1)
+    return log_text, health
+
+
 def bank_leg(root: Path, rust_daemon: Path, log: Log, owned: list[str], client, port: int) -> dict:
     bank = Bank(root, rust_daemon, owned, port)
     seen = {"metas": []}
@@ -524,13 +534,7 @@ def bank_leg(root: Path, rust_daemon: Path, log: Log, owned: list[str], client, 
             conn.execute("UPDATE meta SET value = %s::jsonb WHERE key = 'schema_version'",
                          (str(newer),))
         rust_refusal = bank.start("rust", refused=True)
-        deadline, log_text, health = time.monotonic() + 60, "", {}
-        while time.monotonic() < deadline:
-            log_text = rust_refusal.log.read_text(errors="replace")
-            health = h.w1a.call(bank.port, "GET", "/health").get("json") or {}
-            if "is newer than this build" in log_text or rust_refusal.proc.poll() is not None:
-                break
-            time.sleep(1)
+        log_text, health = _wait_refusal(bank, rust_refusal)
         exited = rust_refusal.proc.poll()
         bank.stop()
         after_rust = _meta(bank.dsn).get("schema_version")
@@ -539,14 +543,17 @@ def bank_leg(root: Path, rust_daemon: Path, log: Log, owned: list[str], client, 
                  and str(after_rust) == str(newer),
                  exited=exited, health={k: health.get(k) for k in ("status", "ready", "pending", "db")},
                  stamp_after=after_rust, log_tail=globals()["tail"](log_text, 500))
-        bank.start("python")
+        python_refusal = bank.start("python", refused=True)
+        log_text, health = _wait_refusal(bank, python_refusal)
         stamped = _meta(bank.dsn).get("schema_version")
         seen["newer_bank"] = {"stamped_before": str(newer), "after_rust_refusal": after_rust,
                               "after_python_start": stamped}
-        # Expected, not met today: Python's ensure_schema upserts its own
-        # version and refuses no newer bank, so a rollback stamps it down.
-        log.step("the Python daemon leaves a newer build's stamp alone", str(stamped) == str(newer),
-                 fatal=False, stamped_before=str(newer), after_python_start=stamped)
+        log.step("the Python daemon leaves a newer build's stamp alone",
+                 "is newer than this build" in log_text and health.get("ready") is not True
+                 and str(stamped) == str(newer),
+                 fatal=False, stamped_before=str(newer), after_python_start=stamped,
+                 health={k: health.get(k) for k in ("status", "ready", "pending", "db")},
+                 log_tail=globals()["tail"](log_text, 500))
         bank.stop()
         return seen
     finally:
