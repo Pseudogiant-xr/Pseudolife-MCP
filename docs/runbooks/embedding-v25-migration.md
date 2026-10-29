@@ -54,7 +54,7 @@ copied into it at the first start after the migration:
   documents are not searchable until it succeeds, and the next start
   retries.
 - The store is read from a scratch copy and never written or deleted; once
-  the import line appears it is no longer read.
+  the bank is marked it is no longer read.
 
 To know whether to expect that import time, check whether a store exists:
 
