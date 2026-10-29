@@ -4,6 +4,7 @@ import hmac
 import json
 import os
 from pathlib import Path
+import subprocess
 import sys
 
 import pytest
@@ -464,8 +465,36 @@ def test_runtime_defaults_cli_reports_failure_without_transport_details(
     report = json.loads(capsys.readouterr().out)
     assert report["status"] == "needs-configuration"
     assert report["recovery"] == (
-        "Check the Codex runtime and configuration; no transport details are displayed.")
+        "Check the Codex runtime and configuration (RuntimeError); no transport details are displayed.")
     assert "private transport detail" not in json.dumps(report)
+
+
+def test_private_backup_runs_without_third_party_packages(tmp_path):
+    """Installers run this helper under the system python3, which need not
+    have the daemon's dependencies: on a fresh Debian client the runtime
+    defaults step failed with an unexplained needs-configuration because its
+    backup imported the coordination adapter, and with it anyio (2026-10-30)."""
+    config = tmp_path / "config.toml"
+    config.write_text('model = "fixture"\n', encoding="utf-8")
+    code = (
+        "import importlib.util, sys\n"
+        "from pathlib import Path\n"
+        f"spec = importlib.util.spec_from_file_location('s', {str(ROOT / 'ops/setup-codex-coordination.py')!r})\n"
+        "module = importlib.util.module_from_spec(spec)\n"
+        "spec.loader.exec_module(module)\n"
+        f"print(module.private_backup(Path({str(config)!r})))\n"
+        "print(sorted(name for name in ('anyio', 'httpx', 'mcp') if name in sys.modules))\n")
+    env = os.environ.copy()
+    env.pop("PYTHONPATH", None)
+    # -S: no site-packages, as on a system python3 without the daemon's dependencies.
+    result = subprocess.run([sys.executable, "-S", "-c", code], cwd=tmp_path, env=env,
+                            capture_output=True, text=True, timeout=30)
+    assert result.returncode == 0, result.stderr
+    backup_line, loaded = result.stdout.strip().splitlines()[-2:]
+    backup = Path(backup_line)
+    assert backup.parent == tmp_path and backup.name.startswith("config.toml.bak-pseudolife-coordination-")
+    assert backup.read_text(encoding="utf-8") == config.read_text(encoding="utf-8")
+    assert loaded == "[]"
 
 
 def test_credentials_cli_accepts_explicit_tokenless_installer_origin(

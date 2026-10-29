@@ -143,10 +143,12 @@ def private_backup(path):
         return None
     # Config may already contain bearer credentials. Secure the destination
     # before copying bytes, including a protected owner-only DACL on Windows.
-    from pseudolife_memory.coordination_adapter import _open_state
+    # private_state is standard library only: installers run this helper under
+    # the system python3, which need not have the daemon's dependencies.
+    from pseudolife_memory.private_state import open_private
     target = path.with_name(path.name + ".bak-pseudolife-coordination-"
                             + datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S-%f"))
-    fd = _open_state(target, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    fd = open_private(target, os.O_CREAT | os.O_EXCL | os.O_WRONLY, error=SetupError)
     with os.fdopen(fd, "wb") as stream:
         stream.write(path.read_bytes())
     return str(target)
@@ -376,8 +378,10 @@ def main():
                     report = configure(client, home, neutral, action)
     except SetupError as error:
         report = {"status": "needs-configuration", "recovery": str(error)}
-    except Exception:
-        report = {"status": "needs-configuration", "recovery": "Check the Codex runtime and configuration; no transport details are displayed."}
+    except Exception as error:
+        # The type names the failure (a missing module, a refused connection)
+        # without its message, which can carry transport details.
+        report = {"status": "needs-configuration", "recovery": f"Check the Codex runtime and configuration ({type(error).__name__}); no transport details are displayed."}
     print(json.dumps(report, indent=2))
     return 1 if report["status"] == "needs-configuration" else 0
 
