@@ -612,7 +612,8 @@ def test_the_brief_and_the_reminder_texts():
     brief = render_delegate_brief(["p"])
     assert brief == (
         "You are the maintainer's conductor for p. Keep this session's context for decisions:\n"
-        "- Start a watcher once: `pseudolife-mcp conductor-watch --detach`; it prints its board "
+        "- Start a watcher once: `pseudolife-mcp conductor-watch --detach` (`delegate-watch` on "
+        "clients older than this release); it prints its board "
         "id. Park with park_needs=\"decision events\" and park_clear_by=<that id> before ending "
         "a turn that waits. On a wake, read with memory_message(action=\"receive\", ack=true), "
         "act, and park again. If it has stopped, run it again; it answers \"already running\" "

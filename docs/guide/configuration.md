@@ -950,7 +950,7 @@ Each card shows its 8-character id; a click copies the full id. The Make
 conductor and Make coordinator buttons sit on each card, so a session found by
 search takes a role without scrolling.
 
-![The Console's Board on the fixture devserver: the Roles band, the searchable session list with the delegate and coordinator pinned, and each card's short id](../images/cortex-console-board.png)
+![The Console's Board on the fixture devserver: the Roles band, the searchable session list with the conductor and coordinator pinned, and each card's short id](../images/cortex-console-board.png)
 
 ### Maintainer messages and roles from the Console
 
@@ -979,7 +979,7 @@ in a role card scrolls in its own pane above the composer, so a long exchange
 never pushes the composer down the page: it opens on the newest message and
 follows each new one, unless you have scrolled up to read earlier ones.
 
-![A delegate card on the fixture devserver: the message thread scrolls in its own pane, newest message in view, with the composer below it](../images/cortex-console-board-thread.png)
+![A conductor card on the fixture devserver: the message thread scrolls in its own pane, newest message in view, with the composer below it](../images/cortex-console-board-thread.png)
 
 **Roles.** The Roles band on the Board shows, per project, the conductor (the
 session whose urgent mail reopens done parks there, see
