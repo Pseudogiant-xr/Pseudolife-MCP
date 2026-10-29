@@ -1,0 +1,17 @@
+## Health, HTTP bodies and logical transfer
+
+Mandatory /health fields: status, version, schema, storage, auth, bank, persist_errors, memory, ready and pending (the readiness contract, `pseudolife_memory/readiness.py`). Conditional fields: build; coordination (enabled/wake); updates (check_releases/latest_release/checked_at/unattended_clients/unattended_daemon); extractor; stall (since/reason/consecutive_failures/last_success_at); hooks_digest; init_refusal; not_ready; migration_partial; dream_tracking_error; capacity_warning; lesson_reconciliation_required; embedder; db; last_backup. `status == "ok"` (or absent status) maps to 200, other payload status to 503, payload exception to 500 with {status: error, error: text}. DB failure, init_refusal and not_ready degrade; extractor/stall/migration/backup/headroom warnings alone do not. Bank fingerprint may be null and is filled after a successful storage ping. Nested optional structures preserve the source shape.
+
+Nested health fields: build {git_sha, dirty, built_at, source}; embedder {backend, device, dtype}; last_backup {at, age_hours, rotation}; coordination.wake carries every WakeConfig field (per_recipient_per_hour, urgent_per_sender_per_hour, nightly_total, fan_out_stagger_seconds, active_seconds). memory has source (cgroup/process/unavailable), and where available current_bytes, working_set_bytes, limit_bytes, used_fraction, near_limit, events (max/oom/oom_kill), anon_bytes, file_bytes, rss_bytes and rss_peak_bytes; absent values and null limits remain distinct.
+
+Console POST body limits are 262144 bytes except /api/facts/set, /api/consolidate and /api/supersede (4194304 bytes); all /api/coordination/<action> bodies are 32768 bytes; hook session-end is 16384 bytes; POST /api/pair is 1024 bytes. GET hooks consume query/header inputs, and woke/subagent POST hooks use query/header inputs rather than parsing a body. /api/agents?view=coordination returns the coordination roster projection rather than the default agent view. Unknown routes and method errors remain oracle behavior.
+
+`EXPORTED_TABLES` (26 tables): `meta`, `episodes`, `entries`, `entry_reinstatement_decisions`, `entities`, `entity_aliases`, `relations`, `edges`, `edge_evidence`, `edge_proposals`, `entity_proposals`, `entity_kinds`, `dismissed_pairs`, `facts`, `world_facts`, `lessons`, `outcome_signals`, `communities`, `entity_communities`, `memory_traces`, `memory_trace_invalidations`, `entity_sources`, `merge_decisions`, `chronicle_events`, `curation_judgments`, `store_decisions`.
+
+`EXCLUDED_TABLES` (14 tables): `dream_runs`, `dream_run_slots`, `retrieval_events`, `retrieval_uses`, `slot_reads`, `lesson_search_events`, `client_sessions`, `coordination_agents`, `coordination_messages`, `coordination_events`, `coordination_leases`, `coordination_lease_waiters`, `coordination_wakes`, `principals`.
+
+Also exclude outcome_signals.used_ids and bank-local meta keys: schema_version, active_session_pointer, dream_ack_secret_v1, coordination_hlc_highwater, coordination_bank_id, writer_lease_epoch, and every *_schema_version key. Import requires all exported tables empty except meta and builtin relations; excluded runtime tables never travel in logical exports.
+
+Before importing exported metadata, import deletes the target's
+`curation_listing_spelling_v2` key. A fresh target daemon may already have set
+that one-time migration marker; only the export's value must survive import.

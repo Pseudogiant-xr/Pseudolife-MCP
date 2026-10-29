@@ -51,9 +51,11 @@ if __name__ == "__main__" and len(sys.argv) > 1 and sys.argv[1] == "embedding":
     raise SystemExit(embedding.main(sys.argv[2:]))
 import daemons  # noqa: E402
 import dbstate  # noqa: E402
-import pgdisposable as pg  # noqa: E402
+import pgdisposable  # noqa: E402
 from mcp_wire import send_while_reading  # noqa: E402
 
+# The launcher picks the slice (http for the static shards); w1a by default.
+pg = pgdisposable.Slice.from_env()
 GOLDENS = HERE / "goldens"
 HEADERS_COMPARED = ("content-type", "cache-control", "location", "content-security-policy",
                     "x-frame-options", "referrer-policy", "x-content-type-options", "x-pl-board")

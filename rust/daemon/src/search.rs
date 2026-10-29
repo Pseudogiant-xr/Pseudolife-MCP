@@ -159,6 +159,49 @@ pub fn rank(
     refs: &[RefHit],
     ref_k: Option<i64>,
 ) -> Ranked {
+    rank_traced(bank, q, p, ce, refs, ref_k, None)
+}
+
+/// `text[:n] + ("…" if len(text) > n else "")`, the trace's previews.
+fn preview(text: &str, n: usize) -> String {
+    let mut out: String = text.chars().take(n).collect();
+    if text.chars().nth(n).is_some() {
+        out.push('…');
+    }
+    out
+}
+
+/// A float as `json.dumps` writes it, `Infinity` included (an overflowing
+/// literal, which `pyjson::dumps` renders as Python does).
+fn py_float(x: f64) -> Value {
+    if x.is_finite() {
+        json!(x)
+    } else {
+        serde_json::from_str(if x > 0.0 { "1e400" } else { "-1e400" }).expect("number literal")
+    }
+}
+
+/// `repr(sorted(xs))` of a filter set, as the trace's drop reasons print it.
+fn sorted_repr(xs: &HashSet<String>) -> String {
+    let mut v: Vec<&String> = xs.iter().collect();
+    v.sort();
+    crate::pyjson::py_str(&json!(v))
+}
+
+/// [`rank`] with `cms.retrieve_with_trace`'s instrumentation: when `trace`
+/// is given (the skeleton `service.trace` builds), it records each tier's
+/// candidates with why each was kept or dropped, the slot, BM25, timeline,
+/// reference and reranker channels, the candidate pool and the final
+/// top-k. The ranking itself is unchanged: the trace is additive.
+pub fn rank_traced(
+    bank: &Bank,
+    q: &[f32],
+    p: &Params,
+    ce: Option<&dyn CrossEncoder>,
+    refs: &[RefHit],
+    ref_k: Option<i64>,
+    mut trace: Option<&mut Map<String, Value>>,
+) -> Ranked {
     let explicit_floor = p.min_score.is_some();
     let floor = p.min_score.unwrap_or(p.default_floor);
     let k = p.k;
@@ -211,6 +254,19 @@ pub fn rank(
     for (depth, members) in by_band.iter().enumerate() {
         let name = p.band_order[depth].as_str();
         if !band_ok(name) {
+            if let Some(t) = trace
+                .as_deref_mut()
+                .filter(|_| !crate::mutants::active("trace-filtered-tier-missing"))
+            {
+                push_tier(
+                    t,
+                    json!({
+                        "name": name, "depth": depth, "filtered_out": true,
+                        "entry_count": members.len(), "eligible_count": 0,
+                        "excluded_count": members.len(), "candidates": [],
+                    }),
+                );
+            }
             continue;
         }
         let (boost, half_life) = if n == 1
@@ -234,9 +290,67 @@ pub fn rank(
             .collect();
         let got = top_k(cand, pool_k);
         pool_size = pool_size.max(got.len());
+        let mut tier: Option<Vec<Value>> = None;
+        if trace.is_some() {
+            let eligible = if dense_filter_active {
+                members
+                    .iter()
+                    .filter(|&&i| dense_eligible(&bank.entries[i]))
+                    .count()
+            } else {
+                members.len()
+            };
+            if let Some(t) = trace.as_deref_mut() {
+                push_tier(
+                    t,
+                    json!({
+                        "name": name, "depth": depth, "filtered_out": false,
+                        "boost": round4(boost), "half_life_s": py_float(half_life),
+                        "entry_count": members.len(), "eligible_count": eligible,
+                        "excluded_count": members.len() - eligible, "candidates": [],
+                    }),
+                );
+            }
+            tier = Some(Vec::new());
+        }
         for (idx, cos) in got {
             let e = &bank.entries[idx];
-            if seen.contains(e.text.as_str()) || !dense_eligible(e) {
+            let mut cand = tier.as_ref().map(|_| {
+                obj(json!({
+                    "text_preview": preview(&e.text, 80), "source": e.source,
+                    "raw_score": round4(cos as f64), "superseded": e.superseded_at.is_some(),
+                    "kept": false, "drop_reason": null,
+                }))
+            });
+            // Why an entry is dropped, in Python's order of checks.
+            let dropped = if seen.contains(e.text.as_str()) {
+                Some("duplicate".to_string())
+            } else if !keep(e) {
+                Some("superseded".to_string())
+            } else if p.sources.as_ref().is_some_and(|s| !s.contains(&e.source)) {
+                Some(format!(
+                    "source≠{}",
+                    sorted_repr(p.sources.as_ref().unwrap())
+                ))
+            } else if p
+                .episodes
+                .as_ref()
+                .is_some_and(|s| !e.episode_id.as_ref().is_some_and(|x| s.contains(x)))
+            {
+                Some(format!(
+                    "episode∉{}",
+                    sorted_repr(p.episodes.as_ref().unwrap())
+                ))
+            } else if !meta_ok(e) {
+                Some(format!("tags∩{}=∅", sorted_repr(p.tags.as_ref().unwrap())))
+            } else {
+                None
+            };
+            if let Some(reason) = dropped {
+                if let (Some(c), Some(list)) = (cand.as_mut(), tier.as_mut()) {
+                    c.insert("drop_reason".into(), json!(reason));
+                    list.push(Value::Object(std::mem::take(c)));
+                }
                 continue;
             }
             let score = cos as f64;
@@ -252,10 +366,33 @@ pub fn rank(
             };
             let (recency, relevance) = if boost > 0.0 {
                 let r = recency_weight(p.now, e.ts, half_life);
+                if let Some(c) = cand.as_mut() {
+                    c.insert("recency".into(), json!(round4(r)));
+                }
                 (r, score * (1.0 + boost * r))
             } else {
                 (0.0, score)
             };
+            if let Some(c) = cand.as_mut() {
+                c.insert("source_mult".into(), json!(src));
+                c.insert("supersession_mult".into(), json!(sup));
+                c.insert("relevance".into(), json!(round4(relevance)));
+                c.insert(
+                    "adjusted_score".into(),
+                    json!(round4(relevance * src * sup)),
+                );
+                if relevance >= floor {
+                    c.insert("kept".into(), json!(true));
+                } else if !crate::mutants::active("trace-no-relevance-drop") {
+                    c.insert(
+                        "drop_reason".into(),
+                        json!(format!("relevance<{}", crate::pyjson::float_repr(floor))),
+                    );
+                }
+            }
+            if let (Some(c), Some(list)) = (cand, tier.as_mut()) {
+                list.push(Value::Object(c));
+            }
             if relevance >= floor {
                 neural.push((idx, relevance * src * sup));
                 dense_rank_src.push((&e.text, relevance));
@@ -279,11 +416,15 @@ pub fn rank(
                 );
             }
         }
+        if let (Some(list), Some(t)) = (tier, trace.as_deref_mut()) {
+            set_last_tier_candidates(t, list);
+        }
     }
 
     // ── Pool 1.5: slot channel (cms.py:1133-1160, 1851-1951) ──
     let qtok = content_tokens(&p.query);
     if !p.query.is_empty() && !qtok.is_empty() {
+        let mut slot_trace: Option<Vec<Value>> = trace.as_ref().map(|_| Vec::new());
         let mut slot_hits: Vec<(usize, f64)> = Vec::new();
         for members in &by_band {
             for &idx in members {
@@ -308,7 +449,19 @@ pub fn rank(
                     score *= SUPERSEDED_MULT;
                 }
                 slot_hits.push((idx, score));
+                if let Some(list) = slot_trace.as_mut() {
+                    let mut tokens: Vec<&String> = qtok.intersection(&stok).collect();
+                    tokens.sort();
+                    list.push(json!({
+                        "text_preview": e.text.chars().take(80).collect::<String>(),
+                        "source": e.source, "overlap_tokens": tokens,
+                        "score": round4(score), "superseded": e.superseded_at.is_some(),
+                    }));
+                }
             }
+        }
+        if let (Some(list), Some(t)) = (slot_trace, trace.as_deref_mut()) {
+            t.insert("slot_pool".into(), Value::Array(list));
         }
         slot_hits.sort_by(|a, b| b.1.total_cmp(&a.1));
         slot_hits.truncate(k);
@@ -346,16 +499,22 @@ pub fn rank(
             );
         }
     }
+    if p.bm25_enabled
+        && !p.query.is_empty()
+        && candidates.is_empty()
+        && let Some(t) = trace.as_deref_mut()
+    {
+        t.insert(
+            "bm25".into(),
+            json!({"fired": false, "reason": "no_candidates_after_filters"}),
+        );
+    }
     if p.bm25_enabled && !p.query.is_empty() && !candidates.is_empty() {
         let knobs = p.bm25;
-        let norm = normalize_scores(bm25_score(
-            bank,
-            &candidates,
-            &p.query,
-            knobs.k1,
-            knobs.b,
-            knobs.top_n,
-        ));
+        let raw = bm25_score(bank, &candidates, &p.query, knobs.k1, knobs.b, knobs.top_n);
+        let raw_trace: Option<Vec<(usize, f64)>> = trace.as_ref().map(|_| raw.clone());
+        let norm = normalize_scores(raw);
+        let mut injected_trace: Vec<Value> = Vec::new();
         let mut lookup: HashMap<&str, f64> = HashMap::new();
         for &(i, s) in &norm {
             if s >= knobs.min_norm {
@@ -391,9 +550,46 @@ pub fn rank(
                 e.text.clone(),
                 obj(json!({"channel": "bm25", "bm25": s, "surprise": 0.0, "band": e.band})),
             );
+            if trace.is_some() {
+                injected_trace.push(json!({
+                    "text_preview": preview(&e.text, 80),
+                    "normalized_score": round4(s), "injected_score": round4(injected),
+                }));
+            }
+        }
+        if let (Some(raw), Some(t)) = (raw_trace, trace.as_deref_mut()) {
+            let norm_again = normalize_scores(raw.clone());
+            let hits: Vec<Value> = raw
+                .iter()
+                .zip(&norm_again)
+                .map(|(&(i, r), &(_, nrm))| {
+                    json!({"text_preview": preview(&bank.entries[i].text, 80),
+                           "raw_bm25": round4(r), "normalized": round4(nrm)})
+                })
+                .collect();
+            t.insert(
+                "bm25".into(),
+                json!({
+                    "fired": true, "k1": knobs.k1, "b": knobs.b, "weight": knobs.weight,
+                    "min_score": knobs.min_norm, "candidates_scored": candidates.len(),
+                    "raw_hits": raw.len(), "hits": hits, "injected": injected_trace,
+                }),
+            );
+        }
+    }
+    if trace.is_some() && p.timeline_enabled && !p.query.is_empty() {
+        let fired_and_fed = timeline_fired && !candidates.is_empty();
+        if !fired_and_fed && let Some(t) = trace.as_deref_mut() {
+            let reason = if !timeline_fired {
+                "no_temporal_cue"
+            } else {
+                "no_candidates_after_filters"
+            };
+            t.insert("timeline".into(), json!({"fired": false, "reason": reason}));
         }
     }
     if timeline_fired && !candidates.is_empty() {
+        let mut injected_n = 0usize;
         let norm = normalize_scores(bm25_score(
             bank,
             &candidates,
@@ -422,6 +618,13 @@ pub fn rank(
             if !e.band.is_empty() {
                 hit_bands.insert(&e.band);
             }
+            injected_n += 1;
+        }
+        if let Some(t) = trace.as_deref_mut() {
+            t.insert(
+                "timeline".into(),
+                json!({"fired": true, "injected": injected_n}),
+            );
         }
     }
 
@@ -487,6 +690,15 @@ pub fn rank(
         );
     }
     ref_pool.truncate(py_slice_stop(ref_pool.len(), ref_k));
+    if let Some(t) = trace.as_deref_mut() {
+        let pool: Vec<Value> = ref_pool
+            .iter()
+            .map(|&(i, s)| {
+                json!({"text_preview": preview(&refs[i].nearest.text, 80), "score": round4(s)})
+            })
+            .collect();
+        t.insert("reference_pool".into(), Value::Array(pool));
+    }
     let text_of = |item: Item| -> &str {
         match item {
             Item::Entry(i) => bank.entries[i].text.as_str(),
@@ -540,6 +752,23 @@ pub fn rank(
         }
         let scores = if skip_for_margin {
             rerank_log.insert("skip_reason".into(), json!("unambiguous_margin"));
+            if let Some(t) = trace.as_deref_mut() {
+                let mut sorted = orig.clone();
+                sorted.sort_by(|a, b| b.total_cmp(a));
+                let margin = if sorted.len() >= 2 {
+                    sorted[0] - sorted[1]
+                } else {
+                    f64::INFINITY
+                };
+                t.insert(
+                    "reranker".into(),
+                    json!({
+                        "fired": false, "reason": "unambiguous_margin",
+                        "margin": if margin.is_infinite() { Value::Null } else { json!(round4(margin)) },
+                        "skip_margin": p.rerank.skip_margin,
+                    }),
+                );
+            }
             Vec::new()
         } else {
             ce.scores(&p.query, &texts)
@@ -558,6 +787,25 @@ pub fn rank(
                 p.rerank.fusion_weight
             };
             let fused = crate::read::rerank::fuse(w, &orig, &scores);
+            if let Some(t) = trace.as_deref_mut() {
+                let candidates: Vec<Value> = texts
+                    .iter()
+                    .zip(&orig)
+                    .zip(&scores)
+                    .zip(&fused)
+                    .map(|(((text, o), c), f)| {
+                        json!({"text_preview": preview(text, 80), "original_score": round4(*o),
+                               "ce_score": round4(*c), "fused_score": round4(*f)})
+                    })
+                    .collect();
+                t.insert(
+                    "reranker".into(),
+                    json!({
+                        "fired": true, "model": p.rerank.model_name, "top_n": top_n,
+                        "fusion_weight": p.rerank.fusion_weight, "candidates": candidates,
+                    }),
+                );
+            }
             let mut reranked: Vec<(Item, f64)> = combined
                 .iter()
                 .zip(fused)
@@ -567,6 +815,12 @@ pub fn rank(
             combined = reranked;
         } else if !skip_for_margin {
             rerank_log.insert("skip_reason".into(), json!("rerank_failed_or_unavailable"));
+            if let Some(t) = trace.as_deref_mut() {
+                t.insert(
+                    "reranker".into(),
+                    json!({"fired": false, "reason": "rerank_failed_or_unavailable"}),
+                );
+            }
         }
     } else if p.rerank_enabled {
         let over_budget = ce.is_some() && !p.query.is_empty() && combined.len() as i64 > top_n;
@@ -576,6 +830,13 @@ pub fn rank(
             "unavailable"
         };
         rerank_log.insert("skip_reason".into(), json!(reason));
+        if let Some(t) = trace.as_deref_mut() {
+            t.insert(
+                "reranker".into(),
+                json!({"fired": false, "reason": reason, "top_n": top_n,
+                       "candidate_count": combined.len()}),
+            );
+        }
     }
     if rerank_before_cut {
         // The deferred cut keeps every reference chunk (their slots are
@@ -619,6 +880,28 @@ pub fn rank(
         "filters": p.filters_json,
     });
 
+    if let Some(t) = trace {
+        t.insert("candidate_pool".into(), params["candidate_pool"].clone());
+        let finals: Vec<Value> = combined
+            .iter()
+            .map(|&(item, s)| {
+                let (text, source, band) = match item {
+                    Item::Entry(i) => {
+                        let e = &bank.entries[i];
+                        (e.text.as_str(), e.source.as_str(), e.band.as_str())
+                    }
+                    Item::Reference(i) => {
+                        let r = &refs[i].nearest;
+                        (r.text.as_str(), r.source.as_str(), "reference")
+                    }
+                };
+                json!({"text_preview": preview(text, 120), "score": round4(s),
+                       "source": source, "bank": band})
+            })
+            .collect();
+        t.insert("final_topk".into(), Value::Array(finals));
+    }
+
     // Timeline presentation: the memory part in stream order (timestamp, seq);
     // reference documents keep their trailing place.
     if timeline_fired && !crate::mutants::active("search-timeline-unsorted") {
@@ -659,6 +942,22 @@ pub fn rank(
         hits,
         comps,
         params,
+    }
+}
+
+/// Append one tier record to `trace["tiers"]`.
+fn push_tier(trace: &mut Map<String, Value>, tier: Value) {
+    if let Some(Value::Array(tiers)) = trace.get_mut("tiers") {
+        tiers.push(tier);
+    }
+}
+
+/// Fill the last tier record's `candidates`.
+fn set_last_tier_candidates(trace: &mut Map<String, Value>, list: Vec<Value>) {
+    if let Some(Value::Array(tiers)) = trace.get_mut("tiers")
+        && let Some(Value::Object(last)) = tiers.last_mut()
+    {
+        last.insert("candidates".into(), Value::Array(list));
     }
 }
 
@@ -1111,6 +1410,54 @@ mod tests {
             ids(&bank, &rank(&bank, &unit(1.0), &p, None, &[], Some(3))),
             vec![1, 2, 3]
         );
+    }
+
+    #[test]
+    fn the_trace_records_each_candidate_and_leaves_the_ranking_alone() {
+        let rows = [
+            (1, "a", "x", false, 0.9),
+            (2, "a", "x", false, 0.8),
+            (5, "d", "x", false, 0.2),
+            (6, "e", "digest", true, 0.99),
+        ];
+        let (mut matrix, mut entries) = (Vec::new(), Vec::new());
+        for (id, t, s, sup, cos) in rows {
+            entries.push(entry(id, t, s, sup));
+            matrix.extend(unit(cos));
+        }
+        let bank = Bank {
+            dim: DIM,
+            entries,
+            matrix,
+        };
+        let p = params("", 6);
+        let plain = ids(&bank, &rank(&bank, &unit(1.0), &p, None, &[], Some(3)));
+        let Value::Object(mut trace) = json!({"tiers": [], "candidate_pool": {}, "final_topk": []})
+        else {
+            unreachable!()
+        };
+        let traced = rank_traced(&bank, &unit(1.0), &p, None, &[], Some(3), Some(&mut trace));
+        assert_eq!(ids(&bank, &traced), plain);
+        let tier = &trace["tiers"][0];
+        assert_eq!(tier["filtered_out"], json!(false));
+        // Recency is off: an infinite half-life, written as json.dumps does.
+        assert!(crate::pyjson::dumps(tier).contains("\"half_life_s\": Infinity"));
+        let reasons: Vec<&Value> = tier["candidates"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|c| &c["drop_reason"])
+            .collect();
+        // Cosine order: 6 (a superseded digest), 1 (kept), 2 (duplicates 1),
+        // 5 (under the floor).
+        assert_eq!(reasons[0], &json!("superseded"));
+        assert_eq!(reasons[1], &Value::Null);
+        assert_eq!(reasons[2], &json!("duplicate"));
+        assert!(reasons[3].as_str().unwrap().starts_with("relevance<"));
+        assert_eq!(tier["candidates"][1]["kept"], json!(true));
+        assert!(tier["candidates"][1].get("recency").is_none());
+        assert_eq!(trace["final_topk"].as_array().unwrap().len(), plain.len());
+        assert!(trace["candidate_pool"].get("pool_size").is_some());
     }
 
     #[test]

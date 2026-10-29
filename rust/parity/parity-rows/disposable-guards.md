@@ -1,0 +1,3 @@
+| Row | Phase | Behavior to preserve and Python source | Existing test pool and boundary | Status |
+|---|---:|---|---|---|
+| DISPOSABLE-GUARDS | 2/3/4/5 | `storage/schema.py:refuse_production_database` rejects known production names after stripping trailing slashes and casefolding; unresolved production identity, including the literal `<unresolved>` sentinel, fails every check closed. `assert_disposable_database` asks the connected server for its actual database and applies that same refusal before reap/DDL/truncate. It does not impose a disposable-name prefix allowlist. Existing guards precede destructive work. | `test_disposable_database_guard.py`, `test_bench_production_port_guard.py` I/DB; equivalent Rust refusal tests pending | deferred |

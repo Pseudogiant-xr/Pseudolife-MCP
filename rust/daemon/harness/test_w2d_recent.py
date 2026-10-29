@@ -82,9 +82,10 @@ def test_near_tied_similar_candidates_align_but_same_entity_order_is_exact():
 
 def test_importing_w2e_keeps_this_harness_name_guard():
     import pgdisposable as pg
-    before = pg.DISPOSABLE_NAME.pattern
+    before = w2d_search.pg.DISPOSABLE_NAME.pattern, pg.DISPOSABLE_NAME.pattern
     w2d_search.import_w2e()
-    assert pg.DISPOSABLE_NAME.pattern == before
+    assert (w2d_search.pg.DISPOSABLE_NAME.pattern, pg.DISPOSABLE_NAME.pattern) == before
+    assert w2d_search.pg.SLICE == "w2d"
 
 
 def test_stats_scenarios_refuse_golden_replay():

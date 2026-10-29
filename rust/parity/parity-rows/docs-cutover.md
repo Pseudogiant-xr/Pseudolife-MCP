@@ -1,0 +1,3 @@
+| Row | Phase | Behavior to preserve and Python source | Existing test pool and boundary | Status |
+|---|---:|---|---|---|
+| DOCS-CUTOVER | 5 | Guide/provider/tunnel/config/schema/atlas/defaults/help/LLMS and benchmark claim currency, oracle retained pending maintainer retirement. `docs/guide/`, `docs/atlas/`, READMEs, `llms*`, `server.json`, `pyproject.toml`, release manifests | `test_release_ux.py`, `test_atlas_currency.py`, `test_llms_txt.py`, `test_i18n_readme.py`, `test_eval_evidence.py`, `test_extractor_model_lists.py`, `test_repository_claims.py` A; regenerate LLMS after doc edits; [W3-J preparation](../../CUTOVER.md) tracks remaining acceptance; opt-in image and YAML evidence only | deferred |

@@ -1,0 +1,3 @@
+| Row | Phase | Behavior to preserve and Python source | Existing test pool and boundary | Status |
+|---|---:|---|---|---|
+| CLI-PAIRING-ENDPOINT | 3/4 | The daemon side of pairing: browser-origin refusal, uniform `pairing_refused`, concurrency and rate budget, unavailable mapping. `web/api.py` | `test_pair_endpoint.py`; the `POST /api/pair` route row. Rust serves redemption (B5): `harness/run.py` `pairing` (live only, Linux dev box) matches Python in responses and bank state, three principal-store mutants caught; `routes/pair.rs` tests pin the two-slot gate, refunds and disconnect ownership on both OSes; no installed-execution proof yet | deferred |
