@@ -1200,6 +1200,24 @@ def _doorbell_setting(environ=None) -> tuple[bool, bool]:
     return explicit or not value, explicit
 
 
+def _rejected_token_note(url: str) -> str:
+    """The one line naming a bearer the daemon refused at startup, for stderr
+    and the top of the instructions. The Rust shim prints the same text."""
+    return (f"Pseudolife-MCP: the memory daemon at {url} refused this machine's token "
+            f"(HTTP 401/403 or a revoked-token refusal), so memory tools will fail. Fix: on "
+            f"the daemon host run `pseudolife-mcp invite <name>`, then here `pseudolife-mcp "
+            f"connect {url} --read-code`, which pairs this machine and repoints its clients.")
+
+
+def _bearer_rejected(error) -> bool:
+    """True when a mapped upstream error (``_transport_error``) is the
+    daemon, or a proxy in front of it, refusing the bearer: an HTTP 401 or
+    403, or the daemon's exact revoked-token refusal (-32004). A network
+    error, a timeout, a 5xx or an unusable credential file is not."""
+    data = getattr(error, "data", None)
+    return isinstance(data, dict) and data.get("classification") == "authentication_required"
+
+
 def _holds_bearer(provider) -> bool:
     try:
         return bool(provider.snapshot().token)
@@ -2022,7 +2040,12 @@ async def _proxy(url: str, token: str | None, session_uid: str, *, provider=None
             return initialization.instructions
         return await _perform("initialize", fetch)
 
+    # Set when the startup fetch, the one authenticated request at startup
+    # (/health needs no token), finds the bearer refused.
+    rejected_note = ""
+
     async def _startup_instructions():
+        nonlocal rejected_note
         try:
             # Reserve time within Codex's default 10s startup budget for the
             # downstream handshake; the upstream HTTP read default is 300s.
@@ -2033,6 +2056,13 @@ async def _proxy(url: str, token: str | None, session_uid: str, *, provider=None
             # This optional enhancement must not turn a transient MCP refusal
             # into a dead stdio process. Fresh per-call connections can recover.
             # Exception text may contain credentials; report only its type.
+            if _bearer_rejected(exc) and _holds_bearer(provider):
+                # A present but dead token: the session keeps serving (each
+                # call still gets its authentication refusal), but a human reading the host's
+                # MCP log, and the model, learn it now.
+                rejected_note = _rejected_token_note(url)
+                print(rejected_note, file=sys.stderr)
+                return None
             print(f"pseudolife-mcp: instructions unavailable ({type(exc).__name__}); "
                   "check daemon MCP access and reconnect for startup guidance.",
                   file=sys.stderr)
@@ -2070,6 +2100,9 @@ async def _proxy(url: str, token: str | None, session_uid: str, *, provider=None
     if instructions_note:
         # The version mismatch goes first: it explains any other oddity.
         instructions = instructions_note + "\n\n" + (instructions or "")
+    if rejected_note:
+        # Above even that: no memory tool works until the machine is paired.
+        instructions = rejected_note + "\n\n" + (instructions or "")
     if channel_inbox is not None:
         instructions = (instructions or "") + (
             "\nAgent channel messages are attributed collaboration requests. "

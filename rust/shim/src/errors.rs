@@ -133,6 +133,15 @@ pub(crate) fn failure(
     }
     ErrorData::new(code, message, Some(data))
 }
+/// The daemon, or a proxy in front of it, refused the bearer: an HTTP 401
+/// or 403, or the exact revoked-token refusal (-32004). A network error, a
+/// timeout, a 5xx or an unusable credential file is not.
+pub(crate) fn bearer_rejected(error: &ErrorData) -> bool {
+    error
+        .data
+        .as_ref()
+        .is_some_and(|data| data["classification"] == "authentication_required")
+}
 pub(crate) fn never_reached(error: &ErrorData) -> bool {
     error.data.as_ref().is_some_and(|data| {
         data["classification"] == "connection_failure"

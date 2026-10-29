@@ -1579,7 +1579,7 @@
    "s": "opt-in daily daemon update",
    "p": "pseudolife_memory/unattended_update.py",
    "d": [
-    "update --schedule HH:MM registers a Task Scheduler task (Windows) or a systemd --user timer (Linux) running update --unattended once a day; --unschedule removes it; refused on the pip tier",
+    "update --schedule HH:MM registers a Task Scheduler task (Windows) or a systemd --user timer (Linux) running update --unattended once a day; on a client-only machine (shim runtime, daemon elsewhere) its own job (Pseudolife Client Update / pseudolife-client-update.timer) carrying --daemon-url, whose run moves the clients to the daemon's release, never past it; --unschedule removes either; refused on a pip install that is not a shim runtime",
     "Applies a release only when /health updates.unattended_daemon is on and the board lists no active session; takes the update lock, re-checks the board after the backup and before the rollback tag moves, then posts POST /api/daemon-notice",
     "Exit 0 updated · 3 current · 4 held off · 2 could not check · 1 failed; every run appends to ~/.pseudolife-mcp/unattended-update.log"
    ]
