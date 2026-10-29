@@ -1405,7 +1405,8 @@ def test_board_runner_checks_execute_on_both_platforms():
     assert step["working-directory"] == "."
     require_command(commands(step["run"]), ("python", "-m", "pytest"),
                     ("rust/daemon/harness/board/test_norm.py",
-                     "rust/daemon/harness/board/test_run.py"), PYTEST_FILTERS)
+                     "rust/daemon/harness/board/test_run.py",
+                     "rust/daemon/harness/test_pgdisposable_slices.py"), PYTEST_FILTERS)
 
 
 def test_rust_job_fits_a_cold_cache_and_bounds_the_override_builds():
