@@ -540,10 +540,26 @@ pub struct SessionStartQuery<'a> {
     pub plugin_version: Option<&'a str>,
     pub plugin_hooks_digest: Option<&'a str>,
     pub launcher: Option<&'a str>,
+    /// The caller presented a bearer the daemon matched to no principal.
+    pub token_rejected: bool,
 }
 
-/// `hook_session_start`: the notices (a newer release, else a plugin
-/// version mismatch, else a hooks mismatch), for an authorized caller the
+/// `token_rejected_notice`: the line for a caller whose bearer the daemon
+/// rejected, naming the caller's launcher for its own commands. Nothing of
+/// the token is echoed.
+fn token_rejected_notice(command: &str) -> String {
+    format!(
+        "Pseudolife-MCP: the memory daemon rejected this machine's token, so this session has \
+         no memory access (the token was revoked, rotated or never issued for this daemon). \
+         Fix: on the daemon host run `pseudolife-mcp invite <name>` (add `--replace` if that \
+         name is still paired), then here `{command} pair <daemon-url> --read-code`; \
+         `{command} doctor` shows the state."
+    )
+}
+
+/// `hook_session_start`: the rejected-token notice, the notices (a newer
+/// release, else a plugin version mismatch, else a hooks mismatch), for an
+/// authorized caller the
 /// dream-stall and (fresh starts only) review-queue lines, the session's
 /// registration and handle line, then the startup body, or the continued
 /// context on a resume or compaction. Never fails.
@@ -571,6 +587,9 @@ pub async fn hook_session_start(app: &App, q: SessionStartQuery<'_>) -> String {
         );
     }
     let mut prefix: Vec<String> = Vec::new();
+    if q.token_rejected {
+        prefix.push(token_rejected_notice(&command));
+    }
     if !notice.is_empty() {
         prefix.push(notice);
     }

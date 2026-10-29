@@ -2,9 +2,9 @@
 
 use crate::auth::Resolved;
 use crate::http::{
-    App, RequestBody, authorized, browser_gate, json_response, method_not_allowed, not_implemented,
-    parse_body_json, parse_query, principals_unavailable, read_body, resolve, text_response,
-    unauthorized, uvicorn_500,
+    App, RequestBody, authorization, authorized, browser_gate, json_response, method_not_allowed,
+    not_implemented, parse_body_json, parse_query, principals_unavailable, read_body, resolve,
+    text_response, unauthorized, uvicorn_500,
 };
 use axum::http::HeaderMap;
 use axum::response::Response;
@@ -147,11 +147,18 @@ pub(crate) async fn route(
         // The plugin's SessionStart context; 200 always. The policy text is
         // public; an unauthorized caller's session id and source are dropped
         // (they could otherwise mint or hijack the active-session pointer),
-        // while the version handshake still reaches it.
+        // while the version handshake still reaches it. A presented bearer
+        // that resolves to no principal was rejected, and the answer says
+        // so first; one the store cannot check now (`Unavailable`) may be
+        // valid, so it is not.
         "/api/hook/session-start" => {
-            let principal = match resolve(app, h) {
-                Resolved::Principal(name) => Some(name),
-                Resolved::None | Resolved::Unavailable => None,
+            let (principal, token_rejected) = match resolve(app, h) {
+                Resolved::Principal(name) => (Some(name), false),
+                Resolved::None => (
+                    None,
+                    crate::auth::bearer_presented(authorization(h).as_deref()),
+                ),
+                Resolved::Unavailable => (None, false),
             };
             let params = parse_query(raw_query);
             let get = |k: &str| params.get(k).map(String::as_str);
@@ -165,6 +172,7 @@ pub(crate) async fn route(
                     plugin_version: get("plugin_version"),
                     plugin_hooks_digest: get("plugin_hooks_digest"),
                     launcher: get("launcher"),
+                    token_rejected,
                 },
             )
             .await;
@@ -210,6 +218,100 @@ mod tests {
             body.starts_with("Pseudolife-MCP: resumed session, so the startup memory briefing"),
             "{body}"
         );
+    }
+
+    /// `tests/test_session_start_rejected_token.py`'s notice, byte for byte.
+    const REJECTED: &str = "Pseudolife-MCP: the memory daemon rejected this machine's token, so \
+        this session has no memory access (the token was revoked, rotated or never issued for \
+        this daemon). Fix: on the daemon host run `pseudolife-mcp invite <name>` (add \
+        `--replace` if that name is still paired), then here `pseudolife-mcp pair <daemon-url> \
+        --read-code`; `pseudolife-mcp doctor` shows the state.";
+
+    async fn start_with(
+        app: &std::sync::Arc<crate::http::App>,
+        authorization: &[&str],
+        query: &str,
+    ) -> String {
+        let mut request = axum::http::Request::builder()
+            .method("GET")
+            .uri(format!("/api/hook/session-start{query}"));
+        for value in authorization {
+            request = request.header("authorization", *value);
+        }
+        let response = crate::http::handle(
+            axum::extract::State(app.clone()),
+            request.body(axum::body::Body::empty()).unwrap(),
+        )
+        .await;
+        assert_eq!(response.status(), 200);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        String::from_utf8(body.to_vec()).unwrap()
+    }
+
+    /// A loaded (available) principal store, so an unknown bearer resolves
+    /// to no principal rather than to `Unavailable`.
+    fn loaded_app() -> std::sync::Arc<crate::http::App> {
+        let app = mcp_refusal_app();
+        app.store
+            .refresh(vec![], None, &[], std::time::Instant::now());
+        app
+    }
+
+    /// A rejected bearer gets the notice, then the no-bearer answer.
+    #[tokio::test]
+    async fn session_start_says_a_rejected_bearer_was_rejected() {
+        let app = loaded_app();
+        let plain = start_with(&app, &[], "").await;
+        let rejected = start_with(&app, &["Bearer fixture-rotated-token-4f2a"], "").await;
+        assert_eq!(rejected, format!("{REJECTED}\n\n{plain}"));
+        assert!(!rejected.contains("fixture-rotated"), "{rejected}");
+        // Before a version notice, naming the reported launcher.
+        let text = start_with(
+            &app,
+            &["Bearer wrong"],
+            "?plugin_version=0.0.1&launcher=/opt/pl/bin/pseudolife-mcp",
+        )
+        .await;
+        assert!(
+            text.starts_with("Pseudolife-MCP: the memory daemon rejected"),
+            "{text}"
+        );
+        assert!(
+            text.contains("`/opt/pl/bin/pseudolife-mcp doctor`"),
+            "{text}"
+        );
+        assert!(
+            text.find("rejected this machine").unwrap()
+                < text.find("Pseudolife-MCP: plugin 0.0.1").unwrap(),
+            "{text}"
+        );
+        // The last Authorization header decides, as the resolver reads it.
+        let valid_last = start_with(&app, &["Bearer wrong", "Bearer fixture-token"], "").await;
+        assert!(
+            !valid_last.contains("rejected this machine"),
+            "{valid_last}"
+        );
+        let valid_first = start_with(&app, &["Bearer fixture-token", "Bearer wrong"], "").await;
+        assert!(valid_first.starts_with(REJECTED), "{valid_first}");
+    }
+
+    /// The near-misses keep the no-bearer answer byte for byte: no header,
+    /// a bare or blank scheme, another scheme, and a bearer the store cannot
+    /// check now (it may be a valid stored one).
+    #[tokio::test]
+    async fn session_start_without_a_presented_bearer_is_unchanged() {
+        let app = loaded_app();
+        let plain = start_with(&app, &[], "").await;
+        assert!(!plain.contains("rejected this machine"), "{plain}");
+        for value in ["Bearer", "Bearer  \t ", "Basic fixture-rotated-token-4f2a"] {
+            assert_eq!(start_with(&app, &[value], "").await, plain, "{value}");
+        }
+        let accepted = start_with(&app, &["Bearer fixture-token"], "").await;
+        assert!(!accepted.contains("rejected this machine"), "{accepted}");
+        let unloaded = mcp_refusal_app();
+        assert_eq!(start_with(&unloaded, &["Bearer wrong"], "").await, plain);
     }
 
     /// With the default `compact` policy the separate hook serves nothing.
