@@ -331,9 +331,9 @@ REFLECT — at task end, or the moment an outcome lands:
   the dream distils them into the do/avoid guidance surfaced at your next
   session start.
 
-Be judicious: skip fleeting chatter (the surprise gate drops
-near-duplicates; `stored=false` is not an error). The first memory call may
-lag while the embedder loads.
+Be judicious: skip fleeting chatter (if the surprise gate is enabled it
+drops near-duplicates; `stored=false` is not an error). The first memory
+call may lag while the embedder loads.
 
 If this session has NO `memory_*` tools, the MCP transport isn't registered
 (these instructions arrive via a hook or a standing file, not MCP) — tell the user to run
