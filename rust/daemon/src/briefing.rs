@@ -15,9 +15,10 @@ use std::sync::Arc;
 
 /// What `session_briefing` assembles.
 pub struct BriefingOptions {
-    pub max_unsure: usize,
-    pub max_lessons: usize,
-    pub max_world: usize,
+    /// Python ints: a negative cap slices from the end, as `[:n]` does.
+    pub max_unsure: i64,
+    pub max_lessons: i64,
+    pub max_world: i64,
     /// `coordination_awareness(session_id)`, when the caller asked for
     /// coordination and it is enabled. The transport computes it (the board
     /// owns awareness), so the briefing never reaches into the board.
@@ -66,6 +67,16 @@ fn one_line(s: &str) -> String {
     collapse_spaces(s)
 }
 
+/// How many items `seq[:n]` keeps of `len`: a negative `n` counts from the
+/// end.
+fn py_head_len(len: usize, n: i64) -> usize {
+    if n >= 0 {
+        len.min(usize::try_from(n).unwrap_or(usize::MAX))
+    } else {
+        len.saturating_sub(usize::try_from(n.unsigned_abs()).unwrap_or(usize::MAX))
+    }
+}
+
 const AVOID_OUTCOMES: [&str; 2] = ["failure", "correction"];
 
 fn is_avoid(e: &Map<String, Value>) -> bool {
@@ -76,15 +87,16 @@ fn is_avoid(e: &Map<String, Value>) -> bool {
 }
 
 /// `select_lessons`: avoid-first, then the rest in input order, capped.
-pub fn select_lessons(entries: Vec<Map<String, Value>>, max: usize) -> Vec<Map<String, Value>> {
+pub fn select_lessons(entries: Vec<Map<String, Value>>, max: i64) -> Vec<Map<String, Value>> {
     if crate::mutants::active("briefing-no-avoid-first") {
         let mut entries = entries;
-        entries.truncate(max);
+        entries.truncate(py_head_len(entries.len(), max));
         return entries;
     }
     let (mut avoid, rest): (Vec<_>, Vec<_>) = entries.into_iter().partition(is_avoid);
     avoid.extend(rest);
-    avoid.truncate(max);
+    let keep = py_head_len(avoid.len(), max);
+    avoid.truncate(keep);
     avoid
 }
 
@@ -620,14 +632,14 @@ async fn graph_digest(ready: &Ready) -> Result<Option<Map<String, Value>>, Strin
 fn head_items(
     d: &Map<String, Value>,
     key: &str,
-    n: usize,
+    n: i64,
 ) -> Result<Vec<Map<String, Value>>, String> {
     let list = match d.get(key) {
         Some(v) if truthy(v) => v.as_array().ok_or(format!("{key} is not a list"))?,
         _ => return Ok(Vec::new()),
     };
     list.iter()
-        .take(n)
+        .take(py_head_len(list.len(), n))
         .map(|v| {
             v.as_object()
                 .cloned()
@@ -659,7 +671,7 @@ async fn lessons_dump(ready: &Ready, limit: usize) -> Result<Vec<Map<String, Val
 
 /// `world_dump()` then the briefing's cut: non-stale facts, best effective
 /// confidence first (stable), capped.
-fn fresh_world(ready: &Ready, config: &Config, max: usize) -> Vec<Map<String, Value>> {
+fn fresh_world(ready: &Ready, config: &Config, max: i64) -> Vec<Map<String, Value>> {
     let snap = ready.world.snapshot();
     let policy = config.memory.search.stale_policy.clone();
     let now = crate::episodes::now();
@@ -681,7 +693,8 @@ fn fresh_world(ready: &Ready, config: &Config, max: usize) -> Vec<Map<String, Va
             .unwrap_or(0.0)
     };
     fresh.sort_by(|a, b| conf(b).partial_cmp(&conf(a)).unwrap_or(Ordering::Equal));
-    fresh.truncate(max);
+    let keep = py_head_len(fresh.len(), max);
+    fresh.truncate(keep);
     fresh
 }
 

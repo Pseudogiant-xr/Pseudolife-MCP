@@ -30,7 +30,8 @@ MUTANTS = ["session-end-no-client-stamp", "session-end-keeps-empty",
            "changes-cursor-echoes-since", "changes-counts-superseded",
            "session-start-no-registration", "session-start-no-pointer",
            "session-start-no-briefing", "briefing-no-avoid-first",
-           "briefing-recap-includes-open"]
+           "briefing-recap-includes-open", "episode-end-ignores-header",
+           "episode-end-stamps-guarded", "episode-end-no-dream"]
 
 HOME_OPS = ("write_file",)
 
@@ -53,6 +54,11 @@ DREAM_NOTES = ["The billing export runs nightly at 02:00.",
 # which holds on the calibration host, not on every host).
 DREAM_CLAIMS: list[dict] = []
 DREAM_SETTLE = {"quiet_s": 3.0, "timeout_s": 120.0}
+# cli-episode-end-dream's notes, in store order: the first in cd-1, the
+# others in cd-2; the one dream pulls all three.
+CLI_DREAM_NOTES = ["The invoice job retries three times.",
+                   "Marta reviews the invoice job's alerts.",
+                   "The invoice job runs on the batch cluster."]
 
 OPS = ("hook",)
 
@@ -95,6 +101,7 @@ def run(op: dict, port: int, dsn: str, harness) -> dict:
                     for k, v in op["body"].items()}
         body = json.dumps(resolved).encode()
     hdrs = [harness.AUTH] if op.get("auth", True) else []
+    hdrs += [tuple(x) for x in op.get("headers", ())]
     if body is not None:
         hdrs.append(("Content-Type", "application/json"))
     path = op["path"].replace("@prev", _LAST_CURSOR.get(port, ""))
@@ -143,12 +150,26 @@ def session_start(query: str = "", auth: bool = True) -> dict:
     return hook("GET", "/api/hook/session-start" + (f"?{query}" if query else ""), auth=auth)
 
 
+def episode_start(body: dict) -> dict:
+    return hook("POST", "/api/episode/start", body)
+
+
+def episode_end(body: dict, headers=()) -> dict:
+    op = hook("POST", "/api/episode/end", body)
+    if headers:
+        op["headers"] = [list(h) for h in headers]
+    return op
+
+
 def changes(query: str = "", auth: bool = True) -> dict:
     return {**hook("GET", "/api/hook/memory-changes" + (f"?{query}" if query else ""), auth=auth),
             "cursor": True}
 
 
 def register(h) -> dict[str, dict]:
+    # cli-episode-routes stamps a registration behind the daemons' backs,
+    # as the idle reaper would have.
+    h.EXTERNAL_WRITES.add("cli-episode-routes")
     start = "/api/hook/session-start?source=startup&session_id="
     seed_start = lambda key: {"op": "http", "method": "GET", "path": start + key}  # noqa: E731
     return {
@@ -402,6 +423,84 @@ def register(h) -> dict[str, dict]:
                 # Authorized with no session id: nothing registers.
                 session_start("source=startup"),
                 h.ep_summary("@root:ss-a:32"),
+            ],
+        },
+        # The CLI's episode routes (B10f): POST /api/episode/start opens or
+        # re-finds a session's episode and registers it as `api`; POST
+        # /api/episode/end closes an explicit key, or with none only the
+        # caller's own session (header, else the active-session pointer).
+        "cli-episode-routes": {
+            "config": "memory:\n  dream:\n    enabled: false\n    extractor_mode: fallback\n",
+            "seed": [
+                h.store("A note in session A about the cache.", [h.sess("es-a")]),
+                h.store("A note in session B.", [h.sess("es-b")]),
+                h.ep_start("es-b sub-task", [h.sess("es-b")]),
+                h.store("A note in es-b's sub-task.", [h.sess("es-b")]),
+                # Registered through the route, and left empty. Seeded, so
+                # both banks hold its id after the end prunes it.
+                {"op": "http", "method": "POST", "path": "/api/episode/start",
+                 "body": {"session_key": "es-empty", "title": "Empty CLI session"}},
+                seed_start("es-ptr"),
+                h.store("A note in the pointer's session.", [h.sess("es-ptr")]),
+            ],
+            "ops": [
+                # A new keyed root with its title and hint, registered as api.
+                episode_start({"session_key": "es-new", "title": "CLI start", "hint": "a hint"}),
+                # Again: the same open episode; the registration appends.
+                episode_start({"session_key": "es-new", "title": "Ignored"}),
+                # An open sub-episode is handed back; the row names the root.
+                episode_start({"session_key": "es-b"}),
+                # Keyless, and an empty key with an empty title.
+                episode_start({}),
+                episode_start({"session_key": "", "title": ""}),
+                # An explicit end: closed and titled from its entries.
+                episode_end({"session_key": "es-a"}),
+                h.ep_summary("@root:es-a:32"),
+                # Nothing open any more, and a key never seen: {}.
+                episode_end({"session_key": "es-a"}),
+                episode_end({"session_key": "never-seen"}),
+                # Empty: pruned, its registration stamped; no dream asked.
+                episode_end({"session_key": "es-empty", "run_dream": False}),
+                # Guarded: the header's session (the sub-task closes too).
+                episode_end({}, headers=[("X-PL-Session", "es-b")]),
+                # Guarded: no header, so the active-session pointer's.
+                episode_end({}),
+                # As if the reaper had closed it: its registration reads idle.
+                h.external("UPDATE client_sessions SET end_reason = 'idle' "
+                           "WHERE session_key = 'es-ptr'"),
+                # Guarded again: the pointer's session has nothing open, and
+                # the guarded path stamps nothing (still idle).
+                episode_end({}),
+                # The same key, explicit: nothing open, the end is stamped.
+                episode_end({"session_key": "es-ptr"}),
+            ],
+        },
+        # The route's session-end dream, against a stub extractor: a close
+        # with run_dream falsy fires nothing (the notes stay pending); a
+        # close with entries fires one dream, whose requests are compared
+        # and which acknowledges every pending note on both sides.
+        "cli-episode-end-dream": {
+            "config": DREAM_CONFIG,
+            "extractor": {"model": "stub-model",
+                          "replies": [{**r, "times": 1}
+                                      for r in h.batch_replies(CLI_DREAM_NOTES, DREAM_CLAIMS)]},
+            "extractor_all_used": True,
+            "seed": [
+                {"op": "http", "method": "POST", "path": "/api/episode/start",
+                 "body": {"session_key": "cd-1", "title": "First"}},
+                h.store(CLI_DREAM_NOTES[0], [h.sess("cd-1")], source="conversation"),
+                {"op": "http", "method": "POST", "path": "/api/episode/start",
+                 "body": {"session_key": "cd-2", "title": "Second"}},
+                h.store(CLI_DREAM_NOTES[1], [h.sess("cd-2")], source="conversation"),
+                h.store(CLI_DREAM_NOTES[2], [h.sess("cd-2")], source="conversation"),
+            ],
+            "ops": [
+                {**episode_end({"session_key": "cd-1", "run_dream": 0}),
+                 "settle": dict(DREAM_SETTLE),
+                 "expect": ["SELECT EXISTS (SELECT 1 FROM entries WHERE dream_state = 'pending')"]},
+                {**episode_end({"session_key": "cd-2"}), "settle": dict(DREAM_SETTLE),
+                 "expect": ["SELECT NOT EXISTS (SELECT 1 FROM entries "
+                            "WHERE dream_state = 'pending')"]},
             ],
         },
         # A cold bank and the A/B arms: sess-a gets compact (policy and
