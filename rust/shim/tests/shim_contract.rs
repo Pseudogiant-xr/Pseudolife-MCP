@@ -11,7 +11,7 @@ fn list(shim: &mut Shim) -> serde_json::Value {
     shim.send(json!({"jsonrpc":"2.0","id":"list","method":"tools/list","params":{}}));
     shim.receive()
 }
-const REJECTED_TOKEN_MARK: &str = "rejected this machine's token";
+const REJECTED_TOKEN_MARK: &str = "refused this machine's token";
 fn initialize_count(fixture: &Fixture) -> usize {
     fixture
         .records
@@ -94,7 +94,7 @@ fn revoked_bearer_refusal_at_startup_is_named_and_the_shim_keeps_serving() {
 fn rejected_token_note_matches_the_python_shim_text() {
     assert_eq!(
         pseudolife_stdio::lifecycle::rejected_token_note("http://127.0.0.1:8765"),
-        "Pseudolife-MCP: the memory daemon at http://127.0.0.1:8765 rejected this machine's token (revoked, rotated or never issued for it), so memory tools will fail. Fix: on the daemon host run `pseudolife-mcp invite <name>`, then here `pseudolife-mcp pair http://127.0.0.1:8765 --read-code`; `pseudolife-mcp doctor` shows the state."
+        "Pseudolife-MCP: the memory daemon at http://127.0.0.1:8765 refused this machine's token (HTTP 401/403 or a revoked-token refusal), so memory tools will fail. Fix: on the daemon host run `pseudolife-mcp invite <name>`, then here `pseudolife-mcp connect http://127.0.0.1:8765 --read-code`, which pairs this machine and repoints its clients."
     );
 }
 /// No credential: a 401 names no token the shim does not hold.

@@ -244,7 +244,7 @@ def _drive_startup_fetch(tmp_path, first_initialize: str, token: str | None,
         worker.join(timeout=2)
 
 
-_REJECTED_TOKEN_MARK = "rejected this machine's token"
+_REJECTED_TOKEN_MARK = "refused this machine's token"
 
 
 @pytest.mark.parametrize("initial_failure", ["refused", "stalled"])
@@ -279,7 +279,7 @@ def test_shim_names_a_rejected_token_at_startup_and_keeps_serving(tmp_path, refu
     note = _shim._rejected_token_note(seen["url"])
     assert _REJECTED_TOKEN_MARK in note and seen["url"] in note
     assert "pseudolife-mcp invite <name>" in note
-    assert f"pseudolife-mcp pair {seen['url']} --read-code" in note
+    assert f"pseudolife-mcp connect {seen['url']} --read-code" in note
     assert "\n" not in note
     assert seen["instructions"].startswith(note)
     assert [line for line in seen["stderr"].splitlines() if _REJECTED_TOKEN_MARK in line] == [note]
@@ -294,10 +294,10 @@ def test_rejected_token_note_matches_the_rust_shim_text():
     """Byte-identical to rust/shim/tests/shim_contract.rs's pin of the Rust
     shim's ``lifecycle::rejected_token_note``."""
     assert _shim._rejected_token_note("http://127.0.0.1:8765") == (
-        "Pseudolife-MCP: the memory daemon at http://127.0.0.1:8765 rejected this machine's "
-        "token (revoked, rotated or never issued for it), so memory tools will fail. Fix: on "
-        "the daemon host run `pseudolife-mcp invite <name>`, then here `pseudolife-mcp pair "
-        "http://127.0.0.1:8765 --read-code`; `pseudolife-mcp doctor` shows the state.")
+        "Pseudolife-MCP: the memory daemon at http://127.0.0.1:8765 refused this machine's "
+        "token (HTTP 401/403 or a revoked-token refusal), so memory tools will fail. Fix: on "
+        "the daemon host run `pseudolife-mcp invite <name>`, then here `pseudolife-mcp connect "
+        "http://127.0.0.1:8765 --read-code`, which pairs this machine and repoints its clients.")
 
 
 def test_shim_without_a_bearer_keeps_todays_startup_on_a_401(tmp_path):

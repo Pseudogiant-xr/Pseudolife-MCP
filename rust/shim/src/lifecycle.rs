@@ -602,7 +602,7 @@ pub fn require_credential_for_auth(
 /// and the top of the instructions; the Python shim prints the same text.
 pub fn rejected_token_note(url: &str) -> String {
     format!(
-        "Pseudolife-MCP: the memory daemon at {url} rejected this machine's token (revoked, rotated or never issued for it), so memory tools will fail. Fix: on the daemon host run `pseudolife-mcp invite <name>`, then here `pseudolife-mcp pair {url} --read-code`; `pseudolife-mcp doctor` shows the state."
+        "Pseudolife-MCP: the memory daemon at {url} refused this machine's token (HTTP 401/403 or a revoked-token refusal), so memory tools will fail. Fix: on the daemon host run `pseudolife-mcp invite <name>`, then here `pseudolife-mcp connect {url} --read-code`, which pairs this machine and repoints its clients."
     )
 }
 pub fn holds_bearer(provider: &CredentialProvider) -> bool {

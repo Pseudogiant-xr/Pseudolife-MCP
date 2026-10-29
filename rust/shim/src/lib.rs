@@ -144,7 +144,7 @@ impl Proxy {
                                 && lifecycle::holds_bearer(&runtime.provider) =>
                         {
                             // A present but dead token: keep serving (each
-                            // call still gets -32004), but say so now.
+                            // call still gets its authentication refusal), but say so now.
                             let note = lifecycle::rejected_token_note(&runtime.url);
                             crate::stderrln!("{note}");
                             (None, Some(note))

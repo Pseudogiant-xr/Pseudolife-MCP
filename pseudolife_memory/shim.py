@@ -1203,10 +1203,10 @@ def _doorbell_setting(environ=None) -> tuple[bool, bool]:
 def _rejected_token_note(url: str) -> str:
     """The one line naming a bearer the daemon refused at startup, for stderr
     and the top of the instructions. The Rust shim prints the same text."""
-    return (f"Pseudolife-MCP: the memory daemon at {url} rejected this machine's token "
-            f"(revoked, rotated or never issued for it), so memory tools will fail. Fix: on "
+    return (f"Pseudolife-MCP: the memory daemon at {url} refused this machine's token "
+            f"(HTTP 401/403 or a revoked-token refusal), so memory tools will fail. Fix: on "
             f"the daemon host run `pseudolife-mcp invite <name>`, then here `pseudolife-mcp "
-            f"pair {url} --read-code`; `pseudolife-mcp doctor` shows the state.")
+            f"connect {url} --read-code`, which pairs this machine and repoints its clients.")
 
 
 def _bearer_rejected(error) -> bool:
@@ -2058,7 +2058,7 @@ async def _proxy(url: str, token: str | None, session_uid: str, *, provider=None
             # Exception text may contain credentials; report only its type.
             if _bearer_rejected(exc) and _holds_bearer(provider):
                 # A present but dead token: the session keeps serving (each
-                # call still gets -32004), but a human reading the host's
+                # call still gets its authentication refusal), but a human reading the host's
                 # MCP log, and the model, learn it now.
                 rejected_note = _rejected_token_note(url)
                 print(rejected_note, file=sys.stderr)
