@@ -43,6 +43,10 @@ HEALTH_OPEN = '{"status": "ok", "version": "0.0.0", "auth": false}'
 PAIRING_CODE = "7KQ2-MX4P-9TZC"
 URLSAFE_TOKEN = "Zq3_x9-KfixtureUrlsafeToken0123456789abcdEF"
 PAIRED_TOKEN = "fixture-paired-token-0123456789"
+# Why a client machine should pair: the installers' hint and the guide say it
+# in the same words.
+COPIED_TOKEN_REASON = ("is shared: rotating it breaks every copy, and you cannot "
+                       "revoke one machine without the others")
 
 
 def _block(name: str) -> str:
@@ -539,6 +543,75 @@ def test_https_off_this_machine_does_not_warn(bash, tmp_path):
                       token_file=shell.path(token))
     assert proc.returncode == 0, proc.stderr
     assert "unencrypted" not in proc.stderr
+
+
+# -- a raw token still works, and pairing is recommended -------------------------
+# 2026-10-18: one rotated static token silently cut off every machine holding
+# a copy of it for 11 days. Pairing gives each machine its own principal.
+
+def _pairing_hints(output: str) -> list[str]:
+    return [line for line in output.splitlines() if "pseudolife-mcp invite <name>" in line]
+
+
+@BASH
+def test_a_raw_token_off_this_machine_recommends_pairing_once(bash, tmp_path):
+    shell = _Shell(bash, tmp_path)
+    token = _token(shell)
+    proc = _preflight(shell, token_file=shell.path(token))
+    assert proc.returncode == 0, proc.stderr
+    [hint] = _pairing_hints(proc.stdout + proc.stderr)
+    assert COPIED_TOKEN_REASON in hint
+    assert f"pseudolife-mcp connect {REMOTE} --read-code" in hint
+    assert FIXTURE_TOKEN not in proc.stdout + proc.stderr
+
+
+@BASH
+def test_a_pasted_raw_token_recommends_pairing(bash, tmp_path):
+    shell = _Shell(bash, tmp_path)
+    target = tmp_path / "keys" / "new.token"
+    proc = _preflight(shell, token_file=shell.path(target), read_token="1",
+                      feed=FIXTURE_TOKEN)
+    assert proc.returncode == 0, proc.stderr
+    assert len(_pairing_hints(proc.stdout + proc.stderr)) == 1
+    assert FIXTURE_TOKEN not in proc.stdout + proc.stderr
+
+
+@BASH
+def test_a_pairing_code_gets_no_pairing_recommendation(bash, tmp_path):
+    shell = _Shell(bash, tmp_path)
+    proc = _preflight(shell, pairing_code=PAIRING_CODE)
+    assert proc.returncode == 0, proc.stderr
+    assert _pairing_hints(proc.stdout + proc.stderr) == []
+
+
+@BASH
+def test_a_pasted_pairing_code_gets_no_pairing_recommendation(bash, tmp_path):
+    shell = _Shell(bash, tmp_path)
+    target = tmp_path / "keys" / "new.token"
+    proc = _preflight(shell, token_file=shell.path(target), read_token="1",
+                      feed=PAIRING_CODE)
+    assert proc.returncode == 0, proc.stderr
+    assert "PAIRING=held\n" in proc.stdout
+    assert _pairing_hints(proc.stdout + proc.stderr) == []
+
+
+@BASH
+def test_a_loopback_daemon_gets_no_pairing_recommendation(bash, tmp_path):
+    """The daemon's own host, or an SSH tunnel to it: no warning."""
+    shell = _Shell(bash, tmp_path)
+    token = _token(shell)
+    proc = _preflight(shell, daemon_url="http://127.0.0.1:18765",
+                      token_file=shell.path(token))
+    assert proc.returncode == 0, proc.stderr
+    assert _pairing_hints(proc.stdout + proc.stderr) == []
+
+
+def test_the_installers_and_the_guide_give_the_same_reason_to_pair():
+    ps1 = (ROOT / "ops" / "install.ps1").read_text(encoding="utf-8").split(
+        "# >>> client-only preflight >>>", 1)[1].split("# <<< client-only preflight <<<", 1)[0]
+    guide = (ROOT / "docs" / "guide" / "remote-bank.md").read_text(encoding="utf-8")
+    for text in (_block("client-only preflight"), ps1, " ".join(guide.split())):
+        assert COPIED_TOKEN_REASON in text
 
 
 @BASH

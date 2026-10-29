@@ -14,9 +14,9 @@
 #   ops/install.sh --extractor endpoint --extractor-url http://127.0.0.1:1234/v1 \
 #       --model qwen3.6-27b --client claude
 #   ops/install.sh --daemon-url http://100.64.0.2:8765 \
-#       --token-file ~/.pseudolife-mcp/claude-code.token --read-token --client claude
-#   ops/install.sh --daemon-url http://100.64.0.2:8765 \
 #       --pairing-code ABCD-EFGH-JKMN --client claude
+#   ops/install.sh --daemon-url http://100.64.0.2:8765 \
+#       --token-file ~/.pseudolife-mcp/claude-code.token --read-token --client claude
 #
 # Providers (--client, comma- or space-separated list):
 #   claude    Claude Code    - MCP + SessionStart briefing + per-turn discipline
@@ -78,15 +78,22 @@
 #   --token-file <path>              client-only: an owner-only file (chmod
 #                                    600) holding the daemon's bearer token
 #                                    (default: PSEUDOLIFE_MCP_TOKEN_FILE);
-#                                    the installer never mints one here
+#                                    the installer never mints one here.
+#                                    The fallback: prefer --pairing-code
 #   --client-only                    wire clients to --daemon-url only; with
 #                                    a loopback URL, for an SSH tunnel
 #   --read-token                     client-only: create the --token-file (it
 #                                    must not exist yet) from the token typed,
-#                                    unechoed, or piped on stdin
-#   --pairing-code <code>            client-only: a pairing code from
-#                                    pseudolife-mcp invite on the daemon's
-#                                    host, instead of a token: the installed
+#                                    unechoed, or piped on stdin (the
+#                                    fallback: prefer --pairing-code)
+#   --pairing-code <code>            client-only, recommended: a pairing code
+#                                    from pseudolife-mcp invite <name> on the
+#                                    daemon's host, instead of a token, so
+#                                    this machine gets its own principal. A
+#                                    token copied from another machine is
+#                                    shared: rotating it breaks every copy,
+#                                    and you cannot revoke one machine
+#                                    without the others. The installed
 #                                    shim's pair creates the --token-file
 #                                    (default ~/.pseudolife-mcp/<client>.token;
 #                                    it must not exist yet). An interactive
@@ -983,6 +990,11 @@ client_only_preflight() {
         esac
     fi
     step "Daemon answered at $DAEMON_URL/health."
+    # A token file is accepted, but another machine's copied token is shared
+    # (docs/guide/remote-bank.md). Not on loopback: the daemon's own host.
+    if [ -z "${PAIRING_CODE:-}" ] && ! is_loopback_url "$DAEMON_URL"; then
+        step "If this token was copied from another machine, it is shared: rotating it breaks every copy, and you cannot revoke one machine without the others. Give this machine its own: run pseudolife-mcp invite <name> on the daemon's host, then pseudolife-mcp connect $DAEMON_URL --read-code here."
+    fi
 }
 # <<< client-only preflight <<<
 step "Preflight..."

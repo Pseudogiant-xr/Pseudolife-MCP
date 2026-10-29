@@ -16,9 +16,9 @@
 #   ops\install.ps1 -Extractor endpoint -ExtractorUrl http://127.0.0.1:1234/v1 `
 #       -Model qwen3.6-27b -Client claude
 #   ops\install.ps1 -DaemonUrl http://100.64.0.2:8765 `
-#       -TokenFile ~\.pseudolife-mcp\claude-code.token -ReadToken -Client claude
-#   ops\install.ps1 -DaemonUrl http://100.64.0.2:8765 `
 #       -PairingCode ABCD-EFGH-JKMN -Client claude
+#   ops\install.ps1 -DaemonUrl http://100.64.0.2:8765 `
+#       -TokenFile ~\.pseudolife-mcp\claude-code.token -ReadToken -Client claude
 #
 # Providers (-Client, comma- or space-separated list):
 #   claude    Claude Code    - MCP + SessionStart briefing + per-turn discipline
@@ -50,14 +50,18 @@
 #   implies -ClientOnly.
 # -TokenFile <path>: client-only - an owner-only file holding the daemon's
 #   bearer token (default: PSEUDOLIFE_MCP_TOKEN_FILE); the installer never
-#   mints one here.
+#   mints one here. The fallback: prefer -PairingCode.
 # -ClientOnly (switch): wire clients to -DaemonUrl only; with a loopback URL,
 #   for an SSH tunnel.
 # -ReadToken (switch): client-only - create the -TokenFile (it must not exist
-#   yet) from the token typed, unechoed, or piped on stdin.
-# -PairingCode <code>: client-only - a pairing code from pseudolife-mcp
-#   invite on the daemon's host, instead of a token: the installed shim's
-#   pair creates the -TokenFile (default ~/.pseudolife-mcp/<client>.token;
+#   yet) from the token typed, unechoed, or piped on stdin (the fallback:
+#   prefer -PairingCode).
+# -PairingCode <code>: client-only, recommended - a pairing code from
+#   pseudolife-mcp invite <name> on the daemon's host, instead of a token, so
+#   this machine gets its own principal. A token copied from another machine
+#   is shared: rotating it breaks every copy, and you cannot revoke one
+#   machine without the others. The installed shim's pair creates the
+#   -TokenFile (default ~/.pseudolife-mcp/<client>.token;
 #   it must not exist yet). An interactive run also takes a code pasted
 #   where it asks for the token, which keeps it off the command line (and
 #   the shell history).
@@ -924,6 +928,11 @@ function Invoke-ClientOnlyPreflight {
         }
     }
     Step "Daemon answered at $DaemonUrl/health."
+    # A token file is accepted, but another machine's copied token is shared
+    # (docs/guide/remote-bank.md). Not on loopback: the daemon's own host.
+    if (-not $script:PairingCode -and -not (Test-LoopbackUrl $DaemonUrl)) {
+        Step "If this token was copied from another machine, it is shared: rotating it breaks every copy, and you cannot revoke one machine without the others. Give this machine its own: run pseudolife-mcp invite <name> on the daemon's host, then pseudolife-mcp connect $DaemonUrl --read-code here."
+    }
 }
 # <<< client-only preflight <<<
 Step "Preflight..."
