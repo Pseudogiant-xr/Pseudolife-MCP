@@ -137,6 +137,92 @@ def read_cases() -> list:
     return out
 
 
+# write_config over a config.yaml (``None``: no file) and a patch: the file
+# it leaves, whether it backed the old one up, or the exception it raised.
+EXISTING = """\
+# Pseudolife daemon settings.
+memory:
+  top_k: 8
+  hide_superseded: yes
+  ref_top_k: 017
+  miras:
+    preset: custom
+    bands:
+    - name: flat
+      max_entries: 5000
+  dream:
+    enabled: false
+    extractor_base_url: 'http://127.0.0.1:8080/v1'
+    extractor_model: "claude-sonnet-4-5"
+  cortex: off
+coordination:
+  enabled: true
+  maintainer:
+    rp_id: console.example.com
+    origin: https://console.example.com
+"""
+WRITES = [
+    ("new-file", None, {"memory.top_k": 12}),
+    ("merge-in-place", EXISTING, {"memory.top_k": "12", "memory.dream.enabled": "on",
+                                  "memory.dream.extractor_base_url": "",
+                                  "memory.cortex.guard_min_score": 0.25,
+                                  "memory.lessons.top_k": 7, "time.relative_age": False,
+                                  "memory.dream.idle_seconds": 1e-05}),
+    ("new-sections-in-patch-order", "time:\n  relative_age: true\n",
+     {"memory.recall.driver": "mechanical", "memory.bm25.weight": 1,
+      "memory.dream.extractor_model": "  some-model  "}),
+    ("empty-file", "", {"memory.hide_superseded": True}),
+    ("comment-only-file", "# nothing yet\n", {"memory.mcp.entry_text_chars": 900}),
+    ("unicode-and-long-text", "note: \"café — " + "long words " * 12 + "\"\n",
+     {"memory.dream.extractor_model": "modèle-é"}),
+    ("protected", EXISTING, {"memory.top_k": 9, "Coordination.Maintainer.rp_id": "x"}),
+    ("protected-padded", EXISTING, {" coordination.maintainer ": {}}),
+    ("protected-before-unknown", EXISTING, {"nope": 1, "coordination.maintainer.origin": "x"}),
+    ("unknown-knob", EXISTING, {"memory.top_k": 9, "memory.nope": 1}),
+    ("invalid-value", EXISTING, {"memory.top_k": 99}),
+    ("type-error", EXISTING, {"memory.top_k": None}),
+    ("empty-patch", EXISTING, {}),
+    ("list-document", "- a\n- b\n", {"memory.top_k": 9}),
+    ("scalar-document", "hello\n", {"memory.top_k": 9}),
+    ("falsy-document", "0\n", {"memory.top_k": 9}),
+    ("timestamp-in-file", "built: 2026-10-27\n", {"memory.top_k": 9}),
+    ("shared-anchor", "defaults: &d\n  top_k: 5\nmemory: *d\n", {"memory.top_k": 9}),
+    ("merge-alias", "base: &b\n  x: 1\nmemory:\n  <<: *b\n  top_k: 4\n", {"memory.top_k": 9}),
+    ("big-int-in-file", "other: 99999999999999999999999\n", {"memory.top_k": 9}),
+    ("boot-ambiguous-string", "memory:\n  dream:\n    fallback_model: '0o17'\n",
+     {"memory.dream.extractor_model": "1e5"}),
+]
+
+
+def write_cases() -> list:
+    import tempfile
+    from types import SimpleNamespace
+
+    out = []
+    with tempfile.TemporaryDirectory() as tmp:
+        for name, before, patch in WRITES:
+            data = Path(tmp) / name
+            data.mkdir()
+            cfg_path = data / "config.yaml"
+            if before is not None:
+                cfg_path.write_text(before, encoding="utf-8", newline="\n")
+            svc = SimpleNamespace(config=AppConfig(), data_dir=data)
+            try:
+                got = config_io.write_config(svc, patch)
+                result = {"ok": {
+                    # Text mode writes CRLF on Windows; the golden keeps LF.
+                    "file": cfg_path.read_bytes().decode("utf-8").replace("\r\n", "\n"),
+                    "backup": got["backup"] is not None,
+                    "paths": got["applied"] + got["restart_required"],
+                }}
+            except ValueError as exc:
+                result = {"error": "ValueError", "text": str(exc)}
+            except Exception as exc:  # noqa: BLE001 — the route answers 500
+                result = {"error": type(exc).__name__, "text": str(exc)}
+            out.append({"name": name, "before": before, "patch": patch, **result})
+    return out
+
+
 def build() -> dict:
     if os.environ.get("PSEUDOLIFE_MCP_CONFIG"):
         raise SystemExit("unset PSEUDOLIFE_MCP_CONFIG first: read_config reads it")
@@ -148,7 +234,7 @@ def build() -> dict:
         knobs.append({"group": knob["group"], "item": item})
         defaults[knob["path"]] = config_io._get_by_path(cfg, knob["path"])
     return {"knobs": knobs, "defaults": defaults, "coerce": coerce_cases(),
-            "boot": BOOT, "read": read_cases()}
+            "boot": BOOT, "read": read_cases(), "write": write_cases()}
 
 
 def render() -> str:

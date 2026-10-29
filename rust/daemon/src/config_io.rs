@@ -1,5 +1,6 @@
-//! The Console's config editor: `GET /api/config` (`web/config_io.py`
-//! `read_config`, `_coerce`, `config_path_for`, `_saved_file`).
+//! The Console's config editor: `GET` and `POST /api/config`
+//! (`web/config_io.py` `read_config`, `write_config`, `_coerce`,
+//! `config_path_for`, `_saved_file`, `_nested_set`).
 //!
 //! The knob table is Python's `KNOBS`, generated into
 //! `harness/goldens/config-knobs.json` (`gen_config_knobs.py`). A knob's
@@ -7,13 +8,24 @@
 //! typed it (Python's dataclasses keep it uncoerced), else this daemon's
 //! default for the setting. A restart knob whose saved value differs also
 //! carries `saved`.
+//!
+//! A write validates and persists the patch as Python does (backup, atomic
+//! replace, PyYAML's `safe_dump` bytes: `yaml_dump.rs`, over the file as
+//! PyYAML reads it: `yaml_load.rs`) but applies nothing to the running
+//! daemon: every patched knob answers `restart_required` and shows its
+//! `saved` value until the next start (declared divergence
+//! `config-write-restart-only`).
 
-use std::path::Path;
-use std::sync::OnceLock;
+mod yaml_dump;
+mod yaml_load;
+
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
 
 use serde_json::{Map, Value, json};
 
-use crate::config::{Config, Node, node_json, safe_load};
+use crate::config::{Config, Node, node_json};
 use crate::pyjson::{float_repr, number_text, py_str};
 
 const KNOBS_JSON: &str = include_str!("../harness/goldens/config-knobs.json");
@@ -54,9 +66,15 @@ pub(crate) fn knobs() -> &'static [Knob] {
     })
 }
 
-#[cfg(test)]
 pub(crate) fn knob(path: &str) -> Option<&'static Knob> {
     knobs().iter().find(|k| k.path() == path)
+}
+
+/// Knobs saved through this process and not applied to it, which show
+/// their `saved` value until the next start.
+fn pending() -> &'static Mutex<HashSet<String>> {
+    static PENDING: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+    PENDING.get_or_init(|| Mutex::new(HashSet::new()))
 }
 
 // ── running values ─────────────────────────────────────────────────────────
@@ -425,7 +443,8 @@ fn py_float(value: &Value) -> Result<f64, Refused> {
     }
 }
 
-fn truthy(v: &Value) -> bool {
+/// Python truthiness of a decoded JSON value.
+pub(crate) fn truthy(v: &Value) -> bool {
     match v {
         Value::Null => false,
         Value::Bool(b) => *b,
@@ -481,7 +500,7 @@ fn saved_file(path: &str) -> Vec<(Node, Node)> {
     let Ok(text) = std::fs::read_to_string(path) else {
         return Vec::new();
     };
-    match safe_load(&text) {
+    match yaml_load::load_reading(&text) {
         Ok(Some(Node::Map(entries))) => entries,
         _ => Vec::new(),
     }
@@ -519,6 +538,17 @@ fn node_value(node: &Node) -> Value {
 /// order. `Err` carries the text of an exception `read_config` lets escape
 /// (an infinite saved value for an int knob), which the route answers 500.
 pub(crate) fn read_config(cfg: &Config, env: Env, data_dir: &Path) -> Result<Value, String> {
+    let pending = pending().lock().expect("pending knobs").clone();
+    read_config_with(cfg, env, data_dir, &pending)
+}
+
+/// [`read_config`] with the knobs saved here and not yet applied.
+fn read_config_with(
+    cfg: &Config,
+    env: Env,
+    data_dir: &Path,
+    pending: &HashSet<String>,
+) -> Result<Value, String> {
     let config_path = config_path_for(env, data_dir);
     let saved = saved_file(&config_path);
     let mut groups: Vec<(String, Vec<Value>)> = Vec::new();
@@ -526,13 +556,18 @@ pub(crate) fn read_config(cfg: &Config, env: Env, data_dir: &Path) -> Result<Val
         let current = running(cfg, knob);
         let mut item = knob.item.clone();
         item.insert("value".into(), current.clone());
-        if knob.restart() && !crate::mutants::active("config-read-no-saved") {
+        if (knob.restart() || pending.contains(knob.path()))
+            && !crate::mutants::active("config-read-no-saved")
+        {
             let shown = match nested_get(&saved, knob.path()) {
                 None => None,
                 Some(node) => match coerce(knob, &node_value(node)) {
                     Ok(v) => Some(v),
                     Err(Refused::Value(_) | Refused::Type(_)) => None,
-                    Err(Refused::Overflow(text)) => return Err(text),
+                    // Python coerces only a restart knob here; a pending
+                    // live knob's overflow is not Python's error.
+                    Err(Refused::Overflow(text)) if knob.restart() => return Err(text),
+                    Err(Refused::Overflow(_)) => None,
                 },
             };
             if let Some(v) = shown
@@ -553,6 +588,266 @@ pub(crate) fn read_config(cfg: &Config, env: Env, data_dir: &Path) -> Result<Val
             .map(|(name, knobs)| json!({"name": name, "knobs": knobs}))
             .collect::<Vec<_>>(),
     }))
+}
+
+// ── write_config ───────────────────────────────────────────────────────────
+
+/// Why a write refused: a `ValueError` (400) or another exception (500),
+/// each answered `{"error": text}`.
+#[derive(Debug, PartialEq)]
+pub(crate) enum WriteError {
+    Invalid(String),
+    Failed(String),
+}
+
+impl From<Refused> for WriteError {
+    fn from(r: Refused) -> Self {
+        match r {
+            Refused::Value(t) => WriteError::Invalid(t),
+            Refused::Type(t) | Refused::Overflow(t) => WriteError::Failed(t),
+        }
+    }
+}
+
+/// `str(path).strip().casefold()` names `coordination.maintainer` or a key
+/// under it. Lower-casing equals case folding here: no character folds to
+/// the target's ASCII letters except their own upper and lower case.
+fn protected(path: &str) -> bool {
+    let folded = py_strip(path).to_lowercase();
+    folded == "coordination.maintainer" || folded.starts_with("coordination.maintainer.")
+}
+
+/// A coerced value as YAML writes it. An integer past i64 (an int knob
+/// without a `max`) is refused; Python writes it.
+fn value_node(path: &str, v: &Value) -> Result<Node, WriteError> {
+    Ok(match v {
+        Value::Null => Node::Null,
+        Value::Bool(b) => Node::Bool(*b),
+        Value::String(s) => Node::Str(s.clone()),
+        Value::Number(n) => match int_of(v) {
+            Some(i) => Node::Int(
+                i64::try_from(i)
+                    .map_err(|_| WriteError::Invalid(format!("{path}: {i} is out of range")))?,
+            ),
+            None => Node::Float(n.as_f64().expect("a coerced float")),
+        },
+        other => unreachable!("coerce returns scalars, not {other}"),
+    })
+}
+
+/// Python's type name for a document `_nested_set` cannot index.
+fn node_type(node: &Node) -> &'static str {
+    match node {
+        Node::Null => "NoneType",
+        Node::Bool(_) => "bool",
+        Node::Int(_) => "int",
+        Node::Float(_) => "float",
+        Node::Str(_) | Node::MergeKey => "str",
+        Node::Seq(_) => "list",
+        Node::Map(_) => "dict",
+    }
+}
+
+/// `_nested_set`: walk (or create) the mappings, replacing a non-mapping on
+/// the way, and set the leaf in place or at the end.
+fn nested_set(entries: &mut Vec<(Node, Node)>, path: &str, value: Node) {
+    let parts: Vec<&str> = path.split('.').collect();
+    let (leaf, walk) = parts.split_last().expect("a dotted path");
+    let mut cur = entries;
+    for part in walk {
+        let at = match cur
+            .iter()
+            .position(|(k, _)| matches!(k, Node::Str(s) if s == part))
+        {
+            Some(at) => at,
+            None => {
+                cur.push((Node::Str((*part).to_string()), Node::Map(Vec::new())));
+                cur.len() - 1
+            }
+        };
+        if !matches!(cur[at].1, Node::Map(_)) {
+            cur[at].1 = Node::Map(Vec::new());
+        }
+        let Node::Map(next) = &mut cur[at].1 else {
+            unreachable!("made a mapping above")
+        };
+        cur = next;
+    }
+    match cur
+        .iter_mut()
+        .find(|(k, _)| matches!(k, Node::Str(s) if s == leaf))
+    {
+        Some(slot) => slot.1 = value,
+        None => cur.push((Node::Str((*leaf).to_string()), value)),
+    }
+}
+
+/// `tempfile.mkstemp(dir=..., prefix=..., suffix=...)`: a new file with a
+/// random 8-character name part, created exclusively, mode 0600.
+fn mkstemp(dir: &Path, prefix: &str, suffix: &str) -> std::io::Result<(PathBuf, std::fs::File)> {
+    const LETTERS: &[u8] = b"abcdefghijklmnopqrstuvwxyz0123456789_";
+    for _ in 0..100 {
+        let mut bytes = [0u8; 8];
+        getrandom::fill(&mut bytes).expect("system randomness");
+        let name: String = bytes
+            .iter()
+            .map(|b| LETTERS[usize::from(*b) % LETTERS.len()] as char)
+            .collect();
+        let path = dir.join(format!("{prefix}{name}{suffix}"));
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+        match options.open(&path) {
+            Ok(file) => return Ok((path, file)),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(e),
+        }
+    }
+    Err(std::io::Error::new(
+        std::io::ErrorKind::AlreadyExists,
+        "No usable temporary file name found",
+    ))
+}
+
+/// `os.path.abspath`, as `mkstemp` returns its name.
+fn abspath(path: &Path) -> String {
+    let abs = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
+    crate::documents::py_path(&abs.to_string_lossy()).shown
+}
+
+fn io_text(e: &std::io::Error) -> String {
+    e.to_string()
+}
+
+/// `write_config`: validate the `{dotted.path: value}` patch, merge it into
+/// config.yaml (a timestamped backup first, then an atomic replace), and
+/// answer `{applied, restart_required, config_path, backup}`. Nothing is
+/// applied to the running daemon (`config-write-restart-only`).
+pub(crate) fn write_config(env: Env, data_dir: &Path, patch: &Value) -> Result<Value, WriteError> {
+    write_config_with(env, data_dir, patch, pending())
+}
+
+/// [`write_config`], recording the saved knobs in `pending`.
+fn write_config_with(
+    env: Env,
+    data_dir: &Path,
+    patch: &Value,
+    pending: &Mutex<HashSet<String>>,
+) -> Result<Value, WriteError> {
+    static WRITE_LOCK: Mutex<()> = Mutex::new(());
+    let _held = WRITE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let patch = match patch {
+        Value::Object(p) if !p.is_empty() => p,
+        _ => return Err(WriteError::Invalid("empty patch".into())),
+    };
+    if patch.keys().any(|path| protected(path))
+        && !crate::mutants::active("config-write-unprotected")
+    {
+        return Err(WriteError::Invalid("config_protected".into()));
+    }
+    let mut coerced: Vec<(&str, Node)> = Vec::new();
+    for (path, raw) in patch {
+        let knob =
+            knob(path).ok_or_else(|| WriteError::Invalid(format!("unknown knob: {path}")))?;
+        let v = coerce(knob, raw)?;
+        coerced.push((path, value_node(path, &v)?));
+    }
+
+    let shown = config_path_for(env, data_dir);
+    let cfg_path = PathBuf::from(&shown);
+    let exists = cfg_path.exists();
+    let mut existing = Vec::new();
+    if exists {
+        let bytes = std::fs::read(&cfg_path).map_err(|e| WriteError::Failed(io_text(&e)))?;
+        let text = String::from_utf8(bytes).map_err(|e| {
+            let at = e.utf8_error().valid_up_to();
+            WriteError::Invalid(format!(
+                "'utf-8' codec can't decode byte 0x{:02x} in position {at}: invalid start byte",
+                e.as_bytes()[at]
+            ))
+        })?;
+        let loaded = if crate::mutants::active("config-write-yaml12") {
+            crate::config::safe_load(&text)
+        } else {
+            yaml_load::load_rewriting(&text)
+        };
+        match loaded.map_err(WriteError::Failed)? {
+            // `yaml.safe_load(f) or {}`.
+            Some(Node::Map(entries)) => existing = entries,
+            Some(node) if node_truthy(&node) => {
+                return Err(WriteError::Failed(format!(
+                    "'{}' object has no attribute 'get'",
+                    node_type(&node)
+                )));
+            }
+            _ => {}
+        }
+    }
+    for (path, value) in &coerced {
+        nested_set(&mut existing, path, value.clone());
+    }
+
+    let parent = match cfg_path.parent() {
+        Some(p) if !p.as_os_str().is_empty() => p.to_path_buf(),
+        _ => PathBuf::from("."),
+    };
+    let name = cfg_path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    std::fs::create_dir_all(&parent).map_err(|e| WriteError::Failed(io_text(&e)))?;
+    let mut backup = Value::Null;
+    if exists {
+        let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
+        let (path, file) = mkstemp(&parent, &format!("{name}.{stamp}."), ".bak")
+            .map_err(|e| WriteError::Failed(io_text(&e)))?;
+        drop(file);
+        if let Err(e) = std::fs::copy(&cfg_path, &path) {
+            let _ = std::fs::remove_file(&path);
+            return Err(WriteError::Failed(io_text(&e)));
+        }
+        backup = json!(abspath(&path));
+    }
+
+    let text = yaml_dump::safe_dump(&Node::Map(existing));
+    // Text mode: Windows writes each newline as CRLF.
+    #[cfg(windows)]
+    let text = text.replace('\n', "\r\n");
+    let (tmp, mut file) = mkstemp(&parent, &format!("{name}."), ".tmp")
+        .map_err(|e| WriteError::Failed(io_text(&e)))?;
+    let written =
+        std::io::Write::write_all(&mut file, text.as_bytes()).and_then(|()| file.sync_all());
+    drop(file);
+    let replaced = written.and_then(|()| std::fs::rename(&tmp, &cfg_path));
+    let _ = std::fs::remove_file(&tmp);
+    replaced.map_err(|e| WriteError::Failed(io_text(&e)))?;
+
+    let paths: Vec<&str> = coerced.iter().map(|(p, _)| *p).collect();
+    pending
+        .lock()
+        .expect("pending knobs")
+        .extend(paths.iter().map(|p| (*p).to_string()));
+    Ok(json!({
+        "applied": [],
+        "restart_required": paths,
+        "config_path": shown,
+        "backup": backup,
+    }))
+}
+
+/// Python truthiness of a loaded document.
+fn node_truthy(node: &Node) -> bool {
+    match node {
+        Node::Null => false,
+        Node::Bool(b) => *b,
+        Node::Int(i) => *i != 0,
+        Node::Float(f) => *f != 0.0,
+        Node::Str(s) => !s.is_empty(),
+        Node::Seq(items) => !items.is_empty(),
+        Node::Map(entries) => !entries.is_empty(),
+        Node::MergeKey => true,
+    }
 }
 
 #[cfg(test)]

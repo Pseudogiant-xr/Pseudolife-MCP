@@ -34,9 +34,21 @@ It adds a second, ``write_config``, on each side's data directory
 ``/api/config`` serves the values each booted with beside the file's
 ``saved`` ones. ``config_path`` names each side's own home, so it compares
 as ``<home>/data/config.yaml``.
+
+``post`` sends a Console POST (``POST /api/config``), and the home op
+``config_file`` answers each side's config.yaml text and backup count, so
+the bytes each daemon wrote compare exactly. The Rust daemon applies no
+patched knob until a restart (declared divergence
+``config-write-restart-only``): a POST's ``applied`` and
+``restart_required`` compare as one set (Rust's ``applied`` must be
+empty), and in a later ``get`` carrying the same ``track`` a knob saved
+here compares by the value its next start uses (``saved`` when shown,
+else ``value``) on each side.
 """
 from __future__ import annotations
 
+import json
+import re
 import sys
 import urllib.parse
 from pathlib import Path
@@ -52,9 +64,17 @@ MUTANTS = ["console-facts-no-contender", "console-sources-by-name", "console-cha
            "console-overview-contested-rows", "console-agents-no-limit-refusal",
            "console-agents-ignore-limit", "maintainer-gate-open", "maintainer-config-unchecked",
            "maintainer-available-any-key", "maintainer-roles-any-grant",
-           "config-read-typed-values", "config-read-no-saved"]
+           "config-read-typed-values", "config-read-no-saved",
+           "config-write-unprotected", "config-write-yaml12"]
 
-OPS = ("get",)
+OPS = ("get", "post")
+
+# Knob paths a ``post`` saved and the Python daemon applied live, by
+# ``track``: only those read differently on the two sides afterwards (a
+# restart knob shows its ``saved`` value on both). Rust's ``applied`` is
+# always empty, so only the Python side's answers fill it; a rerun of the
+# same scenario (mutants) refills it with the same paths.
+SAVED: dict[str, set] = {}
 
 
 def run_get(op: dict, port: int, dsn: str) -> dict:
@@ -73,9 +93,22 @@ def run_get(op: dict, port: int, dsn: str) -> dict:
 _base_run_op = w2e.run_op
 
 
+def run_post(op: dict, port: int) -> dict:
+    body = json.dumps(op["body"]).encode()
+    r = w2e.w1a.call(port, "POST", op["path"], [w2e.AUTH, ("Content-Type", "application/json")],
+                     body)
+    value = r.get("json", r.get("bytes"))
+    if r["status"] == 200 and op.get("track") and isinstance(value, dict):
+        SAVED.setdefault(op["track"], set()).update(value.get("applied", []))
+    return {"isError": r["status"] != 200, "status": r["status"], "value": value}
+
+
 def run_op(op: dict, port: int, mcp, dsn: str) -> dict | None:
+    if op["op"] == "post":
+        return run_post(op, port)
     if op["op"] in OPS:
-        return run_get(op, port, dsn)
+        r = run_get(op, port, dsn)
+        return {**r, "_track": op["track"]} if op.get("track") else r
     return _base_run_op(op, port, mcp, dsn)
 
 
@@ -106,6 +139,12 @@ def compare_response(py, rs, tol, stats) -> list[str]:
                        f"(not both >= 0 within {IDLE_BOUND_S}s)")
         py = {**py, "value": {**py["value"], "dream": {**a, "idle_seconds": "<idle>"}}}
         rs = {**rs, "value": {**rs["value"], "dream": {**b, "idle_seconds": "<idle>"}}}
+    py, rs = dict(py), dict(rs)
+    track = py.pop("_track", None)
+    rs.pop("_track", None)
+    if track is not None:
+        out += next_start_values(py, rs, SAVED.get(track, set()))
+    out += config_write_answers(py, rs)
     py, rs, homes = config_homes(py), config_homes(rs), []
     for r in (py, rs):
         v = r.get("value") if isinstance(r, dict) else None
@@ -114,6 +153,57 @@ def compare_response(py, rs, tol, stats) -> list[str]:
     if homes and not all(str(h) == "<home>/data/config.yaml" for h in homes):
         out.append(f"config_path: python/rust {homes!r} not each side's data/config.yaml")
     return out + _base_compare(py, rs, tol, stats)
+
+
+BACKUP = re.compile(r".+[\\/]config\.yaml\.\d{8}-\d{6}\.[a-z0-9_]{8}\.bak")
+
+
+def config_write_answers(py: dict, rs: dict) -> list[str]:
+    """A ``POST /api/config`` success on both sides: the saved knobs as
+    one set (Rust applies none), the backup by its name's shape."""
+    a, b = py.get("value"), rs.get("value")
+    if not (isinstance(a, dict) and isinstance(b, dict) and "restart_required" in a
+            and "restart_required" in b):
+        return []
+    out = []
+    if b.get("applied") != []:
+        out.append(f"rust applied {b.get('applied')!r}: every knob needs a restart there")
+    sets = [sorted(v.get("applied", []) + v.get("restart_required", [])) for v in (a, b)]
+    if sets[0] != sets[1]:
+        out.append(f"saved knobs: python {sets[0]!r} vs rust {sets[1]!r}")
+    shapes = [None if v.get("backup") is None else bool(BACKUP.fullmatch(str(v["backup"])))
+              for v in (a, b)]
+    if shapes[0] != shapes[1] or False in shapes:
+        out.append(f"backup: python {a.get('backup')!r} vs rust {b.get('backup')!r}")
+    for r, v, s in ((py, a, sets[0]), (rs, b, sets[1])):
+        r["value"] = {**{k: x for k, x in v.items() if k not in ("applied", "restart_required")},
+                      "saved_knobs": s, "backup": "<backup>" if v.get("backup") else None}
+    return out
+
+
+def next_start_values(py: dict, rs: dict, saved: set) -> list[str]:
+    """``GET /api/config`` after a save: each knob Python applied live by
+    the value its next start uses, which Rust shows as ``saved``."""
+    out = []
+    knobs = {}
+    for side, r in (("python", py), ("rust", rs)):
+        v = r.get("value")
+        if not isinstance(v, dict) or "groups" not in v:
+            return []
+        groups = [{**g, "knobs": [dict(k) for k in g["knobs"]]} for g in v["groups"]]
+        r["value"] = {**v, "groups": groups}
+        knobs[side] = {k["path"]: k for g in groups for k in g["knobs"]}
+    for path in sorted(saved):
+        a, b = knobs["python"].get(path), knobs["rust"].get(path)
+        if a is None or b is None:
+            continue
+        nxt = [k.get("saved", k.get("value")) for k in (a, b)]
+        if nxt[0] != nxt[1] or type(nxt[0]) is not type(nxt[1]):
+            out.append(f"{path}: next start python {nxt[0]!r} vs rust {nxt[1]!r}")
+        for k in (a, b):
+            k.pop("saved", None)
+            k["value"] = "<next start>"
+    return out
 
 
 def config_homes(r):
@@ -135,6 +225,12 @@ def home_op(op: dict, home: Path) -> dict:
     if op["op"] == "write_config":
         (home / "data" / "config.yaml").write_text(op["text"], encoding="utf-8")
         return {"isError": False, "value": None}
+    if op["op"] == "config_file":
+        data = home / "data"
+        return {"isError": False, "value": {
+            "text": (data / "config.yaml").read_bytes().decode("utf-8"),
+            "backups": len(list(data.glob("config.yaml.*.bak"))),
+            "temp_files": len(list(data.glob("config.yaml.*.tmp")))}}
     return _base_home_op(op, home)
 
 
@@ -142,8 +238,17 @@ def write_config(text: str) -> dict:
     return {"op": "write_config", "text": text}
 
 
-def get(path: str, headers=(), **query) -> dict:
-    return {"op": "get", "path": path, "query": query, "headers": list(headers)}
+def post(path: str, body: dict, track: str | None = None) -> dict:
+    return {"op": "post", "path": path, "body": body, "track": track}
+
+
+def config_file() -> dict:
+    return {"op": "config_file"}
+
+
+def get(path: str, headers=(), track: str | None = None, **query) -> dict:
+    return {"op": "get", "path": path, "query": query, "headers": list(headers),
+            "track": track}
 
 
 store, sess, fact, tool = w2e.store, w2e.sess, w2e.fact, w2e.tool
@@ -553,6 +658,41 @@ def config_scenarios() -> dict[str, dict]:
             "seed": [store("A note before the config reads.")],
             "ops": ops,
         },
+        # POST /api/config: the file each daemon writes (PyYAML's bytes,
+        # comments dropped, a backup), the refusals in Python's order, the
+        # ``patch`` wrapper and its falsy fallback, and the next read.
+        "console-config-write": {
+            "config": golden["boot"] + "# kept until the first write\n",
+            "seed": [store("A note before the config writes.")],
+            "ops": [
+                post("/api/config", {"memory.top_k": "12", "memory.dream.enabled": "on",
+                                     "memory.dream.extractor_base_url": "",
+                                     "memory.lessons.top_k": 7,
+                                     "memory.dream.idle_seconds": 1e-05,
+                                     "memory.reranker.top_n": 30}, track="w"),
+                config_file(),
+                get("/api/config", track="w"),
+                post("/api/config", {"memory.top_k": 9, "Coordination.Maintainer.rp_id": "x"}),
+                post("/api/config", {"memory.top_k": 9, "memory.nope": 1}),
+                post("/api/config", {"memory.top_k": 99}),
+                post("/api/config", {"memory.top_k": None}),
+                post("/api/config", {"memory.dream.literal_gate": "bogus"}),
+                post("/api/config", {}),
+                post("/api/config", {"patch": {}}),
+                post("/api/config", {"patch": {"memory.recall.driver": "mechanical",
+                                               "time.relative_age": 0}}, track="w"),
+                config_file(),
+                get("/api/config", track="w"),
+                # A file Python reads by YAML 1.1 rules, rewritten as it would.
+                write_config("memory:\n  hide_superseded: yes\n  ref_top_k: 017\n"
+                             "  cortex: off\nother:\n  when: '2026-10-27'\n  n: 1_000\n"),
+                post("/api/config", {"memory.cortex.guard_min_score": 0.25}, track="w"),
+                config_file(),
+                write_config("- a\n- b\n"),
+                post("/api/config", {"memory.top_k": 9}),
+                config_file(),
+            ],
+        },
         # No config.yaml at all: every knob at its default.
         "console-config-defaults": {
             "config": None,
@@ -574,8 +714,9 @@ def install() -> None:
     w2e.run_op = run_op
     w2e.compare_response = compare_response
     w2e.home_op = home_op
-    if "write_config" not in w2e.HOME_OPS:
-        w2e.HOME_OPS = (*w2e.HOME_OPS, "write_config")
+    for name in ("write_config", "config_file"):
+        if name not in w2e.HOME_OPS:
+            w2e.HOME_OPS = (*w2e.HOME_OPS, name)
 
 
 def main() -> int:

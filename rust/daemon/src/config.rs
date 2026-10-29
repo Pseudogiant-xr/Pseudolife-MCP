@@ -1322,6 +1322,10 @@ enum Frame {
     Map(Vec<(Node, Node)>, Option<Node>, usize),
 }
 
+/// How a scalar event becomes a node: [`resolve_scalar`] for the daemon's
+/// own load, or a caller's (`config_io`'s PyYAML 1.1 rules).
+pub(crate) type ScalarResolver = fn(String, TScalarStyle, Option<Tag>) -> Result<Node, String>;
+
 #[derive(Default)]
 struct Loader {
     docs: Vec<Node>,
@@ -1329,6 +1333,10 @@ struct Loader {
     stack: Vec<Frame>,
     anchors: HashMap<usize, Node>,
     error: Option<String>,
+    resolve: Option<ScalarResolver>,
+    /// Refuse an alias to a mapping or list with this text (a rewrite
+    /// cannot keep the shared node).
+    collection_alias: Option<&'static str>,
 }
 
 fn unknown_tag(tag: &Tag) -> String {
@@ -1338,7 +1346,11 @@ fn unknown_tag(tag: &Tag) -> String {
     )
 }
 
-fn resolve_scalar(value: String, style: TScalarStyle, tag: Option<Tag>) -> Result<Node, String> {
+pub(crate) fn resolve_scalar(
+    value: String,
+    style: TScalarStyle,
+    tag: Option<Tag>,
+) -> Result<Node, String> {
     if let Some(tag) = tag {
         if tag.handle == "!" && tag.suffix.is_empty() {
             return Ok(Node::Str(value));
@@ -1482,10 +1494,23 @@ impl Loader {
                     .get(&id)
                     .cloned()
                     .ok_or_else(|| "found undefined alias".to_string())?;
+                // A merge of a mapping of scalars copies them, so nothing is
+                // shared; any other alias to a collection shares it.
+                let merged_scalars = matches!(
+                    self.stack.last(),
+                    Some(Frame::Map(_, Some(Node::MergeKey), _))
+                ) && matches!(&node, Node::Map(pairs)
+                    if pairs.iter().all(|(_, v)| !matches!(v, Node::Seq(_) | Node::Map(_))));
+                if let Some(refusal) = self.collection_alias
+                    && matches!(node, Node::Seq(_) | Node::Map(_))
+                    && !merged_scalars
+                {
+                    return Err(refusal.to_string());
+                }
                 self.complete(node, 0);
             }
             Event::Scalar(value, style, anchor, tag) => {
-                let node = resolve_scalar(value, style, tag)?;
+                let node = self.resolve.unwrap_or(resolve_scalar)(value, style, tag)?;
                 self.complete(node, anchor);
             }
             Event::SequenceStart(anchor, tag) => {
@@ -1541,6 +1566,24 @@ fn non_printable(c: char) -> bool {
 /// error, more than one document, an unknown tag or a non-printable
 /// character.
 pub(crate) fn safe_load(text: &str) -> Result<Option<Node>, String> {
+    load_with(text, None, None)
+}
+
+/// [`safe_load`] with another scalar resolver, refusing an alias to a
+/// mapping or list with `collection_alias` when given.
+pub(crate) fn safe_load_with(
+    text: &str,
+    resolve: ScalarResolver,
+    collection_alias: Option<&'static str>,
+) -> Result<Option<Node>, String> {
+    load_with(text, Some(resolve), collection_alias)
+}
+
+fn load_with(
+    text: &str,
+    resolve: Option<ScalarResolver>,
+    collection_alias: Option<&'static str>,
+) -> Result<Option<Node>, String> {
     if let Some((offset, c)) = text.char_indices().find(|(_, c)| non_printable(*c)) {
         return Err(format!(
             "unacceptable character #x{:04x} at offset {offset}",
@@ -1548,7 +1591,11 @@ pub(crate) fn safe_load(text: &str) -> Result<Option<Node>, String> {
         ));
     }
     let text = text.strip_prefix('\u{feff}').unwrap_or(text);
-    let mut loader = Loader::default();
+    let mut loader = Loader {
+        resolve,
+        collection_alias,
+        ..Loader::default()
+    };
     let mut parser = Parser::new_from_str(text);
     parser.load(&mut loader, true).map_err(|e| e.to_string())?;
     if let Some(e) = loader.error {
