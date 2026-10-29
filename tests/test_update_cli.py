@@ -1089,7 +1089,7 @@ def test_a_silent_docker_and_a_silent_remote_daemon_still_stop(world, clients, m
     for argv in ([], ["--clients-only"]):
         assert _run(argv + ["--daemon-url", "https://this-host.example.com"]) == 2, argv
         err = capsys.readouterr().err
-        assert "did not answer /health either" in err and "this-host.example.com" in err
+        assert "the daemon configured at https://this-host.example.com did not answer /health either" in err
     assert clients == []
     assert not any(c[1:4] == ["-m", "pip", "install"] for c in world.calls)
 
