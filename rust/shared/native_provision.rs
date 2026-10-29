@@ -754,7 +754,12 @@ pub fn unpack_zip_tree(path: &Path, tree: &Path, mut layout: Layout) -> Result<(
     let mut archive = zip::ZipArchive::new(BufReader::new(file)).map_err(|e| e.to_string())?;
     for index in 0..archive.len() {
         let mut entry = archive.by_index(index).map_err(|e| e.to_string())?;
-        let raw = entry.name().to_owned();
+        // zip decodes a name on demand and can refuse it; refuse the archive
+        // rather than skip the entry or guess at its name.
+        let raw = entry
+            .name()
+            .map_err(|e| format!("entry {index} has an unreadable name: {e}"))?
+            .into_owned();
         let Some(relative) = layout.place(&raw, entry.is_dir())? else {
             continue;
         };
