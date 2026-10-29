@@ -65,12 +65,22 @@ pub(crate) async fn route(
         return method_not_allowed();
     }
     match path {
+        // Status notes and lessons are memory content: an unauthorized
+        // caller gets the empty body, and the hook keeps its cursor. The
+        // maintainer's delegate's reminder line (`?agent=`) is not ported
+        // (declared in divergences.md).
         "/api/hook/memory-changes" => {
-            if authorized(app, h) {
-                not_implemented(path)
-            } else {
-                hook_text("")
+            if !authorized(app, h) {
+                return hook_text("");
             }
+            let params = parse_query(raw_query);
+            let text = crate::memory_changes::hook_memory_changes(
+                app,
+                params.get("session_id").map(String::as_str),
+                params.get("since").map(String::as_str),
+            )
+            .await;
+            hook_text(&text)
         }
         "/api/hook/park-gate" | "/api/hook/woke" | "/api/hook/subagent" => {
             if !authorized(app, h) {
@@ -147,9 +157,7 @@ mod tests {
     #[tokio::test]
     async fn unserved_hooks_answer_the_declared_501() {
         let app = mcp_refusal_app();
-        for path in ["/api/hook/session-start", "/api/hook/memory-changes"] {
-            assert_declared_501(&app, authed_request("GET", path, None)).await;
-        }
+        assert_declared_501(&app, authed_request("GET", "/api/hook/session-start", None)).await;
     }
 
     /// With the default `compact` policy the separate hook serves nothing.

@@ -12,10 +12,14 @@ side as ``w2e.resolve_args`` does.
 from __future__ import annotations
 
 import json
+import re
+import time
 
 # Deliberate breaks (``--features mutants``) these scenarios must catch.
 MUTANTS = ["session-end-no-client-stamp", "session-end-keeps-empty",
-           "session-end-clears-foreign", "session-end-no-dream", "policy-arm-shifted"]
+           "session-end-clears-foreign", "session-end-no-dream", "policy-arm-shifted",
+           "changes-counts-own-session", "changes-from-open-leaf",
+           "changes-cursor-echoes-since", "changes-counts-superseded"]
 
 # The session-end dream: everything but extraction off, and no sweep dream,
 # so only the close's own trigger can dream.
@@ -33,7 +37,36 @@ DREAM_SETTLE = {"quiet_s": 3.0, "timeout_s": 120.0}
 
 OPS = ("hook",)
 
+# A status note whose excerpt exercises the JSON quoting (ensure_ascii=False),
+# Python's str.split whitespace (U+001F included) and the 160-character cut.
+MC_LONG_NOTE = ('Status from session C: the café said "ship it" \\ then\x1fpaused,   and\n'
+                + "the release notes still need a pass over every section " * 4)
+
 _HEADERS = ("content-type", "cache-control")
+
+
+# The memory-change hook's last cursor per side (keyed by daemon port), for
+# a later op's ``since=@prev``.
+_LAST_CURSOR: dict[int, str] = {}
+_CURSOR_LINE = re.compile(r"[0-9]{1,12}\.[0-9]{6}")
+
+
+def _cursor(value, port: int, before: float, after: float) -> str:
+    """Line 1 of a memory-change answer: a six-decimal cursor that must read
+    this side's clock during the call; it becomes ``<cursor>`` and is kept
+    for ``@prev``. Anything else is a difference."""
+    if not isinstance(value, str) or not value:
+        return value
+    line, _, rest = value.partition("\n")
+    # Python 3.11's time.time() on Windows is the coarse system clock: it
+    # trails the precise clock a native daemon reads by up to a tick
+    # (~16 ms), so only the upper bound needs room; the Python daemon reads
+    # the same coarse clock as this harness.
+    if not _CURSOR_LINE.fullmatch(line) or not before - 1e-3 <= float(line) <= after + 0.05:
+        _LAST_CURSOR.pop(port, None)
+        return f"<bad cursor {line!r}>" + "\n" + rest
+    _LAST_CURSOR[port] = line
+    return "<cursor>\n" + rest
 
 
 def run(op: dict, port: int, dsn: str, harness) -> dict:
@@ -45,10 +78,16 @@ def run(op: dict, port: int, dsn: str, harness) -> dict:
     hdrs = [harness.AUTH] if op.get("auth", True) else []
     if body is not None:
         hdrs.append(("Content-Type", "application/json"))
-    r = harness.w1a.call(port, op["method"], op["path"], hdrs, body)
+    path = op["path"].replace("@prev", _LAST_CURSOR.get(port, ""))
+    before = time.time()
+    r = harness.w1a.call(port, op["method"], path, hdrs, body)
+    after = time.time()
+    value = r.get("json", r.get("bytes"))
+    if op.get("cursor"):
+        value = _cursor(value, port, before, after)
     return {"isError": r["status"] != 200, "status": r["status"],
             "headers": {k: r["headers"].get(k) for k in _HEADERS},
-            "value": r.get("json", r.get("bytes"))}
+            "value": value}
 
 
 def hook(method: str, path: str, body: dict | None = None, auth: bool = True) -> dict:
@@ -64,6 +103,11 @@ def end(session_id) -> dict:
 
 def policy(query: str = "", auth: bool = True) -> dict:
     return hook("GET", "/api/hook/memory-policy" + (f"?{query}" if query else ""), auth=auth)
+
+
+def changes(query: str = "", auth: bool = True) -> dict:
+    return {**hook("GET", "/api/hook/memory-changes" + (f"?{query}" if query else ""), auth=auth),
+            "cursor": True}
 
 
 def register(h) -> dict[str, dict]:
@@ -200,5 +244,66 @@ def register(h) -> dict[str, dict]:
             "config": None,
             "seed": [],
             "ops": [policy(), policy("session_id=sess-b")],
+        },
+        # The per-turn memory-change note. Seeded by Python: session mc-a
+        # registered first; status notes from mc-b and from mc-a itself,
+        # a plain note, and two lessons asserted after mc-a's start (one
+        # current, one superseded) and one before it.
+        "hook-memory-changes": {
+            "config": None,
+            "seed": [
+                seed_start("mc-a"),
+                h.store("Status from another session: the deploy is halfway.",
+                        [h.sess("mc-b")], source="status"),
+                h.store("Status from this session: reading the spec.",
+                        [h.sess("mc-a")], source="status"),
+                h.store("A plain note, not a status.", [h.sess("mc-b")]),
+                h.store("Status from another session, newer:   the deploy\n is done.",
+                        [h.sess("mc-b")], source="status"),
+                # The newest current note is the excerpt: quotes, a
+                # backslash, non-ASCII, U+001F and runs of whitespace,
+                # past 160 characters. A newer note superseded by SQL is
+                # neither counted nor shown.
+                h.store(MC_LONG_NOTE, [h.sess("mc-c")], source="status"),
+                h.store("Status from session C, withdrawn.", [h.sess("mc-c")], source="status"),
+                h.sql("UPDATE entries SET superseded_at = ts + 1, "
+                      "superseded_by_text = 'Withdrawn.' "
+                      "WHERE text = 'Status from session C, withdrawn.'", after_stop=True),
+                # mc-a's open sub-episode starts after those notes: a first
+                # turn counts from the session's root, not this leaf.
+                h.ep_start("mc-a sub-task", [h.sess("mc-a")]),
+                *[h.sql(
+                    "INSERT INTO lessons (entity, attribute, entity_norm, attribute_norm, value, "
+                    "polarity, outcome, status, confidence, origin, support, provenance, "
+                    "asserted_at, last_confirmed, embedding) SELECT "
+                    f"'{task}', 'pitfall', '{task}', 'pitfall', '{text}', '{pol}', 'failure', "
+                    f"'{status}', 0.8, 'agent', '[]', '[]', "
+                    f"(SELECT started_at FROM episodes WHERE session_key = 'mc-a' "
+                    f"AND parent_id IS NULL) + {offset}, 1700000000, embedding "
+                    "FROM entries WHERE text = 'A plain note, not a status.'", after_stop=True)
+                  for task, text, pol, status, offset in [
+                      ("deploy", "Avoid deploying on a stale cache.", "-", "current", 1),
+                      ("review", "A superseded lesson.", "+", "superseded", 2),
+                      ("old", "A lesson from before the session.", "+", "current", -100)]],
+            ],
+            "ops": [
+                # First turn: counted from mc-a's start, its own status left out.
+                changes("session_id=mc-a"),
+                # Nothing new since that cursor.
+                changes("session_id=mc-a&since=@prev"),
+                # mc-b's first turn: its root opened with its first store.
+                changes("session_id=mc-b"),
+                # No session: everything since the given cursor.
+                changes("since=1"),
+                # A cursor ahead of this daemon's clock, a malformed one with
+                # no session, an unknown session: baselines (a cursor, no note).
+                changes("since=99999999999.5"),
+                changes("since=not-a-cursor"),
+                changes("session_id=no-such-session"),
+                # An agent that is not the maintainer's delegate adds nothing.
+                changes("session_id=mc-a&agent=0123456789abcdef"),
+                # Unauthorized: the empty body.
+                changes("session_id=mc-a", auth=False),
+            ],
         },
     }
