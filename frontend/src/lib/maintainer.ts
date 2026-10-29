@@ -195,13 +195,13 @@ export function leftPercent(h: RoleHolder, nowMs: number): number | null {
 export function displacedLines(preview: Preview | null | undefined, nameOf: (id: string) => string): string[] {
   if (!preview || typeof preview.action !== "string") return [];
   const lines: string[] = [];
-  const role = preview.role === "delegate" ? "your delegate" : "the coordinator";
+  const role = preview.role === "delegate" ? "your conductor" : "the coordinator";
   if (preview.action !== "revoke" && typeof preview.replaces === "string" && preview.replaces) {
     lines.push(`“${nameOf(preview.replaces)}” stops being ${role}.`);
   }
   const also = typeof preview.also_breaks === "string" ? preview.also_breaks : "";
   if (also.startsWith("coordinator:")) lines.push("It also stops being the coordinator: a session holds one role at a time.");
-  else if (also.startsWith("delegate:")) lines.push("It also stops being your delegate: a session holds one role at a time.");
+  else if (also.startsWith("delegate:")) lines.push("It also stops being your conductor: a session holds one role at a time.");
   return lines;
 }
 

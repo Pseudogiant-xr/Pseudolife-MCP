@@ -1,8 +1,8 @@
 usage: pseudolife-mcp lease delegate [-h] [--for DURATION] PROJECT AGENT
 
 Operator only: make the session AGENT (its id, or a unique prefix) the
-maintainer's delegate for PROJECT for DURATION, replacing any current one. Its
-urgent mail then reopens done parks in that project; holding the open
+maintainer's conductor for PROJECT for DURATION, replacing any current one.
+Its urgent mail then reopens done parks in that project; holding the open
 coordinator:<project> lease grants nothing. The grant is the board lease
 delegate:<project>, which no session can take: it opens the bank directly,
 like break, and the audit log records it with the operator as its actor.

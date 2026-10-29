@@ -14,6 +14,9 @@ ACCEPTED_BLOBS = {
         # The --help entry for delegate-watch (the PR that also defers it in
         # the native shim).
         "8342dc8cc7775d43641703299689e9a3dc5d2295",
+        # The conductor-watch alias and the role's new name in --help (the
+        # PR that also defers conductor-watch in the native shim).
+        "99d8d321458c1993aedefcda77013a4b854cce3c",
     ),
     "pseudolife_memory/wait_mail_cli.py": ("236636957e2f5affbe2eec21d9e125c35ffae5f2",),
 }

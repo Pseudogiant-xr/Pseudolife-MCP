@@ -398,12 +398,12 @@ describe("the role preview", () => {
         nameOf,
       ),
     ).toEqual([
-      "“Release relay” stops being your delegate.",
+      "“Release relay” stops being your conductor.",
       "It also stops being the coordinator: a session holds one role at a time.",
     ]);
     expect(
       displacedLines({ role: "coordinator", action: "assign", replaces: null, also_breaks: "delegate:P" }, nameOf),
-    ).toEqual(["It also stops being your delegate: a session holds one role at a time."]);
+    ).toEqual(["It also stops being your conductor: a session holds one role at a time."]);
   });
 
   it("says nothing for a revoke, an extend or a send preview", () => {
