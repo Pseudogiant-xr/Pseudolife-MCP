@@ -60,6 +60,8 @@ class FakeGh:
         self.unmerged: set[int] = set()   # members `pr merge` leaves unmarked
         self.lag: dict[int, int] = {}       # reads of OPEN before a member shows MERGED
         self.fail_merge: str | None = None  # "before" or "after" merging
+        # A check run's annotation messages by job id; a missing id fails.
+        self.annotations: dict[str, list[str]] = {}
 
     def add(self, number: int, sha: str, *, title: str | None = None,
             labeled_at: str | None = None, **extra) -> None:
@@ -135,6 +137,12 @@ class FakeGh:
             if self.fail_merge == "after":       # merged, but the reply was lost
                 raise integrate.Refusal("`gh pr merge` failed (1): HTTP 504")
             return ""
+        if args[0] == "api" and "/check-runs/" in args[1]:
+            assert args[1].endswith("/annotations") and args[2:] == ["--jq", ".[].message"]
+            job = args[1].split("/")[-2]
+            if job not in self.annotations:
+                raise integrate.Refusal("`gh api` failed (1): HTTP 502")
+            return "".join(f"{m}\n" for m in self.annotations[job])
         if args[0] == "api":
             number = int(next(a for a in args if "/issues/" in a).split("/")[-2])
             return self.labeled_at.get(number, "") + "\n"
@@ -579,6 +587,57 @@ def test_open_takes_a_member_whose_own_ci_was_cancelled_after_build(world, capsy
     assert _open(world) == 0, capsys.readouterr()
 
     assert world.remote_branches() == [f"integrate/{DATE}-batch-1"]
+
+
+def _cancelled_job(job: str) -> dict:
+    """A cancelled Actions job as `gh pr list --json statusCheckRollup` lists it."""
+    return {"__typename": "CheckRun", "name": "Rust / windows-latest", "workflowName": "Rust shim",
+            "status": "COMPLETED", "conclusion": "CANCELLED",
+            "detailsUrl": f"https://github.com/o/r/actions/runs/7/job/{job}"}
+
+
+# GitHub reports a job that ran past its timeout-minutes as CANCELLED, with
+# this runner annotation (jobs 116301727515 and 116323387861, 2026-10-15).
+TIMEOUT = "The job has exceeded the maximum execution time of 25m0s"
+
+
+@pytest.mark.parametrize("messages, joins", [
+    ([TIMEOUT, "The operation was canceled."], False),   # a hang: a known failure
+    (None, False),                                         # annotations unreadable
+    (["The operation was canceled."], True),               # superseded or cancelled by hand
+    ([], True),
+    (["Note: The job has exceeded the maximum execution time of 25m0s"], True),
+], ids=["timed-out", "unreadable", "cancelled", "no-annotations", "quoted-near-miss"])
+def test_a_cancelled_job_joins_unless_it_ran_past_its_timeout(world, capsys, messages, joins):
+    sha10 = world.pr(10, {"b.txt": "b\n"})
+    sha11 = world.pr(11, {"c.txt": "c\n"})
+    world.gh.add(10, sha10)
+    world.gh.add(11, sha11, statusCheckRollup=[
+        {"status": "COMPLETED", "conclusion": "SUCCESS"}, _cancelled_job("123")])
+    if messages is not None:
+        world.gh.annotations["123"] = messages
+
+    assert _build() == 0, capsys.readouterr()
+    out = capsys.readouterr().out
+
+    assert ("left out #11: CI on its head is failing" in out) is not joins
+
+
+def test_open_refuses_a_member_whose_own_job_timed_out_after_build(world, capsys):
+    sha10 = world.pr(10, {"b.txt": "b\n"})
+    sha11 = world.pr(11, {"c.txt": "c\n"})
+    world.gh.add(10, sha10)
+    world.gh.add(11, sha11, statusCheckRollup=[{"status": "IN_PROGRESS", "conclusion": None}])
+    assert _build() == 0
+    capsys.readouterr()
+    world.gh.ready[1]["statusCheckRollup"] = [_cancelled_job("123")]
+    world.gh.annotations["123"] = [TIMEOUT]
+
+    assert _open(world) == 2
+
+    err = capsys.readouterr().err
+    assert "#11" in err and "failing" in err
+    assert world.remote_branches() == []
 
 
 def test_conflict_markers_a_member_committed_are_flagged_in_the_body(world, capsys):
@@ -1654,8 +1713,8 @@ def test_a_census_too_deep_to_parse_lists_no_drift(world):
     ([{"status": "QUEUED", "conclusion": ""}], "pending"),
     ([{"status": "IN_PROGRESS", "conclusion": None},
       {"status": "COMPLETED", "conclusion": "FAILURE"}], "failing"),
-    # A cancelled run (superseded, or cancelled because only batches run the
-    # heavy lanes) gave no verdict: not green, but no known failure either.
+    # A run cancelled by hand or by a re-trigger gave no verdict: not green,
+    # but no known failure either (a timeout is: see below).
     ([{"status": "COMPLETED", "conclusion": "CANCELLED"}], "cancelled"),
     ([{"status": "COMPLETED", "conclusion": "SUCCESS"},
       {"status": "COMPLETED", "conclusion": "CANCELLED"}], "cancelled"),

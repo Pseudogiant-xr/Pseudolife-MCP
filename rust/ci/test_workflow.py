@@ -1461,9 +1461,8 @@ def test_selfhosted_lane_never_touches_a_required_check():
         needs = job.get("needs", [])
         assert "parity-selfhosted" not in ([needs] if isinstance(needs, str) else needs), name
     assert "parity-selfhosted" not in jobs["parity"]["steps"][0]["run"]
-    # Nightly and manual CI only: their concurrency groups are their own, so
-    # queued self-hosted jobs neither hold a PR's checks open nor let a newer
-    # master push cancel a run whose hosted jobs already finished.
+    # Nightly and manual CI only: queued self-hosted jobs never hold a PR's
+    # checks open.
     assert lane["if"] == (
         "${{ !cancelled() && (github.event_name == 'schedule' || "
         "(github.event_name == 'workflow_dispatch' && inputs.mode == 'ci')) "

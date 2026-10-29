@@ -76,9 +76,9 @@ The nightly, manual CI and merge groups run every parity suite, and a
 master push runs every one less the pairs its merged batch passed on the
 same tree (never `eval` or `judges`; `docs/dev/merge-batches.md`). Since
 2026-10-21 a pull request from any branch but `integrate/*` skips the
-candidate build and the matrix unless it changes CI or dependency
-inputs (`docs/dev/merge-batches.md`, "What CI runs where"). Any other pull
-request runs only the suites its diff reaches, and never fewer
+candidate build and the matrix, and since 2026-10-29 also when it changes
+CI or dependency inputs (`docs/dev/merge-batches.md`, "What CI runs
+where"). A batch pull request runs only the suites its diff reaches, and never fewer
 than the floor: `eval`, `cli`, `cli-store`, `cli-daemon`, `cli-daemon-2`,
 `cli-live` and `h5-w1a`. The `cli` suite was split into `cli`, `cli-daemon`
 and `cli-live`, and on 2026-10-24 `cli` and `cli-daemon` in two again. The scope job's

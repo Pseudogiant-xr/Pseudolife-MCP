@@ -225,12 +225,18 @@ _sleep = time.sleep
 _clock = time.monotonic
 
 # Conclusions that are a known failure on a member's own head. CANCELLED is
-# not one: a superseded run, or one cancelled because only batches spend the
-# heavy lanes (maintainer, 2026-10-29), gave no verdict, and the batch's CI
+# not one: a run cancelled by hand (maintainer, 2026-10-29: cancel CI that is
+# not part of a batch) or by a re-trigger gave no verdict, and the batch's CI
 # is its members' CI. `merge` still counts a cancelled batch check as red
 # (PASSING, above).
 FAILED = {"FAILURE", "TIMED_OUT", "ACTION_REQUIRED", "STARTUP_FAILURE", "ERROR"}
 CANCELLED = "CANCELLED"
+# GitHub reports a job that ran past its timeout-minutes as CANCELLED, not
+# TIMED_OUT, and the runner annotates it with this message (jobs
+# 116301727515 and 116323387861, 2026-10-15). Such a head likely hangs, so it
+# stays a known failure.
+TIMEOUT_ANNOTATION = "The job has exceeded the maximum execution time"
+_ACTIONS_JOB = re.compile(r"/actions/runs/\d+/job/(\d+)$")
 
 
 def _check_state(check: dict) -> str:
@@ -249,10 +255,28 @@ def _checks(rollup: list[dict] | None) -> str:
         if state in FAILED:
             return "failing"
         if state == CANCELLED:
+            if _timed_out(check):
+                return "failing"
             cancelled = True
         elif _unfinished(check):
             pending = True
     return "pending" if pending else "cancelled" if cancelled else "green"
+
+
+def _timed_out(check: dict) -> bool:
+    """Whether a cancelled Actions job ran past its timeout-minutes: the
+    runner's annotation, read by the job's id (its check-run id). Annotations
+    that cannot be read count as a timeout; a check that is no Actions job
+    has none to read."""
+    job = _ACTIONS_JOB.search(check.get("detailsUrl") or "")
+    if not job:
+        return False
+    try:
+        out = gh("api", f"repos/{{owner}}/{{repo}}/check-runs/{job.group(1)}/annotations",
+                 "--jq", ".[].message")
+    except Refusal:
+        return True
+    return any(line.startswith(TIMEOUT_ANNOTATION) for line in out.splitlines())
 
 
 def _unfinished(check: dict) -> bool:

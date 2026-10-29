@@ -1471,11 +1471,11 @@ jobs:
     # the same matrix and steps as parity-checks, on the maintainer's dev
     # machines. continue-on-error and no place in the Parity gate's needs
     # keep its outcome out of every required check. It runs only on the
-    # nightly and manual CI, which have their own concurrency groups: on a
-    # pull request its pending jobs would hold the PR's checks open, and on
-    # a master push a newer push would cancel the whole run while its
-    # self-hosted jobs queue, turning finished hosted results into a
-    # cancelled run. It stays off until the repository variable
+    # nightly and manual CI: on a pull request its pending jobs would hold
+    # the PR's checks open, and it was kept off master pushes when a newer
+    # push could cancel a run whose self-hosted jobs still queued (since
+    # 2026-10-29 every master push has a concurrency group of its own; the
+    # nightly still covers master). It stays off until the repository variable
     # PARITY_SELFHOSTED_RUNNERS lists the registered runners (JSON, such as
     # ["linux", "windows"]); a job for an unregistered label would queue for
     # a day.

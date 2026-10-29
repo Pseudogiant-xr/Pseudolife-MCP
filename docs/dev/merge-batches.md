@@ -19,8 +19,8 @@ Each change waits for hosted CI once, on its batch:
   the disposable-image check and the `Parity` gate; the candidate, harness
   candidate and fixtures builds and the parity matrix are skipped. Both `scope` jobs decide this from
   `github.head_ref` (an absent one runs everything), whatever the pull
-  request changes; only one whose diff cannot be read runs as a batch
-  would. The required `test`
+  request changes; only one whose diff is empty or cannot be read runs as
+  a batch would. The required `test`
   check reports its skip, which GitHub counts as success, and the required
   `Parity / <os>` gate runs and accepts the skipped candidate and parity
   jobs only on a pull request its `scope` marked not full; the `Rust` job
@@ -98,10 +98,12 @@ CI, only for a known failure: a labelled pull request whose current head
 has a failing check sits the batch out without a comment and keeps its
 label, and joins a later batch once a rerun of the failed job passes or a
 push replaces that head. Pending, cancelled,
-green or no checks all admit it: a cancelled run (superseded by a newer
-push, or cancelled because only batches spend the heavy lanes) gave no
-verdict. `merge` still counts a cancelled check on the batch itself as
-red.
+green or no checks all admit it: a run cancelled by hand or by a
+re-trigger gave no verdict. GitHub also reports a job that ran past its
+`timeout-minutes` as cancelled; the script reads that job's annotations,
+and a timeout (or annotations it cannot read) counts as failing, since the
+head likely hangs. `merge` still counts a cancelled check on the batch
+itself as red.
 
 Why not wait for green on the member's own head: on 2026-10-20/21 four
 things held batches up (#877 broke only against a newer master; an
