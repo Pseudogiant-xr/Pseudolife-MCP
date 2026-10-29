@@ -419,6 +419,21 @@ fn ct_eq(a: &[u8], b: &[u8]) -> bool {
     a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
 }
 
+/// `_presented_bearer`: the token of a `Bearer <token>` value, else `None`
+/// (no header, another scheme, or no token after the scheme).
+fn presented_bearer(header: Option<&str>) -> Option<&str> {
+    let header = header?;
+    let (scheme, rest) = header.split_once(' ').unwrap_or((header, ""));
+    let token = rest.trim_matches([' ', '\t']);
+    (scheme.eq_ignore_ascii_case("bearer") && !token.is_empty()).then_some(token)
+}
+
+/// `bearer_presented`: whether the value presents a bearer token, by the
+/// parse `resolve` applies; one that resolves to no principal was rejected.
+pub fn bearer_presented(header: Option<&str>) -> bool {
+    presented_bearer(header).is_some()
+}
+
 /// `header` is the raw Authorization value decoded as latin-1 (one char per byte).
 pub fn resolve(header: Option<&str>, env: &EnvTokens, store: &PrincipalStore) -> Resolved {
     resolve_detailed(header, env, store).0
@@ -435,14 +450,9 @@ pub fn resolve_detailed(
             Some(PrincipalSource::Open),
         );
     }
-    let Some(header) = header else {
+    let Some(token) = presented_bearer(header) else {
         return (Resolved::None, None);
     };
-    let (scheme, rest) = header.split_once(' ').unwrap_or((header, ""));
-    let token = rest.trim_matches([' ', '\t']);
-    if !scheme.eq_ignore_ascii_case("bearer") || token.is_empty() {
-        return (Resolved::None, None);
-    }
     // The header string is latin-1 decoded, so its chars are bytes. Python
     // re-encodes it as UTF-8 and, when possible, as latin-1.
     let utf8 = token.as_bytes().to_vec();

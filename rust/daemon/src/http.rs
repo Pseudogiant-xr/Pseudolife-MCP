@@ -241,11 +241,12 @@ pub(crate) fn browser_gate(app: &App, h: &HeaderMap) -> Result<Option<&'static s
 }
 
 pub(crate) fn resolve(app: &App, h: &HeaderMap) -> Resolved {
-    auth::resolve(
-        last_header(h, "authorization").as_deref(),
-        &app.env_tokens,
-        &app.store,
-    )
+    auth::resolve(authorization(h).as_deref(), &app.env_tokens, &app.store)
+}
+
+/// `_authorization`: the Authorization value `resolve` judges, the last one sent.
+pub(crate) fn authorization(h: &HeaderMap) -> Option<String> {
+    last_header(h, "authorization")
 }
 
 /// `_principal` / `_authorized`: an unavailable store counts as unauthorized.

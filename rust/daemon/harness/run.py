@@ -755,6 +755,16 @@ class Tokens(Scenario):
                  [bearer("stored-dave-token-w1a")]),
             case("coordination hub (authenticated)", "POST", "/api/coordination/receive",
                  [auth, ("Content-Type", "application/json")], b"{}"),
+            # A presented bearer the daemon rejects opens the answer with the
+            # rejected-token notice; the near-misses keep "hook session-start".
+            case("hook session-start rejected bearer", "GET", "/api/hook/session-start",
+                 [bearer("not-a-real-token")]),
+            case("hook session-start revoked stored principal", "GET", "/api/hook/session-start",
+                 [bearer("stored-dave-token-w1a")]),
+            case("hook session-start basic scheme", "GET", "/api/hook/session-start",
+                 [("Authorization", f"Basic {T_DEFAULT}")]),
+            case("hook session-start bearer, no token", "GET", "/api/hook/session-start",
+                 [("Authorization", "Bearer")]),
         ]
         return with_declared(c)
 

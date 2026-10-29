@@ -147,8 +147,11 @@ def policy(query: str = "", auth: bool = True) -> dict:
     return hook("GET", "/api/hook/memory-policy" + (f"?{query}" if query else ""), auth=auth)
 
 
-def session_start(query: str = "", auth: bool = True) -> dict:
-    return hook("GET", "/api/hook/session-start" + (f"?{query}" if query else ""), auth=auth)
+def session_start(query: str = "", auth: bool = True, headers=()) -> dict:
+    op = hook("GET", "/api/hook/session-start" + (f"?{query}" if query else ""), auth=auth)
+    if headers:
+        op["headers"] = [list(x) for x in headers]
+    return op
 
 
 def briefing(query: str = "", headers=()) -> dict:
@@ -425,6 +428,11 @@ def register(h) -> dict[str, dict]:
                 # whose session id is dropped: nothing registers), newer
                 # with a launcher path to quote, and equal by number.
                 session_start("session_id=ss-z&plugin_version=0.1.0", auth=False),
+                # A rejected bearer: the same answer after the rejected-token
+                # notice, naming the launcher; nothing registers.
+                session_start("session_id=ss-y&plugin_version=0.1.0"
+                              "&launcher=/opt/pl/bin/pseudolife-mcp", auth=False,
+                              headers=[("Authorization", "Bearer w2e-rotated-token")]),
                 session_start("plugin_version=99.0.0"
                               "&launcher=C:/Program%20Files/pl/pseudolife-mcp.exe"),
                 session_start(f"plugin_version={VERSION}.dev1&launcher=relative/pseudolife-mcp"),
