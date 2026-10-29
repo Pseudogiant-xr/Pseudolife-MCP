@@ -82,7 +82,7 @@ impl Archive {
                     member.compression(),
                     CompressionMethod::Stored | CompressionMethod::Deflated
                 )
-                || !names.insert(member.name().to_owned())
+                || !names.insert(member.name().ok()?.into_owned())
             {
                 return None;
             }
