@@ -113,6 +113,14 @@ class MCP:
         return response.json()
 
 
+def _log_ending(path, limit=4000):
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace").strip()
+    except OSError:
+        return ""
+    return f"; its log ends:\n{text[-limit:]}" if text else ""
+
+
 def free_port():
     with socket.socket() as handle:
         handle.bind(("127.0.0.1", 0))
@@ -192,9 +200,12 @@ def launched_daemon(dsn, private, *, env_extra=None, source_root=None, startup_t
                     payload, evidence = wait_started(url, time.monotonic() + startup_timeout, check=verify,
                                                      alive=lambda: process.poll() is None)
                 except StartupFailed as exc:
+                    # The log goes with the private directory, so its end
+                    # travels in the error.
+                    ending = _log_ending(Path(private) / "daemon.log")
                     if exc.exited:
-                        raise RuntimeError("disposable daemon exited during startup") from exc
-                    raise RuntimeError(f"disposable daemon startup deadline exceeded ({exc})") from exc
+                        raise RuntimeError("disposable daemon exited during startup" + ending) from exc
+                    raise RuntimeError(f"disposable daemon startup deadline exceeded ({exc})" + ending) from exc
                 identity = payload["baseline_instance"]
                 process.verified_runtime_pid = identity["pid"]
                 cleanup["readiness_identity_verified"] = True

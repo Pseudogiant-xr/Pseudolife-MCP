@@ -27,6 +27,7 @@ import secrets
 import shutil
 import socket
 import subprocess
+import sys
 import tempfile
 import time
 from pathlib import Path
@@ -62,10 +63,42 @@ def _bin(name: str) -> str:
     return str(versions[-1] / "bin" / (name + suffix))
 
 
-def _run(cmd: list[str], **kwargs) -> subprocess.CompletedProcess:
+class _Failed(subprocess.CalledProcessError):
+    """A failed program whose message carries the end of its error output."""
+
+    def __str__(self) -> str:
+        detail = (self.stderr or b"").decode("utf-8", "replace").strip()[-2000:]
+        return super().__str__() + (f" Its error output: {detail}" if detail else "")
+
+
+def _environment(program: str) -> dict[str, str]:
+    """The environment a pg0 bundle program runs with.
+
+    pg0 starts its own servers with the bundle's lib directory on the loader
+    path. The bundled libxml2 needs the bundled ICU (libicuuc.so.70) and has
+    no RUNPATH of its own, so without it initdb's `postgres -V` probe fails to
+    load on a host that ships another ICU (Debian 13 ships 76; found on the
+    self-hosted parity runners, 2026-10-28). Windows finds DLLs beside the
+    executable.
+    """
+    env = dict(os.environ)
+    path = Path(program)
+    if sys.platform.startswith("linux") and PG0 in path.parents:
+        lib = str(path.parent.parent / "lib")
+        env["LD_LIBRARY_PATH"] = os.pathsep.join(
+            part for part in (lib, env.get("LD_LIBRARY_PATH", "")) if part)
+    return env
+
+
+def _run(cmd: list[str], *, report: bool = False, **kwargs) -> subprocess.CompletedProcess:
     # pg_ctl's server inherits handles: never give it pipes it would hold open.
-    return subprocess.run(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                          stderr=subprocess.DEVNULL, check=True, timeout=180, **kwargs)
+    # A program that leaves nothing running (initdb) reports its error output.
+    try:
+        return subprocess.run(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                              stderr=subprocess.PIPE if report else subprocess.DEVNULL,
+                              check=True, timeout=180, env=_environment(cmd[0]), **kwargs)
+    except subprocess.CalledProcessError as error:
+        raise _Failed(error.returncode, error.cmd, error.output, error.stderr) from None
 
 
 def _connect(port: int, dbname: str = "postgres", user: str = SUPERUSER,
@@ -130,7 +163,7 @@ def _build_template() -> Path:
     pwfile.write_text(SUPERUSER_PASSWORD + "\n", encoding="ascii")
     try:
         _run([_bin("initdb"), "-D", str(data), "-U", SUPERUSER, f"--pwfile={pwfile}",
-              "--auth=scram-sha-256", "-E", "UTF8", "--no-locale", "--no-sync"])
+              "--auth=scram-sha-256", "-E", "UTF8", "--no-locale", "--no-sync"], report=True)
     finally:
         pwfile.unlink()
     with open(data / "postgresql.conf", "a", encoding="utf-8") as conf:

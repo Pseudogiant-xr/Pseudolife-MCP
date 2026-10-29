@@ -443,9 +443,18 @@ def test_sweep_scenarios_settle_without_timing_on_their_mutants(harness):
     diff), so what a mutant breaks is asserted by ``expect``."""
     import w2e_sweep as sw
     names = sorted(n for n in harness.SCENARIOS if n.startswith("sweep-"))
-    assert names == ["sweep-analyzer-tick", "sweep-deep-tick", "sweep-dream-auto",
-                     "sweep-stall"]
-    for n in names:
+    assert names == ["sweep-analyzer-tick", "sweep-compaction", "sweep-deep-tick",
+                     "sweep-dream-auto", "sweep-stall"]
+    # Compaction runs on the sweep with dreams off, so the dream checks below
+    # do not apply; its mutant must answer a diff, so no op settles on it.
+    compaction = harness.SCENARIOS["sweep-compaction"]
+    assert "  dream:\n    enabled: false\n" in compaction["config"]
+    assert "  compaction:\n    enabled: true\n" in compaction["config"]
+    assert not any(op.get("settle") for op in compaction["ops"])
+    assert any(op.get("expect") for op in compaction["ops"])
+    service = Path(__file__).resolve().parents[1] / "src" / "service.rs"
+    assert '"compaction-off"' in service.read_text(encoding="utf-8")
+    for n in (n for n in names if n != "sweep-compaction"):
         scn = harness.SCENARIOS[n]
         assert "  dream:\n    enabled: true\n" in scn["config"], n
         # The seeding daemon's sweep must not write what the arms compare.
@@ -459,7 +468,7 @@ def test_sweep_scenarios_settle_without_timing_on_their_mutants(harness):
     assert set(sw.MUTANTS) <= set(harness.MUTANTS)
     src = Path(__file__).resolve().parents[1] / "src" / "dream"
     text = "".join((src / f).read_text(encoding="utf-8") for f in ("ticks.rs", "deep.rs"))
-    assert all(f'"{m}"' in text for m in sw.MUTANTS)
+    assert all(f'"{m}"' in text for m in sw.MUTANTS if m != "compaction-off")
 
 
 def test_graph_insight_scenarios_register_their_clocks_and_mutants(harness):
