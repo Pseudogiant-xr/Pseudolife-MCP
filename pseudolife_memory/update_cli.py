@@ -15,6 +15,10 @@ Docker tier, release mode (no checkout)::
     pseudolife-mcp update --schedule 03:30   # a daily unattended run (applies only with updates.unattended_daemon on)
     pseudolife-mcp update --unattended   # what that run does (pseudolife_memory.unattended_update)
 
+On a client-only machine (a shim runtime, the daemon on another host),
+``--schedule`` installs that machine's own daily job, whose ``--unattended``
+run moves its clients to the daemon's release.
+
 pulls the pinned GHCR daemon image, backs the bank up (the checkout's
 backup script when the container's compose project still has one, else
 this module's own pg_dump + state tar), tags the running image for
@@ -189,6 +193,15 @@ def create_test_login(argv: list[str]) -> dict:
         if isinstance(report, dict):
             return report
     return {"exit": code, "error": "the test-login command printed no report", "changes": []}
+
+
+def plain_release(version: object) -> bool:
+    """Whether ``version`` is a plain release number (``N.N`` up to
+    ``N.N.N.N``, ASCII digits only). A daemon's ``/health`` is
+    unauthenticated and its version becomes a pip requirement, so a client
+    update installs only these: never a pre-release, a local version or
+    requirement syntax."""
+    return isinstance(version, str) and re.fullmatch(r"[0-9]+(?:\.[0-9]+){1,3}", version) is not None
 
 
 def _on_shim_runtime() -> bool:
@@ -652,7 +665,11 @@ class Update:
                               f"run pseudolife-mcp update on {host}, where it runs. Nothing was changed", 2)
         health = self.daemon_health()
         daemon_version = (health or {}).get("version")
-        daemon_version = daemon_version if isinstance(daemon_version, str) and version_key(daemon_version) else None
+        if isinstance(daemon_version, str) and daemon_version and not plain_release(daemon_version) and not self.o.tag:
+            raise UpdateError(f"the daemon at {self.o.daemon_url} reports the version {daemon_version[:64]!r} on /health, "
+                              f"which is not a plain release number (N.N.N), so it is not installed as one. Name the "
+                              f"release with --tag <version>. Nothing was changed", 2)
+        daemon_version = daemon_version if plain_release(daemon_version) else None
         target = self.o.tag or daemon_version or self.target_version()
         self.report.mode = "clients"
         self.report.current, self.report.target = daemon_version, target
@@ -1424,14 +1441,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--unattended", action="store_true",
                         help="the scheduled run: apply a new release only while updates.unattended_daemon is on and "
                              "no session is active on the board; post a board notice either way (exit 0 updated, "
-                             "3 current, 4 held off)")
+                             "3 current, 4 held off). On a client-only machine: move this machine's clients to the "
+                             "daemon's release, never past it")
     parser.add_argument("--schedule", metavar="HH:MM", default=None,
                         help="install a daily scheduled task (Windows) or systemd --user timer (Linux) that runs "
-                             "`update --unattended` at this time")
+                             "`update --unattended` at this time (a client-only machine gets its own job, "
+                             "'Pseudolife Client Update' / pseudolife-client-update.timer)")
     parser.add_argument("--allow-no-bearer", action="store_true",
                         help="--schedule even when no bearer resolves for the scheduled run (it then holds off "
                              "every day with exit 4 until one does)")
-    parser.add_argument("--unschedule", action="store_true", help="remove that task or timer")
+    parser.add_argument("--unschedule", action="store_true", help="remove that task or timer (the daemon job and the client job alike)")
     parser.add_argument("--check", action="store_true",
                         help="report whether a newer release exists: exit 0 when one does, 3 when current")
     parser.add_argument("--checkout", default=None,

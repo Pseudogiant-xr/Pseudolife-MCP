@@ -252,7 +252,7 @@
       "lock-resolve": "83bcc6b654896c6d",
       "test": "ac414107d3d9c71d",
       "test-lite-linux": "44e2a8f2c01baeab",
-      "test-lite-windows": "4c14277e515e1711",
+      "test-lite-windows": "b628a0135e33c187",
       "test-lite-macos": "2abde9b5cf74fc3d",
       "frontend": "b1b6a1a1278f2e60"
     },
@@ -296,6 +296,11 @@
         "job": "test-lite-windows",
         "fingerprint": "4c14277e515e1711",
         "reason": "adds tests/test_selfhosted_windows_scripts.py (9 cases, about 4 s locally) to the one pytest step beside master's runner-cleanup and worktree-retention files; no new setup or step"
+      },
+      {
+        "job": "test-lite-windows",
+        "fingerprint": "b628a0135e33c187",
+        "reason": "adds tests/test_unattended_update.py (49 cases, under 1 s on Windows locally, all scheduler and Docker calls faked); no new setup or step"
       }
     ]
   }

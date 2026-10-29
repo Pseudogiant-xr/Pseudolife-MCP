@@ -4090,7 +4090,9 @@ that command is, in PowerShell, once:
 
 `--allow-no-bearer` installs the schedule anyway, with a warning. Its
 output names the bearer the run will use. `--schedule` also refuses on a
-pip install, which has no daemon container to update. `--schedule` on Linux writes
+pip install that is not a shim runtime (it has no daemon container to
+update; a client-only machine gets [its own job](#unattended-client-updates-on-client-only-machines)).
+`--schedule` on Linux writes
 `~/.config/systemd/user/pseudolife-update.{service,timer}` with the
 daemon URL and the token file as `Environment=` lines (a token given only
 as `PSEUDOLIFE_MCP_TOKEN` is written to a private
@@ -4109,12 +4111,54 @@ above), not only in a shell. A `--daemon-url` given with `--schedule` rides
 along in the task or unit. The task or timer runs the shim launcher
 (`pseudolife-mcp update --unattended`), so it follows the side-by-side
 runtimes; `--unschedule` removes the task or the unit, the timer and the
-private token file. A tokenless install cannot read the board and
+private token file, and the client job below when that is the one installed. A tokenless install cannot read the board and
 therefore never updates unattended; nor does macOS get a scheduler here
 (run `--unattended` from your own). The bank backup is taken every time
 and is never skipped by this path. The board read registers a throwaway
 address labelled "unattended update", pruned by the board after its
 hour; a run never counts that label as a session.
+
+### Unattended client updates on client-only machines
+
+```bash
+pseudolife-mcp update --schedule 03:30 --daemon-url http://<daemon-host>:8765   # once, on the client machine
+pseudolife-mcp update --unattended --daemon-url http://<daemon-host>:8765       # what that run does
+pseudolife-mcp update --unschedule
+```
+
+A client-only machine (its `pseudolife-mcp` is the shim launcher of a
+[client-only install](remote-bank.md#with-the-installer-client-only-path),
+and no daemon container runs here) has no daemon to recreate, so
+`--schedule` there installs its own job: the task `Pseudolife Client
+Update` on Windows, `~/.config/systemd/user/pseudolife-client-update.{service,timer}`
+(`Persistent=true`, `SuccessExitStatus=3 4`) on Linux. A machine that
+hosts the daemon keeps the daemon job above under its own names. The job
+runs `pseudolife-mcp update --unattended` with the daemon URL on its
+command line, since a task or unit inherits no shell; with no `--daemon-url`,
+`PSEUDOLIFE_MCP_DAEMON_URL` in the shell running `--schedule` is the URL it
+carries.
+
+On a client-only machine the run reads the daemon's `/health` and, when the
+daemon runs a newer release than the current shim runtime here, installs
+exactly that release as a new shim runtime, refreshes the plugin cache and
+runs the Codex step, as `pseudolife-mcp update --clients-only` does. It
+never moves past the daemon's release and never downgrades; a daemon that
+does not answer changes nothing (attended, `--clients-only` falls back to
+the newest release; unattended it does not guess), and only a plain
+release number (`N.N.N`) is installed, never a pre-release or anything else
+an unauthenticated `/health` might carry. It reads no knob and no
+board, and needs no bearer: running sessions keep their runtime and new
+sessions start on the new one, so nothing is recreated under anyone.
+Exit codes: 0 updated, 3 current, 4 another update holds the update lock,
+2 the daemon did not answer (or reported no version), 5 a client step
+failed. `--tag` is refused with `--unattended` here, since the run follows
+the daemon. Every run appends to `~/.pseudolife-mcp/unattended-update.log`.
+
+`--schedule` refuses on a client machine whose daemon does not answer
+`/health` at the time, naming `--daemon-url`, since the job would change
+nothing every day. A pip install that is not a shim runtime is refused as
+above. The installer does not offer the schedule yet: run `--schedule`
+once after a client-only install.
 
 ### Codex hook re-approval, on every update path
 
