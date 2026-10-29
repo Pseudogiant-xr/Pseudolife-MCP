@@ -545,15 +545,13 @@ pub struct SessionStartQuery<'a> {
 }
 
 /// `token_rejected_notice`: the line for a caller whose bearer the daemon
-/// rejected, naming the caller's launcher for its own commands. Nothing of
-/// the token is echoed.
+/// rejected ("refused": the daemon cannot tell why), naming the caller's
+/// launcher for its own `connect`. Nothing of the token is echoed.
 fn token_rejected_notice(command: &str) -> String {
     format!(
-        "Pseudolife-MCP: the memory daemon rejected this machine's token, so this session has \
-         no memory access (the token was revoked, rotated or never issued for this daemon). \
-         Fix: on the daemon host run `pseudolife-mcp invite <name>` (add `--replace` if that \
-         name is still paired), then on this machine `{command} connect <daemon-url> \
-         --read-code`; `{command} doctor` shows the state."
+        "Pseudolife-MCP: the memory daemon refused this machine's token, so this session has \
+         no memory access. Fix: on the daemon host run `pseudolife-mcp invite <name>`, then on \
+         this machine `{command} connect <daemon-url> --read-code`."
     )
 }
 

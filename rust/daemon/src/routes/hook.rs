@@ -221,11 +221,10 @@ mod tests {
     }
 
     /// `tests/test_session_start_rejected_token.py`'s notice, byte for byte.
-    const REJECTED: &str = "Pseudolife-MCP: the memory daemon rejected this machine's token, so \
-        this session has no memory access (the token was revoked, rotated or never issued for \
-        this daemon). Fix: on the daemon host run `pseudolife-mcp invite <name>` (add \
-        `--replace` if that name is still paired), then on this machine `pseudolife-mcp connect \
-        <daemon-url> --read-code`; `pseudolife-mcp doctor` shows the state.";
+    const REJECTED: &str = "Pseudolife-MCP: the memory daemon refused this machine's token, so \
+        this session has no memory access. Fix: on the daemon host run `pseudolife-mcp invite \
+        <name>`, then on this machine `pseudolife-mcp connect <daemon-url> --read-code`.";
+    const HEAD: &str = "Pseudolife-MCP: the memory daemon refused this machine's token";
 
     async fn start_with(
         app: &std::sync::Arc<crate::http::App>,
@@ -274,25 +273,18 @@ mod tests {
             "?plugin_version=0.0.1&launcher=/opt/pl/bin/pseudolife-mcp",
         )
         .await;
+        assert!(text.starts_with(HEAD), "{text}");
         assert!(
-            text.starts_with("Pseudolife-MCP: the memory daemon rejected"),
+            text.contains("`/opt/pl/bin/pseudolife-mcp connect <daemon-url> --read-code`"),
             "{text}"
         );
         assert!(
-            text.contains("`/opt/pl/bin/pseudolife-mcp doctor`"),
-            "{text}"
-        );
-        assert!(
-            text.find("rejected this machine").unwrap()
-                < text.find("Pseudolife-MCP: plugin 0.0.1").unwrap(),
+            text.find(HEAD).unwrap() < text.find("Pseudolife-MCP: plugin 0.0.1").unwrap(),
             "{text}"
         );
         // The last Authorization header decides, as the resolver reads it.
         let valid_last = start_with(&app, &["Bearer wrong", "Bearer fixture-token"], "").await;
-        assert!(
-            !valid_last.contains("rejected this machine"),
-            "{valid_last}"
-        );
+        assert!(!valid_last.contains(HEAD), "{valid_last}");
         let valid_first = start_with(&app, &["Bearer fixture-token", "Bearer wrong"], "").await;
         assert!(valid_first.starts_with(REJECTED), "{valid_first}");
     }
@@ -304,12 +296,12 @@ mod tests {
     async fn session_start_without_a_presented_bearer_is_unchanged() {
         let app = loaded_app();
         let plain = start_with(&app, &[], "").await;
-        assert!(!plain.contains("rejected this machine"), "{plain}");
+        assert!(!plain.contains(HEAD), "{plain}");
         for value in ["Bearer", "Bearer  \t ", "Basic fixture-rotated-token-4f2a"] {
             assert_eq!(start_with(&app, &[value], "").await, plain, "{value}");
         }
         let accepted = start_with(&app, &["Bearer fixture-token"], "").await;
-        assert!(!accepted.contains("rejected this machine"), "{accepted}");
+        assert!(!accepted.contains(HEAD), "{accepted}");
         let unloaded = mcp_refusal_app();
         assert_eq!(start_with(&unloaded, &["Bearer wrong"], "").await, plain);
     }

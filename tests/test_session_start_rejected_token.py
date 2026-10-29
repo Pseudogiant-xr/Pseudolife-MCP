@@ -24,7 +24,7 @@ from tests.asgi_helpers import call, stub_mcp
 
 TOKEN = "fixture-daemon-token"
 WRONG = "fixture-rotated-token-4f2a"
-HEAD = "Pseudolife-MCP: the memory daemon rejected this machine's token"
+HEAD = "Pseudolife-MCP: the memory daemon refused this machine's token"
 
 
 @pytest.fixture
@@ -50,18 +50,15 @@ def _start(svc, authorization=None, token=TOKEN, query=""):
 def test_the_notice_names_the_cause_and_the_fix():
     text = session_hook.token_rejected_notice()
     assert text == (
-        "Pseudolife-MCP: the memory daemon rejected this machine's token, so this "
-        "session has no memory access (the token was revoked, rotated or never issued "
-        "for this daemon). Fix: on the daemon host run `pseudolife-mcp invite <name>` "
-        "(add `--replace` if that name is still paired), then on this machine "
-        "`pseudolife-mcp connect <daemon-url> --read-code`; `pseudolife-mcp doctor` "
-        "shows the state.")
+        "Pseudolife-MCP: the memory daemon refused this machine's token, so this "
+        "session has no memory access. Fix: on the daemon host run "
+        "`pseudolife-mcp invite <name>`, then on this machine "
+        "`pseudolife-mcp connect <daemon-url> --read-code`.")
 
 
 def test_the_notice_names_the_reported_launcher():
     text = session_hook.token_rejected_notice('"C:/Program Files/pl/pseudolife-mcp.exe"')
     assert '`"C:/Program Files/pl/pseudolife-mcp.exe" connect <daemon-url> --read-code`' in text
-    assert '`"C:/Program Files/pl/pseudolife-mcp.exe" doctor`' in text
     # The daemon host's command is not the caller's launcher.
     assert "`pseudolife-mcp invite <name>`" in text
 
@@ -86,7 +83,7 @@ def test_the_notice_precedes_a_version_notice(svc):
 
 def test_a_rejected_bearer_names_the_launcher_the_hook_reported(svc):
     text = _start(svc, f"Bearer {WRONG}", query="launcher=/opt/pl/bin/pseudolife-mcp")
-    assert "`/opt/pl/bin/pseudolife-mcp doctor`" in text
+    assert "`/opt/pl/bin/pseudolife-mcp connect <daemon-url> --read-code`" in text
 
 
 def test_a_rejected_bearer_registers_no_session(svc):

@@ -151,14 +151,16 @@ def token_rejected_notice(command: str = UPDATE_COMMAND) -> str:
     """The line for a caller whose bearer the daemon rejected. Until
     2026-10-30 that caller got the public instructions with nothing saying
     why the briefing was missing, and two machines with rotated tokens ran
-    11 days without memory. ``command`` names the caller's own launcher;
-    the invite runs on the daemon host, whose launcher is not known here.
+    11 days without memory. It says "refused" and no more: the daemon cannot
+    tell a revoked token from one never issued. ``connect --read-code``,
+    not ``pair``, because pairing alone leaves the client registrations on
+    the refused token. ``command`` names the caller's own launcher; the
+    invite runs on the daemon host, whose launcher is not known here.
     Nothing of the token is echoed."""
-    return ("Pseudolife-MCP: the memory daemon rejected this machine's token, so this "
-            "session has no memory access (the token was revoked, rotated or never issued "
-            "for this daemon). Fix: on the daemon host run `pseudolife-mcp invite <name>` "
-            "(add `--replace` if that name is still paired), then on this machine "
-            f"`{command} connect <daemon-url> --read-code`; `{command} doctor` shows the state.")
+    return ("Pseudolife-MCP: the memory daemon refused this machine's token, so this "
+            "session has no memory access. Fix: on the daemon host run "
+            "`pseudolife-mcp invite <name>`, then on this machine "
+            f"`{command} connect <daemon-url> --read-code`.")
 
 
 def _version_key(value: str) -> tuple[int, ...] | None:
