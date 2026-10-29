@@ -1,0 +1,3 @@
+| Named substitution | Producer and supported domain | Refusal and controls |
+| --- | --- | --- |
+| `doorbell-bounded-relevant-numbers` | Daemon SQL counts and current finite timestamps. Count is positive u64, v3 maintainer is an integer in 1..count; timestamps are nonnegative finite f64 numbers or u64 integers. Legacy integer +86400 uses checked addition and exact equality, including mixed float comparisons. | Beyond-u64 relevant integers and checked-add overflow invalidate pending with exit 0 and empty streams, preserving pending/receipt bytes; an ordinary lock may exist. Exact 2**54 expiry distinctions, u64 edges and huge-timestamp controls are prepared. |

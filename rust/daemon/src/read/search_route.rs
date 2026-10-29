@@ -190,19 +190,14 @@ pub struct Searched {
     pub event_id: Option<i64>,
 }
 
-/// `MemoryService.search` (service.py:1877-2076), after the band check and
-/// the blank-query answer.
-pub async fn run(svc: &Service, ready: &Arc<Ready>, req: Request) -> anyhow::Result<Searched> {
+/// `cms.retrieve`'s inputs for a search or trace call: the request's
+/// filters and overrides over the configured knobs, with `k` resolved.
+pub(crate) fn params_for(svc: &Service, req: &Request, k: usize) -> Params {
     let cfg = &svc.config.memory;
-    let k = match req.top_k {
-        0 => cfg.top_k.max(0) as usize,
-        n if n < 0 => anyhow::bail!("top_k must not be negative"),
-        n => n as usize,
-    };
     let b = &cfg.bm25;
     let s = &cfg.search;
     let tags_norm = req.tags.as_ref().map(|t| normalize_tags(t));
-    let params = Params {
+    Params {
         query: req.query.clone(),
         k,
         sources: req
@@ -256,7 +251,20 @@ pub async fn run(svc: &Service, ready: &Arc<Ready>, req: Request) -> anyhow::Res
             "tags": tags_norm,
             "min_logical_turn": null,
         }),
+    }
+}
+
+/// `MemoryService.search` (service.py:1877-2076), after the band check and
+/// the blank-query answer.
+pub async fn run(svc: &Service, ready: &Arc<Ready>, req: Request) -> anyhow::Result<Searched> {
+    let cfg = &svc.config.memory;
+    let k = match req.top_k {
+        0 => cfg.top_k.max(0) as usize,
+        n if n < 0 => anyhow::bail!("top_k must not be negative"),
+        n => n as usize,
     };
+    let params = params_for(svc, &req, k);
+    let s = &cfg.search;
     let n_ctg = if crate::mutants::active("search-no-contiguity") {
         0
     } else {

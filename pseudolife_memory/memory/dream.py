@@ -2054,35 +2054,190 @@ def resolve_endpoints(cfg) -> dict:
 
 
 def probe_endpoint(base_url: str, timeout: float = 3.0) -> bool:
-    """Is an OpenAI-compatible endpoint alive? GET /health at the base with
-    any trailing /v1 stripped (the sonnet shim serves /health at root and
-    answers 503 when its CLI is logged out); a 404 there means a plain
-    llama-server, so retry as GET {base_url}/models. Only HTTP 200 counts."""
+    """Is an OpenAI-compatible endpoint alive? See
+    :func:`probe_endpoint_cause`; only HTTP 200 counts."""
+    return probe_endpoint_cause(base_url, timeout) is None
+
+
+# The /health status token a probe may quote: the CLI shims' vocabulary
+# (``login_required``, ``cli_error``). Nothing else of the answer is read
+# into a cause, which can carry paths or prompts (the
+# ``classify_extractor_error`` rule).
+_HEALTH_STATUS_RE = re.compile(r"[a-z][a-z_]{0,31}")
+
+
+def _probe_answer_cause(exc, path: str) -> tuple[str, str]:
+    """``(reason, error)`` for a probe's HTTP error answer: ``login_expired``
+    for 401/403 or a shim's ``"status": "login_required"`` (the exact
+    signal the shims document), else ``extractor_error``; the error names
+    the path, the HTTP status and a status token of the fixed shape."""
+    import json
+
+    status = None
+    try:
+        obj = json.loads((exc.read(_AUTH_BODY_PEEK) or b"").decode("utf-8", "replace"))
+        token = obj.get("status") if isinstance(obj, dict) else None
+        if isinstance(token, str) and _HEALTH_STATUS_RE.fullmatch(token):
+            status = token
+    except Exception:  # noqa: BLE001 — a hint, never an error
+        status = None
+    error = f"{path} HTTP {exc.code}" + (f" ({status})" if status else "")
+    login = exc.code in (401, 403) or status == "login_required"
+    return ("login_expired" if login else "extractor_error"), error
+
+
+def probe_endpoint_cause(base_url: str, timeout: float = 3.0) -> tuple[str, str] | None:
+    """None when an OpenAI-compatible endpoint is alive, else ``(reason,
+    error)`` in the dream-stall vocabulary. GET /health at the base with
+    any trailing /v1 stripped (the CLI shims serve /health at root and
+    answer 503 ``login_required`` when their CLI is signed out); a 404 there
+    means a plain llama-server, so retry as GET {base_url}/models. Only
+    HTTP 200 counts."""
     import urllib.error
     import urllib.request
 
     root = base_url.rstrip("/")
     root = root.removesuffix("/v1")
-    for url in (f"{root}/health", f"{base_url.rstrip('/')}/models"):
+    for path, url in (("/health", f"{root}/health"),
+                      ("/models", f"{base_url.rstrip('/')}/models")):
         try:
             with urllib.request.urlopen(url, timeout=timeout) as resp:
-                return resp.status == 200
+                if resp.status == 200:
+                    return None
+                return "extractor_error", f"{path} HTTP {resp.status}"
         except urllib.error.HTTPError as e:
-            if e.code == 404 and url.endswith("/health"):
+            if e.code == 404 and path == "/health":
                 continue                      # llama-server: try /models
-            return False
-        except Exception:  # noqa: BLE001 — connection refused, timeout, DNS
-            return False
-    return False
+            return _probe_answer_cause(e, path)
+        except Exception as e:  # noqa: BLE001 — connection refused, timeout, DNS
+            return classify_extractor_error(e)
+    return "extractor_error", "no answer"
 
 
 def _host_resolves(hostname: str) -> bool:
+    """False only on a definitive not-found answer (``EAI_NONAME``, or
+    ``EAI_NODATA`` where the platform has it) or a name that cannot be
+    encoded for a lookup at all (an empty or over-long label raises
+    ``UnicodeError``); a temporary failure cannot be judged and counts as
+    resolving, so a resolver hiccup never skips a working fallback."""
     import socket
+    not_found = {getattr(socket, n) for n in ("EAI_NONAME", "EAI_NODATA")
+                 if hasattr(socket, n)}
     try:
         socket.getaddrinfo(hostname, None)
         return True
-    except OSError:
+    except socket.gaierror as e:
+        return e.errno not in not_found
+    except UnicodeError:
         return False
+    except OSError:
+        return True
+
+
+# host -> (resolves, monotonic stamp): dream status is polled by the
+# Console and the session hooks, and the auto-mode builder asks once per
+# dream; one lookup per host per minute bounds both.
+_resolves_cache: dict[str, tuple[bool, float]] = {}
+_RESOLVES_TTL = 60.0
+# Fallback URLs already reported as skipped, so a sweep every few minutes
+# logs the misconfiguration once rather than once per dream.
+_fallback_skip_warned: set[str] = set()
+
+# What an unresolvable fallback means, by what the builder does with it:
+# skipped (auto mode with a usable primary) or still dialled (fallback mode,
+# or auto mode with no usable primary, where skipping would let an empty
+# extraction acknowledge the backlog).
+FALLBACK_UNRESOLVED = (
+    "the dream fallback does not resolve from the daemon, so it is never used "
+    "and dreams fail whenever the primary is down: remove the fallback "
+    "(PSEUDOLIFE_DREAM_FALLBACK_BASE_URL/_MODEL, or the Console's Extractor "
+    "panel) or start the extractor it names")
+FALLBACK_UNRESOLVED_DIALLED = (
+    "the dream fallback does not resolve from the daemon and dreams are sent "
+    "to it, so they fail: start the extractor it names, or point the "
+    "fallback (PSEUDOLIFE_DREAM_FALLBACK_BASE_URL/_MODEL, or the Console's "
+    "Extractor panel) at one that runs")
+
+
+def _primary_usable(r: dict) -> bool:
+    """Whether ``build_extractor`` would build a real primary (URL and
+    model), not the no-op extractor."""
+    return bool(r["primary_url"] and r["primary_model"])
+
+
+def fallback_warning(r: dict) -> str | None:
+    """The status and startup text for a configured fallback whose host
+    does not resolve, worded by what the mode does with it; None when it
+    resolves, is unused (``primary`` mode) or is not configured."""
+    if not (r["fallback_url"] and r["fallback_model"]) or r["mode"] == "primary":
+        return None
+    if _url_resolves(r["fallback_url"]):
+        return None
+    if r["mode"] == "auto" and _primary_usable(r):
+        return FALLBACK_UNRESOLVED
+    return FALLBACK_UNRESOLVED_DIALLED
+
+
+def _url_host(url: str) -> str | None:
+    """The host this daemon's transport dials: ``urlsplit(url).hostname``,
+    the host urllib connects to (the authority after ``//`` up to ``/?#``,
+    the userinfo before its last ``@`` dropped, the bracketed IPv6 literal
+    or the text before the first ``:``, lowercased; None when empty). The
+    Rust daemon judges reqwest's parsed host instead, so each judges what
+    its own transport would look up."""
+    if "://" not in url:
+        return None
+    netloc = url.split("://", 1)[1]
+    for sep in "/?#":
+        netloc = netloc.split(sep, 1)[0]
+    netloc = netloc.rpartition("@")[2]
+    if "[" in netloc:
+        host = netloc.partition("[")[2].partition("]")[0]
+    else:
+        host = netloc.partition(":")[0]
+    return host.lower() or None
+
+
+def _proxied(url: str) -> bool:
+    """Whether a proxy environment variable applies to ``url``'s scheme
+    (``<scheme>_proxy`` or ``all_proxy``, either case, non-empty). urllib
+    and reqwest both send through it without resolving the host here, so
+    local DNS cannot judge the host. ``no_proxy`` is not consulted: a
+    configured proxy is enough to not judge."""
+    import os
+    scheme = url.split("://", 1)[0].lower() if "://" in url else ""
+    names = [f"{scheme}_proxy", "all_proxy"] if scheme else ["all_proxy"]
+    return any(os.environ.get(n) or os.environ.get(n.upper()) for n in names)
+
+
+def _url_resolves(url: str) -> bool:
+    """Whether ``url``'s host resolves from here, cached per host for
+    ``_RESOLVES_TTL``. Only a definitive not-found counts as not resolving
+    (:func:`_host_resolves`); a URL with no host, or one a proxy carries,
+    cannot be judged and counts as resolving."""
+    import time
+
+    host = _url_host(url)
+    if not host or _proxied(url):
+        return True
+    now = time.monotonic()
+    hit = _resolves_cache.get(host)
+    if hit and now - hit[1] < _RESOLVES_TTL:
+        return hit[0]
+    ok = _host_resolves(host)
+    _resolves_cache[host] = (ok, now)
+    return ok
+
+
+def _redacted_url(url: str) -> str:
+    """``url`` with any userinfo replaced, for a log line or a warning (the
+    Rust daemon's ``redact_url``)."""
+    if "://" not in url:
+        return url
+    scheme, rest = url.split("://", 1)
+    end = min((i for i in (rest.find(c) for c in "/?#") if i >= 0), default=len(rest))
+    at = rest[:end].rfind("@")
+    return url if at < 0 else f"{scheme}://<redacted>{rest[at:]}"
 
 
 _HOST_GATEWAY_NAME = "host.docker.internal"
@@ -2114,6 +2269,9 @@ def startup_extractor_warnings(cfg) -> list[str]:
             "PSEUDOLIFE_DREAM_FALLBACK_BASE_URL/_MODEL to keep the in-stack "
             "sidecar as automatic fallback; verify with "
             'memory_dream(action="status").')
+    unresolved = fallback_warning(r)
+    if unresolved:
+        out.append(f"dream fallback {_redacted_url(r['fallback_url'])}: {unresolved}.")
     if has_fallback and r["primary_url"] == r["fallback_url"]:
         out.append(
             f"dream primary and fallback are the same endpoint "
@@ -2166,16 +2324,17 @@ def fetch_served_model(base_url: str, timeout: float = 1.5) -> str | None:
     return served
 
 
-def _probe_primary(url: str) -> bool:
-    """Probe with ONE retry: the first probe after a daemon container restart
-    reliably fails (host-gateway cold start) while the endpoint is healthy —
-    2/2 live dreams on 2026-07-19 fell back spuriously on a healthy shim."""
+def _probe_primary(url: str) -> tuple[str, str] | None:
+    """The primary's probe cause (None: healthy), with ONE retry: the first
+    probe after a daemon container restart reliably fails (host-gateway
+    cold start) while the endpoint is healthy — 2/2 live dreams on
+    2026-07-19 fell back spuriously on a healthy shim."""
     import time
 
-    if probe_endpoint(url):
-        return True
+    if probe_endpoint_cause(url) is None:
+        return None
     time.sleep(_probe_retry_delay)
-    return probe_endpoint(url)
+    return probe_endpoint_cause(url)
 
 
 def _cache_extra_body(cfg) -> dict | None:
@@ -2236,15 +2395,41 @@ def build_extractor_with_fallback(cfg) -> tuple["DreamExtractor", str]:
         return build_extractor(cfg), "primary"
     # mode == "auto" with a configured fallback: probe (with one retry —
     # see _probe_primary), then choose.
-    if r["primary_url"] and _probe_primary(r["primary_url"]):
+    cause = (_probe_primary(r["primary_url"]) if r["primary_url"]
+             else ("extractor_error", "no primary endpoint"))
+    if cause is None:
         return build_extractor(cfg), "primary"
+    # The probe's verdict rides on the extractor as ``primary_probe`` so
+    # the dream-stall record names the primary's own cause, not only the
+    # fallback's (2026-10-27: a signed-out primary read as the fallback's
+    # DNS failure).
+    probe = {"reason": cause[0], "error": cause[1],
+             "fallback_resolves": _url_resolves(r["fallback_url"])}
+    if not probe["fallback_resolves"] and _primary_usable(r):
+        # A fallback that cannot resolve is a misconfiguration, not a
+        # transient fault: it is never dialled, and the dream runs on the
+        # primary, whose own failure (or success) is first-hand. Only with
+        # a usable primary: the no-op extractor's empty extraction would
+        # acknowledge the backlog, where a failed fallback holds it.
+        if r["fallback_url"] not in _fallback_skip_warned:
+            _fallback_skip_warned.add(r["fallback_url"])
+            logger.warning("dream primary extractor %s failed its probe (%s) and %s; "
+                           "dreams run on the primary", _redacted_url(r["primary_url"]),
+                           cause[1], FALLBACK_UNRESOLVED.replace(
+                               "the dream fallback",
+                               f"the fallback {_redacted_url(r['fallback_url'])}", 1))
+        extractor = build_extractor(cfg)
+        extractor.primary_probe = probe
+        return extractor, "primary"
     logger.warning("dream primary extractor %s unreachable — using fallback %s",
                    r["primary_url"], r["fallback_url"])
-    return OpenAICompatExtractor(
+    extractor = OpenAICompatExtractor(
         r["fallback_url"], r["fallback_model"], api_key=fallback_key,
         max_tokens=r["max_tokens"], timeout_seconds=r["timeout"],
         extra_body=_cache_extra_body(cfg),
-    ), "fallback"
+    )
+    extractor.primary_probe = probe
+    return extractor, "fallback"
 
 
 def _status_extractor_fields(cfg, last_dream_extractor) -> dict:
@@ -2265,6 +2450,7 @@ def _status_extractor_fields(cfg, last_dream_extractor) -> dict:
         "primary_model_served": served,
         "fallback_url": r["fallback_url"] if has_fallback else None,
         "fallback_model": r["fallback_model"] if has_fallback else None,
+        "fallback_warning": fallback_warning(r),
         "extractor_source": getattr(cfg, "extractor_source", "env"),
         "model_override": getattr(cfg, "extractor_model_override", None),
         "reasoning_effort": getattr(cfg, "extractor_reasoning_effort",

@@ -1,0 +1,3 @@
+| Row | Phase | Behavior to preserve and Python source | Existing test pool and boundary | Status |
+|---|---:|---|---|---|
+| SHIM-WAKE-REASON | 1 | Pinned CPython 3.11 Unicode 14 alnum/space predicates preserve bounded wake-reason sanitization, including U+001C–001F splitting; repository claim tables remain pinned. `board/liveness.rs`, `board/unicode14.rs` | `board_ring_reason_uses_python_unicode14_predicates`, `board_ring_unicode14_full_range_contract`, `evals/rust_port/unicode14_reason.py`; Phase 2b c implemented with original isolated-tree hash proof in `phase2b-fixes-evidence.json`; final integrated-head parity gates pending | ported |

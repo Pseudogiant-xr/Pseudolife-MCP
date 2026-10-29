@@ -1,0 +1,3 @@
+| Row | Phase | Behavior to preserve and Python source | Existing test pool and boundary | Status |
+|---|---:|---|---|---|
+| WRITE-CMS | 4 | Store surprise admission, non-destructive possible conflicts, bounded capacity, explicit supersede/reinstate/consolidate/forget/reinforce semantics and audit lineage. `cms.py`, `contradiction.py`, `consolidation.py`, `compaction.py`, `service.py` | `test_service.py`, `test_consolidation.py`, `test_consolidation_atomicity.py`, `test_correction_atomicity.py`, `test_correction_identity.py`, `test_entry_reinstatement.py`, `test_forget_cascade.py`, `test_access_count_semantics.py`, `test_store_retirement.py`, `test_slot_keyed_supersession.py` I; add before/after rows and restart corpus | deferred |

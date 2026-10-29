@@ -6,7 +6,8 @@
 # installs from BEFORE applying this file as a constraint; the pin here is
 # what stops pip re-resolving torch out from under that install.
 #
-#   *** setuptools and torch are COUPLED. Bump them together or not at all. ***
+#   *** setuptools and torch are COUPLED: setuptools must stay inside the ***
+#   *** pinned torch's own setuptools range; re-check it on every bump.   ***
 #
 # 2026-08-02: torch 2.12.0+cpu -> 2.13.0+cpu and setuptools 78.1.1 -> 83.0.0
 # bumped TOGETHER for Dependabot alerts #6/#7 (setuptools MANIFEST.in
@@ -14,6 +15,11 @@
 # no setuptools ceiling, so the 78.1.1 hold below is history, kept for the
 # lesson. Dockerfile.daemon's pre-install pin bumped in the same change;
 # tests/test_daemon_image_is_cpu_only.py still guards the CUDA-pull trap.
+#
+# 2026-10-28: setuptools 83.0.0 -> 84.2.1 alone (Dependabot #60, Windows path
+# escape via namespace_packages.txt, fixed in 84.1.0). torch 2.13.0 declares
+# only setuptools>=77.0.3, so no torch bump was needed; re-check the pinned
+# torch's setuptools requirement before every bump.
 #
 # torch 2.12.0 requires setuptools<82. A Dependabot bump to setuptools==83.0.0
 # (17b97180, 2026-07-24) crossed that ceiling, and because a constraint file
@@ -165,9 +171,11 @@ safetensors==0.8.0
 scikit-learn==1.9.0
 scipy==1.18.0
 sentence-transformers==5.6.0
-# HELD <82 by torch 2.12.0's own requirement — see the coupling note in the
-# header. Raising this silently swaps the image's CPU torch for the CUDA build.
-setuptools==83.0.0
+# COUPLED to torch's own setuptools requirement (2.13.0: >=77.0.3, no ceiling)
+# — see the coupling note in the header. A pin outside the pinned torch's range
+# makes the constrained install unresolvable (CI's lock-resolve job and the
+# image build fail). ops/Dockerfile.daemon's step 2 pins it too; move both.
+setuptools==84.2.1
 shellingham==1.5.4
 six==1.17.0
 sse-starlette==3.4.5

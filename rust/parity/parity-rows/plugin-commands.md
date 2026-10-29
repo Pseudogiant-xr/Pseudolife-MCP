@@ -1,0 +1,3 @@
+| Row | Phase | Behavior to preserve and Python source | Existing test pool and boundary | Status |
+|---|---:|---|---|---|
+| PLUGIN-COMMANDS | 2/4/5 | plugin/commands/dream.md and memory-status.md user workflows; plugin/.claude-plugin/plugin.json identity and release.json release metadata; hooks.json 11 entries/eight shell scripts/lifecycle.ps1; PreToolUse subagent-board-guard allows list/default agents and receive-only mail, denies board writes/send/ack on parent address. `plugin/`, `plugin_hooks.py` | `test_plugin_packaging.py`, `test_subagent_board_guard.py`, `test_subagent_board_hook.py`, `test_hooks_digest.py`, `test_codex_reapproval.py` A/I/mixed; cross-reference HOOKS and hook acceptance checklist | deferred |

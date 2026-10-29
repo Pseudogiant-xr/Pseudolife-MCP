@@ -26,7 +26,7 @@ use std::sync::{Arc, Mutex};
 
 use serde_json::{Map, Value, json};
 
-use super::extractor::{Claim, Event, ExtractFailure, Extracted, Extractor};
+use super::extractor::{Claim, Event, ExtractFailure, Extracted, Extractor, PrimaryProbe};
 use super::gates;
 use crate::config::DreamConfig;
 use crate::episodes::Caller;
@@ -284,19 +284,31 @@ impl StallTracker {
         self.stall = Some(m);
     }
 
-    /// `record(result, served_by_fallback=...)`.
-    pub fn record(&mut self, result: &Map<String, Value>, served_by_fallback: bool) {
-        self.record_at(result, served_by_fallback, now());
+    /// `record(result, served_by_fallback=..., primary_probe=...)`.
+    pub fn record(
+        &mut self,
+        result: &Map<String, Value>,
+        served_by_fallback: bool,
+        primary_probe: Option<&PrimaryProbe>,
+    ) {
+        self.record_at(result, served_by_fallback, primary_probe, now());
     }
 
-    fn record_at(&mut self, result: &Map<String, Value>, served_by_fallback: bool, now: f64) {
+    fn record_at(
+        &mut self,
+        result: &Map<String, Value>,
+        served_by_fallback: bool,
+        primary_probe: Option<&PrimaryProbe>,
+        now: f64,
+    ) {
         if truthy(result.get("skipped")) || truthy(result.get("error")) {
             return;
         }
         let pulled = result.get("pulled").and_then(Value::as_i64).unwrap_or(0);
         let err = result.get("extractor_error").and_then(Value::as_object);
         let field = |k: &str| err.and_then(|e| e.get(k));
-        let (reason, error) = if truthy(result.get("extractor_failed")) {
+        let mut failed = true;
+        let (mut reason, mut error) = if truthy(result.get("extractor_failed")) {
             if result.get("hold_phase").and_then(Value::as_str) == Some("write") {
                 return;
             }
@@ -316,9 +328,13 @@ impl StallTracker {
                 text_or(field("error"), "every pulled memory failed extraction"),
             )
         } else if served_by_fallback {
+            failed = false;
             (
                 "served_by_fallback".to_string(),
-                "primary health probe failed".to_string(),
+                match primary_probe {
+                    Some(p) => format!("primary {}", p.error),
+                    None => "primary health probe failed".to_string(),
+                },
             )
         } else if pulled > 0 {
             self.succeed(now);
@@ -326,6 +342,15 @@ impl StallTracker {
         } else {
             return;
         };
+        if let (true, Some(p)) = (failed, primary_probe) {
+            if served_by_fallback {
+                // The fallback failed too: the primary's cause stays named.
+                reason = p.reason.clone();
+                error = format!("primary {}; fallback {error}", p.error);
+            } else if !p.fallback_resolves {
+                error = format!("primary {error}; fallback does not resolve");
+            }
+        }
         self.failures += 1;
         if self.first_failure_at.is_none() {
             self.first_failure_at = Some(now);
@@ -1754,7 +1779,8 @@ pub async fn run_auto(
     limit: Option<i64>,
 ) -> Result<Value, ToolError> {
     let cfg = &svc.config.dream;
-    let (extractor, which) = match super::extractor::build_extractor_with_fallback(cfg).await {
+    let (extractor, which, probe) = match super::extractor::build_extractor_with_fallback(cfg).await
+    {
         Ok(x) => x,
         Err(e) => return Ok(json!({"error": e, "pulled": 0, "claims": 0})),
     };
@@ -1768,12 +1794,11 @@ pub async fn run_auto(
     let mut result = dream_run(svc, &ready, &caller, &writer, &extractor, limit).await?;
     result.insert("extractor".into(), json!(which));
     let forced = super::extractor::resolve_endpoints(cfg).mode == "fallback";
-    ready
-        .dream_run
-        .stall
-        .lock()
-        .expect("stall tracker")
-        .record(&result, which == "fallback" && !forced);
+    ready.dream_run.stall.lock().expect("stall tracker").record(
+        &result,
+        which == "fallback" && !forced,
+        probe.as_ref(),
+    );
     super::ticks::stall_notify(svc, &ready).await;
     Ok(Value::Object(result))
 }
@@ -2207,9 +2232,9 @@ mod tests {
         let mut t = StallTracker::default();
         let held = json!({"pulled": 2, "extractor_failed": true, "hold_phase": "extract",
                           "extractor_error": {"reason": "extractor_error", "error": "HTTP 500"}});
-        t.record(held.as_object().unwrap(), false);
+        t.record(held.as_object().unwrap(), false, None);
         assert_eq!(t.snapshot(), (Value::Null, Value::Null));
-        t.record(held.as_object().unwrap(), false);
+        t.record(held.as_object().unwrap(), false, None);
         let (stall, _) = t.snapshot();
         let keys: Vec<&String> = stall.as_object().unwrap().keys().collect();
         assert_eq!(
@@ -2225,17 +2250,17 @@ mod tests {
         assert_eq!(stall["consecutive_failures"], json!(2));
         assert_eq!(stall["last_error"], json!("HTTP 500"));
         let write = json!({"pulled": 2, "extractor_failed": true, "hold_phase": "write"});
-        t.record(write.as_object().unwrap(), false);
+        t.record(write.as_object().unwrap(), false, None);
         assert_eq!(t.snapshot().0["consecutive_failures"], json!(2));
         let ok = json!({"pulled": 2, "quarantined": 1});
-        t.record(ok.as_object().unwrap(), false);
+        t.record(ok.as_object().unwrap(), false, None);
         let (stall, last) = t.snapshot();
         assert!(stall.is_null());
         assert!(last["recovered_at"].is_number());
         let skipped = json!({"skipped": "dream_in_progress", "pulled": 0});
-        t.record(skipped.as_object().unwrap(), false);
+        t.record(skipped.as_object().unwrap(), false, None);
         let all_quarantined = json!({"pulled": 1, "quarantined": 1});
-        t.record(all_quarantined.as_object().unwrap(), false);
+        t.record(all_quarantined.as_object().unwrap(), false, None);
         assert_eq!(t.failures, 1);
         assert_eq!(
             t.last_error.as_deref(),

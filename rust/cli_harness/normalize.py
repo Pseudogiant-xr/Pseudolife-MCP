@@ -2,7 +2,8 @@
 name, and a rule rewrites only the span it names after validating it. A rule
 that cannot validate its span leaves it untouched, so the diff still shows.
 
-Every rule here is recorded in rust/PARITY.md beside the row that uses it.
+Every rule here is recorded in the parity register (rust/parity/) beside the
+row that uses it.
 """
 
 from __future__ import annotations
