@@ -551,6 +551,10 @@ pub struct CoordinationConfig {
     pub maintainer_principals: Vec<String>,
     pub audit_retention_days: i64,
     pub maintainer_per_recipient_per_hour: i64,
+    /// `coordination.maintainer.rp_id` and `.origin` ("" unset): the
+    /// Console host a maintainer passkey is bound to, and its exact origin.
+    pub maintainer_rp_id: String,
+    pub maintainer_origin: String,
 }
 
 /// Field order is Python `WakeConfig`'s (`utils/config.py:1418-1423`).
@@ -915,6 +919,8 @@ impl Default for CoordinationConfig {
             maintainer_principals: Vec::new(),
             audit_retention_days: 90,
             maintainer_per_recipient_per_hour: 30,
+            maintainer_rp_id: String::new(),
+            maintainer_origin: String::new(),
         }
     }
 }
@@ -2709,7 +2715,21 @@ fn read_coordination(c: &[(Node, Node)]) -> Result<CoordinationConfig, ConfigErr
                 .unwrap_or(defaults.maintainer_per_recipient_per_hour),
             _ => defaults.maintainer_per_recipient_per_hour,
         },
+        maintainer_rp_id: maintainer_text(c, "rp_id"),
+        maintainer_origin: maintainer_text(c, "origin"),
     })
+}
+
+/// A `coordination.maintainer` string (`validate_maintainer` has refused
+/// any other type), "" when absent.
+fn maintainer_text(c: &[(Node, Node)], key: &str) -> String {
+    match lookup(c, "maintainer") {
+        Some(Node::Map(m)) => match lookup(m, key) {
+            Some(Node::Str(s)) => s.clone(),
+            _ => String::new(),
+        },
+        _ => String::new(),
+    }
 }
 
 /// `MaintainerConfig(**mapping)`: unknown or non-string keys are a

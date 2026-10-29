@@ -7,6 +7,7 @@ pub mod embed_cache;
 pub mod fact_get;
 pub mod history;
 pub mod identity;
+pub mod maintainer;
 pub mod mcp_reads;
 pub mod mcp_search;
 pub mod rerank;
