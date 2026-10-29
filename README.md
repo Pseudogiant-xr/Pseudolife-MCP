@@ -1344,9 +1344,10 @@ pseudolife-mcp-daemon`).
   means dreaming itself is switched off in config. `"extractor":
   "stalled"` means an extractor is configured but live dreams have stopped
   reaching it; the `stall` sub-object gives the reason and times. For
-  `stall.reason` `login_expired`, the extractor CLI's login lapsed (or a
-  hosted endpoint rejected its key): re-run
-  `claude auth login` (or `codex login`) on the daemon host. See
+  `stall.reason` `login_expired`, the extractor CLI is signed out (or a
+  hosted endpoint rejected its key): sign it in again on the machine
+  running the CLI shim (`stall.shim_remote` is true when that is not the
+  daemon's machine) by running `claude`, then `/login` (or `codex login`). See
   [When dreaming stalls](docs/guide/dreaming.md#when-dreaming-stalls).
 - **Lite daemon refuses to start on Windows** with a message about the data
   path: the embedded Postgres runtime needs an **ASCII-only** data

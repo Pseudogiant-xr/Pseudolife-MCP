@@ -65,6 +65,9 @@ export interface DreamerStatus {
   /** true/false when a fallback is configured and the primary was probed; null otherwise. */
   primary_healthy?: boolean | null;
   last_dream_extractor?: { which?: string; base_url?: string | null; at?: Epoch | null } | null;
+  /** The session-start hook's one-line stall notice, rendered by the daemon;
+   *  null while dreams are healthy. */
+  stall_line?: string | null;
 }
 
 export type ConfigPatch = Record<string, unknown>;

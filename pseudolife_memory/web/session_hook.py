@@ -620,17 +620,38 @@ def hook_memory_policy(service: Any, session_id: str | None = None,
     return MEMORY_LOOP_BLOCK if _utf8_len(MEMORY_LOOP_BLOCK) <= HOOK_CONTEXT_MAX_CHARS else ""
 
 
-def _dream_stall_line(service: Any) -> str:
+_HOST_HEADER_RE = re.compile(r"(\[[0-9A-Fa-f:.%]{2,64}\]|[A-Za-z0-9.-]{1,253})(:\d{1,5})?")
+
+
+def stall_where(host_header: str | None) -> str | None:
+    """Where the daemon runs, as the hook's caller reaches it, for the
+    dream-stall line: the daemon's machine named by the host the client
+    used. None (the line's default, "the machine running the Pseudolife
+    daemon") for a missing or malformed header, and for a loopback one: an
+    SSH tunnel to a remote daemon looks the same, so loopback is no
+    evidence the daemon runs on the caller's machine (Codex review of
+    1f782865). The value is echoed only to the client that sent it."""
+    if not host_header or not _HOST_HEADER_RE.fullmatch(host_header):
+        return None
+    host = _HOST_HEADER_RE.fullmatch(host_header).group(1).strip("[]").lower()
+    from pseudolife_memory.memory.dream import DAEMON_MACHINE, loopback_host
+    if loopback_host(host):
+        return None
+    return f"{DAEMON_MACHINE} ({host})"
+
+
+def _dream_stall_line(service: Any, where: str | None = None) -> str:
     """The dream-stall line (2026-09-28) while live dreams are stalled or
     the fallback is serving for the primary, else ''. On 2026-08-11 an
     expired extractor login went unseen for over a day; a session start is
-    where an operator will read it. Never raises."""
+    where an operator will read it. ``where`` is :func:`stall_where`'s.
+    Never raises."""
     try:
         state = getattr(service, "dream_stall_state", None)
         if state is None:
             return ""
         from pseudolife_memory.memory.dream import dream_stall_line
-        return dream_stall_line((state() or {}).get("stall"))
+        return dream_stall_line((state() or {}).get("stall"), where=where)
     except Exception:  # noqa: BLE001 — never break a session start
         return ""
 
@@ -654,6 +675,7 @@ def hook_session_start(
     service: Any, session_id: str | None = None, source: str | None = None,
     authorized: bool = True, plugin_version: str | None = None,
     plugin_hooks_digest: str | None = None, launcher: str | None = None,
+    host: str | None = None,
 ) -> str:
     """``session_start_context`` plus (when ``session_id`` is given) identity
     registration: opens/re-fires the session's episode, sets it as the active
@@ -677,7 +699,9 @@ def hook_session_start(
     if notice:
         prefix_parts.append(notice)
     if authorized:
-        stall = _dream_stall_line(service)
+        # ``host``: the request's Host header, so a signed-out extractor
+        # CLI is named on the machine the caller reaches the daemon at.
+        stall = _dream_stall_line(service, stall_where(host))
         if stall:
             prefix_parts.append(stall)
         # Fresh starts only: a resumed or compacted session keeps drift

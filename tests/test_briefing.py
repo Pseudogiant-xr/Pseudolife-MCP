@@ -573,7 +573,7 @@ def test_session_briefing_opens_with_the_dream_stall_line(tmp_path):
     md = svc.session_briefing()["markdown"]
     first = md.splitlines()[0]
     assert first.startswith(STALL_HEAD)
-    assert "(login_expired)" in first and "claude auth login" in first
+    assert "(login_expired)" in first and "`claude`, then `/login`" in first
     assert "keep the lesson" in md
     assert STALL_HEAD not in svc.session_briefing(include_dream_stall=False)["markdown"]
 

@@ -321,6 +321,7 @@ fn an_unreachable_daemon_is_reported_without_touching_the_home() {
                 "board",
                 "maintainer_passkeys",
                 "daemon_status",
+                "dreams",
                 "error",
                 "recovery",
                 "wake",
@@ -348,6 +349,7 @@ fn an_unreachable_daemon_is_reported_without_touching_the_home() {
             json!({"state": "not_checked", "line": "not checked - the board is off for this token"})
         );
         assert_eq!(map["daemon_status"], json!("unreachable"));
+        assert_eq!(map["dreams"], json!("unknown"));
         assert_eq!(map["error"], json!("DaemonUnavailable"));
         assert_eq!(
             map["recovery"],
@@ -409,6 +411,7 @@ fn a_healthy_daemon_is_checked_through_this_runtimes_own_shim() {
     let output = diagnose(&home, &fixture.url).output().unwrap();
     let map = report(&output);
     assert_eq!(map["daemon_status"], json!("ok"));
+    assert_eq!(map["dreams"], json!("no stall reported"));
     assert_eq!(map["daemon_version"], json!(env!("CARGO_PKG_VERSION")));
     assert_eq!(map["codex_hooks"], json!("not-configured"));
     assert_eq!(map["instructions_present"], json!(true));

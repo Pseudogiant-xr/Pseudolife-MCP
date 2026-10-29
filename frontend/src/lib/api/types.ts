@@ -78,6 +78,9 @@ export interface DreamStatus {
   review_queue?: ReviewQueue;
   stall?: Stall | null;
   last_stall?: Stall | null;
+  /** The session-start hook's one-line stall notice, rendered by the daemon;
+   *  null while dreams are healthy. */
+  stall_line?: string | null;
   extractor_mode?: string;
   primary_healthy?: boolean;
   error?: string;

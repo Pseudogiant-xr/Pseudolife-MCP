@@ -47,6 +47,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import getpass
 import json
 import os
 import re
@@ -82,10 +83,28 @@ _SIGN_IN_RE = re.compile(
     r"|token (?:has )?expired|could not be refreshed"
     r"|incorrect api key|invalid_api_key",
     re.IGNORECASE)
-SIGN_IN_FIX = ("sign in to the Codex CLI on the shim host: run `codex login` "
-               "(or `codex login --with-api-key` for an API key) as the user "
-               "the shim runs as; /health recovers within the health TTL "
-               "(5 minutes by default), no restart needed")
+PROVIDER = "codex"
+# While the cached verdict is a sign-in failure, re-check at least this
+# often: on 2026-10-27 the Claude shim's 5-minute TTL kept answering a stale
+# 503 for up to five minutes after a live re-login. A signed-out CLI exits
+# at once, so the check is cheap.
+HEALTH_FAILURE_TTL = 30.0
+
+
+def _sign_in_fix(user: str | None) -> str:
+    who = f"as {user}" if user else "as the user the shim runs as"
+    return (f"sign in to the Codex CLI on the shim host {who}: run `codex "
+            "login` (or `codex login --with-api-key` for an API key); /health "
+            "recovers within 30 seconds, no restart needed")
+
+
+def _shim_user() -> str | None:
+    """The OS user this shim runs as, whose CLI sign-in it uses; None when
+    the platform cannot say."""
+    try:
+        return getpass.getuser() or None
+    except Exception:  # noqa: BLE001 — a hint for the fix text, never an error
+        return None
 
 
 class CliCallFailed(RuntimeError):
@@ -138,7 +157,14 @@ def health_status(detail: str, sign_in: bool | None = None) -> dict:
     if sign_in is None:
         sign_in = bool(_SIGN_IN_RE.search(detail))
     if sign_in:
-        return {"status": "login_required", "detail": detail, "fix": SIGN_IN_FIX}
+        # ``provider`` and ``user`` let the daemon say which CLI to sign in,
+        # as whom (the CLI's sign-in is per OS user).
+        user = _shim_user()
+        body = {"status": "login_required", "detail": detail,
+                "fix": _sign_in_fix(user), "provider": PROVIDER}
+        if user:
+            body["user"] = user
+        return body
     return {"status": "cli_error", "detail": detail}
 
 
@@ -406,8 +432,12 @@ class CodexCli:
         if snapshot is None:
             return self._health_refresh()
         ok, body = snapshot  # pre-refresh verdict
-        if (now - self._health_at >= self._health_ttl
-                and not self._health_refreshing):
+        # Only a sign-in failure is re-checked sooner: it exits at once,
+        # while a rate limit or a slow CLI would spend a real call every
+        # 30 s on a polled /health.
+        ttl = (min(self._health_ttl, HEALTH_FAILURE_TTL)
+               if body.get("status") == "login_required" else self._health_ttl)
+        if now - self._health_at >= ttl and not self._health_refreshing:
             self._health_refreshing = True
             threading.Thread(target=self._health_refresh, daemon=True).start()
         return ok, body

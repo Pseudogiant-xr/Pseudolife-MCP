@@ -202,3 +202,48 @@ def test_shim_stays_quiet_when_there_is_nothing_to_report(
                         lambda url, timeout=0.25: dict(payload))
     shim.ensure_daemon("http://127.0.0.1:8765")
     assert "PSEUDOLIFE_DREAM_BASE_URL" not in capsys.readouterr().err
+
+
+def test_health_names_a_signed_out_provider_but_never_the_user() -> None:
+    """The signed-out notice (2026-10-27): doctor reads /health, so the
+    provider rides on its stall object; the probe is unauthenticated, so
+    the shim's OS user stays on the authenticated surfaces."""
+    from pseudolife_memory.daemon import _build_health_payload
+    from pseudolife_memory.service_dream import DreamStallTracker
+
+    svc = _stalled("login_expired")
+    tracker = DreamStallTracker(clock=lambda: 1_000_000.0)
+    probe = {"reason": "login_expired", "error": "/health HTTP 503 (login_required)",
+             "provider": "claude", "shim_user": "svc", "fallback_resolves": True}
+    failed = {"pulled": 3, "claims": 0, "extractor_failed": True,
+              "extractor_error": {"reason": "extractor_unreachable",
+                                  "error": "unreachable (gaierror)"}}
+    for _ in range(2):
+        tracker.record(failed, served_by_fallback=True, primary_probe=probe)
+    svc._dream_stall_tracker = tracker
+    stall = _build_health_payload(svc, token_present=False)["stall"]
+    assert stall["provider"] == "claude"
+    assert "shim_user" not in stall and "svc" not in str(stall)
+
+
+def test_health_says_a_shim_is_remote_without_naming_its_host() -> None:
+    """Security review of 42e1ac0b: an internal hostname does not belong on
+    the unauthenticated /health; a boolean lets doctor say the sign-in is
+    on another machine than the daemon's."""
+    from pseudolife_memory.daemon import _build_health_payload
+    from pseudolife_memory.service_dream import DreamStallTracker
+
+    svc = _stalled("login_expired")
+    tracker = DreamStallTracker(clock=lambda: 1_000_000.0)
+    probe = {"reason": "login_expired", "error": "/health HTTP 503 (login_required)",
+             "provider": "claude", "shim_user": "svc", "shim_host": "gpu-box.example",
+             "fallback_resolves": True}
+    failed = {"pulled": 3, "claims": 0, "extractor_failed": True,
+              "extractor_error": {"reason": "extractor_unreachable",
+                                  "error": "unreachable (gaierror)"}}
+    for _ in range(2):
+        tracker.record(failed, served_by_fallback=True, primary_probe=probe)
+    svc._dream_stall_tracker = tracker
+    stall = _build_health_payload(svc, token_present=False)["stall"]
+    assert stall["shim_remote"] is True
+    assert "shim_host" not in stall and "gpu-box" not in str(stall)
