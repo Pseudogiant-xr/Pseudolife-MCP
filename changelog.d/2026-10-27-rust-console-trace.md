@@ -1,0 +1,3 @@
+### Added (2026-10-27 — the Rust daemon serves the Console's retrieval trace)
+
+- The Rust daemon now answers `GET /api/trace`, which returned 501 `not_implemented`: a search's entries plus the structured ranking trace the Python daemon serves, each tier's candidates with their raw score, recency, multipliers and why each was kept or dropped, and the slot, BM25, timeline, reference and reranker channels, the candidate pool and the final top-k. The trace is recorded alongside the ranking without changing it, and a trace logs no retrieval event, as in Python. `memory_search(explain=true)` is still refused on the Rust daemon; its adapter over the same trace is a follow-up.

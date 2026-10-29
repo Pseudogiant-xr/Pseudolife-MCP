@@ -70,8 +70,9 @@ overwrites nobody was sent.
 ``lease check NAME`` is the launch gate: exit 0 when free, 1 when the OS lock
 or the board says held, naming the holder and the expected end. For
 ``full-suite`` it probes the test suite's own lock (``full-suite.lock`` and its
-slots, with the holder record beside it), since that file, not
-``lease-full-suite.lock``, is the truth for a full run.
+slots, with the holder record beside it), since that file is the truth for a
+full run, and the lease's own lock, which ``hold`` and ``run`` of the suite
+lease take when they reserve the machine.
 """
 from __future__ import annotations
 
@@ -1420,6 +1421,19 @@ def _local_state(name: str) -> dict:
                 if key in holder:
                     record[key] = holder[key]
         return record
+    # `lease hold` / `lease run` of this machine's suite lease (a reproduction
+    # loop reserving the machine) take the lease's own lock, in the lease lock
+    # directory, which is the suite's unless PSEUDOLIFE_SUITE_LOCK_DIR points
+    # elsewhere (a runner reading the suite user's directory). Without it a
+    # check read a reserved machine as free.
+    lease_file = os_lock.lock_file_name(name)
+    for place in dict.fromkeys((directory, os_lock.lock_dir())):
+        try:
+            reserved = os_lock.probe(place / lease_file)
+        except OSError:
+            reserved = None
+        if reserved:
+            return {"file": lease_file, "state": "held"}
     return seen or {"file": SUITE_LOCK_FILE, "state": None}
 
 

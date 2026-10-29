@@ -7,11 +7,13 @@ pub mod embed_cache;
 pub mod fact_get;
 pub mod history;
 pub mod identity;
+pub mod maintainer;
 pub mod mcp_reads;
 pub mod mcp_search;
 pub mod rerank;
 pub mod search_route;
 pub mod stats;
+pub mod trace;
 
 /// Keeps resident access accrual and its response telemetry in search order.
 /// Database operations use `txn::with_client`; this mutex protects only the

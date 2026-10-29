@@ -1,3 +1,3 @@
 | Method | Path | Phase | Status | Rust | Evidence |
 |---|---|---:|---|---|---|
-| GET | /api/trace | 3 | deferred | 501 | 501 (`w2d-console-projections`, W2-D) |
+| GET | /api/trace | 3 | deferred | served | `read/trace.rs` over `search::rank_traced` (the ranking with an optional trace sink; `rank` is unchanged for every other caller); `daemon/harness/w2d_search.py live` (`trace`, `trace-rerank`, `trace-continuum`, `trace-timeline`) compares status and body, the trace's float leaves within `SCORE_TOL`, and the bank after each scenario (no retrieval event); the other `w2d_search.py` scenarios, unchanged, show the ranking did not move; recorded Linux dev-box run cited in the PR, until a published nightly run (B13, D11) covers it. `memory_search(explain=true)` is still refused (MCP-SEARCH-EXPLAIN) |

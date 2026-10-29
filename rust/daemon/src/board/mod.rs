@@ -8,7 +8,6 @@ pub mod console;
 pub mod db;
 pub mod dispatch;
 pub mod error;
-pub mod hlc;
 pub mod http;
 pub mod hub;
 pub mod lease;
@@ -18,6 +17,9 @@ pub mod notice;
 pub mod store;
 pub mod text;
 pub mod wake;
+
+#[cfg(test)]
+mod clock_tests;
 
 // The shim's byte-exact credential-shape guard and its pinned CPython 3.11
 // Unicode tables, compiled into this crate from the same source files.
@@ -49,13 +51,16 @@ pub struct Board {
     /// The bank's DSN, for calls that open a connection of their own
     /// (pairing's redemption, `principal_store.redeem`).
     pub(crate) dsn: String,
-    pub(crate) hlc: Mutex<hlc::Hlc>,
     pub(crate) pruned_at: Mutex<Option<Instant>>,
     pub(crate) hub: hub::Hub,
     pub(crate) service: Arc<Service>,
     pub(crate) principals: Arc<PrincipalStore>,
     /// The daemon's own board address, registered by its first notice.
     pub(crate) daemon_identity: Mutex<Option<(String, String)>>,
+    /// Test seam: how many full-tier calls declined the published ready
+    /// service and waited for the initialization.
+    #[cfg(test)]
+    pub(crate) tier_waits: std::sync::atomic::AtomicUsize,
 }
 
 type StoreCall<'a> = Pin<Box<dyn Future<Output = Result<serde_json::Value>> + Send + 'a>>;
@@ -84,12 +89,13 @@ impl Board {
             config,
             conn: tokio::sync::Mutex::new(db::Conn::new(dsn.clone())),
             dsn,
-            hlc: Mutex::new(hlc::Hlc::default()),
             pruned_at: Mutex::new(None),
             hub: hub::Hub::default(),
             service,
             principals,
             daemon_identity: Mutex::new(None),
+            #[cfg(test)]
+            tier_waits: Default::default(),
         }
     }
 
