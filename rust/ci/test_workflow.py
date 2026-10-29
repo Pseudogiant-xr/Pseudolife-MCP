@@ -851,11 +851,12 @@ def test_scope_marks_an_ordinary_pull_request_not_full(tmp_path, head_ref, files
                                       "pyproject.toml", "ops/requirements.lock.txt",
                                       "rust/Cargo.lock", "frontend/package-lock.json",
                                       "rust/rust-toolchain.toml"])
-def test_scope_keeps_an_ordinary_pull_request_changing_ci_inputs_full(tmp_path, ci_input):
-    # A workflow or dependency edit is tested by the full lanes on its own
-    # pull request, so it cannot switch off its own check.
+def test_scope_keeps_an_ordinary_pull_request_changing_ci_inputs_fast(tmp_path, ci_input):
+    # Only batches spend the heavy lanes (maintainer, 2026-10-29). A workflow
+    # or dependency edit runs its full lanes on its batch's head, under the
+    # edited workflow, before it can reach master.
     assert run_scope(tmp_path, "pull_request", ["rust/daemon/src/main.rs", ci_input],
-                     head_ref="claude/some-change") == ["full=true", "rust=true"]
+                     head_ref="claude/some-change") == ["full=false", "rust=true"]
 
 
 @pytest.mark.parametrize("files, git_exit", [([], 0), (["rust/daemon/src/main.rs"], 128)])
@@ -878,55 +879,57 @@ def test_scope_reads_the_head_ref_only_for_pull_requests(tmp_path, event):
                      head_ref="claude/some-change") == ["full=true", "rust=true"]
 
 
-def concurrency_group(event, ref="refs/heads/master", mode=None, run_id="101"):
+def concurrency_group(event, ref="refs/heads/master", mode=None, run_id="101", head_ref=""):
     """Evaluate the workflow's group expression the way Actions does."""
     expression = workflow()["concurrency"]["group"]
     assert expression.startswith("${{ ") and expression.endswith(" }}")
     body = expression[4:-3]
     # Actions' && / || return an operand, like Python's and / or.
-    assert set(re.findall(r"[a-z_.]+(?=\s*==)", body)) <= {"github.event_name", "inputs.mode"}
+    assert set(re.findall(r"[a-z_.]+(?=\s*[!=]=)", body)) <= {"github.event_name",
+                                                             "github.head_ref"}
     body = body.replace("&&", " and ").replace("||", " or ")
-    body = body.replace("github.event_name", "event").replace("inputs.mode", "mode")
+    body = re.sub(r"!(?=[A-Za-z])", " not ", body)
+    body = body.replace("github.event_name", "event").replace("github.head_ref", "head_ref")
     body = body.replace("github.run_id", "run_id").replace("github.workflow", "'Rust shim'")
     body = body.replace("github.ref", "ref")
     import ast
     tree = ast.parse(body, mode="eval")
-    allowed = (ast.Expression, ast.BoolOp, ast.And, ast.Or, ast.Compare, ast.Eq, ast.Name,
-               ast.Load, ast.Constant, ast.Call)
-    # Only comparisons, and/or and format() calls; nothing else is evaluated.
+    allowed = (ast.Expression, ast.BoolOp, ast.And, ast.Or, ast.Compare, ast.Eq, ast.NotEq,
+               ast.UnaryOp, ast.Not, ast.Name, ast.Load, ast.Constant, ast.Call)
+    # Only comparisons, and/or/not and format()/startsWith() calls.
     assert all(isinstance(node, allowed) for node in ast.walk(tree)), body
-    assert all(node.func.id == "format" for node in ast.walk(tree) if isinstance(node, ast.Call))
+    assert all(node.func.id in ("format", "startsWith")
+               for node in ast.walk(tree) if isinstance(node, ast.Call))
     return eval(compile(tree, "<concurrency>", "eval"),
-                {"__builtins__": {}, "format": lambda text, *args: text.format(*args)},
-                {"event": event, "mode": mode, "run_id": run_id, "ref": ref})
+                {"__builtins__": {}, "format": lambda text, *args: text.format(*args),
+                 # Actions' startsWith ignores case.
+                 "startsWith": lambda text, prefix: text.lower().startswith(prefix.lower())},
+                {"event": event, "mode": mode, "run_id": run_id, "ref": ref,
+                 "head_ref": head_ref})
 
 
-def test_nightly_never_shares_a_group_with_master_pushes():
-    push = concurrency_group("push")
-    assert concurrency_group("schedule") != push
-    assert concurrency_group("schedule") == concurrency_group("schedule")
-    # A newer push still supersedes an older one, and pull requests stay per-ref.
-    assert concurrency_group("push") == push
-    assert concurrency_group("pull_request", "refs/pull/1/merge") != concurrency_group(
-        "pull_request", "refs/pull/2/merge")
-    assert concurrency_group("workflow_dispatch", mode="wait-mail") != concurrency_group(
-        "workflow_dispatch", mode="wait-mail", run_id="102")
-    # Manual CI on master must not cancel the push run either.
-    assert concurrency_group("workflow_dispatch", mode="ci") not in (push, concurrency_group("schedule"))
-    assert concurrency_group("workflow_dispatch", mode="ci") == concurrency_group("workflow_dispatch", mode="ci")
+def test_only_an_ordinary_pull_request_supersedes_its_own_runs():
+    # A newer push to an ordinary pull request cancels its older run, per PR.
+    pr1 = concurrency_group("pull_request", "refs/pull/1/merge", head_ref="fix/x", run_id="1")
+    assert pr1 == concurrency_group("pull_request", "refs/pull/1/merge", head_ref="fix/x",
+                                    run_id="2")
+    assert pr1 != concurrency_group("pull_request", "refs/pull/2/merge", head_ref="fix/y")
     assert workflow()["concurrency"]["cancel-in-progress"] is True
-
-
-def test_merge_group_runs_share_no_group_with_pull_requests_or_pushes():
-    # Each queue entry has its own branch ref, so neither a PR's newer push nor
-    # a master push can cancel the queue's run, and it cancels neither.
+    # Every other run has a group of its own, so nothing cancels it (a newer
+    # run in a group cancels a pending one even without cancel-in-progress):
+    # master pushes, the nightly, manual CI, wait-mail captures, stress
+    # loops, merge groups and integrate/* batch runs.
     queued = "refs/heads/gh-readonly-queue/master/pr-830-" + "a" * 40
-    group = concurrency_group("merge_group", queued)
-    assert group not in (concurrency_group("push"), concurrency_group("schedule"),
-                         concurrency_group("pull_request", "refs/pull/830/merge"),
-                         concurrency_group("workflow_dispatch", mode="ci"))
-    assert group != concurrency_group(
-        "merge_group", "refs/heads/gh-readonly-queue/master/pr-831-" + "b" * 40)
+    for kwargs in ({"event": "push"}, {"event": "schedule"},
+                   {"event": "workflow_dispatch", "mode": "ci"},
+                   {"event": "workflow_dispatch", "mode": "wait-mail"},
+                   {"event": "workflow_dispatch", "mode": "stress"},
+                   {"event": "merge_group", "ref": queued},
+                   {"event": "pull_request", "ref": "refs/pull/3/merge",
+                    "head_ref": "integrate/2026-10-29-batch-1"},
+                   {"event": "pull_request", "ref": "refs/pull/3/merge", "head_ref": ""}):
+        assert concurrency_group(**kwargs, run_id="1") != concurrency_group(**kwargs, run_id="2")
+        assert concurrency_group(**kwargs, run_id="1") != pr1
 
 
 def test_merge_queue_trigger_and_image_base():
@@ -1460,9 +1463,8 @@ def test_selfhosted_lane_never_touches_a_required_check():
         needs = job.get("needs", [])
         assert "parity-selfhosted" not in ([needs] if isinstance(needs, str) else needs), name
     assert "parity-selfhosted" not in jobs["parity"]["steps"][0]["run"]
-    # Nightly and manual CI only: their concurrency groups are their own, so
-    # queued self-hosted jobs neither hold a PR's checks open nor let a newer
-    # master push cancel a run whose hosted jobs already finished.
+    # Nightly and manual CI only: queued self-hosted jobs never hold a PR's
+    # checks open.
     assert lane["if"] == (
         "${{ !cancelled() && (github.event_name == 'schedule' || "
         "(github.event_name == 'workflow_dispatch' && inputs.mode == 'ci')) "

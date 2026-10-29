@@ -1,0 +1,3 @@
+| Item | Phase | Status | Rust | Evidence |
+|---|---|---|---|---|
+| POST /api/hook/subagent | 4 | ported | served | `board/http.rs`; board harness scenarios `identity` (and `hooks` for the no-bearer reply). `daemon/harness/board/run.py live` compares every step's status, headers and body, the board tables after each write and the audit chain. Recorded runs: the W2-F completion run on a Linux dev lane, 263 steps in 11 scenarios with zero differences ([W2-F evidence](../../daemon/FORWARD-w2f.md)), and the runs #777 (`mcp-tools`) and #829 (`identity`) recorded for the scenarios they added. #754's three REST `ack` steps have no recorded live run. Hosted CI runs only the harness's own unit tests; no Windows runtime run; hosted CI compares the unauthorized reply only |

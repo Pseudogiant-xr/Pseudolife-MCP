@@ -50,18 +50,21 @@ on:
 permissions:
   contents: read
 
-# The nightly gets its own group. Sharing master's let it cancel the push run
-# a merge relies on: push run 38870639548 ended 2 s after nightly 38872655184
-# started (2026-10-16), and push 38704856443 / nightly 38705376001 match the
-# same pattern (2026-10-15); a later push then cancelled each nightly. Manual
-# CI on master would do the same, so it gets its own group too; a wait-mail
-# capture or a stress loop gets a group per run. A push run is now cancelled
-# only by a newer push. A merge group falls through to the
-# ref-keyed group: its ref is its own queue branch
-# (refs/heads/gh-readonly-queue/master/...), one per queue entry, so no pull
-# request or push shares it and nothing else cancels it.
+# Only an ordinary pull request (any head branch but integrate/*) is ever
+# cancelled: a newer push to it supersedes its older run, keyed by its
+# refs/pull/N/merge ref. Every other run gets a group of its own (its run
+# id), so nothing cancels it, running or pending: master pushes, the nightly,
+# manual CI, wait-mail captures, stress loops, merge groups and integrate/*
+# batch runs (maintainer, 2026-10-29: never cancel those). A shared group
+# would not do, even without cancel-in-progress: a newer run in a group
+# cancels a pending one. History: the nightly once shared master's group and
+# cancelled the push run a merge relied on (push 38870639548 ended 2 s after
+# nightly 38872655184 started, 2026-10-16). Two batches merged minutes
+# apart now both run their master push in full. Actions' startsWith ignores
+# case, so an Integrate/... branch is never cancelled although scope treats
+# it as ordinary; that costs only an uncancelled fast-lane run.
 concurrency:
-  group: ${{ github.event_name == 'workflow_dispatch' && (inputs.mode == 'wait-mail' || inputs.mode == 'stress') && format('rust-{0}-{1}', inputs.mode, github.run_id) || (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && format('rust-{0}-{1}-{2}', github.event_name, github.workflow, github.ref) || format('rust-{0}-{1}', github.workflow, github.ref) }}
+  group: ${{ github.event_name == 'pull_request' && github.head_ref != '' && !startsWith(github.head_ref, 'integrate/') && format('rust-pr-{0}', github.ref) || format('rust-{0}-{1}', github.event_name, github.run_id) }}
   cancel-in-progress: true
 
 env:
@@ -124,11 +127,19 @@ jobs:
       # `full` (2026-10-21): a pull request from any branch but integrate/*
       # skips the candidate build and so the parity matrix; its full CI is
       # its integration batch's (docs/dev/merge-batches.md), and the Rust
-      # job (format, clippy, builds, nextest) still runs. One whose diff
-      # changes CI or dependency inputs ($ciInputs, the same pattern as
-      # ci.yml's scope) stays full, so a workflow edit cannot switch off its
-      # own check. Every other event, a pull request whose head ref Actions
-      # did not supply, and an empty or unreadable diff run everything.
+      # job (format, clippy, builds, nextest) still runs. Since 2026-10-29
+      # that holds whatever the diff changes (maintainer: only batches spend
+      # the heavy lanes). A workflow or dependency edit used to run full on
+      # its own head, but that run used the edited workflow too, so it never
+      # stopped an edit from switching off its own check; the batch runs the
+      # same edited workflow on a head containing it, and a batch is the only
+      # way to master. On 2026-10-28 PRs editing rust.yml, ci.yml or a lock
+      # file ran 43 jobs per push and held batch #1031 queued over an hour.
+      # The diff (the merge commit against its first parent, the base tip,
+      # so the PR's own net change, never what a forward merge brought in)
+      # still decides `rust`. Every other event, a pull request whose head
+      # ref Actions did not supply, and an empty or unreadable diff run
+      # everything.
       - name: Classify the change
         id: scope
         shell: pwsh
@@ -137,7 +148,6 @@ jobs:
           MERGE_GROUP_BASE_REF: ${{ github.event.merge_group.base_ref }}
           HEAD_REF: ${{ github.head_ref }}
         run: |
-          $ciInputs = '^(\.github/workflows/|pyproject\.toml$|ops/requirements\.lock\.txt$|rust/rust-toolchain\.toml$)|(^|/)(Cargo\.lock|package-lock\.json)$'
           $ordinary = $env:EVENT_NAME -ceq 'pull_request' -and $env:HEAD_REF -and -not $env:HEAD_REF.StartsWith('integrate/', [System.StringComparison]::Ordinal)
           $full = 'true'
           $docs = '^(?!(?i:rust|evals|pseudolife_memory|plugin|ops|tests|\.github)/)([^/"].*\.md|llms(-full)?\.txt|docs/.*(?<!\.(py|ps1|psm1|sh|bash|bat|cmd|js|mjs|cjs|ts|rs|toml|yml|yaml)))$'
@@ -160,7 +170,7 @@ jobs:
               # changed docs keeps a docs-only diff docs-only; alone, it runs.
               $code = @($files | Where-Object { $_ -cnotmatch $docs -and $_ -cne 'rust/producer-census.json' })
               if ($code.Count -eq 0 -and @($files | Where-Object { $_ -cmatch $docs }).Count -gt 0) { $rust = 'false' }
-              if ($ordinary -and @($files | Where-Object { $_ -cmatch $ciInputs }).Count -eq 0) { $full = 'false' }
+              if ($ordinary) { $full = 'false' }
             }
           }
           Write-Output "full=$full"
@@ -171,8 +181,8 @@ jobs:
       # The parity matrix (rust/ci/parity_scope.py). The nightly, manual CI
       # and merge groups run every suite; a master push runs every suite less
       # the pairs its merged batch passed (see below). A pull request
-      # that scope marks full (one from integrate/*, or one changing CI or
-      # dependency inputs; the others skip the matrix, see `full` above)
+      # that scope marks full (one from integrate/*; the others skip the
+      # matrix, see `full` above)
       # runs the floor (eval, cli, cli-daemon, cli-live, h5-w1a) plus the
       # suites its diff reaches: a row, its golden or its command's shim code
       # reaches the shard that runs the row, the daemon crate its daemon
@@ -1473,11 +1483,11 @@ jobs:
     # the same matrix and steps as parity-checks, on the maintainer's dev
     # machines. continue-on-error and no place in the Parity gate's needs
     # keep its outcome out of every required check. It runs only on the
-    # nightly and manual CI, which have their own concurrency groups: on a
-    # pull request its pending jobs would hold the PR's checks open, and on
-    # a master push a newer push would cancel the whole run while its
-    # self-hosted jobs queue, turning finished hosted results into a
-    # cancelled run. It stays off until the repository variable
+    # nightly and manual CI: on a pull request its pending jobs would hold
+    # the PR's checks open, and it was kept off master pushes when a newer
+    # push could cancel a run whose self-hosted jobs still queued (since
+    # 2026-10-29 every master push has a concurrency group of its own; the
+    # nightly still covers master). It stays off until the repository variable
     # PARITY_SELFHOSTED_RUNNERS lists the registered runners (JSON, such as
     # ["linux", "windows"]); a job for an unregistered label would queue for
     # a day.
@@ -1669,7 +1679,7 @@ jobs:
     # matrix. The nightly (and ordinary manual CI) require its success, never
     # a skip or failure. A PR or merge group that scope classified as
     # documentation-only skips the Rust, candidate and parity jobs, and a PR
-    # scope marked not full (an ordinary branch changing no CI input) skips the candidate
+    # scope marked not full (any branch but integrate/*) skips the candidate
     # and parity jobs; any other skip still fails.
     if: always() && (github.event_name != 'workflow_dispatch' || inputs.mode == 'ci')
     name: Parity / ${{ matrix.os }}

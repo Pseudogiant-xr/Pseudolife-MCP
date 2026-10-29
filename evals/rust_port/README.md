@@ -467,7 +467,7 @@ registration cases retain local fallback under `native-lease-diagnostics`,
 substituting only the named registration-header reason bytes; every unaffected
 stream, exit and state field remains exact. Unaffected ordinary bearer-file
 cases compare the full raw response exactly. See the
-[producer admission contract](../../rust/PARITY.md#lease-producer-admission-and-native-refusals).
+[producer admission contract](../../rust/parity/lease-producer-admission-and/).
 
 Output/file/request mutation controls accompany every substituted response.
 The Parity job runs this separate lane without a database or daemon. Private

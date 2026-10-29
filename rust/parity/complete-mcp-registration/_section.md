@@ -1,0 +1,6 @@
+## Complete MCP registration checklist
+
+All rows share `pseudolife_memory/mcp_server.py` and the `test_mcp_server.py`/`test_mcp_string_arguments.py` oracle pools; the differential harness must freeze tool inputSchema, descriptions, annotations, defaults, response and invalid-argument semantics for each. These registrations are source-derived, not an imported server introspection result. `ported` means the Rust daemon serves the tool's body and the differential harnesses compare its answers and bank effects with Python's; each tool's declared divergences are in `rust/daemon/divergences.md`, and `deferred` tools answer the declared `not_implemented` stub. The body comparisons behind each `ported` row are recorded runs of `daemon/harness/w2d_search.py`, `daemon/harness/w2e.py` and `daemon/harness/board/run.py` on Linux dev lanes, cited in the PR that served the tool. Hosted CI (`daemon/harness/mcp_ci.py` in both Parity jobs) compares the `tools/list` bytes at every tier, the argument-binding sweep, the wire corpus and every unserved tool's stub; it compares no served body by value other than `memory_toolset`'s. `memory_search` refuses `explain=true` (MCP-SEARCH-EXPLAIN).
+
+| Tool | Assigned tier | Port phase | Status |
+|---|---|---:|---|
