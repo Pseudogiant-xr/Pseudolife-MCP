@@ -379,6 +379,16 @@ Run this from a normal shell, not an elevated one: from an elevated shell a
 new file is owned by Administrators rather than by you, and fails the
 owner-only check. Or let `-ReadToken` write it.
 
+A file the shim refuses (it lost its owner-only permissions in a rotation,
+another account owns it, it is a link) is named in every MCP call's error
+with the reason and the one fix. On Windows that fix is usually `python -m
+pseudolife_memory.credentials repair <file>`, run with the shim's own
+interpreter, which rewrites the file owner-only with the same token; on
+Linux and macOS a too-open file takes `chmod 600 <file>`. Every reason and
+its fix, and the Windows rule for folders that grant Modify rather than
+Full Control: [When the shim refuses its token
+file](configuration.md#when-the-shim-refuses-its-token-file).
+
 ### With the installer (client-only path)
 
 Run the installer on the client machine (`ops/install.sh`, or
@@ -743,9 +753,11 @@ pipx install --force "pseudolife-mcp==<the daemon's version>"
 or, for a daemon on the 2.1 line, `pipx runpip pseudolife-mcp install
 "mcp<2.2"`.
 
-**The shim exits at startup naming the credential file.** The file is
-missing, not owner-only, or holds more than the token. Fix the file; the
-error line names the path it read.
+**The shim exits at startup naming the credential file.** The line gives
+the path it read and the reason (missing, not owner-only, owned by another
+account, a link, or holding more than the token). Each reason's fix,
+including the `repair` command: [When the shim refuses its token
+file](configuration.md#when-the-shim-refuses-its-token-file).
 
 ## What latency to expect
 

@@ -14,7 +14,7 @@ backups. Part of the [user guide](../../README.md#documentation).
 | `PSEUDOLIFE_MCP_NO_SPAWN` | _(unset)_ | Set `1` on the **shim** to disable its spawn-a-daemon fallback: when nothing answers at `PSEUDOLIFE_MCP_DAEMON_URL` it waits up to 5 s for an external daemon instead, then starts the session without it (the last handshake it cached for that URL, retried until the daemon answers; see [the remote bank guide](remote-bank.md#when-the-daemon-is-unreachable)). The Docker-tier installers set this on every shim registration — after a reboot the shim can probe before Docker Desktop has bound the port, and a spawned host fallback then wins the bind race and shadows the real bank with whatever stale local state it finds. Leave unset on pip/lite installs, where the spawn fallback is the intended zero-config path. |
 | `PSEUDOLIFE_MCP_HOST` / `_PORT` | `127.0.0.1` / `8765` | Daemon bind address. |
 | `PSEUDOLIFE_MCP_TOKEN` | _(unset)_ | Bearer token; **required** to bind a non-loopback host (a `PSEUDOLIFE_MCP_TOKENS` map also satisfies this). Maps to the reserved principal `default`, which keeps the `X-PL-Writer`/`PSEUDOLIFE_WRITER_ID` writer path. |
-| `PSEUDOLIFE_MCP_TOKEN_FILE` | _(unset)_ | Client-side private file containing the bearer token. The shim reloads it for each operation, so replacing its contents does not require a client restart. An explicitly configured file takes precedence over a literal token; an unavailable, unsafe or malformed file fails closed. The daemon continues to use its own token configuration. |
+| `PSEUDOLIFE_MCP_TOKEN_FILE` | _(unset)_ | Client-side private file containing the bearer token. The shim reloads it for each operation, so replacing its contents does not require a client restart. An explicitly configured file takes precedence over a literal token; an unavailable, unsafe or malformed file fails closed, and the error names the fix ([When the shim refuses its token file](#when-the-shim-refuses-its-token-file)). The daemon continues to use its own token configuration. |
 | `PSEUDOLIFE_MCP_PROXY_TIMEOUT_SECONDS` | `180` | Total deadline for one upstream shim operation, including connection and initialization. Accepts finite positive seconds; invalid values use the default. Set the client's tool timeout above this value to leave time for the shim's sanitized failure response. An uncertain write is never automatically replayed. |
 | `PSEUDOLIFE_MCP_TOKENS` | _(unset)_ | Per-principal bearer tokens: `token:principal,token:principal`. A matched token's principal **is** the writer id and keys the toolset tier (the identity axis that survives the MCP 2026-07-28 stateless core). Malformed entries are logged and skipped — a skipped token does not authenticate, and a map that parses to zero entries with no singular token refuses startup rather than running open. May be set alongside `PSEUDOLIFE_MCP_TOKEN`; the map wins for its tokens. Note the singular-token holder is fully trusted and may still assert any writer via `X-PL-Writer` — mint per-principal tokens when that distinction matters. |
 | `PSEUDOLIFE_MCP_TRUST_BIND` | _(unset)_ | Set `1` to allow a non-loopback bind without a token when the boundary is external (containerized, loopback-published). The compose daemon sets this; never set it for a host daemon. |
@@ -1072,6 +1072,11 @@ Add more keys from Settings: an active key approves the new one, which waits
 that time. A key can revoke itself; only the host revokes an older key:
 `pseudolife-mcp maintainer revoke <prefix>`, or `reset`, which revokes every
 key and reopens enrolment. `pseudolife-mcp maintainer list` shows them all.
+An Ed25519 key of small order, a degenerate key no authenticator generates
+that would verify a forged signature over any message, is refused at
+enrolment and at every signature (`cose_key` in the daemon log), so such a
+key enrolled before that check no longer verifies: revoke it (`pseudolife-mcp
+maintainer revoke <prefix>`) and enrol a real passkey.
 
 **What a passkey does not prove.**
 
@@ -3378,6 +3383,75 @@ at startup, the daemon serves nothing rather than a partly loaded bank:
 `init_refusal` is different. It marks a bank the daemon will never serve as
 configured, such as an embedding-dimension mismatch, and the shim exits on
 it.
+
+`/health` also says when a starting daemon can serve. `pending` lists the
+startup stages still unfinished, in this order: `init` (storage connected,
+the embedder loaded, the stores hydrated and the clock reseeded) and
+`principals` (the first read of the bank's stored principals; a daemon
+without Postgres never lists it). `ready` is true only when `status` is
+`"ok"` and `pending` is empty. Until then a request waits on the service or
+fails initialization, and a bearer the environment does not match is
+refused `503 principals_unavailable`. Neither key changes `status` or the
+HTTP code, so the Docker healthcheck and `pseudolife-mcp update` treat a
+daemon that is still warming up as a healthy one. A script that starts a
+daemon and calls it at once should wait for `ready: true`; a daemon older
+than these keys sends neither.
+
+### When the shim refuses its token file
+
+The shim re-reads `PSEUDOLIFE_MCP_TOKEN_FILE` on every call and fails
+closed on a file it cannot trust. At startup against a daemon that requires
+a bearer it exits with the reason on stderr; after that, every MCP call's
+error names the reason, the file and the one fix, and the error's data
+carries the same `reason`, `recovery` and `credential_file` (never the
+token):
+
+| `reason` | The fix the error names |
+|---|---|
+| `credential file must be owner-only` | Other accounts can read it; a plain rewrite during a token rotation does this. Linux and macOS: `chmod 600 <file>`. Windows: the `repair` command below. |
+| `credential file is owned by another account` | The `repair` command below, run as the account that runs the shim. On Windows a file written from an elevated prompt is owned by Administrators. Narrowing that file's permissions instead would lock the shim's own account out of it. |
+| `configured credential file is missing` | Restore the file, or set `PSEUDOLIFE_MCP_TOKEN_FILE` to the file that holds the token. |
+| `configured credential file is unavailable` | Check that the shim's account can read it and no other program holds it locked. |
+| `credential path ancestors cannot be inspected` | Check that the shim's account can read every directory on the path. |
+| `credential path must not contain redirects` | A directory on the path is a symlink or junction: set `PSEUDOLIFE_MCP_TOKEN_FILE` to the real path. |
+| `credential file must be a private regular file` | It is a link, a junction, a hard link or not a file: replace it with a regular file holding only the token. |
+| `credential file contains an invalid bearer token` | Write only the token: one line, no spaces or control characters, at most 4096 bytes. |
+
+A token file replaced in the middle of a call (a rotation) reports
+`credential changed during the operation`. It says to retry only when the
+call cannot have reached the daemon; otherwise check the call's result
+before retrying.
+
+**Repairing a token file:**
+
+```bash
+<shim python> -m pseudolife_memory.credentials repair <file>
+```
+
+The error prints this line with the shim runtime's own interpreter filled
+in (in PowerShell, start the line with `& `). Run it as the account that
+runs the shim. It reads the file once (it must be one regular file holding
+a valid token), writes a new file that is owner-only before the token goes
+into it, and renames that over the old one only while the file it read is
+still in place, so a token rotation that lands meanwhile is never undone
+(`credential file changed while it was being repaired`: run it again). It
+never prints the token. Pseudolife's own token-file writer (Codex setup,
+the Claude Desktop registration, unattended updates) likewise replaces an
+existing file you own whose permissions are too broad; it still refuses
+links, hard links, non-files and a file another account owns, except, on
+Windows, an Administrators-owned file when the writer itself runs elevated.
+
+**On Windows, keep token files in a folder you have Full Control of.** A
+folder that grants only Modify, as many secondary drives do, withholds the
+right to set a file's owner. When you already own the file, Pseudolife sets
+only its owner-only access list, which works there. Any other owner, such
+as the Administrators default of an elevated session, must be replaced,
+which needs the take-ownership privilege enabled: an elevated SSH session
+or a hosted runner has it, an elevated console does not. Without it the
+write refuses with `credential file permissions could not be protected`
+and the Windows error; move the file to a folder you have full control of,
+such as one under your user profile. This applies to every private file
+Pseudolife writes: token files, client configs, tunnel profiles.
 
 ## Claude Code plugin
 
