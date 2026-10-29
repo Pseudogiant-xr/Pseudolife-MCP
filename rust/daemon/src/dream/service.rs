@@ -665,10 +665,17 @@ pub(crate) async fn deep_dream_need(
     Ok(Value::Object(out))
 }
 
-/// `review_queue_health(include_agreement=True)` (`service_dream.py:3717-3787`).
-async fn review_queue_health(ready: &Ready, config: &Config, now: f64) -> Value {
+/// `review_queue_health(include_agreement=...)` (`service_dream.py:3717-3787`):
+/// the status call asks for the judge agreement block, the session-start
+/// briefing does not.
+pub(crate) async fn review_queue_health(
+    ready: &Ready,
+    config: &Config,
+    now: f64,
+    include_agreement: bool,
+) -> Value {
     let quiet = json!({"needed": false, "reasons": []});
-    match review_queue_inner(ready, config, now).await {
+    match review_queue_inner(ready, config, now, include_agreement).await {
         Ok(v) => v,
         Err(e) => {
             eprintln!("review-queue health failed: {e}");
@@ -677,7 +684,12 @@ async fn review_queue_health(ready: &Ready, config: &Config, now: f64) -> Value 
     }
 }
 
-async fn review_queue_inner(ready: &Ready, config: &Config, now: f64) -> Result<Value, String> {
+async fn review_queue_inner(
+    ready: &Ready,
+    config: &Config,
+    now: f64,
+    include_agreement: bool,
+) -> Result<Value, String> {
     let cfg = &config.memory.deep_dream;
     let client = ready.storage.client();
     let (merge, junk, oldest, unjudged, link) = crate::txn::with_client(client, |c| async move {
@@ -751,14 +763,20 @@ async fn review_queue_inner(ready: &Ready, config: &Config, now: f64) -> Result<
         };
         judges.insert(key.into(), v);
     }
-    let agreement = super::judge_agreement::judge_agreement(
-        client,
-        now,
-        cfg.judge_accept_min_confidence,
-        cfg.judge_reject_min_confidence_2,
-        cfg.link_two_vote_min_confidence,
-    )
-    .await;
+    let agreement = if include_agreement {
+        Some(
+            super::judge_agreement::judge_agreement(
+                client,
+                now,
+                cfg.judge_accept_min_confidence,
+                cfg.judge_reject_min_confidence_2,
+                cfg.link_two_vote_min_confidence,
+            )
+            .await,
+        )
+    } else {
+        None
+    };
     let mut out = Map::new();
     out.insert(
         "pending".into(),
@@ -767,7 +785,9 @@ async fn review_queue_inner(ready: &Ready, config: &Config, now: f64) -> Result<
     out.insert("oldest_merge_age_days".into(), json!(age_v));
     out.insert("oldest_unjudged_merge_age_days".into(), json!(unjudged_age));
     out.insert("judges".into(), Value::Object(judges));
-    out.insert("judge_agreement".into(), agreement);
+    if let Some(agreement) = agreement {
+        out.insert("judge_agreement".into(), agreement);
+    }
     out.insert(
         "attention".into(),
         json!({"needed": !reasons.is_empty(), "reasons": reasons}),
@@ -837,7 +857,7 @@ pub async fn status(ready: &Ready, config: &Config) -> Result<Value, ToolError> 
             || infer >= 1
             || (digest >= 1 && backlog == 0));
     let deep = deep_dream_need(ready, config, now).await?;
-    let review = review_queue_health(ready, config, now).await;
+    let review = review_queue_health(ready, config, now, true).await;
     drop(ws);
     let mut out = Map::new();
     out.insert("backlog".into(), json!(backlog));

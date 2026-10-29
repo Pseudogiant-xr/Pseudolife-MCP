@@ -92,6 +92,30 @@ pub struct LessonStore {
     pub dirty_slots: BTreeSet<SlotKey>,
 }
 
+impl LessonStore {
+    /// `compact_store` over the lesson store (`memory/compaction.py`):
+    /// purge old non-live lessons, their slots dirty. The store keeps no
+    /// index to rebuild. Returns the purge count.
+    pub(crate) fn compact(&mut self, keep: i64, min_age_days: f64, now: f64) -> usize {
+        let before = self.records.len();
+        let purged = crate::maintenance::compact_records(
+            &mut self.records,
+            |r| crate::maintenance::CompactRecord {
+                entity_norm: &r.key.0,
+                attribute_norm: &r.key.1,
+                status: &r.status,
+                superseded_at: r.superseded_at,
+                asserted_at: r.asserted_at,
+            },
+            keep,
+            min_age_days,
+            now,
+        );
+        self.dirty_slots.extend(purged);
+        before - self.records.len()
+    }
+}
+
 /// `OUTCOMES` (`memory/lessons.py:32`).
 const OUTCOMES: [&str; 3] = ["success", "failure", "correction"];
 
@@ -710,6 +734,28 @@ async fn entity_id_in(c: &Client, name: &str) -> Result<Option<i64>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn compaction_purges_old_retired_lessons_and_marks_their_slot() {
+        let now = 1000.0 * 86400.0;
+        let retired = |task: &str, days_ago: f64| {
+            let mut r = rec(task, "approach", "retired");
+            r.superseded_at = Some(now - days_ago * 86400.0);
+            r
+        };
+        let mut store = LessonStore {
+            records: vec![
+                retired("deploy", 400.0),
+                retired("deploy", 300.0),
+                rec("deploy", "approach", "current"),
+            ],
+            ..Default::default()
+        };
+        assert_eq!(store.compact(1, 30.0, now), 1);
+        assert_eq!(store.records.len(), 2);
+        assert_eq!(store.records[0].superseded_at, Some(now - 300.0 * 86400.0));
+        assert_eq!(store.dirty_slots.len(), 1);
+    }
 
     fn rec(task: &str, aspect: &str, status: &str) -> LessonRecord {
         LessonRecord {

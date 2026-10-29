@@ -59,6 +59,25 @@ to either authentication variable in `ops/.env` makes that file authoritative
 for both. Inherited client token variables cannot add an unintended fallback;
 the launching shell's environment is preserved after the deployment command.
 
+## Docker runtime account
+
+The Python Docker image starts with a short ownership bootstrap for `/data`,
+then clears supplementary groups and permanently switches to UID/GID
+`10001:10001` before executing the daemon. Existing root-owned state is
+transferred automatically; file contents, non-root ownership, application
+code and baked models are preserved, and symbolic links are not followed.
+Install and both update modes run this entrypoint on every container start,
+including daemon-only `--no-deps` recreates. No host account changes are
+needed. Compose also enables `no-new-privileges` and restricts bootstrap
+capabilities; the running daemon has no effective or permitted capabilities.
+
+An explicit Docker `--user` override skips ownership migration; that account
+must already have access to its data and a writable home. Container metadata
+still names root for the bootstrap, and `docker exec` uses that configured
+user unless passed `--user`: inspect the running daemon's UID to check its
+runtime identity. Backup/restore tools deliberately bypass the bootstrap
+using `--entrypoint` for administrative operations.
+
 ## Experimental agent coordination
 
 Coordination adds peer awareness and addressed mail within one bank. It is on
@@ -613,8 +632,11 @@ holder, such as a session that claimed the lease with `memory_agents`, a
 `lease run`, or a hold from WSL or another machine or account, counts as held
 until it is released or lapses, since no local lock can speak for it.
 For `full-suite` it probes the test suite's own lock (`full-suite.lock` and its
-slots, with the holder record's pid, worktree and start time), since that file,
-not `lease-full-suite.lock`, is the truth for a full run. A run with
+slots, with the holder record's pid, worktree and start time), since that file
+is the truth for a full run. It also reads the lease's own lock
+(`lease-full-suite.lock`, or `lease-full-suite_<machine>-<hash>.lock` for
+`full-suite@<machine>`), so `lease hold` or `lease run` of the suite lease
+reserving the machine, for reproduction work say, reads as held too. A run with
 `PSEUDOLIFE_SUITE_LOCK=off` takes no lock, so no check sees it.
 
 Given a command after `--`, the check is the gate itself: it prints the same

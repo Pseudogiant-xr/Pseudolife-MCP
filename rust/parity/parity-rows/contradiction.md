@@ -1,0 +1,3 @@
+| Row | Phase | Behavior to preserve and Python source | Existing test pool and boundary | Status |
+|---|---:|---|---|---|
+| CONTRADICTION | 4 | Structured-slot identity first, then negation asymmetry, affirmative replacement and anchor-tier state transition heuristics; optional bounded NLI scorer is implemented but unwired by service. Detection admits possible conflicts and never retires whole notes automatically. `memory/contradiction.py`, `memory/nli.py`, `memory/cms.py`, `service.py` | `test_contradiction_cost.py`, `test_service.py`, `test_store_retirement.py` I; four paths and missing-scorer equivalents pending | deferred |

@@ -155,6 +155,11 @@ pub struct Service {
     counters_pending: std::sync::atomic::AtomicBool,
     /// A `weights.pt` the bank has no counters row for (`/health`).
     pub(crate) counters_import: std::sync::Mutex<Option<String>>,
+    /// Test seam: an initialization waits here, still holding the service
+    /// mutex, between verifying the writer session and the rehydrate that
+    /// follows (taken, so the test sees it was reached).
+    #[cfg(test)]
+    pub(crate) verify_gate: std::sync::Mutex<Option<tokio::sync::oneshot::Receiver<()>>>,
 }
 
 impl Service {
@@ -193,6 +198,8 @@ impl Service {
             last_saved: std::sync::Mutex::new(None),
             counters_pending: std::sync::atomic::AtomicBool::new(false),
             counters_import: std::sync::Mutex::new(None),
+            #[cfg(test)]
+            verify_gate: std::sync::Mutex::new(None),
         }
     }
 
@@ -324,6 +331,13 @@ impl Service {
         self.inner.lock().await.ready.clone()
     }
 
+    /// Test seam: hold the service mutex, as an initialization, the reaper
+    /// or a sweep does, until the guard is dropped.
+    #[cfg(test)]
+    pub(crate) async fn hold_service_lock(&self) -> impl Sized + '_ {
+        self.inner.lock().await
+    }
+
     pub async fn ensure_init(self: &Arc<Self>) -> Result<Arc<Ready>, String> {
         let me = self.clone();
         tokio::spawn(async move { me.ensure_init_inner().await })
@@ -336,7 +350,6 @@ impl Service {
     /// session check stale, so reprobe the writer session even inside its
     /// probe interval (`_session_ok_at = 0.0`) and run `_ensure_init`, both
     /// under the service lock, before the caller's one fresh attempt.
-    #[allow(dead_code)] // B5's W2F-CLOCK-RETRY send retry is its caller.
     pub async fn refresh_writer_session(self: &Arc<Self>) -> Result<Arc<Ready>, String> {
         let me = self.clone();
         tokio::spawn(async move { me.init(true).await })
@@ -355,6 +368,13 @@ impl Service {
             storage.forget_probe();
         }
         self.verify_writer_session(&mut inner).await?;
+        #[cfg(test)]
+        {
+            let gate = self.verify_gate.lock().unwrap().take();
+            if let Some(gate) = gate {
+                let _ = gate.await;
+            }
+        }
         self.rehydrate_if_bank_changed_hands(&mut inner);
         if let Some(r) = &inner.ready {
             if crate::mutants::active("startup-clock-reloads")
@@ -507,17 +527,6 @@ impl Service {
             return Ok(());
         };
         let fresh = Arc::new(fresh);
-        if fresh.resident_invalidated().is_some()
-            && !crate::mutants::active("writer-board-clock-kept")
-            && let Some(board) = self.board()
-        {
-            // `_coordination_hlc_epoch = None` (service.py:1420): the board's
-            // own clock never saw the other writer's high-water mark, and the
-            // replacement's epoch would let a send past the epoch fence. Mark
-            // it unseeded before any caller can see that epoch, so the next
-            // send reseeds from the bank.
-            board.hlc.lock().expect("hlc lock").seeded = false;
-        }
         inner.storage = Some(fresh.clone());
         let republished = inner
             .ready
@@ -559,6 +568,55 @@ impl Service {
             s.ready = None;
         });
         storage.acknowledge_rehydration();
+    }
+
+    /// `compact_superseded` (service.py:5832-5866), on the sweep tick: purge
+    /// old superseded and retired versions from the three canonical stores
+    /// (per slot the newest `memory.compaction.keep_per_slot` non-live
+    /// records stay, the rest go once older than `min_age_days`), then save
+    /// each store that changed through its per-slot sync, which deletes the
+    /// purged rows. Under the write lock, as every canonical write is, so no
+    /// write sees the records shift under it. A failed save is logged and
+    /// counted (`persist_errors`); the slots stay dirty for the next save.
+    async fn compact_superseded(&self, ready: &Ready) {
+        if crate::mutants::active("compaction-off") {
+            return;
+        }
+        let m = &self.config.memory;
+        let (keep, min_age) = (m.compaction_keep_per_slot, m.compaction_min_age_days);
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs_f64())
+            .unwrap_or(0.0);
+        // Each store saves when this tick purged from it, or when an earlier
+        // save left slots dirty: Python's autosave retries those, and this
+        // daemon's autosave does not save the canonical stores, so without
+        // the retry a purge whose save failed would come back at restart.
+        let _write = ready.write.lock().await;
+        let facts = ready.cortex.write(|s| s.compact(keep, min_age, now));
+        if (facts > 0 || !ready.cortex.snapshot().dirty_slots.is_empty())
+            && let Err(e) = crate::fact_set::save_cortex(self, ready).await
+        {
+            eprintln!("compaction: cortex save failed: {e:?}");
+        }
+        let world_facts = ready.world.write(|s| s.compact(keep, min_age, now));
+        if (world_facts > 0 || !ready.world.snapshot().dirty_slots.is_empty())
+            && let Err(e) = crate::world_tools::save_world(self, ready).await
+        {
+            eprintln!("compaction: world cortex save failed: {e:?}");
+        }
+        let lessons = ready.lessons.write(|s| s.compact(keep, min_age, now));
+        if (lessons > 0 || !ready.lessons.snapshot().dirty_slots.is_empty())
+            && let Err(e) = crate::forget_tools::save_lessons(self, ready).await
+        {
+            eprintln!("compaction: lesson store save failed: {e:?}");
+        }
+        let total = facts + world_facts + lessons;
+        if total > 0 {
+            eprintln!(
+                "compaction purged {{'facts': {facts}, 'world_facts': {world_facts}, 'lessons': {lessons}, 'total': {total}}}"
+            );
+        }
     }
 
     /// `_load_counters` (service.py:1487-1545) for a bank this daemon reads:
@@ -743,9 +801,8 @@ impl crate::background::Duties for Service {
     fn sweep(&self, stop: tokio::sync::watch::Receiver<bool>) -> crate::background::Duty<'_> {
         Box::pin(async move {
             if self.config.memory.compaction_enabled {
-                self.ensure_init_inner().await?;
-                // The current reader has no canonical resident stores.
-                // W2-E connects compaction_victims and its slot-rewrite API.
+                let ready = self.ensure_init_inner().await?;
+                self.compact_superseded(&ready).await;
             }
             let inner = self.inner.lock().await;
             let Some(storage) = &inner.storage else {
@@ -955,17 +1012,37 @@ mod tests {
         // Initialization owns this same mutex throughout embedding and hydration,
         // after ensure_storage has published the usable storage snapshot.
         let initializing = service.inner.lock().await;
-        let heartbeat = tokio::time::timeout(
-            Duration::from_secs(2),
-            board.dispatch(
-                "heartbeat",
-                params(json!({"attachment_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                "generation": attached["generation"], "active": true})),
+        // A send waits for the full service (its stamp is the service clock's),
+        // outside the board's lock, so it holds up no other board call.
+        let heartbeat = {
+            let send = board.dispatch(
+                "send",
+                params(
+                    json!({"to": registered["agent_id"], "text": "waits for init",
+                    "request_id": "paused-init"}),
+                ),
                 &headers,
                 "default",
-            ),
-        )
-        .await;
+            );
+            tokio::pin!(send);
+            assert!(
+                tokio::time::timeout(Duration::from_millis(300), &mut send)
+                    .await
+                    .is_err(),
+                "a send must wait for the full service"
+            );
+            tokio::time::timeout(
+                Duration::from_secs(2),
+                board.dispatch(
+                    "heartbeat",
+                    params(json!({"attachment_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "generation": attached["generation"], "active": true})),
+                    &headers,
+                    "default",
+                ),
+            )
+            .await
+        };
         drop(initializing);
         let result = heartbeat
             .expect("heartbeat waited behind full service initialization")
@@ -975,139 +1052,19 @@ mod tests {
             result["lease_until"].as_f64().unwrap() >= attached["lease_until"].as_f64().unwrap()
         );
         drop(board);
-        let storage = service.inner.lock().await.storage.take().unwrap();
-        service.update(|s| s.storage = None);
-        Arc::try_unwrap(storage)
-            .ok()
-            .expect("storage released")
-            .close()
-            .await;
-    }
-
-    #[tokio::test]
-    #[ignore = "requires a disposable board database through board.boundary"]
-    async fn board_send_refuses_an_incomplete_clock_seed() {
-        let dsn = std::env::var("PL_W2F_BOARD_DSN").expect("owned board fixture DSN");
-        let parsed = crate::storage::parse_dsn(&dsn).unwrap();
-        assert!(
-            parsed
-                .get_dbname()
-                .is_some_and(|n| n.starts_with("pl_cf_w2f_"))
-        );
-        assert_eq!(parsed.get_ports(), &[5434]);
-        assert!(
-            matches!(parsed.get_hosts(), [tokio_postgres::config::Host::Tcp(h)] if h == "127.0.0.1")
-        );
-        let service = Arc::new(Service::new(
-            Config::default(),
-            DaemonEnv::from_env(&|_| None).unwrap(),
-            PathBuf::new(),
-            dsn.clone(),
-            true,
-        ));
-        let board = crate::board::Board::new(
-            service.config.coordination.clone(),
-            dsn.clone(),
-            service.clone(),
-            Arc::new(crate::auth::PrincipalStore::new()),
-        );
-        let params = |v: Value| v.as_object().unwrap().clone();
-        let mut headers = std::collections::HashMap::new();
-        let sender = board
-            .dispatch(
-                "register",
-                params(json!({"label": "sender"})),
-                &headers,
-                "default",
-            )
-            .await
-            .unwrap();
-        let recipient = board
-            .dispatch(
-                "register",
-                params(json!({"label": "recipient"})),
-                &headers,
-                "default",
-            )
-            .await
-            .unwrap();
-        headers.insert(
-            "x-pl-agent".into(),
-            sender["agent_id"].as_str().unwrap().into(),
-        );
-        headers.insert(
-            "x-pl-agent-key".into(),
-            sender["credential"].as_str().unwrap().into(),
-        );
-        let storage = service.storage_tier().await.unwrap();
-        let future = (crate::board::store::now() * 1000.0) as i64 + 3_600_000;
-        storage.client().execute(
-            "INSERT INTO facts(entity,attribute,entity_norm,attribute_norm,value,status,confidence,asserted_at,last_confirmed,hlc_phys,hlc_logical) VALUES ('clock','fixture','clock','fixture','future','current',1,0,0,$1,7)",
-            &[&future],
-        ).await.unwrap();
-        // A real query timeout hides a persisted high-water mark from the
-        // first seed attempt. No schema mutation or production bank is used.
-        let (mut locker, connection) = tokio_postgres::connect(&dsn, tokio_postgres::NoTls)
-            .await
-            .unwrap();
-        let driver = tokio::spawn(connection);
-        let lock = locker.transaction().await.unwrap();
-        lock.batch_execute("LOCK TABLE facts IN ACCESS EXCLUSIVE MODE")
-            .await
-            .unwrap();
-        storage
-            .client()
-            .batch_execute("SET statement_timeout = '100ms'")
-            .await
-            .unwrap();
-        let send = params(
-            json!({"to": recipient["agent_id"], "text": "clock proof", "request_id": "clock-proof"}),
-        );
-        let refused = board
-            .dispatch("send", send.clone(), &headers, "default")
-            .await;
-        lock.rollback().await.unwrap();
-        storage
-            .client()
-            .batch_execute("RESET statement_timeout")
-            .await
-            .unwrap();
-        let committed: i64 = storage
-            .client()
-            .query_one("SELECT count(*) FROM coordination_messages", &[])
-            .await
-            .unwrap()
-            .get(0);
-        assert_eq!(
-            committed, 0,
-            "incomplete clock seed committed mail below bank history"
-        );
-        assert!(refused.is_err());
-        assert!(!board.hlc.lock().unwrap().seeded);
-        board
-            .dispatch("send", send, &headers, "default")
-            .await
-            .unwrap();
-        assert!(board.hlc.lock().unwrap().seeded);
-        let stamp: String = storage
-            .client()
-            .query_one("SELECT hlc FROM coordination_messages", &[])
-            .await
-            .unwrap()
-            .get(0);
-        let (phys, logical) = stamp.split_once(':').unwrap();
-        assert!(
-            (
-                phys.parse::<i64>().unwrap(),
-                logical.parse::<i64>().unwrap()
-            ) > (future, 7)
-        );
-        drop(storage);
-        drop(board);
-        drop(locker);
-        driver.abort();
-        let storage = service.inner.lock().await.storage.take().unwrap();
-        service.update(|s| s.storage = None);
+        // The dropped send's initialization task still runs once the mutex is
+        // free; a later call queues behind it (tokio's mutex is fair), so it
+        // has finished, and whatever it published is dropped, before cleanup.
+        let _ = service.ensure_init().await;
+        let storage = {
+            let mut inner = service.inner.lock().await;
+            inner.ready = None;
+            inner.storage.take().unwrap()
+        };
+        service.update(|s| {
+            s.storage = None;
+            s.startup = None;
+        });
         Arc::try_unwrap(storage)
             .ok()
             .expect("storage released")
@@ -1397,7 +1354,6 @@ mod tests {
             dsn.clone(),
             false,
         ));
-        // The board's own clock, which a handover must unseed.
         let board = Arc::new(crate::board::Board::new(
             service.config.coordination.clone(),
             dsn.clone(),
@@ -1501,7 +1457,6 @@ mod tests {
                     (observed, served)
                 }
             };
-        let seeded = || board.hlc.lock().unwrap().seeded;
         let first = service.ensure_init().await.expect("initial init");
         let pid = backend_pid(&first.storage).await;
         let (observed, mut current) = observe(Ok(first.clone()), pid, first.clone()).await;
@@ -1510,24 +1465,19 @@ mod tests {
         run_helper(&["--dump-db", "initial"]);
 
         // Death with no other writer: the next call reconnects and keeps
-        // the resident copy, and the board keeps its seeded clock.
-        board.hlc.lock().unwrap().seeded = true;
+        // the resident copy.
         let pid = backend_pid(&current.storage).await;
         kill(&current.storage, &dsn).await;
         past_probe().await;
         let result = service.ensure_init().await;
         let (observed, next) = observe(result, pid, current).await;
         current = next;
-        assert!(
-            seeded(),
-            "a reconnect with no other writer keeps the board clock"
-        );
         phases.push(json!({"phase": "death", "observed": observed}));
         run_helper(&["--dump-db", "death"]);
 
         // Another writer held the bank in the gap: the reconnect flags the
-        // handover, the board clock must reseed before its next send, and
-        // the service re-reads the bank before serving.
+        // handover and the service re-reads the bank, reseeding the clock the
+        // board's sends tick, before serving.
         let pid = backend_pid(&current.storage).await;
         kill(&current.storage, &dsn).await;
         run_helper(&["--other-writer"]);
@@ -1535,7 +1485,10 @@ mod tests {
         let result = service.ensure_init().await;
         let (observed, next) = observe(result, pid, current).await;
         current = next;
-        assert!(!seeded(), "a handover must unseed the board clock");
+        // The other writer left a board clock mark in 2100 (the helper's
+        // OTHER_WRITER_HLC); only the reseed can put the next tick past it.
+        assert!(!current.startup.clock_state().hlc_reseed_pending);
+        assert!(current.tick_hlc() > (4_102_444_800_000, 3));
         phases.push(json!({"phase": "handover", "observed": observed}));
         run_helper(&["--dump-db", "handover"]);
 

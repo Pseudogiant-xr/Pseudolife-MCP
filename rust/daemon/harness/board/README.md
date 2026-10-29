@@ -12,7 +12,7 @@ python -m board.run golden  --rust-bin PATH [--only NAME ...]
 python -m board.run mutants --rust-bin PATH_BUILT_WITH_--features_mutants
 python -m pytest board/test_norm.py board/test_run.py
 python -m board.boundary
-python -m board.boundary --clock
+python -m board.boundary --shared-clock
 python -m board.boundary --json-keys
 ```
 
@@ -54,8 +54,10 @@ on both arms identically (the audit log is hashed and stays as written).
 
 Linux runs go to the slice's lane box with its own test PostgreSQL on
 127.0.0.1:5434 (`PSEUDOLIFE_TEST_PG_HOST_PORT`, `PSEUDOLIFE_TEST_PG_LOGIN_FILE`);
-the Rust daemon needs no ONNX model for the board. Both daemons must expose `db: ok` before the first step; the Python oracle
-also finishes embedding warmup (the runner waits for these tiers).
+both daemons need the embedding model (`ORT_DYLIB_PATH`, `PSEUDOLIFE_DAEMON_ONNX_DIR` and the
+reranker directory for the Rust arm), because a `send` ticks the service clock, which only the
+initialized service holds (W2F-SHARED-HLC). Both daemons must expose `db: ok` and finish embedding
+warmup before the first step (the runner waits for these tiers).
 
 
 The completion run uses the original supplied oracle recordings, preserved
@@ -76,16 +78,19 @@ port 5434, then explicitly runs the otherwise ignored Cargo regression: a
 registered, attached agent must heartbeat while full initialization holds the
 service mutex after publishing storage. The normal Cargo suite also covers a
 PostgreSQL server that accepts TCP but never completes authentication. With
-`--clock`, the fixture stores a canonical fact one hour ahead, makes its
-high-water query time out, and requires no mail commit until seeding can retry
-successfully above that stored clock.
+`--shared-clock` (W2F-SHARED-HLC) it also writes the offline four-dimension
+embedding fixture and its config, initializes the full service, and requires
+board sends to take the service clock's next tick: above a stamp only that
+clock holds, strictly between memory ticks on either side, and below what the
+reseed a restart runs reads back from the board's stored high-water mark.
 
 CI runs `test_norm.py` and `test_run.py` on Linux and Windows; the existing
 daemon checks compile the board unconditionally and build the `mutants` feature.
 The live corpus and eight controls currently run on the development test service.
-Hosted live coverage remains a follow-up: the proven runner warms the Python
-arm with a cached model, while a portable offline fixture has not yet been
-integrated and validated for this board runner. The original timing-sensitive
+Hosted live coverage remains a follow-up: the proven runner warms both arms
+with a cached model, while a portable offline fixture has not yet been
+integrated and validated for this board runner (`board.boundary --shared-clock`
+uses the four-dimension fixture for its one Cargo test). The original timing-sensitive
 goldens remain strict failing evidence, not CI expectations.
 
 The foundation `tokens` scenario now compares the implemented board routes;

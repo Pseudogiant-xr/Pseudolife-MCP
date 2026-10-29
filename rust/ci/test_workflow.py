@@ -261,7 +261,8 @@ def check_executable_coverage(jobs):
     require_command(commands(search["run"]), ("python", "-m", "pytest"),
                     ("rust/daemon/harness/test_w2d_controls.py",
                      "rust/daemon/harness/test_w2d_namespace.py",
-                     "rust/daemon/harness/test_w2d_recent.py"), PYTEST_FILTERS)
+                     "rust/daemon/harness/test_w2d_recent.py",
+                     "rust/daemon/harness/test_config_knobs_golden.py"), PYTEST_FILTERS)
     assert search["timeout-minutes"] == 1
     # The mail, hook and episode rows replay their goldens in the required
     # cli shard; their live arms run beside the other live comparisons.
@@ -851,11 +852,12 @@ def test_scope_marks_an_ordinary_pull_request_not_full(tmp_path, head_ref, files
                                       "pyproject.toml", "ops/requirements.lock.txt",
                                       "rust/Cargo.lock", "frontend/package-lock.json",
                                       "rust/rust-toolchain.toml"])
-def test_scope_keeps_an_ordinary_pull_request_changing_ci_inputs_full(tmp_path, ci_input):
-    # A workflow or dependency edit is tested by the full lanes on its own
-    # pull request, so it cannot switch off its own check.
+def test_scope_keeps_an_ordinary_pull_request_changing_ci_inputs_fast(tmp_path, ci_input):
+    # Only batches spend the heavy lanes (maintainer, 2026-10-29). A workflow
+    # or dependency edit runs its full lanes on its batch's head, under the
+    # edited workflow, before it can reach master.
     assert run_scope(tmp_path, "pull_request", ["rust/daemon/src/main.rs", ci_input],
-                     head_ref="claude/some-change") == ["full=true", "rust=true"]
+                     head_ref="claude/some-change") == ["full=false", "rust=true"]
 
 
 @pytest.mark.parametrize("files, git_exit", [([], 0), (["rust/daemon/src/main.rs"], 128)])
@@ -878,55 +880,57 @@ def test_scope_reads_the_head_ref_only_for_pull_requests(tmp_path, event):
                      head_ref="claude/some-change") == ["full=true", "rust=true"]
 
 
-def concurrency_group(event, ref="refs/heads/master", mode=None, run_id="101"):
+def concurrency_group(event, ref="refs/heads/master", mode=None, run_id="101", head_ref=""):
     """Evaluate the workflow's group expression the way Actions does."""
     expression = workflow()["concurrency"]["group"]
     assert expression.startswith("${{ ") and expression.endswith(" }}")
     body = expression[4:-3]
     # Actions' && / || return an operand, like Python's and / or.
-    assert set(re.findall(r"[a-z_.]+(?=\s*==)", body)) <= {"github.event_name", "inputs.mode"}
+    assert set(re.findall(r"[a-z_.]+(?=\s*[!=]=)", body)) <= {"github.event_name",
+                                                             "github.head_ref"}
     body = body.replace("&&", " and ").replace("||", " or ")
-    body = body.replace("github.event_name", "event").replace("inputs.mode", "mode")
+    body = re.sub(r"!(?=[A-Za-z])", " not ", body)
+    body = body.replace("github.event_name", "event").replace("github.head_ref", "head_ref")
     body = body.replace("github.run_id", "run_id").replace("github.workflow", "'Rust shim'")
     body = body.replace("github.ref", "ref")
     import ast
     tree = ast.parse(body, mode="eval")
-    allowed = (ast.Expression, ast.BoolOp, ast.And, ast.Or, ast.Compare, ast.Eq, ast.Name,
-               ast.Load, ast.Constant, ast.Call)
-    # Only comparisons, and/or and format() calls; nothing else is evaluated.
+    allowed = (ast.Expression, ast.BoolOp, ast.And, ast.Or, ast.Compare, ast.Eq, ast.NotEq,
+               ast.UnaryOp, ast.Not, ast.Name, ast.Load, ast.Constant, ast.Call)
+    # Only comparisons, and/or/not and format()/startsWith() calls.
     assert all(isinstance(node, allowed) for node in ast.walk(tree)), body
-    assert all(node.func.id == "format" for node in ast.walk(tree) if isinstance(node, ast.Call))
+    assert all(node.func.id in ("format", "startsWith")
+               for node in ast.walk(tree) if isinstance(node, ast.Call))
     return eval(compile(tree, "<concurrency>", "eval"),
-                {"__builtins__": {}, "format": lambda text, *args: text.format(*args)},
-                {"event": event, "mode": mode, "run_id": run_id, "ref": ref})
+                {"__builtins__": {}, "format": lambda text, *args: text.format(*args),
+                 # Actions' startsWith ignores case.
+                 "startsWith": lambda text, prefix: text.lower().startswith(prefix.lower())},
+                {"event": event, "mode": mode, "run_id": run_id, "ref": ref,
+                 "head_ref": head_ref})
 
 
-def test_nightly_never_shares_a_group_with_master_pushes():
-    push = concurrency_group("push")
-    assert concurrency_group("schedule") != push
-    assert concurrency_group("schedule") == concurrency_group("schedule")
-    # A newer push still supersedes an older one, and pull requests stay per-ref.
-    assert concurrency_group("push") == push
-    assert concurrency_group("pull_request", "refs/pull/1/merge") != concurrency_group(
-        "pull_request", "refs/pull/2/merge")
-    assert concurrency_group("workflow_dispatch", mode="wait-mail") != concurrency_group(
-        "workflow_dispatch", mode="wait-mail", run_id="102")
-    # Manual CI on master must not cancel the push run either.
-    assert concurrency_group("workflow_dispatch", mode="ci") not in (push, concurrency_group("schedule"))
-    assert concurrency_group("workflow_dispatch", mode="ci") == concurrency_group("workflow_dispatch", mode="ci")
+def test_only_an_ordinary_pull_request_supersedes_its_own_runs():
+    # A newer push to an ordinary pull request cancels its older run, per PR.
+    pr1 = concurrency_group("pull_request", "refs/pull/1/merge", head_ref="fix/x", run_id="1")
+    assert pr1 == concurrency_group("pull_request", "refs/pull/1/merge", head_ref="fix/x",
+                                    run_id="2")
+    assert pr1 != concurrency_group("pull_request", "refs/pull/2/merge", head_ref="fix/y")
     assert workflow()["concurrency"]["cancel-in-progress"] is True
-
-
-def test_merge_group_runs_share_no_group_with_pull_requests_or_pushes():
-    # Each queue entry has its own branch ref, so neither a PR's newer push nor
-    # a master push can cancel the queue's run, and it cancels neither.
+    # Every other run has a group of its own, so nothing cancels it (a newer
+    # run in a group cancels a pending one even without cancel-in-progress):
+    # master pushes, the nightly, manual CI, wait-mail captures, stress
+    # loops, merge groups and integrate/* batch runs.
     queued = "refs/heads/gh-readonly-queue/master/pr-830-" + "a" * 40
-    group = concurrency_group("merge_group", queued)
-    assert group not in (concurrency_group("push"), concurrency_group("schedule"),
-                         concurrency_group("pull_request", "refs/pull/830/merge"),
-                         concurrency_group("workflow_dispatch", mode="ci"))
-    assert group != concurrency_group(
-        "merge_group", "refs/heads/gh-readonly-queue/master/pr-831-" + "b" * 40)
+    for kwargs in ({"event": "push"}, {"event": "schedule"},
+                   {"event": "workflow_dispatch", "mode": "ci"},
+                   {"event": "workflow_dispatch", "mode": "wait-mail"},
+                   {"event": "workflow_dispatch", "mode": "stress"},
+                   {"event": "merge_group", "ref": queued},
+                   {"event": "pull_request", "ref": "refs/pull/3/merge",
+                    "head_ref": "integrate/2026-10-29-batch-1"},
+                   {"event": "pull_request", "ref": "refs/pull/3/merge", "head_ref": ""}):
+        assert concurrency_group(**kwargs, run_id="1") != concurrency_group(**kwargs, run_id="2")
+        assert concurrency_group(**kwargs, run_id="1") != pr1
 
 
 def test_merge_queue_trigger_and_image_base():
@@ -1129,6 +1133,7 @@ def test_coverage_contract_allows_additions(monkeypatch, name, old, new):
     ("Offline embedding golden and mutant row", "rust/daemon/harness/test_embedding.py", ""),
     ("Offline W2-D search harness regressions", "rust/daemon/harness/test_w2d_controls.py", ""),
     ("Offline W2-D search harness regressions", "rust/daemon/harness/test_w2d_namespace.py", ""),
+    ("Offline W2-D search harness regressions", "rust/daemon/harness/test_config_knobs_golden.py", ""),
     ("CLI W1-C differential harness", "$rows = @(${{ matrix.w1c_rows }})", "$rows = @('move')"),
     ("CLI W1-C differential harness", "python rust/cli_harness @golden",
      "# python rust/cli_harness @golden"),
@@ -1402,7 +1407,8 @@ def test_board_runner_checks_execute_on_both_platforms():
     assert step["working-directory"] == "."
     require_command(commands(step["run"]), ("python", "-m", "pytest"),
                     ("rust/daemon/harness/board/test_norm.py",
-                     "rust/daemon/harness/board/test_run.py"), PYTEST_FILTERS)
+                     "rust/daemon/harness/board/test_run.py",
+                     "rust/daemon/harness/test_pgdisposable_slices.py"), PYTEST_FILTERS)
 
 
 def test_rust_job_fits_a_cold_cache_and_bounds_the_override_builds():
@@ -1418,6 +1424,7 @@ def test_rust_job_fits_a_cold_cache_and_bounds_the_override_builds():
 # --- self-hosted comparison lane (docs/specs/2026-10-19-self-hosted-parity-lane.md) ---
 
 SELF_HOSTED = "runner.environment == 'self-hosted'"
+DISK_STEP = "Check the runner's free disk"
 GATE_STEP = "Yield to this machine's full suite"
 VENV_STEP = "Give the shard its own Python environment"
 
@@ -1440,8 +1447,10 @@ def test_selfhosted_lane_runs_the_hosted_shards_unchanged():
         suite for suite in hosted["strategy"]["matrix"]["suite"] if suite not in HOSTED_ONLY]
     assert lane["strategy"]["matrix"]["include"] == [
         entry for entry in hosted["strategy"]["matrix"]["include"] if entry["suite"] not in HOSTED_ONLY]
+    # A dispatch may name the machines itself (a machine's trial before the
+    # watcher lists it); the nightly has no inputs and reads the variable.
     assert lane["strategy"]["matrix"]["runner"] == (
-        "${{ fromJSON(vars.PARITY_SELFHOSTED_RUNNERS || '[\"off\"]') }}")
+        "${{ fromJSON(inputs.selfhosted_runners || vars.PARITY_SELFHOSTED_RUNNERS || '[\"off\"]') }}")
     assert lane["strategy"]["fail-fast"] is False
     assert lane["needs"] == hosted["needs"] == ["scope", "candidate", "candidate-harness", "fixtures"]
     # Only the maintainer's registered runners: one label per machine.
@@ -1458,16 +1467,20 @@ def test_selfhosted_lane_never_touches_a_required_check():
         needs = job.get("needs", [])
         assert "parity-selfhosted" not in ([needs] if isinstance(needs, str) else needs), name
     assert "parity-selfhosted" not in jobs["parity"]["steps"][0]["run"]
-    # Nightly and manual CI only: their concurrency groups are their own, so
-    # queued self-hosted jobs neither hold a PR's checks open nor let a newer
-    # master push cancel a run whose hosted jobs already finished.
+    # Nightly and manual CI only: queued self-hosted jobs never hold a PR's
+    # checks open.
     assert lane["if"] == (
         "${{ !cancelled() && (github.event_name == 'schedule' || "
         "(github.event_name == 'workflow_dispatch' && inputs.mode == 'ci')) "
-        "&& vars.PARITY_SELFHOSTED_RUNNERS != '' "
+        "&& (inputs.selfhosted_runners != '' || vars.PARITY_SELFHOSTED_RUNNERS != '') "
         "&& needs.candidate.result == 'success' && needs.candidate-harness.result == 'success' "
         "&& needs.fixtures.result == 'success' }}")
     assert "pull_request" not in lane["if"] and "'push'" not in lane["if"]
+    # The trial override is a dispatch input and read nowhere else.
+    trial = workflow()[True]["workflow_dispatch"]["inputs"]["selfhosted_runners"]
+    assert trial["type"] == "string" and trial["required"] is False
+    text = WORKFLOW.read_text(encoding="utf-8")
+    assert text.count("inputs.selfhosted_runners") == 2
 
 
 def test_both_lanes_upload_under_distinct_names():
@@ -1486,9 +1499,10 @@ def test_both_lanes_upload_under_distinct_names():
 
 def test_self_hosted_only_steps_leave_the_hosted_shard_unchanged():
     steps = workflow()["jobs"]["parity-checks"]["steps"]
-    gate = steps[0]
+    disk, gate = steps[0], steps[1]
+    assert disk["name"] == DISK_STEP and disk["if"] == SELF_HOSTED
     assert gate["name"] == GATE_STEP and gate["if"] == SELF_HOSTED
-    assert steps[1]["uses"] == "actions/checkout@v4"
+    assert steps[2]["uses"] == "actions/checkout@v4"
     venv = next(step for step in steps if step.get("name") == VENV_STEP)
     assert venv["if"] == SELF_HOSTED
     setup = next(step for step in steps if step.get("uses") == "actions/setup-python@v5")
@@ -1501,7 +1515,7 @@ def test_self_hosted_only_steps_leave_the_hosted_shard_unchanged():
     cache = next(step for step in steps if step.get("uses") == "Swatinem/rust-cache@v2")
     assert cache["with"]["save-if"] == "${{ runner.environment != 'self-hosted' }}"
     added = [step for step in steps if SELF_HOSTED in step.get("if", "")]
-    assert [step["name"] for step in added] == [GATE_STEP, VENV_STEP]
+    assert [step["name"] for step in added] == [DISK_STEP, GATE_STEP, VENV_STEP]
 
 
 GATE_STUBS = r'''$ErrorActionPreference = 'stop'
@@ -1527,12 +1541,11 @@ function pseudolife-mcp {
     ("the host's lease", [[0, "free"]], {"PSEUDOLIFE_PARITY_LEASE": "full-suite"}, False, 0, 0),
     ("no lock directory", [[0, "free"]], {"PSEUDOLIFE_PARITY_LOCK_DIR": ""}, False, 0, 0),
     ("no cli", [[0, "free"]], {"PL_NO_CLI": "1"}, False, 0, 0),
-    ("disk below the floor", [[0, "free"]], {"PARITY_MIN_FREE_GB": "1000000"}, False, 0, 0),
 ])
 def test_selfhosted_gate_runs_only_on_a_free_lease(tmp_path, case, sequence, overrides,
                                                    accepted, calls, sleeps):
     import os
-    gate = workflow()["jobs"]["parity-checks"]["steps"][0]
+    gate = next(step for step in workflow()["jobs"]["parity-checks"]["steps"] if step.get("name") == GATE_STEP)
     log, summary = tmp_path / "calls.log", tmp_path / "summary.md"
     log.write_text("", encoding="utf-8")
     env = dict(os.environ, PL_LOG=str(log), PL_SEQUENCE=json.dumps(sequence),
@@ -1540,8 +1553,6 @@ def test_selfhosted_gate_runs_only_on_a_free_lease(tmp_path, case, sequence, ove
                PSEUDOLIFE_PARITY_LEASE="full-suite@fixture",
                PSEUDOLIFE_PARITY_LOCK_DIR=str(tmp_path / "locks"),
                **workflow()["jobs"]["parity-selfhosted"]["env"])
-    # Only the low-disk case may depend on this machine's free space.
-    env["PARITY_MIN_FREE_GB"] = "0"
     env.pop("PSEUDOLIFE_SUITE_LEASE", None)
     env.pop("PSEUDOLIFE_SUITE_LOCK_DIR", None)
     env.update(overrides)
@@ -1556,6 +1567,26 @@ def test_selfhosted_gate_runs_only_on_a_free_lease(tmp_path, case, sequence, ove
         assert line == f"call lease check --json full-suite@fixture | full-suite@fixture | {tmp_path / 'locks'}"
     yielded = summary.exists() and "Yielded" in summary.read_text(encoding="utf-8")
     assert yielded == (case == "yields")
+
+
+@pytest.mark.parametrize("floor, accepted", [("0", True), ("1000000", False)])
+def test_selfhosted_disk_check_names_a_full_disk_before_the_lease(tmp_path, floor, accepted):
+    import os
+    disk = workflow()["jobs"]["parity-checks"]["steps"][0]
+    assert disk["name"] == DISK_STEP
+    summary = tmp_path / "summary.md"
+    env = dict(os.environ, GITHUB_WORKSPACE=str(tmp_path), GITHUB_STEP_SUMMARY=str(summary),
+               **workflow()["jobs"]["parity-selfhosted"]["env"])
+    env["PARITY_MIN_FREE_GB"] = floor
+    result = subprocess.run(["pwsh", "-NoProfile", "-NonInteractive", "-Command",
+                             "$ErrorActionPreference = 'stop'\n" + disk["run"]],
+                            env=env, capture_output=True, text=True)
+    assert (result.returncode == 0) == accepted, result.stdout + result.stderr
+    # Every shard records its free disk, the comparison week's disk figure.
+    assert f"GB free on the runner's work drive (floor {floor} GB)" in summary.read_text(encoding="utf-8")
+    if not accepted:
+        assert "so the shard did not run" in result.stderr + result.stdout
+        assert '"Disk use"' in result.stderr + result.stdout
 
 
 # --- the required gate holds only deterministic Windows work ---
@@ -1751,9 +1782,9 @@ def pytest_lines(script):
 
 def test_parity_shards_record_their_runner():
     steps = workflow()["jobs"]["parity-checks"]["steps"]
-    facts = steps[2]
+    facts = steps[3]
     assert facts["name"] == FACTS_STEP and "if" not in facts and facts["shell"] == "pwsh"
-    assert steps[1]["uses"] == "actions/checkout@v4"
+    assert steps[2]["uses"] == "actions/checkout@v4"
 
 
 def test_parity_pytest_runs_name_failures_and_keep_reports():

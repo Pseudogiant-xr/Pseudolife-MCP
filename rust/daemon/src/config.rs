@@ -11,7 +11,7 @@
 // Wired by main in W1-A.
 #![allow(dead_code)]
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::fmt;
 use std::path::{Path, PathBuf};
 
@@ -32,6 +32,28 @@ pub struct Config {
     pub coordination: CoordinationConfig,
     pub updates: UpdatesConfig,
     pub dream: DreamConfig,
+    /// The dotted leaves config.yaml set when it was loaded, as YAML typed
+    /// them (`_user_yaml_leaves`, with values). Python's dataclasses keep a
+    /// set value uncoerced, and `/api/config` serves the running value.
+    pub user_leaves: JsonMap<String, Value>,
+    pub memory_policy: MemoryPolicyConfig,
+}
+
+/// `MemoryPolicyConfig` (utils/config.py:1371-1408): the standing memory
+/// policy the session-start hooks serve, and an optional A/B arm list.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MemoryPolicyConfig {
+    pub variant: String,
+    pub ab_arms: Vec<String>,
+}
+
+impl Default for MemoryPolicyConfig {
+    fn default() -> Self {
+        MemoryPolicyConfig {
+            variant: "compact".into(),
+            ab_arms: Vec::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -551,6 +573,10 @@ pub struct CoordinationConfig {
     pub maintainer_principals: Vec<String>,
     pub audit_retention_days: i64,
     pub maintainer_per_recipient_per_hour: i64,
+    /// `coordination.maintainer.rp_id` and `.origin` ("" unset): the
+    /// Console host a maintainer passkey is bound to, and its exact origin.
+    pub maintainer_rp_id: String,
+    pub maintainer_origin: String,
 }
 
 /// Field order is Python `WakeConfig`'s (`utils/config.py:1418-1423`).
@@ -683,6 +709,8 @@ impl Config {
             "memory.dream.fallback_base_url": d.fallback_base_url,
             "memory.dream.fallback_model": d.fallback_model,
             "memory.dream.extractor_model_override": d.extractor_model_override,
+            "memory_policy.variant": self.memory_policy.variant,
+            "memory_policy.ab_arms": self.memory_policy.ab_arms,
         });
         let map = dump.as_object_mut().expect("config dump object");
         map.insert(
@@ -915,6 +943,8 @@ impl Default for CoordinationConfig {
             maintainer_principals: Vec::new(),
             audit_retention_days: 90,
             maintainer_per_recipient_per_hour: 30,
+            maintainer_rp_id: String::new(),
+            maintainer_origin: String::new(),
         }
     }
 }
@@ -994,6 +1024,8 @@ impl Default for Config {
             updates: UpdatesConfig::default(),
             dream: DreamConfig::default(),
             time: TimeConfig::default(),
+            user_leaves: JsonMap::new(),
+            memory_policy: MemoryPolicyConfig::default(),
         }
     }
 }
@@ -1188,7 +1220,7 @@ impl DaemonEnv {
 /// keys (`<<`) are applied when the mapping closes, as PyYAML's
 /// `flatten_mapping` does.
 #[derive(Debug, Clone, PartialEq)]
-enum Node {
+pub(crate) enum Node {
     Null,
     Bool(bool),
     Int(i64),
@@ -1229,7 +1261,7 @@ impl Node {
 }
 
 /// A YAML value as JSON, for a setting served as configured.
-fn node_json(node: &Node) -> Value {
+pub(crate) fn node_json(node: &Node) -> Value {
     match node {
         Node::Null => Value::Null,
         Node::Bool(b) => Value::from(*b),
@@ -1290,6 +1322,10 @@ enum Frame {
     Map(Vec<(Node, Node)>, Option<Node>, usize),
 }
 
+/// How a scalar event becomes a node: [`resolve_scalar`] for the daemon's
+/// own load, or a caller's (`config_io`'s PyYAML 1.1 rules).
+pub(crate) type ScalarResolver = fn(String, TScalarStyle, Option<Tag>) -> Result<Node, String>;
+
 #[derive(Default)]
 struct Loader {
     docs: Vec<Node>,
@@ -1297,6 +1333,10 @@ struct Loader {
     stack: Vec<Frame>,
     anchors: HashMap<usize, Node>,
     error: Option<String>,
+    resolve: Option<ScalarResolver>,
+    /// Refuse an alias to a mapping or list with this text (a rewrite
+    /// cannot keep the shared node).
+    collection_alias: Option<&'static str>,
 }
 
 fn unknown_tag(tag: &Tag) -> String {
@@ -1306,7 +1346,11 @@ fn unknown_tag(tag: &Tag) -> String {
     )
 }
 
-fn resolve_scalar(value: String, style: TScalarStyle, tag: Option<Tag>) -> Result<Node, String> {
+pub(crate) fn resolve_scalar(
+    value: String,
+    style: TScalarStyle,
+    tag: Option<Tag>,
+) -> Result<Node, String> {
     if let Some(tag) = tag {
         if tag.handle == "!" && tag.suffix.is_empty() {
             return Ok(Node::Str(value));
@@ -1450,10 +1494,23 @@ impl Loader {
                     .get(&id)
                     .cloned()
                     .ok_or_else(|| "found undefined alias".to_string())?;
+                // A merge of a mapping of scalars copies them, so nothing is
+                // shared; any other alias to a collection shares it.
+                let merged_scalars = matches!(
+                    self.stack.last(),
+                    Some(Frame::Map(_, Some(Node::MergeKey), _))
+                ) && matches!(&node, Node::Map(pairs)
+                    if pairs.iter().all(|(_, v)| !matches!(v, Node::Seq(_) | Node::Map(_))));
+                if let Some(refusal) = self.collection_alias
+                    && matches!(node, Node::Seq(_) | Node::Map(_))
+                    && !merged_scalars
+                {
+                    return Err(refusal.to_string());
+                }
                 self.complete(node, 0);
             }
             Event::Scalar(value, style, anchor, tag) => {
-                let node = resolve_scalar(value, style, tag)?;
+                let node = self.resolve.unwrap_or(resolve_scalar)(value, style, tag)?;
                 self.complete(node, anchor);
             }
             Event::SequenceStart(anchor, tag) => {
@@ -1508,7 +1565,25 @@ fn non_printable(c: char) -> bool {
 /// `yaml.safe_load(text)`: `None` for an empty stream, refused on a syntax
 /// error, more than one document, an unknown tag or a non-printable
 /// character.
-fn safe_load(text: &str) -> Result<Option<Node>, String> {
+pub(crate) fn safe_load(text: &str) -> Result<Option<Node>, String> {
+    load_with(text, None, None)
+}
+
+/// [`safe_load`] with another scalar resolver, refusing an alias to a
+/// mapping or list with `collection_alias` when given.
+pub(crate) fn safe_load_with(
+    text: &str,
+    resolve: ScalarResolver,
+    collection_alias: Option<&'static str>,
+) -> Result<Option<Node>, String> {
+    load_with(text, Some(resolve), collection_alias)
+}
+
+fn load_with(
+    text: &str,
+    resolve: Option<ScalarResolver>,
+    collection_alias: Option<&'static str>,
+) -> Result<Option<Node>, String> {
     if let Some((offset, c)) = text.char_indices().find(|(_, c)| non_printable(*c)) {
         return Err(format!(
             "unacceptable character #x{:04x} at offset {offset}",
@@ -1516,7 +1591,11 @@ fn safe_load(text: &str) -> Result<Option<Node>, String> {
         ));
     }
     let text = text.strip_prefix('\u{feff}').unwrap_or(text);
-    let mut loader = Loader::default();
+    let mut loader = Loader {
+        resolve,
+        collection_alias,
+        ..Loader::default()
+    };
     let mut parser = Parser::new_from_str(text);
     parser.load(&mut loader, true).map_err(|e| e.to_string())?;
     if let Some(e) = loader.error {
@@ -1531,9 +1610,9 @@ fn safe_load(text: &str) -> Result<Option<Node>, String> {
 }
 
 /// `_user_yaml_leaves`: dotted leaf keys of the document (string keys only;
-/// no other key type can spell a key the overlay tests).
-fn yaml_leaves(node: &Node) -> HashSet<String> {
-    fn walk(node: &Node, prefix: &str, out: &mut HashSet<String>) {
+/// no other key type can spell a key the overlay tests), with their values.
+fn yaml_leaves(node: &Node) -> JsonMap<String, Value> {
+    fn walk(node: &Node, prefix: &str, out: &mut JsonMap<String, Value>) {
         match node {
             Node::Map(entries) if !entries.is_empty() => {
                 for (k, v) in entries {
@@ -1543,12 +1622,12 @@ fn yaml_leaves(node: &Node) -> HashSet<String> {
                 }
             }
             _ if !prefix.is_empty() => {
-                out.insert(prefix[..prefix.len() - 1].to_string());
+                out.insert(prefix[..prefix.len() - 1].to_string(), node_json(node));
             }
             _ => {}
         }
     }
-    let mut out = HashSet::new();
+    let mut out = JsonMap::new();
     walk(node, "", &mut out);
     out
 }
@@ -1777,7 +1856,7 @@ fn load_str(text: &str) -> Result<Config, ConfigError> {
         }
     };
     let leaves = yaml_leaves(&raw);
-    let user_set = |key: &str| leaves.contains(key);
+    let user_set = |key: &str| leaves.contains_key(key);
 
     let mut config = Config::default();
 
@@ -2277,9 +2356,11 @@ fn load_str(text: &str) -> Result<Config, ConfigError> {
     if let Some(c) = section(entries, "coordination", "")? {
         config.coordination = read_coordination(c)?;
     }
-    // Validated only; a non-mapping is kept unvalidated by Python (exact).
+    // A non-mapping is kept unvalidated by Python (exact); its readers then
+    // fall back to `compact`, as the default here does.
     if let Some(Node::Map(policy)) = lookup(entries, "memory_policy") {
         validate_memory_policy(policy)?;
+        config.memory_policy = read_memory_policy(policy);
     }
     if let Some(u) = section(entries, "updates", "")? {
         config.updates = read_updates(u)?;
@@ -2291,6 +2372,7 @@ fn load_str(text: &str) -> Result<Config, ConfigError> {
     {
         config.time.relative_age = v.truthy();
     }
+    config.user_leaves = leaves;
     Ok(config)
 }
 
@@ -2709,7 +2791,21 @@ fn read_coordination(c: &[(Node, Node)]) -> Result<CoordinationConfig, ConfigErr
                 .unwrap_or(defaults.maintainer_per_recipient_per_hour),
             _ => defaults.maintainer_per_recipient_per_hour,
         },
+        maintainer_rp_id: maintainer_text(c, "rp_id"),
+        maintainer_origin: maintainer_text(c, "origin"),
     })
+}
+
+/// A `coordination.maintainer` string (`validate_maintainer` has refused
+/// any other type), "" when absent.
+fn maintainer_text(c: &[(Node, Node)], key: &str) -> String {
+    match lookup(c, "maintainer") {
+        Some(Node::Map(m)) => match lookup(m, key) {
+            Some(Node::Str(s)) => s.clone(),
+            _ => String::new(),
+        },
+        _ => String::new(),
+    }
 }
 
 /// `MaintainerConfig(**mapping)`: unknown or non-string keys are a
@@ -2797,6 +2893,24 @@ fn validate_memory_policy(p: &[(Node, Node)]) -> Result<(), ConfigError> {
         }
     }
     Ok(())
+}
+
+/// The fields of a validated `memory_policy` mapping.
+fn read_memory_policy(p: &[(Node, Node)]) -> MemoryPolicyConfig {
+    let mut out = MemoryPolicyConfig::default();
+    if let Some(Node::Str(v)) = lookup(p, "variant") {
+        out.variant = v.clone();
+    }
+    if let Some(Node::Seq(items)) = lookup(p, "ab_arms") {
+        out.ab_arms = items
+            .iter()
+            .filter_map(|n| match n {
+                Node::Str(s) => Some(s.clone()),
+                _ => None,
+            })
+            .collect();
+    }
+    out
 }
 
 /// `UpdatesConfig.__post_init__` (utils/config.py:1628-1633).
@@ -2994,7 +3108,11 @@ mod tests {
             "1: 2\n",
             "memory_policy:\n",
         ] {
-            assert_eq!(cfg(text), Config::default(), "{text:?}");
+            let loaded = Config {
+                user_leaves: JsonMap::new(),
+                ..cfg(text)
+            };
+            assert_eq!(loaded, Config::default(), "{text:?}");
         }
     }
 

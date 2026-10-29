@@ -1,0 +1,3 @@
+| Row | Phase | Behavior to preserve and Python source | Existing test pool and boundary | Status |
+|---|---:|---|---|---|
+| CURATION-RECOVERY | 4 | Slot duplicate retirement/undo transaction and fingerprint/audit reconciliation after uncertain commit; hydrate pending recovery under the service lock before ordinary operations; unknown durable state fails closed and prevents the affected lesson/world snapshot from overwriting uncertain durable state. `curation_safety.py`, `service.py` | `test_curation_safety.py` I/DB; rollback, uncertain commit, next-operation recovery, snapshot protection, third-state refusal and undo tests are Python oracle coverage; Rust runtime/restart evidence pending | deferred |

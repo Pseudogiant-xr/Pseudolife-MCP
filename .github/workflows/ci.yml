@@ -42,11 +42,15 @@
 # Ordinary pull requests (2026-10-21): a PR merges through
 # an integration batch (docs/dev/merge-batches.md), whose own PR from an
 # integrate/* branch runs every lane, so a push to any other PR branch runs
-# only the fast lanes: scope, guards, lock-resolve and frontend, unless it
-# changes CI or dependency inputs (workflows, pyproject.toml, a lock file,
-# the Rust toolchain pin), which run as before. The `test` job is skipped
-# there, which reports success to its required check. The nightly and
-# manual runs are unchanged.
+# only the fast lanes: scope, guards, lock-resolve and frontend. Since
+# 2026-10-29 that includes a PR changing CI or dependency inputs (workflows,
+# pyproject.toml, a lock file, the Rust toolchain pin): only batches spend
+# the heavy lanes (maintainer decision), and the batch runs the edited
+# workflow on a head containing the edit before it reaches master. The
+# `test` job is skipped there, which reports success to its required check.
+# A newer push to an ordinary PR cancels its older run; nothing else is
+# ever cancelled (see `concurrency`). The nightly and manual runs are
+# unchanged.
 #
 # Master pushes (2026-10-24): a batch merges with a merge commit whose tree
 # is its head's (ops/integrate.py merge refuses otherwise), so on a push of
@@ -79,24 +83,28 @@ permissions:
   contents: read
 
 concurrency:
-  # A merge group's ref is its own queue branch
-  # (refs/heads/gh-readonly-queue/master/...), one per queue entry, so it
-  # never shares a group with a pull request or a master push.
-  group: ci-${{ github.ref }}
-  # Only pull requests cancel superseded runs: the nightly shares master's
-  # group and must not cancel a master push run (or the reverse), and a
-  # merge-group run is the queue's verdict, never cancelled by concurrency.
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  # Only an ordinary pull request (any head branch but integrate/*) is ever
+  # cancelled: a newer push to it supersedes its older run, keyed by its
+  # refs/pull/N/merge ref. Every other run gets a group of its own (its run
+  # id), so nothing cancels it, running or pending: master pushes, the
+  # nightly, manual runs, merge groups (the queue's verdict) and integrate/*
+  # batch runs (maintainer, 2026-10-29). A shared group would not do, even
+  # without cancel-in-progress: a newer run in a group cancels a pending
+  # one. Actions' startsWith ignores case, so an Integrate/... branch is
+  # never cancelled although scope treats it as ordinary.
+  group: ${{ github.event_name == 'pull_request' && github.head_ref != '' && !startsWith(github.head_ref, 'integrate/') && format('ci-pr-{0}', github.ref) || format('ci-{0}-{1}', github.event_name, github.run_id) }}
+  cancel-in-progress: true
 
 jobs:
   scope:
     # Decides whether this run needs the Python suite lanes. A pull request
-    # from any branch but integrate/* that changes no CI or dependency input
-    # skips them (fast lanes only; its batch runs them). Otherwise only a pull request or merge group whose net
+    # from any branch but integrate/* skips them, whatever it changes (fast
+    # lanes only; its batch runs them). Otherwise only a pull request or merge group whose net
     # change is entirely under rust/, or is
     # .github/workflows/rust.yml, CHANGELOG.md or a changelog.d/ fragment,
     # skips them; an empty or unreadable diff runs everything. A pull
-    # request's change is its merge commit vs its base parent; a merge
+    # request's change is its merge commit vs its base parent (the base tip,
+    # so its own net change, never what a forward merge brought in); a merge
     # group's is master's current tip (fetched here) to the group head.
     # On a master push it also lists the jobs the merged batch passed on the
     # same tree (batch_passed, a JSON list of job names; empty or absent
@@ -150,16 +158,14 @@ jobs:
           fi
           printf '%s\n' "$files"
           # An ordinary pull request runs the fast lanes only (guards and the
-          # unscoped jobs): its full CI is its integration batch's
-          # (docs/dev/merge-batches.md). One that changes CI or dependency
-          # inputs (workflows, pyproject.toml, a lock file, the Rust
-          # toolchain pin) is classified as before, so a workflow edit
-          # cannot switch off its own check. rust.yml's scope uses the same
-          # pattern. A batch branch, or a head ref Actions did not supply, is
-          # classified as before too.
-          ci_inputs='^(\.github/workflows/|pyproject\.toml$|ops/requirements\.lock\.txt$|rust/rust-toolchain\.toml$)|(^|/)(Cargo\.lock|package-lock\.json)$'
+          # unscoped jobs), whatever it changes: its full CI is its
+          # integration batch's (docs/dev/merge-batches.md), which runs a
+          # workflow or dependency edit under the edited workflow before it
+          # reaches master (rust.yml's scope says why that suffices). A batch
+          # branch, or a head ref Actions did not supply, is classified by
+          # its diff.
           if [ "$EVENT_NAME" = pull_request ] && [ -n "$HEAD_REF" ] \
-             && [[ "$HEAD_REF" != integrate/* ]] && ! grep -qE "$ci_inputs" <<<"$files"; then
+             && [[ "$HEAD_REF" != integrate/* ]]; then
             echo "not an integrate/ batch branch: fast lanes only"
             echo "python=false" >> "$GITHUB_OUTPUT"; exit 0
           fi
@@ -541,6 +547,9 @@ jobs:
         #   handshake.
         # - test_credentials, test_coordination_credentials: the token files'
         #   Windows owner and explicit-ACL checks.
+        # - test_prune_worktrees, test_ops_install_worktree_retention: the
+        #   retention script's junction and reparse-point refusal, its
+        #   Win32_Process listing, and the weekly task's registration.
         # - test_repository_claims: file claims refuse Windows junctions and
         #   reserved names (CON, trailing dots and spaces).
         # - test_tunnel_*: the tunnel's DPAPI key storage, owner-only ACLs and
@@ -555,6 +564,10 @@ jobs:
         #   full installer and hook matrix runs nightly.
         # - test_schema_version, test_doctor_cli, test_tool_annotations (one
         #   test): schema pins and doctor, cheap and platform-sensitive.
+        # - test_runner_cleanup: the parity runners' disk cleanup treats a
+        #   directory junction as a link, which only Windows can make.
+        # - test_selfhosted_windows_scripts: the Windows parity runner's hook
+        #   refuses a job when the account's LAN block does not bind.
         env:
           PSEUDOLIFE_REQUIRE_TEST_POSTGRES: "1"
         run: >-
@@ -568,6 +581,10 @@ jobs:
           tests/test_credentials.py
           tests/test_coordination_credentials.py
           tests/test_repository_claims.py
+          tests/test_prune_worktrees.py
+          tests/test_ops_install_worktree_retention.py
+          tests/test_runner_cleanup.py
+          tests/test_selfhosted_windows_scripts.py
           tests/test_tunnel_profiles.py
           tests/test_tunnel_service.py
           tests/test_tunnel_cli.py
@@ -658,10 +675,11 @@ jobs:
         # cannot pass for coverage.
         # The test_tunnel_*.py files run the tunnel's owner-only files and
         # process handling on macOS; test_delegate_watch.py runs the
-        # watcher's `ps` start-time check there.
+        # watcher's `ps` start-time check there, and test_prune_worktrees.py
+        # the retention script's `ps` process listing.
         env:
           PSEUDOLIFE_SUITE_LOCK: "off"
-        run: python -m pytest tests/test_delegate_watch.py tests/test_wait_mail_cli.py tests/test_hooks_digest.py tests/test_stop_wake_hook.py tests/test_hook_glob_ranges.py tests/test_coordination_turn_digest.py tests/test_coordination_adapter.py tests/test_coordination_credentials.py tests/test_codex_doorbell.py tests/test_lease_cli.py tests/test_suite_lock.py tests/test_memory_changes_hook.py tests/test_client_install_ux.py tests/test_codex_hooks.py tests/test_subagent_board_guard.py tests/test_codex_hook_setup_edges.py tests/test_installer_legacy_hooks.py tests/test_plugin_packaging.py tests/test_embedded_pg.py tests/test_tunnel_bridge.py tests/test_tunnel_cli.py tests/test_tunnel_profiles.py tests/test_tunnel_runtime.py tests/test_tunnel_service.py -q -rs
+        run: python -m pytest tests/test_delegate_watch.py tests/test_wait_mail_cli.py tests/test_hooks_digest.py tests/test_stop_wake_hook.py tests/test_hook_glob_ranges.py tests/test_coordination_turn_digest.py tests/test_coordination_adapter.py tests/test_coordination_credentials.py tests/test_codex_doorbell.py tests/test_lease_cli.py tests/test_suite_lock.py tests/test_memory_changes_hook.py tests/test_client_install_ux.py tests/test_codex_hooks.py tests/test_subagent_board_guard.py tests/test_codex_hook_setup_edges.py tests/test_installer_legacy_hooks.py tests/test_plugin_packaging.py tests/test_embedded_pg.py tests/test_tunnel_bridge.py tests/test_tunnel_cli.py tests/test_tunnel_profiles.py tests/test_tunnel_runtime.py tests/test_tunnel_service.py tests/test_prune_worktrees.py -q -rs
 
   test-windows-nightly:
     # Not a merge gate, and never run for a pull request or merge group: the

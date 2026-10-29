@@ -123,6 +123,32 @@ impl WorldStore {
         s
     }
 
+    /// `compact_store` over the world cortex (`memory/compaction.py`):
+    /// purge old non-live records, rebuild the current index (the plain
+    /// comprehension) and mark the purged slots dirty. Returns the count.
+    pub(crate) fn compact(&mut self, keep: i64, min_age_days: f64, now: f64) -> usize {
+        let before = self.records.len();
+        let purged = crate::maintenance::compact_records(
+            &mut self.records,
+            |r| crate::maintenance::CompactRecord {
+                entity_norm: &r.key.0,
+                attribute_norm: &r.key.1,
+                status: &r.status,
+                superseded_at: r.superseded_at,
+                asserted_at: r.asserted_at,
+            },
+            keep,
+            min_age_days,
+            now,
+        );
+        let count = before - self.records.len();
+        if count > 0 {
+            self.reindex();
+            self.dirty_slots.extend(purged);
+        }
+        count
+    }
+
     /// `_current = {r.key: i for current records}`: the last wins.
     fn reindex(&mut self) {
         self.current = self

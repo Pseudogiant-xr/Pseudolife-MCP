@@ -1,0 +1,3 @@
+| Named divergence | Omitted surface | Reason / owner |
+|---|---|---|
+| `POST /api/config` over a config.yaml this daemon cannot rewrite exactly: a YAML timestamp or `!!binary` value, a mapping or list shared through an anchor and alias (a merge of a mapping of scalars is fine), an integer past 64 bits | PyYAML loads a `date`/`datetime`/`bytes`, one shared object (a patch through either path changes both; written back with `&id001`/`*id001`), or a big int, and writes each back in its own form | refused, 500 naming the reason, the file untouched | no shipped config holds one; a hand-written one is edited on the host |

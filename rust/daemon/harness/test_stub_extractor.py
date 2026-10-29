@@ -54,9 +54,7 @@ def harness(monkeypatch):
     monkeypatch.syspath_prepend(str(Path(__file__).resolve().parent))
     import pgdisposable as pg
     from rust.cli_harness.run_names import RunNames
-    monkeypatch.setattr(pg, "DISPOSABLE_NAME", pg.DISPOSABLE_NAME)
     h = importlib.import_module("w2e")
-    monkeypatch.setattr(pg, "DISPOSABLE_NAME", re.compile(r"pl_cf_w2e_[a-z0-9_]{1,40}"))
     monkeypatch.setattr(pg, "NAMES", RunNames())
     return h
 

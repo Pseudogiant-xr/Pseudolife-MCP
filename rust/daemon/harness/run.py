@@ -51,9 +51,11 @@ if __name__ == "__main__" and len(sys.argv) > 1 and sys.argv[1] == "embedding":
     raise SystemExit(embedding.main(sys.argv[2:]))
 import daemons  # noqa: E402
 import dbstate  # noqa: E402
-import pgdisposable as pg  # noqa: E402
+import pgdisposable  # noqa: E402
 from mcp_wire import send_while_reading  # noqa: E402
 
+# The launcher picks the slice (http for the static shards); w1a by default.
+pg = pgdisposable.Slice.from_env()
 GOLDENS = HERE / "goldens"
 HEADERS_COMPARED = ("content-type", "cache-control", "location", "content-security-policy",
                     "x-frame-options", "referrer-policy", "x-content-type-options", "x-pl-board")
@@ -1237,6 +1239,7 @@ CONFIG_PROFILES = {
     "dream from config": "memory:\n  dream:\n    enabled: true\n    extractor_source: config\n    extractor_base_url: http://x\n    extractor_model: m\n    extractor_model_override: o\n",
     "duplicate keys": "memory:\n  top_k: 3\n  top_k: 5\n",
     "anchors and merge": "base: &b {top_k: 4}\nmemory:\n  <<: *b\n  hide_superseded: true\n",
+    "memory policy": "memory_policy:\n  variant: full_separate_hook\n  ab_arms: [none, compact, compact]\n",
 }
 
 
@@ -1278,7 +1281,8 @@ print(json.dumps({
  "memory.dream.enabled": d.enabled, "memory.dream.extractor_source": d.extractor_source,
  "memory.dream.extractor_base_url": d.extractor_base_url, "memory.dream.extractor_model": d.extractor_model,
  "memory.dream.fallback_base_url": d.fallback_base_url, "memory.dream.fallback_model": d.fallback_model,
- "memory.dream.extractor_model_override": d.extractor_model_override}))
+ "memory.dream.extractor_model_override": d.extractor_model_override,
+ "memory_policy.variant": c.memory_policy.variant, "memory_policy.ab_arms": list(c.memory_policy.ab_arms)}))
 '''
     env = daemons.base_env(home, {})
     r = subprocess.run([sys.executable, "-c", code, str(home / "data")], env=dict(env, PYTHONPATH=str(REPO)),

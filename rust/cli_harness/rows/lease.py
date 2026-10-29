@@ -359,6 +359,21 @@ def cases():
             add(f"check-suite-{state}-{slot}" + ("-json" if flag else ""),
                 ["check", "full-suite", *flag], setup=_suite(state, slot))
     add("check-suite-elsewhere", ["check", "full-suite@box", "--json"], setup=_suite("held"))
+    # `lease hold full-suite` takes the lease's own lock (lease-full-suite.lock)
+    # in the lease lock directory, which here differs from the suite's; check
+    # reads either as held (a reproduction loop reserving the machine).
+    for where in ("locks", "suite"):
+        def reserved(arm, where=where):
+            from pseudolife_memory.os_lock import lock_file_name
+            _suite("free")(arm)
+            if where == "locks":
+                _local("held", name="full-suite")(arm)
+            else:
+                holder = _Holder(arm.home / "suite" / lock_file_name("full-suite"))
+                assert holder.line() == "HELD"
+                arm.daemon.locals.append(holder)
+        add(f"check-suite-reserved-in-{where}", ["check", "full-suite", "--json"],
+            setup=reserved, golden=False)
     # lease_cli.py:1391 copies these holder fields after json.loads.
     for suffix, value in (("text", "not a number"), ("numeric", "123")):
         def private_holder(arm, value=value):

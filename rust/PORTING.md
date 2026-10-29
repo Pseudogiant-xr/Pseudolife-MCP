@@ -175,8 +175,8 @@ coverage awaits a compiled candidate; historical `health-redirect` still
 contains the extra field and remains a mismatch under this comparator.
 
 Tests decide where implementation and documentation disagree. Where tests are
-silent, record the Python behaviour and the coverage gap in `PARITY.md` before
-porting it. Existing tests remain unchanged. The maintainer selected an external
+silent, record the Python behaviour and the coverage gap in the parity register
+(`parity/`, one file per row; `PARITY.md` explains the layout) before porting it. Existing tests remain unchanged. The maintainer selected an external
 pytest plugin on 2026-10-03 to route eligible process-boundary assertions to the
 candidate executable; direct calls into Python internals remain oracle tests.
 
@@ -374,7 +374,7 @@ that oracle pin. This preparation does not promote historical receipts.
 The adapter writes UTF-8 digest text with an ASCII decimal watermark, an
 ASCII ring decision/reason and decimal `.seen` content. The command's public
 argv, environment and explicitly selected digest path are user inputs.
-The declared producer substitutions in [PARITY](PARITY.md#wait-mail-producer-substitutions)
+The declared producer substitutions in [PARITY](parity/wait-mail-producer-substitutions/)
 narrow marker and numeric grammar, help wrapping and stdout failure behavior;
 opaque identity/path bytes and every field outside those declarations stay exact.
 This local-file mode makes no HTTP requests, so it has no
@@ -1026,7 +1026,7 @@ is marked ported. Date/TZ/UTF-8/JSON and traceback scope above remains in force.
 The new branch prepares native hold and the full action parser/help surface
 against the pending Phase 2d base. Hold follows an external PID without
 signalling it; its asynchronous mirror preserves local ownership under the
-named [hold-mirror-best-effort rule](PARITY.md#phase-4-lease-hold-preparation).
+named [hold-mirror-best-effort rule](parity/phase-4-lease-hold-preparation/).
 The historical hold checkpoint retained break/delegate/designate exit-1
 deferrals. Subsequent operator preparation supersedes those implementation
 deferrals; acceptance of all four actions remains deferred.
@@ -1089,7 +1089,7 @@ retain their original runtime identities.
 
 ## Offline break source preparation
 
-The [break preparation](PARITY.md#phase-4-offline-break-source-preparation) adds
+The [break preparation](parity/phase-4-offline-break-source/) adds
 external-DSN transactions and the existing container-host deployment transport.
 The shared client's reviewed TLS policy is unchanged. The embedded lifecycle
 has the named `phase4-embedded-pg-deferred` refusal, and generic failures use
@@ -1107,8 +1107,8 @@ on an owned disposable bank, whose missing-row result creates no audit/time
 fields. Subsequent mutations require the identical clock seam in both arms,
 all-row/byte comparison and rejecting controls. Delegate/designate were then
 unimplemented; subsequent implementation
-and scoped execution are recorded in [PARITY](PARITY.md#phase-4-delegate-source-preparation).
-The [operator closure](PARITY.md#cli-lease-operator-closure-2026-10-10) since
+and scoped execution are recorded in [PARITY](parity/phase-4-delegate-source/).
+The [operator closure](parity/cli-lease-operator-closure-2026/) since
 accepts full mode with server-side COMMIT-abort rollback controls, and
 declares container cancellation and transport loss around COMMIT as unexercised;
 prior transport measurements retain their original runtime identities.

@@ -44,6 +44,9 @@ chrono.workspace = true
 sha2.workspace = true
 hmac.workspace = true
 base64 = "=0.22.1"
+# The maintainer passkey verifier's ES256, EdDSA and RS256 checks: the
+# version and features rustls already builds, so nothing new is resolved.
+aws-lc-rs = { version = "=1.18.1", default-features = false, features = ["aws-lc-sys", "prebuilt-nasm"] }
 getrandom = "=0.3.4"
 percent-encoding.workspace = true
 regex.workspace = true

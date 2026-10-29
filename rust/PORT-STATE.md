@@ -403,7 +403,7 @@ ASCII byte stripping and empty-to-zero reads; digest/ring LF framing remains
 exact. Other substitutions include finite ASCII numeric options,
 positive ASCII terminal dimensions with invalid input falling back to 80,
 simple help wrapping, direct stdout failure exit 2 and a native temporary-file
-collision budget. [PARITY](PARITY.md#wait-mail-producer-substitutions) records
+collision budget. [PARITY](parity/wait-mail-producer-substitutions/) records
 each deliberate substitution. The approved 4,301-digit assertion and exact Rust
 and Python legacy-test exception patches have been applied. The shared checker
 binds 19 changed corpus cases to explicit candidate contracts while retaining
@@ -732,7 +732,7 @@ and the remaining full-mode gates; `briefing` and `prompt-hook` remain deferred.
 ## Doorbell prompt receipt candidate
 
 The doorbell candidate's source now uses the four approved producer domains
-listed in [PARITY.md](PARITY.md#doorbell-producer-domains-2026-10-07).
+listed in [PARITY.md](parity/doorbell-producer-domains-2026/).
 Preparation removes the cloned CPython value/parser model and retains private
 files, locking, atomic replacement and the production rollback allowlist.
 Earlier source-bound Windows native checks and one positive receipt cell pass.
@@ -2336,7 +2336,7 @@ measurements.
 The new branch prepares native hold and the full action parser/help surface
 against the pending Phase 2d base. Hold follows an external PID without
 signalling it; its asynchronous mirror preserves local ownership under the
-named [hold-mirror-best-effort rule](PARITY.md#phase-4-lease-hold-preparation).
+named [hold-mirror-best-effort rule](parity/phase-4-lease-hold-preparation/).
 The historical hold checkpoint retained break/delegate/designate exit-1
 deferrals. Subsequent operator preparation supersedes those implementation
 deferrals; acceptance of all four actions remains deferred.
@@ -2351,12 +2351,12 @@ Accepted master `59a8624eecd336686acac3846b75334e643b94d6` is merged ordinarily
 into the hold/shared-PG branch. External-DSN break and retained container-host
 transport are prepared in source; reviewed PG admission/TLS and hold ownership
 remain unchanged. The named `phase4-embedded-pg-deferred` refusal and
-`native-pg-diagnostics` are described in [PARITY](PARITY.md#phase-4-offline-break-source-preparation).
+`native-pg-diagnostics` are described in [PARITY](parity/phase-4-offline-break-source/).
 At this historical checkpoint, whole-command streams, SQL rows, audit chains,
 rollback, container cancellation and identical-clock replay were unrun. No runtime
 image or acceptance receipt was claimed; the earlier PG and Phase 2d proofs remain historical.
 At this historical break checkpoint, delegate/designate implementation remained
 deferred. Their source is now prepared as described in
-[PARITY](PARITY.md#phase-4-delegate-source-preparation); hold, break, delegate and
+[PARITY](parity/phase-4-delegate-source/); hold, break, delegate and
 the designate alias are implemented, while all lease mode acceptance remains
 deferred.

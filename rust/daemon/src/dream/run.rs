@@ -151,7 +151,7 @@ pub struct StallTracker {
 const OVERDUE_SWEEPS: f64 = 3.0;
 
 /// `_STALL_REMEDIES` (`memory/dream.py:2313-2320`).
-fn stall_remedy(reason: &str) -> &'static str {
+pub(crate) fn stall_remedy(reason: &str) -> &'static str {
     match reason {
         "login_expired" => {
             "the extractor CLI is signed out on the machine running the CLI shim; sign it in there: run `claude`, then `/login` (or `codex login`)"
@@ -167,7 +167,7 @@ fn stall_remedy(reason: &str) -> &'static str {
 }
 
 /// `_stall_reason`: a known reason, else `extractor_error`.
-fn stall_reason(record: &Map<String, Value>) -> String {
+pub(crate) fn stall_reason(record: &Map<String, Value>) -> String {
     let reason = match record.get("reason") {
         Some(Value::String(s)) => s.clone(),
         _ => String::new(),
