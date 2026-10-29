@@ -1967,14 +1967,16 @@ fn fallback_extractor(cfg: &DreamConfig, r: &Endpoints, key: Option<String>) -> 
     )))
 }
 
-/// `build_extractor_with_fallback` (`memory/dream.py:2207-2247`): the
-/// extractor and which endpoint it is (`primary` / `fallback`). `Err` is
-/// the ValueError for mode `fallback` with no fallback endpoint.
+/// `build_extractor_with_fallback` (`memory/dream.py`): the extractor,
+/// which endpoint it is (`primary` / `fallback`) and, in auto mode, the
+/// failed primary probe. A fallback whose host does not resolve is never
+/// dialled. `Err` is the ValueError for mode `fallback` with no fallback
+/// endpoint.
 pub async fn build_extractor_with_fallback_using(
     cfg: &DreamConfig,
     env: &(dyn Fn(&str) -> Option<String> + Sync),
     retry_delay: f64,
-) -> Result<(Extractor, &'static str), String> {
+) -> Result<Built, String> {
     let r = resolve_endpoints_with(cfg, env);
     let fallback_key = if crate::mutants::active("mcp-dream-extractor-shared-key") {
         env("PSEUDOLIFE_DREAM_API_KEY")
@@ -1993,27 +1995,77 @@ pub async fn build_extractor_with_fallback_using(
                     .into(),
             );
         }
-        return Ok((fallback_extractor(cfg, &r, fallback_key), "fallback"));
+        return Ok((fallback_extractor(cfg, &r, fallback_key), "fallback", None));
     }
     if !r.has_fallback() || r.mode == "primary" {
-        return Ok((build_extractor_with(cfg, env), "primary"));
+        return Ok((build_extractor_with(cfg, env), "primary", None));
     }
-    if let Some(url) = r.primary_url.as_deref().filter(|u| !u.is_empty())
-        && probe_primary(url, retry_delay).await
-    {
-        return Ok((build_extractor_with(cfg, env), "primary"));
+    let cause = match r.primary_url.as_deref().filter(|u| !u.is_empty()) {
+        Some(url) => probe_primary(url, retry_delay).await,
+        None => Some(("extractor_error", "no primary endpoint".to_string())),
+    };
+    let Some((reason, error)) = cause else {
+        return Ok((build_extractor_with(cfg, env), "primary", None));
+    };
+    let fallback_url = r.fallback_url.as_deref().unwrap_or("");
+    let probe = PrimaryProbe {
+        reason: reason.to_string(),
+        error,
+        fallback_resolves: url_resolves(fallback_url).await,
+    };
+    if !probe.fallback_resolves && r.has_primary() {
+        // A fallback that cannot resolve is a misconfiguration, not a
+        // transient fault: never dialled; the dream runs on the primary.
+        // Only with a usable primary: the no-op extractor's empty
+        // extraction would acknowledge the backlog.
+        static WARNED: std::sync::OnceLock<Mutex<std::collections::HashSet<String>>> =
+            std::sync::OnceLock::new();
+        let first = WARNED
+            .get_or_init(|| Mutex::new(std::collections::HashSet::new()))
+            .lock()
+            .expect("fallback warned")
+            .insert(fallback_url.to_string());
+        if first {
+            eprintln!(
+                "dream primary extractor {} failed its probe ({}) and {}; dreams run on the primary",
+                redact_url(r.primary_url.as_deref().unwrap_or("None")),
+                probe.error,
+                FALLBACK_UNRESOLVED.replacen(
+                    "the dream fallback",
+                    &format!("the fallback {}", redact_url(fallback_url)),
+                    1
+                )
+            );
+        }
+        return Ok((build_extractor_with(cfg, env), "primary", Some(probe)));
     }
     eprintln!(
         "dream primary extractor {} unreachable — using fallback {}",
         redact_url(r.primary_url.as_deref().unwrap_or("None")),
         redact_url(r.fallback_url.as_deref().unwrap_or("None"))
     );
-    Ok((fallback_extractor(cfg, &r, fallback_key), "fallback"))
+    Ok((
+        fallback_extractor(cfg, &r, fallback_key),
+        "fallback",
+        Some(probe),
+    ))
 }
 
-pub async fn build_extractor_with_fallback(
-    cfg: &DreamConfig,
-) -> Result<(Extractor, &'static str), String> {
+/// The auto-mode builder's failed primary probe (Python's
+/// `extractor.primary_probe`): the dream-stall record names the primary's
+/// own cause from it, not only the fallback's.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PrimaryProbe {
+    pub reason: String,
+    pub error: String,
+    pub fallback_resolves: bool,
+}
+
+/// The extractor, which endpoint it is, and the failed primary probe that
+/// chose it (auto mode only).
+pub type Built = (Extractor, &'static str, Option<PrimaryProbe>);
+
+pub async fn build_extractor_with_fallback(cfg: &DreamConfig) -> Result<Built, String> {
     build_extractor_with_fallback_using(cfg, &process_env, PROBE_RETRY_DELAY).await
 }
 
@@ -2023,46 +2075,214 @@ pub async fn build_extractor_with_fallback(
 
 /// A plain `urllib.request.urlopen` GET: redirects followed. A URL with
 /// userinfo fails as urllib fails it, without connecting.
-async fn get(url: &str, timeout: f64) -> Result<(u16, Vec<u8>), ()> {
-    let timeout = Duration::try_from_secs_f64(timeout).map_err(|_| ())?;
-    if userinfo_refusal(url).is_some() {
-        return Err(());
+async fn get(url: &str, timeout: f64) -> Result<(u16, Vec<u8>), Raised> {
+    let timeout = Duration::try_from_secs_f64(timeout)
+        .map_err(|_| Raised::other("ValueError", "invalid timeout"))?;
+    if let Some(refused) = userinfo_refusal(url) {
+        return Err(refused);
     }
-    let client = http_client(timeout, true).map_err(|_| ())?;
-    let resp = client.get(url).send().await.map_err(|_| ())?;
+    let client = http_client(timeout, true)?;
+    let resp = client
+        .get(url)
+        .send()
+        .await
+        .map_err(|e| transport_failure(&e, Phase::Send))?;
     let status = resp.status().as_u16();
-    let body = resp.bytes().await.map_err(|_| ())?;
+    let body = resp
+        .bytes()
+        .await
+        .map_err(|e| transport_failure(&e, Phase::Body))?;
     Ok((status, body.to_vec()))
 }
 
-/// `probe_endpoint` (`memory/dream.py:2056-2076`): `GET {root}/health`
-/// (any trailing `/v1` stripped); a 404 there retries `GET {base}/models`.
-/// Only HTTP 200 counts.
+/// `probe_endpoint` (`memory/dream.py`): [`probe_endpoint_cause`] is
+/// `None`. Only HTTP 200 counts.
 pub async fn probe_endpoint(base_url: &str, timeout: f64) -> bool {
-    let base = base_url.trim_end_matches('/');
-    let root = base.strip_suffix("/v1").unwrap_or(base);
-    for (i, url) in [format!("{root}/health"), format!("{base}/models")]
-        .iter()
-        .enumerate()
-    {
-        match get(url, timeout).await {
-            Ok((status, _)) if (200..300).contains(&status) => return status == 200,
-            Ok((404, _)) if i == 0 => continue,
-            _ => return false,
-        }
-    }
-    false
+    probe_endpoint_cause(base_url, timeout).await.is_none()
 }
 
-/// `_probe_primary` (`memory/dream.py:2169-2178`): one retry after the delay.
-pub async fn probe_primary(url: &str, delay: f64) -> bool {
-    if probe_endpoint(url, 3.0).await {
-        return true;
+/// `_HEALTH_STATUS_RE` (`memory/dream.py`): the `/health` status token a
+/// probe may quote.
+fn health_status_token(token: &str) -> bool {
+    let mut chars = token.chars();
+    chars.next().is_some_and(|c| c.is_ascii_lowercase())
+        && token.len() <= 32
+        && chars.all(|c| c.is_ascii_lowercase() || c == '_')
+}
+
+/// `_probe_answer_cause` (`memory/dream.py`): `login_expired` for 401/403
+/// or a shim's `"status": "login_required"`, else `extractor_error`; the
+/// error names the path, the HTTP status and a status token of the fixed
+/// shape, read from the first `_AUTH_BODY_PEEK` bytes of the answer.
+fn probe_answer_cause(path: &str, code: u16, body: &[u8]) -> (&'static str, String) {
+    let peek = &body[..body.len().min(4096)];
+    let status = crate::mcp::py_loads::loads(&String::from_utf8_lossy(peek))
+        .and_then(|v| v.as_object()?.get("status")?.as_str().map(String::from))
+        .filter(|s| health_status_token(s));
+    let error = match &status {
+        Some(s) => format!("{path} HTTP {code} ({s})"),
+        None => format!("{path} HTTP {code}"),
+    };
+    let login = matches!(code, 401 | 403) || status.as_deref() == Some("login_required");
+    (
+        if login {
+            "login_expired"
+        } else {
+            "extractor_error"
+        },
+        error,
+    )
+}
+
+/// `probe_endpoint_cause` (`memory/dream.py`): `None` when the endpoint is
+/// alive, else `(reason, error)` in the dream-stall vocabulary.
+/// `GET {root}/health` (any trailing `/v1` stripped); a 404 there retries
+/// `GET {base}/models`. Only HTTP 200 counts.
+pub async fn probe_endpoint_cause(base_url: &str, timeout: f64) -> Option<(&'static str, String)> {
+    let base = base_url.trim_end_matches('/');
+    let root = base.strip_suffix("/v1").unwrap_or(base);
+    for (path, url) in [
+        ("/health", format!("{root}/health")),
+        ("/models", format!("{base}/models")),
+    ] {
+        match get(&url, timeout).await {
+            Ok((200, _)) => return None,
+            Ok((status, _)) if (200..300).contains(&status) => {
+                return Some(("extractor_error", format!("{path} HTTP {status}")));
+            }
+            Ok((404, _)) if path == "/health" => continue,
+            Ok((status, body)) => return Some(probe_answer_cause(path, status, &body)),
+            Err(raised) => return Some(raised.label("probe", false).classify()),
+        }
     }
+    Some(("extractor_error", "no answer".into()))
+}
+
+/// `_probe_primary` (`memory/dream.py`): the primary's probe cause
+/// (`None`: healthy), with one retry after the delay.
+pub async fn probe_primary(url: &str, delay: f64) -> Option<(&'static str, String)> {
+    probe_endpoint_cause(url, 3.0).await?;
     if let Ok(d) = Duration::try_from_secs_f64(delay) {
         tokio::time::sleep(d).await;
     }
-    probe_endpoint(url, 3.0).await
+    probe_endpoint_cause(url, 3.0).await
+}
+
+/// `FALLBACK_UNRESOLVED` (`memory/dream.py`).
+pub const FALLBACK_UNRESOLVED: &str = "the dream fallback does not resolve from the daemon, \
+     so it is never used and dreams fail whenever the primary is down: remove the fallback \
+     (PSEUDOLIFE_DREAM_FALLBACK_BASE_URL/_MODEL, or the Console's Extractor panel) or start \
+     the extractor it names";
+
+/// `_RESOLVES_TTL` (`memory/dream.py`).
+const RESOLVES_TTL: f64 = 60.0;
+
+type ResolvesCache = Mutex<HashMap<String, (bool, Instant)>>;
+
+fn resolves_cache() -> &'static ResolvesCache {
+    static CACHE: std::sync::OnceLock<ResolvesCache> = std::sync::OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// `_url_resolves` (`memory/dream.py`): whether the URL's host resolves,
+/// cached per host for a minute; any lookup failure counts as not
+/// resolving, a URL with no host as resolving.
+pub async fn url_resolves(url: &str) -> bool {
+    let Some(host) = url_host(url) else {
+        return true;
+    };
+    if proxied(url, &process_env) {
+        return true;
+    }
+    if let Some((ok, at)) = resolves_cache().lock().expect("resolves cache").get(&host)
+        && at.elapsed().as_secs_f64() < RESOLVES_TTL
+    {
+        return *ok;
+    }
+    let started = Instant::now();
+    let ok = match tokio::net::lookup_host((host.as_str(), 0)).await {
+        Ok(_) => true,
+        Err(e) => !definitely_not_found(&e),
+    };
+    resolves_cache()
+        .lock()
+        .expect("resolves cache")
+        .insert(host, (ok, started));
+    ok
+}
+
+/// `_host_resolves`' definitive not-found (`memory/dream.py`):
+/// `EAI_NONAME` / `EAI_NODATA`. Windows reports them as WSA codes
+/// (`WSAHOST_NOT_FOUND`, `WSANO_DATA`); Unix std reports
+/// `gai_strerror`'s text (glibc, musl, macOS wordings). Anything else is a
+/// temporary failure that cannot be judged.
+fn definitely_not_found(e: &std::io::Error) -> bool {
+    if cfg!(windows) && matches!(e.raw_os_error(), Some(11001 | 11004)) {
+        return true;
+    }
+    let text = e.to_string();
+    [
+        "Name or service not known",
+        "No address associated with hostname",
+        "Name does not resolve",
+        "nodename nor servname provided",
+    ]
+    .iter()
+    .any(|w| text.contains(w))
+}
+
+/// `_url_host` (`memory/dream.py`): the host this daemon's transport
+/// dials, so the check never judges a name the transport would not look
+/// up. Python's is `urlsplit().hostname`, the host urllib connects to;
+/// here it is reqwest's parsed host (percent-decoded, IDNA-mapped), with
+/// IPv6 brackets dropped. The two differ only where the transports do
+/// (`http:///v1`, a percent-encoded or out-of-range-port URL).
+fn url_host(url: &str) -> Option<String> {
+    let parsed = reqwest::Url::parse(url).ok()?;
+    let host = parsed
+        .host_str()?
+        .trim_start_matches('[')
+        .trim_end_matches(']');
+    Some(host.to_lowercase()).filter(|h| !h.is_empty())
+}
+
+/// `_proxied` (`memory/dream.py`): a `<scheme>_proxy` or `all_proxy`
+/// variable, either case, non-empty.
+fn proxied(url: &str, env: &dyn Fn(&str) -> Option<String>) -> bool {
+    let scheme = url.split_once("://").map(|(s, _)| s.to_lowercase());
+    let mut names = Vec::new();
+    if let Some(s) = scheme.filter(|s| !s.is_empty()) {
+        names.push(format!("{s}_proxy"));
+    }
+    names.push("all_proxy".into());
+    let set = |n: &str| env(n).is_some_and(|v| !v.is_empty());
+    names.iter().any(|n| set(n) || set(&n.to_uppercase()))
+}
+
+/// `FALLBACK_UNRESOLVED_DIALLED` (`memory/dream.py`).
+pub const FALLBACK_UNRESOLVED_DIALLED: &str = "the dream fallback does not resolve from the \
+     daemon and dreams are sent to it, so they fail: start the extractor it names, or point \
+     the fallback (PSEUDOLIFE_DREAM_FALLBACK_BASE_URL/_MODEL, or the Console's Extractor panel) \
+     at one that runs";
+
+/// `fallback_warning` (`memory/dream.py`): the text for a configured
+/// fallback that does not resolve, by what the mode does with it.
+pub async fn fallback_warning(r: &Endpoints) -> Option<&'static str> {
+    if !r.has_fallback() || r.mode == "primary" {
+        return None;
+    }
+    if url_resolves(r.fallback_url.as_deref().unwrap_or("")).await {
+        return None;
+    }
+    Some(fallback_warning_text(&r.mode, r.has_primary()))
+}
+
+fn fallback_warning_text(mode: &str, primary_usable: bool) -> &'static str {
+    if mode == "auto" && primary_usable {
+        FALLBACK_UNRESOLVED
+    } else {
+        FALLBACK_UNRESOLVED_DIALLED
+    }
 }
 
 type ServedCache = Mutex<HashMap<String, (Option<String>, Instant)>>;
@@ -2142,6 +2362,7 @@ pub async fn status_extractor_fields(
             None
         }),
     );
+    m.insert("fallback_warning".into(), json!(fallback_warning(&r).await));
     m.insert("extractor_source".into(), json!(cfg.extractor_source));
     m.insert("model_override".into(), json!(cfg.extractor_model_override));
     m.insert(
@@ -2738,11 +2959,11 @@ mod tests {
             let want = &case["built"];
             match built {
                 Err(e) => assert_eq!(json!(e), want["error"], "{name}"),
-                Ok((Extractor::NoOp, which)) => {
+                Ok((Extractor::NoOp, which, _)) => {
                     assert_eq!(want["kind"], "noop", "{name}");
                     assert_eq!(json!(which), want["which"], "{name}");
                 }
-                Ok((Extractor::Compat(c), which)) => {
+                Ok((Extractor::Compat(c), which, _)) => {
                     assert_eq!(want["kind"], "compat", "{name}");
                     assert_eq!(json!(which), want["which"], "{name}");
                     assert_eq!(json!(c.base_url), want["base_url"], "{name}");
@@ -2757,6 +2978,94 @@ mod tests {
                     );
                 }
             }
+        }
+    }
+
+    /// `_probe_answer_cause` (`tests/test_extractor_fallback.py`'s probe
+    /// cases): only a status token of the fixed shape is quoted, and only
+    /// 401/403 or `login_required` reads as a sign-in failure.
+    #[test]
+    fn probe_answer_cause_matches_python() {
+        let signed_out = br#"{"status": "login_required", "detail": "OAuth session expired"}"#;
+        assert_eq!(
+            probe_answer_cause("/health", 503, signed_out),
+            ("login_expired", "/health HTTP 503 (login_required)".into())
+        );
+        let other = br#"{"status": "cli_error", "detail": "/home/someone/secret"}"#;
+        assert_eq!(
+            probe_answer_cause("/health", 503, other),
+            ("extractor_error", "/health HTTP 503 (cli_error)".into())
+        );
+        for body in [
+            &br#"{"status": "Bearer abc.def", "detail": "x"}"#[..],
+            b"not json at all",
+            br#"{"detail": "OAuth session expired"}"#,
+        ] {
+            assert_eq!(
+                probe_answer_cause("/health", 503, body),
+                ("extractor_error", "/health HTTP 503".into())
+            );
+        }
+        assert_eq!(
+            probe_answer_cause("/models", 401, b"{}"),
+            ("login_expired", "/models HTTP 401".into())
+        );
+        assert!(health_status_token("login_required"));
+        assert_eq!(
+            probe_answer_cause("/health", 503, &[b'x'; 5000]).1,
+            "/health HTTP 503"
+        );
+        assert!(!health_status_token("_x"));
+        assert!(!health_status_token(""));
+        assert!(!health_status_token(&"a".repeat(33)));
+        assert!(health_status_token(&"a".repeat(32)));
+    }
+
+    /// `_url_host`, `_proxied` and the warning wording
+    /// (`tests/test_extractor_fallback.py`'s review-fix cases).
+    #[test]
+    fn fallback_resolution_helpers_match_python() {
+        for (url, host) in [
+            (
+                "http://pseudolife-extractor:8081/v1",
+                Some("pseudolife-extractor"),
+            ),
+            ("http://User:Pass@Host.Example:1/v1", Some("host.example")),
+            ("http://[::1]:8/v1", Some("::1")),
+            // Codex review of ef2c6389: the transport decodes this host
+            // and reaches it, so the check must judge the decoded name.
+            ("http://127%2e0%2e0%2e1:8081/v1", Some("127.0.0.1")),
+            // Where reqwest's parse differs from urlsplit, the check
+            // follows the transport that will dial it.
+            ("http:///v1", Some("v1")),
+            ("http://h:99999/v1", None),
+            ("pseudolife-extractor:8081", None),
+        ] {
+            assert_eq!(url_host(url).as_deref(), host, "{url}");
+        }
+        let env_with = |var: &'static str| {
+            move |n: &str| (n == var).then(|| "http://proxy.example:3128".to_string())
+        };
+        for var in ["HTTP_PROXY", "http_proxy", "ALL_PROXY"] {
+            assert!(proxied("http://f:1/v1", &env_with(var)), "{var}");
+        }
+        assert!(!proxied("http://f:1/v1", &env_with("HTTPS_PROXY")));
+        assert!(!proxied("http://f:1/v1", &|_: &str| Some(String::new())));
+        assert_eq!(fallback_warning_text("auto", true), FALLBACK_UNRESOLVED);
+        assert_eq!(
+            fallback_warning_text("auto", false),
+            FALLBACK_UNRESOLVED_DIALLED
+        );
+        assert_eq!(
+            fallback_warning_text("fallback", true),
+            FALLBACK_UNRESOLVED_DIALLED
+        );
+        let refused = std::io::Error::from(std::io::ErrorKind::ConnectionRefused);
+        assert!(!definitely_not_found(&refused));
+        if cfg!(windows) {
+            assert!(definitely_not_found(&std::io::Error::from_raw_os_error(
+                11001
+            )));
         }
     }
 
