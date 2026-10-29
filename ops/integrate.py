@@ -233,9 +233,12 @@ FAILED = {"FAILURE", "TIMED_OUT", "ACTION_REQUIRED", "STARTUP_FAILURE", "ERROR"}
 CANCELLED = "CANCELLED"
 # GitHub reports a job that ran past its timeout-minutes as CANCELLED, not
 # TIMED_OUT, and the runner annotates it with this message (jobs
-# 116301727515 and 116323387861, 2026-10-15). Such a head likely hangs, so it
-# stays a known failure.
-TIMEOUT_ANNOTATION = "The job has exceeded the maximum execution time"
+# 116301727515 and 116323387861, 2026-10-15: "The job has exceeded the
+# maximum execution time of 25m0s"; runners in 2023-24 wrote "The job
+# running on runner <name> has exceeded ..."). Such a head likely hangs, so
+# it stays a known failure.
+TIMEOUT_ANNOTATION = re.compile(
+    r"The job (running on runner .+ )?has exceeded the maximum execution time")
 _ACTIONS_JOB = re.compile(r"/actions/runs/\d+/job/(\d+)$")
 
 
@@ -245,38 +248,50 @@ def _check_state(check: dict) -> str:
 
 
 def _checks(rollup: list[dict] | None) -> str:
-    """One word for a head's CI: green, pending, cancelled, failing or none.
-    Only `failing` keeps a member out of a batch."""
+    """One word for a head's CI: green, pending, cancelled, unverified,
+    failing or none. `failing` and `unverified` keep a member out of a batch.
+
+    A cancelled Actions job that is the latest attempt of its check is read
+    for the runner's timeout annotation: a timeout is `failing`, and
+    annotations that cannot be read leave the head `unverified` (retry)."""
     if not rollup:
         return "none"
-    pending = cancelled = False
+    if any(_check_state(check) in FAILED for check in rollup):
+        return "failing"
+    latest = {id(check) for check in _latest_checks(rollup)}
+    pending = cancelled = unverified = False
     for check in rollup:
-        state = _check_state(check)
-        if state in FAILED:
-            return "failing"
-        if state == CANCELLED:
-            if _timed_out(check):
+        if _check_state(check) == CANCELLED:
+            if id(check) not in latest:
+                continue                    # an attempt a rerun replaced
+            timed_out = _timed_out(check)
+            if timed_out:
                 return "failing"
             cancelled = True
+            unverified = unverified or timed_out is None
         elif _unfinished(check):
             pending = True
-    return "pending" if pending else "cancelled" if cancelled else "green"
+    return ("unverified" if unverified else "pending" if pending
+            else "cancelled" if cancelled else "green")
 
 
-def _timed_out(check: dict) -> bool:
-    """Whether a cancelled Actions job ran past its timeout-minutes: the
-    runner's annotation, read by the job's id (its check-run id). Annotations
-    that cannot be read count as a timeout; a check that is no Actions job
-    has none to read."""
+def _timed_out(check: dict) -> bool | None:
+    """Whether a cancelled Actions job ran past its timeout-minutes, from the
+    runner's annotation read by the job's id (its check-run id); None when
+    the annotations cannot be read. A check that is no Actions job has none
+    to read."""
     job = _ACTIONS_JOB.search(check.get("detailsUrl") or "")
     if not job:
         return False
     try:
+        # Every page (a job's own annotations can come first), one JSON
+        # string per message so a multi-line message is matched whole.
         out = gh("api", f"repos/{{owner}}/{{repo}}/check-runs/{job.group(1)}/annotations",
-                 "--jq", ".[].message")
-    except Refusal:
-        return True
-    return any(line.startswith(TIMEOUT_ANNOTATION) for line in out.splitlines())
+                 "--paginate", "--jq", ".[].message | @json")
+        messages = [json.loads(line) for line in out.splitlines() if line.strip()]
+    except (Refusal, ValueError):
+        return None
+    return any(isinstance(m, str) and TIMEOUT_ANNOTATION.match(m) for m in messages)
 
 
 def _unfinished(check: dict) -> bool:
@@ -414,6 +429,9 @@ def _not_ready(m: Member) -> str | None:
     if m.checks == "failing":
         return ("CI on its head is failing; it joins a batch once a rerun of "
                 "the failed job passes or a push replaces that head")
+    if m.checks == "unverified":
+        return ("a cancelled job's annotations could not be read, so a timeout "
+                "is not ruled out; rerun `build` once `gh api` answers again")
     return None
 
 
@@ -976,7 +994,15 @@ def _refuse_red_members(plan: Plan) -> None:
     for m in plan.merged:
         view = json.loads(gh("pr", "view", str(m.number), "--json",
                              "headRefOid,statusCheckRollup"))
-        if view["headRefOid"] == m.sha and _checks(view.get("statusCheckRollup")) == "failing":
+        if view["headRefOid"] != m.sha:
+            continue
+        checks = _checks(view.get("statusCheckRollup"))
+        if checks == "unverified":
+            raise Refusal(f"#{m.number} has a cancelled job on {m.sha[:12]} whose "
+                          "annotations could not be read, so a timeout is not ruled "
+                          "out; nothing was opened: run `open` again once `gh api` "
+                          "answers")
+        if checks == "failing":
             raise Refusal(f"#{m.number}'s own CI is now failing on {m.sha[:12]}, a known "
                           "failure this batch would carry. Drop it: switch back with "
                           f"`git switch --detach {REMOTE}/{BASE}`, remove the local "

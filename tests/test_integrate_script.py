@@ -138,11 +138,14 @@ class FakeGh:
                 raise integrate.Refusal("`gh pr merge` failed (1): HTTP 504")
             return ""
         if args[0] == "api" and "/check-runs/" in args[1]:
-            assert args[1].endswith("/annotations") and args[2:] == ["--jq", ".[].message"]
+            # Every page: a timeout annotation can follow 30 others.
+            assert args[1].endswith("/annotations")
+            # One JSON string per message, so a multi-line message stays whole.
+            assert args[2:] == ["--paginate", "--jq", ".[].message | @json"], args
             job = args[1].split("/")[-2]
             if job not in self.annotations:
                 raise integrate.Refusal("`gh api` failed (1): HTTP 502")
-            return "".join(f"{m}\n" for m in self.annotations[job])
+            return "".join(f"{json.dumps(m)}\n" for m in self.annotations[job])
         if args[0] == "api":
             number = int(next(a for a in args if "/issues/" in a).split("/")[-2])
             return self.labeled_at.get(number, "") + "\n"
@@ -601,14 +604,23 @@ def _cancelled_job(job: str) -> dict:
 TIMEOUT = "The job has exceeded the maximum execution time of 25m0s"
 
 
-@pytest.mark.parametrize("messages, joins", [
-    ([TIMEOUT, "The operation was canceled."], False),   # a hang: a known failure
-    (None, False),                                         # annotations unreadable
-    (["The operation was canceled."], True),               # superseded or cancelled by hand
-    ([], True),
-    (["Note: The job has exceeded the maximum execution time of 25m0s"], True),
-], ids=["timed-out", "unreadable", "cancelled", "no-annotations", "quoted-near-miss"])
-def test_a_cancelled_job_joins_unless_it_ran_past_its_timeout(world, capsys, messages, joins):
+FAILING = "left out #11: CI on its head is failing"
+UNVERIFIED = "left out #11: a cancelled job's annotations could not be read"
+
+
+@pytest.mark.parametrize("messages, outcome", [
+    ([TIMEOUT, "The operation was canceled."], FAILING),   # a hang: a known failure
+    # The wording GitHub's runners used before (2023-24 public runs).
+    (["The job running on runner GitHub Actions 7 has exceeded the maximum execution "
+      "time of 10 minutes."], FAILING),
+    (None, UNVERIFIED),                                      # annotations unreadable
+    (["The operation was canceled."], None),                 # cancelled by hand
+    ([], None),
+    (["Note: The job has exceeded the maximum execution time of 25m0s"], None),
+    (["step log:\nThe job has exceeded the maximum execution time of 25m0s"], None),
+], ids=["timed-out", "older-wording", "unreadable", "cancelled", "no-annotations",
+        "quoted-near-miss", "multi-line-near-miss"])
+def test_a_cancelled_job_joins_unless_it_ran_past_its_timeout(world, capsys, messages, outcome):
     sha10 = world.pr(10, {"b.txt": "b\n"})
     sha11 = world.pr(11, {"c.txt": "c\n"})
     world.gh.add(10, sha10)
@@ -620,7 +632,56 @@ def test_a_cancelled_job_joins_unless_it_ran_past_its_timeout(world, capsys, mes
     assert _build() == 0, capsys.readouterr()
     out = capsys.readouterr().out
 
-    assert ("left out #11: CI on its head is failing" in out) is not joins
+    for message in (FAILING, UNVERIFIED):
+        assert (message in out) is (message == outcome), out
+    if outcome == UNVERIFIED:
+        # The true cause and its fix: a retry, not a rerun of a failed job.
+        assert "rerun `build`" in out
+
+
+@pytest.mark.parametrize("details_url", ["https://ci.example/build/1", None])
+def test_a_cancelled_check_that_is_no_actions_job_joins_unprobed(world, capsys, details_url):
+    sha10 = world.pr(10, {"b.txt": "b\n"})
+    sha11 = world.pr(11, {"c.txt": "c\n"})
+    world.gh.add(10, sha10)
+    world.gh.add(11, sha11, statusCheckRollup=[
+        dict(_cancelled_job("123"), detailsUrl=details_url)])
+
+    assert _publish(world) == 0, capsys.readouterr()
+
+    assert _second_parents(world.origin, f"integrate/{DATE}-batch-1") == [sha10, sha11]
+    assert not [args for args, _ in world.gh.calls if "/check-runs/" in " ".join(args)]
+
+
+def test_a_failure_beside_a_cancelled_job_needs_no_annotations(world, capsys):
+    sha10 = world.pr(10, {"b.txt": "b\n"})
+    sha11 = world.pr(11, {"c.txt": "c\n"})
+    world.gh.add(10, sha10)
+    world.gh.add(11, sha11, statusCheckRollup=[
+        _cancelled_job("123"), {"status": "COMPLETED", "conclusion": "FAILURE"}])
+
+    assert _build() == 0, capsys.readouterr()
+
+    assert FAILING in capsys.readouterr().out
+    assert not [args for args, _ in world.gh.calls if "/check-runs/" in " ".join(args)]
+
+
+def test_a_timed_out_attempt_a_rerun_superseded_does_not_keep_a_member_out(world, capsys):
+    # gh can list an older attempt beside the rerun that replaced it; only the
+    # latest attempt of a check counts, as in `merge`.
+    sha10 = world.pr(10, {"b.txt": "b\n"})
+    sha11 = world.pr(11, {"c.txt": "c\n"})
+    world.gh.add(10, sha10)
+    timed_out = dict(_cancelled_job("123"), startedAt="2026-10-29T01:00:00Z",
+                     completedAt="2026-10-29T01:45:00Z")
+    rerun = dict(_cancelled_job("456"), conclusion="SUCCESS", startedAt="2026-10-29T02:00:00Z",
+                 completedAt="2026-10-29T02:20:00Z")
+    world.gh.add(11, sha11, statusCheckRollup=[timed_out, rerun])
+    world.gh.annotations["123"] = [TIMEOUT]
+
+    assert _publish(world) == 0, capsys.readouterr()
+
+    assert _second_parents(world.origin, f"integrate/{DATE}-batch-1") == [sha10, sha11]
 
 
 def test_open_refuses_a_member_whose_own_job_timed_out_after_build(world, capsys):
@@ -637,6 +698,23 @@ def test_open_refuses_a_member_whose_own_job_timed_out_after_build(world, capsys
 
     err = capsys.readouterr().err
     assert "#11" in err and "failing" in err
+    assert world.remote_branches() == []
+
+
+def test_open_refuses_without_dropping_when_annotations_cannot_be_read(world, capsys):
+    sha10 = world.pr(10, {"b.txt": "b\n"})
+    sha11 = world.pr(11, {"c.txt": "c\n"})
+    world.gh.add(10, sha10)
+    world.gh.add(11, sha11, statusCheckRollup=[{"status": "IN_PROGRESS", "conclusion": None}])
+    assert _build() == 0
+    capsys.readouterr()
+    world.gh.ready[1]["statusCheckRollup"] = [_cancelled_job("123")]   # unreadable
+
+    assert _open(world) == 2
+
+    err = capsys.readouterr().err
+    assert "#11" in err and "could not be read" in err and "run `open` again" in err
+    assert "failing" not in err and "Drop it" not in err
     assert world.remote_branches() == []
 
 

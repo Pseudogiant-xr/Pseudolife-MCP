@@ -100,9 +100,11 @@ label, and joins a later batch once a rerun of the failed job passes or a
 push replaces that head. Pending, cancelled,
 green or no checks all admit it: a run cancelled by hand or by a
 re-trigger gave no verdict. GitHub also reports a job that ran past its
-`timeout-minutes` as cancelled; the script reads that job's annotations,
-and a timeout (or annotations it cannot read) counts as failing, since the
-head likely hangs. `merge` still counts a cancelled check on the batch
+`timeout-minutes` as cancelled, so the script reads the annotations of
+the latest attempt of each cancelled job: the runner's timeout message
+counts as failing, since the head likely hangs, and annotations it cannot
+read leave the pull request out of this batch as `unverified` until a
+retry reads them. `merge` still counts a cancelled check on the batch
 itself as red.
 
 Why not wait for green on the member's own head: on 2026-10-20/21 four
