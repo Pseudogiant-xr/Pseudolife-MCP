@@ -421,7 +421,7 @@ fn ct_eq(a: &[u8], b: &[u8]) -> bool {
 
 /// `_presented_bearer`: the token of a `Bearer <token>` value, else `None`
 /// (no header, another scheme, or no token after the scheme).
-fn presented_bearer(header: Option<&str>) -> Option<&str> {
+pub fn presented_bearer(header: Option<&str>) -> Option<&str> {
     let header = header?;
     let (scheme, rest) = header.split_once(' ').unwrap_or((header, ""));
     let token = rest.trim_matches([' ', '\t']);

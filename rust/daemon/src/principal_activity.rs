@@ -17,6 +17,7 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use sha2::{Digest, Sha256};
 use tokio_postgres::Client;
 
+pub use crate::auth::presented_bearer;
 use crate::auth::{PrincipalSource, Resolved};
 
 // Design bounds (2026-10-30), not measurements; principal_activity.py.
@@ -26,15 +27,6 @@ pub const MAX_PENDING_REJECTED: usize = 1000;
 pub const MAX_REJECTED_ROWS: i64 = 1000;
 pub const REJECTED_RETENTION_S: f64 = 90.0 * 86400.0;
 pub const LOG_PREFIXES: usize = 5;
-
-/// The token of a `Bearer` Authorization header, parsed as `auth::resolve`
-/// parses it, or `None`.
-pub fn presented_bearer(header: Option<&str>) -> Option<&str> {
-    let header = header.filter(|h| !h.is_empty())?;
-    let (scheme, rest) = header.split_once(' ').unwrap_or((header, ""));
-    let token = rest.trim_matches([' ', '\t']);
-    (scheme.eq_ignore_ascii_case("bearer") && !token.is_empty()).then_some(token)
-}
 
 fn prefix_of(bytes: &[u8]) -> String {
     hex::encode(Sha256::digest(bytes))[..HASH_PREFIX_LEN].to_string()

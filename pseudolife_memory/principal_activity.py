@@ -29,7 +29,10 @@ import threading
 import time
 from typing import Callable
 
-from pseudolife_memory.principals import SOURCE_ENVIRONMENT, SOURCE_STORE
+# The gate's own parse of an Authorization value (re-exported for callers).
+from pseudolife_memory.principals import (  # noqa: F401
+    SOURCE_ENVIRONMENT, SOURCE_STORE, presented_bearer,
+)
 
 logger = logging.getLogger("pseudolife-mcp.principals")
 
@@ -45,18 +48,6 @@ MAX_PENDING_REJECTED = 1000
 # the retention, so a spray cannot grow it without bound.
 MAX_REJECTED_ROWS = 1000
 REJECTED_RETENTION_S = 90 * 86400
-
-
-def presented_bearer(auth_header: str | None) -> str | None:
-    """The token of a ``Bearer`` Authorization header, parsed as
-    :func:`principals.resolve_principal_detailed` parses it, or ``None``."""
-    if not auth_header:
-        return None
-    scheme, _, presented = auth_header.partition(" ")
-    presented = presented.strip(" \t")
-    if scheme.lower() != "bearer" or not presented:
-        return None
-    return presented
 
 
 def bearer_hash_prefix(token: str) -> str:

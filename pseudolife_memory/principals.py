@@ -242,7 +242,7 @@ def resolve_principal(auth_header: str | None,
     return resolve_principal_detailed(auth_header, token_map, single_token, store)[0]
 
 
-def _presented_bearer(auth_header: str | None) -> str | None:
+def presented_bearer(auth_header: str | None) -> str | None:
     """The token of a ``Bearer <token>`` header value, else ``None`` (no
     header, another scheme, or no token after the scheme)."""
     if not auth_header:
@@ -260,7 +260,7 @@ def bearer_presented(auth_header: str | None) -> bool:
     """Whether an ``Authorization`` header value presents a bearer token, by
     the parse :func:`resolve_principal_detailed` applies: a caller that sent
     one and resolved to no principal had its token rejected."""
-    return _presented_bearer(auth_header) is not None
+    return presented_bearer(auth_header) is not None
 
 
 def resolve_principal_detailed(auth_header: str | None,
@@ -288,7 +288,7 @@ def resolve_principal_detailed(auth_header: str | None,
     """
     if not token_map and single_token is None:
         return DEFAULT_PRINCIPAL, SOURCE_OPEN
-    presented = _presented_bearer(auth_header)
+    presented = presented_bearer(auth_header)
     if presented is None:
         return None, None
     # Compare bytes: compare_digest raises TypeError on non-ASCII str, which
