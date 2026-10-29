@@ -42,8 +42,11 @@ keeps a job out of the budget.
 
 ## Changing the shape of CI
 
-1. Make the change and push it. A pull request that edits a workflow runs
-   the whole matrix, so its hosted runs measure it.
+1. Make the change and push it. Since 2026-10-29 an ordinary pull request
+   runs only the fast lanes, even when it edits a workflow, so its own
+   runs measure only those. A changed heavy job carries an `accept` entry
+   (its cost holds) or an `estimate` (below) in the same pull request, and
+   is measured from its batch's or master's runs afterwards.
 2. `python rust/ci/ci_budget.py measure --workflow rust.yml <run> <run> [...]`
    rewrites that workflow's measured minutes: each job's median over two or
    more completed runs, successful jobs of the latest attempt only, and only

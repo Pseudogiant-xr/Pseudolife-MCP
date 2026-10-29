@@ -1,0 +1,3 @@
+| Variable | Reader/reference source paths |
+|---|---|
+| `PSEUDOLIFE_MCP_TOKENS` | `ops/client_credentials.py`, `ops/docker-compose.yml`, `ops/install.ps1`, `ops/install.sh`, `ops/register_claude_desktop.py`, `pseudolife_memory/compose/docker-compose.yml`, `pseudolife_memory/connect_cli.py`, `pseudolife_memory/daemon.py`, `pseudolife_memory/expose_cli.py`, `pseudolife_memory/invite_cli.py`, `pseudolife_memory/move_cli.py`, `pseudolife_memory/principal_store.py`, `pseudolife_memory/principals.py`, `pseudolife_memory/shim.py`, `pseudolife_memory/tunnel_bridge.py`, `pseudolife_memory/unattended_update.py`, `pseudolife_memory/update_cli.py`, `pseudolife_memory/utils/config.py`, `pseudolife_memory/web/routes.py`, `pseudolife_memory/writer_context.py` |

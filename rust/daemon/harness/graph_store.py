@@ -24,10 +24,11 @@ from unittest.mock import patch
 
 REPO = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO))
-os.environ["PL_HARNESS_SLICE"] = "w3h"
 import dbstate
-import pgdisposable as pg
+import pgdisposable
 from daemons import base_env
+
+pg = pgdisposable.Slice("w3h")
 
 GOLDEN = Path(__file__).parent / "goldens" / "graph-store.json"
 MUTANTS = ["graph-confidence", "graph-origin", "graph-revive", "graph-bless",

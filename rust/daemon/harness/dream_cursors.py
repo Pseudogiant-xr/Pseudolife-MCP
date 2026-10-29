@@ -22,12 +22,12 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-os.environ.setdefault("PL_HARNESS_SLICE", "w3d")
 import daemons
 import dbstate
-import pgdisposable as pg
+import pgdisposable
 from run import DB_NONDETERMINISTIC, diff_values, golden_scrub
 
+pg = pgdisposable.Slice.from_env("w3d")
 SECRET = "11" * 32  # Synthetic fixture secret, never an operator credential.
 MUTANTS = ("dream-pull-reverse", "dream-pull-ignore-source", "dream-token-no-signature",
            "dream-ack-all-pending", "dream-cursor-rewind", "dream-ack-skip-write",

@@ -15,7 +15,7 @@ revised 2026-10-23 over master `bd8217a1` with the maintainer's decisions on
 D1 to D11 (the gates G1 to G4 stay open), the MCP count re-derived from the
 tool registry, a readiness view per surface, and the three linked proofs
 each closed slice needs. The other surface counts come from the refreshed
-checklists in [PARITY.md](PARITY.md). The acceptance checklists after the
+checklists in the [parity register](parity/). The acceptance checklists after the
 plan are the 2026-10-10 draft's per-item evidence rules, plus the
 three-proofs row in "Acceptance boundary".
 
@@ -36,10 +36,10 @@ three-proofs row in "Acceptance boundary".
 | Surface | On master `2092e7b1` (2026-10-20); MCP row re-derived on `bd8217a1` (2026-10-23) | Left to do |
 |---|---|---|
 | MCP tools (38) | 32 served: the 31 bodies in the tool registry (`rust/daemon/src/mcp/dispatch.rs`, `registry()`) plus `memory_toolset`, which `mcp/mod.rs` answers before the registry. `mcp_compare.py`'s `UNSERVED` lists the other 6 and agrees. Since the first audit: `memory_consolidation_candidates` (#833, batch #850), the four graph write tools `memory_graph_relate`, `memory_graph_unrelate`, `memory_alias` and `memory_relation_define` (#842, task M, batch #866), and `memory_graph` (#847, task N1, batch #882). In flight: #836 `memory_consolidate` (task L), #864, #867, #873 and #881 `memory_dream` (task P1: the consolidation pass, outcome inference, lesson synthesis and digests, then the deep dream and its merge judge). | 6: `memory_consolidate`, `memory_recall` (graph expansion, task N2), `memory_graph_review` (task O), `memory_dream` (after task P1, the graph-insight refresh P2b under Option B), and `document_ingest` and `document_search`, blocked on the Python document table. `memory_search` still refuses `explain=true`. |
-| Console routes (72 `ConsoleRoutes`, plus `POST /api/pair`) | 2 served (`GET /api/search`, `POST /api/daemon-notice`), 1 partly (`GET /api/agents`: the coordination view). `/api/pair` serves its refusals; redemption is 501. | 69 routes answer 501: 32 GET and 37 POST ([Console checklist](PARITY.md#complete-console-registration-checklist)). Under D9 (2026-10-23), 5 of them retire with a deprecation note, the 3 episode routes are one small batch (B2e), and 4 move to the CLI batches (B10), which leaves 57 for the Console batches B2a to B2d. |
+| Console routes (72 `ConsoleRoutes`, plus `POST /api/pair`) | 2 served (`GET /api/search`, `POST /api/daemon-notice`), 1 partly (`GET /api/agents`: the coordination view). `/api/pair` serves its refusals; redemption is 501. | 69 routes answer 501: 32 GET and 37 POST ([Console checklist](parity/complete-console-registration/)). Under D9 (2026-10-23), 5 of them retire with a deprecation note, the 3 episode routes are one small batch (B2e), and 4 move to the CLI batches (B10), which leaves 57 for the Console batches B2a to B2d. |
 | Hook endpoints (8) | 4 served (coordination-start, park-gate, woke, subagent). memory-changes and session-end serve their gates and refusals. | 4: session-start and memory-policy (501 for every caller), the authorized memory-changes body and the session-end close. |
 | Coordination actions (15) | All served and compared by the board harness. | Three declared cutover blockers (below). |
-| CLI modes (29) | 9 native, 15 partly native, 5 defer by name ([CLI checklist](PARITY.md#cli-mode-acceptance-checklist)). | The deferred sub-rows and modes in batch B10, plus the lite-tier rows (D1: lite is ported). Of the operator modes, D8 ports `coordination-recovery` before the switch and defers `delegate-watch`, `channel`'s remainder and `maintainer setup` by name until after it. |
+| CLI modes (29) | 9 native, 15 partly native, 5 defer by name ([CLI checklist](parity/cli-mode-acceptance-checklist/)). | The deferred sub-rows and modes in batch B10, plus the lite-tier rows (D1: lite is ported). Of the operator modes, D8 ports `coordination-recovery` before the switch and defers `delegate-watch`, `channel`'s remainder and `maintainer setup` by name until after it. |
 | Background duties | The scheduler, session reaper, dream-journal and log pruning, heap trim, release check and stored-principal refresh are implemented. | Autosave and the clean-exit flush are scheduled no-ops. The compaction policy is ported and golden-tested but never invoked. The reaper's automatic titles are absent. Automatic dreams, graph sweeps and the session-end dream trigger are absent or a declared no-op. |
 | Evidence | Every `ported` body rests on recorded Linux dev-lane differential runs (`w2d_search.py`, `w2e.py`, `board/run.py`). | Hosted CI compares no served MCP or REST body other than `memory_toolset`'s. It runs the MCP wire, binding and stub corpus, HTTP admission, security and body limits, static files, sweep pruning, dream cursors, the graph store and graph read model, and the CLI harness rows. No Windows runtime run of the daemon exists (batch B13). Since 2026-10-19 a local full suite runs in 9 to 12 minutes on four workers (#846, batch #850), and the CI reshape in batch #868 (merged 2026-10-20 as 72fbcc88) takes the Windows `cli-live` parity suite out of the required gate (still required on Linux; the other live suites stay gated on Windows) and runs only the parity shards a PR's diff reaches (#859), narrows the required Windows Python lane to the cases that reach Windows-specific product code (#862), and replaces sub-second clock waits in tests with event waits, with a guard against new ones (#863). Under D6 and D11 (2026-10-23) the body differentials will run nightly on a Linux dev box instead of in hosted CI (B13); no nightly runs yet. |
 | Declared divergences | About 150 rows in `daemon/divergences.md`, 9 in `daemon/spec.md` (W2-F) and a few dozen across the CLI harness rows and specs. | Under D7 (2026-10-23) the two sent-YAML presentation deferrals are accepted; every other row is bucketed as presentation, behaviour with no caller, or behaviour with a caller, and only the behaviour-with-a-caller bucket must close before G2. A row stays open until it is bucketed (B14a). |
@@ -212,8 +212,8 @@ Shared hot spots, and how batches share them:
 - `pseudolife_memory/storage/schema.py` and the Rust schema plan: B7 only;
   D2's table rides in B7's bump (D10: one bump). Any schema bump serializes
   with every other.
-- `rust/PARITY.md` and `rust/daemon/divergences.md`: each batch edits only
-  its own rows. B14's register-wide pass runs when few batches are open.
+- `rust/parity/` and `rust/daemon/divergences/`: each batch edits only
+  its own row files. B14's register-wide pass runs when few batches are open.
 
 A new session takes a batch whose files no open session owns; it does not
 add a second session onto a hot-spot file above, but queues for it.
@@ -340,7 +340,7 @@ The tables below are the 2026-10-10 draft's acceptance rules. The plan above
 schedules them; it does not change them.
 
 Source audit: `3b4de2c515bee07e97cd35b6e1473ea48511ec77`, 2026-10-10.
-All five scoped rows in [PARITY.md](PARITY.md#parity-rows) are **deferred**.
+All five scoped rows in [PARITY.md](parity/parity-rows/) are **deferred**.
 Every item below is **pending cutover acceptance**, including items whose
 Python implementation or static guard already exists. A source reference is
 not an execution result. Record later evidence against the actual tested head,
@@ -352,7 +352,7 @@ command, platform, exit code and CI run; do not reuse an older head's proof.
 |---|---|---|
 | Whole-row closure | Pending | Close every contract item before changing a PARITY row to ported; otherwise add only the evidence actually obtained. |
 | Three linked proofs | Pending | Each closed slice links three proofs, each citing its head, command and result: **behaviour** (the differential run comparing its answers with the Python oracle's), **durable state** (the touched rows and files compared after the same writes, plus the older side reading what the newer side wrote, so a rollback cannot strand data) and **installed execution** (the slice reached through the entry point an install registers: the launcher, client registration or hook a user's setup invokes, after a restart). A slice with one or two of them is not closed. |
-| Disposable installed paths | Pending | Fresh install, update and restore through the actual installed Rust entry points; compilation and Python fakes do not establish installed-runtime parity. [Phase 5 gap](PARITY.md#per-phase-selection-and-acceptance-gaps). |
+| Disposable installed paths | Pending | Fresh install, update and restore through the actual installed Rust entry points; compilation and Python fakes do not establish installed-runtime parity. [Phase 5 gap](parity/per-phase-selection-and/). |
 | Differential acceptance | Pending | Reuse `daemon/harness/run.py`, `compare.py` and `dbstate.py`: response values and consumer-read headers, touched and potentially touched DB rows after writes, and files in isolated client homes. Retain declared normalizers, raw failures, and caught source mutants. |
 | Platform and hosted gates | Pending | Linux disposable proofs, native Windows evidence for OS-sensitive client/process/file behavior, and completed exact-head Rust/Parity CI on both OSes; required repository guards and current-master integration. |
 | Independent reviews | Pending | Required independent reviews and findings/dispositions in the PR body; a fixed finding receives a covering case and watched passing rerun. |
@@ -465,8 +465,8 @@ needed; static assertions and Python fakes remain oracle evidence.
 
 The configuration and environment inventories below enumerate the current
 PARITY appendix names. They retain the canonical section/reader paths in
-[Configuration sections](PARITY.md#configuration-sections) and
-[Environment variable appendix](PARITY.md#environment-variable-appendix),
+[Configuration sections](parity/configuration-sections/) and
+[Environment variable appendix](parity/environment-variable-appendix/),
 including field-level inventory in `phase1-contract-inventory.json` and reader
 paths in `contract-inventory.json`. Every listed name is pending accounting
 for its installed Rust consumer or an explicit maintainer-accepted disposition;
@@ -476,7 +476,7 @@ precedence rather than porting arbitrary Python parser behavior.
 
 ### Health and HTTP
 
-State: **Pending**. Source: [health/body appendix](PARITY.md#health-http-bodies-and-logical-transfer),
+State: **Pending**. Source: [health/body appendix](parity/health-http-bodies-and-logical/),
 `pseudolife_memory/daemon.py`, `web/api.py`, `rust/daemon/src/health.rs`.
 Prove mandatory `status`, `version`, `schema`, `storage`, `auth`, `bank`,
 `persist_errors`, `memory`; and conditional `build`, `coordination`, `updates`,
@@ -504,7 +504,7 @@ Container health smoke covers only the exercised subset.
 
 State: **Pending dependency**, not a new port in this preparation. Physical
 backup/restore and `.pt` recovery must remain distinct from logical transfer.
-The [transfer appendix](PARITY.md#health-http-bodies-and-logical-transfer)
+The [transfer appendix](parity/health-http-bodies-and-logical/)
 requires every exported/excluded table, `outcome_signals.used_ids`, bank-local
 metadata and target emptiness rule to be preserved. Include them in disposable
 export/import/restore state checks, not just counts.

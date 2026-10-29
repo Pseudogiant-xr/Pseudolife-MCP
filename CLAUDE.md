@@ -45,9 +45,9 @@ the memory bank; procedures belong in a skill or doc this file points to.
 4. **CI before merge:** a PR from any branch but `integrate/*` is never
    merged directly but lands in an integration batch whose own passing CI,
    on its head integrated with current master, is every member's CI,
-   because pushes to other branches run only the fast lanes (what runs
-   where, and the `merge-forward` skill's exceptions:
-   `docs/dev/merge-batches.md`).
+   because pushes to other branches run only the fast lanes, workflow and
+   lock-file edits included (what runs where, and the `merge-forward`
+   skill's exceptions: `docs/dev/merge-batches.md`).
    A batch merges through `python ops/integrate.py merge`, which refuses
    anything but a green batch at its built head, except a merge under the
    `merge-forward` skill's exceptions, which the maintainer makes by hand.
@@ -224,7 +224,8 @@ current merge ref, except as the `merge-forward` skill allows):
 - **An integration batch** (`integrate/<date>-batch-N` from `python
   ops/integrate.py build`, over `ready-to-batch` PRs with their review,
   their own local targeted validation and own-head CI that has not
-  failed (pending is fine, since the batch's CI is its members' CI),
+  failed (pending or cancelled is fine, since the batch's CI is its
+  members' CI),
   built whenever none is open and one is ready, a lone PR or release cut
   as a batch of one) passes the local WSL full
   suite, the `rust/` harness run `build` prints and, when it changes
@@ -380,6 +381,10 @@ bank ("dev machines homelab"), never in the tree.
   and tell the maintainer or your launching session; others' worktrees,
   evidence and caches are not yours, and removing a merged branch's cache
   (by its owner or with the maintainer's go) is recorded (path, size, why).
+- **When all of a session's work has merged and nothing is stacked on it,**
+  it runs `python ops/prune_worktrees.py --mine --apply` before it ends,
+  which removes its own worktree and build cache only if every safety
+  check passes (`docs/dev/worktree-retention.md`).
 - **Watchers include disk:** each heartbeat over a long run reports free
   disk.
 
