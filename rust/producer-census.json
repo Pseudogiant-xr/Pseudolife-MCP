@@ -273,7 +273,7 @@
     "ops/selfhosted/setup-windows-runner.ps1": "39abc4963c382af5f33c32433b8e5489d71acdd50c5e4eaf9d233b8db303d6f3",
     "ops/selfhosted/windows-egress-proof.ps1": "3289ce4646e56c413ac878a927cd91e453da0f6825d3e60c9ef682dfd8b2991c",
     "ops/selfhosted/windows-job-started.ps1": "34bb407c8f93ffe2f87cce3e3c334bde1bc8ffa695ebcd7e448f3b2f776bc84c",
-    "ops/setup-codex-coordination.py": "fbd43cc2efee3b38fdabf237ea988c77a4230d703fa2a1b22b20b228c9ea4086",
+    "ops/setup-codex-coordination.py": "7d2f4d6e0bbbdc098046d2f488a626a397a0bdc933f8ba22a32c3d90c16a02e3",
     "ops/setup-codex-hooks.py": "42f141d432d428b5034a72dfdb19fccc8487aa782b3d69ae9e8bf218fa8093f5",
     "ops/shim_autostart.py": "3f159a5be7c73c8070da787322abf79701404a1b273b990c691cb51872a25ec3",
     "ops/shim_python.py": "599b057c0f09fa0b4c44e6ea2d8bc7a65e828297e44780af8291d13213856e81",
@@ -5499,7 +5499,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/setup-codex-coordination.py:164",
+          "location": "ops/setup-codex-coordination.py:166",
           "shape": {
             "argv": [
               {
@@ -20955,7 +20955,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/setup-codex-coordination.py:194",
+          "location": "ops/setup-codex-coordination.py:196",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -21435,7 +21435,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/setup-codex-coordination.py:212",
+          "location": "ops/setup-codex-coordination.py:214",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -21450,22 +21450,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/setup-codex-coordination.py:236",
-          "shape": {
-            "channel": "environment",
-            "complete": true,
-            "omitted_optional": null,
-            "parameters": {
-              "value": {
-                "literal": "0"
-              }
-            }
-          },
-          "usage": "assignment"
-        },
-        {
-          "evidence": "static",
-          "location": "ops/setup-codex-coordination.py:269",
+          "location": "ops/setup-codex-coordination.py:238",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -21488,6 +21473,21 @@
             "parameters": {
               "value": {
                 "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "ops/setup-codex-coordination.py:271",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "0"
               }
             }
           },
@@ -21745,7 +21745,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/setup-codex-coordination.py:187",
+          "location": "ops/setup-codex-coordination.py:189",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -21758,7 +21758,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/setup-codex-coordination.py:229",
+          "location": "ops/setup-codex-coordination.py:231",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -21909,7 +21909,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/setup-codex-coordination.py:237",
+          "location": "ops/setup-codex-coordination.py:239",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -21922,7 +21922,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/setup-codex-coordination.py:239",
+          "location": "ops/setup-codex-coordination.py:241",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -28836,7 +28836,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/setup-codex-coordination.py:188",
+          "location": "ops/setup-codex-coordination.py:190",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -33939,7 +33939,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/setup-codex-coordination.py:186",
+          "location": "ops/setup-codex-coordination.py:188",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -36134,19 +36134,6 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/setup-codex-coordination.py:173",
-          "shape": {
-            "channel": "environment",
-            "complete": false,
-            "expression": "reference",
-            "omitted_optional": null,
-            "parameters": {}
-          },
-          "usage": "reference"
-        },
-        {
-          "dynamic": "unresolved",
-          "evidence": "static",
           "location": "ops/setup-codex-coordination.py:175",
           "shape": {
             "channel": "environment",
@@ -36160,7 +36147,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/setup-codex-coordination.py:176",
+          "location": "ops/setup-codex-coordination.py:177",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -36173,7 +36160,20 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/setup-codex-coordination.py:177",
+          "location": "ops/setup-codex-coordination.py:178",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "ops/setup-codex-coordination.py:179",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -40926,7 +40926,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/setup-codex-coordination.py:199",
+          "location": "ops/setup-codex-coordination.py:201",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -82096,25 +82096,13 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/setup-codex-coordination.py:164",
+      "location": "ops/setup-codex-coordination.py:166",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:shim"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/setup-codex-coordination.py:173",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
-    },
-    {
-      "dynamic": "unresolved",
       "location": "ops/setup-codex-coordination.py:175",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "ops/setup-codex-coordination.py:176",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
     },
@@ -82126,39 +82114,45 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/setup-codex-coordination.py:186",
+      "location": "ops/setup-codex-coordination.py:178",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
+      "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/setup-codex-coordination.py:187",
+      "location": "ops/setup-codex-coordination.py:179",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_AGENT_STATE"
+      "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
     },
     {
       "dynamic": "unresolved",
       "location": "ops/setup-codex-coordination.py:188",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/setup-codex-coordination.py:189",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_AGENT_STATE"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/setup-codex-coordination.py:190",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_DAEMON_URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/setup-codex-coordination.py:194",
+      "location": "ops/setup-codex-coordination.py:196",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_AGENT_COORDINATION"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/setup-codex-coordination.py:199",
+      "location": "ops/setup-codex-coordination.py:201",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_WRITER_ID"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "ops/setup-codex-coordination.py:229",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_AGENT_STATE"
     },
     {
       "dynamic": "unresolved",
@@ -82168,13 +82162,19 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/setup-codex-coordination.py:237",
+      "location": "ops/setup-codex-coordination.py:231",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_AGENT_STATE"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/setup-codex-coordination.py:239",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_AGENT_STATE_DIR"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/setup-codex-coordination.py:239",
+      "location": "ops/setup-codex-coordination.py:241",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_AGENT_STATE_DIR"
     },
