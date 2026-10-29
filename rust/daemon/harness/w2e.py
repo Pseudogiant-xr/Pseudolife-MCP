@@ -217,13 +217,13 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import daemons  # noqa: E402
 import dbstate  # noqa: E402
-import pgdisposable as pg  # noqa: E402
+import pgdisposable  # noqa: E402
 import run as w1a  # noqa: E402
 import w2e_documents  # noqa: E402
 from stub_extractor import StubExtractor  # noqa: E402
 import w2e_recall_llm  # noqa: E402
 
-pg.DISPOSABLE_NAME = re.compile(r"pl_cf_w2e_[a-z0-9_]{1,40}")
+pg = pgdisposable.Slice("w2e")
 GOLDENS = HERE / "goldens" / "w2e"
 TOLERANCE_FILE = HERE / "goldens" / "w2e-tolerance.json"
 TOKEN = "tok-default-w2e-0001"

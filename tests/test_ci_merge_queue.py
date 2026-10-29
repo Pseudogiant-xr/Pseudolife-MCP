@@ -84,12 +84,40 @@ def test_every_check_the_spec_asks_to_require_exists():
         assert f"`{name}`" in spec, name
 
 
-def test_merge_group_runs_are_never_cancelled_by_concurrency():
-    concurrency = load("ci.yml")["concurrency"]
-    # Keyed by ref: a group's queue branch is its own ref, distinct from
-    # refs/pull/N/merge and refs/heads/master.
-    assert concurrency["group"] == "ci-${{ github.ref }}"
-    assert concurrency["cancel-in-progress"] == "${{ github.event_name == 'pull_request' }}"
+def ci_concurrency_group(event, *, ref="refs/heads/master", head_ref="", run_id="101"):
+    """ci.yml's group expression, evaluated the way Actions does for the
+    shapes it uses: an ordinary pull request's group, or one per run."""
+    expression = load("ci.yml")["concurrency"]["group"]
+    assert expression == ("${{ github.event_name == 'pull_request' && github.head_ref != '' "
+                          "&& !startsWith(github.head_ref, 'integrate/') "
+                          "&& format('ci-pr-{0}', github.ref) "
+                          "|| format('ci-{0}-{1}', github.event_name, github.run_id) }}")
+    # Actions' startsWith ignores case.
+    if event == "pull_request" and head_ref and not head_ref.lower().startswith("integrate/"):
+        return f"ci-pr-{ref}"
+    return f"ci-{event}-{run_id}"
+
+
+def test_only_an_ordinary_pull_request_supersedes_its_own_runs():
+    assert load("ci.yml")["concurrency"]["cancel-in-progress"] is True
+    pr1 = ci_concurrency_group("pull_request", ref="refs/pull/1/merge", head_ref="fix/x")
+    assert pr1 == ci_concurrency_group("pull_request", ref="refs/pull/1/merge",
+                                       head_ref="fix/x", run_id="102")
+    assert pr1 != ci_concurrency_group("pull_request", ref="refs/pull/2/merge", head_ref="fix/x")
+    # Master pushes, the nightly, manual runs, merge groups (the queue's
+    # verdict) and integrate/* batch runs each get a group of their own, so
+    # nothing cancels them, pending or running.
+    queued = "refs/heads/gh-readonly-queue/master/pr-830-" + "a" * 40
+    for event, ref, head_ref in (("push", "refs/heads/master", ""),
+                                 ("schedule", "refs/heads/master", ""),
+                                 ("workflow_dispatch", "refs/heads/master", ""),
+                                 ("merge_group", queued, ""),
+                                 ("pull_request", "refs/pull/3/merge",
+                                  "integrate/2026-10-29-batch-1"),
+                                 ("pull_request", "refs/pull/3/merge", "")):
+        first = ci_concurrency_group(event, ref=ref, head_ref=head_ref, run_id="1")
+        assert first != ci_concurrency_group(event, ref=ref, head_ref=head_ref, run_id="2")
+        assert first != pr1
 
 
 # Stand in for `git fetch` and `git diff`, the step's only external inputs. An
@@ -192,8 +220,8 @@ ORDINARY_REFS = ["claude/some-change", "fix/x", "integrate", "integrated/x",
 PYTHON_CHANGE = ["pseudolife_memory/service.py", "tests/test_x.py"]
 
 
-# Files whose change must be tested by the full lanes on its own pull request:
-# a workflow edit could otherwise switch off its own check.
+# CI and dependency inputs: before 2026-10-29 a pull request changing one ran
+# every lane on its own head; now its batch does.
 CI_INPUTS = [".github/workflows/ci.yml", ".github/workflows/rust.yml",
              ".github/workflows/release.yml", "pyproject.toml", "ops/requirements.lock.txt",
              "rust/Cargo.lock", "evals/rust_port/users_comparison/Cargo.lock",
@@ -212,9 +240,11 @@ def test_an_ordinary_pull_request_runs_the_fast_lanes_only(tmp_path, head_ref, f
 
 
 @pytest.mark.parametrize("ci_input", CI_INPUTS)
-def test_an_ordinary_pull_request_changing_ci_inputs_runs_every_lane(tmp_path, ci_input):
+def test_an_ordinary_pull_request_changing_ci_inputs_runs_the_fast_lanes_only(tmp_path, ci_input):
+    # Only batches spend the heavy lanes (maintainer, 2026-10-29): the edit
+    # runs every lane, under the edited workflow, on its batch's head.
     assert run_scope(tmp_path, "pull_request", PYTHON_CHANGE + [ci_input],
-                     head_ref="claude/some-change") == ["python=true"]
+                     head_ref="claude/some-change") == ["python=false"]
 
 
 @pytest.mark.parametrize("files, diff_exit", [([], 0), (PYTHON_CHANGE, 128)])
@@ -222,19 +252,6 @@ def test_an_ordinary_pull_request_with_an_unreadable_diff_runs_everything(tmp_pa
                                                                           diff_exit):
     assert run_scope(tmp_path, "pull_request", files, diff_exit=diff_exit,
                      head_ref="claude/some-change") == ["python=true"]
-
-
-def test_both_scopes_name_the_same_ci_inputs():
-    import re
-    ci = next(s for s in load("ci.yml")["jobs"]["scope"]["steps"] if s.get("id") == "scope")
-    rust = next(s for s in load("rust.yml")["jobs"]["scope"]["steps"] if s.get("id") == "scope")
-    ci_pattern, = re.findall(r"^\s*ci_inputs='([^']+)'$", ci["run"], re.MULTILINE)
-    rust_pattern, = re.findall(r"^\s*\$ciInputs = '([^']+)'$", rust["run"], re.MULTILINE)
-    assert ci_pattern == rust_pattern
-    for path in CI_INPUTS:
-        assert re.search(ci_pattern, path), path
-    for path in NOT_CI_INPUTS:
-        assert not re.search(ci_pattern, path), path
 
 
 @pytest.mark.parametrize("head_ref", [BATCH_REF, "integrate/2026-10-07-rust-modes"])

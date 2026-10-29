@@ -1,0 +1,3 @@
+| Row | Phase | Behavior to preserve and Python source | Existing test pool and boundary | Status |
+|---|---:|---|---|---|
+| BACKGROUND-SESSIONS | 4 | `mcp_server.start_session_reaper` idempotence, idle/reap intervals, close/end dream, empty-session resume window and tombstones; `start_background_durability` registers clean-exit flush, autosave and warmup exactly once. `service.py`, `mcp_server.py` | `test_session_identity.py`, `test_episode_service.py`, `test_loop_health.py` I; native scheduling/reaper source and unit coverage added, daemon reap/restart and writer integration still pending; see background-duty preparation below | deferred |
