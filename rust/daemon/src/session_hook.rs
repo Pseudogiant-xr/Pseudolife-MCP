@@ -724,19 +724,22 @@ mod tests {
     }
 
     /// `version_notice`, `hooks_notice` and `all_update_commands` with
-    /// command `pl`, computed in Python at daemon version 0.19.0.
+    /// command `pl`, computed in Python. Only the daemon version `v` is
+    /// interpolated into them, so they hold at every release.
     #[test]
     fn notices_follow_python() {
-        assert_eq!(DAEMON_VERSION, "0.19.0", "recompute these from Python");
-        let plugin_cmds = "pl update --clients-only --tag 0.19.0, or in Claude Code /plugin \
-                           marketplace update pseudolife-mcp, then /plugin update \
-                           pseudolife-memory@pseudolife-mcp";
+        let v = DAEMON_VERSION;
+        let plugin_cmds = format!(
+            "pl update --clients-only --tag {v}, or in Claude Code /plugin \
+             marketplace update pseudolife-mcp, then /plugin update \
+             pseudolife-memory@pseudolife-mcp"
+        );
         let daemon_cmds = "pl update, or from a checkout git pull, then ops/update.ps1 or \
                            ops/update.sh";
         assert_eq!(
             version_notice(Some("0.1.0"), "pl"),
             format!(
-                "Pseudolife-MCP: plugin 0.1.0 and daemon 0.19.0 differ — update the plugin \
+                "Pseudolife-MCP: plugin 0.1.0 and daemon {v} differ — update the plugin \
                  ({plugin_cmds}) and start a new session; until then its hooks may lack what \
                  the daemon serves."
             )
@@ -744,56 +747,60 @@ mod tests {
         assert_eq!(
             version_notice(Some("99.0.0"), "pl"),
             format!(
-                "Pseudolife-MCP: plugin 99.0.0 and daemon 0.19.0 differ — update the daemon \
+                "Pseudolife-MCP: plugin 99.0.0 and daemon {v} differ — update the daemon \
                  ({daemon_cmds}); until then the plugin may call what the daemon does not serve."
             )
         );
-        for equal_or_unordered in ["0.19.0.dev1", "abc"] {
+        for equal_or_unordered in [format!("{v}.dev1"), "abc".to_string()] {
             assert_eq!(
-                version_notice(Some(equal_or_unordered), "pl"),
+                version_notice(Some(&equal_or_unordered), "pl"),
                 format!(
-                    "Pseudolife-MCP: plugin {equal_or_unordered} and daemon 0.19.0 differ — \
+                    "Pseudolife-MCP: plugin {equal_or_unordered} and daemon {v} differ — \
                      update the older one: plugin via {plugin_cmds}; daemon via {daemon_cmds}."
                 )
             );
         }
-        for silent in ["0.19.0", "", "bad version!", &"1".repeat(33)] {
+        for silent in [v, "", "bad version!", &"1".repeat(33)] {
             assert_eq!(version_notice(Some(silent), "pl"), "", "{silent:?}");
         }
         assert_eq!(version_notice(None, "pl"), "");
 
-        let release = "pl update --clients-only --tag 0.19.0, or from a checkout git pull, \
-                       then ops/update.ps1 -All on Windows or ops/update.sh --all";
-        let checkout = "in the checkout this daemon was built from: git pull, then \
-                        ops/update.ps1 -All on Windows or ops/update.sh --all (on a release \
-                        install: pl update --clients-only --tag 0.19.0)";
+        let release = format!(
+            "pl update --clients-only --tag {v}, or from a checkout git pull, \
+             then ops/update.ps1 -All on Windows or ops/update.sh --all"
+        );
+        let checkout = format!(
+            "in the checkout this daemon was built from: git pull, then \
+             ops/update.ps1 -All on Windows or ops/update.sh --all (on a release \
+             install: pl update --clients-only --tag {v})"
+        );
         assert_eq!(all_update_commands("pl", false), release);
         assert_eq!(all_update_commands("pl", true), checkout);
         let (d, b) = ("a".repeat(64), "b".repeat(64));
         let hooks = |cmds: &str| {
             format!(
-                "Pseudolife-MCP: plugin 0.19.0 matches the daemon's version but its hooks \
+                "Pseudolife-MCP: plugin {v} matches the daemon's version but its hooks \
                  differ from the daemon's copy — run {cmds} to refresh the plugin cache and \
                  shim, then start a new session."
             )
         };
-        let v = Some("0.19.0");
+        let pv = Some(v);
         assert_eq!(
-            hooks_notice(v, Some(&b), Some(&d), "pl", false),
-            hooks(release)
+            hooks_notice(pv, Some(&b), Some(&d), "pl", false),
+            hooks(&release)
         );
         assert_eq!(
-            hooks_notice(v, Some(&b), Some(&d), "pl", true),
-            hooks(checkout)
+            hooks_notice(pv, Some(&b), Some(&d), "pl", true),
+            hooks(&checkout)
         );
-        assert_eq!(hooks_notice(v, Some(&d), Some(&d), "pl", false), "");
+        assert_eq!(hooks_notice(pv, Some(&d), Some(&d), "pl", false), "");
         assert_eq!(
             hooks_notice(Some("0.1.0"), Some(&b), Some(&d), "pl", false),
             ""
         );
         let upper = "B".repeat(64);
-        assert_eq!(hooks_notice(v, Some(&upper), Some(&d), "pl", false), "");
-        assert_eq!(hooks_notice(v, Some(&b), None, "pl", false), "");
+        assert_eq!(hooks_notice(pv, Some(&upper), Some(&d), "pl", false), "");
+        assert_eq!(hooks_notice(pv, Some(&b), None, "pl", false), "");
     }
 
     #[test]
