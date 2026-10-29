@@ -33,18 +33,24 @@ pub(crate) const PATHS: &[&str] = &[
     "/api/maintainer/inbox",
 ];
 
-/// `MaintainerError.STATUS` for the codes a read can answer.
-fn status(code: &str) -> u16 {
+/// `MaintainerError.STATUS`.
+pub(crate) fn status(code: &str) -> u16 {
     match code {
-        "maintainer_https_required" => 409,
+        "maintainer_https_required"
+        | "maintainer_not_enrolled"
+        | "enrolment_closed"
+        | "role_changed" => 409,
+        "challenge_expired" | "challenge_spent" => 410,
+        "assertion_invalid" | "bootstrap_code_invalid" | "principal_not_allowed" => 403,
+        "recipient_unknown" | "message_not_found" | "credential_not_found" | "not_found" => 404,
+        "rate_capped" => 429,
         "authentication_required" | "unauthorized" => 401,
-        "principal_not_allowed" => 403,
         "principals_unavailable" | "coordination_unavailable" => 503,
         _ => 400,
     }
 }
 
-fn refusal(code: &str, public: Option<(&str, &str)>) -> Response {
+pub(crate) fn refusal(code: &str, public: Option<(&str, &str)>) -> Response {
     let mut body = Map::new();
     if let Some((k, v)) = public {
         body.insert(k.into(), json!(v));
@@ -220,39 +226,49 @@ fn list_limit(q: &HashMap<String, String>) -> i64 {
     crate::read::console::i_param(q, "limit", LIST_DEFAULT).clamp(1, LIST_MAX)
 }
 
+/// `_gate`: the caller's principal, or the refusal to answer.
+pub(crate) fn gate(app: &App, h: &HeaderMap) -> Result<String, Box<Response>> {
+    let headers = crate::board::http::header_dict(h);
+    let principal = match crate::board::http::authenticated_principal(app, &headers) {
+        Ok(p) => p,
+        Err(crate::board::error::BoardError::Refused(r)) => {
+            return Err(Box::new(refusal(&r.code, None)));
+        }
+        Err(_) => return Err(Box::new(refusal("coordination_unavailable", None))),
+    };
+    let cfg = &app.board.config;
+    if principal == MAINTAINER_PRINCIPAL
+        || (!app.board.admitted(&principal) && !crate::mutants::active("maintainer-gate-open"))
+    {
+        return Err(Box::new(refusal("principal_not_allowed", None)));
+    }
+    if !cfg.enabled {
+        return Err(Box::new(refusal("coordination_unavailable", None)));
+    }
+    match config_problem(&cfg.maintainer_rp_id, &cfg.maintainer_origin) {
+        _ if crate::mutants::active("maintainer-config-unchecked") => {}
+        Ok(None) => {}
+        Ok(Some(problem)) => {
+            return Err(Box::new(refusal(
+                "maintainer_https_required",
+                Some(("config_problem", &problem)),
+            )));
+        }
+        Err(()) => return Err(Box::new(refusal("coordination_unavailable", None))),
+    }
+    Ok(principal)
+}
+
 pub(crate) async fn route(
     app: &App,
     path: &str,
     q: &HashMap<String, String>,
     h: &HeaderMap,
 ) -> Response {
-    // `_gate`.
-    let headers = crate::board::http::header_dict(h);
-    let principal = match crate::board::http::authenticated_principal(app, &headers) {
-        Ok(p) => p,
-        Err(crate::board::error::BoardError::Refused(r)) => return refusal(&r.code, None),
-        Err(_) => return refusal("coordination_unavailable", None),
-    };
+    if let Err(refused) = gate(app, h) {
+        return *refused;
+    }
     let cfg = &app.board.config;
-    if principal == MAINTAINER_PRINCIPAL
-        || (!app.board.admitted(&principal) && !crate::mutants::active("maintainer-gate-open"))
-    {
-        return refusal("principal_not_allowed", None);
-    }
-    if !cfg.enabled {
-        return refusal("coordination_unavailable", None);
-    }
-    match config_problem(&cfg.maintainer_rp_id, &cfg.maintainer_origin) {
-        _ if crate::mutants::active("maintainer-config-unchecked") => {}
-        Ok(None) => {}
-        Ok(Some(problem)) => {
-            return refusal(
-                "maintainer_https_required",
-                Some(("config_problem", &problem)),
-            );
-        }
-        Err(()) => return refusal("coordination_unavailable", None),
-    }
     let (path, limit) = (path.to_string(), list_limit(q));
     let (rp_id, origin) = (cfg.maintainer_rp_id.clone(), cfg.maintainer_origin.clone());
     let read = app

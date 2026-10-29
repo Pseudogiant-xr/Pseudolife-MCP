@@ -261,7 +261,8 @@ def check_executable_coverage(jobs):
     require_command(commands(search["run"]), ("python", "-m", "pytest"),
                     ("rust/daemon/harness/test_w2d_controls.py",
                      "rust/daemon/harness/test_w2d_namespace.py",
-                     "rust/daemon/harness/test_w2d_recent.py"), PYTEST_FILTERS)
+                     "rust/daemon/harness/test_w2d_recent.py",
+                     "rust/daemon/harness/test_config_knobs_golden.py"), PYTEST_FILTERS)
     assert search["timeout-minutes"] == 1
     # The mail, hook and episode rows replay their goldens in the required
     # cli shard; their live arms run beside the other live comparisons.
@@ -1132,6 +1133,7 @@ def test_coverage_contract_allows_additions(monkeypatch, name, old, new):
     ("Offline embedding golden and mutant row", "rust/daemon/harness/test_embedding.py", ""),
     ("Offline W2-D search harness regressions", "rust/daemon/harness/test_w2d_controls.py", ""),
     ("Offline W2-D search harness regressions", "rust/daemon/harness/test_w2d_namespace.py", ""),
+    ("Offline W2-D search harness regressions", "rust/daemon/harness/test_config_knobs_golden.py", ""),
     ("CLI W1-C differential harness", "$rows = @(${{ matrix.w1c_rows }})", "$rows = @('move')"),
     ("CLI W1-C differential harness", "python rust/cli_harness @golden",
      "# python rust/cli_harness @golden"),

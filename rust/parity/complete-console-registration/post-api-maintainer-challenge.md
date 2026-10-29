@@ -1,3 +1,3 @@
 | Method | Path | Phase | Status | Rust | Evidence |
 |---|---|---:|---|---|---|
-| POST | /api/maintainer/challenge | 4 | deferred | 501 | 501 (W2-F) |
+| POST | /api/maintainer/challenge | 4 | deferred | served | `maintainer_ops.rs` (B2d), behind the maintainer reads' gate; `daemon/harness/w2d_console.py live` (`console-challenge`, `console-challenge-bootstrap`) compares status and body and the full bank after each call; recorded Linux dev-box run cited in the PR, until a published nightly run (B13, D11) covers it: every purpose with its preview (recipient, duplicate name, role holder, `replaces`, `also_breaks`), the WebAuthn request and creation options, each refusal in `_challenge`'s order; each side's nonce, expiry and MAC are its own, so the payload compares as canonical JSON with them checked by shape, the MAC as the HMAC under the seeded key and the challenge as the payload's SHA-256; a MAC key made on first use compares by shape |

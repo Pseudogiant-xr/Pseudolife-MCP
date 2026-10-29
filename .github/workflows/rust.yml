@@ -862,12 +862,14 @@ jobs:
           exit $LASTEXITCODE
       # Linux 2026-10-13: offline W2-D checks measured below one second;
       # one minute is the smallest whole-minute timeout above twice that.
+      # 2026-10-27: the config knob golden check adds about 5 s on Windows
+      # (it imports the service module), still far inside the minute.
       - name: Offline W2-D search harness regressions
         if: matrix.suite == 'eval'
         timeout-minutes: 1
         shell: pwsh
         run: |
-          python -m pytest -q rust/daemon/harness/test_w2d_controls.py rust/daemon/harness/test_w2d_namespace.py rust/daemon/harness/test_w2d_recent.py -ra --durations=30 --junitxml (Join-Path $env:RUNNER_TEMP 'junit/offline-w2-d-search-harness-regressions.xml')
+          python -m pytest -q rust/daemon/harness/test_w2d_controls.py rust/daemon/harness/test_w2d_namespace.py rust/daemon/harness/test_w2d_recent.py rust/daemon/harness/test_config_knobs_golden.py -ra --durations=30 --junitxml (Join-Path $env:RUNNER_TEMP 'junit/offline-w2-d-search-harness-regressions.xml')
           exit $LASTEXITCODE
       # This fixture creates a small graph locally; no model is downloaded.
       - name: Offline embedding golden and mutant row
