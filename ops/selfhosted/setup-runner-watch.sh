@@ -7,6 +7,12 @@
 #
 #   setup-runner-watch.sh            # install or update the watcher
 #   setup-runner-watch.sh --token    # then paste the token on stdin
+#   setup-runner-watch.sh --machines linux,windows
+#                                    # the machines nightly jobs may route to
+#
+# The allowlist (/etc/pseudolife-runner-watch/machines) keeps a machine whose
+# runner is online for a trial dispatch out of the variable until the trial
+# passes. Without the file every online machine is listed.
 #
 # The token is a fine-grained token for this repository alone with
 # "Administration: read" and "Variables: read and write". It is stored
@@ -18,6 +24,7 @@ ACCOUNT=pseudolife-runner-watch
 LIB=/usr/local/lib/pseudolife-runner-watch
 CONFIG=/etc/pseudolife-runner-watch
 TOKEN=$CONFIG/token
+MACHINES=$CONFIG/machines
 
 if [ "$(id -u)" -ne 0 ]; then echo "run as root" >&2; exit 1; fi
 command -v python3 >/dev/null || { echo "python3 is required" >&2; exit 1; }
@@ -44,6 +51,26 @@ if [ "${1:-}" = "--token" ]; then
   exit 0
 fi
 
+if [ "${1:-}" = "--machines" ]; then
+  [ -d "$CONFIG" ] || { echo "install the watcher first (run without --machines)" >&2; exit 1; }
+  # The list is required, so a forgotten argument never empties it; '' is
+  # the explicit way to allow no machine.
+  [ $# -ge 2 ] || { echo "--machines needs a list such as linux,windows (or '' for none); nothing changed" >&2; exit 2; }
+  list=$2
+  if [[ -n "$list" && ! "$list" =~ ^[a-z0-9-]+(,[a-z0-9-]+)*$ ]]; then
+    echo "--machines takes a comma-separated list of machine names such as linux,windows (or '' for none); nothing changed" >&2
+    exit 2
+  fi
+  { echo "# Machines nightly parity jobs may route to (setup-runner-watch.sh --machines).";
+    [ -z "$list" ] || tr ',' '\n' <<<"$list"; } > "$MACHINES.part"
+  chown "root:$ACCOUNT" "$MACHINES.part"
+  chmod 0640 "$MACHINES.part"
+  mv "$MACHINES.part" "$MACHINES"
+  echo "allowlist: ${list:-none}"
+  systemctl start pseudolife-runner-watch.service || true
+  exit 0
+fi
+
 here=$(cd "$(dirname "$0")" && pwd)
 id "$ACCOUNT" >/dev/null 2>&1 || useradd --system --no-create-home --shell /usr/sbin/nologin "$ACCOUNT"
 install -d -m 0755 "$LIB"
@@ -61,7 +88,7 @@ Wants=network-online.target
 Type=oneshot
 User=$ACCOUNT
 StateDirectory=pseudolife-runner-watch
-ExecStart=/usr/bin/python3 -I $LIB/runner_watch.py --token-file $TOKEN --state-file /var/lib/pseudolife-runner-watch/last-seen.json
+ExecStart=/usr/bin/python3 -I $LIB/runner_watch.py --token-file $TOKEN --state-file /var/lib/pseudolife-runner-watch/last-seen.json --machines-file $MACHINES
 NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=yes

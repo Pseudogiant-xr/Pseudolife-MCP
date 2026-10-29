@@ -1447,8 +1447,10 @@ def test_selfhosted_lane_runs_the_hosted_shards_unchanged():
         suite for suite in hosted["strategy"]["matrix"]["suite"] if suite not in HOSTED_ONLY]
     assert lane["strategy"]["matrix"]["include"] == [
         entry for entry in hosted["strategy"]["matrix"]["include"] if entry["suite"] not in HOSTED_ONLY]
+    # A dispatch may name the machines itself (a machine's trial before the
+    # watcher lists it); the nightly has no inputs and reads the variable.
     assert lane["strategy"]["matrix"]["runner"] == (
-        "${{ fromJSON(vars.PARITY_SELFHOSTED_RUNNERS || '[\"off\"]') }}")
+        "${{ fromJSON(inputs.selfhosted_runners || vars.PARITY_SELFHOSTED_RUNNERS || '[\"off\"]') }}")
     assert lane["strategy"]["fail-fast"] is False
     assert lane["needs"] == hosted["needs"] == ["scope", "candidate", "candidate-harness", "fixtures"]
     # Only the maintainer's registered runners: one label per machine.
@@ -1470,10 +1472,15 @@ def test_selfhosted_lane_never_touches_a_required_check():
     assert lane["if"] == (
         "${{ !cancelled() && (github.event_name == 'schedule' || "
         "(github.event_name == 'workflow_dispatch' && inputs.mode == 'ci')) "
-        "&& vars.PARITY_SELFHOSTED_RUNNERS != '' "
+        "&& (inputs.selfhosted_runners != '' || vars.PARITY_SELFHOSTED_RUNNERS != '') "
         "&& needs.candidate.result == 'success' && needs.candidate-harness.result == 'success' "
         "&& needs.fixtures.result == 'success' }}")
     assert "pull_request" not in lane["if"] and "'push'" not in lane["if"]
+    # The trial override is a dispatch input and read nowhere else.
+    trial = workflow()[True]["workflow_dispatch"]["inputs"]["selfhosted_runners"]
+    assert trial["type"] == "string" and trial["required"] is False
+    text = WORKFLOW.read_text(encoding="utf-8")
+    assert text.count("inputs.selfhosted_runners") == 2
 
 
 def test_both_lanes_upload_under_distinct_names():
