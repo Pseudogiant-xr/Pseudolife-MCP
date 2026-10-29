@@ -495,8 +495,12 @@ mod tests {
             .unwrap();
         let recorder = Arc::new(Recorder::new());
         let store = Arc::new(auth::PrincipalStore::new());
-        let mut r = Refresher::new(dsn.clone(), store, vec![]).with_activity(Some(recorder.clone()));
-        assert!(!r.flush_activity().await, "no connection yet: nothing written");
+        let mut r =
+            Refresher::new(dsn.clone(), store, vec![]).with_activity(Some(recorder.clone()));
+        assert!(
+            !r.flush_activity().await,
+            "no connection yet: nothing written"
+        );
         assert!(r.refresh_once().await);
         recorder.seen("w58-refresher");
         assert!(r.flush_activity().await);

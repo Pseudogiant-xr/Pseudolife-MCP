@@ -257,8 +257,7 @@ pub(crate) fn browser_gate(app: &App, h: &HeaderMap) -> Result<Option<&'static s
 /// that needs the bound principal again uses `auth::resolve`.
 pub(crate) fn resolve(app: &App, h: &HeaderMap) -> Resolved {
     let header = authorization(h);
-    let (resolved, source) =
-        auth::resolve_detailed(header.as_deref(), &app.env_tokens, &app.store);
+    let (resolved, source) = auth::resolve_detailed(header.as_deref(), &app.env_tokens, &app.store);
     if let Some(activity) = &app.activity {
         activity.note(header.as_deref(), &resolved, source);
     }

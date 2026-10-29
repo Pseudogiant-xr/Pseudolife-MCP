@@ -251,7 +251,10 @@ pub fn refusal_log_line(batch: &Batch) -> Option<String> {
         .join(", ");
     let mut tail = String::new();
     if ranked.len() > LOG_PREFIXES {
-        tail.push_str(&format!(" and {} more prefix(es)", ranked.len() - LOG_PREFIXES));
+        tail.push_str(&format!(
+            " and {} more prefix(es)",
+            ranked.len() - LOG_PREFIXES
+        ));
     }
     if batch.dropped != 0 {
         tail.push_str(&format!(
@@ -356,9 +359,15 @@ mod tests {
         let c = &g["constants"];
         assert_eq!(c["flush_interval_s"].as_f64(), Some(FLUSH_INTERVAL_S));
         assert_eq!(c["hash_prefix_len"].as_u64(), Some(HASH_PREFIX_LEN as u64));
-        assert_eq!(c["max_pending_rejected"].as_u64(), Some(MAX_PENDING_REJECTED as u64));
+        assert_eq!(
+            c["max_pending_rejected"].as_u64(),
+            Some(MAX_PENDING_REJECTED as u64)
+        );
         assert_eq!(c["max_rejected_rows"].as_i64(), Some(MAX_REJECTED_ROWS));
-        assert_eq!(c["rejected_retention_s"].as_f64(), Some(REJECTED_RETENTION_S));
+        assert_eq!(
+            c["rejected_retention_s"].as_f64(),
+            Some(REJECTED_RETENTION_S)
+        );
         assert_eq!(c["log_prefixes"].as_u64(), Some(LOG_PREFIXES as u64));
     }
 
@@ -388,8 +397,12 @@ mod tests {
         let g: Value = serde_json::from_str(GOLDEN).unwrap();
         for seq in g["sequences"].as_array().unwrap() {
             let name = seq["name"].as_str().unwrap();
-            let wall = Arc::new(AtomicU64::new(g["start"]["wall"].as_f64().unwrap().to_bits()));
-            let mono = Arc::new(AtomicU64::new(g["start"]["mono"].as_f64().unwrap().to_bits()));
+            let wall = Arc::new(AtomicU64::new(
+                g["start"]["wall"].as_f64().unwrap().to_bits(),
+            ));
+            let mono = Arc::new(AtomicU64::new(
+                g["start"]["mono"].as_f64().unwrap().to_bits(),
+            ));
             let (w, m) = (wall.clone(), mono.clone());
             let rec = Recorder::with_clocks(
                 Box::new(move || f64::from_bits(w.load(Ordering::SeqCst))),
@@ -519,7 +532,11 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(
-            (row.get::<_, i64>(0), row.get::<_, f64>(1), row.get::<_, f64>(2)),
+            (
+                row.get::<_, i64>(0),
+                row.get::<_, f64>(1),
+                row.get::<_, f64>(2)
+            ),
             (5, 5.0, 20.0)
         );
         // Past retention: the next write with refusals prunes it.
