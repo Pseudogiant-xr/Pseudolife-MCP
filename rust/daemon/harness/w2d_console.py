@@ -65,7 +65,8 @@ MUTANTS = ["console-facts-no-contender", "console-sources-by-name", "console-cha
            "console-agents-ignore-limit", "maintainer-gate-open", "maintainer-config-unchecked",
            "maintainer-available-any-key", "maintainer-roles-any-grant",
            "config-read-typed-values", "config-read-no-saved",
-           "config-write-unprotected", "config-write-yaml12"]
+           "config-write-unprotected", "config-write-yaml12",
+           "maintainer-challenge-any-field"]
 
 OPS = ("get", "post")
 
@@ -145,6 +146,7 @@ def compare_response(py, rs, tol, stats) -> list[str]:
     if track is not None:
         out += next_start_values(py, rs, SAVED.get(track, set()))
     out += config_write_answers(py, rs)
+    out += challenge_answers(py, rs)
     py, rs, homes = config_homes(py), config_homes(rs), []
     for r in (py, rs):
         v = r.get("value") if isinstance(r, dict) else None
@@ -204,6 +206,72 @@ def next_start_values(py: dict, rs: dict, saved: set) -> list[str]:
             k.pop("saved", None)
             k["value"] = "<next start>"
     return out
+
+
+# The MAC key the challenge scenarios seed, so each answer's MAC is checked.
+CHALLENGE_SECRET = "5e" * 32
+HEX32 = re.compile(r"[0-9a-f]{32}")
+HEX64 = re.compile(r"[0-9a-f]{64}")
+
+
+def challenge_answers(py: dict, rs: dict) -> list[str]:
+    """A ``POST /api/maintainer/challenge`` answer on both sides. Each
+    side's nonce, expiry and MAC are its own: the payload must be the
+    canonical JSON of its fields, the nonce 32 hex digits, the expiry about
+    two minutes ahead, the MAC its HMAC under the seeded key (any 64 hex
+    digits where none is seeded) and ``publicKey.challenge`` its SHA-256;
+    the rest compares exactly."""
+    import base64
+    import hashlib
+    import hmac
+    import time
+    a, b = py.get("value"), rs.get("value")
+    if not (isinstance(a, dict) and isinstance(b, dict) and "payload" in a and "payload" in b):
+        return []
+    out, fields, expiries, macs = [], [], [], []
+    for side, r, v in (("python", py, a), ("rust", rs, b)):
+        payload = v["payload"]
+        try:
+            f = json.loads(payload)
+        except (TypeError, ValueError):
+            return [f"{side}: payload is not JSON"]
+        if json.dumps(f, sort_keys=True, separators=(",", ":"), ensure_ascii=True) != payload:
+            out.append(f"{side}: payload is not canonical JSON")
+        if not HEX32.fullmatch(str(f.get("nonce"))):
+            out.append(f"{side}: nonce {f.get('nonce')!r}")
+        expiries.append(f.get("expires_at"))
+        seeded = hmac.new(bytes.fromhex(CHALLENGE_SECRET), payload.encode(), hashlib.sha256)
+        macs.append(str(v.get("mac")) == seeded.hexdigest())
+        digest = base64.urlsafe_b64encode(hashlib.sha256(payload.encode()).digest())
+        if v.get("publicKey", {}).get("challenge") != digest.rstrip(b"=").decode():
+            out.append(f"{side}: publicKey.challenge is not the payload's SHA-256")
+        f.update(nonce="<nonce>", expires_at="<expiry>")
+        fields.append(f)
+        key = {**v.get("publicKey", {}), "challenge": "<challenge>"}
+        r["value"] = {**v, "payload": f, "mac": "<mac>", "publicKey": key}
+    now = time.time()
+    if not all(isinstance(x, (int, float)) and abs(x - now - 120) < 30 for x in expiries):
+        out.append(f"expires_at: python/rust {expiries!r} not about now + 120")
+    # Where the key is seeded both MACs are its HMAC; where each side made
+    # its own, both are 64 hex digits.
+    shapes = [HEX64.fullmatch(str(v.get("mac"))) is not None for v in (a, b)]
+    if (any(macs) and not all(macs)) or not all(shapes):
+        out.append(f"mac: python {a.get('mac')!r} vs rust {b.get('mac')!r}")
+    return out
+
+
+_base_normalize_state = w2e.normalize_state
+
+
+def normalize_state(state, before, ts_map=None):
+    """Each side's lazily made maintainer MAC key is its own random 64 hex
+    digits (``expect`` checks it exists): it compares by that shape."""
+    meta = state.get("rows", {}).get("public.meta", {}) if isinstance(state, dict) else {}
+    for row in meta.get("rows", []) if isinstance(meta, dict) else []:
+        if (isinstance(row, list) and len(row) == 2 and row[0] == "maintainer_secret_v1"
+                and isinstance(row[1], str) and HEX64.fullmatch(row[1])):
+            row[1] = "<64 hex digits>"
+    return _base_normalize_state(state, before, ts_map)
 
 
 def config_homes(r):
@@ -702,7 +770,95 @@ def config_scenarios() -> dict[str, dict]:
     }
 
 
-SCENARIOS = {**scenarios(), **maintainer_scenarios(), **config_scenarios()}
+# Board rows the challenge previews read: sessions with full agent ids and
+# credentials (one sharing a recent label), the reserved maintainer and a
+# subagent, and role holders on two projects.
+G1, G2, G3 = "0123456789abcdef0123456789abcdef", "fedcba9876543210fedcba9876543210", "3" * 32
+RESERVED, CHILD = "1" * 32, "2" * 32
+CHALLENGE_SEED = [
+    _agent(G1, "default", "gamma session", credential_hash="'h1'", project="'Pseudolife-MCP'",
+           task="'B2d'", capabilities="'{\"codex\": true, \"host\": \"laptop\"}'::jsonb"),
+    _agent(G2, "default", "gamma session", credential_hash="'h2'", project="'Other'"),
+    _agent(G3, "default", "delta session", credential_hash="'h3'", project="'Proj2'"),
+    _agent(RESERVED, "maintainer", "maintainer", credential_hash="'h4'"),
+    _agent(CHILD, "default", "a subagent", credential_hash="'h5'", parent_thread="'thread-1'"),
+    _lease("coordinator:Proj2", G3, 4),
+]
+SEED_SECRET = sql("INSERT INTO meta (key, value) VALUES ('maintainer_secret_v1', "
+                  f"'\"{CHALLENGE_SECRET}\"'::jsonb)")
+
+
+def challenge(**body) -> dict:
+    return post("/api/maintainer/challenge", body)
+
+
+CHALLENGE_OPS = [
+    # Each purpose, as the Console asks for it.
+    challenge(purpose="send", to=G1, text="Please rebase onto master.", urgent=True),
+    challenge(purpose="send", to=G2, text="A quiet note."),
+    challenge(purpose="enrol-approve", label="  Desk key "),
+    challenge(purpose="cancel", credential_id="cred-pending-0002"),
+    challenge(purpose="revoke-self", credential_id="cred-active-0001"),
+    challenge(purpose="repudiate", message_id="m-sent-1"),
+    challenge(purpose="grant-delegate", project="Pseudolife-MCP", agent_id=G1, hold=3600),
+    challenge(purpose="assign-coordinator", project="Pseudolife-MCP", agent_id=G1, hold=60),
+    challenge(purpose="grant-delegate", project="Proj2", agent_id=G3, hold=604800),
+    challenge(purpose="revoke-delegate", project="Pseudolife-MCP"),
+    challenge(purpose="revoke-coordinator", project="Nobody"),
+    # Refusals, in _challenge's order.
+    challenge(purpose="bogus"),
+    challenge(),
+    challenge(purpose=["send"]),
+    challenge(purpose="send", to=G1, text="hi", extra=1),
+    challenge(purpose="enrol-bootstrap", label="laptop"),
+    challenge(purpose="send", to=G1, text="hi", urgent="yes"),
+    challenge(purpose="send", to="agent-alpha-0001", text="hi"),
+    challenge(purpose="send", to="9" * 32, text="hi"),
+    challenge(purpose="send", to=RESERVED, text="hi"),
+    challenge(purpose="send", to=CHILD, text="hi"),
+    challenge(purpose="send", to=G1, text="   "),
+    challenge(purpose="send", to=G1, text="x" * 8193),
+    challenge(purpose="send", to=G1, text="key sk-ant-api03-" + "A" * 90),
+    challenge(purpose="enrol-approve", label="a b"),
+    challenge(purpose="enrol-approve", label="x" * 65),
+    challenge(purpose="cancel", credential_id=""),
+    challenge(purpose="cancel", credential_id="c" * 1401),
+    challenge(purpose="repudiate", message_id="m-reply-1"),
+    challenge(purpose="repudiate", message_id=7),
+    challenge(purpose="grant-delegate", project=" Pseudolife-MCP", agent_id=G1, hold=3600),
+    challenge(purpose="grant-delegate", project="Pseudolife-MCP", agent_id=G1, hold=59),
+    challenge(purpose="grant-delegate", project="Pseudolife-MCP", agent_id=G1, hold=60.0),
+    challenge(purpose="grant-delegate", project="Pseudolife-MCP", agent_id=G2, hold=3600),
+    challenge(purpose="assign-coordinator", project="Pseudolife-MCP", agent_id=None, hold=60),
+]
+
+
+def challenge_scenarios() -> dict[str, dict]:
+    seed = [store("A note."), *MAINTAINER_SEED, *CHALLENGE_SEED]
+    return {
+        "console-challenge": {
+            "config": MAINTAINER_CONFIG,
+            "seed": [*seed, SEED_SECRET],
+            "ops": CHALLENGE_OPS,
+        },
+        # No passkey yet: the bootstrap enrolment is the one purpose open,
+        # and its MAC key is made on first use (each side its own).
+        "console-challenge-bootstrap": {
+            "config": MAINTAINER_CONFIG,
+            "seed": [store("A note."), *CHALLENGE_SEED],
+            "ops": [
+                {**challenge(purpose="enrol-bootstrap", label="First key"),
+                 "expect": ["SELECT value #>> '{}' ~ '^[0-9a-f]{64}$' FROM meta "
+                            "WHERE key = 'maintainer_secret_v1'"]},
+                challenge(purpose="send", to=G1, text="hi"),
+                challenge(purpose="enrol-bootstrap", label=""),
+            ],
+        },
+    }
+
+
+SCENARIOS = {**scenarios(), **maintainer_scenarios(), **config_scenarios(),
+             **challenge_scenarios()}
 
 
 def install() -> None:
@@ -714,6 +870,7 @@ def install() -> None:
     w2e.run_op = run_op
     w2e.compare_response = compare_response
     w2e.home_op = home_op
+    w2e.normalize_state = normalize_state
     for name in ("write_config", "config_file"):
         if name not in w2e.HOME_OPS:
             w2e.HOME_OPS = (*w2e.HOME_OPS, name)
