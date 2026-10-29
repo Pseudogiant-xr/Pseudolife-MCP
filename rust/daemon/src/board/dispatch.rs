@@ -248,12 +248,15 @@ impl Board {
             .dispatch_once(action, params.clone(), headers, principal)
             .await
         {
-            // `_ensure_init` before the one retry, which then stamps from the
-            // ready service it publishes (W2F-CLOCK-RETRY: without Python's
-            // forced writer-session reprobe).
+            // The mailbox transaction rolled back. An epoch mismatch proves
+            // the cached session check stale: reprobe even inside its probe
+            // interval and run `_ensure_init`, then make one fresh attempt.
             Err(BoardError::ClockChanged) if action == "send" => {
+                #[cfg(test)]
+                self.clock_retries
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 self.service
-                    .ensure_init()
+                    .refresh_writer_session()
                     .await
                     .map_err(BoardError::Internal)?;
                 self.dispatch_once(action, params, headers, principal).await
@@ -435,6 +438,13 @@ impl Board {
         let ready = if action == "send" {
             drop(conn);
             let ready = self.full_tier().await?;
+            #[cfg(test)]
+            {
+                let gate = self.stamp_gate.lock().expect("stamp gate").take();
+                if let Some(gate) = gate {
+                    let _ = gate.await;
+                }
+            }
             conn = self.conn.lock().await;
             Some(ready)
         } else {
@@ -699,7 +709,7 @@ impl Board {
     /// never queues behind an initialization retry, the reaper or a sweep;
     /// otherwise `_ensure_init` under the mutex, which runs a pending reseed.
     /// Like Python's lock-free path it does not probe the writer session; a
-    /// send its stale session fences is retried after `_ensure_init`.
+    /// send its stale session fences is retried after a forced reprobe.
     ///
     /// A ready service over a session that found another writer held the
     /// bank is not taken: it carries that session's lease epoch, which the

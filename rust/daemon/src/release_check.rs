@@ -25,7 +25,7 @@ pub struct ReleaseCheck {
     state: RwLock<Snapshot>,
 }
 
-fn version_shape(value: &str) -> bool {
+pub(crate) fn version_shape(value: &str) -> bool {
     (1..=32).contains(&value.len())
         && value
             .bytes()
@@ -33,7 +33,7 @@ fn version_shape(value: &str) -> bool {
 }
 
 /// Numeric tuple comparison without narrowing Python's integer components.
-fn version_key(value: &str) -> Option<Vec<&str>> {
+pub(crate) fn version_key(value: &str) -> Option<Vec<&str>> {
     let mut end = 0;
     let bytes = value.as_bytes();
     while end < bytes.len() && bytes[end].is_ascii_digit() {
@@ -62,7 +62,7 @@ fn version_key(value: &str) -> Option<Vec<&str>> {
     )
 }
 
-fn compare_keys(a: &[&str], b: &[&str]) -> Ordering {
+pub(crate) fn compare_keys(a: &[&str], b: &[&str]) -> Ordering {
     for (a, b) in a.iter().zip(b) {
         let cmp = a.len().cmp(&b.len()).then_with(|| a.cmp(b));
         if cmp != Ordering::Equal {
@@ -72,8 +72,8 @@ fn compare_keys(a: &[&str], b: &[&str]) -> Ordering {
     a.len().cmp(&b.len())
 }
 
-// W2-D's session-start briefing consumes this when its hook handler lands.
-#[allow(dead_code)]
+/// `update_notice`: one line when the daemon knows of a release newer than
+/// itself, naming the plugin's version when that differs too.
 pub fn update_notice(
     daemon: &str,
     latest: Option<&str>,
