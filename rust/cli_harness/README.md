@@ -6,7 +6,7 @@ then compares exit code, stdout, stderr, every file under the home, the HTTP
 requests a fixture daemon received and any database rows the case dumps. It
 exits non-zero on any difference. Comparison is exact except for named rules
 a case opts into; each rule validates its span first and is listed in the
-row's spec under `specs/` and in `rust/PARITY.md`.
+row's spec under `specs/` and in the parity register (`rust/parity/`).
 
 ```sh
 # live: oracle and candidate side by side (CI runs this on both OSes)

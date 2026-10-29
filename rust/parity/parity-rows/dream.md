@@ -1,0 +1,3 @@
+| Row | Phase | Behavior to preserve and Python source | Existing test pool and boundary | Status |
+|---|---:|---|---|---|
+| DREAM | 4 | Pull/ack/commit cursors, scheduled quiescence, retry/fallback/extractor protocol/redirection, atomic run rollback, quarantine, literal gate, digests/chronicle. `service_dream.py`, `memory/dream.py`, `dream_token.py` | `test_dream.py`, `test_dream_acknowledgement.py`, `test_dream_ack_storage.py`, `test_dream_runs.py`, `test_dream_stall.py`, `test_dream_quarantine.py`, `test_dream_chronicle.py`, `test_session_digest.py`, `test_extractor_fallback.py`, `test_extractor_no_redirect.py`, `test_literal_gate.py` I/DB; fake sidecar E2E and ladder evidence | deferred |

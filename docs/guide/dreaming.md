@@ -500,7 +500,8 @@ steps:
    `last_dream_extractor.which` should read `primary` against the `:8082`
    URL. The daemon also logs a startup warning for the common
    half-configurations (unresolvable `host.docker.internal`, `auto` without
-   a fallback, primary == fallback).
+   a fallback, primary == fallback, a fallback whose host does not
+   resolve).
 
 When the shim is unreachable or the CLI is logged out, dreams automatically
 use the fallback; the Console's Observatory shows which extractor is
@@ -682,6 +683,24 @@ stall record and reports it:
   found the primary down and the fallback served: a warning, not a stall,
   since dreams still land). `last_error` is an HTTP status or an exception
   type, never the endpoint's answer.
+- **The primary's own cause.** In `auto` mode the failed health probe that
+  sent a dream to the fallback is kept with it. The probe reads the
+  shim's `/health` status (`login_required` is `login_expired`). If the
+  fallback then fails too, the reason is still the primary's, and
+  `last_error` names both, for example
+  `primary /health HTTP 503 (login_required); fallback unreachable (gaierror)`.
+  A fallback that served names the primary's cause in `last_error`.
+- **A fallback that does not resolve** (DNS answers "not found", say for a
+  sidecar this stack does not run) is a misconfiguration, not a network
+  fault. In `auto` mode with a usable primary it is never dialled: the
+  dream runs on the primary, and `last_error` ends `fallback does not
+  resolve`. With no usable primary, or in `fallback` mode, it is still
+  dialled, so the dream fails and holds its batch. A temporary DNS failure,
+  or a fallback reached through a proxy (`http_proxy`, `https_proxy`,
+  `all_proxy`), is never judged. `memory_dream(action="status")` carries
+  it as `fallback_warning`, saying what the mode does with it and the fix:
+  remove the fallback, or start the extractor it names. The Python daemon
+  also logs it once at startup and once when a dream first skips it.
 - **Where it shows.** `memory_dream(action="status")` carries `stall` (null
   while dreams are served) and `last_stall`; `/health` reports
   `extractor: "stalled"` with a `stall` sub-object while `status` stays

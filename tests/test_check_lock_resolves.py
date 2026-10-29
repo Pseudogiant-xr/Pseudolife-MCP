@@ -63,7 +63,7 @@ def test_the_dry_run_is_the_image_install_plus_only_the_documented_flags(on_imag
         sys.executable, "-m", "pip", "install", "--dry-run", "--ignore-installed",
         "--disable-pip-version-check", "--extra-index-url", "https://download.pytorch.org/whl/cpu",
         "-c", str(ROOT / "ops" / "requirements.lock.txt"),
-        *PROJECT["dependencies"], *PROJECT["optional-dependencies"]["onnx"], "setuptools==83.0.0",
+        *PROJECT["dependencies"], *PROJECT["optional-dependencies"]["onnx"], "setuptools==84.2.1",
     ]]
     assert "resolves the way the daemon image installs it (2 packages" in capsys.readouterr().out
 

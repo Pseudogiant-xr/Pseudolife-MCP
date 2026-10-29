@@ -9,8 +9,10 @@ import json
 from pathlib import Path
 import re
 import subprocess
+import sys
 
 ROOT = Path(__file__).resolve().parents[1]
+REGISTER = "rust/PARITY.md"
 ORACLE = "3691f5cb75487d3fda54a6bde6fab35dcf32c681"
 PHASE1_ORACLE = "1d444aa1bc432431e5fcbc07a55e1fe661c0f8e4"
 PHASE1_FUNCTION_FILES = (
@@ -23,6 +25,15 @@ PHASE1_FUNCTION_FILES = (
 
 
 def source(path: str) -> str:
+    if path == REGISTER:
+        # The register is one file per row under rust/parity/; PARITY.md is
+        # its pointer, so the register's path reads the rendered whole.
+        sys.path.insert(0, str(ROOT / "rust"))
+        try:
+            import split_parity
+        finally:
+            sys.path.remove(str(ROOT / "rust"))
+        return split_parity.register_text()
     return (ROOT / path).read_text(encoding="utf-8-sig")
 
 
@@ -264,7 +275,7 @@ def validate(*, phase1: bool = False) -> dict:
                             and (ROOT / rust_path).is_file()
                             and re.search(rf"\bfn\s+{re.escape(rust_function)}\s*\(", source(rust_path))), "equivalent Rust function is absent"
         assert manifest["phase1_function_counts"] == dict(Counter(item["bucket"] for item in functions))
-    register = source("rust/PARITY.md")
+    register = source(REGISTER)
     assert (f"{len(files)} `tests/test_*.py` files: {counts['oracle']} oracle, "
             f"{counts['candidate']} candidate and {counts['internal']} internal") in register, "stale bucket counts"
     for name in inventory["config_sections"]:
