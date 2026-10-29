@@ -547,6 +547,9 @@ jobs:
         #   handshake.
         # - test_credentials, test_coordination_credentials: the token files'
         #   Windows owner and explicit-ACL checks.
+        # - test_prune_worktrees, test_ops_install_worktree_retention: the
+        #   retention script's junction and reparse-point refusal, its
+        #   Win32_Process listing, and the weekly task's registration.
         # - test_repository_claims: file claims refuse Windows junctions and
         #   reserved names (CON, trailing dots and spaces).
         # - test_tunnel_*: the tunnel's DPAPI key storage, owner-only ACLs and
@@ -576,6 +579,8 @@ jobs:
           tests/test_credentials.py
           tests/test_coordination_credentials.py
           tests/test_repository_claims.py
+          tests/test_prune_worktrees.py
+          tests/test_ops_install_worktree_retention.py
           tests/test_runner_cleanup.py
           tests/test_tunnel_profiles.py
           tests/test_tunnel_service.py
@@ -667,10 +672,11 @@ jobs:
         # cannot pass for coverage.
         # The test_tunnel_*.py files run the tunnel's owner-only files and
         # process handling on macOS; test_delegate_watch.py runs the
-        # watcher's `ps` start-time check there.
+        # watcher's `ps` start-time check there, and test_prune_worktrees.py
+        # the retention script's `ps` process listing.
         env:
           PSEUDOLIFE_SUITE_LOCK: "off"
-        run: python -m pytest tests/test_delegate_watch.py tests/test_wait_mail_cli.py tests/test_hooks_digest.py tests/test_stop_wake_hook.py tests/test_hook_glob_ranges.py tests/test_coordination_turn_digest.py tests/test_coordination_adapter.py tests/test_coordination_credentials.py tests/test_codex_doorbell.py tests/test_lease_cli.py tests/test_suite_lock.py tests/test_memory_changes_hook.py tests/test_client_install_ux.py tests/test_codex_hooks.py tests/test_subagent_board_guard.py tests/test_codex_hook_setup_edges.py tests/test_installer_legacy_hooks.py tests/test_plugin_packaging.py tests/test_embedded_pg.py tests/test_tunnel_bridge.py tests/test_tunnel_cli.py tests/test_tunnel_profiles.py tests/test_tunnel_runtime.py tests/test_tunnel_service.py -q -rs
+        run: python -m pytest tests/test_delegate_watch.py tests/test_wait_mail_cli.py tests/test_hooks_digest.py tests/test_stop_wake_hook.py tests/test_hook_glob_ranges.py tests/test_coordination_turn_digest.py tests/test_coordination_adapter.py tests/test_coordination_credentials.py tests/test_codex_doorbell.py tests/test_lease_cli.py tests/test_suite_lock.py tests/test_memory_changes_hook.py tests/test_client_install_ux.py tests/test_codex_hooks.py tests/test_subagent_board_guard.py tests/test_codex_hook_setup_edges.py tests/test_installer_legacy_hooks.py tests/test_plugin_packaging.py tests/test_embedded_pg.py tests/test_tunnel_bridge.py tests/test_tunnel_cli.py tests/test_tunnel_profiles.py tests/test_tunnel_runtime.py tests/test_tunnel_service.py tests/test_prune_worktrees.py -q -rs
 
   test-windows-nightly:
     # Not a merge gate, and never run for a pull request or merge group: the
