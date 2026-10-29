@@ -26,9 +26,8 @@ in the memory bank (search "dev machines homelab"), never in this tree.
   flake repro loops, Windows Rust builds under MSVC, and native-Windows
   behaviour: process ownership and shutdown, named pipes, junctions, UNC
   and device paths. It is also where native Windows full suites run, which
-  the Windows host refuses. Its disk is slow (a cold `cargo test --no-run`
-  of one shim integration-test binary took 15 minutes there), so keep its
-  one shared `CARGO_TARGET_DIR` warm rather than cleaning it. Its default
+  the Windows host refuses. Like the Linux boxes, its disk is on the
+  hypervisor's NVMe pool, so its Rust target is an ordinary cache. Its default
   SSH shell is PowerShell 7. Its updates are notify-only and paused, with
   automatic restart disabled.
 - **Hosted CI.** The merge gate. Its required Windows job runs the product
