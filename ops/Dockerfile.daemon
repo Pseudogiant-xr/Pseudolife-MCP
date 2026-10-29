@@ -118,7 +118,13 @@ ENV PSEUDOLIFE_PLUGIN_DIR=/app/plugin
 
 # Runtime data (neural weights, ChromaDB, cortex snapshot) lives here on a
 # mounted volume so it survives container recreation.
-RUN mkdir -p /data
+RUN apt-get update && apt-get install -y --no-install-recommends passwd \
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd --gid 10001 pseudolife \
+    && useradd --uid 10001 --gid 10001 --create-home --no-log-init --shell /usr/sbin/nologin pseudolife \
+    && mkdir -p /data \
+    && chown 10001:10001 /data
+ENV HOME=/home/pseudolife
 VOLUME ["/data"]
 
 # Build stamp: the commit this image holds, so `docker image inspect` and
@@ -148,4 +154,7 @@ EXPOSE 8765
 HEALTHCHECK --interval=15s --timeout=5s --start-period=90s --retries=5 \
     CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8765/health', timeout=3).status==200 else 1)"
 
+# Root is used only to migrate legacy volume ownership. The entrypoint
+# clears supplementary groups and drops gid/uid before importing the daemon.
+ENTRYPOINT ["python", "-m", "pseudolife_memory.container_entrypoint"]
 CMD ["python", "-m", "pseudolife_memory.cli", "serve"]

@@ -4689,6 +4689,25 @@ to either authentication variable in `ops/.env` makes that file authoritative
 for both. Inherited client token variables cannot add an unintended fallback;
 the launching shell's environment is preserved after the deployment command.
 
+## Docker runtime account
+
+The Python Docker image starts with a short ownership bootstrap for `/data`,
+then clears supplementary groups and permanently switches to UID/GID
+`10001:10001` before executing the daemon. Existing root-owned state is
+transferred automatically; file contents, non-root ownership, application
+code and baked models are preserved, and symbolic links are not followed.
+Install and both update modes run this entrypoint on every container start,
+including daemon-only `--no-deps` recreates. No host account changes are
+needed. Compose also enables `no-new-privileges` and restricts bootstrap
+capabilities; the running daemon has no effective or permitted capabilities.
+
+An explicit Docker `--user` override skips ownership migration; that account
+must already have access to its data and a writable home. Container metadata
+still names root for the bootstrap, and `docker exec` uses that configured
+user unless passed `--user`: inspect the running daemon's UID to check its
+runtime identity. Backup/restore tools deliberately bypass the bootstrap
+using `--entrypoint` for administrative operations.
+
 ## Experimental agent coordination
 
 Coordination adds peer awareness and addressed mail within one bank. It is on
