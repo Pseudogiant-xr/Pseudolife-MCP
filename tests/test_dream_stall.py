@@ -672,3 +672,78 @@ def test_database_write_failures_are_not_an_extractor_stall(svc, monkeypatch):
     assert all(r.get("extractor_failed") and r["hold_phase"] == "write" for r in results)
     assert all("extractor_error" not in r for r in results)
     assert svc.dream_status()["stall"] is None
+
+
+# ── the primary's own cause wins (2026-10-27) ─────────────────────────────
+#
+# Live: the primary CLI shim's sign-in expired (its /health answered 503),
+# the auto-mode fallback named a sidecar this stack does not run, and every
+# fallback dream failed on DNS. The stall said `extractor_unreachable` /
+# `unreachable (gaierror)` and the session-start line said to check the
+# network, while the fix was to sign the CLI in again.
+
+LOGIN_PROBE = {"reason": "login_expired", "error": "/health HTTP 503 (login_required)",
+               "fallback_resolves": True}
+
+
+def test_a_failed_fallback_does_not_hide_the_primarys_cause():
+    from pseudolife_memory.memory.dream import dream_stall_line
+    t, clock = _tracker()
+    dns = _failed("extractor_unreachable", "unreachable (gaierror)")
+    t.record(dns, served_by_fallback=True, primary_probe=LOGIN_PROBE)
+    clock.t += 600
+    t.record(dns, served_by_fallback=True, primary_probe=LOGIN_PROBE)
+    stall = t.snapshot()["stall"]
+    assert stall["reason"] == "login_expired"
+    assert stall["last_error"] == ("primary /health HTTP 503 (login_required); "
+                                   "fallback unreachable (gaierror)")
+    line = dream_stall_line(stall)
+    assert "claude auth login" in line and "reachable" not in line
+
+
+def test_a_served_fallback_names_the_primarys_cause():
+    t, clock = _tracker()
+    t.record(OK, served_by_fallback=True, primary_probe=LOGIN_PROBE)
+    clock.t += 600
+    t.record(OK, served_by_fallback=True, primary_probe=LOGIN_PROBE)
+    stall = t.snapshot()["stall"]
+    assert stall["reason"] == "served_by_fallback"
+    assert stall["last_error"] == "primary /health HTTP 503 (login_required)"
+
+
+def test_a_skipped_fallback_is_named_in_the_error():
+    # A fallback that does not resolve is never dialled: the dream runs on
+    # the primary, whose own failure is the first-hand cause.
+    t, clock = _tracker()
+    probe = {**LOGIN_PROBE, "fallback_resolves": False}
+    t.record(_failed(), served_by_fallback=False, primary_probe=probe)
+    clock.t += 600
+    t.record(_failed(), served_by_fallback=False, primary_probe=probe)
+    stall = t.snapshot()["stall"]
+    assert stall["reason"] == "login_expired"
+    assert stall["last_error"] == "primary HTTP 500; fallback does not resolve"
+
+
+def test_a_primary_that_serves_despite_its_probe_is_a_success():
+    t, clock = _tracker()
+    probe = {**LOGIN_PROBE, "fallback_resolves": False}
+    t.record(_failed(), served_by_fallback=False, primary_probe=probe)
+    clock.t += 600
+    t.record(OK, served_by_fallback=False, primary_probe=probe)
+    assert t.snapshot()["stall"] is None and t.failures == 0
+
+
+def test_dream_run_auto_hands_the_probe_to_the_tracker(monkeypatch):
+    from pseudolife_memory.memory import dream as d
+    fallback = StubExtractor([])
+    fallback.primary_probe = LOGIN_PROBE
+    monkeypatch.setattr(d, "build_extractor_with_fallback",
+                        lambda cfg: (fallback, "fallback"))
+    svc = _fallback_service("auto")
+    svc.dream_run = lambda extractor, *, limit=None: _failed(
+        "extractor_unreachable", "unreachable (gaierror)")
+    svc.dream_run_auto()
+    svc.dream_run_auto()
+    stall = svc.dream_stall_state()["stall"]
+    assert stall["reason"] == "login_expired"
+    assert stall["last_error"].startswith("primary /health HTTP 503")

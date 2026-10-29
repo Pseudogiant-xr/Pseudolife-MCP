@@ -1,0 +1,3 @@
+| Mode | Phase | Status | Native | Evidence |
+|---|---|---|---|---|
+| tunnel | 2 | deferred | partly | The read-only status, pending-only update and pre-effect refusals ported as CLI-TUNNEL-STATUS (harness row `tunnel`); the runtime (CLI-TUNNEL-RUNTIME) defers before any effect; B operator/runtime/bridge/network consent (`tunnel_cli.py`, `tunnel_profiles.py`, `tunnel_runtime.py`, `tunnel_bridge.py`); internal `test_tunnel_cli.py::test_setup_resumes_without_erasing_key_consent_or_local_config`, `test_handshake_failure_redacts_transport_output_and_does_not_write`; additive process fixtures pending |

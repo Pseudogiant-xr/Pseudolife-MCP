@@ -1,0 +1,3 @@
+| Row | Phase | Behavior to preserve and Python source | Existing test pool and boundary | Status |
+|---|---:|---|---|---|
+| CONFIG-LOAD | 1/2/3/4/5 | YAML path/missing-file defaults, unknown-key filtering, recursive dataclass construction, section-specific load rules and env precedence at each reader. `utils/config.py`, service/daemon/client/ops readers; every dataclass and variable is enumerated below and in `contract-inventory.json` | `test_memory_config.py`, `test_ops_env_example.py`, `test_dream.py`, `test_client_environment.py` I/A; preserve defaults, coercion and validation errors | deferred |

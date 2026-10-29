@@ -57,7 +57,7 @@ change:
      dumps a bank (dream cursors, daemon run.py rows, graph store,
      principals, and the CLI harness w1c rows whose goldens carry a bank
      dump or export: transfer, invite, maintainer at least),
-     re-recorded on both OSes — rust/PARITY.md names the pin.
+     re-recorded on both OSes — the parity register (rust/parity/) names the pin.
 
 And test the behaviour the bump added BESIDE ITS CONSUMER — or, if it is
 pure DDL shape and nothing reads it yet, add a row to

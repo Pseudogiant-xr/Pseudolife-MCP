@@ -201,7 +201,7 @@ def test_recall_direct_endpoint_still_answers(wire, monkeypatch):
 
 # Unauthenticated GETs (endpoint health, served-model listing) that may keep
 # the stdlib opener: they carry no credential for a redirect to forward.
-_PLAIN_OPEN_ALLOWED = {"probe_endpoint", "fetch_served_model"}
+_PLAIN_OPEN_ALLOWED = {"probe_endpoint_cause", "fetch_served_model"}
 
 
 def _plain_opens(source: str) -> list[tuple[str, int]]:
