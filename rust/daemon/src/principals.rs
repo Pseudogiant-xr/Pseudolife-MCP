@@ -17,6 +17,7 @@ use tokio_postgres::Client;
 use tokio_postgres::error::SqlState;
 
 use crate::auth::{self, StoredPrincipal};
+use crate::principal_activity::Recorder;
 use crate::storage::{self, BANK_ID_META_KEY};
 
 /// `_connect`'s `connect_timeout=5` (principal_store.py:221-223).
@@ -105,22 +106,48 @@ pub async fn revoke(client: &mut Client, name: &str) -> Result<bool, tokio_postg
     Ok(row.is_some())
 }
 
-/// `list_principals`/`describe_rows`: public metadata, never hashes or secrets.
+/// `principal_store.LIST_SQL` (v58): the stored rows with their last
+/// success, then the names seen with no stored row; the last column says
+/// which half a row is from.
+const LIST_SQL: &str = "SELECT p.principal, p.tier, p.board, p.token_hash IS NOT NULL, \
+     p.code_hash IS NOT NULL, p.code_expires_at, p.created_at, p.paired_at, p.revoked_at, \
+     EXTRACT(EPOCH FROM clock_timestamp())::double precision, a.last_seen_at, TRUE \
+     FROM public.principals p LEFT JOIN public.principal_activity a ON a.principal = p.principal \
+     UNION ALL \
+     SELECT a.principal, NULL, NULL, FALSE, FALSE, NULL, NULL, NULL, NULL, \
+     EXTRACT(EPOCH FROM clock_timestamp())::double precision, a.last_seen_at, FALSE \
+     FROM public.principal_activity a \
+     WHERE NOT EXISTS (SELECT 1 FROM public.principals p WHERE p.principal = a.principal) \
+     ORDER BY 1";
+/// `LIST_SQL_V53`: a bank before v58, the stored rows alone.
+const LIST_SQL_V53: &str = "SELECT principal, tier, board, token_hash IS NOT NULL, \
+     code_hash IS NOT NULL, code_expires_at, created_at, paired_at, revoked_at, \
+     EXTRACT(EPOCH FROM clock_timestamp())::double precision, NULL::double precision, TRUE \
+     FROM public.principals ORDER BY principal";
+
+/// `list_principals`/`describe_rows` (no environment names): public
+/// metadata, never hashes or secrets, each row with `last_seen_at`.
 pub async fn list_principals(
     client: &Client,
 ) -> Result<Vec<serde_json::Value>, tokio_postgres::Error> {
-    let rows = client
-        .query(
-            "SELECT principal, tier, board, token_hash IS NOT NULL, code_hash IS NOT NULL, \
-         code_expires_at, created_at, paired_at, revoked_at, \
-         EXTRACT(EPOCH FROM clock_timestamp())::double precision \
-         FROM public.principals ORDER BY principal",
-            &[],
-        )
-        .await?;
-    Ok(rows
+    let rows = match client.query(LIST_SQL, &[]).await {
+        Ok(rows) => rows,
+        Err(e) if e.code() == Some(&SqlState::UNDEFINED_TABLE) => {
+            client.query(LIST_SQL_V53, &[]).await?
+        }
+        Err(e) => return Err(e),
+    };
+    let mut out: Vec<serde_json::Value> = rows
         .iter()
         .map(|r| {
+            let name: String = r.get(0);
+            let last_seen: Option<f64> = r.get(10);
+            if !r.get::<_, bool>(11) {
+                return serde_json::json!({"principal": name, "state": "environment",
+                "paired": false, "tier": null, "board": null, "code_expires_at": null,
+                "created_at": null, "paired_at": null, "revoked_at": null,
+                "last_seen_at": last_seen});
+            }
             let paired: bool = r.get(3);
             let pending: bool = r.get(4);
             let expires: Option<f64> = r.get(5);
@@ -137,13 +164,16 @@ pub async fn list_principals(
             } else {
                 "unpaired"
             };
-            serde_json::json!({"principal": r.get::<_, String>(0), "state": state,
+            serde_json::json!({"principal": name, "state": state,
             "paired": paired, "tier": r.get::<_, Option<String>>(1), "board": r.get::<_, bool>(2),
             "code_expires_at": if pending { expires } else { None },
             "created_at": r.get::<_, f64>(6), "paired_at": r.get::<_, Option<f64>>(7),
-            "revoked_at": revoked})
+            "revoked_at": revoked, "last_seen_at": last_seen})
         })
-        .collect())
+        .collect();
+    // Python's sorted(key=principal): code point order, stable.
+    out.sort_by(|a, b| a["principal"].as_str().cmp(&b["principal"].as_str()));
+    Ok(out)
 }
 
 /// Pairing's store transaction only. The caller validates and hashes input,
@@ -221,6 +251,9 @@ pub struct Refresher {
     env_principals: Vec<String>,
     conn: Option<(Client, JoinHandle<()>)>,
     failing: bool,
+    /// v58: the gate's activity record, written after each good refresh.
+    activity: Option<Arc<Recorder>>,
+    activity_failing: bool,
 }
 
 impl Refresher {
@@ -231,6 +264,43 @@ impl Refresher {
             env_principals,
             conn: None,
             failing: false,
+            activity: None,
+            activity_failing: false,
+        }
+    }
+
+    pub fn with_activity(mut self, activity: Option<Arc<Recorder>>) -> Self {
+        self.activity = activity;
+        self
+    }
+
+    /// `flush_activity`: write the recorder's batch when due, on the live
+    /// connection only (none: the batch waits). A failed write keeps the
+    /// batch and is logged once; a bank whose schema is not applied yet is
+    /// not a failure.
+    pub async fn flush_activity(&mut self) -> bool {
+        let Some(activity) = self.activity.clone() else {
+            return false;
+        };
+        let Some((client, _)) = self.conn.as_mut().filter(|(c, _)| !c.is_closed()) else {
+            return false;
+        };
+        match activity.flush(client).await {
+            Ok(wrote) => {
+                if wrote && self.activity_failing {
+                    eprintln!("principal activity: write recovered");
+                    self.activity_failing = false;
+                }
+                wrote
+            }
+            Err(e) if e.code() == Some(&SqlState::UNDEFINED_TABLE) => false,
+            Err(_e) => {
+                if !self.activity_failing {
+                    eprintln!("principal activity: write failed; kept for the next try");
+                }
+                self.activity_failing = true;
+                false
+            }
         }
     }
 
@@ -291,10 +361,13 @@ impl Refresher {
         }
     }
 
-    /// `_run`: refresh at once, then every 10 s after each refresh ends.
+    /// `_run`: refresh at once, then every 10 s after each refresh ends;
+    /// after a good refresh, the activity write when it is due.
     pub async fn run(mut self) {
         loop {
-            self.refresh_once().await;
+            if self.refresh_once().await {
+                self.flush_activity().await;
+            }
             tokio::time::sleep(auth::REFRESH_EVERY).await;
         }
     }
@@ -308,8 +381,13 @@ pub fn spawn_refresher(
     dsn: String,
     store: Arc<auth::PrincipalStore>,
     env_principals: Vec<String>,
+    activity: Option<Arc<Recorder>>,
 ) -> JoinHandle<()> {
-    tokio::spawn(Refresher::new(dsn, store, env_principals).run())
+    tokio::spawn(
+        Refresher::new(dsn, store, env_principals)
+            .with_activity(activity)
+            .run(),
+    )
 }
 
 #[cfg(test)]
@@ -390,6 +468,53 @@ mod tests {
             .unwrap();
         assert!(r.refresh_once().await);
         assert!(!store.has("w1a-refresher"));
+        drop(c);
+        let _ = t.await;
+    }
+
+    /// v58: after a good refresh the refresher writes the recorder's batch
+    /// on its own connection, and holds the next one for the minute.
+    #[tokio::test]
+    async fn db_refresher_writes_activity_when_due() {
+        let Some(dsn) = test_dsn() else { return };
+        let (c, t) = storage::connect(&storage::parse_dsn(&dsn).unwrap(), Duration::from_secs(10))
+            .await
+            .unwrap();
+        let has_table = c
+            .query_opt("SELECT to_regclass('public.principal_activity')::text", &[])
+            .await
+            .unwrap()
+            .and_then(|r| r.get::<_, Option<String>>(0))
+            .is_some();
+        if !has_table {
+            eprintln!("principal_activity absent (bank below v58): skipping");
+            return;
+        }
+        c.batch_execute("DELETE FROM principal_activity WHERE principal = 'w58-refresher'")
+            .await
+            .unwrap();
+        let recorder = Arc::new(Recorder::new());
+        let store = Arc::new(auth::PrincipalStore::new());
+        let mut r = Refresher::new(dsn.clone(), store, vec![]).with_activity(Some(recorder.clone()));
+        assert!(!r.flush_activity().await, "no connection yet: nothing written");
+        assert!(r.refresh_once().await);
+        recorder.seen("w58-refresher");
+        assert!(r.flush_activity().await);
+        let seen: i64 = c
+            .query_one(
+                "SELECT count(*) FROM principal_activity WHERE principal = 'w58-refresher'",
+                &[],
+            )
+            .await
+            .unwrap()
+            .get(0);
+        assert_eq!(seen, 1);
+        recorder.seen("w58-refresher");
+        assert!(!r.flush_activity().await, "within the minute: held");
+        assert!(recorder.take().is_some(), "and still pending");
+        c.batch_execute("DELETE FROM principal_activity WHERE principal = 'w58-refresher'")
+            .await
+            .unwrap();
         drop(c);
         let _ = t.await;
     }

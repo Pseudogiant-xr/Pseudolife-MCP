@@ -1,0 +1,766 @@
+{
+ "source": "pseudolife_memory/principal_activity.py",
+ "constants": {
+  "flush_interval_s": 60.0,
+  "hash_prefix_len": 8,
+  "max_pending_rejected": 1000,
+  "max_rejected_rows": 1000,
+  "rejected_retention_s": 7776000,
+  "log_prefixes": 5
+ },
+ "start": {
+  "wall": 1800000000.0,
+  "mono": 1000.0
+ },
+ "sequences": [
+  {
+   "name": "first-write-due-at-once",
+   "max_rejected": 1000,
+   "steps": [
+    [
+     "due"
+    ],
+    [
+     "take"
+    ],
+    [
+     "seen",
+     "laptop"
+    ],
+    [
+     "due"
+    ],
+    [
+     "take"
+    ],
+    [
+     "due"
+    ]
+   ],
+   "expect": [
+    false,
+    null,
+    null,
+    true,
+    {
+     "seen": {
+      "laptop": 1800000000.0
+     },
+     "rejected": {},
+     "dropped": 0
+    },
+    false
+   ]
+  },
+  {
+   "name": "once-a-minute",
+   "max_rejected": 1000,
+   "steps": [
+    [
+     "seen",
+     "laptop"
+    ],
+    [
+     "take"
+    ],
+    [
+     "tick",
+     10.0
+    ],
+    [
+     "seen",
+     "laptop"
+    ],
+    [
+     "due"
+    ],
+    [
+     "tick",
+     49.9
+    ],
+    [
+     "due"
+    ],
+    [
+     "tick",
+     0.1
+    ],
+    [
+     "due"
+    ],
+    [
+     "take"
+    ]
+   ],
+   "expect": [
+    null,
+    {
+     "seen": {
+      "laptop": 1800000000.0
+     },
+     "rejected": {},
+     "dropped": 0
+    },
+    null,
+    null,
+    false,
+    null,
+    false,
+    null,
+    true,
+    {
+     "seen": {
+      "laptop": 1800000010.0
+     },
+     "rejected": {},
+     "dropped": 0
+    }
+   ]
+  },
+  {
+   "name": "latest-success-wins",
+   "max_rejected": 1000,
+   "steps": [
+    [
+     "seen",
+     "laptop"
+    ],
+    [
+     "tick",
+     5.0
+    ],
+    [
+     "seen",
+     "laptop"
+    ],
+    [
+     "seen",
+     "desk"
+    ],
+    [
+     "take"
+    ]
+   ],
+   "expect": [
+    null,
+    null,
+    null,
+    null,
+    {
+     "seen": {
+      "desk": 1800000005.0,
+      "laptop": 1800000005.0
+     },
+     "rejected": {},
+     "dropped": 0
+    }
+   ]
+  },
+  {
+   "name": "refusals-count",
+   "max_rejected": 1000,
+   "steps": [
+    [
+     "rejected",
+     "ab12cd34"
+    ],
+    [
+     "tick",
+     3.0
+    ],
+    [
+     "rejected",
+     "ab12cd34"
+    ],
+    [
+     "rejected",
+     "00ff00ff"
+    ],
+    [
+     "take"
+    ],
+    [
+     "log"
+    ]
+   ],
+   "expect": [
+    null,
+    null,
+    null,
+    null,
+    {
+     "seen": {},
+     "rejected": {
+      "00ff00ff": [
+       1,
+       1800000003.0,
+       1800000003.0
+      ],
+      "ab12cd34": [
+       2,
+       1800000000.0,
+       1800000003.0
+      ]
+     },
+     "dropped": 0
+    },
+    "refused 3 bearer token(s) since the last report, by SHA-256 prefix: ab12cd34 x2, 00ff00ff x1. `pseudolife-mcp doctor` on a client prints its own token's prefix; `pseudolife-mcp invite --list` shows them all"
+   ]
+  },
+  {
+   "name": "give-back-merges",
+   "max_rejected": 1000,
+   "steps": [
+    [
+     "seen",
+     "laptop"
+    ],
+    [
+     "rejected",
+     "ab12cd34"
+    ],
+    [
+     "take"
+    ],
+    [
+     "tick",
+     2.0
+    ],
+    [
+     "seen",
+     "laptop"
+    ],
+    [
+     "rejected",
+     "ab12cd34"
+    ],
+    [
+     "rejected",
+     "11111111"
+    ],
+    [
+     "give_back"
+    ],
+    [
+     "due"
+    ],
+    [
+     "tick",
+     60.0
+    ],
+    [
+     "due"
+    ],
+    [
+     "take"
+    ]
+   ],
+   "expect": [
+    null,
+    null,
+    {
+     "seen": {
+      "laptop": 1800000000.0
+     },
+     "rejected": {
+      "ab12cd34": [
+       1,
+       1800000000.0,
+       1800000000.0
+      ]
+     },
+     "dropped": 0
+    },
+    null,
+    null,
+    null,
+    null,
+    null,
+    false,
+    null,
+    true,
+    {
+     "seen": {
+      "laptop": 1800000002.0
+     },
+     "rejected": {
+      "11111111": [
+       1,
+       1800000002.0,
+       1800000002.0
+      ],
+      "ab12cd34": [
+       2,
+       1800000000.0,
+       1800000002.0
+      ]
+     },
+     "dropped": 0
+    }
+   ]
+  },
+  {
+   "name": "older-given-back-time-loses",
+   "max_rejected": 1000,
+   "steps": [
+    [
+     "seen",
+     "laptop"
+    ],
+    [
+     "take"
+    ],
+    [
+     "tick",
+     4.0
+    ],
+    [
+     "seen",
+     "laptop"
+    ],
+    [
+     "give_back"
+    ],
+    [
+     "tick",
+     60.0
+    ],
+    [
+     "take"
+    ]
+   ],
+   "expect": [
+    null,
+    {
+     "seen": {
+      "laptop": 1800000000.0
+     },
+     "rejected": {},
+     "dropped": 0
+    },
+    null,
+    null,
+    null,
+    null,
+    {
+     "seen": {
+      "laptop": 1800000004.0
+     },
+     "rejected": {},
+     "dropped": 0
+    }
+   ]
+  },
+  {
+   "name": "gate-outcomes",
+   "max_rejected": 1000,
+   "steps": [
+    [
+     "note",
+     "Bearer x",
+     "laptop",
+     "store"
+    ],
+    [
+     "note",
+     "Bearer y",
+     "desk",
+     "environment"
+    ],
+    [
+     "note",
+     null,
+     "default",
+     "open"
+    ],
+    [
+     "note",
+     "Bearer fixture-refused",
+     null,
+     null
+    ],
+    [
+     "note",
+     null,
+     null,
+     null
+    ],
+    [
+     "note",
+     "Basic Zm9vOmJhcg==",
+     null,
+     null
+    ],
+    [
+     "note",
+     "bearer \tfixture-refused \t",
+     null,
+     null
+    ],
+    [
+     "note",
+     "Bearer ",
+     null,
+     null
+    ],
+    [
+     "note",
+     "Bearer fixture-tÃ¶kÃ©n",
+     null,
+     null
+    ],
+    [
+     "take"
+    ],
+    [
+     "log"
+    ]
+   ],
+   "expect": [
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    {
+     "seen": {
+      "desk": 1800000000.0,
+      "laptop": 1800000000.0
+     },
+     "rejected": {
+      "3a2b117c": [
+       1,
+       1800000000.0,
+       1800000000.0
+      ],
+      "6ab5804e": [
+       2,
+       1800000000.0,
+       1800000000.0
+      ]
+     },
+     "dropped": 0
+    },
+    "refused 3 bearer token(s) since the last report, by SHA-256 prefix: 6ab5804e x2, 3a2b117c x1. `pseudolife-mcp doctor` on a client prints its own token's prefix; `pseudolife-mcp invite --list` shows them all"
+   ]
+  },
+  {
+   "name": "prefix-cap",
+   "max_rejected": 3,
+   "steps": [
+    [
+     "rejected",
+     "00000001"
+    ],
+    [
+     "rejected",
+     "00000002"
+    ],
+    [
+     "rejected",
+     "00000003"
+    ],
+    [
+     "rejected",
+     "00000004"
+    ],
+    [
+     "rejected",
+     "00000005"
+    ],
+    [
+     "rejected",
+     "00000001"
+    ],
+    [
+     "take"
+    ],
+    [
+     "log"
+    ]
+   ],
+   "expect": [
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    {
+     "seen": {},
+     "rejected": {
+      "00000001": [
+       2,
+       1800000000.0,
+       1800000000.0
+      ],
+      "00000002": [
+       1,
+       1800000000.0,
+       1800000000.0
+      ],
+      "00000003": [
+       1,
+       1800000000.0,
+       1800000000.0
+      ]
+     },
+     "dropped": 2
+    },
+    "refused 6 bearer token(s) since the last report, by SHA-256 prefix: 00000001 x2, 00000002 x1, 00000003 x1, plus 2 past the 1000-prefix cap. `pseudolife-mcp doctor` on a client prints its own token's prefix; `pseudolife-mcp invite --list` shows them all"
+   ]
+  },
+  {
+   "name": "log-names-five",
+   "max_rejected": 100,
+   "steps": [
+    [
+     "rejected",
+     "00000001"
+    ],
+    [
+     "rejected",
+     "00000002"
+    ],
+    [
+     "rejected",
+     "00000002"
+    ],
+    [
+     "rejected",
+     "00000003"
+    ],
+    [
+     "rejected",
+     "00000003"
+    ],
+    [
+     "rejected",
+     "00000003"
+    ],
+    [
+     "rejected",
+     "00000004"
+    ],
+    [
+     "rejected",
+     "00000004"
+    ],
+    [
+     "rejected",
+     "00000004"
+    ],
+    [
+     "rejected",
+     "00000004"
+    ],
+    [
+     "rejected",
+     "00000005"
+    ],
+    [
+     "rejected",
+     "00000005"
+    ],
+    [
+     "rejected",
+     "00000005"
+    ],
+    [
+     "rejected",
+     "00000005"
+    ],
+    [
+     "rejected",
+     "00000005"
+    ],
+    [
+     "rejected",
+     "00000006"
+    ],
+    [
+     "rejected",
+     "00000006"
+    ],
+    [
+     "rejected",
+     "00000006"
+    ],
+    [
+     "rejected",
+     "00000006"
+    ],
+    [
+     "rejected",
+     "00000006"
+    ],
+    [
+     "rejected",
+     "00000006"
+    ],
+    [
+     "rejected",
+     "00000007"
+    ],
+    [
+     "rejected",
+     "00000007"
+    ],
+    [
+     "rejected",
+     "00000007"
+    ],
+    [
+     "rejected",
+     "00000007"
+    ],
+    [
+     "rejected",
+     "00000007"
+    ],
+    [
+     "rejected",
+     "00000007"
+    ],
+    [
+     "rejected",
+     "00000007"
+    ],
+    [
+     "take"
+    ],
+    [
+     "log"
+    ]
+   ],
+   "expect": [
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    {
+     "seen": {},
+     "rejected": {
+      "00000001": [
+       1,
+       1800000000.0,
+       1800000000.0
+      ],
+      "00000002": [
+       2,
+       1800000000.0,
+       1800000000.0
+      ],
+      "00000003": [
+       3,
+       1800000000.0,
+       1800000000.0
+      ],
+      "00000004": [
+       4,
+       1800000000.0,
+       1800000000.0
+      ],
+      "00000005": [
+       5,
+       1800000000.0,
+       1800000000.0
+      ],
+      "00000006": [
+       6,
+       1800000000.0,
+       1800000000.0
+      ],
+      "00000007": [
+       7,
+       1800000000.0,
+       1800000000.0
+      ]
+     },
+     "dropped": 0
+    },
+    "refused 28 bearer token(s) since the last report, by SHA-256 prefix: 00000007 x7, 00000006 x6, 00000005 x5, 00000004 x4, 00000003 x3 and 2 more prefix(es). `pseudolife-mcp doctor` on a client prints its own token's prefix; `pseudolife-mcp invite --list` shows them all"
+   ]
+  }
+ ],
+ "prefixes": [
+  {
+   "header": "Bearer abc",
+   "presented": "abc",
+   "prefix": "ba7816bf"
+  },
+  {
+   "header": "bearer \tabc \t",
+   "presented": "abc",
+   "prefix": "ba7816bf"
+  },
+  {
+   "header": "Basic abc",
+   "presented": null,
+   "prefix": null
+  },
+  {
+   "header": "Bearer ",
+   "presented": null,
+   "prefix": null
+  },
+  {
+   "header": "",
+   "presented": null,
+   "prefix": null
+  },
+  {
+   "header": "Bearerabc",
+   "presented": null,
+   "prefix": null
+  },
+  {
+   "header": "Bearer a b",
+   "presented": "a b",
+   "prefix": "c8687a08"
+  },
+  {
+   "header": "Bearer fixture-tÃ¶kÃ©n",
+   "presented": "fixture-tÃ¶kÃ©n",
+   "prefix": "3a2b117c"
+  }
+ ],
+ "tokens": [
+  {
+   "token": "fixture-doctor-token",
+   "prefix": "7f1a2d12"
+  },
+  {
+   "token": "fixture-tökén",
+   "prefix": "3a2b117c"
+  }
+ ]
+}

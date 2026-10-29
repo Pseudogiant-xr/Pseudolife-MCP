@@ -3,7 +3,7 @@
 //!
 //! - `invite <name> [--tier T] [--board|--no-board] [--expires D] [--replace]
 //!   [--url U] [--port P] [--bank FP] [--json]`
-//! - `invite --list [--bank FP] [--json]`
+//! - `invite --list [--bank FP] [--json]` (with last seen and refused tokens, v58)
 //! - `invite --revoke <name> [--yes] [--bank FP] [--json]`
 //!
 //! Each option at most once, a value as the next argument; the name
@@ -206,8 +206,13 @@ impl Report {
 
 /// `time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime(epoch)) if epoch else "-"`.
 fn when(epoch: Option<f64>) -> Result<String, Defer> {
+    when_or(epoch, "-")
+}
+
+/// `_when(epoch, missing)`.
+fn when_or(epoch: Option<f64>, missing: &str) -> Result<String, Defer> {
     let Some(epoch) = epoch.filter(|epoch| *epoch != 0.0) else {
-        return Ok("-".to_owned());
+        return Ok(missing.to_owned());
     };
     // 1970-01-01 to 9999-12-31: glibc prints a year before 1000 unpadded
     // where this formatting pads it, and Windows' gmtime refuses negative
@@ -264,6 +269,18 @@ fn environment_names() -> Result<(Vec<String>, Vec<String>), Defer> {
         writers.push(writer);
     }
     Ok((tokens.into_iter().map(|(_, p)| p).collect(), writers))
+}
+
+/// `_environment_names`: the token map's principals, and `default` when
+/// `PSEUDOLIFE_MCP_TOKEN` is set (v58's `invite --list`).
+fn list_environment() -> Result<Vec<String>, Defer> {
+    let (mut names, _writers) = environment_names()?;
+    if std::env::var_os("PSEUDOLIFE_MCP_TOKEN").is_some_and(|value| !value.is_empty()) {
+        names.push("default".to_owned());
+    }
+    names.sort();
+    names.dedup();
+    Ok(names)
 }
 
 /// `_name_refusal`.
@@ -636,7 +653,10 @@ async fn local(
             }
         }
         if args.list {
-            return Ok(Ok(Outcome::List(invite_db::list(session.client()).await?)));
+            let environment = list_environment()?;
+            let rows = invite_db::list(session.client(), &environment).await?;
+            let rejected = invite_db::list_rejected(session.client()).await?;
+            return Ok(Ok(Outcome::List(rows, rejected)));
         }
         if let Some(revoke) = &revoke {
             let found = invite_db::revoke(session.client_mut(), revoke).await?;
@@ -656,7 +676,7 @@ async fn local(
     }
     .await;
     match result {
-        Ok(Ok(Outcome::List(rows))) => list_report(report, &rows),
+        Ok(Ok(Outcome::List(rows, rejected))) => list_report(report, &rows, &rejected),
         Ok(Ok(Outcome::Revoked(false))) => Ok(report.fail(
             EXIT_REFUSED,
             &format!(
@@ -694,7 +714,7 @@ async fn local(
 }
 
 enum Outcome {
-    List(Vec<invite_db::Listed>),
+    List(Vec<invite_db::Listed>, Vec<invite_db::Rejected>),
     Revoked(bool),
     Created(invite_db::Created),
 }
@@ -770,15 +790,20 @@ fn float(value: Option<f64>) -> J {
 }
 
 /// `_list` (read only: an unrepresentable time defers before any output).
-fn list_report(report: &mut Report, rows: &[invite_db::Listed]) -> Result<u8, Defer> {
+fn list_report(
+    report: &mut Report,
+    rows: &[invite_db::Listed],
+    rejected: &[invite_db::Rejected],
+) -> Result<u8, Defer> {
     let mut lines = Vec::new();
     let mut members = Vec::new();
     for row in rows {
         for time in [
             row.code_expires_at,
-            Some(row.created_at),
+            row.created_at,
             row.paired_at,
             row.revoked_at,
+            row.last_seen_at,
         ]
         .into_iter()
         .flatten()
@@ -797,13 +822,19 @@ fn list_report(report: &mut Report, rows: &[invite_db::Listed]) -> Result<u8, De
             .clone()
             .filter(|tier| !tier.is_empty())
             .unwrap_or_else(|| "default".to_owned());
+        let board = match row.board {
+            None => "-",
+            Some(true) => "on",
+            Some(false) => "off",
+        };
         lines.push(format!(
-            "  {:<24} {:<9} {:<8} {:<6} {:<21} {:<21} {}",
+            "  {:<24} {:<11} {:<21} {:<8} {:<6} {:<21} {:<21} {}",
             row.principal,
             state,
+            when_or(row.last_seen_at, "never")?,
             tier,
-            if row.board { "on" } else { "off" },
-            when(Some(row.created_at))?,
+            board,
+            when(row.created_at)?,
             when(row.paired_at)?,
             when(row.revoked_at)?
         ));
@@ -812,7 +843,7 @@ fn list_report(report: &mut Report, rows: &[invite_db::Listed]) -> Result<u8, De
             ("state".into(), J::Str(row.state.into())),
             ("paired".into(), J::Bool(row.paired)),
             ("tier".into(), row.tier.clone().map_or(J::Null, J::Str)),
-            ("board".into(), J::Bool(row.board)),
+            ("board".into(), row.board.map_or(J::Null, J::Bool)),
             (
                 "code_expires_at".into(),
                 float(if row.pending {
@@ -821,21 +852,59 @@ fn list_report(report: &mut Report, rows: &[invite_db::Listed]) -> Result<u8, De
                     None
                 }),
             ),
-            ("created_at".into(), J::Float(row.created_at)),
+            ("created_at".into(), float(row.created_at)),
             ("paired_at".into(), float(row.paired_at)),
             ("revoked_at".into(), float(row.revoked_at)),
+            ("last_seen_at".into(), float(row.last_seen_at)),
+        ]));
+    }
+    let mut refused_lines = Vec::new();
+    let mut refused = Vec::new();
+    for row in rejected {
+        if !row.first_seen_at.is_finite() || !row.last_seen_at.is_finite() {
+            return Err(Defer);
+        }
+        refused_lines.push(format!(
+            "  {:<8} {:>8}  {:<21} {}",
+            row.hash_prefix,
+            row.rejections,
+            when(Some(row.first_seen_at))?,
+            when(Some(row.last_seen_at))?
+        ));
+        refused.push(J::Dict(vec![
+            ("hash_prefix".into(), J::Str(row.hash_prefix.clone())),
+            ("rejections".into(), J::Int(row.rejections.to_string())),
+            ("first_seen_at".into(), J::Float(row.first_seen_at)),
+            ("last_seen_at".into(), J::Float(row.last_seen_at)),
         ]));
     }
     report.set("principals", J::List(members));
+    report.set("rejected", J::List(refused));
     if rows.is_empty() {
         report.say("no stored principals");
+    } else {
+        report.say(&format!(
+            "  {:<24} {:<11} {:<21} {:<8} {:<6} {:<21} {:<21} revoked",
+            "name", "state", "last seen", "tier", "board", "created", "paired"
+        ));
+    }
+    for line in lines {
+        report.say(&line);
+    }
+    if !rows.is_empty() {
+        report.say("  (environment: a token in the daemon's PSEUDOLIFE_MCP_TOKENS or PSEUDOLIFE_MCP_TOKEN; last seen: its last accepted request, written once a minute)");
+    }
+    report.say("");
+    if rejected.is_empty() {
+        report.say("no refused tokens recorded");
         return Ok(report.finish(EXIT_OK));
     }
+    report.say("refused tokens, by the first 8 characters of their SHA-256 (`pseudolife-mcp doctor` on a client prints its own token's as token_sha256_prefix):");
     report.say(&format!(
-        "  {:<24} {:<9} {:<8} {:<6} {:<21} {:<21} revoked",
-        "name", "state", "tier", "board", "created", "paired"
+        "  {:<8} {:>8}  {:<21} last",
+        "prefix", "refused", "first"
     ));
-    for line in lines {
+    for line in refused_lines {
         report.say(&line);
     }
     Ok(report.finish(EXIT_OK))

@@ -146,6 +146,17 @@ fn no_proxy_environment() -> Res<()> {
 /// (board, maintainer) would send Latin-1, but the handshake's Python shim
 /// (httpx) and the --agent-state check cannot encode it, so anything
 /// beyond ASCII defers; DEL is a header value reqwest refuses.
+/// `principal_activity.token_hash_prefix`: the first 8 hex of the SHA-256
+/// of the token's UTF-8.
+fn token_hash_prefix(token: &str) -> String {
+    use sha2::{Digest, Sha256};
+    Sha256::digest(token.as_bytes())
+        .iter()
+        .take(4)
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
 fn sendable(token: &str) -> bool {
     token.bytes().all(|byte| (0x20..0x7f).contains(&byte))
 }
@@ -421,6 +432,16 @@ async fn diagnose(args: &Args) -> Res<(Value, bool)> {
         &mut report,
         "credential_source",
         json!(credential_source.as_deref().unwrap_or("none")),
+    );
+    // `_token_prefix` (v58): never the token, the 8 hex of its SHA-256 that
+    // the daemon's `invite --list` shows when it refuses it.
+    put(
+        &mut report,
+        "token_sha256_prefix",
+        token
+            .as_deref()
+            .filter(|token| !token.is_empty())
+            .map_or(Value::Null, |token| json!(token_hash_prefix(token))),
     );
     let board = probes::board(&url, token.as_deref(), short).await?;
     let board_state = board
