@@ -11,10 +11,22 @@ fn list(shim: &mut Shim) -> serde_json::Value {
     shim.send(json!({"jsonrpc":"2.0","id":"list","method":"tools/list","params":{}}));
     shim.receive()
 }
+const REJECTED_TOKEN_MARK: &str = "rejected this machine's token";
+fn initialize_count(fixture: &Fixture) -> usize {
+    fixture
+        .records
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|record| record.message["method"] == "initialize")
+        .count()
+}
+/// A 5xx (here a proxy's 502) at the startup fetch is no verdict on the
+/// bearer: today's line, no instructions, and the next list recovers.
 #[test]
 fn test_shim_initializes_after_instruction_fetch_refused_and_recovers() {
     let fixture = Fixture::start_with(Setup {
-        initialize: vec![Reply::Http(401, "{}".into())],
+        initialize: vec![Reply::Http(502, "{}".into())],
         ..Default::default()
     });
     let mut shim =
@@ -25,19 +37,116 @@ fn test_shim_initializes_after_instruction_fetch_refused_and_recovers() {
     assert_eq!(list(&mut shim)["result"]["tools"][0]["name"], "fixture");
     assert!(shim.finish().is_empty());
     assert!(shim.stderr().contains("instructions unavailable"));
+    assert!(!shim.stderr().contains(REJECTED_TOKEN_MARK));
     assert!(!shim.stderr().contains("fixture-secret"));
     assert!(!shim.stderr().contains("Traceback"));
-    assert_eq!(
-        fixture
-            .records
-            .lock()
-            .unwrap()
-            .iter()
-            .filter(|record| record.message["method"] == "initialize")
-            .count(),
-        2
-    );
+    assert_eq!(initialize_count(&fixture), 2);
     fixture.assert_deleted();
+}
+/// A present but dead bearer is named at startup (stderr and the top of the
+/// instructions) and the shim keeps serving: two machines went without
+/// memory for 11 days (found 2026-10-30) because /health needs no token.
+fn assert_rejected_bearer_is_named_at_startup(refusal: Reply) {
+    let fixture = Fixture::start_with(Setup {
+        initialize: vec![refusal],
+        ..Default::default()
+    });
+    let mut shim =
+        Shim::start_with_env(&fixture.url, &[("PSEUDOLIFE_MCP_TOKEN", "fixture-secret")]);
+    let note = pseudolife_stdio::lifecycle::rejected_token_note(&fixture.url);
+    let initialized = initialize(&mut shim);
+    let instructions = initialized["result"]["instructions"]
+        .as_str()
+        .expect("instructions carry the rejected-token line");
+    assert!(instructions.starts_with(&note), "{instructions}");
+    assert_eq!(list(&mut shim)["result"]["tools"][0]["name"], "fixture");
+    assert!(shim.finish().is_empty());
+    let stderr = shim.stderr();
+    assert_eq!(
+        stderr
+            .lines()
+            .filter(|line| line.contains(REJECTED_TOKEN_MARK))
+            .collect::<Vec<_>>(),
+        vec![note.as_str()]
+    );
+    assert!(!stderr.contains("instructions unavailable"));
+    assert!(!stderr.contains("fixture-secret") && !instructions.contains("fixture-secret"));
+    assert_eq!(initialize_count(&fixture), 2);
+    fixture.assert_deleted();
+}
+#[test]
+fn rejected_bearer_401_at_startup_is_named_and_the_shim_keeps_serving() {
+    assert_rejected_bearer_is_named_at_startup(Reply::Http(401, "{}".into()));
+}
+#[test]
+fn rejected_bearer_403_at_startup_is_named_and_the_shim_keeps_serving() {
+    assert_rejected_bearer_is_named_at_startup(Reply::Http(403, "{}".into()));
+}
+#[test]
+fn revoked_bearer_refusal_at_startup_is_named_and_the_shim_keeps_serving() {
+    assert_rejected_bearer_is_named_at_startup(Reply::RpcError(
+        -32004,
+        "unauthorized".into(),
+        Some(json!({"status":401,"error":"unauthorized"})),
+    ));
+}
+#[test]
+fn rejected_token_note_matches_the_python_shim_text() {
+    assert_eq!(
+        pseudolife_stdio::lifecycle::rejected_token_note("http://127.0.0.1:8765"),
+        "Pseudolife-MCP: the memory daemon at http://127.0.0.1:8765 rejected this machine's token (revoked, rotated or never issued for it), so memory tools will fail. Fix: on the daemon host run `pseudolife-mcp invite <name>`, then here `pseudolife-mcp pair http://127.0.0.1:8765 --read-code`; `pseudolife-mcp doctor` shows the state."
+    );
+}
+/// No credential: a 401 names no token the shim does not hold.
+#[test]
+fn startup_401_without_a_bearer_keeps_todays_startup() {
+    let fixture = Fixture::start_with(Setup {
+        initialize: vec![Reply::Http(401, "{}".into())],
+        ..Default::default()
+    });
+    let mut shim = Shim::start(&fixture.url);
+    let initialized = initialize(&mut shim);
+    assert!(initialized["result"].get("instructions").is_none());
+    assert_eq!(list(&mut shim)["result"]["tools"][0]["name"], "fixture");
+    assert!(shim.finish().is_empty());
+    assert!(shim.stderr().contains("instructions unavailable"));
+    assert!(!shim.stderr().contains(REJECTED_TOKEN_MARK));
+    fixture.assert_deleted();
+}
+/// An unreachable daemon is not a rejected token, with a bearer held: the
+/// degraded start keeps its own note, and no startup fetch is made.
+#[test]
+fn unreachable_daemon_with_a_bearer_names_no_rejected_token() {
+    let fixture = Fixture::start();
+    fixture
+        .health_enabled
+        .store(false, std::sync::atomic::Ordering::SeqCst);
+    fixture
+        .mcp_enabled
+        .store(false, std::sync::atomic::Ordering::SeqCst);
+    let mut shim =
+        Shim::start_with_env(&fixture.url, &[("PSEUDOLIFE_MCP_TOKEN", "fixture-secret")]);
+    let initialized = initialize(&mut shim);
+    let instructions = initialized["result"]["instructions"].as_str().unwrap();
+    assert!(instructions.contains("did not answer when this session started"));
+    assert!(!instructions.contains(REJECTED_TOKEN_MARK));
+    shim.finish();
+    assert!(!shim.stderr().contains(REJECTED_TOKEN_MARK));
+}
+/// A connection dropped at the startup fetch keeps today's line.
+#[test]
+fn startup_connection_failure_with_a_bearer_is_not_a_rejected_token() {
+    let fixture = Fixture::start_with(Setup {
+        initialize: vec![Reply::Close],
+        ..Default::default()
+    });
+    let mut shim =
+        Shim::start_with_env(&fixture.url, &[("PSEUDOLIFE_MCP_TOKEN", "fixture-secret")]);
+    let initialized = initialize(&mut shim);
+    assert!(initialized["result"].get("instructions").is_none());
+    shim.finish();
+    assert!(shim.stderr().contains("instructions unavailable"));
+    assert!(!shim.stderr().contains(REJECTED_TOKEN_MARK));
 }
 #[test]
 fn test_shim_caches_the_handshake_of_a_healthy_daemon() {
