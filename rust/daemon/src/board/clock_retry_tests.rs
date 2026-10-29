@@ -331,7 +331,8 @@ async fn a_send_refuses_with_nothing_written_while_another_writer_holds_the_bank
     let refused = board
         .dispatch("send", send(&to, "held"), &headers, "default")
         .await;
-    assert!(refused.is_err(), "{refused:?}");
+    // Not printed: CodeQL (rust/cleartext-logging) treats a board result as sensitive.
+    assert!(refused.is_err(), "the held lease must refuse the send");
     assert_eq!(count(&side, "coordination_messages").await, messages);
     assert_eq!(count(&side, "coordination_events").await, events);
     holder.close().await;
