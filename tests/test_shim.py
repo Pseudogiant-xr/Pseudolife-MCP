@@ -146,13 +146,17 @@ def test_doctor_checks_registered_runtime_handshake_without_bank_writes(shared_d
     assert result["interpreter"] == sys.executable
 
 
-@pytest.mark.parametrize("initial_failure", ["refused", "stalled"])
-def test_shim_initializes_after_instruction_fetch_refused_and_recovers(tmp_path, initial_failure):
-    """An optional briefing fetch must not prevent downstream initialize.
+def _drive_startup_fetch(tmp_path, first_initialize: str, token: str | None,
+                         *, url: str | None = None) -> dict:
+    """Run ``_proxy`` over stdio against a fixture daemon whose first MCP
+    ``initialize`` (the startup instructions fetch) answers as
+    ``first_initialize`` says, then initialize and list tools downstream.
 
-    A fixture HTTP server refuses or stalls the first handshake, then accepts the next
-    one. The same stdio process must remain usable for subsequent tool lists.
-    """
+    ``first_initialize`` is ``"http-<status>"`` for a bare HTTP status,
+    ``"revoked"`` for the daemon's exact -32004 refusal, or ``"stalled"`` for
+    a reply held past the shim's 5 s fetch bound. Later handshakes succeed.
+    With ``url`` the shim is pointed there instead (nothing listening), and
+    no tool list is asked for."""
     import asyncio
     from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
     from threading import Thread
@@ -163,15 +167,31 @@ def test_shim_initializes_after_instruction_fetch_refused_and_recovers(tmp_path,
         def log_message(self, *args):
             pass
 
+        def _send_json(self, status, payload):
+            body = json.dumps(payload).encode()
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
         def do_POST(self):
             request = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
             method = request["method"]
             if method == "initialize":
                 Handler.initializations += 1
                 if Handler.initializations == 1:
-                    if initial_failure == "stalled":
+                    if first_initialize == "revoked":
+                        self._send_json(200, {"jsonrpc": "2.0", "id": request["id"], "error": {
+                            "code": -32004, "message": "unauthorized",
+                            "data": {"status": 401, "error": "unauthorized"}}})
+                        return
+                    if first_initialize == "stalled":
                         time.sleep(12)
-                    self.send_response(401)
+                        status = 502
+                    else:
+                        status = int(first_initialize.removeprefix("http-"))
+                    self.send_response(status)
                     self.end_headers()
                     return
                 result = {"protocolVersion": request["params"]["protocolVersion"],
@@ -183,12 +203,7 @@ def test_shim_initializes_after_instruction_fetch_refused_and_recovers(tmp_path,
                 self.send_response(202)
                 self.end_headers()
                 return
-            body = json.dumps({"jsonrpc": "2.0", "id": request["id"], "result": result}).encode()
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
+            self._send_json(200, {"jsonrpc": "2.0", "id": request["id"], "result": result})
 
         def do_GET(self):
             self.send_response(405)
@@ -197,6 +212,8 @@ def test_shim_initializes_after_instruction_fetch_refused_and_recovers(tmp_path,
     http = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     worker = Thread(target=http.serve_forever, daemon=True)
     worker.start()
+    target = url or f"http://127.0.0.1:{http.server_port}"
+    seen: dict = {"url": target}
 
     async def drive():
         from mcp import ClientSession, StdioServerParameters
@@ -204,28 +221,101 @@ def test_shim_initializes_after_instruction_fetch_refused_and_recovers(tmp_path,
 
         params = StdioServerParameters(command=sys.executable, args=["-c",
             "import asyncio, sys; from pseudolife_memory.shim import _proxy; "
-            "asyncio.run(_proxy(sys.argv[1], 'fixture-secret', 'fixture-session'))",
-            f"http://127.0.0.1:{http.server_port}"])
+            "asyncio.run(_proxy(sys.argv[1], sys.argv[2] or None, 'fixture-session'))",
+            target, token or ""])
         with (tmp_path / "shim-stderr.txt").open("w", encoding="utf-8") as errlog:
             async with stdio_client(params, errlog=errlog) as (read, write):
                 async with ClientSession(read, write) as client:
                     # Leave margin around the shim's optional-fetch deadline,
                     # but remain well below the upstream transport's 300s read.
                     initialized = await asyncio.wait_for(client.initialize(), timeout=9)
-                    assert not initialized.instructions
-                    assert [t.name for t in (await client.list_tools()).tools] == ["fixture_tool"]
-        errors = (tmp_path / "shim-stderr.txt").read_text(encoding="utf-8")
-        assert "instructions unavailable" in errors
-        assert "fixture-secret" not in errors
-        assert "Traceback" not in errors
+                    seen["instructions"] = initialized.instructions or ""
+                    if url is None:
+                        seen["tools"] = [t.name for t in (await client.list_tools()).tools]
+        seen["stderr"] = (tmp_path / "shim-stderr.txt").read_text(encoding="utf-8")
 
     try:
         asyncio.run(asyncio.wait_for(drive(), timeout=20))
-        assert Handler.initializations == 2
+        seen["initializations"] = Handler.initializations
+        return seen
     finally:
         http.shutdown()
         http.server_close()
         worker.join(timeout=2)
+
+
+_REJECTED_TOKEN_MARK = "refused this machine's token"
+
+
+@pytest.mark.parametrize("initial_failure", ["refused", "stalled"])
+def test_shim_initializes_after_instruction_fetch_refused_and_recovers(tmp_path, initial_failure):
+    """An optional briefing fetch must not prevent downstream initialize.
+
+    A fixture HTTP server refuses (a 502 from a proxy in front of the daemon)
+    or stalls the first handshake, then accepts the next one. The same stdio
+    process must remain usable for subsequent tool lists, and neither failure
+    reads as a rejected token: only a 401 or 403 does (the test below).
+    """
+    seen = _drive_startup_fetch(
+        tmp_path, "http-502" if initial_failure == "refused" else "stalled", "fixture-secret")
+    assert not seen["instructions"]
+    assert seen["tools"] == ["fixture_tool"]
+    assert "instructions unavailable" in seen["stderr"]
+    assert _REJECTED_TOKEN_MARK not in seen["stderr"]
+    assert "fixture-secret" not in seen["stderr"]
+    assert "Traceback" not in seen["stderr"]
+    assert seen["initializations"] == 2
+
+
+@pytest.mark.parametrize("refusal", ["http-401", "http-403", "revoked"])
+def test_shim_names_a_rejected_token_at_startup_and_keeps_serving(tmp_path, refusal):
+    """A present but dead bearer (revoked or rotated away) is named at
+    startup, not only on the model's first tool call: two machines went
+    without memory for 11 days (found 2026-10-30) because /health, the only
+    startup check, needs no token. The startup instructions fetch is the one
+    authenticated request; its 401/403 puts one line on stderr and the same
+    line at the top of the instructions, and the process keeps serving."""
+    seen = _drive_startup_fetch(tmp_path, refusal, "fixture-secret")
+    note = _shim._rejected_token_note(seen["url"])
+    assert _REJECTED_TOKEN_MARK in note and seen["url"] in note
+    assert "pseudolife-mcp invite <name>" in note
+    assert f"pseudolife-mcp connect {seen['url']} --read-code" in note
+    assert "\n" not in note
+    assert seen["instructions"].startswith(note)
+    assert [line for line in seen["stderr"].splitlines() if _REJECTED_TOKEN_MARK in line] == [note]
+    assert "instructions unavailable" not in seen["stderr"]
+    assert seen["tools"] == ["fixture_tool"]
+    assert seen["initializations"] == 2
+    assert "fixture-secret" not in seen["stderr"] + seen["instructions"]
+    assert "Traceback" not in seen["stderr"]
+
+
+def test_rejected_token_note_matches_the_rust_shim_text():
+    """Byte-identical to rust/shim/tests/shim_contract.rs's pin of the Rust
+    shim's ``lifecycle::rejected_token_note``."""
+    assert _shim._rejected_token_note("http://127.0.0.1:8765") == (
+        "Pseudolife-MCP: the memory daemon at http://127.0.0.1:8765 refused this machine's "
+        "token (HTTP 401/403 or a revoked-token refusal), so memory tools will fail. Fix: on "
+        "the daemon host run `pseudolife-mcp invite <name>`, then here `pseudolife-mcp connect "
+        "http://127.0.0.1:8765 --read-code`, which pairs this machine and repoints its clients.")
+
+
+def test_shim_without_a_bearer_keeps_todays_startup_on_a_401(tmp_path):
+    """No credential: a 401 names no token the shim does not hold."""
+    seen = _drive_startup_fetch(tmp_path, "http-401", None)
+    assert not seen["instructions"]
+    assert "instructions unavailable" in seen["stderr"]
+    assert _REJECTED_TOKEN_MARK not in seen["stderr"]
+    assert seen["tools"] == ["fixture_tool"]
+
+
+def test_shim_startup_connection_failure_is_not_a_rejected_token(tmp_path):
+    """A network error at the startup fetch keeps today's line."""
+    seen = _drive_startup_fetch(tmp_path, "http-401", "fixture-secret",
+                                url=f"http://127.0.0.1:{_free_port()}")
+    assert _REJECTED_TOKEN_MARK not in seen["instructions"] + seen["stderr"]
+    assert "instructions unavailable" in seen["stderr"]
+    assert "fixture-secret" not in seen["stderr"]
 
 
 def test_shim_survives_idle_gap(shared_daemon):
