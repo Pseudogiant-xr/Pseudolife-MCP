@@ -1,0 +1,2 @@
+### Fixed (2026-10-29 — the memory-loop guidance no longer says the surprise gate drops near-duplicates by default)
+- The memory-loop text the session hook serves (`MEMORY_LOOP_BLOCK`, kept identical to `examples/CLAUDE.memory.md`) said "the surprise gate drops near-duplicates", but the shipped `surprise_threshold` is 0.0, which stores them; it now says the gate drops near-duplicates if it is enabled, and the Rust daemon's recorded copy (`rust/daemon/harness/goldens/memory-loop-block.txt`) moves with it.

@@ -209,7 +209,8 @@ trade-offs: [Dreaming](docs/guide/dreaming.md).
 ## Durable tier — Docker (recommended for a long-lived bank)
 
 Everything above plus the bundled extractor, external volumes,
-health-checked services, and backup/rollback tooling. Requires Docker and
+health-checked services, and backup/rollback tooling. Requires Docker
+(with the compose v2 and buildx plugins) and
 at least one MCP-capable coding agent — Claude Code, Codex, and Gemini CLI
 are wired end-to-end; anything else gets paste-ready config
 ([provider matrix](docs/guide/providers.md)). One command from clone to
@@ -238,8 +239,8 @@ this machine with other machines connecting to it (see
 asks which agents to wire (multi-select, with a capability
 matrix showing exactly what each one gets — session briefing, per-turn
 discipline, standing file), runs the preflight (one exact fix line per
-missing prerequisite), then asks which **dream extractor** should
-consolidate memories —
+missing prerequisite, Docker's compose v2 and buildx plugins included),
+then asks which **dream extractor** should consolidate memories —
 
 - **sidecar** — the bundled local CPU model; no Claude plan needed, works
   for everyone, and keeps every memory on the box (~11.8 GB image);
@@ -299,6 +300,24 @@ covers saved-instance checks and an explicitly disposable mail proof.
 dormant ([Turning the board on](docs/guide/configuration.md#turning-the-board-on)).
 Linux (Docker Engine): your user must be in the `docker` group —
 `sudo usermod -aG docker $USER`, then log out/in (the preflight checks this).
+Docker Engine also needs the buildx plugin, which Docker Desktop bundles:
+the Dockerfiles' `RUN --mount` caches need BuildKit, and without buildx the
+build dies with "the --mount option requires BuildKit". The preflight
+fails without it and prints the install line for each distro (Arch: `sudo
+pacman -S docker-buildx`; Debian/Ubuntu with Docker's repository or Fedora:
+`docker-buildx-plugin`).
+In the Claude and Codex CLI shim extractor modes on Linux, `ops/install.sh`
+also checks that the daemon's container reaches the shim on the host. A
+host firewall such as ufw can drop that traffic, and dreams then pause
+(or fall back to the sidecar) while the shim itself looks healthy; the
+summary marks `[!] Extractor shim`, and a warning above it names the cause.
+When ufw is enabled with a dropping input policy, it names the narrowest rule (`sudo ufw allow from <the daemon's network> to
+<docker0 address> port <shim port> proto tcp`), and `--firewall-rule
+ask|yes|no` (default `ask`) decides whether to add it: `ask` offers it once
+at a terminal, defaulting to no, and probes again once the rule is added; an unattended run
+changes no firewall unless given `--firewall-rule yes`, and prints the
+command instead. `ops/install.ps1` has no equivalent: the check and the
+flag are Linux-only.
 
 Image sizes, the Windows WSL2 memory cap, and what the installer automates:
 [the containerized install](#install--containerized-any-os) below.
@@ -523,7 +542,8 @@ No host Python, no torch install, no version skew; the daemon image bakes
 in CPU-only torch and the embedding weights — `Qwen/Qwen3-Embedding-0.6B`
 (the default retrieval backbone since schema v25) plus `all-MiniLM-L6-v2`
 (kept baked for the ONNX-parity test path) — so it runs identically on
-Windows / macOS / Linux. Requires only Docker; built once: ~5.0 GB daemon
+Windows / macOS / Linux. Requires only Docker (with the compose v2 and
+buildx plugins, which Docker Desktop bundles); built once: ~5.0 GB daemon
 image (measured 2026-07-29 on the deployed build) + ~0.6 GB Postgres +
 ~11.8 GB extractor sidecar (measured 2026-08-20 with the v3 multi-task
 bake; skip the sidecar entirely with the installer's `claude-only` mode).
