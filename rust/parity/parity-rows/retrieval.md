@@ -1,0 +1,3 @@
+| Row | Phase | Behavior to preserve and Python source | Existing test pool and boundary | Status |
+|---|---:|---|---|---|
+| RETRIEVAL | 3 | Five pools, exact cosine/tie order, source/episode/tag/band filters, BM25 fusion, recency/retention, supersession pointers, abstention and strict rerank whole-pool budget. `memory/cms.py`, `miras/`, `bm25.py`, `reranker.py`, `abstain.py` | `test_retrieval_golden.py`, `test_retrieval_pool.py`, `test_retrieval_replay.py`, `test_band_cosine.py`, `test_band_ablation_flat.py`, `test_bm25.py`, `test_cortex_bm25.py`, `test_reranker.py`, `test_reranker_margin_gate.py`, `test_abstain.py`, `test_retention_boost.py`, `test_superseded_visibility.py`, `test_meta_filter.py` I; add exact order corpus, floors alone insufficient | deferred |

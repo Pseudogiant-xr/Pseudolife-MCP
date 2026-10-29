@@ -156,7 +156,7 @@
       }
     },
     "fingerprints": {
-      "scope": "96dd91911ecc126e",
+      "scope": "d10e8ec27d84d0e9",
       "rust": "7e31d77eff2ceb0b",
       "fixtures": "defc5e07c5ac3f94",
       "candidate": "77b0c5fa6b2afcbf",
@@ -185,6 +185,11 @@
         "job": "parity-checks",
         "fingerprint": "76658076fa1ea57e",
         "reason": "adds one self-hosted-only step (the free-disk check moved out of the lease gate); it is skipped on hosted runners, so no hosted minutes change"
+      },
+      {
+        "job": "scope",
+        "fingerprint": "d10e8ec27d84d0e9",
+        "reason": "2026-10-29: the classify step drops the CI-input regex match; no new step, command or fetch, so its minutes hold"
       }
     ]
   },
@@ -232,7 +237,7 @@
       }
     },
     "fingerprints": {
-      "scope": "3ba3c75b87d879b7",
+      "scope": "3954688b694461a6",
       "guards": "92b7929dcce188df",
       "lock-resolve": "83bcc6b654896c6d",
       "test": "ac414107d3d9c71d",
@@ -261,6 +266,11 @@
         "job": "test-lite-windows",
         "fingerprint": "01f3aa5029dd38ce",
         "reason": "adds tests/test_runner_cleanup.py (23 cases, under 1 s locally); no new setup or step"
+      },
+      {
+        "job": "scope",
+        "fingerprint": "3954688b694461a6",
+        "reason": "2026-10-29: the classify step drops the CI-input grep; no new step, command or fetch, so its minutes hold"
       },
       {
         "job": "test-lite-windows",

@@ -1,0 +1,3 @@
+| Row | Phase | Behavior to preserve and Python source | Existing test pool and boundary | Status |
+|---|---:|---|---|---|
+| CLI-MOVE-REFUSALS | 2 | `move`'s refusals before any effect: argparse help and the missing `--to` usage at `COLUMNS=80`, an invalid `--target-url`, an empty, whitespace or C0-control `--to`, a CR/LF `--target-checkout`; every argv that passes them defers before any I/O. `move_cli.py` `_parser`, `main`, `Mover.run` | `rust/cli_harness/rows/move.py` live differential (the oracle runs only on refusing argv; valid argv runs against a verified stub, with proxies recorded and no docker or ssh on PATH), with caught mutants; spec `rust/cli_harness/rows/move.md`; `shim/tests/cli_move_contract.rs` (help, refusals, deferrals, no connection) in CI | ported |
