@@ -558,6 +558,8 @@ jobs:
         #   full installer and hook matrix runs nightly.
         # - test_schema_version, test_doctor_cli, test_tool_annotations (one
         #   test): schema pins and doctor, cheap and platform-sensitive.
+        # - test_runner_cleanup: the parity runners' disk cleanup treats a
+        #   directory junction as a link, which only Windows can make.
         env:
           PSEUDOLIFE_REQUIRE_TEST_POSTGRES: "1"
         run: >-
@@ -573,6 +575,7 @@ jobs:
           tests/test_repository_claims.py
           tests/test_prune_worktrees.py
           tests/test_ops_install_worktree_retention.py
+          tests/test_runner_cleanup.py
           tests/test_tunnel_profiles.py
           tests/test_tunnel_service.py
           tests/test_tunnel_cli.py

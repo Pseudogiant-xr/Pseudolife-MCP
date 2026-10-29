@@ -167,7 +167,7 @@ pub(crate) async fn judge_extractor(service: &Service, model: Option<&str>) -> O
             None,
         )));
     }
-    let (ex, _) = extractor::build_extractor_with_fallback(dream).await.ok()?;
+    let (ex, _, _) = extractor::build_extractor_with_fallback(dream).await.ok()?;
     let compat = ex.as_compat()?.clone();
     Some(JudgeEx::new(match model {
         Some(m) if compat.model != m => Compat::new(

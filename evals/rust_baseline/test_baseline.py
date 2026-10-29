@@ -146,6 +146,18 @@ class BaselineTests(unittest.TestCase):
                 self.assert_child_stopped(pid_file)
             self.toy_ready(directory)
 
+    def test_exit_during_startup_reports_the_end_of_the_daemon_log(self):
+        # The log lives in the private directory, which is removed when the
+        # launcher exits, so the error carries its end (a self-hosted Windows
+        # judges shard, run 40748991561, failed with no cause left to read).
+        command = [sys.executable, "-c", "import sys; print('starting'); "
+                   "sys.stderr.write('ImportError: synthetic-startup-cause\\n'); sys.exit(3)"]
+        with launcher_directory() as directory:
+            with patch.object(daemon, "_daemon_command", return_value=command):
+                with self.assertRaisesRegex(RuntimeError, "(?s)exited during startup.*synthetic-startup-cause"):
+                    with daemon.launched_daemon("synthetic-not-connected", directory):
+                        pass
+
     def test_deadline_cleans_owned_descendant(self):
         with launcher_directory() as directory:
             root = Path(directory)

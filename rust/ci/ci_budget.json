@@ -161,7 +161,7 @@
       "fixtures": "defc5e07c5ac3f94",
       "candidate": "77b0c5fa6b2afcbf",
       "candidate-harness": "ab479a8fc85283e7",
-      "parity-checks": "dc6efde1c2658559",
+      "parity-checks": "76658076fa1ea57e",
       "daemon-image": "cf93a3a209618bdc",
       "parity": "4c39a489bf4b1642"
     },
@@ -180,6 +180,11 @@
         "job": "scope",
         "fingerprint": "96dd91911ecc126e",
         "reason": "Classification only: a regenerated producer census beside docs keeps a docs-only diff docs-only; same steps, same minutes"
+      },
+      {
+        "job": "parity-checks",
+        "fingerprint": "76658076fa1ea57e",
+        "reason": "adds one self-hosted-only step (the free-disk check moved out of the lease gate); it is skipped on hosted runners, so no hosted minutes change"
       }
     ]
   },
@@ -232,15 +237,35 @@
       "lock-resolve": "83bcc6b654896c6d",
       "test": "ac414107d3d9c71d",
       "test-lite-linux": "44e2a8f2c01baeab",
-      "test-lite-windows": "446b42eeefad78a5",
+      "test-lite-windows": "931a46f2dd7a6c48",
       "test-lite-macos": "2abde9b5cf74fc3d",
       "frontend": "b1b6a1a1278f2e60"
     },
     "accepted": [
       {
         "job": "test-lite-windows",
-        "fingerprint": "446b42eeefad78a5",
-        "reason": "adds tests/test_prune_worktrees.py and tests/test_ops_install_worktree_retention.py to the one pytest step: no new job, shard or setup step; about +1 minute of test time (both files ran in 57s natively on Windows 2026-10-27), keeping runner minutes near 62 of the 67 limit; re-measure from the next batch run"
+        "fingerprint": "01f3aa5029dd38ce",
+        "reason": "adds tests/test_runner_cleanup.py (15 cases, under 1 s locally); no new setup or step"
+      },
+      {
+        "job": "test-lite-windows",
+        "fingerprint": "01f3aa5029dd38ce",
+        "reason": "adds tests/test_runner_cleanup.py (19 cases, under 1 s locally); no new setup or step"
+      },
+      {
+        "job": "test-lite-windows",
+        "fingerprint": "01f3aa5029dd38ce",
+        "reason": "adds tests/test_runner_cleanup.py (22 cases, under 1 s locally); no new setup or step"
+      },
+      {
+        "job": "test-lite-windows",
+        "fingerprint": "01f3aa5029dd38ce",
+        "reason": "adds tests/test_runner_cleanup.py (23 cases, under 1 s locally); no new setup or step"
+      },
+      {
+        "job": "test-lite-windows",
+        "fingerprint": "931a46f2dd7a6c48",
+        "reason": "adds tests/test_prune_worktrees.py and tests/test_ops_install_worktree_retention.py to the one pytest step, beside tests/test_runner_cleanup.py from master: no new job, shard or setup step; about +1 minute of test time (both files ran in 57s natively on Windows 2026-10-27), keeping runner minutes near 62 of the 67 limit; re-measure from the next batch run"
       },
       {
         "job": "test-lite-macos",
