@@ -366,6 +366,24 @@ def test_a_client_machine_never_guesses_a_release_when_the_daemon_is_silent(worl
     assert clients == [] and "did not answer" in _log(tmp_path)
 
 
+def test_a_client_machine_installs_only_a_plain_release_number_the_daemon_reports(world, board, clients,
+                                                                                  monkeypatch, tmp_path, capsys):
+    """/health is unauthenticated, and its version goes into a pip
+    requirement: anything but a plain release number (a pre-release, a
+    local version, requirement syntax) is refused, never installed."""
+    for reported in ("0.16.0rc1", "0.16.0+local", "0.16.0; python_version>'0'", "0.16.0 @ https://example.com/x.whl",
+                     "0.16.0 --index-url https://example.com", "0.16"):
+        _client(world, monkeypatch, daemon=reported)
+        code = up.main(["--unattended", "--daemon-url", REMOTE])
+        shutil.rmtree(tmp_path / "rt")
+        if reported == "0.16":                                    # a plain release number is fine
+            assert code == 0 and clients[-1]["source"] == "pseudolife-mcp==0.16"
+            clients.clear()
+            continue
+        assert code == 2, reported
+        assert "not a plain release number" in capsys.readouterr().err and clients == [], reported
+
+
 def test_a_client_machine_refuses_a_pinned_tag_unattended(world, board, clients, monkeypatch, capsys):
     _client(world, monkeypatch)
     assert up.main(["--unattended", "--tag", "0.16.0", "--daemon-url", REMOTE]) == 2

@@ -4144,7 +4144,9 @@ exactly that release as a new shim runtime, refreshes the plugin cache and
 runs the Codex step, as `pseudolife-mcp update --clients-only` does. It
 never moves past the daemon's release and never downgrades; a daemon that
 does not answer changes nothing (attended, `--clients-only` falls back to
-the newest release; unattended it does not guess). It reads no knob and no
+the newest release; unattended it does not guess), and only a plain
+release number (`N.N.N`) is installed, never a pre-release or anything else
+an unauthenticated `/health` might carry. It reads no knob and no
 board, and needs no bearer: running sessions keep their runtime and new
 sessions start on the new one, so nothing is recreated under anyone.
 Exit codes: 0 updated, 3 current, 4 another update holds the update lock,

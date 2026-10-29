@@ -346,8 +346,14 @@ def _run_clients(update) -> int:
         raise UpdateError(f"the daemon at {o.daemon_url} did not answer /health, and the unattended client run "
                           f"follows its release rather than guess one; nothing was changed. It tries again at the "
                           f"next scheduled run", 2)
-    if not isinstance(daemon, str) or not version_key(daemon):
+    if not isinstance(daemon, str) or not daemon:
         raise UpdateError(f"the daemon at {o.daemon_url} reports no version on /health; nothing was changed", 2)
+    # /health is unauthenticated and the version becomes a pip requirement:
+    # only a plain release number, never a pre-release or requirement syntax.
+    if not re.fullmatch(r"\d+(?:\.\d+){1,3}", daemon):
+        raise UpdateError(f"the daemon at {o.daemon_url} reports the version {daemon[:64]!r} on /health, which is "
+                          f"not a plain release number (N.N.N); the unattended client run installs only those. "
+                          f"Nothing was changed", 2)
     own = _client_version()
     update.report.current, update.report.target = own, daemon
     if version_key(own) and version_key(own) >= version_key(daemon):
