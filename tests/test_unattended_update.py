@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -22,7 +23,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from pseudolife_memory import client_updates, unattended_update as uu, update_cli as up  # noqa: E402
-from tests.test_update_cli import World, _project, clients, world  # noqa: E402,F401
+from tests.test_update_cli import World, _on_a_shim_runtime, _project, _runtime, clients, world  # noqa: E402,F401
 
 REAL_COMMAND = uu._command          # the scheduler fixture replaces it; one test wants the real one
 
@@ -307,6 +308,106 @@ def test_the_unattended_run_releases_the_lock_on_every_exit_path(world, board, c
     assert os_lock.probe(path) is False and not holder.exists()
 
 
+# ── a client machine: the shim runtime follows a daemon elsewhere ───────────
+
+REMOTE = "http://10.0.0.7:8765"
+
+
+def _client(world, monkeypatch, *, runtime="0.15.0", daemon="0.15.1"):
+    """A client-only machine: no daemon container, the command runs from a
+    shim runtime at ``runtime``, the daemon at REMOTE answers ``daemon``
+    (``None``: it does not answer)."""
+    _on_a_shim_runtime(monkeypatch)
+    _runtime(world, version=runtime, source=f"pseudolife-mcp=={runtime}", commit=None)
+    world.health = [] if daemon is None else [{"status": "ok", "version": daemon, "hooks_digest": "d" * 64,
+                                               "updates": {"unattended_daemon": False}}]
+
+
+def test_a_client_machine_follows_the_daemons_release_unattended(world, board, clients, tmp_path, monkeypatch,
+                                                                 capsys):
+    """The run a client machine's schedule makes: its clients move to the
+    release the daemon runs, with no knob, no board read and no bearer
+    (sessions keep their runtime), and the log records it (2026-10-30: two
+    client machines ran a shim two releases behind the daemon)."""
+    _client(world, monkeypatch)
+    world.pypi = "0.16.0"                                         # newer than the daemon: never taken
+    assert up.main(["--unattended", "--daemon-url", REMOTE]) == 0
+    assert clients == [{"steps": ("shim", "plugin", "codex"), "repo": None, "source": "pseudolife-mcp==0.15.1",
+                        "daemon_digest": "d" * 64, "reinstall": False}]
+    out = capsys.readouterr().out
+    assert "10.0.0.7" in out and "0.15.0" in out and "0.15.1" in out
+    assert world.docker_calls() == ["inspect -f {{.Id}} pseudolife-daemon"] or \
+        not any(c.startswith(("pull", "tag", "compose", "exec")) for c in world.docker_calls())
+    assert board["notices"] == []
+    log = _log(tmp_path)
+    assert "updated this machine's clients unattended from 0.15.0 to 0.15.1" in log
+
+
+def test_a_client_machine_already_on_the_daemons_release_has_nothing_to_do(world, board, clients, monkeypatch,
+                                                                           tmp_path, capsys):
+    for runtime, daemon in (("0.15.1", "0.15.1"), ("0.15.2", "0.15.1")):   # equal, or ahead: never a downgrade
+        _client(world, monkeypatch, runtime=runtime, daemon=daemon)
+        assert up.main(["--unattended", "--daemon-url", REMOTE]) == 3, runtime
+        assert clients == []
+        assert "nothing to do" in capsys.readouterr().out
+        shutil.rmtree(tmp_path / "rt")
+    assert "nothing to do" in _log(tmp_path)
+
+
+def test_a_client_machine_never_guesses_a_release_when_the_daemon_is_silent(world, board, clients, monkeypatch,
+                                                                            tmp_path, capsys):
+    """Attended, a silent daemon falls back to the newest release; the
+    unattended run must not move past a daemon it cannot see."""
+    _client(world, monkeypatch, daemon=None)
+    world.pypi = "0.16.0"
+    assert up.main(["--unattended", "--daemon-url", REMOTE]) == 2
+    err = capsys.readouterr().err
+    assert REMOTE in err and "nothing was changed" in err.lower()
+    assert clients == [] and "did not answer" in _log(tmp_path)
+
+
+def test_a_client_machine_refuses_a_pinned_tag_unattended(world, board, clients, monkeypatch, capsys):
+    _client(world, monkeypatch)
+    assert up.main(["--unattended", "--tag", "0.16.0", "--daemon-url", REMOTE]) == 2
+    assert "follows the daemon's release" in capsys.readouterr().err and clients == []
+
+
+def test_a_client_machine_holds_off_while_another_update_holds_the_lock(world, board, clients, monkeypatch,
+                                                                        tmp_path, capsys):
+    from pseudolife_memory import os_lock
+
+    _client(world, monkeypatch)
+    lock = os_lock.OsLock(tmp_path / "data" / up.LOCK_NAME)
+    assert lock.acquire()
+    (tmp_path / "data" / up.LOCK_HOLDER_NAME).write_text("4242\n", encoding="utf-8")
+    try:
+        assert up.main(["--unattended", "--daemon-url", REMOTE]) == 4
+    finally:
+        lock.release()
+    assert clients == [] and board["notices"] == []
+    assert "another pseudolife-mcp update is running (pid 4242)" in _log(tmp_path)
+
+
+def test_a_failed_client_step_fails_the_unattended_client_run(world, board, monkeypatch, tmp_path, capsys):
+    _client(world, monkeypatch)
+    monkeypatch.setattr(client_updates, "run_steps", lambda steps, **kw: {
+        "shim": {"state": "failed", "detail": "pip refused"}, "plugin": {"state": "current:0.15.1", "detail": "ok"},
+        "codex": {"state": "current", "detail": "ok"}, "ok": False})
+    assert up.main(["--unattended", "--daemon-url", REMOTE]) == up.CLIENT_STEP_FAILED
+    assert "a client-side step failed" in _log(tmp_path)
+
+
+def test_the_daemon_host_keeps_its_unattended_run_on_a_shim_runtime(world, board, clients, tmp_path, monkeypatch,
+                                                                    capsys):
+    """The near miss: a shim runtime on the machine whose Docker runs the
+    daemon container takes the daemon run (knob, board, backup), never the
+    client run."""
+    _on_a_shim_runtime(monkeypatch)
+    _daemon(world, tmp_path, knob=False)
+    assert up.main(["--unattended"]) == 4
+    assert "updates.unattended_daemon is off" in capsys.readouterr().out and clients == []
+
+
 # ── the board read ──────────────────────────────────────────────────────────
 
 def test_board_activity_registers_a_throwaway_address_and_reads_the_page(monkeypatch):
@@ -512,6 +613,100 @@ def test_schedule_refuses_a_pip_install(scheduler, tmp_path):
     assert not (tmp_path / "xdg" / "systemd" / "user" / "pseudolife-update.service").exists()
 
 
+def _client_machine(scheduler, monkeypatch, tmp_path, *, health=True):
+    """--schedule on a client-only machine: no daemon container, a shim
+    runtime, the daemon at REMOTE, and no bearer anywhere (the client run
+    reads no board). The real command, from a launcher."""
+    scheduler.tier = "pip"
+    scheduler.user_env.clear()
+    monkeypatch.setattr(up, "_on_shim_runtime", lambda: True)
+    monkeypatch.setattr(up.Update, "daemon_health",
+                        lambda self, timeout=3.0: {"status": "ok", "version": "0.15.1"} if health else None)
+    monkeypatch.setattr(uu, "_command", REAL_COMMAND)
+    launcher = tmp_path / "bin" / ("pseudolife-mcp.exe" if os.name == "nt" else "pseudolife-mcp")
+    launcher.parent.mkdir(parents=True, exist_ok=True)
+    launcher.write_text("launcher", encoding="utf-8")
+    monkeypatch.setenv("PSEUDOLIFE_SHIM_LAUNCHER", str(launcher))
+    monkeypatch.setenv("PSEUDOLIFE_SHIM_RUNTIMES", str(tmp_path / "rt"))
+    return up.Update(up.Options(schedule="03:30", daemon_url=REMOTE))
+
+
+def test_schedule_on_a_client_machine_registers_its_own_windows_task(scheduler, tmp_path, monkeypatch, capsys):
+    """A client-only machine was refused ("no daemon container to update"),
+    so nothing ever moved its shim. It now gets its own daily task, under a
+    name of its own, whose command carries the daemon URL; no bearer is
+    needed, since the client run reads only the daemon's /health."""
+    update = _client_machine(scheduler, monkeypatch, tmp_path)
+    assert uu.schedule(update, "03:30", platform="win32") == 0
+    (argv,) = scheduler
+    assert argv[:2] == ["schtasks", "/Create"] and argv[argv.index("/TN") + 1] == uu.CLIENT_TASK_NAME
+    assert argv[argv.index("/ST") + 1] == "03:30"
+    assert argv[argv.index("/TR") + 1].endswith(f"update --unattended --daemon-url {REMOTE}")
+    out = capsys.readouterr().out
+    assert uu.CLIENT_TASK_NAME in out and "never past it" in out and str(tmp_path / "data" / uu.LOG_NAME) in out
+    assert "updates.unattended_daemon" not in out and "daemon_notice_principals" not in out
+
+
+def test_schedule_on_a_client_machine_writes_its_own_systemd_timer(scheduler, tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("PSEUDOLIFE_MCP_TOKEN", "secret-token")         # not needed, so never written out
+    update = _client_machine(scheduler, monkeypatch, tmp_path)
+    assert uu.schedule(update, "03:30", platform="linux") == 0
+    unit_dir = tmp_path / "xdg" / "systemd" / "user"
+    service = (unit_dir / f"{uu.CLIENT_UNIT_NAME}.service").read_text(encoding="utf-8")
+    timer = (unit_dir / f"{uu.CLIENT_UNIT_NAME}.timer").read_text(encoding="utf-8")
+    assert f"update --unattended --daemon-url {REMOTE}" in service and "SuccessExitStatus=3 4" in service
+    assert "TOKEN" not in service and not (tmp_path / "data" / "unattended-update.token").exists()
+    assert "OnCalendar=*-*-* 03:30:00" in timer and "Persistent=true" in timer
+    assert not (unit_dir / f"{uu.UNIT_NAME}.service").exists()        # the daemon job's unit is not this one
+    assert scheduler == [["systemctl", "--user", "daemon-reload"],
+                         ["systemctl", "--user", "enable", "--now", f"{uu.CLIENT_UNIT_NAME}.timer"]]
+
+
+def test_schedule_on_a_client_machine_refuses_when_its_daemon_does_not_answer(scheduler, tmp_path, monkeypatch):
+    """The run would exit 2 every day: say so now, naming --daemon-url (a
+    client machine that never said where its daemon is has the loopback
+    default, where nothing answers)."""
+    update = _client_machine(scheduler, monkeypatch, tmp_path, health=False)
+    for platform in ("win32", "linux"):
+        with pytest.raises(up.UpdateError) as refused:
+            uu.schedule(update, "03:30", platform=platform)
+        text = str(refused.value)
+        assert refused.value.exit_code == 2 and REMOTE in text and "--daemon-url" in text
+        assert "Nothing was installed" in text
+    assert scheduler == [] and not (tmp_path / "xdg" / "systemd" / "user").exists()
+
+
+def test_schedule_on_the_daemon_host_keeps_the_daemon_job_from_a_shim_runtime(scheduler, tmp_path, monkeypatch):
+    """The near miss: the daemon's own host, its command run from a shim
+    runtime, still gets the daemon job under its old name."""
+    monkeypatch.setattr(up, "_on_shim_runtime", lambda: True)
+    assert uu.schedule(_update(), "03:30", platform="win32") == 0
+    (argv,) = scheduler
+    assert argv[argv.index("/TN") + 1] == uu.TASK_NAME
+
+
+def test_unschedule_removes_the_client_job_too(scheduler, tmp_path, monkeypatch):
+    update = _client_machine(scheduler, monkeypatch, tmp_path)
+    uu.schedule(update, "03:30", platform="linux")
+    scheduler.clear()
+    assert uu.unschedule(update, platform="linux") == 0
+    unit_dir = tmp_path / "xdg" / "systemd" / "user"
+    assert not (unit_dir / f"{uu.CLIENT_UNIT_NAME}.timer").exists()
+    assert not (unit_dir / f"{uu.CLIENT_UNIT_NAME}.service").exists()
+    assert ["systemctl", "--user", "disable", "--now", f"{uu.CLIENT_UNIT_NAME}.timer"] in scheduler
+    # Windows: only the task that is registered is deleted
+    def run_cli(argv, **kw):
+        scheduler.append(argv)
+        return (1, "ERROR: not found") if argv[1] == "/Query" and uu.TASK_NAME in argv else (0, "")
+
+    monkeypatch.setattr(uu, "run_cli", run_cli)
+    scheduler.clear()
+    assert uu.unschedule(update, platform="win32") == 0
+    assert scheduler == [["schtasks", "/Query", "/TN", uu.TASK_NAME],
+                         ["schtasks", "/Query", "/TN", uu.CLIENT_TASK_NAME],
+                         ["schtasks", "/Delete", "/F", "/TN", uu.CLIENT_TASK_NAME]]
+
+
 def test_unschedule_removes_the_task_or_the_timer(scheduler, tmp_path, monkeypatch):
     monkeypatch.setenv("PSEUDOLIFE_MCP_TOKEN", "secret-token")
     uu.schedule(_update(), "03:30", platform="linux")
@@ -522,7 +717,10 @@ def test_unschedule_removes_the_task_or_the_timer(scheduler, tmp_path, monkeypat
     assert scheduler[0] == ["systemctl", "--user", "disable", "--now", "pseudolife-update.timer"]
     scheduler.clear()
     assert uu.unschedule(_update(), platform="win32") == 0
-    assert scheduler == [["schtasks", "/Query", "/TN", uu.TASK_NAME], ["schtasks", "/Delete", "/F", "/TN", uu.TASK_NAME]]
+    # both names are looked up, so one --unschedule removes whichever job this machine has
+    assert scheduler == [["schtasks", "/Query", "/TN", uu.TASK_NAME], ["schtasks", "/Delete", "/F", "/TN", uu.TASK_NAME],
+                         ["schtasks", "/Query", "/TN", uu.CLIENT_TASK_NAME],
+                         ["schtasks", "/Delete", "/F", "/TN", uu.CLIENT_TASK_NAME]]
 
 
 # ── the route ───────────────────────────────────────────────────────────────

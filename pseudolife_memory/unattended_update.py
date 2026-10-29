@@ -20,6 +20,17 @@ rollback).
 Idle sessions do not hold an update off: the board omits a session with no
 activity in its active window, such a session keeps its shim runtime, and
 its next call reconnects to the recreated daemon.
+
+A client-only machine (a shim runtime here, no daemon container, the daemon
+on another host) has no daemon to recreate. There ``--schedule`` installs
+its own task or timer (``CLIENT_TASK_NAME``, ``CLIENT_UNIT_NAME``) running
+the same ``update --unattended``, which there moves this machine's clients
+(a new shim runtime, the plugin cache, the Codex step) to the release the
+daemon's ``/health`` reports, never past it. It reads no knob and no board:
+a running session keeps its runtime, so a new one beside it disturbs
+nothing. Exit codes as above: 0 updated, 3 current, 4 another update holds
+the lock, 2 the daemon did not answer (nothing is guessed), 5 a client step
+failed. The same log records each run.
 """
 from __future__ import annotations
 
@@ -43,6 +54,10 @@ def data_dir() -> Path:
 
 TASK_NAME = "Pseudolife Unattended Update"
 UNIT_NAME = "pseudolife-update"
+# A client-only machine's job, under its own names so the daemon host's job
+# is never the one replaced or removed by mistake.
+CLIENT_TASK_NAME = "Pseudolife Client Update"
+CLIENT_UNIT_NAME = "pseudolife-client-update"
 LOG_NAME = "unattended-update.log"
 BOARD_LABEL = "unattended update"
 NOTICE_LIMIT = 4000
@@ -183,9 +198,12 @@ def _run(update) -> int:
     update.step("unattended run: checking the daemon, the newest release and the board")
     tier = update.detect_tier()
     update.report.tier = tier
+    if tier == "pip" and _cli._on_shim_runtime():
+        return _run_clients(update)
     if tier != "docker":
-        raise UpdateError("unattended updates apply to the Docker tier (a daemon container); this is a pip "
-                          "install, which `pseudolife-mcp update` upgrades when you run it. Nothing was changed", 2)
+        raise UpdateError("unattended updates apply to the Docker tier (a daemon container) or, on a client "
+                          "machine, its shim runtime; this is a pip install that is neither, which `pseudolife-mcp update` "
+                          "upgrades when you run it. Nothing was changed", 2)
     health = update.daemon_health()
     if not health:
         raise UpdateError("the daemon did not answer /health; nothing was changed", 2)
@@ -293,6 +311,76 @@ def _apply(update, latest: str, idle: int) -> int:
     text = _updated_text(update, current, latest)
     update.step(text)
     post_notice(update, text)
+    return 0
+
+
+def _client_version() -> str:
+    """The version the launcher starts here: the current shim runtime's, or
+    this interpreter's when the layout names none."""
+    from pseudolife_memory import __version__, runtimes
+    try:
+        current = runtimes.current_runtime(runtimes.default_layout())
+    except ValueError:
+        current = None
+    if current is not None and version_key(current.version):
+        return current.version
+    return __version__
+
+
+def _run_clients(update) -> int:
+    """The unattended run on a client-only machine: this machine's clients
+    to the daemon's release, never past it and never a downgrade."""
+    from urllib.parse import urlsplit
+
+    o = update.o
+    update.report.tier = "client"
+    update.report.mode = "unattended-clients"
+    if o.tag:
+        raise UpdateError(f"--tag cannot be combined with --unattended on a client machine: the unattended client "
+                          f"run follows the daemon's release (the daemon at {o.daemon_url}). Run pseudolife-mcp "
+                          f"update --clients-only --tag {o.tag} yourself for another one. Nothing was changed", 2)
+    host = urlsplit(o.daemon_url).hostname or o.daemon_url
+    health = update.daemon_health()
+    daemon = (health or {}).get("version")
+    if not health:
+        raise UpdateError(f"the daemon at {o.daemon_url} did not answer /health, and the unattended client run "
+                          f"follows its release rather than guess one; nothing was changed. It tries again at the "
+                          f"next scheduled run", 2)
+    if not isinstance(daemon, str) or not version_key(daemon):
+        raise UpdateError(f"the daemon at {o.daemon_url} reports no version on /health; nothing was changed", 2)
+    own = _client_version()
+    update.report.current, update.report.target = own, daemon
+    if version_key(own) and version_key(own) >= version_key(daemon):
+        update.step(f"current: this machine's shim runs {own} and the daemon on {host} {daemon}; nothing to do")
+        update.report.exit_code = 3
+        return 3
+    lock = _cli.UpdateLock()
+    try:
+        lock.acquire()
+    except _cli.UpdateBusy as busy:
+        update.step(f"held off: the daemon on {host} runs {daemon} and this machine's shim {own}, but another "
+                    f"pseudolife-mcp update is running (pid {busy.pid}); it tries again at the next scheduled run")
+        update.report.exit_code = 4
+        return 4
+    try:
+        # Read again under the lock: an update that finished meanwhile has
+        # already installed the daemon's release.
+        own = _client_version()
+        update.report.current = own
+        if version_key(own) and version_key(own) >= version_key(daemon):
+            update.step(f"current: this machine's shim already runs {own} (another update moved it); nothing to do")
+            update.report.exit_code = 3
+            return 3
+        update.refuse_checkout_shadow(daemon)
+        update.step(f"the daemon on {host} runs {daemon} and this machine's shim {own}: updating this machine's "
+                    f"clients to {daemon} unattended")
+        update.clients(None, f"pseudolife-mcp=={daemon}", health)
+    finally:
+        lock.release()
+    if not update.report.ok:
+        return update.report.exit_code
+    update.step(f"updated this machine's clients unattended from {own} to {daemon}; running sessions keep their "
+                f"runtime and new sessions start on the new one. The log is {data_dir() / LOG_NAME}")
     return 0
 
 
@@ -426,9 +514,13 @@ def schedule(update, when: str, platform: str = sys.platform) -> int:
         raise UpdateError("--schedule installs a Windows scheduled task or a systemd --user timer; on this "
                           "platform run `pseudolife-mcp update --unattended` from your own scheduler", 2)
     if update.detect_tier() == "pip":
-        raise UpdateError("--schedule installs unattended daemon updates, and this is a pip install with no "
-                          "daemon container to update: run `pseudolife-mcp update` yourself when a release is "
-                          "out. Nothing was installed", 2)
+        if _cli._on_shim_runtime():
+            return _schedule_clients(update, hour, minute, platform)
+        raise UpdateError("--schedule installs unattended updates for a daemon container or, on a client machine, "
+                          "for its shim runtime; this is a pip install that is neither (no daemon container, and "
+                          "this command does not run from a shim runtime), so run `pseudolife-mcp update` yourself "
+                          "when a release is out. On a client machine, run --schedule through the pseudolife-mcp "
+                          "launcher the client install put on PATH. Nothing was installed", 2)
     command = _command(getattr(update.o, "daemon_url", None))
     again = f"pseudolife-mcp update --schedule {hour:02d}:{minute:02d}"
     if platform.startswith("win"):
@@ -497,20 +589,78 @@ def schedule(update, when: str, platform: str = sys.platform) -> int:
     return 0
 
 
-def unschedule(update, platform: str = sys.platform) -> int:
+def _schedule_clients(update, hour: int, minute: int, platform: str) -> int:
+    """``--schedule`` on a client-only machine: its own task or timer, which
+    runs ``update --unattended`` with the daemon URL. No bearer is checked
+    or carried: the client run reads only the daemon's unauthenticated
+    ``/health``. The daemon must answer now, since a run that cannot see it
+    changes nothing, every day."""
+    url = update.o.daemon_url
+    if not update.daemon_health():
+        raise UpdateError(f"this is a client machine (a shim runtime with no daemon container here), and the daemon "
+                          f"at {url} did not answer /health; the scheduled run follows that daemon's release, so it "
+                          f"would change nothing. Check that the daemon is up, or name it with --daemon-url "
+                          f"http(s)://<host>:<port> (or PSEUDOLIFE_MCP_DAEMON_URL), and run --schedule again. "
+                          f"Nothing was installed", 2)
+    command = _command(url)
+    shown = " ".join(f'"{part}"' if " " in part else part for part in command)
     if platform.startswith("win"):
-        code, _out = run_cli(["schtasks", "/Query", "/TN", TASK_NAME])
+        code, out = run_cli(["schtasks", "/Create", "/F", "/SC", "DAILY", "/ST", f"{hour:02d}:{minute:02d}",
+                             "/TN", CLIENT_TASK_NAME, "/TR", shown])
         if code != 0:
-            update.step(f"no scheduled task '{TASK_NAME}' is registered; nothing to remove")
-            return 0
-        code, out = run_cli(["schtasks", "/Delete", "/F", "/TN", TASK_NAME])
-        if code != 0:
-            raise UpdateError(f"schtasks /Delete failed ({out.strip() or code})", 2)
-        update.step(f"removed the scheduled task '{TASK_NAME}'")
+            raise UpdateError(f"schtasks /Create failed ({out.strip() or code}). Task Scheduler refuses per-user "
+                              f"registration from an unelevated administrator account: open an elevated "
+                              f"PowerShell fresh from the Start menu (never from a shell inside a Store-packaged "
+                              f"app) and run this command there once", 2)
+        update.step(f"registered the scheduled task '{CLIENT_TASK_NAME}' (daily at {hour:02d}:{minute:02d}): {shown}")
+    else:
+        unit_dir = _systemd_dir()
+        unit_dir.mkdir(parents=True, exist_ok=True)
+        service = "\n".join(["[Unit]", "Description=Pseudolife-MCP unattended client update", "",
+                             "[Service]", "Type=oneshot", f"ExecStart={shown}",
+                             # 3 = current, 4 = held off: not failures of the unit.
+                             "SuccessExitStatus=3 4", ""])
+        timer = "\n".join(["[Unit]", "Description=Pseudolife-MCP unattended client update (daily)", "",
+                           "[Timer]", f"OnCalendar=*-*-* {hour:02d}:{minute:02d}:00", "Persistent=true",
+                           "RandomizedDelaySec=300", "", "[Install]", "WantedBy=timers.target", ""])
+        (unit_dir / f"{CLIENT_UNIT_NAME}.service").write_text(service, encoding="utf-8")
+        (unit_dir / f"{CLIENT_UNIT_NAME}.timer").write_text(timer, encoding="utf-8")
+        for argv in (["systemctl", "--user", "daemon-reload"],
+                     ["systemctl", "--user", "enable", "--now", f"{CLIENT_UNIT_NAME}.timer"]):
+            code, out = run_cli(argv)
+            if code != 0:
+                raise UpdateError(f"{' '.join(argv)} failed ({out.strip() or code}); the unit files are under "
+                                  f"{unit_dir}", 2)
+        update.step(f"installed {CLIENT_UNIT_NAME}.timer under {unit_dir} (daily at {hour:02d}:{minute:02d}): {shown}")
+    update.step(f"the run moves this machine's clients (shim runtime, plugin cache, Codex step) to the release the "
+                f"daemon at {url} runs, never past it; running sessions keep their runtime. The log is "
+                f"{data_dir() / LOG_NAME}")
+    return 0
+
+
+def unschedule(update, platform: str = sys.platform) -> int:
+    """Remove the daemon job and the client job, whichever this machine has."""
+    if platform.startswith("win"):
+        removed = []
+        for name in (TASK_NAME, CLIENT_TASK_NAME):
+            code, _out = run_cli(["schtasks", "/Query", "/TN", name])
+            if code != 0:
+                continue
+            code, out = run_cli(["schtasks", "/Delete", "/F", "/TN", name])
+            if code != 0:
+                raise UpdateError(f"schtasks /Delete failed ({out.strip() or code})", 2)
+            removed.append(name)
+            update.step(f"removed the scheduled task '{name}'")
+        if not removed:
+            update.step(f"no scheduled task '{TASK_NAME}' or '{CLIENT_TASK_NAME}' is registered; nothing to remove")
     elif platform.startswith("linux"):
         unit_dir = _systemd_dir()
         run_cli(["systemctl", "--user", "disable", "--now", f"{UNIT_NAME}.timer"])
-        for name in (f"{UNIT_NAME}.timer", f"{UNIT_NAME}.service"):
+        client = any((unit_dir / f"{CLIENT_UNIT_NAME}.{kind}").exists() for kind in ("timer", "service"))
+        if client:
+            run_cli(["systemctl", "--user", "disable", "--now", f"{CLIENT_UNIT_NAME}.timer"])
+        for name in (f"{UNIT_NAME}.timer", f"{UNIT_NAME}.service",
+                     f"{CLIENT_UNIT_NAME}.timer", f"{CLIENT_UNIT_NAME}.service"):
             try:
                 (unit_dir / name).unlink()
             except FileNotFoundError:
@@ -521,6 +671,8 @@ def unschedule(update, platform: str = sys.platform) -> int:
         except FileNotFoundError:
             pass
         update.step(f"removed {UNIT_NAME}.timer and its service from {unit_dir}")
+        if client:
+            update.step(f"removed {CLIENT_UNIT_NAME}.timer and its service from {unit_dir}")
     else:
         raise UpdateError("nothing to remove on this platform", 2)
     return 0

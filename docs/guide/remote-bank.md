@@ -448,6 +448,23 @@ Codex does not use the operator's token file directly: its credential helper
 keeps its own copy under `~/.codex/pseudolife/`, which Codex's hooks read. A
 token rotation therefore has to be written to both places.
 
+### Keeping the client up to date
+
+A client machine's shim is not moved when the daemon is updated on its own
+host. `pseudolife-mcp update` (or `update --clients-only`) on the client
+machine installs the daemon's release as a new shim runtime and refreshes
+the plugin cache and the Codex step. To have that happen daily, once:
+
+```bash
+pseudolife-mcp update --schedule 03:30 --daemon-url <url>
+```
+
+It installs a scheduled task (`Pseudolife Client Update`, Windows) or a
+systemd `--user` timer (`pseudolife-client-update.timer`, Linux) that
+follows the daemon's release, never past it, and logs each run to
+`~/.pseudolife-mcp/unattended-update.log`; `--unschedule` removes it.
+Details: [unattended client updates](configuration.md#unattended-client-updates-on-client-only-machines).
+
 ### By hand
 
 ```bash

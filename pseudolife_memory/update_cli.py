@@ -15,6 +15,10 @@ Docker tier, release mode (no checkout)::
     pseudolife-mcp update --schedule 03:30   # a daily unattended run (applies only with updates.unattended_daemon on)
     pseudolife-mcp update --unattended   # what that run does (pseudolife_memory.unattended_update)
 
+On a client-only machine (a shim runtime, the daemon on another host),
+``--schedule`` installs that machine's own daily job, whose ``--unattended``
+run moves its clients to the daemon's release.
+
 pulls the pinned GHCR daemon image, backs the bank up (the checkout's
 backup script when the container's compose project still has one, else
 this module's own pg_dump + state tar), tags the running image for
@@ -1424,14 +1428,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--unattended", action="store_true",
                         help="the scheduled run: apply a new release only while updates.unattended_daemon is on and "
                              "no session is active on the board; post a board notice either way (exit 0 updated, "
-                             "3 current, 4 held off)")
+                             "3 current, 4 held off). On a client-only machine: move this machine's clients to the "
+                             "daemon's release, never past it")
     parser.add_argument("--schedule", metavar="HH:MM", default=None,
                         help="install a daily scheduled task (Windows) or systemd --user timer (Linux) that runs "
-                             "`update --unattended` at this time")
+                             "`update --unattended` at this time (a client-only machine gets its own job, "
+                             "'Pseudolife Client Update' / pseudolife-client-update.timer)")
     parser.add_argument("--allow-no-bearer", action="store_true",
                         help="--schedule even when no bearer resolves for the scheduled run (it then holds off "
                              "every day with exit 4 until one does)")
-    parser.add_argument("--unschedule", action="store_true", help="remove that task or timer")
+    parser.add_argument("--unschedule", action="store_true", help="remove that task or timer (the daemon job and the client job alike)")
     parser.add_argument("--check", action="store_true",
                         help="report whether a newer release exists: exit 0 when one does, 3 when current")
     parser.add_argument("--checkout", default=None,
