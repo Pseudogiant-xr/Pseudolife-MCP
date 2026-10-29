@@ -239,7 +239,7 @@ CANCELLED = "CANCELLED"
 # it stays a known failure.
 TIMEOUT_ANNOTATION = re.compile(
     r"The job (running on runner .+ )?has exceeded the maximum execution time")
-_ACTIONS_JOB = re.compile(r"/actions/runs/\d+/job/(\d+)$")
+_ACTIONS_JOB = re.compile(r"/actions/runs/\d+/job/(\d+)(?:[?#].*)?$")
 
 
 def _check_state(check: dict) -> str:
@@ -431,7 +431,7 @@ def _not_ready(m: Member) -> str | None:
                 "the failed job passes or a push replaces that head")
     if m.checks == "unverified":
         return ("a cancelled job's annotations could not be read, so a timeout "
-                "is not ruled out; rerun `build` once `gh api` answers again")
+                "is not ruled out; it joins a batch built once `gh api` answers")
     return None
 
 

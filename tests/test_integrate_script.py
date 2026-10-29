@@ -635,11 +635,12 @@ def test_a_cancelled_job_joins_unless_it_ran_past_its_timeout(world, capsys, mes
     for message in (FAILING, UNVERIFIED):
         assert (message in out) is (message == outcome), out
     if outcome == UNVERIFIED:
-        # The true cause and its fix: a retry, not a rerun of a failed job.
-        assert "rerun `build`" in out
+        # The true cause, and a condition that reads right in a batch body too.
+        assert "it joins a batch built once `gh api` answers" in out
 
 
-@pytest.mark.parametrize("details_url", ["https://ci.example/build/1", None])
+@pytest.mark.parametrize("details_url", ["https://ci.example/build/1", None,
+                                         "https://github.com/o/r/actions/runs/7/job/"])
 def test_a_cancelled_check_that_is_no_actions_job_joins_unprobed(world, capsys, details_url):
     sha10 = world.pr(10, {"b.txt": "b\n"})
     sha11 = world.pr(11, {"c.txt": "c\n"})
@@ -682,6 +683,38 @@ def test_a_timed_out_attempt_a_rerun_superseded_does_not_keep_a_member_out(world
     assert _publish(world) == 0, capsys.readouterr()
 
     assert _second_parents(world.origin, f"integrate/{DATE}-batch-1") == [sha10, sha11]
+
+
+@pytest.mark.parametrize("suffix", ["?pr=11", "#step:4:1"])
+def test_a_job_url_with_a_query_or_fragment_is_still_read(world, capsys, suffix):
+    sha10 = world.pr(10, {"b.txt": "b\n"})
+    sha11 = world.pr(11, {"c.txt": "c\n"})
+    world.gh.add(10, sha10)
+    job = _cancelled_job("123")
+    job["detailsUrl"] += suffix
+    world.gh.add(11, sha11, statusCheckRollup=[job])
+    world.gh.annotations["123"] = [TIMEOUT]
+
+    assert _build() == 0, capsys.readouterr()
+
+    assert FAILING in capsys.readouterr().out
+
+
+def test_a_rerun_that_timed_out_after_an_earlier_pass_keeps_a_member_out(world, capsys):
+    # The reverse of the superseded case: the latest attempt is the timeout.
+    sha10 = world.pr(10, {"b.txt": "b\n"})
+    sha11 = world.pr(11, {"c.txt": "c\n"})
+    world.gh.add(10, sha10)
+    passed = dict(_cancelled_job("456"), conclusion="SUCCESS", startedAt="2026-10-29T01:00:00Z",
+                  completedAt="2026-10-29T01:20:00Z")
+    timed_out = dict(_cancelled_job("123"), startedAt="2026-10-29T02:00:00Z",
+                     completedAt="2026-10-29T02:45:00Z")
+    world.gh.add(11, sha11, statusCheckRollup=[timed_out, passed])
+    world.gh.annotations["123"] = [TIMEOUT]
+
+    assert _build() == 0, capsys.readouterr()
+
+    assert FAILING in capsys.readouterr().out
 
 
 def test_open_refuses_a_member_whose_own_job_timed_out_after_build(world, capsys):
