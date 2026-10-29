@@ -293,6 +293,7 @@ def build_console_app(
     paths; ``health_payload`` powers ``/health``; ``service`` backs ``/api``.
     ``token`` is the singular bearer (default principal); ``token_map`` maps
     per-principal tokens (spec 2026-08-10) — either alone closes the gate."""
+    from pseudolife_memory import principal_activity
     from pseudolife_memory.principal_store import FailureLimiter, RedemptionGate
     from pseudolife_memory.principals import (
         DEFAULT_PRINCIPAL, SOURCE_STORE, PrincipalsUnavailable, bearer_presented,
@@ -310,11 +311,15 @@ def build_console_app(
     def _resolve_detailed(scope) -> tuple[str | None, str | None]:
         """``(principal, source)``: ``(None, None)`` when unauthorized;
         raises ``PrincipalsUnavailable`` when the bearer may be a stored one
-        the daemon cannot check right now (principals.resolve_principal)."""
+        the daemon cannot check right now (principals.resolve_principal).
+        The transport gate's one resolution per request, so it is also
+        where the outcome is noted for ``invite --list`` (v58)."""
         if not auth_configured:
             return DEFAULT_PRINCIPAL, None
-        return resolve_principal_detailed(
-            _authorization(scope), token_map, token, installed_store())
+        auth = _authorization(scope)
+        principal, source = resolve_principal_detailed(auth, token_map, token, installed_store())
+        principal_activity.note(principal_activity.installed_recorder(), auth, principal, source)
+        return principal, source
 
     def _authorization(scope) -> str | None:
         """The ``Authorization`` value the resolver judges: the last one

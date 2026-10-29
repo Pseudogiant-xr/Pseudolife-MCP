@@ -252,6 +252,26 @@ def test_doctor_hands_the_registration_credential_to_the_handshake(tmp_path, mon
     assert exit_info.value.code == 0 and report["ok"] is True
 
 
+def test_doctor_prints_its_tokens_hash_prefix_never_the_token(tmp_path, monkeypatch, capsys):
+    import hashlib
+    token = "fixture-doctor-token-0123456789"
+    monkeypatch.delenv("PSEUDOLIFE_MCP_TOKEN_FILE", raising=False)
+    monkeypatch.setenv("PSEUDOLIFE_MCP_TOKEN", token)
+
+    async def handshake():
+        return {"instructions_present": True, "tool_count": 3, "tools_missing_annotations": []}
+
+    _doctor_with_auth(monkeypatch, handshake)
+    with pytest.raises(SystemExit):
+        doctor_cli.run_doctor()
+    output = capsys.readouterr().out
+    report = json.loads(output)
+    assert report["token_sha256_prefix"] == hashlib.sha256(token.encode()).hexdigest()[:8]
+    assert token not in output
+    keys = list(report)
+    assert keys.index("token_sha256_prefix") == keys.index("credential_source") + 1
+
+
 def test_doctor_names_the_missing_bearer_not_the_interpreter(monkeypatch, capsys):
     handshake = AsyncMock(side_effect=RuntimeError("unhandled errors in a TaskGroup"))
     _doctor_with_auth(monkeypatch, handshake)
@@ -261,6 +281,7 @@ def test_doctor_names_the_missing_bearer_not_the_interpreter(monkeypatch, capsys
     report = json.loads(output)
     assert exit_info.value.code == 1 and report["ok"] is False
     assert report["error"] == "BearerMissing" and report["credential_source"] == "none"
+    assert report["token_sha256_prefix"] is None
     assert "PSEUDOLIFE_MCP_TOKEN_FILE" in report["recovery"]
     assert "PSEUDOLIFE_MCP_TOKEN" in report["recovery"]
     assert "ExceptionGroup" not in output and "reinstall" not in report["recovery"]

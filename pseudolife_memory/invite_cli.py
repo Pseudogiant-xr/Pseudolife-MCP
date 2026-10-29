@@ -2,7 +2,7 @@
 
     pseudolife-mcp invite <name> [--tier TIER] [--board | --no-board] [--expires 15m]
                                  [--replace] [--url URL] [--port 8765] [--bank FP] [--json]
-    pseudolife-mcp invite --list [--bank FP] [--json]
+    pseudolife-mcp invite --list [--bank FP] [--json]   (with last seen, and refused tokens)
     pseudolife-mcp invite --revoke <name> [--yes] [--bank FP] [--json]
 
 An operator command on the daemon host. Like ``board-audit`` and ``lease
@@ -76,10 +76,23 @@ POSTGRES_CONTAINER = "pseudolife-mcp-postgres"
 _PSQL = ["docker", "exec", "-i", POSTGRES_CONTAINER, "sh", "-c",
          'psql -X -q -tA -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"']
 _NOW_SQL = "EXTRACT(EPOCH FROM clock_timestamp())::double precision"
+# psql's one-line JSON form of principal_store.LIST_SQL and REJECTED_SQL
+# (schema v58), for --list with the daemon container stopped.
 LIST_SQL = (
-    "SELECT coalesce(json_agg(json_build_array(principal, tier, board, token_hash IS NOT NULL, "
-    f"code_hash IS NOT NULL, code_expires_at, created_at, paired_at, revoked_at, {_NOW_SQL}) "
-    "ORDER BY principal), '[]'::json) FROM public.principals;")
+    "SELECT json_build_object("
+    "'principals', (SELECT coalesce(json_agg(json_build_array(l.principal, l.tier, l.board, "
+    "l.paired, l.pending, l.code_expires_at, l.created_at, l.paired_at, l.revoked_at, l.now, "
+    "l.last_seen_at, l.stored) ORDER BY l.principal), '[]'::json) FROM ("
+    "SELECT p.principal, p.tier, p.board, p.token_hash IS NOT NULL AS paired, "
+    "p.code_hash IS NOT NULL AS pending, p.code_expires_at, p.created_at, p.paired_at, "
+    f"p.revoked_at, {_NOW_SQL} AS now, a.last_seen_at, TRUE AS stored FROM public.principals p "
+    "LEFT JOIN public.principal_activity a ON a.principal = p.principal UNION ALL "
+    "SELECT a.principal, NULL, NULL, FALSE, FALSE, NULL, NULL, NULL, NULL, "
+    f"{_NOW_SQL}, a.last_seen_at, FALSE FROM public.principal_activity a WHERE NOT EXISTS "
+    "(SELECT 1 FROM public.principals p WHERE p.principal = a.principal)) l), "
+    "'rejected', (SELECT coalesce(json_agg(json_build_array(hash_prefix, rejections, "
+    "first_seen_at, last_seen_at) ORDER BY last_seen_at DESC, hash_prefix), '[]'::json) "
+    "FROM public.rejected_bearers));")
 BANK_SQL = "SELECT value #>> '{}' FROM public.meta WHERE key = 'coordination_bank_id';"
 DEFAULT_PORT = expose_cli.DEFAULT_PORT
 # Stored principals arrive with schema v53.
@@ -281,8 +294,18 @@ def _listed_note(name: str) -> str | None:
     return None
 
 
-def _when(epoch) -> str:
-    return time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime(epoch)) if epoch else "-"
+def _when(epoch, missing: str = "-") -> str:
+    return time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime(epoch)) if epoch else missing
+
+
+def _environment_names() -> list[str]:
+    """The daemon's environment principals, as this process sees its
+    environment (the daemon's own inside its container): the token map's,
+    and ``default`` when ``PSEUDOLIFE_MCP_TOKEN`` is set."""
+    names = _env_names()[0]
+    if os.environ.get("PSEUDOLIFE_MCP_TOKEN"):
+        names.add("default")
+    return sorted(names)
 
 
 def _local(args, report: _Report, dsn: str) -> int:
@@ -312,7 +335,8 @@ def _local(args, report: _Report, dsn: str) -> int:
                 if refusal:
                     return report.fail(EXIT_REFUSED, refusal)
             if args.list:
-                return _list(report, store.list_principals(conn))
+                return _list(report, store.list_principals(conn, environment=_environment_names()),
+                             store.list_rejected(conn))
             if args.revoke:
                 return _revoke(args, report, store, conn)
             return _invite(args, report, store, conn)
@@ -364,17 +388,33 @@ def _revoke(args, report: _Report, store, conn) -> int:
     return report.finish(EXIT_OK)
 
 
-def _list(report: _Report, rows: list[dict]) -> int:
+def _list(report: _Report, rows: list[dict], rejected: list[dict]) -> int:
     report.data["principals"] = rows
+    report.data["rejected"] = rejected
     if not rows:
         report.say("no stored principals")
-        return report.finish(EXIT_OK)
-    report.say(f"  {'name':<24} {'state':<9} {'tier':<8} {'board':<6} {'created':<21} {'paired':<21} revoked")
+    else:
+        report.say(f"  {'name':<24} {'state':<11} {'last seen':<21} {'tier':<8} {'board':<6} "
+                   f"{'created':<21} {'paired':<21} revoked")
     for row in rows:
         state = row["state"] + (f" until {_when(row['code_expires_at'])}" if row["state"] == "pending" else "")
-        report.say(f"  {row['principal']:<24} {state:<9} {row['tier'] or 'default':<8} "
-                   f"{'on' if row['board'] else 'off':<6} {_when(row['created_at']):<21} "
+        board = "-" if row["board"] is None else "on" if row["board"] else "off"
+        report.say(f"  {row['principal']:<24} {state:<11} {_when(row['last_seen_at'], 'never'):<21} "
+                   f"{row['tier'] or 'default':<8} {board:<6} {_when(row['created_at']):<21} "
                    f"{_when(row['paired_at']):<21} {_when(row['revoked_at'])}")
+    if rows:
+        report.say("  (environment: a token in the daemon's PSEUDOLIFE_MCP_TOKENS or "
+                   "PSEUDOLIFE_MCP_TOKEN; last seen: its last accepted request, written once a minute)")
+    report.say()
+    if not rejected:
+        report.say("no refused tokens recorded")
+        return report.finish(EXIT_OK)
+    report.say("refused tokens, by the first 8 characters of their SHA-256 (`pseudolife-mcp doctor` on a "
+               "client prints its own token's as token_sha256_prefix):")
+    report.say(f"  {'prefix':<8} {'refused':>8}  {'first':<21} last")
+    for row in rejected:
+        report.say(f"  {row['hash_prefix']:<8} {row['rejections']:>8}  {_when(row['first_seen_at']):<21} "
+                   f"{_when(row['last_seen_at'])}")
     return report.finish(EXIT_OK)
 
 
@@ -417,7 +457,7 @@ def _psql(sql: str) -> subprocess.CompletedProcess:
 def _through_postgres(args, report: _Report) -> int:
     """``--list`` / ``--revoke`` with the daemon container stopped: plain
     SQL through psql in the Postgres container."""
-    from pseudolife_memory.principal_store import bank_fingerprint, describe_rows
+    from pseudolife_memory.principal_store import bank_fingerprint, describe_rejected, describe_rows
     sql = LIST_SQL if args.list else revoke_sql(args.revoke)
 
     def by_hand(why: str) -> int:
@@ -439,10 +479,12 @@ def _through_postgres(args, report: _Report) -> int:
     output = (proc.stdout or "").strip()
     if args.list:
         try:
-            rows = json.loads(output.splitlines()[-1]) if output else []
-        except (ValueError, IndexError):
+            listed = json.loads(output.splitlines()[-1])
+            rows, rejected = listed["principals"], listed["rejected"]
+        except (ValueError, IndexError, KeyError, TypeError):
             return by_hand("psql answered something that is not the list")
-        return _list(report, describe_rows(rows))
+        # No environment here: the stopped daemon's is not this shell's.
+        return _list(report, describe_rows(rows), describe_rejected(rejected))
     if args.revoke not in output.splitlines():
         return report.fail(EXIT_REFUSED, f"no stored principal is named {args.revoke}")
     report.data.update(principal=args.revoke, state="revoked")
@@ -500,7 +542,8 @@ def _parser() -> argparse.ArgumentParser:
                         help=f"the local daemon's port (default: PSEUDOLIFE_MCP_PORT, else {DEFAULT_PORT})")
     parser.add_argument("--bank", metavar="FINGERPRINT",
                         help="refuse unless the database holds this bank (/health's bank)")
-    parser.add_argument("--list", action="store_true", help="list stored principals")
+    parser.add_argument("--list", action="store_true",
+                        help="list principals with when each last connected, and refused tokens")
     parser.add_argument("--revoke", metavar="NAME", help="revoke a stored principal")
     parser.add_argument("--yes", action="store_true", help="revoke without asking")
     parser.add_argument("--json", action="store_true", help="one JSON report on stdout")

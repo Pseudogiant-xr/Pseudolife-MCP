@@ -50,7 +50,7 @@ pub(super) const EXPORTED_TABLES: [&str; 27] = [
     "store_decisions",
     "reference_chunks",
 ];
-pub(super) const EXCLUDED_TABLES: [&str; 18] = [
+pub(super) const EXCLUDED_TABLES: [&str; 20] = [
     "dream_runs",
     "dream_run_slots",
     "retrieval_events",
@@ -69,6 +69,8 @@ pub(super) const EXCLUDED_TABLES: [&str; 18] = [
     "maintainer_bootstrap",
     "maintainer_nonces",
     "cms_counters",
+    "principal_activity",
+    "rejected_bearers",
 ];
 const META_SKIP_KEYS: [&str; 8] = [
     "schema_version",
@@ -270,7 +272,7 @@ fn finish(mode: &str, outcome: Outcome) -> Option<ExitCode> {
         Outcome::SchemaDeferred => (
             emit(
                 &mut io::stderr().lock(),
-                "pseudolife-stdio: import into a bank not at this build's schema (57) is deferred in this candidate (needs native ensure_schema)\n",
+                "pseudolife-stdio: import into a bank not at this build's schema (58) is deferred in this candidate (needs native ensure_schema)\n",
             ),
             1,
         ),

@@ -165,7 +165,10 @@ def start_stored_principals(svc, token_map, *, auth_configured: bool):
     refresh thread, or ``None`` on a daemon without Postgres, which has no
     store. The snapshot ignores rows whose name the environment already
     uses. The refresher gets the DSN, never the service, so it cannot take
-    the service or coordination lock."""
+    the service or coordination lock. With authentication on, the gate's
+    activity recorder (schema v58) is installed too, and the refresher
+    writes it."""
+    from pseudolife_memory.principal_activity import ActivityRecorder, install_recorder
     from pseudolife_memory.principal_store import PrincipalRefresher, PrincipalSnapshot
     from pseudolife_memory.principals import install_store
 
@@ -174,7 +177,10 @@ def start_stored_principals(svc, token_map, *, auth_configured: bool):
         return None
     snapshot = PrincipalSnapshot(shadowed=set((token_map or {}).values()))
     install_store(snapshot)
-    PrincipalRefresher(dsn, snapshot, auth_configured=auth_configured).start()
+    recorder = ActivityRecorder() if auth_configured else None
+    install_recorder(recorder)
+    PrincipalRefresher(dsn, snapshot, auth_configured=auth_configured,
+                       recorder=recorder).start()
     return snapshot
 
 

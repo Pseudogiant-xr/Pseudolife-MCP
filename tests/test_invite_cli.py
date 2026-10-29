@@ -282,10 +282,17 @@ def test_a_stopped_daemon_container_revokes_through_postgres(docker, capsys):
 
 def test_a_stopped_daemon_container_lists_through_postgres(docker, capsys):
     docker.running = False
-    docker.psql["stdout"] = json.dumps([["laptop", "core", True, True, False, None, 1.0, 2.0, None,
-                                         3.0]]) + "\n"
+    docker.psql["stdout"] = json.dumps({
+        "principals": [["laptop", "core", True, True, False, None, 1.0, 2.0, None, 3.0, 2.5, True],
+                       ["codex", None, None, False, False, None, None, None, None, 3.0, 2.0, False]],
+        "rejected": [["ab12cd34", 3, 1.0, 2.0]]}) + "\n"
     code, out, _err = _run(capsys, "--list", "--json")
-    assert code == 0 and json.loads(out)["principals"][0]["state"] == "paired"
+    report = json.loads(out)
+    assert code == 0 and [(r["principal"], r["state"], r["last_seen_at"])
+                          for r in report["principals"]] == [("codex", "environment", 2.0),
+                                                              ("laptop", "paired", 2.5)]
+    assert report["rejected"] == [{"hash_prefix": "ab12cd34", "rejections": 3,
+                                   "first_seen_at": 1.0, "last_seen_at": 2.0}]
 
 
 def test_a_stopped_daemon_container_cannot_invite(docker, capsys):
@@ -306,8 +313,12 @@ def test_the_postgres_route_sql_runs_as_written(bank, pg_url, capsys):
     import psycopg
     _run(capsys, "laptop")
     with psycopg.connect(pg_url, autocommit=True) as conn:
+        conn.execute("INSERT INTO principal_activity VALUES ('codex', 5.0), ('laptop', 6.0)")
+        conn.execute("INSERT INTO rejected_bearers VALUES ('ab12cd34', 2, 1.0, 4.0)")
         listed = conn.execute(invite_cli.LIST_SQL).fetchone()[0]
-        assert [row[0] for row in listed] == ["laptop"]
+        assert [(row[0], row[10], row[11]) for row in listed["principals"]] == [
+            ("codex", 5.0, False), ("laptop", 6.0, True)]
+        assert listed["rejected"] == [["ab12cd34", 2, 1.0, 4.0]]
         assert conn.execute(invite_cli.revoke_sql("laptop")).fetchone() == ("laptop",)
         assert conn.execute(invite_cli.BANK_SQL).fetchone() == (BANK_ID,)
     with pytest.raises(ValueError):
@@ -326,3 +337,40 @@ def test_re_invites_keep_the_tier_and_board_unless_given(bank, pg_url, capsys):
     assert _rows(pg_url)[0][3:] == ("core", False)
     _run(capsys, "laptop", "--replace", "--tier", "full", "--board")
     assert _rows(pg_url)[0][3:] == ("full", True)
+
+
+# -- v58: last seen and refused tokens ------------------------------------------
+
+def test_the_list_shows_last_seen_for_stored_and_environment_principals(bank, env, pg_url, capsys):
+    import psycopg
+    env.setenv("PSEUDOLIFE_MCP_TOKENS", "fixture-env-token:codex,fixture-env-token-2:desk")
+    env.setenv("PSEUDOLIFE_MCP_TOKEN", "fixture-singular-token")
+    _run(capsys, "laptop")
+    seen = 1_793_000_000.0          # 2026-10-26 07:33 UTC
+    with psycopg.connect(pg_url, autocommit=True) as conn:
+        conn.execute("INSERT INTO principal_activity VALUES ('codex', %s), ('laptop', %s)",
+                     (seen, seen + 60))
+        conn.execute("INSERT INTO rejected_bearers VALUES ('ab12cd34', 37, %s, %s)",
+                     (seen - 86400, seen))
+    code, out, _err = _run(capsys, "--list")
+    assert code == 0
+    lines = out.splitlines()
+    assert lines[0].split()[:4] == ["name", "state", "last", "seen"]
+    by_name = {line.split()[0]: line for line in lines[1:5]}
+    assert set(by_name) == {"codex", "default", "desk", "laptop"}
+    assert "environment" in by_name["codex"] and "2026-10-26 07:33 UTC" in by_name["codex"]
+    assert "environment" in by_name["default"] and "never" in by_name["default"]
+    assert "pending" in by_name["laptop"] and "2026-10-26 07:34 UTC" in by_name["laptop"]
+    assert "  ab12cd34       37  2026-10-25 07:33 UTC  2026-10-26 07:33 UTC" in lines
+    assert "fixture-env-token" not in out and "fixture-singular-token" not in out
+    report = json.loads(_run(capsys, "--list", "--json")[1])
+    assert {r["principal"]: r["last_seen_at"] for r in report["principals"]} == {
+        "codex": seen, "default": None, "desk": None, "laptop": seen + 60}
+    assert report["rejected"] == [{"hash_prefix": "ab12cd34", "rejections": 37,
+                                   "first_seen_at": seen - 86400, "last_seen_at": seen}]
+
+
+def test_the_list_says_when_no_token_was_refused(bank, capsys):
+    _run(capsys, "laptop")
+    code, out, _err = _run(capsys, "--list")
+    assert code == 0 and out.rstrip().endswith("no refused tokens recorded")

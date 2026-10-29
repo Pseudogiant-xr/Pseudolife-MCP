@@ -18,7 +18,7 @@ from typing import Iterable
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_META_VERSION = 57
+SCHEMA_META_VERSION = 58
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -928,6 +928,30 @@ CREATE TABLE IF NOT EXISTS cms_counters (
 """
 SCHEMA_SQL += CMS_COUNTERS_SCHEMA_SQL
 
+# v58: when each principal last authenticated, and the bearers the daemon
+# refused, so an operator can tell a machine whose token stopped working
+# from one that is switched off (`pseudolife-mcp invite --list`). Keyed by
+# principal NAME, not a principals row: environment principals
+# (PSEUDOLIFE_MCP_TOKENS, and `default` for PSEUDOLIFE_MCP_TOKEN) have no
+# row there. A refused bearer is kept only as the first 8 hex characters of
+# its SHA-256, enough to match a client's `pseudolife-mcp doctor` line and
+# nothing a caller can use. The daemon batches both in memory and writes
+# them at most once a minute (principal_activity.py). Serving telemetry of
+# this daemon, like client_sessions: never in a logical export.
+PRINCIPAL_ACTIVITY_SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS principal_activity (
+    principal    TEXT PRIMARY KEY,
+    last_seen_at DOUBLE PRECISION NOT NULL
+);
+CREATE TABLE IF NOT EXISTS rejected_bearers (
+    hash_prefix   TEXT PRIMARY KEY,
+    rejections    BIGINT NOT NULL,
+    first_seen_at DOUBLE PRECISION NOT NULL,
+    last_seen_at  DOUBLE PRECISION NOT NULL
+);
+"""
+SCHEMA_SQL += PRINCIPAL_ACTIVITY_SCHEMA_SQL
+
 # Every table this schema declares — the ONE list a bench/test reset
 # truncates. It lives here, beside the DDL, because it has to grow in the
 # same edit that adds a table; `tests/test_bench_reset_tables.py` fails the
@@ -966,6 +990,7 @@ BENCH_RESET_TABLES = (
     "principals",
     "maintainer_passkeys", "maintainer_bootstrap", "maintainer_nonces",
     "reference_chunks", "cms_counters",
+    "principal_activity", "rejected_bearers",
 )
 
 # A test or bench reset reaps every other backend on its database, applies

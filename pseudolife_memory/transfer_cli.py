@@ -114,6 +114,9 @@ EXCLUDED_TABLES = (
     # hits, surprise history) describe this daemon's serving history, like
     # the weights.pt file they replace, which no transfer carried either.
     "cms_counters",
+    # v58: when each principal last authenticated here, and the refused
+    # bearers' hash prefixes: this daemon's serving history.
+    "principal_activity", "rejected_bearers",
 )
 
 # Columns of an exported table that are serving telemetry under the same

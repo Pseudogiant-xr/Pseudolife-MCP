@@ -250,7 +250,18 @@ The rules:
   given. A tier sets which tools a client sees at first, not what it may
   call: `memory_toolset` expands any session to the full set.
 - `invite --list` shows each name, whether it is paired or pending, its
-  tier, board access and times: never a token or a code.
+  tier, board access and times: never a token or a code. It also lists the
+  principals whose tokens live in the daemon's environment
+  (`PSEUDOLIFE_MCP_TOKENS`, and `default` for `PSEUDOLIFE_MCP_TOKEN`), and
+  gives every principal a "last seen" time: its last request the daemon
+  accepted, written at most once a minute (schema v58). Below the list are
+  the tokens the daemon refused, each as the first 8 characters of its
+  SHA-256 with how often and when. To find which machine holds a refused
+  token, run `pseudolife-mcp doctor` there: its `token_sha256_prefix` is
+  the same 8 characters for the token that machine sends. A machine that
+  stopped connecting shows an old "last seen"; if its prefix is also in
+  the refused list, its token is dead (pair it again), and if not, it is
+  probably switched off.
   `invite --revoke laptop` takes the token away within 10 seconds, or
   within 60 seconds at worst while the daemon cannot read its database.
   Neither needs a running daemon, so access can be withdrawn while it is
