@@ -72,51 +72,19 @@ class Slice:
         return _check(name, self)
 
     def name(self, label: str) -> str:
-        return self.NAMES.name(self._check(label), max_length=len(self.PREFIX) + 40)
+        return _name(self, label)
 
     def dsn(self, name: str) -> str:
-        self.NAMES.require_process()
-        user, password = self._login()
-        host, port = self.HOST_PORT.rsplit(":", 1)
-        return (f"postgresql://{quote(user, safe='')}:{quote(password, safe='')}"
-                f"@{host}:{port}/{self._check(name)}")
+        return _dsn(self, name)
 
     def create(self, name: str, template: str | None = None) -> str:
-        """Drop and recreate ``name`` (optionally as a copy of ``template``)."""
-        self.drop(name)
-        with self._admin() as conn:
-            self.assert_disposable_database(conn)
-            if template is None:
-                self.create_from_default_template(conn, sql.SQL("CREATE DATABASE {}").format(
-                    sql.Identifier(self._check(name))))
-            else:
-                conn.execute(sql.SQL("CREATE DATABASE {} TEMPLATE {}").format(
-                    sql.Identifier(self._check(name)), sql.Identifier(self._check(template))))
-        return self.dsn(name)
+        return _create(self, name, template)
 
     def drop(self, name: str, attempts: int = 10) -> None:
-        """FORCE cannot end a backend this role does not own (an autovacuum
-        worker on a just-used bank): retry until it has gone."""
-        self._check(name)
-        self.NAMES.require_owned(name)
-        for i in range(attempts):
-            try:
-                with self._admin() as conn:
-                    self.assert_disposable_database(conn)
-                    conn.execute(sql.SQL("DROP DATABASE IF EXISTS {} WITH (FORCE)").format(
-                        sql.Identifier(self._check(name))))
-                return
-            except psycopg.errors.InsufficientPrivilege:
-                if i == attempts - 1:
-                    raise
-                time.sleep(2)
+        _drop(self, name, attempts)
 
     def existing(self) -> list[str]:
-        with self._admin() as conn:
-            rows = conn.execute("SELECT datname FROM pg_database WHERE starts_with(datname, %s)",
-                                (self.PREFIX,))
-            return sorted(r[0] for r in rows
-                          if self.DISPOSABLE_NAME.fullmatch(r[0]) and self.NAMES.owns(r[0]))
+        return _existing(self)
 
 
 def current() -> Slice:
@@ -124,15 +92,28 @@ def current() -> Slice:
     return Slice.from_env()
 
 
+class _Launcher:
+    """The module-level functions' namespace: the slice is the launcher's,
+    read at each use, and every step (``drop``, ``dsn``, ``_admin``...)
+    is this module's own function, so patching the module keeps working."""
+
+    def __getattr__(self, attr: str):
+        if attr in ("SLICE", "PREFIX", "DISPOSABLE_NAME"):
+            return getattr(current(), attr)
+        try:
+            return globals()[attr]
+        except KeyError:
+            raise AttributeError(attr) from None
+
+
+_LAUNCHER = _Launcher()
+
+
 def __getattr__(attr: str):
     # SLICE, PREFIX and DISPOSABLE_NAME follow PL_HARNESS_SLICE at each read.
     if attr in ("SLICE", "PREFIX", "DISPOSABLE_NAME"):
         return getattr(current(), attr)
     raise AttributeError(f"module {__name__!r} has no attribute {attr!r}")
-
-
-def name(label: str) -> str:
-    return current().name(label)
 
 
 def _login() -> tuple[str, str]:
@@ -157,10 +138,6 @@ def _check(name: str, space: Slice | None = None) -> str:
     return name
 
 
-def dsn(name: str) -> str:
-    return current().dsn(name)
-
-
 def _admin():
     NAMES.require_process()
     user, password = _login()
@@ -169,14 +146,91 @@ def _admin():
                            dbname="postgres", autocommit=True, connect_timeout=10)
 
 
+def name(label: str) -> str:
+    return _name(_LAUNCHER, label)
+
+
+def dsn(name: str) -> str:
+    return _dsn(_LAUNCHER, name)
+
+
 def create(name: str, template: str | None = None) -> str:
-    """Drop and recreate ``name`` (optionally as a copy of ``template``)."""
-    return current().create(name, template)
+    """Drop and recreate ``name`` (optionally as a copy of ``template``).
+
+    A copy starts without the rows of ``dbstate.UNPORTED_ROWS`` tables: a
+    seeding Python daemon's exit flush writes them (the cms_counters row,
+    schema v57), and the Python arm would restore what the Rust arm cannot
+    read yet. Before v57 those counters stayed in the seeder's own
+    weights.pt, out of both arms' reach, which this keeps."""
+    return _create(_LAUNCHER, name, template)
 
 
 def drop(name: str, attempts: int = 10) -> None:
-    current().drop(name, attempts)
+    """FORCE cannot end a backend this role does not own (an autovacuum
+    worker on a just-used bank): retry until it has gone."""
+    _drop(_LAUNCHER, name, attempts)
 
 
 def existing() -> list[str]:
-    return current().existing()
+    return _existing(_LAUNCHER)
+
+
+# One implementation for a Slice handle and for the module-level functions:
+# ``space`` supplies the prefix and every step, so each path's patches apply.
+
+def _name(space, label: str) -> str:
+    return space.NAMES.name(space._check(label), max_length=len(space.PREFIX) + 40)
+
+
+def _dsn(space, name: str) -> str:
+    space.NAMES.require_process()
+    user, password = space._login()
+    host, port = space.HOST_PORT.rsplit(":", 1)
+    return (f"postgresql://{quote(user, safe='')}:{quote(password, safe='')}"
+            f"@{host}:{port}/{space._check(name)}")
+
+
+def _create(space, name: str, template: str | None) -> str:
+    space.drop(name)
+    with space._admin() as conn:
+        space.assert_disposable_database(conn)
+        if template is None:
+            space.create_from_default_template(conn, sql.SQL("CREATE DATABASE {}").format(
+                sql.Identifier(space._check(name))))
+        else:
+            conn.execute(sql.SQL("CREATE DATABASE {} TEMPLATE {}").format(
+                sql.Identifier(space._check(name)), sql.Identifier(space._check(template))))
+    if template is not None:
+        try:  # the harness's own dbstate when it is on the path, so one
+            from dbstate import UNPORTED_ROWS  # module instance holds it
+        except ImportError:
+            from rust.daemon.harness.dbstate import UNPORTED_ROWS
+        with psycopg.connect(space.dsn(name), autocommit=True) as conn:
+            for table in UNPORTED_ROWS:
+                if conn.execute("SELECT to_regclass(%s)", (f"public.{table}",)).fetchone()[0]:
+                    conn.execute(sql.SQL("DELETE FROM {}").format(sql.Identifier("public", table)))
+    return space.dsn(name)
+
+
+def _drop(space, name: str, attempts: int) -> None:
+    space._check(name)
+    space.NAMES.require_owned(name)
+    for i in range(attempts):
+        try:
+            with space._admin() as conn:
+                space.assert_disposable_database(conn)
+                conn.execute(sql.SQL("DROP DATABASE IF EXISTS {} WITH (FORCE)").format(
+                    sql.Identifier(space._check(name))))
+            return
+        except psycopg.errors.InsufficientPrivilege:
+            if i == attempts - 1:
+                raise
+            time.sleep(2)
+
+
+def _existing(space) -> list[str]:
+    with space._admin() as conn:
+        rows = conn.execute("SELECT datname FROM pg_database WHERE starts_with(datname, %s)",
+                            (space.PREFIX,))
+        return sorted(r[0] for r in rows
+                      if space.DISPOSABLE_NAME.fullmatch(r[0]) and space.NAMES.owns(r[0]))
