@@ -161,7 +161,7 @@
       "fixtures": "defc5e07c5ac3f94",
       "candidate": "77b0c5fa6b2afcbf",
       "candidate-harness": "ab479a8fc85283e7",
-      "parity-checks": "76658076fa1ea57e",
+      "parity-checks": "06054831b8e7b5d2",
       "daemon-image": "cf93a3a209618bdc",
       "parity": "4c39a489bf4b1642"
     },
@@ -195,6 +195,11 @@
         "job": "rust",
         "fingerprint": "59cc6066e4ac1f82",
         "reason": "adds rust/daemon/harness/test_pgdisposable_slices.py to the existing harness pytest step: no new job, shard or setup step; the file runs 50 tests in 1.45s on a Windows desktop (2026-10-29), so the measured minutes hold"
+      },
+      {
+        "job": "parity-checks",
+        "fingerprint": "06054831b8e7b5d2",
+        "reason": "#1013 adds one pytest file (test_config_knobs_golden.py, about 5 s on Windows: it imports the service module) to the existing Offline W2-D search harness regressions step; no new job, shard or setup"
       }
     ]
   },

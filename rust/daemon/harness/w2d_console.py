@@ -3,8 +3,9 @@
 ``/api/facts/history``, ``/api/world``, ``/api/lessons``, ``/api/sources``,
 ``/api/recent``, ``/api/chain``, ``/api/entry``, ``/api/episodes``,
 ``/api/episodes/summary``, ``/api/consolidation``, ``/api/overview``,
-``/api/agents``' default view and the maintainer reads ``/api/maintainer``,
-``/sent`` and ``/inbox`` (the maintainer's board state is seeded as rows).
+``/api/agents``' default view, the maintainer reads ``/api/maintainer``,
+``/sent`` and ``/inbox`` (the maintainer's board state is seeded as rows)
+and ``GET /api/config``.
 
 usage:
   python w2d_console.py live    --rust-bin PATH [--only NAME ...] [--out FILE]
@@ -27,6 +28,12 @@ resolved by ``w2e.resolve_args``) and whose ``headers`` follow the bearer
 "value"}``, so a refusal compares by status as well as body. Nothing here
 edits ``w2e.py``: the scenarios, the mutants and the ``get`` dispatch are
 registered on the imported module.
+
+It adds a second, ``write_config``, on each side's data directory
+(``w2e.HOME_OPS``): it replaces config.yaml under the running daemons, so
+``/api/config`` serves the values each booted with beside the file's
+``saved`` ones. ``config_path`` names each side's own home, so it compares
+as ``<home>/data/config.yaml``.
 """
 from __future__ import annotations
 
@@ -44,7 +51,8 @@ MUTANTS = ["console-facts-no-contender", "console-sources-by-name", "console-cha
            "mcp-recent-oldest-first", "mcp-consolidation-unsorted",
            "console-overview-contested-rows", "console-agents-no-limit-refusal",
            "console-agents-ignore-limit", "maintainer-gate-open", "maintainer-config-unchecked",
-           "maintainer-available-any-key", "maintainer-roles-any-grant"]
+           "maintainer-available-any-key", "maintainer-roles-any-grant",
+           "config-read-typed-values", "config-read-no-saved"]
 
 OPS = ("get",)
 
@@ -98,7 +106,40 @@ def compare_response(py, rs, tol, stats) -> list[str]:
                        f"(not both >= 0 within {IDLE_BOUND_S}s)")
         py = {**py, "value": {**py["value"], "dream": {**a, "idle_seconds": "<idle>"}}}
         rs = {**rs, "value": {**rs["value"], "dream": {**b, "idle_seconds": "<idle>"}}}
+    py, rs, homes = config_homes(py), config_homes(rs), []
+    for r in (py, rs):
+        v = r.get("value") if isinstance(r, dict) else None
+        if isinstance(v, dict) and "config_path" in v:
+            homes.append(v["config_path"])
+    if homes and not all(str(h) == "<home>/data/config.yaml" for h in homes):
+        out.append(f"config_path: python/rust {homes!r} not each side's data/config.yaml")
     return out + _base_compare(py, rs, tol, stats)
+
+
+def config_homes(r):
+    """``/api/config``'s ``config_path`` with the side's home as ``<home>``."""
+    v = r.get("value") if isinstance(r, dict) else None
+    if not (isinstance(v, dict) and isinstance(v.get("config_path"), str)):
+        return r
+    path = Path(v["config_path"])
+    home = path.parent.parent
+    shown = (f"<home>/{path.parent.name}/{path.name}" if path.parent.name == "data"
+             and home.name else v["config_path"])
+    return {**r, "value": {**v, "config_path": shown}}
+
+
+_base_home_op = w2e.home_op
+
+
+def home_op(op: dict, home: Path) -> dict:
+    if op["op"] == "write_config":
+        (home / "data" / "config.yaml").write_text(op["text"], encoding="utf-8")
+        return {"isError": False, "value": None}
+    return _base_home_op(op, home)
+
+
+def write_config(text: str) -> dict:
+    return {"op": "write_config", "text": text}
 
 
 def get(path: str, headers=(), **query) -> dict:
@@ -491,7 +532,37 @@ def maintainer_scenarios() -> dict[str, dict]:
     }
 
 
-SCENARIOS = {**scenarios(), **maintainer_scenarios()}
+def _knob_golden() -> dict:
+    import json
+    return json.loads((HERE / "goldens" / "config-knobs.json").read_text(encoding="utf-8"))
+
+
+def config_scenarios() -> dict[str, dict]:
+    # The fixtures the Rust unit tests check against Python's read_config
+    # (``gen_config_knobs.py``), here through both running daemons.
+    golden = _knob_golden()
+    ops = [get("/api/config")]
+    for case in golden["read"]:
+        ops += [write_config(case["saved"]), get("/api/config")]
+    return {
+        # Boot values served as YAML typed them, defaults where unset; the
+        # restart knobs' ``saved`` values, absent when equal or not
+        # coercible; a 500 when a saved int knob is infinite.
+        "console-config": {
+            "config": golden["boot"],
+            "seed": [store("A note before the config reads.")],
+            "ops": ops,
+        },
+        # No config.yaml at all: every knob at its default.
+        "console-config-defaults": {
+            "config": None,
+            "seed": [store("A note.")],
+            "ops": [get("/api/config")],
+        },
+    }
+
+
+SCENARIOS = {**scenarios(), **maintainer_scenarios(), **config_scenarios()}
 
 
 def install() -> None:
@@ -502,6 +573,9 @@ def install() -> None:
             w2e.MUTANTS.append(m)
     w2e.run_op = run_op
     w2e.compare_response = compare_response
+    w2e.home_op = home_op
+    if "write_config" not in w2e.HOME_OPS:
+        w2e.HOME_OPS = (*w2e.HOME_OPS, "write_config")
 
 
 def main() -> int:

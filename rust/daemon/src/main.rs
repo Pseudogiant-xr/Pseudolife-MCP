@@ -12,6 +12,7 @@ mod bank;
 mod board;
 mod briefing;
 mod config;
+mod config_io;
 mod consolidation_tools;
 mod contradiction;
 mod correction_tools;
