@@ -19,7 +19,6 @@ may remove their own completed runs after collecting the evidence they need.
 from __future__ import annotations
 
 import json
-import os
 import re
 import subprocess
 import sys
@@ -33,8 +32,9 @@ import daemons  # noqa: E402
 
 sys.path.insert(0, str(daemons.REPO))
 
-os.environ["PL_HARNESS_SLICE"] = "w2g"
-import pgdisposable as pg  # noqa: E402
+import pgdisposable  # noqa: E402
+
+pg = pgdisposable.Slice("w2g")
 
 ENV = {
     "PSEUDOLIFE_MCP_TOKEN": "tok-default-0001",

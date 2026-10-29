@@ -29,15 +29,15 @@ HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[2]
 sys.path.insert(0, str(REPO))
 sys.path.insert(0, str(HERE))
-os.environ.setdefault("PL_HARNESS_SLICE", "pgs")
 import daemons
 import dbstate
-import pgdisposable as pg
+import pgdisposable
 import psycopg
 from psycopg import sql
 from schema_cases import clock_diffs
 from pseudolife_memory.storage.schema import assert_disposable_database
 
+pg = pgdisposable.Slice.from_env("pgs")
 CUSTOM_CONFIG = """memory:
   embedding_dim: 1024
   miras:

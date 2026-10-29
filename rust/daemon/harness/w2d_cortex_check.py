@@ -58,8 +58,9 @@ sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(REPO))
 import dbstate  # noqa: E402
 
-os.environ["PL_HARNESS_SLICE"] = "w2d"
-import pgdisposable as pg  # noqa: E402
+import pgdisposable  # noqa: E402
+
+pg = pgdisposable.Slice("w2d")
 
 SEED = pg.name("pl_cf_w2d_cortex_seed")
 RUST_TEST = "read::cortex_search::tests::differential_cases_from_harness"
