@@ -51,6 +51,7 @@ class World:
         self.pip_rc = 0
         self.on_image_inspect = None
         self.docker_down = False
+        self.docker_error = "error during connect: this error may indicate that the docker daemon is not running"
 
     # docker -----------------------------------------------------------------
     def run_cli(self, argv, **kw):
@@ -68,7 +69,7 @@ class World:
 
     def docker(self, a: list[str]):
         if self.docker_down:
-            return 1, "error during connect: this error may indicate that the docker daemon is not running"
+            return 1, self.docker_error
         if a[:2] == ["inspect", "-f"] or a[:2] == ["inspect", "--format"]:
             fmt, target = a[2], a[3]
             if target == DAEMON:
@@ -159,6 +160,8 @@ def world(tmp_path, monkeypatch):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.delenv("PSEUDOLIFE_MCP_TOKEN", raising=False)
     monkeypatch.delenv("PSEUDOLIFE_MCP_TOKENS", raising=False)
+    # --daemon-url's default: a remote suite exports a non-loopback one
+    monkeypatch.delenv("PSEUDOLIFE_MCP_DAEMON_URL", raising=False)
     # the pip tier's own-install checks: a plain site install, a runtime layout elsewhere
     monkeypatch.setattr(client_updates, "install_kind", lambda interpreter: ("site", ""))
     # this interpreter's own extras are not the test's: no lite extra unless a test says so
@@ -1035,6 +1038,60 @@ def test_a_client_only_machine_takes_the_newest_release_when_the_daemon_is_silen
     world.pypi = "0.16.0"
     assert _run(["--clients-only"]) == 0
     assert clients[0]["source"] == "pseudolife-mcp==0.16.0" and clients[0]["daemon_digest"] is None
+
+
+def test_a_client_machine_whose_docker_this_user_cannot_use_still_updates_its_clients(world, clients, monkeypatch,
+                                                                                      capsys):
+    """Docker installed but refusing this user (no docker group) on a
+    client machine whose daemon is on another host: the update used to
+    stop with "docker is installed but did not answer" before it looked
+    at where the daemon is, even with --daemon-url (2026-10-29)."""
+    _on_a_shim_runtime(monkeypatch)
+    world.docker_down = True
+    world.docker_error = ("permission denied while trying to connect to the Docker daemon socket at "
+                          "unix:///var/run/docker.sock")
+    world.health = [{"status": "ok", "version": "0.15.1", "hooks_digest": "d" * 64}]
+    for argv in ([], ["--clients-only"]):
+        clients.clear()
+        assert _run(argv + ["--daemon-url", "http://10.0.0.7:8765"]) == 0, argv
+        assert clients == [{"steps": ("shim", "plugin", "codex"), "repo": None,
+                            "source": "pseudolife-mcp==0.15.1", "daemon_digest": "d" * 64, "reinstall": False}]
+        assert "10.0.0.7" in capsys.readouterr().out
+    assert not any(c[1:4] == ["-m", "pip", "install"] for c in world.calls)
+
+
+def test_a_silent_docker_with_a_local_daemon_url_still_stops_and_names_daemon_url(world, clients, monkeypatch,
+                                                                                    capsys):
+    """The near miss: a shim runtime on the daemon's own host with Docker
+    stopped keeps the loopback URL, and the daemon may well be a container
+    there, so the update still stops; the refusal names --daemon-url for
+    the client machine that only forgot to say where its daemon is."""
+    _on_a_shim_runtime(monkeypatch)
+    world.docker_down = True
+    for argv in ([], ["--clients-only"], ["--clients-only", "--daemon-url", "http://localhost:8765"],
+                 ["--clients-only", "--daemon-url", "http://[::1"], ["--clients-only", "--daemon-url", "myhost:8765"]):
+        clients.clear()
+        assert _run(argv) == 2, argv
+        err = capsys.readouterr().err
+        assert "did not answer" in err and "--daemon-url http(s)://" in err, argv
+        assert clients == []
+    assert not any(c[1:4] == ["-m", "pip", "install"] for c in world.calls)
+
+
+def test_a_silent_docker_and_a_silent_remote_daemon_still_stop(world, clients, monkeypatch, capsys):
+    """A name can resolve to this machine (a host's own tailnet name): with
+    its Docker stopped its daemon is down too, so a URL naming another
+    machine moves the clients only when that daemon answers there."""
+    _on_a_shim_runtime(monkeypatch)
+    world.docker_down = True
+    world.health = []
+    world.pypi = "0.16.0"
+    for argv in ([], ["--clients-only"]):
+        assert _run(argv + ["--daemon-url", "https://this-host.example.com"]) == 2, argv
+        err = capsys.readouterr().err
+        assert "the daemon configured at https://this-host.example.com did not answer /health either" in err
+    assert clients == []
+    assert not any(c[1:4] == ["-m", "pip", "install"] for c in world.calls)
 
 
 def test_a_client_only_machine_refuses_daemon_only_naming_the_daemon_host(world, clients, monkeypatch, capsys):

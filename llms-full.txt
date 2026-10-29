@@ -215,7 +215,8 @@ trade-offs: [Dreaming](docs/guide/dreaming.md).
 ## Durable tier — Docker (recommended for a long-lived bank)
 
 Everything above plus the bundled extractor, external volumes,
-health-checked services, and backup/rollback tooling. Requires Docker and
+health-checked services, and backup/rollback tooling. Requires Docker
+(with the compose v2 and buildx plugins) and
 at least one MCP-capable coding agent — Claude Code, Codex, and Gemini CLI
 are wired end-to-end; anything else gets paste-ready config
 ([provider matrix](docs/guide/providers.md)). One command from clone to
@@ -244,8 +245,8 @@ this machine with other machines connecting to it (see
 asks which agents to wire (multi-select, with a capability
 matrix showing exactly what each one gets — session briefing, per-turn
 discipline, standing file), runs the preflight (one exact fix line per
-missing prerequisite), then asks which **dream extractor** should
-consolidate memories —
+missing prerequisite, Docker's compose v2 and buildx plugins included),
+then asks which **dream extractor** should consolidate memories —
 
 - **sidecar** — the bundled local CPU model; no Claude plan needed, works
   for everyone, and keeps every memory on the box (~11.8 GB image);
@@ -305,6 +306,24 @@ covers saved-instance checks and an explicitly disposable mail proof.
 dormant ([Turning the board on](docs/guide/configuration.md#turning-the-board-on)).
 Linux (Docker Engine): your user must be in the `docker` group —
 `sudo usermod -aG docker $USER`, then log out/in (the preflight checks this).
+Docker Engine also needs the buildx plugin, which Docker Desktop bundles:
+the Dockerfiles' `RUN --mount` caches need BuildKit, and without buildx the
+build dies with "the --mount option requires BuildKit". The preflight
+fails without it and prints the install line for each distro (Arch: `sudo
+pacman -S docker-buildx`; Debian/Ubuntu with Docker's repository or Fedora:
+`docker-buildx-plugin`).
+In the Claude and Codex CLI shim extractor modes on Linux, `ops/install.sh`
+also checks that the daemon's container reaches the shim on the host. A
+host firewall such as ufw can drop that traffic, and dreams then pause
+(or fall back to the sidecar) while the shim itself looks healthy; the
+summary marks `[!] Extractor shim`, and a warning above it names the cause.
+When ufw is enabled with a dropping input policy, it names the narrowest rule (`sudo ufw allow from <the daemon's network> to
+<docker0 address> port <shim port> proto tcp`), and `--firewall-rule
+ask|yes|no` (default `ask`) decides whether to add it: `ask` offers it once
+at a terminal, defaulting to no, and probes again once the rule is added; an unattended run
+changes no firewall unless given `--firewall-rule yes`, and prints the
+command instead. `ops/install.ps1` has no equivalent: the check and the
+flag are Linux-only.
 
 Image sizes, the Windows WSL2 memory cap, and what the installer automates:
 [the containerized install](#install--containerized-any-os) below.
@@ -529,7 +548,8 @@ No host Python, no torch install, no version skew; the daemon image bakes
 in CPU-only torch and the embedding weights — `Qwen/Qwen3-Embedding-0.6B`
 (the default retrieval backbone since schema v25) plus `all-MiniLM-L6-v2`
 (kept baked for the ONNX-parity test path) — so it runs identically on
-Windows / macOS / Linux. Requires only Docker; built once: ~5.0 GB daemon
+Windows / macOS / Linux. Requires only Docker (with the compose v2 and
+buildx plugins, which Docker Desktop bundles); built once: ~5.0 GB daemon
 image (measured 2026-07-29 on the deployed build) + ~0.6 GB Postgres +
 ~11.8 GB extractor sidecar (measured 2026-08-20 with the v3 multi-task
 bake; skip the sidecar entirely with the installer's `claude-only` mode).
@@ -2395,7 +2415,13 @@ For an important document, do both: distil the key facts into memory *and*
 > as empty text; have the agent read it and store the distillate instead.
 > Paths resolve on the **server's** filesystem: with the Docker daemon,
 > `document_ingest` needs a path visible inside the container (a mounted
-> volume), not a host path.
+> volume), not a host path. It reads only a regular file (a symlink to one
+> is fine) of at most 64 MiB, enough for a 1,000-page manual as a PDF with
+> figures. A directory, FIFO, socket or device is refused as
+> `not_a_regular_file`, naming what the path is, and a larger file as
+> `document_too_large`, with its size and the cap, before anything is read;
+> split such a document or ingest the part you need. A file that grows past
+> the cap while it is read is refused the same way.
 
 ## Sense of time + multi-writer attribution (schema v11)
 
@@ -2466,8 +2492,9 @@ text and structured content are the same JSON object:
 `error` is a stable snake_case code and `message` one sentence naming the
 fix. `param`, `accepted` and `action` appear where the refusal knows them.
 The general codes are `invalid_argument`, `unknown_parameter`,
-`file_not_found` (`document_ingest`; paths resolve on the server's
-filesystem), `internal_error` (the cause stays in the daemon log) and
+`file_not_found`, `not_a_regular_file` and `document_too_large`
+(`document_ingest`; paths resolve on the server's filesystem),
+`internal_error` (the cause stays in the daemon log) and
 `coordination_unavailable` (the board failed inside the call). A tool's own
 coded refusal keeps its code (`missing_parameter`, `invalid_park`, ...).
 On a write tool, `internal_error` and `coordination_unavailable` add
@@ -4682,7 +4709,7 @@ backups. Part of the [user guide](../../README.md#documentation).
 | `PSEUDOLIFE_MCP_NO_SPAWN` | _(unset)_ | Set `1` on the **shim** to disable its spawn-a-daemon fallback: when nothing answers at `PSEUDOLIFE_MCP_DAEMON_URL` it waits up to 5 s for an external daemon instead, then starts the session without it (the last handshake it cached for that URL, retried until the daemon answers; see [the remote bank guide](remote-bank.md#when-the-daemon-is-unreachable)). The Docker-tier installers set this on every shim registration — after a reboot the shim can probe before Docker Desktop has bound the port, and a spawned host fallback then wins the bind race and shadows the real bank with whatever stale local state it finds. Leave unset on pip/lite installs, where the spawn fallback is the intended zero-config path. |
 | `PSEUDOLIFE_MCP_HOST` / `_PORT` | `127.0.0.1` / `8765` | Daemon bind address. |
 | `PSEUDOLIFE_MCP_TOKEN` | _(unset)_ | Bearer token; **required** to bind a non-loopback host (a `PSEUDOLIFE_MCP_TOKENS` map also satisfies this). Maps to the reserved principal `default`, which keeps the `X-PL-Writer`/`PSEUDOLIFE_WRITER_ID` writer path. |
-| `PSEUDOLIFE_MCP_TOKEN_FILE` | _(unset)_ | Client-side private file containing the bearer token. The shim reloads it for each operation, so replacing its contents does not require a client restart. An explicitly configured file takes precedence over a literal token; an unavailable, unsafe or malformed file fails closed. The daemon continues to use its own token configuration. |
+| `PSEUDOLIFE_MCP_TOKEN_FILE` | _(unset)_ | Client-side private file containing the bearer token. The shim reloads it for each operation, so replacing its contents does not require a client restart. An explicitly configured file takes precedence over a literal token; an unavailable, unsafe or malformed file fails closed, and the error names the fix ([When the shim refuses its token file](#when-the-shim-refuses-its-token-file)). The daemon continues to use its own token configuration. |
 | `PSEUDOLIFE_MCP_PROXY_TIMEOUT_SECONDS` | `180` | Total deadline for one upstream shim operation, including connection and initialization. Accepts finite positive seconds; invalid values use the default. Set the client's tool timeout above this value to leave time for the shim's sanitized failure response. An uncertain write is never automatically replayed. |
 | `PSEUDOLIFE_MCP_TOKENS` | _(unset)_ | Per-principal bearer tokens: `token:principal,token:principal`. A matched token's principal **is** the writer id and keys the toolset tier (the identity axis that survives the MCP 2026-07-28 stateless core). Malformed entries are logged and skipped — a skipped token does not authenticate, and a map that parses to zero entries with no singular token refuses startup rather than running open. May be set alongside `PSEUDOLIFE_MCP_TOKEN`; the map wins for its tokens. Note the singular-token holder is fully trusted and may still assert any writer via `X-PL-Writer` — mint per-principal tokens when that distinction matters. |
 | `PSEUDOLIFE_MCP_TRUST_BIND` | _(unset)_ | Set `1` to allow a non-loopback bind without a token when the boundary is external (containerized, loopback-published). The compose daemon sets this; never set it for a host daemon. |
@@ -5740,6 +5767,11 @@ Add more keys from Settings: an active key approves the new one, which waits
 that time. A key can revoke itself; only the host revokes an older key:
 `pseudolife-mcp maintainer revoke <prefix>`, or `reset`, which revokes every
 key and reopens enrolment. `pseudolife-mcp maintainer list` shows them all.
+An Ed25519 key of small order, a degenerate key no authenticator generates
+that would verify a forged signature over any message, is refused at
+enrolment and at every signature (`cose_key` in the daemon log), so such a
+key enrolled before that check no longer verifies: revoke it (`pseudolife-mcp
+maintainer revoke <prefix>`) and enrol a real passkey.
 
 **What a passkey does not prove.**
 
@@ -8046,6 +8078,75 @@ at startup, the daemon serves nothing rather than a partly loaded bank:
 `init_refusal` is different. It marks a bank the daemon will never serve as
 configured, such as an embedding-dimension mismatch, and the shim exits on
 it.
+
+`/health` also says when a starting daemon can serve. `pending` lists the
+startup stages still unfinished, in this order: `init` (storage connected,
+the embedder loaded, the stores hydrated and the clock reseeded) and
+`principals` (the first read of the bank's stored principals; a daemon
+without Postgres never lists it). `ready` is true only when `status` is
+`"ok"` and `pending` is empty. Until then a request waits on the service or
+fails initialization, and a bearer the environment does not match is
+refused `503 principals_unavailable`. Neither key changes `status` or the
+HTTP code, so the Docker healthcheck and `pseudolife-mcp update` treat a
+daemon that is still warming up as a healthy one. A script that starts a
+daemon and calls it at once should wait for `ready: true`; a daemon older
+than these keys sends neither.
+
+### When the shim refuses its token file
+
+The shim re-reads `PSEUDOLIFE_MCP_TOKEN_FILE` on every call and fails
+closed on a file it cannot trust. At startup against a daemon that requires
+a bearer it exits with the reason on stderr; after that, every MCP call's
+error names the reason, the file and the one fix, and the error's data
+carries the same `reason`, `recovery` and `credential_file` (never the
+token):
+
+| `reason` | The fix the error names |
+|---|---|
+| `credential file must be owner-only` | Other accounts can read it; a plain rewrite during a token rotation does this. Linux and macOS: `chmod 600 <file>`. Windows: the `repair` command below. |
+| `credential file is owned by another account` | The `repair` command below, run as the account that runs the shim. On Windows a file written from an elevated prompt is owned by Administrators. Narrowing that file's permissions instead would lock the shim's own account out of it. |
+| `configured credential file is missing` | Restore the file, or set `PSEUDOLIFE_MCP_TOKEN_FILE` to the file that holds the token. |
+| `configured credential file is unavailable` | Check that the shim's account can read it and no other program holds it locked. |
+| `credential path ancestors cannot be inspected` | Check that the shim's account can read every directory on the path. |
+| `credential path must not contain redirects` | A directory on the path is a symlink or junction: set `PSEUDOLIFE_MCP_TOKEN_FILE` to the real path. |
+| `credential file must be a private regular file` | It is a link, a junction, a hard link or not a file: replace it with a regular file holding only the token. |
+| `credential file contains an invalid bearer token` | Write only the token: one line, no spaces or control characters, at most 4096 bytes. |
+
+A token file replaced in the middle of a call (a rotation) reports
+`credential changed during the operation`. It says to retry only when the
+call cannot have reached the daemon; otherwise check the call's result
+before retrying.
+
+**Repairing a token file:**
+
+```bash
+<shim python> -m pseudolife_memory.credentials repair <file>
+```
+
+The error prints this line with the shim runtime's own interpreter filled
+in (in PowerShell, start the line with `& `). Run it as the account that
+runs the shim. It reads the file once (it must be one regular file holding
+a valid token), writes a new file that is owner-only before the token goes
+into it, and renames that over the old one only while the file it read is
+still in place, so a token rotation that lands meanwhile is never undone
+(`credential file changed while it was being repaired`: run it again). It
+never prints the token. Pseudolife's own token-file writer (Codex setup,
+the Claude Desktop registration, unattended updates) likewise replaces an
+existing file you own whose permissions are too broad; it still refuses
+links, hard links, non-files and a file another account owns, except, on
+Windows, an Administrators-owned file when the writer itself runs elevated.
+
+**On Windows, keep token files in a folder you have Full Control of.** A
+folder that grants only Modify, as many secondary drives do, withholds the
+right to set a file's owner. When you already own the file, Pseudolife sets
+only its owner-only access list, which works there. Any other owner, such
+as the Administrators default of an elevated session, must be replaced,
+which needs the take-ownership privilege enabled: an elevated SSH session
+or a hosted runner has it, an elevated console does not. Without it the
+write refuses with `credential file permissions could not be protected`
+and the Windows error; move the file to a folder you have full control of,
+such as one under your user profile. This applies to every private file
+Pseudolife writes: token files, client configs, tunnel profiles.
 
 ## Claude Code plugin
 
@@ -11259,6 +11360,16 @@ Run this from a normal shell, not an elevated one: from an elevated shell a
 new file is owned by Administrators rather than by you, and fails the
 owner-only check. Or let `-ReadToken` write it.
 
+A file the shim refuses (it lost its owner-only permissions in a rotation,
+another account owns it, it is a link) is named in every MCP call's error
+with the reason and the one fix. On Windows that fix is usually `python -m
+pseudolife_memory.credentials repair <file>`, run with the shim's own
+interpreter, which rewrites the file owner-only with the same token; on
+Linux and macOS a too-open file takes `chmod 600 <file>`. Every reason and
+its fix, and the Windows rule for folders that grant Modify rather than
+Full Control: [When the shim refuses its token
+file](configuration.md#when-the-shim-refuses-its-token-file).
+
 ### With the installer (client-only path)
 
 Run the installer on the client machine (`ops/install.sh`, or
@@ -11623,9 +11734,11 @@ pipx install --force "pseudolife-mcp==<the daemon's version>"
 or, for a daemon on the 2.1 line, `pipx runpip pseudolife-mcp install
 "mcp<2.2"`.
 
-**The shim exits at startup naming the credential file.** The file is
-missing, not owner-only, or holds more than the token. Fix the file; the
-error line names the path it read.
+**The shim exits at startup naming the credential file.** The line gives
+the path it read and the reason (missing, not owner-only, owned by another
+account, a link, or holding more than the token). Each reason's fix,
+including the `repair` command: [When the shim refuses its token
+file](configuration.md#when-the-shim-refuses-its-token-file).
 
 ## What latency to expect
 
