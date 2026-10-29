@@ -11,11 +11,41 @@ pub struct CompactRecord<'a> {
     pub asserted_at: f64,
 }
 
+/// `compact_store`'s purge (`memory/compaction.py:24-64`) over one store's
+/// records: removes [`compaction_victims`] and returns the slots it purged,
+/// which the store marks dirty (its slot rewrite is the delete path, as in
+/// Python: no separate SQL). The caller rebuilds its indexes.
+pub fn compact_records<T>(
+    records: &mut Vec<T>,
+    view: impl for<'a> Fn(&'a T) -> CompactRecord<'a>,
+    keep: i64,
+    min_age_days: f64,
+    now: f64,
+) -> std::collections::BTreeSet<(String, String)> {
+    let victims: HashSet<usize> = {
+        let views: Vec<CompactRecord<'_>> = records.iter().map(&view).collect();
+        compaction_victims(&views, keep, min_age_days, now)
+            .into_iter()
+            .collect()
+    };
+    let mut purged = std::collections::BTreeSet::new();
+    for &i in &victims {
+        let r = view(&records[i]);
+        purged.insert((r.entity_norm.to_string(), r.attribute_norm.to_string()));
+    }
+    let mut i = 0;
+    records.retain(|_| {
+        let keep = !victims.contains(&i);
+        i += 1;
+        keep
+    });
+    purged
+}
+
 /// Returns resident ordinals to remove. The canonical-store owner rebuilds
 /// its current index, marks affected slots dirty and persists through its
 /// existing slot-rewrite API; direct DELETE would lose Python's row-ID and
 /// sequence behavior.
-#[allow(dead_code)] // W2-E's mutable canonical stores consume this policy.
 pub fn compaction_victims(
     records: &[CompactRecord<'_>],
     keep: i64,

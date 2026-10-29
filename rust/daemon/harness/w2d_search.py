@@ -50,8 +50,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import daemons  # noqa: E402
 import dbstate  # noqa: E402
-os.environ["PL_HARNESS_SLICE"] = "w2d"
-import pgdisposable as pg  # noqa: E402
+import pgdisposable  # noqa: E402
 from run import DB_DECLARED, bearer, call, settled, wait_settled  # noqa: E402,F401
 
 REPO = HERE.parents[2]
@@ -87,12 +86,25 @@ MUTANTS = {"search-skip-event": "log-off-control", "search-no-access-bump": "def
            "mcp-fact-get-no-lean": "mcp-fact-get",
            "mcp-get-no-db-bump": "mcp-get", "mcp-get-no-use-credit": "mcp-get",
            "mcp-stats-no-tier-hits": "mcp-stats", "mcp-stats-no-graduation": "mcp-stats",
-           "mcp-stats-no-capacity-warning": "mcp-stats-capacity"}
-pg.DISPOSABLE_NAME = re.compile(r"pl_cf_w2d_[a-z0-9_]{1,40}")
+           "mcp-stats-no-capacity-warning": "mcp-stats-capacity",
+           "trace-no-trace": "trace", "trace-no-relevance-drop": "trace",
+           "trace-filtered-tier-missing": "trace-continuum"}
+pg = pgdisposable.Slice("w2d")
 
 
 def q(**kw) -> str:
     return "/api/search?" + urllib.parse.urlencode(kw)
+
+
+def tq(**kw) -> str:
+    return "/api/trace?" + urllib.parse.urlencode(kw)
+
+
+# The ranking trace's float leaves (GET /api/trace): scores and their
+# inputs, compared within SCORE_TOL like a search ``score``.
+TRACE_FLOAT_KEYS = ("raw_score", "relevance", "adjusted_score", "recency", "raw_bm25",
+                    "normalized", "normalized_score", "injected_score", "original_score",
+                    "ce_score", "fused_score", "margin")
 
 
 QUERIES = json.loads((HERE / "queries.json").read_text(encoding="utf-8"))
@@ -368,11 +380,8 @@ class McpTransportSession(Scenario):
 
 
 def import_w2e():
-    """w2e.py, for its store rules. Importing it sets pgdisposable's name
-    guard to the w2e prefix; this harness's own guard is put back."""
-    saved = pg.DISPOSABLE_NAME
+    """w2e.py, for its store rules."""
     import w2e
-    pg.DISPOSABLE_NAME = saved
     return w2e
 
 
@@ -662,11 +671,89 @@ class McpStatsCapacity(Scenario):
                 stats("after the drop")]
 
 
+class Trace(Scenario):
+    """GET /api/trace (MemoryService.trace): the entries and the ranking
+    trace under the default config (dense, slot and BM25 channels), the
+    route's coercions and refusals, and the resident access counts the
+    trace's retrieve bumps, seen by a search after it. No retrieval event
+    is logged (the bank comparison)."""
+    name = "trace"
+    require = {"trace.responses": 8, "trace.kept": 8, "trace.dropped_relevance": 1,
+               "trace.bm25_fired": 2, "trace.slot_pool": 1, "trace.final": 6}
+
+    def cases(self):
+        auth = [bearer(TOKEN)]
+        return [
+            *[case(f"trace crafted {i}", tq(q=t), auth) for i, t in enumerate(CRAFTED[:8])],
+            # top_k 1 keeps the dense pool narrow, so the slot channel finds
+            # its entry unseen (as the search scenario's slot cases do).
+            case("trace slot channel", tq(q="is jacque female", top_k=1), auth),
+            case("trace slot channel, staging", tq(q="staging migration", top_k=1), auth),
+            case("trace slot channel, endpoint", tq(q="extractor endpoint old gpu box", top_k=1),
+                 auth),
+            case("trace top_k 3", tq(q="deploy the daemon", top_k=3), auth),
+            case("trace top_k 0 (the configured top_k)", tq(q="deploy the daemon", top_k=0), auth),
+            case("trace top_k negative", tq(q="deploy the daemon", top_k=-1), auth),
+            case("trace source filter", tq(q="deploy", source="conversation"), auth),
+            case("trace band flat", tq(q="deploy", band="flat"), auth),
+            case("trace unknown band", tq(q="deploy", band="working"), auth),
+            case("trace blank q", tq(q="   "), auth),
+            case("trace bm25 off", tq(q="PLX-4471 writer lease", bm25="false"), auth),
+            case("trace padded q", tq(q="  PLX-4471  "), auth),
+            case("trace nothing relevant", tq(q="zebra crossing quantum marmalade"), auth),
+            case("search after the traces (access counts)", q(q=CRAFTED[0], top_k=8), auth),
+        ]
+
+
+class TraceRerank(Scenario):
+    """The reranker's trace records: fired (with each candidate's scores),
+    skipped on an unambiguous margin, and over its candidate budget."""
+    name = "trace-rerank"
+    config_yaml = "memory:\n  reranker:\n    enabled: true\n    skip_margin: 0.05\n"
+    require = {"trace.reranker_fired": 1, "trace.reranker_margin": 1,
+               "trace.reranker_budget": 1}
+
+    def cases(self):
+        auth = [bearer(TOKEN)]
+        return [case(f"trace rerank {i}", tq(q=t, top_k=5), auth)
+                for i, t in enumerate(CRAFTED[:8])] + [
+            case("trace rerank over budget", tq(q="how do I back up the bank", top_k=30), auth),
+            case("trace rerank off by request", tq(q="how do I back up the bank", rerank="0"), auth)]
+
+
+class TraceContinuum(Scenario):
+    """Multi-band tiers: depth recency (each candidate's recency weight),
+    and the tiers a band filter leaves out."""
+    name = "trace-continuum"
+    config_yaml = "memory:\n  recency_boost_enabled: true\n  miras:\n    preset: continuum\n"
+    require = {"trace.recency": 1, "trace.filtered_out_tier": 1}
+
+    def cases(self):
+        auth = [bearer(TOKEN)]
+        return [case(f"trace continuum {i}", tq(q=t, top_k=6), auth)
+                for i, t in enumerate(CRAFTED[:4])] + [
+            case("trace band working", tq(q="deploy the daemon", band="working"), auth)]
+
+
+class TraceTimeline(Scenario):
+    """The timeline channel's record: fired with its injections, or why not."""
+    name = "trace-timeline"
+    config_yaml = "memory:\n  search:\n    timeline_channel: true\n"
+    require = {"trace.timeline_fired": 1, "trace.timeline_no_cue": 1}
+
+    def cases(self):
+        auth = [bearer(TOKEN)]
+        return [case(f"trace timeline {i}", tq(q=t), auth) for i, t in enumerate(
+            ["when did the session step happen", "what happened before the deploy runbook",
+             "in what order did the session steps go", "deploy the daemon"])]
+
+
 SCENARIOS = {s.name: s for s in (Default, Timeline, Contiguity, RrfPool, MarginGate, LogOff,
                                   LogOffControl, Continuum, HideSuperseded, ConfidenceFloor,
                                   PointerExpired, ConfidenceRounding, McpSearch,
                                   McpTransportSession, McpRecent, McpFactGet, McpGet,
-                                  McpStats, McpStatsContinuum, McpStatsCapacity)}
+                                  McpStats, McpStatsContinuum, McpStatsCapacity, Trace,
+                                  TraceRerank, TraceContinuum, TraceTimeline)}
 
 
 # ---- comparison ----------------------------------------------------------------------
@@ -723,7 +810,8 @@ def diff(a, b, path="", tol_keys=("score",)) -> list[str]:
     return [] if a == b else [f"{path}: python {json.dumps(a)[:160]} vs rust {json.dumps(b)[:160]}"]
 
 
-def align_ties(py_list: list, rs_list: list, key: str = "id", *, ordered=False) -> tuple[list, list[str]]:
+def align_ties(py_list: list, rs_list: list, key: str = "id", *, ordered=False,
+               score_key: str = "score") -> tuple[list, list[str]]:
     """Reorder the Rust list to Python's where the only difference is a swap
     among entries whose scores are within SCORE_TOL; report each swap. Lists
     ordered by stream position (any contiguity or timeline entry) are never
@@ -740,7 +828,7 @@ def align_ties(py_list: list, rs_list: list, key: str = "id", *, ordered=False) 
         j = next((j for j in range(i + 1, len(rs)) if rs[j].get(key) == want.get(key)), None)
         if j is None:
             continue
-        span = [x.get("score", 0.0) for x in rs[i:j + 1]]
+        span = [x.get(score_key, 0.0) for x in rs[i:j + 1]]
         # A null score (a same-entity fact_get candidate) is an exact order,
         # never a tie.
         if all(isinstance(x, (int, float)) for x in span) and max(span) - min(span) <= SCORE_TOL:
@@ -810,6 +898,34 @@ def compare(py: dict, rs: dict, *, timeline_fired=False, ordered=False,
     if stats and isinstance(a, dict) and isinstance(b, dict):
         diffs += key_order(a, b)
         b = align_worst_sources(a, b)
+    if isinstance(a, dict) and isinstance(b, dict) and isinstance(a.get("trace"), dict) \
+            and isinstance(b.get("trace"), dict):
+        # A GET /api/trace answer: its key order is Python's insertion
+        # order (slot_pool and timeline join last), so it is compared too;
+        # a fired timeline orders the entries by stream position, and the
+        # final top-k (taken before that sort) aligns ties as entries do.
+        # Each tier's candidates (cosine order) align ties on their raw
+        # score. A near-tie at a pool edge, where each side keeps a
+        # different candidate, still shows as a difference.
+        diffs += key_order(a["trace"], b["trace"], ".trace")
+        timeline_fired = timeline_fired or (a["trace"].get("timeline") or {}).get("fired") is True
+        b = dict(b, trace=dict(b["trace"]))
+        ta, tb = a["trace"], b["trace"]
+        if isinstance(ta.get("final_topk"), list) and isinstance(tb.get("final_topk"), list):
+            tb["final_topk"], n = align_ties(ta["final_topk"], tb["final_topk"], "text_preview")
+            notes += [f"trace.final_topk: {x}" for x in n]
+        if isinstance(ta.get("tiers"), list) and isinstance(tb.get("tiers"), list) \
+                and len(ta["tiers"]) == len(tb["tiers"]):
+            tiers = []
+            for i, (x, y) in enumerate(zip(ta["tiers"], tb["tiers"])):
+                if isinstance(x, dict) and isinstance(y, dict) \
+                        and isinstance(x.get("candidates"), list) and isinstance(y.get("candidates"), list):
+                    cands, n = align_ties(x["candidates"], y["candidates"], "text_preview",
+                                          score_key="raw_score")
+                    notes += [f"trace.tiers[{i}].candidates: {m}" for m in n]
+                    y = dict(y, candidates=cands)
+                tiers.append(y)
+            tb["tiers"] = tiers
     if isinstance(a, dict) and isinstance(b, dict):
         for k in ("entries", "cortex", "candidates"):
             if isinstance(a.get(k), list) and isinstance(b.get(k), list):
@@ -818,7 +934,7 @@ def compare(py: dict, rs: dict, *, timeline_fired=False, ordered=False,
                 b[k], n = align_ties(a[k], b[k], key,
                                      ordered=(timeline_fired or ordered) and k == "entries")
                 notes += [f"{k}: {x}" for x in n]
-    diffs += diff(a, b)
+    diffs += diff(a, b, tol_keys=("score",) + TRACE_FLOAT_KEYS)
     return diffs, notes
 
 
@@ -926,9 +1042,39 @@ def coverage(responses: list[dict], state: dict) -> dict:
            "stats": {"responses": 0, "graduation": 0, "hits": 0, "worst_sources": 0,
                      "communities": 0, "digest": 0, "interactions": 0, "reads": 0,
                      "multiband": 0, "capacity_warning": 0, "true_drops": 0,
-                     "last_true_drop": 0}}
+                     "last_true_drop": 0},
+           "trace": {"responses": 0, "kept": 0, "dropped_relevance": 0, "dropped_duplicate": 0,
+                     "filtered_out_tier": 0, "recency": 0, "bm25_fired": 0, "slot_pool": 0,
+                     "reranker_fired": 0, "reranker_margin": 0, "reranker_budget": 0,
+                     "timeline_fired": 0, "timeline_no_cue": 0, "final": 0}}
     for r in responses:
         body = r.get("json") or {}
+        if isinstance(body, dict) and isinstance(body.get("trace"), dict):
+            # A GET /api/trace answer.
+            tc, tr = cov["trace"], body["trace"]
+            tc["responses"] += 1
+            cands = [c for t in tr.get("tiers") or [] for c in t.get("candidates") or []]
+            tc["kept"] += any(c.get("kept") for c in cands)
+            tc["dropped_relevance"] += any(str(c.get("drop_reason")).startswith("relevance<")
+                                           for c in cands)
+            tc["dropped_duplicate"] += any(c.get("drop_reason") == "duplicate" for c in cands)
+            tc["filtered_out_tier"] += any(t.get("filtered_out") for t in tr.get("tiers") or [])
+            tc["recency"] += any("recency" in c for c in cands)
+            tc["bm25_fired"] += (tr.get("bm25") or {}).get("fired") is True
+            # The slot channel ran (its record is present). On this seed the
+            # dense pool always sees the slot channel's entries first, so
+            # the record is empty: its rows are not exercised here.
+            tc["slot_pool"] += "slot_pool" in tr
+            rr = tr.get("reranker") or {}
+            tc["reranker_fired"] += rr.get("fired") is True
+            tc["reranker_margin"] += rr.get("reason") == "unambiguous_margin"
+            tc["reranker_budget"] += rr.get("reason") == "candidate_budget_exceeded"
+            tl = tr.get("timeline") or {}
+            tc["timeline_fired"] += tl.get("fired") is True
+            tc["timeline_no_cue"] += tl.get("reason") == "no_temporal_cue"
+            tc["final"] += bool(tr.get("final_topk"))
+            cov["with_entries"] += bool(body.get("entries"))
+            continue
         if isinstance(body, dict) and "bands" in body and "total_memories" in body:
             # A memory_stats answer.
             sc = cov["stats"]

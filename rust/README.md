@@ -4,7 +4,8 @@
 The runtime is under implementation; complete parity is not yet accepted.
 Behaviour and validation state
 are recorded in [PORT-STATE.md](PORT-STATE.md), with the oracle contract in
-[PORTING.md](PORTING.md) and the parity register in [PARITY.md](PARITY.md).
+[PORTING.md](PORTING.md) and the parity register in [parity/](parity/), one file per row ([PARITY.md](PARITY.md)
+explains the layout).
 Use the [Python-to-Rust review checklist](SEMANTICS-CHECKLIST.md) when reviewing a frozen boundary.
 
 Build from this directory so `rust-toolchain.toml` selects Rust 1.94.0, after

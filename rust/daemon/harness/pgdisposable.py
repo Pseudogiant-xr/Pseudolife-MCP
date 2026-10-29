@@ -1,14 +1,21 @@
 """Disposable banks on the bench PostgreSQL, through the test login only.
 
-Every database this module creates, clones or drops must match
-``DISPOSABLE_NAME``; anything else is refused before a connection opens, so
-the harness cannot reach the live bank or a production-named database.
+Every database this module creates, clones or drops must match its slice's
+disposable name pattern; anything else is refused before a connection opens,
+so the harness cannot reach the live bank or a production-named database.
+
+A harness binds its own slice with ``pg = pgdisposable.Slice("w2f")`` (or
+``pgdisposable.Slice.from_env("pgs")`` to follow the launcher's
+``PL_HARNESS_SLICE``), so importing several harnesses into one process
+cannot change which names another admits. The module-level functions follow
+``PL_HARNESS_SLICE`` (default ``w1a``) at each call.
 """
 from __future__ import annotations
 
 import os
 import re
 import sys
+import time
 from pathlib import Path
 from urllib.parse import quote
 
@@ -23,18 +30,90 @@ from rust.cli_harness.run_names import RunNames
 HOST_PORT = os.environ.get("PSEUDOLIFE_TEST_PG_HOST_PORT", "127.0.0.1:5433")
 LOGIN_FILE = Path(os.environ.get("PSEUDOLIFE_TEST_PG_LOGIN_FILE")
                   or Path.home() / ".pseudolife-mcp" / "test-pg.env")
-# A slice prefix bounds admission; name() adds a random run suffix so two
+SLICE_ID = re.compile(r"w[0-9][a-z]|http|pgs|prn")
+DEFAULT_SLICE = "w1a"
+# One run owns every slice's names: name() adds a random run suffix so two
 # invocations of the same slice cannot share a database.
-SLICE = os.environ.get("PL_HARNESS_SLICE", "w1a")
-if not re.fullmatch(r"w[0-9][a-z]|http|pgs|prn", SLICE):
-    raise SystemExit(f"PL_HARNESS_SLICE={SLICE!r}: expected a slice id like w1a, w2g, http, pgs or prn")
-PREFIX = f"pl_cf_{SLICE}_"
-DISPOSABLE_NAME = re.compile(re.escape(PREFIX) + r"[a-z0-9_]{1,40}")
 NAMES = RunNames()
 
 
-def name(label: str) -> str:
-    return NAMES.name(_check(label), max_length=len(PREFIX) + 40)
+def _pattern(prefix: str) -> re.Pattern:
+    return re.compile(re.escape(prefix) + r"[a-z0-9_]{1,40}")
+
+
+class Slice:
+    """One slice's disposable namespace: its prefix bounds admission.
+
+    Helpers it does not define (``_admin``, ``_login``, ``NAMES``,
+    ``HOST_PORT``...) are this module's, looked up at each use, so a patch
+    on the module or on one handle both take effect."""
+
+    def __init__(self, slice_id: str):
+        if not isinstance(slice_id, str) or not SLICE_ID.fullmatch(slice_id):
+            raise SystemExit(f"PL_HARNESS_SLICE={slice_id!r}: expected a slice id like w1a, w2g, http, pgs or prn")
+        self.SLICE = slice_id
+        self.PREFIX = f"pl_cf_{slice_id}_"
+        self.DISPOSABLE_NAME = _pattern(self.PREFIX)
+
+    @classmethod
+    def from_env(cls, default: str = DEFAULT_SLICE) -> Slice:
+        return cls(os.environ.get("PL_HARNESS_SLICE", default))
+
+    def __getattr__(self, attr: str):
+        try:
+            return globals()[attr]
+        except KeyError:
+            raise AttributeError(attr) from None
+
+    def __repr__(self) -> str:
+        return f"pgdisposable.Slice({self.SLICE!r})"
+
+    def _check(self, name: str) -> str:
+        return _check(name, self)
+
+    def name(self, label: str) -> str:
+        return _name(self, label)
+
+    def dsn(self, name: str) -> str:
+        return _dsn(self, name)
+
+    def create(self, name: str, template: str | None = None) -> str:
+        return _create(self, name, template)
+
+    def drop(self, name: str, attempts: int = 10) -> None:
+        _drop(self, name, attempts)
+
+    def existing(self) -> list[str]:
+        return _existing(self)
+
+
+def current() -> Slice:
+    """The launcher's slice, read now."""
+    return Slice.from_env()
+
+
+class _Launcher:
+    """The module-level functions' namespace: the slice is the launcher's,
+    read at each use, and every step (``drop``, ``dsn``, ``_admin``...)
+    is this module's own function, so patching the module keeps working."""
+
+    def __getattr__(self, attr: str):
+        if attr in ("SLICE", "PREFIX", "DISPOSABLE_NAME"):
+            return getattr(current(), attr)
+        try:
+            return globals()[attr]
+        except KeyError:
+            raise AttributeError(attr) from None
+
+
+_LAUNCHER = _Launcher()
+
+
+def __getattr__(attr: str):
+    # SLICE, PREFIX and DISPOSABLE_NAME follow PL_HARNESS_SLICE at each read.
+    if attr in ("SLICE", "PREFIX", "DISPOSABLE_NAME"):
+        return getattr(current(), attr)
+    raise AttributeError(f"module {__name__!r} has no attribute {attr!r}")
 
 
 def _login() -> tuple[str, str]:
@@ -50,19 +129,13 @@ def _login() -> tuple[str, str]:
         raise SystemExit(f"{LOGIN_FILE}: no test login; run `pseudolife-mcp test-login create`")
 
 
-def _check(name: str) -> str:
+def _check(name: str, space: Slice | None = None) -> str:
+    PREFIX = (space or current()).PREFIX
+    DISPOSABLE_NAME = _pattern(PREFIX)
     refuse_production_database(name)
     if not DISPOSABLE_NAME.fullmatch(name):
         raise ValueError(f"refusing non-disposable database name {name!r}")
     return name
-
-
-def dsn(name: str) -> str:
-    NAMES.require_process()
-    user, password = _login()
-    host, port = HOST_PORT.rsplit(":", 1)
-    return (f"postgresql://{quote(user, safe='')}:{quote(password, safe='')}"
-            f"@{host}:{port}/{_check(name)}")
 
 
 def _admin():
@@ -73,6 +146,14 @@ def _admin():
                            dbname="postgres", autocommit=True, connect_timeout=10)
 
 
+def name(label: str) -> str:
+    return _name(_LAUNCHER, label)
+
+
+def dsn(name: str) -> str:
+    return _dsn(_LAUNCHER, name)
+
+
 def create(name: str, template: str | None = None) -> str:
     """Drop and recreate ``name`` (optionally as a copy of ``template``).
 
@@ -81,39 +162,65 @@ def create(name: str, template: str | None = None) -> str:
     schema v57), and the Python arm would restore what the Rust arm cannot
     read yet. Before v57 those counters stayed in the seeder's own
     weights.pt, out of both arms' reach, which this keeps."""
-    drop(name)
-    with _admin() as conn:
-        assert_disposable_database(conn)
-        if template is None:
-            create_from_default_template(conn, sql.SQL("CREATE DATABASE {}").format(
-                sql.Identifier(_check(name))))
-        else:
-            conn.execute(sql.SQL("CREATE DATABASE {} TEMPLATE {}").format(
-                sql.Identifier(_check(name)), sql.Identifier(_check(template))))
-    if template is not None:
-        try:  # the harness's own dbstate when it is on the path, so one
-            from dbstate import UNPORTED_ROWS  # module instance holds it
-        except ImportError:
-            from rust.daemon.harness.dbstate import UNPORTED_ROWS
-        with psycopg.connect(dsn(name), autocommit=True) as conn:
-            for table in UNPORTED_ROWS:
-                if conn.execute("SELECT to_regclass(%s)", (f"public.{table}",)).fetchone()[0]:
-                    conn.execute(sql.SQL("DELETE FROM {}").format(sql.Identifier("public", table)))
-    return dsn(name)
+    return _create(_LAUNCHER, name, template)
 
 
 def drop(name: str, attempts: int = 10) -> None:
     """FORCE cannot end a backend this role does not own (an autovacuum
     worker on a just-used bank): retry until it has gone."""
-    import time
-    _check(name)
-    NAMES.require_owned(name)
+    _drop(_LAUNCHER, name, attempts)
+
+
+def existing() -> list[str]:
+    return _existing(_LAUNCHER)
+
+
+# One implementation for a Slice handle and for the module-level functions:
+# ``space`` supplies the prefix and every step, so each path's patches apply.
+
+def _name(space, label: str) -> str:
+    return space.NAMES.name(space._check(label), max_length=len(space.PREFIX) + 40)
+
+
+def _dsn(space, name: str) -> str:
+    space.NAMES.require_process()
+    user, password = space._login()
+    host, port = space.HOST_PORT.rsplit(":", 1)
+    return (f"postgresql://{quote(user, safe='')}:{quote(password, safe='')}"
+            f"@{host}:{port}/{space._check(name)}")
+
+
+def _create(space, name: str, template: str | None) -> str:
+    space.drop(name)
+    with space._admin() as conn:
+        space.assert_disposable_database(conn)
+        if template is None:
+            space.create_from_default_template(conn, sql.SQL("CREATE DATABASE {}").format(
+                sql.Identifier(space._check(name))))
+        else:
+            conn.execute(sql.SQL("CREATE DATABASE {} TEMPLATE {}").format(
+                sql.Identifier(space._check(name)), sql.Identifier(space._check(template))))
+    if template is not None:
+        try:  # the harness's own dbstate when it is on the path, so one
+            from dbstate import UNPORTED_ROWS  # module instance holds it
+        except ImportError:
+            from rust.daemon.harness.dbstate import UNPORTED_ROWS
+        with psycopg.connect(space.dsn(name), autocommit=True) as conn:
+            for table in UNPORTED_ROWS:
+                if conn.execute("SELECT to_regclass(%s)", (f"public.{table}",)).fetchone()[0]:
+                    conn.execute(sql.SQL("DELETE FROM {}").format(sql.Identifier("public", table)))
+    return space.dsn(name)
+
+
+def _drop(space, name: str, attempts: int) -> None:
+    space._check(name)
+    space.NAMES.require_owned(name)
     for i in range(attempts):
         try:
-            with _admin() as conn:
-                assert_disposable_database(conn)
+            with space._admin() as conn:
+                space.assert_disposable_database(conn)
                 conn.execute(sql.SQL("DROP DATABASE IF EXISTS {} WITH (FORCE)").format(
-                    sql.Identifier(_check(name))))
+                    sql.Identifier(space._check(name))))
             return
         except psycopg.errors.InsufficientPrivilege:
             if i == attempts - 1:
@@ -121,7 +228,9 @@ def drop(name: str, attempts: int = 10) -> None:
             time.sleep(2)
 
 
-def existing() -> list[str]:
-    with _admin() as conn:
-        rows = conn.execute("SELECT datname FROM pg_database WHERE starts_with(datname, %s)", (PREFIX,))
-        return sorted(r[0] for r in rows if DISPOSABLE_NAME.fullmatch(r[0]) and NAMES.owns(r[0]))
+def _existing(space) -> list[str]:
+    with space._admin() as conn:
+        rows = conn.execute("SELECT datname FROM pg_database WHERE starts_with(datname, %s)",
+                            (space.PREFIX,))
+        return sorted(r[0] for r in rows
+                      if space.DISPOSABLE_NAME.fullmatch(r[0]) and space.NAMES.owns(r[0]))

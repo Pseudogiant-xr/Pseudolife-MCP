@@ -531,7 +531,7 @@ mod tests {
     fn stall_after(results: &[(Value, bool)]) -> Map<String, Value> {
         let mut tracker = crate::dream::run::StallTracker::default();
         for (result, fallback) in results {
-            tracker.record(result.as_object().unwrap(), *fallback);
+            tracker.record(result.as_object().unwrap(), *fallback, None);
         }
         tracker
             .snapshot()
@@ -599,8 +599,8 @@ mod tests {
             "extractor_error": {"reason": "http_503", "error": "upstream failure"}});
         {
             let mut stall = service.dream_run().stall.lock().unwrap();
-            stall.record(failed.as_object().unwrap(), false);
-            stall.record(failed.as_object().unwrap(), false);
+            stall.record(failed.as_object().unwrap(), false, None);
+            stall.record(failed.as_object().unwrap(), false, None);
         }
         let p = payload(&service, &crate::auth::PrincipalStore::new()).await;
         assert_eq!(p["extractor"], json!("stalled"));

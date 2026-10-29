@@ -338,7 +338,7 @@ guard tests go red:
   store, principals, and the CLI harness rows under
   `rust/cli_harness/goldens/` whose cases dump or export the bank:
   transfer, invite, maintainer at least), re-recorded on both OSes;
-  `rust/PARITY.md` names the pin.
+  the parity register (`rust/parity/`) names the pin.
 
 ## Licensing of contributions
 

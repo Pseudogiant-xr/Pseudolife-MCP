@@ -38,6 +38,16 @@ EMPTY = {"pulled": 0}
 QUARANTINED = {"pulled": 2, "quarantined": 2}
 HOLD = {"pulled": 2, "extractor_failed": True, "hold_phase": "write"}
 SKIPPED = {"skipped": "dream_in_progress", "pulled": 0}
+# The auto-mode builder's failed primary probe (2026-10-27): a signed-out
+# primary shim, with a fallback that resolves and one that does not.
+FALLBACK_DNS = {"pulled": 3, "extractor_failed": True,
+                "extractor_error": {"reason": "extractor_unreachable",
+                                    "error": "unreachable (gaierror)"}}
+PRIMARY_500 = {"pulled": 3, "extractor_failed": True,
+               "extractor_error": {"reason": "login_expired", "error": "HTTP 500"}}
+LOGIN_PROBE = {"reason": "login_expired", "error": "/health HTTP 503 (login_required)",
+               "fallback_resolves": True}
+SKIP_PROBE = {**LOGIN_PROBE, "fallback_resolves": False}
 
 # (op, args...) steps; "at" advances the fake clock to an absolute time.
 SEQUENCES = {
@@ -81,6 +91,22 @@ SEQUENCES = {
         ("at", 30.0), ("record", FAIL, False), ("at", 40.0), ("record", FAIL, False),
         ("take", 3600.0), ("at", 3700.0), ("take", 3600.0),
     ],
+    "primary-cause-survives-a-failed-fallback": [
+        ("at", 0.0), ("record", FALLBACK_DNS, True, LOGIN_PROBE),
+        ("at", 10.0), ("record", FALLBACK_DNS, True, LOGIN_PROBE),
+        ("take", 3600.0), ("mark", "begin"),
+        ("at", 20.0), ("record", OK, True, LOGIN_PROBE), ("take", 3600.0),
+        ("at", 30.0), ("record", QUARANTINED, True, LOGIN_PROBE), ("take", 3600.0),
+        ("at", 40.0), ("record", OK, False), ("take", 3600.0),
+    ],
+    "skipped-fallback-runs-on-the-primary": [
+        ("at", 0.0), ("record", PRIMARY_500, False, SKIP_PROBE),
+        ("at", 10.0), ("record", PRIMARY_500, False, SKIP_PROBE),
+        ("at", 20.0), ("record", FAIL, False, {**SKIP_PROBE, "reason": "extractor_unreachable",
+                                               "error": "connection refused"}),
+        ("take", 3600.0),
+        ("at", 30.0), ("record", OK, False, SKIP_PROBE), ("take", 3600.0),
+    ],
     "silent-results": [
         ("at", 0.0), ("record", HOLD, False), ("record", SKIPPED, True), ("record", EMPTY, True),
         ("record", {"error": "boom", "pulled": 0}, False),
@@ -111,7 +137,8 @@ def run(steps):
             now[0] = args[0]
             continue
         if op == "record":
-            t.record(args[0], served_by_fallback=args[1])
+            t.record(args[0], served_by_fallback=args[1],
+                     primary_probe=args[2] if len(args) > 2 else None)
             got = None
         elif op == "overdue":
             t.check_overdue(backlog=args[0], min_batch=args[1], would_fire=args[2],

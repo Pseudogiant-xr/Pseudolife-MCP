@@ -1,0 +1,3 @@
+| Row | Phase | Behavior to preserve and Python source | Existing test pool and boundary | Status |
+|---|---:|---|---|---|
+| CURATION-SAFETY | 3/4 | Read-side auto-dismissal refresh can mutate durable metadata; lesson/world duplicate decisions bind immutable evidence, recheck resident and PostgreSQL row-locked records, commit durable changes before publishing resident stores, and fail closed during reconciliation. Folded-dismissal spelling migration and recovery are write contracts. `curation_safety.py` | `test_curation_safety.py` I/DB; process-boundary equivalents and durable recovery evidence pending | deferred |

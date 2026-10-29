@@ -6,8 +6,10 @@ use super::error::{BoardError, Result};
 use super::mail::{MAINTAINER_ORIGIN, SendArgs};
 use super::store::{DAEMON_PRINCIPAL, MAINTAINER_PRINCIPAL};
 use super::{Board, lease};
+use crate::service::Ready;
 use serde_json::{Map, Value, json};
 use std::collections::HashMap;
+use std::sync::Arc;
 
 /// `_PARAMETERS`, in sorted action order.
 pub const ACTIONS: [&str; 15] = [
@@ -246,8 +248,14 @@ impl Board {
             .dispatch_once(action, params.clone(), headers, principal)
             .await
         {
+            // `_ensure_init` before the one retry, which then stamps from the
+            // ready service it publishes (W2F-CLOCK-RETRY: without Python's
+            // forced writer-session reprobe).
             Err(BoardError::ClockChanged) if action == "send" => {
-                self.hlc.lock().expect("hlc lock").seeded = false;
+                self.service
+                    .ensure_init()
+                    .await
+                    .map_err(BoardError::Internal)?;
                 self.dispatch_once(action, params, headers, principal).await
             }
             other => other,
@@ -393,32 +401,46 @@ impl Board {
         }
         self.ensure_tier().await?;
         let mut conn = self.conn.lock().await;
-        let client = conn.client().await?;
-        if action == "context" {
-            return self
-                .store
-                .context(
-                    client,
-                    principal,
-                    params.get("agent_id").and_then(Value::as_str),
-                    params.get("nonce").and_then(Value::as_str),
-                    params.get("read_only") == Some(&Value::Bool(true)),
-                )
-                .await;
-        }
-        if let Some(binding) = binding {
-            let context = self
-                .store
-                .context(client, principal, None, None, false)
-                .await?;
-            let found = (
-                context["bank_id"].as_str().unwrap_or("").to_string(),
-                context["principal"].as_str().unwrap_or("").to_string(),
-            );
-            if binding != found {
-                return Err(BoardError::code("bank_identity_mismatch"));
+        {
+            let client = conn.client().await?;
+            if action == "context" {
+                return self
+                    .store
+                    .context(
+                        client,
+                        principal,
+                        params.get("agent_id").and_then(Value::as_str),
+                        params.get("nonce").and_then(Value::as_str),
+                        params.get("read_only") == Some(&Value::Bool(true)),
+                    )
+                    .await;
+            }
+            if let Some(binding) = binding {
+                let context = self
+                    .store
+                    .context(client, principal, None, None, false)
+                    .await?;
+                let found = (
+                    context["bank_id"].as_str().unwrap_or("").to_string(),
+                    context["principal"].as_str().unwrap_or("").to_string(),
+                );
+                if binding != found {
+                    return Err(BoardError::code("bank_identity_mismatch"));
+                }
             }
         }
+        // Only send needs the full service, paid after the cheap refusals
+        // above and, as Python takes it, outside the coordination lock: a
+        // cold daemon's initialization must not hold every other board call.
+        let ready = if action == "send" {
+            drop(conn);
+            let ready = self.full_tier().await?;
+            conn = self.conn.lock().await;
+            Some(ready)
+        } else {
+            None
+        };
+        let client = conn.client().await?;
         if matches!(action, "register" | "send" | "heartbeat") {
             let due = {
                 let at = self.pruned_at.lock().expect("prune clock");
@@ -542,7 +564,7 @@ impl Board {
                     .await?
             }
             "send" => {
-                let (hlc, epoch) = self.tick().await?;
+                let (hlc, epoch) = stamp(ready.as_deref().expect("send holds the full tier"));
                 self.store
                     .send(
                         client,
@@ -670,25 +692,42 @@ impl Board {
             .map_err(BoardError::Internal)
     }
 
-    /// A send's HLC stamp and the writer epoch it must see, seeding the
-    /// clock first (`_ensure_tier(full=True)`; see the declared divergence).
-    pub(crate) async fn tick(&self) -> Result<(String, i64)> {
-        let storage = self
-            .service
-            .storage_tier()
-            .await
-            .map_err(BoardError::Internal)?;
-        let seeded = self.hlc.lock().expect("hlc lock").seeded;
-        if !seeded {
-            let best = super::hlc::stored_high_water(storage.client()).await?;
-            let mut hlc = self.hlc.lock().expect("hlc lock");
-            if best > (0, 0) {
-                hlc.observe(best.0, best.1);
-            }
-            hlc.seeded = true;
+    /// `_ensure_tier(full=True)`: the initialized service, whose clock is
+    /// reseeded, for a send's stamp. On a served daemon it is the published
+    /// ready service, read without the service mutex (`_tier_ready`'s
+    /// `coordination_tier_ready`: initialized, no reseed pending), so a send
+    /// never queues behind an initialization retry, the reaper or a sweep;
+    /// otherwise `_ensure_init` under the mutex, which runs a pending reseed.
+    /// Like Python's lock-free path it does not probe the writer session; a
+    /// send its stale session fences is retried after `_ensure_init`.
+    ///
+    /// A ready service over a session that found another writer held the
+    /// bank is not taken: it carries that session's lease epoch, which the
+    /// mailbox fence accepts, with the clock seeded before that writer's
+    /// high-water mark, until the rehydrate drops it. Python fences on
+    /// `_coordination_hlc_epoch`, which the handover clears; here the send
+    /// waits for the initialization, whose reseed passes the mark. The
+    /// second read closes the gap where the rehydrate acknowledged the
+    /// handover after the first.
+    pub(crate) async fn full_tier(&self) -> Result<Arc<Ready>> {
+        if let Some(ready) = self.service.snapshot().ready
+            && !ready.startup.clock_state().hlc_reseed_pending
+            && ready.storage.resident_invalidated().is_none()
+            && self
+                .service
+                .snapshot()
+                .ready
+                .is_some_and(|now| Arc::ptr_eq(&now, &ready))
+        {
+            return Ok(ready);
         }
-        let (phys, logical) = self.hlc.lock().expect("hlc lock").tick();
-        Ok((format!("{phys}:{logical}"), storage.lease_epoch()))
+        #[cfg(test)]
+        self.tier_waits
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.service
+            .ensure_init()
+            .await
+            .map_err(BoardError::Internal)
     }
 
     /// `_acknowledge_page`: acknowledge the page a receive returned, in the
@@ -747,4 +786,15 @@ impl Board {
         }
         Ok(())
     }
+}
+
+/// A send's HLC stamp and the writer epoch it must see: the service clock's
+/// next tick (`service._hlc.tick()`), so board and memory writes share one
+/// order and the stamp outranks every reseeded high-water mark, with the
+/// epoch of the same ready service's storage. After a handover that service
+/// is stale and so is its epoch, so the database refuses the send
+/// (`ClockChanged`) instead of committing a stamp below the other writer's.
+pub(crate) fn stamp(ready: &Ready) -> (String, i64) {
+    let (phys, logical) = ready.tick_hlc();
+    (format!("{phys}:{logical}"), ready.storage.lease_epoch())
 }
