@@ -207,9 +207,13 @@ def _on_shim_runtime() -> bool:
 def _names_another_machine(url: str) -> bool:
     """Whether ``url`` has a host and that host is not this machine (a
     tailnet or LAN address, a reverse-proxy name). A URL with no host
-    names nothing, so it is never taken for a daemon elsewhere."""
+    names nothing (nor does one ``urlsplit`` rejects, such as a broken
+    IPv6 literal), so it is never taken for a daemon elsewhere."""
     from pseudolife_memory.daemon_url import _is_loopback_url
-    return bool(urllib.parse.urlsplit(url).hostname) and not _is_loopback_url(url)
+    try:
+        return bool(urllib.parse.urlsplit(url).hostname) and not _is_loopback_url(url)
+    except ValueError:
+        return False
 
 
 def docker_cmd() -> str:
@@ -558,10 +562,12 @@ class Update:
         all. Docker present but not answering (Docker Desktop stopped, the
         engine down) is neither: the daemon may well be a container, so
         the update stops rather than pip-upgrade the shim's own runtime.
-        The exception is a shim runtime pointed at a daemon on another
-        machine (a user outside the docker group on a client machine):
-        no container here can be that daemon, so it is ``pip`` and
-        :meth:`_run` takes the client-machine path."""
+        The exception is a shim runtime pointed at a daemon that names
+        another machine and answers /health there (a user outside the
+        docker group on a client machine): ``pip``, so :meth:`_run` takes
+        the client-machine path. The answer is required because a name
+        can resolve to this machine, whose daemon container is down
+        whenever its Docker is."""
         if self.o.checkout is not None:
             return "docker"
         if not which(self.docker) and self.docker == "docker":
@@ -573,11 +579,16 @@ class Update:
             return "pip"
         on_runtime = _on_shim_runtime()
         if on_runtime and _names_another_machine(self.o.daemon_url):
-            self.step(f"docker did not answer here ({_last_line(out)}); the daemon is configured at "
-                      f"{self.o.daemon_url}, on another machine, so this machine is its client")
-            return "pip"
-        hint = (" If the daemon runs on another machine, name it with --daemon-url <url> (or "
-                "PSEUDOLIFE_MCP_DAEMON_URL) to update this machine's clients." if on_runtime else "")
+            if self.daemon_health() is not None:
+                self.step(f"docker did not answer here ({_last_line(out)}); the daemon answers at "
+                          f"{self.o.daemon_url}, on another machine, so this machine is its client")
+                return "pip"
+            raise UpdateError(f"docker is installed but did not answer ({_last_line(out)}), and the daemon "
+                              f"configured at {self.o.daemon_url} did not answer /health either, so this "
+                              f"cannot tell whether the daemon runs here. Start Docker if it does, or check "
+                              f"that the daemon at {self.o.daemon_url} is up, and retry. Nothing was changed", 2)
+        hint = (" If the daemon runs on another machine, name it with --daemon-url http(s)://<host>:<port> "
+                "(or PSEUDOLIFE_MCP_DAEMON_URL) to update this machine's clients." if on_runtime else "")
         raise UpdateError(f"docker is installed but did not answer ({_last_line(out)}): start Docker and retry. "
                           f"Nothing was changed.{hint}", 2)
 

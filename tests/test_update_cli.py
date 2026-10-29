@@ -160,6 +160,8 @@ def world(tmp_path, monkeypatch):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.delenv("PSEUDOLIFE_MCP_TOKEN", raising=False)
     monkeypatch.delenv("PSEUDOLIFE_MCP_TOKENS", raising=False)
+    # --daemon-url's default: a remote suite exports a non-loopback one
+    monkeypatch.delenv("PSEUDOLIFE_MCP_DAEMON_URL", raising=False)
     # the pip tier's own-install checks: a plain site install, a runtime layout elsewhere
     monkeypatch.setattr(client_updates, "install_kind", lambda interpreter: ("site", ""))
     # this interpreter's own extras are not the test's: no lite extra unless a test says so
@@ -1066,12 +1068,29 @@ def test_a_silent_docker_with_a_local_daemon_url_still_stops_and_names_daemon_ur
     the client machine that only forgot to say where its daemon is."""
     _on_a_shim_runtime(monkeypatch)
     world.docker_down = True
-    for argv in ([], ["--clients-only"], ["--clients-only", "--daemon-url", "http://localhost:8765"]):
+    for argv in ([], ["--clients-only"], ["--clients-only", "--daemon-url", "http://localhost:8765"],
+                 ["--clients-only", "--daemon-url", "http://[::1"], ["--clients-only", "--daemon-url", "myhost:8765"]):
         clients.clear()
         assert _run(argv) == 2, argv
         err = capsys.readouterr().err
-        assert "did not answer" in err and "--daemon-url" in err
+        assert "did not answer" in err and "--daemon-url http(s)://" in err, argv
         assert clients == []
+    assert not any(c[1:4] == ["-m", "pip", "install"] for c in world.calls)
+
+
+def test_a_silent_docker_and_a_silent_remote_daemon_still_stop(world, clients, monkeypatch, capsys):
+    """A name can resolve to this machine (a host's own tailnet name): with
+    its Docker stopped its daemon is down too, so a URL naming another
+    machine moves the clients only when that daemon answers there."""
+    _on_a_shim_runtime(monkeypatch)
+    world.docker_down = True
+    world.health = []
+    world.pypi = "0.16.0"
+    for argv in ([], ["--clients-only"]):
+        assert _run(argv + ["--daemon-url", "https://self.example.ts.net"]) == 2, argv
+        err = capsys.readouterr().err
+        assert "did not answer /health either" in err and "self.example.ts.net" in err
+    assert clients == []
     assert not any(c[1:4] == ["-m", "pip", "install"] for c in world.calls)
 
 
