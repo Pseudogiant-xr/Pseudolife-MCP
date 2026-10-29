@@ -5,8 +5,9 @@
   11 days without memory. When the caller presents a bearer the daemon
   rejects, the session-start answer now opens with one line naming the
   cause and the fix (`pseudolife-mcp invite <name>` on the daemon host,
-  then `pseudolife-mcp pair <daemon-url> --read-code` here; `doctor` shows
-  the state). A caller with no bearer, a daemon with authentication off,
+  then `pseudolife-mcp connect <daemon-url> --read-code` on this machine,
+  which pairs and repoints every client registration; `doctor` shows the
+  state). A caller with no bearer, a daemon with authentication off,
   and a bearer the daemon cannot check while its principal store is
   unavailable get the same answer as before. The Rust daemon answers
   byte for byte the same. The line reaches the agent's context, which is

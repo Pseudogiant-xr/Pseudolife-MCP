@@ -552,8 +552,8 @@ fn token_rejected_notice(command: &str) -> String {
         "Pseudolife-MCP: the memory daemon rejected this machine's token, so this session has \
          no memory access (the token was revoked, rotated or never issued for this daemon). \
          Fix: on the daemon host run `pseudolife-mcp invite <name>` (add `--replace` if that \
-         name is still paired), then here `{command} pair <daemon-url> --read-code`; \
-         `{command} doctor` shows the state."
+         name is still paired), then on this machine `{command} connect <daemon-url> \
+         --read-code`; `{command} doctor` shows the state."
     )
 }
 

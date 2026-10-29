@@ -224,8 +224,8 @@ mod tests {
     const REJECTED: &str = "Pseudolife-MCP: the memory daemon rejected this machine's token, so \
         this session has no memory access (the token was revoked, rotated or never issued for \
         this daemon). Fix: on the daemon host run `pseudolife-mcp invite <name>` (add \
-        `--replace` if that name is still paired), then here `pseudolife-mcp pair <daemon-url> \
-        --read-code`; `pseudolife-mcp doctor` shows the state.";
+        `--replace` if that name is still paired), then on this machine `pseudolife-mcp connect \
+        <daemon-url> --read-code`; `pseudolife-mcp doctor` shows the state.";
 
     async fn start_with(
         app: &std::sync::Arc<crate::http::App>,

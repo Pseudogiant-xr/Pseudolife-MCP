@@ -53,14 +53,14 @@ def test_the_notice_names_the_cause_and_the_fix():
         "Pseudolife-MCP: the memory daemon rejected this machine's token, so this "
         "session has no memory access (the token was revoked, rotated or never issued "
         "for this daemon). Fix: on the daemon host run `pseudolife-mcp invite <name>` "
-        "(add `--replace` if that name is still paired), then here "
-        "`pseudolife-mcp pair <daemon-url> --read-code`; `pseudolife-mcp doctor` "
+        "(add `--replace` if that name is still paired), then on this machine "
+        "`pseudolife-mcp connect <daemon-url> --read-code`; `pseudolife-mcp doctor` "
         "shows the state.")
 
 
 def test_the_notice_names_the_reported_launcher():
     text = session_hook.token_rejected_notice('"C:/Program Files/pl/pseudolife-mcp.exe"')
-    assert '`"C:/Program Files/pl/pseudolife-mcp.exe" pair <daemon-url> --read-code`' in text
+    assert '`"C:/Program Files/pl/pseudolife-mcp.exe" connect <daemon-url> --read-code`' in text
     assert '`"C:/Program Files/pl/pseudolife-mcp.exe" doctor`' in text
     # The daemon host's command is not the caller's launcher.
     assert "`pseudolife-mcp invite <name>`" in text

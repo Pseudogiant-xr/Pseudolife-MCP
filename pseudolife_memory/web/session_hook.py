@@ -157,8 +157,8 @@ def token_rejected_notice(command: str = UPDATE_COMMAND) -> str:
     return ("Pseudolife-MCP: the memory daemon rejected this machine's token, so this "
             "session has no memory access (the token was revoked, rotated or never issued "
             "for this daemon). Fix: on the daemon host run `pseudolife-mcp invite <name>` "
-            "(add `--replace` if that name is still paired), then here "
-            f"`{command} pair <daemon-url> --read-code`; `{command} doctor` shows the state.")
+            "(add `--replace` if that name is still paired), then on this machine "
+            f"`{command} connect <daemon-url> --read-code`; `{command} doctor` shows the state.")
 
 
 def _version_key(value: str) -> tuple[int, ...] | None:
