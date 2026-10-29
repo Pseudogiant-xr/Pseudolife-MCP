@@ -20,11 +20,12 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[2]
 sys.path.insert(0, str(REPO))
-os.environ.setdefault("PL_HARNESS_SLICE", "pgs")
 import dbstate
-import pgdisposable as pg
+import pgdisposable
 import psycopg
 from pseudolife_memory.storage.schema import assert_disposable_database
+
+pg = pgdisposable.Slice.from_env("pgs")
 GOLDEN_FILE = HERE / "goldens" / "schema-startup.json"
 
 

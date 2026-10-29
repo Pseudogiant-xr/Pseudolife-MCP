@@ -50,8 +50,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import daemons  # noqa: E402
 import dbstate  # noqa: E402
-os.environ["PL_HARNESS_SLICE"] = "w2d"
-import pgdisposable as pg  # noqa: E402
+import pgdisposable  # noqa: E402
 from run import DB_DECLARED, bearer, call, settled, wait_settled  # noqa: E402,F401
 
 REPO = HERE.parents[2]
@@ -90,7 +89,7 @@ MUTANTS = {"search-skip-event": "log-off-control", "search-no-access-bump": "def
            "mcp-stats-no-capacity-warning": "mcp-stats-capacity",
            "trace-no-trace": "trace", "trace-no-relevance-drop": "trace",
            "trace-filtered-tier-missing": "trace-continuum"}
-pg.DISPOSABLE_NAME = re.compile(r"pl_cf_w2d_[a-z0-9_]{1,40}")
+pg = pgdisposable.Slice("w2d")
 
 
 def q(**kw) -> str:
@@ -381,11 +380,8 @@ class McpTransportSession(Scenario):
 
 
 def import_w2e():
-    """w2e.py, for its store rules. Importing it sets pgdisposable's name
-    guard to the w2e prefix; this harness's own guard is put back."""
-    saved = pg.DISPOSABLE_NAME
+    """w2e.py, for its store rules."""
     import w2e
-    pg.DISPOSABLE_NAME = saved
     return w2e
 
 

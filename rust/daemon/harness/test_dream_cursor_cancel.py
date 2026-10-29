@@ -13,11 +13,12 @@ import threading
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-os.environ.setdefault("PL_HARNESS_SLICE", "w3d")
 import dbstate
 import daemons
-import pgdisposable as pg
+import pgdisposable
 from dream_cursor_oracle import make_service, seed
+
+pg = pgdisposable.Slice.from_env("w3d")
 
 
 def stop_owned(proc):
