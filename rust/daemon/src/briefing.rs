@@ -866,7 +866,8 @@ mod tests {
         assert_eq!(
             line(json!({"since": 100.0, "reason": "login_expired"})),
             "Pseudolife-MCP: dreams stalled since <minute 100> (login_expired): the extractor \
-             CLI's login expired; re-run `claude auth login` (or `codex login`) on the daemon host."
+             CLI is signed out on the machine running the CLI shim; sign it in there: run \
+             `claude`, then `/login` (or `codex login`)."
         );
         assert_eq!(
             line(json!({"since": 7, "reason": "extractor_unreachable"})),
