@@ -1,0 +1,3 @@
+| Row | Phase | Behavior to preserve and Python source | Existing test pool and boundary | Status |
+|---|---:|---|---|---|
+| STORAGE-COMPAT | 3/4/5 | Embedded PG18 lite startup/stable data-dir, files `.pt` state+import/partial restore/weights, Chroma reference-bank ingest/search, parser/chunk rules. `storage/embedded_pg.py`, `migrate.py`, `memory/reference_bank.py`, `document_parser.py`, `utils/atomic_io.py` | `test_embedded_pg.py`, `test_cms_pt_schema.py`, `test_cms_legacy_load.py`, `test_migration.py`, `test_restore_from_pt.py`, `test_atomic_weights.py`, `test_reference_bank.py`, `test_document_parser.py`, `test_document_ingest_batch_bound.py` I/mixed. No simplification is pre-authorized | deferred |

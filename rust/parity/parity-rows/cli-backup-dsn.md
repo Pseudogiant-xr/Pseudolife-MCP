@@ -1,0 +1,3 @@
+| Row | Phase | Behavior to preserve and Python source | Existing test pool and boundary | Status |
+|---|---:|---|---|---|
+| CLI-BACKUP-DSN | 2 | Explicit-DSN pg_dump and file-mode state archive, no create-on-backup, exclusions and post-success-only own-file rotation, argparse argv and pathlib paths. `backup_cli.py` | `rust/cli_harness/rows/backup.py` live differential (bundled and PATH pg_dump, pg_dump missing and failing, rotation, `--out` shapes, sort orders, read-only and dotfile members, closed stdout, POSIX symlink members) with applicable caught source controls; `shim/tests/cli_backup_contract.rs` (help, refusals, deferrals, file mode) in CI; see "Backup explicit-DSN and file mode" | ported |

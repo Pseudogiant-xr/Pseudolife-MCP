@@ -1,0 +1,3 @@
+| Row | Phase | Behavior to preserve and Python source | Existing test pool and boundary | Status |
+|---|---:|---|---|---|
+| SHIM-UPDATE-SCHEDULING | 1 | Explicit-interpreter unattended-update launch starts after the first successful stdout frame flush; manual version remedy precedes it. This row covers launch/scheduling only; installer-backed client updates remain Phase 5 deferred. `wire_json.rs`, `lifecycle.rs` | `wire_json.rs` callback ordering/failure tests, `nonboard_final_assertions.rs::built_binary_launches_updater_only_after_first_flushed_frame`, remote updater subprocess test; Phase 2b e isolated sentinel proof in `phase2b-fixes-evidence.json`; final integrated-head acceptance pending | ported-with-substitution |

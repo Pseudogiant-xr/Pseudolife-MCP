@@ -1,10 +1,9 @@
 //! The service hybrid logical clock (`memory/hlc.py` `HybridLogicalClock`),
 //! the ordering authority for canonical writes: `(physical ms, logical)`,
 //! monotonic whatever the wall clock does. `Ready::tick_hlc` seeds it from
-//! the stored high-water mark as `MemoryService._reseed_hlc` does.
-//!
-//! The coordination board keeps its own clock (`board/hlc.rs`); Python
-//! shares one object between the two (declared in `divergences.md`).
+//! the stored high-water mark as `MemoryService._reseed_hlc` does. The
+//! coordination board's sends tick it too (`Board::tick`), as Python's
+//! board and memory writes share `service._hlc`.
 
 /// `_wall_ms`: `int(time.time() * 1000)`.
 fn wall_ms() -> i64 {

@@ -1282,6 +1282,411 @@
     }
    }
   ],
+  "primary-cause-survives-a-failed-fallback": [
+   {
+    "op": "record",
+    "args": [
+     {
+      "pulled": 3,
+      "extractor_failed": true,
+      "extractor_error": {
+       "reason": "extractor_unreachable",
+       "error": "unreachable (gaierror)"
+      }
+     },
+     true,
+     {
+      "reason": "login_expired",
+      "error": "/health HTTP 503 (login_required)",
+      "fallback_resolves": true
+     }
+    ],
+    "now": 0.0,
+    "got": null,
+    "snapshot": {
+     "stall": null,
+     "last_stall": null
+    }
+   },
+   {
+    "op": "record",
+    "args": [
+     {
+      "pulled": 3,
+      "extractor_failed": true,
+      "extractor_error": {
+       "reason": "extractor_unreachable",
+       "error": "unreachable (gaierror)"
+      }
+     },
+     true,
+     {
+      "reason": "login_expired",
+      "error": "/health HTTP 503 (login_required)",
+      "fallback_resolves": true
+     }
+    ],
+    "now": 10.0,
+    "got": null,
+    "snapshot": {
+     "stall": {
+      "since": 0.0,
+      "reason": "login_expired",
+      "consecutive_failures": 2,
+      "last_error": "primary /health HTTP 503 (login_required); fallback unreachable (gaierror)",
+      "last_success_at": null
+     },
+     "last_stall": null
+    }
+   },
+   {
+    "op": "take",
+    "args": [
+     3600.0
+    ],
+    "now": 10.0,
+    "got": [
+     "begin",
+     {
+      "since": 0.0,
+      "reason": "login_expired",
+      "consecutive_failures": 2,
+      "last_error": "primary /health HTTP 503 (login_required); fallback unreachable (gaierror)",
+      "last_success_at": null
+     }
+    ],
+    "snapshot": {
+     "stall": {
+      "since": 0.0,
+      "reason": "login_expired",
+      "consecutive_failures": 2,
+      "last_error": "primary /health HTTP 503 (login_required); fallback unreachable (gaierror)",
+      "last_success_at": null
+     },
+     "last_stall": null
+    }
+   },
+   {
+    "op": "mark",
+    "args": [
+     "begin"
+    ],
+    "now": 10.0,
+    "got": null,
+    "snapshot": {
+     "stall": {
+      "since": 0.0,
+      "reason": "login_expired",
+      "consecutive_failures": 2,
+      "last_error": "primary /health HTTP 503 (login_required); fallback unreachable (gaierror)",
+      "last_success_at": null
+     },
+     "last_stall": null
+    }
+   },
+   {
+    "op": "record",
+    "args": [
+     {
+      "pulled": 3
+     },
+     true,
+     {
+      "reason": "login_expired",
+      "error": "/health HTTP 503 (login_required)",
+      "fallback_resolves": true
+     }
+    ],
+    "now": 20.0,
+    "got": null,
+    "snapshot": {
+     "stall": {
+      "since": 0.0,
+      "reason": "served_by_fallback",
+      "consecutive_failures": 3,
+      "last_error": "primary /health HTTP 503 (login_required)",
+      "last_success_at": null
+     },
+     "last_stall": null
+    }
+   },
+   {
+    "op": "take",
+    "args": [
+     3600.0
+    ],
+    "now": 20.0,
+    "got": null,
+    "snapshot": {
+     "stall": {
+      "since": 0.0,
+      "reason": "served_by_fallback",
+      "consecutive_failures": 3,
+      "last_error": "primary /health HTTP 503 (login_required)",
+      "last_success_at": null
+     },
+     "last_stall": null
+    }
+   },
+   {
+    "op": "record",
+    "args": [
+     {
+      "pulled": 2,
+      "quarantined": 2
+     },
+     true,
+     {
+      "reason": "login_expired",
+      "error": "/health HTTP 503 (login_required)",
+      "fallback_resolves": true
+     }
+    ],
+    "now": 30.0,
+    "got": null,
+    "snapshot": {
+     "stall": {
+      "since": 0.0,
+      "reason": "login_expired",
+      "consecutive_failures": 4,
+      "last_error": "primary /health HTTP 503 (login_required); fallback every pulled memory failed extraction",
+      "last_success_at": null
+     },
+     "last_stall": null
+    }
+   },
+   {
+    "op": "take",
+    "args": [
+     3600.0
+    ],
+    "now": 30.0,
+    "got": null,
+    "snapshot": {
+     "stall": {
+      "since": 0.0,
+      "reason": "login_expired",
+      "consecutive_failures": 4,
+      "last_error": "primary /health HTTP 503 (login_required); fallback every pulled memory failed extraction",
+      "last_success_at": null
+     },
+     "last_stall": null
+    }
+   },
+   {
+    "op": "record",
+    "args": [
+     {
+      "pulled": 3
+     },
+     false
+    ],
+    "now": 40.0,
+    "got": null,
+    "snapshot": {
+     "stall": null,
+     "last_stall": {
+      "since": 0.0,
+      "reason": "login_expired",
+      "consecutive_failures": 4,
+      "last_error": "primary /health HTTP 503 (login_required); fallback every pulled memory failed extraction",
+      "last_success_at": null,
+      "recovered_at": 40.0
+     }
+    }
+   },
+   {
+    "op": "take",
+    "args": [
+     3600.0
+    ],
+    "now": 40.0,
+    "got": [
+     "clear",
+     {
+      "since": 0.0,
+      "reason": "login_expired",
+      "consecutive_failures": 4,
+      "last_error": "primary /health HTTP 503 (login_required); fallback every pulled memory failed extraction",
+      "last_success_at": null,
+      "recovered_at": 40.0
+     }
+    ],
+    "snapshot": {
+     "stall": null,
+     "last_stall": {
+      "since": 0.0,
+      "reason": "login_expired",
+      "consecutive_failures": 4,
+      "last_error": "primary /health HTTP 503 (login_required); fallback every pulled memory failed extraction",
+      "last_success_at": null,
+      "recovered_at": 40.0
+     }
+    }
+   }
+  ],
+  "skipped-fallback-runs-on-the-primary": [
+   {
+    "op": "record",
+    "args": [
+     {
+      "pulled": 3,
+      "extractor_failed": true,
+      "extractor_error": {
+       "reason": "login_expired",
+       "error": "HTTP 500"
+      }
+     },
+     false,
+     {
+      "reason": "login_expired",
+      "error": "/health HTTP 503 (login_required)",
+      "fallback_resolves": false
+     }
+    ],
+    "now": 0.0,
+    "got": null,
+    "snapshot": {
+     "stall": null,
+     "last_stall": null
+    }
+   },
+   {
+    "op": "record",
+    "args": [
+     {
+      "pulled": 3,
+      "extractor_failed": true,
+      "extractor_error": {
+       "reason": "login_expired",
+       "error": "HTTP 500"
+      }
+     },
+     false,
+     {
+      "reason": "login_expired",
+      "error": "/health HTTP 503 (login_required)",
+      "fallback_resolves": false
+     }
+    ],
+    "now": 10.0,
+    "got": null,
+    "snapshot": {
+     "stall": {
+      "since": 0.0,
+      "reason": "login_expired",
+      "consecutive_failures": 2,
+      "last_error": "primary HTTP 500; fallback does not resolve",
+      "last_success_at": null
+     },
+     "last_stall": null
+    }
+   },
+   {
+    "op": "record",
+    "args": [
+     {
+      "pulled": 3,
+      "extractor_failed": true,
+      "extractor_error": {
+       "reason": "extractor_unreachable",
+       "error": "connection refused"
+      }
+     },
+     false,
+     {
+      "reason": "extractor_unreachable",
+      "error": "connection refused",
+      "fallback_resolves": false
+     }
+    ],
+    "now": 20.0,
+    "got": null,
+    "snapshot": {
+     "stall": {
+      "since": 0.0,
+      "reason": "extractor_unreachable",
+      "consecutive_failures": 3,
+      "last_error": "primary connection refused; fallback does not resolve",
+      "last_success_at": null
+     },
+     "last_stall": null
+    }
+   },
+   {
+    "op": "take",
+    "args": [
+     3600.0
+    ],
+    "now": 20.0,
+    "got": [
+     "begin",
+     {
+      "since": 0.0,
+      "reason": "extractor_unreachable",
+      "consecutive_failures": 3,
+      "last_error": "primary connection refused; fallback does not resolve",
+      "last_success_at": null
+     }
+    ],
+    "snapshot": {
+     "stall": {
+      "since": 0.0,
+      "reason": "extractor_unreachable",
+      "consecutive_failures": 3,
+      "last_error": "primary connection refused; fallback does not resolve",
+      "last_success_at": null
+     },
+     "last_stall": null
+    }
+   },
+   {
+    "op": "record",
+    "args": [
+     {
+      "pulled": 3
+     },
+     false,
+     {
+      "reason": "login_expired",
+      "error": "/health HTTP 503 (login_required)",
+      "fallback_resolves": false
+     }
+    ],
+    "now": 30.0,
+    "got": null,
+    "snapshot": {
+     "stall": null,
+     "last_stall": {
+      "since": 0.0,
+      "reason": "extractor_unreachable",
+      "consecutive_failures": 3,
+      "last_error": "primary connection refused; fallback does not resolve",
+      "last_success_at": null,
+      "recovered_at": 30.0
+     }
+    }
+   },
+   {
+    "op": "take",
+    "args": [
+     3600.0
+    ],
+    "now": 30.0,
+    "got": null,
+    "snapshot": {
+     "stall": null,
+     "last_stall": {
+      "since": 0.0,
+      "reason": "extractor_unreachable",
+      "consecutive_failures": 3,
+      "last_error": "primary connection refused; fallback does not resolve",
+      "last_success_at": null,
+      "recovered_at": 30.0
+     }
+    }
+   }
+  ],
   "silent-results": [
    {
     "op": "record",

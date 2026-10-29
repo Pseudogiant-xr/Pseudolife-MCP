@@ -285,6 +285,21 @@ fn local_state(name: &str) -> Value {
         }
         return record;
     }
+    // `lease hold` / `lease run` of this machine's suite lease take the
+    // lease's own lock in the lease lock directory, which is the suite's
+    // unless PSEUDOLIFE_SUITE_LOCK_DIR points elsewhere (lease_cli.py
+    // _local_state).
+    let lease_file = lock::file_name(name);
+    let mut places = vec![directory.clone()];
+    let leases = lock::directory();
+    if leases != directory {
+        places.push(leases);
+    }
+    for place in places {
+        if state(&place.join(&lease_file)) == "held" {
+            return json!({"file":&lease_file,"state":"held"});
+        }
+    }
     seen.unwrap_or_else(|| json!({"file":"full-suite.lock","state":Value::Null}))
 }
 fn local_text(local: &Value) -> String {

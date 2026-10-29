@@ -156,12 +156,12 @@
       }
     },
     "fingerprints": {
-      "scope": "96dd91911ecc126e",
-      "rust": "7e31d77eff2ceb0b",
+      "scope": "d10e8ec27d84d0e9",
+      "rust": "59cc6066e4ac1f82",
       "fixtures": "defc5e07c5ac3f94",
       "candidate": "77b0c5fa6b2afcbf",
       "candidate-harness": "ab479a8fc85283e7",
-      "parity-checks": "993e8c4b05b30fc5",
+      "parity-checks": "06054831b8e7b5d2",
       "daemon-image": "cf93a3a209618bdc",
       "parity": "4c39a489bf4b1642"
     },
@@ -183,7 +183,22 @@
       },
       {
         "job": "parity-checks",
-        "fingerprint": "993e8c4b05b30fc5",
+        "fingerprint": "76658076fa1ea57e",
+        "reason": "adds one self-hosted-only step (the free-disk check moved out of the lease gate); it is skipped on hosted runners, so no hosted minutes change"
+      },
+      {
+        "job": "scope",
+        "fingerprint": "d10e8ec27d84d0e9",
+        "reason": "2026-10-29: the classify step drops the CI-input regex match; no new step, command or fetch, so its minutes hold"
+      },
+      {
+        "job": "rust",
+        "fingerprint": "59cc6066e4ac1f82",
+        "reason": "adds rust/daemon/harness/test_pgdisposable_slices.py to the existing harness pytest step: no new job, shard or setup step; the file runs 50 tests in 1.45s on a Windows desktop (2026-10-29), so the measured minutes hold"
+      },
+      {
+        "job": "parity-checks",
+        "fingerprint": "06054831b8e7b5d2",
         "reason": "#1013 adds one pytest file (test_config_knobs_golden.py, about 5 s on Windows: it imports the service module) to the existing Offline W2-D search harness regressions step; no new job, shard or setup"
       }
     ]
@@ -232,14 +247,51 @@
       }
     },
     "fingerprints": {
-      "scope": "3ba3c75b87d879b7",
+      "scope": "3954688b694461a6",
       "guards": "92b7929dcce188df",
       "lock-resolve": "83bcc6b654896c6d",
       "test": "ac414107d3d9c71d",
       "test-lite-linux": "44e2a8f2c01baeab",
-      "test-lite-windows": "c02e5b0ebea51aa2",
-      "test-lite-macos": "dc361f58439e1e1e",
+      "test-lite-windows": "931a46f2dd7a6c48",
+      "test-lite-macos": "2abde9b5cf74fc3d",
       "frontend": "b1b6a1a1278f2e60"
-    }
+    },
+    "accepted": [
+      {
+        "job": "test-lite-windows",
+        "fingerprint": "01f3aa5029dd38ce",
+        "reason": "adds tests/test_runner_cleanup.py (15 cases, under 1 s locally); no new setup or step"
+      },
+      {
+        "job": "test-lite-windows",
+        "fingerprint": "01f3aa5029dd38ce",
+        "reason": "adds tests/test_runner_cleanup.py (19 cases, under 1 s locally); no new setup or step"
+      },
+      {
+        "job": "test-lite-windows",
+        "fingerprint": "01f3aa5029dd38ce",
+        "reason": "adds tests/test_runner_cleanup.py (22 cases, under 1 s locally); no new setup or step"
+      },
+      {
+        "job": "test-lite-windows",
+        "fingerprint": "01f3aa5029dd38ce",
+        "reason": "adds tests/test_runner_cleanup.py (23 cases, under 1 s locally); no new setup or step"
+      },
+      {
+        "job": "scope",
+        "fingerprint": "3954688b694461a6",
+        "reason": "2026-10-29: the classify step drops the CI-input grep; no new step, command or fetch, so its minutes hold"
+      },
+      {
+        "job": "test-lite-windows",
+        "fingerprint": "931a46f2dd7a6c48",
+        "reason": "adds tests/test_prune_worktrees.py and tests/test_ops_install_worktree_retention.py to the one pytest step, beside tests/test_runner_cleanup.py from master: no new job, shard or setup step; about +1 minute of test time (both files ran in 57s natively on Windows 2026-10-27), keeping runner minutes near 62 of the 67 limit; re-measure from the next batch run"
+      },
+      {
+        "job": "test-lite-macos",
+        "fingerprint": "2abde9b5cf74fc3d",
+        "reason": "adds tests/test_prune_worktrees.py to the one pytest step: no new job, shard or setup step; about +1 minute of test time (the file ran in 52s natively on Windows 2026-10-27), keeping runner minutes near 62 of the 67 limit; re-measure from the next batch run"
+      }
+    ]
   }
 }
