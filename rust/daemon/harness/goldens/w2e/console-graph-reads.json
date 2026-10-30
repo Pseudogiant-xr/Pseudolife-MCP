@@ -17757,7 +17757,7 @@
        "bigint",
        1,
        1,
-       2
+       4
       ],
       [
        "public",
@@ -17765,7 +17765,7 @@
        "bigint",
        1,
        1,
-       3
+       4
       ],
       [
        "public",
@@ -18167,8 +18167,8 @@
         null,
         "<clock>",
         null,
-        1793381798.5491378,
-        1793381798.5491378,
+        1793382957.3716536,
+        1793382957.3716536,
         null,
         null,
         "legacy",
@@ -18184,8 +18184,42 @@
         null,
         "<clock>",
         null,
-        1793381798.5544412,
-        1793381798.5544412,
+        1793382957.3770065,
+        1793382957.3770065,
+        null,
+        null,
+        "legacy",
+        null,
+        1
+       ],
+       [
+        3,
+        1,
+        "related-to",
+        4,
+        0.8,
+        null,
+        "<clock>",
+        null,
+        1793382957.3816965,
+        1793382957.3816965,
+        null,
+        null,
+        "legacy",
+        null,
+        1
+       ],
+       [
+        4,
+        4,
+        "related-to",
+        3,
+        0.8,
+        null,
+        "<clock>",
+        null,
+        1793382957.3847702,
+        1793382957.3847702,
         null,
         null,
         "legacy",
@@ -18221,6 +18255,13 @@
         3,
         "gamma",
         "Gamma",
+        null,
+        "<clock>"
+       ],
+       [
+        4,
+        "delta",
+        "Delta",
         null,
         "<clock>"
        ]
@@ -18554,13 +18595,13 @@
        [
         "curation_listing_spelling_v2",
         {
-         "at": 1793381792.2062488,
+         "at": 1793382956.987372,
          "copied": 0
         }
        ],
        [
         "dream_ack_secret_v1",
-        "c85ba8bed7f404993f9762f9c0c769efedf84ed1c38f34b40236f852c65e81c9"
+        "840b90eb8dec0d8d581d45c62eef1114038635784584266d9ed3cfbbf49eaeeb"
        ],
        [
         "schema_version",
@@ -18909,7 +18950,7 @@
     "value": {
      "edges": [
       {
-       "asserted_at": 1793381798.5491378,
+       "asserted_at": 1793382957.3716536,
        "confidence": 0.8,
        "derived": false,
        "dst": "Beta",
@@ -18919,13 +18960,33 @@
        "tag": "INFERRED"
       },
       {
-       "asserted_at": 1793381798.5544412,
+       "asserted_at": 1793382957.3770065,
        "confidence": 0.8,
        "derived": false,
        "dst": "Gamma",
        "origin": null,
        "relation": "related-to",
        "src": "Beta",
+       "tag": "INFERRED"
+      },
+      {
+       "asserted_at": 1793382957.3816965,
+       "confidence": 0.8,
+       "derived": false,
+       "dst": "Delta",
+       "origin": null,
+       "relation": "related-to",
+       "src": "Alpha",
+       "tag": "INFERRED"
+      },
+      {
+       "asserted_at": 1793382957.3847702,
+       "confidence": 0.8,
+       "derived": false,
+       "dst": "Gamma",
+       "origin": null,
+       "relation": "related-to",
+       "src": "Delta",
        "tag": "INFERRED"
       }
      ],
@@ -18938,7 +18999,7 @@
        ],
        "canonical": "alpha",
        "community": null,
-       "created_at": 1793381798.539194,
+       "created_at": 1793382957.3613553,
        "entity": "Alpha",
        "etype": null,
        "facts": [
@@ -18955,7 +19016,7 @@
        "aliases": [],
        "canonical": "beta",
        "community": null,
-       "created_at": 1793381798.547488,
+       "created_at": 1793382957.3701763,
        "entity": "Beta",
        "etype": null,
        "facts": [],
@@ -18965,8 +19026,18 @@
        "aliases": [],
        "canonical": "gamma",
        "community": null,
-       "created_at": 1793381798.5531206,
+       "created_at": 1793382957.3755026,
        "entity": "Gamma",
+       "etype": null,
+       "facts": [],
+       "sources": []
+      },
+      {
+       "aliases": [],
+       "canonical": "delta",
+       "community": null,
+       "created_at": 1793382957.380264,
+       "entity": "Delta",
        "etype": null,
        "facts": [],
        "sources": []
@@ -18974,8 +19045,8 @@
      ],
      "paths": [],
      "scope": "all",
-     "total_edges": 2,
-     "total_nodes": 3,
+     "total_edges": 4,
+     "total_nodes": 4,
      "truncated": false
     }
    },
@@ -19044,7 +19115,7 @@
        "bigint",
        1,
        1,
-       2
+       4
       ],
       [
        "public",
@@ -19052,7 +19123,7 @@
        "bigint",
        1,
        1,
-       3
+       4
       ],
       [
        "public",
@@ -19179,8 +19250,8 @@
         null,
         "<clock>",
         null,
-        1793381798.5491378,
-        1793381798.5491378,
+        1793382957.3716536,
+        1793382957.3716536,
         null,
         null,
         "legacy",
@@ -19196,8 +19267,42 @@
         null,
         "<clock>",
         null,
-        1793381798.5544412,
-        1793381798.5544412,
+        1793382957.3770065,
+        1793382957.3770065,
+        null,
+        null,
+        "legacy",
+        null,
+        1
+       ],
+       [
+        3,
+        1,
+        "related-to",
+        4,
+        0.8,
+        null,
+        "<clock>",
+        null,
+        1793382957.3816965,
+        1793382957.3816965,
+        null,
+        null,
+        "legacy",
+        null,
+        1
+       ],
+       [
+        4,
+        4,
+        "related-to",
+        3,
+        0.8,
+        null,
+        "<clock>",
+        null,
+        1793382957.3847702,
+        1793382957.3847702,
         null,
         null,
         "legacy",
@@ -19233,6 +19338,13 @@
         3,
         "gamma",
         "Gamma",
+        null,
+        "<clock>"
+       ],
+       [
+        4,
+        "delta",
+        "Delta",
         null,
         "<clock>"
        ]
@@ -19435,13 +19547,13 @@
        [
         "curation_listing_spelling_v2",
         {
-         "at": 1793381792.2062488,
+         "at": 1793382956.987372,
          "copied": 0
         }
        ],
        [
         "dream_ack_secret_v1",
-        "c85ba8bed7f404993f9762f9c0c769efedf84ed1c38f34b40236f852c65e81c9"
+        "840b90eb8dec0d8d581d45c62eef1114038635784584266d9ed3cfbbf49eaeeb"
        ],
        [
         "schema_version",
@@ -19688,6 +19800,14 @@
        "relation": "related-to",
        "src": "Alpha",
        "tag": "INFERRED"
+      },
+      {
+       "confidence": 0.8,
+       "derived": false,
+       "dst": "Delta",
+       "relation": "related-to",
+       "src": "Alpha",
+       "tag": "INFERRED"
       }
      ],
      "entity": "Alpha",
@@ -19715,6 +19835,14 @@
        "canonical": "beta",
        "community": null,
        "entity": "Beta",
+       "etype": null,
+       "facts": []
+      },
+      {
+       "aliases": [],
+       "canonical": "delta",
+       "community": null,
+       "entity": "Delta",
        "etype": null,
        "facts": []
       }
@@ -19787,7 +19915,7 @@
        "bigint",
        1,
        1,
-       2
+       4
       ],
       [
        "public",
@@ -19795,7 +19923,7 @@
        "bigint",
        1,
        1,
-       3
+       4
       ],
       [
        "public",
@@ -19922,8 +20050,8 @@
         null,
         "<clock>",
         null,
-        1793381798.5491378,
-        1793381798.5491378,
+        1793382957.3716536,
+        1793382957.3716536,
         null,
         null,
         "legacy",
@@ -19939,8 +20067,42 @@
         null,
         "<clock>",
         null,
-        1793381798.5544412,
-        1793381798.5544412,
+        1793382957.3770065,
+        1793382957.3770065,
+        null,
+        null,
+        "legacy",
+        null,
+        1
+       ],
+       [
+        3,
+        1,
+        "related-to",
+        4,
+        0.8,
+        null,
+        "<clock>",
+        null,
+        1793382957.3816965,
+        1793382957.3816965,
+        null,
+        null,
+        "legacy",
+        null,
+        1
+       ],
+       [
+        4,
+        4,
+        "related-to",
+        3,
+        0.8,
+        null,
+        "<clock>",
+        null,
+        1793382957.3847702,
+        1793382957.3847702,
         null,
         null,
         "legacy",
@@ -19976,6 +20138,13 @@
         3,
         "gamma",
         "Gamma",
+        null,
+        "<clock>"
+       ],
+       [
+        4,
+        "delta",
+        "Delta",
         null,
         "<clock>"
        ]
@@ -20178,13 +20347,13 @@
        [
         "curation_listing_spelling_v2",
         {
-         "at": 1793381792.2062488,
+         "at": 1793382956.987372,
          "copied": 0
         }
        ],
        [
         "dream_ack_secret_v1",
-        "c85ba8bed7f404993f9762f9c0c769efedf84ed1c38f34b40236f852c65e81c9"
+        "840b90eb8dec0d8d581d45c62eef1114038635784584266d9ed3cfbbf49eaeeb"
        ],
        [
         "schema_version",
@@ -20439,6 +20608,22 @@
        "relation": "related-to",
        "src": "Beta",
        "tag": "INFERRED"
+      },
+      {
+       "confidence": 0.8,
+       "derived": false,
+       "dst": "Delta",
+       "relation": "related-to",
+       "src": "Alpha",
+       "tag": "INFERRED"
+      },
+      {
+       "confidence": 0.8,
+       "derived": false,
+       "dst": "Gamma",
+       "relation": "related-to",
+       "src": "Delta",
+       "tag": "INFERRED"
       }
      ],
      "entity": "Alpha",
@@ -20465,6 +20650,13 @@
        "canonical": "gamma",
        "community": null,
        "entity": "Gamma",
+       "etype": null
+      },
+      {
+       "aliases": [],
+       "canonical": "delta",
+       "community": null,
+       "entity": "Delta",
        "etype": null
       }
      ],
@@ -20542,7 +20734,7 @@
        "bigint",
        1,
        1,
-       2
+       4
       ],
       [
        "public",
@@ -20550,7 +20742,7 @@
        "bigint",
        1,
        1,
-       3
+       4
       ],
       [
        "public",
@@ -20677,8 +20869,8 @@
         null,
         "<clock>",
         null,
-        1793381798.5491378,
-        1793381798.5491378,
+        1793382957.3716536,
+        1793382957.3716536,
         null,
         null,
         "legacy",
@@ -20694,8 +20886,42 @@
         null,
         "<clock>",
         null,
-        1793381798.5544412,
-        1793381798.5544412,
+        1793382957.3770065,
+        1793382957.3770065,
+        null,
+        null,
+        "legacy",
+        null,
+        1
+       ],
+       [
+        3,
+        1,
+        "related-to",
+        4,
+        0.8,
+        null,
+        "<clock>",
+        null,
+        1793382957.3816965,
+        1793382957.3816965,
+        null,
+        null,
+        "legacy",
+        null,
+        1
+       ],
+       [
+        4,
+        4,
+        "related-to",
+        3,
+        0.8,
+        null,
+        "<clock>",
+        null,
+        1793382957.3847702,
+        1793382957.3847702,
         null,
         null,
         "legacy",
@@ -20731,6 +20957,13 @@
         3,
         "gamma",
         "Gamma",
+        null,
+        "<clock>"
+       ],
+       [
+        4,
+        "delta",
+        "Delta",
         null,
         "<clock>"
        ]
@@ -20933,13 +21166,13 @@
        [
         "curation_listing_spelling_v2",
         {
-         "at": 1793381792.2062488,
+         "at": 1793382956.987372,
          "copied": 0
         }
        ],
        [
         "dream_ack_secret_v1",
-        "c85ba8bed7f404993f9762f9c0c769efedf84ed1c38f34b40236f852c65e81c9"
+        "840b90eb8dec0d8d581d45c62eef1114038635784584266d9ed3cfbbf49eaeeb"
        ],
        [
         "schema_version",
@@ -21253,7 +21486,7 @@
        "bigint",
        1,
        1,
-       2
+       4
       ],
       [
        "public",
@@ -21261,7 +21494,7 @@
        "bigint",
        1,
        1,
-       3
+       4
       ],
       [
        "public",
@@ -21388,8 +21621,8 @@
         null,
         "<clock>",
         null,
-        1793381798.5491378,
-        1793381798.5491378,
+        1793382957.3716536,
+        1793382957.3716536,
         null,
         null,
         "legacy",
@@ -21405,8 +21638,42 @@
         null,
         "<clock>",
         null,
-        1793381798.5544412,
-        1793381798.5544412,
+        1793382957.3770065,
+        1793382957.3770065,
+        null,
+        null,
+        "legacy",
+        null,
+        1
+       ],
+       [
+        3,
+        1,
+        "related-to",
+        4,
+        0.8,
+        null,
+        "<clock>",
+        null,
+        1793382957.3816965,
+        1793382957.3816965,
+        null,
+        null,
+        "legacy",
+        null,
+        1
+       ],
+       [
+        4,
+        4,
+        "related-to",
+        3,
+        0.8,
+        null,
+        "<clock>",
+        null,
+        1793382957.3847702,
+        1793382957.3847702,
         null,
         null,
         "legacy",
@@ -21442,6 +21709,13 @@
         3,
         "gamma",
         "Gamma",
+        null,
+        "<clock>"
+       ],
+       [
+        4,
+        "delta",
+        "Delta",
         null,
         "<clock>"
        ]
@@ -21644,13 +21918,13 @@
        [
         "curation_listing_spelling_v2",
         {
-         "at": 1793381792.2062488,
+         "at": 1793382956.987372,
          "copied": 0
         }
        ],
        [
         "dream_ack_secret_v1",
-        "c85ba8bed7f404993f9762f9c0c769efedf84ed1c38f34b40236f852c65e81c9"
+        "840b90eb8dec0d8d581d45c62eef1114038635784584266d9ed3cfbbf49eaeeb"
        ],
        [
         "schema_version",
@@ -21964,7 +22238,7 @@
        "bigint",
        1,
        1,
-       2
+       4
       ],
       [
        "public",
@@ -21972,7 +22246,7 @@
        "bigint",
        1,
        1,
-       3
+       4
       ],
       [
        "public",
@@ -22099,8 +22373,8 @@
         null,
         "<clock>",
         null,
-        1793381798.5491378,
-        1793381798.5491378,
+        1793382957.3716536,
+        1793382957.3716536,
         null,
         null,
         "legacy",
@@ -22116,8 +22390,42 @@
         null,
         "<clock>",
         null,
-        1793381798.5544412,
-        1793381798.5544412,
+        1793382957.3770065,
+        1793382957.3770065,
+        null,
+        null,
+        "legacy",
+        null,
+        1
+       ],
+       [
+        3,
+        1,
+        "related-to",
+        4,
+        0.8,
+        null,
+        "<clock>",
+        null,
+        1793382957.3816965,
+        1793382957.3816965,
+        null,
+        null,
+        "legacy",
+        null,
+        1
+       ],
+       [
+        4,
+        4,
+        "related-to",
+        3,
+        0.8,
+        null,
+        "<clock>",
+        null,
+        1793382957.3847702,
+        1793382957.3847702,
         null,
         null,
         "legacy",
@@ -22153,6 +22461,13 @@
         3,
         "gamma",
         "Gamma",
+        null,
+        "<clock>"
+       ],
+       [
+        4,
+        "delta",
+        "Delta",
         null,
         "<clock>"
        ]
@@ -22355,13 +22670,13 @@
        [
         "curation_listing_spelling_v2",
         {
-         "at": 1793381792.2062488,
+         "at": 1793382956.987372,
          "copied": 0
         }
        ],
        [
         "dream_ack_secret_v1",
-        "c85ba8bed7f404993f9762f9c0c769efedf84ed1c38f34b40236f852c65e81c9"
+        "840b90eb8dec0d8d581d45c62eef1114038635784584266d9ed3cfbbf49eaeeb"
        ],
        [
         "schema_version",
@@ -22601,13 +22916,13 @@
     "value": {
      "edges": [
       {
-       "asserted_at": 1793381798.5544412,
+       "asserted_at": 1793382957.3847702,
        "confidence": 0.8,
        "derived": false,
        "dst": "Gamma",
        "origin": null,
        "relation": "related-to",
-       "src": "Beta",
+       "src": "Delta",
        "tag": "INFERRED"
       }
      ],
@@ -22616,20 +22931,20 @@
      "nodes": [
       {
        "aliases": [],
-       "canonical": "beta",
+       "canonical": "gamma",
        "community": null,
-       "created_at": 1793381798.547488,
-       "entity": "Beta",
+       "created_at": 1793382957.3755026,
+       "entity": "Gamma",
        "etype": null,
        "facts": [],
        "sources": []
       },
       {
        "aliases": [],
-       "canonical": "gamma",
+       "canonical": "delta",
        "community": null,
-       "created_at": 1793381798.5531206,
-       "entity": "Gamma",
+       "created_at": 1793382957.380264,
+       "entity": "Delta",
        "etype": null,
        "facts": [],
        "sources": []
@@ -22637,8 +22952,8 @@
      ],
      "paths": [],
      "scope": "all",
-     "total_edges": 2,
-     "total_nodes": 3,
+     "total_edges": 4,
+     "total_nodes": 4,
      "truncated": true
     }
    },
@@ -22707,7 +23022,7 @@
        "bigint",
        1,
        1,
-       2
+       4
       ],
       [
        "public",
@@ -22715,7 +23030,7 @@
        "bigint",
        1,
        1,
-       3
+       4
       ],
       [
        "public",
@@ -22842,8 +23157,8 @@
         null,
         "<clock>",
         null,
-        1793381798.5491378,
-        1793381798.5491378,
+        1793382957.3716536,
+        1793382957.3716536,
         null,
         null,
         "legacy",
@@ -22859,8 +23174,42 @@
         null,
         "<clock>",
         null,
-        1793381798.5544412,
-        1793381798.5544412,
+        1793382957.3770065,
+        1793382957.3770065,
+        null,
+        null,
+        "legacy",
+        null,
+        1
+       ],
+       [
+        3,
+        1,
+        "related-to",
+        4,
+        0.8,
+        null,
+        "<clock>",
+        null,
+        1793382957.3816965,
+        1793382957.3816965,
+        null,
+        null,
+        "legacy",
+        null,
+        1
+       ],
+       [
+        4,
+        4,
+        "related-to",
+        3,
+        0.8,
+        null,
+        "<clock>",
+        null,
+        1793382957.3847702,
+        1793382957.3847702,
         null,
         null,
         "legacy",
@@ -22896,6 +23245,13 @@
         3,
         "gamma",
         "Gamma",
+        null,
+        "<clock>"
+       ],
+       [
+        4,
+        "delta",
+        "Delta",
         null,
         "<clock>"
        ]
@@ -23098,13 +23454,13 @@
        [
         "curation_listing_spelling_v2",
         {
-         "at": 1793381792.2062488,
+         "at": 1793382956.987372,
          "copied": 0
         }
        ],
        [
         "dream_ack_secret_v1",
-        "c85ba8bed7f404993f9762f9c0c769efedf84ed1c38f34b40236f852c65e81c9"
+        "840b90eb8dec0d8d581d45c62eef1114038635784584266d9ed3cfbbf49eaeeb"
        ],
        [
         "schema_version",
@@ -23344,7 +23700,7 @@
     "value": {
      "edges": [
       {
-       "asserted_at": 1793381798.5491378,
+       "asserted_at": 1793382957.3716536,
        "confidence": 0.8,
        "derived": false,
        "dst": "Beta",
@@ -23354,13 +23710,33 @@
        "tag": "INFERRED"
       },
       {
-       "asserted_at": 1793381798.5544412,
+       "asserted_at": 1793382957.3770065,
        "confidence": 0.8,
        "derived": false,
        "dst": "Gamma",
        "origin": null,
        "relation": "related-to",
        "src": "Beta",
+       "tag": "INFERRED"
+      },
+      {
+       "asserted_at": 1793382957.3816965,
+       "confidence": 0.8,
+       "derived": false,
+       "dst": "Delta",
+       "origin": null,
+       "relation": "related-to",
+       "src": "Alpha",
+       "tag": "INFERRED"
+      },
+      {
+       "asserted_at": 1793382957.3847702,
+       "confidence": 0.8,
+       "derived": false,
+       "dst": "Gamma",
+       "origin": null,
+       "relation": "related-to",
+       "src": "Delta",
        "tag": "INFERRED"
       }
      ],
@@ -23373,7 +23749,7 @@
        ],
        "canonical": "alpha",
        "community": null,
-       "created_at": 1793381798.539194,
+       "created_at": 1793382957.3613553,
        "entity": "Alpha",
        "etype": null,
        "facts": [
@@ -23390,7 +23766,7 @@
        "aliases": [],
        "canonical": "beta",
        "community": null,
-       "created_at": 1793381798.547488,
+       "created_at": 1793382957.3701763,
        "entity": "Beta",
        "etype": null,
        "facts": [],
@@ -23400,8 +23776,18 @@
        "aliases": [],
        "canonical": "gamma",
        "community": null,
-       "created_at": 1793381798.5531206,
+       "created_at": 1793382957.3755026,
        "entity": "Gamma",
+       "etype": null,
+       "facts": [],
+       "sources": []
+      },
+      {
+       "aliases": [],
+       "canonical": "delta",
+       "community": null,
+       "created_at": 1793382957.380264,
+       "entity": "Delta",
        "etype": null,
        "facts": [],
        "sources": []
@@ -23409,8 +23795,8 @@
      ],
      "paths": [],
      "scope": "all",
-     "total_edges": 2,
-     "total_nodes": 3,
+     "total_edges": 4,
+     "total_nodes": 4,
      "truncated": false
     }
    },
@@ -23479,7 +23865,7 @@
        "bigint",
        1,
        1,
-       2
+       4
       ],
       [
        "public",
@@ -23487,7 +23873,7 @@
        "bigint",
        1,
        1,
-       3
+       4
       ],
       [
        "public",
@@ -23614,8 +24000,8 @@
         null,
         "<clock>",
         null,
-        1793381798.5491378,
-        1793381798.5491378,
+        1793382957.3716536,
+        1793382957.3716536,
         null,
         null,
         "legacy",
@@ -23631,8 +24017,42 @@
         null,
         "<clock>",
         null,
-        1793381798.5544412,
-        1793381798.5544412,
+        1793382957.3770065,
+        1793382957.3770065,
+        null,
+        null,
+        "legacy",
+        null,
+        1
+       ],
+       [
+        3,
+        1,
+        "related-to",
+        4,
+        0.8,
+        null,
+        "<clock>",
+        null,
+        1793382957.3816965,
+        1793382957.3816965,
+        null,
+        null,
+        "legacy",
+        null,
+        1
+       ],
+       [
+        4,
+        4,
+        "related-to",
+        3,
+        0.8,
+        null,
+        "<clock>",
+        null,
+        1793382957.3847702,
+        1793382957.3847702,
         null,
         null,
         "legacy",
@@ -23668,6 +24088,13 @@
         3,
         "gamma",
         "Gamma",
+        null,
+        "<clock>"
+       ],
+       [
+        4,
+        "delta",
+        "Delta",
         null,
         "<clock>"
        ]
@@ -23870,13 +24297,13 @@
        [
         "curation_listing_spelling_v2",
         {
-         "at": 1793381792.2062488,
+         "at": 1793382956.987372,
          "copied": 0
         }
        ],
        [
         "dream_ack_secret_v1",
-        "c85ba8bed7f404993f9762f9c0c769efedf84ed1c38f34b40236f852c65e81c9"
+        "840b90eb8dec0d8d581d45c62eef1114038635784584266d9ed3cfbbf49eaeeb"
        ],
        [
         "schema_version",
@@ -24182,7 +24609,7 @@
        "bigint",
        1,
        1,
-       2
+       4
       ],
       [
        "public",
@@ -24190,7 +24617,7 @@
        "bigint",
        1,
        1,
-       3
+       4
       ],
       [
        "public",
@@ -24317,8 +24744,8 @@
         null,
         "<clock>",
         null,
-        1793381798.5491378,
-        1793381798.5491378,
+        1793382957.3716536,
+        1793382957.3716536,
         null,
         null,
         "legacy",
@@ -24334,8 +24761,42 @@
         null,
         "<clock>",
         null,
-        1793381798.5544412,
-        1793381798.5544412,
+        1793382957.3770065,
+        1793382957.3770065,
+        null,
+        null,
+        "legacy",
+        null,
+        1
+       ],
+       [
+        3,
+        1,
+        "related-to",
+        4,
+        0.8,
+        null,
+        "<clock>",
+        null,
+        1793382957.3816965,
+        1793382957.3816965,
+        null,
+        null,
+        "legacy",
+        null,
+        1
+       ],
+       [
+        4,
+        4,
+        "related-to",
+        3,
+        0.8,
+        null,
+        "<clock>",
+        null,
+        1793382957.3847702,
+        1793382957.3847702,
         null,
         null,
         "legacy",
@@ -24371,6 +24832,13 @@
         3,
         "gamma",
         "Gamma",
+        null,
+        "<clock>"
+       ],
+       [
+        4,
+        "delta",
+        "Delta",
         null,
         "<clock>"
        ]
@@ -24573,13 +25041,13 @@
        [
         "curation_listing_spelling_v2",
         {
-         "at": 1793381792.2062488,
+         "at": 1793382956.987372,
          "copied": 0
         }
        ],
        [
         "dream_ack_secret_v1",
-        "c85ba8bed7f404993f9762f9c0c769efedf84ed1c38f34b40236f852c65e81c9"
+        "840b90eb8dec0d8d581d45c62eef1114038635784584266d9ed3cfbbf49eaeeb"
        ],
        [
         "schema_version",
@@ -24819,13 +25287,13 @@
     "value": {
      "edges": [
       {
-       "asserted_at": 1793381798.5544412,
+       "asserted_at": 1793382957.3847702,
        "confidence": 0.8,
        "derived": false,
        "dst": "Gamma",
        "origin": null,
        "relation": "related-to",
-       "src": "Beta",
+       "src": "Delta",
        "tag": "INFERRED"
       }
      ],
@@ -24834,20 +25302,20 @@
      "nodes": [
       {
        "aliases": [],
-       "canonical": "beta",
+       "canonical": "gamma",
        "community": null,
-       "created_at": 1793381798.547488,
-       "entity": "Beta",
+       "created_at": 1793382957.3755026,
+       "entity": "Gamma",
        "etype": null,
        "facts": [],
        "sources": []
       },
       {
        "aliases": [],
-       "canonical": "gamma",
+       "canonical": "delta",
        "community": null,
-       "created_at": 1793381798.5531206,
-       "entity": "Gamma",
+       "created_at": 1793382957.380264,
+       "entity": "Delta",
        "etype": null,
        "facts": [],
        "sources": []
@@ -24855,8 +25323,8 @@
      ],
      "paths": [],
      "scope": "all",
-     "total_edges": 2,
-     "total_nodes": 3,
+     "total_edges": 4,
+     "total_nodes": 4,
      "truncated": true
     }
    },
@@ -24925,7 +25393,7 @@
        "bigint",
        1,
        1,
-       2
+       4
       ],
       [
        "public",
@@ -24933,7 +25401,7 @@
        "bigint",
        1,
        1,
-       3
+       4
       ],
       [
        "public",
@@ -25060,8 +25528,8 @@
         null,
         "<clock>",
         null,
-        1793381798.5491378,
-        1793381798.5491378,
+        1793382957.3716536,
+        1793382957.3716536,
         null,
         null,
         "legacy",
@@ -25077,8 +25545,42 @@
         null,
         "<clock>",
         null,
-        1793381798.5544412,
-        1793381798.5544412,
+        1793382957.3770065,
+        1793382957.3770065,
+        null,
+        null,
+        "legacy",
+        null,
+        1
+       ],
+       [
+        3,
+        1,
+        "related-to",
+        4,
+        0.8,
+        null,
+        "<clock>",
+        null,
+        1793382957.3816965,
+        1793382957.3816965,
+        null,
+        null,
+        "legacy",
+        null,
+        1
+       ],
+       [
+        4,
+        4,
+        "related-to",
+        3,
+        0.8,
+        null,
+        "<clock>",
+        null,
+        1793382957.3847702,
+        1793382957.3847702,
         null,
         null,
         "legacy",
@@ -25114,6 +25616,13 @@
         3,
         "gamma",
         "Gamma",
+        null,
+        "<clock>"
+       ],
+       [
+        4,
+        "delta",
+        "Delta",
         null,
         "<clock>"
        ]
@@ -25316,13 +25825,13 @@
        [
         "curation_listing_spelling_v2",
         {
-         "at": 1793381792.2062488,
+         "at": 1793382956.987372,
          "copied": 0
         }
        ],
        [
         "dream_ack_secret_v1",
-        "c85ba8bed7f404993f9762f9c0c769efedf84ed1c38f34b40236f852c65e81c9"
+        "840b90eb8dec0d8d581d45c62eef1114038635784584266d9ed3cfbbf49eaeeb"
        ],
        [
         "schema_version",
@@ -25562,7 +26071,7 @@
     "value": {
      "edges": [
       {
-       "asserted_at": 1793381798.5491378,
+       "asserted_at": 1793382957.3716536,
        "confidence": 0.8,
        "derived": false,
        "dst": "Beta",
@@ -25572,13 +26081,33 @@
        "tag": "INFERRED"
       },
       {
-       "asserted_at": 1793381798.5544412,
+       "asserted_at": 1793382957.3770065,
        "confidence": 0.8,
        "derived": false,
        "dst": "Gamma",
        "origin": null,
        "relation": "related-to",
        "src": "Beta",
+       "tag": "INFERRED"
+      },
+      {
+       "asserted_at": 1793382957.3816965,
+       "confidence": 0.8,
+       "derived": false,
+       "dst": "Delta",
+       "origin": null,
+       "relation": "related-to",
+       "src": "Alpha",
+       "tag": "INFERRED"
+      },
+      {
+       "asserted_at": 1793382957.3847702,
+       "confidence": 0.8,
+       "derived": false,
+       "dst": "Gamma",
+       "origin": null,
+       "relation": "related-to",
+       "src": "Delta",
        "tag": "INFERRED"
       }
      ],
@@ -25591,7 +26120,7 @@
        ],
        "canonical": "alpha",
        "community": null,
-       "created_at": 1793381798.539194,
+       "created_at": 1793382957.3613553,
        "entity": "Alpha",
        "etype": null,
        "facts": [
@@ -25608,7 +26137,7 @@
        "aliases": [],
        "canonical": "beta",
        "community": null,
-       "created_at": 1793381798.547488,
+       "created_at": 1793382957.3701763,
        "entity": "Beta",
        "etype": null,
        "facts": [],
@@ -25618,8 +26147,18 @@
        "aliases": [],
        "canonical": "gamma",
        "community": null,
-       "created_at": 1793381798.5531206,
+       "created_at": 1793382957.3755026,
        "entity": "Gamma",
+       "etype": null,
+       "facts": [],
+       "sources": []
+      },
+      {
+       "aliases": [],
+       "canonical": "delta",
+       "community": null,
+       "created_at": 1793382957.380264,
+       "entity": "Delta",
        "etype": null,
        "facts": [],
        "sources": []
@@ -25627,8 +26166,8 @@
      ],
      "paths": [],
      "scope": "all",
-     "total_edges": 2,
-     "total_nodes": 3,
+     "total_edges": 4,
+     "total_nodes": 4,
      "truncated": false
     }
    },
@@ -25697,7 +26236,7 @@
        "bigint",
        1,
        1,
-       2
+       4
       ],
       [
        "public",
@@ -25705,7 +26244,7 @@
        "bigint",
        1,
        1,
-       3
+       4
       ],
       [
        "public",
@@ -25832,8 +26371,8 @@
         null,
         "<clock>",
         null,
-        1793381798.5491378,
-        1793381798.5491378,
+        1793382957.3716536,
+        1793382957.3716536,
         null,
         null,
         "legacy",
@@ -25849,8 +26388,42 @@
         null,
         "<clock>",
         null,
-        1793381798.5544412,
-        1793381798.5544412,
+        1793382957.3770065,
+        1793382957.3770065,
+        null,
+        null,
+        "legacy",
+        null,
+        1
+       ],
+       [
+        3,
+        1,
+        "related-to",
+        4,
+        0.8,
+        null,
+        "<clock>",
+        null,
+        1793382957.3816965,
+        1793382957.3816965,
+        null,
+        null,
+        "legacy",
+        null,
+        1
+       ],
+       [
+        4,
+        4,
+        "related-to",
+        3,
+        0.8,
+        null,
+        "<clock>",
+        null,
+        1793382957.3847702,
+        1793382957.3847702,
         null,
         null,
         "legacy",
@@ -25886,6 +26459,13 @@
         3,
         "gamma",
         "Gamma",
+        null,
+        "<clock>"
+       ],
+       [
+        4,
+        "delta",
+        "Delta",
         null,
         "<clock>"
        ]
@@ -26088,13 +26668,13 @@
        [
         "curation_listing_spelling_v2",
         {
-         "at": 1793381792.2062488,
+         "at": 1793382956.987372,
          "copied": 0
         }
        ],
        [
         "dream_ack_secret_v1",
-        "c85ba8bed7f404993f9762f9c0c769efedf84ed1c38f34b40236f852c65e81c9"
+        "840b90eb8dec0d8d581d45c62eef1114038635784584266d9ed3cfbbf49eaeeb"
        ],
        [
         "schema_version",
@@ -26334,7 +26914,7 @@
     "value": {
      "edges": [
       {
-       "asserted_at": 1793381798.5491378,
+       "asserted_at": 1793382957.3716536,
        "confidence": 0.8,
        "derived": false,
        "dst": "Beta",
@@ -26344,13 +26924,33 @@
        "tag": "INFERRED"
       },
       {
-       "asserted_at": 1793381798.5544412,
+       "asserted_at": 1793382957.3770065,
        "confidence": 0.8,
        "derived": false,
        "dst": "Gamma",
        "origin": null,
        "relation": "related-to",
        "src": "Beta",
+       "tag": "INFERRED"
+      },
+      {
+       "asserted_at": 1793382957.3816965,
+       "confidence": 0.8,
+       "derived": false,
+       "dst": "Delta",
+       "origin": null,
+       "relation": "related-to",
+       "src": "Alpha",
+       "tag": "INFERRED"
+      },
+      {
+       "asserted_at": 1793382957.3847702,
+       "confidence": 0.8,
+       "derived": false,
+       "dst": "Gamma",
+       "origin": null,
+       "relation": "related-to",
+       "src": "Delta",
        "tag": "INFERRED"
       }
      ],
@@ -26363,7 +26963,7 @@
        ],
        "canonical": "alpha",
        "community": null,
-       "created_at": 1793381798.539194,
+       "created_at": 1793382957.3613553,
        "entity": "Alpha",
        "etype": null,
        "sources": []
@@ -26372,7 +26972,7 @@
        "aliases": [],
        "canonical": "beta",
        "community": null,
-       "created_at": 1793381798.547488,
+       "created_at": 1793382957.3701763,
        "entity": "Beta",
        "etype": null,
        "sources": []
@@ -26381,16 +26981,25 @@
        "aliases": [],
        "canonical": "gamma",
        "community": null,
-       "created_at": 1793381798.5531206,
+       "created_at": 1793382957.3755026,
        "entity": "Gamma",
+       "etype": null,
+       "sources": []
+      },
+      {
+       "aliases": [],
+       "canonical": "delta",
+       "community": null,
+       "created_at": 1793382957.380264,
+       "entity": "Delta",
        "etype": null,
        "sources": []
       }
      ],
      "paths": [],
      "scope": "all",
-     "total_edges": 2,
-     "total_nodes": 3,
+     "total_edges": 4,
+     "total_nodes": 4,
      "truncated": false
     }
    },
@@ -26459,7 +27068,7 @@
        "bigint",
        1,
        1,
-       2
+       4
       ],
       [
        "public",
@@ -26467,7 +27076,7 @@
        "bigint",
        1,
        1,
-       3
+       4
       ],
       [
        "public",
@@ -26594,8 +27203,8 @@
         null,
         "<clock>",
         null,
-        1793381798.5491378,
-        1793381798.5491378,
+        1793382957.3716536,
+        1793382957.3716536,
         null,
         null,
         "legacy",
@@ -26611,8 +27220,42 @@
         null,
         "<clock>",
         null,
-        1793381798.5544412,
-        1793381798.5544412,
+        1793382957.3770065,
+        1793382957.3770065,
+        null,
+        null,
+        "legacy",
+        null,
+        1
+       ],
+       [
+        3,
+        1,
+        "related-to",
+        4,
+        0.8,
+        null,
+        "<clock>",
+        null,
+        1793382957.3816965,
+        1793382957.3816965,
+        null,
+        null,
+        "legacy",
+        null,
+        1
+       ],
+       [
+        4,
+        4,
+        "related-to",
+        3,
+        0.8,
+        null,
+        "<clock>",
+        null,
+        1793382957.3847702,
+        1793382957.3847702,
         null,
         null,
         "legacy",
@@ -26648,6 +27291,13 @@
         3,
         "gamma",
         "Gamma",
+        null,
+        "<clock>"
+       ],
+       [
+        4,
+        "delta",
+        "Delta",
         null,
         "<clock>"
        ]
@@ -26850,13 +27500,13 @@
        [
         "curation_listing_spelling_v2",
         {
-         "at": 1793381792.2062488,
+         "at": 1793382956.987372,
          "copied": 0
         }
        ],
        [
         "dream_ack_secret_v1",
-        "c85ba8bed7f404993f9762f9c0c769efedf84ed1c38f34b40236f852c65e81c9"
+        "840b90eb8dec0d8d581d45c62eef1114038635784584266d9ed3cfbbf49eaeeb"
        ],
        [
         "schema_version",
@@ -27163,7 +27813,7 @@
        "bigint",
        1,
        1,
-       2
+       4
       ],
       [
        "public",
@@ -27171,7 +27821,7 @@
        "bigint",
        1,
        1,
-       3
+       4
       ],
       [
        "public",
@@ -27298,8 +27948,8 @@
         null,
         "<clock>",
         null,
-        1793381798.5491378,
-        1793381798.5491378,
+        1793382957.3716536,
+        1793382957.3716536,
         null,
         null,
         "legacy",
@@ -27315,8 +27965,42 @@
         null,
         "<clock>",
         null,
-        1793381798.5544412,
-        1793381798.5544412,
+        1793382957.3770065,
+        1793382957.3770065,
+        null,
+        null,
+        "legacy",
+        null,
+        1
+       ],
+       [
+        3,
+        1,
+        "related-to",
+        4,
+        0.8,
+        null,
+        "<clock>",
+        null,
+        1793382957.3816965,
+        1793382957.3816965,
+        null,
+        null,
+        "legacy",
+        null,
+        1
+       ],
+       [
+        4,
+        4,
+        "related-to",
+        3,
+        0.8,
+        null,
+        "<clock>",
+        null,
+        1793382957.3847702,
+        1793382957.3847702,
         null,
         null,
         "legacy",
@@ -27352,6 +28036,13 @@
         3,
         "gamma",
         "Gamma",
+        null,
+        "<clock>"
+       ],
+       [
+        4,
+        "delta",
+        "Delta",
         null,
         "<clock>"
        ]
@@ -27554,13 +28245,814 @@
        [
         "curation_listing_spelling_v2",
         {
-         "at": 1793381792.2062488,
+         "at": 1793382956.987372,
          "copied": 0
         }
        ],
        [
         "dream_ack_secret_v1",
-        "c85ba8bed7f404993f9762f9c0c769efedf84ed1c38f34b40236f852c65e81c9"
+        "840b90eb8dec0d8d581d45c62eef1114038635784584266d9ed3cfbbf49eaeeb"
+       ],
+       [
+        "schema_version",
+        58
+       ],
+       [
+        "writer_lease_epoch",
+        2
+       ]
+      ]
+     },
+     "public.outcome_signals": {
+      "columns": [
+       "id",
+       "task",
+       "outcome",
+       "about",
+       "detail",
+       "polarity",
+       "origin",
+       "episode_id",
+       "created_at",
+       "consumed_at",
+       "used_ids"
+      ],
+      "rows": []
+     },
+     "public.reference_chunks": {
+      "columns": [
+       "id",
+       "source",
+       "chunk_index",
+       "text",
+       "embedding",
+       "metadata",
+       "ingested_at",
+       "created_at"
+      ],
+      "rows": []
+     },
+     "public.relations": {
+      "columns": [
+       "name",
+       "description",
+       "src_type",
+       "dst_type",
+       "transitive",
+       "inverse_of",
+       "builtin",
+       "created_at"
+      ],
+      "rows": [
+       [
+        "avoids",
+        "src (a task-type) should avoid dead-end dst (negative lesson)",
+        null,
+        null,
+        false,
+        null,
+        true,
+        "<clock>"
+       ],
+       [
+        "configures",
+        "src sets configuration for dst",
+        null,
+        null,
+        false,
+        null,
+        true,
+        "<clock>"
+       ],
+       [
+        "depends-on",
+        "src requires dst to function",
+        null,
+        null,
+        true,
+        null,
+        true,
+        "<clock>"
+       ],
+       [
+        "hosts",
+        "src is the host/platform for dst",
+        null,
+        null,
+        false,
+        null,
+        true,
+        "<clock>"
+       ],
+       [
+        "implements",
+        "src (a source file) realizes concept/role dst",
+        null,
+        null,
+        false,
+        null,
+        true,
+        "<clock>"
+       ],
+       [
+        "part-of",
+        "src is a component of dst",
+        null,
+        null,
+        true,
+        null,
+        true,
+        "<clock>"
+       ],
+       [
+        "prefers",
+        "src (a task-type) prefers approach/tool dst (positive lesson)",
+        null,
+        null,
+        false,
+        null,
+        true,
+        "<clock>"
+       ],
+       [
+        "related-to",
+        "untyped catch-all association",
+        null,
+        null,
+        false,
+        null,
+        true,
+        "<clock>"
+       ],
+       [
+        "runs-on",
+        "src executes on host/platform dst",
+        null,
+        null,
+        false,
+        "hosts",
+        true,
+        "<clock>"
+       ],
+       [
+        "stores-data-in",
+        "src persists its data in dst",
+        null,
+        null,
+        false,
+        null,
+        true,
+        "<clock>"
+       ],
+       [
+        "uses",
+        "src makes use of dst",
+        null,
+        null,
+        false,
+        null,
+        true,
+        "<clock>"
+       ]
+      ]
+     },
+     "public.slot_reads": {
+      "columns": [
+       "entity_norm",
+       "attribute_norm",
+       "read_count",
+       "last_read_at"
+      ],
+      "rows": []
+     },
+     "public.store_decisions": {
+      "columns": [
+       "id",
+       "store",
+       "entity_norm",
+       "attribute_norm",
+       "action",
+       "decided_by",
+       "reason",
+       "record",
+       "decided_at"
+      ],
+      "rows": []
+     },
+     "public.world_facts": {
+      "columns": [
+       "id",
+       "entity",
+       "attribute",
+       "entity_norm",
+       "attribute_norm",
+       "value",
+       "polarity",
+       "status",
+       "confidence",
+       "origin",
+       "support",
+       "provenance",
+       "asserted_at",
+       "last_confirmed",
+       "supersedes_value",
+       "superseded_by_value",
+       "superseded_at",
+       "embedding",
+       "source_url",
+       "source_quote",
+       "retrieved_at",
+       "freshness_class",
+       "content_hash",
+       "source_doc_id",
+       "tx_time",
+       "valid_time",
+       "hlc_phys",
+       "hlc_logical",
+       "writer_id",
+       "session_id",
+       "version"
+      ],
+      "rows": []
+     }
+    }
+   }
+  },
+  {
+   "numeric_new": {},
+   "op": {
+    "method": "GET",
+    "op": "rest",
+    "path": "/api/graph?entity=Alpha&to=missing"
+   },
+   "python": {
+    "isError": false,
+    "status": 200,
+    "value": {
+     "depth": 1,
+     "edges": [
+      {
+       "confidence": 0.8,
+       "derived": false,
+       "dst": "Beta",
+       "relation": "related-to",
+       "src": "Alpha",
+       "tag": "INFERRED"
+      },
+      {
+       "confidence": 0.8,
+       "derived": false,
+       "dst": "Delta",
+       "relation": "related-to",
+       "src": "Alpha",
+       "tag": "INFERRED"
+      }
+     ],
+     "entity": "Alpha",
+     "found": true,
+     "nodes": [
+      {
+       "aliases": [
+        "alias"
+       ],
+       "canonical": "alpha",
+       "community": null,
+       "entity": "Alpha",
+       "etype": null,
+       "facts": [
+        {
+         "attribute": "color",
+         "confidence": 0.8,
+         "origin": "agent",
+         "value": "blue"
+        }
+       ]
+      },
+      {
+       "aliases": [],
+       "canonical": "beta",
+       "community": null,
+       "entity": "Beta",
+       "etype": null,
+       "facts": []
+      },
+      {
+       "aliases": [],
+       "canonical": "delta",
+       "community": null,
+       "entity": "Delta",
+       "etype": null,
+       "facts": []
+      }
+     ],
+     "paths": [],
+     "to_not_found": "missing"
+    }
+   },
+   "state": {
+    "catalog": {
+     "sequences": [
+      [
+       "public",
+       "chronicle_events_id_seq",
+       "bigint",
+       1,
+       1,
+       null
+      ],
+      [
+       "public",
+       "coordination_lease_fence",
+       "bigint",
+       1,
+       1,
+       null
+      ],
+      [
+       "public",
+       "coordination_lease_waiters_ticket_seq",
+       "bigint",
+       1,
+       1,
+       null
+      ],
+      [
+       "public",
+       "coordination_wakes_wake_id_seq",
+       "bigint",
+       1,
+       1,
+       null
+      ],
+      [
+       "public",
+       "dream_run_slots_id_seq",
+       "bigint",
+       1,
+       1,
+       null
+      ],
+      [
+       "public",
+       "dream_runs_id_seq",
+       "bigint",
+       1,
+       1,
+       null
+      ],
+      [
+       "public",
+       "edge_proposals_id_seq",
+       "bigint",
+       1,
+       1,
+       null
+      ],
+      [
+       "public",
+       "edges_id_seq",
+       "bigint",
+       1,
+       1,
+       4
+      ],
+      [
+       "public",
+       "entities_id_seq",
+       "bigint",
+       1,
+       1,
+       4
+      ],
+      [
+       "public",
+       "entity_proposals_id_seq",
+       "bigint",
+       1,
+       1,
+       null
+      ],
+      [
+       "public",
+       "entries_id_seq",
+       "bigint",
+       1,
+       1,
+       null
+      ],
+      [
+       "public",
+       "facts_id_seq",
+       "bigint",
+       1,
+       1,
+       1
+      ],
+      [
+       "public",
+       "lesson_search_events_id_seq",
+       "bigint",
+       1,
+       1,
+       null
+      ],
+      [
+       "public",
+       "lessons_id_seq",
+       "bigint",
+       1,
+       1,
+       null
+      ],
+      [
+       "public",
+       "merge_decisions_id_seq",
+       "bigint",
+       1,
+       1,
+       null
+      ],
+      [
+       "public",
+       "outcome_signals_id_seq",
+       "bigint",
+       1,
+       1,
+       null
+      ],
+      [
+       "public",
+       "retrieval_events_id_seq",
+       "bigint",
+       1,
+       1,
+       1
+      ],
+      [
+       "public",
+       "store_decisions_id_seq",
+       "bigint",
+       1,
+       1,
+       null
+      ],
+      [
+       "public",
+       "world_facts_id_seq",
+       "bigint",
+       1,
+       1,
+       null
+      ]
+     ]
+    },
+    "rows": {
+     "public.client_sessions": {
+      "columns": [
+       "session_key",
+       "registered_via",
+       "principal",
+       "started_at",
+       "ended_at",
+       "end_reason",
+       "policy_variant",
+       "episode_ids",
+       "start_times"
+      ],
+      "rows": []
+     },
+     "public.edges": {
+      "columns": [
+       "id",
+       "src_id",
+       "relation",
+       "dst_id",
+       "confidence",
+       "origin",
+       "asserted_at",
+       "superseded_at",
+       "tx_time",
+       "valid_time",
+       "hlc_phys",
+       "hlc_logical",
+       "writer_id",
+       "session_id",
+       "version"
+      ],
+      "rows": [
+       [
+        1,
+        1,
+        "related-to",
+        2,
+        0.8,
+        null,
+        "<clock>",
+        null,
+        1793382957.3716536,
+        1793382957.3716536,
+        null,
+        null,
+        "legacy",
+        null,
+        1
+       ],
+       [
+        2,
+        2,
+        "related-to",
+        3,
+        0.8,
+        null,
+        "<clock>",
+        null,
+        1793382957.3770065,
+        1793382957.3770065,
+        null,
+        null,
+        "legacy",
+        null,
+        1
+       ],
+       [
+        3,
+        1,
+        "related-to",
+        4,
+        0.8,
+        null,
+        "<clock>",
+        null,
+        1793382957.3816965,
+        1793382957.3816965,
+        null,
+        null,
+        "legacy",
+        null,
+        1
+       ],
+       [
+        4,
+        4,
+        "related-to",
+        3,
+        0.8,
+        null,
+        "<clock>",
+        null,
+        1793382957.3847702,
+        1793382957.3847702,
+        null,
+        null,
+        "legacy",
+        null,
+        1
+       ]
+      ]
+     },
+     "public.entities": {
+      "columns": [
+       "id",
+       "canonical",
+       "display",
+       "etype",
+       "created_at"
+      ],
+      "rows": [
+       [
+        1,
+        "alpha",
+        "Alpha",
+        null,
+        "<clock>"
+       ],
+       [
+        2,
+        "beta",
+        "Beta",
+        null,
+        "<clock>"
+       ],
+       [
+        3,
+        "gamma",
+        "Gamma",
+        null,
+        "<clock>"
+       ],
+       [
+        4,
+        "delta",
+        "Delta",
+        null,
+        "<clock>"
+       ]
+      ]
+     },
+     "public.entity_aliases": {
+      "columns": [
+       "alias",
+       "entity_id"
+      ],
+      "rows": [
+       [
+        "alias",
+        1
+       ]
+      ]
+     },
+     "public.entries": {
+      "columns": [
+       "id",
+       "band",
+       "text",
+       "embedding",
+       "surprise",
+       "ts",
+       "access_count",
+       "source",
+       "superseded_at",
+       "superseded_by_text",
+       "last_logical_turn",
+       "episode_id",
+       "episode_title",
+       "tags",
+       "slots",
+       "authority",
+       "distortion_tolerance",
+       "dream_state",
+       "reinforcements",
+       "explicit_reinforcements"
+      ],
+      "rows": []
+     },
+     "public.entry_reinstatement_decisions": {
+      "columns": [
+       "operation_id",
+       "entry_id",
+       "request_sha256",
+       "entry_text_sha256",
+       "entry_source_sha256",
+       "prior_superseded_at",
+       "prior_superseded_by_text",
+       "prior_superseded_by_text_sha256",
+       "evidence_packet_sha256",
+       "reviewer_ids",
+       "reason",
+       "decided_by",
+       "decided_at"
+      ],
+      "rows": []
+     },
+     "public.episodes": {
+      "columns": [
+       "id",
+       "title",
+       "hint",
+       "started_at",
+       "ended_at",
+       "closed_by_new_start",
+       "session_key",
+       "parent_id"
+      ],
+      "rows": []
+     },
+     "public.facts": {
+      "columns": [
+       "id",
+       "entity",
+       "attribute",
+       "entity_norm",
+       "attribute_norm",
+       "value",
+       "polarity",
+       "status",
+       "confidence",
+       "origin",
+       "support",
+       "provenance",
+       "asserted_at",
+       "last_confirmed",
+       "supersedes_value",
+       "superseded_by_value",
+       "superseded_at",
+       "embedding",
+       "entity_id",
+       "object_entity_id",
+       "freshness_class",
+       "kind",
+       "value_norm",
+       "stance",
+       "authority",
+       "distortion_tolerance",
+       "tx_time",
+       "valid_time",
+       "hlc_phys",
+       "hlc_logical",
+       "writer_id",
+       "session_id",
+       "version"
+      ],
+      "rows": [
+       [
+        1,
+        "Alpha",
+        "color",
+        "alpha",
+        "color",
+        "blue",
+        "+",
+        "current",
+        0.8,
+        "agent",
+        [
+         "agent"
+        ],
+        [],
+        "<clock>",
+        "<clock>",
+        null,
+        null,
+        null,
+        "<embedding>",
+        1,
+        null,
+        "evergreen",
+        "scalar",
+        null,
+        null,
+        null,
+        null,
+        "<clock>",
+        "<clock>",
+        "<clock>",
+        0,
+        "unknown",
+        null,
+        1
+       ]
+      ]
+     },
+     "public.lessons": {
+      "columns": [
+       "id",
+       "entity",
+       "attribute",
+       "entity_norm",
+       "attribute_norm",
+       "value",
+       "about",
+       "polarity",
+       "outcome",
+       "status",
+       "confidence",
+       "origin",
+       "support",
+       "provenance",
+       "asserted_at",
+       "last_confirmed",
+       "supersedes_value",
+       "superseded_by_value",
+       "superseded_at",
+       "embedding",
+       "entity_id",
+       "object_entity_id",
+       "tx_time",
+       "valid_time",
+       "hlc_phys",
+       "hlc_logical",
+       "writer_id",
+       "session_id",
+       "version"
+      ],
+      "rows": []
+     },
+     "public.memory_trace_invalidations": {
+      "columns": [
+       "entity_norm",
+       "attribute_norm",
+       "source_entry_id",
+       "invalidated_at",
+       "cause"
+      ],
+      "rows": []
+     },
+     "public.meta": {
+      "columns": [
+       "key",
+       "value"
+      ],
+      "rows": [
+       [
+        "curation_listing_spelling_v2",
+        {
+         "at": 1793382956.987372,
+         "copied": 0
+        }
+       ],
+       [
+        "dream_ack_secret_v1",
+        "840b90eb8dec0d8d581d45c62eef1114038635784584266d9ed3cfbbf49eaeeb"
        ],
        [
         "schema_version",
@@ -27866,7 +29358,7 @@
        "bigint",
        1,
        1,
-       2
+       4
       ],
       [
        "public",
@@ -27874,7 +29366,7 @@
        "bigint",
        1,
        1,
-       3
+       4
       ],
       [
        "public",
@@ -28001,8 +29493,8 @@
         null,
         "<clock>",
         null,
-        1793381798.5491378,
-        1793381798.5491378,
+        1793382957.3716536,
+        1793382957.3716536,
         null,
         null,
         "legacy",
@@ -28018,8 +29510,42 @@
         null,
         "<clock>",
         null,
-        1793381798.5544412,
-        1793381798.5544412,
+        1793382957.3770065,
+        1793382957.3770065,
+        null,
+        null,
+        "legacy",
+        null,
+        1
+       ],
+       [
+        3,
+        1,
+        "related-to",
+        4,
+        0.8,
+        null,
+        "<clock>",
+        null,
+        1793382957.3816965,
+        1793382957.3816965,
+        null,
+        null,
+        "legacy",
+        null,
+        1
+       ],
+       [
+        4,
+        4,
+        "related-to",
+        3,
+        0.8,
+        null,
+        "<clock>",
+        null,
+        1793382957.3847702,
+        1793382957.3847702,
         null,
         null,
         "legacy",
@@ -28055,6 +29581,13 @@
         3,
         "gamma",
         "Gamma",
+        null,
+        "<clock>"
+       ],
+       [
+        4,
+        "delta",
+        "Delta",
         null,
         "<clock>"
        ]
@@ -28257,13 +29790,13 @@
        [
         "curation_listing_spelling_v2",
         {
-         "at": 1793381792.2062488,
+         "at": 1793382956.987372,
          "copied": 0
         }
        ],
        [
         "dream_ack_secret_v1",
-        "c85ba8bed7f404993f9762f9c0c769efedf84ed1c38f34b40236f852c65e81c9"
+        "840b90eb8dec0d8d581d45c62eef1114038635784584266d9ed3cfbbf49eaeeb"
        ],
        [
         "schema_version",
@@ -28570,7 +30103,7 @@
        "bigint",
        1,
        1,
-       2
+       4
       ],
       [
        "public",
@@ -28578,7 +30111,7 @@
        "bigint",
        1,
        1,
-       3
+       4
       ],
       [
        "public",
@@ -28705,8 +30238,8 @@
         null,
         "<clock>",
         null,
-        1793381798.5491378,
-        1793381798.5491378,
+        1793382957.3716536,
+        1793382957.3716536,
         null,
         null,
         "legacy",
@@ -28722,8 +30255,42 @@
         null,
         "<clock>",
         null,
-        1793381798.5544412,
-        1793381798.5544412,
+        1793382957.3770065,
+        1793382957.3770065,
+        null,
+        null,
+        "legacy",
+        null,
+        1
+       ],
+       [
+        3,
+        1,
+        "related-to",
+        4,
+        0.8,
+        null,
+        "<clock>",
+        null,
+        1793382957.3816965,
+        1793382957.3816965,
+        null,
+        null,
+        "legacy",
+        null,
+        1
+       ],
+       [
+        4,
+        4,
+        "related-to",
+        3,
+        0.8,
+        null,
+        "<clock>",
+        null,
+        1793382957.3847702,
+        1793382957.3847702,
         null,
         null,
         "legacy",
@@ -28759,6 +30326,13 @@
         3,
         "gamma",
         "Gamma",
+        null,
+        "<clock>"
+       ],
+       [
+        4,
+        "delta",
+        "Delta",
         null,
         "<clock>"
        ]
@@ -28961,13 +30535,13 @@
        [
         "curation_listing_spelling_v2",
         {
-         "at": 1793381792.2062488,
+         "at": 1793382956.987372,
          "copied": 0
         }
        ],
        [
         "dream_ack_secret_v1",
-        "c85ba8bed7f404993f9762f9c0c769efedf84ed1c38f34b40236f852c65e81c9"
+        "840b90eb8dec0d8d581d45c62eef1114038635784584266d9ed3cfbbf49eaeeb"
        ],
        [
         "schema_version",
@@ -29274,7 +30848,7 @@
        "bigint",
        1,
        1,
-       2
+       4
       ],
       [
        "public",
@@ -29282,7 +30856,7 @@
        "bigint",
        1,
        1,
-       3
+       4
       ],
       [
        "public",
@@ -29409,8 +30983,8 @@
         null,
         "<clock>",
         null,
-        1793381798.5491378,
-        1793381798.5491378,
+        1793382957.3716536,
+        1793382957.3716536,
         null,
         null,
         "legacy",
@@ -29426,8 +31000,42 @@
         null,
         "<clock>",
         null,
-        1793381798.5544412,
-        1793381798.5544412,
+        1793382957.3770065,
+        1793382957.3770065,
+        null,
+        null,
+        "legacy",
+        null,
+        1
+       ],
+       [
+        3,
+        1,
+        "related-to",
+        4,
+        0.8,
+        null,
+        "<clock>",
+        null,
+        1793382957.3816965,
+        1793382957.3816965,
+        null,
+        null,
+        "legacy",
+        null,
+        1
+       ],
+       [
+        4,
+        4,
+        "related-to",
+        3,
+        0.8,
+        null,
+        "<clock>",
+        null,
+        1793382957.3847702,
+        1793382957.3847702,
         null,
         null,
         "legacy",
@@ -29463,6 +31071,13 @@
         3,
         "gamma",
         "Gamma",
+        null,
+        "<clock>"
+       ],
+       [
+        4,
+        "delta",
+        "Delta",
         null,
         "<clock>"
        ]
@@ -29665,13 +31280,13 @@
        [
         "curation_listing_spelling_v2",
         {
-         "at": 1793381792.2062488,
+         "at": 1793382956.987372,
          "copied": 0
         }
        ],
        [
         "dream_ack_secret_v1",
-        "c85ba8bed7f404993f9762f9c0c769efedf84ed1c38f34b40236f852c65e81c9"
+        "840b90eb8dec0d8d581d45c62eef1114038635784584266d9ed3cfbbf49eaeeb"
        ],
        [
         "schema_version",
@@ -29997,7 +31612,7 @@
        "bigint",
        1,
        1,
-       2
+       4
       ],
       [
        "public",
@@ -30005,7 +31620,7 @@
        "bigint",
        1,
        1,
-       3
+       4
       ],
       [
        "public",
@@ -30132,8 +31747,8 @@
         null,
         "<clock>",
         null,
-        1793381798.5491378,
-        1793381798.5491378,
+        1793382957.3716536,
+        1793382957.3716536,
         null,
         null,
         "legacy",
@@ -30149,8 +31764,42 @@
         null,
         "<clock>",
         null,
-        1793381798.5544412,
-        1793381798.5544412,
+        1793382957.3770065,
+        1793382957.3770065,
+        null,
+        null,
+        "legacy",
+        null,
+        1
+       ],
+       [
+        3,
+        1,
+        "related-to",
+        4,
+        0.8,
+        null,
+        "<clock>",
+        null,
+        1793382957.3816965,
+        1793382957.3816965,
+        null,
+        null,
+        "legacy",
+        null,
+        1
+       ],
+       [
+        4,
+        4,
+        "related-to",
+        3,
+        0.8,
+        null,
+        "<clock>",
+        null,
+        1793382957.3847702,
+        1793382957.3847702,
         null,
         null,
         "legacy",
@@ -30186,6 +31835,13 @@
         3,
         "gamma",
         "Gamma",
+        null,
+        "<clock>"
+       ],
+       [
+        4,
+        "delta",
+        "Delta",
         null,
         "<clock>"
        ]
@@ -30388,13 +32044,13 @@
        [
         "curation_listing_spelling_v2",
         {
-         "at": 1793381792.2062488,
+         "at": 1793382956.987372,
          "copied": 0
         }
        ],
        [
         "dream_ack_secret_v1",
-        "c85ba8bed7f404993f9762f9c0c769efedf84ed1c38f34b40236f852c65e81c9"
+        "840b90eb8dec0d8d581d45c62eef1114038635784584266d9ed3cfbbf49eaeeb"
        ],
        [
         "schema_version",
@@ -30705,7 +32361,7 @@
        "bigint",
        1,
        1,
-       2
+       4
       ],
       [
        "public",
@@ -30713,7 +32369,7 @@
        "bigint",
        1,
        1,
-       3
+       4
       ],
       [
        "public",
@@ -30840,8 +32496,8 @@
         null,
         "<clock>",
         null,
-        1793381798.5491378,
-        1793381798.5491378,
+        1793382957.3716536,
+        1793382957.3716536,
         null,
         null,
         "legacy",
@@ -30857,8 +32513,42 @@
         null,
         "<clock>",
         null,
-        1793381798.5544412,
-        1793381798.5544412,
+        1793382957.3770065,
+        1793382957.3770065,
+        null,
+        null,
+        "legacy",
+        null,
+        1
+       ],
+       [
+        3,
+        1,
+        "related-to",
+        4,
+        0.8,
+        null,
+        "<clock>",
+        null,
+        1793382957.3816965,
+        1793382957.3816965,
+        null,
+        null,
+        "legacy",
+        null,
+        1
+       ],
+       [
+        4,
+        4,
+        "related-to",
+        3,
+        0.8,
+        null,
+        "<clock>",
+        null,
+        1793382957.3847702,
+        1793382957.3847702,
         null,
         null,
         "legacy",
@@ -30894,6 +32584,13 @@
         3,
         "gamma",
         "Gamma",
+        null,
+        "<clock>"
+       ],
+       [
+        4,
+        "delta",
+        "Delta",
         null,
         "<clock>"
        ]
@@ -31096,13 +32793,13 @@
        [
         "curation_listing_spelling_v2",
         {
-         "at": 1793381792.2062488,
+         "at": 1793382956.987372,
          "copied": 0
         }
        ],
        [
         "dream_ack_secret_v1",
-        "c85ba8bed7f404993f9762f9c0c769efedf84ed1c38f34b40236f852c65e81c9"
+        "840b90eb8dec0d8d581d45c62eef1114038635784584266d9ed3cfbbf49eaeeb"
        ],
        [
         "schema_version",
@@ -31409,7 +33106,7 @@
        "bigint",
        1,
        1,
-       2
+       4
       ],
       [
        "public",
@@ -31417,7 +33114,7 @@
        "bigint",
        1,
        1,
-       3
+       4
       ],
       [
        "public",
@@ -31544,8 +33241,8 @@
         null,
         "<clock>",
         null,
-        1793381798.5491378,
-        1793381798.5491378,
+        1793382957.3716536,
+        1793382957.3716536,
         null,
         null,
         "legacy",
@@ -31561,8 +33258,42 @@
         null,
         "<clock>",
         null,
-        1793381798.5544412,
-        1793381798.5544412,
+        1793382957.3770065,
+        1793382957.3770065,
+        null,
+        null,
+        "legacy",
+        null,
+        1
+       ],
+       [
+        3,
+        1,
+        "related-to",
+        4,
+        0.8,
+        null,
+        "<clock>",
+        null,
+        1793382957.3816965,
+        1793382957.3816965,
+        null,
+        null,
+        "legacy",
+        null,
+        1
+       ],
+       [
+        4,
+        4,
+        "related-to",
+        3,
+        0.8,
+        null,
+        "<clock>",
+        null,
+        1793382957.3847702,
+        1793382957.3847702,
         null,
         null,
         "legacy",
@@ -31598,6 +33329,13 @@
         3,
         "gamma",
         "Gamma",
+        null,
+        "<clock>"
+       ],
+       [
+        4,
+        "delta",
+        "Delta",
         null,
         "<clock>"
        ]
@@ -31800,13 +33538,13 @@
        [
         "curation_listing_spelling_v2",
         {
-         "at": 1793381792.2062488,
+         "at": 1793382956.987372,
          "copied": 0
         }
        ],
        [
         "dream_ack_secret_v1",
-        "c85ba8bed7f404993f9762f9c0c769efedf84ed1c38f34b40236f852c65e81c9"
+        "840b90eb8dec0d8d581d45c62eef1114038635784584266d9ed3cfbbf49eaeeb"
        ],
        [
         "schema_version",
@@ -32115,7 +33853,7 @@
        "bigint",
        1,
        1,
-       2
+       4
       ],
       [
        "public",
@@ -32123,7 +33861,7 @@
        "bigint",
        1,
        1,
-       3
+       4
       ],
       [
        "public",
@@ -32250,8 +33988,8 @@
         null,
         "<clock>",
         null,
-        1793381798.5491378,
-        1793381798.5491378,
+        1793382957.3716536,
+        1793382957.3716536,
         null,
         null,
         "legacy",
@@ -32267,8 +34005,42 @@
         null,
         "<clock>",
         null,
-        1793381798.5544412,
-        1793381798.5544412,
+        1793382957.3770065,
+        1793382957.3770065,
+        null,
+        null,
+        "legacy",
+        null,
+        1
+       ],
+       [
+        3,
+        1,
+        "related-to",
+        4,
+        0.8,
+        null,
+        "<clock>",
+        null,
+        1793382957.3816965,
+        1793382957.3816965,
+        null,
+        null,
+        "legacy",
+        null,
+        1
+       ],
+       [
+        4,
+        4,
+        "related-to",
+        3,
+        0.8,
+        null,
+        "<clock>",
+        null,
+        1793382957.3847702,
+        1793382957.3847702,
         null,
         null,
         "legacy",
@@ -32304,6 +34076,13 @@
         3,
         "gamma",
         "Gamma",
+        null,
+        "<clock>"
+       ],
+       [
+        4,
+        "delta",
+        "Delta",
         null,
         "<clock>"
        ]
@@ -32506,13 +34285,13 @@
        [
         "curation_listing_spelling_v2",
         {
-         "at": 1793381792.2062488,
+         "at": 1793382956.987372,
          "copied": 0
         }
        ],
        [
         "dream_ack_secret_v1",
-        "c85ba8bed7f404993f9762f9c0c769efedf84ed1c38f34b40236f852c65e81c9"
+        "840b90eb8dec0d8d581d45c62eef1114038635784584266d9ed3cfbbf49eaeeb"
        ],
        [
         "schema_version",
@@ -32821,7 +34600,7 @@
        "bigint",
        1,
        1,
-       2
+       4
       ],
       [
        "public",
@@ -32829,7 +34608,7 @@
        "bigint",
        1,
        1,
-       3
+       4
       ],
       [
        "public",
@@ -32956,8 +34735,8 @@
         null,
         "<clock>",
         null,
-        1793381798.5491378,
-        1793381798.5491378,
+        1793382957.3716536,
+        1793382957.3716536,
         null,
         null,
         "legacy",
@@ -32973,8 +34752,42 @@
         null,
         "<clock>",
         null,
-        1793381798.5544412,
-        1793381798.5544412,
+        1793382957.3770065,
+        1793382957.3770065,
+        null,
+        null,
+        "legacy",
+        null,
+        1
+       ],
+       [
+        3,
+        1,
+        "related-to",
+        4,
+        0.8,
+        null,
+        "<clock>",
+        null,
+        1793382957.3816965,
+        1793382957.3816965,
+        null,
+        null,
+        "legacy",
+        null,
+        1
+       ],
+       [
+        4,
+        4,
+        "related-to",
+        3,
+        0.8,
+        null,
+        "<clock>",
+        null,
+        1793382957.3847702,
+        1793382957.3847702,
         null,
         null,
         "legacy",
@@ -33010,6 +34823,13 @@
         3,
         "gamma",
         "Gamma",
+        null,
+        "<clock>"
+       ],
+       [
+        4,
+        "delta",
+        "Delta",
         null,
         "<clock>"
        ]
@@ -33212,13 +35032,13 @@
        [
         "curation_listing_spelling_v2",
         {
-         "at": 1793381792.2062488,
+         "at": 1793382956.987372,
          "copied": 0
         }
        ],
        [
         "dream_ack_secret_v1",
-        "c85ba8bed7f404993f9762f9c0c769efedf84ed1c38f34b40236f852c65e81c9"
+        "840b90eb8dec0d8d581d45c62eef1114038635784584266d9ed3cfbbf49eaeeb"
        ],
        [
         "schema_version",
@@ -33524,7 +35344,7 @@
        "bigint",
        1,
        1,
-       2
+       4
       ],
       [
        "public",
@@ -33532,7 +35352,7 @@
        "bigint",
        1,
        1,
-       3
+       4
       ],
       [
        "public",
@@ -33659,8 +35479,8 @@
         null,
         "<clock>",
         null,
-        1793381798.5491378,
-        1793381798.5491378,
+        1793382957.3716536,
+        1793382957.3716536,
         null,
         null,
         "legacy",
@@ -33676,8 +35496,42 @@
         null,
         "<clock>",
         null,
-        1793381798.5544412,
-        1793381798.5544412,
+        1793382957.3770065,
+        1793382957.3770065,
+        null,
+        null,
+        "legacy",
+        null,
+        1
+       ],
+       [
+        3,
+        1,
+        "related-to",
+        4,
+        0.8,
+        null,
+        "<clock>",
+        null,
+        1793382957.3816965,
+        1793382957.3816965,
+        null,
+        null,
+        "legacy",
+        null,
+        1
+       ],
+       [
+        4,
+        4,
+        "related-to",
+        3,
+        0.8,
+        null,
+        "<clock>",
+        null,
+        1793382957.3847702,
+        1793382957.3847702,
         null,
         null,
         "legacy",
@@ -33713,6 +35567,13 @@
         3,
         "gamma",
         "Gamma",
+        null,
+        "<clock>"
+       ],
+       [
+        4,
+        "delta",
+        "Delta",
         null,
         "<clock>"
        ]
@@ -33915,13 +35776,13 @@
        [
         "curation_listing_spelling_v2",
         {
-         "at": 1793381792.2062488,
+         "at": 1793382956.987372,
          "copied": 0
         }
        ],
        [
         "dream_ack_secret_v1",
-        "c85ba8bed7f404993f9762f9c0c769efedf84ed1c38f34b40236f852c65e81c9"
+        "840b90eb8dec0d8d581d45c62eef1114038635784584266d9ed3cfbbf49eaeeb"
        ],
        [
         "schema_version",
@@ -34227,7 +36088,7 @@
        "bigint",
        1,
        1,
-       2
+       4
       ],
       [
        "public",
@@ -34235,7 +36096,7 @@
        "bigint",
        1,
        1,
-       3
+       4
       ],
       [
        "public",
@@ -34362,8 +36223,8 @@
         null,
         "<clock>",
         null,
-        1793381798.5491378,
-        1793381798.5491378,
+        1793382957.3716536,
+        1793382957.3716536,
         null,
         null,
         "legacy",
@@ -34379,8 +36240,42 @@
         null,
         "<clock>",
         null,
-        1793381798.5544412,
-        1793381798.5544412,
+        1793382957.3770065,
+        1793382957.3770065,
+        null,
+        null,
+        "legacy",
+        null,
+        1
+       ],
+       [
+        3,
+        1,
+        "related-to",
+        4,
+        0.8,
+        null,
+        "<clock>",
+        null,
+        1793382957.3816965,
+        1793382957.3816965,
+        null,
+        null,
+        "legacy",
+        null,
+        1
+       ],
+       [
+        4,
+        4,
+        "related-to",
+        3,
+        0.8,
+        null,
+        "<clock>",
+        null,
+        1793382957.3847702,
+        1793382957.3847702,
         null,
         null,
         "legacy",
@@ -34416,6 +36311,13 @@
         3,
         "gamma",
         "Gamma",
+        null,
+        "<clock>"
+       ],
+       [
+        4,
+        "delta",
+        "Delta",
         null,
         "<clock>"
        ]
@@ -34618,13 +36520,13 @@
        [
         "curation_listing_spelling_v2",
         {
-         "at": 1793381792.2062488,
+         "at": 1793382956.987372,
          "copied": 0
         }
        ],
        [
         "dream_ack_secret_v1",
-        "c85ba8bed7f404993f9762f9c0c769efedf84ed1c38f34b40236f852c65e81c9"
+        "840b90eb8dec0d8d581d45c62eef1114038635784584266d9ed3cfbbf49eaeeb"
        ],
        [
         "schema_version",
@@ -34930,7 +36832,7 @@
        "bigint",
        1,
        1,
-       2
+       4
       ],
       [
        "public",
@@ -34938,7 +36840,7 @@
        "bigint",
        1,
        1,
-       3
+       4
       ],
       [
        "public",
@@ -35065,8 +36967,8 @@
         null,
         "<clock>",
         null,
-        1793381798.5491378,
-        1793381798.5491378,
+        1793382957.3716536,
+        1793382957.3716536,
         null,
         null,
         "legacy",
@@ -35082,8 +36984,42 @@
         null,
         "<clock>",
         null,
-        1793381798.5544412,
-        1793381798.5544412,
+        1793382957.3770065,
+        1793382957.3770065,
+        null,
+        null,
+        "legacy",
+        null,
+        1
+       ],
+       [
+        3,
+        1,
+        "related-to",
+        4,
+        0.8,
+        null,
+        "<clock>",
+        null,
+        1793382957.3816965,
+        1793382957.3816965,
+        null,
+        null,
+        "legacy",
+        null,
+        1
+       ],
+       [
+        4,
+        4,
+        "related-to",
+        3,
+        0.8,
+        null,
+        "<clock>",
+        null,
+        1793382957.3847702,
+        1793382957.3847702,
         null,
         null,
         "legacy",
@@ -35119,6 +37055,13 @@
         3,
         "gamma",
         "Gamma",
+        null,
+        "<clock>"
+       ],
+       [
+        4,
+        "delta",
+        "Delta",
         null,
         "<clock>"
        ]
@@ -35321,13 +37264,13 @@
        [
         "curation_listing_spelling_v2",
         {
-         "at": 1793381792.2062488,
+         "at": 1793382956.987372,
          "copied": 0
         }
        ],
        [
         "dream_ack_secret_v1",
-        "c85ba8bed7f404993f9762f9c0c769efedf84ed1c38f34b40236f852c65e81c9"
+        "840b90eb8dec0d8d581d45c62eef1114038635784584266d9ed3cfbbf49eaeeb"
        ],
        [
         "schema_version",
@@ -35633,7 +37576,7 @@
        "bigint",
        1,
        1,
-       2
+       4
       ],
       [
        "public",
@@ -35641,7 +37584,7 @@
        "bigint",
        1,
        1,
-       3
+       4
       ],
       [
        "public",
@@ -35768,8 +37711,8 @@
         null,
         "<clock>",
         null,
-        1793381798.5491378,
-        1793381798.5491378,
+        1793382957.3716536,
+        1793382957.3716536,
         null,
         null,
         "legacy",
@@ -35785,8 +37728,42 @@
         null,
         "<clock>",
         null,
-        1793381798.5544412,
-        1793381798.5544412,
+        1793382957.3770065,
+        1793382957.3770065,
+        null,
+        null,
+        "legacy",
+        null,
+        1
+       ],
+       [
+        3,
+        1,
+        "related-to",
+        4,
+        0.8,
+        null,
+        "<clock>",
+        null,
+        1793382957.3816965,
+        1793382957.3816965,
+        null,
+        null,
+        "legacy",
+        null,
+        1
+       ],
+       [
+        4,
+        4,
+        "related-to",
+        3,
+        0.8,
+        null,
+        "<clock>",
+        null,
+        1793382957.3847702,
+        1793382957.3847702,
         null,
         null,
         "legacy",
@@ -35822,6 +37799,13 @@
         3,
         "gamma",
         "Gamma",
+        null,
+        "<clock>"
+       ],
+       [
+        4,
+        "delta",
+        "Delta",
         null,
         "<clock>"
        ]
@@ -36024,13 +38008,13 @@
        [
         "curation_listing_spelling_v2",
         {
-         "at": 1793381792.2062488,
+         "at": 1793382956.987372,
          "copied": 0
         }
        ],
        [
         "dream_ack_secret_v1",
-        "c85ba8bed7f404993f9762f9c0c769efedf84ed1c38f34b40236f852c65e81c9"
+        "840b90eb8dec0d8d581d45c62eef1114038635784584266d9ed3cfbbf49eaeeb"
        ],
        [
         "schema_version",
@@ -36339,7 +38323,7 @@
        "bigint",
        1,
        1,
-       2
+       4
       ],
       [
        "public",
@@ -36347,7 +38331,7 @@
        "bigint",
        1,
        1,
-       3
+       4
       ],
       [
        "public",
@@ -36474,8 +38458,8 @@
         null,
         "<clock>",
         null,
-        1793381798.5491378,
-        1793381798.5491378,
+        1793382957.3716536,
+        1793382957.3716536,
         null,
         null,
         "legacy",
@@ -36491,8 +38475,42 @@
         null,
         "<clock>",
         null,
-        1793381798.5544412,
-        1793381798.5544412,
+        1793382957.3770065,
+        1793382957.3770065,
+        null,
+        null,
+        "legacy",
+        null,
+        1
+       ],
+       [
+        3,
+        1,
+        "related-to",
+        4,
+        0.8,
+        null,
+        "<clock>",
+        null,
+        1793382957.3816965,
+        1793382957.3816965,
+        null,
+        null,
+        "legacy",
+        null,
+        1
+       ],
+       [
+        4,
+        4,
+        "related-to",
+        3,
+        0.8,
+        null,
+        "<clock>",
+        null,
+        1793382957.3847702,
+        1793382957.3847702,
         null,
         null,
         "legacy",
@@ -36528,6 +38546,13 @@
         3,
         "gamma",
         "Gamma",
+        null,
+        "<clock>"
+       ],
+       [
+        4,
+        "delta",
+        "Delta",
         null,
         "<clock>"
        ]
@@ -36730,13 +38755,13 @@
        [
         "curation_listing_spelling_v2",
         {
-         "at": 1793381792.2062488,
+         "at": 1793382956.987372,
          "copied": 0
         }
        ],
        [
         "dream_ack_secret_v1",
-        "c85ba8bed7f404993f9762f9c0c769efedf84ed1c38f34b40236f852c65e81c9"
+        "840b90eb8dec0d8d581d45c62eef1114038635784584266d9ed3cfbbf49eaeeb"
        ],
        [
         "schema_version",
@@ -37043,7 +39068,7 @@
        "bigint",
        1,
        1,
-       2
+       4
       ],
       [
        "public",
@@ -37051,7 +39076,7 @@
        "bigint",
        1,
        1,
-       3
+       4
       ],
       [
        "public",
@@ -37178,8 +39203,8 @@
         null,
         "<clock>",
         null,
-        1793381798.5491378,
-        1793381798.5491378,
+        1793382957.3716536,
+        1793382957.3716536,
         null,
         null,
         "legacy",
@@ -37195,8 +39220,42 @@
         null,
         "<clock>",
         null,
-        1793381798.5544412,
-        1793381798.5544412,
+        1793382957.3770065,
+        1793382957.3770065,
+        null,
+        null,
+        "legacy",
+        null,
+        1
+       ],
+       [
+        3,
+        1,
+        "related-to",
+        4,
+        0.8,
+        null,
+        "<clock>",
+        null,
+        1793382957.3816965,
+        1793382957.3816965,
+        null,
+        null,
+        "legacy",
+        null,
+        1
+       ],
+       [
+        4,
+        4,
+        "related-to",
+        3,
+        0.8,
+        null,
+        "<clock>",
+        null,
+        1793382957.3847702,
+        1793382957.3847702,
         null,
         null,
         "legacy",
@@ -37232,6 +39291,13 @@
         3,
         "gamma",
         "Gamma",
+        null,
+        "<clock>"
+       ],
+       [
+        4,
+        "delta",
+        "Delta",
         null,
         "<clock>"
        ]
@@ -37434,13 +39500,13 @@
        [
         "curation_listing_spelling_v2",
         {
-         "at": 1793381792.2062488,
+         "at": 1793382956.987372,
          "copied": 0
         }
        ],
        [
         "dream_ack_secret_v1",
-        "c85ba8bed7f404993f9762f9c0c769efedf84ed1c38f34b40236f852c65e81c9"
+        "840b90eb8dec0d8d581d45c62eef1114038635784584266d9ed3cfbbf49eaeeb"
        ],
        [
         "schema_version",
@@ -37687,7 +39753,7 @@
      "etype": null,
      "facts": [
       {
-       "asserted_at": 1793381798.534273,
+       "asserted_at": 1793382957.3565261,
        "attribute": "color",
        "confidence": 0.8,
        "history_available": false,
@@ -37695,7 +39761,7 @@
        "value": "blue"
       }
      ],
-     "first_seen": 1793381798.539194,
+     "first_seen": 1793382957.3613553,
      "flags": [
       {
        "kind": "unattributed"
@@ -37713,24 +39779,36 @@
         "relation": "related-to",
         "tag": "INFERRED",
         "target": "Beta"
+       },
+       {
+        "confidence": 0.8,
+        "derived": false,
+        "relation": "related-to",
+        "tag": "INFERRED",
+        "target": "Delta"
        }
       ]
      },
      "timeline": [
       {
        "kind": "edge-asserted",
+       "text": "Alpha related-to Delta",
+       "ts": 1793382957.3816965
+      },
+      {
+       "kind": "edge-asserted",
        "text": "Alpha related-to Beta",
-       "ts": 1793381798.5491378
+       "ts": 1793382957.3716536
       },
       {
        "kind": "entity-created",
        "text": "\u201cAlpha\u201d first seen",
-       "ts": 1793381798.539194
+       "ts": 1793382957.3613553
       },
       {
        "kind": "fact-stamped",
        "text": "color = blue",
-       "ts": 1793381798.534273
+       "ts": 1793382957.3565261
       }
      ],
      "world_facts": []
@@ -37801,7 +39879,7 @@
        "bigint",
        1,
        1,
-       2
+       4
       ],
       [
        "public",
@@ -37809,7 +39887,7 @@
        "bigint",
        1,
        1,
-       3
+       4
       ],
       [
        "public",
@@ -37936,8 +40014,8 @@
         null,
         "<clock>",
         null,
-        1793381798.5491378,
-        1793381798.5491378,
+        1793382957.3716536,
+        1793382957.3716536,
         null,
         null,
         "legacy",
@@ -37953,8 +40031,42 @@
         null,
         "<clock>",
         null,
-        1793381798.5544412,
-        1793381798.5544412,
+        1793382957.3770065,
+        1793382957.3770065,
+        null,
+        null,
+        "legacy",
+        null,
+        1
+       ],
+       [
+        3,
+        1,
+        "related-to",
+        4,
+        0.8,
+        null,
+        "<clock>",
+        null,
+        1793382957.3816965,
+        1793382957.3816965,
+        null,
+        null,
+        "legacy",
+        null,
+        1
+       ],
+       [
+        4,
+        4,
+        "related-to",
+        3,
+        0.8,
+        null,
+        "<clock>",
+        null,
+        1793382957.3847702,
+        1793382957.3847702,
         null,
         null,
         "legacy",
@@ -37990,6 +40102,13 @@
         3,
         "gamma",
         "Gamma",
+        null,
+        "<clock>"
+       ],
+       [
+        4,
+        "delta",
+        "Delta",
         null,
         "<clock>"
        ]
@@ -38192,13 +40311,13 @@
        [
         "curation_listing_spelling_v2",
         {
-         "at": 1793381792.2062488,
+         "at": 1793382956.987372,
          "copied": 0
         }
        ],
        [
         "dream_ack_secret_v1",
-        "c85ba8bed7f404993f9762f9c0c769efedf84ed1c38f34b40236f852c65e81c9"
+        "840b90eb8dec0d8d581d45c62eef1114038635784584266d9ed3cfbbf49eaeeb"
        ],
        [
         "schema_version",
@@ -38445,7 +40564,7 @@
      "etype": null,
      "facts": [
       {
-       "asserted_at": 1793381798.534273,
+       "asserted_at": 1793382957.3565261,
        "attribute": "color",
        "confidence": 0.8,
        "history_available": false,
@@ -38453,7 +40572,7 @@
        "value": "blue"
       }
      ],
-     "first_seen": 1793381798.539194,
+     "first_seen": 1793382957.3613553,
      "flags": [
       {
        "kind": "unattributed"
@@ -38471,24 +40590,36 @@
         "relation": "related-to",
         "tag": "INFERRED",
         "target": "Beta"
+       },
+       {
+        "confidence": 0.8,
+        "derived": false,
+        "relation": "related-to",
+        "tag": "INFERRED",
+        "target": "Delta"
        }
       ]
      },
      "timeline": [
       {
        "kind": "edge-asserted",
+       "text": "Alpha related-to Delta",
+       "ts": 1793382957.3816965
+      },
+      {
+       "kind": "edge-asserted",
        "text": "Alpha related-to Beta",
-       "ts": 1793381798.5491378
+       "ts": 1793382957.3716536
       },
       {
        "kind": "entity-created",
        "text": "\u201cAlpha\u201d first seen",
-       "ts": 1793381798.539194
+       "ts": 1793382957.3613553
       },
       {
        "kind": "fact-stamped",
        "text": "color = blue",
-       "ts": 1793381798.534273
+       "ts": 1793382957.3565261
       }
      ],
      "world_facts": []
@@ -38559,7 +40690,7 @@
        "bigint",
        1,
        1,
-       2
+       4
       ],
       [
        "public",
@@ -38567,7 +40698,7 @@
        "bigint",
        1,
        1,
-       3
+       4
       ],
       [
        "public",
@@ -38694,8 +40825,8 @@
         null,
         "<clock>",
         null,
-        1793381798.5491378,
-        1793381798.5491378,
+        1793382957.3716536,
+        1793382957.3716536,
         null,
         null,
         "legacy",
@@ -38711,8 +40842,42 @@
         null,
         "<clock>",
         null,
-        1793381798.5544412,
-        1793381798.5544412,
+        1793382957.3770065,
+        1793382957.3770065,
+        null,
+        null,
+        "legacy",
+        null,
+        1
+       ],
+       [
+        3,
+        1,
+        "related-to",
+        4,
+        0.8,
+        null,
+        "<clock>",
+        null,
+        1793382957.3816965,
+        1793382957.3816965,
+        null,
+        null,
+        "legacy",
+        null,
+        1
+       ],
+       [
+        4,
+        4,
+        "related-to",
+        3,
+        0.8,
+        null,
+        "<clock>",
+        null,
+        1793382957.3847702,
+        1793382957.3847702,
         null,
         null,
         "legacy",
@@ -38748,6 +40913,13 @@
         3,
         "gamma",
         "Gamma",
+        null,
+        "<clock>"
+       ],
+       [
+        4,
+        "delta",
+        "Delta",
         null,
         "<clock>"
        ]
@@ -38950,13 +41122,13 @@
        [
         "curation_listing_spelling_v2",
         {
-         "at": 1793381792.2062488,
+         "at": 1793382956.987372,
          "copied": 0
         }
        ],
        [
         "dream_ack_secret_v1",
-        "c85ba8bed7f404993f9762f9c0c769efedf84ed1c38f34b40236f852c65e81c9"
+        "840b90eb8dec0d8d581d45c62eef1114038635784584266d9ed3cfbbf49eaeeb"
        ],
        [
         "schema_version",
@@ -39273,7 +41445,7 @@
        "bigint",
        1,
        1,
-       2
+       4
       ],
       [
        "public",
@@ -39281,7 +41453,7 @@
        "bigint",
        1,
        1,
-       3
+       4
       ],
       [
        "public",
@@ -39408,8 +41580,8 @@
         null,
         "<clock>",
         null,
-        1793381798.5491378,
-        1793381798.5491378,
+        1793382957.3716536,
+        1793382957.3716536,
         null,
         null,
         "legacy",
@@ -39425,8 +41597,42 @@
         null,
         "<clock>",
         null,
-        1793381798.5544412,
-        1793381798.5544412,
+        1793382957.3770065,
+        1793382957.3770065,
+        null,
+        null,
+        "legacy",
+        null,
+        1
+       ],
+       [
+        3,
+        1,
+        "related-to",
+        4,
+        0.8,
+        null,
+        "<clock>",
+        null,
+        1793382957.3816965,
+        1793382957.3816965,
+        null,
+        null,
+        "legacy",
+        null,
+        1
+       ],
+       [
+        4,
+        4,
+        "related-to",
+        3,
+        0.8,
+        null,
+        "<clock>",
+        null,
+        1793382957.3847702,
+        1793382957.3847702,
         null,
         null,
         "legacy",
@@ -39462,6 +41668,13 @@
         3,
         "gamma",
         "Gamma",
+        null,
+        "<clock>"
+       ],
+       [
+        4,
+        "delta",
+        "Delta",
         null,
         "<clock>"
        ]
@@ -39664,13 +41877,13 @@
        [
         "curation_listing_spelling_v2",
         {
-         "at": 1793381792.2062488,
+         "at": 1793382956.987372,
          "copied": 0
         }
        ],
        [
         "dream_ack_secret_v1",
-        "c85ba8bed7f404993f9762f9c0c769efedf84ed1c38f34b40236f852c65e81c9"
+        "840b90eb8dec0d8d581d45c62eef1114038635784584266d9ed3cfbbf49eaeeb"
        ],
        [
         "schema_version",
@@ -39987,7 +42200,7 @@
        "bigint",
        1,
        1,
-       2
+       4
       ],
       [
        "public",
@@ -39995,7 +42208,7 @@
        "bigint",
        1,
        1,
-       3
+       4
       ],
       [
        "public",
@@ -40122,8 +42335,8 @@
         null,
         "<clock>",
         null,
-        1793381798.5491378,
-        1793381798.5491378,
+        1793382957.3716536,
+        1793382957.3716536,
         null,
         null,
         "legacy",
@@ -40139,8 +42352,42 @@
         null,
         "<clock>",
         null,
-        1793381798.5544412,
-        1793381798.5544412,
+        1793382957.3770065,
+        1793382957.3770065,
+        null,
+        null,
+        "legacy",
+        null,
+        1
+       ],
+       [
+        3,
+        1,
+        "related-to",
+        4,
+        0.8,
+        null,
+        "<clock>",
+        null,
+        1793382957.3816965,
+        1793382957.3816965,
+        null,
+        null,
+        "legacy",
+        null,
+        1
+       ],
+       [
+        4,
+        4,
+        "related-to",
+        3,
+        0.8,
+        null,
+        "<clock>",
+        null,
+        1793382957.3847702,
+        1793382957.3847702,
         null,
         null,
         "legacy",
@@ -40176,6 +42423,13 @@
         3,
         "gamma",
         "Gamma",
+        null,
+        "<clock>"
+       ],
+       [
+        4,
+        "delta",
+        "Delta",
         null,
         "<clock>"
        ]
@@ -40378,13 +42632,13 @@
        [
         "curation_listing_spelling_v2",
         {
-         "at": 1793381792.2062488,
+         "at": 1793382956.987372,
          "copied": 0
         }
        ],
        [
         "dream_ack_secret_v1",
-        "c85ba8bed7f404993f9762f9c0c769efedf84ed1c38f34b40236f852c65e81c9"
+        "840b90eb8dec0d8d581d45c62eef1114038635784584266d9ed3cfbbf49eaeeb"
        ],
        [
         "schema_version",
@@ -40623,12 +42877,19 @@
     "status": 200,
     "value": {
      "edge_hop": [
+      1,
       1
      ],
      "edges": [
       {
        "derived": false,
        "dst": "Beta",
+       "relation": "related-to",
+       "src": "Alpha"
+      },
+      {
+       "derived": false,
+       "dst": "Delta",
        "relation": "related-to",
        "src": "Alpha"
       }
@@ -40648,11 +42909,16 @@
       {
        "entity": "Beta",
        "facts": []
+      },
+      {
+       "entity": "Delta",
+       "facts": []
       }
      ],
      "entity_hop": {
       "Alpha": 0,
-      "Beta": 1
+      "Beta": 1,
+      "Delta": 1
      },
      "hops": 1,
      "iterations": 1,
@@ -40731,7 +42997,7 @@
        "bigint",
        1,
        1,
-       2
+       4
       ],
       [
        "public",
@@ -40739,7 +43005,7 @@
        "bigint",
        1,
        1,
-       3
+       4
       ],
       [
        "public",
@@ -40803,7 +43069,7 @@
        "bigint",
        1,
        1,
-       4
+       5
       ],
       [
        "public",
@@ -40866,8 +43132,8 @@
         null,
         "<clock>",
         null,
-        1793381798.5491378,
-        1793381798.5491378,
+        1793382957.3716536,
+        1793382957.3716536,
         null,
         null,
         "legacy",
@@ -40883,8 +43149,42 @@
         null,
         "<clock>",
         null,
-        1793381798.5544412,
-        1793381798.5544412,
+        1793382957.3770065,
+        1793382957.3770065,
+        null,
+        null,
+        "legacy",
+        null,
+        1
+       ],
+       [
+        3,
+        1,
+        "related-to",
+        4,
+        0.8,
+        null,
+        "<clock>",
+        null,
+        1793382957.3816965,
+        1793382957.3816965,
+        null,
+        null,
+        "legacy",
+        null,
+        1
+       ],
+       [
+        4,
+        4,
+        "related-to",
+        3,
+        0.8,
+        null,
+        "<clock>",
+        null,
+        1793382957.3847702,
+        1793382957.3847702,
         null,
         null,
         "legacy",
@@ -40920,6 +43220,13 @@
         3,
         "gamma",
         "Gamma",
+        null,
+        "<clock>"
+       ],
+       [
+        4,
+        "delta",
+        "Delta",
         null,
         "<clock>"
        ]
@@ -41122,13 +43429,13 @@
        [
         "curation_listing_spelling_v2",
         {
-         "at": 1793381792.2062488,
+         "at": 1793382956.987372,
          "copied": 0
         }
        ],
        [
         "dream_ack_secret_v1",
-        "c85ba8bed7f404993f9762f9c0c769efedf84ed1c38f34b40236f852c65e81c9"
+        "840b90eb8dec0d8d581d45c62eef1114038635784584266d9ed3cfbbf49eaeeb"
        ],
        [
         "schema_version",
@@ -41367,12 +43674,19 @@
     "status": 200,
     "value": {
      "edge_hop": [
+      1,
       1
      ],
      "edges": [
       {
        "derived": false,
        "dst": "Beta",
+       "relation": "related-to",
+       "src": "Alpha"
+      },
+      {
+       "derived": false,
+       "dst": "Delta",
        "relation": "related-to",
        "src": "Alpha"
       }
@@ -41392,11 +43706,16 @@
       {
        "entity": "Beta",
        "facts": []
+      },
+      {
+       "entity": "Delta",
+       "facts": []
       }
      ],
      "entity_hop": {
       "Alpha": 0,
-      "Beta": 1
+      "Beta": 1,
+      "Delta": 1
      },
      "hops": 1,
      "iterations": 1,
@@ -41475,7 +43794,7 @@
        "bigint",
        1,
        1,
-       2
+       4
       ],
       [
        "public",
@@ -41483,7 +43802,7 @@
        "bigint",
        1,
        1,
-       3
+       4
       ],
       [
        "public",
@@ -41547,7 +43866,7 @@
        "bigint",
        1,
        1,
-       6
+       8
       ],
       [
        "public",
@@ -41610,8 +43929,8 @@
         null,
         "<clock>",
         null,
-        1793381798.5491378,
-        1793381798.5491378,
+        1793382957.3716536,
+        1793382957.3716536,
         null,
         null,
         "legacy",
@@ -41627,8 +43946,42 @@
         null,
         "<clock>",
         null,
-        1793381798.5544412,
-        1793381798.5544412,
+        1793382957.3770065,
+        1793382957.3770065,
+        null,
+        null,
+        "legacy",
+        null,
+        1
+       ],
+       [
+        3,
+        1,
+        "related-to",
+        4,
+        0.8,
+        null,
+        "<clock>",
+        null,
+        1793382957.3816965,
+        1793382957.3816965,
+        null,
+        null,
+        "legacy",
+        null,
+        1
+       ],
+       [
+        4,
+        4,
+        "related-to",
+        3,
+        0.8,
+        null,
+        "<clock>",
+        null,
+        1793382957.3847702,
+        1793382957.3847702,
         null,
         null,
         "legacy",
@@ -41664,6 +44017,13 @@
         3,
         "gamma",
         "Gamma",
+        null,
+        "<clock>"
+       ],
+       [
+        4,
+        "delta",
+        "Delta",
         null,
         "<clock>"
        ]
@@ -41866,13 +44226,13 @@
        [
         "curation_listing_spelling_v2",
         {
-         "at": 1793381792.2062488,
+         "at": 1793382956.987372,
          "copied": 0
         }
        ],
        [
         "dream_ack_secret_v1",
-        "c85ba8bed7f404993f9762f9c0c769efedf84ed1c38f34b40236f852c65e81c9"
+        "840b90eb8dec0d8d581d45c62eef1114038635784584266d9ed3cfbbf49eaeeb"
        ],
        [
         "schema_version",
@@ -42113,8 +44473,8 @@
      "backlog": 0,
      "deep_dream": {
       "last_apply_at": null,
-      "new_entities": 3,
-      "reason": "never deep-dreamed (3 entities)",
+      "new_entities": 4,
+      "reason": "never deep-dreamed (4 entities)",
       "recommended": true
      },
      "digests": {
@@ -42325,7 +44685,7 @@
        "bigint",
        1,
        1,
-       2
+       4
       ],
       [
        "public",
@@ -42333,7 +44693,7 @@
        "bigint",
        1,
        1,
-       3
+       4
       ],
       [
        "public",
@@ -42397,7 +44757,7 @@
        "bigint",
        1,
        1,
-       6
+       8
       ],
       [
        "public",
@@ -42460,8 +44820,8 @@
         null,
         "<clock>",
         null,
-        1793381798.5491378,
-        1793381798.5491378,
+        1793382957.3716536,
+        1793382957.3716536,
         null,
         null,
         "legacy",
@@ -42477,8 +44837,42 @@
         null,
         "<clock>",
         null,
-        1793381798.5544412,
-        1793381798.5544412,
+        1793382957.3770065,
+        1793382957.3770065,
+        null,
+        null,
+        "legacy",
+        null,
+        1
+       ],
+       [
+        3,
+        1,
+        "related-to",
+        4,
+        0.8,
+        null,
+        "<clock>",
+        null,
+        1793382957.3816965,
+        1793382957.3816965,
+        null,
+        null,
+        "legacy",
+        null,
+        1
+       ],
+       [
+        4,
+        4,
+        "related-to",
+        3,
+        0.8,
+        null,
+        "<clock>",
+        null,
+        1793382957.3847702,
+        1793382957.3847702,
         null,
         null,
         "legacy",
@@ -42514,6 +44908,13 @@
         3,
         "gamma",
         "Gamma",
+        null,
+        "<clock>"
+       ],
+       [
+        4,
+        "delta",
+        "Delta",
         null,
         "<clock>"
        ]
@@ -42716,13 +45117,13 @@
        [
         "curation_listing_spelling_v2",
         {
-         "at": 1793381792.2062488,
+         "at": 1793382956.987372,
          "copied": 0
         }
        ],
        [
         "dream_ack_secret_v1",
-        "c85ba8bed7f404993f9762f9c0c769efedf84ed1c38f34b40236f852c65e81c9"
+        "840b90eb8dec0d8d581d45c62eef1114038635784584266d9ed3cfbbf49eaeeb"
        ],
        [
         "schema_version",
