@@ -351,6 +351,82 @@ def test_late_adapter_feeds_the_channel_inbox(monkeypatch):
     assert "hello" in seen["event"].content
 
 
+def _saved_address(path, **binding):
+    from tests.test_coordination_adapter import _secure_state
+    path.write_text(json.dumps({
+        "bank_url": "http://127.0.0.1:8099", "agent_id": "agent-old",
+        "credential": "old-key", "version": 2, **binding}))
+    _secure_state(path)
+    return path.read_bytes()
+
+
+def test_a_login_moved_to_another_principal_gets_a_fresh_board_address(
+        monkeypatch, tmp_path, capsys):
+    """2026-10-30: a session saved its board address under one login, then
+    the client was moved to a per-machine login (another principal, same
+    bank). Every start refused the saved address and the session ran
+    memory-only for its whole life. It now registers a fresh address and
+    its board writes go out on it."""
+    daemon = Daemon()
+    daemon.up = True
+    state = tmp_path / "agent-state.json"
+    original = _saved_address(state, bank_id=BANK, principal="shared-login")
+    seen = {}
+
+    async def driver(handler, calls, inbox):
+        seen["headers"], _ = await _until_registered(handler, calls)
+
+    _board_session(monkeypatch, daemon, driver=driver, state_path=state)
+    assert seen["headers"]["X-PL-Agent"] == "agent-late"
+    assert daemon.calls.count("register") == 1
+    assert json.loads(state.read_text())["principal"] == "claude-code"
+    assert state.with_name(state.name + ".stale").read_bytes() == original
+    err = capsys.readouterr().err
+    assert "coordination unavailable" not in err
+    assert "belongs to another login on this bank" in err
+
+
+def test_a_saved_address_from_another_bank_is_kept_and_the_cause_named(
+        monkeypatch, tmp_path, capsys):
+    """The near miss: the endpoint now serves a different bank, which a
+    fresh address would not fix. The state is kept, nothing registers, and
+    the startup line names that cause and its fix instead of a generic
+    checklist."""
+    daemon = Daemon()
+    daemon.up = True
+    state = tmp_path / "agent-state.json"
+    original = _saved_address(state, bank_id="00000000-0000-4000-8000-000000000002",
+                              principal="claude-code")
+    seen = {}
+
+    async def driver(handler, calls, inbox):
+        await handler(None, _update())
+        seen["headers"] = calls[-1]["headers"]
+
+    _board_session(monkeypatch, daemon, driver=driver, state_path=state)
+    assert "X-PL-Agent" not in seen["headers"]
+    assert "register" not in daemon.calls
+    assert state.read_bytes() == original
+    assert not state.with_name(state.name + ".stale").exists()
+    err = capsys.readouterr().err
+    assert "coordination unavailable; memory proxy remains active" in err
+    assert "is bound to a different bank than this daemon serves" in err
+    assert str(state) in err
+
+
+def test_the_generic_unavailable_line_is_kept_for_other_causes(capsys):
+    """The near miss for the cause line: any other refusal keeps the
+    existing checklist, which names no bank."""
+    from pseudolife_memory.coordination_adapter import AdapterError
+    shim._report_coordination_unavailable(
+        "state.json", AdapterError("refused", status=401, code="unauthorized"))
+    shim._report_coordination_unavailable(None)
+    err = capsys.readouterr().err
+    assert err.count("Check the daemon's coordination setting, authentication and "
+                     "private adapter state") == 2
+    assert "different bank" not in err
+
+
 def test_retry_waits_out_the_attachment_its_cancelled_startup_left(
         monkeypatch, tmp_path):
     """With a session state file the startup attempt registers, saves the

@@ -309,6 +309,25 @@ fn bound_headers(
     Ok(headers)
 }
 
+/// Move a state file whose address cannot be resumed aside under a `.stale`
+/// suffix, so the path is free for a fresh identity and the old one stays
+/// available for diagnosis (Python `_retire_stale_state`).
+async fn retire_stale(path: &std::path::Path) -> Result<(), Failure> {
+    let stale = path.with_file_name(format!(
+        "{}.stale",
+        path.file_name()
+            .ok_or(Failure::local("invalid_state"))?
+            .to_string_lossy()
+    ));
+    let current = path.to_path_buf();
+    state::offload(path, move || {
+        state::open(&current)?;
+        std::fs::rename(&current, stale).map_err(|_| "state_unavailable")
+    })
+    .await
+    .map_err(Failure::local)
+}
+
 impl Adapter {
     pub async fn enter(config: Config) -> Result<Arc<Self>, Failure> {
         let client = Client::builder()
@@ -394,6 +413,22 @@ impl Adapter {
                     }
                 }
                 Some(version) if version.as_u64() == Some(2) => {
+                    if context.principal_changed(&saved)
+                        && reservation.is_none()
+                        && loaded_identity.is_some()
+                        && let Some(path) = &config.state
+                    {
+                        // The saved address was bound under the client's
+                        // previous login on this same bank. Its key is never
+                        // sent under the new one: it is set aside and a fresh
+                        // address registered, as a new session would. A
+                        // different bank still refuses below.
+                        retire_stale(path).await?;
+                        crate::stderrln!(
+                            "pseudolife-mcp: the saved coordination address belongs to another login on this bank; registering a new one under the current login (old state kept with a .stale suffix)."
+                        );
+                        return Box::pin(Self::enter(config)).await;
+                    }
                     context.check_binding(&saved).map_err(Failure::local)?
                 }
                 _ => return Err(Failure::local("invalid_state")),
@@ -506,19 +541,7 @@ impl Adapter {
             && was_saved
             && let Some(path) = &config.state
         {
-            let stale = path.with_file_name(format!(
-                "{}.stale",
-                path.file_name()
-                    .ok_or(Failure::local("invalid_state"))?
-                    .to_string_lossy()
-            ));
-            let current = path.clone();
-            state::offload(path, move || {
-                state::open(&current)?;
-                std::fs::rename(&current, stale).map_err(|_| "state_unavailable")
-            })
-            .await
-            .map_err(Failure::local)?;
+            retire_stale(path).await?;
             crate::stderrln!(
                 "pseudolife-mcp: the saved coordination address is no longer valid on this bank; registering a new one (old state kept with a .stale suffix)."
             );

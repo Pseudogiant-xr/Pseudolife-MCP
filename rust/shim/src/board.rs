@@ -311,7 +311,7 @@ impl Board {
                         status.checkin = true;
                     }
                     Ok(Err(failure)) if !failure.transient() => {
-                        board.report_unavailable();
+                        board.report_unavailable(failure.code);
                     }
                     _ => {
                         board.begin_retry(false).await;
@@ -324,13 +324,22 @@ impl Board {
         }
         board
     }
-    fn report_unavailable(&self) {
+    fn report_unavailable(&self, code: &str) {
         let where_state = self
             .options
             .state
             .as_ref()
             .map(|path| format!(" ({})", path.display()))
             .unwrap_or_default();
+        if code == "bank_identity_mismatch" {
+            // A login change on the same bank re-registers at startup, so what
+            // still lands here is a saved address for another bank (or a legacy
+            // record the bank would not prove), which a retry cannot change.
+            crate::stderrln!(
+                "pseudolife-mcp: coordination unavailable; memory proxy remains active. The saved board address{where_state} is bound to a different bank than this daemon serves, or the bank did not prove it, so it was kept and not used. Point this client back at that bank, or move the file aside and restart the session to register a new address on this one."
+            );
+            return;
+        }
         crate::stderrln!(
             "pseudolife-mcp: coordination unavailable; memory proxy remains active. Check the daemon's coordination setting, authentication and private adapter state{where_state}."
         );
@@ -558,7 +567,7 @@ impl Board {
                         if board.closing.load(Ordering::Acquire) { adapter.close().await; return; }
                         let mut status = board.status.lock().await; status.mode = Mode::Adapter(adapter); status.note = Some(policy::REGISTERED);crate::stderrln!("pseudolife-mcp: coordination registered after a startup delay; board tools are available."); return;
                     }
-                    Ok(Err(failure)) if !failure.transient() => { let mut status = board.status.lock().await; status.mode = Mode::Stopped; status.note = Some(policy::STOPPED);board.report_unavailable(); return; }
+                    Ok(Err(failure)) if !failure.transient() => { let mut status = board.status.lock().await; status.mode = Mode::Stopped; status.note = Some(policy::STOPPED);board.report_unavailable(failure.code); return; }
                     _ => {}
                 }
             }

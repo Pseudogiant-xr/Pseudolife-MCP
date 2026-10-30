@@ -1317,8 +1317,19 @@ def _serves_many_conversations() -> bool:
             or shared not in {"", "0", "false", "no", "off"})
 
 
-def _report_coordination_unavailable(state_path) -> None:
+def _report_coordination_unavailable(state_path, exc: BaseException | None = None) -> None:
     where = f" ({state_path})" if state_path else ""
+    if getattr(exc, "code", None) == "bank_identity_mismatch":
+        # A login change on the same bank re-registers at startup, so what
+        # still lands here is a saved address for another bank (or a legacy
+        # record the bank would not prove), which a retry cannot change.
+        print("pseudolife-mcp: coordination unavailable; memory proxy remains active. "
+              f"The saved board address{where} is bound to a different bank than this "
+              "daemon serves, or the bank did not prove it, so it was kept and not used. "
+              "Point this client back at that bank, or move the file aside and restart "
+              "the session to register a new address on this one.",
+              file=sys.stderr)
+        return
     print("pseudolife-mcp: coordination unavailable; memory proxy remains active. "
           "Check the daemon's coordination setting, authentication and "
           f"private adapter state{where}.",
@@ -1489,7 +1500,7 @@ class _LateBoardAdapter:
                 self._stopped = True
                 self._note = _BOARD_STOPPED_NOTE
                 self._settled.set()
-                _report_coordination_unavailable(self._state_path)
+                _report_coordination_unavailable(self._state_path, exc)
                 return
             self._adapter = adapter
             self._note = _BOARD_REGISTERED_NOTE
@@ -2466,7 +2477,7 @@ async def _run_session_proxy(url: str, token: str | None, session_uid: str, *,
                               "proxy remains active and registration is retried in the "
                               "background.", file=sys.stderr)
                     else:
-                        _report_coordination_unavailable(state_path)
+                        _report_coordination_unavailable(state_path, exc)
         if adapter is not None:
             kwargs["agent_headers"] = adapter.instance_headers
             kwargs["coordination_adapter"] = adapter

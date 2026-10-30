@@ -38,6 +38,15 @@ impl Context {
             Err("bank_identity_mismatch")
         }
     }
+    /// Whether a bound record names this bank under another principal: the
+    /// client's login changed while the endpoint serves the same bank. Only a
+    /// start acts on it, by registering a fresh address (Python
+    /// `principal_changed`); a running session's checks still refuse.
+    pub fn principal_changed(&self, state: &Value) -> bool {
+        state.get("version").and_then(Value::as_u64) == Some(2)
+            && state.get("bank_id").and_then(Value::as_str) == Some(&self.bank_id)
+            && state.get("principal").and_then(Value::as_str) != Some(&self.principal)
+    }
     pub fn encoded_principal(&self) -> String {
         let mut value = String::new();
         for byte in self.principal.bytes() {

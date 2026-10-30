@@ -173,6 +173,15 @@ async def fetch_context(client, url: str, snapshot, *, identity=None,
     return context
 
 
+def principal_changed(state: dict, context: dict) -> bool:
+    """Whether a bound record names this bank under another principal: the
+    client's login changed (a per-machine token replaced a shared one) while
+    the endpoint still serves the same bank. Only a start may act on it, by
+    registering a fresh address; a running session's checks still refuse."""
+    return (state.get("version") == 2 and state.get("bank_id") == context["bank_id"]
+            and state.get("principal") != context["principal"])
+
+
 def check_binding(state: dict, context: dict) -> None:
     from .coordination_adapter import AdapterError
 

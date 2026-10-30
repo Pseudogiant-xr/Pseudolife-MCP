@@ -296,9 +296,10 @@ def test_running_adapter_and_restart_keep_mailbox_after_rotation(tmp_path):
     asyncio.run(run())
 
 
-@pytest.mark.parametrize("field,value", [("bank_id", "22222222-2222-4222-8222-222222222222"),
-                                         ("principal", "other-user")])
-def test_context_mismatch_never_transmits_key_or_replaces_state(tmp_path, field, value):
+def test_bank_mismatch_never_transmits_key_or_replaces_state(tmp_path, capsys):
+    """A saved address bound to another bank is never used or replaced: the
+    endpoint now serves a different bank, which a fresh address would not
+    fix. The near miss of the principal-change case below."""
     async def run():
         provider, bank = Provider(), Bank()
         path = tmp_path / "state.json"
@@ -306,15 +307,106 @@ def test_context_mismatch_never_transmits_key_or_replaces_state(tmp_path, field,
         async with client, first:
             pass
         original = path.read_bytes()
-        setattr(bank, field, value)
+        bank.bank_id = "22222222-2222-4222-8222-222222222222"
         bank.calls.clear()
         client, resumed = instance(bank, provider, path)
         async with client:
-            with pytest.raises(AdapterError):
+            with pytest.raises(AdapterError) as caught:
                 await resumed.__aenter__()
+        assert caught.value.code == "bank_identity_mismatch"
         assert path.read_bytes() == original
+        assert not path.with_name(path.name + ".stale").exists()
         assert bank.registered == 1
         assert all("x-pl-agent-key" not in headers for _, _, headers in bank.calls)
+    asyncio.run(run())
+    assert ".stale" not in capsys.readouterr().err
+
+
+def test_principal_change_on_the_same_bank_retires_and_registers_fresh(tmp_path, capsys):
+    """2026-10-30: a client's login moved to a per-machine token (another
+    principal on the same bank). The saved address, bound to the old
+    principal, was refused as ``bank_identity_mismatch`` on every start, so
+    the session never reached the board. The same bank under a new login
+    now gets a fresh address, as a new session would, and the old state is
+    kept beside it; the old address's key is never sent."""
+    async def run():
+        provider, bank = Provider(), Bank()
+        path = tmp_path / "state.json"
+        client, first = instance(bank, provider, path)
+        async with client, first:
+            old = first.instance_headers["X-PL-Agent"]
+        original = path.read_bytes()
+        bank.principal = "machine-login"
+        bank.token = "fixture-machine"
+        provider.rotate(bank.token)
+        bank.calls.clear()
+        client, resumed = instance(bank, provider, path)
+        async with client, resumed:
+            headers = resumed.instance_headers
+            assert headers["X-PL-Agent"] == bank.agent != old
+            assert headers["X-PL-Principal"] == "machine-login"
+            # A board call on the new address goes through.
+            await resumed._heartbeat()
+        assert bank.registered == 2
+        assert all(h.get("x-pl-agent") != old for _, _, h in bank.calls)
+        register = next(i for i, (a, _, _) in enumerate(bank.calls) if a == "register")
+        assert all("x-pl-agent-key" not in h for _, _, h in bank.calls[:register])
+        state = json.loads(path.read_text())
+        assert state["agent_id"] == bank.agent and state["principal"] == "machine-login"
+        assert state["bank_id"] == bank.bank_id
+        assert path.with_name(path.name + ".stale").read_bytes() == original
+    asyncio.run(run())
+    err = capsys.readouterr().err
+    assert err.count("belongs to another login on this bank") == 1
+    assert "no longer valid on this bank" not in err
+
+
+def test_same_bank_and_principal_resume_the_saved_address_unchanged(tmp_path, capsys):
+    """The near miss: nothing changed, so the saved address is resumed as
+    it is, with no new registration and nothing retired."""
+    async def run():
+        provider, bank = Provider(), Bank()
+        path = tmp_path / "state.json"
+        client, first = instance(bank, provider, path)
+        async with client, first:
+            old = first.instance_headers["X-PL-Agent"]
+        original = path.read_bytes()
+        client, resumed = instance(bank, provider, path)
+        async with client, resumed:
+            assert resumed.instance_headers["X-PL-Agent"] == old
+        assert bank.registered == 1
+        assert path.read_bytes() == original
+        assert not path.with_name(path.name + ".stale").exists()
+    asyncio.run(run())
+    assert ".stale" not in capsys.readouterr().err
+
+
+def test_principal_change_during_legacy_migration_still_refuses(tmp_path):
+    """The near miss for unversioned state: it names no bank or principal,
+    so a context that changes between the startup check and the mailbox
+    proof is refused as before and the state is kept."""
+    async def run():
+        provider, bank = Provider(), Bank()
+        bank.agent = "a" * 32
+        path = tmp_path / "state.json"
+        path.write_text(json.dumps({"bank_url": URL, "agent_id": bank.agent,
+                                    "credential": bank.credential}))
+        _secure_state(path)
+        original = path.read_bytes()
+
+        def flip(action):
+            if action == "context":
+                bank.principal = "machine-login"
+                bank.response_hook = None
+        bank.response_hook = flip
+        client, resumed = instance(bank, provider, path)
+        async with client:
+            with pytest.raises(AdapterError, match="changed during migration") as caught:
+                await resumed.__aenter__()
+        assert caught.value.code == "bank_identity_mismatch"
+        assert path.read_bytes() == original
+        assert not path.with_name(path.name + ".stale").exists()
+        assert bank.registered == 0
     asyncio.run(run())
 
 

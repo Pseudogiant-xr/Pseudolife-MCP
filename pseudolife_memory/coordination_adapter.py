@@ -1025,7 +1025,8 @@ class CoordinationAdapter:
         self._sent_name = None
         self._save_new_identity(reservation)
 
-    def _retire_stale_state(self):
+    def _retire_stale_state(self, reason="the saved coordination address is no longer "
+                                         "valid on this bank; registering a new one"):
         """Move a state file whose address the bank no longer accepts aside
         under a ``.stale`` suffix, so the path is free for a fresh identity
         and the old one stays available for diagnosis."""
@@ -1037,8 +1038,7 @@ class CoordinationAdapter:
             os.replace(self.state_path, stale)
         except OSError:
             raise AdapterError("cannot retire stale adapter state") from None
-        print("pseudolife-mcp: the saved coordination address is no longer valid on this "
-              "bank; registering a new one (old state kept with a .stale suffix).",
+        print(f"pseudolife-mcp: {reason} (old state kept with a .stale suffix).",
               file=sys.stderr)
 
     def _discard_reservation(self, reservation):
@@ -1169,8 +1169,20 @@ class CoordinationAdapter:
                 self._check_snapshot(snapshot)
             reservation = self._load_or_reserve()
             if snapshot is not None:
-                from .coordination_identity import read_legacy, fetch_context, check_binding
+                from .coordination_identity import (
+                    read_legacy, fetch_context, check_binding, principal_changed)
 
+                if (self._identity is not None and self._loaded_state_info is not None
+                        and principal_changed(self._identity, self._context)):
+                    # The saved address was bound under the client's previous
+                    # login on this same bank. Its key is never sent under the
+                    # new one: it is set aside and a fresh address registered,
+                    # as a new session would. A different bank still refuses.
+                    self._retire_stale_state(
+                        "the saved coordination address belongs to another login on this "
+                        "bank; registering a new one under the current login")
+                    self._loaded_state_info = None
+                    reservation = self._load_or_reserve()
                 if self._identity is None and self._legacy_state_path is not None:
                     # Only the exact legacy path derived from this configured
                     # credential is eligible; never search neighboring namespaces.

@@ -959,3 +959,124 @@ async fn board_other_bank_context_answer_stops_background_delivery() {
     }
     background_check("other bank", None).await;
 }
+
+fn saved_address(
+    fixture: &Fixture,
+    path: &std::path::Path,
+    bank: &str,
+    principal: &str,
+) -> Vec<u8> {
+    let bytes = json!({"bank_url":fixture.url,"agent_id":"old-agent","credential":"fictional-old-key","version":2,"bank_id":bank,"principal":principal})
+        .to_string()
+        .into_bytes();
+    pseudolife_stdio::board::state::atomic_write(path, &bytes, None).unwrap();
+    bytes
+}
+fn stale(path: &std::path::Path) -> std::path::PathBuf {
+    path.with_file_name(format!(
+        "{}.stale",
+        path.file_name().unwrap().to_string_lossy()
+    ))
+}
+fn saved(path: &std::path::Path) -> Vec<u8> {
+    pseudolife_stdio::board::state::read(path, 16384).unwrap()
+}
+// 2026-10-30: a client's login moved to a per-machine token (another
+// principal, same bank). The saved address, bound to the old principal, was
+// refused as bank_identity_mismatch on every start, so the session never
+// reached the board. It now gets a fresh address, as a new session would;
+// the old state is kept beside it and its key is never sent.
+#[tokio::test]
+async fn board_retry_principal_change_on_the_same_bank_registers_fresh() {
+    if capture(
+        "board_retry_principal_change_on_the_same_bank_registers_fresh",
+        &[
+            "belongs to another login on this bank; registering a new one under the current login (old state kept with a .stale suffix).",
+        ],
+        &["no longer valid on this bank", "coordination unavailable"],
+    ) {
+        return;
+    }
+    let fixture = Fixture::new(0);
+    let home = Home::new();
+    let config = adapter_config(&fixture, &home);
+    let path = config.state.clone().unwrap();
+    let original = saved_address(&fixture, &path, BANK, "previous-login");
+    let provider = config.provider.clone();
+    let adapter = Adapter::enter(config).await.unwrap();
+    let snapshot = provider.snapshot().unwrap();
+    assert_eq!(
+        adapter.validated_headers(&snapshot).await.unwrap()["x-pl-agent"],
+        "fixture-agent"
+    );
+    adapter.close().await;
+    assert_eq!(fixture.count("/register"), 1);
+    assert!(
+        fixture
+            .requests
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|request| !request.headers.contains("x-pl-agent: old-agent"))
+    );
+    let state: serde_json::Value = serde_json::from_slice(&saved(&path)).unwrap();
+    assert_eq!(state["agent_id"], "fixture-agent");
+    assert_eq!(state["principal"], "fixture");
+    assert_eq!(state["bank_id"], BANK);
+    assert_eq!(saved(&stale(&path)), original);
+}
+// The near miss: nothing changed, so the saved address is resumed as it is.
+#[tokio::test]
+async fn board_retry_same_bank_and_principal_resume_the_saved_address() {
+    let fixture = Fixture::new(0);
+    let home = Home::new();
+    let config = adapter_config(&fixture, &home);
+    let path = config.state.clone().unwrap();
+    let original = saved_address(&fixture, &path, BANK, "fixture");
+    let provider = config.provider.clone();
+    let adapter = Adapter::enter(config).await.unwrap();
+    let snapshot = provider.snapshot().unwrap();
+    assert_eq!(
+        adapter.validated_headers(&snapshot).await.unwrap()["x-pl-agent"],
+        "old-agent"
+    );
+    adapter.close().await;
+    assert_eq!(fixture.count("/register"), 0);
+    assert_eq!(saved(&path), original);
+    assert!(!stale(&path).exists());
+}
+// The near miss: the endpoint now serves a different bank, which a fresh
+// address would not fix. The state is kept, nothing registers, and the
+// startup line names that cause and its fix.
+#[tokio::test]
+async fn board_retry_saved_address_from_another_bank_is_kept_and_the_cause_named() {
+    if capture(
+        "board_retry_saved_address_from_another_bank_is_kept_and_the_cause_named",
+        &[
+            "coordination unavailable; memory proxy remains active. The saved board address (",
+            "is bound to a different bank than this daemon serves",
+        ],
+        &[".stale", "Check the daemon's coordination setting"],
+    ) {
+        return;
+    }
+    let fixture = Fixture::new(0);
+    let home = Home::new();
+    let path = home.0.join("agent.json");
+    let original = saved_address(
+        &fixture,
+        &path,
+        "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+        "fixture",
+    );
+    let runtime = runtime(&fixture, false);
+    let mut options = fast(&runtime, &home, "1");
+    options.state = Some(path.clone());
+    let board = Board::attach_options(runtime.clone(), options).await;
+    let call = forward(&board, true).await;
+    assert!(!call.operation.headers.contains_key("x-pl-agent"));
+    board.close().await;
+    assert_eq!(fixture.count("/register"), 0);
+    assert_eq!(saved(&path), original);
+    assert!(!stale(&path).exists());
+}
