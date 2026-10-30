@@ -991,9 +991,9 @@ async fn board_retry_principal_change_on_the_same_bank_registers_fresh() {
     if capture(
         "board_retry_principal_change_on_the_same_bank_registers_fresh",
         &[
-            "belongs to another login on this bank; registering a new one under the current login (old state kept with a .stale suffix).",
+            "pseudolife-mcp: the daemon now maps this login to a different principal than the saved coordination address was registered under (same bank); registering a new address (old state kept with a .stale suffix; mail sent to the old address is not carried over).",
         ],
-        &["no longer valid on this bank", "coordination unavailable"],
+        &["no longer valid on this bank"],
     ) {
         return;
     }
@@ -1002,6 +1002,9 @@ async fn board_retry_principal_change_on_the_same_bank_registers_fresh() {
     let config = adapter_config(&fixture, &home);
     let path = config.state.clone().unwrap();
     let original = saved_address(&fixture, &path, BANK, "previous-login");
+    // An older retired record is replaced by this one (documented).
+    pseudolife_stdio::board::state::atomic_write(&stale(&path), b"older retired record", None)
+        .unwrap();
     let provider = config.provider.clone();
     let adapter = Adapter::enter(config).await.unwrap();
     let snapshot = provider.snapshot().unwrap();
@@ -1079,4 +1082,66 @@ async fn board_retry_saved_address_from_another_bank_is_kept_and_the_cause_named
     assert_eq!(fixture.count("/register"), 0);
     assert_eq!(saved(&path), original);
     assert!(!stale(&path).exists());
+}
+// The near miss for the principal change: a record bound to another bank is
+// refused and kept whatever its principal.
+#[tokio::test]
+async fn board_retry_bank_and_principal_both_changed_still_refuses() {
+    let fixture = Fixture::new(0);
+    let home = Home::new();
+    let config = adapter_config(&fixture, &home);
+    let path = config.state.clone().unwrap();
+    let original = saved_address(
+        &fixture,
+        &path,
+        "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+        "previous-login",
+    );
+    let failure = Adapter::enter(config).await.err().unwrap();
+    assert_eq!(failure.code, "bank_identity_mismatch");
+    assert_eq!(failure.binding, Some("bank"));
+    assert_eq!(fixture.count("/register"), 0);
+    assert_eq!(saved(&path), original);
+    assert!(!stale(&path).exists());
+}
+// Only the session's own state file is retired: a record read from a legacy
+// path is refused and kept as it is.
+#[tokio::test]
+async fn board_retry_legacy_record_naming_another_principal_is_not_retired() {
+    let fixture = Fixture::new(0);
+    let home = Home::new();
+    let mut config = adapter_config(&fixture, &home);
+    let legacy = home.0.join("legacy.json");
+    let original = saved_address(&fixture, &legacy, BANK, "previous-login");
+    config.legacy_state = Some(legacy.clone());
+    let path = config.state.clone().unwrap();
+    let failure = Adapter::enter(config).await.err().unwrap();
+    assert_eq!(failure.code, "bank_identity_mismatch");
+    assert_eq!(failure.binding, Some("principal"));
+    assert_eq!(fixture.count("/register"), 0);
+    assert_eq!(saved(&legacy), original);
+    assert!(!stale(&legacy).exists() && !stale(&path).exists());
+}
+// Codex review of 22f969dc: after a deliberate retire the session registers
+// fresh instead of importing the legacy record beside it, which was bound
+// under the previous principal too and is never proved now.
+#[tokio::test]
+async fn board_retry_retired_record_does_not_fall_back_to_the_legacy_record() {
+    let fixture = Fixture::new(0);
+    let home = Home::new();
+    let mut config = adapter_config(&fixture, &home);
+    let path = config.state.clone().unwrap();
+    let original = saved_address(&fixture, &path, BANK, "previous-login");
+    let legacy = home.0.join("legacy.json");
+    let unversioned =
+        json!({"bank_url":fixture.url,"agent_id":"old-agent","credential":"fictional-old-key"})
+            .to_string()
+            .into_bytes();
+    pseudolife_stdio::board::state::atomic_write(&legacy, &unversioned, None).unwrap();
+    config.legacy_state = Some(legacy.clone());
+    let adapter = Adapter::enter(config).await.unwrap();
+    adapter.close().await;
+    assert_eq!(fixture.count("/register"), 1);
+    assert_eq!(saved(&stale(&path)), original);
+    assert_eq!(saved(&legacy), unversioned);
 }

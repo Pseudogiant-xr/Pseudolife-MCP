@@ -307,10 +307,16 @@ pub(super) async fn probe(
             };
             let version = state.get("version");
             if version.is_some_and(is_two)
-                && (state.get("bank_id").and_then(Value::as_str) != Some(bank_id)
-                    || state.get("principal").and_then(Value::as_str) != Some(principal))
+                && state.get("bank_id").and_then(Value::as_str) != Some(bank_id)
             {
                 return "bank_identity_mismatch";
+            }
+            if version.is_some_and(is_two)
+                && state.get("principal").and_then(Value::as_str) != Some(principal)
+            {
+                // Same bank, another principal for this login: the shim
+                // registers a new address on its next start.
+                return "principal_changed";
             }
             if !matches!(version, None | Some(Value::Null)) && !version.is_some_and(is_two) {
                 return "invalid_state";

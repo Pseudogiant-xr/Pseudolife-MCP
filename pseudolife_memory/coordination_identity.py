@@ -175,11 +175,26 @@ async def fetch_context(client, url: str, snapshot, *, identity=None,
 
 def principal_changed(state: dict, context: dict) -> bool:
     """Whether a bound record names this bank under another principal: the
-    client's login changed (a per-machine token replaced a shared one) while
-    the endpoint still serves the same bank. Only a start may act on it, by
-    registering a fresh address; a running session's checks still refuse."""
+    daemon now maps this client's login to a different principal than the
+    one the address was registered under (a new per-machine token, or the
+    same bearer remapped on the daemon), while the endpoint still serves the
+    same bank. Only a start acts on it, by registering a new address (mail
+    sent to the old address is not carried over); a running session's
+    checks still refuse."""
     return (state.get("version") == 2 and state.get("bank_id") == context["bank_id"]
             and state.get("principal") != context["principal"])
+
+
+def binding_difference(state: dict, context: dict) -> str | None:
+    """Which part of a saved binding differs from the bank's answer:
+    ``"bank"`` when the bank differs (whatever the principal), ``"principal"``
+    when only the principal does, ``None`` when neither (or the record
+    names no binding to compare)."""
+    if state.get("bank_id") != context["bank_id"]:
+        return "bank"
+    if state.get("principal") != context["principal"]:
+        return "principal"
+    return None
 
 
 def check_binding(state: dict, context: dict) -> None:
@@ -187,4 +202,26 @@ def check_binding(state: dict, context: dict) -> None:
 
     if state.get("version") != 2 or any(state.get(key) != value for key, value in context.items()):
         raise AdapterError("saved mailbox belongs to a different bank or principal; state was preserved",
-                           code="bank_identity_mismatch")
+                           code="bank_identity_mismatch",
+                           binding=binding_difference(state, context)
+                           if state.get("version") == 2 else None)
+
+
+def coordination_unavailable_line(state_file, exc: BaseException | None = None) -> str:
+    """The one stderr line a shim prints when board registration stopped for
+    good. A saved address refused at startup names that file, the cause and
+    the fix; any other cause keeps the generic checklist. The Rust shim
+    prints the same text (``board::unavailable_line``)."""
+    where = f" ({state_file})" if state_file else ""
+    if getattr(exc, "code", None) == "bank_identity_mismatch":
+        # A principal change on the same bank re-registers at startup, so
+        # what still lands here is a saved address for another bank (or a
+        # legacy record the bank would not prove), which a retry cannot change.
+        return ("pseudolife-mcp: coordination unavailable; memory proxy remains active. "
+                f"The saved board address{where} is bound to a different bank than this "
+                "daemon serves, or the bank did not prove it, so it was kept and not used. "
+                "Point this client back at that bank, or move the file aside and restart "
+                "the session to register a new address on this one.")
+    return ("pseudolife-mcp: coordination unavailable; memory proxy remains active. "
+            "Check the daemon's coordination setting, authentication and "
+            f"private adapter state{where}.")

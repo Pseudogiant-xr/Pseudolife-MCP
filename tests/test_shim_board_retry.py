@@ -383,7 +383,7 @@ def test_a_login_moved_to_another_principal_gets_a_fresh_board_address(
     assert state.with_name(state.name + ".stale").read_bytes() == original
     err = capsys.readouterr().err
     assert "coordination unavailable" not in err
-    assert "belongs to another login on this bank" in err
+    assert "now maps this login to a different principal" in err
 
 
 def test_a_saved_address_from_another_bank_is_kept_and_the_cause_named(

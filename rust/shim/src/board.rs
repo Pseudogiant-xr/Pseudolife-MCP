@@ -325,25 +325,33 @@ impl Board {
         board
     }
     fn report_unavailable(&self, code: &str) {
-        let where_state = self
-            .options
-            .state
-            .as_ref()
-            .map(|path| format!(" ({})", path.display()))
-            .unwrap_or_default();
-        if code == "bank_identity_mismatch" {
-            // A login change on the same bank re-registers at startup, so what
-            // still lands here is a saved address for another bank (or a legacy
-            // record the bank would not prove), which a retry cannot change.
-            crate::stderrln!(
-                "pseudolife-mcp: coordination unavailable; memory proxy remains active. The saved board address{where_state} is bound to a different bank than this daemon serves, or the bank did not prove it, so it was kept and not used. Point this client back at that bank, or move the file aside and restart the session to register a new address on this one."
-            );
-            return;
-        }
-        crate::stderrln!(
-            "pseudolife-mcp: coordination unavailable; memory proxy remains active. Check the daemon's coordination setting, authentication and private adapter state{where_state}."
+        // This shim reads no legacy record, so the state file the adapter was
+        // configured with is the one any refusal is about.
+        let line = unavailable_line(code, self.config(None, None).state.as_deref());
+        crate::stderrln!("{line}");
+    }
+}
+/// The one stderr line printed when board registration stopped for good
+/// (Python `coordination_unavailable_line`, same text). A saved address
+/// refused at startup names that file, the cause and the fix; any other
+/// cause keeps the generic checklist.
+fn unavailable_line(code: &str, state: Option<&std::path::Path>) -> String {
+    let where_state = state
+        .map(|path| format!(" ({})", path.display()))
+        .unwrap_or_default();
+    if code == "bank_identity_mismatch" {
+        // A principal change on the same bank re-registers at startup, so
+        // what still lands here is a saved address for another bank (or a
+        // legacy record the bank would not prove), which a retry cannot change.
+        return format!(
+            "pseudolife-mcp: coordination unavailable; memory proxy remains active. The saved board address{where_state} is bound to a different bank than this daemon serves, or the bank did not prove it, so it was kept and not used. Point this client back at that bank, or move the file aside and restart the session to register a new address on this one."
         );
     }
+    format!(
+        "pseudolife-mcp: coordination unavailable; memory proxy remains active. Check the daemon's coordination setting, authentication and private adapter state{where_state}."
+    )
+}
+impl Board {
     async fn configure_registry(&self) {
         #[cfg(feature = "codex-delivery")]
         if self.options.wake {
@@ -667,7 +675,7 @@ impl Board {
                     return Err("Coordination: session is closing.".into());
                 }
                 let validation = tokio::select! {_ = self.cancel.cancelled() => return Err("Coordination: session is closing.".into()), value = tokio::time::timeout(self.options.timing.validation, adapter.validated_headers(snapshot)) => value};
-                let (code, status) = match validation {
+                let (code, status, binding) = match validation {
                     Ok(Ok(_)) => {
                         // A completed check is fenced by closing too.
                         if self.closing.load(Ordering::Acquire) {
@@ -676,8 +684,8 @@ impl Board {
                         entry.failure_hint.clear();
                         return Ok(adapter);
                     }
-                    Ok(Err(failure)) => (failure.code, failure.status),
-                    Err(_) => ("timeout", None),
+                    Ok(Err(failure)) => (failure.code, failure.status, failure.binding),
+                    Err(_) => ("timeout", None, None),
                 };
                 let transient = matches!(
                     code,
@@ -691,7 +699,7 @@ impl Board {
                 if transient && attempt == 0 && !self.closing.load(Ordering::Acquire) {
                     continue;
                 }
-                entry.failure_hint = policy::registry_failure_hint(code, status, true);
+                entry.failure_hint = policy::registry_failure_hint(code, status, true, binding);
                 return Err(entry.failure_hint.clone());
             }
             unreachable!("the second attempt always returns");
@@ -742,11 +750,12 @@ impl Board {
         }
         let doorbell = self.doorbell.lock().await.clone();
         config.ring = doorbell.is_some();
+        let state_file = config.state.clone();
         let result = tokio::select! {_=self.cancel.cancelled()=>return Err("Coordination: session is closing.".into()),result=tokio::time::timeout(self.options.timing.startup,Adapter::enter(config))=>result};
-        let (failure_code, failure_status) = match &result {
-            Ok(Err(failure)) => (failure.code, failure.status),
-            Ok(Ok(_)) => ("", None),
-            Err(_) => ("timeout", None),
+        let (failure_code, failure_status, failure_binding) = match &result {
+            Ok(Err(failure)) => (failure.code, failure.status, failure.binding),
+            Ok(Ok(_)) => ("", None, None),
+            Err(_) => ("timeout", None, None),
         };
         if let Ok(Ok(adapter)) = result {
             if self.closing.load(Ordering::Acquire) {
@@ -785,11 +794,16 @@ impl Board {
                 delivery.close().await;
             }
             entry.retry = Some((snapshot.generation().clone(), tokio::time::Instant::now()));
-            entry.failure_hint = policy::registry_failure_hint(failure_code, failure_status, false);
+            entry.failure_hint =
+                policy::registry_failure_hint(failure_code, failure_status, false, failure_binding);
             if !self.registry_failure_reported.swap(true, Ordering::AcqRel) {
-                crate::stderrln!(
-                    "pseudolife-mcp: coordination unavailable; memory proxy remains active. Check the daemon's coordination setting, authentication and private adapter state."
-                );
+                // Name the saved file only for a refusal about one (Python's
+                // registry line; this shim reads no legacy record).
+                let state = (failure_code == "bank_identity_mismatch")
+                    .then_some(state_file.as_deref())
+                    .flatten();
+                let line = unavailable_line(failure_code, state);
+                crate::stderrln!("{line}");
             }
             Err(entry.failure_hint.clone())
         }
@@ -914,6 +928,7 @@ impl Board {
                             failure.code,
                             failure.status,
                             true,
+                            failure.binding,
                         ));
                     }
                     adapter = None;

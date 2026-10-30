@@ -83,6 +83,51 @@ def test_instance_probe_is_read_only_and_redacted(tmp_path, monkeypatch, status,
     assert "fixture-secret" not in result and "fixture-key" not in result
 
 
+_SAVED_BANK = "00000000-0000-4000-8000-000000000001"
+_OTHER_BANK = "00000000-0000-4000-8000-000000000002"
+
+
+@pytest.mark.parametrize("bank_id,principal,expected", [
+    # The daemon maps this login to another principal on the same bank.
+    (_SAVED_BANK, "machine-login", "principal_changed"),
+    # Near misses: another bank, whatever the principal, is a bank change.
+    (_OTHER_BANK, "default", "bank_identity_mismatch"),
+    (_OTHER_BANK, "machine-login", "bank_identity_mismatch"),
+])
+def test_registration_tells_a_principal_change_from_a_bank_change(
+        tmp_path, monkeypatch, bank_id, principal, expected):
+    from pseudolife_memory import coordination_identity
+    monkeypatch.setattr(coordination_identity, "read_legacy", lambda path, url: {
+        "version": 2, "bank_id": _SAVED_BANK, "principal": "default",
+        "agent_id": "a" * 32, "credential": "fixture-key"})
+    state = tmp_path / "state.json"
+    state.write_text("fixture", encoding="utf-8")
+    transport = httpx.MockTransport(lambda request: httpx.Response(
+        200, json={"bank_id": bank_id, "principal": principal, "proof": "f" * 64}))
+
+    async def drive():
+        async with httpx.AsyncClient(transport=transport) as client:
+            return await doctor_cli.probe_registration(
+                "http://fixture", "fixture-bearer", state, 1, client=client)
+
+    assert asyncio.run(drive()) == expected
+
+
+def test_a_principal_change_says_the_shim_registers_a_new_address():
+    result = doctor_cli.coordination_snapshot(
+        {"status": "ok"}, {"state": "on"}, {}, "generic", "principal_changed")
+    assert result["registration"] == "principal_changed"
+    assert result["next"][0] == (
+        "The daemon now maps this login to a different principal than the saved address "
+        "was registered under (same bank); the shim registers a new address on its next "
+        "start (mail sent to the old address is not carried over), so nothing is needed, "
+        "or restart the session to do it now.")
+    # The near miss: a bank change keeps the preserve-the-file advice.
+    bank = doctor_cli.coordination_snapshot(
+        {"status": "ok"}, {"state": "on"}, {}, "generic", "bank_identity_mismatch")
+    assert bank["next"][0].startswith("Preserve the saved instance file")
+
+
 def test_missing_state_does_not_contact_daemon(tmp_path):
     assert asyncio.run(doctor_cli.probe_registration(
         "http://fixture", "fixture", tmp_path / "absent", 1)) == "missing_registration"

@@ -25,10 +25,25 @@ use tokio_util::{sync::CancellationToken, task::TaskTracker};
 pub struct Failure {
     pub code: &'static str,
     pub status: Option<u16>,
+    /// For `bank_identity_mismatch`: "bank" or "principal" when the saved
+    /// binding was compared with the bank's answer, `None` when unproved
+    /// (Python `AdapterError.binding`).
+    pub binding: Option<&'static str>,
 }
 impl Failure {
     fn local(code: &'static str) -> Self {
-        Self { code, status: None }
+        Self {
+            code,
+            status: None,
+            binding: None,
+        }
+    }
+    /// The refusal of a saved binding, naming which part differs.
+    fn binding(context: &Context, state: &Value) -> Self {
+        Self {
+            binding: context.binding_difference(state),
+            ..Self::local("bank_identity_mismatch")
+        }
     }
     /// Worth checking or registering again (Python `_transient_board_failure`):
     /// no answer, an overloaded daemon, an identity check answered with
@@ -188,6 +203,7 @@ async fn request(
         return Err(Failure {
             code,
             status: Some(status),
+            binding: None,
         });
     }
     let value = value.map_err(|_| Failure::local("invalid_response"))?;
@@ -310,9 +326,16 @@ fn bound_headers(
 }
 
 /// Move a state file whose address cannot be resumed aside under a `.stale`
-/// suffix, so the path is free for a fresh identity and the old one stays
-/// available for diagnosis (Python `_retire_stale_state`).
-async fn retire_stale(path: &std::path::Path) -> Result<(), Failure> {
+/// suffix (replacing an older one), so the path is free for a fresh
+/// identity and the old one stays available for diagnosis (Python
+/// `_retire_stale_state`). With `expected` (the file identity the record was
+/// read from) it is retired only while it is still that record, and `false`
+/// returned otherwise, so the caller reads it again; a window remains
+/// between this check and the rename, which only narrows the race.
+async fn retire_stale(
+    path: &std::path::Path,
+    expected: Option<Vec<u128>>,
+) -> Result<bool, Failure> {
     let stale = path.with_file_name(format!(
         "{}.stale",
         path.file_name()
@@ -321,15 +344,35 @@ async fn retire_stale(path: &std::path::Path) -> Result<(), Failure> {
     ));
     let current = path.to_path_buf();
     state::offload(path, move || {
-        state::open(&current)?;
-        std::fs::rename(&current, stale).map_err(|_| "state_unavailable")
+        let Ok(opened) = state::open(&current) else {
+            if expected.is_some() {
+                return Ok(false);
+            }
+            return Err("state_unavailable");
+        };
+        let same = expected.is_none_or(|expected| opened.identity == expected);
+        // Closed before the rename: Windows refuses to move an open file.
+        drop(opened);
+        if !same {
+            return Ok(false);
+        }
+        std::fs::rename(&current, stale).map_err(|_| "state_unavailable")?;
+        Ok(true)
     })
     .await
     .map_err(Failure::local)
 }
 
+/// How many times a start retires a saved record and reads the path again
+/// before it stops: a record another process keeps replacing is not chased
+/// for ever (Python `_RETIRE_ATTEMPTS`).
+const RETIRE_ATTEMPTS: u8 = 3;
+
 impl Adapter {
     pub async fn enter(config: Config) -> Result<Arc<Self>, Failure> {
+        Self::enter_with(config, RETIRE_ATTEMPTS).await
+    }
+    async fn enter_with(config: Config, retires_left: u8) -> Result<Arc<Self>, Failure> {
         let client = Client::builder()
             .redirect(reqwest::redirect::Policy::none())
             .build()
@@ -386,7 +429,10 @@ impl Adapter {
                     let proved =
                         fetch_context(&client, &config, &snapshot, Some(&saved), false).await?;
                     if proved != context {
-                        return Err(Failure::local("bank_identity_mismatch"));
+                        return Err(Failure::binding(
+                            &context,
+                            &json!({"bank_id":proved.bank_id,"principal":proved.principal}),
+                        ));
                     }
                     context = proved;
                     saved["version"] = json!(2);
@@ -415,21 +461,36 @@ impl Adapter {
                 Some(version) if version.as_u64() == Some(2) => {
                     if context.principal_changed(&saved)
                         && reservation.is_none()
-                        && loaded_identity.is_some()
-                        && let Some(path) = &config.state
+                        && let (Some(original), Some(path)) =
+                            (loaded_identity.clone(), config.state.clone())
                     {
-                        // The saved address was bound under the client's
-                        // previous login on this same bank. Its key is never
-                        // sent under the new one: it is set aside and a fresh
-                        // address registered, as a new session would. A
-                        // different bank still refuses below.
-                        retire_stale(path).await?;
-                        crate::stderrln!(
-                            "pseudolife-mcp: the saved coordination address belongs to another login on this bank; registering a new one under the current login (old state kept with a .stale suffix)."
-                        );
-                        return Box::pin(Self::enter(config)).await;
+                        // The daemon now maps this login to a different
+                        // principal than the saved address was registered
+                        // under, on this same bank. Its key is never sent
+                        // under the new one: it is set aside and a new address
+                        // registered, as a new session would. A different
+                        // bank still refuses below.
+                        if retires_left == 0 {
+                            return Err(Failure::local("reservation_changed"));
+                        }
+                        // Retired only while it is still the record read
+                        // above; one another process saved meanwhile is read
+                        // again instead.
+                        if retire_stale(&path, Some(original)).await? {
+                            crate::stderrln!(
+                                "pseudolife-mcp: the daemon now maps this login to a different principal than the saved coordination address was registered under (same bank); registering a new address (old state kept with a .stale suffix; mail sent to the old address is not carried over)."
+                            );
+                        }
+                        // After a deliberate retire the session registers
+                        // fresh: a legacy record of the same bearer was bound
+                        // under the previous principal too.
+                        let mut config = config;
+                        config.legacy_state = None;
+                        return Box::pin(Self::enter_with(config, retires_left - 1)).await;
                     }
-                    context.check_binding(&saved).map_err(Failure::local)?
+                    context
+                        .check_binding(&saved)
+                        .map_err(|_| Failure::binding(&context, &saved))?
                 }
                 _ => return Err(Failure::local("invalid_state")),
             }
@@ -493,7 +554,9 @@ impl Adapter {
         };
         // Every instance request validates the current bank before exposing its key.
         context = fetch_context(&client, &config, &snapshot, None, false).await?;
-        context.check_binding(&identity).map_err(Failure::local)?;
+        context
+            .check_binding(&identity)
+            .map_err(|_| Failure::binding(&context, &identity))?;
         let attachment = uuid::Uuid::new_v4().simple().to_string();
         let mut body =
             json!({"attachment_id":attachment,"wake_enabled":config.wake,"ring":config.ring});
@@ -541,11 +604,11 @@ impl Adapter {
             && was_saved
             && let Some(path) = &config.state
         {
-            retire_stale(path).await?;
+            retire_stale(path, None).await?;
             crate::stderrln!(
                 "pseudolife-mcp: the saved coordination address is no longer valid on this bank; registering a new one (old state kept with a .stale suffix)."
             );
-            return Box::pin(Self::enter(config)).await;
+            return Box::pin(Self::enter_with(config, retires_left)).await;
         }
         let attached = attached?;
         let generation = attached
@@ -652,7 +715,7 @@ impl Adapter {
         let mut mailbox = self.mailbox.lock().await;
         context
             .check_binding(&mailbox.identity)
-            .map_err(Failure::local)?;
+            .map_err(|_| Failure::binding(&context, &mailbox.identity))?;
         current(&self.config.provider, snapshot)?;
         mailbox.context = context;
         if mailbox.failure.as_ref().is_some_and(|failure| {
@@ -1708,4 +1771,36 @@ pub fn render_digest(count: u64, preview: &[Value]) -> String {
         ));
     }
     lines.join("\n")
+}
+
+// `retire_stale` is private, so its fence is tested here: an integration
+// test cannot step between another process's save and this one's retire.
+#[cfg(test)]
+mod retire_tests {
+    use super::{retire_stale, state};
+
+    #[tokio::test]
+    async fn retire_stale_leaves_a_record_replaced_since_it_was_read() {
+        let dir = std::env::temp_dir().join(format!(
+            "pseudolife-retire-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        state::private_dir(&dir).unwrap();
+        let path = dir.join("agent.json");
+        let stale = dir.join("agent.json.stale");
+        state::atomic_write(&path, br#"{"agent_id":"old"}"#, None).unwrap();
+        let read = state::open(&path).unwrap().identity;
+        // Another process retires the record it read and saves its own.
+        state::atomic_write(&path, br#"{"agent_id":"peer"}"#, None).unwrap();
+        assert!(!retire_stale(&path, Some(read)).await.unwrap());
+        assert_eq!(state::read(&path, 64).unwrap(), br#"{"agent_id":"peer"}"#);
+        assert!(!stale.exists());
+        // The near miss: the record still read is retired, over an older one.
+        state::atomic_write(&stale, b"older retired record", None).unwrap();
+        let current = state::open(&path).unwrap().identity;
+        assert!(retire_stale(&path, Some(current)).await.unwrap());
+        assert!(!path.exists());
+        assert_eq!(state::read(&stale, 64).unwrap(), br#"{"agent_id":"peer"}"#);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

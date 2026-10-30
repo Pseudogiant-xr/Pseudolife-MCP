@@ -514,9 +514,12 @@ async def probe_registration(url, token, state_path, timeout, *, client=None) ->
             if not isinstance(value, dict) or not all(isinstance(value.get(key), str)
                                                       for key in ("bank_id", "principal", "proof")):
                 return "unsupported_capability"
-            if state.get("version") == 2 and any(state.get(key) != value[key]
-                                                  for key in ("bank_id", "principal")):
+            if state.get("version") == 2 and state.get("bank_id") != value["bank_id"]:
                 return "bank_identity_mismatch"
+            if state.get("version") == 2 and state.get("principal") != value["principal"]:
+                # Same bank, another principal for this login: the shim
+                # registers a new address on its next start.
+                return "principal_changed"
             if state.get("version") not in (None, 2):
                 return "invalid_state"
             message = json.dumps(["pseudolife-context-v1", value["bank_id"], value["principal"],
@@ -563,6 +566,8 @@ def coordination_snapshot(health, board, wake, host, registration, *, tools_pres
         result["next"].append("Start the intended daemon and retry; HTTP health does not prove mail delivery.")
     elif auth != "admitted":
         result["next"].append("Check the board reason and credential source; repair authentication or daemon coordination settings.")
+    elif registration == "principal_changed":
+        result["next"].append("The daemon now maps this login to a different principal than the saved address was registered under (same bank); the shim registers a new address on its next start (mail sent to the old address is not carried over), so nothing is needed, or restart the session to do it now.")
     elif registration in ("invalid_state", "invalid_credential", "bank_identity_mismatch"):
         result["next"].append("Preserve the saved instance file; verify its bank and principal and the client's credentials before explicit recovery.")
     elif registration == "unsupported_capability" or tools_present is False:

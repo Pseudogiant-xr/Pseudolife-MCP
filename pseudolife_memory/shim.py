@@ -1318,22 +1318,12 @@ def _serves_many_conversations() -> bool:
 
 
 def _report_coordination_unavailable(state_path, exc: BaseException | None = None) -> None:
-    where = f" ({state_path})" if state_path else ""
-    if getattr(exc, "code", None) == "bank_identity_mismatch":
-        # A login change on the same bank re-registers at startup, so what
-        # still lands here is a saved address for another bank (or a legacy
-        # record the bank would not prove), which a retry cannot change.
-        print("pseudolife-mcp: coordination unavailable; memory proxy remains active. "
-              f"The saved board address{where} is bound to a different bank than this "
-              "daemon serves, or the bank did not prove it, so it was kept and not used. "
-              "Point this client back at that bank, or move the file aside and restart "
-              "the session to register a new address on this one.",
-              file=sys.stderr)
-        return
-    print("pseudolife-mcp: coordination unavailable; memory proxy remains active. "
-          "Check the daemon's coordination setting, authentication and "
-          f"private adapter state{where}.",
-          file=sys.stderr)
+    from pseudolife_memory.coordination_identity import coordination_unavailable_line
+
+    # The file the refusal is about, when the adapter named it; this shim
+    # passes no legacy path, so it is the session's own state file.
+    print(coordination_unavailable_line(
+        getattr(exc, "state_file", None) or state_path, exc), file=sys.stderr)
 
 
 def _transient_board_failure(exc: BaseException) -> bool:

@@ -56,13 +56,24 @@ pub fn canonical_uuid(candidate: &str) -> Option<String> {
 /// `CodexCoordinationRegistry._note_failure`, #637). `validation` is an
 /// existing thread's authority check; otherwise it is the thread's first
 /// identity attachment. `code` is "timeout" when its deadline ran out.
-pub fn registry_failure_hint(code: &str, status: Option<u16>, validation: bool) -> String {
+/// `binding` says which part of a refused saved binding differs ("bank" or
+/// "principal"); a principal change reaches this only mid-session, as a
+/// start registers a new address instead. `None` is an unproved mailbox (a
+/// failed proof, a context that moved during migration).
+pub fn registry_failure_hint(
+    code: &str,
+    status: Option<u16>,
+    validation: bool,
+    binding: Option<&str>,
+) -> String {
     let origin = if validation {
         "authority validation"
     } else {
         "identity attachment"
     };
     match code {
+        "bank_identity_mismatch" if binding == Some("principal") => "Coordination: the daemon now maps this login to a different principal than the saved mailbox was registered under (same bank); state was preserved. Restart the session to register a new address (mail sent to the old address is not carried over), or restore the previous login to keep this one.".to_owned(),
+        "bank_identity_mismatch" if binding == Some("bank") => "Coordination: the saved mailbox belongs to a different bank than this daemon serves; state was preserved. Point this client back at that bank, or move the saved state aside and restart the session to register on this one.".to_owned(),
         "bank_identity_mismatch" => "Coordination: bank or principal differs from the saved mailbox; state was preserved. Check the configured bank and credential.".to_owned(),
         "credential_unavailable" | "credential_changed" => "Coordination: credential source changed or is unavailable; saved identity was preserved. Retry after credential setup completes.".to_owned(),
         _ if matches!(code, "unauthorized" | "authentication_required" | "principal_not_allowed")
