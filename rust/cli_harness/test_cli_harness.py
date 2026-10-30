@@ -356,6 +356,8 @@ def test_connect_attributes_the_oracle_probe_through_a_venv_launcher(tmp_path):
     venv = tmp_path / "venv"
     subprocess.run([sys.executable, "-m", "venv", "--without-pip", str(venv)], check=True)
     python = venv / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    from cli_harness.rows import connect  # noqa: PLC0415
+    assert connect._redirects(str(python)) is (os.name == "nt")
     requests = _connect_arm_requests(str(python))
     assert [(r["method"], r["target"]) for r in requests] == [
         ("GET", "/health"), ("handshake-credentials", "/mcp")]
@@ -366,10 +368,29 @@ def test_connect_keeps_a_direct_interpreter_childs_requests_out_of_its_own():
     """The near miss: an arm that is its own interpreter keeps every other
     process's requests out of connect's own, its direct children's too."""
     python = getattr(sys, "_base_executable", None) or sys.executable
+    from cli_harness.rows import connect  # noqa: PLC0415
+    assert connect._redirects(python) is False
     requests = _connect_arm_requests(python)
     assert [(r["method"], r["target"]) for r in requests] == [
         ("GET", "/health"), ("handshake-credentials", "/mcp")]
     assert requests[-1]["headers"] == {"authorization": "Bearer child-credential"}
+
+
+def test_connect_refuses_to_attribute_when_the_launcher_probe_fails(tmp_path):
+    """A probe that cannot run fails the case as a harness fault: falling
+    back to the started pid would drop connect's own requests and blame the
+    candidate. The hook runs on a thread, so the error waits for requests()."""
+    from types import SimpleNamespace  # noqa: PLC0415
+    from cli_harness.rows import connect  # noqa: PLC0415
+    port, url = connect._target()
+    daemon = connect.Daemon(port, url=url, auth=False)
+    try:
+        proc = SimpleNamespace(pid=os.getpid(), args=[str(tmp_path / "missing-python.exe")])
+        connect._arm_pid(SimpleNamespace(name="python", daemon=daemon), proc)
+        with pytest.raises(RuntimeError, match="runs in a child process"):
+            daemon.requests()
+    finally:
+        daemon.close()
 
 
 @pytest.mark.parametrize("failure, check", [("symlink", "not_symlink"),

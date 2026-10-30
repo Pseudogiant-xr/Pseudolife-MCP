@@ -123,6 +123,7 @@ class Daemon:
         # Whether the arm's executable runs its interpreter as a child
         # (``_redirects``), which then holds connect's own sockets.
         self.arm_redirects = False
+        self.arm_error: Exception | None = None
         self._seen: list[tuple[int | None, int | None, dict]] = []
         self._lock = threading.Lock()
         daemon = self
@@ -270,6 +271,11 @@ class Daemon:
         posts carried, as one summary entry whose headers are already
         projected. Credentials are tokenized later, per arm, by
         redact_credentials."""
+        if self.arm_error is not None:
+            # Attribution would silently fall back to the launcher's pid,
+            # and connect's own requests would read as the candidate's extra.
+            raise RuntimeError("connect row: could not tell whether the arm's python "
+                               "runs in a child process") from self.arm_error
         with self._lock:
             seen = list(self._seen)
 
@@ -321,13 +327,24 @@ def _redirects(executable: str) -> bool:
     interpreter as its child (the self-hosted lane runs the oracle from a
     venv, hosted CI from setup-python's interpreter). Measured, not guessed
     from the path: a venv made with ``--symlinks`` runs in place."""
-    with subprocess.Popen([executable, "-I", "-c", "import os; print(os.getpid())"],
-                          stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, text=True,
-                          creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)) as probe:
-        out, _ = probe.communicate(timeout=60)
-    if probe.returncode != 0:
-        raise RuntimeError(f"{executable} exited {probe.returncode} reporting its pid")
-    return int(out.split()[0]) != probe.pid
+    probe = subprocess.Popen([executable, "-I", "-c", "import os; print(os.getpid())"],
+                             stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, text=True,
+                             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    try:
+        # Inside core.run_arm's 10 s join of the `during` hook that runs this.
+        out, _ = probe.communicate(timeout=8)
+    except subprocess.TimeoutExpired:
+        probe.kill()
+        probe.communicate()
+        raise RuntimeError(f"connect row: {executable} did not report its pid within 8 s") from None
+    try:
+        reported = int(out.split()[0])
+    except (IndexError, ValueError):
+        reported = None
+    if probe.returncode != 0 or reported is None:
+        raise RuntimeError(f"connect row: {executable} exited {probe.returncode} "
+                           f"without reporting its pid: {out[:200]!r}")
+    return reported != probe.pid
 
 
 def _free_port() -> int:
@@ -791,7 +808,10 @@ RULES = ("connect-backup-stamp", "connect-restart-pid", "shim-handshake-cache-na
 def _arm_pid(arm, proc) -> None:
     if arm.daemon is not None:
         arm.daemon.arm_pid = proc.pid
-        arm.daemon.arm_redirects = arm.name == "python" and _redirects(proc.args[0])
+        try:
+            arm.daemon.arm_redirects = arm.name == "python" and _redirects(proc.args[0])
+        except Exception as error:  # noqa: BLE001 (re-raised by requests(); a hook thread's would be lost)
+            arm.daemon.arm_error = error
 
 
 def _with_temp(setup):
