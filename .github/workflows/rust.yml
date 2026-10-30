@@ -1700,7 +1700,14 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 5
     steps:
+      # A cancelled needed job fails this step and skips the verdict, the
+      # same result the verdict gives it, so the failed step names the cause:
+      # ops/integrate.py admits such a head as cancelled, not failing.
+      - name: A needed job was cancelled
+        if: ${{ contains(needs.*.result, 'cancelled') }}
+        run: exit 1
       - name: Require every Rust and parity job to pass
+        if: ${{ !contains(needs.*.result, 'cancelled') }}
         shell: pwsh
         env:
           GATE_RESULTS: ${{ toJSON(needs) }}
