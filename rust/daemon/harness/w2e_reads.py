@@ -35,7 +35,8 @@ def register(h):
                  h.relate('Beta', 'related_to', 'Gamma'),
                  h.relate('Alpha', 'related_to', 'Delta'),
                  h.relate('Delta', 'related_to', 'Gamma'),
-                 h.alias('Alpha', 'Alias')],
+                 h.alias('Alpha', 'Alias'),
+                 h.sql("INSERT INTO meta(key,value) VALUES ('graph_digest','{}'::jsonb) ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value", after_stop=True)],
         'ops': [{'op': 'rest', 'method': 'GET', 'path': p} for p in paths],
     }}
 
@@ -59,7 +60,6 @@ def register(h):
         'ops': [{'op': 'rest', 'method': 'GET', 'path': p} for p in [
             '/api/wiki?entity=Alias', '/api/graph/entity-provenance?entity=Alias&limit=1',
             '/api/graph?scope=read-demo', '/api/graph/projects', '/api/graph/digest',
-        ]] + [h.sql("UPDATE meta SET value='{}'::jsonb WHERE key='graph_digest'"),
-              {'op': 'rest', 'method': 'GET', 'path': '/api/graph/digest'}],
+        ]],
     }
     return scenarios
