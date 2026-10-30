@@ -106,11 +106,17 @@ counts as failing, since the head likely hangs, and annotations it cannot
 read leave the pull request out of this batch as `unverified` until a
 retry reads them. A gate job (one that runs under `always()` and needs
 other jobs, such as `Parity / <os>`) still runs after a cancel and fails
-because the jobs it needs did not pass; the script reads the workflow at
-that head and the run's jobs, and counts the gate as cancelled when the
-jobs it needs include a cancelled one and none that failed, never finished
-or ran past its timeout. Any other gate failure is failing, and a run it
-cannot read is `unverified`. `merge` still counts a cancelled or failed
+because the jobs it needs did not pass. It counts as cancelled only when
+all of these hold: it failed at its verdict step (the named step that reads
+`needs`) and nowhere else; no other job in that run attempt failed, timed
+out or needs action; and the jobs it needs include a cancelled one, none
+unfinished and none that ran past its timeout. The script reads the
+workflow file at the head commit, because the API does not name the merge
+ref GitHub ran a pull request's workflow from, and refuses the downgrade
+when the run lists a job that file does not define. A failure the
+checkout's own workflows define no gate for is failing without any API
+read. Any other gate failure is failing, and a run or job it cannot read is
+`unverified`. `merge` still counts a cancelled or failed
 check on the batch itself as red.
 
 Why not wait for green on the member's own head: on 2026-10-20/21 four
