@@ -125,6 +125,25 @@ def _prepare_private_dir(root: Path, namespace: Path) -> None:
         namespace.chmod(0o700)
 
 
+# The hint a refused saved binding leaves, by which part differs; the Rust
+# shim returns the same text (board/policy.rs registry_failure_hint). A
+# principal change reaches this only mid-session: at startup the adapter
+# registers a new address instead. None is an unproved mailbox (a failed
+# proof, a context that moved during migration), where nothing says which.
+_BINDING_HINTS = {
+    "principal": ("Coordination: the daemon now maps this login to a different principal "
+                  "than the saved mailbox was registered under (same bank); state was "
+                  "preserved. Restart the session to register a new address (mail sent to "
+                  "the old address is not carried over), or restore the previous login to "
+                  "keep this one."),
+    "bank": ("Coordination: the saved mailbox belongs to a different bank than this daemon "
+             "serves; state was preserved. Point this client back at that bank, or move the "
+             "saved state aside and restart the session to register on this one."),
+    None: ("Coordination: bank or principal differs from the saved mailbox; state was "
+           "preserved. Check the configured bank and credential."),
+}
+
+
 class CodexCoordinationRegistry:
     """Lazily attach one adapter for each validated Codex thread ID."""
 
@@ -389,7 +408,7 @@ class CodexCoordinationRegistry:
         code = getattr(error, "code", None)
         origin = "authority validation" if phase == "authority_validation" else "identity attachment"
         if code == "bank_identity_mismatch":
-            hint = "Coordination: bank or principal differs from the saved mailbox; state was preserved. Check the configured bank and credential."
+            hint = _BINDING_HINTS.get(getattr(error, "binding", None), _BINDING_HINTS[None])
         elif code in {"credential_unavailable", "credential_changed"}:
             hint = "Coordination: credential source changed or is unavailable; saved identity was preserved. Retry after credential setup completes."
         elif code in {"unauthorized", "authentication_required", "principal_not_allowed"} or getattr(error, "status", None) in {401, 403}:
@@ -496,9 +515,12 @@ class CodexCoordinationRegistry:
                     self._retry_generations[thread_id] = snapshot.generation
                 self._note_failure(thread_id, error)
                 if not self._failure_reported:
-                    print("pseudolife-mcp: coordination unavailable; memory proxy remains "
-                          "active. Check the daemon's coordination setting, authentication "
-                          "and private adapter state.", file=sys.stderr)
+                    from .coordination_identity import coordination_unavailable_line
+
+                    # Name the saved file only for a refusal about one (the
+                    # bound or legacy record the adapter loaded).
+                    print(coordination_unavailable_line(
+                        getattr(error, "state_file", None), error), file=sys.stderr)
                     self._failure_reported = True
                 return None
             self._adapters[thread_id] = adapter

@@ -59,7 +59,10 @@ def test_instance_probe_is_read_only_and_redacted(tmp_path, monkeypatch, status,
     def respond(request):
         requests.append(request)
         value = body
-        if status == 200:
+        if status == 200 and "agent_id" not in json.loads(request.content):
+            # The binding read, without a mailbox.
+            value = {"bank_id": "00000000-0000-4000-8000-000000000001", "principal": "default"}
+        elif status == 200:
             import hashlib
             import hmac
             nonce = json.loads(request.content)["nonce"]
@@ -76,11 +79,139 @@ def test_instance_probe_is_read_only_and_redacted(tmp_path, monkeypatch, status,
 
     result = asyncio.run(drive())
     assert result == expected
-    assert len(requests) == 1
-    assert requests[0].url.path == "/api/coordination/context"
-    assert json.loads(requests[0].content)["read_only"] is True
-    assert "x-pl-agent-key" not in requests[0].headers
+    # A version-2 record's binding is read first, without its mailbox; the
+    # proof request follows only when that read was answered.
+    assert len(requests) == (2 if status == 200 else 1)
+    assert json.loads(requests[0].content) == {"read_only": True}
+    for request in requests:
+        assert request.url.path == "/api/coordination/context"
+        assert json.loads(request.content)["read_only"] is True
+        assert "x-pl-agent-key" not in request.headers
     assert "fixture-secret" not in result and "fixture-key" not in result
+
+
+_SAVED_BANK = "00000000-0000-4000-8000-000000000001"
+_OTHER_BANK = "00000000-0000-4000-8000-000000000002"
+
+
+@pytest.mark.parametrize("bank_id,principal,expected", [
+    # The daemon maps this login to another principal on the same bank.
+    (_SAVED_BANK, "machine-login", "principal_changed"),
+    # Near misses: another bank, whatever the principal, is a bank change.
+    (_OTHER_BANK, "default", "bank_identity_mismatch"),
+    (_OTHER_BANK, "machine-login", "bank_identity_mismatch"),
+])
+def test_registration_tells_a_principal_change_from_a_bank_change(
+        tmp_path, monkeypatch, bank_id, principal, expected):
+    """Round-2 Codex review of #1066: both daemons refuse a mailbox another
+    principal owns (or another bank never had) as ``invalid_credential``
+    before answering (storage/coordination.py ``context``, the Rust daemon's
+    board/store.rs), so a proof request alone could never report either
+    change. This double answers as they do; the doctor reads the binding
+    without the mailbox first and never sends the mailbox to a changed one."""
+    from pseudolife_memory import coordination_identity
+    monkeypatch.setattr(coordination_identity, "read_legacy", lambda path, url: {
+        "version": 2, "bank_id": _SAVED_BANK, "principal": "default",
+        "agent_id": "a" * 32, "credential": "fixture-key"})
+    state = tmp_path / "state.json"
+    state.write_text("fixture", encoding="utf-8")
+    requests = []
+
+    def daemon(request):
+        requests.append(json.loads(request.content))
+        if "agent_id" not in requests[-1]:
+            return httpx.Response(200, json={"bank_id": bank_id, "principal": principal})
+        if (bank_id, principal) != (_SAVED_BANK, "default"):
+            return httpx.Response(403, json={"error": "invalid_credential"})
+        return httpx.Response(200, json={"bank_id": bank_id, "principal": principal,
+                                         "proof": "f" * 64})
+
+    async def drive():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(daemon)) as client:
+            return await doctor_cli.probe_registration(
+                "http://fixture", "fixture-bearer", state, 1, client=client)
+
+    assert asyncio.run(drive()) == expected
+    assert requests == [{"read_only": True}]
+
+
+@pytest.mark.parametrize("moved,expected", [
+    # The binding the mailbox read answers with moved after the first read.
+    ({"bank_id": _OTHER_BANK, "principal": "default"}, "bank_identity_mismatch"),
+    ({"bank_id": _SAVED_BANK, "principal": "machine-login"}, "bank_identity_mismatch"),
+    # The near miss: an unmoved binding with a proof that does not verify.
+    ({"bank_id": _SAVED_BANK, "principal": "default"}, "invalid_credential"),
+])
+def test_a_binding_that_moves_between_the_two_reads_is_a_bank_change(
+        tmp_path, monkeypatch, moved, expected):
+    """Round-3 review of #1066: the binding read matched, and the mailbox
+    read then answered for another bank or principal (a daemon swapped or
+    remapped between the reads). That is reported as a binding change, not
+    as a rejected key."""
+    from pseudolife_memory import coordination_identity
+    monkeypatch.setattr(coordination_identity, "read_legacy", lambda path, url: {
+        "version": 2, "bank_id": _SAVED_BANK, "principal": "default",
+        "agent_id": "a" * 32, "credential": "fixture-key"})
+    state = tmp_path / "state.json"
+    state.write_text("fixture", encoding="utf-8")
+    requests = []
+
+    def daemon(request):
+        requests.append(json.loads(request.content))
+        if "agent_id" not in requests[-1]:
+            return httpx.Response(200, json={"bank_id": _SAVED_BANK, "principal": "default"})
+        return httpx.Response(200, json={**moved, "proof": "f" * 64})
+
+    async def drive():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(daemon)) as client:
+            return await doctor_cli.probe_registration(
+                "http://fixture", "fixture-bearer", state, 1, client=client)
+
+    assert asyncio.run(drive()) == expected
+    assert requests[0] == {"read_only": True} and requests[1]["agent_id"] == "a" * 32
+
+
+def test_a_revoked_mailbox_key_after_a_matching_binding_is_invalid_credential(
+        tmp_path, monkeypatch):
+    """Round-3 review of #1066: the real shape of a revoked key. The binding
+    read matches; the mailbox read is refused as ``invalid_credential``, as
+    the daemons refuse a mailbox whose key is gone."""
+    from pseudolife_memory import coordination_identity
+    monkeypatch.setattr(coordination_identity, "read_legacy", lambda path, url: {
+        "version": 2, "bank_id": _SAVED_BANK, "principal": "default",
+        "agent_id": "a" * 32, "credential": "fixture-key"})
+    state = tmp_path / "state.json"
+    state.write_text("fixture", encoding="utf-8")
+
+    def daemon(request):
+        if "agent_id" not in json.loads(request.content):
+            return httpx.Response(200, json={"bank_id": _SAVED_BANK, "principal": "default"})
+        return httpx.Response(403, json={"error": "invalid_credential"})
+
+    async def drive():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(daemon)) as client:
+            return await doctor_cli.probe_registration(
+                "http://fixture", "fixture-bearer", state, 1, client=client)
+
+    assert asyncio.run(drive()) == "invalid_credential"
+
+
+def test_a_principal_change_says_the_shim_registers_a_new_address():
+    result = doctor_cli.coordination_snapshot(
+        {"status": "ok"}, {"state": "on"}, {}, "generic", "principal_changed")
+    assert result["registration"] == "principal_changed"
+    # Doctor fails --agent-state for anything but authenticated (as for a
+    # missing_registration the shim also fixes itself), so the line says the
+    # file needs no repair rather than that nothing is needed.
+    assert result["next"][0] == (
+        "The daemon now maps this login to a different principal than the saved address "
+        "was registered under (same bank); this file needs no repair: the shim registers a "
+        "new address on its next start (mail sent to the old address is not carried over), "
+        "or restart the session to do it now.")
+    # The near miss: a bank change keeps the preserve-the-file advice.
+    bank = doctor_cli.coordination_snapshot(
+        {"status": "ok"}, {"state": "on"}, {}, "generic", "bank_identity_mismatch")
+    assert bank["next"][0].startswith("Preserve the saved instance file")
 
 
 def test_missing_state_does_not_contact_daemon(tmp_path):
@@ -176,9 +307,14 @@ def test_registration_never_discloses_instance_credential_to_changed_or_redirect
             return await doctor_cli.probe_registration("http://fixture", "fixture-bearer", state, 1, client=client)
 
     assert asyncio.run(drive()) in ("bank_identity_mismatch", "invalid_credential", "refused")
-    assert len(requests) == 1
-    assert "fixture-key" not in requests[0].content.decode()
-    assert "fixture-key" not in str(dict(requests[0].headers))
+    # The binding read goes first and alone to a changed or redirecting
+    # bank; only the unchanged one is asked for the mailbox proof.
+    same = status == 200 and body["bank_id"] == "fixture-bank"
+    assert len(requests) == (2 if same else 1)
+    assert json.loads(requests[0].content) == {"read_only": True}
+    for request in requests:
+        assert "fixture-key" not in request.content.decode()
+        assert "fixture-key" not in str(dict(request.headers))
 
 
 @pytest.mark.parametrize("status,state", [(401, "unauthorized"), (404, "unsupported_capability"), (503, "transport_refused")])

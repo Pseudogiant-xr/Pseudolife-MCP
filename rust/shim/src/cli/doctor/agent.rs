@@ -262,35 +262,47 @@ pub(super) async fn probe(
         // h11 refuses the value: a LocalProtocolError, a TransportError.
         return "unavailable";
     };
-    let sent = client
-        .post(format!("{url}/api/coordination/context"))
-        // httpx's default request fields besides Host, User-Agent and the
-        // body's (reqwest sends `Accept: */*` itself). The daemon never
-        // compresses, so the advertised encodings are never decoded here.
-        .header("Accept-Encoding", "gzip, deflate")
-        .header("Connection", "keep-alive")
-        .header("Authorization", bearer)
-        .json(&json!({"agent_id": agent, "nonce": nonce, "read_only": true}))
-        .send()
-        .await;
-    let Ok(response) = sent else {
-        return "unavailable";
-    };
-    let status = response.status().as_u16();
-    let encodings: Vec<String> = response
-        .headers()
-        .get_all(reqwest::header::CONTENT_ENCODING)
-        .iter()
-        .filter_map(|value| value.to_str().ok().map(str::to_owned))
-        .collect();
-    let Ok(raw) = response.bytes().await else {
-        return "unavailable";
-    };
-    // httpx decodes the body as it reads it inside client.post; a
-    // DecodingError is no TransportError and reaches the doctor's
-    // `except`, which reports `unavailable`.
-    let Ok(body) = content_decode(&encodings, &raw) else {
-        return "unavailable";
+    let version = state.get("version");
+    if version.is_some_and(is_two) {
+        // The binding first, without the mailbox: both daemons refuse a
+        // mailbox another principal owns (invalid_credential) before they
+        // answer, so only a context read without one can tell a bank change
+        // or a principal change from a rejected key (Python, the same).
+        let (status, body) = match post(&client, url, &bearer, &json!({"read_only": true})).await {
+            Ok(answer) => answer,
+            Err(state) => return state,
+        };
+        if status != 200 {
+            return refusal(status, &body);
+        }
+        let value = match decode(&body) {
+            Decoded::Value(Value::Object(value)) => value,
+            Decoded::TooDeep => return "unavailable",
+            _ => return "unsupported_capability",
+        };
+        let field = |key: &str| value.get(key).and_then(Value::as_str);
+        let (Some(bank_id), Some(principal)) = (field("bank_id"), field("principal")) else {
+            return "unsupported_capability";
+        };
+        if state.get("bank_id").and_then(Value::as_str) != Some(bank_id) {
+            return "bank_identity_mismatch";
+        }
+        if state.get("principal").and_then(Value::as_str) != Some(principal) {
+            // Same bank, another principal for this login: the shim
+            // registers a new address on its next start.
+            return "principal_changed";
+        }
+    }
+    let (status, body) = match post(
+        &client,
+        url,
+        &bearer,
+        &json!({"agent_id": agent, "nonce": nonce, "read_only": true}),
+    )
+    .await
+    {
+        Ok(answer) => answer,
+        Err(state) => return state,
     };
     match status {
         200 => {
@@ -305,11 +317,11 @@ pub(super) async fn probe(
             else {
                 return "unsupported_capability";
             };
-            let version = state.get("version");
             if version.is_some_and(is_two)
                 && (state.get("bank_id").and_then(Value::as_str) != Some(bank_id)
                     || state.get("principal").and_then(Value::as_str) != Some(principal))
             {
+                // The binding moved between the two reads.
                 return "bank_identity_mismatch";
             }
             if !matches!(version, None | Some(Value::Null)) && !version.is_some_and(is_two) {
@@ -333,10 +345,58 @@ pub(super) async fn probe(
                 "invalid_credential"
             }
         }
+        _ => refusal(status, &body),
+    }
+}
+
+/// One `POST /api/coordination/context` as httpx sends it; the status and
+/// the decoded body, or the doctor's state for a request that failed.
+async fn post(
+    client: &reqwest::Client,
+    url: &str,
+    bearer: &reqwest::header::HeaderValue,
+    body: &Value,
+) -> Result<(u16, Vec<u8>), &'static str> {
+    let sent = client
+        .post(format!("{url}/api/coordination/context"))
+        // httpx's default request fields besides Host, User-Agent and the
+        // body's (reqwest sends `Accept: */*` itself). The daemon never
+        // compresses, so the advertised encodings are never decoded here.
+        .header("Accept-Encoding", "gzip, deflate")
+        .header("Connection", "keep-alive")
+        .header("Authorization", bearer.clone())
+        .json(body)
+        .send()
+        .await;
+    let Ok(response) = sent else {
+        return Err("unavailable");
+    };
+    let status = response.status().as_u16();
+    let encodings: Vec<String> = response
+        .headers()
+        .get_all(reqwest::header::CONTENT_ENCODING)
+        .iter()
+        .filter_map(|value| value.to_str().ok().map(str::to_owned))
+        .collect();
+    let Ok(raw) = response.bytes().await else {
+        return Err("unavailable");
+    };
+    // httpx decodes the body as it reads it inside client.post; a
+    // DecodingError is no TransportError and reaches the doctor's
+    // `except`, which reports `unavailable`.
+    let Ok(body) = content_decode(&encodings, &raw) else {
+        return Err("unavailable");
+    };
+    Ok((status, body))
+}
+
+/// The doctor's state for a context answer other than 200.
+fn refusal(status: u16, body: &[u8]) -> &'static str {
+    match status {
         401 => "unauthorized",
         404 | 405 => "unsupported_capability",
         400 | 403 => {
-            let value = match decode(&body) {
+            let value = match decode(body) {
                 Decoded::Value(value) => value,
                 Decoded::TooDeep => return "unavailable",
                 Decoded::Invalid => return "unsupported_capability",
@@ -424,5 +484,116 @@ mod tests {
             ),
             "f1aad97ee6eda42f4d6eee91e4550127c36012e2bd0eb5ec86270f942ffa7273"
         );
+    }
+
+    /// A loopback daemon answering one request per connection, in order;
+    /// returns its address and the request bodies it read.
+    fn daemon(answers: Vec<(u16, Value)>) -> (String, std::thread::JoinHandle<Vec<Value>>) {
+        use std::io::Write;
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let served = std::thread::spawn(move || {
+            let mut bodies = Vec::new();
+            for (status, answer) in answers {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut bytes = Vec::new();
+                let mut chunk = [0u8; 4096];
+                let body_at = loop {
+                    let read = stream.read(&mut chunk).unwrap();
+                    assert!(read > 0, "request ended early");
+                    bytes.extend_from_slice(&chunk[..read]);
+                    let Some(split) = bytes.windows(4).position(|w| w == b"\r\n\r\n") else {
+                        continue;
+                    };
+                    let length = String::from_utf8_lossy(&bytes[..split])
+                        .lines()
+                        .find_map(|line| {
+                            line.to_ascii_lowercase()
+                                .strip_prefix("content-length:")
+                                .and_then(|value| value.trim().parse::<usize>().ok())
+                        })
+                        .unwrap_or(0);
+                    if bytes.len() >= split + 4 + length {
+                        break split + 4;
+                    }
+                };
+                bodies.push(serde_json::from_slice(&bytes[body_at..]).unwrap());
+                let text = answer.to_string();
+                write!(
+                    stream,
+                    "HTTP/1.1 {status} OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{text}",
+                    text.len()
+                )
+                .unwrap();
+            }
+            bodies
+        });
+        (url, served)
+    }
+
+    // Round-3 review of #1066: the binding read matched, and the mailbox read
+    // then answered for another bank or principal; that is a binding change,
+    // not a rejected key (Python `probe_registration`, the same). The near
+    // miss is an unmoved binding whose proof does not verify.
+    #[tokio::test]
+    async fn a_binding_that_moves_between_the_two_reads_is_a_bank_change() {
+        const BANK: &str = "00000000-0000-4000-8000-000000000001";
+        const OTHER: &str = "00000000-0000-4000-8000-000000000002";
+        let state = json!({"version":2,"bank_id":BANK,"principal":"default",
+                           "agent_id":"a".repeat(32),"credential":"fixture-key"});
+        for (moved, expected) in [
+            (
+                json!({"bank_id":OTHER,"principal":"default"}),
+                "bank_identity_mismatch",
+            ),
+            (
+                json!({"bank_id":BANK,"principal":"machine-login"}),
+                "bank_identity_mismatch",
+            ),
+            (
+                json!({"bank_id":BANK,"principal":"default"}),
+                "invalid_credential",
+            ),
+        ] {
+            let mut answer = moved.clone();
+            answer["proof"] = json!("f".repeat(64));
+            let (url, served) = daemon(vec![
+                (200, json!({"bank_id":BANK,"principal":"default"})),
+                (200, answer),
+            ]);
+            let result = probe(
+                &url,
+                Ok(Some("fixture-bearer".into())),
+                state.as_object().unwrap(),
+                Duration::from_secs(5),
+            )
+            .await;
+            assert_eq!(result, expected, "{moved}");
+            let bodies = served.join().unwrap();
+            assert_eq!(bodies[0], json!({"read_only": true}));
+            assert_eq!(bodies[1]["agent_id"], "a".repeat(32));
+        }
+    }
+
+    // Round-3 review of #1066: a revoked key's real shape, the binding read
+    // answered and the mailbox read refused as invalid_credential.
+    #[tokio::test]
+    async fn a_revoked_mailbox_key_after_a_matching_binding_is_invalid_credential() {
+        const BANK: &str = "00000000-0000-4000-8000-000000000001";
+        let state = json!({"version":2,"bank_id":BANK,"principal":"default",
+                           "agent_id":"a".repeat(32),"credential":"fixture-key"});
+        let (url, served) = daemon(vec![
+            (200, json!({"bank_id":BANK,"principal":"default"})),
+            (403, json!({"error":"invalid_credential"})),
+        ]);
+        let result = probe(
+            &url,
+            Ok(Some("fixture-bearer".into())),
+            state.as_object().unwrap(),
+            Duration::from_secs(5),
+        )
+        .await;
+        assert_eq!(result, "invalid_credential");
+        assert_eq!(served.join().unwrap().len(), 2);
     }
 }

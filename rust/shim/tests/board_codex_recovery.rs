@@ -14,7 +14,8 @@ const UNAVAILABLE: &str = "Coordination: authority validation failed (context_un
 const UNREADABLE: &str = "Coordination: authority validation failed (context_unreadable); saved state was preserved. Retry when the bank responds.";
 const TIMEOUT: &str = "Coordination: authority validation timed out (timeout); saved state was preserved. Retry when the bank responds.";
 const ACCESS: &str = "Coordination: authority validation was refused by authentication or access policy; saved state was preserved. Check the configured credential and access.";
-const BANK_HINT: &str = "Coordination: bank or principal differs from the saved mailbox; state was preserved. Check the configured bank and credential.";
+const BANK_HINT: &str = "Coordination: the saved mailbox belongs to a different bank than this daemon serves; state was preserved. Point this client back at that bank, or move the saved state aside and restart the session to register on this one.";
+const PRINCIPAL_HINT: &str = "Coordination: the daemon now maps this login to a different principal than the saved mailbox was registered under (same bank); state was preserved. Restart the session to register a new address (mail sent to the old address is not carried over), or restore the previous login to keep this one.";
 const CREDENTIAL: &str = "Coordination: credential source changed or is unavailable; saved identity was preserved. Retry after credential setup completes.";
 
 fn codex_runtime(
@@ -187,6 +188,16 @@ async fn codex_unresolved_check_never_forwards_and_names_its_cause() {
             BANK_HINT,
         ),
         ("mismatch", vec![], 1, BANK_HINT),
+        // A principal change mid-session names it and its fix.
+        (
+            "other principal",
+            vec![Answer::json(
+                200,
+                json!({"bank_id":BANK,"principal":"another-login"}),
+            )],
+            1,
+            PRINCIPAL_HINT,
+        ),
     ];
     for (name, answers, checks, hint) in cases {
         let fixture = Fixture::new(0);

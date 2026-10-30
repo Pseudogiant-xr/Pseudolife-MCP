@@ -36,10 +36,15 @@ class AdapterError(RuntimeError):
     """
 
     def __init__(self, message: str, *, status: int | None = None,
-                 code: str | None = None):
+                 code: str | None = None, binding: str | None = None):
         super().__init__(message)
         self.status = status
         self.code = code
+        # For bank_identity_mismatch: "bank" or "principal" when the saved
+        # binding was compared with the bank's answer, None when unproved.
+        self.binding = binding
+        # The saved state file a startup refusal is about (bound or legacy).
+        self.state_file = None
 
 
 # A Claude Code subagent runs inside its parent's shim, so a tool result the
@@ -52,6 +57,26 @@ class AdapterError(RuntimeError):
 # (storage/coordination.py, not imported here: it pulls in psycopg), which
 # a test pins.
 SUBAGENT_MARKER_SECONDS = 2 * 3600 + 3600
+
+
+# The stderr lines a retired saved address leaves; the Rust shim prints the
+# same text (board/adapter.rs).
+_MISSING_ADDRESS_NOTICE = (
+    "the saved coordination address is no longer valid on this bank; registering a "
+    "new one (old state kept with a .stale suffix).")
+_PRINCIPAL_CHANGED_NOTICE = (
+    "the daemon now maps this login to a different principal than the saved "
+    "coordination address was registered under (same bank); registering a new "
+    "address (old state kept with a .stale suffix; mail sent to the old address is "
+    "not carried over).")
+_LEGACY_PRINCIPAL_CHANGED_NOTICE = (
+    "the daemon now maps this login to a different principal than the saved legacy "
+    "coordination address was registered under (same bank); registering a new address "
+    "(the legacy record is left as it is; mail sent to the old address is not carried "
+    "over).")
+# A record another process keeps replacing is not chased for ever: after this
+# many retires that lost the race, a record that still needs one is refused.
+_RETIRE_ATTEMPTS = 3
 
 
 @dataclass
@@ -875,7 +900,9 @@ class CoordinationAdapter:
         if self._identity is not None:
             check_binding(self._identity, context)
         elif self._context is not None and context != self._context:
-            raise AdapterError("coordination bank or principal changed", code="bank_identity_mismatch")
+            from .coordination_identity import binding_difference
+            raise AdapterError("coordination bank or principal changed", code="bank_identity_mismatch",
+                               binding=binding_difference(self._context, context))
         self._context = context
         if self._failure is not None and self._failure.code in {
                 "unauthorized", "authentication_required", "principal_not_allowed",
@@ -1025,21 +1052,32 @@ class CoordinationAdapter:
         self._sent_name = None
         self._save_new_identity(reservation)
 
-    def _retire_stale_state(self):
+    def _retire_stale_state(self, notice=_MISSING_ADDRESS_NOTICE, *, expected=None) -> bool:
         """Move a state file whose address the bank no longer accepts aside
-        under a ``.stale`` suffix, so the path is free for a fresh identity
-        and the old one stays available for diagnosis."""
+        under a ``.stale`` suffix (replacing an older one), so the path is
+        free for a fresh identity and the old one stays available for
+        diagnosis. With ``expected`` (the dev/inode the identity was loaded
+        from) the file is retired only while it is still that record: a
+        record another process saved meanwhile is left alone and ``False``
+        returned, so the caller loads it again. A window remains between
+        this check and the rename; it only narrows the race."""
         self._identity = None
         if self.state_path is None:
-            return
+            return True
+        if expected is not None:
+            try:
+                info = self.state_path.stat(follow_symlinks=False)
+            except OSError:
+                return False
+            if (info.st_dev, info.st_ino) != (expected.dev, expected.ino):
+                return False
         stale = self.state_path.with_name(self.state_path.name + ".stale")
         try:
             os.replace(self.state_path, stale)
         except OSError:
             raise AdapterError("cannot retire stale adapter state") from None
-        print("pseudolife-mcp: the saved coordination address is no longer valid on this "
-              "bank; registering a new one (old state kept with a .stale suffix).",
-              file=sys.stderr)
+        print(f"pseudolife-mcp: {notice}", file=sys.stderr)
+        return True
 
     def _discard_reservation(self, reservation):
         """Remove the empty file reserved before ``register`` when no identity
@@ -1168,25 +1206,81 @@ class CoordinationAdapter:
                 self._context = await fetch_context(self._client, self.url, snapshot)
                 self._check_snapshot(snapshot)
             reservation = self._load_or_reserve()
+            # The saved file a refused binding is about: the bound record,
+            # or the legacy one when that was imported below.
+            source = self.state_path
             if snapshot is not None:
-                from .coordination_identity import read_legacy, fetch_context, check_binding
+                from .coordination_identity import (
+                    read_legacy, fetch_context, check_binding, principal_changed,
+                    binding_difference)
 
-                if self._identity is None and self._legacy_state_path is not None:
+                superseded = False
+                retires_left = _RETIRE_ATTEMPTS
+                while (self._identity is not None and self._loaded_state_info is not None
+                       and principal_changed(self._identity, self._context)):
+                    # The daemon now maps this login to a different principal
+                    # than the saved address was registered under, on this same
+                    # bank. Its key is never sent under the new one: it is set
+                    # aside and a new address registered, as a new session
+                    # would. A different bank still refuses below.
+                    if retires_left == 0:
+                        # The record read a fourth time still needs retiring:
+                        # another process keeps replacing it (Rust: the same).
+                        raise AdapterError("adapter state is being replaced by another process",
+                                           code="reservation_changed")
+                    retires_left -= 1
+                    expected, self._loaded_state_info = self._loaded_state_info, None
+                    superseded = True
+                    retired = self._retire_stale_state(
+                        _PRINCIPAL_CHANGED_NOTICE, expected=expected)
+                    # Retired: reserve the freed path. Not retired: another
+                    # process replaced the record since it was read, so read
+                    # what is there now and decide again.
+                    reservation = self._load_or_reserve()
+                    if retired:
+                        break
+                # A .stale beside the bound path exists only once this exact
+                # path held a bound record that was retired (a principal
+                # change or a missing address). The legacy record is then
+                # history the session already moved past, never its current
+                # address, so it is not imported: also on a later attempt or
+                # restart after a registration that failed, when nothing else
+                # remembers the retire.
+                retired_before = self.state_path is not None and os.path.lexists(
+                    self.state_path.with_name(self.state_path.name + ".stale"))
+                if (self._identity is None and self._legacy_state_path is not None
+                        and not superseded and not retired_before):
                     # Only the exact legacy path derived from this configured
                     # credential is eligible; never search neighboring namespaces.
                     if self._legacy_state_path.exists() or self._legacy_state_path.is_symlink():
-                        self._identity = read_legacy(self._legacy_state_path, self.url)
+                        legacy = read_legacy(self._legacy_state_path, self.url)
+                        if principal_changed(legacy, self._context):
+                            # A bound legacy record under the previous principal
+                            # would be refused on every start: register a new
+                            # address instead and leave the legacy file as it is.
+                            print(f"pseudolife-mcp: {_LEGACY_PRINCIPAL_CHANGED_NOTICE}",
+                                  file=sys.stderr)
+                        else:
+                            self._identity = legacy
+                            source = self._legacy_state_path
                 if self._identity is not None:
                     if self._identity.get("version") not in (None, 2):
                         raise AdapterError("unsupported adapter state version; state was preserved")
                     needs_upgrade = self._identity.get("version") != 2
-                    if not needs_upgrade:
-                        check_binding(self._identity, self._context)
-                    else:
-                        proved = await fetch_context(self._client, self.url, snapshot, identity=self._identity)
-                        self._check_snapshot(snapshot)
-                        if proved != self._context:
-                            raise AdapterError("coordination context changed during migration", code="bank_identity_mismatch")
+                    try:
+                        if not needs_upgrade:
+                            check_binding(self._identity, self._context)
+                        else:
+                            proved = await fetch_context(self._client, self.url, snapshot, identity=self._identity)
+                            self._check_snapshot(snapshot)
+                            if proved != self._context:
+                                raise AdapterError("coordination context changed during migration",
+                                                   code="bank_identity_mismatch",
+                                                   binding=binding_difference(proved, self._context))
+                    except AdapterError as error:
+                        if error.code == "bank_identity_mismatch":
+                            error.state_file = source
+                        raise
                     self._identity = {**self._identity, "version": 2, **self._context}
                     if reservation is not None:
                         self._save_new_identity(reservation)
@@ -1205,6 +1299,10 @@ class CoordinationAdapter:
             try:
                 result = await self._post_attach(self.wake_enabled)
             except AdapterError as error:
+                if error.code == "bank_identity_mismatch" and error.state_file is None:
+                    # _post re-checked the binding before the attach (the Rust
+                    # shim checks it there too, and names the same file).
+                    error.state_file = source
                 if not (resumed and error.code == "instance_not_found"):
                     raise
                 # The saved address is unknown to this bank: pruned after long

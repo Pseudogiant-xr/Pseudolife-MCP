@@ -118,7 +118,7 @@ async fn board_channel_parent_parameter_fallback_and_registry_failure_hints_pres
     let hint = board.finish_call(&call, &mut result).await.unwrap();
     assert_eq!(
         hint,
-        policy::registry_failure_hint("bank_identity_mismatch", None, true)
+        policy::registry_failure_hint("bank_identity_mismatch", None, true, Some("bank"))
     );
     assert_eq!(result.is_error, Some(true));
     let error = board
@@ -470,7 +470,7 @@ async fn board_channel_registry_unavailable_fails_before_dispatch_and_reuses_fai
             .unwrap();
         assert_eq!(
             error.data.unwrap(),
-            json!({"classification":"coordination_unavailable","phase":"initialize","operation_outcome":"not_dispatched","hint":policy::registry_failure_hint("context_unavailable", Some(503), false)})
+            json!({"classification":"coordination_unavailable","phase":"initialize","operation_outcome":"not_dispatched","hint":policy::registry_failure_hint("context_unavailable", Some(503), false, None)})
         );
     }
     assert_eq!(fixture.count("context"), 1);
@@ -481,7 +481,7 @@ async fn board_channel_registry_unavailable_fails_before_dispatch_and_reuses_fai
     let mut result = rmcp::model::CallToolResult::success(vec![]);
     assert_eq!(
         board.finish_call(&call, &mut result).await.as_deref(),
-        Some(policy::registry_failure_hint("context_unavailable", Some(503), false).as_str())
+        Some(policy::registry_failure_hint("context_unavailable", Some(503), false, None).as_str())
     );
     board.close().await;
     assert_eq!(fixture.count("/detach"), 0);
@@ -519,7 +519,28 @@ async fn board_channel_registry_unavailable_fails_before_dispatch_and_reuses_fai
         ),
     ] {
         assert_eq!(
-            policy::registry_failure_hint(code, status, validation),
+            policy::registry_failure_hint(code, status, validation, None),
+            hint
+        );
+    }
+    // A refused saved binding names which part differs, as Python's
+    // `_BINDING_HINTS`; an unproved one keeps the generic text.
+    for (binding, hint) in [
+        (
+            Some("principal"),
+            "Coordination: the daemon now maps this login to a different principal than the saved mailbox was registered under (same bank); state was preserved. Restart the session to register a new address (mail sent to the old address is not carried over), or restore the previous login to keep this one.",
+        ),
+        (
+            Some("bank"),
+            "Coordination: the saved mailbox belongs to a different bank than this daemon serves; state was preserved. Point this client back at that bank, or move the saved state aside and restart the session to register on this one.",
+        ),
+        (
+            None,
+            "Coordination: bank or principal differs from the saved mailbox; state was preserved. Check the configured bank and credential.",
+        ),
+    ] {
+        assert_eq!(
+            policy::registry_failure_hint("bank_identity_mismatch", None, true, binding),
             hint
         );
     }
