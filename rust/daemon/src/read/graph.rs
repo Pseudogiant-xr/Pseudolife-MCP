@@ -525,3 +525,38 @@ async fn wiki(
         json!({"found":true,"entity":e["display"],"canonical":e["canonical"],"etype":e["etype"],"aliases":e["aliases"],"projects":projects,"community":community,"first_seen":e["created_at"],"facts":facts,"world_facts":world,"relations":{"out":outgoing,"in":incoming},"mentions":mentions,"timeline":timeline,"flags":flags}),
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn console_cap_peels_current_degrees_instead_of_ranking_initial_hubs() {
+        let nodes: Vec<Value> = ["A", "B", "C", "D", "X", "Y", "Z"]
+            .into_iter()
+            .map(|name| json!({"entity": name, "sources": ["demo"]}))
+            .collect();
+        let edges: Vec<Value> = [
+            ("A", "X"),
+            ("A", "Y"),
+            ("A", "Z"),
+            ("B", "C"),
+            ("C", "D"),
+            ("D", "B"),
+        ]
+        .into_iter()
+        .map(|(a, b)| json!({"src": a, "dst": b}))
+        .collect();
+        let mut graph = json!({"nodes": nodes, "edges": edges, "truncated": false});
+        filter_graph(&mut graph, "demo", 3).unwrap();
+        let kept: Vec<&str> = rows(&graph["nodes"])
+            .iter()
+            .map(|n| text(&n["entity"]))
+            .collect();
+        assert_eq!(kept, ["B", "C", "D"]);
+        assert_eq!(graph["total_nodes"], 7);
+        assert_eq!(graph["total_edges"], 6);
+        assert_eq!(rows(&graph["edges"]).len(), 3);
+        assert_eq!(graph["truncated"], true);
+    }
+}
