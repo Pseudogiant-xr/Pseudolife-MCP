@@ -29,6 +29,9 @@ pub struct Failure {
     /// binding was compared with the bank's answer, `None` when unproved
     /// (Python `AdapterError.binding`).
     pub binding: Option<&'static str>,
+    /// The saved state file a startup refusal of a saved binding is about,
+    /// bound or legacy (Python `AdapterError.state_file`).
+    pub state_file: Option<PathBuf>,
 }
 impl Failure {
     fn local(code: &'static str) -> Self {
@@ -36,7 +39,15 @@ impl Failure {
             code,
             status: None,
             binding: None,
+            state_file: None,
         }
+    }
+    /// Name the saved file a refused binding came from.
+    fn about(mut self, file: &Option<PathBuf>) -> Self {
+        if self.code == "bank_identity_mismatch" {
+            self.state_file.clone_from(file);
+        }
+        self
     }
     /// The refusal of a saved binding, naming which part differs.
     fn binding(context: &Context, state: &Value) -> Self {
@@ -201,9 +212,8 @@ async fn request(
                 .unwrap_or("request_refused")
         };
         return Err(Failure {
-            code,
             status: Some(status),
-            binding: None,
+            ..Failure::local(code)
         });
     }
     let value = value.map_err(|_| Failure::local("invalid_response"))?;
@@ -336,12 +346,7 @@ async fn retire_stale(
     path: &std::path::Path,
     expected: Option<Vec<u128>>,
 ) -> Result<bool, Failure> {
-    let stale = path.with_file_name(format!(
-        "{}.stale",
-        path.file_name()
-            .ok_or(Failure::local("invalid_state"))?
-            .to_string_lossy()
-    ));
+    let stale = stale_path(path).ok_or(Failure::local("invalid_state"))?;
     let current = path.to_path_buf();
     state::offload(path, move || {
         let Ok(opened) = state::open(&current) else {
@@ -363,6 +368,11 @@ async fn retire_stale(
     .map_err(Failure::local)
 }
 
+/// Where a retired state file is kept.
+fn stale_path(path: &std::path::Path) -> Option<PathBuf> {
+    Some(path.with_file_name(format!("{}.stale", path.file_name()?.to_string_lossy())))
+}
+
 /// How many times a start retires a saved record and reads the path again
 /// before it stops: a record another process keeps replacing is not chased
 /// for ever (Python `_RETIRE_ATTEMPTS`).
@@ -372,7 +382,10 @@ impl Adapter {
     pub async fn enter(config: Config) -> Result<Arc<Self>, Failure> {
         Self::enter_with(config, RETIRE_ATTEMPTS).await
     }
-    async fn enter_with(config: Config, retires_left: u8) -> Result<Arc<Self>, Failure> {
+    /// `enter` with `retires_left` retires of a saved record still allowed;
+    /// public only so a test can exhaust the budget deterministically.
+    #[doc(hidden)]
+    pub async fn enter_with(config: Config, retires_left: u8) -> Result<Arc<Self>, Failure> {
         let client = Client::builder()
             .redirect(reqwest::redirect::Policy::none())
             .build()
@@ -400,11 +413,22 @@ impl Adapter {
             }
             None => (None, None, None),
         };
+        let mut source = config.state.clone();
         if saved.is_none()
             && let Some(path) = &config.legacy_state
         {
+            // A .stale beside the bound path exists only once this exact path
+            // held a bound record that was retired (a principal change or a
+            // missing address). The legacy record is then history the session
+            // already moved past, so it is not imported: also on a later
+            // attempt or restart after a registration that failed, when
+            // nothing else remembers the retire (Python, the same).
+            let retired = config.state.as_deref().and_then(stale_path);
             let legacy = path.clone();
             let bytes = state::offload(path, move || {
+                if retired.is_some_and(|stale| state::exists(&stale)) {
+                    return Ok(None);
+                }
                 if state::exists(&legacy) {
                     state::read(&legacy, 16384).map(Some)
                 } else {
@@ -419,20 +443,32 @@ impl Adapter {
                 if value["bank_url"].as_str() != Some(&config.url) {
                     return Err(Failure::local("invalid_state"));
                 }
-                saved = Some(value);
+                if context.principal_changed(&value) {
+                    // A bound legacy record under the previous principal would
+                    // be refused on every start: register a new address
+                    // instead and leave the legacy file as it is.
+                    crate::stderrln!(
+                        "pseudolife-mcp: the daemon now maps this login to a different principal than the saved legacy coordination address was registered under (same bank); registering a new address (the legacy record is left as it is; mail sent to the old address is not carried over)."
+                    );
+                } else {
+                    saved = Some(value);
+                    source = Some(path.clone());
+                }
             }
         }
         let was_saved = saved.is_some();
         let mut identity = if let Some(mut saved) = saved {
             match saved.get("version") {
                 None => {
-                    let proved =
-                        fetch_context(&client, &config, &snapshot, Some(&saved), false).await?;
+                    let proved = fetch_context(&client, &config, &snapshot, Some(&saved), false)
+                        .await
+                        .map_err(|failure| failure.about(&source))?;
                     if proved != context {
                         return Err(Failure::binding(
                             &context,
                             &json!({"bank_id":proved.bank_id,"principal":proved.principal}),
-                        ));
+                        )
+                        .about(&source));
                     }
                     context = proved;
                     saved["version"] = json!(2);
@@ -490,7 +526,7 @@ impl Adapter {
                     }
                     context
                         .check_binding(&saved)
-                        .map_err(|_| Failure::binding(&context, &saved))?
+                        .map_err(|_| Failure::binding(&context, &saved).about(&source))?
                 }
                 _ => return Err(Failure::local("invalid_state")),
             }
@@ -556,7 +592,7 @@ impl Adapter {
         context = fetch_context(&client, &config, &snapshot, None, false).await?;
         context
             .check_binding(&identity)
-            .map_err(|_| Failure::binding(&context, &identity))?;
+            .map_err(|_| Failure::binding(&context, &identity).about(&source))?;
         let attachment = uuid::Uuid::new_v4().simple().to_string();
         let mut body =
             json!({"attachment_id":attachment,"wake_enabled":config.wake,"ring":config.ring});
@@ -602,13 +638,20 @@ impl Adapter {
             .as_ref()
             .is_err_and(|failure| failure.code == "instance_not_found")
             && was_saved
-            && let Some(path) = &config.state
+            && let Some(path) = config.state.clone()
         {
-            retire_stale(path, None).await?;
+            if retires_left == 0 {
+                return Err(attached.unwrap_err());
+            }
+            retire_stale(&path, None).await?;
             crate::stderrln!(
                 "pseudolife-mcp: the saved coordination address is no longer valid on this bank; registering a new one (old state kept with a .stale suffix)."
             );
-            return Box::pin(Self::enter_with(config, retires_left)).await;
+            // Registered fresh next, as Python's start does: a legacy record
+            // whose address the bank pruned would otherwise be read again.
+            let mut config = config;
+            config.legacy_state = None;
+            return Box::pin(Self::enter_with(config, retires_left - 1)).await;
         }
         let attached = attached?;
         let generation = attached

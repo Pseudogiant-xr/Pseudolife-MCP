@@ -262,35 +262,47 @@ pub(super) async fn probe(
         // h11 refuses the value: a LocalProtocolError, a TransportError.
         return "unavailable";
     };
-    let sent = client
-        .post(format!("{url}/api/coordination/context"))
-        // httpx's default request fields besides Host, User-Agent and the
-        // body's (reqwest sends `Accept: */*` itself). The daemon never
-        // compresses, so the advertised encodings are never decoded here.
-        .header("Accept-Encoding", "gzip, deflate")
-        .header("Connection", "keep-alive")
-        .header("Authorization", bearer)
-        .json(&json!({"agent_id": agent, "nonce": nonce, "read_only": true}))
-        .send()
-        .await;
-    let Ok(response) = sent else {
-        return "unavailable";
-    };
-    let status = response.status().as_u16();
-    let encodings: Vec<String> = response
-        .headers()
-        .get_all(reqwest::header::CONTENT_ENCODING)
-        .iter()
-        .filter_map(|value| value.to_str().ok().map(str::to_owned))
-        .collect();
-    let Ok(raw) = response.bytes().await else {
-        return "unavailable";
-    };
-    // httpx decodes the body as it reads it inside client.post; a
-    // DecodingError is no TransportError and reaches the doctor's
-    // `except`, which reports `unavailable`.
-    let Ok(body) = content_decode(&encodings, &raw) else {
-        return "unavailable";
+    let version = state.get("version");
+    if version.is_some_and(is_two) {
+        // The binding first, without the mailbox: both daemons refuse a
+        // mailbox another principal owns (invalid_credential) before they
+        // answer, so only a context read without one can tell a bank change
+        // or a principal change from a rejected key (Python, the same).
+        let (status, body) = match post(&client, url, &bearer, &json!({"read_only": true})).await {
+            Ok(answer) => answer,
+            Err(state) => return state,
+        };
+        if status != 200 {
+            return refusal(status, &body);
+        }
+        let value = match decode(&body) {
+            Decoded::Value(Value::Object(value)) => value,
+            Decoded::TooDeep => return "unavailable",
+            _ => return "unsupported_capability",
+        };
+        let field = |key: &str| value.get(key).and_then(Value::as_str);
+        let (Some(bank_id), Some(principal)) = (field("bank_id"), field("principal")) else {
+            return "unsupported_capability";
+        };
+        if state.get("bank_id").and_then(Value::as_str) != Some(bank_id) {
+            return "bank_identity_mismatch";
+        }
+        if state.get("principal").and_then(Value::as_str) != Some(principal) {
+            // Same bank, another principal for this login: the shim
+            // registers a new address on its next start.
+            return "principal_changed";
+        }
+    }
+    let (status, body) = match post(
+        &client,
+        url,
+        &bearer,
+        &json!({"agent_id": agent, "nonce": nonce, "read_only": true}),
+    )
+    .await
+    {
+        Ok(answer) => answer,
+        Err(state) => return state,
     };
     match status {
         200 => {
@@ -305,18 +317,12 @@ pub(super) async fn probe(
             else {
                 return "unsupported_capability";
             };
-            let version = state.get("version");
             if version.is_some_and(is_two)
-                && state.get("bank_id").and_then(Value::as_str) != Some(bank_id)
+                && (state.get("bank_id").and_then(Value::as_str) != Some(bank_id)
+                    || state.get("principal").and_then(Value::as_str) != Some(principal))
             {
+                // The binding moved between the two reads.
                 return "bank_identity_mismatch";
-            }
-            if version.is_some_and(is_two)
-                && state.get("principal").and_then(Value::as_str) != Some(principal)
-            {
-                // Same bank, another principal for this login: the shim
-                // registers a new address on its next start.
-                return "principal_changed";
             }
             if !matches!(version, None | Some(Value::Null)) && !version.is_some_and(is_two) {
                 return "invalid_state";
@@ -339,10 +345,58 @@ pub(super) async fn probe(
                 "invalid_credential"
             }
         }
+        _ => refusal(status, &body),
+    }
+}
+
+/// One `POST /api/coordination/context` as httpx sends it; the status and
+/// the decoded body, or the doctor's state for a request that failed.
+async fn post(
+    client: &reqwest::Client,
+    url: &str,
+    bearer: &reqwest::header::HeaderValue,
+    body: &Value,
+) -> Result<(u16, Vec<u8>), &'static str> {
+    let sent = client
+        .post(format!("{url}/api/coordination/context"))
+        // httpx's default request fields besides Host, User-Agent and the
+        // body's (reqwest sends `Accept: */*` itself). The daemon never
+        // compresses, so the advertised encodings are never decoded here.
+        .header("Accept-Encoding", "gzip, deflate")
+        .header("Connection", "keep-alive")
+        .header("Authorization", bearer.clone())
+        .json(body)
+        .send()
+        .await;
+    let Ok(response) = sent else {
+        return Err("unavailable");
+    };
+    let status = response.status().as_u16();
+    let encodings: Vec<String> = response
+        .headers()
+        .get_all(reqwest::header::CONTENT_ENCODING)
+        .iter()
+        .filter_map(|value| value.to_str().ok().map(str::to_owned))
+        .collect();
+    let Ok(raw) = response.bytes().await else {
+        return Err("unavailable");
+    };
+    // httpx decodes the body as it reads it inside client.post; a
+    // DecodingError is no TransportError and reaches the doctor's
+    // `except`, which reports `unavailable`.
+    let Ok(body) = content_decode(&encodings, &raw) else {
+        return Err("unavailable");
+    };
+    Ok((status, body))
+}
+
+/// The doctor's state for a context answer other than 200.
+fn refusal(status: u16, body: &[u8]) -> &'static str {
+    match status {
         401 => "unauthorized",
         404 | 405 => "unsupported_capability",
         400 | 403 => {
-            let value = match decode(&body) {
+            let value = match decode(body) {
                 Decoded::Value(value) => value,
                 Decoded::TooDeep => return "unavailable",
                 Decoded::Invalid => return "unsupported_capability",

@@ -1104,10 +1104,21 @@ async fn board_retry_bank_and_principal_both_changed_still_refuses() {
     assert_eq!(saved(&path), original);
     assert!(!stale(&path).exists());
 }
-// Only the session's own state file is retired: a record read from a legacy
-// path is refused and kept as it is.
+// Round-2 review of #1066: a legacy record naming this bank under another
+// principal was refused on every start, and the hint's "restart" re-read it.
+// It is now left as it is (never retired or rewritten) and a new address
+// registers on the bound path, so later starts resume that one.
 #[tokio::test]
-async fn board_retry_legacy_record_naming_another_principal_is_not_retired() {
+async fn board_retry_legacy_record_naming_another_principal_is_left_and_replaced() {
+    if capture(
+        "board_retry_legacy_record_naming_another_principal_is_left_and_replaced",
+        &[
+            "than the saved legacy coordination address was registered under (same bank); registering a new address (the legacy record is left as it is",
+        ],
+        &[],
+    ) {
+        return;
+    }
     let fixture = Fixture::new(0);
     let home = Home::new();
     let mut config = adapter_config(&fixture, &home);
@@ -1115,12 +1126,163 @@ async fn board_retry_legacy_record_naming_another_principal_is_not_retired() {
     let original = saved_address(&fixture, &legacy, BANK, "previous-login");
     config.legacy_state = Some(legacy.clone());
     let path = config.state.clone().unwrap();
+    let adapter = Adapter::enter(config).await.unwrap();
+    adapter.close().await;
+    assert_eq!(fixture.count("/register"), 1);
+    assert!(
+        fixture
+            .requests
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|request| !request.headers.contains("x-pl-agent: old-agent"))
+    );
+    let state: serde_json::Value = serde_json::from_slice(&saved(&path)).unwrap();
+    assert_eq!(state["principal"], "fixture");
+    assert_eq!(saved(&legacy), original);
+    assert!(!stale(&legacy).exists());
+}
+// The near miss: a legacy record bound to another bank is refused, kept as it
+// is, and named as the file the refusal is about.
+#[tokio::test]
+async fn board_retry_legacy_record_naming_another_bank_is_refused_and_named() {
+    let fixture = Fixture::new(0);
+    let home = Home::new();
+    let mut config = adapter_config(&fixture, &home);
+    let legacy = home.0.join("legacy.json");
+    let original = saved_address(
+        &fixture,
+        &legacy,
+        "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+        "fixture",
+    );
+    config.legacy_state = Some(legacy.clone());
     let failure = Adapter::enter(config).await.err().unwrap();
     assert_eq!(failure.code, "bank_identity_mismatch");
-    assert_eq!(failure.binding, Some("principal"));
+    assert_eq!(failure.binding, Some("bank"));
+    assert_eq!(failure.state_file.as_deref(), Some(legacy.as_path()));
     assert_eq!(fixture.count("/register"), 0);
     assert_eq!(saved(&legacy), original);
-    assert!(!stale(&legacy).exists() && !stale(&path).exists());
+}
+// Round-2 Codex review of #1066: after a principal-change retire, a
+// registration the daemon could not take left only the .stale; the next
+// attempt imported the legacy record bound under the previous principal and
+// was refused for good. The retired .stale keeps the legacy record out.
+#[tokio::test]
+async fn board_retry_failed_registration_after_a_retire_does_not_import_the_legacy_record() {
+    let fixture = Fixture::new(1);
+    let home = Home::new();
+    let mut config = adapter_config(&fixture, &home);
+    let path = config.state.clone().unwrap();
+    saved_address(&fixture, &path, BANK, "previous-login");
+    let legacy = home.0.join("legacy.json");
+    let unversioned =
+        json!({"bank_url":fixture.url,"agent_id":"old-agent","credential":"fictional-old-key"})
+            .to_string()
+            .into_bytes();
+    pseudolife_stdio::board::state::atomic_write(&legacy, &unversioned, None).unwrap();
+    config.legacy_state = Some(legacy.clone());
+    let failure = Adapter::enter(config.clone()).await.err().unwrap();
+    assert_eq!(failure.status, Some(503));
+    assert!(!path.exists() && stale(&path).exists());
+    let adapter = Adapter::enter(config).await.unwrap();
+    adapter.close().await;
+    assert_eq!(fixture.count("/register"), 2);
+    let state: serde_json::Value = serde_json::from_slice(&saved(&path)).unwrap();
+    assert_eq!(state["agent_id"], "fixture-agent");
+    assert_eq!(saved(&legacy), unversioned);
+}
+// Round-2 review of #1066: a legacy record whose address the bank pruned is
+// replaced by a fresh registration, as Python's start does, instead of being
+// read again after the retire.
+#[tokio::test]
+async fn board_retry_pruned_legacy_address_registers_fresh() {
+    let fixture = Fixture::new(0);
+    fixture.answer(
+        "attach",
+        Answer::json(404, json!({"error":"instance_not_found"})),
+    );
+    let home = Home::new();
+    let mut config = adapter_config(&fixture, &home);
+    let legacy = home.0.join("legacy.json");
+    let original = saved_address(&fixture, &legacy, BANK, "fixture");
+    config.legacy_state = Some(legacy.clone());
+    let provider = config.provider.clone();
+    let adapter = tokio::time::timeout(std::time::Duration::from_secs(10), Adapter::enter(config))
+        .await
+        .unwrap()
+        .unwrap();
+    let snapshot = provider.snapshot().unwrap();
+    assert_eq!(
+        adapter.validated_headers(&snapshot).await.unwrap()["x-pl-agent"],
+        "fixture-agent"
+    );
+    adapter.close().await;
+    assert_eq!(fixture.count("/register"), 1);
+    assert_eq!(saved(&legacy), original);
+}
+// Round-2 review of #1066: the retire budget ends as in Python. With no
+// retire left, a record that still needs one is refused as
+// reservation_changed, and nothing is moved or registered.
+#[tokio::test]
+async fn board_retry_exhausted_retire_budget_refuses_the_record() {
+    let fixture = Fixture::new(0);
+    let home = Home::new();
+    let config = adapter_config(&fixture, &home);
+    let path = config.state.clone().unwrap();
+    let original = saved_address(&fixture, &path, BANK, "previous-login");
+    let failure = Adapter::enter_with(config, 0).await.err().unwrap();
+    assert_eq!(failure.code, "reservation_changed");
+    assert_eq!(fixture.count("/register"), 0);
+    assert_eq!(saved(&path), original);
+    assert!(!stale(&path).exists());
+}
+// Round-2 review of #1066: the Codex registry's startup line names the saved
+// file the refusal is about, with the cause and the fix.
+#[tokio::test]
+async fn board_retry_codex_startup_line_names_a_saved_mailbox_from_another_bank() {
+    // The thread's bound file name is fixed by its id; its directory is the
+    // child's own temporary home.
+    let named = format!(
+        "{}.json) is bound to a different bank than this daemon serves",
+        pseudolife_stdio::board::identity::hex_hash(BANK)
+    );
+    if capture(
+        "board_retry_codex_startup_line_names_a_saved_mailbox_from_another_bank",
+        &[
+            "coordination unavailable; memory proxy remains active. The saved board address (",
+            &named,
+        ],
+        &["Check the daemon's coordination setting"],
+    ) {
+        return;
+    }
+    let fixture = Fixture::new(0);
+    let home = Home::new();
+    let runtime = runtime(&fixture, true);
+    let path = pseudolife_stdio::board::identity::bound_state_path(
+        &home.0.join("agents"),
+        &fixture.url,
+        BANK,
+    );
+    pseudolife_stdio::board::state::private_dir(path.parent().unwrap()).unwrap();
+    let original = saved_address(
+        &fixture,
+        &path,
+        "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+        "fixture",
+    );
+    let board = Board::attach_options(runtime.clone(), options(&runtime, &home, "1")).await;
+    let _ = board
+        .prepare_call(
+            "memory_message",
+            Some(json!({"action":"receive"}).as_object().unwrap().clone()),
+            &json!({"threadId":BANK}),
+        )
+        .await;
+    board.close().await;
+    assert_eq!(fixture.count("/register"), 0);
+    assert_eq!(saved(&path), original);
 }
 // Codex review of 22f969dc: after a deliberate retire the session registers
 // fresh instead of importing the legacy record beside it, which was bound

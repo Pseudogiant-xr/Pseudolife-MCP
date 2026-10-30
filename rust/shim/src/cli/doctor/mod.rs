@@ -287,7 +287,7 @@ fn coordination_snapshot(
     } else if auth != "admitted" {
         next.push("Check the board reason and credential source; repair authentication or daemon coordination settings.");
     } else if registration == Some("principal_changed") {
-        next.push("The daemon now maps this login to a different principal than the saved address was registered under (same bank); the shim registers a new address on its next start (mail sent to the old address is not carried over), so nothing is needed, or restart the session to do it now.");
+        next.push("The daemon now maps this login to a different principal than the saved address was registered under (same bank); this file needs no repair: the shim registers a new address on its next start (mail sent to the old address is not carried over), or restart the session to do it now.");
     } else if matches!(
         registration,
         Some("invalid_state" | "invalid_credential" | "bank_identity_mismatch")

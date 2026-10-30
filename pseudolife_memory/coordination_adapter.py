@@ -69,7 +69,13 @@ _PRINCIPAL_CHANGED_NOTICE = (
     "coordination address was registered under (same bank); registering a new "
     "address (old state kept with a .stale suffix; mail sent to the old address is "
     "not carried over).")
-# A record another process keeps replacing is not chased for ever.
+_LEGACY_PRINCIPAL_CHANGED_NOTICE = (
+    "the daemon now maps this login to a different principal than the saved legacy "
+    "coordination address was registered under (same bank); registering a new address "
+    "(the legacy record is left as it is; mail sent to the old address is not carried "
+    "over).")
+# A record another process keeps replacing is not chased for ever: after this
+# many retires that lost the race, a record that still needs one is refused.
 _RETIRE_ATTEMPTS = 3
 
 
@@ -1205,16 +1211,21 @@ class CoordinationAdapter:
                     read_legacy, fetch_context, check_binding, principal_changed,
                     binding_difference)
 
-                retired = superseded = False
-                for _ in range(_RETIRE_ATTEMPTS):
-                    if not (self._identity is not None and self._loaded_state_info is not None
-                            and principal_changed(self._identity, self._context)):
-                        break
+                superseded = False
+                retires_left = _RETIRE_ATTEMPTS
+                while (self._identity is not None and self._loaded_state_info is not None
+                       and principal_changed(self._identity, self._context)):
                     # The daemon now maps this login to a different principal
                     # than the saved address was registered under, on this same
                     # bank. Its key is never sent under the new one: it is set
                     # aside and a new address registered, as a new session
                     # would. A different bank still refuses below.
+                    if retires_left == 0:
+                        # The record read a fourth time still needs retiring:
+                        # another process keeps replacing it (Rust: the same).
+                        raise AdapterError("adapter state is being replaced by another process",
+                                           code="reservation_changed")
+                    retires_left -= 1
                     expected, self._loaded_state_info = self._loaded_state_info, None
                     superseded = True
                     retired = self._retire_stale_state(
@@ -1225,19 +1236,31 @@ class CoordinationAdapter:
                     reservation = self._load_or_reserve()
                     if retired:
                         break
-                else:
-                    raise AdapterError("adapter state is being replaced by another process")
                 source = self.state_path
+                # A .stale beside the bound path exists only once this exact
+                # path held a bound record that was retired (a principal
+                # change or a missing address). The legacy record is then
+                # history the session already moved past, never its current
+                # address, so it is not imported: also on a later attempt or
+                # restart after a registration that failed, when nothing else
+                # remembers the retire.
+                retired_before = self.state_path is not None and os.path.lexists(
+                    self.state_path.with_name(self.state_path.name + ".stale"))
                 if (self._identity is None and self._legacy_state_path is not None
-                        and not superseded):
+                        and not superseded and not retired_before):
                     # Only the exact legacy path derived from this configured
                     # credential is eligible; never search neighboring namespaces.
-                    # After a deliberate retire the session registers fresh: a
-                    # legacy record of the same bearer was bound under the
-                    # previous principal too and would never prove itself now.
                     if self._legacy_state_path.exists() or self._legacy_state_path.is_symlink():
-                        self._identity = read_legacy(self._legacy_state_path, self.url)
-                        source = self._legacy_state_path
+                        legacy = read_legacy(self._legacy_state_path, self.url)
+                        if principal_changed(legacy, self._context):
+                            # A bound legacy record under the previous principal
+                            # would be refused on every start: register a new
+                            # address instead and leave the legacy file as it is.
+                            print(f"pseudolife-mcp: {_LEGACY_PRINCIPAL_CHANGED_NOTICE}",
+                                  file=sys.stderr)
+                        else:
+                            self._identity = legacy
+                            source = self._legacy_state_path
                 if self._identity is not None:
                     if self._identity.get("version") not in (None, 2):
                         raise AdapterError("unsupported adapter state version; state was preserved")

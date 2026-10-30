@@ -311,7 +311,7 @@ impl Board {
                         status.checkin = true;
                     }
                     Ok(Err(failure)) if !failure.transient() => {
-                        board.report_unavailable(failure.code);
+                        board.report_unavailable(&failure);
                     }
                     _ => {
                         board.begin_retry(false).await;
@@ -324,10 +324,14 @@ impl Board {
         }
         board
     }
-    fn report_unavailable(&self, code: &str) {
-        // This shim reads no legacy record, so the state file the adapter was
-        // configured with is the one any refusal is about.
-        let line = unavailable_line(code, self.config(None, None).state.as_deref());
+    fn report_unavailable(&self, failure: &adapter::Failure) {
+        // The file a refused binding came from, else the session's own state
+        // file (this session-level adapter is configured with no legacy path).
+        let state = failure
+            .state_file
+            .clone()
+            .or_else(|| self.config(None, None).state);
+        let line = unavailable_line(failure.code, state.as_deref());
         crate::stderrln!("{line}");
     }
 }
@@ -575,7 +579,7 @@ impl Board {
                         if board.closing.load(Ordering::Acquire) { adapter.close().await; return; }
                         let mut status = board.status.lock().await; status.mode = Mode::Adapter(adapter); status.note = Some(policy::REGISTERED);crate::stderrln!("pseudolife-mcp: coordination registered after a startup delay; board tools are available."); return;
                     }
-                    Ok(Err(failure)) if !failure.transient() => { let mut status = board.status.lock().await; status.mode = Mode::Stopped; status.note = Some(policy::STOPPED);board.report_unavailable(failure.code); return; }
+                    Ok(Err(failure)) if !failure.transient() => { let mut status = board.status.lock().await; status.mode = Mode::Stopped; status.note = Some(policy::STOPPED);board.report_unavailable(&failure); return; }
                     _ => {}
                 }
             }
@@ -750,12 +754,16 @@ impl Board {
         }
         let doorbell = self.doorbell.lock().await.clone();
         config.ring = doorbell.is_some();
-        let state_file = config.state.clone();
         let result = tokio::select! {_=self.cancel.cancelled()=>return Err("Coordination: session is closing.".into()),result=tokio::time::timeout(self.options.timing.startup,Adapter::enter(config))=>result};
-        let (failure_code, failure_status, failure_binding) = match &result {
-            Ok(Err(failure)) => (failure.code, failure.status, failure.binding),
-            Ok(Ok(_)) => ("", None, None),
-            Err(_) => ("timeout", None, None),
+        let (failure_code, failure_status, failure_binding, state_file) = match &result {
+            Ok(Err(failure)) => (
+                failure.code,
+                failure.status,
+                failure.binding,
+                failure.state_file.clone(),
+            ),
+            Ok(Ok(_)) => ("", None, None, None),
+            Err(_) => ("timeout", None, None, None),
         };
         if let Ok(Ok(adapter)) = result {
             if self.closing.load(Ordering::Acquire) {
@@ -797,12 +805,10 @@ impl Board {
             entry.failure_hint =
                 policy::registry_failure_hint(failure_code, failure_status, false, failure_binding);
             if !self.registry_failure_reported.swap(true, Ordering::AcqRel) {
-                // Name the saved file only for a refusal about one (Python's
-                // registry line; this shim reads no legacy record).
-                let state = (failure_code == "bank_identity_mismatch")
-                    .then_some(state_file.as_deref())
-                    .flatten();
-                let line = unavailable_line(failure_code, state);
+                // Name the saved file only for a refusal about one: the
+                // bound or legacy record the adapter loaded (Python's
+                // registry line, `error.state_file`).
+                let line = unavailable_line(failure_code, state_file.as_deref());
                 crate::stderrln!("{line}");
             }
             Err(entry.failure_hint.clone())

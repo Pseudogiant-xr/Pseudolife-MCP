@@ -434,9 +434,12 @@ def test_a_record_replaced_after_it_was_read_is_reloaded_not_retired(tmp_path, m
     asyncio.run(run())
 
 
-def test_a_legacy_record_naming_another_principal_is_not_retired(tmp_path):
-    """Only the session's own state file is retired: a record read from the
-    token-derived legacy path is refused, kept as it is, and named."""
+def test_a_legacy_record_naming_another_principal_is_left_and_replaced(tmp_path, capsys):
+    """Round-2 review of #1066: a record read from the token-derived legacy
+    path that names this bank under another principal was refused on every
+    start, and the hint's "restart" re-read it. It is now left as it is (never
+    retired or rewritten) and a new address registers on the bound path, so
+    later starts resume that one."""
     async def run():
         provider, bank = Provider(), Bank()
         legacy = tmp_path / "legacy.json"
@@ -447,15 +450,136 @@ def test_a_legacy_record_naming_another_principal_is_not_retired(tmp_path):
         original = legacy.read_bytes()
         path = tmp_path / "bound.json"
         client, resumed = instance(bank, provider, path, legacy_state_path=legacy)
+        async with client, resumed:
+            assert resumed.instance_headers["X-PL-Agent"] == bank.agent
+        assert bank.registered == 1
+        assert all(h.get("x-pl-agent") != "a" * 32 for _, _, h in bank.calls)
+        assert json.loads(path.read_text())["principal"] == bank.principal
+        assert legacy.read_bytes() == original
+        assert not legacy.with_name(legacy.name + ".stale").exists()
+    asyncio.run(run())
+    assert ("than the saved legacy coordination address was registered under (same bank); "
+            "registering a new address (the legacy record is left as it is") in capsys.readouterr().err
+
+
+def test_a_legacy_record_naming_another_bank_is_refused_and_named(tmp_path):
+    """The near miss: a legacy record bound to another bank is refused, kept
+    as it is, and named as the file the refusal is about."""
+    async def run():
+        provider, bank = Provider(), Bank()
+        legacy = tmp_path / "legacy.json"
+        legacy.write_text(json.dumps({
+            "bank_url": URL, "agent_id": "a" * 32, "credential": bank.credential,
+            "version": 2, "bank_id": "22222222-2222-4222-8222-222222222222",
+            "principal": bank.principal}))
+        _secure_state(legacy)
+        original = legacy.read_bytes()
+        path = tmp_path / "bound.json"
+        client, resumed = instance(bank, provider, path, legacy_state_path=legacy)
         async with client:
             with pytest.raises(AdapterError) as caught:
                 await resumed.__aenter__()
         assert caught.value.code == "bank_identity_mismatch"
-        assert caught.value.binding == "principal"
+        assert caught.value.binding == "bank"
         assert caught.value.state_file == legacy
         assert legacy.read_bytes() == original
-        assert not legacy.with_name(legacy.name + ".stale").exists()
         assert not path.exists() and bank.registered == 0
+    asyncio.run(run())
+
+
+def test_a_record_that_keeps_being_replaced_is_refused_after_three_retires(tmp_path, monkeypatch):
+    """Round-2 review of #1066: the retire budget ends as in the Rust shim.
+    After three retires that each lost the race to another process, a
+    fourth read that still needs one is refused as ``reservation_changed``;
+    nothing registers and nothing is moved into .stale."""
+    from pseudolife_memory import coordination_identity
+
+    async def run():
+        provider, bank = Provider(), Bank()
+        path = tmp_path / "state.json"
+        client, first = instance(bank, provider, path)
+        async with client, first:
+            pass
+        bank.principal = "machine-login"
+        stale_record = json.loads(path.read_text())
+        real, swaps = coordination_identity.principal_changed, []
+
+        def racing(state, context):
+            changed = real(state, context)
+            if changed:
+                # Another process saves a record that still names the old
+                # principal: a new file over the one just read.
+                fresh = tmp_path / f"peer-{len(swaps)}.json"
+                fresh.write_text(json.dumps(dict(stale_record, agent_id=f"{len(swaps):032x}")))
+                _secure_state(fresh)
+                os.replace(fresh, path)
+                swaps.append(True)
+            return changed
+
+        monkeypatch.setattr(coordination_identity, "principal_changed", racing)
+        client, resumed = instance(bank, provider, path)
+        async with client:
+            with pytest.raises(AdapterError) as caught:
+                await resumed.__aenter__()
+        assert caught.value.code == "reservation_changed"
+        assert len(swaps) == 4
+        assert bank.registered == 1
+        assert not path.with_name(path.name + ".stale").exists()
+    asyncio.run(run())
+
+
+def test_a_failed_registration_after_a_retire_does_not_import_the_legacy_record(tmp_path):
+    """Round-2 Codex review of #1066: after a principal-change retire, a
+    registration the daemon could not take (a 503) left only the .stale; the
+    next attempt imported the legacy record bound under the previous
+    principal and was refused for good, even after the daemon recovered. The
+    retired .stale beside the bound path keeps the legacy record out, so the
+    retry registers a new address."""
+    async def run():
+        provider, bank = Provider(), Bank()
+        owners, refuse = {}, []
+
+        async def daemon(request):
+            body = json.loads(request.content) if request.content else {}
+            path = request.url.path
+            if (path.endswith("/context") and "agent_id" in body
+                    and owners.get(body["agent_id"], bank.principal) != bank.principal):
+                return httpx.Response(403, json={"error": "invalid_credential"})
+            if path.endswith("/register") and refuse:
+                refuse.pop()
+                return httpx.Response(503, json={"error": "principals_unavailable"})
+            response = await bank(request)
+            if path.endswith("/register"):
+                owners[bank.agent] = bank.principal
+            return response
+
+        def adapter(**kwargs):
+            client = httpx.AsyncClient(transport=httpx.MockTransport(daemon))
+            return client, CoordinationAdapter(URL, provider.token, client=client,
+                                               provider=provider, state_path=path, **kwargs)
+
+        legacy = tmp_path / "legacy.json"
+        path = tmp_path / "bound.json"
+        client, first = adapter()
+        async with client, first:
+            old = first.instance_headers["X-PL-Agent"]
+        legacy.write_text(json.dumps({"bank_url": URL, "agent_id": old,
+                                      "credential": bank.credential}))
+        _secure_state(legacy)
+        original = legacy.read_bytes()
+        bank.principal = "machine-login"
+        refuse.append(True)
+        client, failed = adapter(legacy_state_path=legacy)
+        async with client:
+            with pytest.raises(AdapterError) as caught:
+                await failed.__aenter__()
+        assert caught.value.status == 503
+        assert not path.exists() and path.with_name(path.name + ".stale").exists()
+        client, retried = adapter(legacy_state_path=legacy)
+        async with client, retried:
+            assert retried.instance_headers["X-PL-Agent"] == bank.agent != old
+        assert json.loads(path.read_text())["principal"] == "machine-login"
+        assert legacy.read_bytes() == original
     asyncio.run(run())
 
 
