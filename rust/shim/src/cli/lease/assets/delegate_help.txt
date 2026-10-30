@@ -4,9 +4,10 @@ Operator only: make the session AGENT (its id, or a unique prefix) the
 maintainer's conductor for PROJECT for DURATION, replacing any current one.
 Its urgent mail then reopens done parks in that project; holding the open
 coordinator:<project> lease grants nothing. The grant is the board lease
-delegate:<project>, which no session can take: it opens the bank directly,
+conductor:<project>, which no session can take: it opens the bank directly,
 like break, and the audit log records it with the operator as its actor.
-Revoke it with: lease break delegate:<project>.
+Revoke it with: lease break conductor:<project> (delegate:<project> for a
+grant made before the role's rename).
 
 positional arguments:
   PROJECT         the project, as sessions set it on the board

@@ -1,5 +1,5 @@
 <script lang="ts">
-  // The pinned Roles band above the Board: per project, the delegate slot
+  // The pinned Roles band above the Board: per project, the conductor slot
   // (gold: it acts with the maintainer's authority) and the coordinator slot
   // (lavender: it organises, with no authority). Every change and every
   // message is signed with the maintainer's passkey; when that is not
@@ -21,12 +21,12 @@
     type RoleKind,
   } from "../../lib/maintainer";
   import {
-    extendDelegate,
+    extendConductor,
     keyChangeNotices,
     maintainer,
     readiness,
     revokeCoordinator,
-    revokeDelegate,
+    revokeConductor,
   } from "../../lib/maintainerFlow.svelte";
   import { fmtDateTime, fmtRelative, shortId } from "../../lib/format";
   import { hrefTo } from "../../lib/state.svelte";
@@ -46,7 +46,7 @@
   const project = $derived(
     picked && projects.includes(picked) ? picked : defaultProject(projects, status, leases),
   );
-  const holders = $derived(project ? rolesFor(project, status, leases) : { delegate: null, coordinator: null });
+  const holders = $derived(project ? rolesFor(project, status, leases) : { conductor: null, coordinator: null });
 
   const ready = $derived(readiness(now));
   const blocked = $derived(ready.ok ? "" : ready.title);
@@ -69,13 +69,13 @@
   }
   // A composer for a holder that changed or left closes.
   $effect(() => {
-    if (composer === "delegate" && !holders.delegate) composer = null;
+    if (composer === "conductor" && !holders.conductor) composer = null;
     if (composer === "coordinator" && !holders.coordinator) composer = null;
   });
 
-  const delegateAgent = $derived(agentOf(holders.delegate));
+  const conductorAgent = $derived(agentOf(holders.conductor));
   const coordinatorAgent = $derived(agentOf(holders.coordinator));
-  const delegatePct = $derived(holders.delegate ? leftPercent(holders.delegate, now) : null);
+  const conductorPct = $derived(holders.conductor ? leftPercent(holders.conductor, now) : null);
 </script>
 
 <section class="band" aria-labelledby="{uid}-title">
@@ -121,10 +121,10 @@
     <p class="caption none">No session names a project yet, so there is no role to give.</p>
   {:else}
     <div class="slots">
-      <!-- Delegate -->
-      {#if holders.delegate}
-        {@const h = holders.delegate}
-        <div class="slot delegate">
+      <!-- Conductor -->
+      {#if holders.conductor}
+        {@const h = holders.conductor}
+        <div class="slot conductor">
           <div class="slot-head">
             <span class="badge gold">
               <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true"
@@ -137,15 +137,15 @@
               >Your conductor
             </span>
             <span class="left">{timeLeft(h.expires_at, now)}</span>
-            <span class="lease mono">{leaseName("delegate", project)}</span>
+            <span class="lease mono">{h.lease ?? leaseName("conductor", project)}</span>
           </div>
           <div class="holder">
-            <span class="dot big {delegateAgent ? agentTone(delegateAgent, snapshotAt) : ''}" aria-hidden="true"></span>
+            <span class="dot big {conductorAgent ? agentTone(conductorAgent, snapshotAt) : ''}" aria-hidden="true"></span>
             <span class="holder-name big">{nameOf(h)}</span>
             {#if nameOf(h) !== shortId(h.agent_id)}<span class="mono meta" title={h.agent_id}>{shortId(h.agent_id)}</span>{/if}
           </div>
-          <p class="holder-status" class:none={!delegateAgent?.status}>
-            {delegateAgent ? delegateAgent.status || "No status set." : "Not in the board's recent list."}
+          <p class="holder-status" class:none={!conductorAgent?.status}>
+            {conductorAgent ? conductorAgent.status || "No status set." : "Not in the board's recent list."}
           </p>
           {#if reachText(h)}
             {@const r = reachText(h)!}
@@ -155,8 +155,8 @@
             Acts with your authority in {project}: it can wake any session here, including sessions parked as done.
           </p>
           <div class="hold">
-            {#if delegatePct !== null}
-              <div class="track thin" aria-hidden="true"><span class="gold-bar" style:width="{delegatePct}%"></span></div>
+            {#if conductorPct !== null}
+              <div class="track thin" aria-hidden="true"><span class="gold-bar" style:width="{conductorPct}%"></span></div>
             {/if}
             <span class="hold-line">
               {grantedByText(h.granted_by)}{#if h.acquired_at}&nbsp;{fmtRelative(h.acquired_at, now)}{/if}{#if h.expires_at};
@@ -167,32 +167,32 @@
             <button
               type="button"
               class="sbtn primary"
-              aria-expanded={composer === "delegate"}
+              aria-expanded={composer === "conductor"}
               disabled={!!blocked}
               title={blocked || undefined}
-              onclick={() => toggle("delegate")}>Message your conductor</button
+              onclick={() => toggle("conductor")}>Message your conductor</button
             >
             <button
               type="button"
               class="sbtn"
               disabled={!!blocked}
               title={blocked || undefined}
-              onclick={() => extendDelegate(target(h))}>Extend</button
+              onclick={() => extendConductor(target(h))}>Extend</button
             >
             <button
               type="button"
               class="sbtn danger"
               disabled={!!blocked}
               title={blocked || undefined}
-              onclick={() => revokeDelegate(target(h))}>Revoke</button
+              onclick={() => revokeConductor(target(h))}>Revoke</button
             >
           </div>
-          {#if composer === "delegate"}
-            <SlotComposer agentId={h.agent_id} name={nameOf(h)} kind="delegate" {blocked} {now} />
+          {#if composer === "conductor"}
+            <SlotComposer agentId={h.agent_id} name={nameOf(h)} kind="conductor" {blocked} {now} />
           {/if}
         </div>
       {:else}
-        <div class="slot empty delegate">
+        <div class="slot empty conductor">
           <span class="empty-title gold-ink">
             <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true"
               ><circle cx="5.5" cy="8" r="3" stroke="currentColor" stroke-width="1.6" /><path
@@ -375,7 +375,7 @@
     border-radius: 20px;
     min-width: 0;
   }
-  .slot.delegate:not(.empty) {
+  .slot.conductor:not(.empty) {
     background: color-mix(in srgb, var(--canon) 7.5%, transparent);
     border: 1px solid color-mix(in srgb, var(--canon) 38%, transparent);
     box-shadow:
@@ -392,7 +392,7 @@
     gap: 8px;
     padding: 22px;
   }
-  .slot.empty.delegate {
+  .slot.empty.conductor {
     border: 1.5px dashed color-mix(in srgb, var(--canon) 40%, transparent);
     background: color-mix(in srgb, var(--canon) 3%, transparent);
   }

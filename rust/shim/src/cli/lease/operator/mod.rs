@@ -171,7 +171,7 @@ pub(super) async fn command(args: &Args, arguments: &[String]) -> i32 {
         Err(before) => -before.duration().as_secs_f64(),
     };
     let result = if args.action == "delegate" {
-        store::grant_delegate(
+        store::grant_conductor(
             &mut session,
             args.name.as_deref().expect("delegate project"),
             args.agent.as_deref().expect("delegate agent"),

@@ -196,7 +196,9 @@ def _operator_clock(obs):
             return T0 + (value - seed)
         assert operation is not None and math.isfinite(value)
         if key == "expires_at":
-            if row.get("name", "").startswith("delegate:"):
+            # The operator's grant: conductor:<project>, delegate:<project> in
+            # observations recorded before the role's rename (2026-10-31).
+            if row.get("name", "").startswith(("conductor:", "delegate:")):
                 hold = obs["hold"]
             else:
                 waiter = next(json.loads(raw) for raw in before["tables"]["coordination_lease_waiters"]
@@ -340,8 +342,27 @@ def operator_case(identifier, argv, scenario="missing", events=(), local=False, 
         if scenario == "free":
             arm.daemon.store.release_lease("alice", target["agent_id"], target["credential"], name="fixture")
         if scenario == "replace":
-            other = arm.daemon.register(label="codex", project="fixture", task="old delegate")
-            arm.daemon.store.grant_delegate("fixture", other["agent_id"], hold=300)
+            other = arm.daemon.register(label="codex", project="fixture", task="old conductor")
+            arm.daemon.store.grant_conductor("fixture", other["agent_id"], hold=300)
+        if scenario in ("legacy", "legacy-expired"):
+            # A grant made before the role's rename: the hold
+            # delegate:<project> and its lease_delegate record for the same
+            # fence. The new grant vacates it (break, or expire when lapsed).
+            other = arm.daemon.register(label="codex", project="fixture", task="old-named conductor")
+            store = arm.daemon.store
+            with store.storage._txn():
+                fence = store._one("SELECT nextval('coordination_lease_fence') AS f", ())["f"]
+                store.storage.conn.execute(
+                    "INSERT INTO coordination_leases (name,holder_agent_id,holder_principal,purpose,"
+                    "fence,acquired_at,expires_at) VALUES (%s,%s,'alice','granted by the operator',"
+                    "%s,%s,%s)",
+                    ("delegate:fixture", other["agent_id"], fence, stamp - 60,
+                     stamp + (300 if scenario == "legacy" else -10)))
+                store._append([store._event("lease_delegate",
+                                            {"name": "delegate:fixture", "fence": fence,
+                                             "hold": 300, "replaced": None},
+                                            actor="operator", agent_id=other["agent_id"])],
+                              stamp)
         if scenario == "coordinator":
             arm.daemon.store.acquire_lease("alice", target["agent_id"], target["credential"],
                                          name="coordinator:fixture", ttl=300)
@@ -415,21 +436,23 @@ def cases():
               operator_case("break-fifo", ["break", "fixture"], "queue", ("lease_break", "lease_grant"))]
     for action in ("delegate", "designate"):
         result.append(operator_case(action + "-normal", [action, "fixture", "{AGENT}", "--for", "2m"],
-                                    "target", ("lease_delegate",)))
-    for scenario in ("replace", "coordinator"):
-        events = ("lease_delegate",) if scenario == "replace" else ("lease_break", "lease_delegate")
+                                    "target", ("lease_conductor",)))
+    for scenario, events in (("replace", ("lease_conductor",)),
+                             ("coordinator", ("lease_break", "lease_conductor")),
+                             ("legacy", ("lease_break", "lease_conductor")),
+                             ("legacy-expired", ("lease_expire", "lease_conductor"))):
         result.append(operator_case("delegate-" + scenario, ["delegate", "fixture", "{AGENT}", "--for", "2m"],
                                     scenario, events))
     result.extend([
         operator_case("delegate-prefix", ["delegate", "fixture", "00000000", "--for", "2m"],
-                      "target", ("lease_delegate",)),
+                      "target", ("lease_conductor",)),
         operator_case("delegate-unknown", ["delegate", "fixture", "f" * 32, "--for", "2m"]),
         operator_case("delegate-ambiguous", ["delegate", "fixture", "00000000", "--for", "2m"], "ambiguous"),
-        operator_case("delegate-default", ["delegate", "fixture", "{AGENT}"], "target", ("lease_delegate",)),
-        operator_case("delegate-seven-days", ["delegate", "fixture", "{AGENT}", "--for", "7d"], "target", ("lease_delegate",)),
-        operator_case("delegate-unicode-project", ["delegate", "资源", "{AGENT}", "--for", "2m"], "target", ("lease_delegate",)),
-        operator_case("delegate-live-listener", ["delegate", "fixture", "{AGENT}", "--for", "2m"], "listener", ("lease_delegate",)),
-        operator_case("delegate-live-ring", ["delegate", "fixture", "{AGENT}", "--for", "2m"], "ring", ("lease_delegate",)),
+        operator_case("delegate-default", ["delegate", "fixture", "{AGENT}"], "target", ("lease_conductor",)),
+        operator_case("delegate-seven-days", ["delegate", "fixture", "{AGENT}", "--for", "7d"], "target", ("lease_conductor",)),
+        operator_case("delegate-unicode-project", ["delegate", "资源", "{AGENT}", "--for", "2m"], "target", ("lease_conductor",)),
+        operator_case("delegate-live-listener", ["delegate", "fixture", "{AGENT}", "--for", "2m"], "listener", ("lease_conductor",)),
+        operator_case("delegate-live-ring", ["delegate", "fixture", "{AGENT}", "--for", "2m"], "ring", ("lease_conductor",)),
         hold_case("hold-no-board"), hold_case("hold-gone-pid", gone=True),
         hold_case("hold-local-wait", queued=True), hold_case("hold-board", board=True),
         hold_case("hold-board-renew", board=True, renew=True),
@@ -464,7 +487,7 @@ MUTANTS = [
     Mutant("lease-break-holder", "lease_operator", "shim/src/cli/lease/operator/store.rs",
            "holder_agent_id=NULL,holder_principal=''", "holder_agent_id=holder_agent_id,holder_principal=''",
            ("break-held",)),
-    Mutant("lease-delegate-duration", "lease_operator", "shim/src/cli/lease/operator/store/delegate.rs",
+    Mutant("lease-delegate-duration", "lease_operator", "shim/src/cli/lease/operator/store/conductor.rs",
            "let expires_at = now + hold as f64;", "let expires_at = now + (hold + 1) as f64;",
            ("delegate-normal",)),
     Mutant("lease-designate-warning", "lease_operator", "shim/src/cli/lease/args.rs",
@@ -477,7 +500,7 @@ MUTANTS = [
            "settle(&tx, name, now, &mut events).await?;\n        let _ = append(&tx, events, now).await;",
            ("break-audit-insert-fails",)),
     # A COMMIT whose answer never came must not be reported as a grant.
-    Mutant("lease-delegate-commit-ignored", "lease_operator", "shim/src/cli/lease/operator/store/delegate.rs",
+    Mutant("lease-delegate-commit-ignored", "lease_operator", "shim/src/cli/lease/operator/store/conductor.rs",
            "    commit(tx).await?;\n    Ok(Granted {", "    let _ = commit(tx).await;\n    Ok(Granted {",
            ("delegate-commit-lost",)),
     # A FATAL or lost COMMIT answer must not be reported as certainly

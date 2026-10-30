@@ -27,7 +27,7 @@ export interface Hold {
   seconds: number;
 }
 
-/** The delegate's grant and extend choices (spec section 5). */
+/** The conductor's grant and extend choices (spec section 5). */
 export const HOLDS: Hold[] = [
   { label: "1 h", seconds: 3600 },
   { label: "8 h", seconds: 8 * 3600 },
@@ -47,14 +47,14 @@ export const ENROL_COMMAND = "pseudolife-mcp maintainer enrol-code";
 
 // ---- roles ------------------------------------------------------------------------
 
-export type RoleKind = "delegate" | "coordinator";
+export type RoleKind = "conductor" | "coordinator";
 
 export interface RoleHolder {
   agent_id: string;
   expires_at: Epoch | null;
   /** When the hold began, from the board's lease listing, if it is there. */
   acquired_at: Epoch | null;
-  /** "maintainer" or "operator" for a delegate; null when only the lease is known. */
+  /** "maintainer" or "operator" for a conductor; null when only the lease is known. */
   granted_by: string | null;
   /** The lease listing's board name for the holder (v55), else its label: a
    *  fallback name for a holder not in the recent roster. */
@@ -63,35 +63,62 @@ export interface RoleHolder {
   reachable: boolean | null;
   /** Why it is not reachable (the daemon's no-path reason). */
   reach_reason: string | null;
+  /** The board lease the holder holds, when the listing has it: for the
+   *  conductor `conductor:<project>`, or `delegate:<project>` for a grant
+   *  made before the rename. */
+  lease: string | null;
 }
 
 export interface ProjectRoleHolders {
-  delegate: RoleHolder | null;
+  conductor: RoleHolder | null;
   coordinator: RoleHolder | null;
 }
 
 export const leaseName = (kind: RoleKind, project: string) => `${kind}:${project}`;
+
+/** Legacy compat: a conductor granted before the daemon renamed the role
+ *  (2026-10-31) holds `delegate:<project>` until it expires (at most 7 days)
+ *  or is re-granted; the board lease name is read as the conductor's. */
+const LEGACY_CONDUCTOR = "delegate";
+
+/** The lease names a role can be held under, the current name first. */
+function roleLeaseNames(kind: RoleKind, project: string): string[] {
+  const names = [leaseName(kind, project)];
+  if (kind === "conductor") names.push(`${LEGACY_CONDUCTOR}:${project}`);
+  return names;
+}
 
 function liveLease(leases: Lease[], name: string): Lease | null {
   const l = leases.find((x) => x.name === name);
   return l && l.holder && !l.expired ? l : null;
 }
 
+/** The first live lease among `names`, optionally the one `agentId` holds. */
+function roleLease(leases: Lease[], names: string[], agentId?: string): Lease | null {
+  for (const name of names) {
+    const l = liveLease(leases, name);
+    if (l && (agentId === undefined || l.holder?.agent_id === agentId)) return l;
+  }
+  return null;
+}
+
 /**
  * Who holds each role in `project`. The status's `roles` map is the
  * authority when the daemon serves it; without it (an unavailable maintainer
- * surface on an older daemon) the board's `delegate:` / `coordinator:`
- * leases say the same. The lease adds the grant time and a label either way.
+ * surface on an older daemon) the board's `conductor:` / `coordinator:`
+ * leases say the same (`delegate:` too, for a conductor granted before the
+ * rename; `conductor:` wins when both are held). The lease adds the grant
+ * time and a label either way.
  */
 export function rolesFor(project: string, status: MaintainerStatus | null, leases: Lease[]): ProjectRoleHolders {
-  const out: ProjectRoleHolders = { delegate: null, coordinator: null };
+  const out: ProjectRoleHolders = { conductor: null, coordinator: null };
   const served = status?.roles && typeof status.roles === "object" ? status.roles : null;
-  for (const kind of ["delegate", "coordinator"] as const) {
-    const lease = liveLease(leases, leaseName(kind, project));
+  for (const kind of ["conductor", "coordinator"] as const) {
+    const names = roleLeaseNames(kind, project);
     if (served) {
       const r = served[project]?.[kind] ?? null;
       if (!r || !r.agent_id) continue;
-      const same = lease?.holder?.agent_id === r.agent_id ? lease : null;
+      const same = roleLease(leases, names, r.agent_id);
       out[kind] = {
         agent_id: r.agent_id,
         expires_at: r.expires_at ?? same?.expires_at ?? null,
@@ -100,8 +127,12 @@ export function rolesFor(project: string, status: MaintainerStatus | null, lease
         label: same?.holder?.name || same?.holder?.label || null,
         reachable: typeof r.reachable === "boolean" ? r.reachable : null,
         reach_reason: typeof r.reason === "string" ? r.reason : null,
+        lease: same?.name ?? null,
       };
-    } else if (lease?.holder) {
+      continue;
+    }
+    const lease = roleLease(leases, names);
+    if (lease?.holder) {
       out[kind] = {
         agent_id: lease.holder.agent_id,
         expires_at: lease.expires_at ?? lease.holder.expires_at ?? null,
@@ -110,6 +141,7 @@ export function rolesFor(project: string, status: MaintainerStatus | null, lease
         label: lease.holder.name || lease.holder.label || null,
         reachable: null,
         reach_reason: null,
+        lease: lease.name,
       };
     }
   }
@@ -139,7 +171,7 @@ export function reachText(h: RoleHolder): { ok: boolean; text: string } | null {
 export function roleOf(a: BoardAgent, status: MaintainerStatus | null, leases: Lease[]): RoleKind | null {
   if (!a.project) return null;
   const r = rolesFor(a.project, status, leases);
-  if (r.delegate?.agent_id === a.agent_id) return "delegate";
+  if (r.conductor?.agent_id === a.agent_id) return "conductor";
   if (r.coordinator?.agent_id === a.agent_id) return "coordinator";
   return null;
 }
@@ -150,7 +182,8 @@ export function projectsOf(agents: BoardAgent[], status: MaintainerStatus | null
   for (const a of agents) if (a.project) set.add(a.project);
   for (const p of Object.keys(status?.roles ?? {})) set.add(p);
   for (const l of leases) {
-    const m = /^(delegate|coordinator):(.+)$/.exec(l.name);
+    // `delegate:` is the conductor's lease name before the rename (legacy compat).
+    const m = /^(conductor|delegate|coordinator):(.+)$/.exec(l.name);
     if (m && l.holder && !l.expired) set.add(m[2]);
   }
   return [...set].sort((a, b) => a.localeCompare(b));
@@ -160,7 +193,7 @@ export function projectsOf(agents: BoardAgent[], status: MaintainerStatus | null
 export function defaultProject(projects: string[], status: MaintainerStatus | null, leases: Lease[]): string | null {
   const withRole = projects.find((p) => {
     const r = rolesFor(p, status, leases);
-    return r.delegate || r.coordinator;
+    return r.conductor || r.coordinator;
   });
   return withRole ?? projects[0] ?? null;
 }
@@ -195,13 +228,14 @@ export function leftPercent(h: RoleHolder, nowMs: number): number | null {
 export function displacedLines(preview: Preview | null | undefined, nameOf: (id: string) => string): string[] {
   if (!preview || typeof preview.action !== "string") return [];
   const lines: string[] = [];
-  const role = preview.role === "delegate" ? "your conductor" : "the coordinator";
+  const role = preview.role === "conductor" ? "your conductor" : "the coordinator";
   if (preview.action !== "revoke" && typeof preview.replaces === "string" && preview.replaces) {
     lines.push(`“${nameOf(preview.replaces)}” stops being ${role}.`);
   }
   const also = typeof preview.also_breaks === "string" ? preview.also_breaks : "";
   if (also.startsWith("coordinator:")) lines.push("It also stops being the coordinator: a session holds one role at a time.");
-  else if (also.startsWith("delegate:")) lines.push("It also stops being your conductor: a session holds one role at a time.");
+  // `delegate:` is a conductor granted before the rename (legacy compat).
+  else if (also.startsWith("conductor:") || also.startsWith("delegate:")) lines.push("It also stops being your conductor: a session holds one role at a time.");
   return lines;
 }
 

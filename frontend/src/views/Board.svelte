@@ -106,7 +106,7 @@
     { id: "parked", label: "Parked", test: (a) => isParked(a, snap?.snapshot_at) },
     { id: "overdue", label: "Overdue", test: (a) => a.status_overdue },
   ];
-  // The search narrows within the filter; the delegate, the coordinator and
+  // The search narrows within the filter; the conductor, the coordinator and
   // sessions with unread mail stay pinned at the top of whatever is shown.
   let query = $state("");
   const filtered = $derived(agents.filter(FILTERS.find((f) => f.id === filter)!.test));
@@ -273,11 +273,11 @@
             {#each rows as { agent: a, pin }, i (a.agent_id)}
               {@const chip = stateChip(a, snap?.snapshot_at)}
               {@const isSel = selected?.agent_id === a.agent_id}
-              {@const role = pin === "delegate" || pin === "coordinator" ? pin : null}
+              {@const role = pin === "conductor" || pin === "coordinator" ? pin : null}
               {#if pinnedCount && pinnedCount < rows.length && (i === 0 || i === pinnedCount)}
                 <li class="group-label caption">{i === 0 ? "Pinned: roles and unread mail" : "Other sessions"}</li>
               {/if}
-              <li class="peer-item" class:selected={isSel} class:delegate={role === "delegate"} class:coordinator={role === "coordinator"}>
+              <li class="peer-item" class:selected={isSel} class:conductor={role === "conductor"} class:coordinator={role === "coordinator"}>
                 <button type="button" class="peer" aria-pressed={isSel} onclick={() => pick(a)}>
                   <span class="peer-head">
                     <span class="dot {agentTone(a, snap?.snapshot_at)}" aria-hidden="true"></span>
@@ -287,7 +287,7 @@
                   {#if scopeLine(a)}<span class="peer-scope">{scopeLine(a)}</span>{/if}
                   <span class="peer-status" class:none={!a.status}>{a.status || "No status set"}</span>
                   <span class="chips">
-                    {#if role === "delegate"}<span class="chip role-chip gold chip-prose">Conductor</span>{/if}
+                    {#if role === "conductor"}<span class="chip role-chip gold chip-prose">Conductor</span>{/if}
                     {#if role === "coordinator"}<span class="chip role-chip lav chip-prose">Coordinator</span>{/if}
                     <span class="chip {chip.tone}">{chip.text}</span>
                     {#if a.subagent}<span class="chip">subagent</span>{/if}
@@ -670,7 +670,7 @@
   .peer-item.selected {
     background: var(--selected);
   }
-  .peer-item.delegate {
+  .peer-item.conductor {
     box-shadow: inset 2px 0 0 var(--canon);
   }
   .peer-item.coordinator {

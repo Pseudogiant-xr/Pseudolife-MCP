@@ -4,8 +4,11 @@ Native `delegate` and its deprecated `designate` alias prepare the existing
 external-DSN role grant. Both role rows lock in name order before resolving a
 registered, unrevoked recipient. The transaction removes its coordinator
 queue entry, breaks its live coordinator role, settles that queue, drops
-reserved delegate waiters, replaces the delegate and appends the ordered audit
-chain with the recipient's project/task scope. The ordinary prefix grammar,
+reserved conductor waiters, vacates a hold under the role's old lease name
+(`delegate:<project>`, a `lease_break` with reason `renamed`), replaces the
+conductor (`conductor:<project>`, record `lease_conductor`, since 2026-10-31;
+the source is `shim/src/cli/lease/operator/store/conductor.rs`) and appends
+the ordered audit chain with the recipient's project/task scope. The ordinary prefix grammar,
 60-second to seven-day grant, 24-hour default, reachability warning and JSON
 field order are retained. The shared PG/TLS policy and container transport are
 unchanged; embedded banks still refuse `phase4-embedded-pg-deferred`, naming

@@ -7,9 +7,12 @@ expect/ttl/purpose/worktree/no-board options, `lease break NAME`,
 `docs/guide/configuration.md`, and `evals/qwen_server.ps1`'s lease helpers.
 The core check/list/run row keeps its own acceptance.
 
-The operator corpus has 37 Windows and 36 Linux cases. It covers missing,
+The operator corpus has 39 Windows and 38 Linux cases. It covers missing,
 free and held leases; FIFO handoff; preservation of a separately held OS
-lock; delegate replacement and coordinator-role handoff; unique/ambiguous
+lock; conductor replacement (the lease `conductor:<project>` and record
+`lease_conductor`), including a live or lapsed hold under the role's old
+lease name `delegate:<project>`, which the grant vacates (a `lease_break`
+with reason `renamed`, or a `lease_expire`); coordinator-role handoff; unique/ambiguous
 prefixes and unknown recipients; default/day durations and Unicode project
 names; active listeners/rings and warnings; alias/help/refusal/output
 behavior; PID lifetime, local contention and mirror renewal. Five failure

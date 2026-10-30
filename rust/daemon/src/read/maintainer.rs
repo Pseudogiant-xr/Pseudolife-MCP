@@ -21,7 +21,9 @@ use axum::response::Response;
 use serde_json::{Map, Value, json};
 use tokio_postgres::Client;
 
-use crate::board::lease::{COORDINATOR_PREFIX, DELEGATE_PREFIX};
+use crate::board::lease::{
+    CONDUCTOR_EVENTS, CONDUCTOR_PREFIXES, COORDINATOR_PREFIX, conductor_project,
+};
 use crate::board::mail::MAINTAINER_ORIGIN;
 use crate::board::store::{MAINTAINER_PRINCIPAL, listener_path};
 use crate::http::{App, json_response};
@@ -392,25 +394,33 @@ async fn key_changes(c: &Client) -> ReadResult<Value> {
     Ok(Value::Array(out))
 }
 
-/// `roles`: every project with a live role lease, its delegate (granted by
+/// `roles`: every project with a live role lease, its conductor (granted by
 /// the operator or the maintainer, read from the grant's audit record for
 /// the current fence) and its coordinator, each with whether maintainer
-/// mail rings it now (`CoordinationStore.reachability`).
+/// mail rings it now (`CoordinationStore.reachability`). A conductor hold
+/// under the role's old name (`delegate:<project>`) fills the same slot; a
+/// project's new-named hold wins over it.
 async fn roles(c: &Client, now: f64) -> ReadResult<Value> {
     let rows = c
         .query(
             "SELECT l.name, l.holder_agent_id, l.expires_at, (SELECT e.actor FROM \
-             coordination_events e WHERE e.event='lease_delegate' \
-             AND e.agent_id=l.holder_agent_id AND CASE WHEN e.event='lease_delegate' \
+             coordination_events e WHERE e.event=ANY($5) \
+             AND e.agent_id=l.holder_agent_id AND CASE WHEN e.event=ANY($5) \
              THEN e.payload::jsonb->>'name'=l.name \
              AND (e.payload::jsonb->>'fence')::bigint=l.fence ELSE false END \
              ORDER BY e.seq DESC LIMIT 1) AS granted_by \
              FROM coordination_leases l WHERE l.holder_agent_id IS NOT NULL \
-             AND l.expires_at > $1 AND (l.name LIKE $2 OR l.name LIKE $3) ORDER BY l.name",
+             AND l.expires_at > $1 AND (l.name LIKE $2 OR l.name LIKE $3 OR l.name LIKE $4) \
+             ORDER BY l.name",
             &[
                 &now,
-                &format!("{DELEGATE_PREFIX}%"),
+                &format!("{}%", CONDUCTOR_PREFIXES[0]),
+                &format!("{}%", CONDUCTOR_PREFIXES[1]),
                 &format!("{COORDINATOR_PREFIX}%"),
+                &CONDUCTOR_EVENTS
+                    .iter()
+                    .map(|e| e.to_string())
+                    .collect::<Vec<_>>(),
             ],
         )
         .await
@@ -438,14 +448,22 @@ async fn roles(c: &Client, now: f64) -> ReadResult<Value> {
         let mut entry = Map::new();
         entry.insert("agent_id".into(), json!(holder));
         entry.insert("expires_at".into(), json!(expires_at));
-        let (slot, project) = if let Some(project) = name.strip_prefix(DELEGATE_PREFIX) {
+        let (slot, project) = if let Some(project) = conductor_project(&name) {
             if !matches!(granted_by.as_deref(), Some("operator" | "maintainer"))
                 && !crate::mutants::active("maintainer-roles-any-grant")
             {
                 continue;
             }
+            // `conductor:` sorts before `delegate:`, so a project's
+            // old-named hold never replaces its new-named one.
+            if out
+                .get(project)
+                .is_some_and(|p: &Value| !p["conductor"].is_null())
+            {
+                continue;
+            }
             entry.insert("granted_by".into(), json!(granted_by));
-            ("delegate", project)
+            ("conductor", project)
         } else {
             (
                 "coordinator",
@@ -456,7 +474,7 @@ async fn roles(c: &Client, now: f64) -> ReadResult<Value> {
         entry.insert("reason".into(), json!(reason));
         let project_entry = out
             .entry(project.to_string())
-            .or_insert_with(|| json!({"delegate": null, "coordinator": null}));
+            .or_insert_with(|| json!({"conductor": null, "coordinator": null}));
         project_entry[slot] = Value::Object(entry);
     }
     Ok(Value::Object(out))

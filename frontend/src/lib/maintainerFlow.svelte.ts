@@ -260,7 +260,7 @@ export interface Target {
 
 const q = (s: string) => `“${s}”`;
 
-export function grantDelegate(t: Target, current: { holder: RoleHolder; name: string } | null, isCoordinator: boolean) {
+export function grantConductor(t: Target, current: { holder: RoleHolder; name: string } | null, isCoordinator: boolean) {
   const replaces: string[] = [];
   if (current && current.holder.agent_id !== t.agent_id) replaces.push(`${q(current.name)} stops being your conductor.`);
   if (isCoordinator) replaces.push("It stops being the coordinator: a session holds one role at a time.");
@@ -272,14 +272,14 @@ export function grantDelegate(t: Target, current: { holder: RoleHolder; name: st
     note: PASSKEY_NOTE,
     tone: "canon",
     confirmLabel: "Confirm with passkey",
-    challenge: (hold) => ({ purpose: "grant-delegate", project: t.project, agent_id: t.agent_id, hold }),
+    challenge: (hold) => ({ purpose: "grant-conductor", project: t.project, agent_id: t.agent_id, hold }),
     complete: (s) => maintainerApi.role(s),
     success: (_r, hold) => `${q(t.name)} is your conductor for ${holdLabel(hold)}.`,
     failure: "The conductor did not change",
   }).then(changed).then(warnUnreachable);
 }
 
-export function extendDelegate(t: Target) {
+export function extendConductor(t: Target) {
   return askSigned<GrantResult>({
     title: "Extend your conductor?",
     body: `${q(t.name)} keeps your authority for ${t.project} for the time you pick, counted from now.`,
@@ -287,31 +287,31 @@ export function extendDelegate(t: Target) {
     note: PASSKEY_NOTE,
     tone: "canon",
     confirmLabel: "Confirm with passkey",
-    challenge: (hold) => ({ purpose: "grant-delegate", project: t.project, agent_id: t.agent_id, hold }),
+    challenge: (hold) => ({ purpose: "grant-conductor", project: t.project, agent_id: t.agent_id, hold }),
     complete: (s) => maintainerApi.role(s),
     success: (_r, hold) => `Your conductor now ends in ${holdLabel(hold)}.`,
     failure: "The conductor was not extended",
   }).then(changed).then(warnUnreachable);
 }
 
-export function revokeDelegate(t: Target) {
+export function revokeConductor(t: Target) {
   return askSigned<RevokeRoleResult>({
     title: "Revoke your conductor?",
     body: `${q(t.name)} loses your authority at once. Sessions it already woke keep running.`,
     note: PASSKEY_NOTE,
     tone: "danger",
     confirmLabel: "Revoke the conductor",
-    challenge: () => ({ purpose: "revoke-delegate", project: t.project }),
+    challenge: () => ({ purpose: "revoke-conductor", project: t.project }),
     complete: (s) => maintainerApi.role(s),
     success: (r) => (r.broken ? "Conductor revoked." : "Conductor revoked; no session was holding the role any more."),
     failure: "The conductor was not revoked",
   }).then(changed);
 }
 
-export function assignCoordinator(t: Target, current: { holder: RoleHolder; name: string } | null, isDelegate: boolean) {
+export function assignCoordinator(t: Target, current: { holder: RoleHolder; name: string } | null, isConductor: boolean) {
   const replaces: string[] = [];
   if (current && current.holder.agent_id !== t.agent_id) replaces.push(`${q(current.name)} stops being the coordinator.`);
-  if (isDelegate) replaces.push("It stops being your conductor: a session holds one role at a time.");
+  if (isConductor) replaces.push("It stops being your conductor: a session holds one role at a time.");
   return askSigned<GrantResult>({
     title: `Make ${q(t.name)} the coordinator?`,
     body: `It organises the work in ${t.project}: hands out tasks and queues shared resources. It gets no authority to wake sessions parked as done. It holds the role a day at a time and renews it itself.`,
