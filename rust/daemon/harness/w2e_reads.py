@@ -7,6 +7,7 @@ def register(h):
         '/api/graph?entity=Alpha&to=Gamma&depth=2&include_facts=false',
         '/api/graph?scope=read-demo', '/api/graph?scope=missing', '/api/graph?limit=2',
         '/api/graph?limit=0', '/api/graph?limit=-1',
+        '/api/graph?limit=%D9%A2', '/api/graph?limit=1_0',
         '/api/graph?depth=bad&include_facts=bad&limit=bad',
         '/api/graph?entity=missing', '/api/graph/projects',
         '/api/graph/digest', '/api/graph/path',
@@ -18,7 +19,9 @@ def register(h):
         '/api/graph/entity-provenance?entity=Alpha&limit=-1',
         '/api/wiki', '/api/wiki?entity=Alpha', '/api/wiki?entity=Alias',
         '/api/recall', '/api/recall?q=%20&hops=-2&top_k=bad',
-        '/api/recall?q=Alpha&hops=1&top_k=2', '/api/dream/status',
+        '/api/recall?q=Alpha&hops=1&top_k=2',
+        '/api/recall?q=Alpha&hops=1&top_k=999999999999999999999999',
+        '/api/dream/status',
     ]
     scenarios = {'console-graph-reads': {
         'config': None,

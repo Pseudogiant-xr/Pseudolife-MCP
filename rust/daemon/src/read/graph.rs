@@ -1,5 +1,5 @@
 //! Console graph reads, with the HTTP defaults and unabridged service bodies.
-use super::console::{caller_session, i_param, tool_error_text};
+use super::console::{caller_session, tool_error_text};
 use crate::http::{App, json_response};
 use crate::mcp::dispatch::ToolError;
 use crate::service::{Ready, Service};
@@ -22,6 +22,25 @@ pub(crate) const PATHS: &[&str] = &[
 fn s<'a>(q: &'a HashMap<String, String>, k: &str) -> Option<&'a str> {
     q.get(k).map(String::as_str).filter(|s| !s.is_empty())
 }
+/// Python `_i`: preserve arbitrary integers for recall telemetry, and accept
+/// the Unicode decimal digits handled by the existing Python-int parser.
+fn integer(q: &HashMap<String, String>, key: &str, default: i64) -> Value {
+    s(q, key)
+        .and_then(|v| crate::graph_review_actions::py_int(&json!(v)).ok())
+        .unwrap_or_else(|| json!(default))
+}
+
+fn i_param(q: &HashMap<String, String>, key: &str, default: i64) -> i64 {
+    let n = integer(q, key, default);
+    n.as_i64().unwrap_or_else(|| {
+        if n.to_string().starts_with('-') {
+            i64::MIN
+        } else {
+            i64::MAX
+        }
+    })
+}
+
 fn internal(e: impl std::fmt::Display) -> ToolError {
     ToolError::Internal(anyhow::anyhow!(e.to_string()))
 }
@@ -51,13 +70,16 @@ pub(crate) async fn route(
     // Finish access accounting even if the browser disconnects, as Python does.
     let task = tokio::spawn(async move {
         if path == "/api/recall" {
+            let top_k = integer(&q, "top_k", 5);
+            let beyond =
+                (top_k.as_i64().is_none() && !top_k.to_string().starts_with('-')).then_some(top_k);
             return crate::recall::recall(
                 &svc,
                 &ready,
                 s(&q, "q").unwrap_or(""),
                 Some(i_param(&q, "hops", 3)),
                 Some(i_param(&q, "top_k", 5)),
-                None,
+                beyond,
                 &ident,
             )
             .await
