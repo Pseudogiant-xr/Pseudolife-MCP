@@ -557,7 +557,7 @@ jobs:
         #   cancellation tests that reap real children run nightly.
         # - test_suite_lock (picks): the only CI coverage of the msvcrt lock
         #   backend, crash release and the native-Windows full-run refusal.
-        # - test_delegate_watch (picks): the watcher's detach flags, its
+        # - test_conductor_watch (picks): the watcher's detach flags, its
         #   GetProcessTimes start-time check and its lifetime lock.
         # - test_client_install_ux, test_installer_plugin, test_codex_hooks
         #   (picks): a smoke of install.ps1 and the native Windows hooks; the
@@ -609,16 +609,16 @@ jobs:
           tests/test_suite_lock.py::test_the_lock_is_released_when_its_holder_crashes
           tests/test_suite_lock.py::test_only_a_full_run_on_native_windows_is_refused_and_only_when_configured
           tests/test_suite_lock.py::test_the_windows_policy_comes_from_the_env_then_the_file_then_allow
-          tests/test_delegate_watch.py::test_detach_starts_the_watcher_and_prints_its_address
-          tests/test_delegate_watch.py::test_detach_reports_one_already_running
-          tests/test_delegate_watch.py::test_detach_reports_a_child_that_never_came_up
-          tests/test_delegate_watch.py::test_detach_says_still_starting_while_the_child_runs_without_a_record
-          tests/test_delegate_watch.py::test_detach_that_lost_a_race_reports_the_winner
-          tests/test_delegate_watch.py::test_the_state_lock_excludes_a_watcher_in_another_process
-          tests/test_delegate_watch.py::test_a_second_watcher_on_the_same_state_exits_quietly
-          tests/test_delegate_watch.py::test_the_pid_file_names_the_watcher_while_it_runs
-          tests/test_delegate_watch.py::test_a_state_held_for_another_owner_is_refused
-          tests/test_delegate_watch.py::test_stop_asks_the_running_watcher_to_exit_at_its_next_poll
+          tests/test_conductor_watch.py::test_detach_starts_the_watcher_and_prints_its_address
+          tests/test_conductor_watch.py::test_detach_reports_one_already_running
+          tests/test_conductor_watch.py::test_detach_reports_a_child_that_never_came_up
+          tests/test_conductor_watch.py::test_detach_says_still_starting_while_the_child_runs_without_a_record
+          tests/test_conductor_watch.py::test_detach_that_lost_a_race_reports_the_winner
+          tests/test_conductor_watch.py::test_the_state_lock_excludes_a_watcher_in_another_process
+          tests/test_conductor_watch.py::test_a_second_watcher_on_the_same_state_exits_quietly
+          tests/test_conductor_watch.py::test_the_pid_file_names_the_watcher_while_it_runs
+          tests/test_conductor_watch.py::test_a_state_held_for_another_owner_is_refused
+          tests/test_conductor_watch.py::test_stop_asks_the_running_watcher_to_exit_at_its_next_poll
           tests/test_client_install_ux.py::test_installer_ps1_parses
           tests/test_client_install_ux.py::test_install_ps1_update_line_names_the_launcher_until_path_finds_it
           tests/test_client_install_ux.py::test_installers_support_codex_hook_on_windows
@@ -675,19 +675,19 @@ jobs:
         # lanes run them. -rs prints every skip reason, so a platform skip
         # cannot pass for coverage.
         # The test_tunnel_*.py files run the tunnel's owner-only files and
-        # process handling on macOS; test_delegate_watch.py runs the
+        # process handling on macOS; test_conductor_watch.py runs the
         # watcher's `ps` start-time check there, and test_prune_worktrees.py
         # the retention script's `ps` process listing.
         env:
           PSEUDOLIFE_SUITE_LOCK: "off"
-        run: python -m pytest tests/test_delegate_watch.py tests/test_wait_mail_cli.py tests/test_hooks_digest.py tests/test_stop_wake_hook.py tests/test_hook_glob_ranges.py tests/test_coordination_turn_digest.py tests/test_coordination_adapter.py tests/test_coordination_credentials.py tests/test_codex_doorbell.py tests/test_lease_cli.py tests/test_suite_lock.py tests/test_memory_changes_hook.py tests/test_client_install_ux.py tests/test_codex_hooks.py tests/test_subagent_board_guard.py tests/test_codex_hook_setup_edges.py tests/test_installer_legacy_hooks.py tests/test_plugin_packaging.py tests/test_embedded_pg.py tests/test_tunnel_bridge.py tests/test_tunnel_cli.py tests/test_tunnel_profiles.py tests/test_tunnel_runtime.py tests/test_tunnel_service.py tests/test_prune_worktrees.py -q -rs
+        run: python -m pytest tests/test_conductor_watch.py tests/test_wait_mail_cli.py tests/test_hooks_digest.py tests/test_stop_wake_hook.py tests/test_hook_glob_ranges.py tests/test_coordination_turn_digest.py tests/test_coordination_adapter.py tests/test_coordination_credentials.py tests/test_codex_doorbell.py tests/test_lease_cli.py tests/test_suite_lock.py tests/test_memory_changes_hook.py tests/test_client_install_ux.py tests/test_codex_hooks.py tests/test_subagent_board_guard.py tests/test_codex_hook_setup_edges.py tests/test_installer_legacy_hooks.py tests/test_plugin_packaging.py tests/test_embedded_pg.py tests/test_tunnel_bridge.py tests/test_tunnel_cli.py tests/test_tunnel_profiles.py tests/test_tunnel_runtime.py tests/test_tunnel_service.py tests/test_prune_worktrees.py -q -rs
 
   test-windows-nightly:
     # Not a merge gate, and never run for a pull request or merge group: the
     # Windows plumbing that starts real processes and shells (installer
     # matrix, Codex hook setup and doorbell, coordination digest and adapter,
     # wait-mail, update CLI, register-claude-desktop, the stop-wake hook's
-    # timing tests, the rest of the suite lock, shim and delegate watcher).
+    # timing tests, the rest of the suite lock, shim and conductor watcher).
     # The 2026-10-20 CI flake review found the Windows flakes live here, so
     # it runs nightly and by hand. ops/pytest_retry_once.py retries
     # first-attempt failures once and keeps the first attempt's junit and
@@ -793,17 +793,17 @@ jobs:
           --deselect tests/test_suite_lock.py::test_the_lock_is_released_when_its_holder_crashes
           --deselect tests/test_suite_lock.py::test_only_a_full_run_on_native_windows_is_refused_and_only_when_configured
           --deselect tests/test_suite_lock.py::test_the_windows_policy_comes_from_the_env_then_the_file_then_allow
-          tests/test_delegate_watch.py
-          --deselect tests/test_delegate_watch.py::test_detach_starts_the_watcher_and_prints_its_address
-          --deselect tests/test_delegate_watch.py::test_detach_reports_one_already_running
-          --deselect tests/test_delegate_watch.py::test_detach_reports_a_child_that_never_came_up
-          --deselect tests/test_delegate_watch.py::test_detach_says_still_starting_while_the_child_runs_without_a_record
-          --deselect tests/test_delegate_watch.py::test_detach_that_lost_a_race_reports_the_winner
-          --deselect tests/test_delegate_watch.py::test_the_state_lock_excludes_a_watcher_in_another_process
-          --deselect tests/test_delegate_watch.py::test_a_second_watcher_on_the_same_state_exits_quietly
-          --deselect tests/test_delegate_watch.py::test_the_pid_file_names_the_watcher_while_it_runs
-          --deselect tests/test_delegate_watch.py::test_a_state_held_for_another_owner_is_refused
-          --deselect tests/test_delegate_watch.py::test_stop_asks_the_running_watcher_to_exit_at_its_next_poll
+          tests/test_conductor_watch.py
+          --deselect tests/test_conductor_watch.py::test_detach_starts_the_watcher_and_prints_its_address
+          --deselect tests/test_conductor_watch.py::test_detach_reports_one_already_running
+          --deselect tests/test_conductor_watch.py::test_detach_reports_a_child_that_never_came_up
+          --deselect tests/test_conductor_watch.py::test_detach_says_still_starting_while_the_child_runs_without_a_record
+          --deselect tests/test_conductor_watch.py::test_detach_that_lost_a_race_reports_the_winner
+          --deselect tests/test_conductor_watch.py::test_the_state_lock_excludes_a_watcher_in_another_process
+          --deselect tests/test_conductor_watch.py::test_a_second_watcher_on_the_same_state_exits_quietly
+          --deselect tests/test_conductor_watch.py::test_the_pid_file_names_the_watcher_while_it_runs
+          --deselect tests/test_conductor_watch.py::test_a_state_held_for_another_owner_is_refused
+          --deselect tests/test_conductor_watch.py::test_stop_asks_the_running_watcher_to_exit_at_its_next_poll
           tests/test_tunnel_runtime.py::test_refresh_cancellation_reaps_actual_children_and_private_launch
           tests/test_tunnel_runtime.py::test_initial_registration_cancellation_reaps_actual_child
           tests/test_tunnel_runtime.py::test_refresh_registration_sigint_reaps_actual_child

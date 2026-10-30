@@ -1,4 +1,4 @@
-"""pseudolife-mcp delegate-watch: wake a delegate session with board mail,
+"""pseudolife-mcp conductor-watch: wake a conductor session with board mail,
 only at decision points.
 
 The watcher polls GitHub, the suite results directory and the suite leases,
@@ -15,11 +15,11 @@ from pathlib import Path
 import httpx
 import pytest
 
-from pseudolife_memory import delegate_watch_cli as watch
+from pseudolife_memory import conductor_watch_cli as watch
 from pseudolife_memory.coordination_identity import resolve_digest_path
 from pseudolife_memory.lease_cli import _Board, _Refused, _Transient
 
-FIXTURES = Path(__file__).resolve().parent / "fixtures" / "delegate_watch_events.json"
+FIXTURES = Path(__file__).resolve().parent / "fixtures" / "conductor_watch_events.json"
 OWNER = "0123456789abcdef0123456789abcdef"
 
 
@@ -416,7 +416,7 @@ CANCELLED_JOBS = ("Candidate / ubuntu-latest", "Candidate / windows-latest", "Pa
 
 
 def _cancelling(done, last=None):
-    """The checks of a run the delegate cancelled: the first ``done`` jobs
+    """The checks of a run the conductor cancelled: the first ``done`` jobs
     have concluded CANCELLED, the rest still run. ``last`` replaces the last
     job's check once it has concluded."""
     checks = [run_(name, conclusion="CANCELLED") if i < done
@@ -428,7 +428,7 @@ def _cancelling(done, last=None):
 
 
 def test_a_cancelled_run_is_reported_once_as_cancelled_not_failing(h):
-    # 2026-10-16: the delegate cancelled the CI of dependabot PRs #783 and
+    # 2026-10-16: the conductor cancelled the CI of dependabot PRs #783 and
     # #784 on purpose, and each job that then concluded CANCELLED woke it
     # again with "PR #784 failing at bdab33d4: ...", three times in 15
     # minutes for one head.
@@ -461,7 +461,7 @@ def test_a_real_failure_among_cancelled_checks_is_still_reported(h):
 
 
 def test_each_rerun_of_a_cancelled_head_reports_how_it_ended(h):
-    # A re-run is a new run, not more jobs of the cancelled one: a delegate
+    # A re-run is a new run, not more jobs of the cancelled one: a conductor
     # that re-ran one job waits for its result. When that job passes and the
     # rest stay cancelled the head never turns green, so staying quiet would
     # leave it waiting (review, 2026-10-16). Like a failing re-run, the head
@@ -834,14 +834,14 @@ def test_a_done_owner_off_a_cut_page_still_gets_no_quiet_mail(h):
 
 
 def test_until_lease_exits_once_the_owner_no_longer_holds_it(h):
-    h.board.holders["delegate:Example"] = OWNER
+    h.board.holders["conductor:Example"] = OWNER
 
     def between(poll):
         if poll == 2:
-            h.board.holders["delegate:Example"] = "f" * 32
-    code, _, _ = h.main("--until-lease", "delegate:Example", between=between, max_age="3000")
+            h.board.holders["conductor:Example"] = "f" * 32
+    code, _, _ = h.main("--until-lease", "conductor:Example", between=between, max_age="3000")
     assert code == 0 and h.clock.t < 300
-    assert "exit lease delegate:Example no longer held by the owner" in h.ledger()[-1]
+    assert "exit lease conductor:Example no longer held by the owner" in h.ledger()[-1]
 
 
 def test_a_forgotten_address_registers_again_once(h):
@@ -1091,7 +1091,7 @@ def test_detach_starts_the_watcher_and_prints_its_address(tmp_path, capsys):
     assert "--detach" not in argv and argv[argv.index("--interval") + 1] == "30"
     assert len(argv[argv.index("--nonce") + 1]) == 32
     assert argv[argv.index("--owner") + 1] == OWNER and argv[argv.index("--state") + 1] == str(state)
-    assert argv[1:4] == ["-m", "pseudolife_memory.cli", "delegate-watch"]
+    assert argv[1:4] == ["-m", "pseudolife_memory.cli", "conductor-watch"]
     assert started["log"] == state.with_suffix(".log")
     out = capsys.readouterr().out.strip()
     assert out == (f"conductor-watch {'c' * 32} watching for {OWNER}; park with "
@@ -1124,7 +1124,7 @@ def test_detach_that_lost_a_race_reports_the_winner(tmp_path, capsys):
 
 def test_detach_reports_a_child_that_never_came_up(tmp_path, capsys):
     state = tmp_path / "w.json"
-    state.with_suffix(".log").write_text("delegate-watch: no board: no bearer token\n", encoding="utf-8")
+    state.with_suffix(".log").write_text("conductor-watch: no board: no bearer token\n", encoding="utf-8")
     clock = Clock()
     code = watch.main(["--detach", "--owner", OWNER, "--state", str(state)], environ={},
                       spawn=lambda argv, log: 999999999, clock=clock, sleep=clock.sleep)
@@ -1185,13 +1185,18 @@ def test_board_update_posts_only_the_fields_given():
 @pytest.mark.parametrize("mode", ["conductor-watch", "delegate-watch"])
 def test_the_package_command_dispatches_here(monkeypatch, capsys, mode):
     """conductor-watch is the role's new name; delegate-watch, its older
-    name, still runs the same watcher."""
+    name, still runs the same watcher after one stderr line naming the new
+    one (2026-10-31)."""
     from pseudolife_memory.cli import main as cli_main
 
     monkeypatch.setattr("sys.argv", ["pseudolife-mcp", mode, "--help"])
     with pytest.raises(SystemExit) as exc:
         cli_main()
     assert exc.value.code == 0
-    out = capsys.readouterr().out
+    captured = capsys.readouterr()
+    out = captured.out
     assert out.startswith("usage: pseudolife-mcp conductor-watch") and "--detach" in out
-    assert "conductor session" in out and "delegate-watch is its older name" in out
+    assert "conductor session" in out and "delegate-watch, its older name" in out
+    assert captured.err == ("" if mode == "conductor-watch" else
+                            "pseudolife-mcp delegate-watch is deprecated: use "
+                            "pseudolife-mcp conductor-watch\n")

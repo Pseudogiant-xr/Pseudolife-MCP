@@ -253,16 +253,17 @@ def test_the_operator_breaks_a_lease_and_the_next_waiter_gets_it(board, pg_url, 
     assert "no bank found" in capsys.readouterr().err
 
 
-def test_the_operator_grants_a_projects_delegate(board, pg_url, monkeypatch, capsys):
+def test_the_operator_grants_a_projects_conductor(board, pg_url, monkeypatch, capsys):
     """``lease delegate`` is the maintainer's only way to give a session the
-    power to reopen done parks (review of #549, 2026-10-03; named delegate
-    2026-10-04): it opens the bank directly, like ``break``, and the session
+    power to reopen done parks (review of #549, 2026-10-03; its lease named
+    delegate 2026-10-04, conductor 2026-10-31): it opens the bank directly, like ``break``, and the session
     cannot take the lease itself."""
     bridge, storage = board
     delegate = _post(bridge, "register", {"label": "delegate", "project": "pseudolife-mcp"})
     as_delegate = {"X-PL-Agent": delegate["agent_id"], "X-PL-Agent-Key": delegate["credential"]}
     with httpx.Client(transport=bridge, base_url="http://fixture") as client:
-        for name in ("delegate:pseudolife-mcp", "designated:coordinator:pseudolife-mcp"):
+        for name in ("conductor:pseudolife-mcp", "delegate:pseudolife-mcp",
+                     "designated:coordinator:pseudolife-mcp"):
             refused = client.post("/api/coordination/lease", json={"name": name, "ttl": 3600},
                                   headers={"Authorization": f"Bearer {BEARER}", **as_delegate})
             assert (refused.status_code, refused.json()) == (400, {"error": "reserved_lease"})
@@ -276,17 +277,17 @@ def test_the_operator_grants_a_projects_delegate(board, pg_url, monkeypatch, cap
     assert out["reachable"] is False
     assert captured.err == out["warning"] + "\n"
     assert (out["name"], out["agent_id"], out["replaced"]) == (
-        "delegate:pseudolife-mcp", delegate["agent_id"], None)
-    [lease] = _post(bridge, "leases", {"name": "delegate:pseudolife-mcp"})["leases"]
+        "conductor:pseudolife-mcp", delegate["agent_id"], None)
+    [lease] = _post(bridge, "leases", {"name": "conductor:pseudolife-mcp"})["leases"]
     assert lease["holder"]["agent_id"] == delegate["agent_id"]
-    [(_, body)] = _events(storage, "lease_delegate")
-    assert (body["name"], body["hold"]) == ("delegate:pseudolife-mcp", 43200)
+    [(_, body)] = _events(storage, "lease_conductor")
+    assert (body["name"], body["hold"]) == ("conductor:pseudolife-mcp", 43200)
     assert storage.conn.execute("SELECT actor FROM coordination_events "
-                                "WHERE event='lease_delegate'").fetchone()[0] == "operator"
+                                "WHERE event='lease_conductor'").fetchone()[0] == "operator"
     # An unknown agent is refused with nothing changed; revoking is ``break``.
     assert lease_cli.main(["delegate", "pseudolife-mcp", "f" * 32]) == 1
     assert "delegate refused: instance_not_found" in capsys.readouterr().err
-    assert lease_cli.main(["break", "delegate:pseudolife-mcp"]) == 0
+    assert lease_cli.main(["break", "conductor:pseudolife-mcp"]) == 0
     assert json.loads(capsys.readouterr().out)["was_held_by"] == delegate["agent_id"]
 
 
@@ -358,7 +359,7 @@ def test_an_operator_says_what_it_knows_when_its_transaction_fails(
                             r"nothing was changed\n", captured.err), captured.err
 
 
-def test_designate_is_a_deprecated_alias_for_delegate(board, pg_url, monkeypatch, capsys):
+def test_designate_is_a_deprecated_alias_for_conductor(board, pg_url, monkeypatch, capsys):
     """0.16.0's ``lease designate`` still grants (as ``delegate:<project>``)
     and says, in one line on stderr, which command replaces it."""
     bridge, _ = board
@@ -367,7 +368,7 @@ def test_designate_is_a_deprecated_alias_for_delegate(board, pg_url, monkeypatch
     assert lease_cli.main(["designate", "pseudolife-mcp", delegate["agent_id"]]) == 0
     captured = capsys.readouterr()
     out = json.loads(captured.out)
-    assert out["name"] == "delegate:pseudolife-mcp"
+    assert out["name"] == "conductor:pseudolife-mcp"
     # One deprecation line, then the never-attached grantee's no-listener
     # warning that every grant prints (2026-10-05).
     deprecation, warning = captured.err.splitlines()

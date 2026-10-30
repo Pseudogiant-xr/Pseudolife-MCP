@@ -2,7 +2,7 @@
 
 Specs: docs/superpowers/specs/2026-10-02-maintainer-wake-design.md and its
 addendum 2026-10-04-board-roles-passkey.md. The maintainer sends one board
-session a message, or changes who holds a project's delegate or coordinator
+session a message, or changes who holds a project's conductor or coordinator
 role, with the maintainer's authority; the proof is a WebAuthn passkey
 signature (user verification required) over every input that decides the
 outcome, per action. A bearer alone can request challenges and read the
@@ -33,12 +33,13 @@ import logging
 
 from pseudolife_memory.maintainer_webauthn import SUPPORTED_ALGS, b64url_encode
 from pseudolife_memory.storage.coordination import (
-    COORDINATOR_PREFIX, DELEGATE_PREFIX, DELEGATION_MAX, DELEGATION_MIN, MAINTAINER_PRINCIPAL,
-    MAX_TEXT_BYTES, CoordinationError, looks_like_secret,
+    CONDUCTOR_PREFIX, COORDINATOR_PREFIX, DELEGATION_MAX, DELEGATION_MIN,
+    LEGACY_CONDUCTOR_PREFIX, MAINTAINER_PRINCIPAL, MAX_TEXT_BYTES, CoordinationError,
+    looks_like_secret,
 )
 from pseudolife_memory.storage.maintainer import (
-    CHALLENGE_PURPOSES, CHALLENGE_TTL, ROLE_PURPOSES, MaintainerError, MaintainerStore,
-    challenge_bytes, check_label, key_prefix,
+    CHALLENGE_PURPOSES, CHALLENGE_TTL, LEGACY_ROLE_PURPOSES, ROLE_PURPOSES, MaintainerError,
+    MaintainerStore, challenge_bytes, check_label, key_prefix,
 )
 
 logger = logging.getLogger("pseudolife-mcp.maintainer")
@@ -53,9 +54,9 @@ _CHALLENGE_FIELDS = {
     "enrol-approve": {"label"}, "enrol-bootstrap": {"label"},
     "cancel": {"credential_id"}, "revoke-self": {"credential_id"},
     "repudiate": {"message_id"},
-    "grant-delegate": {"project", "agent_id", "hold"},
+    "grant-conductor": {"project", "agent_id", "hold"},
     "assign-coordinator": {"project", "agent_id", "hold"},
-    "revoke-delegate": {"project"}, "revoke-coordinator": {"project"},
+    "revoke-conductor": {"project"}, "revoke-coordinator": {"project"},
 }
 # What a board refusal means to the Console.
 _BOARD_CODES = {
@@ -63,11 +64,11 @@ _BOARD_CODES = {
     "agent_revoked": "recipient_unknown", "recipient_reserved": "recipient_reserved",
     "rate_limited": "rate_capped", "queue_full": "rate_capped",
 }
-_ROLE_PREFIX = {"grant-delegate": DELEGATE_PREFIX, "revoke-delegate": DELEGATE_PREFIX,
+_ROLE_PREFIX = {"grant-conductor": CONDUCTOR_PREFIX, "revoke-conductor": CONDUCTOR_PREFIX,
                 "assign-coordinator": COORDINATOR_PREFIX,
                 "revoke-coordinator": COORDINATOR_PREFIX}
 # The role a grant or assignment breaks when its recipient holds it.
-_OTHER_PREFIX = {"grant-delegate": COORDINATOR_PREFIX, "assign-coordinator": DELEGATE_PREFIX}
+_OTHER_PREFIX = {"grant-conductor": COORDINATOR_PREFIX, "assign-coordinator": CONDUCTOR_PREFIX}
 LIST_DEFAULT, LIST_MAX = 50, 200
 
 
@@ -261,17 +262,17 @@ def _status(service, board, store):
 
 
 def _role_preview(store, purpose, fields):
-    role = "delegate" if purpose.endswith("delegate") else "coordinator"
-    prefix = DELEGATE_PREFIX if role == "delegate" else COORDINATOR_PREFIX
+    role = "conductor" if purpose.endswith("conductor") else "coordinator"
+    prefix = CONDUCTOR_PREFIX if role == "conductor" else COORDINATOR_PREFIX
     holder = store.role_holder(prefix + fields["project"])
     preview = {"role": role, "project": fields["project"],
                "action": "revoke" if purpose.startswith("revoke") else (
-                   "grant" if role == "delegate" else "assign"),
+                   "grant" if role == "conductor" else "assign"),
                "current_holder": holder}
     if "agent_id" in fields:
         preview.update(store.recipient(fields["agent_id"]))
         preview["replaces"] = holder if holder != fields["agent_id"] else None
-        other = COORDINATOR_PREFIX if role == "delegate" else DELEGATE_PREFIX
+        other = COORDINATOR_PREFIX if role == "conductor" else CONDUCTOR_PREFIX
         preview["also_breaks"] = (other + fields["project"]
                                   if store.role_holder(other + fields["project"])
                                   == fields["agent_id"] else None)
@@ -280,6 +281,8 @@ def _role_preview(store, purpose, fields):
 
 def _challenge(service, board, store, body):
     purpose = body.get("purpose")
+    if isinstance(purpose, str):
+        purpose = LEGACY_ROLE_PURPOSES.get(purpose, purpose)
     if purpose not in CHALLENGE_PURPOSES:
         raise MaintainerError("invalid_request", check="purpose")
     if set(body) - {"purpose"} - _CHALLENGE_FIELDS[purpose]:
@@ -310,12 +313,12 @@ def _challenge(service, board, store, body):
         if not store.is_sent(mid):
             raise MaintainerError("message_not_found")
         fields = {"message_id": mid}
-    elif purpose in ("grant-delegate", "assign-coordinator"):
+    elif purpose in ("grant-conductor", "assign-coordinator"):
         fields = {"project": _project(body.get("project")), "agent_id": body.get("agent_id"),
                   "hold": _hold(body.get("hold"))}
         _role_recipient(store, fields)
         preview = _role_preview(store, purpose, fields)
-    else:  # revoke-delegate, revoke-coordinator
+    else:  # revoke-conductor, revoke-coordinator
         fields = {"project": _project(body.get("project"))}
         preview = _role_preview(store, purpose, fields)
     if purpose in ROLE_PURPOSES:
@@ -323,7 +326,7 @@ def _challenge(service, board, store, body):
         # signed too (review, 2026-10-04): a session that swaps in during
         # the window is not the one the maintainer approved removing.
         fields["holder"] = store.role_holder(_ROLE_PREFIX[purpose] + fields["project"])
-    if purpose in ("grant-delegate", "assign-coordinator"):
+    if purpose in ("grant-conductor", "assign-coordinator"):
         # So is the other role's holder, which the change breaks when it is
         # the recipient: a preview that said ``also_breaks: null`` must not
         # break a role the recipient took since (review of #569, 2026-10-05).
@@ -361,22 +364,30 @@ def _role(service, board, store, body):
         purpose = fields["purpose"]
         project = _project(fields.get("project"))
         try:
-            # Both role leases, in name order (lease rows before any agent
+            # The role leases, in name order (lease rows before any agent
             # row), then the holder the maintainer signed for.
             board._lock_role_leases(project)
             if store.role_holder(_ROLE_PREFIX[purpose] + project) != fields.get("holder"):
                 raise MaintainerError("role_changed", check="holder")
-            if purpose in ("grant-delegate", "assign-coordinator"):
+            if purpose in ("grant-conductor", "assign-coordinator"):
                 if (store.role_holder(_OTHER_PREFIX[purpose] + project)
                         != fields.get("other_holder")):
                     raise MaintainerError("role_changed", check="other_holder")
                 _role_recipient(store, fields)
-                change = (board.grant_delegate if purpose == "grant-delegate"
+                change = (board.grant_conductor if purpose == "grant-conductor"
                           else board.assign_coordinator)
                 return change(_project(project), fields["agent_id"], hold=_hold(fields.get("hold")),
                               actor="maintainer")
-            prefix = DELEGATE_PREFIX if purpose == "revoke-delegate" else COORDINATOR_PREFIX
-            return board.break_lease(prefix + _project(project), actor="maintainer")
+            if purpose == "revoke-coordinator":
+                return board.break_lease(COORDINATOR_PREFIX + _project(project),
+                                         actor="maintainer")
+            # A conductor revoke frees the hold under either of the role's
+            # names; the answer is the new name's unless only the old one
+            # was held.
+            out = board.break_lease(CONDUCTOR_PREFIX + _project(project), actor="maintainer")
+            legacy = board.break_lease(LEGACY_CONDUCTOR_PREFIX + _project(project),
+                                       actor="maintainer")
+            return out if out["broken"] or not legacy["broken"] else legacy
         except CoordinationError as exc:
             raise _board_error(exc) from None
     return store.complete(body.get("payload"), body.get("mac"), ROLE_PURPOSES,

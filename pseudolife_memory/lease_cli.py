@@ -1699,7 +1699,7 @@ def _delegate(args) -> int:
     bank itself (operator only), as ``break`` does. Prints the store's
     answer as JSON, and its warning on stderr when the session has no live
     wake path; 1 when no bank is found or the grant was refused."""
-    return _operator("delegate", lambda store: store.grant_delegate(
+    return _operator("delegate", lambda store: store.grant_conductor(
         args.project, args.agent, hold=args.hold))
 
 
@@ -1933,9 +1933,10 @@ def _parsers():
                     "maintainer's conductor for PROJECT for DURATION, replacing any current "
                     "one. Its urgent mail then reopens done parks in that project; holding "
                     "the open coordinator:<project> lease grants nothing. The grant is the "
-                    "board lease delegate:<project>, which no session can take: it opens "
+                    "board lease conductor:<project>, which no session can take: it opens "
                     "the bank directly, like break, and the audit log records it with the "
-                    "operator as its actor. Revoke it with: lease break delegate:<project>.")
+                    "operator as its actor. Revoke it with: lease break conductor:<project> "
+                    "(delegate:<project> for a grant made before the role's rename).")
     delegating.add_argument("project", type=_lease_name, metavar="PROJECT",
                             help="the project, as sessions set it on the board")
     delegating.add_argument("agent", metavar="AGENT", help="the session's agent id or prefix")

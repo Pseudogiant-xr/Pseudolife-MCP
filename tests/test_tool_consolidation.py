@@ -686,19 +686,19 @@ def test_recall_surface_carries_trap_avoidance_guidance(
     assert "re_verify" in d["memory_lesson_search"]
 
 
-def test_message_description_names_the_maintainers_delegate(
+def test_message_description_names_the_maintainers_conductor(
         tmp_path: Path, monkeypatch) -> None:
     """Since #550 (2026-10-03) only the session the operator granted the
-    live ``delegate:<project>`` lease (``designated:coordinator:<project>``
-    before 0.16.1) reopens a done park; holding the open
+    live ``conductor:<project>`` lease (``delegate:<project>`` until
+    2026-10-31, ``designated:coordinator:<project>`` before 0.16.1) reopens a done park; holding the open
     ``coordinator:<project>`` lease, which the memory_agents description
     tells sessions to claim, grants nothing. A "coordinator" in the send's
     done-park sentence reads, beside that claim line, as if claiming the
     lease conferred the authority (maintainer decision 2026-10-04: the
-    authority is the maintainer's delegate)."""
+    authority is the maintainer's delegate, read "conductor" since
+    2026-10-30)."""
     d = _descriptions(tmp_path, monkeypatch)
     assert "coordinator:<project>" in d["memory_agents"]
-    # 2026-10-30: the role reads "conductor"; its stored id stays delegate.
     assert "maintainer's conductor" in d["memory_message"]
     assert "delegate" not in d["memory_message"]
     assert "coordinator" not in d["memory_message"]
