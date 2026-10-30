@@ -262,10 +262,10 @@ const q = (s: string) => `“${s}”`;
 
 export function grantDelegate(t: Target, current: { holder: RoleHolder; name: string } | null, isCoordinator: boolean) {
   const replaces: string[] = [];
-  if (current && current.holder.agent_id !== t.agent_id) replaces.push(`${q(current.name)} stops being your delegate.`);
+  if (current && current.holder.agent_id !== t.agent_id) replaces.push(`${q(current.name)} stops being your conductor.`);
   if (isCoordinator) replaces.push("It stops being the coordinator: a session holds one role at a time.");
   return askSigned<GrantResult>({
-    title: `Make ${q(t.name)} your delegate?`,
+    title: `Make ${q(t.name)} your conductor?`,
     body: `For ${t.project} it acts with your authority: it can wake any session here, including sessions parked as done, and its urgent mail rings like yours.`,
     replaces,
     askHold: true,
@@ -274,14 +274,14 @@ export function grantDelegate(t: Target, current: { holder: RoleHolder; name: st
     confirmLabel: "Confirm with passkey",
     challenge: (hold) => ({ purpose: "grant-delegate", project: t.project, agent_id: t.agent_id, hold }),
     complete: (s) => maintainerApi.role(s),
-    success: (_r, hold) => `${q(t.name)} is your delegate for ${holdLabel(hold)}.`,
-    failure: "The delegate did not change",
+    success: (_r, hold) => `${q(t.name)} is your conductor for ${holdLabel(hold)}.`,
+    failure: "The conductor did not change",
   }).then(changed).then(warnUnreachable);
 }
 
 export function extendDelegate(t: Target) {
   return askSigned<GrantResult>({
-    title: "Extend your delegate?",
+    title: "Extend your conductor?",
     body: `${q(t.name)} keeps your authority for ${t.project} for the time you pick, counted from now.`,
     askHold: true,
     note: PASSKEY_NOTE,
@@ -289,29 +289,29 @@ export function extendDelegate(t: Target) {
     confirmLabel: "Confirm with passkey",
     challenge: (hold) => ({ purpose: "grant-delegate", project: t.project, agent_id: t.agent_id, hold }),
     complete: (s) => maintainerApi.role(s),
-    success: (_r, hold) => `Your delegate now ends in ${holdLabel(hold)}.`,
-    failure: "The delegate was not extended",
+    success: (_r, hold) => `Your conductor now ends in ${holdLabel(hold)}.`,
+    failure: "The conductor was not extended",
   }).then(changed).then(warnUnreachable);
 }
 
 export function revokeDelegate(t: Target) {
   return askSigned<RevokeRoleResult>({
-    title: "Revoke your delegate?",
+    title: "Revoke your conductor?",
     body: `${q(t.name)} loses your authority at once. Sessions it already woke keep running.`,
     note: PASSKEY_NOTE,
     tone: "danger",
-    confirmLabel: "Revoke the delegate",
+    confirmLabel: "Revoke the conductor",
     challenge: () => ({ purpose: "revoke-delegate", project: t.project }),
     complete: (s) => maintainerApi.role(s),
-    success: (r) => (r.broken ? "Delegate revoked." : "Delegate revoked; no session was holding the role any more."),
-    failure: "The delegate was not revoked",
+    success: (r) => (r.broken ? "Conductor revoked." : "Conductor revoked; no session was holding the role any more."),
+    failure: "The conductor was not revoked",
   }).then(changed);
 }
 
 export function assignCoordinator(t: Target, current: { holder: RoleHolder; name: string } | null, isDelegate: boolean) {
   const replaces: string[] = [];
   if (current && current.holder.agent_id !== t.agent_id) replaces.push(`${q(current.name)} stops being the coordinator.`);
-  if (isDelegate) replaces.push("It stops being your delegate: a session holds one role at a time.");
+  if (isDelegate) replaces.push("It stops being your conductor: a session holds one role at a time.");
   return askSigned<GrantResult>({
     title: `Make ${q(t.name)} the coordinator?`,
     body: `It organises the work in ${t.project}: hands out tasks and queues shared resources. It gets no authority to wake sessions parked as done. It holds the role a day at a time and renews it itself.`,

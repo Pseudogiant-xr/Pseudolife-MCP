@@ -317,7 +317,7 @@ current merge ref, except as the `merge-forward` skill allows):
   (Bash tool's maximum timeout, `--timeout 7000`, re-armed after a ring or
   timeout); in Codex use the doorbell where the host supports it. With no durable path, say
   `next-turn-only` in the park or status and tell the maintainer when an
-  urgent dependency cannot wait (the delegate especially: the Roles band
+  urgent dependency cannot wait (the conductor especially: the Roles band
   and a grant show a role holder with no live listener). A `rung` receipt means an armed path, not
   that the recipient acted; on `no_path` use the recipient host's
   messaging (Claude Desktop's `send_message`) or expect its next turn.
@@ -575,6 +575,10 @@ commit messages.
   owning them (one process, one bank); the stdio MCP bridge to the daemon.
 - **principal / tier**: the bearer-token caller identity, which keys the
   toolset tier.
+- **conductor**: the maintainer's board role (granted per project) that acts
+  for them on the board. Its stored id and lease name are still `delegate`
+  (`delegate:<project>`); `lease delegate` keeps its name and
+  `conductor-watch` is an alias of `delegate-watch`.
 - **Console**: the web UI (Cortex Console). The **System Atlas**
   (`docs/atlas/`) is the curated codebase architecture map, not the
   Console's Graph view of the bank.

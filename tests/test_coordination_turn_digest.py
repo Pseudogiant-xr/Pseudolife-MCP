@@ -1547,12 +1547,12 @@ def test_start_hook_ignores_a_symlinked_agent_file(shell, checkin_daemon, tmp_pa
 def test_start_hook_prints_the_brief_block_the_daemon_appends(shell, tmp_path):
     """The brief is a separate block after the check-in; the hook prints the
     whole body."""
-    daemon = _CheckinDaemon(CHECKIN + "\n\nYou are the maintainer's delegate for p.\n- one")
+    daemon = _CheckinDaemon(CHECKIN + "\n\nYou are the maintainer's conductor for p.\n- one")
     try:
         env, key = _start_env(tmp_path, daemon)
         _plant_agent(tmp_path / "digests", key, AGENT_ID + "\n")
         assert _run_start_hook(shell, env) == (
-            CHECKIN + "\n\nYou are the maintainer's delegate for p.\n- one\n")
+            CHECKIN + "\n\nYou are the maintainer's conductor for p.\n- one\n")
     finally:
         daemon.close()
 

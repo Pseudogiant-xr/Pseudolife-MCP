@@ -1234,7 +1234,7 @@ class FixtureService:
                  else CoordinationStore.reachability(
                      {"attachment_id": None, "lease_until": 0, "wake_enabled": False,
                       "capabilities": {"ring": True, "ring_armed_until": 0}},
-                     now, role=role))
+                     now, role="conductor" if role == "delegate" else role))
         entry = {"agent_id": agent_id, "expires_at": now + fields["hold"],
                  "reachable": reach["reachable"], "reason": reach["reason"]}
         if role == "delegate":

@@ -16,7 +16,7 @@ removed when the GitHub merge queue is enabled. When in doubt, close the
 batch and build the next one.
 
 Merging before CI reports on the new head is a ruleset bypass (admin
-merge), so only the maintainer or the maintainer's delegate does it.
+merge), so only the maintainer or the maintainer's conductor does it.
 
 ## A. Disjoint merge-forward
 

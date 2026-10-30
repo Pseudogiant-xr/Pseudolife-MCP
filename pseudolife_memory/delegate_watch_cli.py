@@ -1,7 +1,8 @@
-"""Wake a delegate session with board mail only when something needs a decision.
+"""Wake the conductor session with board mail only when something needs a decision.
 
-A delegate session (the one the maintainer talks to, which dispatches work,
-orders suites and merges) pays a full-context request for every wake.
+The conductor session (the maintainer's board role, stored as ``delegate``:
+the one the maintainer talks to, which dispatches work, orders suites and
+merges) pays a full-context request for every wake.
 Measured 2026-10-14 over six such sessions (Sep 23 - Oct 13): 2,504 turns
 began with a background-task notification and 557 with board mail, and about
 a third of all their turns took no action. Cache reads were 96% of their
@@ -64,9 +65,9 @@ from pseudolife_memory.lease_cli import (
 EXIT_OK = 0
 EXIT_SETUP = 2
 
-LABEL = "delegate-watch"
+LABEL = "conductor-watch"
 CLEARS = "decision events"
-REMINDER = "Delegate: raw output goes to a subagent; a quiet wake gets one line."
+REMINDER = "Conductor: raw output goes to a subagent; a quiet wake gets one line."
 # 55 minutes keeps a quiet wake inside the one-hour prompt-cache lifetime
 # with room for the harness to start the turn.
 DEFAULT_QUIET_AFTER = 3300.0
@@ -621,10 +622,10 @@ def _age(text):
 def parser():
     home = Path.home() / ".pseudolife-mcp"
     p = argparse.ArgumentParser(
-        prog="pseudolife-mcp delegate-watch", description=__doc__.split("\n\n")[0],
-        epilog=("Start it from the delegate session with --detach; it prints its board id. "
+        prog="pseudolife-mcp conductor-watch", description=__doc__.split("\n\n")[0],
+        epilog=("Start it from the conductor session with --detach; it prints its board id. "
                 f'Then park waiting_peer with park_needs="{CLEARS}" and park_clear_by=<that id>. '
-                "Stop it with --stop."))
+                "Stop it with --stop. delegate-watch is its older name and still works."))
     p.add_argument("--owner", help="the board agent id to send to (32 lowercase hex; default: "
                                    "this session's, from the .agent file beside its digest)")
     p.add_argument("--detach", action="store_true",
@@ -659,7 +660,7 @@ def parser():
 
 
 def _say(message: str) -> None:
-    print(f"delegate-watch: {message}", file=sys.stderr, flush=True)
+    print(f"conductor-watch: {message}", file=sys.stderr, flush=True)
 
 
 def _save(path: Path, state):
@@ -724,11 +725,11 @@ def _log_tail(log: Path) -> str:
 def _stop(state: Path) -> int:
     record = _running(state)
     if record is None:
-        print(f"delegate-watch: no watcher running for {state}; nothing changed")
+        print(f"conductor-watch: no watcher running for {state}; nothing changed")
         return EXIT_OK
     state.with_suffix(".stop").parent.mkdir(parents=True, exist_ok=True)
     state.with_suffix(".stop").write_text("", encoding="utf-8")
-    print(f"delegate-watch {record.get('agent_id')} asked to stop; it exits at its next poll")
+    print(f"conductor-watch {record.get('agent_id')} asked to stop; it exits at its next poll")
     return EXIT_OK
 
 
@@ -743,7 +744,7 @@ def _foreign(record: dict, owner: str, state: Path) -> bool:
 
 def _already(record: dict) -> int:
     agent_id = record.get("agent_id")
-    print(f"delegate-watch {agent_id} already running for {record.get('owner')}; "
+    print(f"conductor-watch {agent_id} already running for {record.get('owner')}; "
           f"{_park_hint(agent_id)}")
     return EXIT_OK
 
@@ -770,7 +771,7 @@ def _detach(argv: list[str], args, owner: str, state: Path, spawn, clock, sleep)
             record = None
         if isinstance(record, dict) and record.get("nonce") == nonce:
             agent_id = record.get("agent_id")
-            print(f"delegate-watch {agent_id} watching for {owner}; {_park_hint(agent_id)}")
+            print(f"conductor-watch {agent_id} watching for {owner}; {_park_hint(agent_id)}")
             return EXIT_OK
         other = _running(state)
         if other is not None:                # another start won the state's lock
@@ -778,7 +779,7 @@ def _detach(argv: list[str], args, owner: str, state: Path, spawn, clock, sleep)
         if not _pid_alive(pid):
             break
         if clock() >= deadline:
-            print(f"delegate-watch: still starting; see {log}")
+            print(f"conductor-watch: still starting; see {log}")
             return EXIT_OK
         sleep(DETACH_POLL)
     tail = _log_tail(log)
@@ -906,8 +907,8 @@ class _Loop:
         _say(why)
         _ledger(self.state, "setup", why)
         try:
-            self.send(f"delegate-watch stopped: {why}. Restart it with "
-                      f"`pseudolife-mcp delegate-watch --detach` once that is fixed.")
+            self.send(f"conductor-watch stopped: {why}. Restart it with "
+                      f"`pseudolife-mcp conductor-watch --detach` once that is fixed.")
         except Exception as exc:  # noqa: BLE001 — the exit code must stand
             _say(f"could not tell the owner ({type(exc).__name__})")
         return EXIT_SETUP
@@ -931,7 +932,7 @@ class _Loop:
             _say(f"could not register on the board: {exc}")
             _ledger(self.state, "setup", f"could not register on the board: {exc}")
             return EXIT_SETUP
-        print(f"delegate-watch {self.board.agent_id} watching for {self.owner}; "
+        print(f"conductor-watch {self.board.agent_id} watching for {self.owner}; "
               f"{_park_hint(self.board.agent_id)}", flush=True)
         try:
             state = json.loads(self.state.read_text(encoding="utf-8"))

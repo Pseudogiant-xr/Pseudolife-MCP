@@ -164,7 +164,7 @@ class FakeBoard:
     # views
     def events(self):
         return [m for m in self.sent if m["clears"] == watch.CLEARS
-                and not m["text"].startswith(("quiet ", "delegate-watch stopped:"))]
+                and not m["text"].startswith(("quiet ", "conductor-watch stopped:"))]
 
     def quiet(self):
         return [m for m in self.sent if m["text"].startswith("quiet ")]
@@ -198,7 +198,7 @@ class Harness:
                           environ={})
         texts = [m["text"] for m in self.board.sent[before:]
                  if m["clears"] == watch.CLEARS
-                 and not m["text"].startswith(("quiet ", "delegate-watch stopped:"))]
+                 and not m["text"].startswith(("quiet ", "conductor-watch stopped:"))]
         return code, texts, None
 
     def ledger(self):
@@ -308,8 +308,8 @@ def test_events_go_to_the_owner_as_one_message_that_clears_the_park(h):
     assert message["urgent"] is False and len(message["request_id"]) >= 16
     assert message["text"].splitlines() == [
         "PR #7 green at aaaaaaaa, merge state clean", "PR #8 opened: feat: y",
-        "Delegate: raw output goes to a subagent; a quiet wake gets one line."]
-    assert h.board.registers[0]["label"] == "delegate-watch"
+        "Conductor: raw output goes to a subagent; a quiet wake gets one line."]
+    assert h.board.registers[0]["label"] == "conductor-watch"
     assert h.board.registers[0]["task"] == f"decision events for {OWNER[:8]}"
 
 
@@ -630,7 +630,7 @@ def test_gh_failing_repeatedly_tells_the_owner_once_then_exits_2(h):
     # names an old id, so only the need match can still ring it.
     assert final["clears"] == "decision events"
     assert final["to"] == OWNER and "gh failed on 5 polls in a row" in final["text"]
-    assert final["text"].startswith("delegate-watch stopped:")
+    assert final["text"].startswith("conductor-watch stopped:")
 
 
 def test_gh_missing_tells_the_owner_and_exits_2(h):
@@ -1094,7 +1094,7 @@ def test_detach_starts_the_watcher_and_prints_its_address(tmp_path, capsys):
     assert argv[1:4] == ["-m", "pseudolife_memory.cli", "delegate-watch"]
     assert started["log"] == state.with_suffix(".log")
     out = capsys.readouterr().out.strip()
-    assert out == (f"delegate-watch {'c' * 32} watching for {OWNER}; park with "
+    assert out == (f"conductor-watch {'c' * 32} watching for {OWNER}; park with "
                    f"park_needs=\"decision events\" park_clear_by={'c' * 32}")
 
 
@@ -1182,12 +1182,16 @@ def test_board_update_posts_only_the_fields_given():
 
 # ── dispatch ────────────────────────────────────────────────────────────────
 
-def test_the_package_command_dispatches_here(monkeypatch, capsys):
+@pytest.mark.parametrize("mode", ["conductor-watch", "delegate-watch"])
+def test_the_package_command_dispatches_here(monkeypatch, capsys, mode):
+    """conductor-watch is the role's new name; delegate-watch, its older
+    name, still runs the same watcher."""
     from pseudolife_memory.cli import main as cli_main
 
-    monkeypatch.setattr("sys.argv", ["pseudolife-mcp", "delegate-watch", "--help"])
+    monkeypatch.setattr("sys.argv", ["pseudolife-mcp", mode, "--help"])
     with pytest.raises(SystemExit) as exc:
         cli_main()
     assert exc.value.code == 0
     out = capsys.readouterr().out
-    assert out.startswith("usage: pseudolife-mcp delegate-watch") and "--detach" in out
+    assert out.startswith("usage: pseudolife-mcp conductor-watch") and "--detach" in out
+    assert "conductor session" in out and "delegate-watch is its older name" in out

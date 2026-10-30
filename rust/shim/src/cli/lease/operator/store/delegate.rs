@@ -94,7 +94,7 @@ fn warning(reason: Option<&str>) -> Option<String> {
         _ => unreachable!("listener reason"),
     };
     Some(format!(
-        "The new delegate has no live wake path now ({text}): maintainer mail to it waits for its next turn. A Claude Code session listens again when its turn ends, a Codex thread once its doorbell re-arms; a client older than the always-listening plugin stops 59 minutes after a turn until it is updated."
+        "The new conductor has no live wake path now ({text}): maintainer mail to it waits for its next turn. A Claude Code session listens again when its turn ends, a Codex thread once its doorbell re-arms; a client older than the always-listening plugin stops 59 minutes after a turn until it is updated."
     ))
 }
 

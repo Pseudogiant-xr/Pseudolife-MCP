@@ -267,9 +267,10 @@ CHECKIN_TEXT = (
 # the output rule on every turn, about 60 tokens at the uncached tail,
 # because an instruction given once in a 300k context is a weak lever.
 DELEGATE_BRIEF = (
-    "You are the maintainer's delegate for {projects}. Keep this session's context for "
+    "You are the maintainer's conductor for {projects}. Keep this session's context for "
     "decisions:\n"
-    "- Start a watcher once: `pseudolife-mcp delegate-watch --detach`; it prints its board "
+    "- Start a watcher once: `pseudolife-mcp conductor-watch --detach` (`delegate-watch` on "
+    "clients older than this release); it prints its board "
     "id. Park with park_needs=\"decision events\" and park_clear_by=<that id> before ending "
     "a turn that waits. On a wake, read with memory_message(action=\"receive\", ack=true), "
     "act, and park again. If it has stopped, run it again; it answers \"already running\" "
@@ -280,7 +281,7 @@ DELEGATE_BRIEF = (
     "wakes you when it finishes.\n"
     "- Ask workers for decision-ready mail and to keep progress in their board status.\n"
     "- Answer a quiet wake in one line, with no tool calls.")
-DELEGATE_REMINDER = "Delegate: raw output goes to a subagent; a quiet wake gets one line."
+DELEGATE_REMINDER = "Conductor: raw output goes to a subagent; a quiet wake gets one line."
 # How long the daemon process keeps one agent's delegate answer: the
 # per-prompt path then costs one cheap lookup a minute per session, and a
 # grant or a revoke shows within a minute.
@@ -313,7 +314,7 @@ PARK_CHECKIN_SENTENCE = (
     "park_clear_by=<agent id|maintainer|anyone>, park_resume=<what to do once "
     "cleared>), so mail wakes you only when it clears that need. Use done only "
     "when no follow-up is expected; urgent mail from the maintainer, the maintainer's "
-    "delegate for the project or your named clearer still rings it. Waiting on a merge "
+    "conductor for the project or your named clearer still rings it. Waiting on a merge "
     "click or a review that may still bring fixes? Park needs_approval with "
     "park_clear_by set to the reviewer's agent id or maintainer, or waiting_peer.")
 # The compact form for MCP initialization, which the shim appends only when
@@ -352,7 +353,7 @@ PARK_GATE_MESSAGE = (
     "Before ending: update your board status with why you stopped and what you need "
     "(memory_agents update park_reason=... park_needs=... park_clear_by=... "
     "park_resume=...). Use done only when no follow-up is expected; urgent mail "
-    "from the maintainer, the maintainer's delegate for the project or your named "
+    "from the maintainer, the maintainer's conductor for the project or your named "
     "clearer still rings it. Waiting on a merge click or a review that may "
     "still bring fixes? Park needs_approval with park_clear_by set to the "
     "reviewer's agent id or maintainer, or waiting_peer. A park records intent; automatic wake requires "

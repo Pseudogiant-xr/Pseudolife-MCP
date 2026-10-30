@@ -439,7 +439,7 @@ def test_a_sessions_first_note_clears_marks_idle_for_a_month(tmp_path, hook):
 # ── the delegate's per-turn reminder (spec 2026-10-14) ────────────────────
 
 AGENT_ID = "0123456789abcdef0123456789abcdef"
-REMINDER = "Delegate: raw output goes to a subagent; a quiet wake gets one line."
+REMINDER = "Conductor: raw output goes to a subagent; a quiet wake gets one line."
 
 
 def _agent_file(digest_dir, session_id, content):

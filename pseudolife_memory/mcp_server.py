@@ -653,7 +653,7 @@ def memory_message(
     resend to force a ring. Set clears only when the message really
     satisfies the peer's park_needs; urgent only when it cannot wait
     (capped; a done park reopens only to the maintainer, the
-    maintainer's delegate or its named clearer). Reuse a request_id only
+    maintainer's conductor or its named clearer). Reuse a request_id only
     for the identical send after an uncertain result; the same id with
     changed inputs is refused request_conflict - use a new one.
 
