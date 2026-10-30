@@ -235,12 +235,14 @@ async fn write(
                 }
                 return Ok(out);
             }
-            check_text(a, &["src", "dst"]).map_err(internal)?;
+            if action != "relate" {
+                check_text(a, &["src", "dst"]).map_err(internal)?;
+            }
         }
         _ => {}
     }
     match action {
-        "relate" => return crate::graph_write_tools::relate(ready, a).await,
+        "relate" => return crate::graph_write_tools::relate_console(ready, a).await,
         "unrelate" => {
             let mut out = crate::graph_write_tools::unrelate(ready, a).await?;
             if out.get("reason").and_then(Value::as_str) == Some("unknown_entity") {
@@ -379,18 +381,8 @@ async fn rejudge(
     let Some(limit) = limit.as_i64().filter(|n| (1..=100).contains(n)) else {
         return Ok(json!({"error":"limit_must_be_between_1_and_100"}));
     };
-    // Read the resident slot candidates before entering the transaction.
-    let candidates = if q == "all" || q == "curation" {
-        Some(duplicates(ready, cfg).await?)
-    } else {
-        None
-    };
     actions::in_txn(ready.storage.client(), |c| async move {
-        let mut left=limit;
-        let mut counts=Map::new();
-        for kind in KINDS {
-            if left==0 {break;}
-            if q!="all" && q!=kind {continue;}
+        bounded_requeue(q, limit, |kind, left| async move {
             let count=if kind=="candidate" {
                 let mut memo=meta(c,"deep_candidate_verdicts").await?;
                 let mut pairs=memo.get("pairs").and_then(Value::as_object).cloned().unwrap_or_default();
@@ -401,9 +393,10 @@ async fn rejudge(
                 done["complete"]=json!(false);set_meta(c,"deep_candidates_judged",&done).await?;
                 keys.len() as i64
             } else if kind=="curation" {
+                let candidates = duplicates(ready, cfg).await?;
                 let mut n=0;
                 for store in ["lesson","world"] {
-                    for pair in candidates.as_ref().unwrap()[format!("{store}_duplicates")].as_array().unwrap() {
+                    for pair in candidates[format!("{store}_duplicates")].as_array().unwrap() {
                         if n>=left {break;}
                         let mut keys=[pair["a_key"].as_str().unwrap(),pair["b_key"].as_str().unwrap()];keys.sort();
                         n+=c.execute("DELETE FROM curation_judgments WHERE store=$1 AND a_key=$2 AND b_key=$3",&[&store,&keys[0],&keys[1]]).await.map_err(internal)? as i64;
@@ -431,9 +424,8 @@ async fn rejudge(
                 set_meta(c,&key,&memo).await?;
                 rows.len() as i64
             };
-            counts.insert(kind.into(),json!(count));left-=count;
-        }
-        Ok(json!({"requeued":limit-left,"queues":counts,"limit":limit}))
+            Ok(count)
+        }).await
     }).await
 }
 
@@ -450,4 +442,60 @@ async fn meta(c: &tokio_postgres::Client, key: &str) -> Result<Value, ToolError>
 async fn set_meta(c: &tokio_postgres::Client, key: &str, value: &Value) -> Result<(), ToolError> {
     c.execute("INSERT INTO meta(key,value) VALUES($1,$2) ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value",&[&key,&value]).await.map_err(internal)?;
     Ok(())
+}
+
+/// Invoke each queue only while capacity remains. In particular, do not
+/// construct the quadratic slot-candidate listing for an exhausted budget.
+async fn bounded_requeue<F, Fut>(queue: &str, limit: i64, mut reset: F) -> Result<Value, ToolError>
+where
+    F: FnMut(&'static str, i64) -> Fut,
+    Fut: std::future::Future<Output = Result<i64, ToolError>>,
+{
+    let mut left = limit;
+    let mut counts = Map::new();
+    for kind in ["merge", "link", "junk", "curation", "candidate"] {
+        if left == 0 {
+            break;
+        }
+        if queue != "all" && queue != kind {
+            continue;
+        }
+        let count = reset(kind, left).await?;
+        counts.insert(kind.into(), json!(count));
+        left -= count;
+    }
+    Ok(json!({"requeued":limit-left,"queues":counts,"limit":limit}))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn exhausted_rejudge_budget_never_enumerates_curation() {
+        let mut called = Vec::new();
+        let out = bounded_requeue("all", 3, |kind, left| {
+            assert_ne!(
+                kind, "curation",
+                "exhausted budget must not enumerate slot pairs"
+            );
+            called.push((kind, left));
+            std::future::ready(Ok(1))
+        })
+        .await
+        .unwrap();
+        assert_eq!(called, [("merge", 3), ("link", 2), ("junk", 1)]);
+        assert_eq!(
+            out,
+            json!({"requeued":3,"queues":{"merge":1,"link":1,"junk":1},"limit":3})
+        );
+        let mut called = Vec::new();
+        bounded_requeue("curation", 2, |kind, left| {
+            called.push((kind, left));
+            std::future::ready(Ok(1))
+        })
+        .await
+        .unwrap();
+        assert_eq!(called, [("curation", 2)]);
+    }
 }

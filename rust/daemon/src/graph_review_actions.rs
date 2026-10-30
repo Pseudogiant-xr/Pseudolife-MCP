@@ -91,7 +91,7 @@ impl Pid {
 
     /// `str(int(proposal_id))`.
     fn text(&self) -> String {
-        crate::pyjson::py_str(&self.echo)
+        crate::pyjson::py_str(&py_int(&self.echo).unwrap_or_else(|_| self.echo.clone()))
     }
 }
 
@@ -1736,18 +1736,6 @@ pub(crate) async fn console_decide(
     decided_by: &str,
 ) -> Result<Value, ToolError> {
     let kind = IdAction::parse(action).expect("registered Console decision");
-    // PostgreSQL compares numeric ids by value, including integral JSON
-    // floats and integer strings, while the response echoes the input.
-    let mut pid = Pid::new(id.clone());
-    pid.id = match &id {
-        Value::String(s) => s.trim().parse().ok(),
-        Value::Number(n) => n.as_i64().or_else(|| {
-            n.as_f64()
-                .filter(|n| n.fract() == 0.0)
-                .and_then(|n| format!("{n:.0}").parse().ok())
-        }),
-        _ => None,
-    };
     if kind == IdAction::RejectLink {
         // confirm_human_proposal calls int(id) before querying the row.
         if let Err(message) = py_int(&id) {
@@ -1758,5 +1746,33 @@ pub(crate) async fn console_decide(
             });
         }
     }
+    // Keep the response echo, but let PostgreSQL validate its integer-string
+    // syntax and range exactly as it validates psycopg's unknown parameter.
+    let mut pid = Pid::new(id.clone());
+    pid.id = match &id {
+        Value::String(s) => Some(
+            reads(ready.storage.client(), |c| async move {
+                c.query_one("SELECT $1::text::bigint", &[s])
+                    .await
+                    .map(|row| row.get(0))
+                    .map_err(|e| {
+                        internal(match e.as_db_error() {
+                            Some(db) => format!(
+                                "{}\nCONTEXT:  unnamed portal parameter $1 = '...'",
+                                db.message()
+                            ),
+                            None => e.to_string(),
+                        })
+                    })
+            })
+            .await?,
+        ),
+        Value::Number(n) => n.as_i64().or_else(|| {
+            n.as_f64()
+                .filter(|n| n.fract() == 0.0)
+                .and_then(|n| format!("{n:.0}").parse().ok())
+        }),
+        _ => None,
+    };
     settle(ready, kind, &pid, decided_by).await
 }

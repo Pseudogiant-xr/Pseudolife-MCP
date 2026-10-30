@@ -1,3 +1,3 @@
 | Method | Path | Phase | Status | Rust | Evidence |
 |---|---|---:|---|---|---|
-| POST | /api/graph/accept-proposal | 4 | implemented | `routes/graph.rs` | `w2e_graph_actions.py`: Console HTTP status/body and durable-state differential scenarios |
+| POST | /api/graph/accept-proposal | 4 | ported | `routes/graph.rs` | `w2e_graph_actions.py`: Console HTTP status/body and durable-state differential scenarios |

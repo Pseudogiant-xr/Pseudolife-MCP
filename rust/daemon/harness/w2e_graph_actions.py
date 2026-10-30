@@ -48,7 +48,7 @@ def register(h):
                 import json
                 ids = json.loads(ids)
             for pid in ids or [args.get("proposal_id")]:
-                ops.append(post(names[action], id=str(pid) if pid == 1 else pid, decided_by="agent" if len(ops) % 2 else "invalid"))
+                ops.append(post(names[action], id="04" if pid == 4 and action == "reject_link" else str(pid) if pid == 1 else pid, decided_by="agent" if len(ops) % 2 else "invalid"))
         elif action == "list":
             ops.append({"op": "rest", "method": "GET", "path": "/api/graph/review"})
         else:
@@ -83,6 +83,11 @@ def register(h):
                 get_duplicates, post("rejudge", queue="curation")],
     }
     scenarios["console-graph-actions"]["ops"].extend([
+        *[post(name, id="not-an-id") for name in ("accept-proposal", "accept-entity-merge", "accept-entity-junk", "reject-entity-proposal")],
+        post("relate", src=None, relation="uses", dst="valid"),
+        post("relate", src=False, relation="uses", dst="valid"),
+        post("relate", src=0, relation="uses", dst="valid"),
+        post("relate", src="Committed source", relation="uses", dst=7),
         post("reject-proposal", id=None), post("reject-proposal", id="not-an-id"),
         post("unrelate", src=None, relation="uses", dst="missing"),
         post("delete-entity", entity=7), post("delete-entity", entity=None),
