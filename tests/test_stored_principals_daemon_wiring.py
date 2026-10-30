@@ -8,15 +8,17 @@ from types import SimpleNamespace
 
 import pytest
 
-from pseudolife_memory import daemon, principal_store
+from pseudolife_memory import daemon, principal_activity, principal_store
 from pseudolife_memory.principals import installed_store, install_store
 
 
 @pytest.fixture(autouse=True)
 def _restore_store():
     previous = installed_store()
+    recorder = principal_activity.installed_recorder()
     yield
     install_store(previous)
+    principal_activity.install_recorder(recorder)
 
 
 @pytest.fixture
@@ -50,3 +52,18 @@ def test_a_daemon_without_postgres_has_no_store(started):
     install_store(None)
     assert daemon.start_stored_principals(SimpleNamespace(_db_url=None), {}, auth_configured=True) is None
     assert installed_store() is None and started == []
+
+
+def test_an_authenticated_daemon_installs_the_activity_recorder_its_refresher_writes(started):
+    svc = SimpleNamespace(_db_url="postgresql://fixture@127.0.0.1:5433/fixture")
+    daemon.start_stored_principals(svc, {"tok": "desk"}, auth_configured=True)
+    recorder = principal_activity.installed_recorder()
+    assert isinstance(recorder, principal_activity.ActivityRecorder)
+    assert started[0]._recorder is recorder
+
+
+def test_an_open_daemon_records_no_activity(started):
+    svc = SimpleNamespace(_db_url="postgresql://fixture@127.0.0.1:5433/fixture")
+    daemon.start_stored_principals(svc, {}, auth_configured=False)
+    assert principal_activity.installed_recorder() is None
+    assert started[0]._recorder is None

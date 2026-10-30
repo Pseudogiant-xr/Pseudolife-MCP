@@ -36,6 +36,13 @@ UNPORTED_ROWS: dict[str, str] = {
     # per-step dump cannot compare it. w2e.py's counters scenarios compare the
     # row at fixed points instead (its `counters` op).
     "cms_counters": "B4",
+    # Both daemons' gate activity (schema v58): each refresher writes it on
+    # its own once-a-minute clock with wall-clock times, so a per-step dump
+    # cannot compare it either. The writer is ported (principal_activity.rs);
+    # its sequences are compared against the Python recorder's goldens
+    # (goldens/principal-activity.json) and its SQL by its database tests.
+    "principal_activity": "v58-clock",
+    "rejected_bearers": "v58-clock",
 }
 
 _CATALOG = {
