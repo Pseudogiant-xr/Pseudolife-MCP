@@ -695,9 +695,11 @@ MUTANTS = [
     Mutant("invite-revoke-dropped", "invite", "shim/src/cli/pairing/invite_db.rs",
            "SET revoked_at = COALESCE(revoked_at, {NOW}), ",
            "SET revoked_at = revoked_at, ", cases=("revoke", "revoke-json")),
+    # The list's order is the final in-code sort (stored and environment
+    # names together); the SQL ORDER BY no longer decides it.
     Mutant("invite-list-order", "invite", "shim/src/cli/pairing/invite_db.rs",
-           "FROM public.principals ORDER BY principal\"",
-           "FROM public.principals ORDER BY principal DESC\"", cases=("list", "list-json")),
+           "out.sort_by(|a, b| a.principal.cmp(&b.principal));",
+           "out.sort_by(|a, b| b.principal.cmp(&a.principal));", cases=("list", "list-json")),
     Mutant("invite-refusal-exit", "invite", "shim/src/cli/pairing/invite.rs",
            "return Ok(report.fail_units(EXIT_REFUSED, refusal));",
            "return Ok(report.fail_units(EXIT_FAILED, refusal));",
