@@ -126,7 +126,8 @@ async fn read(
                     &mut v,
                     s(q, "scope").unwrap_or("all"),
                     i_param(q, "limit", 2000),
-                )?;
+                )
+                .map_err(internal)?;
             }
             Ok(v)
         }
@@ -218,7 +219,7 @@ async fn read(
 }
 
 /// Python `_whole_graph`: scope first, then peel by current degree and name.
-fn filter_graph(v: &mut Value, scope: &str, limit: i64) -> Result<(), ToolError> {
+fn filter_graph(v: &mut Value, scope: &str, limit: i64) -> Result<(), String> {
     let mut nodes = rows(&v["nodes"]).to_vec();
     if scope != "all" {
         nodes.retain(|n| rows(&n["sources"]).iter().any(|s| s == scope));
@@ -238,7 +239,7 @@ fn filter_graph(v: &mut Value, scope: &str, limit: i64) -> Result<(), ToolError>
     if limit != 0 && (nodes.len() as i64) > limit {
         // Python's heap peel raises IndexError after exhausting a negative cap.
         if limit < 0 {
-            return Err(internal("index out of range"));
+            return Err("index out of range".into());
         }
         let mut adj: BTreeMap<String, BTreeSet<String>> =
             alive.iter().map(|n| (n.clone(), BTreeSet::new())).collect();
