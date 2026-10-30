@@ -17,8 +17,9 @@
   loaded before the upgrade still grants and revokes (its challenge keeps
   the old purpose it asked for). Before deploying, `lease break` any
   `conductor:` lease `pseudolife-mcp lease list` shows held, since any
-  session could take one until now, and run `lease conductor` from a client
-  at the daemon's version.
+  session could take one until now, and grant from a client at the
+  daemon's version (an older daemon container refuses `lease conductor`;
+  update the daemon first).
 - `pseudolife-mcp conductor-watch` is the watcher's command and
   `pseudolife_memory.conductor_watch_cli` its module; `delegate-watch` still
   runs it after one stderr line naming `conductor-watch`.

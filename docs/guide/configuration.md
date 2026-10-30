@@ -813,9 +813,12 @@ to see the role in its Roles band again. Before deploying, check that
 `pseudolife-mcp lease list` shows no `conductor:` lease held: until this
 release any session could take one, and although it grants nothing, the
 Console would name its holder as the one a grant replaces; `lease break` it.
-Run `lease conductor` from a client at the daemon's version: an older one
-writes an old-named grant beside a new one, and a newer one against an older
-daemon writes a lease that daemon neither honours nor reserves.
+Grant from a client at the daemon's version. An older client's `lease delegate`
+writes an old-named grant beside any new one, and a newer client against an
+older daemon writes a lease that daemon neither honours nor reserves; when it
+re-runs the command inside an older daemon container, that container refuses
+`conductor` as an invalid choice and nothing changes, so update the daemon
+first.
 
 **Upgrading from 0.16.0**, where the grant was the lease
 `designated:coordinator:<project>` and its rings were `reason: coordinator`:
