@@ -313,6 +313,65 @@ def test_connect_runtime_image_projection_refuses_a_path_outside_its_bound_home(
     assert image.read_bytes() == b"fixture"
 
 
+# The arm's own probe, then a child of the arm's interpreter posting /mcp
+# with a credential, as connect's handshake child does.
+_ARM_SCRIPT = """
+import subprocess, sys, urllib.request
+url = sys.argv[1]
+urllib.request.urlopen(url + "/health", timeout=30).read()
+subprocess.run([sys.executable, "-c", '''
+import sys, urllib.request
+request = urllib.request.Request(sys.argv[1] + "/mcp", data=b'{"jsonrpc": "2.0"}',
+                                 headers={"Authorization": "Bearer child-credential"})
+urllib.request.urlopen(request, timeout=30).read()
+''', url], check=True)
+"""
+
+
+def _connect_arm_requests(python: str) -> list:
+    """The requests a fixture daemon attributes to an arm that runs
+    ``_ARM_SCRIPT`` under ``python``, the arm's pid recorded the way the row
+    records it."""
+    import subprocess  # noqa: PLC0415
+    from types import SimpleNamespace  # noqa: PLC0415
+    from cli_harness.rows import connect  # noqa: PLC0415
+    port, url = connect._target()
+    daemon = connect.Daemon(port, url=url, auth=False)
+    try:
+        proc = subprocess.Popen([python, "-I", "-c", _ARM_SCRIPT, url])
+        connect._arm_pid(SimpleNamespace(name="python", daemon=daemon), proc)
+        assert proc.wait(timeout=60) == 0
+        return daemon.requests()
+    finally:
+        daemon.close()
+
+
+def test_connect_attributes_the_oracle_probe_through_a_venv_launcher(tmp_path):
+    """A Windows venv's python.exe is a launcher that runs the interpreter
+    as its child, so the pid the harness started is not the pid holding the
+    oracle's sockets; connect's own /health must still be connect's, and the
+    handshake child's /mcp post still the handshake child's. (On POSIX the
+    venv's python is a symlink and the arm is the interpreter itself.)"""
+    import subprocess  # noqa: PLC0415
+    venv = tmp_path / "venv"
+    subprocess.run([sys.executable, "-m", "venv", "--without-pip", str(venv)], check=True)
+    python = venv / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    requests = _connect_arm_requests(str(python))
+    assert [(r["method"], r["target"]) for r in requests] == [
+        ("GET", "/health"), ("handshake-credentials", "/mcp")]
+    assert requests[-1]["headers"] == {"authorization": "Bearer child-credential"}
+
+
+def test_connect_keeps_a_direct_interpreter_childs_requests_out_of_its_own():
+    """The near miss: an arm that is its own interpreter keeps every other
+    process's requests out of connect's own, its direct children's too."""
+    python = getattr(sys, "_base_executable", None) or sys.executable
+    requests = _connect_arm_requests(python)
+    assert [(r["method"], r["target"]) for r in requests] == [
+        ("GET", "/health"), ("handshake-credentials", "/mcp")]
+    assert requests[-1]["headers"] == {"authorization": "Bearer child-credential"}
+
+
 @pytest.mark.parametrize("failure, check", [("symlink", "not_symlink"),
                                           ("directory", "regular"),
                                           ("hardlink", "single_link"),

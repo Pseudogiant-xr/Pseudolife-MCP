@@ -13,7 +13,8 @@ those deferrals. This row compares answered cases only.
 Contract per arm: exit code, both streams byte-exact, every file under the
 home (written configs, backups, created token files), and the requests the
 stand-in daemon received: connect's own requests (attributed by the client
-process holding each connection) in order, each with method, target, every
+process holding each connection: the arm's process, or its interpreter child
+when the oracle's ``python.exe`` is a venv launcher) in order, each with method, target, every
 header field by name (repeats flagged) and the body, and of its handshake
 child, whose transport is the shim's own
 row, the ``Authorization`` values its MCP posts carried. The fixture
@@ -43,6 +44,7 @@ addresses, where the fixture listens.
 from __future__ import annotations
 
 import base64
+import functools
 import hashlib
 import datetime
 import json
@@ -118,7 +120,10 @@ class Daemon:
         self.board_seen = False
         self.port = port
         self.arm_pid: int | None = None
-        self._seen: list[tuple[int | None, dict]] = []
+        # Whether the arm's executable runs its interpreter as a child
+        # (``_redirects``), which then holds connect's own sockets.
+        self.arm_redirects = False
+        self._seen: list[tuple[int | None, int | None, dict]] = []
         self._lock = threading.Lock()
         daemon = self
 
@@ -144,7 +149,7 @@ class Daemon:
                          "headers": [[name, value] for name, value in self.headers.items()],
                          "body": body.decode("utf-8", "backslashreplace")}
                 with daemon._lock:
-                    daemon._seen.append((owner, entry))
+                    daemon._seen.append((owner, _parent(owner), entry))
 
             def _send(self, status, body=b"", headers=()):
                 self.send_response(status)
@@ -275,14 +280,19 @@ class Daemon:
             values = [v for k, v in entry["headers"] if k.lower() == "authorization"]
             return "|".join(values) if values else "none"
 
+        def connect(owner: int | None, parent: int | None) -> bool:
+            # Through a launcher, connect is the launcher's interpreter
+            # child; the handshake child is then a grandchild.
+            return owner == self.arm_pid or (self.arm_redirects and parent == self.arm_pid)
+
         # Connect never calls /mcp (connect_cli.py, codex_connection.py), so
         # an unattributed /mcp request is the handshake child's: on Linux
         # psutil can miss the child's short-lived sockets. A /mcp request
         # traced to connect's own pid stays in `own` and fails the comparison.
-        own = [entry for owner, entry in seen
-               if owner == self.arm_pid or (owner is None and not mcp(entry))]
-        child = sorted({authorization(entry) for owner, entry in seen
-                        if owner != self.arm_pid and mcp(entry) and entry["method"] == "POST"})
+        own = [entry for owner, parent, entry in seen
+               if connect(owner, parent) or (owner is None and not mcp(entry))]
+        child = sorted({authorization(entry) for owner, parent, entry in seen
+                        if not connect(owner, parent) and mcp(entry) and entry["method"] == "POST"})
         return own + [{"method": "handshake-credentials", "target": "/mcp",
                        "headers": {"authorization": ",".join(child)}, "body": ""}]
 
@@ -292,6 +302,32 @@ class Daemon:
             server.server_close()
         for thread in self.threads:
             thread.join(timeout=5)
+
+
+def _parent(pid: int | None) -> int | None:
+    """``pid``'s parent, read while it still holds the request's socket."""
+    if pid is None:
+        return None
+    try:
+        return psutil.Process(pid).ppid()
+    except psutil.Error:
+        return None
+
+
+@functools.cache
+def _redirects(executable: str) -> bool:
+    """Whether ``executable`` runs Python in a child process instead of its
+    own: a Windows venv's ``python.exe`` is a launcher that starts the base
+    interpreter as its child (the self-hosted lane runs the oracle from a
+    venv, hosted CI from setup-python's interpreter). Measured, not guessed
+    from the path: a venv made with ``--symlinks`` runs in place."""
+    with subprocess.Popen([executable, "-I", "-c", "import os; print(os.getpid())"],
+                          stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, text=True,
+                          creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)) as probe:
+        out, _ = probe.communicate(timeout=60)
+    if probe.returncode != 0:
+        raise RuntimeError(f"{executable} exited {probe.returncode} reporting its pid")
+    return int(out.split()[0]) != probe.pid
 
 
 def _free_port() -> int:
@@ -755,6 +791,7 @@ RULES = ("connect-backup-stamp", "connect-restart-pid", "shim-handshake-cache-na
 def _arm_pid(arm, proc) -> None:
     if arm.daemon is not None:
         arm.daemon.arm_pid = proc.pid
+        arm.daemon.arm_redirects = arm.name == "python" and _redirects(proc.args[0])
 
 
 def _with_temp(setup):
