@@ -26,7 +26,7 @@ fn s<'a>(q: &'a HashMap<String, String>, k: &str) -> Option<&'a str> {
 /// the Unicode decimal digits handled by the existing Python-int parser.
 fn integer(q: &HashMap<String, String>, key: &str, default: i64) -> Value {
     s(q, key)
-        .and_then(|v| crate::graph_review_actions::py_int(&json!(v)).ok())
+        .and_then(|v| crate::graph_review_tools::actions::py_int(&json!(v)).ok())
         .unwrap_or_else(|| json!(default))
 }
 
