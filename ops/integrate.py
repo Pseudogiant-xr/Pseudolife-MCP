@@ -272,8 +272,10 @@ def _checks_why(rollup: list[dict] | None) -> tuple[str, str]:
            or not _ACTIONS_JOB.search(check.get("detailsUrl") or "")
            for check in failures):
         return "failing", ""                # no gate's failure: nothing to read
+    local: dict = {}
     if failures:
-        gates = _local_gates()
+        local = _local_workflows()
+        gates = _local_gates(local)
         if not all(_gate_named(check, gates) for check in failures):
             return "failing", ""            # the checkout defines no such gate
     latest = {id(check) for check in _latest_checks(rollup)}
@@ -282,7 +284,7 @@ def _checks_why(rollup: list[dict] | None) -> tuple[str, str]:
     runs: dict = {}
     probes: dict = {}
     for check in failures:
-        verdict, why = _gate_cancelled(check, runs, probes)
+        verdict, why = _gate_cancelled(check, runs, probes, local)
         if verdict is False:
             return "failing", ""
         cancelled = True
@@ -355,6 +357,15 @@ _EXPRESSION = re.compile(r"\$\{\{.*?\}\}", re.S)
 CANCEL_STEP_IF = "${{ contains(needs.*.result, 'cancelled') }}"
 CANCEL_STEP_RUN = "exit 1"
 CANCEL_STEP_KEYS = {"name", "id", "if", "run"}
+# Gate job keys that change how a step starts (its directory, shell,
+# environment or machine) before its script runs, so the cancelled-need
+# step could fail on them: a gate carrying any is never downgraded. Its
+# other keys, and the workflow's `defaults` and `env`, must equal the
+# checkout's copy, which the gate already runs under.
+GATE_STEP_SETTINGS = {"defaults", "env", "container", "services"}
+WORKFLOW_STEP_SETTINGS = ("defaults", "env")
+# The runner's own first step: workflow step i (from 0) is API step i + 2.
+SETUP_STEP = "Set up job"
 # A job conclusion that is no failure on the head: a skip the gate admits or
 # rejects by design, or a cancel (whose timeout is read separately).
 _NO_VERDICT = {"success", "skipped", "neutral", "cancelled"}
@@ -389,7 +400,8 @@ def _job_pattern(job_id: str, job: dict) -> re.Pattern:
     return _template(name)
 
 
-def _workflow_jobs(text: str, where: str) -> dict[str, dict]:
+def _workflow(text: str, where: str) -> dict:
+    """A workflow file parsed, its jobs keyed by id as text."""
     yaml = _yaml()
     try:
         data = yaml.safe_load(text)
@@ -398,7 +410,7 @@ def _workflow_jobs(text: str, where: str) -> dict[str, dict]:
     jobs = data.get("jobs") if isinstance(data, dict) else None
     if not isinstance(jobs, dict):
         raise ValueError(f"{where} defines no jobs")
-    return {str(k): v for k, v in jobs.items() if isinstance(v, dict)}
+    return dict(data, jobs={str(k): v for k, v in jobs.items() if isinstance(v, dict)})
 
 
 def _needs(job: dict) -> set[str]:
@@ -410,28 +422,31 @@ def _is_gate(job: dict) -> bool:
     return bool(_needs(job)) and bool(_ALWAYS.search(str(job.get("if", ""))))
 
 
-def _local_gates() -> list[tuple[str, re.Pattern]]:
-    """(workflow name, run-name pattern) of every gate job in this checkout's
-    workflows, the filter that keeps a plain failure from any API read. A
-    gate only the member's head defines is not seen, so its failure stays
-    failing. `build` runs this on origin/master and `open` on the batch
-    branch, whose members can add a gate: that only widens this filter, and
-    the head's own workflow still decides (`_gate_cancelled`)."""
-    yaml = _yaml()
+def _local_workflows() -> dict[str, dict]:
+    """This checkout's workflows by workflow name. `build` reads them on
+    origin/master and `open` on the batch branch, whose members can add or
+    change a gate: that only widens the gate filter, and a gate whose
+    settings differ from the batch's copy is still refused."""
+    _yaml()
     folder = Path(_out("rev-parse", "--show-toplevel")) / ".github" / "workflows"
-    gates = []
+    workflows = {}
     for path in sorted(folder.glob("*.y*ml")):
         try:
-            data = yaml.safe_load(path.read_text(encoding="utf-8"))
-        except (OSError, yaml.YAMLError):
+            data = _workflow(path.read_text(encoding="utf-8"), path.name)
+        except (OSError, ValueError):
             continue                        # unreadable here: no gate seen
-        if not isinstance(data, dict) or not isinstance(data.get("jobs"), dict):
-            continue
-        workflow = str(data.get("name") or f".github/workflows/{path.name}")
-        gates += [(workflow, _job_pattern(str(job_id), job))
-                  for job_id, job in data["jobs"].items()
-                  if isinstance(job, dict) and _is_gate(job)]
-    return gates
+        workflows.setdefault(str(data.get("name") or f".github/workflows/{path.name}"), data)
+    return workflows
+
+
+def _local_gates(workflows: dict[str, dict]) -> list[tuple[str, re.Pattern]]:
+    """(workflow name, run-name pattern) of every gate job in the checkout's
+    workflows, the filter that keeps a plain failure from any API read. A
+    gate only the member's head defines is not seen, so its failure stays
+    failing."""
+    return [(name, _job_pattern(job_id, job))
+            for name, data in workflows.items()
+            for job_id, job in data["jobs"].items() if _is_gate(job)]
 
 
 def _gate_named(check: dict, gates: list[tuple[str, re.Pattern]]) -> bool:
@@ -439,65 +454,108 @@ def _gate_named(check: dict, gates: list[tuple[str, re.Pattern]]) -> bool:
                for workflow, pattern in gates)
 
 
-def _cancel_steps(definition: dict) -> list[re.Pattern]:
-    """Name patterns of the gate's cancelled-need steps: named, with exactly
-    `if: CANCEL_STEP_IF` and `run: exit 1`, and no key but CANCEL_STEP_KEYS."""
-    return [_template(step["name"]) for step in definition.get("steps") or []
-            if isinstance(step, dict) and set(step) <= CANCEL_STEP_KEYS
-            and isinstance(step.get("name"), str)
+def _is_cancel_step(step: dict) -> bool:
+    """Named, with exactly `if: CANCEL_STEP_IF` and `run: exit 1`, and no key
+    but CANCEL_STEP_KEYS."""
+    return (set(step) <= CANCEL_STEP_KEYS and isinstance(step.get("name"), str)
             and isinstance(step.get("if"), str) and step["if"].strip() == CANCEL_STEP_IF
-            and isinstance(step.get("run"), str) and step["run"].strip() == CANCEL_STEP_RUN]
+            and isinstance(step.get("run"), str) and step["run"].strip() == CANCEL_STEP_RUN)
 
 
-def _failed_at_cancel_step(steps: list, cancels: list[re.Pattern]) -> bool:
-    """Whether the one step that failed is a cancelled-need step, every other
-    step having succeeded or skipped."""
-    ran = [(str(step["name"]), step.get("conclusion")) for step in steps]
-    failed = [(name, c) for name, c in ran if c not in ("success", "skipped")]
-    return (len(failed) == 1 and failed[0][1] == "failure"
-            and any(p.fullmatch(failed[0][0]) for p in cancels))
+def _gate_steps(head: dict, gate_id: str, local: dict | None) -> tuple[list[str], int] | None:
+    """(the gate's step names, its cancelled-need step's index) when the
+    gate at the head can only fail that step on a cancel: no key in
+    GATE_STEP_SETTINGS, its other keys but `steps` and the workflow's
+    `defaults` and `env` equal to `local` (the checkout's copy), every step a
+    `run` step (no action, so no pre or post step) with a unique literal
+    name, and exactly one cancelled-need step. None otherwise."""
+    gate = head["jobs"][gate_id]
+    mine = (local or {}).get("jobs", {}).get(gate_id)
+    if not isinstance(mine, dict) or GATE_STEP_SETTINGS & set(gate):
+        return None
+    if ({k: v for k, v in gate.items() if k != "steps"}
+            != {k: v for k, v in mine.items() if k != "steps"}):
+        return None
+    if any(head.get(key) != local.get(key) for key in WORKFLOW_STEP_SETTINGS):
+        return None
+    steps = gate.get("steps")
+    if not isinstance(steps, list) or not all(isinstance(s, dict) for s in steps):
+        return None
+    names = [s.get("name") for s in steps]
+    if (any(not isinstance(n, str) or "${{" in n for n in names)
+            or len(set(names)) != len(names)
+            or any("uses" in s or not isinstance(s.get("run"), str) for s in steps)):
+        return None
+    cancels = [i for i, s in enumerate(steps) if _is_cancel_step(s)]
+    return (names, cancels[0]) if len(cancels) == 1 else None
 
 
-def _gate_cancelled(check: dict, runs: dict, probes: dict) -> tuple[bool | None, str]:
+def _failed_at_cancel_step(steps: list, names: list[str], index: int) -> bool:
+    """Whether a gate job's API steps are the workflow's, in place, and the
+    one that failed is its cancelled-need step: API step 1 is the runner's
+    SETUP_STEP, workflow step i is API step i + 2 under its own name, and
+    every other step succeeded or skipped."""
+    ran = {int(step["number"]): (str(step["name"]), step.get("conclusion")) for step in steps}
+    if ran.get(1, ("",))[0] != SETUP_STEP:
+        return False
+    if any(ran.get(i + 2, ("",))[0] != name for i, name in enumerate(names)):
+        return False
+    failed = [number for number, (_, c) in ran.items() if c not in ("success", "skipped")]
+    return failed == [index + 2] and ran[index + 2][1] == "failure"
+
+
+def _gate_cancelled(check: dict, runs: dict, probes: dict,
+                    local: dict[str, dict]) -> tuple[bool | None, str]:
     """Whether a FAILURE check is a gate that failed only because jobs it
     needs were cancelled, with why when that cannot be read. All must hold:
 
     - its job in the workflow file at the run's head commit runs under
-      `always()`, has `needs` and a cancelled-need step (`_cancel_steps`).
-      GitHub runs a pull request's workflow from its merge ref, which the
-      API does not name, so every job the run lists must match a job of
-      that file, or the downgrade is refused;
-    - that step is the only one that failed (`_failed_at_cancel_step`);
-    - no job in the run attempt but this gate's own legs failed, timed out
-      or needs action, and none it needs is unfinished;
+      `always()`, has `needs` and can fail its cancelled-need step on
+      nothing but a cancel (`_gate_steps`, against the checkout's copy in
+      `local`). GitHub runs a pull request's workflow from its merge ref,
+      which the API does not name, so every job the run lists must match a
+      job of that file, or the downgrade is refused;
+    - that step is, by position and name, the only one that failed, on this
+      leg and on every other failed leg of the gate in the run attempt,
+      whether the rollup lists that leg or not (`_failed_at_cancel_step`);
+    - no other job in the run attempt failed, timed out or needs action,
+      and none the gate needs is unfinished;
     - a job it needs, and nothing outside its needs, was cancelled, and no
       such job ran past its timeout.
 
     False when that is not proven; None when GitHub's record cannot be read.
-    `runs` caches each run attempt's read, `probes` the timeout reads."""
+    `runs` caches each run attempt's and job's read, `probes` the timeout
+    reads."""
     job = _ACTIONS_JOB.search(check.get("detailsUrl") or "")
     if not job:
         return False, ""
+
+    def job_meta(job_id: str) -> dict:
+        if ("job", job_id) not in runs:
+            runs[("job", job_id)] = json.loads(
+                gh("api", f"repos/{{owner}}/{{repo}}/actions/jobs/{job_id}"))
+        return runs[("job", job_id)]
+
     what = f"job {job.group(1)}"
     try:
-        meta = json.loads(gh("api", f"repos/{{owner}}/{{repo}}/actions/jobs/{job.group(1)}"))
+        meta = job_meta(job.group(1))
         key = (int(meta["run_id"]), int(meta["run_attempt"]))
         if key not in runs:
             what = f"run {key[0]}"
             run = json.loads(gh("api", f"repos/{{owner}}/{{repo}}/actions/runs/{key[0]}"))
             path, head = str(run["path"]).split("@", 1)[0], str(meta["head_sha"])
             what = f"{path} at {head[:12]}"
-            defs = _workflow_jobs(gh("api", "-H", "Accept: application/vnd.github.raw+json",
-                                     f"repos/{{owner}}/{{repo}}/contents/{path}?ref={head}"),
-                                  what)
+            data = _workflow(gh("api", "-H", "Accept: application/vnd.github.raw+json",
+                                f"repos/{{owner}}/{{repo}}/contents/{path}?ref={head}"), what)
             what = f"the jobs of run {key[0]} attempt {key[1]}"
             out = gh("api", "--paginate",
                      f"repos/{{owner}}/{{repo}}/actions/runs/{key[0]}/attempts/{key[1]}/jobs"
                      # 100 a page made GitHub answer 502 on every try for a
                      # 140-job attempt (run 40995606796, 2026-10-30); 50 worked.
                      "?per_page=50", "--jq", ".jobs[] | @json")
-            runs[key] = defs, [json.loads(line) for line in out.splitlines() if line.strip()]
-        defs, listed = runs[key]
+            runs[key] = data, [json.loads(line) for line in out.splitlines() if line.strip()]
+        data, listed = runs[key]
+        defs = data["jobs"]
         what = f"the jobs of run {key[0]} attempt {key[1]}"
         patterns = {job_id: _job_pattern(job_id, d) for job_id, d in defs.items()}
 
@@ -510,23 +568,31 @@ def _gate_cancelled(check: dict, runs: dict, probes: dict) -> tuple[bool | None,
         gate_id = gate.pop()
         definition = defs[gate_id]
         needs = _needs(definition)
-        cancels = _cancel_steps(definition)
-        if not _is_gate(definition) or not cancels:
+        shape = _gate_steps(data, gate_id, local.get(str(check.get("workflowName"))))
+        if not _is_gate(definition) or shape is None:
             return False, ""                # no gate, or none that names a cancel
+        names, index = shape
         if any(not owners(str(other["name"])) for other in listed):
             return False, ""                # the run is not this file's
-        steps = meta.get("steps")
-        if not isinstance(steps, list) or not steps:
-            return None, f"the steps of job {job.group(1)} could not be read (none listed)"
-        what = f"the steps of job {job.group(1)}"
-        if not _failed_at_cancel_step(steps, cancels):
-            return False, ""
+        legs = [str(meta["id"])] + [
+            str(other["id"]) for other in listed
+            if owners(str(other["name"])) == {gate_id} and other.get("id") != meta.get("id")
+            and other.get("conclusion") is not None
+            and other.get("conclusion") not in _NO_VERDICT]
+        for leg in legs:
+            what = f"job {leg}"
+            steps = job_meta(leg).get("steps")
+            if not isinstance(steps, list) or not steps:
+                return None, f"the steps of job {leg} could not be read (none listed)"
+            what = f"the steps of job {leg}"
+            if not _failed_at_cancel_step(steps, names, index):
+                return False, ""            # this leg failed for another reason
         what = f"the jobs of run {key[0]} attempt {key[1]}"
         cancelled = []
         for other in listed:
             named = owners(str(other["name"]))
             if other.get("id") == meta.get("id") or named == {gate_id}:
-                continue                    # this gate, or another of its legs
+                continue                    # a leg of this gate, read above
             conclusion = other.get("conclusion")
             if conclusion is not None and conclusion not in _NO_VERDICT:
                 return False, ""            # a job of the run failed

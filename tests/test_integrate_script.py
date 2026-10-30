@@ -1078,6 +1078,102 @@ def test_a_gate_whose_steps_cannot_be_read_is_unverified(world, capsys, steps):
     assert "left out #11: the steps of job 508 could not be read (none listed), " in out, out
 
 
+@pytest.mark.parametrize("sibling, outcome", [
+    # The rollup lists only one leg; the other failed before its
+    # cancelled-need step ran.
+    ([("Set up job", "failure"), (CANCEL_STEP, "skipped"), (VERDICT_STEP, "skipped"),
+      ("Complete job", "success")], FAILING),
+    # It failed at its verdict instead.
+    ([("Set up job", "success"), (CANCEL_STEP, "skipped"), (VERDICT_STEP, "failure"),
+      ("Complete job", "success")], FAILING),
+    # Its steps cannot be read.
+    (None, UNVERIFIED),
+    # It failed at its cancelled-need step too: the near miss that joins.
+    (GATE_STEPS, None),
+], ids=["setup-failed", "verdict-failed", "unreadable", "cancelled"])
+def test_a_failed_gate_leg_the_rollup_omits_is_read_too(world, capsys, sibling, outcome):
+    sha10, sha11 = _gate_world(world, rollup=["509"])
+    if sibling is None:
+        del world.gh.actions_jobs["508"]["steps"]
+    else:
+        world.gh.actions_jobs["508"]["steps"] = _steps(sibling)
+
+    assert _build() == 0, capsys.readouterr()
+
+    out = capsys.readouterr().out
+    for message in (FAILING, UNVERIFIED):
+        assert (message in out) is (message == outcome), out
+
+
+# Text edits to the head's rust.yml (the checkout keeps the real one).
+TOP_DEFAULTS = ("\njobs:\n", "\ndefaults:\n  run:\n    working-directory: nowhere\njobs:\n")
+TOP_ENV = ("\nenv:\n", "\nenv:\n  BASH_ENV: ./broken.sh\n")
+GATE_NAME = "    name: Parity / ${{ matrix.os }}\n"
+
+
+def _gate_key(text: str) -> tuple[str, str]:
+    return GATE_NAME, GATE_NAME + text
+
+
+@pytest.mark.parametrize("edit, admitted", [
+    (TOP_DEFAULTS, False),
+    (TOP_ENV, False),
+    (_gate_key("    defaults:\n      run:\n        working-directory: nowhere\n"), False),
+    (_gate_key("    env:\n      BASH_ENV: ./broken.sh\n"), False),
+    (_gate_key("    container: ubuntu:24.04\n"), False),
+    (_gate_key("    services:\n      db:\n        image: postgres:16\n"), False),
+    (("    timeout-minutes: 5\n    steps:\n      # A cancelled",
+      "    timeout-minutes: 6\n    steps:\n      # A cancelled"), False),
+    # A change outside the gate and the workflow's defaults and env.
+    (("    name: Rust daemon / disposable image\n",
+      "    name: Rust daemon / disposable image\n    timeout-minutes: 61\n"), True),
+], ids=["workflow-defaults", "workflow-env", "job-defaults", "job-env", "container",
+        "services", "timeout", "other-job"])
+def test_a_gate_whose_steps_inherit_other_settings_keeps_a_member_out(
+        world, capsys, edit, admitted):
+    old, new = edit
+    assert WORKFLOW.count(old) == 1, old
+    _gate_world(world, rollup=list(GATES), head_workflow=WORKFLOW.replace(old, new))
+
+    assert _build() == 0, capsys.readouterr()
+
+    assert (FAILING not in capsys.readouterr().out) is admitted
+
+
+@pytest.mark.parametrize("edit, steps", [
+    # A step named like the cancelled-need step, placed before it.
+    (("      - name: A needed job was cancelled\n        if:",
+      "      - name: A needed job was cancelled\n        run: exit 1\n"
+      "      - name: A needed job was cancelled\n        if:"), None),
+    # A templated name.
+    (("      - name: A needed job was cancelled\n",
+      "      - name: ${{ 'A needed job was cancelled' }}\n"), None),
+    # An unnamed step, or one running an action.
+    (("        run: exit 1\n      - name: Require",
+      "        run: exit 1\n      - run: echo here\n      - name: Require"), None),
+    (("        run: exit 1\n      - name: Require",
+      "        run: exit 1\n      - uses: actions/checkout@v4\n      - name: Require"), None),
+    # The workflow is the real one, but the failed step sits where the
+    # verdict step is.
+    (None, [("Set up job", "success"), (VERDICT_STEP, "skipped"), (CANCEL_STEP, "failure"),
+            ("Complete job", "success")]),
+    (None, [("Set up job", "success"), ("Initialize containers", "success"),
+            (CANCEL_STEP, "failure"), (VERDICT_STEP, "skipped"), ("Complete job", "success")]),
+], ids=["duplicate-name", "templated-name", "unnamed-step", "action-step",
+        "swapped-positions", "shifted-positions"])
+def test_the_failed_step_must_be_the_cancelled_need_step_by_position(world, capsys, edit, steps):
+    head = WORKFLOW
+    if edit:
+        assert WORKFLOW.count(edit[0]) == 1, edit[0]
+        head = WORKFLOW.replace(*edit)
+    _gate_world(world, rollup=list(GATES), head_workflow=head,
+                gate_steps=steps or GATE_STEPS)
+
+    assert _build() == 0, capsys.readouterr()
+
+    assert FAILING in capsys.readouterr().out
+
+
 @pytest.mark.parametrize("extra", [
     # A job the gate needs only through `parity-checks` failed, so
     # `parity-checks` skipped; its own row is absent from the rollup.
