@@ -19,6 +19,8 @@ def register(h):
         '/api/graph/entity-provenance?entity=Alpha&limit=-1',
         '/api/graph/entity-provenance?entity=Alpha&limit=999999999999999999999999',
         '/api/graph/entity-provenance?entity=Alpha&limit=-999999999999999999999999',
+        '/api/graph/entity-provenance?entity=Alpha&limit=' + '9' * 4300,
+        '/api/graph/entity-provenance?entity=Alpha&limit=' + '9' * 4301,
         '/api/wiki', '/api/wiki?entity=Alpha', '/api/wiki?entity=Alias',
         '/api/recall', '/api/recall?q=%20&hops=-2&top_k=bad',
         '/api/recall?q=Alpha&hops=1&top_k=2',

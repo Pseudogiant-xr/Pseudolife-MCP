@@ -26,6 +26,14 @@ fn s<'a>(q: &'a HashMap<String, String>, k: &str) -> Option<&'a str> {
 /// the Unicode decimal digits handled by the existing Python-int parser.
 fn integer(q: &HashMap<String, String>, key: &str, default: i64) -> Value {
     s(q, key)
+        // CPython's default decimal conversion limit counts digits, including
+        // leading zeroes, but excludes signs, whitespace and underscores.
+        .filter(|v| {
+            v.chars()
+                .filter(|c| crate::graph_review::is_decimal(*c))
+                .count()
+                <= 4300
+        })
         .and_then(|v| crate::graph_review_tools::actions::py_int(&json!(v)).ok())
         .unwrap_or_else(|| json!(default))
 }
@@ -557,6 +565,21 @@ async fn wiki(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn console_integer_uses_python_decimal_conversion_limit() {
+        for digit in ["9", "٠"] {
+            let q = HashMap::from([("limit".to_string(), digit.repeat(4301))]);
+            assert_eq!(integer(&q, "limit", 20), json!(20));
+        }
+        let q = HashMap::from([("limit".to_string(), "9".repeat(4300))]);
+        assert_eq!(integer(&q, "limit", 20).to_string(), "9".repeat(4300));
+        let q = HashMap::from([(
+            "limit".to_string(),
+            format!(" -{} ", vec!["0"; 4300].join("_")),
+        )]);
+        assert_eq!(integer(&q, "limit", 20), json!(0));
+    }
 
     #[test]
     fn console_cap_peels_current_degrees_instead_of_ranking_initial_hubs() {
