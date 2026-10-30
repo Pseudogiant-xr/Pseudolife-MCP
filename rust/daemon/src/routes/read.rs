@@ -14,7 +14,6 @@ pub(super) const SERVED: &[(&str, &str)] = &[
     ("GET", "/api/recall"),
     ("GET", "/api/wiki"),
     ("GET", "/api/dream/status"),
-
     ("GET", "/api/search"),
     ("GET", "/api/facts"),
     ("GET", "/api/facts/history"),

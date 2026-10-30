@@ -6486,7 +6486,6 @@ import w2e_episodes  # noqa: E402
 SCENARIOS.update(w2e_episodes.register(sys.modules[__name__]))
 MUTANTS += w2e_episodes.MUTANTS
 
-
 import w2e_reads
 SCENARIOS.update(w2e_reads.register(sys.modules[__name__]))
 
