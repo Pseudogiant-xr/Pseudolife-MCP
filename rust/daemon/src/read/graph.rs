@@ -198,6 +198,11 @@ async fn read(
             }
             let id = e["id"].as_i64().unwrap();
             let sources = sources(ready, id).await?;
+            // psycopg sends out-of-i64 integers as NUMERIC; PostgreSQL's
+            // LIMIT coercion then rejects them instead of clamping the read.
+            if path.ends_with("provenance") && integer(q, "limit", 20).as_i64().is_none() {
+                return Err(internal("bigint out of range"));
+            }
             let entries = entries(
                 ready,
                 id,
