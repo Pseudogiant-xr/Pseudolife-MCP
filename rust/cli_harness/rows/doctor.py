@@ -639,18 +639,27 @@ def redirected_dir(rel: str):
 
 def context_proof(bank: str = BANK, principal: str = PRINCIPAL, proof: str | None = None,
                   extra: str | None = None):
-    """``/api/coordination/context``'s read-only answer: the daemon's nonce
-    proof over the request's agent and nonce (``web/coordination``)."""
+    """``/api/coordination/context``'s read-only answer as the daemons give it
+    (``storage/coordination.py`` ``context``, the Rust daemon's
+    ``board/store.rs``): the bank and the bearer's principal, plus the nonce
+    proof when the request names a mailbox. The saved mailbox belongs to
+    ``PRINCIPAL`` on ``BANK``, so a daemon serving another bank or principal
+    refuses it as ``invalid_credential`` before answering."""
     import hashlib
     import hmac
 
     def answer(_daemon, request):
-        message = json.dumps(["pseudolife-context-v1", bank, principal, request["agent_id"],
-                              request["nonce"]], separators=(",", ":"),
-                             ensure_ascii=True).encode("ascii")
-        good = hmac.new(hashlib.sha256(CREDENTIAL.encode()).digest(), message,
-                        hashlib.sha256).hexdigest()
-        value = {"bank_id": bank, "principal": principal, "proof": proof or good}
+        if "agent_id" not in request:
+            value = {"bank_id": bank, "principal": principal}
+        elif bank != BANK or principal != PRINCIPAL:
+            return Route(403, {"error": "invalid_credential"})
+        else:
+            message = json.dumps(["pseudolife-context-v1", bank, principal,
+                                  request["agent_id"], request["nonce"]],
+                                 separators=(",", ":"), ensure_ascii=True).encode("ascii")
+            good = hmac.new(hashlib.sha256(CREDENTIAL.encode()).digest(), message,
+                            hashlib.sha256).hexdigest()
+            value = {"bank_id": bank, "principal": principal, "proof": proof or good}
         if extra is None:
             return Route(200, value)
         # One more member, spelled raw (deep nesting, long integers).
@@ -860,6 +869,25 @@ def cases() -> list[Case]:
     agent("version-3", answer=context_proof(), steps=[saved_instance(version=3)])
     agent("bank-mismatch", answer=context_proof(bank="00000000-0000-4000-8000-000000000002"))
     agent("principal-mismatch", answer=context_proof(principal="other"))
+    agent("bank-and-principal-mismatch",
+          answer=context_proof(bank="00000000-0000-4000-8000-000000000002", principal="other"))
+
+    def binding_then(status, value):
+        """The binding read answered as the daemons do, then this answer to
+        the mailbox read."""
+        def answer(_daemon, request):
+            if "agent_id" not in request:
+                return Route(200, {"bank_id": BANK, "principal": PRINCIPAL})
+            return Route(status, value)
+        return answer
+
+    # A revoked mailbox key as the daemons report it: the binding read
+    # answers, the mailbox read is refused.
+    agent("revoked-key", answer=binding_then(403, {"error": "invalid_credential"}))
+    # The binding moved between the two reads (a daemon swapped or remapped
+    # meanwhile): a binding change, not a rejected key.
+    agent("binding-moved-between-reads", answer=binding_then(200, {
+        "bank_id": BANK, "principal": "other", "proof": "f" * 64}))
     agent("bad-proof", answer=context_proof(proof="0" * 64))
     agent("proof-missing", answer=lambda _d, _r: Route(200, {"bank_id": BANK,
                                                              "principal": PRINCIPAL}))

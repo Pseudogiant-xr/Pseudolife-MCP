@@ -219,6 +219,40 @@ def test_existing_validation_never_initializes_missing_bank_or_cold_storage(
     asyncio.run(run())
 
 
+def test_codex_startup_line_names_a_saved_mailbox_from_another_bank(tmp_path, capsys):
+    """A Codex thread whose saved mailbox is bound to another bank is kept
+    and refused; the one startup line names that file, the cause and the
+    fix, and the thread's hint says the same."""
+    async def run():
+        provider, bank = Provider(), ContextBank()
+        async with httpx.AsyncClient(transport=httpx.MockTransport(bank)) as client:
+            registry = registry_for(tmp_path, bank, provider, client)
+            try:
+                original = await registry.get(THREAD)
+                path = original.state_path
+            finally:
+                await registry.aclose()
+        saved = path.read_bytes()
+        capsys.readouterr()
+        bank.bank_id = "22222222-2222-4222-8222-222222222222"
+        async with httpx.AsyncClient(transport=httpx.MockTransport(bank)) as client:
+            registry = registry_for(tmp_path, bank, provider, client)
+            try:
+                assert await registry.get(THREAD) is None
+                hint = registry._failure_hints[THREAD]
+            finally:
+                await registry.aclose()
+        assert path.read_bytes() == saved
+        return path, hint
+
+    path, hint = asyncio.run(run())
+    err = capsys.readouterr().err
+    assert (f"coordination unavailable; memory proxy remains active. The saved board "
+            f"address ({path}) is bound to a different bank than this daemon serves") in err
+    assert "Check the daemon's coordination setting" not in err
+    assert hint.startswith("Coordination: the saved mailbox belongs to a different bank")
+
+
 def test_startup_establishes_authority_before_read_only_validation(tmp_path):
     async def run():
         provider, bank = Provider(), ContextBank()
@@ -241,8 +275,13 @@ def test_startup_establishes_authority_before_read_only_validation(tmp_path):
     ("503", 2, "context_unavailable"),
     ("401", 1, "authentication"),
     ("403", 1, "authentication"),
-    ("mismatch", 1, "bank or principal"),
-    ("other_bank", 1, "bank or principal"),
+    # A principal change mid-session names it and its fix; the near miss, a
+    # bank change, keeps the point-back-or-move-aside advice.
+    ("mismatch", 1, "now maps this login to a different principal than the saved mailbox "
+                    "was registered under (same bank); state was preserved. Restart the "
+                    "session to register a new address"),
+    ("other_bank", 1, "the saved mailbox belongs to a different bank than this daemon "
+                      "serves; state was preserved. Point this client back at that bank"),
     ("malformed", 2, "context_unreadable"),
     ("not_json", 2, "context_unreadable"),
     ("credential_changed", 1, "credential"),

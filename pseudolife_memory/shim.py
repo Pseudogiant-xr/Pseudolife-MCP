@@ -1317,12 +1317,13 @@ def _serves_many_conversations() -> bool:
             or shared not in {"", "0", "false", "no", "off"})
 
 
-def _report_coordination_unavailable(state_path) -> None:
-    where = f" ({state_path})" if state_path else ""
-    print("pseudolife-mcp: coordination unavailable; memory proxy remains active. "
-          "Check the daemon's coordination setting, authentication and "
-          f"private adapter state{where}.",
-          file=sys.stderr)
+def _report_coordination_unavailable(state_path, exc: BaseException | None = None) -> None:
+    from pseudolife_memory.coordination_identity import coordination_unavailable_line
+
+    # The file the refusal is about, when the adapter named it; this shim
+    # passes no legacy path, so it is the session's own state file.
+    print(coordination_unavailable_line(
+        getattr(exc, "state_file", None) or state_path, exc), file=sys.stderr)
 
 
 def _transient_board_failure(exc: BaseException) -> bool:
@@ -1489,7 +1490,7 @@ class _LateBoardAdapter:
                 self._stopped = True
                 self._note = _BOARD_STOPPED_NOTE
                 self._settled.set()
-                _report_coordination_unavailable(self._state_path)
+                _report_coordination_unavailable(self._state_path, exc)
                 return
             self._adapter = adapter
             self._note = _BOARD_REGISTERED_NOTE
@@ -2466,7 +2467,7 @@ async def _run_session_proxy(url: str, token: str | None, session_uid: str, *,
                               "proxy remains active and registration is retried in the "
                               "background.", file=sys.stderr)
                     else:
-                        _report_coordination_unavailable(state_path)
+                        _report_coordination_unavailable(state_path, exc)
         if adapter is not None:
             kwargs["agent_headers"] = adapter.instance_headers
             kwargs["coordination_adapter"] = adapter

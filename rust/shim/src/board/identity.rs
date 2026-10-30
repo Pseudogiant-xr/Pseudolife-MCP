@@ -38,6 +38,30 @@ impl Context {
             Err("bank_identity_mismatch")
         }
     }
+    /// Whether a bound record names this bank under another principal: the
+    /// daemon now maps this client's login to a different principal than the
+    /// one the address was registered under (a new per-machine token, or the
+    /// same bearer remapped on the daemon), while the endpoint serves the same
+    /// bank. Only a start acts on it, by registering a new address (mail sent
+    /// to the old address is not carried over; Python `principal_changed`); a
+    /// running session's checks still refuse.
+    pub fn principal_changed(&self, state: &Value) -> bool {
+        state.get("version").and_then(Value::as_u64) == Some(2)
+            && state.get("bank_id").and_then(Value::as_str) == Some(&self.bank_id)
+            && state.get("principal").and_then(Value::as_str) != Some(&self.principal)
+    }
+    /// Which part of a saved binding differs from this answer: "bank" when
+    /// the bank differs (whatever the principal), "principal" when only the
+    /// principal does (Python `binding_difference`).
+    pub fn binding_difference(&self, state: &Value) -> Option<&'static str> {
+        if state.get("bank_id").and_then(Value::as_str) != Some(&self.bank_id) {
+            Some("bank")
+        } else if state.get("principal").and_then(Value::as_str) != Some(&self.principal) {
+            Some("principal")
+        } else {
+            None
+        }
+    }
     pub fn encoded_principal(&self) -> String {
         let mut value = String::new();
         for byte in self.principal.bytes() {
