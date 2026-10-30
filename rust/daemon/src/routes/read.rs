@@ -6,6 +6,15 @@ use axum::response::Response;
 /// The Console registrations this family serves in full.
 #[cfg(test)]
 pub(super) const SERVED: &[(&str, &str)] = &[
+    ("GET", "/api/graph"),
+    ("GET", "/api/graph/path"),
+    ("GET", "/api/graph/projects"),
+    ("GET", "/api/graph/digest"),
+    ("GET", "/api/graph/entity-provenance"),
+    ("GET", "/api/recall"),
+    ("GET", "/api/wiki"),
+    ("GET", "/api/dream/status"),
+
     ("GET", "/api/search"),
     ("GET", "/api/facts"),
     ("GET", "/api/facts/history"),
@@ -32,6 +41,9 @@ pub(super) async fn route(req: &mut Request<'_>) -> Option<Response> {
         }
         ("GET", path) if crate::read::console::PATHS.contains(&path) => {
             Some(crate::read::console::route(req.app, path, req.params, req.headers).await)
+        }
+        ("GET", path) if crate::read::graph::PATHS.contains(&path) => {
+            Some(crate::read::graph::route(req.app, path, req.params, req.headers).await)
         }
         _ => None,
     }

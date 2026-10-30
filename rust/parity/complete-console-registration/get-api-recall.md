@@ -1,3 +1,3 @@
 | Method | Path | Phase | Status | Rust | Evidence |
 |---|---|---:|---|---|---|
-| GET | /api/recall | 3 | deferred | 501 | 501 (`w2d-recall-graph`, W3-H) |
+| GET | /api/recall | 3 | deferred | served | `read/graph.rs`; `w2e.py live --only console-graph-reads` compares HTTP status, bodies and bank state; local validation cited in the PR pending published nightly evidence (B13, D11). |
