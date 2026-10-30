@@ -145,7 +145,10 @@ async fn resolve_targets(
         ));
     }
     if by_id {
-        if selectors.iter().any(|v| !v.is_number() || !int_value(v).0) {
+        if selectors
+            .iter()
+            .any(|v| !v.is_number() || v.to_string().contains(['.', 'e', 'E']) || !int_value(v).0)
+        {
             return Err(noop(
                 "invalid_selector",
                 "Entry IDs must be positive integers, not coerced values.",
@@ -403,7 +406,7 @@ fn mcp_memory_consolidate<'a>(app: &'a crate::http::App, call: ToolCall<'a>) -> 
 
 /// `service.supersede` (`service.py:3201-3229`): one target, by id or exact
 /// text, source `correction`, no tags, the derived slots reported.
-async fn supersede(
+pub(crate) async fn supersede(
     ready: &Arc<Ready>,
     cfg: &MemoryConfig,
     caller: &Caller,
@@ -443,7 +446,7 @@ async fn supersede(
 /// `service.consolidate` (`service.py:7462-7519`): a list of targets, by ids
 /// or exact texts, source `consolidation` unless the caller's is truthy, the
 /// caller's tags, no derived-slot report.
-async fn consolidate(
+pub(crate) async fn consolidate(
     ready: &Arc<Ready>,
     cfg: &MemoryConfig,
     caller: &Caller,
