@@ -57,7 +57,7 @@
     title={blocked || undefined}
     onclick={delegateAction}
   >
-    {isDelegate ? "Revoke delegate" : "Make delegate"}
+    {isDelegate ? "Revoke conductor" : "Make conductor"}
   </button>
   <button
     type="button"

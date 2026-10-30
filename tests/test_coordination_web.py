@@ -607,12 +607,13 @@ def test_the_brief_and_the_reminder_texts():
     measurement is what they answer (spec docs/specs/2026-10-14-delegate-
     mode-design.md, section 2)."""
     from pseudolife_memory.coordination import DELEGATE_REMINDER, render_delegate_brief
-    assert DELEGATE_REMINDER == ("Delegate: raw output goes to a subagent; a quiet wake gets "
+    assert DELEGATE_REMINDER == ("Conductor: raw output goes to a subagent; a quiet wake gets "
                                  "one line.")
     brief = render_delegate_brief(["p"])
     assert brief == (
-        "You are the maintainer's delegate for p. Keep this session's context for decisions:\n"
-        "- Start a watcher once: `pseudolife-mcp delegate-watch --detach`; it prints its board "
+        "You are the maintainer's conductor for p. Keep this session's context for decisions:\n"
+        "- Start a watcher once: `pseudolife-mcp conductor-watch --detach` (`delegate-watch` on "
+        "clients older than this release); it prints its board "
         "id. Park with park_needs=\"decision events\" and park_clear_by=<that id> before ending "
         "a turn that waits. On a wake, read with memory_message(action=\"receive\", ack=true), "
         "act, and park again. If it has stopped, run it again; it answers \"already running\" "
@@ -624,9 +625,9 @@ def test_the_brief_and_the_reminder_texts():
         "- Ask workers for decision-ready mail and to keep progress in their board status.\n"
         "- Answer a quiet wake in one line, with no tool calls.")
     assert render_delegate_brief(["p", "q"]).startswith(
-        "You are the maintainer's delegate for p and q. ")
+        "You are the maintainer's conductor for p and q. ")
     assert render_delegate_brief(["p", "q", "r"]).startswith(
-        "You are the maintainer's delegate for p, q and r. ")
+        "You are the maintainer's conductor for p, q and r. ")
 
 
 def test_coordination_start_appends_the_brief_after_the_unchanged_checkin(monkeypatch):

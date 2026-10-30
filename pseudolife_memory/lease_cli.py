@@ -1695,7 +1695,7 @@ def _break(args) -> int:
 
 
 def _delegate(args) -> int:
-    """Make a session the maintainer's delegate for a project through the
+    """Make a session the maintainer's conductor for a project through the
     bank itself (operator only), as ``break`` does. Prints the store's
     answer as JSON, and its warning on stderr when the session has no live
     wake path; 1 when no bank is found or the grant was refused."""
@@ -1928,9 +1928,9 @@ def _parsers():
                     "lock keeps it until it exits.")
     breaking.add_argument("name", type=_lease_name, metavar="NAME", help="the lease to free")
     delegating = actions.add_parser(
-        "delegate", help="(operator) make one session the maintainer's delegate for a project",
+        "delegate", help="(operator) make one session the maintainer's conductor for a project",
         description="Operator only: make the session AGENT (its id, or a unique prefix) the "
-                    "maintainer's delegate for PROJECT for DURATION, replacing any current "
+                    "maintainer's conductor for PROJECT for DURATION, replacing any current "
                     "one. Its urgent mail then reopens done parks in that project; holding "
                     "the open coordinator:<project> lease grants nothing. The grant is the "
                     "board lease delegate:<project>, which no session can take: it opens "
