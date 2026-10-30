@@ -149,6 +149,7 @@ fn member_record(
         entity_norm: super::cortex::norm_key(entity),
         attribute_norm: super::cortex::norm_key(attribute),
         value: value.to_string(),
+        null_value: false,
         polarity: polarity.to_string(),
         status: "current".into(),
         confidence,

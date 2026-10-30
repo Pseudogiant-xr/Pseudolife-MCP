@@ -26,6 +26,25 @@ def register(h) -> dict[str, dict]:
         return rest(set_fact, {"entity": entity, "attribute": attribute, "value": value, **kw})
 
     return {
+        "console-facts-null": {
+            "config": None,
+            # A deterministic database refusal replaces PostgreSQL's failing-row
+            # detail (which embeds run-specific timestamps and vector bytes).
+            # The trigger fires only for NULL: coercing to an empty string evades it.
+            "seed": [h.sql("CREATE FUNCTION console_null_fact() RETURNS trigger LANGUAGE plpgsql AS $$ "
+                           "BEGIN IF NEW.value IS NULL THEN RAISE EXCEPTION 'null fact value rejected'; "
+                           "END IF; RETURN NEW; END $$; "
+                           "CREATE TRIGGER console_null_fact BEFORE INSERT ON facts "
+                           "FOR EACH ROW EXECUTE FUNCTION console_null_fact()")],
+            "ops": [
+                checked(set_fact, {"entity": "Console Null", "attribute": "value", "value": None},
+                        "SELECT count(*) = 0 FROM facts WHERE entity_norm = 'console-null'"),
+                {"op": "rest", "method": "GET", "path": "/api/facts"},
+                rest(forget, {"entity": "Console Null"}),
+                checked(set_fact, {"entity": "Console Null", "attribute": "value", "value": "valid"},
+                        "SELECT count(*) = 1 FROM facts WHERE entity_norm = 'console-null' AND value = 'valid'"),
+            ],
+        },
         "console-facts-set": {
             "config": None,
             "seed": [h.set_add("Console Team", "tools", "editor")],
@@ -71,6 +90,7 @@ def register(h) -> dict[str, dict]:
                 # Falsey optional fields take the route's documented defaults.
                 write("Console DB", "region", "west", origin="", freshness_class=None,
                       authority="", distortion_tolerance=None, confidence=True),
+                write("Console DB", "numeric", "decimal", confidence="٠.٨"),
             ],
         },
         "console-facts-resolve": {
@@ -146,7 +166,7 @@ def register(h) -> dict[str, dict]:
                 # int() accepts numeric strings, floats and booleans at this route.
                 *[rest(reinforce, {"entry_id": value})
                   for value in (0, -1, 999999, "999999", 999999.5, False)],
-                checked(reinforce, {"entry_id": "@id:Console reinforcement target."},
+                checked(reinforce, {"entry_id": "١"},
                         "SELECT reinforcements = 1 AND explicit_reinforcements = 1 FROM entries "
                         "WHERE text = 'Console reinforcement target.'"),
                 checked(reinforce, {"entry_id": "@id:Console reinforcement target."},
@@ -227,6 +247,8 @@ def register(h) -> dict[str, dict]:
                 h.store("Console cluster second note."),
                 h.store("Console exact cluster first note."),
                 h.store("Console exact cluster second note."),
+                h.store("Console string tags target."),
+                h.store("Console object tags target."),
             ],
             "ops": [
                 rest(consolidate),
@@ -242,6 +264,14 @@ def register(h) -> dict[str, dict]:
                   for value in (7, "7", [True], [1.5], [0], [-1], [[1]])],
                 *[rest(consolidate, {"replaces": value, "new_text": "Invalid text selection."})
                   for value in ("Console cluster first note.", [7], ["  "])],
+                *[checked(consolidate, {"replaces": ["Console cluster first note."],
+                                       "new_text": "Invalid tags replacement.", "tags": tags},
+                          "SELECT superseded_at IS NULL FROM entries WHERE text = 'Console cluster first note.'")
+                  for tags in (7, True, 1.5)],
+                checked(consolidate, {"replaces": ["Console string tags target."], "new_text": "String tags result.", "tags": "AbA"},
+                        "SELECT tags = jsonb_build_array('a', 'b') FROM entries WHERE text = 'String tags result.'"),
+                checked(consolidate, {"replaces": ["Console object tags target."], "new_text": "Object tags result.", "tags": {" Mixed ": 1}},
+                        "SELECT tags = jsonb_build_array('mixed') FROM entries WHERE text = 'Object tags result.'"),
                 # One missing target must not retire the valid member of the request.
                 checked(consolidate, {"entry_ids": ["@id:Console cluster first note.", 999999],
                                       "new_text": "Atomic refusal."},

@@ -486,9 +486,26 @@ pub(crate) async fn consolidate(
         _ if crate::mutants::active("mcp-consolidate-default-source") => "correction",
         _ => "consolidation",
     };
+    // Console bodies reach the service without MCP's list binding. Python
+    // iterates string characters and dict keys, but a truthy scalar raises.
+    let tags = match args.get("tags") {
+        Some(Value::String(s)) => json!(s.chars().map(|c| c.to_string()).collect::<Vec<_>>()),
+        Some(Value::Object(m)) => json!(m.keys().collect::<Vec<_>>()),
+        Some(v) if !crate::board::store::py_truthy(v) => json!([]),
+        Some(v @ Value::Array(_)) => v.clone(),
+        None => json!([]),
+        Some(v) => {
+            let kind = match v {
+                Value::Bool(_) => "bool",
+                Value::Number(n) if n.to_string().contains(['.', 'e', 'E']) => "float",
+                _ => "int",
+            };
+            return Err(internal(format!("'{kind}' object is not iterable")));
+        }
+    };
     let correction = Correction {
         source,
-        tags: store::normalize_tags(args.get("tags")),
+        tags: store::normalize_tags(Some(&tags)),
         report_derivations: crate::mutants::active("mcp-consolidate-derived-keys"),
     };
     apply_correction(ready, cfg, &mut ws, caller, targets, new_text, correction).await

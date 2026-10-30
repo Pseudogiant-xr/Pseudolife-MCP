@@ -69,6 +69,7 @@ pub(crate) struct CortexWriteArgs {
     pub entity: String,
     pub attribute: String,
     pub value: String,
+    pub null_value: bool,
     pub confidence: f64,
     pub provenance: Vec<String>,
     /// As passed; `_norm_support` runs in the store.
@@ -91,6 +92,7 @@ impl CortexWriteArgs {
             entity: entity.into(),
             attribute: attribute.into(),
             value: value.into(),
+            null_value: false,
             confidence: 0.7,
             provenance: Vec::new(),
             support: None,
@@ -210,7 +212,8 @@ pub(crate) async fn cortex_write(
     } else {
         a.freshness_class.clone()
     };
-    let claim = py_strip(&format!("{} {} {}", a.entity, a.attribute, a.value)).to_string();
+    let display_value = if a.null_value { "None" } else { &a.value };
+    let claim = py_strip(&format!("{} {} {}", a.entity, a.attribute, display_value)).to_string();
     let embedding = embed(ready, claim).await?;
     let slot_text = py_strip(&format!("{} {}", a.entity, a.attribute)).to_string();
     let slot_embedding = embed(ready, slot_text).await?;
@@ -246,7 +249,14 @@ pub(crate) async fn cortex_write(
     };
     let outcome = ready
         .cortex
-        .write(|s| s.write_fact(&w))
+        .write(|s| {
+            let before = s.records.len();
+            let outcome = s.write_fact(&w)?;
+            if outcome.record >= before {
+                s.records[outcome.record].null_value = a.null_value;
+            }
+            Ok::<_, &'static str>(outcome)
+        })
         .map_err(|_| ToolError::Invalid(SET_SLOT_REFUSAL.into()))?;
     if !crate::mutants::active("mcp-fact-set-no-entity-mint") {
         ensure_subject_entity(db, &a.entity)
@@ -315,7 +325,25 @@ pub(crate) async fn save_cortex(svc: &Service, ready: &Ready) -> Result<(), Tool
         svc.persist_errors
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         eprintln!("Cortex save failed (NOT durably persisted): {e:#}");
-        internal(format!("cortex save failed: {e:#}"))
+        let message = e
+            .chain()
+            .find_map(|cause| {
+                cause
+                    .downcast_ref::<tokio_postgres::Error>()
+                    .and_then(tokio_postgres::Error::as_db_error)
+                    .map(|db| {
+                        let mut text = db.message().to_string();
+                        if let Some(detail) = db.detail() {
+                            text.push_str(&format!("\nDETAIL:  {detail}"));
+                        }
+                        if let Some(context) = db.where_() {
+                            text.push_str(&format!("\nCONTEXT:  {context}"));
+                        }
+                        text
+                    })
+            })
+            .unwrap_or_else(|| format!("{e:#}"));
+        internal(format!("cortex save failed: {message}"))
     };
     let snap = ready.cortex.snapshot();
     let rows = crate::stores::cortex_sync::sync_slot_rows(db, &snap).await;

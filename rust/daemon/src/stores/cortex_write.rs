@@ -367,6 +367,7 @@ impl CortexStore {
             entity_norm: norm_key(w.entity),
             attribute_norm: norm_key(w.attribute),
             value: w.value.to_string(),
+            null_value: false,
             polarity: "+".into(),
             status: status.into(),
             confidence: w.confidence,

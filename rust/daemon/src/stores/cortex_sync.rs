@@ -158,7 +158,7 @@ async fn replace_slot_rows(
                     &r.attribute,
                     &entity_norm,
                     &attribute_norm,
-                    &r.value,
+                    &(!r.null_value).then_some(r.value.as_str()),
                     &r.polarity,
                     &r.status,
                     &r.confidence,

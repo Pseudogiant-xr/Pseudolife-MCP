@@ -91,6 +91,9 @@ pub struct CortexRecord {
     pub entity_norm: String,
     pub attribute_norm: String,
     pub value: String,
+    /// A Console null remains resident after its NOT NULL persistence failure.
+    /// It compares as the empty string, but must never persist as one.
+    pub(crate) null_value: bool,
     pub polarity: String,
     pub status: String,
     /// PostgreSQL REAL decoded from its decimal text, as psycopg reads it.
@@ -585,6 +588,7 @@ async fn hydrate_locked(client: &Client, dim: usize) -> Result<CortexStore> {
             entity_norm: r.get(3),
             attribute_norm: r.get(4),
             value: r.get(5),
+            null_value: false,
             polarity: r.get(6),
             status: r.get(7),
             confidence: r.get::<_, String>(8).parse()?,
@@ -797,6 +801,7 @@ pub(crate) mod tests {
             entity_norm: norm_key(entity),
             attribute_norm: norm_key(attribute),
             value: value.into(),
+            null_value: false,
             polarity: "+".into(),
             status: "current".into(),
             confidence: 0.7,

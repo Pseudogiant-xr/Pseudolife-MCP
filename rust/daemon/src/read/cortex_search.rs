@@ -242,7 +242,14 @@ pub fn record_to_dict_age(
     let mut d = Map::new();
     d.insert("entity".into(), json!(r.entity));
     d.insert("attribute".into(), json!(r.attribute));
-    d.insert("value".into(), json!(r.value));
+    d.insert(
+        "value".into(),
+        if r.null_value {
+            Value::Null
+        } else {
+            json!(r.value)
+        },
+    );
     d.insert("polarity".into(), json!(r.polarity));
     d.insert("status".into(), json!(r.status));
     d.insert("kind".into(), json!(r.kind));

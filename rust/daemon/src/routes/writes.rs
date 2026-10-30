@@ -79,19 +79,31 @@ fn label(b: &Map<String, Value>, key: &str) -> Result<crate::fact_set::LabelArg>
     Ok(crate::fact_set::LabelArg::Requested(Some(requested)))
 }
 
+fn decimal_digits(s: &str) -> String {
+    s.chars()
+        .map(|c| {
+            crate::graph_review::decimal_value(c)
+                .and_then(|n| char::from_digit(n, 10))
+                .unwrap_or(c)
+        })
+        .collect()
+}
+
 fn float(v: &Value) -> Result<f64> {
     match v {
         Value::Bool(b) => Ok(u8::from(*b) as f64),
         Value::Number(_) => Ok(crate::mcp::binding::float_arg(v).unwrap_or(f64::NAN)),
-        Value::String(s) => crate::read::search_route::py_float(s).ok_or_else(|| {
-            Failure(
-                400,
-                format!(
-                    "could not convert string to float: {}",
-                    crate::storage::py_repr(v.as_str().unwrap())
-                ),
-            )
-        }),
+        Value::String(s) => {
+            crate::read::search_route::py_float(&decimal_digits(s)).ok_or_else(|| {
+                Failure(
+                    400,
+                    format!(
+                        "could not convert string to float: {}",
+                        crate::storage::py_repr(v.as_str().unwrap())
+                    ),
+                )
+            })
+        }
         _ => Err(Failure(
             500,
             format!(
@@ -121,7 +133,8 @@ fn integer(v: &Value) -> Result<Option<i64>> {
             Ok((f >= i64::MIN as f64 && f < -(i64::MIN as f64)).then_some(f as i64))
         }
         Value::String(s) => {
-            let s = crate::http::py_strip(s);
+            let normalized = decimal_digits(s);
+            let s = crate::http::py_strip(&normalized);
             if let Some(i) = crate::read::search_route::py_int(s) {
                 return Ok(Some(i));
             }
@@ -201,6 +214,7 @@ async fn answer(req: &mut Request<'_>) -> Result<Value> {
                 &strip(&b["attribute"])?,
                 &strip(&b["value"])?,
             );
+            a.null_value = b["value"].is_null();
             a.confidence = confidence;
             a.support = Some(strip(&defaulted(&b, "origin", "agent"))?);
             a.freshness_class = strip(&defaulted(&b, "freshness_class", "auto"))?;
@@ -319,6 +333,8 @@ mod tests {
     #[test]
     fn console_numeric_conversions_keep_python_coercion_and_exception_classes() {
         assert_eq!(integer(&json!(true)).unwrap(), Some(1));
+        assert_eq!(integer(&json!("١")).unwrap(), Some(1));
+        assert_eq!(float(&json!("٠.٨")).unwrap(), 0.8);
         assert_eq!(integer(&json!(3.9)).unwrap(), Some(3));
         assert_eq!(integer(&json!(" 1_234 ")).unwrap(), Some(1234));
         assert_eq!(integer(&json!("999999999999999999999999")).unwrap(), None);
