@@ -318,6 +318,7 @@ fn an_unreachable_daemon_is_reported_without_touching_the_home() {
                 "source",
                 "pseudolife-mcp",
                 "credential_source",
+                "token_sha256_prefix",
                 "board",
                 "maintainer_passkeys",
                 "daemon_status",

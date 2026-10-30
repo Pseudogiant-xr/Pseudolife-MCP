@@ -11866,7 +11866,8 @@
       "code_expires_at": "<adversarial-invite-daemon:code_expires_at+900>",
       "created_at": "<adversarial-invite-daemon:created_at+0>",
       "paired_at": null,
-      "revoked_at": null
+      "revoked_at": null,
+      "last_seen_at": null
      },
      {
       "principal": "default",
@@ -11877,7 +11878,8 @@
       "code_expires_at": "<adversarial-invite-default:code_expires_at+900>",
       "created_at": "<adversarial-invite-default:created_at+0>",
       "paired_at": null,
-      "revoked_at": null
+      "revoked_at": null,
+      "last_seen_at": null
      },
      {
       "principal": "desk",
@@ -11888,7 +11890,8 @@
       "code_expires_at": "<invite-desk:code_expires_at+900>",
       "created_at": "<invite-desk:created_at+0>",
       "paired_at": null,
-      "revoked_at": null
+      "revoked_at": null,
+      "last_seen_at": null
      },
      {
       "principal": "expired",
@@ -11899,7 +11902,8 @@
       "code_expires_at": 1000.0,
       "created_at": "<invite-expired:created_at+0>",
       "paired_at": null,
-      "revoked_at": null
+      "revoked_at": null,
+      "last_seen_at": null
      },
      {
       "principal": "gone",
@@ -11910,7 +11914,8 @@
       "code_expires_at": "<adversarial-revoked-with-live-codes:code_expires_at+600>",
       "created_at": "<invite-gone:created_at+0>",
       "paired_at": "<adversarial-revoked-with-live-codes:paired_at+0>",
-      "revoked_at": "<revoke-pending:revoked_at+0>"
+      "revoked_at": "<revoke-pending:revoked_at+0>",
+      "last_seen_at": null
      },
      {
       "principal": "laptop",
@@ -11921,7 +11926,8 @@
       "code_expires_at": "<invite-laptop:code_expires_at+900>",
       "created_at": "<invite-laptop:created_at+0>",
       "paired_at": null,
-      "revoked_at": null
+      "revoked_at": null,
+      "last_seen_at": null
      },
      {
       "principal": "maintainer",
@@ -11932,7 +11938,8 @@
       "code_expires_at": "<adversarial-invite-maintainer:code_expires_at+900>",
       "created_at": "<adversarial-invite-maintainer:created_at+0>",
       "paired_at": null,
-      "revoked_at": null
+      "revoked_at": null,
+      "last_seen_at": null
      },
      {
       "principal": "pending",
@@ -11943,7 +11950,8 @@
       "code_expires_at": "<invite-pending:code_expires_at+900>",
       "created_at": "<invite-pending:created_at+0>",
       "paired_at": null,
-      "revoked_at": null
+      "revoked_at": null,
+      "last_seen_at": null
      },
      {
       "principal": "quiet",
@@ -11954,7 +11962,8 @@
       "code_expires_at": "<invite-quiet:code_expires_at+900>",
       "created_at": "<invite-quiet:created_at+0>",
       "paired_at": null,
-      "revoked_at": null
+      "revoked_at": null,
+      "last_seen_at": null
      },
      {
       "principal": "unpaired",
@@ -11965,7 +11974,8 @@
       "code_expires_at": null,
       "created_at": 1000.0,
       "paired_at": null,
-      "revoked_at": null
+      "revoked_at": null,
+      "last_seen_at": null
      }
     ]
    },
@@ -20853,7 +20863,8 @@
       "code_expires_at": "<adversarial-invite-daemon:code_expires_at+900>",
       "created_at": "<adversarial-invite-daemon:created_at+0>",
       "paired_at": null,
-      "revoked_at": null
+      "revoked_at": null,
+      "last_seen_at": null
      },
      {
       "principal": "default",
@@ -20864,7 +20875,8 @@
       "code_expires_at": "<adversarial-invite-default:code_expires_at+900>",
       "created_at": "<adversarial-invite-default:created_at+0>",
       "paired_at": null,
-      "revoked_at": null
+      "revoked_at": null,
+      "last_seen_at": null
      },
      {
       "principal": "desk",
@@ -20875,7 +20887,8 @@
       "code_expires_at": "<invite-desk:code_expires_at+900>",
       "created_at": "<invite-desk:created_at+0>",
       "paired_at": null,
-      "revoked_at": null
+      "revoked_at": null,
+      "last_seen_at": null
      },
      {
       "principal": "expired",
@@ -20886,7 +20899,8 @@
       "code_expires_at": 1000.0,
       "created_at": "<invite-expired:created_at+0>",
       "paired_at": null,
-      "revoked_at": null
+      "revoked_at": null,
+      "last_seen_at": null
      },
      {
       "principal": "gone",
@@ -20897,7 +20911,8 @@
       "code_expires_at": "<adversarial-revoked-with-live-codes:code_expires_at+600>",
       "created_at": "<invite-gone:created_at+0>",
       "paired_at": "<adversarial-revoked-with-live-codes:paired_at+0>",
-      "revoked_at": "<revoke-pending:revoked_at+0>"
+      "revoked_at": "<revoke-pending:revoked_at+0>",
+      "last_seen_at": null
      },
      {
       "principal": "laptop",
@@ -20908,7 +20923,8 @@
       "code_expires_at": null,
       "created_at": "<invite-laptop:created_at+0>",
       "paired_at": "<redeem-immediate-add:paired_at+0>",
-      "revoked_at": null
+      "revoked_at": null,
+      "last_seen_at": null
      },
      {
       "principal": "maintainer",
@@ -20919,7 +20935,8 @@
       "code_expires_at": "<adversarial-invite-maintainer:code_expires_at+900>",
       "created_at": "<adversarial-invite-maintainer:created_at+0>",
       "paired_at": null,
-      "revoked_at": null
+      "revoked_at": null,
+      "last_seen_at": null
      },
      {
       "principal": "pending",
@@ -20930,7 +20947,8 @@
       "code_expires_at": "<invite-pending:code_expires_at+900>",
       "created_at": "<invite-pending:created_at+0>",
       "paired_at": null,
-      "revoked_at": null
+      "revoked_at": null,
+      "last_seen_at": null
      },
      {
       "principal": "quiet",
@@ -20941,7 +20959,8 @@
       "code_expires_at": null,
       "created_at": "<invite-quiet:created_at+0>",
       "paired_at": "<unique-refusal-rollback-proven:paired_at+0>",
-      "revoked_at": null
+      "revoked_at": null,
+      "last_seen_at": null
      },
      {
       "principal": "unpaired",
@@ -20952,7 +20971,8 @@
       "code_expires_at": null,
       "created_at": 1000.0,
       "paired_at": null,
-      "revoked_at": null
+      "revoked_at": null,
+      "last_seen_at": null
      }
     ]
    },
@@ -25641,7 +25661,8 @@
       "code_expires_at": "<adversarial-invite-daemon:code_expires_at+900>",
       "created_at": "<adversarial-invite-daemon:created_at+0>",
       "paired_at": null,
-      "revoked_at": null
+      "revoked_at": null,
+      "last_seen_at": null
      },
      {
       "principal": "default",
@@ -25652,7 +25673,8 @@
       "code_expires_at": "<adversarial-invite-default:code_expires_at+900>",
       "created_at": "<adversarial-invite-default:created_at+0>",
       "paired_at": null,
-      "revoked_at": null
+      "revoked_at": null,
+      "last_seen_at": null
      },
      {
       "principal": "desk",
@@ -25663,7 +25685,8 @@
       "code_expires_at": "<invite-desk:code_expires_at+900>",
       "created_at": "<invite-desk:created_at+0>",
       "paired_at": null,
-      "revoked_at": null
+      "revoked_at": null,
+      "last_seen_at": null
      },
      {
       "principal": "expired",
@@ -25674,7 +25697,8 @@
       "code_expires_at": 1000.0,
       "created_at": "<invite-expired:created_at+0>",
       "paired_at": null,
-      "revoked_at": null
+      "revoked_at": null,
+      "last_seen_at": null
      },
      {
       "principal": "gone",
@@ -25685,7 +25709,8 @@
       "code_expires_at": "<adversarial-revoked-with-live-codes:code_expires_at+600>",
       "created_at": "<invite-gone:created_at+0>",
       "paired_at": "<adversarial-revoked-with-live-codes:paired_at+0>",
-      "revoked_at": "<revoke-pending:revoked_at+0>"
+      "revoked_at": "<revoke-pending:revoked_at+0>",
+      "last_seen_at": null
      },
      {
       "principal": "laptop",
@@ -25696,7 +25721,8 @@
       "code_expires_at": null,
       "created_at": "<invite-laptop:created_at+0>",
       "paired_at": 1000.0,
-      "revoked_at": null
+      "revoked_at": null,
+      "last_seen_at": null
      },
      {
       "principal": "maintainer",
@@ -25707,7 +25733,8 @@
       "code_expires_at": "<adversarial-invite-maintainer:code_expires_at+900>",
       "created_at": "<adversarial-invite-maintainer:created_at+0>",
       "paired_at": null,
-      "revoked_at": null
+      "revoked_at": null,
+      "last_seen_at": null
      },
      {
       "principal": "pending",
@@ -25718,7 +25745,8 @@
       "code_expires_at": "<invite-pending:code_expires_at+900>",
       "created_at": "<invite-pending:created_at+0>",
       "paired_at": null,
-      "revoked_at": null
+      "revoked_at": null,
+      "last_seen_at": null
      },
      {
       "principal": "quiet",
@@ -25729,7 +25757,8 @@
       "code_expires_at": null,
       "created_at": "<invite-quiet:created_at+0>",
       "paired_at": "<unique-refusal-rollback-proven:paired_at+0>",
-      "revoked_at": "<revoke-paired:revoked_at+0>"
+      "revoked_at": "<revoke-paired:revoked_at+0>",
+      "last_seen_at": null
      },
      {
       "principal": "unpaired",
@@ -25740,7 +25769,8 @@
       "code_expires_at": null,
       "created_at": 1000.0,
       "paired_at": null,
-      "revoked_at": null
+      "revoked_at": null,
+      "last_seen_at": null
      }
     ]
    },

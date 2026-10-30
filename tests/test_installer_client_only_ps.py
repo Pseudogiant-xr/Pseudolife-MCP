@@ -528,6 +528,75 @@ def test_https_off_this_machine_does_not_warn(tmp_path):
     assert "unencrypted" not in _output(proc)
 
 
+# -- a raw token still works, and pairing is recommended -------------------------
+# The Bash twin's contract (test_installer_client_only.py), for install.ps1:
+# the preflight records the daemon URL in $script:pairingHintUrl, and the line
+# is printed at the end of the run by Write-UpdateLine.
+
+_HINT_AFTER = "Write-Output \"HINT=$script:pairingHintUrl\"\n"
+
+
+def _pairing_hints(output: str) -> list[str]:
+    return [line for line in output.splitlines() if "invite <name>" in line]
+
+
+def test_a_raw_token_off_this_machine_records_the_pairing_hint(tmp_path):
+    ps = _PowerShell(tmp_path)
+    token = _token(ps)
+    proc = _preflight(ps, token_file=str(token), after=_HINT_AFTER)
+    assert proc.returncode == 0, _output(proc)
+    assert f"HINT={REMOTE}" in proc.stdout.splitlines()
+    assert _pairing_hints(_output(proc)) == []
+    assert FIXTURE_TOKEN not in _output(proc)
+
+
+def test_a_pasted_raw_token_records_the_pairing_hint(tmp_path):
+    ps = _PowerShell(tmp_path)
+    target = tmp_path / "keys" / "new.token"
+    proc = _preflight(ps, token_file=str(target), read_token=True, feed=FIXTURE_TOKEN + "\n",
+                      after=_HINT_AFTER)
+    assert proc.returncode == 0, _output(proc)
+    assert f"HINT={REMOTE}" in proc.stdout.splitlines()
+    assert FIXTURE_TOKEN not in _output(proc)
+
+
+def test_a_pairing_code_records_no_pairing_hint(tmp_path):
+    ps = _PowerShell(tmp_path)
+    proc = _preflight(ps, pairing_code=PAIRING_CODE, after=_HINT_AFTER)
+    assert proc.returncode == 0, _output(proc)
+    assert "HINT=" in proc.stdout.splitlines()
+
+
+def test_a_pasted_pairing_code_records_no_pairing_hint(tmp_path):
+    ps = _PowerShell(tmp_path)
+    target = tmp_path / "keys" / "new.token"
+    proc = _preflight(ps, token_file=str(target), read_token=True, feed=PAIRING_CODE + "\n",
+                      after=_HINT_AFTER)
+    assert proc.returncode == 0, _output(proc)
+    assert "PAIRING=held" in proc.stdout.splitlines()
+    assert "HINT=" in proc.stdout.splitlines()
+
+
+def test_a_loopback_daemon_records_no_pairing_hint(tmp_path):
+    """The daemon's own host, or an SSH tunnel to it: no hint."""
+    ps = _PowerShell(tmp_path)
+    token = _token(ps)
+    proc = _preflight(ps, daemon_url="http://127.0.0.1:18765", token_file=str(token),
+                      after=_HINT_AFTER)
+    assert proc.returncode == 0, _output(proc)
+    assert "HINT=" in proc.stdout.splitlines()
+
+
+def test_the_refusals_lead_with_pairing():
+    block = _block("client-only preflight")
+    messages = re.findall(
+        r"client-only install: [^\n]*(?:never mints|missing or empty)[^\n]*", block)
+    assert len(messages) == 2, messages
+    for message in messages:
+        assert "-PairingCode" in message, message
+        assert message.index("-PairingCode") < message.index("-ReadToken"), message
+
+
 def test_a_relative_token_file_is_made_absolute(tmp_path):
     ps = _PowerShell(tmp_path)
     token = _token(ps)

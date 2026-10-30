@@ -887,7 +887,7 @@
               ],
               [
                 "schema_version",
-                57
+                58
               ],
               [
                 "writer_lease_epoch",
@@ -908,6 +908,13 @@
               "created_at",
               "consumed_at",
               "used_ids"
+            ],
+            "rows": []
+          },
+          "public.principal_activity": {
+            "columns": [
+              "principal",
+              "last_seen_at"
             ],
             "rows": []
           },
@@ -936,6 +943,15 @@
               "metadata",
               "ingested_at",
               "created_at"
+            ],
+            "rows": []
+          },
+          "public.rejected_bearers": {
+            "columns": [
+              "hash_prefix",
+              "rejections",
+              "first_seen_at",
+              "last_seen_at"
             ],
             "rows": []
           },
@@ -2076,7 +2092,7 @@
               ],
               [
                 "schema_version",
-                57
+                58
               ],
               [
                 "writer_lease_epoch",
@@ -2097,6 +2113,13 @@
               "created_at",
               "consumed_at",
               "used_ids"
+            ],
+            "rows": []
+          },
+          "public.principal_activity": {
+            "columns": [
+              "principal",
+              "last_seen_at"
             ],
             "rows": []
           },
@@ -2125,6 +2148,15 @@
               "metadata",
               "ingested_at",
               "created_at"
+            ],
+            "rows": []
+          },
+          "public.rejected_bearers": {
+            "columns": [
+              "hash_prefix",
+              "rejections",
+              "first_seen_at",
+              "last_seen_at"
             ],
             "rows": []
           },
@@ -3213,7 +3245,7 @@
               ],
               [
                 "schema_version",
-                57
+                58
               ],
               [
                 "writer_lease_epoch",
@@ -3234,6 +3266,13 @@
               "created_at",
               "consumed_at",
               "used_ids"
+            ],
+            "rows": []
+          },
+          "public.principal_activity": {
+            "columns": [
+              "principal",
+              "last_seen_at"
             ],
             "rows": []
           },
@@ -3262,6 +3301,15 @@
               "metadata",
               "ingested_at",
               "created_at"
+            ],
+            "rows": []
+          },
+          "public.rejected_bearers": {
+            "columns": [
+              "hash_prefix",
+              "rejections",
+              "first_seen_at",
+              "last_seen_at"
             ],
             "rows": []
           },
@@ -4351,7 +4399,7 @@
               ],
               [
                 "schema_version",
-                57
+                58
               ],
               [
                 "writer_lease_epoch",
@@ -4372,6 +4420,13 @@
               "created_at",
               "consumed_at",
               "used_ids"
+            ],
+            "rows": []
+          },
+          "public.principal_activity": {
+            "columns": [
+              "principal",
+              "last_seen_at"
             ],
             "rows": []
           },
@@ -4400,6 +4455,15 @@
               "metadata",
               "ingested_at",
               "created_at"
+            ],
+            "rows": []
+          },
+          "public.rejected_bearers": {
+            "columns": [
+              "hash_prefix",
+              "rejections",
+              "first_seen_at",
+              "last_seen_at"
             ],
             "rows": []
           },
@@ -5542,7 +5606,7 @@
               ],
               [
                 "schema_version",
-                57
+                58
               ],
               [
                 "writer_lease_epoch",
@@ -5563,6 +5627,13 @@
               "created_at",
               "consumed_at",
               "used_ids"
+            ],
+            "rows": []
+          },
+          "public.principal_activity": {
+            "columns": [
+              "principal",
+              "last_seen_at"
             ],
             "rows": []
           },
@@ -5591,6 +5662,15 @@
               "metadata",
               "ingested_at",
               "created_at"
+            ],
+            "rows": []
+          },
+          "public.rejected_bearers": {
+            "columns": [
+              "hash_prefix",
+              "rejections",
+              "first_seen_at",
+              "last_seen_at"
             ],
             "rows": []
           },
@@ -6677,7 +6757,7 @@
               ],
               [
                 "schema_version",
-                57
+                58
               ],
               [
                 "writer_lease_epoch",
@@ -6698,6 +6778,13 @@
               "created_at",
               "consumed_at",
               "used_ids"
+            ],
+            "rows": []
+          },
+          "public.principal_activity": {
+            "columns": [
+              "principal",
+              "last_seen_at"
             ],
             "rows": []
           },
@@ -6726,6 +6813,15 @@
               "metadata",
               "ingested_at",
               "created_at"
+            ],
+            "rows": []
+          },
+          "public.rejected_bearers": {
+            "columns": [
+              "hash_prefix",
+              "rejections",
+              "first_seen_at",
+              "last_seen_at"
             ],
             "rows": []
           },
@@ -7814,7 +7910,7 @@
               ],
               [
                 "schema_version",
-                57
+                58
               ],
               [
                 "writer_lease_epoch",
@@ -7835,6 +7931,13 @@
               "created_at",
               "consumed_at",
               "used_ids"
+            ],
+            "rows": []
+          },
+          "public.principal_activity": {
+            "columns": [
+              "principal",
+              "last_seen_at"
             ],
             "rows": []
           },
@@ -7863,6 +7966,15 @@
               "metadata",
               "ingested_at",
               "created_at"
+            ],
+            "rows": []
+          },
+          "public.rejected_bearers": {
+            "columns": [
+              "hash_prefix",
+              "rejections",
+              "first_seen_at",
+              "last_seen_at"
             ],
             "rows": []
           },
@@ -8952,7 +9064,7 @@
               ],
               [
                 "schema_version",
-                57
+                58
               ],
               [
                 "writer_lease_epoch",
@@ -8973,6 +9085,13 @@
               "created_at",
               "consumed_at",
               "used_ids"
+            ],
+            "rows": []
+          },
+          "public.principal_activity": {
+            "columns": [
+              "principal",
+              "last_seen_at"
             ],
             "rows": []
           },
@@ -9001,6 +9120,15 @@
               "metadata",
               "ingested_at",
               "created_at"
+            ],
+            "rows": []
+          },
+          "public.rejected_bearers": {
+            "columns": [
+              "hash_prefix",
+              "rejections",
+              "first_seen_at",
+              "last_seen_at"
             ],
             "rows": []
           },
@@ -10089,7 +10217,7 @@
               ],
               [
                 "schema_version",
-                57
+                58
               ],
               [
                 "writer_lease_epoch",
@@ -10110,6 +10238,13 @@
               "created_at",
               "consumed_at",
               "used_ids"
+            ],
+            "rows": []
+          },
+          "public.principal_activity": {
+            "columns": [
+              "principal",
+              "last_seen_at"
             ],
             "rows": []
           },
@@ -10138,6 +10273,15 @@
               "metadata",
               "ingested_at",
               "created_at"
+            ],
+            "rows": []
+          },
+          "public.rejected_bearers": {
+            "columns": [
+              "hash_prefix",
+              "rejections",
+              "first_seen_at",
+              "last_seen_at"
             ],
             "rows": []
           },

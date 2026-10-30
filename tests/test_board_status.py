@@ -89,6 +89,30 @@ def test_an_unlisted_principal_is_told_about_invite():
     assert "pseudolife-mcp invite <machine>" in line
 
 
+def test_a_rejected_token_is_told_both_fixes():
+    """On the daemon's own host the token file follows ops/.env; on another
+    machine the fix is pairing again, never copying the daemon's token."""
+    with _Daemon("off; reason=unauthorized") as daemon:
+        line = board_status(daemon.url, "fixture-token")[1]
+    assert "on the daemon's own host, re-run the installer" in line
+    assert "ops/.env" in line
+    assert "on another machine, run `pseudolife-mcp invite <name> --replace`" in line
+    assert "`pseudolife-mcp connect <url> --read-code` here" in line
+
+
+@pytest.mark.parametrize("source", ["rust/shim/src/cli/doctor/probes.rs",
+                                    "rust/shim/src/cli/connect/net.rs"])
+def test_the_rust_shim_prints_the_same_reason_lines(source):
+    """The Rust doctor and connect carry this table too: byte-identical."""
+    from pathlib import Path
+
+    from pseudolife_memory.board_status import _REASONS
+
+    text = (Path(__file__).resolve().parents[1] / source).read_text(encoding="utf-8")
+    for reason, hint in _REASONS.items():
+        assert f'"{hint}"' in text, (reason, source)
+
+
 def test_board_off_without_a_token_never_asks_the_daemon():
     with _Daemon("on", b"check in\n") as daemon:
         on, line = board_status(daemon.url, None)

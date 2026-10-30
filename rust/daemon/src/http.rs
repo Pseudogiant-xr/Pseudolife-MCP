@@ -37,6 +37,9 @@ pub struct App {
     pub board: Arc<crate::board::Board>,
     pub(crate) pair_limiter: crate::routes::pair::PairLimiter,
     pub mcp: crate::mcp::McpState,
+    /// v58: where the gate notes each request's outcome (`None`: open
+    /// daemon, or a test app).
+    pub activity: Option<Arc<crate::principal_activity::Recorder>>,
 }
 
 impl App {
@@ -56,7 +59,16 @@ impl App {
             board,
             pair_limiter: Default::default(),
             mcp,
+            activity: None,
         }
+    }
+
+    pub fn with_activity(
+        mut self,
+        activity: Option<Arc<crate::principal_activity::Recorder>>,
+    ) -> App {
+        self.activity = activity;
+        self
     }
 
     pub(crate) fn auth_configured(&self) -> bool {
@@ -240,8 +252,16 @@ pub(crate) fn browser_gate(app: &App, h: &HeaderMap) -> Result<Option<&'static s
     Ok(None)
 }
 
+/// The transport gate's one resolution per request (`_resolve_detailed`),
+/// so also where its outcome is noted for `invite --list` (v58). A route
+/// that needs the bound principal again uses `auth::resolve`.
 pub(crate) fn resolve(app: &App, h: &HeaderMap) -> Resolved {
-    auth::resolve(authorization(h).as_deref(), &app.env_tokens, &app.store)
+    let header = authorization(h);
+    let (resolved, source) = auth::resolve_detailed(header.as_deref(), &app.env_tokens, &app.store);
+    if let Some(activity) = &app.activity {
+        activity.note(header.as_deref(), &resolved, source);
+    }
+    resolved
 }
 
 /// `_authorization`: the Authorization value `resolve` judges, the last one sent.
@@ -728,6 +748,10 @@ pub(crate) mod tests {
 
     /// An App with a configured bearer (`fixture-token`) and no reachable bank.
     pub(crate) fn mcp_refusal_app() -> Arc<App> {
+        Arc::new(fixture_app())
+    }
+
+    fn fixture_app() -> App {
         let env = crate::config::DaemonEnv::from_env(&|_| None).unwrap();
         let service = Arc::new(Service::new(
             crate::config::Config::default(),
@@ -743,7 +767,7 @@ pub(crate) mod tests {
             service.clone(),
             store.clone(),
         ));
-        Arc::new(App::new(
+        App::new(
             service,
             auth::EnvTokens {
                 single: Some("fixture-token".into()),
@@ -752,7 +776,45 @@ pub(crate) mod tests {
             store,
             None,
             board,
-        ))
+        )
+    }
+
+    /// v58: the gate notes each request once: a success by principal, a
+    /// refused bearer by its hash prefix, nothing without a bearer.
+    #[tokio::test]
+    async fn the_gate_notes_each_requests_outcome() {
+        let activity = Arc::new(crate::principal_activity::Recorder::new());
+        let app = Arc::new(fixture_app().with_activity(Some(activity.clone())));
+        let get = |path: &str, bearer: &str| {
+            Request::builder()
+                .method("GET")
+                .uri(path)
+                .header("authorization", format!("Bearer {bearer}"))
+                .body(Body::empty())
+                .unwrap()
+        };
+        // A store never loaded answers an unknown bearer principals_unavailable:
+        // it may be a valid stored token, so it is not counted as refused.
+        let _ = handle(State(app.clone()), get("/api/stats", "fixture-wrong")).await;
+        assert!(activity.take().is_none());
+        app.store.refresh(vec![], None, &[], Instant::now());
+        for (path, bearer) in [
+            ("/api/stats", Some("fixture-wrong")),
+            ("/api/hook/memory-policy", Some("fixture-wrong")),
+            ("/api/hook/memory-policy", Some("fixture-token")),
+            ("/api/hook/memory-policy", None),
+        ] {
+            let mut request = Request::builder().method("GET").uri(path);
+            if let Some(token) = bearer {
+                request = request.header("authorization", format!("Bearer {token}"));
+            }
+            let _ = handle(State(app.clone()), request.body(Body::empty()).unwrap()).await;
+        }
+        let batch = activity.take().unwrap();
+        assert_eq!(batch.seen.keys().collect::<Vec<_>>(), vec!["default"]);
+        let prefix = crate::principal_activity::bearer_hash_prefix("fixture-wrong");
+        assert_eq!(batch.rejected.get(&prefix).map(|r| r.0), Some(2));
+        assert_eq!(batch.rejected.len(), 1);
     }
 
     #[tokio::test]

@@ -362,6 +362,19 @@ def _codex_hooks_line(health: dict) -> str:
     return result["state"] + (f" (changed: {', '.join(changed)})" if changed else "")
 
 
+def _token_prefix() -> str | None:
+    """The first 8 hex of the SHA-256 of the bearer this shim would send,
+    or ``None`` without one (or with an unreadable token file)."""
+    from pseudolife_memory.credentials import CredentialProvider
+    from pseudolife_memory.principal_activity import token_hash_prefix
+
+    try:
+        token = CredentialProvider.from_environment().snapshot().token
+    except Exception:  # noqa: BLE001 - never serialize credential errors
+        return None
+    return token_hash_prefix(token) if token else None
+
+
 def _board_probe(timeout: float) -> dict:
     """The agent board's status for the credential this shim would send."""
     from pseudolife_memory.board_status import board_probe
@@ -613,6 +626,9 @@ def run_doctor() -> None:
     overrides, credential_source = registration_credentials(os.environ)
     os.environ.update(overrides)
     report["credential_source"] = credential_source or "none"
+    # Never the token: the prefix the daemon's `invite --list` shows when it
+    # refuses this token (schema v58), so an operator can match the two.
+    report["token_sha256_prefix"] = _token_prefix()
     board = _board_probe(min(args.timeout, 2))
     report["board"] = board["line"]
     # The maintainer routes need the board admitted: probed only then.

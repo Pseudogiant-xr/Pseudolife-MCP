@@ -131,6 +131,10 @@ _REQUIRED_COLUMNS = [
     ("cms_counters", {"id", "preset_name", "interaction_count", "logical_turn_count",
                       "tier_queries", "tier_hits", "surprise_history",
                       "consolidation_events", "updated_at"}),
+    # v58 — each principal's last accepted request, and refused bearers by
+    # hash prefix (never the token).
+    ("principal_activity", {"principal", "last_seen_at"}),
+    ("rejected_bearers", {"hash_prefix", "rejections", "first_seen_at", "last_seen_at"}),
 ]
 
 
@@ -174,6 +178,8 @@ _COLUMN_TYPES = [
     ("cms_counters", "tier_hits", "jsonb"),
     ("cms_counters", "surprise_history", "jsonb"),
     ("cms_counters", "consolidation_events", "jsonb"),
+    ("rejected_bearers", "rejections", "bigint"),            # v58: counts add per write
+    ("principal_activity", "last_seen_at", "double precision"),
     ("maintainer_passkeys", "public_key", "bytea"),          # v54: the COSE key as registered
     ("maintainer_passkeys", "sign_count", "bigint"),         # v54: a 32-bit counter, unsigned
     ("maintainer_bootstrap", "failed_attempts", "integer"),  # v54: wrong guesses; 5 burn a code

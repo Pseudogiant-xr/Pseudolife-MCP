@@ -58,6 +58,7 @@ mod onnx_artifacts;
 mod onnx_runtime;
 mod openblas_sdot;
 mod outcome_tools;
+mod principal_activity;
 #[cfg(feature = "principal-harness")]
 mod principal_probe;
 mod principals;
@@ -300,7 +301,15 @@ fn main() {
         let store = Arc::new(auth::PrincipalStore::new_with_shadowed(
             env_principals.clone(),
         ));
-        principals::spawn_refresher(dsn.clone(), store.clone(), env_principals);
+        // v58: the gate's activity record, written by the refresher; an
+        // open daemon records nothing (daemon.py start_stored_principals).
+        let activity = auth_configured.then(|| Arc::new(principal_activity::Recorder::new()));
+        principals::spawn_refresher(
+            dsn.clone(),
+            store.clone(),
+            env_principals,
+            activity.clone(),
+        );
         let service_dsn = dsn.clone();
         let service = Arc::new(service::Service::new(
             config,
@@ -327,13 +336,10 @@ fn main() {
             store.clone(),
         ));
         service.install(&board);
-        let app = Arc::new(http::App::new(
-            service.clone(),
-            tokens,
-            store,
-            static_dir,
-            board,
-        ));
+        let app = Arc::new(
+            http::App::new(service.clone(), tokens, store, static_dir, board)
+                .with_activity(activity),
+        );
         let router = axum::Router::new().fallback(http::handle).with_state(app);
         let listener = match tokio::net::TcpListener::bind((host.as_str(), port)).await {
             Ok(l) => l,

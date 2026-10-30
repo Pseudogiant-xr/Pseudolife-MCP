@@ -128,6 +128,42 @@ def test_a_used_code_is_refused_with_the_same_body(daemon, paired):
     assert (status, body) == (400, b'{"error": "pairing_refused"}')
 
 
+def test_the_daemon_records_last_seen_and_refused_prefixes_without_the_token(daemon, paired):
+    """Schema v58: the gate notes each outcome in memory and the refresher
+    writes it when due. The module's daemon may have written moments ago
+    (earlier tests' requests), so the next write can be a whole flush
+    interval away, then lands on the next refresh tick: the deadline is that
+    worst case plus a margin, and the poll returns as soon as the rows are
+    there."""
+    import hashlib
+
+    from pseudolife_memory.principal_activity import FLUSH_INTERVAL_S
+    from pseudolife_memory.principal_store import REFRESH_INTERVAL_S
+    refused = "fixture-refused-token-" + secrets.token_hex(8)
+    assert _http(daemon["url"] + "/api/stats", token=paired)[0] == 200
+    assert _http(daemon["url"] + "/api/stats", token=ENV_TOKEN)[0] == 200
+    for _ in range(3):
+        assert _http(daemon["url"] + "/api/stats", token=refused)[0] == 401
+    prefix = hashlib.sha256(refused.encode()).hexdigest()[:8]
+    # Worst case: a write began just before these requests, so the next is
+    # due FLUSH_INTERVAL_S later and runs at the refresh tick after that;
+    # 15 s covers the refresh itself and a loaded host.
+    deadline = time.monotonic() + FLUSH_INTERVAL_S + REFRESH_INTERVAL_S + 15
+    seen, rejected = {}, []
+    with psycopg.connect(daemon["db"], autocommit=True) as conn:
+        while time.monotonic() < deadline:
+            seen = dict(conn.execute("SELECT principal, last_seen_at FROM principal_activity"))
+            rejected = conn.execute("SELECT hash_prefix, rejections FROM rejected_bearers "
+                                    "WHERE hash_prefix = %s", (prefix,)).fetchall()
+            if {"laptop", "default"} <= set(seen) and rejected:
+                break
+            time.sleep(0.5)
+        dump = repr(conn.execute("SELECT * FROM rejected_bearers").fetchall())
+    assert {"laptop", "default"} <= set(seen), seen
+    assert rejected == [(prefix, 3)]
+    assert refused not in dump and paired not in dump
+
+
 def test_revoking_takes_the_token_away_within_one_refresh(daemon, paired):
     from pseudolife_memory import principal_store
     with psycopg.connect(daemon["db"], autocommit=True) as conn:
