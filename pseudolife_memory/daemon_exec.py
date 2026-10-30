@@ -1,6 +1,6 @@
 """Run an operator command inside the bundled daemon container.
 
-``lease break|delegate``, ``maintainer`` and ``board-audit`` open the bank
+``lease break|conductor``, ``maintainer`` and ``board-audit`` open the bank
 directly, with the database owner's credentials: ``PSEUDOLIFE_MCP_DATABASE_URL``
 or the lite tier's embedded instance. On a Docker-tier host neither is in the
 operator's shell: the URL lives in the ``pseudolife-mcp-daemon`` container's

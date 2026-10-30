@@ -254,7 +254,7 @@ def test_the_operator_breaks_a_lease_and_the_next_waiter_gets_it(board, pg_url, 
 
 
 def test_the_operator_grants_a_projects_conductor(board, pg_url, monkeypatch, capsys):
-    """``lease delegate`` is the maintainer's only way to give a session the
+    """``lease conductor`` is the maintainer's only way to give a session the
     power to reopen done parks (review of #549, 2026-10-03; its lease named
     delegate 2026-10-04, conductor 2026-10-31): it opens the bank directly, like ``break``, and the session
     cannot take the lease itself."""
@@ -268,7 +268,7 @@ def test_the_operator_grants_a_projects_conductor(board, pg_url, monkeypatch, ca
                                   headers={"Authorization": f"Bearer {BEARER}", **as_delegate})
             assert (refused.status_code, refused.json()) == (400, {"error": "reserved_lease"})
     monkeypatch.setenv("PSEUDOLIFE_MCP_DATABASE_URL", pg_url)
-    assert lease_cli.main(["delegate", "pseudolife-mcp", delegate["agent_id"][:8],
+    assert lease_cli.main(["conductor", "pseudolife-mcp", delegate["agent_id"][:8],
                            "--for", "12h"]) == 0
     captured = capsys.readouterr()
     out = json.loads(captured.out)
@@ -285,8 +285,8 @@ def test_the_operator_grants_a_projects_conductor(board, pg_url, monkeypatch, ca
     assert storage.conn.execute("SELECT actor FROM coordination_events "
                                 "WHERE event='lease_conductor'").fetchone()[0] == "operator"
     # An unknown agent is refused with nothing changed; revoking is ``break``.
-    assert lease_cli.main(["delegate", "pseudolife-mcp", "f" * 32]) == 1
-    assert "delegate refused: instance_not_found" in capsys.readouterr().err
+    assert lease_cli.main(["conductor", "pseudolife-mcp", "f" * 32]) == 1
+    assert "conductor refused: instance_not_found" in capsys.readouterr().err
     assert lease_cli.main(["break", "conductor:pseudolife-mcp"]) == 0
     assert json.loads(capsys.readouterr().out)["was_held_by"] == delegate["agent_id"]
 
@@ -325,7 +325,7 @@ def operator_failure(pg_url):
         admin.close()
 
 
-@pytest.mark.parametrize("verb", ["break", "delegate"])
+@pytest.mark.parametrize("verb", ["break", "conductor"])
 @pytest.mark.parametrize("kind", list(_FAILURES))
 def test_an_operator_says_what_it_knows_when_its_transaction_fails(
         board, pg_url, monkeypatch, capsys, operator_failure, verb, kind):
@@ -342,7 +342,7 @@ def test_an_operator_says_what_it_knows_when_its_transaction_fails(
     operator_failure(kind)
     monkeypatch.setenv("PSEUDOLIFE_MCP_DATABASE_URL", pg_url)
     argv = (["break", "claim:shim.py"] if verb == "break"
-            else ["delegate", "pseudolife-mcp", held["agent_id"]])
+            else ["conductor", "pseudolife-mcp", held["agent_id"]])
     assert lease_cli.main(argv) == 1
     captured = capsys.readouterr()
     assert captured.out == ""
@@ -359,20 +359,24 @@ def test_an_operator_says_what_it_knows_when_its_transaction_fails(
                             r"nothing was changed\n", captured.err), captured.err
 
 
-def test_designate_is_a_deprecated_alias_for_conductor(board, pg_url, monkeypatch, capsys):
-    """0.16.0's ``lease designate`` still grants (as ``delegate:<project>``)
-    and says, in one line on stderr, which command replaces it."""
+@pytest.mark.parametrize("old", ["delegate", "designate"])
+def test_the_old_action_names_are_deprecated_aliases_for_conductor(
+        board, pg_url, monkeypatch, capsys, old):
+    """``lease delegate`` (until 2026-10-31) and 0.16.0's ``lease designate``
+    still grant (as ``conductor:<project>``) and say, in one line on stderr,
+    which command replaces them."""
     bridge, _ = board
     delegate = _post(bridge, "register", {"label": "delegate", "project": "pseudolife-mcp"})
     monkeypatch.setenv("PSEUDOLIFE_MCP_DATABASE_URL", pg_url)
-    assert lease_cli.main(["designate", "pseudolife-mcp", delegate["agent_id"]]) == 0
+    assert lease_cli.main([old, "pseudolife-mcp", delegate["agent_id"]]) == 0
     captured = capsys.readouterr()
     out = json.loads(captured.out)
     assert out["name"] == "conductor:pseudolife-mcp"
     # One deprecation line, then the never-attached grantee's no-listener
     # warning that every grant prints (2026-10-05).
     deprecation, warning = captured.err.splitlines()
-    assert "lease delegate" in deprecation and "deprecated" in deprecation
+    assert deprecation == (f"pseudolife-mcp lease {old} is deprecated: use "
+                           "pseudolife-mcp lease conductor")
     assert warning == out["warning"]
 
 

@@ -2572,7 +2572,7 @@ def test_a_conductors_project_burst_reopens_only_its_own_project(store):
 # --- upgrading across the delegate rename (0.16.1, 2026-10-04) ---------------
 # 0.16.0 called the grant ``designated:coordinator:<project>`` and its wake
 # reason ``coordinator``. A grant made under the old name is not honoured
-# (the operator re-grants with ``lease delegate``); wake rows written before
+# (the operator re-grants with ``lease conductor``); wake rows written before
 # the upgrade are history that still counts and is still served.
 
 def _legacy_grant(store, agent, project="proj"):

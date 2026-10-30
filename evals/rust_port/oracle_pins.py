@@ -20,6 +20,8 @@ ACCEPTED_BLOBS = {
         # delegate-watch deprecated in --help and on stderr (the PR that
         # renames the role's stored ids to conductor).
         "3ea4594b958bcde244a147def1ae1abbe2f7e9ba",
+        # lease conductor in --help (lease delegate deprecated), same PR.
+        "5e2b3e25090d4fc6158552592088947aa21c18f9",
     ),
     "pseudolife_memory/wait_mail_cli.py": ("236636957e2f5affbe2eec21d9e125c35ffae5f2",),
 }

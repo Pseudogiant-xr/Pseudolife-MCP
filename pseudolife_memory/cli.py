@@ -96,7 +96,7 @@ modes:
                  --while-pid PID` holds one for a process already running;
                  `lease check NAME` exits 1 while it is held (a launch gate);
                  `lease list` shows them; operator only: `lease break NAME`
-                 frees a stuck one, `lease delegate PROJECT AGENT` makes
+                 frees a stuck one, `lease conductor PROJECT AGENT` makes
                  one session the maintainer's conductor for a project
   maintainer    on the daemon host, the maintainer's passkeys (operator
                  only; reads PSEUDOLIFE_MCP_DATABASE_URL, else runs inside

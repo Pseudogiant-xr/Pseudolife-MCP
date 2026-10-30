@@ -230,7 +230,7 @@ REOPEN_REASONS = (*AUTHORITY_REASONS, "clearer")
 _LEGACY_AUTHORITY_REASONS = ("delegate", "coordinator")
 _AUTHORITY_ROW_REASONS = (*AUTHORITY_REASONS, *_LEGACY_AUTHORITY_REASONS)
 _REOPEN_ROW_REASONS = (*REOPEN_REASONS, *_LEGACY_AUTHORITY_REASONS)
-# Leases only the operator grants (``pseudolife-mcp lease delegate``, which
+# Leases only the operator grants (``pseudolife-mcp lease conductor``, which
 # opens the bank directly like ``lease break``): an agent's acquire is
 # refused ``reserved_lease``, while its release (resigning) and the
 # operator's break work as for any lease. The power to reopen done parks is
@@ -239,7 +239,7 @@ _REOPEN_ROW_REASONS = (*REOPEN_REASONS, *_LEGACY_AUTHORITY_REASONS)
 # session on a host may share one principal (review of #549, 2026-10-03).
 # ``designated:`` was the namespace before 0.16.1 and stays reserved; a
 # ``designated:coordinator:<project>`` hold left on an upgraded bank grants
-# nothing (the operator re-grants with ``lease delegate``).
+# nothing (the operator re-grants with ``lease conductor``).
 CONDUCTOR_PREFIX = "conductor:"
 # The conductor's lease and grant record were ``delegate:<project>`` and
 # ``lease_delegate`` until 2026-10-31. A hold granted under those names
