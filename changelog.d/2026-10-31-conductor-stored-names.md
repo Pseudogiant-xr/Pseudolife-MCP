@@ -17,9 +17,12 @@
   loaded before the upgrade still grants and revokes (its challenge keeps
   the old purpose it asked for). Before deploying, `lease break` any
   `conductor:` lease `pseudolife-mcp lease list` shows held, since any
-  session could take one until now, and run `lease delegate` from a client
+  session could take one until now, and run `lease conductor` from a client
   at the daemon's version.
 - `pseudolife-mcp conductor-watch` is the watcher's command and
   `pseudolife_memory.conductor_watch_cli` its module; `delegate-watch` still
-  runs it after one stderr line naming `conductor-watch`. The `lease
-  delegate` command keeps its name; its help names the new lease.
+  runs it after one stderr line naming `conductor-watch`.
+- `pseudolife-mcp lease conductor PROJECT AGENT` is the operator's grant
+  command; `lease delegate` (its name until now) and `lease designate` (its
+  0.16.0 name) still run it after one stderr line naming `lease conductor`,
+  so "delegate" no longer reads like T3 Code's `delegate_task`.

@@ -458,7 +458,7 @@ is agent context every session, so it stays lean.
 | `memory_forget(scope, ...)` | Forget from one store: `memory` (by text/substring/source/episode/tag — several filters narrow the match, AND across kinds like `memory_search`; a match over `memory.delete_confirm_threshold` entries, default 20, is refused with `would_delete` until the call repeats with `confirm_bulk=true`) and `fact` hard-delete; `world` and `lesson` (by entity/attribute) retire the slot with an audit row — reversible via `memory_graph_review(action="restore_slot")` |
 | `memory_stats()` | Store occupancy, hit rates, totals |
 | `memory_agents(action, project?, task?, status?, lease?, worktree?, repository_id?, path?, expect?, children?, park_reason?, park_needs?, park_clear_by?, park_resume?, park_expires?, name?)` | Experimental peer awareness or update of the caller's registered context, on by default for authenticated installs ([coordination](docs/guide/configuration.md#experimental-agent-coordination)); lists peers active within the hour (three hours while holding a lease), each status with its age and a stale flag past two hours, and each row by its session's `name` (the title Claude Code or Codex shows, else one the agent set with `name`, else its `memory_session_title`, else its label and short id; [board names](docs/guide/configuration.md#board-names-and-finding-a-session)), and counts the rest as `idle_omitted`; `update` sets project, task, status, `expect` (seconds until the status is overdue), `children` (the labels of subagents working under the caller's address, which only read the board; the Claude Code plugin's subagent hooks keep their own entries there, and a Codex subagent's own row carries its `parent_agent_id`) and the park record (why the session stopped, what clears it, who can, what to do then; a plain status clears it), which every listed row carries; `claim`/`release` take or free an advisory `lease`, or an advisory claim on one exact repository file (`worktree` + relative `path` through the stdio shim; a hashed `repository_id` + `path` over direct HTTP; no globs, directories or edit enforcement — [exact repository file claims](docs/guide/configuration.md#exact-repository-file-claims)); unknown episode scope stays unknown, and activity is not a resource reservation |
-| `memory_message(action, to?, text?, request_id?, reply_to?, after?, message_id?, clears?, urgent?, limit?, peer?, ack?)` | Experimental addressed mail: `send` (needs `to`, `text` and a new unique `request_id`; reuse the id only to retry the identical send after an uncertain result) to one agent (its id, or a unique prefix of 8+ hex characters), to `project:<name>` or to `all` (every attached, non-idle peer, at most 50, one request id for the burst, per-recipient receipts), non-destructive `receive` (with `ack=true` it also acknowledges the mail it returns, in a compact result), explicit recipient `ack` (one id or several comma-separated, ids or prefixes), or read-only `history` of this instance's own retained sent and received mail (`limit` ≤ 50, optional exact `peer` id; no delivery, acknowledgement or wake); requires authenticated adapter binding, remains outside memory retrieval, and never grants user approval; a subagent's own address (a Codex subagent) does not send (`child_send_refused`): its parent does. Each receipt carries the daemon's `wake` decision (`hinted`, `not_needed`, `rung`, `withheld` with the parked need, `no_path`, `capped`): a parked peer rings only for mail that clears what it declared it needs (or `urgent` mail), a peer parked `done` only for `urgent` mail from the maintainer, the maintainer's conductor for the project (`pseudolife-mcp lease delegate`) or the park's named clearer, an idle peer that has not parked only for `urgent` mail; plain mail to it waits for its next turn ([park records and wake](docs/guide/configuration.md#park-records-and-the-wake-decision)) |
+| `memory_message(action, to?, text?, request_id?, reply_to?, after?, message_id?, clears?, urgent?, limit?, peer?, ack?)` | Experimental addressed mail: `send` (needs `to`, `text` and a new unique `request_id`; reuse the id only to retry the identical send after an uncertain result) to one agent (its id, or a unique prefix of 8+ hex characters), to `project:<name>` or to `all` (every attached, non-idle peer, at most 50, one request id for the burst, per-recipient receipts), non-destructive `receive` (with `ack=true` it also acknowledges the mail it returns, in a compact result), explicit recipient `ack` (one id or several comma-separated, ids or prefixes), or read-only `history` of this instance's own retained sent and received mail (`limit` ≤ 50, optional exact `peer` id; no delivery, acknowledgement or wake); requires authenticated adapter binding, remains outside memory retrieval, and never grants user approval; a subagent's own address (a Codex subagent) does not send (`child_send_refused`): its parent does. Each receipt carries the daemon's `wake` decision (`hinted`, `not_needed`, `rung`, `withheld` with the parked need, `no_path`, `capped`): a parked peer rings only for mail that clears what it declared it needs (or `urgent` mail), a peer parked `done` only for `urgent` mail from the maintainer, the maintainer's conductor for the project (`pseudolife-mcp lease conductor`) or the park's named clearer, an idle peer that has not parked only for `urgent` mail; plain mail to it waits for its next turn ([park records and wake](docs/guide/configuration.md#park-records-and-the-wake-decision)) |
 | `memory_get(entry_id)` / `memory_reinforce(entry_id)` | Dereference a memory id to its full episode (+ `consolidated_into`); reinforce it after finding it useful |
 | `memory_fact_get(entity, attribute, verbose?)` | The one CURRENT canonical value at a slot (+ parked contenders); on an empty slot returns ranked `candidates` (same-entity, then similar slots); aged/contested facts carry a ready-made `correct_with` call (as do `memory_search` / `memory_world_search` hits) |
 | `memory_fact_set(entity, attribute, value, origin?, confidence?, episode?, freshness_class?, authority?, distortion_tolerance?)` | Assert a canonical fact deliberately (insert / confirm / supersede / contest); `freshness_class` (`auto` default) says how fast the slot rots — `auto` infers it from the entity's kind; `authority`/`distortion_tolerance` (`auto` = deterministic form heuristic, no model call) inherit the slot's labels unless restated |
@@ -5420,12 +5420,12 @@ the bank directly, as `board-audit` and `export` do
 (`PSEUDOLIFE_MCP_DATABASE_URL`, else the lite tier's data dir), grants the
 lease to the next waiter, and logs a `lease_break` with the operator as its
 actor. It frees the board's record only: a process still holding the local lock
-keeps it until it exits. If `lease break` or `lease delegate` says it lost the
+keeps it until it exits. If `lease break` or `lease conductor` says it lost the
 answer to its COMMIT, the change may have been committed: run
 `pseudolife-mcp lease list` before retrying. Any other failure means nothing
 was changed.
 
-`pseudolife-mcp lease delegate PROJECT AGENT [--for DURATION]` is the
+`pseudolife-mcp lease conductor PROJECT AGENT [--for DURATION]` is the
 operator's way to name the maintainer's conductor for a project: the one
 session whose urgent mail [reopens a done park](#reopening-a-done-park) in
 that project. It opens the bank the same way, grants AGENT (its id, or a
@@ -5451,8 +5451,9 @@ The conductor is not the coordinator: `coordinator:<project>` is the open role
 any session may claim to say it is coordinating, and it grants nothing. A
 session holds at most one of the two: granting the conductor role to the current
 coordinator also frees its `coordinator:<project>` lease (the answer names it
-in `also_broken`). `pseudolife-mcp lease designate`, the command's name in
-0.16.0, still works and prints one line naming `lease delegate`. Both roles
+in `also_broken`). `pseudolife-mcp lease delegate`, the command's name until
+2026-10-31, and `lease designate`, its name in 0.16.0, still work and print
+one line naming `lease conductor`. Both roles
 can also be given and taken from the Console, signed with your passkey: see
 [Maintainer messages and roles from the Console](#maintainer-messages-and-roles-from-the-console).
 
@@ -5509,14 +5510,14 @@ to see the role in its Roles band again. Before deploying, check that
 `pseudolife-mcp lease list` shows no `conductor:` lease held: until this
 release any session could take one, and although it grants nothing, the
 Console would name its holder as the one a grant replaces; `lease break` it.
-Run `lease delegate` from a client at the daemon's version: an older one
+Run `lease conductor` from a client at the daemon's version: an older one
 writes an old-named grant beside a new one, and a newer one against an older
 daemon writes a lease that daemon neither honours nor reserves.
 
 **Upgrading from 0.16.0**, where the grant was the lease
 `designated:coordinator:<project>` and its rings were `reason: coordinator`:
 a grant made under the old name reopens nothing after the upgrade, so
-re-grant with `lease delegate` (a 0.16.0 grant lasted at most 7 days anyway).
+re-grant with `lease conductor` (a 0.16.0 grant lasted at most 7 days anyway).
 The old hold stays on the board until it expires; `lease break` it to clear
 it. Wake rows recorded as `coordinator` before the upgrade stay as history:
 they still count against the sender's authority budget for their hour and a
@@ -5780,7 +5781,7 @@ so is an origin written with its scheme's default port, `https://<rp_id>:443`
 or `http://localhost:80`, since browsers send it without);
 then run `pseudolife-mcp maintainer enrol-code` on the daemon host (on the
 Docker tier it runs itself inside the daemon container, as
-[`lease delegate`](#leases-pseudolife-mcp-lease) does), redeem the code in the Console, check the printed
+[`lease conductor`](#leases-pseudolife-mcp-lease) does), redeem the code in the Console, check the printed
 prefix against it, and run `pseudolife-mcp maintainer confirm <prefix>`.
 Only then is the key active.
 
@@ -6979,7 +6980,7 @@ needs to reach it. `urgent` mail reopens it when the sender is one of:
   `coordination.maintainer_principals` (`reason: maintainer`);
 - **the maintainer's conductor for the project**: the operator made the
   sending session the conductor for the recipient's own, non-empty `project`
-  with [`pseudolife-mcp lease delegate`](#leases-pseudolife-mcp-lease), and the grant has
+  with [`pseudolife-mcp lease conductor`](#leases-pseudolife-mcp-lease), and the grant has
   not expired, been released or been revoked (`reason: conductor`). The
   grant names one agent id, not a principal, and no session can take it, so
   it is a credential the maintainer hands out, not a board convention; a
@@ -11724,7 +11725,7 @@ after a move that ended that way, read it and run its `manual_rollback`
 lines in order.
 
 **Don't run commands that write the database directly during a move**
-(`lease break`, `lease delegate`, `board-audit redact`, `coordination-recovery`, a `psql`
+(`lease break`, `lease conductor`, `board-audit redact`, `coordination-recovery`, a `psql`
 session). The move cuts such connections off before the final dump and
 fences the database right after it, but the dump has to connect first, so
 a write landing in those seconds would miss the dump.
@@ -12221,7 +12222,7 @@ no longer copies `ops/.env` into WSL.
 |---|---|
 | Its own checkout of the repository (a clone in a folder it owns or is granted), with no `ops/.env` | The deployment checkout with `ops/.env` (the owner's password, the operator tokens) |
 | Its own Claude Code / Codex installs, logins and client configs | Docker Desktop (membership of `docker-users`), the compose stack, the daemon, backups, `pseudolife-mcp update` |
-| Its own principal and bearer token: `pseudolife-mcp invite` by the maintainer, `pseudolife-mcp pair` by the agent account | `pseudolife-mcp invite`, `lease break`, `lease delegate`, `board-audit`, `test-login create`, and the maintainer passkey and its commands (`pseudolife-mcp maintainer setup`, `enrol-code`, `confirm`, `revoke`, `reset`, `list`) |
+| Its own principal and bearer token: `pseudolife-mcp invite` by the maintainer, `pseudolife-mcp pair` by the agent account | `pseudolife-mcp invite`, `lease break`, `lease conductor`, `board-audit`, `test-login create`, and the maintainer passkey and its commands (`pseudolife-mcp maintainer setup`, `enrol-code`, `confirm`, `revoke`, `reset`, `list`) |
 | A copy of `test-pg.env` | The owner's password, and anything else in the maintainer's profile |
 | Network access to `127.0.0.1:8765` (the daemon, gated by its bearer) and `127.0.0.1:5433` (Postgres, where only the test login works for it) | |
 

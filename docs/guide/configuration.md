@@ -723,12 +723,12 @@ the bank directly, as `board-audit` and `export` do
 (`PSEUDOLIFE_MCP_DATABASE_URL`, else the lite tier's data dir), grants the
 lease to the next waiter, and logs a `lease_break` with the operator as its
 actor. It frees the board's record only: a process still holding the local lock
-keeps it until it exits. If `lease break` or `lease delegate` says it lost the
+keeps it until it exits. If `lease break` or `lease conductor` says it lost the
 answer to its COMMIT, the change may have been committed: run
 `pseudolife-mcp lease list` before retrying. Any other failure means nothing
 was changed.
 
-`pseudolife-mcp lease delegate PROJECT AGENT [--for DURATION]` is the
+`pseudolife-mcp lease conductor PROJECT AGENT [--for DURATION]` is the
 operator's way to name the maintainer's conductor for a project: the one
 session whose urgent mail [reopens a done park](#reopening-a-done-park) in
 that project. It opens the bank the same way, grants AGENT (its id, or a
@@ -754,8 +754,9 @@ The conductor is not the coordinator: `coordinator:<project>` is the open role
 any session may claim to say it is coordinating, and it grants nothing. A
 session holds at most one of the two: granting the conductor role to the current
 coordinator also frees its `coordinator:<project>` lease (the answer names it
-in `also_broken`). `pseudolife-mcp lease designate`, the command's name in
-0.16.0, still works and prints one line naming `lease delegate`. Both roles
+in `also_broken`). `pseudolife-mcp lease delegate`, the command's name until
+2026-10-31, and `lease designate`, its name in 0.16.0, still work and print
+one line naming `lease conductor`. Both roles
 can also be given and taken from the Console, signed with your passkey: see
 [Maintainer messages and roles from the Console](#maintainer-messages-and-roles-from-the-console).
 
@@ -812,14 +813,14 @@ to see the role in its Roles band again. Before deploying, check that
 `pseudolife-mcp lease list` shows no `conductor:` lease held: until this
 release any session could take one, and although it grants nothing, the
 Console would name its holder as the one a grant replaces; `lease break` it.
-Run `lease delegate` from a client at the daemon's version: an older one
+Run `lease conductor` from a client at the daemon's version: an older one
 writes an old-named grant beside a new one, and a newer one against an older
 daemon writes a lease that daemon neither honours nor reserves.
 
 **Upgrading from 0.16.0**, where the grant was the lease
 `designated:coordinator:<project>` and its rings were `reason: coordinator`:
 a grant made under the old name reopens nothing after the upgrade, so
-re-grant with `lease delegate` (a 0.16.0 grant lasted at most 7 days anyway).
+re-grant with `lease conductor` (a 0.16.0 grant lasted at most 7 days anyway).
 The old hold stays on the board until it expires; `lease break` it to clear
 it. Wake rows recorded as `coordinator` before the upgrade stay as history:
 they still count against the sender's authority budget for their hour and a
@@ -1083,7 +1084,7 @@ so is an origin written with its scheme's default port, `https://<rp_id>:443`
 or `http://localhost:80`, since browsers send it without);
 then run `pseudolife-mcp maintainer enrol-code` on the daemon host (on the
 Docker tier it runs itself inside the daemon container, as
-[`lease delegate`](#leases-pseudolife-mcp-lease) does), redeem the code in the Console, check the printed
+[`lease conductor`](#leases-pseudolife-mcp-lease) does), redeem the code in the Console, check the printed
 prefix against it, and run `pseudolife-mcp maintainer confirm <prefix>`.
 Only then is the key active.
 
@@ -2282,7 +2283,7 @@ needs to reach it. `urgent` mail reopens it when the sender is one of:
   `coordination.maintainer_principals` (`reason: maintainer`);
 - **the maintainer's conductor for the project**: the operator made the
   sending session the conductor for the recipient's own, non-empty `project`
-  with [`pseudolife-mcp lease delegate`](#leases-pseudolife-mcp-lease), and the grant has
+  with [`pseudolife-mcp lease conductor`](#leases-pseudolife-mcp-lease), and the grant has
   not expired, been released or been revoked (`reason: conductor`). The
   grant names one agent id, not a principal, and no session can take it, so
   it is a credential the maintainer hands out, not a board convention; a

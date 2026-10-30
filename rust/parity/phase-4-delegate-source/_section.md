@@ -1,7 +1,8 @@
 ## Phase 4 delegate source preparation
 
 Native `delegate` and its deprecated `designate` alias prepare the existing
-external-DSN role grant. Both role rows lock in name order before resolving a
+external-DSN role grant (the action is `conductor` since 2026-10-31; `delegate`
+and `designate` now print one deprecation line naming it, then run it). Both role rows lock in name order before resolving a
 registered, unrevoked recipient. The transaction removes its coordinator
 queue entry, breaks its live coordinator role, settles that queue, drops
 reserved conductor waiters, vacates a hold under the role's old lease name

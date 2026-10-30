@@ -62,7 +62,7 @@ def _docker_after(action, tail):
         expected = [['inspect', '-f', '{{.State.Running}}', 'pseudolife-mcp-daemon'],
                     ['exec', '-i', '-e', 'PSEUDOLIFE_DAEMON_EXEC=1',
                      'pseudolife-mcp-daemon', 'python', '-m', 'pseudolife_memory.cli',
-                     'lease', 'delegate' if action == 'designate' else action, *tail]]
+                     'lease', 'conductor' if action in ('delegate', 'designate') else action, *tail]]
         assert calls == expected, calls
         assert obs['exit'] == 23, obs['exit']
         assert (arm.home / 'docker.stdin').read_bytes() == b'container-input\x00\xff\n'
@@ -266,7 +266,7 @@ def cases():
     env = {'PSEUDOLIFE_DOCKER': '{HOME}/fake_docker.' + ('cmd' if core.WINDOWS else 'sh'),
            'PSEUDOLIFE_MCP_DATABASE_URL': None, 'PSEUDOLIFE_DAEMON_EXEC': None}
     result = []
-    for action in ('break', 'delegate', 'designate'):
+    for action in ('break', 'conductor', 'delegate', 'designate'):
         tail = ['fixture'] if action == 'break' else ['fixture', '01234567', '--for', '2m']
         result.append(core.Case('operator-container-' + action, ['lease', action, *tail],
                                 env=env, stdin=b'container-input\x00\xff\n',

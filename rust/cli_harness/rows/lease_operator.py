@@ -275,8 +275,8 @@ _FAULTS = {
 # Faults whose COMMIT answer is FATAL or lost: the uncertain line, not the
 # certain one.
 _UNKNOWN_FAULTS = frozenset({"commit-lost"})
-_FAILED = re.compile(rb"^(break|delegate) failed \(([A-Za-z]+)\); nothing was changed(\r?\n)\Z")
-_LOST = re.compile(rb"^(break|delegate) lost the answer to its COMMIT \(([A-Za-z]+)\); it may have been "
+_FAILED = re.compile(rb"^(break|conductor) failed \(([A-Za-z]+)\); nothing was changed(\r?\n)\Z")
+_LOST = re.compile(rb"^(break|conductor) lost the answer to its COMMIT \(([A-Za-z]+)\); it may have been "
                    rb"committed: run `pseudolife-mcp lease list` before retrying(\r?\n)\Z")
 _NATIVE_FAILED = b" failed (PostgreSQL transaction failed); nothing was changed"
 _NATIVE_LOST = (b" lost the answer to its COMMIT (PostgreSQL session ended); it may have been "
@@ -434,25 +434,27 @@ def cases():
               operator_case("break-free", ["break", "fixture"], "free"),
               operator_case("break-held", ["break", "fixture"], "held", ("lease_break",)),
               operator_case("break-fifo", ["break", "fixture"], "queue", ("lease_break", "lease_grant"))]
-    for action in ("delegate", "designate"):
+    # conductor is the action; delegate (until 2026-10-31) and designate
+    # (0.16.0) still run it after one deprecation line on stderr.
+    for action in ("conductor", "delegate", "designate"):
         result.append(operator_case(action + "-normal", [action, "fixture", "{AGENT}", "--for", "2m"],
                                     "target", ("lease_conductor",)))
     for scenario, events in (("replace", ("lease_conductor",)),
                              ("coordinator", ("lease_break", "lease_conductor")),
                              ("legacy", ("lease_break", "lease_conductor")),
                              ("legacy-expired", ("lease_expire", "lease_conductor"))):
-        result.append(operator_case("delegate-" + scenario, ["delegate", "fixture", "{AGENT}", "--for", "2m"],
+        result.append(operator_case("conductor-" + scenario, ["conductor", "fixture", "{AGENT}", "--for", "2m"],
                                     scenario, events))
     result.extend([
-        operator_case("delegate-prefix", ["delegate", "fixture", "00000000", "--for", "2m"],
+        operator_case("conductor-prefix", ["conductor", "fixture", "00000000", "--for", "2m"],
                       "target", ("lease_conductor",)),
-        operator_case("delegate-unknown", ["delegate", "fixture", "f" * 32, "--for", "2m"]),
-        operator_case("delegate-ambiguous", ["delegate", "fixture", "00000000", "--for", "2m"], "ambiguous"),
-        operator_case("delegate-default", ["delegate", "fixture", "{AGENT}"], "target", ("lease_conductor",)),
-        operator_case("delegate-seven-days", ["delegate", "fixture", "{AGENT}", "--for", "7d"], "target", ("lease_conductor",)),
-        operator_case("delegate-unicode-project", ["delegate", "资源", "{AGENT}", "--for", "2m"], "target", ("lease_conductor",)),
-        operator_case("delegate-live-listener", ["delegate", "fixture", "{AGENT}", "--for", "2m"], "listener", ("lease_conductor",)),
-        operator_case("delegate-live-ring", ["delegate", "fixture", "{AGENT}", "--for", "2m"], "ring", ("lease_conductor",)),
+        operator_case("conductor-unknown", ["conductor", "fixture", "f" * 32, "--for", "2m"]),
+        operator_case("conductor-ambiguous", ["conductor", "fixture", "00000000", "--for", "2m"], "ambiguous"),
+        operator_case("conductor-default", ["conductor", "fixture", "{AGENT}"], "target", ("lease_conductor",)),
+        operator_case("conductor-seven-days", ["conductor", "fixture", "{AGENT}", "--for", "7d"], "target", ("lease_conductor",)),
+        operator_case("conductor-unicode-project", ["conductor", "资源", "{AGENT}", "--for", "2m"], "target", ("lease_conductor",)),
+        operator_case("conductor-live-listener", ["conductor", "fixture", "{AGENT}", "--for", "2m"], "listener", ("lease_conductor",)),
+        operator_case("conductor-live-ring", ["conductor", "fixture", "{AGENT}", "--for", "2m"], "ring", ("lease_conductor",)),
         hold_case("hold-no-board"), hold_case("hold-gone-pid", gone=True),
         hold_case("hold-local-wait", queued=True), hold_case("hold-board", board=True),
         hold_case("hold-board-renew", board=True, renew=True),
@@ -464,16 +466,16 @@ def cases():
                       fault="audit-insert", failure_class="RaiseException"),
         operator_case("break-commit-refused", ["break", "fixture"], "queue",
                       fault="commit-refused", failure_class="RaiseException"),
-        # The near miss of delegate-commit-lost: an ERROR at COMMIT keeps
+        # The near miss of conductor-commit-lost: an ERROR at COMMIT keeps
         # the certain line.
-        operator_case("delegate-commit-refused", ["delegate", "fixture", "{AGENT}", "--for", "2m"],
+        operator_case("conductor-commit-refused", ["conductor", "fixture", "{AGENT}", "--for", "2m"],
                       "coordinator", fault="commit-refused", failure_class="RaiseException"),
         operator_case("break-commit-lost", ["break", "fixture"], "held",
                       fault="commit-lost", failure_class="AdminShutdown"),
-        operator_case("delegate-commit-lost", ["delegate", "fixture", "{AGENT}", "--for", "2m"], "coordinator",
+        operator_case("conductor-commit-lost", ["conductor", "fixture", "{AGENT}", "--for", "2m"], "coordinator",
                       fault="commit-lost", failure_class="AdminShutdown"),
     ])
-    for action in ("hold", "break", "delegate", "designate"):
+    for action in ("hold", "break", "conductor", "delegate", "designate"):
         result.append(Case("help-" + action, ["lease", action, "--help"],
                            env={"PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"}))
     from .lease_transport import cases as transport_cases
@@ -487,12 +489,12 @@ MUTANTS = [
     Mutant("lease-break-holder", "lease_operator", "shim/src/cli/lease/operator/store.rs",
            "holder_agent_id=NULL,holder_principal=''", "holder_agent_id=holder_agent_id,holder_principal=''",
            ("break-held",)),
-    Mutant("lease-delegate-duration", "lease_operator", "shim/src/cli/lease/operator/store/conductor.rs",
+    Mutant("lease-conductor-duration", "lease_operator", "shim/src/cli/lease/operator/store/conductor.rs",
            "let expires_at = now + hold as f64;", "let expires_at = now + (hold + 1) as f64;",
-           ("delegate-normal",)),
-    Mutant("lease-designate-warning", "lease_operator", "shim/src/cli/lease/args.rs",
-           "pseudolife-mcp lease designate is deprecated: use pseudolife-mcp lease delegate",
-           "pseudolife-mcp lease designate is deprecated: changed alias warning", ("designate-normal",)),
+           ("conductor-normal",)),
+    Mutant("lease-deprecated-warning", "lease_operator", "shim/src/cli/lease/args.rs",
+           "is deprecated: use pseudolife-mcp lease {new}",
+           "is deprecated: changed alias warning {new}", ("delegate-normal", "designate-normal")),
     # A swallowed audit failure leaves an aborted block whose COMMIT the
     # server answers with ROLLBACK, so break would report success.
     Mutant("lease-break-audit-swallowed", "lease_operator", "shim/src/cli/lease/operator/store.rs",
@@ -500,15 +502,15 @@ MUTANTS = [
            "settle(&tx, name, now, &mut events).await?;\n        let _ = append(&tx, events, now).await;",
            ("break-audit-insert-fails",)),
     # A COMMIT whose answer never came must not be reported as a grant.
-    Mutant("lease-delegate-commit-ignored", "lease_operator", "shim/src/cli/lease/operator/store/conductor.rs",
+    Mutant("lease-conductor-commit-ignored", "lease_operator", "shim/src/cli/lease/operator/store/conductor.rs",
            "    commit(tx).await?;\n    Ok(Granted {", "    let _ = commit(tx).await;\n    Ok(Granted {",
-           ("delegate-commit-lost",)),
+           ("conductor-commit-lost",)),
     # A FATAL or lost COMMIT answer must not be reported as certainly
     # rolled back, and an ERROR at COMMIT must not be reported as unknown.
     Mutant("lease-commit-unknown-certain", "lease_operator", "shim/src/cli/lease/operator/store.rs",
            "_ => Error::CommitUnknown,", "_ => Error::Database,",
-           ("break-commit-lost", "delegate-commit-lost")),
+           ("break-commit-lost", "conductor-commit-lost")),
     Mutant("lease-commit-refused-unknown", "lease_operator", "shim/src/cli/lease/operator/store.rs",
            "Some(Severity::Error) => Error::Database,", "Some(Severity::Error) => Error::CommitUnknown,",
-           ("break-commit-refused", "delegate-commit-refused")),
+           ("break-commit-refused", "conductor-commit-refused")),
 ]
