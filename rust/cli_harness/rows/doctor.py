@@ -871,6 +871,23 @@ def cases() -> list[Case]:
     agent("principal-mismatch", answer=context_proof(principal="other"))
     agent("bank-and-principal-mismatch",
           answer=context_proof(bank="00000000-0000-4000-8000-000000000002", principal="other"))
+
+    def binding_then(status, value):
+        """The binding read answered as the daemons do, then this answer to
+        the mailbox read."""
+        def answer(_daemon, request):
+            if "agent_id" not in request:
+                return Route(200, {"bank_id": BANK, "principal": PRINCIPAL})
+            return Route(status, value)
+        return answer
+
+    # A revoked mailbox key as the daemons report it: the binding read
+    # answers, the mailbox read is refused.
+    agent("revoked-key", answer=binding_then(403, {"error": "invalid_credential"}))
+    # The binding moved between the two reads (a daemon swapped or remapped
+    # meanwhile): a binding change, not a rejected key.
+    agent("binding-moved-between-reads", answer=binding_then(200, {
+        "bank_id": BANK, "principal": "other", "proof": "f" * 64}))
     agent("bad-proof", answer=context_proof(proof="0" * 64))
     agent("proof-missing", answer=lambda _d, _r: Route(200, {"bank_id": BANK,
                                                              "principal": PRINCIPAL}))

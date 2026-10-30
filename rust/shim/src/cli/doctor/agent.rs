@@ -485,4 +485,115 @@ mod tests {
             "f1aad97ee6eda42f4d6eee91e4550127c36012e2bd0eb5ec86270f942ffa7273"
         );
     }
+
+    /// A loopback daemon answering one request per connection, in order;
+    /// returns its address and the request bodies it read.
+    fn daemon(answers: Vec<(u16, Value)>) -> (String, std::thread::JoinHandle<Vec<Value>>) {
+        use std::io::Write;
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let served = std::thread::spawn(move || {
+            let mut bodies = Vec::new();
+            for (status, answer) in answers {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut bytes = Vec::new();
+                let mut chunk = [0u8; 4096];
+                let body_at = loop {
+                    let read = stream.read(&mut chunk).unwrap();
+                    assert!(read > 0, "request ended early");
+                    bytes.extend_from_slice(&chunk[..read]);
+                    let Some(split) = bytes.windows(4).position(|w| w == b"\r\n\r\n") else {
+                        continue;
+                    };
+                    let length = String::from_utf8_lossy(&bytes[..split])
+                        .lines()
+                        .find_map(|line| {
+                            line.to_ascii_lowercase()
+                                .strip_prefix("content-length:")
+                                .and_then(|value| value.trim().parse::<usize>().ok())
+                        })
+                        .unwrap_or(0);
+                    if bytes.len() >= split + 4 + length {
+                        break split + 4;
+                    }
+                };
+                bodies.push(serde_json::from_slice(&bytes[body_at..]).unwrap());
+                let text = answer.to_string();
+                write!(
+                    stream,
+                    "HTTP/1.1 {status} OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{text}",
+                    text.len()
+                )
+                .unwrap();
+            }
+            bodies
+        });
+        (url, served)
+    }
+
+    // Round-3 review of #1066: the binding read matched, and the mailbox read
+    // then answered for another bank or principal; that is a binding change,
+    // not a rejected key (Python `probe_registration`, the same). The near
+    // miss is an unmoved binding whose proof does not verify.
+    #[tokio::test]
+    async fn a_binding_that_moves_between_the_two_reads_is_a_bank_change() {
+        const BANK: &str = "00000000-0000-4000-8000-000000000001";
+        const OTHER: &str = "00000000-0000-4000-8000-000000000002";
+        let state = json!({"version":2,"bank_id":BANK,"principal":"default",
+                           "agent_id":"a".repeat(32),"credential":"fixture-key"});
+        for (moved, expected) in [
+            (
+                json!({"bank_id":OTHER,"principal":"default"}),
+                "bank_identity_mismatch",
+            ),
+            (
+                json!({"bank_id":BANK,"principal":"machine-login"}),
+                "bank_identity_mismatch",
+            ),
+            (
+                json!({"bank_id":BANK,"principal":"default"}),
+                "invalid_credential",
+            ),
+        ] {
+            let mut answer = moved.clone();
+            answer["proof"] = json!("f".repeat(64));
+            let (url, served) = daemon(vec![
+                (200, json!({"bank_id":BANK,"principal":"default"})),
+                (200, answer),
+            ]);
+            let result = probe(
+                &url,
+                Ok(Some("fixture-bearer".into())),
+                state.as_object().unwrap(),
+                Duration::from_secs(5),
+            )
+            .await;
+            assert_eq!(result, expected, "{moved}");
+            let bodies = served.join().unwrap();
+            assert_eq!(bodies[0], json!({"read_only": true}));
+            assert_eq!(bodies[1]["agent_id"], "a".repeat(32));
+        }
+    }
+
+    // Round-3 review of #1066: a revoked key's real shape, the binding read
+    // answered and the mailbox read refused as invalid_credential.
+    #[tokio::test]
+    async fn a_revoked_mailbox_key_after_a_matching_binding_is_invalid_credential() {
+        const BANK: &str = "00000000-0000-4000-8000-000000000001";
+        let state = json!({"version":2,"bank_id":BANK,"principal":"default",
+                           "agent_id":"a".repeat(32),"credential":"fixture-key"});
+        let (url, served) = daemon(vec![
+            (200, json!({"bank_id":BANK,"principal":"default"})),
+            (403, json!({"error":"invalid_credential"})),
+        ]);
+        let result = probe(
+            &url,
+            Ok(Some("fixture-bearer".into())),
+            state.as_object().unwrap(),
+            Duration::from_secs(5),
+        )
+        .await;
+        assert_eq!(result, "invalid_credential");
+        assert_eq!(served.join().unwrap().len(), 2);
+    }
 }

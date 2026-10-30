@@ -1206,6 +1206,9 @@ class CoordinationAdapter:
                 self._context = await fetch_context(self._client, self.url, snapshot)
                 self._check_snapshot(snapshot)
             reservation = self._load_or_reserve()
+            # The saved file a refused binding is about: the bound record,
+            # or the legacy one when that was imported below.
+            source = self.state_path
             if snapshot is not None:
                 from .coordination_identity import (
                     read_legacy, fetch_context, check_binding, principal_changed,
@@ -1236,7 +1239,6 @@ class CoordinationAdapter:
                     reservation = self._load_or_reserve()
                     if retired:
                         break
-                source = self.state_path
                 # A .stale beside the bound path exists only once this exact
                 # path held a bound record that was retired (a principal
                 # change or a missing address). The legacy record is then
@@ -1297,6 +1299,10 @@ class CoordinationAdapter:
             try:
                 result = await self._post_attach(self.wake_enabled)
             except AdapterError as error:
+                if error.code == "bank_identity_mismatch" and error.state_file is None:
+                    # _post re-checked the binding before the attach (the Rust
+                    # shim checks it there too, and names the same file).
+                    error.state_file = source
                 if not (resumed and error.code == "instance_not_found"):
                     raise
                 # The saved address is unknown to this bank: pruned after long

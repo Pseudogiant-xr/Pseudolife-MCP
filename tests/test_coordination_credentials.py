@@ -393,6 +393,36 @@ def test_bank_and_principal_both_changed_still_refuses(tmp_path, capsys):
     assert ".stale" not in capsys.readouterr().err
 
 
+def test_a_bank_that_changes_before_the_attach_names_the_saved_file(tmp_path):
+    """Round-3 review of #1066: the binding is checked again just before the
+    attach (``_post``'s ``validate_snapshot``). A bank that changed between
+    the startup check and that one is refused as before, and the refusal now
+    names the saved file, as the Rust shim's check there does, so the Codex
+    registry's startup line can name it."""
+    async def run():
+        provider, bank = Provider(), Bank()
+        path = tmp_path / "state.json"
+        client, first = instance(bank, provider, path)
+        async with client, first:
+            pass
+        original = path.read_bytes()
+
+        def flip(action):
+            if action == "context":
+                bank.bank_id = "22222222-2222-4222-8222-222222222222"
+                bank.response_hook = None
+        bank.response_hook = flip
+        client, resumed = instance(bank, provider, path)
+        async with client:
+            with pytest.raises(AdapterError) as caught:
+                await resumed.__aenter__()
+        assert caught.value.code == "bank_identity_mismatch"
+        assert caught.value.binding == "bank"
+        assert caught.value.state_file == path
+        assert path.read_bytes() == original
+    asyncio.run(run())
+
+
 def test_a_record_replaced_after_it_was_read_is_reloaded_not_retired(tmp_path, monkeypatch):
     """Two shims on one state path: after this one read the old record,
     another retired it and saved a new address under the current principal.

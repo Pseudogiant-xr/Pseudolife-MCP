@@ -135,6 +135,67 @@ def test_registration_tells_a_principal_change_from_a_bank_change(
     assert requests == [{"read_only": True}]
 
 
+@pytest.mark.parametrize("moved,expected", [
+    # The binding the mailbox read answers with moved after the first read.
+    ({"bank_id": _OTHER_BANK, "principal": "default"}, "bank_identity_mismatch"),
+    ({"bank_id": _SAVED_BANK, "principal": "machine-login"}, "bank_identity_mismatch"),
+    # The near miss: an unmoved binding with a proof that does not verify.
+    ({"bank_id": _SAVED_BANK, "principal": "default"}, "invalid_credential"),
+])
+def test_a_binding_that_moves_between_the_two_reads_is_a_bank_change(
+        tmp_path, monkeypatch, moved, expected):
+    """Round-3 review of #1066: the binding read matched, and the mailbox
+    read then answered for another bank or principal (a daemon swapped or
+    remapped between the reads). That is reported as a binding change, not
+    as a rejected key."""
+    from pseudolife_memory import coordination_identity
+    monkeypatch.setattr(coordination_identity, "read_legacy", lambda path, url: {
+        "version": 2, "bank_id": _SAVED_BANK, "principal": "default",
+        "agent_id": "a" * 32, "credential": "fixture-key"})
+    state = tmp_path / "state.json"
+    state.write_text("fixture", encoding="utf-8")
+    requests = []
+
+    def daemon(request):
+        requests.append(json.loads(request.content))
+        if "agent_id" not in requests[-1]:
+            return httpx.Response(200, json={"bank_id": _SAVED_BANK, "principal": "default"})
+        return httpx.Response(200, json={**moved, "proof": "f" * 64})
+
+    async def drive():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(daemon)) as client:
+            return await doctor_cli.probe_registration(
+                "http://fixture", "fixture-bearer", state, 1, client=client)
+
+    assert asyncio.run(drive()) == expected
+    assert requests[0] == {"read_only": True} and requests[1]["agent_id"] == "a" * 32
+
+
+def test_a_revoked_mailbox_key_after_a_matching_binding_is_invalid_credential(
+        tmp_path, monkeypatch):
+    """Round-3 review of #1066: the real shape of a revoked key. The binding
+    read matches; the mailbox read is refused as ``invalid_credential``, as
+    the daemons refuse a mailbox whose key is gone."""
+    from pseudolife_memory import coordination_identity
+    monkeypatch.setattr(coordination_identity, "read_legacy", lambda path, url: {
+        "version": 2, "bank_id": _SAVED_BANK, "principal": "default",
+        "agent_id": "a" * 32, "credential": "fixture-key"})
+    state = tmp_path / "state.json"
+    state.write_text("fixture", encoding="utf-8")
+
+    def daemon(request):
+        if "agent_id" not in json.loads(request.content):
+            return httpx.Response(200, json={"bank_id": _SAVED_BANK, "principal": "default"})
+        return httpx.Response(403, json={"error": "invalid_credential"})
+
+    async def drive():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(daemon)) as client:
+            return await doctor_cli.probe_registration(
+                "http://fixture", "fixture-bearer", state, 1, client=client)
+
+    assert asyncio.run(drive()) == "invalid_credential"
+
+
 def test_a_principal_change_says_the_shim_registers_a_new_address():
     result = doctor_cli.coordination_snapshot(
         {"status": "ok"}, {"state": "on"}, {}, "generic", "principal_changed")
