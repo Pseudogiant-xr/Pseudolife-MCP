@@ -287,7 +287,7 @@
                   {#if scopeLine(a)}<span class="peer-scope">{scopeLine(a)}</span>{/if}
                   <span class="peer-status" class:none={!a.status}>{a.status || "No status set"}</span>
                   <span class="chips">
-                    {#if role === "delegate"}<span class="chip role-chip gold chip-prose">Delegate</span>{/if}
+                    {#if role === "delegate"}<span class="chip role-chip gold chip-prose">Conductor</span>{/if}
                     {#if role === "coordinator"}<span class="chip role-chip lav chip-prose">Coordinator</span>{/if}
                     <span class="chip {chip.tone}">{chip.text}</span>
                     {#if a.subagent}<span class="chip">subagent</span>{/if}

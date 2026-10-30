@@ -37,7 +37,7 @@ memory_agents(action=update, children=[...]) only if they do not appear.";
 pub const PARK_GATE_MESSAGE: &str = "Before ending: update your board status with why you stopped and what you need \
 (memory_agents update park_reason=... park_needs=... park_clear_by=... \
 park_resume=...). Use done only when no follow-up is expected; urgent mail \
-from the maintainer, the maintainer's delegate for the project or your named \
+from the maintainer, the maintainer's conductor for the project or your named \
 clearer still rings it. Waiting on a merge click or a review that may \
 still bring fixes? Park needs_approval with park_clear_by set to the \
 reviewer's agent id or maintainer, or waiting_peer. A park records intent; automatic wake requires \

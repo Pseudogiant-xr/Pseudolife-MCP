@@ -42,6 +42,7 @@ const DEFERRED_MODES: &[&str] = &[
     "export",
     "import",
     "maintainer",
+    "conductor-watch",
     "delegate-watch",
 ];
 

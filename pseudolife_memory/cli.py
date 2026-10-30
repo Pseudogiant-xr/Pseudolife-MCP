@@ -86,9 +86,10 @@ modes:
                  (plain mail never wakes), print the mail and exit (arm as a
                  background command to wake an idle session; exit 0 ring,
                  3 timeout, 2 setup; --help for options)
-  delegate-watch wake a delegate session with board mail only when something
-                 needs a decision: pull requests, CI, suite results and suite
-                 leases, polled without a model (--help for options)
+  conductor-watch wake the conductor session with board mail only when
+                 something needs a decision: pull requests, CI, suite results
+                 and suite leases, polled without a model (`delegate-watch`
+                 is its older name; --help for options)
   lease          hold a named lease around a command: `lease run NAME --
                  COMMAND...` takes an OS file lock the agent board mirrors
                  (FIFO queue, holder, expected end); `lease hold NAME
@@ -96,7 +97,7 @@ modes:
                  `lease check NAME` exits 1 while it is held (a launch gate);
                  `lease list` shows them; operator only: `lease break NAME`
                  frees a stuck one, `lease delegate PROJECT AGENT` makes
-                 one session the maintainer's delegate for a project
+                 one session the maintainer's conductor for a project
   maintainer    on the daemon host, the maintainer's passkeys (operator
                  only; reads PSEUDOLIFE_MCP_DATABASE_URL, else runs inside
                  the pseudolife-mcp-daemon container):
@@ -208,7 +209,7 @@ def main() -> None:
     elif mode == "wait-mail":
         from pseudolife_memory.wait_mail_cli import run_wait_mail
         sys.exit(run_wait_mail(sys.argv[2:]))
-    elif mode == "delegate-watch":
+    elif mode in ("conductor-watch", "delegate-watch"):
         from pseudolife_memory.delegate_watch_cli import main as delegate_watch_main
         sys.exit(delegate_watch_main(sys.argv[2:]))
     elif mode == "lease":

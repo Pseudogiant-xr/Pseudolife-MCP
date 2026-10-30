@@ -90,6 +90,7 @@ def test_help_lists_version(monkeypatch, capsys):
 UNLISTED_MODES = {
     "shim": "the no-argument mode by name",
     "doorbell-prompt-seen": "the doorbell helper the plugin's prompt hook runs, not run by hand",
+    "delegate-watch": "conductor-watch's older name, which its help line names",
 }
 
 

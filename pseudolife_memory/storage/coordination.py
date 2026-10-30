@@ -255,7 +255,7 @@ ROLE_ACTORS = ("operator", "maintainer")
 DELEGATION_MIN = 60
 DELEGATION_MAX = 7 * 86400
 # What a send to a done park is told would reopen it.
-DONE_REOPEN_BY = ("urgent mail from the maintainer, the maintainer's delegate for the project, "
+DONE_REOPEN_BY = ("urgent mail from the maintainer, the maintainer's conductor for the project, "
                   "or the park's named clearer")
 # What a withheld send is told would ring the park.
 WITHHELD_RETRY = "urgent=true, or clears=<its park_needs>, rings this park"
@@ -2463,7 +2463,9 @@ class CoordinationStore:
                "expires_at": row["expires_at"], "replaced": replaced}
         if also:
             out["also_broken"] = also
-        return {**out, **self.reachability(agent, now, role="delegate")}
+        # ``role`` only names the role in the warning: the stored id stays
+        # ``delegate``, the name a user reads is "conductor".
+        return {**out, **self.reachability(agent, now, role="conductor")}
 
     @classmethod
     def reachability(cls, agent, now, *, role=None):

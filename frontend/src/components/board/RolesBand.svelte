@@ -134,7 +134,7 @@
                   stroke-width="1.6"
                   stroke-linecap="round"
                 /></svg
-              >Your delegate
+              >Your conductor
             </span>
             <span class="left">{timeLeft(h.expires_at, now)}</span>
             <span class="lease mono">{leaseName("delegate", project)}</span>
@@ -170,7 +170,7 @@
               aria-expanded={composer === "delegate"}
               disabled={!!blocked}
               title={blocked || undefined}
-              onclick={() => toggle("delegate")}>Message your delegate</button
+              onclick={() => toggle("delegate")}>Message your conductor</button
             >
             <button
               type="button"
@@ -201,10 +201,10 @@
                 stroke-width="1.6"
                 stroke-linecap="round"
               /></svg
-            >No delegate for {project}
+            >No conductor for {project}
           </span>
           <span class="empty-body">
-            Pick a session below and choose Make delegate. It acts with your authority until you revoke it or its time
+            Pick a session below and choose Make conductor. It acts with your authority until you revoke it or its time
             runs out.
           </span>
         </div>

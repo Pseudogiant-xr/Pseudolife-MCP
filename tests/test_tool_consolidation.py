@@ -698,7 +698,9 @@ def test_message_description_names_the_maintainers_delegate(
     authority is the maintainer's delegate)."""
     d = _descriptions(tmp_path, monkeypatch)
     assert "coordinator:<project>" in d["memory_agents"]
-    assert "maintainer's delegate" in d["memory_message"]
+    # 2026-10-30: the role reads "conductor"; its stored id stays delegate.
+    assert "maintainer's conductor" in d["memory_message"]
+    assert "delegate" not in d["memory_message"]
     assert "coordinator" not in d["memory_message"]
 
 
