@@ -203,9 +203,11 @@ def _probe_install_kind(interpreter: Path) -> tuple[str, str, list[str]]:
     stripped its editable install."""
     # From a neutral directory: `python -c` puts the working directory first
     # on sys.path, and this helper runs from a checkout that holds the
-    # package, which would make every interpreter look editable.
-    code, out = run_cli([str(interpreter), "-c", _INSTALL_KIND_PROBE], timeout=60,
-                        cwd=tempfile.gettempdir())
+    # package, which would make every interpreter look editable. A fresh
+    # empty directory, not the shared temp directory, where a stray
+    # `pseudolife_memory` folder would be imported in place of the install.
+    with tempfile.TemporaryDirectory(prefix="pseudolife-probe-", ignore_cleanup_errors=True) as neutral:
+        code, out = run_cli([str(interpreter), "-c", _INSTALL_KIND_PROBE], timeout=60, cwd=neutral)
     if code != 0:
         return "unknown", f"probe exited {code}: {_failure_line(out, code)}", []
     # run_cli appends stderr after stdout, so a warning from a .pth or

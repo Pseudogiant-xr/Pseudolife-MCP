@@ -22,6 +22,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 
 import pytest
@@ -671,6 +672,23 @@ def test_the_handshake_ignores_a_pseudolife_memory_package_in_the_working_direct
     result = connect_cli.subprocess_handshake("http://127.0.0.1:9", ("literal", GOOD), timeout=10)
     assert not marker.exists(), marker.read_text(encoding="utf-8")
     assert result.get("tool_count") != 999
+
+
+def test_the_handshake_ignores_a_module_left_in_the_shared_temp_directory(tmp_path, monkeypatch):
+    # The temp directory is shared: any file there named like a module the
+    # handshake imports (`mcp.py`, a `pseudolife_memory` folder) would run in
+    # its place. A stray copy of mcp_server.py named mcp.py made every
+    # `connect` verification fail on the maintainer's PC (2026-10-30).
+    marker = tmp_path / "shadow-imported"
+    shared = tmp_path / "shared-temp"
+    shared.mkdir()
+    (shared / "mcp.py").write_text(
+        f"open({str(marker)!r}, 'a').write('mcp\\n')\nraise SystemExit(42)\n", encoding="utf-8")
+    monkeypatch.setattr(tempfile, "tempdir", str(shared))
+    monkeypatch.setenv("PYTHONPATH", str(Path(connect_cli.__file__).resolve().parents[1]))
+    result = connect_cli.subprocess_handshake("http://127.0.0.1:9", ("literal", GOOD), timeout=10)
+    assert not marker.exists(), marker.read_text(encoding="utf-8")
+    assert result.get("error") != "the handshake exited 42"
 
 
 def test_a_relative_token_file_reaches_the_neutral_directory_handshake_resolved(tmp_path,

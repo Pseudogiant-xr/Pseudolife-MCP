@@ -21,6 +21,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -887,6 +888,20 @@ def test_install_kind_probe_runs_from_a_neutral_directory(cli, tmp_path):
     uc.install_kind(python)
     probe = next(kw for call, kw in zip(cli.calls, cli.run_kwargs) if "package_dir" in " ".join(call))
     assert probe.get("cwd") and Path(probe["cwd"]).resolve() != ROOT.resolve()
+
+
+def test_the_install_kind_probe_ignores_a_package_left_in_the_shared_temp_directory(tmp_path, monkeypatch):
+    """The temp directory is shared: a stray `pseudolife_memory` folder there
+    would be imported in place of the installed package and could make the
+    probe misreport the install kind, the 2026-09-21 class of mistake."""
+    marker = tmp_path / "shadow-imported"
+    shared = tmp_path / "shared-temp"
+    shadow = shared / "pseudolife_memory"
+    shadow.mkdir(parents=True)
+    (shadow / "__init__.py").write_text(f"open({str(marker)!r}, 'a').write('shadow\\n')\n", encoding="utf-8")
+    monkeypatch.setattr(tempfile, "tempdir", str(shared))
+    uc._probe_install_kind(Path(sys.executable))
+    assert not marker.exists(), marker.read_text(encoding="utf-8")
 
 
 def test_failure_line_quotes_pips_error_not_its_notice():
