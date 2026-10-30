@@ -5505,7 +5505,13 @@ conductor from the Console frees either. To revoke an old grant from the host,
 `lease break delegate:<project>`. Wake rows recorded as `delegate` still count
 against the sender's authority budget and a queued reopen is still served. A
 Console tab left open across the upgrade still grants and revokes; reload it
-to see the role in its Roles band again.
+to see the role in its Roles band again. Before deploying, check that
+`pseudolife-mcp lease list` shows no `conductor:` lease held: until this
+release any session could take one, and although it grants nothing, the
+Console would name its holder as the one a grant replaces; `lease break` it.
+Run `lease delegate` from a client at the daemon's version: an older one
+writes an old-named grant beside a new one, and a newer one against an older
+daemon writes a lease that daemon neither honours nor reserves.
 
 **Upgrading from 0.16.0**, where the grant was the lease
 `designated:coordinator:<project>` and its rings were `reason: coordinator`:

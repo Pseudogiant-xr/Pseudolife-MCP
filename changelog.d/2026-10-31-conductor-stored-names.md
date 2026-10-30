@@ -14,8 +14,11 @@
   (`lease_break`, reason `renamed`); the Console's revoke frees either name.
   Both names stay reserved. Wake rows recorded as `delegate` still count
   against the authority budget and are still served, and a Console tab
-  still asking for `grant-delegate` or `revoke-delegate` is issued the new
-  purpose.
+  loaded before the upgrade still grants and revokes (its challenge keeps
+  the old purpose it asked for). Before deploying, `lease break` any
+  `conductor:` lease `pseudolife-mcp lease list` shows held, since any
+  session could take one until now, and run `lease delegate` from a client
+  at the daemon's version.
 - `pseudolife-mcp conductor-watch` is the watcher's command and
   `pseudolife_memory.conductor_watch_cli` its module; `delegate-watch` still
   runs it after one stderr line naming `conductor-watch`. The `lease

@@ -47,8 +47,10 @@ const ROLE_PURPOSES: [&str; 4] = [
     "revoke-coordinator",
 ];
 /// `LEGACY_ROLE_PURPOSES`: the conductor's purposes until 2026-10-31. A
-/// challenge asked for under one (a Console tab loaded before the upgrade)
-/// is issued and signed under the new name.
+/// Console tab loaded before the upgrade asks for one and refuses a payload
+/// whose purpose differs from its request, so the challenge is issued under
+/// the requested name (and previews the role as `delegate`); everything
+/// else reads it as the new one.
 const LEGACY_ROLE_PURPOSES: [(&str, &str); 2] = [
     ("grant-delegate", "grant-conductor"),
     ("revoke-delegate", "revoke-conductor"),
@@ -516,12 +518,13 @@ async fn role_preview(
 
 /// `_challenge`.
 async fn challenge(c: &Client, rp_id: &str, body: &Map<String, Value>, now: f64) -> Outcome<Value> {
+    let legacy = match body.get("purpose") {
+        Some(Value::String(p)) => LEGACY_ROLE_PURPOSES.iter().find(|(old, _)| old == p),
+        _ => None,
+    };
     let purpose = match body.get("purpose") {
         Some(Value::String(p)) => {
-            let p = LEGACY_ROLE_PURPOSES
-                .iter()
-                .find(|(old, _)| old == p)
-                .map_or(p.as_str(), |(_, new)| new);
+            let p = legacy.map_or(p.as_str(), |(_, new)| new);
             CHALLENGE_FIELDS.iter().find(|(name, _)| *name == p)
         }
         _ => None,
@@ -598,6 +601,10 @@ async fn challenge(c: &Client, rp_id: &str, body: &Map<String, Value>, now: f64)
             preview = Some(role_preview(c, purpose, &fields, now).await?);
         }
     }
+    if let (Some(_), Some(preview)) = (legacy, preview.as_mut()) {
+        // The role as that tab names it.
+        preview.insert("role".into(), json!("delegate"));
+    }
     let project_name = fields
         .get("project")
         .and_then(Value::as_str)
@@ -624,7 +631,8 @@ async fn challenge(c: &Client, rp_id: &str, body: &Map<String, Value>, now: f64)
         let name = format!("{other}{}", project_name.as_deref().unwrap_or(""));
         fields.insert("other_holder".into(), role_holder(c, &name, now).await?);
     }
-    let (payload, mac) = issue(c, purpose, fields, now).await?;
+    let issued = legacy.map_or(purpose, |(old, _)| old);
+    let (payload, mac) = issue(c, issued, fields, now).await?;
     let options = get_options(rp_id, &payload, &signing_keys(c, now).await?);
     let mut out = json!({"payload": payload, "mac": mac, "publicKey": options});
     if let Some(preview) = preview {

@@ -1305,7 +1305,7 @@ def test_fixture_board_serves_named_sessions_and_role_holders(svc):
     unnamed = next(a for a in agents.values() if a["name_source"] == "")
     assert unnamed["name"] == f"{unnamed['label']} {unnamed['agent_id'][:8]}"
     roles = svc.maintainer_status()["roles"]["Pseudolife-MCP"]
-    for role in ("delegate", "coordinator"):
+    for role in ("conductor", "coordinator"):
         assert roles[role]["agent_id"] in agents
         lease = next(l for l in out["leases"] if l["name"] == f"{role}:Pseudolife-MCP")
         assert lease["holder"]["name"] == agents[roles[role]["agent_id"]]["name"]

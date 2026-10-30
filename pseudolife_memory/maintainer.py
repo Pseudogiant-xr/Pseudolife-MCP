@@ -280,9 +280,13 @@ def _role_preview(store, purpose, fields):
 
 
 def _challenge(service, board, store, body):
-    purpose = body.get("purpose")
-    if isinstance(purpose, str):
-        purpose = LEGACY_ROLE_PURPOSES.get(purpose, purpose)
+    # A Console tab loaded before the conductor's rename asks for the old
+    # purpose and refuses a payload whose purpose differs from its request,
+    # so the payload keeps the requested name; everything else, and the
+    # completing route, reads it as the new one.
+    requested = body.get("purpose")
+    purpose = (LEGACY_ROLE_PURPOSES.get(requested, requested)
+               if isinstance(requested, str) else requested)
     if purpose not in CHALLENGE_PURPOSES:
         raise MaintainerError("invalid_request", check="purpose")
     if set(body) - {"purpose"} - _CHALLENGE_FIELDS[purpose]:
@@ -321,6 +325,9 @@ def _challenge(service, board, store, body):
     else:  # revoke-conductor, revoke-coordinator
         fields = {"project": _project(body.get("project"))}
         preview = _role_preview(store, purpose, fields)
+    if requested in LEGACY_ROLE_PURPOSES:
+        # The role as that tab names it.
+        preview["role"] = "delegate"
     if purpose in ROLE_PURPOSES:
         # Who the change replaces or evicts decides its outcome, so it is
         # signed too (review, 2026-10-04): a session that swaps in during
@@ -331,7 +338,7 @@ def _challenge(service, board, store, body):
         # the recipient: a preview that said ``also_breaks: null`` must not
         # break a role the recipient took since (review of #569, 2026-10-05).
         fields["other_holder"] = store.role_holder(_OTHER_PREFIX[purpose] + fields["project"])
-    payload, mac = store.issue(purpose, fields)
+    payload, mac = store.issue(requested, fields)
     out = {"payload": payload, "mac": mac, "publicKey": _get_options(store, payload)}
     if preview is not None:
         out["preview"] = preview
@@ -361,7 +368,7 @@ def _send(service, board, store, body):
 
 def _role(service, board, store, body):
     def action(fields, key):
-        purpose = fields["purpose"]
+        purpose = LEGACY_ROLE_PURPOSES.get(fields["purpose"], fields["purpose"])
         project = _project(fields.get("project"))
         try:
             # The role leases, in name order (lease rows before any agent
@@ -390,7 +397,8 @@ def _role(service, board, store, body):
             return out if out["broken"] or not legacy["broken"] else legacy
         except CoordinationError as exc:
             raise _board_error(exc) from None
-    return store.complete(body.get("payload"), body.get("mac"), ROLE_PURPOSES,
+    return store.complete(body.get("payload"), body.get("mac"),
+                          (*ROLE_PURPOSES, *LEGACY_ROLE_PURPOSES),
                           body.get("assertion"), action)
 
 

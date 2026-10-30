@@ -2609,30 +2609,73 @@ def _agent_held(store, agent, name, purpose="granted by the operator"):
         (name, agent["agent_id"], purpose, store.test_time[0], store.test_time[0] + 86400))
 
 
-def test_a_conductor_lease_an_agent_took_before_the_upgrade_grants_nothing(store):
+@pytest.mark.parametrize("name", ["delegate:proj", "conductor:proj"])
+def test_a_conductor_lease_an_agent_took_before_the_upgrade_grants_nothing(store, name):
     """0.16.0 let any session acquire an ordinary lease named
-    ``delegate:<project>``; a hold taken then must not become reopen
+    ``delegate:<project>``, and releases until 2026-10-31 one named
+    ``conductor:<project>``; a hold taken then must not become reopen
     authority after the upgrade (coordinator review of #559). Only the
-    operator's grant, recorded as ``lease_delegate`` for the lease's
-    current fence, counts; the purpose text is the agent's and proves
-    nothing."""
+    operator's grant, recorded for the lease's own name and current fence,
+    counts; the purpose text is the agent's and proves nothing."""
     squatter = store.register("alice", project="proj")
-    _agent_held(store, squatter, "conductor:proj")
+    _agent_held(store, squatter, name)
     b = _done(store)
     assert _wake(store, squatter, b, urgent=True)["reason"] == "parked_done"
 
 
-def test_a_regrant_counts_and_a_revoked_grant_cannot_be_revived(store):
+@pytest.mark.parametrize("name", ["delegate:proj", "conductor:proj"])
+def test_a_regrant_counts_and_a_revoked_grant_cannot_be_revived(store, name):
     delegate = _delegate(store)
     store.grant_conductor("proj", delegate["agent_id"], hold=3600)   # a new fence
     b = _done(store)
     assert _wake(store, delegate, b, urgent=True)["reason"] == "conductor"
-    # Revoked, then the same agent holds the name again by any other route:
-    # its old grant was for an earlier fence, so it counts for nothing.
+    # Revoked, then the same agent holds either name again by any other
+    # route: its grant was for another lease or an earlier fence, so it
+    # counts for nothing.
     store.break_lease("conductor:proj")
-    _agent_held(store, delegate, "conductor:proj")
+    _agent_held(store, delegate, name)
     c = _done(store)
     assert _wake(store, delegate, c, urgent=True)["reason"] == "parked_done"
+
+
+@pytest.mark.parametrize("actor", ["operator", "agent", "daemon"])
+def test_an_old_named_hold_proves_the_role_only_with_a_role_actors_record(store, actor):
+    """The conductor's grant before 2026-10-31: ``delegate:<project>`` with
+    the operator's ``lease_delegate`` record for its fence. The same record
+    by any actor but the operator or maintainer proves nothing."""
+    old = store.register("alice", project="proj")
+    _agent_held(store, old, "delegate:proj")
+    fence = store.storage.conn.execute(
+        "SELECT fence FROM coordination_leases WHERE name='delegate:proj'").fetchone()[0]
+    with store.storage._txn():
+        store._append([store._event("lease_delegate",
+                                    {"name": "delegate:proj", "fence": fence, "hold": 3600,
+                                     "replaced": None},
+                                    actor=actor, agent_id=old["agent_id"])],
+                      store.test_time[0])
+    b = _done(store)
+    assert _wake(store, old, b, urgent=True)["reason"] == (
+        "conductor" if actor == "operator" else "parked_done")
+
+
+def test_a_grant_settles_an_expired_old_named_hold_instead_of_breaking_it(store):
+    """An old-named hold already past its expiry is settled (``lease_expire``)
+    by the grant, not broken, and replaces nobody."""
+    old = store.register("alice", project="proj")
+    new = store.register("alice", project="proj")
+    _agent_held(store, old, "delegate:proj")
+    store.storage.conn.execute(
+        "UPDATE coordination_leases SET expires_at=%s WHERE name='delegate:proj'",
+        (store.test_time[0] - 1,))
+    out = store.grant_conductor("proj", new["agent_id"], hold=3600)
+    assert out["replaced"] is None
+    rows = store.storage.conn.execute(
+        "SELECT event, payload FROM coordination_events WHERE agent_id=%s ORDER BY seq",
+        (old["agent_id"],)).fetchall()
+    assert [r[0] for r in rows if "delegate:proj" in r[1]] == ["lease_expire"]
+    assert store.storage.conn.execute(
+        "SELECT holder_agent_id FROM coordination_leases WHERE name='delegate:proj'"
+    ).fetchone()[0] is None
 
 
 # Rows from before either rename: ``coordinator`` until 0.16.1 (2026-10-04),

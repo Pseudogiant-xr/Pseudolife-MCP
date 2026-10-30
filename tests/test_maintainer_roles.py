@@ -862,18 +862,19 @@ def test_assigning_the_coordinator_to_an_old_named_conductor_breaks_that_hold(sv
 
 
 @pytest.mark.parametrize("purpose", ["grant-delegate", "revoke-delegate"])
-def test_the_old_purpose_names_are_issued_under_the_new_ones(svc, purpose):
-    """A Console tab loaded before the upgrade still asks for the old
-    purposes; the challenge is issued, previewed and signed under the new
-    name, so the completed action is the new route's."""
+def test_a_tab_loaded_before_the_rename_still_grants_and_revokes(svc, purpose):
+    """A Console tab loaded before the upgrade asks for the old purposes and
+    refuses to sign a payload whose purpose differs from its request (Codex
+    review, 2026-10-31), so the payload keeps the old name and the preview
+    the old role word; the completing route acts as the new purpose."""
     auth = bootstrap(svc)
     agent = peer(svc)
     fields = {"project": "p"}
     if purpose.startswith("grant"):
         fields.update(agent_id=agent["agent_id"], hold=HOUR)
     out, challenge = role(svc, auth, purpose, **fields)
-    assert json.loads(challenge["payload"])["purpose"] == purpose.replace("delegate", "conductor")
-    assert challenge["preview"]["role"] == "conductor"
+    assert json.loads(challenge["payload"])["purpose"] == purpose
+    assert challenge["preview"]["role"] == "delegate"
     if purpose.startswith("grant"):
         assert holder(svc, "conductor:p") == agent["agent_id"]
     else:

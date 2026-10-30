@@ -805,6 +805,7 @@ class FixtureService:
         "8d2fedbd6a3c4f1e9b8a7d6c5e4f3a2b": ("Console board roles", "laptop"),
         "3b7c91e04d2a4b6c8e1f0a9b8c7d6e5f": ("Forget cascade fix", "box"),
     }
+    _MX_LEGACY = {"grant-delegate": "grant-conductor", "revoke-delegate": "revoke-conductor"}
     _MX_ROLE_PURPOSES = ("grant-conductor", "revoke-conductor", "assign-coordinator",
                          "revoke-coordinator")
     # As the real route: any other field in a challenge body is refused.
@@ -1085,11 +1086,11 @@ class FixtureService:
         return out
 
     def maintainer_challenge(self, body: dict) -> dict:
-        purpose = body.get("purpose")
-        if isinstance(purpose, str):
-            # As the real route: the conductor's old purpose names still work.
-            purpose = {"grant-delegate": "grant-conductor",
-                       "revoke-delegate": "revoke-conductor"}.get(purpose, purpose)
+        # As the real route: the conductor's old purpose names still work,
+        # issued under the name asked for.
+        requested = body.get("purpose")
+        purpose = (self._MX_LEGACY.get(requested, requested)
+                   if isinstance(requested, str) else requested)
         if purpose not in self._MX_FIELDS or set(body) - {"purpose"} - self._MX_FIELDS[purpose]:
             raise ValueError("invalid_request")
         if purpose == "enrol-bootstrap":
@@ -1128,6 +1129,8 @@ class FixtureService:
                 fields["other_holder"] = self._mx_holder(other, project)
             # The holder the change displaces is signed too, as the real route does.
             fields["holder"] = holder
+            if requested in self._MX_LEGACY:
+                preview["role"] = "delegate"
         elif purpose in ("cancel", "revoke-self"):
             fields = {"credential_id": body.get("credential_id")}
         elif purpose == "repudiate":
@@ -1139,7 +1142,7 @@ class FixtureService:
             fields = {"label": label.strip()}
         else:
             raise ValueError("invalid_request")
-        payload, mac = self._mx_issue(purpose, fields)
+        payload, mac = self._mx_issue(requested, fields)
         out = {"payload": payload, "mac": mac,
                "publicKey": self._mx_options(payload, create=purpose == "enrol-bootstrap")}
         if preview is not None:
@@ -1203,10 +1206,11 @@ class FixtureService:
         return {"message_id": message_id, "wake": wake}
 
     def maintainer_role(self, body: dict) -> dict:
-        purpose = self._mx_purpose(body)
+        signed = self._mx_purpose(body)
+        purpose = self._MX_LEGACY.get(signed, signed)
         if purpose not in self._MX_ROLE_PURPOSES:
             raise ValueError("assertion_invalid")
-        fields = self._mx_open(body, purpose)
+        fields = self._mx_open(body, signed)
         now = time.time()
         project = fields["project"]
         slots = self._mx()["roles"].setdefault(project, {"conductor": None, "coordinator": None})
