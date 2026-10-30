@@ -12,6 +12,9 @@ from test_workflow import commands
 ROOT = Path(__file__).resolve().parents[2]
 SYSTEMS = ["ubuntu-latest", "windows-latest"]
 SOURCE_EVENTS = "github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'ci')"
+PARITY_CANCELLED_STEP = {"name": "A needed job was cancelled",
+                         "if": "${{ contains(needs.*.result, 'cancelled') }}", "run": "exit 1"}
+PARITY_VERDICT_IF = "${{ !contains(needs.*.result, 'cancelled') }}"
 PARITY_EVENT_GATE = """
 $results = ConvertFrom-Json $env:GATE_RESULTS -AsHashtable
 $docsOnly = ($env:GATE_EVENT -ceq 'pull_request' -or $env:GATE_EVENT -ceq 'merge_group') -and $results['scope'].result -ceq 'success' -and $results['scope'].outputs.rust -ceq 'false'
@@ -201,9 +204,12 @@ def check(workflow):
     gate = jobs['parity']
     assert gate['needs'] == ['scope', 'rust', 'candidate', 'parity-checks', 'source-mutants'], 'Parity event gate lost dependency'
     assert gate['if'] == f'always() && ({ordinary_ci})' and not gate.get('continue-on-error'), 'Parity event gate can skip failures'
-    assert len(gate['steps']) == 1, 'Parity event gate steps changed'
-    required = gate['steps'][0]
-    assert required.get('shell') == 'pwsh' and not required.get('if') \
+    assert len(gate['steps']) == 2, 'Parity event gate steps changed'
+    cancelled, required = gate['steps']
+    # A cancelled need fails its own step, which ops/integrate.py reads as
+    # "cancelled, no verdict"; the verdict step skips only in that case.
+    assert cancelled == PARITY_CANCELLED_STEP, 'Parity event gate can skip a cancelled job'
+    assert required.get('shell') == 'pwsh' and required.get('if') == PARITY_VERDICT_IF \
         and not required.get('continue-on-error'), 'Parity event gate can skip failures'
     assert required['env'] == {'GATE_RESULTS': '${{ toJSON(needs) }}',
                               'GATE_EVENT': '${{ github.event_name }}'}, 'Parity event gate inputs changed'

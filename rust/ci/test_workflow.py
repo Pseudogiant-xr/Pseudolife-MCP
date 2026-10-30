@@ -608,14 +608,55 @@ def test_daemon_artifact_is_built_once_and_shared_with_graph():
 
 
 GATE_NEEDS = ["scope", "rust", "candidate", "parity-checks", "source-mutants"]
+# The gate's first step fails when a job it needs was cancelled, and its
+# verdict step then skips, so the failed step itself says a cancel caused it
+# (ops/integrate.py reads that to tell a cancel from a failure).
+CANCELLED_IF = "${{ contains(needs.*.result, 'cancelled') }}"
+CANCELLED_STEP = {"name": "A needed job was cancelled", "if": CANCELLED_IF, "run": "exit 1"}
+VERDICT_IF = "${{ !contains(needs.*.result, 'cancelled') }}"
+
+
+def gate_steps(jobs=None):
+    """(the cancelled-need step, the verdict step) of the Parity gate."""
+    steps = (jobs or workflow()["jobs"])["parity"]["steps"]
+    assert len(steps) == 2 and steps[0] == CANCELLED_STEP, steps
+    assert steps[1]["if"] == VERDICT_IF
+    return steps[0], steps[1]
+
+
+def run_verdict(needs, event):
+    import os
+    return subprocess.run(["pwsh", "-NoProfile", "-Command", gate_steps()[1]["run"]],
+                          env=dict(os.environ, GATE_RESULTS=json.dumps(needs), GATE_EVENT=event),
+                          capture_output=True, text=True)
 
 
 def run_gate(needs, event):
-    import os
-    step = workflow()["jobs"]["parity"]["steps"][0]
-    return subprocess.run(["pwsh", "-NoProfile", "-Command", step["run"]],
-                          env=dict(os.environ, GATE_RESULTS=json.dumps(needs), GATE_EVENT=event),
-                          capture_output=True, text=True)
+    """The gate as GitHub runs it: a cancelled need fails the first step and
+    skips the verdict; otherwise the verdict step decides."""
+    gate_steps()
+    if any(need.get("result") == "cancelled" for need in needs.values()):
+        return subprocess.CompletedProcess([], 1, "", "a needed job was cancelled")
+    return run_verdict(needs, event)
+
+
+@pytest.mark.parametrize("dependency", GATE_NEEDS)
+@pytest.mark.parametrize("event", ["pull_request", "merge_group", "push", "schedule",
+                                   "workflow_dispatch"])
+@pytest.mark.parametrize("base", ["all-success", "docs-only", "ordinary-pr"])
+def test_a_cancelled_need_fails_the_gate_as_the_verdict_alone_did(dependency, event, base):
+    # The cancelled-need step changes which step fails, not the gate's
+    # result: the verdict step alone also fails a cancelled need. The one
+    # exception is `scope` cancelled while every other need passed, which
+    # the verdict never checked (it reads only scope's outputs) and the gate
+    # now fails: reachable only when `scope` alone ran past its timeout,
+    # since its dependents run under `!cancelled()`.
+    needs = copy.deepcopy({"all-success": {n: {"result": "success"} for n in GATE_NEEDS},
+                           "docs-only": DOCS_ONLY_SKIP, "ordinary-pr": ORDINARY_PR_SKIP}[base])
+    needs[dependency]["result"] = "cancelled"
+    stricter = dependency == "scope" and base == "all-success"
+    assert run_verdict(needs, event).returncode == (0 if stricter else 1)
+    assert run_gate(needs, event).returncode == 1
 
 
 @pytest.mark.parametrize("result", ["success", "failure", "cancelled", "skipped", ""])
@@ -625,7 +666,7 @@ def test_required_parity_gate_fails_closed(result, dependency, event):
     gate = workflow()["jobs"]["parity"]
     assert gate["needs"] == GATE_NEEDS
     assert gate["if"].startswith("always() &&")
-    step = gate["steps"][0]
+    step = gate_steps()[1]
     assert step["env"] == {"GATE_RESULTS": "${{ toJSON(needs) }}", "GATE_EVENT": "${{ github.event_name }}"}
     import os
     needs = {name: {"result": "success"} for name in gate["needs"]}
@@ -1466,7 +1507,7 @@ def test_selfhosted_lane_never_touches_a_required_check():
     for name, job in jobs.items():
         needs = job.get("needs", [])
         assert "parity-selfhosted" not in ([needs] if isinstance(needs, str) else needs), name
-    assert "parity-selfhosted" not in jobs["parity"]["steps"][0]["run"]
+    assert "parity-selfhosted" not in gate_steps(jobs)[1]["run"]
     # Nightly and manual CI only: queued self-hosted jobs never hold a PR's
     # checks open.
     assert lane["if"] == (
@@ -1635,7 +1676,7 @@ def test_windows_live_job_reports_but_never_gates():
     for name, job in jobs.items():
         needs = job.get("needs", [])
         assert "parity-live" not in ([needs] if isinstance(needs, str) else needs), name
-    assert "parity-live" not in jobs["parity"]["steps"][0]["run"]
+    assert "parity-live" not in gate_steps(jobs)[1]["run"]
     # Master pushes, the nightly and manual CI: never a pull request or a
     # merge group, whose required checks it would otherwise hold open.
     assert live["if"] == LIVE_EVENTS

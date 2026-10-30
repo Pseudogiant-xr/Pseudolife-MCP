@@ -221,7 +221,7 @@ fn cell(out: &mut String, kind: Kind, text: Option<&str>, rendering: &Rendering)
 }
 
 /// `meta.schema_version` as this build's `ensure_schema` writes it.
-const BUILD_SCHEMA: &str = "57";
+const BUILD_SCHEMA: &str = "58";
 
 async fn tables(client: &Client) -> Result<Option<Vec<Table>>, ()> {
     // Every public table must be classified, as transfer_cli's roster test

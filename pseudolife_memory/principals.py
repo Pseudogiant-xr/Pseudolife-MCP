@@ -242,6 +242,27 @@ def resolve_principal(auth_header: str | None,
     return resolve_principal_detailed(auth_header, token_map, single_token, store)[0]
 
 
+def presented_bearer(auth_header: str | None) -> str | None:
+    """The token of a ``Bearer <token>`` header value, else ``None`` (no
+    header, another scheme, or no token after the scheme)."""
+    if not auth_header:
+        return None
+    scheme, _, presented = auth_header.partition(" ")
+    # HTTP whitespace only: str.strip() would also drop NBSP/NEL, which is
+    # how latin-1 text renders the last byte of UTF-8 "à" (C3 A0) or "ą" (C4 85).
+    presented = presented.strip(" \t")
+    if scheme.lower() != "bearer" or not presented:
+        return None
+    return presented
+
+
+def bearer_presented(auth_header: str | None) -> bool:
+    """Whether an ``Authorization`` header value presents a bearer token, by
+    the parse :func:`resolve_principal_detailed` applies: a caller that sent
+    one and resolved to no principal had its token rejected."""
+    return presented_bearer(auth_header) is not None
+
+
 def resolve_principal_detailed(auth_header: str | None,
                                token_map: dict[str, str],
                                single_token: str | None,
@@ -267,13 +288,8 @@ def resolve_principal_detailed(auth_header: str | None,
     """
     if not token_map and single_token is None:
         return DEFAULT_PRINCIPAL, SOURCE_OPEN
-    if not auth_header:
-        return None, None
-    scheme, _, presented = auth_header.partition(" ")
-    # HTTP whitespace only: str.strip() would also drop NBSP/NEL, which is
-    # how latin-1 text renders the last byte of UTF-8 "à" (C3 A0) or "ą" (C4 85).
-    presented = presented.strip(" \t")
-    if scheme.lower() != "bearer" or not presented:
+    presented = presented_bearer(auth_header)
+    if presented is None:
         return None, None
     # Compare bytes: compare_digest raises TypeError on non-ASCII str, which
     # would 500 the gate instead of 401ing (review 2026-08-10, finding 1).

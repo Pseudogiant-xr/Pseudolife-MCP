@@ -598,6 +598,19 @@ pub fn require_credential_for_auth(
         "[shim] the daemon at {url} requires bearer authentication (/health reports auth=true) and this shim has no credential configured — every call would be rejected with 401.\n  Give the MCP registration one of these in its env block:\n    PSEUDOLIFE_MCP_TOKEN_FILE=<absolute path to a private file holding the token>   (preferred; reloaded per call)\n    PSEUDOLIFE_MCP_TOKEN=<the token>\n  Claude Desktop launches MCP servers with a sanitized environment, so a token exported in the OS env (setx / shell profile) does NOT reach it — the entry in claude_desktop_config.json must carry the setting itself (ops/install.* --client claude-desktop writes it; then fully quit and relaunch Desktop)."
     )))
 }
+/// The one line naming a bearer the daemon refused at startup, for stderr
+/// and the top of the instructions; the Python shim prints the same text.
+pub fn rejected_token_note(url: &str) -> String {
+    format!(
+        "Pseudolife-MCP: the memory daemon at {url} refused this machine's token (HTTP 401/403 or a revoked-token refusal), so memory tools will fail. Fix: on the daemon host run `pseudolife-mcp invite <name>`, then here `pseudolife-mcp connect {url} --read-code`, which pairs this machine and repoints its clients."
+    )
+}
+pub fn holds_bearer(provider: &CredentialProvider) -> bool {
+    provider
+        .snapshot()
+        .ok()
+        .is_some_and(|snapshot| snapshot.token().is_some_and(|token| !token.is_empty()))
+}
 pub fn credential_file_warning(provider: &CredentialProvider) -> Option<String> {
     let path = provider.path()?;
     provider.snapshot().err().map(|error| format!("[shim] the configured credential file cannot be used: {error}\n  PSEUDOLIFE_MCP_TOKEN_FILE={}\n  If the daemon requires bearer authentication, every call will be refused until the file exists, is owner-only, and holds only the token.", path.display()))

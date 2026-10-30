@@ -163,7 +163,7 @@
       "candidate-harness": "ab479a8fc85283e7",
       "parity-checks": "06054831b8e7b5d2",
       "daemon-image": "cf93a3a209618bdc",
-      "parity": "4c39a489bf4b1642"
+      "parity": "aa4ba434de948ea6"
     },
     "accepted": [
       {
@@ -200,6 +200,11 @@
         "job": "parity-checks",
         "fingerprint": "06054831b8e7b5d2",
         "reason": "#1013 adds one pytest file (test_config_knobs_golden.py, about 5 s on Windows: it imports the service module) to the existing Offline W2-D search harness regressions step; no new job, shard or setup"
+      },
+      {
+        "job": "parity",
+        "fingerprint": "aa4ba434de948ea6",
+        "reason": "Adds a run: exit 1 step that runs only when a needed job was cancelled, and skips the verdict step then; the gate runs one of two trivial steps, so its minutes are unchanged"
       }
     ]
   },
@@ -252,7 +257,7 @@
       "lock-resolve": "83bcc6b654896c6d",
       "test": "ac414107d3d9c71d",
       "test-lite-linux": "44e2a8f2c01baeab",
-      "test-lite-windows": "4c14277e515e1711",
+      "test-lite-windows": "b628a0135e33c187",
       "test-lite-macos": "2abde9b5cf74fc3d",
       "frontend": "b1b6a1a1278f2e60"
     },
@@ -296,6 +301,11 @@
         "job": "test-lite-windows",
         "fingerprint": "4c14277e515e1711",
         "reason": "adds tests/test_selfhosted_windows_scripts.py (9 cases, about 4 s locally) to the one pytest step beside master's runner-cleanup and worktree-retention files; no new setup or step"
+      },
+      {
+        "job": "test-lite-windows",
+        "fingerprint": "b628a0135e33c187",
+        "reason": "adds tests/test_unattended_update.py (49 cases, under 1 s on Windows locally, all scheduler and Docker calls faked); no new setup or step"
       }
     ]
   }

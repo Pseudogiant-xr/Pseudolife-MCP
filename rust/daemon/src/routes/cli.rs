@@ -129,9 +129,11 @@ fn refused(message: String) -> Response {
     json_response(400, &json!({"error": message}))
 }
 
-/// The caller's principal name, as the transport bound it for the route.
+/// The caller's principal name, as the transport bound it for the route
+/// (a re-resolution: the gate already noted this request's outcome).
 fn principal(req: &Request<'_>) -> Option<String> {
-    match crate::http::resolve(req.app, req.headers) {
+    let header = crate::http::authorization(req.headers);
+    match crate::auth::resolve(header.as_deref(), &req.app.env_tokens, &req.app.store) {
         Resolved::Principal(name) => Some(name),
         Resolved::None | Resolved::Unavailable => None,
     }

@@ -1,5 +1,5 @@
 //! `principal_store`'s invite operations (create_invite, list_principals,
-//! revoke) and `invite_cli._bank_of`, as the same SQL on this crate's
+//! list_rejected, revoke) and `invite_cli._bank_of`, as the same SQL on this crate's
 //! PostgreSQL client.
 use super::Defer;
 use tokio_postgres::Client;
@@ -143,38 +143,92 @@ pub(super) async fn bank_of(client: &Client) -> Result<Option<String>, DbError> 
     })
 }
 
-/// One `invite --list` row (`describe_rows`).
+/// One `invite --list` row (`describe_rows`); an `environment` row (a
+/// principal with no stored row, schema v58) has no tier, board or times
+/// but its last success.
 pub(super) struct Listed {
     pub principal: String,
     pub state: &'static str,
     pub paired: bool,
     pub pending: bool,
     pub tier: Option<String>,
-    pub board: bool,
+    pub board: Option<bool>,
     pub code_expires_at: Option<f64>,
-    pub created_at: f64,
+    pub created_at: Option<f64>,
     pub paired_at: Option<f64>,
     pub revoked_at: Option<f64>,
+    pub last_seen_at: Option<f64>,
 }
 
-/// `list_principals`.
-pub(super) async fn list(client: &Client) -> Result<Vec<Listed>, DbError> {
-    let rows = client
-        .query(
-            &format!(
-                "SELECT principal, tier, board, token_hash IS NOT NULL, code_hash IS NOT NULL, \
-                 code_expires_at, created_at, paired_at, revoked_at, {NOW} \
-                 FROM public.principals ORDER BY principal"
-            ),
-            &[],
-        )
-        .await
-        .map_err(|error| classify(&error))?;
+impl Listed {
+    fn environment(principal: String, last_seen_at: Option<f64>) -> Self {
+        Listed {
+            principal,
+            state: "environment",
+            paired: false,
+            pending: false,
+            tier: None,
+            board: None,
+            code_expires_at: None,
+            created_at: None,
+            paired_at: None,
+            revoked_at: None,
+            last_seen_at,
+        }
+    }
+}
+
+/// `principal_store.LIST_SQL` (v58).
+fn list_sql() -> String {
+    format!(
+        "SELECT p.principal, p.tier, p.board, p.token_hash IS NOT NULL, \
+         p.code_hash IS NOT NULL, p.code_expires_at, p.created_at, p.paired_at, p.revoked_at, \
+         {NOW}, a.last_seen_at, TRUE \
+         FROM public.principals p LEFT JOIN public.principal_activity a \
+         ON a.principal = p.principal \
+         UNION ALL \
+         SELECT a.principal, NULL, NULL, FALSE, FALSE, NULL, NULL, NULL, NULL, {NOW}, \
+         a.last_seen_at, FALSE FROM public.principal_activity a \
+         WHERE NOT EXISTS (SELECT 1 FROM public.principals p WHERE p.principal = a.principal) \
+         ORDER BY 1"
+    )
+}
+
+/// `LIST_SQL_V53`: a bank before v58.
+fn list_sql_v53() -> String {
+    format!(
+        "SELECT principal, tier, board, token_hash IS NOT NULL, code_hash IS NOT NULL, \
+         code_expires_at, created_at, paired_at, revoked_at, {NOW}, NULL::double precision, \
+         TRUE FROM public.principals ORDER BY principal"
+    )
+}
+
+/// `list_principals(conn, environment=...)`: the stored rows, the names
+/// seen with no stored row, and each `environment` name not listed, sorted
+/// by name.
+pub(super) async fn list(client: &Client, environment: &[String]) -> Result<Vec<Listed>, DbError> {
+    let rows = match client.query(&list_sql(), &[]).await {
+        Ok(rows) => rows,
+        Err(error) => match classify(&error) {
+            DbError::UndefinedTable => client
+                .query(&list_sql_v53(), &[])
+                .await
+                .map_err(|error| classify(&error))?,
+            other => return Err(other),
+        },
+    };
     let mut out = Vec::with_capacity(rows.len());
     for row in rows {
         let get = |index: usize| -> Result<Option<f64>, DbError> {
             row.try_get(index).map_err(|_| DbError::Defer)
         };
+        let principal: String = row.try_get(0).map_err(|_| DbError::Defer)?;
+        let last_seen = get(10)?;
+        let stored: bool = row.try_get(11).map_err(|_| DbError::Defer)?;
+        if !stored {
+            out.push(Listed::environment(principal, last_seen));
+            continue;
+        }
         let paired: bool = row.try_get(3).map_err(|_| DbError::Defer)?;
         let pending: bool = row.try_get(4).map_err(|_| DbError::Defer)?;
         let expires = get(5)?;
@@ -192,19 +246,68 @@ pub(super) async fn list(client: &Client) -> Result<Vec<Listed>, DbError> {
             "unpaired"
         };
         out.push(Listed {
-            principal: row.try_get(0).map_err(|_| DbError::Defer)?,
+            principal,
             state,
             paired,
             pending,
             tier: row.try_get(1).map_err(|_| DbError::Defer)?,
-            board: row.try_get(2).map_err(|_| DbError::Defer)?,
+            board: Some(row.try_get(2).map_err(|_| DbError::Defer)?),
             code_expires_at: expires,
-            created_at: get(6)?.ok_or(DbError::Defer)?,
+            created_at: Some(get(6)?.ok_or(DbError::Defer)?),
             paired_at: get(7)?,
             revoked_at: revoked,
+            last_seen_at: last_seen,
         });
     }
+    let mut names: Vec<&String> = environment.iter().collect();
+    names.sort();
+    names.dedup();
+    for name in names {
+        if !out.iter().any(|row| &row.principal == name) {
+            out.push(Listed::environment(name.clone(), None));
+        }
+    }
+    // Python's sorted(key=principal): code point order, stable.
+    out.sort_by(|a, b| a.principal.cmp(&b.principal));
     Ok(out)
+}
+
+/// One refused bearer (`describe_rejected`).
+pub(super) struct Rejected {
+    pub hash_prefix: String,
+    pub rejections: i64,
+    pub first_seen_at: f64,
+    pub last_seen_at: f64,
+}
+
+/// `list_rejected`: newest first; none on a bank before v58.
+pub(super) async fn list_rejected(client: &Client) -> Result<Vec<Rejected>, DbError> {
+    let rows = match client
+        .query(
+            "SELECT hash_prefix, rejections, first_seen_at, last_seen_at \
+             FROM public.rejected_bearers ORDER BY last_seen_at DESC, hash_prefix",
+            &[],
+        )
+        .await
+    {
+        Ok(rows) => rows,
+        Err(error) => {
+            return match classify(&error) {
+                DbError::UndefinedTable => Ok(Vec::new()),
+                other => Err(other),
+            };
+        }
+    };
+    rows.iter()
+        .map(|row| {
+            Ok(Rejected {
+                hash_prefix: row.try_get(0).map_err(|_| DbError::Defer)?,
+                rejections: row.try_get(1).map_err(|_| DbError::Defer)?,
+                first_seen_at: row.try_get(2).map_err(|_| DbError::Defer)?,
+                last_seen_at: row.try_get(3).map_err(|_| DbError::Defer)?,
+            })
+        })
+        .collect()
 }
 
 /// `revoke`: whether a row was there.

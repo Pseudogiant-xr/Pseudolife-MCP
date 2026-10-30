@@ -1,4 +1,4 @@
--- schema_version 57
+-- schema_version 58
 
 CREATE TABLE IF NOT EXISTS meta (
   key TEXT PRIMARY KEY,
@@ -840,4 +840,15 @@ CREATE TABLE IF NOT EXISTS cms_counters (
     surprise_history     JSONB NOT NULL,
     consolidation_events JSONB NOT NULL,
     updated_at           DOUBLE PRECISION NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS principal_activity (
+    principal    TEXT PRIMARY KEY,
+    last_seen_at DOUBLE PRECISION NOT NULL
+);
+CREATE TABLE IF NOT EXISTS rejected_bearers (
+    hash_prefix   TEXT PRIMARY KEY,
+    rejections    BIGINT NOT NULL,
+    first_seen_at DOUBLE PRECISION NOT NULL,
+    last_seen_at  DOUBLE PRECISION NOT NULL
 );

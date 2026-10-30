@@ -147,6 +147,22 @@ def hooks_notice(plugin_version: str | None, plugin_digest: str | None,
             f"refresh the plugin cache and shim, then start a new session.")
 
 
+def token_rejected_notice(command: str = UPDATE_COMMAND) -> str:
+    """The line for a caller whose bearer the daemon rejected. Until
+    2026-10-30 that caller got the public instructions with nothing saying
+    why the briefing was missing, and two machines with rotated tokens ran
+    11 days without memory. It says "refused" and no more: the daemon cannot
+    tell a revoked token from one never issued. ``connect --read-code``,
+    not ``pair``, because pairing alone leaves the client registrations on
+    the refused token. ``command`` names the caller's own launcher; the
+    invite runs on the daemon host, whose launcher is not known here.
+    Nothing of the token is echoed."""
+    return ("Pseudolife-MCP: the memory daemon refused this machine's token, so this "
+            "session has no memory access. Fix: on the daemon host run "
+            "`pseudolife-mcp invite <name>`, then on this machine "
+            f"`{command} connect <daemon-url> --read-code`.")
+
+
 def _version_key(value: str) -> tuple[int, ...] | None:
     """The leading dotted-integer part of a version as a sortable tuple
     (``0.15.0rc1`` → ``(0, 15, 0)``); ``None`` when there is none. No
@@ -675,12 +691,14 @@ def hook_session_start(
     service: Any, session_id: str | None = None, source: str | None = None,
     authorized: bool = True, plugin_version: str | None = None,
     plugin_hooks_digest: str | None = None, launcher: str | None = None,
-    host: str | None = None,
+    host: str | None = None, token_rejected: bool = False,
 ) -> str:
     """``session_start_context`` plus (when ``session_id`` is given) identity
     registration: opens/re-fires the session's episode, sets it as the active
     session (identity tier 3), and prepends the episode-handle advertisement.
-    A release newer than the daemon (``release_check``) puts
+    ``token_rejected`` (the caller presented a bearer the daemon matched to
+    no principal) puts :func:`token_rejected_notice` first of all. A
+    release newer than the daemon (``release_check``) puts
     :func:`update_notice` first of all; else a ``plugin_version`` that
     differs from the daemon's puts :func:`version_notice` there; else an
     equal version whose ``plugin_hooks_digest`` differs puts
@@ -693,6 +711,8 @@ def hook_session_start(
     from pseudolife_memory import release_check
     prefix_parts = []
     command = launcher_command(launcher)
+    if token_rejected:
+        prefix_parts.append(token_rejected_notice(command))
     notice = (update_notice(DAEMON_VERSION, release_check.latest_release(), plugin_version, command)
               or version_notice(plugin_version, command=command)
               or hooks_notice(plugin_version, plugin_hooks_digest, command=command))

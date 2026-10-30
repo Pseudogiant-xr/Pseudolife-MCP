@@ -1094,6 +1094,22 @@ def test_a_silent_docker_and_a_silent_remote_daemon_still_stop(world, clients, m
     assert not any(c[1:4] == ["-m", "pip", "install"] for c in world.calls)
 
 
+def test_an_attended_client_update_installs_only_a_plain_release_the_daemon_reports(world, clients, monkeypatch,
+                                                                                    capsys):
+    """/health is unauthenticated and its version becomes a pip
+    requirement: a pre-release or requirement syntax is refused, never
+    installed, unless the release is named with --tag."""
+    _on_a_shim_runtime(monkeypatch)
+    for reported in ("0.16.0rc1", "0.*", "0.16.0; python_version>'0'", "١٦.٠"):
+        world.health = [{"status": "ok", "version": reported}]
+        assert _run(["--clients-only", "--daemon-url", "http://10.0.0.7:8765"]) == 2, reported
+        err = capsys.readouterr().err
+        assert "not a plain release number" in err and "--tag" in err
+    assert clients == []
+    assert _run(["--clients-only", "--daemon-url", "http://10.0.0.7:8765", "--tag", "0.15.1"]) == 0
+    assert clients[0]["source"] == "pseudolife-mcp==0.15.1"
+
+
 def test_a_client_only_machine_refuses_daemon_only_naming_the_daemon_host(world, clients, monkeypatch, capsys):
     _on_a_shim_runtime(monkeypatch)
     world.health = [{"status": "ok", "version": "0.15.1"}]

@@ -81,8 +81,22 @@ def seed_states(conn, name: str) -> None:
                         replace=False)
 
 
+def seed_activity(conn, name: str) -> None:
+    """Schema v58: last-seen times and refused prefixes at fixed times (so
+    their cases replay as goldens), with no stored principal: activity
+    names list as `environment` rows beside the case's environment ones."""
+    _meta(conn)
+    _guarded(conn)
+    conn.execute("INSERT INTO principal_activity VALUES ('codex', 1793000000.0), "
+                 "('default', 1792900000.5), ('old-laptop', 1792000000.0)")
+    conn.execute("INSERT INTO rejected_bearers VALUES ('ab12cd34', 37, 1792000000.0, "
+                 "1793000000.0), ('00ff00ff', 1, 1792500000.0, 1792500000.0), "
+                 "('ffffffff', 12345678, 1791000000.0, 1793000000.0)")
+
+
 SEEDERS = {
     "states": seed_states,
+    "activity": seed_activity,
     "empty": lambda conn, name: _meta(conn),
     "nometa": lambda conn, name: None,
 }
@@ -583,6 +597,11 @@ def _cases() -> list[core.Case]:
     add(read_case("list-bank", "states", ["--list", "--bank", FINGERPRINT]))
     add(read_case("list-other-bank-json", "states", ["--list", "--bank", OTHER_FINGERPRINT,
                                                      "--json"]))
+    activity_env = {"PSEUDOLIFE_MCP_TOKENS": "seed-env-token:codex,seed-env-token-2:desk",
+                    "PSEUDOLIFE_MCP_TOKEN": "seed-singular-token"}
+    add(read_case("list-activity", "activity", ["--list"], extra_env=activity_env))
+    add(read_case("list-activity-json", "activity", ["--list", "--json"], extra_env=activity_env))
+    add(read_case("list-activity-no-env", "activity", ["--list"]))
     add(read_case("list-empty", "empty", ["--list"]))
     add(read_case("list-empty-json", "empty", ["--json", "--list"]))
     add(read_case("list-no-table", "noschema", ["--list"]))
@@ -676,9 +695,11 @@ MUTANTS = [
     Mutant("invite-revoke-dropped", "invite", "shim/src/cli/pairing/invite_db.rs",
            "SET revoked_at = COALESCE(revoked_at, {NOW}), ",
            "SET revoked_at = revoked_at, ", cases=("revoke", "revoke-json")),
+    # The list's order is the final in-code sort (stored and environment
+    # names together); the SQL ORDER BY no longer decides it.
     Mutant("invite-list-order", "invite", "shim/src/cli/pairing/invite_db.rs",
-           "FROM public.principals ORDER BY principal\"",
-           "FROM public.principals ORDER BY principal DESC\"", cases=("list", "list-json")),
+           "out.sort_by(|a, b| a.principal.cmp(&b.principal));",
+           "out.sort_by(|a, b| b.principal.cmp(&a.principal));", cases=("list", "list-json")),
     Mutant("invite-refusal-exit", "invite", "shim/src/cli/pairing/invite.rs",
            "return Ok(report.fail_units(EXIT_REFUSED, refusal));",
            "return Ok(report.fail_units(EXIT_FAILED, refusal));",

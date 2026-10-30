@@ -261,16 +261,23 @@ class PrincipalRefresher:
 
     Startup warnings (logged once, after the first successful load): rows
     exist on a daemon with no authentication configured, or a row's name is
-    shadowed by the environment."""
+    shadowed by the environment.
+
+    After each successful refresh it writes the gate's activity
+    (``recorder``, a :class:`principal_activity.ActivityRecorder`) on the
+    same connection when that is due, at most once a minute (schema v58)."""
 
     def __init__(self, dsn: str, snapshot: PrincipalSnapshot, *,
-                 auth_configured: bool, interval: float = REFRESH_INTERVAL_S):
+                 auth_configured: bool, interval: float = REFRESH_INTERVAL_S,
+                 recorder=None):
         self._dsn = dsn
         self._snapshot = snapshot
         self._auth_configured = auth_configured
         self._interval = interval
+        self._recorder = recorder
         self._conn = None
         self._failing = False
+        self._activity_failing = False
         self._warned = False
         self._warned_invalid: set[str] = set()
         self._stop = threading.Event()
@@ -324,9 +331,33 @@ class PrincipalRefresher:
                 "a reserved name): its stored token is ignored; revoke it with "
                 "`pseudolife-mcp invite --revoke %s`", name, name)
 
+    def flush_activity(self) -> bool:
+        """Write the recorder's batch when due, on the refresher's live
+        connection only (no connection, no write: the batch waits). A failed
+        write keeps the batch for the next tick and is logged once, by type;
+        a bank whose schema is not applied yet is not a failure."""
+        if self._recorder is None or self._conn is None or self._conn.closed:
+            return False
+        import psycopg
+        try:
+            wrote = self._recorder.flush(self._conn)
+        except psycopg.errors.UndefinedTable:
+            return False
+        except Exception as exc:  # noqa: BLE001 - the batch is kept; the type only
+            if not self._activity_failing:
+                logger.warning("principal activity: write failed (%s); kept for the next try",
+                               type(exc).__name__)
+            self._activity_failing = True
+            return False
+        if wrote and self._activity_failing:
+            logger.info("principal activity: write recovered")
+            self._activity_failing = False
+        return wrote
+
     def _run(self) -> None:
         while not self._stop.is_set():
-            self.refresh_once()
+            if self.refresh_once():
+                self.flush_activity()
             self._stop.wait(self._interval)
 
     def start(self) -> threading.Thread:
@@ -533,23 +564,71 @@ def create_invite(conn, name: str, *, tier=KEEP, board=KEEP, ttl_seconds: float,
     raise InviteRefused("could not draw an unused pairing code; try again")
 
 
-def list_principals(conn) -> list[dict]:
-    """Every stored principal, for ``invite --list``: never a token or a
-    code, only whether one is set and when the pending code expires."""
-    return describe_rows(conn.execute(
-        f"""
-        SELECT principal, tier, board, token_hash IS NOT NULL, code_hash IS NOT NULL,
-               code_expires_at, created_at, paired_at, revoked_at, {_NOW}
-          FROM public.principals ORDER BY principal
-        """).fetchall())
+# v58: the stored rows with their last success, then the names seen with no
+# stored row (environment principals: PSEUDOLIFE_MCP_TOKENS, and `default`
+# for PSEUDOLIFE_MCP_TOKEN). The last column says which half a row is from.
+LIST_SQL = f"""
+SELECT p.principal, p.tier, p.board, p.token_hash IS NOT NULL, p.code_hash IS NOT NULL,
+       p.code_expires_at, p.created_at, p.paired_at, p.revoked_at, {_NOW}, a.last_seen_at, TRUE
+  FROM public.principals p LEFT JOIN public.principal_activity a ON a.principal = p.principal
+UNION ALL
+SELECT a.principal, NULL, NULL, FALSE, FALSE, NULL, NULL, NULL, NULL, {_NOW}, a.last_seen_at, FALSE
+  FROM public.principal_activity a
+ WHERE NOT EXISTS (SELECT 1 FROM public.principals p WHERE p.principal = a.principal)
+ ORDER BY 1
+"""
+# Before v58 (a newer CLI on an older bank): the stored rows alone.
+LIST_SQL_V53 = f"""
+SELECT principal, tier, board, token_hash IS NOT NULL, code_hash IS NOT NULL,
+       code_expires_at, created_at, paired_at, revoked_at, {_NOW}, NULL::double precision, TRUE
+  FROM public.principals ORDER BY principal
+"""
+REJECTED_SQL = ("SELECT hash_prefix, rejections, first_seen_at, last_seen_at "
+                "FROM public.rejected_bearers ORDER BY last_seen_at DESC, hash_prefix")
 
 
-def describe_rows(rows) -> list[dict]:
+def list_principals(conn, *, environment=()) -> list[dict]:
+    """Every principal, for ``invite --list``: the stored ones (never a
+    token or a code, only whether one is set and when the pending code
+    expires), then environment ones, each with when it last authenticated
+    (``last_seen_at``, schema v58). ``environment`` names the daemon's
+    environment principals, so one never seen is listed too."""
+    import psycopg
+    try:
+        rows = conn.execute(LIST_SQL).fetchall()
+    except psycopg.errors.UndefinedTable:
+        rows = conn.execute(LIST_SQL_V53).fetchall()
+    return describe_rows(rows, environment=environment)
+
+
+def list_rejected(conn) -> list[dict]:
+    """The refused bearers' hash prefixes, newest first (schema v58; none
+    on an older bank)."""
+    import psycopg
+    try:
+        rows = conn.execute(REJECTED_SQL).fetchall()
+    except psycopg.errors.UndefinedTable:
+        return []
+    return describe_rejected(rows)
+
+
+def describe_rejected(rows) -> list[dict]:
+    return [{"hash_prefix": r[0], "rejections": int(r[1]), "first_seen_at": r[2],
+             "last_seen_at": r[3]} for r in rows]
+
+
+def describe_rows(rows, *, environment=()) -> list[dict]:
     """``invite --list``'s view of ``(principal, tier, board, paired,
-    pending, code_expires_at, created_at, paired_at, revoked_at, now)``
-    tuples, from psycopg or from psql's JSON."""
+    pending, code_expires_at, created_at, paired_at, revoked_at, now,
+    last_seen_at, stored)`` tuples, from psycopg or from psql's JSON, plus
+    an ``environment`` row for each name in ``environment`` not listed,
+    sorted by name."""
     out = []
-    for (name, tier, board, paired, pending, expires, created, paired_at, revoked, now) in rows:
+    for (name, tier, board, paired, pending, expires, created, paired_at, revoked, now,
+         last_seen, stored) in rows:
+        if not stored:
+            out.append(_environment_row(name, last_seen))
+            continue
         if revoked is not None:
             state = "revoked"
         elif pending and expires is not None and expires > now:
@@ -563,8 +642,19 @@ def describe_rows(rows) -> list[dict]:
         out.append({"principal": name, "state": state, "paired": bool(paired),
                     "tier": tier, "board": bool(board),
                     "code_expires_at": expires if pending else None,
-                    "created_at": created, "paired_at": paired_at, "revoked_at": revoked})
-    return out
+                    "created_at": created, "paired_at": paired_at, "revoked_at": revoked,
+                    "last_seen_at": last_seen})
+    listed = {row["principal"] for row in out}
+    out.extend(_environment_row(name, None) for name in sorted(set(environment) - listed))
+    return sorted(out, key=lambda row: row["principal"])
+
+
+def _environment_row(name: str, last_seen) -> dict:
+    """A principal with no stored row: its token is in the daemon's
+    environment, so it has no tier, board or pairing of its own here."""
+    return {"principal": name, "state": "environment", "paired": False, "tier": None,
+            "board": None, "code_expires_at": None, "created_at": None, "paired_at": None,
+            "revoked_at": None, "last_seen_at": last_seen}
 
 
 def revoke(conn, name: str) -> bool:

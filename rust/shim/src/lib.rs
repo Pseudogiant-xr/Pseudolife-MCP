@@ -124,24 +124,36 @@ impl Proxy {
     pub async fn attach_mode(channel: bool) -> Result<Self, lifecycle::StartupError> {
         let runtime = std::sync::Arc::new(lifecycle::Runtime::from_environment().await?);
         let upstream = Upstream::new(runtime.clone());
-        let (board, fetched) = tokio::join!(
+        // The startup fetch is the one authenticated request at startup
+        // (/health needs no token), so it is also where a dead bearer shows.
+        let (board, (fetched, rejected_note)) = tokio::join!(
             board::Board::attach(runtime.clone(), channel),
             async {
                 if runtime.daemon_unreachable() {
-                    None
+                    (None, None)
                 } else {
                     match upstream.instructions().await {
                         Ok(instructions) => {
                             if let Some(cache) = &runtime.cache {
                                 cache.remember_instructions(instructions.as_deref());
                             }
-                            instructions
+                            (instructions, None)
+                        }
+                        Err(error)
+                            if errors::bearer_rejected(&error)
+                                && lifecycle::holds_bearer(&runtime.provider) =>
+                        {
+                            // A present but dead token: keep serving (each
+                            // call still gets its authentication refusal), but say so now.
+                            let note = lifecycle::rejected_token_note(&runtime.url);
+                            crate::stderrln!("{note}");
+                            (None, Some(note))
                         }
                         Err(_error) => {
                             crate::stderrln!(
                                 "pseudolife-mcp: instructions unavailable (MCPError); check daemon MCP access and reconnect for startup guidance."
                             );
-                            None
+                            (None, None)
                         }
                     }
                 }
@@ -152,6 +164,7 @@ impl Proxy {
             fetched,
             board.board_checkin().await,
             board.instructions_note(),
+            rejected_note.as_deref(),
             channel,
         );
         let subscriptions = subscriptions::Subscriptions::default();
@@ -175,13 +188,20 @@ fn proxy_instructions(
     fetched: Option<String>,
     board_ready: bool,
     board_note: &str,
+    rejected_note: Option<&str>,
     channel: bool,
 ) -> Option<String> {
-    let instructions_note = [runtime.instructions_note.as_str(), board_note]
-        .into_iter()
-        .filter(|note| !note.is_empty())
-        .collect::<Vec<_>>()
-        .join("\n\n");
+    // A rejected token goes above even the version note: no memory tool
+    // works until the machine is paired.
+    let instructions_note = [
+        rejected_note.unwrap_or_default(),
+        runtime.instructions_note.as_str(),
+        board_note,
+    ]
+    .into_iter()
+    .filter(|note| !note.is_empty())
+    .collect::<Vec<_>>()
+    .join("\n\n");
     let instructions = lifecycle::Runtime {
         url: runtime.url.clone(),
         provider: runtime.provider.clone(),
@@ -585,7 +605,7 @@ mod integration_tests {
             instructions_note: "version note".into(),
         };
         assert_eq!(
-            proxy_instructions(&runtime, Some("workflow".into()), true, "", false),
+            proxy_instructions(&runtime, Some("workflow".into()), true, "", None, false),
             Some(format!(
                 "version note\n\nworkflow {}",
                 board::policy::CHECKIN
@@ -597,6 +617,7 @@ mod integration_tests {
                 Some("workflow".into()),
                 false,
                 board::policy::SHARED_NOTE,
+                None,
                 true
             ),
             Some(format!(
@@ -611,9 +632,24 @@ mod integration_tests {
                 Some("memory_agents already".into()),
                 true,
                 "",
+                None,
                 false
             ),
             Some("version note\n\nmemory_agents already".into())
+        );
+        assert_eq!(
+            proxy_instructions(
+                &runtime,
+                None,
+                false,
+                board::policy::SHARED_NOTE,
+                Some("rejected"),
+                false
+            ),
+            Some(format!(
+                "rejected\n\nversion note\n\n{}\n\n",
+                board::policy::SHARED_NOTE
+            ))
         );
     }
     #[tokio::test]

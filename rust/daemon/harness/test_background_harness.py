@@ -160,7 +160,8 @@ def test_dump_declares_tables_whose_writer_is_not_ported_yet():
     import dbstate
     import psycopg
     import pgdisposable as pg
-    assert dbstate.UNPORTED_ROWS == {"cms_counters": "B4"}
+    assert dbstate.UNPORTED_ROWS == {"cms_counters": "B4", "principal_activity": "v58-clock",
+                                     "rejected_bearers": "v58-clock"}
     name = pg.name(pg.PREFIX + "dump_unported")
     dsn = pg.create(name)
     try:

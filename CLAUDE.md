@@ -374,9 +374,7 @@ bank ("dev machines homelab"), never in the tree.
   download (`df -h /`, `Get-PSDrive`) and don't start below 8 GB, because a
   full disk kills runs mid-step.
 - **A Rust `target/` is a cache:** prefer one shared `CARGO_TARGET_DIR` per
-  machine, and `cargo clean` your own stale profiles before a big rebuild
-  (on the Windows dev VM, whose disk is slow, keep the shared
-  `CARGO_TARGET_DIR` warm instead of cleaning it).
+  machine, and `cargo clean` your own stale profiles before a big rebuild.
 - **Below the floor, stop starting heavy work**, free only your own caches
   and tell the maintainer or your launching session; others' worktrees,
   evidence and caches are not yours, and removing a merged branch's cache

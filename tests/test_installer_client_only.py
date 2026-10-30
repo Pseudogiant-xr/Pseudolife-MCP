@@ -43,6 +43,9 @@ HEALTH_OPEN = '{"status": "ok", "version": "0.0.0", "auth": false}'
 PAIRING_CODE = "7KQ2-MX4P-9TZC"
 URLSAFE_TOKEN = "Zq3_x9-KfixtureUrlsafeToken0123456789abcdEF"
 PAIRED_TOKEN = "fixture-paired-token-0123456789"
+# Why a client machine should pair: the installers' closing hint and the guide
+# say it in the same words.
+SHARED_TOKEN_REASON = "rotating it breaks both and neither can be revoked alone"
 
 
 def _block(name: str) -> str:
@@ -539,6 +542,96 @@ def test_https_off_this_machine_does_not_warn(bash, tmp_path):
                       token_file=shell.path(token))
     assert proc.returncode == 0, proc.stderr
     assert "unencrypted" not in proc.stderr
+
+
+# -- a raw token still works, and pairing is recommended -------------------------
+# 2026-10-18: one rotated static token silently cut off every machine holding
+# a copy of it for 11 days. Pairing gives each machine its own principal. The
+# preflight only records the daemon URL in PAIRING_HINT_URL; the line itself
+# is printed at the end of the run, beside the update line, with the full
+# shim path (test_client_install_ux.py), since the shim is not installed yet.
+
+_HINT_AFTER = "printf 'HINT=%s\\n' \"${PAIRING_HINT_URL:-}\"\n"
+
+
+def _pairing_hints(output: str) -> list[str]:
+    return [line for line in output.splitlines() if "invite <name>" in line]
+
+
+@BASH
+def test_a_raw_token_off_this_machine_records_the_pairing_hint(bash, tmp_path):
+    shell = _Shell(bash, tmp_path)
+    token = _token(shell)
+    proc = _preflight(shell, token_file=shell.path(token), after=_HINT_AFTER)
+    assert proc.returncode == 0, proc.stderr
+    assert f"HINT={REMOTE}\n" in proc.stdout
+    # Printed at the end of the run, not here, before the shim exists.
+    assert _pairing_hints(proc.stdout + proc.stderr) == []
+    assert FIXTURE_TOKEN not in proc.stdout + proc.stderr
+
+
+@BASH
+def test_a_pasted_raw_token_records_the_pairing_hint(bash, tmp_path):
+    shell = _Shell(bash, tmp_path)
+    target = tmp_path / "keys" / "new.token"
+    proc = _preflight(shell, token_file=shell.path(target), read_token="1",
+                      feed=FIXTURE_TOKEN, after=_HINT_AFTER)
+    assert proc.returncode == 0, proc.stderr
+    assert f"HINT={REMOTE}\n" in proc.stdout
+    assert FIXTURE_TOKEN not in proc.stdout + proc.stderr
+
+
+@BASH
+def test_a_pairing_code_records_no_pairing_hint(bash, tmp_path):
+    shell = _Shell(bash, tmp_path)
+    proc = _preflight(shell, pairing_code=PAIRING_CODE, after=_HINT_AFTER)
+    assert proc.returncode == 0, proc.stderr
+    assert "HINT=\n" in proc.stdout
+
+
+@BASH
+def test_a_pasted_pairing_code_records_no_pairing_hint(bash, tmp_path):
+    shell = _Shell(bash, tmp_path)
+    target = tmp_path / "keys" / "new.token"
+    proc = _preflight(shell, token_file=shell.path(target), read_token="1",
+                      feed=PAIRING_CODE, after=_HINT_AFTER)
+    assert proc.returncode == 0, proc.stderr
+    assert "PAIRING=held\n" in proc.stdout
+    assert "HINT=\n" in proc.stdout
+
+
+@BASH
+def test_a_loopback_daemon_records_no_pairing_hint(bash, tmp_path):
+    """The daemon's own host, or an SSH tunnel to it: no hint."""
+    shell = _Shell(bash, tmp_path)
+    token = _token(shell)
+    proc = _preflight(shell, daemon_url="http://127.0.0.1:18765",
+                      token_file=shell.path(token), after=_HINT_AFTER)
+    assert proc.returncode == 0, proc.stderr
+    assert "HINT=\n" in proc.stdout
+
+
+def test_the_installers_and_the_guide_give_the_same_reason_to_pair():
+    ps1 = (ROOT / "ops" / "install.ps1").read_text(encoding="utf-8").split(
+        "# >>> update line >>>", 1)[1].split("# <<< update line <<<", 1)[0]
+    guide = (ROOT / "docs" / "guide" / "remote-bank.md").read_text(encoding="utf-8")
+    for text in (_block("update line"), ps1, " ".join(guide.split())):
+        assert SHARED_TOKEN_REASON in text
+    # The old wording told a paired machine its token was shared.
+    for text in (_block("client-only preflight"), _block("update line"), ps1):
+        assert "it is shared" not in text
+
+
+def test_the_refusals_lead_with_pairing():
+    """With no token file, or an empty one, the refusal names the pairing
+    code first and the token as the fallback, as the help text does."""
+    block = _block("client-only preflight")
+    messages = re.findall(
+        r"client-only install: [^\n]*(?:never mints|missing or empty)[^\n]*", block)
+    assert len(messages) == 2, messages
+    for message in messages:
+        assert "--pairing-code" in message, message
+        assert message.index("--pairing-code") < message.index("--read-token"), message
 
 
 @BASH
@@ -1286,6 +1379,12 @@ def test_client_only_notes_are_synced_across_installers():
     joined = "\n".join(sh)
     assert "token file" in joined
     assert "~/.codex/pseudolife/token" in joined
+    # A paired machine whose token is revoked or replaced pairs again; only
+    # an environment-token client writes a new token by hand.
+    flat = " ".join(joined.split())
+    assert "invite <name> --replace" in flat
+    assert "connect <url> --read-code" in flat
+    assert "A new token there: write it" not in flat
     for line in sh:
         assert len(line) <= 78, f"notes line over 78 cols: {line!r}"
         assert all(0x20 <= ord(c) <= 0x7E for c in line), f"non-ASCII: {line!r}"

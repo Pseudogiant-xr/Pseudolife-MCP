@@ -317,3 +317,105 @@ def test_a_shadowed_or_reserved_row_is_refused_without_spending_its_code(db, pg_
     assert store.redeem(pg_url, code_hash, secret_sha256(TOKEN_A), excluded=["desk"]) is None
     assert db.execute("SELECT code_hash, token_hash FROM principals").fetchone() == (code_hash, None)
     assert store.redeem(pg_url, code_hash, secret_sha256(TOKEN_A)) is not None
+
+
+# -- v58: principal activity and refused bearers -----------------------------
+
+def _activity(conn):
+    return conn.execute("SELECT principal, last_seen_at FROM principal_activity "
+                        "ORDER BY principal").fetchall()
+
+
+def _refused(conn):
+    return conn.execute("SELECT hash_prefix, rejections, first_seen_at, last_seen_at "
+                        "FROM rejected_bearers ORDER BY hash_prefix").fetchall()
+
+
+def test_the_activity_tables_have_the_v58_columns(db):
+    for table, want in (("principal_activity", {"principal", "last_seen_at"}),
+                        ("rejected_bearers", {"hash_prefix", "rejections", "first_seen_at",
+                                              "last_seen_at"})):
+        cols = {r[0] for r in db.execute(
+            "SELECT column_name FROM information_schema.columns WHERE table_name = %s", (table,))}
+        assert cols == want
+
+
+def test_a_batch_upserts_times_forward_and_adds_counts(db):
+    from pseudolife_memory.principal_activity import Batch, write_batch
+    write_batch(db, Batch(seen={"laptop": 100.0, "default": 50.0},
+                          rejected={"ab12cd34": (2, 10.0, 20.0)}), now=1000.0)
+    write_batch(db, Batch(seen={"laptop": 90.0, "desk": 70.0},
+                          rejected={"ab12cd34": (3, 5.0, 15.0), "00ff00ff": (1, 30.0, 30.0)}),
+                now=1000.0)
+    # An older time never moves last_seen back (two daemons, or a retry).
+    assert _activity(db) == [("default", 50.0), ("desk", 70.0), ("laptop", 100.0)]
+    assert _refused(db) == [("00ff00ff", 1, 30.0, 30.0), ("ab12cd34", 5, 5.0, 20.0)]
+
+
+def test_old_and_excess_refused_prefixes_are_pruned(db, monkeypatch):
+    from pseudolife_memory import principal_activity as activity
+    monkeypatch.setattr(activity, "MAX_REJECTED_ROWS", 2)
+    now = 200 * 86400.0
+    activity.write_batch(db, activity.Batch(rejected={
+        "00000001": (1, 1.0, now - activity.REJECTED_RETENTION_S - 1),
+        "00000002": (1, 1.0, now - 30), "00000003": (1, 1.0, now - 20),
+        "00000004": (1, 1.0, now - 10)}), now=now)
+    assert [r[0] for r in _refused(db)] == ["00000003", "00000004"]
+
+
+def test_the_refresher_writes_activity_when_due_and_keeps_it_on_failure(db, pg_url):
+    from pseudolife_memory import principal_activity as activity
+    mono = [1000.0]
+    recorder = activity.ActivityRecorder(wall=lambda: 1234.5, clock=lambda: mono[0])
+    refresher = store.PrincipalRefresher(pg_url, store.PrincipalSnapshot(), auth_configured=True,
+                                         recorder=recorder)
+    assert not refresher.flush_activity()          # no connection yet: nothing written
+    assert refresher.refresh_once()
+    recorder.seen("laptop")
+    recorder.rejected("ab12cd34")
+    assert refresher.flush_activity()
+    assert _activity(db) == [("laptop", 1234.5)]
+    assert _refused(db) == [("ab12cd34", 1, 1234.5, 1234.5)]
+    recorder.seen("desk")
+    assert not refresher.flush_activity()          # within the minute: held
+    mono[0] += 60
+    db.execute("ALTER TABLE principal_activity RENAME TO principal_activity_moved")
+    try:
+        assert not refresher.flush_activity()      # missing table: kept, not lost
+    finally:
+        db.execute("ALTER TABLE principal_activity_moved RENAME TO principal_activity")
+    assert not refresher.flush_activity()          # a failed try also starts the minute
+    mono[0] += 60
+    assert refresher.flush_activity()
+    assert _activity(db) == [("desk", 1234.5), ("laptop", 1234.5)]
+
+
+def test_the_list_carries_last_seen_for_stored_and_environment_principals(db, pg_url):
+    from pseudolife_memory.principal_activity import Batch, write_batch
+    invite = _invite(db, "laptop")
+    store.redeem(pg_url, secret_sha256(invite["code"]), secret_sha256(TOKEN_A))
+    _invite(db, "phone")
+    write_batch(db, Batch(seen={"laptop": 1000.0, "desk": 2000.0}), now=0.0)
+    rows = {r["principal"]: r for r in store.list_principals(db, environment=["desk", "codex"])}
+    assert rows["laptop"]["state"] == "paired" and rows["laptop"]["last_seen_at"] == 1000.0
+    assert rows["phone"]["last_seen_at"] is None
+    assert rows["desk"]["state"] == "environment" and rows["desk"]["last_seen_at"] == 2000.0
+    assert rows["codex"]["state"] == "environment" and rows["codex"]["last_seen_at"] is None
+    assert list(rows) == sorted(rows)
+
+
+def test_the_list_shows_seen_names_without_a_row_when_the_environment_is_unknown(db):
+    from pseudolife_memory.principal_activity import Batch, write_batch
+    write_batch(db, Batch(seen={"default": 3000.0}), now=0.0)
+    rows = store.list_principals(db)
+    assert [(r["principal"], r["state"], r["last_seen_at"]) for r in rows] == [
+        ("default", "environment", 3000.0)]
+
+
+def test_the_refused_list_is_newest_first(db):
+    from pseudolife_memory.principal_activity import Batch, write_batch
+    write_batch(db, Batch(rejected={"ab12cd34": (4, 10.0, 50.0), "00ff00ff": (1, 60.0, 60.0)}),
+                now=100.0)
+    assert store.list_rejected(db) == [
+        {"hash_prefix": "00ff00ff", "rejections": 1, "first_seen_at": 60.0, "last_seen_at": 60.0},
+        {"hash_prefix": "ab12cd34", "rejections": 4, "first_seen_at": 10.0, "last_seen_at": 50.0}]

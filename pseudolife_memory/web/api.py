@@ -293,10 +293,11 @@ def build_console_app(
     paths; ``health_payload`` powers ``/health``; ``service`` backs ``/api``.
     ``token`` is the singular bearer (default principal); ``token_map`` maps
     per-principal tokens (spec 2026-08-10) — either alone closes the gate."""
+    from pseudolife_memory import principal_activity
     from pseudolife_memory.principal_store import FailureLimiter, RedemptionGate
     from pseudolife_memory.principals import (
-        DEFAULT_PRINCIPAL, SOURCE_STORE, PrincipalsUnavailable, installed_store,
-        resolve_principal_detailed)
+        DEFAULT_PRINCIPAL, SOURCE_STORE, PrincipalsUnavailable, bearer_presented,
+        installed_store, resolve_principal_detailed)
 
     token = token or None
     token_map = dict(token_map or {})
@@ -310,18 +311,38 @@ def build_console_app(
     def _resolve_detailed(scope) -> tuple[str | None, str | None]:
         """``(principal, source)``: ``(None, None)`` when unauthorized;
         raises ``PrincipalsUnavailable`` when the bearer may be a stored one
-        the daemon cannot check right now (principals.resolve_principal)."""
+        the daemon cannot check right now (principals.resolve_principal).
+        The transport gate's one resolution per request, so it is also
+        where the outcome is noted for ``invite --list`` (v58)."""
         if not auth_configured:
             return DEFAULT_PRINCIPAL, None
-        # latin-1 like every other header read here: it cannot fail, and
-        # resolve_principal compares the bytes the client sent.
+        auth = _authorization(scope)
+        principal, source = resolve_principal_detailed(auth, token_map, token, installed_store())
+        principal_activity.note(principal_activity.installed_recorder(), auth, principal, source)
+        return principal, source
+
+    def _authorization(scope) -> str | None:
+        """The ``Authorization`` value the resolver judges: the last one
+        sent. latin-1 like every other header read here: it cannot fail,
+        and resolve_principal compares the bytes the client sent."""
         headers = {k.decode().lower(): v.decode("latin-1")
                    for k, v in scope.get("headers", [])}
-        return resolve_principal_detailed(
-            headers.get("authorization"), token_map, token, installed_store())
+        return headers.get("authorization")
 
     def _resolve(scope) -> str | None:
         return _resolve_detailed(scope)[0]
+
+    def _token_rejected(scope) -> tuple[str | None, bool]:
+        """``(principal, rejected)`` for the session-start hook: ``rejected``
+        only when the caller presented a bearer and the daemon matched no
+        principal to it. A bearer the daemon cannot check right now (the
+        principal store is unavailable) is unauthorized but not rejected:
+        it may be a valid stored one."""
+        try:
+            principal = _resolve(scope)
+        except PrincipalsUnavailable:
+            return None, False
+        return principal, principal is None and bearer_presented(_authorization(scope))
 
     def _principal(scope) -> str | None:
         """:func:`_resolve` for the always-200 hooks: a principal that
@@ -515,6 +536,9 @@ def build_console_app(
         # active-session pointer just by hitting this endpoint, so session_id
         # and source are dropped entirely (byte-identical to the plain
         # instructions-only response) rather than merely gated on output.
+        # A caller whose bearer was rejected gets that answer after one
+        # notice saying so: on 2026-10-30 two machines with rotated tokens
+        # had run 11 days without memory while their sessions looked normal.
         if path == "/api/hook/session-start":
             denied = _browser_gate(scope)
             if denied:
@@ -523,7 +547,7 @@ def build_console_app(
             if method != "GET":
                 await _send_json(send, 405, {"error": "method_not_allowed"})
                 return
-            principal = _principal(scope)
+            principal, token_rejected = _token_rejected(scope)
             authorized = principal is not None
             params = _parse_query(scope)
             session_id = params.get("session_id") if authorized else None
@@ -549,7 +573,8 @@ def build_console_app(
                                               plugin_version=plugin_version,
                                               plugin_hooks_digest=plugin_hooks_digest,
                                               launcher=launcher,
-                                              host=headers.get("host"))
+                                              host=headers.get("host"),
+                                              token_rejected=token_rejected)
                 finally:
                     unbind_request_headers(binding)
             text = await asyncio.get_running_loop().run_in_executor(None, start_hook)
