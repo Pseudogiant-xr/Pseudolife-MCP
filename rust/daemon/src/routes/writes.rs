@@ -53,6 +53,32 @@ fn defaulted(b: &Map<String, Value>, k: &str, d: &str) -> Value {
         .cloned()
         .unwrap_or_else(|| json!(d))
 }
+/// Resolve labels before slot validation, as `service.cortex_write` does.
+/// Non-string labels are stringified for normalization, but their error uses repr.
+fn label(b: &Map<String, Value>, key: &str) -> Result<crate::fact_set::LabelArg> {
+    let raw = defaulted(b, key, "auto");
+    let requested = crate::pyjson::py_str(&raw);
+    let value = if requested == "auto" {
+        strip(&b["value"])?
+    } else {
+        String::new()
+    };
+    let resolve = if key == "authority" {
+        crate::labels::resolve_authority
+    } else {
+        crate::labels::resolve_distortion
+    };
+    resolve(Some(&requested), &value).map_err(|mut error| {
+        if !raw.is_string()
+            && let Some((prefix, _)) = error.rsplit_once(", got ")
+        {
+            error = format!("{prefix}, got {requested}");
+        }
+        Failure(400, error)
+    })?;
+    Ok(crate::fact_set::LabelArg::Requested(Some(requested)))
+}
+
 fn float(v: &Value) -> Result<f64> {
     match v {
         Value::Bool(b) => Ok(u8::from(*b) as f64),
@@ -99,8 +125,9 @@ fn integer(v: &Value) -> Result<Option<i64>> {
             if let Some(i) = crate::read::search_route::py_int(s) {
                 return Ok(Some(i));
             }
-            if !s.trim_start_matches(['+', '-']).is_empty()
-                && s.trim_start_matches(['+', '-'])
+            let digits = s.strip_prefix(['+', '-']).unwrap_or(s);
+            if !digits.is_empty()
+                && digits
                     .split('_')
                     .all(|g| !g.is_empty() && g.bytes().all(|x| x.is_ascii_digit()))
             {
@@ -167,6 +194,8 @@ async fn answer(req: &mut Request<'_>) -> Result<Value> {
     match path.as_str() {
         "/api/facts/set" => {
             let confidence = float(b.get("confidence").unwrap_or(&json!(0.8)))?;
+            let authority = label(&b, "authority")?;
+            let distortion = label(&b, "distortion_tolerance")?;
             let mut a = crate::fact_set::CortexWriteArgs::new(
                 &strip(&b["entity"])?,
                 &strip(&b["attribute"])?,
@@ -175,12 +204,8 @@ async fn answer(req: &mut Request<'_>) -> Result<Value> {
             a.confidence = confidence;
             a.support = Some(strip(&defaulted(&b, "origin", "agent"))?);
             a.freshness_class = strip(&defaulted(&b, "freshness_class", "auto"))?;
-            a.authority = crate::fact_set::LabelArg::Requested(Some(crate::pyjson::py_str(
-                &defaulted(&b, "authority", "auto"),
-            )));
-            a.distortion_tolerance = crate::fact_set::LabelArg::Requested(Some(
-                crate::pyjson::py_str(&defaulted(&b, "distortion_tolerance", "auto")),
-            ));
+            a.authority = authority;
+            a.distortion_tolerance = distortion;
             fact = Some(a);
         }
         "/api/reinforce" => id = integer(&b["entry_id"])?,
@@ -298,6 +323,7 @@ mod tests {
         assert_eq!(integer(&json!(" 1_234 ")).unwrap(), Some(1234));
         assert_eq!(integer(&json!("999999999999999999999999")).unwrap(), None);
         assert_eq!(integer(&json!("1.5")).unwrap_err().0, 400);
+        assert_eq!(integer(&json!("--1")).unwrap_err().0, 400);
         assert_eq!(integer(&Value::Null).unwrap_err().0, 500);
         assert_eq!(float(&json!(" 0.8 ")).unwrap(), 0.8);
         assert_eq!(float(&json!(true)).unwrap(), 1.0);

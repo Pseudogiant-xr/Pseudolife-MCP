@@ -41,6 +41,9 @@ def register(h) -> dict[str, dict]:
                 write("Console DB", "port", "8765", confidence=None),
                 write("Console DB", "port", "8765", confidence=[]),
                 write("Console DB", "port", "8765", authority="invalid"),
+                write(7, "port", "8765", authority="invalid"),
+                write("Console DB", "port", "8765", authority=True),
+                write("Console DB", "port", "8765", distortion_tolerance=["constraint"]),
                 write("Console DB", "port", "8765", distortion_tolerance="invalid"),
                 write("Console DB", "port", "8765", origin=["user"]),
                 write("Console DB", "port", "8765", freshness_class=["slow"]),
@@ -139,7 +142,7 @@ def register(h) -> dict[str, dict]:
                 rest(reinforce),
                 rest(reinforce, {}),
                 *[rest(reinforce, {"entry_id": value})
-                  for value in (None, "invalid", [], {}, "1.5")],
+                  for value in (None, "invalid", [], {}, "1.5", "--1")],
                 # int() accepts numeric strings, floats and booleans at this route.
                 *[rest(reinforce, {"entry_id": value})
                   for value in (0, -1, 999999, "999999", 999999.5, False)],
