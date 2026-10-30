@@ -62,6 +62,11 @@ class FakeGh:
         self.fail_merge: str | None = None  # "before" or "after" merging
         # A check run's annotation messages by job id; a missing id fails.
         self.annotations: dict[str, list[str]] = {}
+        # The Actions API a failed gate is read through; a missing key fails.
+        self.actions_jobs: dict[str, dict] = {}      # job id -> the job
+        self.runs: dict[str, dict] = {}              # run id -> the run
+        self.attempt_jobs: dict[tuple[str, str], list[dict]] = {}   # (run, attempt)
+        self.files: dict[tuple[str, str], str] = {}  # (path, ref) -> file text
 
     def add(self, number: int, sha: str, *, title: str | None = None,
             labeled_at: str | None = None, **extra) -> None:
@@ -146,6 +151,8 @@ class FakeGh:
             if job not in self.annotations:
                 raise integrate.Refusal("`gh api` failed (1): HTTP 502")
             return "".join(f"{json.dumps(m)}\n" for m in self.annotations[job])
+        if args[0] == "api" and any("/actions/" in a or "/contents/" in a for a in args):
+            return self._actions(args)
         if args[0] == "api":
             number = int(next(a for a in args if "/issues/" in a).split("/")[-2])
             return self.labeled_at.get(number, "") + "\n"
@@ -169,6 +176,34 @@ class FakeGh:
         if args[:2] in (["pr", "comment"], ["pr", "edit"]):
             return ""
         raise AssertionError(f"unexpected gh call: {args}")
+
+    def _actions(self, args: list[str]) -> str:
+        """The Actions REST calls that read a failed gate's run."""
+        unreadable = integrate.Refusal("`gh api` failed (1): HTTP 502")
+        prefix = "repos/{owner}/{repo}/"
+        if args[1:3] == ["-H", "Accept: application/vnd.github.raw+json"]:
+            assert len(args) == 4 and args[3].startswith(prefix + "contents/"), args
+            path, ref = args[3].removeprefix(prefix + "contents/").split("?ref=")
+            if (path, ref) not in self.files:
+                raise unreadable
+            return self.files[(path, ref)]
+        if args[1] == "--paginate":
+            # Every page: a matrix workflow lists more jobs than one page holds.
+            assert args[3:] == ["--jq", ".jobs[] | @json"], args
+            parts = args[2].removeprefix(prefix).split("/")
+            assert parts[:2] == ["actions", "runs"] and parts[3] == "attempts", args
+            assert parts[5] == "jobs?per_page=100", args
+            key = (parts[2], parts[4])
+            if key not in self.attempt_jobs:
+                raise unreadable
+            # gh prints each `@json` string raw: one job's JSON per line.
+            return "".join(f"{json.dumps(j)}\n" for j in self.attempt_jobs[key])
+        assert len(args) == 2 and args[1].startswith(prefix + "actions/"), args
+        kind, ident = args[1].removeprefix(prefix + "actions/").split("/")
+        table = {"jobs": self.actions_jobs, "runs": self.runs}[kind]
+        if ident not in table:
+            raise unreadable
+        return json.dumps(table[ident])
 
 
 # Stands in for `cargo`: records its arguments, directory and the
@@ -605,7 +640,8 @@ TIMEOUT = "The job has exceeded the maximum execution time of 25m0s"
 
 
 FAILING = "left out #11: CI on its head is failing"
-UNVERIFIED = "left out #11: a cancelled job's annotations could not be read"
+UNVERIFIED = ("left out #11: a cancelled job's annotations, or the run behind a "
+              "failed gate, could not be read")
 
 
 @pytest.mark.parametrize("messages, outcome", [
@@ -748,6 +784,171 @@ def test_open_refuses_without_dropping_when_annotations_cannot_be_read(world, ca
     err = capsys.readouterr().err
     assert "#11" in err and "could not be read" in err and "run `open` again" in err
     assert "failing" not in err and "Drop it" not in err
+    assert world.remote_branches() == []
+
+
+# PR #1059's head 3dda95a1 (2026-10-30): its Rust run (40992819326) was
+# cancelled after the `Rust / <os>` jobs started, and the `Parity / <os>` gate,
+# which runs under `always()`, still ran and failed only because the jobs it
+# needs were cancelled (job 123859514294). The run's jobs, as the Actions API
+# lists them: (id, name, conclusion).
+RUN, ATTEMPT, HEAD = "7", "1", "3dda95a1"
+_RUN_1059 = [
+    ("500", "Scope", "success"),
+    ("501", "Rust / ubuntu-latest", "cancelled"),
+    ("502", "Rust / windows-latest", "cancelled"),
+    ("503", "Rust daemon / disposable image", "cancelled"),
+    ("504", "Candidate / ${{ matrix.os }}", "skipped"),
+    ("505", "Parity checks / ${{ matrix.os }} / ${{ matrix.suite }}", "skipped"),
+    ("506", "Source mutants / ${{ matrix.os }} / ${{ matrix.shard }}", "skipped"),
+    ("507", "Stress report", "skipped"),
+    ("508", "Parity / windows-latest", "failure"),
+    ("509", "Parity / ubuntu-latest", "failure"),
+]
+GATES = ("508", "509")
+
+
+def _actions_check(job: str, name: str, conclusion: str, workflow: str = "Rust shim") -> dict:
+    """An Actions job as `gh pr list --json statusCheckRollup` lists it."""
+    return {"__typename": "CheckRun", "name": name, "workflowName": workflow,
+            "status": "COMPLETED", "conclusion": conclusion.upper(),
+            "detailsUrl": f"https://github.com/o/r/actions/runs/{RUN}/job/{job}"}
+
+
+def _gate_world(world, run=_RUN_1059, rollup: list[str] | None = None):
+    """PR #11 whose head carries `run` (by default #1059's), listed in its
+    rollup (the given job ids, else every job that did not skip), with the
+    real rust.yml as that head's workflow and every job's annotations empty
+    (none ran past its timeout)."""
+    sha10 = world.pr(10, {"b.txt": "b\n"})
+    sha11 = world.pr(11, {"c.txt": "c\n"})
+    world.gh.add(10, sha10)
+    jobs = {job: (name, conclusion) for job, name, conclusion in run}
+    ids = rollup if rollup is not None else [j for j, (_, c) in jobs.items() if c != "skipped"]
+    world.gh.add(11, sha11, statusCheckRollup=[_actions_check(j, *jobs[j]) for j in ids])
+    for job, (name, conclusion) in jobs.items():
+        world.gh.actions_jobs[job] = {"id": int(job), "name": name, "conclusion": conclusion,
+                                      "status": "completed", "run_id": int(RUN),
+                                      "run_attempt": int(ATTEMPT), "head_sha": HEAD}
+        world.gh.annotations[job] = []
+    world.gh.runs[RUN] = {"id": int(RUN), "path": ".github/workflows/rust.yml",
+                          "head_sha": HEAD, "run_attempt": int(ATTEMPT)}
+    world.gh.attempt_jobs[(RUN, ATTEMPT)] = [
+        {"id": int(job), "name": name, "status": "completed", "conclusion": conclusion}
+        for job, (name, conclusion) in jobs.items()]
+    world.gh.files[(".github/workflows/rust.yml", HEAD)] = (
+        ROOT / ".github" / "workflows" / "rust.yml").read_text(encoding="utf-8")
+    return sha10, sha11
+
+
+def _with(run, **conclusions) -> list[tuple[str, str, str]]:
+    """`run` with some jobs' conclusions replaced (by job id, as `j<id>`)."""
+    return [(job, name, conclusions.get(f"j{job}", conclusion)) for job, name, conclusion in run]
+
+
+def test_a_gate_that_failed_only_because_its_needed_jobs_were_cancelled_joins(world, capsys):
+    # #1059: `build` refused it as failing although nothing on its head failed.
+    sha10, sha11 = _gate_world(world)
+
+    assert _publish(world) == 0, capsys.readouterr()
+
+    assert _second_parents(world.origin, f"integrate/{DATE}-batch-1") == [sha10, sha11]
+    # Every cancelled job the gates need was read for a timeout.
+    probed = {args[1].split("/")[-2] for args, _ in world.gh.calls
+              if "/check-runs/" in args[1]}
+    assert {"501", "502"} <= probed
+    # `merge` is unchanged: on a batch the same checks are red.
+    red, _ = integrate._merge_checks(world.gh.pr(11)["statusCheckRollup"])
+    assert {"Parity / ubuntu-latest (FAILURE)", "Parity / windows-latest (FAILURE)"} <= set(red)
+
+
+def test_the_gates_of_one_run_read_the_run_once(world, capsys):
+    _gate_world(world)
+
+    assert _build() == 0, capsys.readouterr()
+
+    reads = [args for args, _ in world.gh.calls if "/contents/" in " ".join(args)
+             or "/attempts/" in " ".join(args)]
+    assert len(reads) == 2, reads
+
+
+@pytest.mark.parametrize("run, rollup", [
+    # A needed shard failed: a real failure, though the gate's rollup row is
+    # all that names it here (and a cancel stopped the other shard).
+    (_with(_RUN_1059, j502="failure"), list(GATES)),
+    (_with(_RUN_1059, j502="timed_out"), list(GATES)),
+    # Every needed job passed and only one the gate does not need was
+    # cancelled: the gate failed on its own.
+    (_with(_RUN_1059, j501="success", j502="success"), None),
+    # A needed job never finished: nothing proves the cause.
+    (_with(_RUN_1059, j502=None), list(GATES)),
+], ids=["needed-failed", "needed-timed-out", "needs-passed", "needed-unfinished"])
+def test_a_gate_failure_with_another_cause_keeps_a_member_out(world, capsys, run, rollup):
+    _gate_world(world, run, rollup)
+
+    assert _build() == 0, capsys.readouterr()
+
+    assert FAILING in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("run", [
+    # `Rust / <os>` needs only `Scope`, which passed.
+    _with(_RUN_1059, j501="failure", j508="success", j509="success"),
+    # A `!cancelled()` job, no gate, beside a cancelled job it needs: only
+    # `always()` lets a job run on after a cancel, so this failure is its own.
+    _with(_RUN_1059, j501="success", j502="success", j508="success", j509="success")
+    + [("510", "Fixtures / ubuntu-latest", "cancelled"),
+       ("511", "Parity checks / ubuntu-latest / cli-store", "failure")],
+], ids=["needs-passed", "need-cancelled"])
+def test_a_non_gate_failure_keeps_a_member_out(world, capsys, run):
+    _gate_world(world, run)
+
+    assert _build() == 0, capsys.readouterr()
+
+    assert FAILING in capsys.readouterr().out
+
+
+def test_a_gate_whose_needed_job_ran_past_its_timeout_keeps_a_member_out(world, capsys):
+    # GitHub reports the timed-out shard as cancelled; its annotation says why.
+    _gate_world(world, rollup=list(GATES))
+    world.gh.annotations["502"] = [TIMEOUT]
+
+    assert _build() == 0, capsys.readouterr()
+
+    assert FAILING in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("unreadable", ["job", "run", "workflow", "attempt", "annotations"])
+def test_a_gate_whose_run_cannot_be_read_is_unverified(world, capsys, unreadable):
+    _gate_world(world, rollup=list(GATES))
+    if unreadable == "job":
+        del world.gh.actions_jobs["509"]
+    elif unreadable == "run":
+        del world.gh.runs[RUN]
+    elif unreadable == "workflow":
+        world.gh.files.clear()
+    elif unreadable == "attempt":
+        world.gh.attempt_jobs.clear()
+    else:
+        del world.gh.annotations["502"]
+
+    assert _build() == 0, capsys.readouterr()
+
+    out = capsys.readouterr().out
+    assert UNVERIFIED in out and FAILING not in out, out
+
+
+def test_open_refuses_without_dropping_when_a_gates_run_cannot_be_read(world, capsys):
+    _gate_world(world, rollup=list(GATES))
+    assert _build() == 0, capsys.readouterr()
+    capsys.readouterr()
+    world.gh.attempt_jobs.clear()
+
+    assert _open(world) == 2
+
+    err = capsys.readouterr().err
+    assert "#11" in err and "could not be read" in err and "run `open` again" in err
+    assert "Drop it" not in err
     assert world.remote_branches() == []
 
 

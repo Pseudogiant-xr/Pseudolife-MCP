@@ -104,8 +104,14 @@ re-trigger gave no verdict. GitHub also reports a job that ran past its
 the latest attempt of each cancelled job: the runner's timeout message
 counts as failing, since the head likely hangs, and annotations it cannot
 read leave the pull request out of this batch as `unverified` until a
-retry reads them. `merge` still counts a cancelled check on the batch
-itself as red.
+retry reads them. A gate job (one that runs under `always()` and needs
+other jobs, such as `Parity / <os>`) still runs after a cancel and fails
+because the jobs it needs did not pass; the script reads the workflow at
+that head and the run's jobs, and counts the gate as cancelled when the
+jobs it needs include a cancelled one and none that failed, never finished
+or ran past its timeout. Any other gate failure is failing, and a run it
+cannot read is `unverified`. `merge` still counts a cancelled or failed
+check on the batch itself as red.
 
 Why not wait for green on the member's own head: on 2026-10-20/21 four
 things held batches up (#877 broke only against a newer master; an
