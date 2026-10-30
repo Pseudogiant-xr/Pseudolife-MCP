@@ -18172,8 +18172,8 @@
         null,
         "<clock>",
         null,
-        1793381181.2617364,
-        1793381181.2617364,
+        1793381818.3140538,
+        1793381818.3140538,
         null,
         null,
         "legacy",
@@ -18189,8 +18189,8 @@
         null,
         "<clock>",
         null,
-        1793381181.2665648,
-        1793381181.2665648,
+        1793381818.319135,
+        1793381818.319135,
         null,
         null,
         "legacy",
@@ -18628,13 +18628,13 @@
        [
         "curation_listing_spelling_v2",
         {
-         "at": 1793381180.44795,
+         "at": 1793381817.9636378,
          "copied": 0
         }
        ],
        [
         "dream_ack_secret_v1",
-        "b16e9564aced25f90d647679a5d33f323c1324ae626ad42c675d9791b7dc831b"
+        "3aee60df9962ce56c0a16a9a108e1587826ceffc3b5c864b364f4bf7c0e82d77"
        ],
        [
         "graph_digest",
@@ -19033,7 +19033,7 @@
      "etype": null,
      "facts": [
       {
-       "asserted_at": 1793381181.248095,
+       "asserted_at": 1793381818.3001416,
        "attribute": "color",
        "confidence": 0.8,
        "history_available": false,
@@ -19041,7 +19041,7 @@
        "value": "blue"
       }
      ],
-     "first_seen": 1793381181.2529075,
+     "first_seen": 1793381818.3050637,
      "flags": [
       {
        "entity": "Alpha",
@@ -19060,7 +19060,7 @@
        "id": 1,
        "source": "read-demo",
        "text": "Alpha is blue and connects to Beta.",
-       "ts": 1793381181.4089923
+       "ts": 1793381818.452137
       }
      ],
      "projects": [
@@ -19086,29 +19086,29 @@
       {
        "kind": "mention",
        "text": "Alpha is blue and connects to Beta.",
-       "ts": 1793381181.4089923
+       "ts": 1793381818.452137
       },
       {
        "kind": "edge-asserted",
        "text": "Alpha related-to Beta",
-       "ts": 1793381181.2617364
+       "ts": 1793381818.3140538
       },
       {
        "kind": "entity-created",
        "text": "\u201cAlpha\u201d first seen",
-       "ts": 1793381181.2529075
+       "ts": 1793381818.3050637
       },
       {
        "kind": "fact-stamped",
        "text": "color = blue",
-       "ts": 1793381181.248095
+       "ts": 1793381818.3001416
       }
      ],
      "world_facts": [
       {
        "attribute": "reference",
        "confidence": 0.85,
-       "retrieved_at": 1793381181.530939,
+       "retrieved_at": 1793381818.5750968,
        "source_url": "https://example.com/alpha",
        "value": "external fact"
       }
@@ -19315,8 +19315,8 @@
         null,
         "<clock>",
         null,
-        1793381181.2617364,
-        1793381181.2617364,
+        1793381818.3140538,
+        1793381818.3140538,
         null,
         null,
         "legacy",
@@ -19332,8 +19332,8 @@
         null,
         "<clock>",
         null,
-        1793381181.2665648,
-        1793381181.2665648,
+        1793381818.319135,
+        1793381818.319135,
         null,
         null,
         "legacy",
@@ -19594,13 +19594,13 @@
        [
         "curation_listing_spelling_v2",
         {
-         "at": 1793381180.44795,
+         "at": 1793381817.9636378,
          "copied": 0
         }
        ],
        [
         "dream_ack_secret_v1",
-        "b16e9564aced25f90d647679a5d33f323c1324ae626ad42c675d9791b7dc831b"
+        "3aee60df9962ce56c0a16a9a108e1587826ceffc3b5c864b364f4bf7c0e82d77"
        ],
        [
         "graph_digest",
@@ -19889,7 +19889,7 @@
        "id": 1,
        "source": "read-demo",
        "text": "Alpha is blue and connects to Beta.",
-       "ts": 1793381181.4089923
+       "ts": 1793381818.452137
       }
      ],
      "found": true,
@@ -20102,8 +20102,8 @@
         null,
         "<clock>",
         null,
-        1793381181.2617364,
-        1793381181.2617364,
+        1793381818.3140538,
+        1793381818.3140538,
         null,
         null,
         "legacy",
@@ -20119,8 +20119,8 @@
         null,
         "<clock>",
         null,
-        1793381181.2665648,
-        1793381181.2665648,
+        1793381818.319135,
+        1793381818.319135,
         null,
         null,
         "legacy",
@@ -20381,13 +20381,13 @@
        [
         "curation_listing_spelling_v2",
         {
-         "at": 1793381180.44795,
+         "at": 1793381817.9636378,
          "copied": 0
         }
        ],
        [
         "dream_ack_secret_v1",
-        "b16e9564aced25f90d647679a5d33f323c1324ae626ad42c675d9791b7dc831b"
+        "3aee60df9962ce56c0a16a9a108e1587826ceffc3b5c864b364f4bf7c0e82d77"
        ],
        [
         "graph_digest",
@@ -20678,7 +20678,7 @@
        ],
        "canonical": "alpha",
        "community": null,
-       "created_at": 1793381181.2529075,
+       "created_at": 1793381818.3050637,
        "entity": "Alpha",
        "etype": null,
        "facts": [
@@ -20901,8 +20901,8 @@
         null,
         "<clock>",
         null,
-        1793381181.2617364,
-        1793381181.2617364,
+        1793381818.3140538,
+        1793381818.3140538,
         null,
         null,
         "legacy",
@@ -20918,8 +20918,8 @@
         null,
         "<clock>",
         null,
-        1793381181.2665648,
-        1793381181.2665648,
+        1793381818.319135,
+        1793381818.319135,
         null,
         null,
         "legacy",
@@ -21180,13 +21180,13 @@
        [
         "curation_listing_spelling_v2",
         {
-         "at": 1793381180.44795,
+         "at": 1793381817.9636378,
          "copied": 0
         }
        ],
        [
         "dream_ack_secret_v1",
-        "b16e9564aced25f90d647679a5d33f323c1324ae626ad42c675d9791b7dc831b"
+        "3aee60df9962ce56c0a16a9a108e1587826ceffc3b5c864b364f4bf7c0e82d77"
        ],
        [
         "graph_digest",
@@ -21676,8 +21676,8 @@
         null,
         "<clock>",
         null,
-        1793381181.2617364,
-        1793381181.2617364,
+        1793381818.3140538,
+        1793381818.3140538,
         null,
         null,
         "legacy",
@@ -21693,8 +21693,8 @@
         null,
         "<clock>",
         null,
-        1793381181.2665648,
-        1793381181.2665648,
+        1793381818.319135,
+        1793381818.319135,
         null,
         null,
         "legacy",
@@ -21955,13 +21955,13 @@
        [
         "curation_listing_spelling_v2",
         {
-         "at": 1793381180.44795,
+         "at": 1793381817.9636378,
          "copied": 0
         }
        ],
        [
         "dream_ack_secret_v1",
-        "b16e9564aced25f90d647679a5d33f323c1324ae626ad42c675d9791b7dc831b"
+        "3aee60df9962ce56c0a16a9a108e1587826ceffc3b5c864b364f4bf7c0e82d77"
        ],
        [
         "graph_digest",
@@ -22449,8 +22449,8 @@
         null,
         "<clock>",
         null,
-        1793381181.2617364,
-        1793381181.2617364,
+        1793381818.3140538,
+        1793381818.3140538,
         null,
         null,
         "legacy",
@@ -22466,8 +22466,8 @@
         null,
         "<clock>",
         null,
-        1793381181.2665648,
-        1793381181.2665648,
+        1793381818.319135,
+        1793381818.319135,
         null,
         null,
         "legacy",
@@ -22728,13 +22728,13 @@
        [
         "curation_listing_spelling_v2",
         {
-         "at": 1793381180.44795,
+         "at": 1793381817.9636378,
          "copied": 0
         }
        ],
        [
         "dream_ack_secret_v1",
-        "b16e9564aced25f90d647679a5d33f323c1324ae626ad42c675d9791b7dc831b"
+        "3aee60df9962ce56c0a16a9a108e1587826ceffc3b5c864b364f4bf7c0e82d77"
        ],
        [
         "graph_digest",
