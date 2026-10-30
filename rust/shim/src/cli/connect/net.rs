@@ -95,7 +95,7 @@ const REASONS: [(&str, &str); 6] = [
     ),
     (
         "unauthorized",
-        "the daemon rejected this token; re-run the installer so the client token file matches ops/.env",
+        "the daemon rejected this token; on the daemon's own host, re-run the installer so the client token file matches ops/.env; on another machine, run `pseudolife-mcp invite <name> --replace` on the daemon host, then `pseudolife-mcp connect <url> --read-code` here",
     ),
     (
         "principal_not_allowed",

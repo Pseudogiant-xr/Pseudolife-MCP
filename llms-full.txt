@@ -239,7 +239,8 @@ ops\install.ps1         # Windows (pwsh 7+)
 
 The installer first asks where the memory bank lives: on this machine
 (the default, and everything below), on another machine that already runs
-it (a client-only install that asks for the daemon's URL and token), or on
+it (a client-only install that asks for the daemon's URL and a pairing code
+from `pseudolife-mcp invite`, or a token), or on
 this machine with other machines connecting to it (see
 [Sharing one bank across machines](docs/guide/remote-bank.md)). It then
 asks which agents to wire (multi-select, with a capability
@@ -11230,7 +11231,10 @@ Plain HTTP is acceptable only inside a private network you trust.
 ## Adding a machine: `invite` and `pair`
 
 Two commands give another machine its own identity on the bank, with no
-daemon restart and no token travelling between machines. On the daemon
+daemon restart and no token travelling between machines. This is the way
+to add every machine other than the daemon's host. Copying another
+machine's token there instead works, but if two machines use one token,
+rotating it breaks both and neither can be revoked alone. On the daemon
 host, after [exposing it](#expose-the-daemon-with-one-command):
 
 ```bash
@@ -11240,7 +11244,8 @@ pseudolife-mcp invite laptop            # prints a code such as 7K3Q-M9XA-2PDF
 On the new machine, either run the installer, answer **2** ("On another
 machine that already runs it"), give the daemon's URL, and paste the code
 where it asks for the token (or pass `--pairing-code <code>` /
-`-PairingCode <code>`), or, where the shim is already installed:
+`-PairingCode <code>`), or, where the shim is already installed (a machine
+set up with a copied token included):
 
 ```bash
 pseudolife-mcp pair http://100.64.0.2:8765 7K3Q-M9XA-2PDF
@@ -11318,12 +11323,15 @@ code for a name the environment or a reservation uses is refused without
 being spent.
 
 The sections below are the hand-made alternative: tokens in the daemon's
-environment, admitted in its configuration.
+environment, admitted in its configuration. Use it where pairing cannot
+run; each token you copy to another machine is then shared by every
+machine that holds it.
 
-## One identity per remote client
+## The fallback: one environment token per remote client
 
-Give each remote client its own principal, so its writes, its board address
-and its toolset tier are its own. On the daemon host, in `ops/.env`:
+Without pairing, give each remote client its own principal, so its writes,
+its board address and its toolset tier are its own. On the daemon host, in
+`ops/.env`:
 
 ```bash
 # token:principal entries, one per client
@@ -11371,6 +11379,16 @@ The file is read at boot, so restart the daemon container
 The client runs no daemon, no Postgres and no Docker: only the shim, the
 token file and the agent's registration.
 
+Pair it: run `pseudolife-mcp invite <name>` on the daemon host, then give
+the code to the installer below (`--pairing-code` / `-PairingCode`, or
+pasted where it asks for the token), or, where the shim is installed, run
+`pseudolife-mcp pair <url> --read-code`, or `pseudolife-mcp connect <url>
+--read-code` to also re-point the clients already registered ([Adding a
+machine](#adding-a-machine-invite-and-pair)). Pairing writes the token
+file for you. A token pasted or copied from the daemon's environment still
+works as the fallback, and the installer's closing lines then say how to
+pair if another machine uses the same token.
+
 ### The token file
 
 One file per client, `~/.pseudolife-mcp/<client>.token`, owner-only (mode
@@ -11378,7 +11396,8 @@ One file per client, `~/.pseudolife-mcp/<client>.token`, owner-only (mode
 start when the daemon requires auth and the file is missing or readable by
 anyone else.
 
-The simplest way to write it is the installer's `--read-token`
+A paired machine has it already. For a token from the daemon's
+environment, the simplest way to write it is the installer's `--read-token`
 (`-ReadToken`): it reads the token without echo and writes the
 `--token-file` path owner-only on Linux, macOS and Windows, and only when
 that file does not exist yet: it refuses an existing file, so delete a bad
@@ -11428,9 +11447,12 @@ Where does the memory bank live?
 ```
 
 Answer **2**. It asks for the daemon's URL, then, once you have chosen the
-agents, for the token: paste it, and it is written to a new owner-only file
-(`~/.pseudolife-mcp/<client>.token` by default; it never replaces an
-existing file), or name a token file that already holds it. The
+agents, for the token: paste the pairing code from `pseudolife-mcp invite`
+and the installer pairs this machine, writing its new token to a new
+owner-only file (`~/.pseudolife-mcp/<client>.token` by default; it never
+replaces an existing file). As the fallback, paste a token from the
+daemon's environment there, written to that file the same way, or name a
+token file that already holds one. The
 client-only install follows: it skips the Docker stack, mints no token,
 checks the daemon's `/health`, and sets up the shim, the plugin and hooks
 and each client's registration against the remote daemon.
@@ -11456,7 +11478,20 @@ session kept in place) only gets a warning: that run leaves existing
 registrations as they are, as before.
 
 The installer takes one token file per run, so run it once per client, each
-with that client's own token file:
+with that client's own pairing code (one `pseudolife-mcp invite <name>` per
+client on the daemon host) and so its own token file:
+
+```bash
+ops/install.sh --client-only --daemon-url <url> --client claude --pairing-code <code>
+ops/install.sh --client-only --daemon-url <url> --client codex --pairing-code <code>
+```
+
+```powershell
+ops\install.ps1 -ClientOnly -DaemonUrl <url> -Client claude -PairingCode <code>
+```
+
+With tokens from the daemon's environment instead (the fallback), each run
+names that client's token file and reads its token without echo:
 
 ```bash
 ops/install.sh --client-only --daemon-url <url> --client claude --token-file ~/.pseudolife-mcp/claude-code.token --read-token
@@ -11466,6 +11501,13 @@ ops/install.sh --client-only --daemon-url <url> --client codex --token-file ~/.p
 ```powershell
 ops\install.ps1 -ClientOnly -DaemonUrl <url> -Client claude -TokenFile <path> -ReadToken
 ```
+
+A run given a token that way, against a daemon on another machine, ends
+with one line beside the update command: if another machine uses this same
+token, give each its own with `invite` and `connect --read-code` (named
+with the installed shim's full path); a machine already paired, or given a
+token no other machine uses, has nothing to do. It changes nothing and asks
+nothing.
 
 If per-client attribution on the board does not matter, one shared principal
 and one token file for every client on the machine is fine too.

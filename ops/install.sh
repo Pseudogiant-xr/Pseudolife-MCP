@@ -14,9 +14,9 @@
 #   ops/install.sh --extractor endpoint --extractor-url http://127.0.0.1:1234/v1 \
 #       --model qwen3.6-27b --client claude
 #   ops/install.sh --daemon-url http://100.64.0.2:8765 \
-#       --token-file ~/.pseudolife-mcp/claude-code.token --read-token --client claude
-#   ops/install.sh --daemon-url http://100.64.0.2:8765 \
 #       --pairing-code ABCD-EFGH-JKMN --client claude
+#   ops/install.sh --daemon-url http://100.64.0.2:8765 \
+#       --token-file ~/.pseudolife-mcp/claude-code.token --read-token --client claude
 #
 # Providers (--client, comma- or space-separated list):
 #   claude    Claude Code    - MCP + SessionStart briefing + per-turn discipline
@@ -78,15 +78,21 @@
 #   --token-file <path>              client-only: an owner-only file (chmod
 #                                    600) holding the daemon's bearer token
 #                                    (default: PSEUDOLIFE_MCP_TOKEN_FILE);
-#                                    the installer never mints one here
+#                                    the installer never mints one here.
+#                                    The fallback: prefer --pairing-code
 #   --client-only                    wire clients to --daemon-url only; with
 #                                    a loopback URL, for an SSH tunnel
 #   --read-token                     client-only: create the --token-file (it
 #                                    must not exist yet) from the token typed,
-#                                    unechoed, or piped on stdin
-#   --pairing-code <code>            client-only: a pairing code from
-#                                    pseudolife-mcp invite on the daemon's
-#                                    host, instead of a token: the installed
+#                                    unechoed, or piped on stdin (the
+#                                    fallback: prefer --pairing-code)
+#   --pairing-code <code>            client-only, recommended: a pairing code
+#                                    from pseudolife-mcp invite <name> on the
+#                                    daemon's host, instead of a token, so
+#                                    this machine gets its own principal. If
+#                                    two machines use one token, rotating it
+#                                    breaks both and neither can be revoked
+#                                    alone. The installed
 #                                    shim's pair creates the --token-file
 #                                    (default ~/.pseudolife-mcp/<client>.token;
 #                                    it must not exist yet). An interactive
@@ -445,9 +451,13 @@ show_client_only_notes() {
   This machine is a client only: the daemon, its bank and its dream
   extractor run on the other host, and nothing here starts, stops or
   upgrades them.
-  - A new token there: write it into the token file here. The shims and
-    the Claude Code hooks read that file on every call. Codex keeps its
-    own copy in ~/.codex/pseudolife/token: write it there too.
+  - Its token revoked or replaced there: a machine paired with invite
+    pairs again (pseudolife-mcp invite <name> --replace on the daemon
+    host, then connect <url> --read-code here, run as the update command
+    below is), which also re-points Codex. Only a client using a token
+    from the daemon's environment writes the new token into its
+    token file here (the shims and the Claude Code hooks read it on
+    every call), and into Codex's own copy in ~/.codex/pseudolife/token.
   - A daemon upgrade there: run the update command below with
     --clients-only here, so the shim matches the daemon.
 PL_CLIENT_ONLY
@@ -898,7 +908,7 @@ client_only_preflight() {
     fi
     [ -n "$TOKEN_FILE" ] || TOKEN_FILE="${PSEUDOLIFE_MCP_TOKEN_FILE:-}"
     if [ -z "$TOKEN_FILE" ]; then
-        echo "client-only install: pass --token-file <path> (or set PSEUDOLIFE_MCP_TOKEN_FILE) naming the file that holds the remote daemon's bearer token, and --read-token to create it, or --pairing-code <code> to pair. The installer never mints one for a remote daemon${CLIENT_ONLY_VIA:-}" >&2
+        echo "client-only install: pass --pairing-code <code> (from pseudolife-mcp invite <name> on the daemon's host) to pair this machine, or, as the fallback, --token-file <path> (or set PSEUDOLIFE_MCP_TOKEN_FILE) naming the file that holds the remote daemon's bearer token, with --read-token to create it. The installer never mints one for a remote daemon${CLIENT_ONLY_VIA:-}" >&2
         exit 2
     fi
     token_py="$(installer_python)"
@@ -949,7 +959,7 @@ client_only_preflight() {
         fi
     else
         if [ ! -f "$TOKEN_FILE" ] || [ ! -s "$TOKEN_FILE" ]; then
-            echo "client-only install: the token file is missing or empty: $TOKEN_FILE. Create it with --read-token, or write the daemon's token into it owner-only, then re-run" >&2
+            echo "client-only install: the token file is missing or empty: $TOKEN_FILE. Pair this machine instead: remove it if it is empty, then re-run with --pairing-code <code> from pseudolife-mcp invite <name> on the daemon's host; or, as the fallback, create it with --read-token or write the daemon's token into it owner-only, then re-run" >&2
             exit 1
         fi
         check_client_token_file
@@ -983,6 +993,14 @@ client_only_preflight() {
         esac
     fi
     step "Daemon answered at $DAEMON_URL/health."
+    # A raw token against another machine's daemon may be one another machine
+    # also holds (docs/guide/remote-bank.md): the update line names pairing at
+    # the end of the run, with the installed shim's path. Not for a pairing
+    # code, nor on loopback (the daemon's own host, or an SSH tunnel).
+    PAIRING_HINT_URL=""
+    if [ -z "${PAIRING_CODE:-}" ] && ! is_loopback_url "$DAEMON_URL"; then
+        PAIRING_HINT_URL="$DAEMON_URL"
+    fi
 }
 # <<< client-only preflight <<<
 step "Preflight..."
@@ -3381,6 +3399,9 @@ print_update_line() {
     fi
     if [ -n "${CLIENT_ONLY:-}" ]; then
         echo "Update this machine's clients later with one command, no checkout needed: $upd_cmd update --clients-only (installs the daemon's release as a new shim runtime and refreshes the plugin cache; the daemon is updated on its own host)$upd_path."
+        if [ -n "${PAIRING_HINT_URL:-}" ]; then
+            echo "If another machine uses this same token, rotating it breaks both and neither can be revoked alone: give each machine its own with pseudolife-mcp invite <name> on the daemon's host and $upd_cmd connect $PAIRING_HINT_URL --read-code here. A machine paired with invite, or given a token no other machine uses, already has its own: nothing to do."
+        fi
     else
         echo "Update later with one command, no checkout needed: $upd_cmd update (--check reports whether a newer release exists)$upd_path; from this checkout, ops/update.sh --all does the same after a git pull."
     fi
