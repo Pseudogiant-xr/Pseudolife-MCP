@@ -166,11 +166,14 @@ def subprocess_handshake(url: str, credential: tuple, timeout: float = HANDSHAKE
         # From a neutral directory: `-c` here and the shim's `-m` put the
         # working directory first on sys.path, so a run from a source
         # checkout would verify the checkout's package, not the installed
-        # one. Not `-I`, which would also drop PYTHONIOENCODING.
-        proc = subprocess.run([sys.executable, "-c", _HANDSHAKE_SCRIPT, str(timeout)], env=env,
-                              cwd=tempfile.gettempdir(),
-                              capture_output=True, text=True, timeout=timeout + 15,
-                              stdin=subprocess.DEVNULL, errors="replace")
+        # one. Not `-I`, which would also drop PYTHONIOENCODING. A fresh
+        # empty directory, not the shared temp directory, where any file
+        # named like an imported module would run in its place.
+        with tempfile.TemporaryDirectory(prefix="pseudolife-handshake-", ignore_cleanup_errors=True) as neutral:
+            proc = subprocess.run([sys.executable, "-c", _HANDSHAKE_SCRIPT, str(timeout)], env=env,
+                                  cwd=neutral,
+                                  capture_output=True, text=True, timeout=timeout + 15,
+                                  stdin=subprocess.DEVNULL, errors="replace")
     except (OSError, subprocess.TimeoutExpired) as exc:
         return {"ok": False, "error": type(exc).__name__}
     if proc.returncode != 0:
