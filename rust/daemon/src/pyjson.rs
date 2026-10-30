@@ -14,6 +14,97 @@ use std::fmt::Write;
 #[path = "../../shared/float_repr.rs"]
 mod shared_float;
 
+/// Python's JSON-visible type names, used by unbound Console arguments.
+pub(crate) fn type_name(v: &Value) -> &'static str {
+    match v {
+        Value::Null => "NoneType",
+        Value::Bool(_) => "bool",
+        Value::Number(n) if n.to_string().contains(['.', 'e', 'E']) => "float",
+        Value::Number(_) => "int",
+        Value::String(_) => "str",
+        Value::Array(_) => "list",
+        Value::Object(_) => "dict",
+    }
+}
+
+/// psycopg parameters assigned to a PostgreSQL TEXT column. Keep this
+/// separate from Python str(): bools and arrays have different SQL text.
+pub(crate) async fn pg_text(
+    db: &tokio_postgres::Client,
+    v: &Value,
+) -> anyhow::Result<Option<String>> {
+    match v {
+        Value::Null => Ok(None),
+        Value::String(s) => Ok(Some(s.clone())),
+        Value::Bool(b) => Ok(Some(b.to_string())),
+        Value::Number(n) if type_name(v) == "float" => {
+            let f = n.as_f64().unwrap_or(f64::NAN);
+            Ok(Some(
+                db.query_one("SELECT $1::float8::text", &[&f]).await?.get(0),
+            ))
+        }
+        Value::Number(n) => Ok(Some(number_text(n))),
+        Value::Object(_) => {
+            anyhow::bail!("cannot adapt type 'dict' using placeholder '%s' (format: AUTO)")
+        }
+        Value::Array(a) => {
+            fn kinds(v: &Value, out: &mut std::collections::BTreeSet<&'static str>) {
+                match v {
+                    Value::Array(a) => {
+                        for v in a {
+                            kinds(v, out);
+                        }
+                    }
+                    Value::Null => (),
+                    _ => {
+                        out.insert(type_name(v));
+                    }
+                }
+            }
+            let mut types = std::collections::BTreeSet::new();
+            kinds(v, &mut types);
+            if types.len() > 1 {
+                anyhow::bail!(
+                    "cannot dump lists of mixed types; got: {}",
+                    types.iter().copied().collect::<Vec<_>>().join(", ")
+                );
+            }
+            let cast = match types.first().copied() {
+                Some("float") => "float8",
+                Some("int") => "numeric",
+                Some("bool") => "bool",
+                _ => "text",
+            };
+            fn literal(v: &Value) -> anyhow::Result<String> {
+                Ok(match v {
+                    Value::Null => "NULL".into(),
+                    Value::Bool(b) => if *b { "t" } else { "f" }.into(),
+                    Value::String(s) => {
+                        format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""))
+                    }
+                    Value::Number(n) => number_text(n),
+                    Value::Array(a) => format!(
+                        "{{{}}}",
+                        a.iter()
+                            .map(literal)
+                            .collect::<anyhow::Result<Vec<_>>>()?
+                            .join(",")
+                    ),
+                    Value::Object(_) => anyhow::bail!(
+                        "cannot adapt type 'dict' using placeholder '%s' (format: AUTO)"
+                    ),
+                })
+            }
+            let array = literal(&Value::Array(a.clone()))?;
+            Ok(Some(
+                db.query_one(&format!("SELECT $1::text::{cast}[]::text"), &[&array])
+                    .await?
+                    .get(0),
+            ))
+        }
+    }
+}
+
 /// Python `repr(float)`: the shortest round-trip digits, positional for
 /// `1e-4 <= |x| < 1e16`, otherwise `d.ddde+XX` (two exponent digits minimum).
 pub fn float_repr(x: f64) -> String {

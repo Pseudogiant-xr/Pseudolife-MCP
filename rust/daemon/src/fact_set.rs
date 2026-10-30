@@ -69,7 +69,7 @@ pub(crate) struct CortexWriteArgs {
     pub entity: String,
     pub attribute: String,
     pub value: String,
-    pub null_value: bool,
+    pub raw: Map<String, Value>,
     pub confidence: f64,
     pub provenance: Vec<String>,
     /// As passed; `_norm_support` runs in the store.
@@ -92,7 +92,7 @@ impl CortexWriteArgs {
             entity: entity.into(),
             attribute: attribute.into(),
             value: value.into(),
-            null_value: false,
+            raw: Map::new(),
             confidence: 0.7,
             provenance: Vec::new(),
             support: None,
@@ -212,10 +212,18 @@ pub(crate) async fn cortex_write(
     } else {
         a.freshness_class.clone()
     };
-    let display_value = if a.null_value { "None" } else { &a.value };
-    let claim = py_strip(&format!("{} {} {}", a.entity, a.attribute, display_value)).to_string();
+    let display = |key: &str, fallback: &str| {
+        a.raw
+            .get(key)
+            .map(crate::pyjson::py_str)
+            .unwrap_or_else(|| fallback.to_string())
+    };
+    let entity_text = display("entity", &a.entity);
+    let attribute_text = display("attribute", &a.attribute);
+    let value_text = display("value", &a.value);
+    let claim = py_strip(&format!("{entity_text} {attribute_text} {value_text}")).to_string();
     let embedding = embed(ready, claim).await?;
-    let slot_text = py_strip(&format!("{} {}", a.entity, a.attribute)).to_string();
+    let slot_text = py_strip(&format!("{entity_text} {attribute_text}")).to_string();
     let slot_embedding = embed(ready, slot_text).await?;
     let mut session = ws.resolve_session(caller).map_err(ToolError::Invalid)?;
     let resolved = ws.resolve_handle(db, a.episode.as_deref()).await;
@@ -231,6 +239,7 @@ pub(crate) async fn cortex_write(
         entity: &a.entity,
         attribute: &a.attribute,
         value: &a.value,
+        raw: a.raw.clone(),
         embedding,
         slot_embedding: Some(slot_embedding),
         confidence: a.confidence,
@@ -249,14 +258,7 @@ pub(crate) async fn cortex_write(
     };
     let outcome = ready
         .cortex
-        .write(|s| {
-            let before = s.records.len();
-            let outcome = s.write_fact(&w)?;
-            if outcome.record >= before {
-                s.records[outcome.record].null_value = a.null_value;
-            }
-            Ok::<_, &'static str>(outcome)
-        })
+        .write(|s| s.write_fact(&w))
         .map_err(|_| ToolError::Invalid(SET_SLOT_REFUSAL.into()))?;
     if !crate::mutants::active("mcp-fact-set-no-entity-mint") {
         ensure_subject_entity(db, &a.entity)

@@ -220,7 +220,11 @@ async fn answer(req: &mut Request<'_>) -> Result<Value> {
                 &strip(&b["attribute"])?,
                 &strip(&b["value"])?,
             );
-            a.null_value = b["value"].is_null();
+            for key in ["entity", "attribute", "value"] {
+                if !b[key].is_string() {
+                    a.raw.insert(key.into(), b[key].clone());
+                }
+            }
             a.confidence = confidence;
             a.support = Some(strip(&defaulted(&b, "origin", "agent"))?);
             a.freshness_class = strip(&defaulted(&b, "freshness_class", "auto"))?;
@@ -277,7 +281,14 @@ async fn answer(req: &mut Request<'_>) -> Result<Value> {
                         &strip(&b["attribute"])?,
                         b.get("accept").is_some_and(truth),
                     );
-                    crate::fact_resolve::cortex_resolve(&svc, &r, a).await
+                    let mut result = crate::fact_resolve::cortex_resolve(&svc, &r, a)
+                        .await
+                        .map_err(service_error)?;
+                    if result.get("resolved") == Some(&Value::Bool(false)) {
+                        result["entity"] = b["entity"].clone();
+                        result["attribute"] = b["attribute"].clone();
+                    }
+                    return Ok(result);
                 }
                 "/api/facts/forget" => {
                     let entity = strip(&b["entity"])?;

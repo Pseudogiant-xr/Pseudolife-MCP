@@ -480,12 +480,10 @@ pub(crate) async fn consolidate(
         Ok(t) => t,
         Err(answer) => return Ok(answer),
     };
-    // `source or "consolidation"`: an empty source takes the default.
-    let source = match args.get("source").and_then(Value::as_str) {
-        Some(s) if !s.is_empty() => s,
-        _ if crate::mutants::active("mcp-consolidate-default-source") => "correction",
-        _ => "consolidation",
-    };
+    // Python defaults only falsey sources; raw non-strings reach psycopg.
+    let raw_source = args
+        .get("source")
+        .filter(|v| crate::board::store::py_truthy(v));
     // Console bodies reach the service without MCP's list binding. Python
     // iterates string characters and dict keys, but a truthy scalar raises.
     let tags = match args.get("tags") {
@@ -503,8 +501,18 @@ pub(crate) async fn consolidate(
             return Err(internal(format!("'{kind}' object is not iterable")));
         }
     };
+    let source = match raw_source {
+        Some(v) => crate::txn::with_client(ready.storage.client(), |db| async move {
+            crate::pyjson::pg_text(db, v).await
+        })
+        .await
+        .map_err(internal)?
+        .unwrap_or_default(),
+        None if crate::mutants::active("mcp-consolidate-default-source") => "correction".into(),
+        None => "consolidation".into(),
+    };
     let correction = Correction {
-        source,
+        source: &source,
         tags: store::normalize_tags(Some(&tags)),
         report_derivations: crate::mutants::active("mcp-consolidate-derived-keys"),
     };

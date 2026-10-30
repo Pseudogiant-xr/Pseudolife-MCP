@@ -16,7 +16,7 @@ use std::collections::{BTreeSet, HashMap};
 use std::sync::{Arc, RwLock};
 
 use anyhow::{Result, bail};
-use serde_json::Value;
+use serde_json::{Value, json};
 use tokio_postgres::Client;
 
 #[cfg(test)]
@@ -91,9 +91,9 @@ pub struct CortexRecord {
     pub entity_norm: String,
     pub attribute_norm: String,
     pub value: String,
-    /// A Console null remains resident after its NOT NULL persistence failure.
-    /// It compares as the empty string, but must never persist as one.
-    pub(crate) null_value: bool,
+    /// Raw Console fields coexist with their string normalization inputs.
+    /// They must survive resident reads, failed saves, links and audit writes.
+    pub(crate) raw: serde_json::Map<String, Value>,
     pub polarity: String,
     pub status: String,
     /// PostgreSQL REAL decoded from its decimal text, as psycopg reads it.
@@ -144,6 +144,20 @@ pub struct CortexRecord {
 }
 
 impl CortexRecord {
+    pub(crate) fn field(&self, key: &str, fallback: &str) -> Value {
+        self.raw
+            .get(key)
+            .cloned()
+            .unwrap_or_else(|| json!(fallback))
+    }
+
+    pub(crate) fn link(&self, key: &str, fallback: &Option<String>) -> Value {
+        self.raw
+            .get(key)
+            .cloned()
+            .unwrap_or_else(|| json!(fallback))
+    }
+
     pub fn key(&self) -> &SlotKey {
         &self.key
     }
@@ -588,7 +602,7 @@ async fn hydrate_locked(client: &Client, dim: usize) -> Result<CortexStore> {
             entity_norm: r.get(3),
             attribute_norm: r.get(4),
             value: r.get(5),
-            null_value: false,
+            raw: Default::default(),
             polarity: r.get(6),
             status: r.get(7),
             confidence: r.get::<_, String>(8).parse()?,
@@ -801,7 +815,7 @@ pub(crate) mod tests {
             entity_norm: norm_key(entity),
             attribute_norm: norm_key(attribute),
             value: value.into(),
-            null_value: false,
+            raw: Default::default(),
             polarity: "+".into(),
             status: "current".into(),
             confidence: 0.7,

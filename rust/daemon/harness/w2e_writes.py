@@ -25,7 +25,56 @@ def register(h) -> dict[str, dict]:
     def write(entity, attribute, value, **kw):
         return rest(set_fact, {"entity": entity, "attribute": attribute, "value": value, **kw})
 
+    # Each raw-field write is followed by a read and cleanup: SQL may cast
+    # a scalar to TEXT while the resident Python record still keeps its type.
+    raw_ops = []
+    for field in ("entity", "attribute", "value"):
+        for value in (0, False, 0.0, [], {}):
+            body = {"entity": "Console Raw", "attribute": "field", "value": "original", field: value}
+            raw_ops.extend([rest(set_fact, body),
+                            {"op": "rest", "method": "GET", "path": "/api/facts"},
+                            rest(forget, {"entity": body["entity"], "attribute": body["attribute"]})])
+    null_trigger = h.sql(
+        "CREATE FUNCTION console_null_fields() RETURNS trigger LANGUAGE plpgsql AS $$ "
+        "BEGIN IF NEW.entity IS NULL THEN RAISE EXCEPTION 'null entity violates not-null constraint'; "
+        "ELSIF NEW.attribute IS NULL THEN RAISE EXCEPTION 'null attribute violates not-null constraint'; "
+        "ELSIF NEW.value IS NULL THEN RAISE EXCEPTION 'null value violates not-null constraint'; "
+        "END IF; RETURN NEW; END $$; CREATE TRIGGER console_null_fields BEFORE INSERT ON facts "
+        "FOR EACH ROW EXECUTE FUNCTION console_null_fields()")
+    sources = (7, ["user"], True, {"source": "user"}, 0, False, [],
+               3.5, [1, 2], [True, False], [1.5, 2.5], [1, "user"],
+               [" a", "NULL", "a,b", 'a"b', "a\\b"], [[1], [2]], ["user", None])
     return {
+        "console-facts-raw-fields": {"config": None, "seed": [], "ops": raw_ops},
+        "console-facts-null-keys": {
+            "config": None, "seed": [null_trigger],
+            "ops": [op for field in ("entity", "attribute") for op in (
+                checked(set_fact, {"entity": "Console Null Key", "attribute": "field", "value": "valid", field: None},
+                        "SELECT count(*) = 0 FROM facts"),
+                {"op": "rest", "method": "GET", "path": "/api/facts"},
+                rest(forget, {"entity": None if field == "entity" else "Console Null Key"}))],
+        },
+        "console-facts-null-audit": {
+            "config": None, "seed": [null_trigger],
+            "ops": [write("Console Audit", "field", "original"),
+                    rest(set_fact, {"entity": "Console Audit", "attribute": "field", "value": None}),
+                    {"op": "rest", "method": "GET", "path": "/api/facts/history?entity=Console%20Audit&attribute=field"},
+                    checked(forget, {"entity": "Console Audit"},
+                            "SELECT value->-1->'new_value' = 'null'::jsonb AND value->-1->>'old_value' = 'original' "
+                            "FROM meta WHERE key = 'cortex_supersession_log'")],
+        },
+        "console-facts-resolve-raw": {
+            "config": None, "seed": [],
+            "ops": [rest(resolve, {"entity": "Console Raw", "attribute": "field", field: value})
+                    for field in ("entity", "attribute") for value in (None, 0, False, [], {})],
+        },
+        "console-consolidate-source": {
+            "config": None,
+            "seed": [h.store(f"Console raw source target {i}.") for i in range(len(sources))],
+            "ops": [rest(consolidate, {"replaces": [f"Console raw source target {i}."],
+                                      "new_text": f"Console raw source replacement {i}.", "source": source})
+                    for i, source in enumerate(sources)],
+        },
         "console-facts-null": {
             "config": None,
             # A deterministic database refusal replaces PostgreSQL's failing-row

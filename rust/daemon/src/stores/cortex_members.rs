@@ -98,6 +98,7 @@ impl MemberWrite<'_> {
             entity: self.entity,
             attribute: self.attribute,
             value: self.member,
+            raw: Default::default(),
             embedding: self.embedding.clone(),
             slot_embedding,
             confidence: self.confidence,
@@ -149,7 +150,7 @@ fn member_record(
         entity_norm: super::cortex::norm_key(entity),
         attribute_norm: super::cortex::norm_key(attribute),
         value: value.to_string(),
-        null_value: false,
+        raw: Default::default(),
         polarity: polarity.to_string(),
         status: "current".into(),
         confidence,
@@ -206,13 +207,14 @@ impl CortexStore {
             cur.status = "superseded".into();
             cur.superseded_at = Some(w.now);
             cur.superseded_by_value = Some(CONVERTED.into());
+            cur.raw.remove("superseded_by_value");
         }
         self.current.remove(key);
         let cur = self.records[idx].clone();
         self.log_row(
             &LogAnchor::of(&cur),
             &LogRow {
-                new_value: w.member,
+                new_value: json!(w.member),
                 new_conf: w.confidence,
                 t: w.now,
                 decision: "convert_to_set",
@@ -358,15 +360,15 @@ impl CortexStore {
         if members.len() >= MAX_CURRENT_MEMBERS {
             // Logged against the rejected value itself; nothing is dirty.
             let anchor = LogAnchor {
-                entity: w.entity.to_string(),
-                attribute: w.attribute.to_string(),
-                value: w.member.to_string(),
+                entity: json!(w.entity),
+                attribute: json!(w.attribute),
+                value: json!(w.member),
                 confidence: w.confidence,
             };
             self.log_row(
                 &anchor,
                 &LogRow {
-                    new_value: w.member,
+                    new_value: json!(w.member),
                     new_conf: w.confidence,
                     t: w.now,
                     decision: "member_capped",
@@ -449,7 +451,7 @@ impl CortexStore {
         self.log_row(
             &anchor,
             &LogRow {
-                new_value: member,
+                new_value: json!(member),
                 new_conf: anchor.confidence,
                 t: now,
                 decision: "member_removed",
