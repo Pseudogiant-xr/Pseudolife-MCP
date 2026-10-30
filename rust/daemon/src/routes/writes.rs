@@ -135,16 +135,22 @@ fn integer(v: &Value) -> Result<Option<i64>> {
         Value::String(s) => {
             let normalized = decimal_digits(s);
             let s = crate::http::py_strip(&normalized);
-            if let Some(i) = crate::read::search_route::py_int(s) {
-                return Ok(Some(i));
-            }
             let digits = s.strip_prefix(['+', '-']).unwrap_or(s);
             if !digits.is_empty()
                 && digits
                     .split('_')
                     .all(|g| !g.is_empty() && g.bytes().all(|x| x.is_ascii_digit()))
             {
-                return Ok(None);
+                let count = digits.bytes().filter(u8::is_ascii_digit).count();
+                if count > 4300 {
+                    return Err(Failure(
+                        400,
+                        format!(
+                            "Exceeds the limit (4300 digits) for integer string conversion: value has {count} digits; use sys.set_int_max_str_digits() to increase the limit"
+                        ),
+                    ));
+                }
+                return Ok(crate::read::search_route::py_int(s));
             }
             Err(Failure(
                 400,

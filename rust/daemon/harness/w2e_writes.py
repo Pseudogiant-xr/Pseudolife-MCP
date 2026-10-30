@@ -166,6 +166,8 @@ def register(h) -> dict[str, dict]:
                 # int() accepts numeric strings, floats and booleans at this route.
                 *[rest(reinforce, {"entry_id": value})
                   for value in (0, -1, 999999, "999999", 999999.5, False)],
+                rest(reinforce, {"entry_id": "0" * 4300}),
+                rest(reinforce, {"entry_id": "0" * 4301}),
                 checked(reinforce, {"entry_id": "١"},
                         "SELECT reinforcements = 1 AND explicit_reinforcements = 1 FROM entries "
                         "WHERE text = 'Console reinforcement target.'"),
