@@ -138,16 +138,6 @@ pub(super) async fn route(req: &mut Request<'_>) -> Option<Response> {
                     duplicates(&ready, &cfg).await
                 }
                 "/api/curation/dismiss-duplicate" => {
-                    if a["store"].is_array() || a["store"].is_object() {
-                        return Err(internal(format!(
-                            "unhashable type: '{}'",
-                            if a["store"].is_array() {
-                                "list"
-                            } else {
-                                "dict"
-                            }
-                        )));
-                    }
                     if !matches!(text(&a, "store"), "lesson" | "world") {
                         return Ok(
                             json!({"dismissed":false,"reason":"bad_store","store":a["store"]}),
@@ -353,6 +343,11 @@ async fn write(
     }
     let id = entity["id"].as_i64().unwrap();
     if action == "assign-scope" {
+        if a["source"].is_object() {
+            return Err(internal(
+                "cannot adapt type 'dict' using placeholder '%s' (format: AUTO)",
+            ));
+        }
         let source = actions::text_param(a.get("source"))?;
         actions::in_txn(c, |c| async move {
             c.execute("INSERT INTO entity_sources (entity_id, source, count, origin, updated_at) VALUES ($1,$2,1,'manual',$3) ON CONFLICT (entity_id,source) DO UPDATE SET count=entity_sources.count+1, updated_at=EXCLUDED.updated_at, origin='manual'", &[&id,&source,&crate::episodes::now()]).await.map_err(internal)?;

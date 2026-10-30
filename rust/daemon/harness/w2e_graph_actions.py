@@ -22,6 +22,8 @@ def register(h):
             post("dismiss-duplicate", a="Console Alpha", b="Console Beta"),
             post("dismiss-duplicate", a="Console Alpha", b="Console Alpha"),
             *[post(name, id=999999) for name in actions if "proposal" in name or name.startswith("accept-entity")],
+            post("bless-edge", src="Absent", relation="uses", dst="Console Alpha"),
+            post("merge", **{"from": "Console Alpha", "into": "Console Alpha"}),
             post("merge", **{"from": "Console Alpha", "into": "Console Beta"}),
             post("delete-entity", entity="Console Beta"),
             post("rejudge", queue="unknown"), post("rejudge", limit=False),
@@ -78,6 +80,8 @@ def register(h):
                 dismiss("lesson", "Rotate Keys", "Owner", "Rotate Keys", "Cadence"),
                 dismiss("world", "ci|cd", "deploy", "ci-cd", "deploy"),
                 dismiss("invalid", "a", "b", "c", "d"),
+                dismiss(["lesson"], "a", "b", "c", "d"),
+                dismiss({"store": "lesson"}, "a", "b", "c", "d"),
                 dismiss("lesson", "a", "b", "a", "b"),
                 dismiss("world", "", "b", "c", "d"),
                 get_duplicates, post("rejudge", queue="curation")],
@@ -98,4 +102,25 @@ def register(h):
         post("assign-scope", entity="absent", source="fixture"),
         post("merge", **{"from": "absent", "into": "missing"}),
     ])
+    # Invalid IDs must preserve both psycopg errors and the earlier committed
+    # automatic-decision retirement on reject-proposal.
+    malformed_ids = (
+        True, False, [], [1], [32768], [2147483648], [1.5], [True],
+        ["x"], [None], [["x"]], [1, "x"], [1.0, 1], [9223372036854775808],
+        [{}], ["a\\b", "NULL", "x y", "\u2003"], {"id": 1}, "١",
+    )
+    malformed = []
+    for name in names.values():
+        for value in malformed_ids:
+            malformed.extend([
+                h.external(h.REVIEW_ACTIVE.replace('"link:4"', '"link:1"')),
+                post(name, id=value),
+            ])
+    malformed.append(post("assign-scope", entity="Tide Gauge", source={"source": "x"}))
+    scenarios["console-graph-malformed"] = {
+        "config": None, "seed": h.REVIEW_SEED,
+        "ops": [post("relate", src="Tide Gauge", relation="uses", dst="Harbor Host"),
+                *malformed],
+    }
+    h.EXTERNAL_WRITES.add("console-graph-malformed")
     return scenarios

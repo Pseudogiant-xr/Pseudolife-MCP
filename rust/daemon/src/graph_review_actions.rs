@@ -1736,8 +1736,10 @@ pub(crate) async fn console_decide(
     decided_by: &str,
 ) -> Result<Value, ToolError> {
     let kind = IdAction::parse(action).expect("registered Console decision");
+    let mut pid = Pid::new(id.clone());
     if kind == IdAction::RejectLink {
-        // confirm_human_proposal calls int(id) before querying the row.
+        // Python commits confirmation before binding the original (not int-coerced)
+        // id. Even a later boolean/operator or Unicode-digit cast error keeps it.
         if let Err(message) = py_int(&id) {
             return Err(if id.is_string() {
                 ToolError::Invalid(message)
@@ -1745,11 +1747,27 @@ pub(crate) async fn console_decide(
                 internal(message)
             });
         }
+        in_txn(ready.storage.client(), |c| async {
+            confirm_human_proposal_body(c, "link", &pid).await
+        })
+        .await?;
     }
-    // Keep the response echo, but let PostgreSQL validate its integer-string
-    // syntax and range exactly as it validates psycopg's unknown parameter.
-    let mut pid = Pid::new(id.clone());
-    pid.id = match &id {
+    // psycopg binds booleans/typed lists as themselves, not as missing IDs.
+    // Untyped lists (strings, nulls, empty) follow the same BIGINT input path
+    // as strings. Keep the original response echo throughout.
+    let bound = match &id {
+        Value::Bool(_) => return Err(console_id_operator_error(kind, "boolean")),
+        Value::Object(_) => return Err(internal(CONSOLE_DICT_ERROR)),
+        Value::Array(_) => {
+            let (text, ty) = console_id_array(&id)?;
+            if let Some(ty) = ty {
+                return Err(console_id_operator_error(kind, ty));
+            }
+            Value::String(text)
+        }
+        _ => id.clone(),
+    };
+    pid.id = match &bound {
         Value::String(s) => Some(
             reads(ready.storage.client(), |c| async move {
                 c.query_one("SELECT $1::text::bigint", &[s])
@@ -1774,5 +1792,105 @@ pub(crate) async fn console_decide(
         }),
         _ => None,
     };
-    settle(ready, kind, &pid, decided_by).await
+    if kind == IdAction::RejectLink {
+        // Confirmation was already committed, including on the error paths.
+        let ok = set_proposal_status(ready.storage.client(), &pid, "rejected", now(), decided_by)
+            .await?;
+        Ok(json!({"rejected": ok, "id": pid.echo}))
+    } else {
+        settle(ready, kind, &pid, decided_by).await
+    }
+}
+
+const CONSOLE_DICT_ERROR: &str = "cannot adapt type 'dict' using placeholder '%s' (format: AUTO)";
+
+/// psycopg/libpq's statement excerpt for the first query each service issues.
+/// These are API error text, including the caret, rather than our SQL queries.
+fn console_id_operator_error(kind: IdAction, ty: &str) -> ToolError {
+    let (line, caret) = match kind {
+        IdAction::AcceptLink => (
+            "...verdict, judge2_confidence FROM edge_proposals WHERE id = $1",
+            67,
+        ),
+        IdAction::RejectLink => (
+            "..._id JOIN entities d ON d.id = p.dst_id WHERE p.id = $1 FOR U...",
+            61,
+        ),
+        _ => (
+            "...rdict, judge3_confidence FROM entity_proposals WHERE id = $1",
+            67,
+        ),
+    };
+    internal(format!(
+        "operator does not exist: bigint = {ty}\nLINE 1: {line}\n{:caret$}^\nHINT:  No operator matches the given name and argument types. You might need to add explicit type casts.",
+        ""
+    ))
+}
+
+/// psycopg's list adapter picks an element type from non-null leaves. Only
+/// unknown/string arrays reach BIGINT's input parser; typed arrays fail during
+/// operator lookup. No database write is attempted by either path.
+#[allow(clippy::result_large_err)]
+fn console_id_array(value: &Value) -> Result<(String, Option<&'static str>), ToolError> {
+    fn leaves<'a>(value: &'a Value, out: &mut Vec<&'a Value>) {
+        match value {
+            Value::Array(items) => items.iter().for_each(|v| leaves(v, out)),
+            Value::Null => (),
+            v => out.push(v),
+        }
+    }
+    let mut items = Vec::new();
+    leaves(value, &mut items);
+    if items.iter().any(|v| v.is_object()) {
+        return Err(internal(CONSOLE_DICT_ERROR));
+    }
+    let types: std::collections::BTreeSet<_> = items.iter().map(|v| py_type(v)).collect();
+    if types.len() > 1 {
+        return Err(internal(format!(
+            "cannot dump lists of mixed types; got: {}",
+            types.into_iter().collect::<Vec<_>>().join(", ")
+        )));
+    }
+    let ty = match types.first().copied() {
+        Some("bool") => Some("boolean[]"),
+        Some("float") => Some("double precision[]"),
+        Some("int") => {
+            if items
+                .iter()
+                .all(|v| v.as_i64().is_some_and(|n| i16::try_from(n).is_ok()))
+            {
+                Some("smallint[]")
+            } else if items
+                .iter()
+                .all(|v| v.as_i64().is_some_and(|n| i32::try_from(n).is_ok()))
+            {
+                Some("integer[]")
+            } else if items.iter().all(|v| v.as_i64().is_some()) {
+                Some("bigint[]")
+            } else {
+                Some("numeric[]")
+            }
+        }
+        _ => None,
+    };
+    fn dump(v: &Value) -> String {
+        match v {
+            Value::Array(items) => format!(
+                "{{{}}}",
+                items.iter().map(dump).collect::<Vec<_>>().join(",")
+            ),
+            Value::Null => "NULL".into(),
+            Value::String(s)
+                if s.is_empty()
+                    || s.eq_ignore_ascii_case("null")
+                    || s.chars()
+                        .any(|c| c.is_ascii_whitespace() || "{},\\\"".contains(c)) =>
+            {
+                format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""))
+            }
+            Value::String(s) => s.clone(),
+            _ => crate::pyjson::py_str(v),
+        }
+    }
+    Ok((dump(value), ty))
 }
