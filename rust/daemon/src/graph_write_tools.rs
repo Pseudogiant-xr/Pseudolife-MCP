@@ -319,7 +319,7 @@ pub(crate) async fn relate(ready: &Ready, a: &Map<String, Value>) -> Result<Valu
 
 /// `service.graph_unrelate` (`service.py:7729-7750`): the edge is superseded
 /// (kept for audit), never deleted.
-async fn unrelate(ready: &Ready, a: &Map<String, Value>) -> Result<Value, ToolError> {
+pub(crate) async fn unrelate(ready: &Ready, a: &Map<String, Value>) -> Result<Value, ToolError> {
     let client = ready.storage.client();
     let relation = req_str(a, "relation");
     let reg = registry(client).await?;

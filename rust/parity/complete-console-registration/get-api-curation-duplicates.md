@@ -1,3 +1,3 @@
 | Method | Path | Phase | Status | Rust | Evidence |
 |---|---|---:|---|---|---|
-| GET | /api/curation/duplicates | 3 | deferred | 501 | 501 (`w2d-recall-graph`, W3-H) |
+| GET | /api/curation/duplicates | 3 | implemented | `routes/graph.rs` | `w2e_graph_actions.py`: Console HTTP status/body and durable-state differential scenarios |
