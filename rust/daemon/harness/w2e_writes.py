@@ -68,6 +68,20 @@ def register(h) -> dict[str, dict]:
             "ops": [rest(resolve, {"entity": "Console Raw", "attribute": "field", field: value})
                     for field in ("entity", "attribute") for value in (None, 0, False, [], {})],
         },
+        "console-consolidate-source-filtered": {
+            "config": "memory:\n  meta_filter:\n    enabled: true\n",
+            "seed": [h.store("Console source admission target.")],
+            "ops": [checked(consolidate, {"replaces": ["Console source admission target."],
+                                         "new_text": "I don't have any saved memories.", "source": {"x": "y"}},
+                            "SELECT superseded_at IS NULL FROM entries WHERE text = 'Console source admission target.'")],
+        },
+        "console-consolidate-source-ragged": {
+            "config": None, "seed": [h.store("Console ragged source target.")],
+            "ops": [checked(consolidate, {"replaces": ["Console ragged source target."],
+                                         "new_text": "Console ragged source replacement.",
+                                         "source": [["a"], ["b", "c"]]},
+                            "SELECT source = '{{a},{b,c}}' FROM entries WHERE text = 'Console ragged source replacement.'")],
+        },
         "console-consolidate-source": {
             "config": None,
             "seed": [h.store(f"Console raw source target {i}.") for i in range(len(sources))],

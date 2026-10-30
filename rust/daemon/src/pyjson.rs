@@ -80,7 +80,15 @@ pub(crate) async fn pg_text(
                     Value::Null => "NULL".into(),
                     Value::Bool(b) => if *b { "t" } else { "f" }.into(),
                     Value::String(s) => {
-                        format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""))
+                        if s.is_empty()
+                            || s.eq_ignore_ascii_case("null")
+                            || s.bytes()
+                                .any(|b| b.is_ascii_whitespace() || b"{},\"\\".contains(&b))
+                        {
+                            format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""))
+                        } else {
+                            s.clone()
+                        }
                     }
                     Value::Number(n) => number_text(n),
                     Value::Array(a) => format!(
@@ -96,6 +104,11 @@ pub(crate) async fn pg_text(
                 })
             }
             let array = literal(&Value::Array(a.clone()))?;
+            // psycopg leaves string-only/all-null lists untyped: a TEXT
+            // column stores their literal, including ragged dimensions.
+            if types.is_empty() || types.contains("str") {
+                return Ok(Some(array));
+            }
             Ok(Some(
                 db.query_one(&format!("SELECT $1::text::{cast}[]::text"), &[&array])
                     .await?

@@ -437,6 +437,7 @@ pub(crate) async fn supersede(
     };
     let correction = Correction {
         source: "correction",
+        raw_source: None,
         tags: Vec::new(),
         report_derivations: true,
     };
@@ -502,17 +503,15 @@ pub(crate) async fn consolidate(
         }
     };
     let source = match raw_source {
-        Some(v) => crate::txn::with_client(ready.storage.client(), |db| async move {
-            crate::pyjson::pg_text(db, v).await
-        })
-        .await
-        .map_err(internal)?
-        .unwrap_or_default(),
-        None if crate::mutants::active("mcp-consolidate-default-source") => "correction".into(),
-        None => "consolidation".into(),
+        Some(Value::String(s)) => s.as_str(),
+        // A non-string is never the special "user" role during admission.
+        Some(_) => "",
+        None if crate::mutants::active("mcp-consolidate-default-source") => "correction",
+        None => "consolidation",
     };
     let correction = Correction {
-        source: &source,
+        source,
+        raw_source: raw_source.filter(|v| !v.is_string()),
         tags: store::normalize_tags(Some(&tags)),
         report_derivations: crate::mutants::active("mcp-consolidate-derived-keys"),
     };
@@ -522,6 +521,7 @@ pub(crate) async fn consolidate(
 /// What distinguishes one correction tool's store from another's.
 struct Correction<'a> {
     source: &'a str,
+    raw_source: Option<&'a Value>,
     tags: Vec<String>,
     /// `report_derivations`: read the derived slots and answer them.
     report_derivations: bool,
@@ -589,13 +589,23 @@ async fn apply_correction(
     } else {
         &ids[..]
     };
-    let admission = match store::admit(ready, cfg, ws, new, bypass, retiring)
+    let mut admission = match store::admit(ready, cfg, ws, new, bypass, retiring)
         .await
         .map_err(from_store)?
     {
         Admit::Admitted(adm) => Some(adm),
         Admit::Filtered | Admit::BelowGate { .. } => None,
     };
+    // A filtered replacement never reaches psycopg in Python. Keep source
+    // adaptation after admission, without publishing any staged mutation.
+    if let (Some(adm), Some(source)) = (admission.as_mut(), correction.raw_source) {
+        adm.entry.source = crate::txn::with_client(ready.storage.client(), |db| async move {
+            crate::pyjson::pg_text(db, source).await
+        })
+        .await
+        .map_err(internal)?
+        .unwrap_or_default();
+    }
     let victim = admission.as_ref().and_then(|adm| {
         let bank = ready.bank.read().expect("bank lock");
         adm.victim.map(|i| {
