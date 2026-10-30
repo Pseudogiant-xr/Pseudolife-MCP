@@ -192,7 +192,9 @@ class FakeGh:
             assert args[3:] == ["--jq", ".jobs[] | @json"], args
             parts = args[2].removeprefix(prefix).split("/")
             assert parts[:2] == ["actions", "runs"] and parts[3] == "attempts", args
-            assert parts[5] == "jobs?per_page=100", args
+            # 100 a page made GitHub answer 502 on every try for a 140-job
+            # attempt (run 40995606796, 2026-10-30); 50 a page worked.
+            assert parts[5] == "jobs?per_page=50", args
             key = (parts[2], parts[4])
             if key not in self.attempt_jobs:
                 raise unreadable
@@ -640,8 +642,9 @@ TIMEOUT = "The job has exceeded the maximum execution time of 25m0s"
 
 
 FAILING = "left out #11: CI on its head is failing"
-UNVERIFIED = ("left out #11: a cancelled job's annotations, or the run behind a "
-              "failed gate, could not be read")
+# The unverified reason names the read that failed, then this.
+UNVERIFIED = ("so a timeout or a failure is not ruled out; it joins a batch built "
+              "once that read succeeds")
 
 
 @pytest.mark.parametrize("messages, outcome", [
@@ -671,8 +674,9 @@ def test_a_cancelled_job_joins_unless_it_ran_past_its_timeout(world, capsys, mes
     for message in (FAILING, UNVERIFIED):
         assert (message in out) is (message == outcome), out
     if outcome == UNVERIFIED:
-        # The true cause, and a condition that reads right in a batch body too.
-        assert "it joins a batch built once `gh api` answers" in out
+        # The true cause: which read failed, and how.
+        assert ("left out #11: the annotations of job 123 could not be read "
+                "(`gh api` failed (1): HTTP 502), so") in out, out
 
 
 @pytest.mark.parametrize("details_url", ["https://ci.example/build/1", None,
@@ -815,10 +819,23 @@ def _actions_check(job: str, name: str, conclusion: str, workflow: str = "Rust s
             "detailsUrl": f"https://github.com/o/r/actions/runs/{RUN}/job/{job}"}
 
 
-# The Parity gate's steps as the jobs API listed them for job 123859514294:
-# it failed at the step that reads `needs`.
+# The Parity gate's steps when a job it needs was cancelled: its dedicated
+# step fails and its verdict step skips (rust.yml since #1068).
+CANCEL_STEP = "A needed job was cancelled"
 VERDICT_STEP = "Require every Rust and parity job to pass"
-GATE_STEPS = [("Set up job", "success"), (VERDICT_STEP, "failure"), ("Complete job", "success")]
+GATE_STEPS = [("Set up job", "success"), (CANCEL_STEP, "failure"),
+              (VERDICT_STEP, "skipped"), ("Complete job", "success")]
+WORKFLOW = (ROOT / ".github" / "workflows" / "rust.yml").read_text(encoding="utf-8")
+CANCEL_BLOCK = ("      - name: A needed job was cancelled\n"
+                "        if: ${{ contains(needs.*.result, 'cancelled') }}\n"
+                "        run: exit 1\n")
+VERDICT_IF = "        if: ${{ !contains(needs.*.result, 'cancelled') }}\n"
+assert WORKFLOW.count(CANCEL_BLOCK) == 1 and WORKFLOW.count(VERDICT_IF) == 1
+# The gate as heads before #1068 carry it (#1059's 3dda95a1): no dedicated
+# step, so a cancel fails the verdict step, as it did on job 123859514294.
+OLD_WORKFLOW = WORKFLOW.replace(CANCEL_BLOCK, "").replace(VERDICT_IF, "")
+OLD_GATE_STEPS = [("Set up job", "success"), (VERDICT_STEP, "failure"),
+                  ("Complete job", "success")]
 
 
 def _steps(steps) -> list[dict]:
@@ -827,17 +844,16 @@ def _steps(steps) -> list[dict]:
 
 
 def _gate_world(world, run=_RUN_1059, rollup: list[str] | None = None,
-                gate_steps=GATE_STEPS):
-    """PR #11 whose head carries `run` (by default #1059's), listed in its
-    rollup (the given job ids, else every job that did not skip), with the
-    real rust.yml as that head's workflow and in the checkout `build` runs
-    from (untracked), the failed gates' steps `gate_steps`, and every job's
-    annotations empty (none ran past its timeout)."""
+                gate_steps=GATE_STEPS, head_workflow: str = WORKFLOW):
+    """PR #11 whose head carries `run` (by default #1059's jobs), listed in
+    its rollup (the given job ids, else every job that did not skip), with
+    `head_workflow` (the real rust.yml) as that head's workflow, the real
+    rust.yml in the checkout `build` runs from (untracked), the failed
+    gates' steps `gate_steps`, and every job's annotations empty (none ran
+    past its timeout)."""
     workflows = world.work / ".github" / "workflows"
     workflows.mkdir(parents=True, exist_ok=True)
-    (workflows / "rust.yml").write_text(
-        (ROOT / ".github" / "workflows" / "rust.yml").read_text(encoding="utf-8"),
-        encoding="utf-8")
+    (workflows / "rust.yml").write_text(WORKFLOW, encoding="utf-8")
     sha10 = world.pr(10, {"b.txt": "b\n"})
     sha11 = world.pr(11, {"c.txt": "c\n"})
     world.gh.add(10, sha10)
@@ -857,8 +873,7 @@ def _gate_world(world, run=_RUN_1059, rollup: list[str] | None = None,
     world.gh.attempt_jobs[(RUN, ATTEMPT)] = [
         {"id": int(job), "name": name, "status": "completed", "conclusion": conclusion}
         for job, (name, conclusion) in jobs.items()]
-    world.gh.files[(".github/workflows/rust.yml", HEAD)] = (
-        ROOT / ".github" / "workflows" / "rust.yml").read_text(encoding="utf-8")
+    world.gh.files[(".github/workflows/rust.yml", HEAD)] = head_workflow
     return sha10, sha11
 
 
@@ -939,8 +954,14 @@ def test_a_gate_whose_needed_job_ran_past_its_timeout_keeps_a_member_out(world, 
     assert FAILING in capsys.readouterr().out
 
 
-@pytest.mark.parametrize("unreadable", ["job", "run", "workflow", "attempt", "annotations"])
-def test_a_gate_whose_run_cannot_be_read_is_unverified(world, capsys, unreadable):
+@pytest.mark.parametrize("unreadable, what", [
+    ("job", "job 509"),
+    ("run", "run 7"),
+    ("workflow", ".github/workflows/rust.yml at 3dda95a1"),
+    ("attempt", "the jobs of run 7 attempt 1"),
+    ("annotations", "the annotations of job 502"),
+], ids=["job", "run", "workflow", "attempt", "annotations"])
+def test_a_gate_whose_run_cannot_be_read_is_unverified(world, capsys, unreadable, what):
     _gate_world(world, rollup=list(GATES))
     if unreadable == "job":
         del world.gh.actions_jobs["509"]
@@ -957,6 +978,9 @@ def test_a_gate_whose_run_cannot_be_read_is_unverified(world, capsys, unreadable
 
     out = capsys.readouterr().out
     assert UNVERIFIED in out and FAILING not in out, out
+    # The read that failed and GitHub's answer, not a generic "retry".
+    assert (f"left out #11: {what} could not be read (`gh api` failed (1): HTTP 502), "
+            f"{UNVERIFIED}") in out, out
 
 
 def test_open_refuses_without_dropping_when_a_gates_run_cannot_be_read(world, capsys):
@@ -968,27 +992,74 @@ def test_open_refuses_without_dropping_when_a_gates_run_cannot_be_read(world, ca
     assert _open(world) == 2
 
     err = capsys.readouterr().err
-    assert "#11" in err and "could not be read" in err and "run `open` again" in err
-    assert "Drop it" not in err
+    assert "#11" in err and "the jobs of run 7 attempt 1 could not be read" in err
+    assert "run `open` again" in err and "Drop it" not in err
     assert world.remote_branches() == []
 
 
 @pytest.mark.parametrize("steps", [
-    # A head that breaks the gate before its verdict, beside a cancelled need.
-    [("Set up job", "failure"), (VERDICT_STEP, "skipped"), ("Complete job", "success")],
-    # A failed step that is not the one reading `needs`.
-    [("Set up job", "success"), ("Run ./gate.ps1", "failure"), ("Complete job", "success")],
-    # The verdict step failed, and so did a later one.
-    [("Set up job", "success"), (VERDICT_STEP, "failure"), ("Complete job", "failure")],
-    # No step failed: the job's failure is not its verdict.
-    [("Set up job", "success"), (VERDICT_STEP, "success"), ("Complete job", "success")],
-], ids=["setup-failed", "other-step", "later-step-failed", "no-step-failed"])
-def test_a_gate_that_failed_outside_its_verdict_step_keeps_a_member_out(world, capsys, steps):
+    # A head that breaks the gate before its cancelled-need step.
+    [("Set up job", "failure"), (CANCEL_STEP, "skipped"), (VERDICT_STEP, "skipped"),
+     ("Complete job", "success")],
+    # The verdict step failed (its own script, say: Codex's repro was a
+    # `throw` there beside a cancelled need), not the cancelled-need step.
+    [("Set up job", "success"), (CANCEL_STEP, "skipped"), (VERDICT_STEP, "failure"),
+     ("Complete job", "success")],
+    # Both failed.
+    [("Set up job", "success"), (CANCEL_STEP, "failure"), (VERDICT_STEP, "failure"),
+     ("Complete job", "success")],
+    # The cancelled-need step failed, and so did a later one.
+    [("Set up job", "success"), (CANCEL_STEP, "failure"), (VERDICT_STEP, "skipped"),
+     ("Complete job", "failure")],
+    # A failed step of another name.
+    [("Set up job", "success"), ("Run exit 1", "failure"), (VERDICT_STEP, "skipped"),
+     ("Complete job", "success")],
+    # No step failed: the job's failure is not its cancelled-need step.
+    [("Set up job", "success"), (CANCEL_STEP, "skipped"), (VERDICT_STEP, "success"),
+     ("Complete job", "success")],
+], ids=["setup-failed", "verdict-failed", "both-failed", "later-step-failed",
+        "other-step", "no-step-failed"])
+def test_a_gate_that_failed_outside_its_cancelled_need_step_keeps_a_member_out(
+        world, capsys, steps):
     _gate_world(world, rollup=list(GATES), gate_steps=steps)
 
     assert _build() == 0, capsys.readouterr()
 
     assert FAILING in capsys.readouterr().out
+
+
+def test_a_head_whose_gate_has_no_cancelled_need_step_keeps_a_member_out(world, capsys):
+    # #1059's own head predates the step: its gate failed at the verdict,
+    # which a broken verdict script would do as well, so it stays failing.
+    _gate_world(world, rollup=list(GATES), gate_steps=OLD_GATE_STEPS,
+                head_workflow=OLD_WORKFLOW)
+
+    assert _build() == 0, capsys.readouterr()
+
+    assert FAILING in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("change, admitted", [
+    # Keys that change what the step does.
+    (("        run: exit 1\n", "        run: exit 1\n        shell: bash\n"), False),
+    (("        run: exit 1\n", "        run: exit 1\n        continue-on-error: false\n"), False),
+    (("        run: exit 1\n", "        run: exit 1\n        env:\n          X: y\n"), False),
+    (("        run: exit 1\n", "        run: exit 1 || true\n"), False),
+    (("cancelled') }}\n        run", "cancelled') || always() }}\n        run"), False),
+    (("      - name: A needed job was cancelled\n", "      -\n"), False),
+    # An `id` changes nothing it does.
+    (("        run: exit 1\n", "        run: exit 1\n        id: cancelled\n"), True),
+], ids=["shell", "continue-on-error", "env", "run", "if", "unnamed", "id"])
+def test_only_the_exact_cancelled_need_step_is_read_as_a_cancel(world, capsys, change, admitted):
+    old, new = change
+    assert WORKFLOW.count(old) >= 1
+    block = CANCEL_BLOCK.replace(old, new)
+    assert block != CANCEL_BLOCK, change
+    _gate_world(world, rollup=list(GATES), head_workflow=WORKFLOW.replace(CANCEL_BLOCK, block))
+
+    assert _build() == 0, capsys.readouterr()
+
+    assert (FAILING not in capsys.readouterr().out) is admitted
 
 
 @pytest.mark.parametrize("steps", [None, []], ids=["no-steps", "empty-steps"])
@@ -1004,6 +1075,7 @@ def test_a_gate_whose_steps_cannot_be_read_is_unverified(world, capsys, steps):
 
     out = capsys.readouterr().out
     assert UNVERIFIED in out and FAILING not in out, out
+    assert "left out #11: the steps of job 508 could not be read (none listed), " in out, out
 
 
 @pytest.mark.parametrize("extra", [

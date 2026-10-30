@@ -106,18 +106,24 @@ counts as failing, since the head likely hangs, and annotations it cannot
 read leave the pull request out of this batch as `unverified` until a
 retry reads them. A gate job (one that runs under `always()` and needs
 other jobs, such as `Parity / <os>`) still runs after a cancel and fails
-because the jobs it needs did not pass. It counts as cancelled only when
-all of these hold: it failed at its verdict step (the named step that reads
-`needs`) and nowhere else; no other job in that run attempt failed, timed
-out or needs action; and the jobs it needs include a cancelled one, none
-unfinished and none that ran past its timeout. The script reads the
-workflow file at the head commit, because the API does not name the merge
-ref GitHub ran a pull request's workflow from, and refuses the downgrade
-when the run lists a job that file does not define. A failure the
-checkout's own workflows define no gate for is failing without any API
-read. Any other gate failure is failing, and a run or job it cannot read is
-`unverified`. `merge` still counts a cancelled or failed
-check on the batch itself as red.
+because the jobs it needs did not pass. The Parity gate's first step,
+"A needed job was cancelled" (`if: ${{ contains(needs.*.result,
+'cancelled') }}`, `run: exit 1`), fails exactly then and skips the verdict
+step, which reaches the same result. The gate counts as cancelled only
+when all of these hold: in the workflow file at the head commit, the gate
+has that exact step (only `name`, `id`, that `if` and that `run`); that
+step is the only one that failed; no other job in that run attempt failed,
+timed out or needs action; and the jobs it needs include a cancelled one,
+none unfinished and none that ran past its timeout. A head whose gate has
+no such step, from before the step was added, stays failing, because there
+a broken verdict script and a cancel fail the same step. The script reads
+the head's workflow because the API does not name the merge ref GitHub
+ran a pull request's workflow from, and refuses the downgrade when the run
+lists a job that file does not define. A failure the checkout's own
+workflows define no gate for is failing without any API read. Any other
+gate failure is failing, and a run, job or step list it cannot read is
+`unverified`, naming the read that failed. `merge` still counts a
+cancelled or failed check on the batch itself as red.
 
 Why not wait for green on the member's own head: on 2026-10-20/21 four
 things held batches up (#877 broke only against a newer master; an

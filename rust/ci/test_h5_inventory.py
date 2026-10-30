@@ -85,7 +85,7 @@ def test_inventory_rejects_aggregate_accepting_any_skipped_job():
     import subprocess
     from inventory import check
     workflow = yaml.safe_load((ROOT / '.github/workflows/rust.yml').read_text(encoding='utf-8'))
-    gate = workflow['jobs']['parity']['steps'][0]
+    gate = workflow['jobs']['parity']['steps'][1]
     gate['run'] = """
 $results = ConvertFrom-Json $env:GATE_RESULTS -AsHashtable
 foreach ($job in @('rust', 'candidate', 'parity-checks', 'source-mutants')) {
@@ -101,6 +101,25 @@ foreach ($job in @('rust', 'candidate', 'parity-checks', 'source-mutants')) {
                               capture_output=True, text=True)
     assert executed.returncode == 0, executed.stderr
     with pytest.raises(AssertionError, match='Parity event gate'):
+        check(workflow)
+
+
+@pytest.mark.parametrize('change, message', [
+    # Without the cancelled-need step a cancel fails the verdict, as before.
+    (lambda steps: steps.pop(0), 'steps changed'),
+    (lambda steps: steps[0].update({'continue-on-error': True}), 'skip a cancelled job'),
+    (lambda steps: steps[0].update({'if': "${{ always() }}"}), 'skip a cancelled job'),
+    (lambda steps: steps[0].update({'run': 'exit 0'}), 'skip a cancelled job'),
+    # The verdict may skip only when the cancelled-need step runs.
+    (lambda steps: steps[1].update({'if': "${{ false }}"}), 'skip failures'),
+    (lambda steps: steps[1].pop('if'), 'skip failures'),
+], ids=['no-cancel-step', 'cancel-step-continues', 'cancel-step-always', 'cancel-step-passes',
+        'verdict-never', 'verdict-unconditional'])
+def test_inventory_rejects_a_gate_that_skips_a_cancelled_or_failed_job(change, message):
+    from inventory import check
+    workflow = yaml.safe_load((ROOT / '.github/workflows/rust.yml').read_text(encoding='utf-8'))
+    change(workflow['jobs']['parity']['steps'])
+    with pytest.raises(AssertionError, match=message):
         check(workflow)
 
 

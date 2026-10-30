@@ -152,6 +152,7 @@ class Member:
     checks: str
     labeled_at: str | None = None
     draft: bool = False
+    checks_why: str = ""   # for `unverified`: the read that failed
 
 
 @dataclass
@@ -249,87 +250,111 @@ def _check_state(check: dict) -> str:
 
 def _checks(rollup: list[dict] | None) -> str:
     """One word for a head's CI: green, pending, cancelled, unverified,
-    failing or none. `failing` and `unverified` keep a member out of a batch.
+    failing or none (`_checks_why`)."""
+    return _checks_why(rollup)[0]
+
+
+def _checks_why(rollup: list[dict] | None) -> tuple[str, str]:
+    """(one word for a head's CI, why): green, pending, cancelled,
+    unverified, failing or none; `failing` and `unverified` keep a member
+    out of a batch, and for `unverified` the why names the read that failed.
 
     A cancelled Actions job that is the latest attempt of its check is read
     for the runner's timeout annotation: a timeout is `failing`, and
     annotations that cannot be read leave the head `unverified` (retry).
     A FAILURE of a gate job counts as cancelled when it failed at its
-    verdict step only because jobs it needs were cancelled
+    cancelled-need step only because jobs it needs were cancelled
     (`_gate_cancelled`); any other failure is `failing` before any read."""
     if not rollup:
-        return "none"
+        return "none", ""
     failures = [check for check in rollup if _check_state(check) in FAILED]
     if any(_check_state(check) != "FAILURE"
            or not _ACTIONS_JOB.search(check.get("detailsUrl") or "")
            for check in failures):
-        return "failing"                    # no gate's failure: nothing to read
+        return "failing", ""                # no gate's failure: nothing to read
     if failures:
         gates = _local_gates()
         if not all(_gate_named(check, gates) for check in failures):
-            return "failing"                # the checkout defines no such gate
+            return "failing", ""            # the checkout defines no such gate
     latest = {id(check) for check in _latest_checks(rollup)}
-    pending = cancelled = unverified = False
+    pending = cancelled = False
+    unread = ""                             # the first read that failed
     runs: dict = {}
     probes: dict = {}
     for check in failures:
-        verdict = _gate_cancelled(check, runs, probes)
+        verdict, why = _gate_cancelled(check, runs, probes)
         if verdict is False:
-            return "failing"
+            return "failing", ""
         cancelled = True
-        unverified = unverified or verdict is None
+        unread = unread or (why if verdict is None else "")
     for check in rollup:
         if _check_state(check) == CANCELLED:
             if id(check) not in latest:
                 continue                    # an attempt a rerun replaced
-            timed_out = _timed_out(check, probes)
+            job = _ACTIONS_JOB.search(check.get("detailsUrl") or "")
+            if not job:
+                cancelled = True            # no Actions job: no annotations
+                continue
+            timed_out, why = _probe_timeout(job.group(1), probes)
             if timed_out:
-                return "failing"
+                return "failing", ""
             cancelled = True
-            unverified = unverified or timed_out is None
-        elif _unfinished(check):
-            pending = True
-    return ("unverified" if unverified else "pending" if pending
-            else "cancelled" if cancelled else "green")
+            unread = unread or (why if timed_out is None else "")
+    pending = any(_unfinished(check) for check in rollup
+                  if _check_state(check) != CANCELLED)
+    return (("unverified", unread) if unread else ("pending", "") if pending
+            else ("cancelled", "") if cancelled else ("green", ""))
 
 
-def _timed_out(check: dict, probes: dict | None = None) -> bool | None:
+def _unread(what: str, exc: BaseException) -> str:
+    """`<what> could not be read (<cause>)`, with gh's first line as the cause."""
+    if isinstance(exc, Refusal):
+        cause = (str(exc).strip().splitlines() or ["no answer"])[0]
+    else:
+        cause = f"unexpected reply: {type(exc).__name__}: {exc}"
+    return f"{what} could not be read ({cause})"
+
+
+def _probe_timeout(job_id: str, probes: dict) -> tuple[bool | None, str]:
     """Whether a cancelled Actions job ran past its timeout-minutes, from the
-    runner's annotation read by the job's id (its check-run id); None when
-    the annotations cannot be read. A check that is no Actions job has none
-    to read. `probes` caches the answer by job id within one `_checks`."""
-    job = _ACTIONS_JOB.search(check.get("detailsUrl") or "")
-    if not job:
-        return False
-    if probes is not None and job.group(1) in probes:
-        return probes[job.group(1)]
+    runner's annotation read by the job's id (its check-run id); None (with
+    why) when the annotations cannot be read. `probes` caches the answer by
+    job id within one `_checks_why`."""
+    if job_id in probes:
+        return probes[job_id]
     try:
         # Every page (a job's own annotations can come first), one JSON
         # string per message so a multi-line message is matched whole.
-        out = gh("api", f"repos/{{owner}}/{{repo}}/check-runs/{job.group(1)}/annotations",
+        out = gh("api", f"repos/{{owner}}/{{repo}}/check-runs/{job_id}/annotations",
                  "--paginate", "--jq", ".[].message | @json")
         messages = [json.loads(line) for line in out.splitlines() if line.strip()]
-        answer: bool | None = any(isinstance(m, str) and TIMEOUT_ANNOTATION.match(m)
-                                  for m in messages)
-    except (Refusal, ValueError):
-        answer = None
-    if probes is not None:
-        probes[job.group(1)] = answer
+        answer: tuple[bool | None, str] = (
+            any(isinstance(m, str) and TIMEOUT_ANNOTATION.match(m) for m in messages), "")
+    except (Refusal, ValueError) as exc:
+        answer = (None, _unread(f"the annotations of job {job_id}", exc))
+    probes[job_id] = answer
     return answer
 
 
 # A gate job runs under `always()` and fails unless the jobs it needs passed,
 # so a cancel that stopped those jobs still leaves it FAILURE: rust.yml's
 # `Parity / <os>` on #1059's head 3dda95a1 (run 40992819326, job
-# 123859514294, 2026-10-30) failed at its step reading `needs` only because
-# `Rust / <os>` was cancelled. Its check run carries no cause (annotation
-# "Process completed with exit code 1"), so the cause is read from the
-# workflow, the job's steps and the run's jobs. Without `always()` a job is
-# skipped once its run is cancelled, so it cannot fail this way and its
-# FAILURE stays its own.
+# 123859514294, 2026-10-30) failed only because `Rust / <os>` was cancelled.
+# Its check run carries no cause (annotation "Process completed with exit
+# code 1"), so the cause is read from the workflow, the job's steps and the
+# run's jobs. Without `always()` a job is skipped once its run is cancelled,
+# so it cannot fail this way and its FAILURE stays its own.
 _ALWAYS = re.compile(r"\balways\(\s*\)")
 _EXPRESSION = re.compile(r"\$\{\{.*?\}\}", re.S)
-_NEEDS = re.compile(r"\bneeds\b")
+# The gate step that fails exactly when a job it needs was cancelled (and
+# skips the verdict step then), so a failure there has no other cause; a
+# gate without it fails at its verdict, which a broken verdict script would
+# do as well (Codex's repro on #1068: a `throw` there beside a cancelled
+# need), so it is never downgraded. Only these keys, which change nothing
+# the step does beyond its condition and command.
+CANCEL_STEP_IF = "${{ contains(needs.*.result, 'cancelled') }}"
+CANCEL_STEP_RUN = "exit 1"
+CANCEL_STEP_KEYS = {"name", "id", "if", "run"}
 # A job conclusion that is no failure on the head: a skip the gate admits or
 # rejects by design, or a cancel (whose timeout is read separately).
 _NO_VERDICT = {"success", "skipped", "neutral", "cancelled"}
@@ -389,7 +414,9 @@ def _local_gates() -> list[tuple[str, re.Pattern]]:
     """(workflow name, run-name pattern) of every gate job in this checkout's
     workflows, the filter that keeps a plain failure from any API read. A
     gate only the member's head defines is not seen, so its failure stays
-    failing."""
+    failing. `build` runs this on origin/master and `open` on the batch
+    branch, whose members can add a gate: that only widens this filter, and
+    the head's own workflow still decides (`_gate_cancelled`)."""
     yaml = _yaml()
     folder = Path(_out("rev-parse", "--show-toplevel")) / ".github" / "workflows"
     gates = []
@@ -412,58 +439,35 @@ def _gate_named(check: dict, gates: list[tuple[str, re.Pattern]]) -> bool:
                for workflow, pattern in gates)
 
 
-def _gate_run(run_id: int, attempt: int, path: str, head: str) -> tuple[dict, list[dict]]:
-    """(the workflow's jobs at `head`, the attempt's jobs) for one run."""
-    text = gh("api", "-H", "Accept: application/vnd.github.raw+json",
-              f"repos/{{owner}}/{{repo}}/contents/{path}?ref={head}")
-    jobs = _workflow_jobs(text, f"{path} at {head}")
-    out = gh("api", "--paginate",
-             f"repos/{{owner}}/{{repo}}/actions/runs/{run_id}/attempts/{attempt}/jobs"
-             "?per_page=100", "--jq", ".jobs[] | @json")
-    listed = [json.loads(line) for line in out.splitlines() if line.strip()]
-    return jobs, listed
+def _cancel_steps(definition: dict) -> list[re.Pattern]:
+    """Name patterns of the gate's cancelled-need steps: named, with exactly
+    `if: CANCEL_STEP_IF` and `run: exit 1`, and no key but CANCEL_STEP_KEYS."""
+    return [_template(step["name"]) for step in definition.get("steps") or []
+            if isinstance(step, dict) and set(step) <= CANCEL_STEP_KEYS
+            and isinstance(step.get("name"), str)
+            and isinstance(step.get("if"), str) and step["if"].strip() == CANCEL_STEP_IF
+            and isinstance(step.get("run"), str) and step["run"].strip() == CANCEL_STEP_RUN]
 
 
-def _strings(value) -> list[str]:
-    if isinstance(value, str):
-        return [value]
-    if isinstance(value, dict):
-        return [s for v in value.values() for s in _strings(v)]
-    if isinstance(value, list):
-        return [s for v in value for s in _strings(v)]
-    return []
-
-
-def _failed_at_verdict(definition: dict, steps) -> bool | None:
-    """Whether a gate job failed at its verdict step and nowhere else: every
-    step before it succeeded, it failed, none after it failed. Its verdict
-    steps are its named steps whose expressions read the `needs` context
-    (an unnamed one has no name to match, so it is not downgraded). None
-    when the job lists no steps."""
-    if not isinstance(steps, list) or not steps:
-        return None
-    verdicts = [_template(step["name"]) for step in definition.get("steps") or []
-                if isinstance(step, dict) and isinstance(step.get("name"), str)
-                and any(_NEEDS.search(expr) for text in _strings(step)
-                        for expr in _EXPRESSION.findall(text))]
+def _failed_at_cancel_step(steps: list, cancels: list[re.Pattern]) -> bool:
+    """Whether the one step that failed is a cancelled-need step, every other
+    step having succeeded or skipped."""
     ran = [(str(step["name"]), step.get("conclusion")) for step in steps]
-    first = next((i for i, (_, conclusion) in enumerate(ran) if conclusion != "success"), None)
-    if not verdicts or first is None:
-        return False
-    name, conclusion = ran[first]
-    return (conclusion == "failure" and any(p.fullmatch(name) for p in verdicts)
-            and all(c in ("success", "skipped") for _, c in ran[first + 1:]))
+    failed = [(name, c) for name, c in ran if c not in ("success", "skipped")]
+    return (len(failed) == 1 and failed[0][1] == "failure"
+            and any(p.fullmatch(failed[0][0]) for p in cancels))
 
 
-def _gate_cancelled(check: dict, runs: dict, probes: dict) -> bool | None:
+def _gate_cancelled(check: dict, runs: dict, probes: dict) -> tuple[bool | None, str]:
     """Whether a FAILURE check is a gate that failed only because jobs it
-    needs were cancelled. All of it must hold:
+    needs were cancelled, with why when that cannot be read. All must hold:
 
     - its job in the workflow file at the run's head commit runs under
-      `always()` and has `needs`. GitHub runs a pull request's workflow
-      from its merge ref, which the API does not name, so every job the run
-      lists must match a job of that file, or the downgrade is refused;
-    - it failed at its verdict step and nowhere else (`_failed_at_verdict`);
+      `always()`, has `needs` and a cancelled-need step (`_cancel_steps`).
+      GitHub runs a pull request's workflow from its merge ref, which the
+      API does not name, so every job the run lists must match a job of
+      that file, or the downgrade is refused;
+    - that step is the only one that failed (`_failed_at_cancel_step`);
     - no job in the run attempt but this gate's own legs failed, timed out
       or needs action, and none it needs is unfinished;
     - a job it needs, and nothing outside its needs, was cancelled, and no
@@ -473,15 +477,28 @@ def _gate_cancelled(check: dict, runs: dict, probes: dict) -> bool | None:
     `runs` caches each run attempt's read, `probes` the timeout reads."""
     job = _ACTIONS_JOB.search(check.get("detailsUrl") or "")
     if not job:
-        return False
+        return False, ""
+    what = f"job {job.group(1)}"
     try:
         meta = json.loads(gh("api", f"repos/{{owner}}/{{repo}}/actions/jobs/{job.group(1)}"))
         key = (int(meta["run_id"]), int(meta["run_attempt"]))
         if key not in runs:
+            what = f"run {key[0]}"
             run = json.loads(gh("api", f"repos/{{owner}}/{{repo}}/actions/runs/{key[0]}"))
-            path = str(run["path"]).split("@", 1)[0]
-            runs[key] = _gate_run(*key, path, str(meta["head_sha"]))
+            path, head = str(run["path"]).split("@", 1)[0], str(meta["head_sha"])
+            what = f"{path} at {head[:12]}"
+            defs = _workflow_jobs(gh("api", "-H", "Accept: application/vnd.github.raw+json",
+                                     f"repos/{{owner}}/{{repo}}/contents/{path}?ref={head}"),
+                                  what)
+            what = f"the jobs of run {key[0]} attempt {key[1]}"
+            out = gh("api", "--paginate",
+                     f"repos/{{owner}}/{{repo}}/actions/runs/{key[0]}/attempts/{key[1]}/jobs"
+                     # 100 a page made GitHub answer 502 on every try for a
+                     # 140-job attempt (run 40995606796, 2026-10-30); 50 worked.
+                     "?per_page=50", "--jq", ".jobs[] | @json")
+            runs[key] = defs, [json.loads(line) for line in out.splitlines() if line.strip()]
         defs, listed = runs[key]
+        what = f"the jobs of run {key[0]} attempt {key[1]}"
         patterns = {job_id: _job_pattern(job_id, d) for job_id, d in defs.items()}
 
         def owners(name: str) -> set[str]:
@@ -489,17 +506,22 @@ def _gate_cancelled(check: dict, runs: dict, probes: dict) -> bool | None:
 
         gate = owners(str(meta["name"]))
         if len(gate) != 1:
-            return False                    # not one job of this workflow
+            return False, ""                # not one job of this workflow
         gate_id = gate.pop()
         definition = defs[gate_id]
         needs = _needs(definition)
-        if not _is_gate(definition):
-            return False                    # no gate: its failure is its own
+        cancels = _cancel_steps(definition)
+        if not _is_gate(definition) or not cancels:
+            return False, ""                # no gate, or none that names a cancel
         if any(not owners(str(other["name"])) for other in listed):
-            return False                    # the run is not this file's
-        at_verdict = _failed_at_verdict(definition, meta.get("steps"))
-        if not at_verdict:
-            return at_verdict               # False, or None: no steps listed
+            return False, ""                # the run is not this file's
+        steps = meta.get("steps")
+        if not isinstance(steps, list) or not steps:
+            return None, f"the steps of job {job.group(1)} could not be read (none listed)"
+        what = f"the steps of job {job.group(1)}"
+        if not _failed_at_cancel_step(steps, cancels):
+            return False, ""
+        what = f"the jobs of run {key[0]} attempt {key[1]}"
         cancelled = []
         for other in listed:
             named = owners(str(other["name"]))
@@ -507,24 +529,24 @@ def _gate_cancelled(check: dict, runs: dict, probes: dict) -> bool | None:
                 continue                    # this gate, or another of its legs
             conclusion = other.get("conclusion")
             if conclusion is not None and conclusion not in _NO_VERDICT:
-                return False                # a job of the run failed
+                return False, ""            # a job of the run failed
             if not named & needs:
                 continue
             if conclusion is None:
-                return False                # a needed job never finished
+                return False, ""            # a needed job never finished
             if conclusion == "cancelled" and named <= needs:
-                cancelled.append(int(other["id"]))
-    except (Refusal, ValueError, KeyError, TypeError, AttributeError):
-        return None
+                cancelled.append(str(other["id"]))
+    except (Refusal, ValueError, KeyError, TypeError, AttributeError) as exc:
+        return None, _unread(what, exc)
     if not cancelled:
-        return False                        # the gate failed on its own
-    verdict: bool | None = True
+        return False, ""                    # no needed job was cancelled
+    verdict: tuple[bool | None, str] = (True, "")
     for job_id in cancelled:
-        timed_out = _timed_out({"detailsUrl": f"/actions/runs/{key[0]}/job/{job_id}"}, probes)
+        timed_out, why = _probe_timeout(job_id, probes)
         if timed_out:
-            return False
-        if timed_out is None:
-            verdict = None
+            return False, ""
+        if timed_out is None and verdict[0]:
+            verdict = (None, why)
     return verdict
 
 
@@ -555,11 +577,12 @@ def ready(label: str) -> list[Member]:
     fields = "number,title,headRefOid,url,isDraft,reviewDecision,statusCheckRollup"
     rows = json.loads(gh("pr", "list", "--state", "open", "--label", label,
                          "--base", BASE, "--limit", "100", "--json", fields) or "[]")
-    members = [Member(number=r["number"], title=r["title"], sha=r["headRefOid"],
-                      url=r["url"], review=r.get("reviewDecision") or "NONE",
-                      checks=_checks(r.get("statusCheckRollup")),
-                      draft=bool(r.get("isDraft")))
-               for r in rows]
+    members = []
+    for r in rows:
+        checks, why = _checks_why(r.get("statusCheckRollup"))
+        members.append(Member(number=r["number"], title=r["title"], sha=r["headRefOid"],
+                              url=r["url"], review=r.get("reviewDecision") or "NONE",
+                              checks=checks, draft=bool(r.get("isDraft")), checks_why=why))
     for m in members:
         m.labeled_at = _labeled_at(m.number, label)
     # Known label times first, oldest first; the rest by number.
@@ -664,9 +687,9 @@ def _not_ready(m: Member) -> str | None:
         return ("CI on its head is failing; it joins a batch once a rerun of "
                 "the failed job passes or a push replaces that head")
     if m.checks == "unverified":
-        return ("a cancelled job's annotations, or the run behind a failed gate, "
-                "could not be read, so a timeout or a failure is not ruled out; "
-                "it joins a batch built once `gh api` answers")
+        why = m.checks_why or "GitHub's record of its CI could not be read"
+        return (f"{why}, so a timeout or a failure is not ruled out; it joins a "
+                "batch built once that read succeeds")
     return None
 
 
@@ -1231,12 +1254,11 @@ def _refuse_red_members(plan: Plan) -> None:
                              "headRefOid,statusCheckRollup"))
         if view["headRefOid"] != m.sha:
             continue
-        checks = _checks(view.get("statusCheckRollup"))
+        checks, why = _checks_why(view.get("statusCheckRollup"))
         if checks == "unverified":
-            raise Refusal(f"#{m.number} has a cancelled job, or a gate failed by "
-                          f"cancelled jobs, on {m.sha[:12]} whose record could not be "
-                          "read, so a timeout or a failure is not ruled out; nothing "
-                          "was opened: run `open` again once `gh api` answers")
+            raise Refusal(f"#{m.number} on {m.sha[:12]}: {why}, so a timeout or a "
+                          "failure is not ruled out; nothing was opened: run `open` "
+                          "again once that read succeeds")
         if checks == "failing":
             raise Refusal(f"#{m.number}'s own CI is now failing on {m.sha[:12]}, a known "
                           "failure this batch would carry. Drop it: switch back with "
