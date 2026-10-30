@@ -6,7 +6,8 @@ use crate::service::{Ready, Service};
 use crate::storage::graph as storage;
 use axum::{http::HeaderMap, response::Response};
 use serde_json::{Value, json};
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::cmp::Reverse;
+use std::collections::{BTreeMap, BTreeSet, BinaryHeap, HashMap};
 use std::sync::Arc;
 
 pub(crate) const PATHS: &[&str] = &[
@@ -96,8 +97,21 @@ pub(crate) async fn route(
         if path == "/api/dream/status" {
             return crate::dream::service::status(&ready, &svc.config).await;
         }
-        let _ws = ready.write.lock().await;
-        read(&svc, &ready, &path, &q).await
+        let mut v = {
+            let _ws = ready.write.lock().await;
+            read(&svc, &ready, &path, &q).await?
+        };
+        // The graph is now an owned snapshot. Like Python's _whole_graph,
+        // scope filtering and cap peeling must not block subsequent writes.
+        if path == "/api/graph" && s(&q, "entity").is_none() {
+            filter_graph(
+                &mut v,
+                s(&q, "scope").unwrap_or("all"),
+                i_param(&q, "limit", 2000),
+            )
+            .map_err(internal)?;
+        }
+        Ok(v)
     });
     match task.await {
         Ok(Ok(v)) => json_response(200, &v),
@@ -121,23 +135,14 @@ async fn read(
     let db = ready.storage.client();
     match path {
         "/api/graph" => {
-            let mut v = crate::graph_read_tools::graph_neighborhood(
+            crate::graph_read_tools::graph_neighborhood(
                 ready,
                 s(q, "entity").unwrap_or(""),
                 i_param(q, "depth", 1),
                 super::search_route::tribool(q, "include_facts") != Some(false),
                 s(q, "to"),
             )
-            .await?;
-            if s(q, "entity").is_none() {
-                filter_graph(
-                    &mut v,
-                    s(q, "scope").unwrap_or("all"),
-                    i_param(q, "limit", 2000),
-                )
-                .map_err(internal)?;
-            }
-            Ok(v)
+            .await
         }
         "/api/graph/digest" => {
             let v = crate::txn::with_client(db, |c| async move {
@@ -263,15 +268,22 @@ fn filter_graph(v: &mut Value, scope: &str, limit: i64) -> Result<(), String> {
                 adj.get_mut(b).unwrap().insert(a.into());
             }
         }
+        let mut heap: BinaryHeap<_> = adj
+            .iter()
+            .map(|(name, neighbors)| Reverse((neighbors.len(), name.clone())))
+            .collect();
         while alive.len() > limit as usize {
-            let name = alive
-                .iter()
-                .min_by_key(|n| (adj[*n].len(), *n))
-                .unwrap()
-                .clone();
+            let Reverse((degree, name)) = heap.pop().unwrap();
+            if !alive.contains(&name) || degree != adj[&name].len() {
+                continue; // stale entry: removed node or an earlier degree
+            }
             alive.remove(&name);
             for nb in adj[&name].clone() {
-                adj.get_mut(&nb).unwrap().remove(&name);
+                if alive.contains(&nb) {
+                    let neighbors = adj.get_mut(&nb).unwrap();
+                    neighbors.remove(&name);
+                    heap.push(Reverse((neighbors.len(), nb)));
+                }
             }
         }
         nodes.retain(|n| alive.contains(text(&n["entity"])));
@@ -579,6 +591,52 @@ mod tests {
             format!(" -{} ", vec!["0"; 4300].join("_")),
         )]);
         assert_eq!(integer(&q, "limit", 20), json!(0));
+    }
+
+    #[test]
+    fn console_cap_breaks_current_degree_ties_by_name_and_preserves_output_order() {
+        let nodes: Vec<Value> = ["Delta", "Beta", "Isolated", "Gamma", "Alpha"]
+            .into_iter()
+            .map(|name| json!({"entity": name}))
+            .collect();
+        let edges: Vec<Value> = [
+            ("Alpha", "Beta"),
+            ("Beta", "Delta"),
+            ("Delta", "Gamma"),
+            ("Gamma", "Alpha"),
+            // Parallel/reversed edges and self-loops do not add neighbors.
+            ("Beta", "Alpha"),
+            ("Alpha", "Alpha"),
+        ]
+        .into_iter()
+        .map(|(a, b)| json!({"src": a, "dst": b}))
+        .collect();
+        // Peel order: Isolated, Alpha, Beta, Delta, Gamma. Each smaller cap
+        // pins the next tie decision; retained arrays keep their input order.
+        for (cap, expected) in [
+            (4, vec!["Delta", "Beta", "Gamma", "Alpha"]),
+            (3, vec!["Delta", "Beta", "Gamma"]),
+            (2, vec!["Delta", "Gamma"]),
+            (1, vec!["Gamma"]),
+        ] {
+            let mut graph = json!({"nodes": nodes, "edges": edges, "truncated": false});
+            filter_graph(&mut graph, "all", cap).unwrap();
+            let kept: Vec<&str> = rows(&graph["nodes"])
+                .iter()
+                .map(|n| text(&n["entity"]))
+                .collect();
+            assert_eq!(kept, expected);
+            let expected_edges: Vec<&Value> = edges
+                .iter()
+                .filter(|e| {
+                    expected.contains(&text(&e["src"])) && expected.contains(&text(&e["dst"]))
+                })
+                .collect();
+            assert_eq!(
+                rows(&graph["edges"]),
+                expected_edges.into_iter().cloned().collect::<Vec<_>>()
+            );
+        }
     }
 
     #[test]
