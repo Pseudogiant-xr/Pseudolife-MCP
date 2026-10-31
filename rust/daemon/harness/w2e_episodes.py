@@ -55,6 +55,8 @@ def run_rest(op: dict, port: int, dsn: str, harness) -> dict:
             else:
                 resolved[k] = v
         body = json.dumps(resolved).encode()
+    if "body_json" in op:
+        body = op["body_json"].encode()
     emap = _before_map(dsn)
     hdrs = [harness.AUTH] + ([("Content-Type", "application/json")] if body is not None else [])
     r = harness.w1a.call(port, op["method"], op["path"], hdrs, body)

@@ -38,7 +38,7 @@ pub(crate) async fn pg_text(
         Value::String(s) => Ok(Some(s.clone())),
         Value::Bool(b) => Ok(Some(b.to_string())),
         Value::Number(n) if type_name(v) == "float" => {
-            let f = n.as_f64().unwrap_or(f64::NAN);
+            let f = n.to_string().parse::<f64>().unwrap_or(f64::NAN);
             Ok(Some(
                 db.query_one("SELECT $1::float8::text", &[&f]).await?.get(0),
             ))
@@ -82,8 +82,9 @@ pub(crate) async fn pg_text(
                     Value::String(s) => {
                         if s.is_empty()
                             || s.eq_ignore_ascii_case("null")
-                            || s.bytes()
-                                .any(|b| b.is_ascii_whitespace() || b"{},\"\\".contains(&b))
+                            || s.bytes().any(|b| {
+                                b.is_ascii_whitespace() || b == 0x0b || b"{},\"\\".contains(&b)
+                            })
                         {
                             format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""))
                         } else {

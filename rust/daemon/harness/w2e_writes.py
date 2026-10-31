@@ -45,6 +45,23 @@ def register(h) -> dict[str, dict]:
                3.5, [1, 2], [True, False], [1.5, 2.5], [1, "user"],
                [" a", "NULL", "a,b", 'a"b', "a\\b"], [[1], [2]], ["user", None])
     return {
+        "console-consolidate-source-overflow": {
+            "config": None,
+            "seed": [h.store(f"Console overflow target {i}.") for i in range(2)],
+            # Keep the JSON token: Python json.dumps would emit Infinity.
+            "ops": [{"op": "rest", "method": "POST", "path": consolidate,
+                     "body_json": ('{"replaces":["Console overflow target %d."],'
+                                   '"new_text":"Console overflow replacement %d.","source":%s}'
+                                   % (i, i, token)),
+                     "expect": [f"SELECT source = '{expected}' FROM entries WHERE text = 'Console overflow replacement {i}.'"]}
+                    for i, (token, expected) in enumerate((("1e999", "Infinity"), ("-1e999", "-Infinity")))],
+        },
+        "console-consolidate-source-vt": {
+            "config": None, "seed": [h.store("Console VT source target.")],
+            "ops": [checked(consolidate, {"replaces": ["Console VT source target."],
+                                         "new_text": "Console VT source replacement.", "source": ["a\u000bb"]},
+                            "SELECT source = '{\"a' || chr(11) || 'b\"}' FROM entries WHERE text = 'Console VT source replacement.'")],
+        },
         "console-facts-raw-fields": {"config": None, "seed": [], "ops": raw_ops},
         "console-facts-null-keys": {
             "config": None, "seed": [null_trigger],
