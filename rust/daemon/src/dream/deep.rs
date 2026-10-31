@@ -101,7 +101,7 @@ async fn pending_entity_proposals(c: &Client) -> anyhow::Result<Vec<EntityPropos
 }
 
 /// `dismissed_pairs` (3427-3429).
-async fn dismissed_pairs(c: &Client) -> anyhow::Result<HashSet<(String, String)>> {
+pub(crate) async fn dismissed_pairs(c: &Client) -> anyhow::Result<HashSet<(String, String)>> {
     Ok(c.query("SELECT a_norm, b_norm FROM dismissed_pairs", &[])
         .await?
         .iter()

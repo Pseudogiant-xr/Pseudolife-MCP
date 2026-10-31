@@ -537,7 +537,7 @@ fn should_fold(
 }
 
 /// `MemoryService.graph_review(scope)` (`service.py:7812-7895`).
-async fn graph_review(
+pub(crate) async fn graph_review(
     ready: &Ready,
     dd: &DeepDreamConfig,
     scope: Option<&str>,
