@@ -807,7 +807,9 @@ windows on-demand
 ```
 
 `setup-runner-watch.sh --machines linux,windows:on-demand` writes that file.
-An on-demand machine is listed while one of its runners is online, as any
+It refuses while the installed watcher predates the marker, since an older
+watcher would read `windows on-demand` as one machine's name; running the
+setup script without arguments first updates it. An on-demand machine is listed while one of its runners is online, as any
 machine is, or while its orchestrator's heartbeat is fresh. The heartbeat is
 the contract with the orchestrator, so its name and format stay stable:
 
@@ -835,15 +837,21 @@ Its token needs "Variables: read and write" on this repository. The
 watcher's token already has that permission, which also reads the
 heartbeats, so it needs nothing new. The watcher reads the heartbeats of the
 on-demand machines in the allowlist only: a plain machine is never kept by
-a heartbeat variable, and a line with any other marker is refused, changing
-nothing. A failed request for a heartbeat is an API error like any other and
-changes nothing; a missing or unreadable heartbeat is no error, it only
-stops counting.
+a heartbeat variable. A line with any other marker, or a machine named both
+with and without `on-demand`, is refused, changing nothing. A failed request
+for a heartbeat is an API error like any other and changes nothing; a
+missing or unreadable heartbeat is no error, it only stops counting.
 
 When the orchestrator stops, the machine stays listed until its last
 heartbeat is `--heartbeat-minutes` old and then for the usual grace: about
 25 minutes with the defaults. Jobs routed to it in that window queue as they
-would for any machine that went down.
+would for any machine that went down. The line reporting the drop names the
+variable and why it stopped counting (`missing`, `unreadable`, `stale` or
+`ahead`), for example:
+
+```text
+runner_watch: PARITY_SELFHOSTED_RUNNERS changed from ["linux", "windows"] to ["linux"] (windows: PARITY_HEARTBEAT_WINDOWS stale)
+```
 
 ## Commands for the maintainer
 

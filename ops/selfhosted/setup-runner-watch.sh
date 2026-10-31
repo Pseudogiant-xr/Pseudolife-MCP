@@ -66,6 +66,11 @@ if [ "${1:-}" = "--machines" ]; then
     echo "--machines takes a comma-separated list of machine names, each optionally ending in :on-demand, such as linux,windows:on-demand (or '' for none); nothing changed" >&2
     exit 2
   fi
+  # An older watcher would read "windows on-demand" as one machine's name.
+  if [[ "$list" == *:on-demand* ]] && ! grep -qs '^ON_DEMAND = "on-demand"$' "$LIB/runner_watch.py"; then
+    echo "the installed watcher does not know :on-demand; run $0 without arguments to update it, then rerun this; nothing changed" >&2
+    exit 1
+  fi
   { echo "# Machines nightly parity jobs may route to (setup-runner-watch.sh --machines).";
     echo "# '<machine> on-demand' also stays listed while PARITY_HEARTBEAT_<MACHINE> is fresh.";
     [ -z "$list" ] || tr ',' '\n' <<<"$list" | sed 's/:on-demand$/ on-demand/'; } > "$MACHINES.part"

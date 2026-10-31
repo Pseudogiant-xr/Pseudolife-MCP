@@ -25,8 +25,10 @@ variable and corrects it:
   ``date +%s`` prints it. Fresh means at most ``--heartbeat-minutes`` old
   and at most ``HEARTBEAT_SKEW_SECONDS`` ahead of this machine's clock; a
   missing, non-numeric or stale heartbeat is not fresh, and the machine
-  then drops out after the grace like any other. Only on-demand machines'
-  heartbeats are read, and a line with any other marker is refused;
+  then drops out after the grace like any other, the change line naming
+  the variable and why. Only on-demand machines' heartbeats are read; a
+  line with any other marker, or a machine named both with and without
+  it, is refused;
 - any API error, or an allowlist that cannot be read, changes nothing and
   exits 1 with one line saying why.
 
@@ -143,20 +145,25 @@ def heartbeat_variable(machine: str) -> str:
     return HEARTBEAT_PREFIX + machine.upper().replace("-", "_")
 
 
-def heartbeat_fresh(call: Call, repository: str, machine: str, now: float, heartbeat_seconds: float) -> bool:
-    """Whether the machine's heartbeat is fresh; a missing or unreadable one is not.
+def heartbeat_problem(call: Call, repository: str, machine: str, now: float, heartbeat_seconds: float) -> str | None:
+    """None while the machine's heartbeat is fresh, else why not: missing, unreadable, stale or ahead.
 
     A failed request raises ApiError, so a transient API error changes
     nothing rather than starting the machine's grace.
     """
     status, variable = call("GET", f"/repos/{repository}/actions/variables/{heartbeat_variable(machine)}", None)
+    if status == 404:
+        return "missing"
     if status != 200 or not isinstance(variable, dict) or not isinstance(variable.get("value"), str):
-        return False
+        return "unreadable"
     text = variable["value"].strip()
-    if not _HEARTBEAT_VALUE.fullmatch(text):
-        return False
-    beat = float(text)
-    return math.isfinite(beat) and -HEARTBEAT_SKEW_SECONDS <= now - beat <= heartbeat_seconds
+    if not _HEARTBEAT_VALUE.fullmatch(text) or not math.isfinite(beat := float(text)):
+        return "unreadable"
+    if now - beat > heartbeat_seconds:
+        return "stale"
+    if now - beat < -HEARTBEAT_SKEW_SECONDS:
+        return "ahead"
+    return None
 
 
 def listed(online: set[str], last_seen: dict[str, float], now: float, grace_seconds: float) -> list[str]:
@@ -195,6 +202,9 @@ def allowed_machines(path: Path | None) -> Machines | None:
         if markers and not _ON_DEMAND_NAME.fullmatch(name):
             raise ApiError(f"--machines-file {path} line {number}: an {ON_DEMAND} machine's name takes only "
                            f"letters, digits and '-', since it names the variable {HEARTBEAT_PREFIX}<MACHINE>")
+        if name in machines.allowed and (name in machines.on_demand) != bool(markers):
+            raise ApiError(f"--machines-file {path} line {number}: {name} is named both with and without "
+                           f"'{ON_DEMAND}'; keep one of the two lines")
         machines.allowed.add(name)
         if markers:
             machines.on_demand.add(name)
@@ -206,11 +216,17 @@ def reconcile(call: Call, repository: str, state_file: Path, grace_seconds: floa
     """Correct the variable. Returns the line describing the change, if any."""
     online = online_machines(call, repository)
     allowed = None if machines is None else machines.allowed
+    # Why each on-demand machine without a runner online has no fresh heartbeat.
+    problems: dict[str, str] = {}
     if machines is not None:
         online &= machines.allowed
         # An idle on-demand machine has no runner online; its heartbeat stands in.
-        online |= {machine for machine in sorted(machines.on_demand - online)
-                   if heartbeat_fresh(call, repository, machine, now, heartbeat_seconds)}
+        for machine in sorted(machines.on_demand - online):
+            problem = heartbeat_problem(call, repository, machine, now, heartbeat_seconds)
+            if problem is None:
+                online.add(machine)
+            else:
+                problems[machine] = problem
     try:
         last_seen = json.loads(state_file.read_text(encoding="utf-8"))
         if not isinstance(last_seen, dict):
@@ -237,6 +253,12 @@ def reconcile(call: Call, repository: str, state_file: Path, grace_seconds: floa
         elif _parsed(value) != wanted:
             call("PATCH", f"/repos/{repository}/actions/variables/{VARIABLE}", {"name": VARIABLE, "value": text})
             change = f"{VARIABLE} changed from {value} to {text}"
+    # A dropped on-demand machine's orchestrator lives elsewhere: name what to check.
+    dropped = sorted(machine for machine in problems
+                     if machine not in wanted and machine in (_parsed(value or "[]") or []))
+    if change and dropped:
+        change += " (" + "; ".join(f"{machine}: {heartbeat_variable(machine)} {problems[machine]}"
+                                   for machine in dropped) + ")"
     # Machines past the grace are forgotten, so the file stays small.
     kept = {machine: seen for machine, seen in last_seen.items() if machine in wanted}
     state_file.parent.mkdir(parents=True, exist_ok=True)

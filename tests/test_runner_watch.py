@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 
 import pytest
 
@@ -307,6 +308,45 @@ def test_an_on_demand_machine_with_a_runner_online_needs_no_heartbeat(tmp_path, 
     fake = FakeGitHub([runner("w", "online", "pseudolife-parity-windows")])
     assert watch_at(fake, tmp_path, monkeypatch, 100000, "windows on-demand\n") == 0
     assert fake.value == '["windows"]'
+    # Its heartbeat is not read, so a heartbeat API error cannot fail the run.
+    assert fake.reads == []
+
+
+@pytest.mark.parametrize("heartbeat, why", [(None, "missing"), ("soon", "unreadable"),
+                                            ("100000", "stale"), (str(100000 + 26 * 60 + 121), "ahead")])
+def test_a_dropped_on_demand_machine_names_its_heartbeat_and_why(tmp_path, monkeypatch, capsys, heartbeat, why):
+    # The orchestrator lives outside this repository, so the change line
+    # says which variable to look at.
+    fake = FakeGitHub([runner("a", "online", "pseudolife-parity-linux")], variables={HEARTBEAT: "100000"})
+    machines = "linux\nwindows on-demand\n"
+    assert watch_at(fake, tmp_path, monkeypatch, 100000, machines) == 0
+    assert json.loads(fake.value) == ["linux", "windows"]
+    capsys.readouterr()
+    fake.variables.pop(HEARTBEAT)
+    if heartbeat is not None:
+        fake.variables[HEARTBEAT] = heartbeat
+    assert watch_at(fake, tmp_path, monkeypatch, 100000 + 26 * 60, machines) == 0
+    assert fake.value == '["linux"]'
+    assert capsys.readouterr().out == (f'runner_watch: {watch.VARIABLE} changed from ["linux", "windows"] to '
+                                       f'["linux"] (windows: {HEARTBEAT} {why})\n')
+
+
+def test_a_dropped_on_demand_machine_names_its_heartbeat_when_the_lane_goes_off(tmp_path, monkeypatch, capsys):
+    fake = FakeGitHub([], value='["windows"]')
+    assert watch_at(fake, tmp_path, monkeypatch, 100000, "windows on-demand\n") == 0
+    assert fake.value is None
+    assert f"(windows: {HEARTBEAT} missing)" in capsys.readouterr().out
+
+
+def test_a_machine_named_both_plain_and_on_demand_is_refused(tmp_path, monkeypatch, capsys):
+    fake = FakeGitHub([runner("a", "online", "pseudolife-parity-linux")], value='["windows"]')
+    assert watch_at(fake, tmp_path, monkeypatch, 100000, "linux\nwindows\nwindows on-demand\n") == 1
+    assert fake.writes == [] and fake.value == '["windows"]'
+    err = capsys.readouterr().err
+    assert "line 3" in err and "windows" in err and "nothing changed" in err and err.count("\n") == 1
+    # The same line twice is harmless and still allowed.
+    assert watch_at(fake, tmp_path, monkeypatch, 100000, "linux\nlinux\n") == 0
+    assert fake.value == '["linux"]'
 
 
 @pytest.mark.parametrize("line", ["windows on_demand", "windows ondemand on-demand", "windows on-demand extra",
@@ -323,6 +363,20 @@ def test_an_unknown_marker_is_refused_and_changes_nothing(tmp_path, monkeypatch,
 def test_a_heartbeat_api_error_changes_nothing(tmp_path, monkeypatch, capsys):
     # A transient API failure must not start the grace clock on the machine.
     fake = FakeGitHub([], value='["windows"]', fail=f"GET {HEARTBEAT_PATH}")
+    state = tmp_path / "state.json"
+    state.write_text('{"windows": 99000}', encoding="utf-8")
     assert watch_at(fake, tmp_path, monkeypatch, 100000, "windows on-demand\n") == 1
     assert fake.writes == [] and fake.value == '["windows"]'
+    assert state.read_text(encoding="utf-8") == '{"windows": 99000}'
     assert "nothing changed" in capsys.readouterr().err
+
+
+def test_the_setup_script_recognises_a_watcher_that_knows_on_demand():
+    # setup-runner-watch.sh refuses :on-demand while the installed watcher
+    # predates it, by finding this line in the installed copy.
+    from pathlib import Path
+
+    selfhosted = Path(watch.__file__).parent
+    probe = "^ON_DEMAND = \"on-demand\"$"
+    assert f"grep -qs '{probe}'" in (selfhosted / "setup-runner-watch.sh").read_text(encoding="utf-8")
+    assert re.search(probe, (selfhosted / "runner_watch.py").read_text(encoding="utf-8"), re.MULTILINE)
