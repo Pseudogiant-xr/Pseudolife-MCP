@@ -261,7 +261,7 @@ describe("finding a session", () => {
     expect(matchesQuery(named, "bulk 2cc0")).toBe(false);
   });
 
-  it("pins the delegate, then the coordinator, then sessions with unread mail, and keeps the rest in order", () => {
+  it("pins the conductor, then the coordinator, then sessions with unread mail, and keeps the rest in order", () => {
     const rows = [
       agent({ agent_id: "r1" }),
       agent({ agent_id: "mail", pending_count: 2 }),
@@ -269,10 +269,10 @@ describe("finding a session", () => {
       agent({ agent_id: "r2", pending_count: 0 }),
       agent({ agent_id: "del", pending_count: 1 }),
     ];
-    const role = (a: BoardAgent) => (a.agent_id === "del" ? "delegate" : a.agent_id === "coord" ? "coordinator" : null);
+    const role = (a: BoardAgent) => (a.agent_id === "del" ? "conductor" : a.agent_id === "coord" ? "coordinator" : null);
     const ordered = orderRoster(rows, role);
     expect(ordered.map((r) => [r.agent.agent_id, r.pin])).toEqual([
-      ["del", "delegate"],
+      ["del", "conductor"],
       ["coord", "coordinator"],
       ["mail", "mail"],
       ["r1", null],

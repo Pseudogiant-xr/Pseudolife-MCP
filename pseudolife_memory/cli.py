@@ -88,15 +88,15 @@ modes:
                  3 timeout, 2 setup; --help for options)
   conductor-watch wake the conductor session with board mail only when
                  something needs a decision: pull requests, CI, suite results
-                 and suite leases, polled without a model (`delegate-watch`
-                 is its older name; --help for options)
+                 and suite leases, polled without a model (`delegate-watch`,
+                 its older name, is deprecated; --help for options)
   lease          hold a named lease around a command: `lease run NAME --
                  COMMAND...` takes an OS file lock the agent board mirrors
                  (FIFO queue, holder, expected end); `lease hold NAME
                  --while-pid PID` holds one for a process already running;
                  `lease check NAME` exits 1 while it is held (a launch gate);
                  `lease list` shows them; operator only: `lease break NAME`
-                 frees a stuck one, `lease delegate PROJECT AGENT` makes
+                 frees a stuck one, `lease conductor PROJECT AGENT` makes
                  one session the maintainer's conductor for a project
   maintainer    on the daemon host, the maintainer's passkeys (operator
                  only; reads PSEUDOLIFE_MCP_DATABASE_URL, else runs inside
@@ -210,8 +210,11 @@ def main() -> None:
         from pseudolife_memory.wait_mail_cli import run_wait_mail
         sys.exit(run_wait_mail(sys.argv[2:]))
     elif mode in ("conductor-watch", "delegate-watch"):
-        from pseudolife_memory.delegate_watch_cli import main as delegate_watch_main
-        sys.exit(delegate_watch_main(sys.argv[2:]))
+        from pseudolife_memory.conductor_watch_cli import DEPRECATED_MODE
+        from pseudolife_memory.conductor_watch_cli import main as conductor_watch_main
+        if mode == "delegate-watch":
+            print(DEPRECATED_MODE, file=sys.stderr)
+        sys.exit(conductor_watch_main(sys.argv[2:]))
     elif mode == "lease":
         from pseudolife_memory.lease_cli import main as lease_main
         sys.exit(lease_main(sys.argv[2:]))

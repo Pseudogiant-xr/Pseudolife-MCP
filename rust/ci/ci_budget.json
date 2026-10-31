@@ -257,8 +257,8 @@
       "lock-resolve": "83bcc6b654896c6d",
       "test": "ac414107d3d9c71d",
       "test-lite-linux": "44e2a8f2c01baeab",
-      "test-lite-windows": "b628a0135e33c187",
-      "test-lite-macos": "2abde9b5cf74fc3d",
+      "test-lite-windows": "e3f25bec895919f9",
+      "test-lite-macos": "a47359a37a210714",
       "frontend": "b1b6a1a1278f2e60"
     },
     "accepted": [
@@ -306,6 +306,16 @@
         "job": "test-lite-windows",
         "fingerprint": "b628a0135e33c187",
         "reason": "adds tests/test_unattended_update.py (49 cases, under 1 s on Windows locally, all scheduler and Docker calls faked); no new setup or step"
+      },
+      {
+        "job": "test-lite-windows",
+        "fingerprint": "e3f25bec895919f9",
+        "reason": "renames tests/test_delegate_watch.py to tests/test_conductor_watch.py with the same tests; the lane runs the same cases, so its measured minutes still hold"
+      },
+      {
+        "job": "test-lite-macos",
+        "fingerprint": "a47359a37a210714",
+        "reason": "renames tests/test_delegate_watch.py to tests/test_conductor_watch.py with the same tests; the lane runs the same cases, so its measured minutes still hold"
       }
     ]
   }

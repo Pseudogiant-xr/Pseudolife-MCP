@@ -407,7 +407,7 @@ def test_operator_break_frees_the_lease_and_grants_the_next(store):
 
 def test_an_agent_cannot_take_a_reserved_lease(store):
     a = store.register("alice", project="proj")
-    for name in ("delegate:proj", "delegate:anything", "designated:coordinator:proj",
+    for name in ("conductor:proj", "delegate:anything", "designated:coordinator:proj",
                  "designated:anything"):
         with pytest.raises(CoordinationError, match="^reserved_lease$"):
             store.acquire_lease(*creds(a), name=name, ttl=3600)
@@ -415,34 +415,34 @@ def test_an_agent_cannot_take_a_reserved_lease(store):
     assert store.list_leases()["leases"] == []
 
 
-def test_the_operator_grants_a_delegate_until_it_expires(store):
+def test_the_operator_grants_a_conductor_until_it_expires(store):
     a = store.register("alice", project="proj")
     b = store.register("alice", project="proj")
-    out = store.grant_delegate("proj", a["agent_id"][:8], hold=3600)
+    out = store.grant_conductor("proj", a["agent_id"][:8], hold=3600)
     assert {k: v for k, v in out.items() if k not in ("reachable", "reason", "warning")} == {
-        "name": "delegate:proj", "agent_id": a["agent_id"],
+        "name": "conductor:proj", "agent_id": a["agent_id"],
         "fence": 1, "expires_at": 4600.0, "replaced": None}
     assert (out["reachable"], out["reason"]) == (False, "wake_disabled")
-    [row] = events(store, "lease_delegate")
+    [row] = events(store, "lease_conductor")
     assert (row["actor"], row["principal"], row["agent_id"]) == ("operator", "", a["agent_id"])
-    assert payload(row) == {"name": "delegate:proj", "fence": 1, "hold": 3600,
+    assert payload(row) == {"name": "conductor:proj", "fence": 1, "hold": 3600,
                             "replaced": None}
     [lease] = store.list_leases()["leases"]
-    assert (lease["name"], lease["holder"]["agent_id"]) == ("delegate:proj",
+    assert (lease["name"], lease["holder"]["agent_id"]) == ("conductor:proj",
                                                            a["agent_id"])
     # The designee cannot renew it through the board, only the operator can.
     with pytest.raises(CoordinationError, match="^reserved_lease$"):
-        store.acquire_lease(*creds(a), name="delegate:proj", ttl=3600)
+        store.acquire_lease(*creds(a), name="conductor:proj", ttl=3600)
     # A new grant replaces the old one and says whom it replaced.
-    out = store.grant_delegate("proj", b["agent_id"], hold=60)
+    out = store.grant_conductor("proj", b["agent_id"], hold=60)
     assert (out["replaced"], out["fence"], out["expires_at"]) == (a["agent_id"], 2, 1060.0)
     # The export names the session that lost the role, not only the CLI.
-    assert payload(events(store, "lease_delegate")[1])["replaced"] == a["agent_id"]
+    assert payload(events(store, "lease_conductor")[1])["replaced"] == a["agent_id"]
     store.test_time[0] = 1061.0
     assert store.list_leases()["leases"] == []
     [expired] = events(store, "lease_expire")
     assert (expired["agent_id"], payload(expired)["name"]) == (b["agent_id"],
-                                                             "delegate:proj")
+                                                             "conductor:proj")
 
 
 def test_a_grant_drops_a_waiter_queued_before_the_namespace_was_reserved(store):
@@ -450,11 +450,11 @@ def test_a_grant_drops_a_waiter_queued_before_the_namespace_was_reserved(store):
     waiter for it; the operator's grant must not go to that waiter first."""
     early, a = store.register("alice"), store.register("alice", project="proj")
     store.storage.conn.execute(
-        "INSERT INTO coordination_leases (name) VALUES ('delegate:proj')")
+        "INSERT INTO coordination_leases (name) VALUES ('conductor:proj')")
     store.storage.conn.execute(
         "INSERT INTO coordination_lease_waiters (name,agent_id,principal,ttl,enqueued_at) "
-        "VALUES ('delegate:proj',%s,'alice',3600,900)", (early["agent_id"],))
-    store.grant_delegate("proj", a["agent_id"], hold=3600)
+        "VALUES ('conductor:proj',%s,'alice',3600,900)", (early["agent_id"],))
+    store.grant_conductor("proj", a["agent_id"], hold=3600)
     assert events(store, "lease_grant") == []
     [dequeued] = events(store, "lease_dequeue")
     assert (dequeued["agent_id"], payload(dequeued)["reason"]) == (early["agent_id"], "reserved")
@@ -470,14 +470,14 @@ def test_a_freed_delegation_is_never_granted_to_a_queued_waiter(store, frees):
     queue instead."""
     a = store.register("alice", project="proj")
     early = store.register("alice", project="proj")
-    store.grant_delegate("proj", a["agent_id"], hold=3600)
+    store.grant_conductor("proj", a["agent_id"], hold=3600)
     store.storage.conn.execute(
         "INSERT INTO coordination_lease_waiters (name,agent_id,principal,ttl,enqueued_at) "
-        "VALUES ('delegate:proj',%s,'alice',3600,900)", (early["agent_id"],))
+        "VALUES ('conductor:proj',%s,'alice',3600,900)", (early["agent_id"],))
     if frees == "break":
-        store.break_lease("delegate:proj")
+        store.break_lease("conductor:proj")
     elif frees == "release":
-        store.release_lease(*creds(a), name="delegate:proj")
+        store.release_lease(*creds(a), name="conductor:proj")
     else:
         store.test_time[0] += 3601
     assert store.list_leases()["leases"] == []
@@ -486,12 +486,12 @@ def test_a_freed_delegation_is_never_granted_to_a_queued_waiter(store, frees):
     assert (dequeued["agent_id"], payload(dequeued)["reason"]) == (early["agent_id"], "reserved")
 
 
-def test_a_delegate_may_resign_and_the_operator_may_revoke(store):
+def test_a_conductor_may_resign_and_the_operator_may_revoke(store):
     a = store.register("alice", project="proj")
-    store.grant_delegate("proj", a["agent_id"], hold=3600)
-    assert store.release_lease(*creds(a), name="delegate:proj")["released"]
-    store.grant_delegate("proj", a["agent_id"], hold=3600)
-    assert store.break_lease("delegate:proj")["was_held_by"] == a["agent_id"]
+    store.grant_conductor("proj", a["agent_id"], hold=3600)
+    assert store.release_lease(*creds(a), name="conductor:proj")["released"]
+    store.grant_conductor("proj", a["agent_id"], hold=3600)
+    assert store.break_lease("conductor:proj")["was_held_by"] == a["agent_id"]
     assert store.list_leases()["leases"] == []
 
 
@@ -514,8 +514,8 @@ def test_a_delegation_needs_a_project_a_live_agent_and_a_bounded_hold(store, pro
                                    "WHERE agent_id=%s", (a["agent_id"],))
     agent_id = "f" * 32 if agent == "nobody" else a["agent_id"]
     with pytest.raises(CoordinationError, match=f"^{code}$"):
-        store.grant_delegate(project, agent_id, hold=hold)
-    assert events(store, "lease_delegate") == []
+        store.grant_conductor(project, agent_id, hold=hold)
+    assert events(store, "lease_conductor") == []
 
 
 def test_status_expectation_marks_a_status_overdue(store):

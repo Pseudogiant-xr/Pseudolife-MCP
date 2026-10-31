@@ -146,8 +146,9 @@ MIN_EXPECT, MAX_EXPECT = 1, 604800
 LIST_LIMIT = 50
 # Old action names that still run, each mapped to the action replacing it:
 # ``main`` prints one line naming the replacement, then runs that instead.
-# ``delegate`` was ``designate`` in 0.16.0 (renamed 2026-10-04).
-DEPRECATED_ACTIONS = {"designate": "delegate"}
+# ``conductor`` was ``delegate`` until 2026-10-31 and ``designate`` in 0.16.0
+# (renamed 2026-10-04).
+DEPRECATED_ACTIONS = {"delegate": "conductor", "designate": "conductor"}
 
 # Cadences from the lease contract (2026-09-26), not measured tuning: board
 # polls every ~5 s while queued, OS-lock retries every ~2 s, a waiting notice
@@ -1694,12 +1695,12 @@ def _break(args) -> int:
     return _operator("break", lambda store: store.break_lease(args.name))
 
 
-def _delegate(args) -> int:
+def _conductor(args) -> int:
     """Make a session the maintainer's conductor for a project through the
     bank itself (operator only), as ``break`` does. Prints the store's
     answer as JSON, and its warning on stderr when the session has no live
     wake path; 1 when no bank is found or the grant was refused."""
-    return _operator("delegate", lambda store: store.grant_delegate(
+    return _operator("conductor", lambda store: store.grant_conductor(
         args.project, args.agent, hold=args.hold))
 
 
@@ -1841,7 +1842,7 @@ def _parsers():
                     "maintenance window) around a command. The lease is an OS file lock; "
                     "the agent board, where the daemon has one, mirrors it so other "
                     "agents see the holder, queue in order and see the expected end.")
-    actions = parser.add_subparsers(dest="action", metavar="{run,hold,check,list,break,delegate}")
+    actions = parser.add_subparsers(dest="action", metavar="{run,hold,check,list,break,conductor}")
     run = actions.add_parser(
         "run", help="run a command while holding a lease",
         usage="pseudolife-mcp lease run NAME [--expect DURATION] [--ttl SECONDS] "
@@ -1927,23 +1928,24 @@ def _parsers():
                     "It frees the board's record only: a process still holding the local "
                     "lock keeps it until it exits.")
     breaking.add_argument("name", type=_lease_name, metavar="NAME", help="the lease to free")
-    delegating = actions.add_parser(
-        "delegate", help="(operator) make one session the maintainer's conductor for a project",
+    granting = actions.add_parser(
+        "conductor", help="(operator) make one session the maintainer's conductor for a project",
         description="Operator only: make the session AGENT (its id, or a unique prefix) the "
                     "maintainer's conductor for PROJECT for DURATION, replacing any current "
                     "one. Its urgent mail then reopens done parks in that project; holding "
                     "the open coordinator:<project> lease grants nothing. The grant is the "
-                    "board lease delegate:<project>, which no session can take: it opens "
+                    "board lease conductor:<project>, which no session can take: it opens "
                     "the bank directly, like break, and the audit log records it with the "
-                    "operator as its actor. Revoke it with: lease break delegate:<project>.")
-    delegating.add_argument("project", type=_lease_name, metavar="PROJECT",
+                    "operator as its actor. Revoke it with: lease break conductor:<project> "
+                    "(delegate:<project> for a grant made before the role's rename).")
+    granting.add_argument("project", type=_lease_name, metavar="PROJECT",
                             help="the project, as sessions set it on the board")
-    delegating.add_argument("agent", metavar="AGENT", help="the session's agent id or prefix")
-    delegating.add_argument("--for", dest="hold", type=_seconds(60, 7 * 86400), default=86400,
+    granting.add_argument("agent", metavar="AGENT", help="the session's agent id or prefix")
+    granting.add_argument("--for", dest="hold", type=_seconds(60, 7 * 86400), default=86400,
                             metavar="DURATION",
                             help="how long the grant lasts (default 1d, at most 7d)")
     return parser, run, {"hold": hold, "check": check, "list": listing, "break": breaking,
-                         "delegate": delegating}
+                         "conductor": granting}
 
 
 def main(argv: list[str] | None = None, *, transport=None) -> int:
@@ -1967,7 +1969,7 @@ def main(argv: list[str] | None = None, *, transport=None) -> int:
         if args.action is None:
             parser.print_usage(sys.stderr)
             parser.exit(EXIT_USAGE, "pseudolife-mcp lease: choose run, hold, check, list, "
-                                    "break or delegate (--help explains each)\n")
+                                    "break or conductor (--help explains each)\n")
         if args.action == "run" and not command:
             run.error("put the command to run after --, as in: "
                       "pseudolife-mcp lease run gpu -- python train.py")
@@ -1988,9 +1990,9 @@ def main(argv: list[str] | None = None, *, transport=None) -> int:
         return _check(args, transport) if command is None else _gated(args, command, transport)
     if args.action == "list":
         return _list(args, transport)
-    if args.action in ("break", "delegate"):
+    if args.action in ("break", "conductor"):
         try:
-            return _break(args) if args.action == "break" else _delegate(args)
+            return _break(args) if args.action == "break" else _conductor(args)
         except NoBank:
             ran = run_in_daemon("lease", argv)
             if ran is not None:

@@ -4,8 +4,15 @@ use common::{LeaseHome as Home, cli::native_text};
 use std::path::PathBuf;
 
 const NO_BANK: &str = "no bank found: set PSEUDOLIFE_MCP_DATABASE_URL to the bank's database URL, or run where the lite tier's data dir holds one (Docker tier: start the daemon, or run `docker exec -it pseudolife-mcp-daemon pseudolife-mcp lease ...` on its host)\n";
-const DEPRECATED: &str =
-    "pseudolife-mcp lease designate is deprecated: use pseudolife-mcp lease delegate\n";
+
+/// The one stderr line an old action name prints before it runs as conductor.
+fn deprecation(action: &str) -> String {
+    if matches!(action, "delegate" | "designate") {
+        format!("pseudolife-mcp lease {action} is deprecated: use pseudolife-mcp lease conductor\n")
+    } else {
+        String::new()
+    }
+}
 
 fn docker_fixture(home: &Home) -> PathBuf {
     #[cfg(windows)]
@@ -57,7 +64,7 @@ fn lease_home_blocks_container_even_when_an_executable_is_available() {
     assert!(proof.status.success());
     let before = std::fs::read(&calls).unwrap();
     for board in [false, true] {
-        for action in ["break", "delegate", "designate"] {
+        for action in ["break", "conductor", "delegate", "designate"] {
             let mut command = if board {
                 home.board_command("http://127.0.0.1:1")
             } else {
@@ -88,14 +95,7 @@ fn lease_home_blocks_container_even_when_an_executable_is_available() {
             assert!(output.stdout.is_empty());
             assert_eq!(
                 output.stderr,
-                native_text(&format!(
-                    "{}{NO_BANK}",
-                    if action == "designate" {
-                        DEPRECATED
-                    } else {
-                        ""
-                    }
-                ))
+                native_text(&format!("{}{NO_BANK}", deprecation(action)))
             );
             assert_eq!(std::fs::read(&calls).unwrap(), before);
             assert!(!arguments.exists());
@@ -117,6 +117,10 @@ fn existing_embedded_data_refuses_lease_actions_before_container_launch() {
     for (action, invocation) in [
         ("break", vec!["lease", "break", "resource"]),
         (
+            "conductor",
+            vec!["lease", "conductor", "project", "fixture-agent"],
+        ),
+        (
             "delegate",
             vec!["lease", "delegate", "project", "fixture-agent"],
         ),
@@ -134,7 +138,13 @@ fn existing_embedded_data_refuses_lease_actions_before_container_launch() {
         assert_eq!(
             output.stderr,
             native_text(&format!(
-                "lease: {action} refused: phase4-embedded-pg-deferred\n"
+                "{}lease: {} refused: phase4-embedded-pg-deferred\n",
+                deprecation(action),
+                if action == "break" {
+                    "break"
+                } else {
+                    "conductor"
+                }
             ))
         );
         assert_eq!(output.status.code(), Some(1));
@@ -146,55 +156,51 @@ fn existing_embedded_data_refuses_lease_actions_before_container_launch() {
 }
 
 #[test]
-fn designate_container_receives_delegate_and_emits_one_deprecation() {
-    let home = Home::new();
-    let fake = docker_fixture(&home);
-    let arguments = home.0.join("arguments");
-    let output = home
-        .command()
-        .current_dir(&home.0)
-        .env_remove("PSEUDOLIFE_DAEMON_EXEC")
-        .env("PSEUDOLIFE_DOCKER", &fake)
-        .env("LEASE_DOCKER_CALLS", home.0.join("calls"))
-        .env("LEASE_DOCKER_ARGUMENTS", &arguments)
-        .args([
-            "lease",
-            "designate",
-            "project",
-            "fixture-agent",
-            "--for",
-            "60",
-        ])
-        .output()
-        .unwrap();
-    assert_eq!(output.status.code(), Some(3));
-    assert!(output.stdout.is_empty());
-    assert_eq!(
-        output.stderr,
-        native_text(&format!(
-            "{DEPRECATED}pseudolife-mcp lease: no bank in this shell; running it inside the pseudolife-mcp-daemon container\n"
-        ))
-    );
-    let forwarded = std::fs::read_to_string(arguments).unwrap();
-    assert_eq!(
-        forwarded.lines().collect::<Vec<_>>(),
-        vec![
-            "exec",
-            "-i",
-            "-e",
-            "PSEUDOLIFE_DAEMON_EXEC=1",
-            "pseudolife-mcp-daemon",
-            "python",
-            "-m",
-            "pseudolife_memory.cli",
-            "lease",
-            "delegate",
-            "project",
-            "fixture-agent",
-            "--for",
-            "60",
-        ]
-    );
+fn old_names_reach_the_container_as_conductor_with_one_deprecation() {
+    for old in ["delegate", "designate"] {
+        let home = Home::new();
+        let fake = docker_fixture(&home);
+        let arguments = home.0.join("arguments");
+        let output = home
+            .command()
+            .current_dir(&home.0)
+            .env_remove("PSEUDOLIFE_DAEMON_EXEC")
+            .env("PSEUDOLIFE_DOCKER", &fake)
+            .env("LEASE_DOCKER_CALLS", home.0.join("calls"))
+            .env("LEASE_DOCKER_ARGUMENTS", &arguments)
+            .args(["lease", old, "project", "fixture-agent", "--for", "60"])
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(3));
+        assert!(output.stdout.is_empty());
+        assert_eq!(
+            output.stderr,
+            native_text(&format!(
+                "{}pseudolife-mcp lease: no bank in this shell; running it inside the pseudolife-mcp-daemon container\n",
+                deprecation(old)
+            ))
+        );
+        let forwarded = std::fs::read_to_string(arguments).unwrap();
+        assert_eq!(
+            forwarded.lines().collect::<Vec<_>>(),
+            vec![
+                "exec",
+                "-i",
+                "-e",
+                "PSEUDOLIFE_DAEMON_EXEC=1",
+                "pseudolife-mcp-daemon",
+                "python",
+                "-m",
+                "pseudolife_memory.cli",
+                "lease",
+                "conductor",
+                "project",
+                "fixture-agent",
+                "--for",
+                "60",
+            ]
+        );
+    }
 }
 
 #[test]
@@ -204,13 +210,13 @@ fn malformed_dsn_fragments_are_never_operator_diagnostics() {
         "fixture_password_fragment=synthetic",
         "postgresql://fixture@localhost/db?fixture_password_fragment=synthetic",
     ] {
-        for action in ["break", "designate"] {
+        for action in ["break", "conductor", "delegate", "designate"] {
             let home = Home::new();
             let mut command = home.command();
             command
                 .env("PSEUDOLIFE_MCP_DATABASE_URL", dsn)
                 .args(["lease", action, "resource"]);
-            if action == "designate" {
+            if action != "break" {
                 command.arg("fixture-agent");
             }
             let output = command.output().unwrap();
@@ -220,11 +226,7 @@ fn malformed_dsn_fragments_are_never_operator_diagnostics() {
                 output.stderr,
                 native_text(&format!(
                     "{}cannot open the bank (unsupported PostgreSQL DSN option)\n",
-                    if action == "designate" {
-                        DEPRECATED
-                    } else {
-                        ""
-                    }
+                    deprecation(action)
                 ))
             );
             assert_eq!(std::fs::read_dir(&home.0).unwrap().count(), 0);

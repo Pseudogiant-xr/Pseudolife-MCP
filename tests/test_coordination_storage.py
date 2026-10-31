@@ -1042,9 +1042,9 @@ def test_a_recipient_parked_done_needs_nothing(store):
 
 def _delegate(store, project="proj", principal="alice"):
     """A session the operator made the maintainer's delegate for ``project``
-    for an hour (``delegate:<project>``)."""
+    for an hour (``conductor:<project>``)."""
     agent = store.register(principal, project=project)
-    store.grant_delegate(project, agent["agent_id"], hold=3600)
+    store.grant_conductor(project, agent["agent_id"], hold=3600)
     return agent
 
 
@@ -1058,22 +1058,22 @@ def _done(store, project="proj", clear_by="anyone", **register):
     return agent
 
 
-def test_the_project_delegates_urgent_mail_reopens_a_done_park(store):
+def test_the_project_conductors_urgent_mail_reopens_a_done_park(store):
     delegate = _delegate(store)
     b = _done(store)
     wake = _wake(store, delegate, b, text="review found two required changes", urgent=True)
-    assert wake == {"decision": "rung", "reason": "delegate", "ring_at": 1000.0,
+    assert wake == {"decision": "rung", "reason": "conductor", "ring_at": 1000.0,
                     "reopened": True}
     row = store.storage.conn.execute(
         "SELECT decision,reason,urgent FROM coordination_wakes").fetchone()
     # Not counted as plain urgency: the authority budget is separate.
-    assert row == ("rung", "delegate", False)
+    assert row == ("rung", "conductor", False)
     # The ring is served like any other, and the gate then asks for a new park.
     answer = store.attach(*creds(b), attachment_id=b["agent_id"][:8], wake_enabled=True)
     assert answer["wake"]["decision"] == "rung"
 
 
-def test_plain_mail_from_the_delegate_still_never_rings_a_done_park(store):
+def test_plain_mail_from_the_conductor_still_never_rings_a_done_park(store):
     """Plain mail never wakes (2026-10-02); reopening takes ``urgent``."""
     delegate = _delegate(store)
     b = _done(store)
@@ -1082,18 +1082,18 @@ def test_plain_mail_from_the_delegate_still_never_rings_a_done_park(store):
 
 @pytest.mark.parametrize("case", ["other_project", "no_project", "resigned", "revoked",
                                   "expired", "lease_named_in_text"])
-def test_delegate_authority_comes_only_from_a_live_grant_for_the_recipients_project(
+def test_conductor_authority_comes_only_from_a_live_grant_for_the_recipients_project(
         store, case):
     delegate = _delegate(store, project="other" if case == "other_project" else "proj")
     b = _done(store, project="" if case == "no_project" else "proj")
     if case == "resigned":
-        store.release_lease(*creds(delegate), name="delegate:proj")
+        store.release_lease(*creds(delegate), name="conductor:proj")
     if case == "revoked":
-        store.break_lease("delegate:proj")
+        store.break_lease("conductor:proj")
     if case == "expired":
         store.test_time[0] += 3601
         _renew_wake_path(store, b)
-    extra = ({"clears": "delegate:proj"} if case == "lease_named_in_text"
+    extra = ({"clears": "conductor:proj"} if case == "lease_named_in_text"
              else {})
     sender = store.register("alice", project="proj") if case == "lease_named_in_text" else delegate
     wake = _wake(store, sender, b, urgent=True,
@@ -1118,16 +1118,16 @@ def test_the_open_coordinator_lease_carries_no_wake_power(store):
     assert _wake(store, holder, idle, urgent=True)["reason"] == "urgent_sender_hour"
 
 
-def test_a_squatter_on_the_open_lease_neither_blocks_nor_borrows_delegate_power(store):
+def test_a_squatter_on_the_open_lease_neither_blocks_nor_borrows_conductor_power(store):
     squatter = store.register("alice", project="proj")
     store.acquire_lease(*creds(squatter), name="coordinator:proj", ttl=86400)
     delegate = _delegate(store)
     b = _done(store)
     assert _wake(store, squatter, b, urgent=True)["reason"] == "parked_done"
-    assert _wake(store, delegate, b, urgent=True)["reason"] == "delegate"
+    assert _wake(store, delegate, b, urgent=True)["reason"] == "conductor"
 
 
-def test_delegate_power_is_one_granted_session_not_its_principal(store):
+def test_conductor_power_is_one_granted_session_not_its_principal(store):
     """Every session on a host may share one principal; the grant names
     one agent, so passing a lease between that principal's sessions passes
     no power and cannot spread the authority budget over several senders."""
@@ -1136,7 +1136,7 @@ def test_delegate_power_is_one_granted_session_not_its_principal(store):
     store.acquire_lease(*creds(same_principal), name="coordinator:proj", ttl=3600)
     b = _done(store)
     assert _wake(store, same_principal, b, urgent=True)["reason"] == "parked_done"
-    assert _wake(store, delegate, b, urgent=True)["reason"] == "delegate"
+    assert _wake(store, delegate, b, urgent=True)["reason"] == "conductor"
 
 
 @pytest.mark.parametrize("listener", [True, False])
@@ -1158,7 +1158,7 @@ def test_the_audit_log_names_the_authority_a_ring_used(store, listener):
     _wake(store, delegate, b, request_id="plain")
     sends = {json.loads(row["payload"])["request_id"]: json.loads(row["payload"])
              for row in audit_events(store.storage.conn) if row["event"] == "send"}
-    assert sends["authority"]["wake_reason"] == "delegate"
+    assert sends["authority"]["wake_reason"] == "conductor"
     assert sends["authority"]["wake"] == wake["decision"]
     assert "wake_reason" not in sends["plain"]
     assert "_ring" not in wake
@@ -1208,7 +1208,7 @@ def test_authority_rings_have_their_own_small_budget_and_the_shared_caps(store):
     peers = [_done(store) for _ in range(3)]
     first = _wake(store, delegate, peers[0], urgent=True)
     second = _wake(store, delegate, peers[1], urgent=True)
-    assert (first["reason"], second["reason"]) == ("delegate", "delegate")
+    assert (first["reason"], second["reason"]) == ("conductor", "conductor")
     assert (first["ring_at"], second["ring_at"]) == (1000.0, 1030.0)
     assert _wake(store, delegate, peers[2], urgent=True) == {
         "decision": "capped", "reason": "authority_sender_hour"}
@@ -1217,8 +1217,8 @@ def test_authority_rings_have_their_own_small_budget_and_the_shared_caps(store):
         _renew_wake_path(store, peer)
         store.update(*creds(peer), park_reason="done", park_clear_by="anyone")
         _idle(store, peer, 120)
-    store.grant_delegate("proj", delegate["agent_id"], hold=3600)
-    assert _wake(store, delegate, peers[2], urgent=True)["reason"] == "delegate"
+    store.grant_conductor("proj", delegate["agent_id"], hold=3600)
+    assert _wake(store, delegate, peers[2], urgent=True)["reason"] == "conductor"
     assert _wake(store, delegate, peers[2], urgent=True) == {
         "decision": "capped", "reason": "recipient_hour"}
 
@@ -1234,12 +1234,12 @@ def test_authority_on_a_parked_or_unparked_session_spends_the_authority_budget(s
                  park_clear_by="someone-else")
     _idle(store, parked)
     assert _wake(store, delegate, parked, urgent=True) == {
-        "decision": "rung", "reason": "delegate", "ring_at": 1000.0}
+        "decision": "rung", "reason": "conductor", "ring_at": 1000.0}
     idle = _wake_capable(store)
     store.storage.conn.execute("UPDATE coordination_agents SET project='proj' WHERE agent_id=%s",
                                (idle["agent_id"],))
     _idle(store, idle)
-    assert _wake(store, delegate, idle, urgent=True)["reason"] == "delegate"
+    assert _wake(store, delegate, idle, urgent=True)["reason"] == "conductor"
     # A peer without authority is still under the plain urgent cap.
     peer = store.register("alice")
     assert _wake(store, peer, idle, urgent=True)["reason"] == "urgent_sender_hour"
@@ -1292,10 +1292,10 @@ def test_codex_serves_a_reopen_of_its_current_done_park_and_nothing_older(store)
     store.test_time[0] = 1002.0
     _idle(store, b, 120)
     reopen = _wake(store, delegate, b, urgent=True, text="two required changes")
-    assert (reopen["decision"], reopen["reason"]) == ("rung", "delegate")
+    assert (reopen["decision"], reopen["reason"]) == ("rung", "conductor")
     answer = store.heartbeat(*creds(b), attachment_id="codex",
                              generation=attached["generation"], ring_armed_until=1062.0)
-    assert (answer["wake"]["decision"], answer["wake"]["reason"]) == ("rung", "delegate")
+    assert (answer["wake"]["decision"], answer["wake"]["reason"]) == ("rung", "conductor")
 
 
 def test_a_recipient_without_a_wake_path_reports_no_path_and_its_need(store):
@@ -2544,7 +2544,7 @@ def test_a_replayed_reopen_repeats_its_receipt_and_rings_once(store):
                        urgent=True)
     again = store.send(*creds(delegate), to=b["agent_id"], text="reopen", request_id="r1",
                        urgent=True)
-    assert first["wake"] == again["wake"] and first["wake"]["reason"] == "delegate"
+    assert first["wake"] == again["wake"] and first["wake"]["reason"] == "conductor"
     assert store.storage.conn.execute("SELECT count(*) FROM coordination_wakes").fetchone() == (1,)
 
 
@@ -2553,26 +2553,26 @@ def test_a_reopened_session_is_asked_to_park_again(store):
     b = _done(store)
     since = store.test_time[0]
     store.test_time[0] += 1
-    assert _wake(store, delegate, b, urgent=True)["reason"] == "delegate"
+    assert _wake(store, delegate, b, urgent=True)["reason"] == "conductor"
     assert store.park_gate(b["agent_id"], "alice", since=since) == {
         "gate": "block", "reason": "not_updated_this_turn"}
 
 
-def test_a_delegates_project_burst_reopens_only_its_own_project(store):
+def test_a_conductors_project_burst_reopens_only_its_own_project(store):
     delegate = _delegate(store)
     ours = _done(store, project="proj")
     theirs = _done(store, project="other")
     burst = store.send(*creds(delegate), to="all", text="incident: stop deploys",
                        request_id="burst", urgent=True)
     reasons = {r["recipient_agent_id"]: r["wake"]["reason"] for r in burst["receipts"]}
-    assert reasons[ours["agent_id"]] == "delegate"
+    assert reasons[ours["agent_id"]] == "conductor"
     assert reasons[theirs["agent_id"]] == "parked_done"
 
 
 # --- upgrading across the delegate rename (0.16.1, 2026-10-04) ---------------
 # 0.16.0 called the grant ``designated:coordinator:<project>`` and its wake
 # reason ``coordinator``. A grant made under the old name is not honoured
-# (the operator re-grants with ``lease delegate``); wake rows written before
+# (the operator re-grants with ``lease conductor``); wake rows written before
 # the upgrade are history that still counts and is still served.
 
 def _legacy_grant(store, agent, project="proj"):
@@ -2609,55 +2609,102 @@ def _agent_held(store, agent, name, purpose="granted by the operator"):
         (name, agent["agent_id"], purpose, store.test_time[0], store.test_time[0] + 86400))
 
 
-def test_a_delegate_lease_an_agent_took_before_the_upgrade_grants_nothing(store):
+@pytest.mark.parametrize("name", ["delegate:proj", "conductor:proj"])
+def test_a_conductor_lease_an_agent_took_before_the_upgrade_grants_nothing(store, name):
     """0.16.0 let any session acquire an ordinary lease named
-    ``delegate:<project>``; a hold taken then must not become reopen
+    ``delegate:<project>``, and releases until 2026-10-31 one named
+    ``conductor:<project>``; a hold taken then must not become reopen
     authority after the upgrade (coordinator review of #559). Only the
-    operator's grant, recorded as ``lease_delegate`` for the lease's
-    current fence, counts; the purpose text is the agent's and proves
-    nothing."""
+    operator's grant, recorded for the lease's own name and current fence,
+    counts; the purpose text is the agent's and proves nothing."""
     squatter = store.register("alice", project="proj")
-    _agent_held(store, squatter, "delegate:proj")
+    _agent_held(store, squatter, name)
     b = _done(store)
     assert _wake(store, squatter, b, urgent=True)["reason"] == "parked_done"
 
 
-def test_a_regrant_counts_and_a_revoked_grant_cannot_be_revived(store):
+@pytest.mark.parametrize("name", ["delegate:proj", "conductor:proj"])
+def test_a_regrant_counts_and_a_revoked_grant_cannot_be_revived(store, name):
     delegate = _delegate(store)
-    store.grant_delegate("proj", delegate["agent_id"], hold=3600)   # a new fence
+    store.grant_conductor("proj", delegate["agent_id"], hold=3600)   # a new fence
     b = _done(store)
-    assert _wake(store, delegate, b, urgent=True)["reason"] == "delegate"
-    # Revoked, then the same agent holds the name again by any other route:
-    # its old grant was for an earlier fence, so it counts for nothing.
-    store.break_lease("delegate:proj")
-    _agent_held(store, delegate, "delegate:proj")
+    assert _wake(store, delegate, b, urgent=True)["reason"] == "conductor"
+    # Revoked, then the same agent holds either name again by any other
+    # route: its grant was for another lease or an earlier fence, so it
+    # counts for nothing.
+    store.break_lease("conductor:proj")
+    _agent_held(store, delegate, name)
     c = _done(store)
     assert _wake(store, delegate, c, urgent=True)["reason"] == "parked_done"
 
 
-def test_authority_rings_from_before_the_rename_still_spend_the_budget(store):
+@pytest.mark.parametrize("actor", ["operator", "agent", "daemon"])
+def test_an_old_named_hold_proves_the_role_only_with_a_role_actors_record(store, actor):
+    """The conductor's grant before 2026-10-31: ``delegate:<project>`` with
+    the operator's ``lease_delegate`` record for its fence. The same record
+    by any actor but the operator or maintainer proves nothing."""
+    old = store.register("alice", project="proj")
+    _agent_held(store, old, "delegate:proj")
+    fence = store.storage.conn.execute(
+        "SELECT fence FROM coordination_leases WHERE name='delegate:proj'").fetchone()[0]
+    with store.storage._txn():
+        store._append([store._event("lease_delegate",
+                                    {"name": "delegate:proj", "fence": fence, "hold": 3600,
+                                     "replaced": None},
+                                    actor=actor, agent_id=old["agent_id"])],
+                      store.test_time[0])
+    b = _done(store)
+    assert _wake(store, old, b, urgent=True)["reason"] == (
+        "conductor" if actor == "operator" else "parked_done")
+
+
+def test_a_grant_settles_an_expired_old_named_hold_instead_of_breaking_it(store):
+    """An old-named hold already past its expiry is settled (``lease_expire``)
+    by the grant, not broken, and replaces nobody."""
+    old = store.register("alice", project="proj")
+    new = store.register("alice", project="proj")
+    _agent_held(store, old, "delegate:proj")
+    store.storage.conn.execute(
+        "UPDATE coordination_leases SET expires_at=%s WHERE name='delegate:proj'",
+        (store.test_time[0] - 1,))
+    out = store.grant_conductor("proj", new["agent_id"], hold=3600)
+    assert out["replaced"] is None
+    rows = store.storage.conn.execute(
+        "SELECT event, payload FROM coordination_events WHERE agent_id=%s ORDER BY seq",
+        (old["agent_id"],)).fetchall()
+    assert [r[0] for r in rows if "delegate:proj" in r[1]] == ["lease_expire"]
+    assert store.storage.conn.execute(
+        "SELECT holder_agent_id FROM coordination_leases WHERE name='delegate:proj'"
+    ).fetchone()[0] is None
+
+
+# Rows from before either rename: ``coordinator`` until 0.16.1 (2026-10-04),
+# ``delegate`` until 2026-10-31.
+@pytest.mark.parametrize("old_reason", ["coordinator", "delegate"])
+def test_authority_rings_from_before_the_rename_still_spend_the_budget(store, old_reason):
     from pseudolife_memory.storage.coordination import WakePolicy
     store.wake = WakePolicy(authority_per_sender_per_hour=1)
     delegate = _delegate(store)
     first, second = _done(store), _done(store)
-    assert _wake(store, delegate, first, urgent=True)["reason"] == "delegate"
-    store.storage.conn.execute("UPDATE coordination_wakes SET reason='coordinator'")
+    assert _wake(store, delegate, first, urgent=True)["reason"] == "conductor"
+    store.storage.conn.execute("UPDATE coordination_wakes SET reason=%s", (old_reason,))
     assert _wake(store, delegate, second, urgent=True) == {
         "decision": "capped", "reason": "authority_sender_hour"}
 
 
-def test_codex_still_serves_a_reopen_recorded_before_the_rename(store):
+@pytest.mark.parametrize("old_reason", ["coordinator", "delegate"])
+def test_codex_still_serves_a_reopen_recorded_before_the_rename(store, old_reason):
     delegate = _delegate(store)
     b = store.register("alice", project="proj", capabilities={"codex": False, "ring": True})
     attached = store.attach(*creds(b), attachment_id="codex", ring=True, ring_armed_until=1060.0)
     store.update(*creds(b), park_reason="done", park_clear_by="anyone")
     _idle(store, b, 120)
     store.test_time[0] = 1001.0
-    assert _wake(store, delegate, b, urgent=True)["reason"] == "delegate"
-    store.storage.conn.execute("UPDATE coordination_wakes SET reason='coordinator'")
+    assert _wake(store, delegate, b, urgent=True)["reason"] == "conductor"
+    store.storage.conn.execute("UPDATE coordination_wakes SET reason=%s", (old_reason,))
     answer = store.heartbeat(*creds(b), attachment_id="codex",
                              generation=attached["generation"], ring_armed_until=1061.0)
-    assert (answer["wake"]["decision"], answer["wake"]["reason"]) == ("rung", "coordinator")
+    assert (answer["wake"]["decision"], answer["wake"]["reason"]) == ("rung", old_reason)
 
 
 def test_releasing_the_lease_a_done_park_names_reopens_it_within_the_urgent_cap(store):

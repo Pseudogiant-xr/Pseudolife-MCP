@@ -123,15 +123,15 @@ describe("roles", () => {
     available: true,
     roles: {
       "Pseudolife-MCP": {
-        delegate: { agent_id: "d1", expires_at: NOW + 7200, granted_by: "maintainer" },
+        conductor: { agent_id: "d1", expires_at: NOW + 7200, granted_by: "maintainer" },
         coordinator: { agent_id: "c1", expires_at: NOW + 600 },
       },
     },
   };
 
   it("reads the served roles, enriched with the lease's grant time and label", () => {
-    const r = rolesFor("Pseudolife-MCP", status, [lease("delegate:Pseudolife-MCP", "d1")]);
-    expect(r.delegate).toEqual({
+    const r = rolesFor("Pseudolife-MCP", status, [lease("conductor:Pseudolife-MCP", "d1")]);
+    expect(r.conductor).toEqual({
       agent_id: "d1",
       expires_at: NOW + 7200,
       acquired_at: NOW - 3600,
@@ -139,64 +139,91 @@ describe("roles", () => {
       label: "label-d1",
       reachable: null,
       reach_reason: null,
+      lease: "conductor:Pseudolife-MCP",
     });
     expect(r.coordinator?.agent_id).toBe("c1");
+    expect(r.coordinator?.lease).toBeNull();
     expect(r.coordinator?.acquired_at).toBeNull();
   });
 
   it("carries whether the daemon can ring each holder now", () => {
-    // Maintainer requirement 2026-10-05: the delegate above all must be
+    // Maintainer requirement 2026-10-05: the conductor above all must be
     // reachable, and the band says so when it is not.
     const served: MaintainerStatus = {
       available: true,
       roles: {
         P: {
-          delegate: { agent_id: "d1", expires_at: NOW + 60, granted_by: "maintainer", reachable: true, reason: null },
+          conductor: { agent_id: "d1", expires_at: NOW + 60, granted_by: "maintainer", reachable: true, reason: null },
           coordinator: { agent_id: "c1", expires_at: NOW + 60, reachable: false, reason: "listener_expired" },
         },
       },
     };
     const r = rolesFor("P", served, []);
-    expect([r.delegate?.reachable, r.delegate?.reach_reason]).toEqual([true, null]);
+    expect([r.conductor?.reachable, r.conductor?.reach_reason]).toEqual([true, null]);
     expect([r.coordinator?.reachable, r.coordinator?.reach_reason]).toEqual([false, "listener_expired"]);
-    expect(reachText(r.delegate!)).toEqual({ ok: true, text: "Reachable now: your messages ring it." });
+    expect(reachText(r.conductor!)).toEqual({ ok: true, text: "Reachable now: your messages ring it." });
     expect(reachText(r.coordinator!)).toEqual({
       ok: false,
       text: "No live wake listener (its listener lapsed): your messages wait for its next turn.",
     });
     // An older daemon serves no reachability, and the lease alone says nothing.
-    expect(reachText(rolesFor("P", null, [lease("delegate:P", "d2")]).delegate!)).toBeNull();
+    expect(reachText(rolesFor("P", null, [lease("conductor:P", "d2")]).conductor!)).toBeNull();
   });
 
   it("names a holder by the lease's board name (v55) before its label", () => {
-    const named = lease("delegate:Pseudolife-MCP", "d1");
+    const named = lease("conductor:Pseudolife-MCP", "d1");
     named.holder = { ...named.holder!, name: "Docs review and bulk merge" };
-    expect(rolesFor("Pseudolife-MCP", status, [named]).delegate?.label).toBe("Docs review and bulk merge");
-    expect(rolesFor("Pseudolife-MCP", null, [named]).delegate?.label).toBe("Docs review and bulk merge");
+    expect(rolesFor("Pseudolife-MCP", status, [named]).conductor?.label).toBe("Docs review and bulk merge");
+    expect(rolesFor("Pseudolife-MCP", null, [named]).conductor?.label).toBe("Docs review and bulk merge");
   });
 
   it("trusts the served map over a lease that names someone else", () => {
-    const r = rolesFor("Pseudolife-MCP", status, [lease("delegate:Pseudolife-MCP", "other")]);
-    expect(r.delegate?.agent_id).toBe("d1");
-    expect(r.delegate?.label).toBeNull();
+    const r = rolesFor("Pseudolife-MCP", status, [lease("conductor:Pseudolife-MCP", "other")]);
+    expect(r.conductor?.agent_id).toBe("d1");
+    expect(r.conductor?.label).toBeNull();
   });
 
   it("falls back to the board's leases when the status serves no roles", () => {
-    const leases = [lease("delegate:P", "d2"), lease("coordinator:P", "c2"), lease("claim:x", "z")];
+    const leases = [lease("conductor:P", "d2"), lease("coordinator:P", "c2"), lease("claim:x", "z")];
     const r = rolesFor("P", { available: false, reason: "maintainer_https_required" }, leases);
-    expect(r.delegate?.agent_id).toBe("d2");
-    expect(r.delegate?.granted_by).toBeNull();
+    expect(r.conductor?.agent_id).toBe("d2");
+    expect(r.conductor?.granted_by).toBeNull();
     expect(r.coordinator?.agent_id).toBe("c2");
-    expect(rolesFor("P", null, leases).delegate?.agent_id).toBe("d2");
+    expect(rolesFor("P", null, leases).conductor?.agent_id).toBe("d2");
   });
 
   it("ignores an expired or free lease", () => {
-    const leases = [lease("delegate:P", "d2", { expired: true }), lease("coordinator:P", null)];
-    expect(rolesFor("P", null, leases)).toEqual({ delegate: null, coordinator: null });
+    const leases = [lease("conductor:P", "d2", { expired: true }), lease("coordinator:P", null)];
+    expect(rolesFor("P", null, leases)).toEqual({ conductor: null, coordinator: null });
+  });
+
+  it("reads a conductor granted before the rename from its delegate: lease", () => {
+    // A grant made before the daemon renamed the role keeps its
+    // delegate:<project> lease until it expires or is re-granted.
+    const r = rolesFor("P", null, [lease("delegate:P", "d2")]);
+    expect(r.conductor?.agent_id).toBe("d2");
+    expect(r.conductor?.lease).toBe("delegate:P");
+    expect(roleOf(agent({ agent_id: "d2", project: "P" }), null, [lease("delegate:P", "d2")])).toBe("conductor");
+    expect(projectsOf([], null, [lease("delegate:legacy", "d2")])).toEqual(["legacy"]);
+    // The served map names the conductor; the old-named lease still adds its grant time and label.
+    const served: MaintainerStatus = {
+      available: true,
+      roles: { P: { conductor: { agent_id: "d2", expires_at: NOW + 60, granted_by: "maintainer" }, coordinator: null } },
+    };
+    const s = rolesFor("P", served, [lease("delegate:P", "d2")]);
+    expect([s.conductor?.acquired_at, s.conductor?.label, s.conductor?.lease]).toEqual([NOW - 3600, "label-d2", "delegate:P"]);
+  });
+
+  it("prefers the conductor: lease when both names are held", () => {
+    const leases = [lease("delegate:P", "old"), lease("conductor:P", "new")];
+    const r = rolesFor("P", null, leases);
+    expect(r.conductor?.agent_id).toBe("new");
+    expect(r.conductor?.lease).toBe("conductor:P");
+    expect(rolesFor("P", null, [...leases].reverse()).conductor?.agent_id).toBe("new");
   });
 
   it("names the role an agent holds in its own project only", () => {
-    expect(roleOf(agent({ agent_id: "d1" }), status, [])).toBe("delegate");
+    expect(roleOf(agent({ agent_id: "d1" }), status, [])).toBe("conductor");
     expect(roleOf(agent({ agent_id: "c1" }), status, [])).toBe("coordinator");
     expect(roleOf(agent({ agent_id: "d1", project: "other" }), status, [])).toBeNull();
     expect(roleOf(agent({ agent_id: "d1", project: "" }), status, [])).toBeNull();
@@ -236,6 +263,7 @@ describe("roles", () => {
       label: null,
       reachable: null,
       reach_reason: null,
+      lease: null,
     };
     expect(leftPercent(h, NOW_MS)).toBe(50);
     expect(leftPercent({ ...h, acquired_at: null }, NOW_MS)).toBeNull();
@@ -350,12 +378,12 @@ describe("the signed exchange", () => {
     // Free text may be normalised by the daemon; it is shown, not compared.
     expect(payloadMismatch({ purpose: "send", to: "a1", text: "hi ", urgent: true }, answer.payload)).toBeNull();
     expect(
-      payloadMismatch({ purpose: "grant-delegate", project: "P", agent_id: "a", hold: 3600 }, { purpose: "grant-delegate", project: "P", agent_id: "a", hold: 60 }),
+      payloadMismatch({ purpose: "grant-conductor", project: "P", agent_id: "a", hold: 3600 }, { purpose: "grant-conductor", project: "P", agent_id: "a", hold: 60 }),
     ).toBe("hold");
-    expect(payloadMismatch({ purpose: "revoke-delegate", project: "P" }, "not json")).toBeNull();
+    expect(payloadMismatch({ purpose: "revoke-conductor", project: "P" }, "not json")).toBeNull();
     // The daemon adds the current holder to a role payload; the Console never sends it.
-    const role = JSON.stringify({ purpose: "revoke-delegate", project: "P", holder: "h1", nonce: "n", expires_at: NOW });
-    expect(payloadMismatch({ purpose: "revoke-delegate", project: "P" }, role)).toBeNull();
+    const role = JSON.stringify({ purpose: "revoke-conductor", project: "P", holder: "h1", nonce: "n", expires_at: NOW });
+    expect(payloadMismatch({ purpose: "revoke-conductor", project: "P" }, role)).toBeNull();
     const vacant = JSON.stringify({ purpose: "assign-coordinator", project: "P", agent_id: "a", hold: 86400, holder: null });
     expect(payloadMismatch({ purpose: "assign-coordinator", project: "P", agent_id: "a", hold: 86400 }, vacant)).toBeNull();
     expect(challengeExpiry(answer)).toBe(NOW + 120);
@@ -394,7 +422,7 @@ describe("the role preview", () => {
   it("names who a grant displaces and the role the recipient loses", () => {
     expect(
       displacedLines(
-        { role: "delegate", project: "P", action: "grant", current_holder: "d1", replaces: "d1", also_breaks: "coordinator:P" },
+        { role: "conductor", project: "P", action: "grant", current_holder: "d1", replaces: "d1", also_breaks: "coordinator:P" },
         nameOf,
       ),
     ).toEqual([
@@ -402,13 +430,17 @@ describe("the role preview", () => {
       "It also stops being the coordinator: a session holds one role at a time.",
     ]);
     expect(
+      displacedLines({ role: "coordinator", action: "assign", replaces: null, also_breaks: "conductor:P" }, nameOf),
+    ).toEqual(["It also stops being your conductor: a session holds one role at a time."]);
+    // A conductor granted before the rename still holds a delegate:<project> lease.
+    expect(
       displacedLines({ role: "coordinator", action: "assign", replaces: null, also_breaks: "delegate:P" }, nameOf),
     ).toEqual(["It also stops being your conductor: a session holds one role at a time."]);
   });
 
   it("says nothing for a revoke, an extend or a send preview", () => {
-    expect(displacedLines({ role: "delegate", action: "revoke", current_holder: "d1" }, nameOf)).toEqual([]);
-    expect(displacedLines({ role: "delegate", action: "grant", current_holder: "d1", replaces: null, also_breaks: null }, nameOf)).toEqual([]);
+    expect(displacedLines({ role: "conductor", action: "revoke", current_holder: "d1" }, nameOf)).toEqual([]);
+    expect(displacedLines({ role: "conductor", action: "grant", current_holder: "d1", replaces: null, also_breaks: null }, nameOf)).toEqual([]);
     expect(displacedLines({ name: "worker", agent_id_prefix: "abc" }, nameOf)).toEqual([]);
     expect(displacedLines(undefined, nameOf)).toEqual([]);
   });

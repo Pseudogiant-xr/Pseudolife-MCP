@@ -6,7 +6,7 @@ fn native(text: &str) -> Vec<u8> {
         .into_bytes()
 }
 #[test]
-fn new_help_assets_are_exact_and_designate_uses_delegate_parser() {
+fn new_help_assets_are_exact_and_old_names_use_conductor_parser() {
     for (action, asset) in [
         (
             "hold",
@@ -17,8 +17,8 @@ fn new_help_assets_are_exact_and_designate_uses_delegate_parser() {
             include_str!("../src/cli/lease/assets/break_help.txt"),
         ),
         (
-            "delegate",
-            include_str!("../src/cli/lease/assets/delegate_help.txt"),
+            "conductor",
+            include_str!("../src/cli/lease/assets/conductor_help.txt"),
         ),
     ] {
         let home = Home::new();
@@ -28,18 +28,35 @@ fn new_help_assets_are_exact_and_designate_uses_delegate_parser() {
         assert_eq!(output.stdout, native(asset));
         assert_eq!(std::fs::read_dir(&home.0).unwrap().count(), 0);
     }
-    let home = Home::new();
-    let output = home.call(&["lease", "designate", "--help"]);
-    assert_eq!(output.status.code(), Some(0));
-    assert_eq!(
-        output.stdout,
-        native(include_str!("../src/cli/lease/assets/delegate_help.txt"))
-    );
-    assert_eq!(
-        output.stderr,
-        native("pseudolife-mcp lease designate is deprecated: use pseudolife-mcp lease delegate\n")
-    );
-    assert_eq!(std::fs::read_dir(&home.0).unwrap().count(), 0);
+    for old in ["delegate", "designate"] {
+        let home = Home::new();
+        let output = home.call(&["lease", old, "--help"]);
+        assert_eq!(output.status.code(), Some(0));
+        assert_eq!(
+            output.stdout,
+            native(include_str!("../src/cli/lease/assets/conductor_help.txt"))
+        );
+        assert_eq!(
+            output.stderr,
+            native(&format!(
+                "pseudolife-mcp lease {old} is deprecated: use pseudolife-mcp lease conductor\n"
+            ))
+        );
+        assert_eq!(std::fs::read_dir(&home.0).unwrap().count(), 0);
+        // A parse error after the rename names only the new action.
+        let home = Home::new();
+        let output = home.call(&["lease", old, "project"]);
+        assert_eq!(output.status.code(), Some(2));
+        assert!(output.stdout.is_empty());
+        assert_eq!(
+            output.stderr,
+            native(&format!(
+                "pseudolife-mcp lease {old} is deprecated: use pseudolife-mcp lease conductor\n{}pseudolife-mcp lease conductor: error: the following arguments are required: AGENT\n",
+                include_str!("../src/cli/lease/assets/conductor_usage.txt")
+            ))
+        );
+        assert_eq!(std::fs::read_dir(&home.0).unwrap().count(), 0);
+    }
 }
 #[test]
 fn required_arguments_and_operator_duration_errors_precede_effects() {
@@ -75,18 +92,18 @@ fn required_arguments_and_operator_duration_errors_precede_effects() {
             "the following arguments are required: NAME",
         ),
         (
-            vec!["delegate"],
-            include_str!("../src/cli/lease/assets/delegate_usage.txt"),
+            vec!["conductor"],
+            include_str!("../src/cli/lease/assets/conductor_usage.txt"),
             "the following arguments are required: PROJECT, AGENT",
         ),
         (
-            vec!["delegate", "project", "agent", "--for", "59"],
-            include_str!("../src/cli/lease/assets/delegate_usage.txt"),
+            vec!["conductor", "project", "agent", "--for", "59"],
+            include_str!("../src/cli/lease/assets/conductor_usage.txt"),
             "argument --for: '59' is out of range: from 60 to 604800 seconds",
         ),
         (
-            vec!["delegate", "project", "agent", "--for", "8d"],
-            include_str!("../src/cli/lease/assets/delegate_usage.txt"),
+            vec!["conductor", "project", "agent", "--for", "8d"],
+            include_str!("../src/cli/lease/assets/conductor_usage.txt"),
             "argument --for: '8d' is out of range: from 60 to 604800 seconds",
         ),
     ] {

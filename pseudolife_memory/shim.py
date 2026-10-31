@@ -1353,7 +1353,7 @@ def _transient_board_failure(exc: BaseException) -> bool:
 
 # Every board call first re-checks this session's identity with the daemon
 # (a read-only context request on the adapter's own connection). On
-# 2026-10-19 a delegate's board update after a host reboot, and its receive
+# 2026-10-19 the conductor's board update after a host reboot, and its receive
 # after an app sign-out, were refused as "identity unavailable" when that one
 # request had failed; the same call seconds later worked. A dropped connection
 # and a cold daemon's 500 reproduce it. A board call checks again on this

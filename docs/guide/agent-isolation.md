@@ -116,7 +116,7 @@ no longer copies `ops/.env` into WSL.
 |---|---|
 | Its own checkout of the repository (a clone in a folder it owns or is granted), with no `ops/.env` | The deployment checkout with `ops/.env` (the owner's password, the operator tokens) |
 | Its own Claude Code / Codex installs, logins and client configs | Docker Desktop (membership of `docker-users`), the compose stack, the daemon, backups, `pseudolife-mcp update` |
-| Its own principal and bearer token: `pseudolife-mcp invite` by the maintainer, `pseudolife-mcp pair` by the agent account | `pseudolife-mcp invite`, `lease break`, `lease delegate`, `board-audit`, `test-login create`, and the maintainer passkey and its commands (`pseudolife-mcp maintainer setup`, `enrol-code`, `confirm`, `revoke`, `reset`, `list`) |
+| Its own principal and bearer token: `pseudolife-mcp invite` by the maintainer, `pseudolife-mcp pair` by the agent account | `pseudolife-mcp invite`, `lease break`, `lease conductor`, `board-audit`, `test-login create`, and the maintainer passkey and its commands (`pseudolife-mcp maintainer setup`, `enrol-code`, `confirm`, `revoke`, `reset`, `list`) |
 | A copy of `test-pg.env` | The owner's password, and anything else in the maintainer's profile |
 | Network access to `127.0.0.1:8765` (the daemon, gated by its bearer) and `127.0.0.1:5433` (Postgres, where only the test login works for it) | |
 

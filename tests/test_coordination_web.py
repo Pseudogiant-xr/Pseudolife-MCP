@@ -520,7 +520,7 @@ class _DelegateStore:
     def __init__(self, calls, answers):
         self.calls, self.answers = calls, answers
 
-    def delegate_of(self, agent, principal):
+    def conductor_of(self, agent, principal):
         self.calls.append((agent, principal))
         answer = self.answers.get(agent, [])
         if isinstance(answer, dict):
@@ -539,19 +539,19 @@ def _delegate_service(monkeypatch, answers):
     return service, calls
 
 
-def test_the_delegate_answer_is_cached_per_agent_for_a_minute(monkeypatch):
+def test_the_conductor_answer_is_cached_per_agent_for_a_minute(monkeypatch):
     """The per-prompt path stays one cheap lookup: a second ask within 60 s
     is served from the process cache, a later one asks the store again, so a
     grant or a revoke shows within a minute."""
-    from pseudolife_memory.coordination import DELEGATE_CACHE_SECONDS, delegate_projects
-    assert DELEGATE_CACHE_SECONDS == 60
+    from pseudolife_memory.coordination import CONDUCTOR_CACHE_SECONDS, conductor_projects
+    assert CONDUCTOR_CACHE_SECONDS == 60
     answers = {"a" * 32: ["p"]}
     service, calls = _delegate_service(monkeypatch, answers)
     now = [1000.0]
     headers = {"authorization": "Bearer fixture-secret"}
 
     def ask(agent="a" * 32):
-        return delegate_projects(service, headers, agent=agent, token_map={},
+        return conductor_projects(service, headers, agent=agent, token_map={},
                                  token="fixture-secret", clock=lambda: now[0])
 
     assert ask() == ["p"] and calls == [("a" * 32, "default")]
@@ -563,7 +563,7 @@ def test_the_delegate_answer_is_cached_per_agent_for_a_minute(monkeypatch):
     assert ask() == [] and len(calls) == 3       # expired: asked again
 
 
-def test_the_delegate_lookup_fails_closed_and_never_raises(monkeypatch):
+def test_the_conductor_lookup_fails_closed_and_never_raises(monkeypatch):
     from pseudolife_memory import coordination
     service, calls = _delegate_service(monkeypatch, {})
 
@@ -573,17 +573,17 @@ def test_the_delegate_lookup_fails_closed_and_never_raises(monkeypatch):
     monkeypatch.setattr(coordination, "_store", boom)
     headers = {"authorization": "Bearer fixture-secret"}
     args = {"agent": "a" * 32, "token_map": {}, "token": "fixture-secret"}
-    assert coordination.delegate_projects(service, headers, **args) == []
-    assert getattr(service, "_delegate_cache", {}) == {}   # a failure is not cached
-    assert coordination.delegate_projects(_board_service(enabled=False), headers, **args) == []
-    assert coordination.delegate_projects(service, {}, **args) == []
+    assert coordination.conductor_projects(service, headers, **args) == []
+    assert getattr(service, "_conductor_cache", {}) == {}   # a failure is not cached
+    assert coordination.conductor_projects(_board_service(enabled=False), headers, **args) == []
+    assert coordination.conductor_projects(service, {}, **args) == []
 
 
-def test_a_cold_daemon_skips_the_delegate_lookup(monkeypatch):
+def test_a_cold_daemon_skips_the_conductor_lookup(monkeypatch):
     """Opening the board's connection waits on the service lock; the hook
     requests carrying the check-in or the memory note must not wait on it
     for a brief."""
-    from pseudolife_memory.coordination import delegate_projects
+    from pseudolife_memory.coordination import conductor_projects
     service, calls = _delegate_service(monkeypatch, {"a" * 32: ["p"]})
     service._storage = None
     taken = []
@@ -597,7 +597,7 @@ def test_a_cold_daemon_skips_the_delegate_lookup(monkeypatch):
             return False
 
     service._lock = ServiceLock()
-    assert delegate_projects(service, {"authorization": "Bearer fixture-secret"},
+    assert conductor_projects(service, {"authorization": "Bearer fixture-secret"},
                              agent="a" * 32, token_map={}, token="fixture-secret") == []
     assert calls == [] and taken == []
 
@@ -606,10 +606,10 @@ def test_the_brief_and_the_reminder_texts():
     """Pinned so a reword is a deliberate change; the 2026-10-14 transcript
     measurement is what they answer (spec docs/specs/2026-10-14-delegate-
     mode-design.md, section 2)."""
-    from pseudolife_memory.coordination import DELEGATE_REMINDER, render_delegate_brief
-    assert DELEGATE_REMINDER == ("Conductor: raw output goes to a subagent; a quiet wake gets "
+    from pseudolife_memory.coordination import CONDUCTOR_REMINDER, render_conductor_brief
+    assert CONDUCTOR_REMINDER == ("Conductor: raw output goes to a subagent; a quiet wake gets "
                                  "one line.")
-    brief = render_delegate_brief(["p"])
+    brief = render_conductor_brief(["p"])
     assert brief == (
         "You are the maintainer's conductor for p. Keep this session's context for decisions:\n"
         "- Start a watcher once: `pseudolife-mcp conductor-watch --detach` (`delegate-watch` on "
@@ -624,28 +624,28 @@ def test_the_brief_and_the_reminder_texts():
         "wakes you when it finishes.\n"
         "- Ask workers for decision-ready mail and to keep progress in their board status.\n"
         "- Answer a quiet wake in one line, with no tool calls.")
-    assert render_delegate_brief(["p", "q"]).startswith(
+    assert render_conductor_brief(["p", "q"]).startswith(
         "You are the maintainer's conductor for p and q. ")
-    assert render_delegate_brief(["p", "q", "r"]).startswith(
+    assert render_conductor_brief(["p", "q", "r"]).startswith(
         "You are the maintainer's conductor for p, q and r. ")
 
 
 def test_coordination_start_appends_the_brief_after_the_unchanged_checkin(monkeypatch):
     from pseudolife_memory import coordination
-    from pseudolife_memory.coordination import CHECKIN_TEXT, render_delegate_brief
+    from pseudolife_memory.coordination import CHECKIN_TEXT, render_conductor_brief
     seen = []
 
     async def projects(service, headers, *, agent, token_map=None, token=None):
         seen.append((agent, headers.get("authorization")))
         return ["p"] if agent == "a" * 32 else []
 
-    monkeypatch.setattr(coordination, "delegate_projects_soon", projects)
+    monkeypatch.setattr(coordination, "conductor_projects_soon", projects)
     app = build_console_app(stub_mcp, "fixture-secret", lambda: {}, _board_service())
     bearer = [(b"authorization", b"Bearer fixture-secret")]
     status, body = call(app, "GET", "/api/hook/coordination-start", headers=bearer,
                         query="agent=" + "a" * 32)
     assert status == 200
-    assert body.decode() == CHECKIN_TEXT + "\n\n" + render_delegate_brief(["p"]) + "\n"
+    assert body.decode() == CHECKIN_TEXT + "\n\n" + render_conductor_brief(["p"]) + "\n"
     for query in ("", "agent=" + "b" * 32):
         status, body = call(app, "GET", "/api/hook/coordination-start", headers=bearer,
                             query=query)
@@ -659,14 +659,14 @@ def test_coordination_start_appends_the_brief_after_the_unchanged_checkin(monkey
     assert body == b""
 
 
-def test_memory_changes_appends_the_reminder_for_the_delegate(monkeypatch):
+def test_memory_changes_appends_the_reminder_for_the_conductor(monkeypatch):
     from pseudolife_memory import coordination
-    from pseudolife_memory.coordination import DELEGATE_REMINDER
+    from pseudolife_memory.coordination import CONDUCTOR_REMINDER
     from pseudolife_memory.web import api
     async def projects(service, headers, *, agent, token_map=None, token=None):
         return ["p"] if agent == "a" * 32 else []
 
-    monkeypatch.setattr(coordination, "delegate_projects_soon", projects)
+    monkeypatch.setattr(coordination, "conductor_projects_soon", projects)
     answers = iter(["100.000000\n", "100.000000\nMemory changed since your last turn:\n- x\n",
                     "", "100.000000\n"])
     monkeypatch.setattr(api, "hook_memory_changes", lambda *a: next(answers))
@@ -679,25 +679,25 @@ def test_memory_changes_appends_the_reminder_for_the_delegate(monkeypatch):
         return body.decode()
 
     delegate = "session_id=s1&agent=" + "a" * 32
-    assert ask(delegate) == "100.000000\n" + DELEGATE_REMINDER + "\n"
+    assert ask(delegate) == "100.000000\n" + CONDUCTOR_REMINDER + "\n"
     assert ask(delegate) == ("100.000000\nMemory changed since your last turn:\n- x\n"
-                             + DELEGATE_REMINDER + "\n")
+                             + CONDUCTOR_REMINDER + "\n")
     # No cursor (a failed note) gets no reminder: the hook would read it as one.
     assert ask(delegate) == ""
     assert ask("session_id=s1&agent=" + "b" * 32) == "100.000000\n"
 
 
-def test_a_cached_yes_ends_with_the_delegate_lease(monkeypatch):
+def test_a_cached_yes_ends_with_the_conductor_lease(monkeypatch):
     """The 60 s lag applies to a revoke or a new grant, but a cached yes is
     never served past the delegate lease's own expiry."""
-    from pseudolife_memory.coordination import delegate_projects
+    from pseudolife_memory.coordination import conductor_projects
     answers = {"a" * 32: {"projects": ["p"], "remaining": 10.0}}
     service, calls = _delegate_service(monkeypatch, answers)
     now = [1000.0]
     headers = {"authorization": "Bearer fixture-secret"}
 
     def ask():
-        return delegate_projects(service, headers, agent="a" * 32, token_map={},
+        return conductor_projects(service, headers, agent="a" * 32, token_map={},
                                  token="fixture-secret", clock=lambda: now[0])
 
     assert ask() == ["p"] and len(calls) == 1
@@ -712,7 +712,7 @@ class _SlowStore:
     def __init__(self, calls, release):
         self.calls, self.release = calls, release
 
-    def delegate_of(self, agent, principal):
+    def conductor_of(self, agent, principal):
         self.calls.append(agent)
         self.release.wait(10)
         return {"projects": ["p"], "remaining": 3600.0}
@@ -726,7 +726,7 @@ def _slow_service(monkeypatch, budget=0.2):
     service._storage = object()
     service._coordination_lock = threading.Lock()
     monkeypatch.setattr(coordination, "_store", lambda s: _SlowStore(calls, release))
-    monkeypatch.setattr(coordination, "DELEGATE_LOOKUP_BUDGET", budget)
+    monkeypatch.setattr(coordination, "CONDUCTOR_LOOKUP_BUDGET", budget)
     return service, calls, release
 
 
@@ -734,22 +734,22 @@ def _wait_for_cache(service, agent, timeout=5.0):
     import time
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        if any(key[1] == agent for key in getattr(service, "_delegate_cache", {})):
+        if any(key[1] == agent for key in getattr(service, "_conductor_cache", {})):
             return
         time.sleep(0.02)
     raise AssertionError("the background lookup never filled the cache")
 
 
-def test_a_slow_delegate_lookup_never_holds_the_hook_answer(monkeypatch):
+def test_a_slow_conductor_lookup_never_holds_the_hook_answer(monkeypatch):
     """A stalled coordination lock or query must not cost a session its
     memory note or check-in: past the budget the route sends the text it
     already has, the lookup finishes in the background and fills the cache,
     and the next call carries the reminder from it."""
     import time
-    from pseudolife_memory.coordination import (CHECKIN_TEXT, DELEGATE_LOOKUP_BUDGET,
-                                                DELEGATE_REMINDER)
+    from pseudolife_memory.coordination import (CHECKIN_TEXT, CONDUCTOR_LOOKUP_BUDGET,
+                                                CONDUCTOR_REMINDER)
     from pseudolife_memory.web import api
-    assert DELEGATE_LOOKUP_BUDGET == 0.5
+    assert CONDUCTOR_LOOKUP_BUDGET == 0.5
     service, calls, release = _slow_service(monkeypatch)
     monkeypatch.setattr(api, "hook_memory_changes", lambda *a: "100.000000\n")
     app = build_console_app(stub_mcp, "fixture-secret", lambda: {}, service)
@@ -769,18 +769,18 @@ def test_a_slow_delegate_lookup_never_holds_the_hook_answer(monkeypatch):
     _wait_for_cache(service, agent)
     status, body = call(app, "GET", "/api/hook/memory-changes", headers=bearer,
                         query=f"session_id=s1&agent={agent}")
-    assert body.decode() == "100.000000\n" + DELEGATE_REMINDER + "\n"
+    assert body.decode() == "100.000000\n" + CONDUCTOR_REMINDER + "\n"
     assert calls == [agent]
 
 
 def test_concurrent_misses_for_one_agent_start_one_lookup(monkeypatch):
     import asyncio
-    from pseudolife_memory.coordination import delegate_projects_soon
+    from pseudolife_memory.coordination import conductor_projects_soon
     service, calls, release = _slow_service(monkeypatch, budget=0.1)
     headers = {"authorization": "Bearer fixture-secret"}
 
     async def both():
-        ask = [delegate_projects_soon(service, headers, agent=agent, token_map={},
+        ask = [conductor_projects_soon(service, headers, agent=agent, token_map={},
                                       token="fixture-secret")
                for agent in ("a" * 32, "a" * 32, "b" * 32)]
         return await asyncio.gather(*ask)
@@ -788,7 +788,7 @@ def test_concurrent_misses_for_one_agent_start_one_lookup(monkeypatch):
     try:
         assert asyncio.run(both()) == [[], [], []]
         # One lookup per key in flight (b's waits for the coordination lock).
-        assert len(service._delegate_inflight) == 2
+        assert len(service._conductor_inflight) == 2
     finally:
         release.set()
     _wait_for_cache(service, "a" * 32)
@@ -803,12 +803,12 @@ def test_a_cached_yes_counts_the_lease_from_before_a_slow_query(monkeypatch):
     end answers no, to its caller and to every hook waiting on it, and
     leaves no yes behind (Codex reviews of the 2026-10-16 batch)."""
     from pseudolife_memory import coordination
-    from pseudolife_memory.coordination import delegate_projects
+    from pseudolife_memory.coordination import conductor_projects
     now = [1000.0]
     calls = []
 
     class StallingStore:
-        def delegate_of(self, agent, principal):
+        def conductor_of(self, agent, principal):
             calls.append(agent)
             now[0] += 5.0                        # the query stalls 5 s after the read
             return {"projects": ["p"], "remaining": 2.0}
@@ -818,14 +818,14 @@ def test_a_cached_yes_counts_the_lease_from_before_a_slow_query(monkeypatch):
     headers = {"authorization": "Bearer fixture-secret"}
 
     def ask():
-        return delegate_projects(service, headers, agent="a" * 32, token_map={},
+        return conductor_projects(service, headers, agent="a" * 32, token_map={},
                                  token="fixture-secret", clock=lambda: now[0])
 
     assert ask() == [] and len(calls) == 1       # the lease ended during the query
     assert ask() == [] and len(calls) == 2       # nothing cached: asked again
 
 
-def test_delegate_lookups_in_flight_are_bounded(monkeypatch):
+def test_conductor_lookups_in_flight_are_bounded(monkeypatch):
     """Each distinct address starts its own lookup thread. While the
     coordination lock stalls, past the bound a miss answers [] at once and
     starts nothing, and a thread that cannot start costs only the brief,
@@ -834,18 +834,18 @@ def test_delegate_lookups_in_flight_are_bounded(monkeypatch):
     import threading
     import time
     from pseudolife_memory import coordination
-    from pseudolife_memory.coordination import delegate_projects_soon
+    from pseudolife_memory.coordination import conductor_projects_soon
     service, calls, release = _slow_service(monkeypatch, budget=0.05)
-    monkeypatch.setattr(coordination, "_DELEGATE_INFLIGHT_MAX", 2, raising=False)
+    monkeypatch.setattr(coordination, "_CONDUCTOR_INFLIGHT_MAX", 2, raising=False)
     headers = {"authorization": "Bearer fixture-secret"}
 
     def ask(agent):
-        return asyncio.run(delegate_projects_soon(service, headers, agent=agent, token_map={},
+        return asyncio.run(conductor_projects_soon(service, headers, agent=agent, token_map={},
                                                   token="fixture-secret"))
 
     try:
         assert [ask(c * 32) for c in "abc"] == [[], [], []]
-        assert sorted(service._delegate_inflight) == [("default", "a" * 32),
+        assert sorted(service._conductor_inflight) == [("default", "a" * 32),
                                                       ("default", "b" * 32)]
     finally:
         release.set()
@@ -854,19 +854,19 @@ def test_delegate_lookups_in_flight_are_bounded(monkeypatch):
     assert "c" * 32 not in calls
     # A lookup leaves the in-flight map just after it fills the cache.
     deadline = time.monotonic() + 5.0
-    while service._delegate_inflight and time.monotonic() < deadline:
+    while service._conductor_inflight and time.monotonic() < deadline:
         time.sleep(0.02)
-    assert service._delegate_inflight == {}
+    assert service._conductor_inflight == {}
 
     start = threading.Thread.start
     refused = []
 
     def refuse(thread):
-        if thread.name == "pl-delegate-lookup":
+        if thread.name == "pl-conductor-lookup":
             refused.append(thread.name)
             raise RuntimeError("can't start new thread")
         return start(thread)
 
     monkeypatch.setattr(threading.Thread, "start", refuse)
     assert ask("d" * 32) == []
-    assert refused and service._delegate_inflight == {}
+    assert refused and service._conductor_inflight == {}

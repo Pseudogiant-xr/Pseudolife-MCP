@@ -576,9 +576,9 @@ commit messages.
 - **principal / tier**: the bearer-token caller identity, which keys the
   toolset tier.
 - **conductor**: the maintainer's board role (granted per project) that acts
-  for them on the board. Its stored id and lease name are still `delegate`
-  (`delegate:<project>`); `lease delegate` keeps its name and
-  `conductor-watch` is an alias of `delegate-watch`.
+  for them on the board, held as the lease `conductor:<project>` and granted
+  with `lease conductor`; its old names (`delegate:<project>`, `lease
+  delegate`, `delegate-watch`) are deprecated and still accepted.
 - **Console**: the web UI (Cortex Console). The **System Atlas**
   (`docs/atlas/`) is the curated codebase architecture map, not the
   Console's Graph view of the bank.

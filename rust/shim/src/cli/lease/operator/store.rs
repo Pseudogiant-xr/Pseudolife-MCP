@@ -5,8 +5,8 @@ use crate::{
 };
 use serde_json::{Value, json};
 use tokio_postgres::error::Severity;
-mod delegate;
-pub use delegate::{Granted, grant_delegate};
+mod conductor;
+pub use conductor::{Granted, grant_conductor};
 
 #[derive(Debug)]
 pub enum Error {
@@ -112,7 +112,10 @@ async fn settle(
             json!({"name": name, "reason": "departed"}),
         ));
     }
-    if name.starts_with("delegate:") || name.starts_with("designated:") {
+    if ["conductor:", "delegate:", "designated:"]
+        .iter()
+        .any(|prefix| name.starts_with(prefix))
+    {
         for row in tx
             .query(
                 "DELETE FROM coordination_lease_waiters WHERE name=$1 RETURNING agent_id",

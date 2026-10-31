@@ -141,10 +141,10 @@
   "lease_operator": [
     "lease-hold-status",
     "lease-break-holder",
-    "lease-delegate-duration",
-    "lease-designate-warning",
+    "lease-conductor-duration",
+    "lease-deprecated-warning",
     "lease-break-audit-swallowed",
-    "lease-delegate-commit-ignored",
+    "lease-conductor-commit-ignored",
     "lease-commit-unknown-certain",
     "lease-commit-refused-unknown"
   ],

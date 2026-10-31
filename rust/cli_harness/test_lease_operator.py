@@ -127,7 +127,7 @@ def test_captured_clocks_compare_in_their_own_seed_and_operation_windows(platfor
                                    "new-event-clock", "operation-window", "seed-window",
                                    "raw-hash", "old-prefix", "seed-stamp", "before-clock"])
 def test_invalid_clocks_and_audit_paths_keep_the_entire_raw_observation(platform, change):
-    identifier = "break-fifo" if change in ("expected-end", "new-event-clock") else "delegate-normal"
+    identifier = "break-fifo" if change in ("expected-end", "new-event-clock") else "conductor-normal"
     good = captured(platform, identifier)
     bad = copy.deepcopy(good)
     final = bad["db"]["final"]
@@ -178,7 +178,7 @@ def test_invalid_clocks_and_audit_paths_keep_the_entire_raw_observation(platform
 @pytest.mark.parametrize("platform", PLATFORMS)
 @pytest.mark.parametrize("change", ["in-window-seed", "operation-as-seed"])
 def test_adversarial_seed_metadata_and_before_tables_cannot_create_a_match(platform, change):
-    good = captured(platform, "delegate-normal")
+    good = captured(platform, "conductor-normal")
     bad = copy.deepcopy(good)
     if change == "in-window-seed":
         bad["seed_stamp"] = sum(bad["seed_window"]) / 2
@@ -253,7 +253,7 @@ def _lost(arm, stderr, **kwargs):
 
 
 @pytest.mark.parametrize("eol", [b"\n", b"\r\n"])
-@pytest.mark.parametrize("verb", [b"break", b"delegate"])
+@pytest.mark.parametrize("verb", [b"break", b"conductor"])
 def test_an_expected_lost_commit_line_maps_to_the_native_diagnostic(verb, eol):
     obs = _lost("python", verb + b" lost the answer to its COMMIT (AdminShutdown)" + LOST_TAIL + eol)
     normalize.RULES["lease-native-pg-diagnostics"](obs)
@@ -280,7 +280,7 @@ def test_near_miss_lost_commit_lines_keep_the_raw_stream(obs):
 
 
 @pytest.mark.parametrize("eol", [b"\n", b"\r\n"])
-@pytest.mark.parametrize("verb", [b"break", b"delegate"])
+@pytest.mark.parametrize("verb", [b"break", b"conductor"])
 def test_only_the_expected_oracle_failure_class_maps_to_the_native_diagnostic(verb, eol):
     rule = normalize.RULES["lease-native-pg-diagnostics"]
     obs = _failure("python", verb + b" failed (RaiseException); nothing was changed" + eol)

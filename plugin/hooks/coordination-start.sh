@@ -369,8 +369,8 @@ fi
 [ -z "$CONNECTION_ERROR" ] || exit 0
 # The session's board address, when the shim has named it in <key>.agent
 # beside the digest (32 lower-case hex, a regular file, as stop-wake.sh
-# reads it): the daemon then appends the maintainer's delegate's brief after
-# the check-in, for a session holding an operator-granted delegate:<project>
+# reads it): the daemon then appends the maintainer's conductor's brief after
+# the check-in, for a session holding an operator-granted conductor:<project>
 # lease, and nothing for any other.
 AGENT_QS=""
 # KEY is the one the record work above settled on (set only there).

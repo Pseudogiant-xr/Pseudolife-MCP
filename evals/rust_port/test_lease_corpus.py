@@ -14,7 +14,8 @@ def test_lease_cases_are_opt_in_and_do_not_admit_deferred_operators():
     assert len(cases) == len({case["id"] for case in cases})
     assert {case["mode"] for case in cases} == {"lease-check", "lease-list", "lease-run", "lease-parser"}
     assert all("response" not in case and case["normalizations"] == [] for case in cases)
-    assert all(case["argv"][1] not in {"hold", "break", "delegate"} for case in cases)
+    assert all(case["argv"][1] not in {"hold", "break", "conductor", "delegate", "designate"}
+               for case in cases)
     assert cli_process.cases(["lease"]) == cases
     assert all(not case["mode"].startswith("lease-") for case in cli_process.cases())
     assert all(base64.b64decode(case["pre_files_b64"][".pseudolife-mcp/locks/instance.id"]) == b"0123456789ab\n" for case in cases)

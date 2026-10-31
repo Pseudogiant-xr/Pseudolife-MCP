@@ -68,7 +68,7 @@ pub const PUBLIC_ERROR_CODES: &[&str] = &[
     "lease_not_held",
     "lease_queue_full",
     "reserved_lease",
-    "already_delegate",
+    "already_conductor",
     "invalid_repository",
     "invalid_repository_id",
     "invalid_claim_path",
