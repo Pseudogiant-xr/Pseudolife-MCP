@@ -296,8 +296,13 @@ pub async fn run(svc: &Service, ready: &Arc<Ready>, req: Request) -> anyhow::Res
     };
     let ref_k = cfg.ref_top_k;
     let r2 = ready.clone();
-    let (entries_out, served_comps, params_json, direct_scores) =
-        tokio::task::spawn_blocking(move || {
+    // Ranking accrues both access and tier counters. Keep its mutation
+    // serialized with saves, and owned through cancellation and shutdown.
+    let write = ready.write.clone().lock_owned().await;
+    let (entries_out, served_comps, params_json, direct_scores) = ready
+        .writes
+        .spawn_blocking(move || {
+            let _write = write;
             let bank_guard = r2.bank.read().expect("bank lock");
             let bank = &*bank_guard;
             let ranked = search::rank(bank, &qv, &params, Some(LazyReranker::get()), &refs, ref_k);

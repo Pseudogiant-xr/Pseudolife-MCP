@@ -138,39 +138,43 @@ async fn trace(svc: &Arc<Service>, ready: &Arc<Ready>, req: Request) -> Result<V
     let ref_accesses = i64::from(!crate::mutants::active("search-no-access-bump"));
     let r2 = ready.clone();
     let query = req.query.clone();
-    let out = tokio::task::spawn_blocking(move || {
-        let bank = r2.bank.read().expect("bank lock");
-        let ranked = search::rank_traced(
-            &bank,
-            &qv,
-            &params,
-            Some(crate::read::search_route::LazyReranker::get()),
-            &refs,
-            ref_k,
-            if crate::mutants::active("trace-no-trace") {
-                None
-            } else {
-                Some(&mut trace)
-            },
-        );
-        let entries: Vec<Value> = ranked
-            .hits
-            .iter()
-            .map(|h| match h.item {
-                Item::Entry(i) => search::entry_json(&bank.entries[i], h.score),
-                Item::Reference(i) => {
-                    crate::documents::hit_json(&refs[i].nearest, h.score, ref_accesses)
-                }
+    let write = ready.write.clone().lock_owned().await;
+    let out = ready
+        .writes
+        .spawn_blocking(move || {
+            let _write = write;
+            let bank = r2.bank.read().expect("bank lock");
+            let ranked = search::rank_traced(
+                &bank,
+                &qv,
+                &params,
+                Some(crate::read::search_route::LazyReranker::get()),
+                &refs,
+                ref_k,
+                if crate::mutants::active("trace-no-trace") {
+                    None
+                } else {
+                    Some(&mut trace)
+                },
+            );
+            let entries: Vec<Value> = ranked
+                .hits
+                .iter()
+                .map(|h| match h.item {
+                    Item::Entry(i) => search::entry_json(&bank.entries[i], h.score),
+                    Item::Reference(i) => {
+                        crate::documents::hit_json(&refs[i].nearest, h.score, ref_accesses)
+                    }
+                })
+                .collect();
+            json!({
+                "query": query,
+                "count": entries.len(),
+                "entries": entries,
+                "trace": Value::Object(trace),
             })
-            .collect();
-        json!({
-            "query": query,
-            "count": entries.len(),
-            "entries": entries,
-            "trace": Value::Object(trace),
         })
-    })
-    .await
-    .map_err(|e| e.to_string())?;
+        .await
+        .map_err(|e| e.to_string())?;
     Ok(out)
 }

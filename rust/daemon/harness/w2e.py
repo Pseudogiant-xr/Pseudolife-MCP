@@ -3653,32 +3653,39 @@ SCENARIOS.update({
             fact_get("Staging Database", "engine"),
         ],
     },
-    # The counters row (D2), written by autosave and read back at start: two
-    # stores and a search autosave the row; a restart reads it back; one more
-    # store autosaves the sum (interaction 3, not 1). The exits write nothing
-    # comparable: Python's exit save never runs on SIGTERM (uvicorn re-raises
-    # it; divergences.md), and Rust's, gated like autosave, finds nothing
-    # changed since the last autosave, so the row stands on both sides.
+    # Restore counters and lazy access counts through an observed clean exit.
+    # Keep periodic saves outside this phase: reads deliberately do not move
+    # the autosave fingerprint, so a timer firing between store and search
+    # on just one arm would make the expected query count nondeterministic.
+    # counters-autosave separately covers the periodic save and its gate.
     "counters-restore": {
-        "live_only": "autosave writes on each daemon's own clock; compared live",
+        "live_only": "clean-exit flush and restart are observed live",
+        "clean_stop": True,
         "config": COUNTERS_CONFIG,
-        "env": {"PSEUDOLIFE_MCP_AUTOSAVE_SECONDS": "1"},
+        "env": {"PSEUDOLIFE_MCP_AUTOSAVE_SECONDS": "3600"},
         "seed": [],
         "ops": [
             store("The counters note about the build cache.", source="pseudolife-mcp"),
             store("The counters note about the token rotation.", source="pseudolife-mcp"),
             search("build cache"),
-            {"op": "sleep", "s": 3},
-            counters(),
             {"op": "restart", "config": COUNTERS_CONFIG},
-            counters(),
+            dict(counters(), expect=[
+                "SELECT interaction_count = 2 AND tier_queries = 1 "
+                "AND (tier_hits->>'flat')::int = 1 FROM cms_counters WHERE id = 1",
+                "SELECT access_count = 1 FROM entries WHERE text = "
+                "'The counters note about the build cache.'",
+            ]),
             store("The counters note after the restart.", source="pseudolife-mcp"),
-            {"op": "sleep", "s": 3},
             counters(),
             # No search after the restart: its logged retrieval event carries
             # a hydrated entry's surprise that differs in the 7th digit
             # between the daemons, a read-path difference outside this row.
-            counters(stop=True),
+            dict(counters(stop=True), expect=[
+                "SELECT interaction_count = 3 AND tier_queries = 1 "
+                "AND (tier_hits->>'flat')::int = 1 FROM cms_counters WHERE id = 1",
+                "SELECT access_count = 1 FROM entries WHERE text = "
+                "'The counters note about the build cache.'",
+            ]),
         ],
     },
     # Autosave: a store changes the bank, so the next autosave writes the row;
@@ -6026,6 +6033,33 @@ MUTANTS += w2e_hooks.MUTANTS
 HOME_OPS += w2e_hooks.HOME_OPS
 
 
+def configure_clean_exit(procs: dict, scn: dict) -> None:
+    """Use the existing lifecycle harness's normal-return signal fixture.
+
+    Uvicorn rethrows the signal to the previous handler; a returning handler
+    lets Python return normally on both platforms, as in SessionReap.
+    Its lifespan shutdown performs the flush before atexit runs again.
+    Durable rows, not merely process exit, prove the flush took effect.
+    """
+    if not scn.get("clean_stop"):
+        return
+    procs["python"].argv = [sys.executable, "-c", """
+import signal
+for sig in (signal.SIGTERM, getattr(signal, "SIGBREAK", signal.SIGTERM)):
+    signal.signal(sig, lambda *_: None)
+from pseudolife_memory.daemon import run_daemon
+run_daemon()
+"""]
+
+
+def stop_for_scenario(daemon, scn: dict) -> None:
+    if scn.get("clean_stop"):
+        from background_sessions import graceful_stop
+        graceful_stop(daemon)
+    else:
+        daemon.stop()
+
+
 def restart_sides(op: dict, scn: dict, procs: dict, homes: dict, envs: dict,
                   stubs: dict, binary: Path) -> dict:
     """``restart``: stop both daemons once their background work has
@@ -6042,7 +6076,7 @@ def restart_sides(op: dict, scn: dict, procs: dict, homes: dict, envs: dict,
             return conn.execute(probes).fetchone()[0]
     booted = {side: count(side) + 1 for side in procs}
     for d in procs.values():
-        d.stop()
+        stop_for_scenario(d, scn)
     for side in ("python", "rust"):
         config = op["config"]
         if stubs.get(side) is not None:
@@ -6052,6 +6086,7 @@ def restart_sides(op: dict, scn: dict, procs: dict, homes: dict, envs: dict,
         homes["python"], daemons.free_port(), daemons.base_env(homes["python"], envs["python"]))
     procs["rust"] = daemons.rust_daemon(
         binary, homes["rust"], daemons.free_port(), daemons.base_env(homes["rust"], envs["rust"]))
+    configure_clean_exit(procs, scn)
     for d in procs.values():
         d.start(300)
     w1a.wait_settled([d.port for d in procs.values()], token=TOKEN)
@@ -6262,6 +6297,7 @@ def _run_live(name: str, scn: dict, tag: str, binary: Path, root: Path, record: 
         homes["rust"] = home
         procs["rust"] = daemons.rust_daemon(binary, home, daemons.free_port(), daemons.base_env(home, renv))
         envs = {"python": penv, "rust": renv}
+        configure_clean_exit(procs, scn)
         daemons.start_all(procs, 300)
         w1a.wait_settled([d.port for d in procs.values()], token=TOKEN)
         warmup_diffs = wait_warmups(dsns, before) if warmup_expected(scn) else []
@@ -6291,7 +6327,7 @@ def _run_live(name: str, scn: dict, tag: str, binary: Path, root: Path, record: 
                 elif op["op"] == "counters":
                     if op["stop"]:
                         for d in procs.values():
-                            d.stop()
+                            stop_for_scenario(d, scn)
                     py, rs = counters_rows(dsns)
                 else:
                     py = run_op(with_pull_token(op, tokens["python"]), procs["python"].port,
@@ -6505,6 +6541,8 @@ def run_golden(name: str, binary: Path, root: Path, tol: dict, owned: list[str])
 RESTART_QUERY = "which port does the bench Postgres use"
 SCENARIOS.update({
     "search-after-restart": {
+        "clean_stop": True,
+        "env": {"PSEUDOLIFE_MCP_AUTOSAVE_SECONDS": "3600"},
         "config": None,
         "seed": [],
         "ops": [
@@ -6513,7 +6551,8 @@ SCENARIOS.update({
             dict(search(RESTART_QUERY, top_k=2), expect=[
                 f"SELECT count(*) = 1 FROM retrieval_events WHERE query_text = '{RESTART_QUERY}'"]),
             # A restart writes some config: the default board setting, unchanged.
-            {"op": "restart", "config": "coordination:\n  enabled: true\n"},
+            {"op": "restart", "config": "coordination:\n  enabled: true\n",
+             "expect": ["SELECT count(*) = 2 FROM entries WHERE access_count = 1"]},
             dict(search(RESTART_QUERY, top_k=2), expect=[
                 f"SELECT count(*) = 2 FROM retrieval_events WHERE query_text = '{RESTART_QUERY}'"]),
         ],
