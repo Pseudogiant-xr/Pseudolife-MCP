@@ -64,9 +64,14 @@ def test_it_is_offered_once_on_a_client_only_install_before_the_update_line(scri
 
 
 def test_the_job_names_are_the_schedulers_own():
-    """The installers look for the job --schedule registers, by its names."""
+    """The installers look for the job --schedule registers, by its names,
+    and for the daemon container that sends --schedule down the daemon
+    host's path instead."""
+    from pseudolife_memory.update_cli import DAEMON_CONTAINER
     assert f'"{unattended_update.CLIENT_TASK_NAME}"' in _block(BLOCK, "install.ps1")
-    assert unattended_update.CLIENT_UNIT_NAME in _block(BLOCK, "install.sh")
+    assert f"CLIENT_SCHEDULE_UNIT={unattended_update.CLIENT_UNIT_NAME} " in _block(BLOCK, "install.sh")
+    assert f'$ClientScheduleContainer = "{DAEMON_CONTAINER}"' in _block(BLOCK, "install.ps1")
+    assert f"CLIENT_SCHEDULE_CONTAINER={DAEMON_CONTAINER} " in _block(BLOCK, "install.sh")
 
 
 def test_both_installers_offer_the_same_default_time():
@@ -89,10 +94,16 @@ def test_the_help_and_the_guides_name_the_offer():
 def _sh(shell: _Shell, *, mode: str = "ask", tty: bool = True, reply: str = "",
         platform: str = "Linux", manager: bool = True, enabled: bool = True,
         existing: str | None = None, existing_time: str = "05:10",
-        schedule_exit: int = 0, shim: bool = True, url: str = URL):
+        schedule_exit: int = 0, shim: bool = True, url: str = URL,
+        kind: str = "runtime", container: bool = False):
     """``existing``: None (no job), a URL its unit follows, or "" (a unit
-    with no --daemon-url, which follows the default URL)."""
+    with no --daemon-url, which follows the default URL). Runs under the
+    installer's own ``set -euo pipefail``."""
     _stub(shell.bin / "uname", f"echo {platform}\n")
+    _stub(shell.bin / "docker",
+          "printf 'docker|%s\\n' \"$*\" >>\"$CALL_LOG\"\n"
+          "case \"$*\" in *'inspect'*pseudolife-mcp-daemon*) exit \"$FAKE_CONTAINER_EXIT\" ;; esac\n"
+          "exit 1\n")
     _stub(shell.bin / "systemctl",
           "printf 'systemctl|%s\\n' \"$*\" >>\"$CALL_LOG\"\n"
           "case \"$*\" in *show-environment*) exit \"$FAKE_MANAGER_EXIT\" ;; "
@@ -120,14 +131,17 @@ def _sh(shell: _Shell, *, mode: str = "ask", tty: bool = True, reply: str = "",
         "bank_trimmed() { printf '%s' \"$1\"; }\n"
         "ensure_shim() { "
         + (f"SHIM_OK=1; SHIM_PATH='{shim_path}'; }}\n" if shim else "SHIM_OK=; SHIM_PATH=; }\n")
+        + f"SHIM_MANAGER_KIND='{kind}'\n"
         + f"CLIENT_ONLY=1\nCLIENT_DAEMON_URL='{url}'\nCLIENT_UPDATE_SCHEDULE='{mode}'\n"
         + _block("update line", "install.sh")
         + _block(BLOCK, "install.sh")
         + "\noffer_client_update_schedule\necho \"STATE=${CLIENT_SCHEDULE_STATE:-}\"\n"
         + "print_update_line\necho DONE\n",
+        strict="set -euo pipefail",
         extra_env={"FAKE_REPLY": reply, "FAKE_SCHEDULE_EXIT": str(schedule_exit),
                    "FAKE_MANAGER_EXIT": "0" if manager else "1",
-                   "FAKE_ENABLED_EXIT": "0" if enabled else "1"})
+                   "FAKE_ENABLED_EXIT": "0" if enabled else "1",
+                   "FAKE_CONTAINER_EXIT": "0" if container else "1"})
 
 
 def _shim_calls(shell: _Shell) -> list[str]:
@@ -167,7 +181,8 @@ def test_sh_enter_or_no_declines_with_the_command_named(bash, tmp_path, reply):
 
 
 @BASH
-@pytest.mark.parametrize("mode,time", [("yes", DEFAULT), ("06:15", "06:15"), ("7:05", "7:05")])
+@pytest.mark.parametrize("mode,time", [("yes", DEFAULT), ("YES", DEFAULT), ("06:15", "06:15"),
+                                       ("7:05", "07:05")])
 @pytest.mark.parametrize("tty", [True, False])
 def test_sh_the_flag_answers_without_asking(bash, tmp_path, mode, time, tty):
     shell = _Shell(bash, tmp_path)
@@ -200,15 +215,27 @@ def test_sh_without_a_terminal_one_line_names_the_command(bash, tmp_path):
 
 
 @BASH
-@pytest.mark.parametrize("mode,tty", [("ask", True), ("ask", False), ("yes", False), ("06:15", True)])
+@pytest.mark.parametrize("mode,tty", [("ask", True), ("ask", False), ("yes", False), ("05:10", True),
+                                      ("5:10", False)])
 def test_sh_a_job_in_place_is_left_alone_in_one_line(bash, tmp_path, mode, tty):
     shell = _Shell(bash, tmp_path)
     proc = _sh(shell, mode=mode, tty=tty, existing=URL)
     assert proc.returncode == 0, proc.stderr
     assert _shim_calls(shell) == [] and "[y/N]" not in proc.stdout
     [line] = _lines_with(proc.stdout, "already scheduled")
-    assert "nothing changed" in line and "05:10" in line
+    assert line.endswith("; nothing changed.") and "05:10" in line
     assert "STATE=scheduled" in proc.stdout
+
+
+@BASH
+def test_sh_a_job_at_another_time_than_the_flag_names_the_command_that_moves_it(bash, tmp_path):
+    shell = _Shell(bash, tmp_path)
+    proc = _sh(shell, mode="06:15", existing=URL)
+    assert proc.returncode == 0, proc.stderr
+    assert _shim_calls(shell) == [] and "[y/N]" not in proc.stdout
+    [line] = _lines_with(proc.stdout, "already scheduled")
+    assert "05:10" in line and "rather than at 06:15" in line
+    assert "nothing changed" in line and _schedule_command("06:15") in line
 
 
 @BASH
@@ -232,12 +259,50 @@ def test_sh_a_job_with_no_url_follows_the_default_daemon(bash, tmp_path):
 
 @BASH
 def test_sh_unit_files_without_an_enabled_timer_are_offered_again(bash, tmp_path):
-    """A half-installed unit (systemctl enable failed) is no job."""
+    """A half-installed or disabled unit never runs: it is said so, and
+    the job is offered again."""
     shell = _Shell(bash, tmp_path)
     proc = _sh(shell, reply="y", existing=URL, enabled=False)
     assert proc.returncode == 0, proc.stderr
     assert _shim_calls(shell) == [f"shim|{_schedule_command()}"]
     assert "already scheduled" not in proc.stdout
+    assert _lines_with(proc.stdout, "not enabled")
+
+
+@BASH
+@pytest.mark.parametrize("kind", ["pipx", "pip", ""])
+def test_sh_a_shim_outside_a_runtime_is_not_offered_a_job_it_cannot_take(bash, tmp_path, kind):
+    """--schedule takes the client path only from a shim runtime."""
+    shell = _Shell(bash, tmp_path)
+    proc = _sh(shell, mode="yes", kind=kind)
+    assert proc.returncode == 0, proc.stderr
+    assert _shim_calls(shell) == [] and "[y/N]" not in proc.stdout
+    [line] = _lines_with(proc.stdout, "not installed as a shim runtime")
+    assert "re-run the installer" in line and "STATE=skipped" in proc.stdout
+
+
+@BASH
+@pytest.mark.parametrize("mode", ["ask", "yes"])
+def test_sh_a_local_daemon_container_is_never_given_the_daemon_job(bash, tmp_path, mode):
+    """With pseudolife-mcp-daemon here, even stopped, --schedule would
+    install the daemon host's job, which the question never offered."""
+    shell = _Shell(bash, tmp_path)
+    proc = _sh(shell, mode=mode, container=True)
+    assert proc.returncode == 0, proc.stderr
+    assert _shim_calls(shell) == [] and "[y/N]" not in proc.stdout
+    [line] = _lines_with(proc.stdout, "pseudolife-mcp-daemon")
+    assert "daemon host's job" in line and _schedule_command() in line
+    assert "STATE=skipped" in proc.stdout
+
+
+@BASH
+def test_sh_git_bash_points_at_install_ps1(bash, tmp_path):
+    shell = _Shell(bash, tmp_path)
+    proc = _sh(shell, platform="MINGW64_NT-10.0-26300")
+    assert proc.returncode == 0, proc.stderr
+    assert _shim_calls(shell) == [] and "[y/N]" not in proc.stdout
+    [line] = _lines_with(proc.stdout, "Git Bash")
+    assert "install.ps1" in line and _schedule_command() in line
 
 
 @BASH
@@ -319,9 +384,9 @@ def test_sh_the_mode_check_holds_with_the_variable_unset(bash, tmp_path):
 
 
 @BASH
-@pytest.mark.parametrize("value,ok", [("ask", True), ("yes", True), ("no", True), ("04:30", True),
-                                      ("4:30", True), ("23:59", True), ("24:00", False),
-                                      ("4:3", False), ("soon", False), ("", False)])
+@pytest.mark.parametrize("value,ok", [("ask", True), ("yes", True), ("YES", True), ("no", True),
+                                      ("04:30", True), ("4:30", True), ("23:59", True),
+                                      ("24:00", False), ("4:3", False), ("soon", False), ("", False)])
 def test_sh_the_flag_value_is_checked_up_front(bash, tmp_path, value, ok):
     shell = _Shell(bash, tmp_path)
     proc = shell.run(f"CLIENT_UPDATE_SCHEDULE='{_q(value)}'\n" + _block(FLAG_BLOCK, "install.sh")
@@ -336,17 +401,24 @@ def test_sh_the_flag_value_is_checked_up_front(bash, tmp_path, value, ok):
 # -- install.ps1 ---------------------------------------------------------------
 
 _XML = ("<?xml version=\"1.0\"?><Task><Triggers><CalendarTrigger>"
-        "<StartBoundary>2026-10-31T{time}:00</StartBoundary></CalendarTrigger></Triggers>"
+        "<StartBoundary>2026-10-31T{time}:00</StartBoundary><Enabled>true</Enabled></CalendarTrigger>"
+        "</Triggers><Settings><Enabled>{enabled}</Enabled></Settings>"
         "<Actions><Exec><Command>C:\\fixture\\bin\\pseudolife-mcp.exe</Command>"
         "<Arguments>update --unattended{flag}</Arguments></Exec></Actions></Task>")
 
 
 def _ps(ps: _PowerShell, *, mode: str = "ask", tty: bool = True, reply: str = "",
         windows: bool = True, existing: str | None = None, existing_time: str = "05:10",
-        schedule_exit: int = 0, shim: bool = True, url: str = URL):
+        schedule_exit: int = 0, shim: bool = True, url: str = URL, enabled: bool = True,
+        kind: str = "runtime", container: bool = False):
     xml = "" if existing is None else _XML.format(
-        time=existing_time, flag=f" --daemon-url {existing}" if existing else "")
+        time=existing_time, flag=f" --daemon-url {existing}" if existing else "",
+        enabled="true" if enabled else "false")
     return ps.run(
+        "function global:docker {\n"
+        f"    Add-Content -LiteralPath '{_psq(ps.calls)}' -Value ('docker|' + (@($args) -join ' '))\n"
+        f"    $global:LASTEXITCODE = {0 if container else 1}\n}}\n"
+        f"$script:shimManagerKind = '{kind}'\n"
         "function global:schtasks {\n"
         f"    Add-Content -LiteralPath '{_psq(ps.calls)}' -Value ('schtasks|' + (@($args) -join ' '))\n"
         + (f"    $global:LASTEXITCODE = 0\n    '{_psq(xml)}'\n" if existing is not None
@@ -402,7 +474,8 @@ def test_ps_enter_or_no_declines_with_the_command_named(tmp_path, reply):
     assert "daily" not in update_line
 
 
-@pytest.mark.parametrize("mode,time", [("yes", DEFAULT), ("06:15", "06:15")])
+@pytest.mark.parametrize("mode,time", [("yes", DEFAULT), ("YES", DEFAULT), ("06:15", "06:15"),
+                                       ("7:05", "07:05")])
 @pytest.mark.parametrize("tty", [True, False])
 def test_ps_the_flag_answers_without_asking(tmp_path, mode, time, tty):
     ps = _PowerShell(tmp_path)
@@ -433,7 +506,7 @@ def test_ps_without_a_terminal_one_line_names_the_command(tmp_path):
     assert "-ClientUpdateSchedule yes" in line and "STATE=skipped" in out
 
 
-@pytest.mark.parametrize("mode,tty", [("ask", True), ("ask", False), ("yes", False)])
+@pytest.mark.parametrize("mode,tty", [("ask", True), ("ask", False), ("yes", False), ("5:10", True)])
 def test_ps_a_job_in_place_is_left_alone_in_one_line(tmp_path, mode, tty):
     ps = _PowerShell(tmp_path)
     proc = _ps(ps, mode=mode, tty=tty, existing=URL)
@@ -443,7 +516,51 @@ def test_ps_a_job_in_place_is_left_alone_in_one_line(tmp_path, mode, tty):
     assert _ps_calls(ps, "schtasks|") == [
         f"schtasks|/Query /TN {unattended_update.CLIENT_TASK_NAME} /XML"]
     [line] = _lines_with(out, "already scheduled")
-    assert "nothing changed" in line and "05:10" in line and "STATE=scheduled" in out
+    assert line.endswith("; nothing changed.") and "05:10" in line and "STATE=scheduled" in out
+
+
+def test_ps_a_job_at_another_time_than_the_flag_names_the_command_that_moves_it(tmp_path):
+    ps = _PowerShell(tmp_path)
+    proc = _ps(ps, mode="06:15", existing=URL)
+    out = _output(proc)
+    assert proc.returncode == 0, out
+    assert _ps_calls(ps) == [] and "[y/N]" not in out
+    [line] = _lines_with(out, "already scheduled")
+    assert "05:10" in line and "rather than at 06:15" in line
+    assert "nothing changed" in line and _schedule_command("06:15") in line
+
+
+def test_ps_a_disabled_task_is_said_so_and_offered_again(tmp_path):
+    ps = _PowerShell(tmp_path)
+    proc = _ps(ps, reply="y", existing=URL, enabled=False)
+    out = _output(proc)
+    assert proc.returncode == 0, out
+    assert _ps_calls(ps) == [f"fakeshim|{_schedule_command()}"]
+    assert "already scheduled" not in out and _lines_with(out, "is disabled")
+    assert "STATE=scheduled" in out
+
+
+@pytest.mark.parametrize("kind", ["pipx", "pip", ""])
+def test_ps_a_shim_outside_a_runtime_is_not_offered_a_job_it_cannot_take(tmp_path, kind):
+    ps = _PowerShell(tmp_path)
+    proc = _ps(ps, mode="yes", kind=kind)
+    out = _output(proc)
+    assert proc.returncode == 0, out
+    assert _ps_calls(ps) == [] and "[y/N]" not in out
+    [line] = _lines_with(out, "not installed as a shim runtime")
+    assert "re-run the installer" in line and "STATE=skipped" in out
+
+
+@pytest.mark.parametrize("mode", ["ask", "yes"])
+def test_ps_a_local_daemon_container_is_never_given_the_daemon_job(tmp_path, mode):
+    ps = _PowerShell(tmp_path)
+    proc = _ps(ps, mode=mode, container=True)
+    out = _output(proc)
+    assert proc.returncode == 0, out
+    assert _ps_calls(ps) == [] and "[y/N]" not in out
+    assert _ps_calls(ps, "docker|") == ["docker|inspect -f {{.Id}} pseudolife-mcp-daemon"]
+    [line] = _lines_with(out, "pseudolife-mcp-daemon")
+    assert "daemon host's job" in line and _schedule_command() in line and "STATE=skipped" in out
 
 
 def test_ps_a_job_following_another_daemon_names_the_command_that_moves_it(tmp_path):
@@ -522,8 +639,9 @@ def test_ps_near_misses_pass_the_mode_check(tmp_path, value, daemon_url):
     assert "PASSED" in proc.stdout
 
 
-@pytest.mark.parametrize("value,ok", [("ask", True), ("yes", True), ("no", True), ("04:30", True),
-                                      ("4:30", True), ("24:00", False), ("soon", False), ("", False)])
+@pytest.mark.parametrize("value,ok", [("ask", True), ("yes", True), ("YES", True), ("no", True),
+                                      ("04:30", True), ("4:30", True), ("24:00", False),
+                                      ("soon", False), ("", False)])
 def test_ps_the_flag_value_is_checked_up_front(tmp_path, value, ok):
     ps = _PowerShell(tmp_path)
     proc = ps.run(f"$ClientUpdateSchedule = '{_psq(value)}'\n" + _block(FLAG_BLOCK, "install.ps1")

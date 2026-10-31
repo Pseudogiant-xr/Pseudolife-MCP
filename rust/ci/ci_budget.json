@@ -320,12 +320,12 @@
       {
         "job": "test-lite-windows",
         "fingerprint": "6e7e01bfd190bb0c",
-        "reason": "adds tests/test_installer_client_update_schedule.py (83 cases, 72 s natively on Windows 2026-11-01: Git Bash and pwsh subprocesses running extracted installer blocks with stub commands) to the one pytest step: no new job, shard or setup step; re-measure from the next batch run"
+        "reason": "adds tests/test_installer_client_update_schedule.py (107 cases, 52 s natively on Windows 2026-11-01: Git Bash and pwsh subprocesses running extracted installer blocks with stub commands) to the one pytest step: no new job, shard or setup step; re-measure from the next batch run"
       },
       {
         "job": "test-lite-macos",
         "fingerprint": "d096d17d3377ee89",
-        "reason": "adds tests/test_installer_client_update_schedule.py (83 cases, 72 s natively on Windows 2026-11-01, where each bash and pwsh subprocess starts slower than on macOS) to the one pytest step: no new job, shard or setup step; re-measure from the next batch run"
+        "reason": "adds tests/test_installer_client_update_schedule.py (107 cases, 52 s natively on Windows 2026-11-01, where each bash and pwsh subprocess starts slower than on macOS) to the one pytest step: no new job, shard or setup step; re-measure from the next batch run"
       }
     ]
   }

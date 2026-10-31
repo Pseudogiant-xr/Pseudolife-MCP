@@ -511,7 +511,7 @@ yes` or `-ClientUpdateSchedule yes` answers it at 04:30, `HH:MM` at that
 time, `no` skips it). Without the installer, or to change the time, once:
 
 ```bash
-pseudolife-mcp update --schedule 03:30 --daemon-url <url>
+pseudolife-mcp update --schedule 04:30 --daemon-url <url>
 ```
 
 It installs a scheduled task (`Pseudolife Client Update`, Windows) or a

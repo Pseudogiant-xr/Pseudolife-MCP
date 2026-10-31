@@ -324,6 +324,7 @@ case "$FIREWALL_RULE" in ask|yes|no) ;; *)
     echo "invalid --firewall-rule '$FIREWALL_RULE' (ask|yes|no)" >&2; exit 2 ;;
 esac
 # >>> client update schedule flag >>>
+CLIENT_UPDATE_SCHEDULE="$(printf '%s' "$CLIENT_UPDATE_SCHEDULE" | tr '[:upper:]' '[:lower:]')"
 case "$CLIENT_UPDATE_SCHEDULE" in
     ask|yes|no) ;;
     *)
@@ -3458,25 +3459,31 @@ print_update_line() {
 # systemd --user timer here (a Windows task from install.ps1), never on macOS.
 CLIENT_SCHEDULE_DEFAULT=04:30
 CLIENT_SCHEDULE_UNIT=pseudolife-client-update   # unattended_update.CLIENT_UNIT_NAME
+CLIENT_SCHEDULE_CONTAINER=pseudolife-mcp-daemon  # update_cli.DAEMON_CONTAINER
 CLIENT_SCHEDULE_STATE=""
-client_schedule_existing() {  # status 0 when the job's timer is installed and enabled; sets its URL, time and path
+# Status 0 when the job's timer is installed and enabled, 2 when its files
+# are there but the timer is not enabled (it never runs), 1 when there is
+# none; sets its path, and with 0 the daemon URL and time it runs with.
+client_schedule_existing() {
     sched_units="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
     CLIENT_SCHEDULE_WHERE="$sched_units/$CLIENT_SCHEDULE_UNIT.timer"
     [ -f "$CLIENT_SCHEDULE_WHERE" ] || return 1
-    # Unit files whose enable failed are no job: --schedule again finishes it.
-    systemctl --user is-enabled --quiet "$CLIENT_SCHEDULE_UNIT.timer" >/dev/null 2>&1 || return 1
+    systemctl --user is-enabled --quiet "$CLIENT_SCHEDULE_UNIT.timer" >/dev/null 2>&1 || return 2
     CLIENT_SCHEDULE_URL="$(sed -n 's/^ExecStart=.*--daemon-url[= ]"\{0,1\}\([^" ]*\).*/\1/p' \
-        "$sched_units/$CLIENT_SCHEDULE_UNIT.service" 2>/dev/null | head -n 1)"
+        "$sched_units/$CLIENT_SCHEDULE_UNIT.service" 2>/dev/null | head -n 1 || true)"
     # --schedule leaves the default daemon URL off the command line.
     CLIENT_SCHEDULE_URL="${CLIENT_SCHEDULE_URL:-http://127.0.0.1:8765}"
     CLIENT_SCHEDULE_TIME="$(sed -n 's/^OnCalendar=[^ ]* \([0-9][0-9]:[0-9][0-9]\).*/\1/p' \
-        "$CLIENT_SCHEDULE_WHERE" 2>/dev/null | head -n 1)"
+        "$CLIENT_SCHEDULE_WHERE" 2>/dev/null | head -n 1 || true)"
     return 0
 }
 offer_client_update_schedule() {
-    sched_mode="${CLIENT_UPDATE_SCHEDULE:-ask}"
+    sched_mode="$(printf '%s' "${CLIENT_UPDATE_SCHEDULE:-ask}" | tr '[:upper:]' '[:lower:]')"
     sched_url="${CLIENT_DAEMON_URL%/}"
-    case "$sched_mode" in ask|yes|no) sched_time="$CLIENT_SCHEDULE_DEFAULT" ;; *) sched_time="$sched_mode" ;; esac
+    case "$sched_mode" in
+        ask|yes|no) sched_time="$CLIENT_SCHEDULE_DEFAULT" ;;
+        *) sched_time="$(printf '%02d:%s' "$((10#${sched_mode%%:*}))" "${sched_mode#*:}")" ;;
+    esac
     ensure_shim
     update_command
     sched_cmd="$upd_cmd update --schedule $sched_time --daemon-url $sched_url"
@@ -3485,12 +3492,17 @@ offer_client_update_schedule() {
         echo "Automatic client updates: not set up (--client-update-schedule no); $sched_cmd sets them up later."
         return 0
     fi
-    if [ "$(uname -s 2>/dev/null || true)" != Linux ]; then
-        if [ "$sched_mode" != ask ]; then
-            echo "Automatic client updates: --client-update-schedule $sched_mode does nothing here, since the daily job needs systemd (Linux) or Task Scheduler (Windows); run $upd_cmd update --clients-only after the daemon upgrades." >&2
-        fi
-        return 0
-    fi
+    case "$(uname -s 2>/dev/null || true)" in
+        Linux) ;;
+        MINGW*|MSYS*|CYGWIN*)
+            echo "Automatic client updates: not offered from Git Bash; ops\\install.ps1 offers them on Windows, or $sched_cmd sets them up."
+            return 0 ;;
+        *)
+            if [ "$sched_mode" != ask ]; then
+                echo "Automatic client updates: --client-update-schedule $sched_mode does nothing here, since the daily job needs systemd (Linux) or Task Scheduler (Windows); run $upd_cmd update --clients-only after the daemon upgrades." >&2
+            fi
+            return 0 ;;
+    esac
     if ! systemctl --user show-environment >/dev/null 2>&1; then
         CLIENT_SCHEDULE_STATE=skipped
         echo "Automatic client updates: not set up, since no systemd user manager answers here (systemctl --user) to run the daily job; once one does (a login session, or loginctl enable-linger), $sched_cmd sets them up."
@@ -3501,15 +3513,44 @@ offer_client_update_schedule() {
         echo "WARNING: the pseudolife-mcp shim is unavailable (see above), so automatic client updates were not set up: run pseudolife-mcp update --schedule $sched_time --daemon-url $sched_url once it is installed." >&2
         return 0
     fi
-    if client_schedule_existing; then
-        if [ "${CLIENT_SCHEDULE_URL%/}" = "$sched_url" ]; then
-            CLIENT_SCHEDULE_STATE=scheduled
-            echo "Automatic client updates: already scheduled (daily at ${CLIENT_SCHEDULE_TIME:-its set time}, $CLIENT_SCHEDULE_WHERE); nothing changed."
-        else
+    # --schedule takes the client path only from a shim runtime.
+    if [ "${SHIM_MANAGER_KIND:-}" != runtime ]; then
+        CLIENT_SCHEDULE_STATE=skipped
+        echo "Automatic client updates: not offered, since the shim is not installed as a shim runtime here (see above for why), and pseudolife-mcp update --schedule installs the client job only from one; re-run the installer once the runtime installs to be offered them."
+        return 0
+    fi
+    # With a daemon container here, even a stopped one, --schedule installs
+    # the daemon host's job, which this question never offered.
+    if command -v docker >/dev/null 2>&1 &&
+            docker inspect -f '{{.Id}}' "$CLIENT_SCHEDULE_CONTAINER" >/dev/null 2>&1; then
+        CLIENT_SCHEDULE_STATE=skipped
+        echo "Automatic client updates: not offered, since this machine still has a local daemon container ($CLIENT_SCHEDULE_CONTAINER), so pseudolife-mcp update --schedule here would install the daemon host's job rather than the client's; once that container is removed (docker rm $CLIENT_SCHEDULE_CONTAINER keeps its volumes and bank), $sched_cmd sets them up."
+        return 0
+    fi
+    sched_found=0
+    client_schedule_existing || sched_found=$?
+    if [ "$sched_found" = 0 ]; then
+        sched_at="${CLIENT_SCHEDULE_TIME:-its set time}"
+        sched_move=""
+        if [ "${CLIENT_SCHEDULE_URL%/}" != "$sched_url" ]; then
             CLIENT_SCHEDULE_STATE=elsewhere
-            echo "Automatic client updates: already scheduled (daily at ${CLIENT_SCHEDULE_TIME:-its set time}, $CLIENT_SCHEDULE_WHERE), following the daemon at $CLIENT_SCHEDULE_URL rather than $sched_url; nothing changed: $upd_cmd update --schedule ${CLIENT_SCHEDULE_TIME:-$sched_time} --daemon-url $sched_url moves it."
+            sched_move=", following the daemon at $CLIENT_SCHEDULE_URL rather than $sched_url"
+            case "$sched_mode" in ask|yes) sched_time="${CLIENT_SCHEDULE_TIME:-$sched_time}" ;; esac
+        else
+            CLIENT_SCHEDULE_STATE=scheduled
+            case "$sched_mode" in ask|yes) ;; *)
+                [ "$sched_time" = "${CLIENT_SCHEDULE_TIME:-}" ] || sched_move=", rather than at $sched_time" ;;
+            esac
+        fi
+        if [ -n "$sched_move" ]; then
+            echo "Automatic client updates: already scheduled (daily at $sched_at, $CLIENT_SCHEDULE_WHERE)$sched_move; nothing changed: $upd_cmd update --schedule $sched_time --daemon-url $sched_url moves it."
+        else
+            echo "Automatic client updates: already scheduled (daily at $sched_at, $CLIENT_SCHEDULE_WHERE); nothing changed."
         fi
         return 0
+    fi
+    if [ "$sched_found" = 2 ]; then
+        echo "Automatic client updates: $CLIENT_SCHEDULE_WHERE is installed but its timer is not enabled, so it never runs."
     fi
     if [ "$sched_mode" = ask ]; then
         if ! bank_can_ask; then

@@ -3288,9 +3288,11 @@ function Write-UpdateLine([string]$ShimPath, [switch]$ClientOnly, [string]$Pairi
 # Windows task here (a systemd --user timer from install.sh).
 $ClientScheduleDefault = "04:30"
 $ClientScheduleTask = "Pseudolife Client Update"   # unattended_update.CLIENT_TASK_NAME
+$ClientScheduleContainer = "pseudolife-mcp-daemon"  # update_cli.DAEMON_CONTAINER
 $script:clientScheduleState = ""
 function Get-ClientScheduleJob {
-    # The task --schedule registered: the daemon URL and time it runs with, or $null.
+    # The task --schedule registered: whether it is enabled, and the daemon
+    # URL and time it runs with; $null when there is none.
     $xml = ""
     $global:LASTEXITCODE = 1
     try { $xml = (& schtasks /Query /TN $ClientScheduleTask /XML 2>$null | Out-String) } catch { $global:LASTEXITCODE = 1 }
@@ -3298,12 +3300,26 @@ function Get-ClientScheduleJob {
     # --schedule leaves the default daemon URL off the command line.
     $url = if ($xml -match '--daemon-url[= ]+"?([^\s"<]+)') { $Matches[1] } else { "http://127.0.0.1:8765" }
     $time = if ($xml -match '<StartBoundary>[^<T]*T(\d\d:\d\d)') { $Matches[1] } else { $null }
-    return [pscustomobject]@{ Url = $url; Time = $time }
+    # A disabled task, or a disabled trigger, never runs.
+    $enabled = $xml -notmatch '<Enabled>\s*false\s*</Enabled>'
+    return [pscustomobject]@{ Url = $url; Time = $time; Enabled = $enabled }
+}
+function Test-ClientScheduleContainer {
+    # Whether a daemon container exists here, running or stopped.
+    if (-not (Get-Command docker -ErrorAction SilentlyContinue)) { return $false }
+    $global:LASTEXITCODE = 1
+    try { & docker inspect -f '{{.Id}}' $ClientScheduleContainer *> $null } catch { $global:LASTEXITCODE = 1 }
+    return ($LASTEXITCODE -eq 0)
 }
 function Invoke-ClientUpdateScheduleOffer {
-    $mode = if ("$ClientUpdateSchedule") { "$ClientUpdateSchedule" } else { "ask" }
+    $mode = if ("$ClientUpdateSchedule") { "$ClientUpdateSchedule".ToLowerInvariant() } else { "ask" }
     $url = "$clientDaemonUrl".TrimEnd("/")
-    $time = if ($mode -in "ask", "yes", "no") { $ClientScheduleDefault } else { $mode }
+    $explicitTime = $mode -notin "ask", "yes", "no"
+    $time = $ClientScheduleDefault
+    if ($explicitTime) {
+        $hour, $minute = $mode.Split(":")
+        $time = "{0:D2}:{1}" -f [int]$hour, $minute
+    }
     $haveShim = (Install-ShimOnce) -and $script:shimInstallPath
     $updCmd = (Get-UpdateCommand $script:shimInstallPath)[0]
     $command = "$updCmd update --schedule $time --daemon-url $url"
@@ -3323,18 +3339,42 @@ function Invoke-ClientUpdateScheduleOffer {
         Write-Warning "The pseudolife-mcp shim is unavailable (see above), so automatic client updates were not set up: run pseudolife-mcp update --schedule $time --daemon-url $url once it is installed."
         return
     }
+    # --schedule takes the client path only from a shim runtime.
+    if ($script:shimManagerKind -ne "runtime") {
+        $script:clientScheduleState = "skipped"
+        Write-Host "Automatic client updates: not offered, since the shim is not installed as a shim runtime here (see above for why), and pseudolife-mcp update --schedule installs the client job only from one; re-run the installer once the runtime installs to be offered them."
+        return
+    }
+    # With a daemon container here, even a stopped one, --schedule installs
+    # the daemon host's job, which this question never offered.
+    if (Test-ClientScheduleContainer) {
+        $script:clientScheduleState = "skipped"
+        Write-Host "Automatic client updates: not offered, since this machine still has a local daemon container ($ClientScheduleContainer), so pseudolife-mcp update --schedule here would install the daemon host's job rather than the client's; once that container is removed (docker rm $ClientScheduleContainer keeps its volumes and bank), $command sets them up."
+        return
+    }
     $job = Get-ClientScheduleJob
-    if ($job) {
+    if ($job -and $job.Enabled) {
         $at = if ($job.Time) { $job.Time } else { "its set time" }
-        if ("$($job.Url)".TrimEnd("/") -eq $url) {
-            $script:clientScheduleState = "scheduled"
-            Write-Host "Automatic client updates: already scheduled (daily at $at, the scheduled task '$ClientScheduleTask'); nothing changed."
-        } else {
+        $where = "the scheduled task '$ClientScheduleTask'"
+        $move = ""
+        $moveAt = $time
+        if ("$($job.Url)".TrimEnd("/") -ne $url) {
             $script:clientScheduleState = "elsewhere"
-            $moveAt = if ($job.Time) { $job.Time } else { $time }
-            Write-Host "Automatic client updates: already scheduled (daily at $at, the scheduled task '$ClientScheduleTask'), following the daemon at $($job.Url) rather than $url; nothing changed: $updCmd update --schedule $moveAt --daemon-url $url moves it."
+            $move = ", following the daemon at $($job.Url) rather than $url"
+            if (-not $explicitTime -and $job.Time) { $moveAt = $job.Time }
+        } else {
+            $script:clientScheduleState = "scheduled"
+            if ($explicitTime -and $time -ne $job.Time) { $move = ", rather than at $time" }
+        }
+        if ($move) {
+            Write-Host "Automatic client updates: already scheduled (daily at $at, $where)$move; nothing changed: $updCmd update --schedule $moveAt --daemon-url $url moves it."
+        } else {
+            Write-Host "Automatic client updates: already scheduled (daily at $at, $where); nothing changed."
         }
         return
+    }
+    if ($job) {
+        Write-Host "Automatic client updates: the scheduled task '$ClientScheduleTask' exists but is disabled, so it never runs."
     }
     if ($mode -eq "ask") {
         if (-not $interactive) {

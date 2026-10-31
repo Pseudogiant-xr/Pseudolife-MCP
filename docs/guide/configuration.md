@@ -4145,7 +4145,7 @@ hour; a run never counts that label as a session.
 ### Unattended client updates on client-only machines
 
 ```bash
-pseudolife-mcp update --schedule 03:30 --daemon-url http://<daemon-host>:8765   # once, on the client machine
+pseudolife-mcp update --schedule 04:30 --daemon-url http://<daemon-host>:8765   # once, on the client machine
 pseudolife-mcp update --unattended --daemon-url http://<daemon-host>:8765       # what that run does
 pseudolife-mcp update --unschedule
 ```
@@ -4196,7 +4196,12 @@ already in place alone and says so in one line, naming the `--schedule`
 command that moves it when it follows another daemon. A refusal from
 `--schedule` is printed as a warning and the install still completes. A
 daemon-host install is never offered it and refuses the flag's `yes` or a
-time; macOS has no scheduler here.
+time; macOS has no scheduler here. Nor is it offered where `--schedule` would
+not install the client job: a machine that still has a local
+`pseudolife-mcp-daemon` container (even a stopped one sends `--schedule` down
+the daemon host's path), or a shim installed with pipx or pip rather than as
+a shim runtime; the run says why in one line. A job whose timer or task is
+disabled is reported and offered again.
 
 ### Codex hook re-approval, on every update path
 
