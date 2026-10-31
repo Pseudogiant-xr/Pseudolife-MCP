@@ -1763,7 +1763,12 @@ def lineage_lesson(task, aspect, task_norm, aspect_norm, lesson, about, source_t
                    embedding_text) -> list[dict]:
     """Seed-only: a current lesson whose provenance and synthesis lineage
     audit name the entries with ``source_texts`` (by their ids), its
-    embedding copied from ``embedding_text``'s entry."""
+    embedding copied from ``embedding_text``'s entry.
+
+    Lessons one search can return together need distinct embedding texts:
+    on an exact score tie Rust keeps record order, while Python's torch
+    matmul scores identical rows a last bit apart, so the order would be
+    float noise (forget-slots, 2026-10-31)."""
     def q(v):
         return "NULL" if v is None else "'" + v.replace("'", "''") + "'"
     texts = ", ".join(q(t) for t in source_texts)
@@ -1847,6 +1852,10 @@ FORGET_SEED = [
         "AND e.text = 'The flaky test needs a warm cache.'", after_stop=True),
 ]
 
+# forget-slots' lessons, one entry each so no two share an embedding.
+FORGET_SLOT_LESSONS = ["Deploy through the pipeline.", "Tune the pool before the replica.",
+                       "Never deploy on Fridays."]
+
 SCENARIOS.update({
     "forget-memory": {
         "config": "memory:\n  delete_confirm_threshold: 2\n",
@@ -1897,6 +1906,8 @@ SCENARIOS.update({
         "config": None,
         "seed": [
             store("A note so the bank is not empty."),
+            # each lesson's embedding comes from its own text (lineage_lesson)
+            *[store(t) for t in FORGET_SLOT_LESSONS],
             fact("Payments DB", "host", "10.0.0.5", origin="user", confidence=0.9),
             fact("Payments DB", "host", "10.0.0.6", origin="user", confidence=0.9),
             fact("Payments DB", "port", "5432", origin="user", confidence=0.9),
@@ -1909,17 +1920,14 @@ SCENARIOS.update({
             world_set("Python", "latest version", "3.13.0", source_url="https://www.python.org/"),
             *lineage_lesson("deploy engine to host", "approach", "deploy-engine-to-host",
                             "approach", "Deploy through the pipeline.", "Payments DB",
-                            ["A note so the bank is not empty."],
-                            "A note so the bank is not empty."),
+                            ["A note so the bank is not empty."], "Deploy through the pipeline."),
             # a lesson whose task is a graph entity (fact_set minted it)
             *lineage_lesson("Payments DB", "tuning", "payments-db", "tuning",
                             "Tune the pool before the replica.", None,
-                            ["A note so the bank is not empty."],
-                            "A note so the bank is not empty."),
+                            ["A note so the bank is not empty."], "Tune the pool before the replica."),
             *lineage_lesson("deploy engine to host", "pitfall", "deploy-engine-to-host",
                             "pitfall", "Never deploy on Fridays.", None,
-                            ["A note so the bank is not empty."],
-                            "A note so the bank is not empty."),
+                            ["A note so the bank is not empty."], "Never deploy on Fridays."),
         ],
         "ops": [
             # the entity is required for these scopes
