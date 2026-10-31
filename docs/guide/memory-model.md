@@ -621,8 +621,12 @@ row records who, why, and the verbatim record. The undo is
 src="entity|attribute")` — restoring from the retired row while it still
 exists, or from the audit snapshot once compaction has purged it; a bare
 entity in `src` (no `|attribute`) restores every retired aspect of that
-entity. `GET /api/curation/retired` lists what's currently retired across
-both stores, and the Console's undo route is `POST /api/world/restore`.
+entity. `POST /api/world/restore` is deprecated; use the
+`memory_graph_review(action="restore_slot", store="world", src=...)`
+action above instead. `GET /api/curation/retired` is also deprecated
+(no replacement; no caller). Both are for removal in a later release under
+[D9 / Proposal A / B2r](../../rust/CUTOVER.md) (2026-10-23).
+Python handlers remain unchanged; Rust keeps its declared `501` responses.
 Only `scope="memory"` and `scope="fact"` still hard-delete.
 
 > The world cortex here is populated **manually** via `memory_world_set`.
@@ -748,8 +752,12 @@ row records who, why, and the verbatim record. The undo is
 src="entity|attribute")` — restoring from the retired row while it still
 exists, or from the audit snapshot once compaction has purged it; a bare
 entity in `src` (no `|attribute`) restores every retired aspect of that
-entity. `GET /api/curation/retired` lists what's currently retired across
-both stores, and the Console's undo route is `POST /api/lessons/restore`.
+entity. `POST /api/lessons/restore` is deprecated; use the
+`memory_graph_review(action="restore_slot", store="lesson", src=...)`
+action above instead. `GET /api/curation/retired` is also deprecated
+(no replacement; no caller). Both are for removal in a later release under
+[D9 / Proposal A / B2r](../../rust/CUTOVER.md) (2026-10-23).
+Python handlers remain unchanged; Rust keeps its declared `501` responses.
 Only `scope="memory"` and `scope="fact"` still hard-delete.
 
 `used_ids` is a second, unrelated payload riding the same call: the ids of
