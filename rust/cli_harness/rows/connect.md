@@ -231,7 +231,12 @@ Every deferral below happens before any request, except the last item.
   from a small directory). This is an oracle fragility on busy hosts, not
   candidate behaviour.
 - Requests are attributed to the process holding the client end of each
-  connection (`psutil`), so connect's own requests are compared exactly:
+  connection (`psutil`): the arm's process, or, when the oracle's
+  `python.exe` is a Windows venv launcher that runs the interpreter as its
+  child (measured once per executable), that child. The self-hosted lane's
+  per-shard venv dropped every own request of the oracle on Windows until
+  this (2026-10-31: 60 of 69 cases "requests differ", hosted passing). So
+  connect's own requests are compared exactly:
   method, target, every header field and the body, as received (review of
   #670: the earlier capture kept only a credential label, so a different
   rejected credential or a changed field was invisible). Same-outcome
