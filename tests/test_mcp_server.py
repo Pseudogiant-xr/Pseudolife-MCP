@@ -1628,3 +1628,21 @@ def test_memory_outcome_reports_the_truncated_tail(tmp_path: Path,
     out = _invoke("memory_outcome", {"task": "t", "outcome": "success",
                                      "used_ids": [12, 34]})
     assert "used_ids_truncated" not in out
+
+
+@pytest.mark.parametrize("field", ["text", "substring", "source", "episode", "tag"])
+@pytest.mark.parametrize("value", [5, True, [], {}])
+def test_forget_binding_rejects_non_string_filters(tmp_path, monkeypatch, field, value):
+    mod = _reload_tiered(tmp_path, monkeypatch)
+
+    def unexpected_delete(**kwargs):
+        pytest.fail("Invalid filter reached service.delete")
+
+    monkeypatch.setattr(mod.service, "delete", unexpected_delete)
+    result = asyncio.run(mod.mcp.call_tool("memory_forget", {
+        "scope": "memory", "substring": "Keep", field: value, "confirm_bulk": True,
+    }))
+    assert result.is_error
+    out = json.loads(result.content[0].text)
+    assert out["error"] == "invalid_argument"
+    assert out["param"] == field

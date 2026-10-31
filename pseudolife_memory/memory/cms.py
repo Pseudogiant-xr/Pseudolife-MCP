@@ -2675,6 +2675,15 @@ class ContinuumMemorySystem:
         Marks each affected band's pattern matrix dirty so the next
         retrieve rebuilds without the gone entries.
         """
+        for name, value in (
+            ("text", text), ("substring", substring), ("source", source),
+            ("episode", episode), ("tag", tag),
+        ):
+            if value is not None and not isinstance(value, str):
+                raise ValueError(
+                    f"Delete filter '{name}' must be a string; "
+                    "supply a string or omit the filter."
+                )
         if all(v is None for v in (text, substring, source, episode, tag)):
             raise ValueError(
                 "delete_entries requires at least one of: "

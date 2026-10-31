@@ -517,7 +517,9 @@ def _gate_cancelled(check: dict, runs: dict, probes: dict,
       job of that file, or the downgrade is refused;
     - that step is, by position and name, the only one that failed, on this
       leg and on every other failed leg of the gate in the run attempt,
-      whether the rollup lists that leg or not (`_failed_at_cancel_step`);
+      whether the rollup lists that leg or not (`_failed_at_cancel_step`),
+      or the leg ran no step at all in an attempt that itself concluded
+      `cancelled` (cancelled while starting, so it gave no verdict);
     - no other job in the run attempt failed, timed out or needs action,
       and none the gate needs is unfinished;
     - a job it needs, and nothing outside its needs, was cancelled, and no
@@ -553,8 +555,11 @@ def _gate_cancelled(check: dict, runs: dict, probes: dict,
                      # 100 a page made GitHub answer 502 on every try for a
                      # 140-job attempt (run 40995606796, 2026-10-30); 50 worked.
                      "?per_page=50", "--jq", ".jobs[] | @json")
-            runs[key] = data, [json.loads(line) for line in out.splitlines() if line.strip()]
-        data, listed = runs[key]
+            # The run's record describes its latest attempt only.
+            ended = run.get("conclusion") if int(run.get("run_attempt") or 0) == key[1] else None
+            runs[key] = (data, [json.loads(line) for line in out.splitlines() if line.strip()],
+                         ended)
+        data, listed, ended = runs[key]
         defs = data["jobs"]
         what = f"the jobs of run {key[0]} attempt {key[1]}"
         patterns = {job_id: _job_pattern(job_id, d) for job_id, d in defs.items()}
@@ -579,9 +584,17 @@ def _gate_cancelled(check: dict, runs: dict, probes: dict,
             if owners(str(other["name"])) == {gate_id} and other.get("id") != meta.get("id")
             and other.get("conclusion") is not None
             and other.get("conclusion") not in _NO_VERDICT]
+        stepless = []
         for leg in legs:
             what = f"job {leg}"
-            steps = job_meta(leg).get("steps")
+            leg_meta = job_meta(leg)
+            steps = leg_meta.get("steps")
+            if steps == [] and ended == "cancelled" and leg_meta.get("conclusion") == "failure":
+                # Cancelling the attempt while this leg was starting failed it
+                # before any step ran (#1074's 7cb16da6), so it gave no
+                # verdict; the needed jobs below still decide.
+                stepless.append(leg)
+                continue
             if not isinstance(steps, list) or not steps:
                 return None, f"the steps of job {leg} could not be read (none listed)"
             what = f"the steps of job {leg}"
@@ -605,6 +618,11 @@ def _gate_cancelled(check: dict, runs: dict, probes: dict,
     except (Refusal, ValueError, KeyError, TypeError, AttributeError) as exc:
         return None, _unread(what, exc)
     if not cancelled:
+        if stepless:
+            # The cancel reached only the gate: nothing failed, but no
+            # verdict was given either, so a rerun of its CI decides.
+            return None, (f"gate job {stepless[0]} was cancelled before it ran a step "
+                          "and no job it needs was cancelled (rerun its CI)")
         return False, ""                    # no needed job was cancelled
     verdict: tuple[bool | None, str] = (True, "")
     for job_id in cancelled:

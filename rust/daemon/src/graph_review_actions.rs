@@ -91,7 +91,7 @@ impl Pid {
 
     /// `str(int(proposal_id))`.
     fn text(&self) -> String {
-        crate::pyjson::py_str(&self.echo)
+        crate::pyjson::py_str(&py_int(&self.echo).unwrap_or_else(|_| self.echo.clone()))
     }
 }
 
@@ -817,7 +817,7 @@ fn pg_float8_text(x: f64) -> String {
 
 /// A proposal's `rationale` as psycopg binds it into the TEXT column.
 #[allow(clippy::result_large_err)]
-fn text_param(v: Option<&Value>) -> Result<Option<String>, ToolError> {
+pub(crate) fn text_param(v: Option<&Value>) -> Result<Option<String>, ToolError> {
     match v {
         None | Some(Value::Null) => Ok(None),
         Some(Value::String(s)) => Ok(Some(s.clone())),
@@ -946,12 +946,13 @@ async fn set_proposal_status(
     pid: &Pid,
     status: &str,
     decided_at: f64,
+    decided_by: &str,
 ) -> Result<bool, ToolError> {
     let Some(id) = pid.id else {
         return Ok(false);
     };
     in_txn(client, |c| async move {
-        set_proposal_status_body(c, id, status, DECIDED_BY, decided_at).await
+        set_proposal_status_body(c, id, status, decided_by, decided_at).await
     })
     .await
 }
@@ -1062,12 +1063,13 @@ async fn set_entity_proposal_status_body(
     id: i64,
     status: &str,
     decided_at: f64,
+    decided_by: &str,
 ) -> Result<bool, ToolError> {
     Ok(c.execute(
         "UPDATE entity_proposals SET status = $1, \
          decided_by = COALESCE($2, decided_by), \
          decided_at = COALESCE($3, decided_at) WHERE id = $4",
-        &[&status, &DECIDED_BY, &decided_at, &id],
+        &[&status, &decided_by, &decided_at, &id],
     )
     .await
     .map_err(internal)?
@@ -1157,6 +1159,7 @@ async fn record_merge_decision_body(
     reason: Option<&str>,
     decided_at: f64,
     votes: Option<Value>,
+    decided_by: &str,
 ) -> Result<i64, ToolError> {
     record_merge_decision_by(
         c,
@@ -1166,7 +1169,7 @@ async fn record_merge_decision_body(
         status,
         score,
         reason,
-        DECIDED_BY,
+        decided_by,
         decided_at,
         votes,
     )
@@ -1340,7 +1343,7 @@ pub(crate) async fn propose_body(
 }
 
 /// `service.graph_dismiss_duplicate` (7897-7942) from the MCP surface.
-async fn dismiss_duplicate(ready: &Ready, a: &str, b: &str) -> Result<Value, ToolError> {
+pub(crate) async fn dismiss_duplicate(ready: &Ready, a: &str, b: &str) -> Result<Value, ToolError> {
     let bad = || json!({"dismissed": false, "reason": "bad_pair", "a": a, "b": b});
     let (an, bn) = (norm_name(a), norm_name(b));
     if an.is_empty() || bn.is_empty() || an == bn {
@@ -1429,7 +1432,7 @@ fn not_pending(key: &str, pid: &Pid) -> Value {
 }
 
 /// `service.graph_accept_proposal` (8867-8922) without a retype.
-async fn accept_link(ready: &Ready, pid: &Pid) -> Result<Value, ToolError> {
+async fn accept_link(ready: &Ready, pid: &Pid, decided_by: &str) -> Result<Value, ToolError> {
     let client = ready.storage.client();
     let Some(prop) = get_proposal(client, pid)
         .await?
@@ -1453,7 +1456,7 @@ async fn accept_link(ready: &Ready, pid: &Pid) -> Result<Value, ToolError> {
     )
     .await
     .map_err(internal)?;
-    set_proposal_status(client, pid, "accepted", now()).await?;
+    set_proposal_status(client, pid, "accepted", now(), decided_by).await?;
     let g = graph::load_graph(client).await.map_err(internal)?;
     let (disp, _) = displays(&g);
     Ok(json!({
@@ -1467,13 +1470,13 @@ async fn accept_link(ready: &Ready, pid: &Pid) -> Result<Value, ToolError> {
 
 /// `service.graph_reject_proposal` (8930-8946): the automatic decision is
 /// retired first, whatever the id names.
-async fn reject_link(ready: &Ready, pid: &Pid) -> Result<Value, ToolError> {
+async fn reject_link(ready: &Ready, pid: &Pid, decided_by: &str) -> Result<Value, ToolError> {
     let client = ready.storage.client();
     in_txn(client, |c| async move {
         confirm_human_proposal_body(c, "link", pid).await
     })
     .await?;
-    let ok = set_proposal_status(client, pid, "rejected", now()).await?;
+    let ok = set_proposal_status(client, pid, "rejected", now(), decided_by).await?;
     Ok(json!({"rejected": ok, "id": pid.echo}))
 }
 
@@ -1490,7 +1493,7 @@ async fn pending_entity(
 }
 
 /// `service.graph_accept_entity_merge` (8965-8999): audit, fold, status.
-async fn accept_merge(ready: &Ready, pid: &Pid) -> Result<Value, ToolError> {
+async fn accept_merge(ready: &Ready, pid: &Pid, decided_by: &str) -> Result<Value, ToolError> {
     let client = ready.storage.client();
     let Some((id, prop)) = pending_entity(client, pid, "merge").await? else {
         return Ok(not_pending("accepted", pid));
@@ -1524,6 +1527,7 @@ async fn accept_merge(ready: &Ready, pid: &Pid) -> Result<Value, ToolError> {
             reason.as_deref(),
             decided_at,
             votes,
+            decided_by,
         )
         .await
     })
@@ -1533,14 +1537,14 @@ async fn accept_merge(ready: &Ready, pid: &Pid) -> Result<Value, ToolError> {
         _ => false,
     };
     in_txn(client, |c| async move {
-        set_entity_proposal_status_body(c, id, "accepted", decided_at).await
+        set_entity_proposal_status_body(c, id, "accepted", decided_at, decided_by).await
     })
     .await?;
     Ok(json!({"accepted": ok, "from": disp_get(&disp, frm), "into": disp_get(&disp, into)}))
 }
 
 /// `service.graph_accept_entity_junk` (9006-9032): audit, delete, status.
-async fn accept_junk(ready: &Ready, pid: &Pid) -> Result<Value, ToolError> {
+async fn accept_junk(ready: &Ready, pid: &Pid, decided_by: &str) -> Result<Value, ToolError> {
     let client = ready.storage.client();
     let Some((id, prop)) = pending_entity(client, pid, "junk").await? else {
         return Ok(not_pending("accepted", pid));
@@ -1561,6 +1565,7 @@ async fn accept_junk(ready: &Ready, pid: &Pid) -> Result<Value, ToolError> {
             Some(&reason),
             now(),
             votes,
+            decided_by,
         )
         .await
     })
@@ -1569,7 +1574,7 @@ async fn accept_junk(ready: &Ready, pid: &Pid) -> Result<Value, ToolError> {
         .await
         .map_err(internal)?;
     in_txn(client, |c| async move {
-        set_entity_proposal_status_body(c, id, "accepted", now()).await
+        set_entity_proposal_status_body(c, id, "accepted", now(), decided_by).await
     })
     .await?;
     Ok(json!({"accepted": ok, "entity": disp_get(&disp, Some(prop.entity_id))}))
@@ -1577,7 +1582,7 @@ async fn accept_junk(ready: &Ready, pid: &Pid) -> Result<Value, ToolError> {
 
 /// `service.graph_reject_entity_proposal` (9039-9083): retire the automatic
 /// decision, then status, audit and pair closure in one transaction.
-async fn reject_entity(ready: &Ready, pid: &Pid) -> Result<Value, ToolError> {
+async fn reject_entity(ready: &Ready, pid: &Pid, decided_by: &str) -> Result<Value, ToolError> {
     let client = ready.storage.client();
     let decided_at = now();
     let prop = get_entity_proposal(client, pid).await?;
@@ -1593,7 +1598,7 @@ async fn reject_entity(ready: &Ready, pid: &Pid) -> Result<Value, ToolError> {
     };
     let ok = in_txn(client, |c| async move {
         let votes = entity_proposal_votes_body(c, id).await?;
-        let ok = set_entity_proposal_status_body(c, id, "rejected", decided_at).await?;
+        let ok = set_entity_proposal_status_body(c, id, "rejected", decided_at, decided_by).await?;
         if !ok {
             return Ok(false);
         }
@@ -1617,6 +1622,7 @@ async fn reject_entity(ready: &Ready, pid: &Pid) -> Result<Value, ToolError> {
                 prop.reason.as_deref(),
                 decided_at,
                 votes,
+                decided_by,
             )
             .await?;
             if let (Some(a), Some(b)) = (canon_get(Some(prop.entity_id)), canon_get(prop.into_id))
@@ -1636,6 +1642,7 @@ async fn reject_entity(ready: &Ready, pid: &Pid) -> Result<Value, ToolError> {
                 Some(&format!("junk keep: {}", py_fmt(&prop.reason))),
                 decided_at,
                 votes,
+                decided_by,
             )
             .await?;
             if let Some(canonical) = canon_get(Some(prop.entity_id))
@@ -1663,13 +1670,18 @@ pub(super) fn noted(mut out: Value) -> Value {
     out
 }
 
-async fn settle(ready: &Ready, kind: IdAction, pid: &Pid) -> Result<Value, ToolError> {
+async fn settle(
+    ready: &Ready,
+    kind: IdAction,
+    pid: &Pid,
+    decided_by: &str,
+) -> Result<Value, ToolError> {
     match kind {
-        IdAction::AcceptLink => accept_link(ready, pid).await,
-        IdAction::RejectLink => reject_link(ready, pid).await,
-        IdAction::AcceptMerge => accept_merge(ready, pid).await,
-        IdAction::AcceptJunk => accept_junk(ready, pid).await,
-        IdAction::RejectEntity => reject_entity(ready, pid).await,
+        IdAction::AcceptLink => accept_link(ready, pid, decided_by).await,
+        IdAction::RejectLink => reject_link(ready, pid, decided_by).await,
+        IdAction::AcceptMerge => accept_merge(ready, pid, decided_by).await,
+        IdAction::AcceptJunk => accept_junk(ready, pid, decided_by).await,
+        IdAction::RejectEntity => reject_entity(ready, pid, decided_by).await,
     }
 }
 
@@ -1701,7 +1713,7 @@ pub(super) async fn run(ready: &Ready, plan: Plan) -> Result<Value, ToolError> {
         } => {
             let mut results = Vec::with_capacity(pids.len());
             for pid in &pids {
-                results.push(noted(settle(ready, kind, pid).await?));
+                results.push(noted(settle(ready, kind, pid, DECIDED_BY).await?));
             }
             if batch {
                 Ok(batch_answer(&action, results))
@@ -1715,3 +1727,170 @@ pub(super) async fn run(ready: &Ready, plan: Plan) -> Result<Value, ToolError> {
 #[cfg(test)]
 #[path = "graph_review_actions_tests.rs"]
 mod tests;
+
+/// Console decisions bypass MCP argument refusals and response notes.
+pub(crate) async fn console_decide(
+    ready: &Ready,
+    action: &str,
+    id: Value,
+    decided_by: &str,
+) -> Result<Value, ToolError> {
+    let kind = IdAction::parse(action).expect("registered Console decision");
+    let mut pid = Pid::new(id.clone());
+    if kind == IdAction::RejectLink {
+        // Python commits confirmation before binding the original (not int-coerced)
+        // id. Even a later boolean/operator or Unicode-digit cast error keeps it.
+        if let Err(message) = py_int(&id) {
+            return Err(if id.is_string() {
+                ToolError::Invalid(message)
+            } else {
+                internal(message)
+            });
+        }
+        in_txn(ready.storage.client(), |c| async {
+            confirm_human_proposal_body(c, "link", &pid).await
+        })
+        .await?;
+    }
+    // psycopg binds booleans/typed lists as themselves, not as missing IDs.
+    // Untyped lists (strings, nulls, empty) follow the same BIGINT input path
+    // as strings. Keep the original response echo throughout.
+    let bound = match &id {
+        Value::Bool(_) => return Err(console_id_operator_error(kind, "boolean")),
+        Value::Object(_) => return Err(internal(CONSOLE_DICT_ERROR)),
+        Value::Array(_) => {
+            let (text, ty) = console_id_array(&id)?;
+            if let Some(ty) = ty {
+                return Err(console_id_operator_error(kind, ty));
+            }
+            Value::String(text)
+        }
+        _ => id.clone(),
+    };
+    pid.id = match &bound {
+        Value::String(s) => Some(
+            reads(ready.storage.client(), |c| async move {
+                c.query_one("SELECT $1::text::bigint", &[s])
+                    .await
+                    .map(|row| row.get(0))
+                    .map_err(|e| {
+                        internal(match e.as_db_error() {
+                            Some(db) => format!(
+                                "{}\nCONTEXT:  unnamed portal parameter $1 = '...'",
+                                db.message()
+                            ),
+                            None => e.to_string(),
+                        })
+                    })
+            })
+            .await?,
+        ),
+        Value::Number(n) => n.as_i64().or_else(|| {
+            n.as_f64()
+                .filter(|n| n.fract() == 0.0)
+                .and_then(|n| format!("{n:.0}").parse().ok())
+        }),
+        _ => None,
+    };
+    if kind == IdAction::RejectLink {
+        // Confirmation was already committed, including on the error paths.
+        let ok = set_proposal_status(ready.storage.client(), &pid, "rejected", now(), decided_by)
+            .await?;
+        Ok(json!({"rejected": ok, "id": pid.echo}))
+    } else {
+        settle(ready, kind, &pid, decided_by).await
+    }
+}
+
+const CONSOLE_DICT_ERROR: &str = "cannot adapt type 'dict' using placeholder '%s' (format: AUTO)";
+
+/// psycopg/libpq's statement excerpt for the first query each service issues.
+/// These are API error text, including the caret, rather than our SQL queries.
+fn console_id_operator_error(kind: IdAction, ty: &str) -> ToolError {
+    let (line, caret) = match kind {
+        IdAction::AcceptLink => (
+            "...verdict, judge2_confidence FROM edge_proposals WHERE id = $1",
+            67,
+        ),
+        IdAction::RejectLink => (
+            "..._id JOIN entities d ON d.id = p.dst_id WHERE p.id = $1 FOR U...",
+            61,
+        ),
+        _ => (
+            "...rdict, judge3_confidence FROM entity_proposals WHERE id = $1",
+            67,
+        ),
+    };
+    internal(format!(
+        "operator does not exist: bigint = {ty}\nLINE 1: {line}\n{:caret$}^\nHINT:  No operator matches the given name and argument types. You might need to add explicit type casts.",
+        ""
+    ))
+}
+
+/// psycopg's list adapter picks an element type from non-null leaves. Only
+/// unknown/string arrays reach BIGINT's input parser; typed arrays fail during
+/// operator lookup. No database write is attempted by either path.
+#[allow(clippy::result_large_err)]
+fn console_id_array(value: &Value) -> Result<(String, Option<&'static str>), ToolError> {
+    fn leaves<'a>(value: &'a Value, out: &mut Vec<&'a Value>) {
+        match value {
+            Value::Array(items) => items.iter().for_each(|v| leaves(v, out)),
+            Value::Null => (),
+            v => out.push(v),
+        }
+    }
+    let mut items = Vec::new();
+    leaves(value, &mut items);
+    if items.iter().any(|v| v.is_object()) {
+        return Err(internal(CONSOLE_DICT_ERROR));
+    }
+    let types: std::collections::BTreeSet<_> = items.iter().map(|v| py_type(v)).collect();
+    if types.len() > 1 {
+        return Err(internal(format!(
+            "cannot dump lists of mixed types; got: {}",
+            types.into_iter().collect::<Vec<_>>().join(", ")
+        )));
+    }
+    let ty = match types.first().copied() {
+        Some("bool") => Some("boolean[]"),
+        Some("float") => Some("double precision[]"),
+        Some("int") => {
+            if items
+                .iter()
+                .all(|v| v.as_i64().is_some_and(|n| i16::try_from(n).is_ok()))
+            {
+                Some("smallint[]")
+            } else if items
+                .iter()
+                .all(|v| v.as_i64().is_some_and(|n| i32::try_from(n).is_ok()))
+            {
+                Some("integer[]")
+            } else if items.iter().all(|v| v.as_i64().is_some()) {
+                Some("bigint[]")
+            } else {
+                Some("numeric[]")
+            }
+        }
+        _ => None,
+    };
+    fn dump(v: &Value) -> String {
+        match v {
+            Value::Array(items) => format!(
+                "{{{}}}",
+                items.iter().map(dump).collect::<Vec<_>>().join(",")
+            ),
+            Value::Null => "NULL".into(),
+            Value::String(s)
+                if s.is_empty()
+                    || s.eq_ignore_ascii_case("null")
+                    || s.chars()
+                        .any(|c| c.is_ascii_whitespace() || "{},\\\"".contains(c)) =>
+            {
+                format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""))
+            }
+            Value::String(s) => s.clone(),
+            _ => crate::pyjson::py_str(v),
+        }
+    }
+    Ok((dump(value), ty))
+}

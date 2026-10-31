@@ -534,6 +534,51 @@ class TestListSources:
 
 
 class TestDelete:
+    @pytest.mark.parametrize("field", ["text", "substring", "source", "episode", "tag"])
+    @pytest.mark.parametrize("value", [5, True, [], {}])
+    @pytest.mark.parametrize("mixed", [False, True])
+    def test_delete_rejects_non_string_filters(self, pristine_service, field, value, mixed):
+        pristine_service.store("Keep tagged", source="keep", tags=["scratch"])
+        pristine_service.store("Keep untagged", source="keep")
+        valid_field = "source" if field == "substring" else "substring"
+        filters = {valid_field: "keep" if valid_field == "source" else "Keep"} if mixed else {}
+        filters[field] = value
+        try:
+            message = f"Delete filter '{field}' must be a string; supply a string or omit the filter."
+            with pytest.raises(ValueError, match=message):
+                pristine_service.delete(**filters, confirm_bulk=True)
+        finally:
+            assert {e["text"] for e in pristine_service.recent(n=10)["entries"]} == {
+                "Keep tagged", "Keep untagged",
+            }
+
+    @pytest.mark.parametrize("field", ["text", "substring", "source", "episode", "tag"])
+    @pytest.mark.parametrize("value", [5, True, [], {}])
+    def test_console_delete_rejects_non_string_filters(self, pristine_service, field, value):
+        import json
+        from pseudolife_memory.web.api import build_console_app
+        from tests.asgi_helpers import call, stub_mcp
+
+        pristine_service.store("Keep this memory", tags=["scratch"])
+        app = build_console_app(stub_mcp, "test-token", lambda: {}, pristine_service)
+        status, body = call(app, "POST", "/api/delete",
+                            headers=[(b"authorization", b"Bearer test-token"),
+                                     (b"content-type", b"application/json")],
+                            body=json.dumps({("source" if field == "substring" else "substring"): "Keep",
+                                             field: value, "confirm_bulk": True}).encode())
+        assert status == 400
+        assert json.loads(body)["error"] == (
+            f"Delete filter '{field}' must be a string; supply a string or omit the filter."
+        )
+        assert [e["text"] for e in pristine_service.recent(n=10)["entries"]] == ["Keep this memory"]
+
+    def test_delete_confirmed_string_tag_still_narrows(self, pristine_service):
+        pristine_service.store("Remove tagged", tags=["scratch"])
+        pristine_service.store("Keep untagged")
+        result = pristine_service.delete(tag=" SCRATCH ", confirm_bulk=True)
+        assert result["deleted_texts"] == ["Remove tagged"]
+        assert [e["text"] for e in pristine_service.recent(n=10)["entries"]] == ["Keep untagged"]
+
     def test_delete_by_exact_text_removes_entry(
         self, pristine_service: MemoryService,
     ) -> None:
