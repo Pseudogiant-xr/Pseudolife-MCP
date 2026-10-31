@@ -509,7 +509,7 @@ fn mcp_memory_reinforce<'a>(app: &'a crate::http::App, call: ToolCall<'a>) -> To
 /// `service.reinforce`: faded when no row has the id; else both counters
 /// in one statement, the resident copy, then the dereference credit
 /// (`used_via="reinforce"`, which never fails the call).
-async fn reinforce(
+pub(crate) async fn reinforce(
     ready: &Arc<Ready>,
     id: i64,
     log: bool,

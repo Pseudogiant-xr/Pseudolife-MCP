@@ -1,3 +1,3 @@
 | Method | Path | Phase | Status | Rust | Evidence |
 |---|---|---:|---|---|---|
-| POST | /api/facts/resolve | 4 | deferred | 501 | 501 (writes, W2-E) |
+| POST | /api/facts/resolve | 4 | deferred | served | `routes/writes.rs`; `w2e_writes.py` differential Console write scenarios compare HTTP status, response bodies and persisted state |

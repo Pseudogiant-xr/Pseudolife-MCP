@@ -130,7 +130,7 @@ struct Doomed {
 
 /// `service.delete` (`service.py:3325-3396`) over `CMS.delete_entries`
 /// (`cms.py:2618-2707`).
-async fn delete(
+pub(crate) async fn delete(
     ready: &Arc<Ready>,
     cfg: &MemoryConfig,
     a: &Map<String, Value>,
@@ -144,12 +144,6 @@ async fn delete(
     let max_removed =
         (!confirm && threshold > 0 && !crate::mutants::active("mcp-forget-no-bulk-guard"))
             .then_some(threshold);
-    let (text, substring, source, episode) = (
-        opt_str(a, "text"),
-        opt_str(a, "substring"),
-        opt_str(a, "source"),
-        opt_str(a, "episode"),
-    );
     let tag_norm = opt_str(a, "tag").map(|t| py_strip(t).to_lowercase());
 
     let ws = ready.write.lock().await;
@@ -157,18 +151,42 @@ async fn delete(
     let matches: Vec<Doomed> = {
         let bank = ready.bank.read().expect("bank lock");
         let band_pos = |name: &str| cfg.bands.iter().position(|b| b == name).unwrap_or(0);
-        let mut hits: Vec<usize> = (0..bank.entries.len())
-            .filter(|&i| {
-                let e = &bank.entries[i];
-                text.is_none_or(|t| e.text == t)
-                    && substring.is_none_or(|s| e.text.contains(s))
-                    && source.is_none_or(|s| e.source == s)
-                    && episode.is_none_or(|ep| e.episode_id.as_deref() == Some(ep))
-                    && tag_norm
-                        .as_deref()
-                        .is_none_or(|t| e.tags.iter().any(|x| x.as_str() == Some(t)))
-            })
-            .collect();
+        let mut hits = Vec::new();
+        for (i, e) in bank.entries.iter().enumerate() {
+            let equal = |key: &str, actual: Option<&str>| {
+                a.get(key)
+                    .filter(|v| !v.is_null())
+                    .is_none_or(|v| v.as_str().is_some_and(|s| actual == Some(s)))
+            };
+            if !equal("text", Some(&e.text)) {
+                continue;
+            }
+            if let Some(v) = a.get("substring").filter(|v| !v.is_null()) {
+                let Some(s) = v.as_str() else {
+                    let kind = match v {
+                        Value::Bool(_) => "bool",
+                        Value::Number(n) if n.to_string().contains(['.', 'e', 'E']) => "float",
+                        Value::Number(_) => "int",
+                        Value::Array(_) => "list",
+                        _ => "dict",
+                    };
+                    return Err(internal(format!(
+                        "'in <string>' requires string as left operand, not {kind}"
+                    )));
+                };
+                if !e.text.contains(s) {
+                    continue;
+                }
+            }
+            if equal("source", Some(&e.source))
+                && equal("episode", e.episode_id.as_deref())
+                && tag_norm
+                    .as_deref()
+                    .is_none_or(|t| e.tags.iter().any(|x| x.as_str() == Some(t)))
+            {
+                hits.push(i);
+            }
+        }
         hits.sort_by_key(|&i| (band_pos(&bank.entries[i].band), i));
         hits.iter()
             .map(|&i| {
@@ -792,7 +810,7 @@ async fn refresh_source_retired_lessons(ready: &Ready) -> Result<(), ToolError> 
 /// `service.cortex_forget` (`service.py:6161-6183`): a hard delete, the
 /// per-slot save, then the slot-read counters (a failure there is counted,
 /// never the call's).
-async fn cortex_forget(
+pub(crate) async fn cortex_forget(
     svc: &Arc<Service>,
     ready: &Arc<Ready>,
     entity: &str,

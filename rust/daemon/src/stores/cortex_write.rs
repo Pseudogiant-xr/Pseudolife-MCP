@@ -186,6 +186,7 @@ pub struct FactWrite<'a> {
     pub entity: &'a str,
     pub attribute: &'a str,
     pub value: &'a str,
+    pub raw: Map<String, Value>,
     pub embedding: Arc<[f32]>,
     pub slot_embedding: Option<Arc<[f32]>>,
     pub confidence: f64,
@@ -212,18 +213,18 @@ pub struct FactWrite<'a> {
 /// The record a `_log` row is written against: its slot, its value
 /// (`old_value`) and its confidence (the base of `confidence_delta`).
 pub(crate) struct LogAnchor {
-    pub entity: String,
-    pub attribute: String,
-    pub value: String,
+    pub entity: Value,
+    pub attribute: Value,
+    pub value: Value,
     pub confidence: f64,
 }
 
 impl LogAnchor {
     pub(super) fn of(r: &CortexRecord) -> LogAnchor {
         LogAnchor {
-            entity: r.entity.clone(),
-            attribute: r.attribute.clone(),
-            value: r.value.clone(),
+            entity: r.field("entity", &r.entity),
+            attribute: r.field("attribute", &r.attribute),
+            value: r.field("value", &r.value),
             confidence: r.confidence,
         }
     }
@@ -231,7 +232,7 @@ impl LogAnchor {
 
 /// The rest of a `_log` call.
 pub(crate) struct LogRow<'a> {
-    pub new_value: &'a str,
+    pub new_value: Value,
     pub new_conf: f64,
     pub t: f64,
     pub decision: &'a str,
@@ -314,7 +315,11 @@ impl CortexStore {
     ) {
         let anchor = LogAnchor::of(&self.records[anchor]);
         let row = LogRow {
-            new_value,
+            new_value: w
+                .raw
+                .get("value")
+                .cloned()
+                .unwrap_or_else(|| json!(new_value)),
             new_conf,
             t,
             decision,
@@ -367,6 +372,7 @@ impl CortexStore {
             entity_norm: norm_key(w.entity),
             attribute_norm: norm_key(w.attribute),
             value: w.value.to_string(),
+            raw: w.raw.clone(),
             polarity: "+".into(),
             status: status.into(),
             confidence: w.confidence,
@@ -413,7 +419,12 @@ impl CortexStore {
         supersedes: Option<String>,
         inherit_from: Option<usize>,
     ) -> usize {
-        let rec = self.new_record(w, "current", supersedes, inherit_from);
+        let mut rec = self.new_record(w, "current", supersedes, inherit_from);
+        if let Some(i) = inherit_from
+            && let Some(value) = self.records[i].raw.get("value")
+        {
+            rec.raw.insert("supersedes_value".into(), value.clone());
+        }
         let key = rec.key.clone();
         self.records.push(rec);
         let i = self.records.len() - 1;
@@ -500,10 +511,12 @@ impl CortexStore {
             self.records[new].value.clone(),
             self.records[new].confidence,
         );
+        let new_raw = self.records[new].field("value", &new_value);
         let contender = &mut self.records[c];
         contender.status = "superseded".into();
         contender.superseded_at = Some(w.now);
         contender.superseded_by_value = Some(new_value.clone());
+        contender.raw.insert("superseded_by_value".into(), new_raw);
         self.log(
             c,
             &new_value,
@@ -569,14 +582,26 @@ impl CortexStore {
             };
         }
         let mut supersedes = None;
+        let mut raw_supersedes = None;
         if let Some(e) = self.active_contender(&key) {
             let ex = &mut self.records[e];
             ex.status = "superseded".into();
             ex.superseded_at = Some(w.now);
             ex.superseded_by_value = Some(w.value.to_string());
+            ex.raw.insert(
+                "superseded_by_value".into(),
+                w.raw
+                    .get("value")
+                    .cloned()
+                    .unwrap_or_else(|| json!(w.value)),
+            );
             supersedes = Some(ex.value.clone());
+            raw_supersedes = ex.raw.get("value").cloned();
         }
-        let rec = self.new_record(w, "contested", supersedes, cur);
+        let mut rec = self.new_record(w, "contested", supersedes, cur);
+        if let Some(value) = raw_supersedes {
+            rec.raw.insert("supersedes_value".into(), value);
+        }
         self.records.push(rec);
         let i = self.records.len() - 1;
         self.contested.entry(key).or_default().push(i);
@@ -665,6 +690,13 @@ impl CortexStore {
             cur.status = "superseded".into();
             cur.superseded_at = Some(w.now);
             cur.superseded_by_value = Some(w.value.to_string());
+            cur.raw.insert(
+                "superseded_by_value".into(),
+                w.raw
+                    .get("value")
+                    .cloned()
+                    .unwrap_or_else(|| json!(w.value)),
+            );
             let old = cur.value.clone();
             self.log(
                 idx,
@@ -761,6 +793,7 @@ impl CortexStore {
             r.status = "retired".into();
             r.superseded_at = Some(now);
             r.superseded_by_value = Some(reason.clone());
+            r.raw.remove("superseded_by_value");
             let anchor = LogAnchor::of(&self.records[i]);
             self.log_retired(&anchor, now, &reason);
             count += 1;
@@ -813,6 +846,7 @@ mod tests {
             entity: e,
             attribute: a,
             value: v,
+            raw: Map::new(),
             embedding: vec![1.0, 0.0].into(),
             slot_embedding: Some(vec![0.0, 1.0].into()),
             confidence: conf,
@@ -1214,6 +1248,7 @@ mod tests {
                     entity: &e,
                     attribute: &a,
                     value: &v,
+                    raw: Map::new(),
                     embedding: emb,
                     slot_embedding: Some(vec![0.0, 1.0].into()),
                     confidence: x["confidence"].as_f64().unwrap(),

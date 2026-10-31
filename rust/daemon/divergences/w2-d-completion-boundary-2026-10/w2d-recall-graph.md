@@ -1,3 +1,3 @@
 | Named divergence | Omitted surface | Reason / owner |
 |---|---|---|
-| `w2d-recall-graph` | `/api/recall`; `/api/graph`, `/api/graph/projects`, `/api/graph/digest`, `/api/graph/communities`, `/api/graph/path`, `/api/graph/proposal-evidence`, `/api/wiki`, `/api/graph/entity-provenance`, `/api/curation/retired`, `/api/dream/status` | The MCP tools `memory_recall` and `memory_graph` are served (spec "memory_recall over MCP", "memory_graph over MCP"); their REST routes, the review/curation recovery and the dream projections are later W3-H work. |
+| `w2d-recall-graph` | `/api/graph/communities`, `/api/graph/proposal-evidence`, `/api/curation/retired` | These three routes remain 501 under D9. The Console read routes are served by `read/graph.rs`, with REST parity in `w2e_reads.py`; graph review and duplicate curation are served by the graph action routes. |

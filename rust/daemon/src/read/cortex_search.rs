@@ -240,9 +240,9 @@ pub fn record_to_dict_age(
     relative_age: bool,
 ) -> Map<String, Value> {
     let mut d = Map::new();
-    d.insert("entity".into(), json!(r.entity));
-    d.insert("attribute".into(), json!(r.attribute));
-    d.insert("value".into(), json!(r.value));
+    d.insert("entity".into(), r.field("entity", &r.entity));
+    d.insert("attribute".into(), r.field("attribute", &r.attribute));
+    d.insert("value".into(), r.field("value", &r.value));
     d.insert("polarity".into(), json!(r.polarity));
     d.insert("status".into(), json!(r.status));
     d.insert("kind".into(), json!(r.kind));
@@ -258,10 +258,13 @@ pub fn record_to_dict_age(
         json!(round4(effective_confidence(r, now))),
     );
     d.insert("stale".into(), json!(is_stale(r, now)));
-    d.insert("supersedes_value".into(), opt_str(&r.supersedes_value));
+    d.insert(
+        "supersedes_value".into(),
+        r.link("supersedes_value", &r.supersedes_value),
+    );
     d.insert(
         "superseded_by_value".into(),
-        opt_str(&r.superseded_by_value),
+        r.link("superseded_by_value", &r.superseded_by_value),
     );
     d.insert("superseded_at".into(), opt_f64(r.superseded_at));
     d.insert("tx_time".into(), opt_f64(r.tx_time));
