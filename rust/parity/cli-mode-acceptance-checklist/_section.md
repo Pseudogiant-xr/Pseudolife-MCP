@@ -12,7 +12,7 @@ Phase 1/2 remainder. The original 26 plus upstream maintainer/test-login made 28
 at the `f709abb5` pin; `delegate-watch` (#755, 2026-10-15) makes 29 on master
 (`cli.py` at `98c5d6bf`). Tier labels record the requested scope, not a claim of HTTP-only
 dependencies: recovery, audit and lease operator actions reach PostgreSQL directly.
-They remain deferred without introducing a database client into this binary.
+Audit and lease have explicit-DSN native subsets using the Rust PostgreSQL client; recovery remains deferred, as do the unsupported audit and lease shapes.
 
 The first slice implements help and unknown dispatch and adds a separate 15-case
 CLI corpus, strict byte self-replay/candidate judge, environment selector and help
@@ -38,9 +38,13 @@ master: `native` (every shape the row claims), `partly` (the ported sub-rows the
 Evidence cell names run natively, other shapes defer by name before any effect)
 or `defers` (every invocation prints the deferral and exits 1: the mode is in
 `DEFERRED_MODES` in `shim/src/cli.rs` and has no native leaf). A mode's Status stays `deferred` until every sub-row closes; the
-sub-rows' own status is in Parity rows. Audited at `98c5d6bf` (2026-10-19): 9
-modes native, 15 partly and 5 defer; `delegate-watch` has no native leaf and no
-scoped sub-row yet.
+sub-rows' own status is in Parity rows. Audited at `75a8015e` (2026-11-01): 9
+modes native, 15 partly and 5 defer. The count is of 29 logical modes, with
+`conductor-watch` and its deprecated `delegate-watch` spelling sharing the
+existing `delegate-watch` row; both defer and have no native leaf or scoped
+sub-row yet. Check `shim/src/main.rs` as well as `shim/src/cli.rs`: the former
+dispatches the native lease, board-audit, maintainer and sent-serve paths
+before the latter's deferral list.
 
 | Mode | Phase | Status | Native | Evidence |
 |---|---|---|---|---|
