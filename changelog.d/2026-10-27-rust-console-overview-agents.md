@@ -1,3 +1,0 @@
-### Added (2026-10-27 — the Rust daemon serves the Console dashboard and its peer list)
-
-- The Rust daemon now answers `GET /api/overview`, the Console dashboard's one-round-trip summary, and the default view of `GET /api/agents`, the open sessions other than the caller's, where both returned 501 `not_implemented`. The overview serves every layer's count, the stats, dream and loop-health blocks as the Python daemon does, each layer falling back to its empty default rather than failing the dashboard. `/api/agents` honours its `limit` (default 5) under `coordination.awareness_limit` and answers a limit below 1 with a 400, as Python does.

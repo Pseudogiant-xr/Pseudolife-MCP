@@ -1,3 +1,0 @@
-### Added (2026-10-27 — the Rust daemon serves the Console's fact, stream and episode views)
-
-- The Rust daemon now answers eleven Console reads that returned 501 `not_implemented`: `GET /api/facts`, `/api/facts/history`, `/api/world`, `/api/lessons`, `/api/sources`, `/api/recent`, `/api/chain`, `/api/entry`, `/api/episodes`, `/api/episodes/summary` and `/api/consolidation`. Each serves the same body as the Python daemon, including the row cap (`count`, `total`, `truncated`), the query defaults and coercions, and the read side effects (`/api/entry` bumps the access count and credits the retrieval that served the entry). Each route reuses the service function its MCP tool already calls, without the MCP layer's reshaping.
