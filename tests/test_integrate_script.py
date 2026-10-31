@@ -1123,6 +1123,22 @@ def test_a_stepless_leg_does_not_excuse_a_sibling_leg_that_failed(world, capsys,
     assert FAILING in out and "merged #11 " not in out, out
 
 
+@pytest.mark.parametrize("conclusion", ["timed_out", "action_required"])
+def test_only_a_failed_stepless_leg_gives_no_verdict(world, capsys, conclusion):
+    # A sibling leg the rollup omits, stepless but timed out or needing
+    # action, is no cancel and must not be excused (Codex review of 758b7806).
+    _gate_world(world, rollup=["508"])
+    world.gh.actions_jobs["509"].update(conclusion=conclusion, steps=[])
+    for job in world.gh.attempt_jobs[(RUN, ATTEMPT)]:
+        if job["id"] == 509:
+            job["conclusion"] = conclusion
+    world.gh.runs[RUN]["conclusion"] = "cancelled"
+
+    assert _build() == 0, capsys.readouterr()
+
+    assert "merged #11 " not in capsys.readouterr().out
+
+
 def test_a_stepless_gate_with_no_cancelled_need_is_unverified(world, capsys):
     # The cancel landed after every job the gate needs had passed: nothing
     # failed, but the gate gave no verdict, so it is not admitted either.
