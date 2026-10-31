@@ -1,5 +1,10 @@
 # Cortex Console v2 — design
 
+> Archival note: [D9 / Proposal A / B2r](../../../rust/CUTOVER.md) (2026-10-23)
+> supersedes the route scope below: `GET /api/graph/communities` is
+> deprecated for removal in a later release; no replacement; no caller.
+> Python handlers remain unchanged; Rust keeps its declared `501` responses.
+
 **Status:** approved design (2026-06-25)
 **Supersedes the aesthetic/scope of:** `docs/specs/2026-06-23-web-frontend-design.md` (v1, now shipped on `master`)
 **Author:** agent + user (brainstorm, 2026-06-25)

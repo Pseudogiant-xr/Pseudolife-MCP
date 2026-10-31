@@ -4296,6 +4296,12 @@ before 2026-08-14 also need the PostgreSQL 16 → 18 volume cutover —
 [the PostgreSQL 18 migration runbook](../runbooks/postgres-18-migration.md).
 The milestones:
 
+> `POST /api/lessons/restore` and `POST /api/world/restore` in the v37
+> history below are deprecated; use `memory_graph_review(action="restore_slot")`
+> with `store="lesson"` or `store="world"` instead. Removal is in a later
+> release under [D9 / Proposal A / B2r](../../rust/CUTOVER.md) (2026-10-23);
+> Python handlers remain unchanged and Rust keeps its declared `501` responses.
+
 | Version | What it added |
 |---|---|
 | v11 | Temporal/provenance stamp (tx/valid time, HLC ordering, writer/session) |
