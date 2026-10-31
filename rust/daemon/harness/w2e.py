@@ -1852,6 +1852,12 @@ SCENARIOS.update({
         "config": "memory:\n  delete_confirm_threshold: 2\n",
         "seed": FORGET_SEED,
         "ops": [
+            # Malformed filters must never widen a confirmed deletion, even
+            # alongside a valid selector. MCP bindings reject these first.
+            *[forget("memory", **{"substring": "deploy", field: value,
+                                  "confirm_bulk": True})
+              for field in ("text", "substring", "source", "episode", "tag")
+              for value in (5, True, [], {})],
             # a filter is required; an empty string is no filter here
             forget("memory"),
             forget("memory", text=""),
