@@ -1078,6 +1078,44 @@ def test_a_gate_whose_steps_cannot_be_read_is_unverified(world, capsys, steps):
     assert "left out #11: the steps of job 508 could not be read (none listed), " in out, out
 
 
+@pytest.mark.parametrize("run_conclusion, run_attempt, admitted", [
+    # #1074's 7cb16da6: cancelling the run while its gate job was starting
+    # left the gate `failure` with no steps; the attempt itself concluded
+    # `cancelled`, so the gate never ran a verdict.
+    ("cancelled", ATTEMPT, True),
+    # The same record in an attempt that did not conclude cancelled proves
+    # no cancel reached the gate.
+    ("failure", ATTEMPT, False),
+    (None, ATTEMPT, False),
+    # The run's record describes a later attempt, not this one.
+    ("cancelled", str(int(ATTEMPT) + 1), False),
+])
+def test_a_gate_with_no_steps_in_a_cancelled_attempt_carries_no_verdict(
+        world, capsys, run_conclusion, run_attempt, admitted):
+    _gate_world(world, rollup=list(GATES))
+    for job in GATES:
+        world.gh.actions_jobs[job]["steps"] = []
+    world.gh.runs[RUN].update(conclusion=run_conclusion, run_attempt=int(run_attempt))
+
+    assert _build() == 0, capsys.readouterr()
+
+    out = capsys.readouterr().out
+    assert FAILING not in out, out
+    assert (UNVERIFIED not in out) is admitted, out
+
+
+def test_a_stepless_gate_still_needs_its_other_jobs_clean(world, capsys):
+    # A cancelled attempt does not excuse a job that failed beside the gate.
+    _gate_world(world, run=_with(_RUN_1059, j500="failure"), rollup=list(GATES))
+    for job in GATES:
+        world.gh.actions_jobs[job]["steps"] = []
+    world.gh.runs[RUN]["conclusion"] = "cancelled"
+
+    assert _build() == 0, capsys.readouterr()
+
+    assert FAILING in capsys.readouterr().out
+
+
 @pytest.mark.parametrize("sibling, outcome", [
     # The rollup lists only one leg; the other failed before its
     # cancelled-need step ran.
