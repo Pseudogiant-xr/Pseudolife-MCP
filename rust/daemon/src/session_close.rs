@@ -77,7 +77,7 @@ async fn end_client_session(ready: &Ready, key: &str, root: Option<(&str, Option
 
 /// `_auto_title_locked`: a root still carrying the generic lazy-open title
 /// takes a content title from its subtree's entries.
-async fn auto_title(
+pub(crate) async fn auto_title(
     ready: &Arc<Ready>,
     ws: &mut WriteState,
     root: usize,
