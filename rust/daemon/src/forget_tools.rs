@@ -40,6 +40,7 @@ fn opt_str<'a>(a: &'a Map<String, Value>, k: &str) -> Option<&'a str> {
     a.get(k).and_then(Value::as_str)
 }
 
+#[allow(clippy::result_large_err)]
 fn validate_delete_filters(a: &Map<String, Value>) -> Result<(), ToolError> {
     for field in FILTERS {
         if a.get(field).is_some_and(|v| !v.is_null() && !v.is_string()) {
