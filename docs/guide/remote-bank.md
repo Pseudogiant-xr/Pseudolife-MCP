@@ -505,10 +505,13 @@ token rotation therefore has to be written to both places.
 A client machine's shim is not moved when the daemon is updated on its own
 host. `pseudolife-mcp update` (or `update --clients-only`) on the client
 machine installs the daemon's release as a new shim runtime and refreshes
-the plugin cache and the Codex step. To have that happen daily, once:
+the plugin cache and the Codex step. The client-only installer offers to
+have that happen daily (one question, default no; `--client-update-schedule
+yes` or `-ClientUpdateSchedule yes` answers it at 04:30, `HH:MM` at that
+time, `no` skips it). Without the installer, or to change the time, once:
 
 ```bash
-pseudolife-mcp update --schedule 03:30 --daemon-url <url>
+pseudolife-mcp update --schedule 04:30 --daemon-url <url>
 ```
 
 It installs a scheduled task (`Pseudolife Client Update`, Windows) or a
