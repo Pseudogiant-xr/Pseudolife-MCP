@@ -18,11 +18,11 @@
     "docs/guide/agent-isolation.md": "e8509e0c6567426a88fad7c301b0f06ac8d69d19f9724ffe9a4643ece7f7d6e4",
     "docs/guide/benchmarks.md": "577a6a8230de0d57351e3e57262bb2b5385b27e6292bfc131c21c3522330fb97",
     "docs/guide/comparison.md": "46f0c02b4e819683b2e861701e0e08b37d5ec5430225763aa3eb27f797969380",
-    "docs/guide/configuration.md": "c0755f055a9e22ad500e855fbf80b1427357884e553c8673fe75ddf19681465f",
+    "docs/guide/configuration.md": "ba102d5259100449422544764ebc34aeac026c50a763a45863877c7b223c705f",
     "docs/guide/coordination-recovery.md": "04425509736ec7e40beb4bc46e7810d32ee0a68d791a969b77876c945ab5cb79",
-    "docs/guide/dreaming.md": "8af52d03632b29d60e54b34d7501cc14439b79512a4723cc4c13a4b22e733b7b",
+    "docs/guide/dreaming.md": "64c92fa9d4a2eb224f3d5e72e6f03cfe81219c959f15914ea745464db93ec249",
     "docs/guide/episodes.md": "547f36bb2469f3ae352107374ba63ebbeecb3929be344730af9c7501d8802f49",
-    "docs/guide/memory-model.md": "c0c2eee09c4f4082d5ced5c51bd1d4f890d2065dc23ddb16c2437d0e9c2fac2e",
+    "docs/guide/memory-model.md": "a63a20c4a39519599e092d8ff308df4dd52440276737792865d4fc699b3e1bbd",
     "docs/guide/providers.md": "755967b36f1b4fe65a189b925a9df8f7c0244025270746fc9cc002966d793d16",
     "docs/guide/remote-bank.md": "339161e26cee88b769f162df0bdbb1ed1b2c0df1839c43fa9854407af1450d46",
     "docs/guide/retrieval.md": "460f9d577022bc6b888f3de05bec0519e4a196b1f92414074ec1dc1bc2f5bb91",
@@ -36,7 +36,7 @@
     "docs/i18n/README.zh.md": "bf01d89fef39e2280a31adc5e87ccbee924c51918fddee03e32814d1a46ea893",
     "docs/plans/2026-06-27-memory-lifecycle-utilization.md": "5acddc5b17d8efc1a87fa98b3e1b980b36c475a9b2df69d96767c5037512f661",
     "docs/plans/2026-08-14-readme-demo-gif-storyboard.md": "dc55a640e549d3b05f691eed65bd168e3cd6b2de4716b20068df798412a4f42d",
-    "docs/runbooks/deep-dream.md": "226d53e857d5e4b4d3b183396b9ffbfbf7a6bc4f238c2b9ed699d642d1957696",
+    "docs/runbooks/deep-dream.md": "7d1e7e74eb3995e22b1306b54fbe47b7dff0c865a918d211864882fd8368a139",
     "docs/runbooks/docker-disk-retention.md": "6d1f10b79a5707bca05ecc892496f907b10c6393e0fde7a7f5e429db3b44b5f3",
     "docs/runbooks/embedding-v25-migration.md": "7edc7ffa51db5aa431a7968e0356d51a61b80072248b50fe0243d466a83db0e9",
     "docs/runbooks/incremental-builds.md": "fc979134d68e40823930bc4981502d6b9746c2fd2d93098622a38d57318d0bab",
@@ -107,7 +107,7 @@
     "docs/specs/2026-10-19-self-hosted-parity-lane.md": "39cdfc17adb157852cb4e28c83da0f4f9553230e7d60cfc72187b8c6c73edb01",
     "docs/specs/2026-10-20-suite-ci-optimization-plan.md": "5dd06d09718ddc4059b5744000959b99d1da4171c98bea281527fa9c44e3eb83",
     "docs/superpowers/plans/2026-06-25-cortex-console-v2-phase0.md": "131e2b6577abedcfb73428ba2d2e53686a73334c1a2cf6b789ebb05b5ce0a7f9",
-    "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md": "93274a9c8d11f869bc844967510a8e13870df5f55425f739b2545ef08ca7308b",
+    "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md": "d1496bd1de7572ecbdcb0bdeedcb60aa10cbba5aef94947066d3d7e96fbb0455",
     "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase2.md": "ecc0779882b6b317132236df74386baf01cec72346a9a50e09d03a1d9f907235",
     "docs/superpowers/plans/2026-06-27-cortex-console-atlas-stage1.md": "b6654b677c7fc453161f681fff637d95b921cca043ae53d3b6f5b51cd646cb59",
     "docs/superpowers/plans/2026-06-27-cortex-console-atlas-stage2.md": "ec189eb76fda541aed5ecb87240a6b7376e86df7fcddb1fccd2cff69846e90b5",
@@ -141,7 +141,7 @@
     "docs/superpowers/plans/2026-07-28-embedding-backbone-v25.md": "a5c344b872818deef6151b315dfac1199cd8162fd0bc629e85e7db2b378057c0",
     "docs/superpowers/plans/2026-07-30-set-valued-slots.md": "f792b94696adb472b8d8332e64817c5e3e28a77fd10b6f7f244a9d8dbfd9096c",
     "docs/superpowers/plans/2026-07-31-aggregate-conversion-guard.md": "eee07e576f08e333ce4f3f19dc513b6c24d76f3eeaeff402b393700b882d82b6",
-    "docs/superpowers/specs/2026-06-25-cortex-console-v2-design.md": "632e5757020f9efdc748c778e4509f8f00ebfb8b7ea507a7d89792f997489e47",
+    "docs/superpowers/specs/2026-06-25-cortex-console-v2-design.md": "a9a15387347851a67732f972a5a14560c2e2474543f00993a4e8a60277f31b9b",
     "docs/superpowers/specs/2026-06-27-cortex-console-atlas-design.md": "14c1109ce4b154faed7ec3b157d209a543d970f8db55400abd8a4906c00d48ca",
     "docs/superpowers/specs/2026-06-28-deep-dream-graph-consolidation-design.md": "1f37f17934391f8623e328a0585516fb6f33fc28136d5c8474640cf1ba024e01",
     "docs/superpowers/specs/2026-06-28-relation-confidence-repair-design.md": "8a73ebf16c34b833324d43620f51d3d26c3f2c821d9a12ecaad4f1f84c066c12",
@@ -798,7 +798,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:4332",
+          "location": "docs/guide/configuration.md:4338",
           "shape": {
             "argv_source": "board-audit",
             "channel": "argv",
@@ -809,7 +809,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:4336",
+          "location": "docs/guide/configuration.md:4342",
           "shape": {
             "argv_source": "board-audit redact",
             "channel": "argv",
@@ -1292,7 +1292,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:1271",
+          "location": "docs/guide/dreaming.md:1274",
           "shape": {
             "argv_source": "briefing",
             "channel": "argv",
@@ -1377,7 +1377,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/memory-model.md:841",
+          "location": "docs/guide/memory-model.md:849",
           "shape": {
             "argv_source": "briefing",
             "channel": "argv",
@@ -3699,7 +3699,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:4343",
+          "location": "docs/guide/configuration.md:4349",
           "shape": {
             "argv_source": "invite",
             "channel": "argv",
@@ -3710,7 +3710,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:4348",
+          "location": "docs/guide/configuration.md:4354",
           "shape": {
             "argv_source": "invite --list",
             "channel": "argv",
@@ -4413,7 +4413,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:4335",
+          "location": "docs/guide/configuration.md:4341",
           "shape": {
             "argv_source": "lease run",
             "channel": "argv",
@@ -7890,7 +7890,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:4332",
+          "location": "docs/guide/configuration.md:4338",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -7906,7 +7906,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:4339",
+          "location": "docs/guide/configuration.md:4345",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -8826,7 +8826,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:4332",
+          "location": "docs/guide/configuration.md:4338",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -9057,7 +9057,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:4339",
+          "location": "docs/guide/configuration.md:4345",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -9167,7 +9167,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:4323",
+          "location": "docs/guide/configuration.md:4329",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -9183,7 +9183,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:4325",
+          "location": "docs/guide/configuration.md:4331",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -9776,7 +9776,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:4325",
+          "location": "docs/guide/configuration.md:4331",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -9877,7 +9877,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:4323",
+          "location": "docs/guide/configuration.md:4329",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -9969,7 +9969,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:4320",
+          "location": "docs/guide/configuration.md:4326",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -9985,7 +9985,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:1263",
+          "location": "docs/guide/dreaming.md:1266",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -10001,7 +10001,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:1341",
+          "location": "docs/guide/dreaming.md:1344",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -10017,7 +10017,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:1346",
+          "location": "docs/guide/dreaming.md:1349",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -10065,23 +10065,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/runbooks/deep-dream.md:11",
-          "shape": {
-            "channel": "config",
-            "complete": false,
-            "omitted_optional": null,
-            "parameters": {
-              "judge_batch": {
-                "expression": "field reference"
-              }
-            }
-          },
-          "usage": "reference"
-        },
-        {
-          "dynamic": "unresolved",
-          "evidence": "documented",
-          "location": "docs/runbooks/deep-dream.md:144",
+          "location": "docs/runbooks/deep-dream.md:159",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -10097,7 +10081,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/runbooks/deep-dream.md:150",
+          "location": "docs/runbooks/deep-dream.md:165",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -10113,7 +10097,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/runbooks/deep-dream.md:167",
+          "location": "docs/runbooks/deep-dream.md:182",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -10129,7 +10113,23 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/runbooks/deep-dream.md:261",
+          "location": "docs/runbooks/deep-dream.md:26",
+          "shape": {
+            "channel": "config",
+            "complete": false,
+            "omitted_optional": null,
+            "parameters": {
+              "judge_batch": {
+                "expression": "field reference"
+              }
+            }
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "documented",
+          "location": "docs/runbooks/deep-dream.md:276",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -10145,7 +10145,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/runbooks/deep-dream.md:32",
+          "location": "docs/runbooks/deep-dream.md:47",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -10161,7 +10161,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/runbooks/deep-dream.md:72",
+          "location": "docs/runbooks/deep-dream.md:87",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -10256,7 +10256,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/runbooks/deep-dream.md:150",
+          "location": "docs/runbooks/deep-dream.md:165",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -10269,7 +10269,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/runbooks/deep-dream.md:167",
+          "location": "docs/runbooks/deep-dream.md:182",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -10394,7 +10394,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/runbooks/deep-dream.md:261",
+          "location": "docs/runbooks/deep-dream.md:276",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -10422,7 +10422,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/runbooks/deep-dream.md:11",
+          "location": "docs/runbooks/deep-dream.md:26",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -10443,7 +10443,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:4320",
+          "location": "docs/guide/configuration.md:4326",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -10532,7 +10532,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/runbooks/deep-dream.md:72",
+          "location": "docs/runbooks/deep-dream.md:87",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -10587,7 +10587,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/runbooks/deep-dream.md:32",
+          "location": "docs/runbooks/deep-dream.md:47",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -10671,7 +10671,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:1346",
+          "location": "docs/guide/dreaming.md:1349",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -10692,7 +10692,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:1341",
+          "location": "docs/guide/dreaming.md:1344",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -10769,7 +10769,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:1263",
+          "location": "docs/guide/dreaming.md:1266",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -10790,7 +10790,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/runbooks/deep-dream.md:144",
+          "location": "docs/runbooks/deep-dream.md:159",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -11107,7 +11107,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:4317",
+          "location": "docs/guide/configuration.md:4323",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -11123,7 +11123,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:4318",
+          "location": "docs/guide/configuration.md:4324",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -11155,7 +11155,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:1312",
+          "location": "docs/guide/dreaming.md:1315",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -12366,7 +12366,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:4318",
+          "location": "docs/guide/configuration.md:4324",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -13543,7 +13543,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:1312",
+          "location": "docs/guide/dreaming.md:1315",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -13577,7 +13577,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:4317",
+          "location": "docs/guide/configuration.md:4323",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -14200,7 +14200,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/memory-model.md:660",
+          "location": "docs/guide/memory-model.md:664",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -14216,7 +14216,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/memory-model.md:675",
+          "location": "docs/guide/memory-model.md:679",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -14232,7 +14232,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/memory-model.md:679",
+          "location": "docs/guide/memory-model.md:683",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -14248,7 +14248,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/memory-model.md:811",
+          "location": "docs/guide/memory-model.md:819",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -14544,7 +14544,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/memory-model.md:811",
+          "location": "docs/guide/memory-model.md:819",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -14599,7 +14599,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/memory-model.md:679",
+          "location": "docs/guide/memory-model.md:683",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -14633,7 +14633,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/memory-model.md:660",
+          "location": "docs/guide/memory-model.md:664",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -14667,7 +14667,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/memory-model.md:675",
+          "location": "docs/guide/memory-model.md:679",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -15137,7 +15137,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:4327",
+          "location": "docs/guide/configuration.md:4333",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -16051,7 +16051,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:4327",
+          "location": "docs/guide/configuration.md:4333",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -17116,7 +17116,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:4333",
+          "location": "docs/guide/configuration.md:4339",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -17172,7 +17172,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:4333",
+          "location": "docs/guide/configuration.md:4339",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -18062,7 +18062,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:4321",
+          "location": "docs/guide/configuration.md:4327",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -18078,7 +18078,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:4321",
+          "location": "docs/guide/configuration.md:4327",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -18094,7 +18094,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:4321",
+          "location": "docs/guide/configuration.md:4327",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -18110,7 +18110,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:4334",
+          "location": "docs/guide/configuration.md:4340",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -18126,7 +18126,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/memory-model.md:792",
+          "location": "docs/guide/memory-model.md:800",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -18182,7 +18182,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:4321",
+          "location": "docs/guide/configuration.md:4327",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -18195,7 +18195,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:4334",
+          "location": "docs/guide/configuration.md:4340",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -18229,7 +18229,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:4321",
+          "location": "docs/guide/configuration.md:4327",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -18250,7 +18250,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:4321",
+          "location": "docs/guide/configuration.md:4327",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -18263,7 +18263,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/memory-model.md:792",
+          "location": "docs/guide/memory-model.md:800",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -19943,7 +19943,7 @@
           "dynamic": "unresolved",
           "evidence": "documented",
           "forwarded_from_tool": "memory_agents",
-          "location": "docs/guide/configuration.md:4337",
+          "location": "docs/guide/configuration.md:4343",
           "mapping_source": "pseudolife_memory/coordination.py:835",
           "shape": {
             "channel": "body",
@@ -21210,7 +21210,7 @@
           "dynamic": "unresolved",
           "evidence": "documented",
           "forwarded_from_tool": "memory_agents",
-          "location": "docs/guide/configuration.md:4337",
+          "location": "docs/guide/configuration.md:4343",
           "mapping_source": "pseudolife_memory/coordination.py:835",
           "shape": {
             "channel": "body",
@@ -21236,7 +21236,7 @@
           "dynamic": "unresolved",
           "evidence": "documented",
           "forwarded_from_tool": "memory_agents",
-          "location": "docs/guide/configuration.md:4339",
+          "location": "docs/guide/configuration.md:4345",
           "mapping_source": "pseudolife_memory/coordination.py:835",
           "shape": {
             "channel": "body",
@@ -21268,7 +21268,7 @@
           "dynamic": "unresolved",
           "evidence": "documented",
           "forwarded_from_tool": "memory_agents",
-          "location": "docs/guide/configuration.md:4345",
+          "location": "docs/guide/configuration.md:4351",
           "mapping_source": "pseudolife_memory/coordination.py:835",
           "shape": {
             "channel": "body",
@@ -33655,7 +33655,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:4343",
+          "location": "docs/guide/configuration.md:4349",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -33668,7 +33668,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:4348",
+          "location": "docs/guide/configuration.md:4354",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -35359,7 +35359,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:4343",
+          "location": "docs/guide/configuration.md:4349",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -35372,7 +35372,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:4348",
+          "location": "docs/guide/configuration.md:4354",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -41268,7 +41268,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/memory-model.md:911",
+          "location": "docs/guide/memory-model.md:919",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -42421,7 +42421,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:1271",
+          "location": "docs/guide/dreaming.md:1274",
           "shape": {
             "channel": "query",
             "complete": false,
@@ -42840,7 +42840,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:238",
+          "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:243",
           "shape": {
             "channel": "query",
             "complete": false,
@@ -42883,7 +42883,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/runbooks/deep-dream.md:265",
+          "location": "docs/runbooks/deep-dream.md:280",
           "shape": {
             "channel": "query",
             "complete": false,
@@ -42922,7 +42922,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/memory-model.md:624",
+          "location": "docs/guide/memory-model.md:626",
           "shape": {
             "channel": "query",
             "complete": false,
@@ -42934,7 +42934,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/memory-model.md:751",
+          "location": "docs/guide/memory-model.md:757",
           "shape": {
             "channel": "query",
             "complete": false,
@@ -42946,7 +42946,19 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/runbooks/deep-dream.md:255",
+          "location": "docs/runbooks/deep-dream.md:18",
+          "shape": {
+            "channel": "query",
+            "complete": false,
+            "expression": "Request helper, URL suffix or body requires resolution at this location.",
+            "omitted_optional": null,
+            "parameters": {}
+          }
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "documented",
+          "location": "docs/runbooks/deep-dream.md:270",
           "shape": {
             "channel": "query",
             "complete": false,
@@ -42969,7 +42981,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/runbooks/deep-dream.md:22",
+          "location": "docs/runbooks/deep-dream.md:37",
           "shape": {
             "channel": "query",
             "complete": false,
@@ -43018,7 +43030,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:255",
+          "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:260",
           "shape": {
             "channel": "query",
             "complete": false,
@@ -43034,7 +43046,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:50",
+          "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:55",
           "shape": {
             "channel": "query",
             "complete": false,
@@ -43050,7 +43062,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:67",
+          "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:72",
           "shape": {
             "channel": "query",
             "complete": false,
@@ -43062,7 +43074,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/superpowers/specs/2026-06-25-cortex-console-v2-design.md:102",
+          "location": "docs/superpowers/specs/2026-06-25-cortex-console-v2-design.md:107",
           "shape": {
             "channel": "query",
             "complete": false,
@@ -43078,7 +43090,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "unverified",
-          "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:103",
+          "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:108",
           "method": null,
           "shape": {
             "channel": "body",
@@ -43664,7 +43676,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "unverified",
-          "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:91",
+          "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:96",
           "method": null,
           "shape": {
             "channel": "body",
@@ -43829,7 +43841,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:50",
+          "location": "docs/runbooks/deep-dream.md:19",
           "shape": {
             "channel": "query",
             "complete": false,
@@ -43841,7 +43853,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:59",
+          "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:4",
           "shape": {
             "channel": "query",
             "complete": false,
@@ -43853,7 +43865,43 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/superpowers/specs/2026-06-25-cortex-console-v2-design.md:100",
+          "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:55",
+          "shape": {
+            "channel": "query",
+            "complete": false,
+            "expression": "Request helper, URL suffix or body requires resolution at this location.",
+            "omitted_optional": null,
+            "parameters": {}
+          }
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "documented",
+          "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:64",
+          "shape": {
+            "channel": "query",
+            "complete": false,
+            "expression": "Request helper, URL suffix or body requires resolution at this location.",
+            "omitted_optional": null,
+            "parameters": {}
+          }
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "documented",
+          "location": "docs/superpowers/specs/2026-06-25-cortex-console-v2-design.md:105",
+          "shape": {
+            "channel": "query",
+            "complete": false,
+            "expression": "Request helper, URL suffix or body requires resolution at this location.",
+            "omitted_optional": null,
+            "parameters": {}
+          }
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "documented",
+          "location": "docs/superpowers/specs/2026-06-25-cortex-console-v2-design.md:4",
           "shape": {
             "channel": "query",
             "complete": false,
@@ -43865,7 +43913,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "unverified",
-          "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:95",
+          "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:100",
           "method": null,
           "shape": {
             "channel": "body",
@@ -43889,7 +43937,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:181",
+          "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:186",
           "shape": {
             "channel": "query",
             "complete": false,
@@ -43901,7 +43949,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:50",
+          "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:55",
           "shape": {
             "channel": "query",
             "complete": false,
@@ -43913,7 +43961,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:57",
+          "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:62",
           "shape": {
             "channel": "query",
             "complete": false,
@@ -43925,7 +43973,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/superpowers/specs/2026-06-25-cortex-console-v2-design.md:99",
+          "location": "docs/superpowers/specs/2026-06-25-cortex-console-v2-design.md:104",
           "shape": {
             "channel": "query",
             "complete": false,
@@ -43937,7 +43985,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "unverified",
-          "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:184",
+          "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:189",
           "method": null,
           "shape": {
             "channel": "body",
@@ -43950,7 +43998,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "unverified",
-          "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:94",
+          "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:99",
           "method": null,
           "shape": {
             "channel": "body",
@@ -44051,7 +44099,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:213",
+          "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:218",
           "shape": {
             "channel": "query",
             "complete": false,
@@ -44070,7 +44118,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:50",
+          "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:55",
           "shape": {
             "channel": "query",
             "complete": false,
@@ -44092,7 +44140,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:61",
+          "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:66",
           "shape": {
             "channel": "query",
             "complete": false,
@@ -44104,7 +44152,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/superpowers/specs/2026-06-25-cortex-console-v2-design.md:101",
+          "location": "docs/superpowers/specs/2026-06-25-cortex-console-v2-design.md:106",
           "shape": {
             "channel": "query",
             "complete": false,
@@ -44126,7 +44174,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "unverified",
-          "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:218",
+          "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:101",
           "method": null,
           "shape": {
             "channel": "body",
@@ -44139,7 +44187,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "unverified",
-          "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:96",
+          "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:223",
           "method": null,
           "shape": {
             "channel": "body",
@@ -44405,7 +44453,19 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:1174",
+          "location": "docs/guide/dreaming.md:1173",
+          "shape": {
+            "channel": "query",
+            "complete": false,
+            "expression": "Request helper, URL suffix or body requires resolution at this location.",
+            "omitted_optional": null,
+            "parameters": {}
+          }
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "documented",
+          "location": "docs/guide/dreaming.md:1177",
           "shape": {
             "channel": "query",
             "complete": false,
@@ -44424,7 +44484,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/runbooks/deep-dream.md:107",
+          "location": "docs/runbooks/deep-dream.md:122",
           "shape": {
             "channel": "query",
             "complete": false,
@@ -44438,6 +44498,18 @@
                 "literal": ""
               }
             }
+          }
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "documented",
+          "location": "docs/runbooks/deep-dream.md:20",
+          "shape": {
+            "channel": "query",
+            "complete": false,
+            "expression": "Request helper, URL suffix or body requires resolution at this location.",
+            "omitted_optional": null,
+            "parameters": {}
           }
         }
       ]
@@ -45512,7 +45584,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:213",
+          "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:218",
           "shape": {
             "channel": "query",
             "complete": false,
@@ -45531,7 +45603,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "unverified",
-          "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:100",
+          "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:105",
           "method": null,
           "shape": {
             "channel": "body",
@@ -45544,7 +45616,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "unverified",
-          "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:217",
+          "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:222",
           "method": null,
           "shape": {
             "channel": "body",
@@ -46414,7 +46486,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:241",
+          "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:246",
           "shape": {
             "channel": "body",
             "complete": false,
@@ -46443,7 +46515,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/runbooks/deep-dream.md:258",
+          "location": "docs/runbooks/deep-dream.md:273",
           "shape": {
             "channel": "body",
             "complete": false,
@@ -46655,7 +46727,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:272",
+          "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:277",
           "shape": {
             "channel": "body",
             "complete": false,
@@ -46667,7 +46739,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:276",
+          "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:281",
           "shape": {
             "channel": "body",
             "complete": false,
@@ -46941,7 +47013,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:4333",
+          "location": "docs/guide/configuration.md:4339",
           "shape": {
             "channel": "body",
             "complete": false,
@@ -47354,7 +47426,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:272",
+          "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:277",
           "shape": {
             "channel": "body",
             "complete": false,
@@ -47366,7 +47438,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:275",
+          "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:280",
           "shape": {
             "channel": "body",
             "complete": false,
@@ -47494,7 +47566,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:272",
+          "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:277",
           "shape": {
             "channel": "body",
             "complete": false,
@@ -47506,7 +47578,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:274",
+          "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:279",
           "shape": {
             "channel": "body",
             "complete": false,
@@ -48868,7 +48940,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:4327",
+          "location": "docs/guide/configuration.md:4299",
           "shape": {
             "channel": "body",
             "complete": false,
@@ -48880,7 +48952,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/memory-model.md:752",
+          "location": "docs/guide/configuration.md:4333",
           "shape": {
             "channel": "body",
             "complete": false,
@@ -48892,7 +48964,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/runbooks/deep-dream.md:18",
+          "location": "docs/guide/memory-model.md:755",
           "shape": {
             "channel": "body",
             "complete": false,
@@ -48904,7 +48976,31 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/runbooks/deep-dream.md:254",
+          "location": "docs/runbooks/deep-dream.md:16",
+          "shape": {
+            "channel": "body",
+            "complete": false,
+            "expression": "Request helper, URL suffix or body requires resolution at this location.",
+            "omitted_optional": null,
+            "parameters": {}
+          }
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "documented",
+          "location": "docs/runbooks/deep-dream.md:269",
+          "shape": {
+            "channel": "body",
+            "complete": false,
+            "expression": "Request helper, URL suffix or body requires resolution at this location.",
+            "omitted_optional": null,
+            "parameters": {}
+          }
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "documented",
+          "location": "docs/runbooks/deep-dream.md:33",
           "shape": {
             "channel": "body",
             "complete": false,
@@ -48929,7 +49025,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:259",
+          "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:264",
           "shape": {
             "channel": "body",
             "complete": false,
@@ -48941,7 +49037,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:69",
+          "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:74",
           "shape": {
             "channel": "body",
             "complete": false,
@@ -48953,7 +49049,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/superpowers/specs/2026-06-25-cortex-console-v2-design.md:103",
+          "location": "docs/superpowers/specs/2026-06-25-cortex-console-v2-design.md:108",
           "shape": {
             "channel": "body",
             "complete": false,
@@ -48965,7 +49061,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "unverified",
-          "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:104",
+          "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:109",
           "method": null,
           "shape": {
             "channel": "body",
@@ -49008,7 +49104,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:272",
+          "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:277",
           "shape": {
             "channel": "body",
             "complete": false,
@@ -49020,7 +49116,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:276",
+          "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:281",
           "shape": {
             "channel": "body",
             "complete": false,
@@ -49048,7 +49144,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:4327",
+          "location": "docs/guide/configuration.md:4299",
           "shape": {
             "channel": "body",
             "complete": false,
@@ -49060,7 +49156,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/memory-model.md:625",
+          "location": "docs/guide/configuration.md:4333",
           "shape": {
             "channel": "body",
             "complete": false,
@@ -49072,7 +49168,31 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/runbooks/deep-dream.md:254",
+          "location": "docs/guide/memory-model.md:624",
+          "shape": {
+            "channel": "body",
+            "complete": false,
+            "expression": "Request helper, URL suffix or body requires resolution at this location.",
+            "omitted_optional": null,
+            "parameters": {}
+          }
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "documented",
+          "location": "docs/runbooks/deep-dream.md:17",
+          "shape": {
+            "channel": "body",
+            "complete": false,
+            "expression": "Request helper, URL suffix or body requires resolution at this location.",
+            "omitted_optional": null,
+            "parameters": {}
+          }
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "documented",
+          "location": "docs/runbooks/deep-dream.md:269",
           "shape": {
             "channel": "body",
             "complete": false,
@@ -49098,7 +49218,7 @@
       "producers": [
         {
           "evidence": "documented",
-          "location": "docs/guide/memory-model.md:849",
+          "location": "docs/guide/memory-model.md:857",
           "shape": {
             "channel": "parameters",
             "complete": true,
@@ -49130,7 +49250,7 @@
       "producers": [
         {
           "evidence": "documented",
-          "location": "docs/guide/memory-model.md:851",
+          "location": "docs/guide/memory-model.md:859",
           "shape": {
             "channel": "parameters",
             "complete": true,
@@ -49213,7 +49333,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:4339",
+          "location": "docs/guide/configuration.md:4345",
           "shape": {
             "channel": "parameters",
             "complete": false,
@@ -49592,7 +49712,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:4337",
+          "location": "docs/guide/configuration.md:4343",
           "shape": {
             "channel": "parameters",
             "complete": true,
@@ -49622,7 +49742,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:4337",
+          "location": "docs/guide/configuration.md:4343",
           "shape": {
             "channel": "parameters",
             "complete": true,
@@ -49654,7 +49774,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:4345",
+          "location": "docs/guide/configuration.md:4351",
           "shape": {
             "channel": "parameters",
             "complete": true,
@@ -50110,7 +50230,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:1370",
+          "location": "docs/guide/dreaming.md:1373",
           "shape": {
             "channel": "parameters",
             "complete": true,
@@ -50189,7 +50309,7 @@
       "producers": [
         {
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:1367",
+          "location": "docs/guide/dreaming.md:1370",
           "shape": {
             "channel": "parameters",
             "complete": true,
@@ -50577,7 +50697,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:4317",
+          "location": "docs/guide/configuration.md:4323",
           "shape": {
             "channel": "parameters",
             "complete": true,
@@ -50619,7 +50739,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:1204",
+          "location": "docs/guide/dreaming.md:1207",
           "shape": {
             "channel": "parameters",
             "complete": true,
@@ -50640,7 +50760,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:1320",
+          "location": "docs/guide/dreaming.md:1323",
           "shape": {
             "channel": "parameters",
             "complete": true,
@@ -50999,7 +51119,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/memory-model.md:977",
+          "location": "docs/guide/memory-model.md:985",
           "shape": {
             "channel": "parameters",
             "complete": true,
@@ -51082,7 +51202,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/runbooks/deep-dream.md:101",
+          "location": "docs/runbooks/deep-dream.md:116",
           "shape": {
             "channel": "parameters",
             "complete": true,
@@ -51103,7 +51223,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/runbooks/deep-dream.md:142",
+          "location": "docs/runbooks/deep-dream.md:157",
           "shape": {
             "channel": "parameters",
             "complete": true,
@@ -51126,7 +51246,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/runbooks/deep-dream.md:22",
+          "location": "docs/runbooks/deep-dream.md:37",
           "shape": {
             "channel": "parameters",
             "complete": true,
@@ -51147,7 +51267,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/runbooks/deep-dream.md:68",
+          "location": "docs/runbooks/deep-dream.md:83",
           "shape": {
             "channel": "parameters",
             "complete": true,
@@ -51744,7 +51864,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/memory-model.md:921",
+          "location": "docs/guide/memory-model.md:929",
           "shape": {
             "channel": "parameters",
             "complete": false,
@@ -52500,7 +52620,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:4327",
+          "location": "docs/guide/configuration.md:4333",
           "shape": {
             "channel": "parameters",
             "complete": false,
@@ -52537,7 +52657,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/memory-model.md:744",
+          "location": "docs/guide/memory-model.md:748",
           "shape": {
             "channel": "parameters",
             "complete": false,
@@ -52600,7 +52720,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/runbooks/deep-dream.md:250",
+          "location": "docs/runbooks/deep-dream.md:265",
           "shape": {
             "channel": "parameters",
             "complete": false,
@@ -52698,7 +52818,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/memory-model.md:717",
+          "location": "docs/guide/memory-model.md:721",
           "shape": {
             "channel": "parameters",
             "complete": true,
@@ -52846,7 +52966,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/memory-model.md:739",
+          "location": "docs/guide/memory-model.md:743",
           "shape": {
             "channel": "parameters",
             "complete": true,
@@ -53192,7 +53312,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:1305",
+          "location": "docs/guide/dreaming.md:1308",
           "shape": {
             "channel": "parameters",
             "complete": false,
@@ -53217,7 +53337,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/runbooks/deep-dream.md:256",
+          "location": "docs/runbooks/deep-dream.md:271",
           "shape": {
             "channel": "parameters",
             "complete": false,
@@ -53368,7 +53488,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:4327",
+          "location": "docs/guide/configuration.md:4300",
           "shape": {
             "channel": "parameters",
             "complete": true,
@@ -53391,7 +53511,30 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:1292",
+          "location": "docs/guide/configuration.md:4333",
+          "shape": {
+            "channel": "parameters",
+            "complete": true,
+            "omitted_optional": [
+              "dst",
+              "proposal_id",
+              "proposal_ids",
+              "proposals",
+              "relation",
+              "scope",
+              "src",
+              "store"
+            ],
+            "parameters": {
+              "action": {
+                "literal": "restore_slot"
+              }
+            }
+          }
+        },
+        {
+          "evidence": "documented",
+          "location": "docs/guide/dreaming.md:1295",
           "shape": {
             "channel": "parameters",
             "complete": true,
@@ -53414,7 +53557,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:1295",
+          "location": "docs/guide/dreaming.md:1298",
           "shape": {
             "channel": "parameters",
             "complete": true,
@@ -53464,7 +53607,34 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/memory-model.md:747",
+          "location": "docs/guide/memory-model.md:625",
+          "shape": {
+            "channel": "parameters",
+            "complete": true,
+            "omitted_optional": [
+              "dst",
+              "proposal_id",
+              "proposal_ids",
+              "proposals",
+              "relation",
+              "scope"
+            ],
+            "parameters": {
+              "action": {
+                "literal": "restore_slot"
+              },
+              "src": {
+                "expression": "..."
+              },
+              "store": {
+                "literal": "world"
+              }
+            }
+          }
+        },
+        {
+          "evidence": "documented",
+          "location": "docs/guide/memory-model.md:751",
           "shape": {
             "channel": "parameters",
             "complete": true,
@@ -53491,7 +53661,34 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/runbooks/deep-dream.md:106",
+          "location": "docs/guide/memory-model.md:756",
+          "shape": {
+            "channel": "parameters",
+            "complete": true,
+            "omitted_optional": [
+              "dst",
+              "proposal_id",
+              "proposal_ids",
+              "proposals",
+              "relation",
+              "scope"
+            ],
+            "parameters": {
+              "action": {
+                "literal": "restore_slot"
+              },
+              "src": {
+                "expression": "..."
+              },
+              "store": {
+                "literal": "lesson"
+              }
+            }
+          }
+        },
+        {
+          "evidence": "documented",
+          "location": "docs/runbooks/deep-dream.md:121",
           "shape": {
             "channel": "parameters",
             "complete": true,
@@ -53514,7 +53711,61 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/runbooks/deep-dream.md:176",
+          "location": "docs/runbooks/deep-dream.md:16",
+          "shape": {
+            "channel": "parameters",
+            "complete": true,
+            "omitted_optional": [
+              "dst",
+              "proposal_id",
+              "proposal_ids",
+              "proposals",
+              "relation",
+              "scope"
+            ],
+            "parameters": {
+              "action": {
+                "literal": "restore_slot"
+              },
+              "src": {
+                "literal": "entity\\|attribute"
+              },
+              "store": {
+                "literal": "lesson"
+              }
+            }
+          }
+        },
+        {
+          "evidence": "documented",
+          "location": "docs/runbooks/deep-dream.md:17",
+          "shape": {
+            "channel": "parameters",
+            "complete": true,
+            "omitted_optional": [
+              "dst",
+              "proposal_id",
+              "proposal_ids",
+              "proposals",
+              "relation",
+              "scope"
+            ],
+            "parameters": {
+              "action": {
+                "literal": "restore_slot"
+              },
+              "src": {
+                "literal": "entity\\|attribute"
+              },
+              "store": {
+                "literal": "world"
+              }
+            }
+          }
+        },
+        {
+          "evidence": "documented",
+          "location": "docs/runbooks/deep-dream.md:191",
           "shape": {
             "channel": "parameters",
             "complete": true,
@@ -53539,7 +53790,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/runbooks/deep-dream.md:179",
+          "location": "docs/runbooks/deep-dream.md:194",
           "shape": {
             "channel": "parameters",
             "complete": true,
@@ -53566,7 +53817,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/runbooks/deep-dream.md:201",
+          "location": "docs/runbooks/deep-dream.md:216",
           "shape": {
             "channel": "parameters",
             "complete": true,
@@ -53591,7 +53842,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/runbooks/deep-dream.md:205",
+          "location": "docs/runbooks/deep-dream.md:220",
           "shape": {
             "channel": "parameters",
             "complete": true,
@@ -53616,7 +53867,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/runbooks/deep-dream.md:230",
+          "location": "docs/runbooks/deep-dream.md:245",
           "shape": {
             "channel": "parameters",
             "complete": true,
@@ -53639,7 +53890,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/runbooks/deep-dream.md:232",
+          "location": "docs/runbooks/deep-dream.md:247",
           "shape": {
             "channel": "parameters",
             "complete": true,
@@ -53664,7 +53915,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/runbooks/deep-dream.md:236",
+          "location": "docs/runbooks/deep-dream.md:251",
           "shape": {
             "channel": "parameters",
             "complete": true,
@@ -53689,7 +53940,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/runbooks/deep-dream.md:253",
+          "location": "docs/runbooks/deep-dream.md:268",
           "shape": {
             "channel": "parameters",
             "complete": true,
@@ -54315,7 +54566,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/memory-model.md:917",
+          "location": "docs/guide/memory-model.md:925",
           "shape": {
             "channel": "parameters",
             "complete": true,
@@ -54541,7 +54792,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/memory-model.md:653",
+          "location": "docs/guide/memory-model.md:657",
           "shape": {
             "channel": "parameters",
             "complete": true,
@@ -55256,7 +55507,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:4321",
+          "location": "docs/guide/configuration.md:4327",
           "shape": {
             "channel": "parameters",
             "complete": false,
@@ -55430,7 +55681,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/configuration.md:4350",
+          "location": "docs/guide/configuration.md:4356",
           "shape": {
             "channel": "parameters",
             "complete": true,
@@ -55449,7 +55700,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/memory-model.md:646",
+          "location": "docs/guide/memory-model.md:650",
           "shape": {
             "channel": "parameters",
             "complete": true,
@@ -55478,7 +55729,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/memory-model.md:648",
+          "location": "docs/guide/memory-model.md:652",
           "shape": {
             "channel": "parameters",
             "complete": true,
@@ -55966,7 +56217,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/dreaming.md:1395",
+          "location": "docs/guide/dreaming.md:1398",
           "shape": {
             "channel": "parameters",
             "complete": false,
@@ -56225,7 +56476,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/memory-model.md:974",
+          "location": "docs/guide/memory-model.md:982",
           "shape": {
             "channel": "parameters",
             "complete": true,
@@ -58089,7 +58340,7 @@
       "dynamic": "unresolved",
       "evidence": "documented",
       "kind": "environment",
-      "location": "docs/runbooks/deep-dream.md:15",
+      "location": "docs/runbooks/deep-dream.md:30",
       "name": "PSEUDOLIFE_JUDGE_THIRD_API_KEY",
       "shape": {
         "channel": "environment",
@@ -58432,7 +58683,7 @@
       "dynamic": "unresolved",
       "evidence": "documented",
       "kind": "route",
-      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:238",
+      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:243",
       "method": "GET",
       "name": "/api/consolidate",
       "shape": {
@@ -58446,7 +58697,7 @@
       "dynamic": "unresolved",
       "evidence": "documented",
       "kind": "route",
-      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:241",
+      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:246",
       "method": "POST",
       "name": "/api/consolidation",
       "shape": {
@@ -58460,7 +58711,7 @@
       "dynamic": "unresolved",
       "evidence": "documented",
       "kind": "route",
-      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:255",
+      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:260",
       "method": "GET",
       "name": "/api/reinforce",
       "shape": {
@@ -58474,7 +58725,7 @@
       "dynamic": "unresolved",
       "evidence": "documented",
       "kind": "route",
-      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:259",
+      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:264",
       "method": "POST",
       "name": "/api/entry",
       "shape": {
@@ -58492,7 +58743,7 @@
       "dynamic": "unresolved",
       "evidence": "documented",
       "kind": "route",
-      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:50",
+      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:55",
       "method": "GET",
       "name": "/api/reinforce",
       "shape": {
@@ -61683,7 +61934,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "docs/guide/memory-model.md:689",
+      "location": "docs/guide/memory-model.md:693",
       "method": null,
       "name": "/health",
       "shape": {
@@ -68671,223 +68922,211 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:4317",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "config:DreamConfig"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:4317",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "config:DreamConfig.runs_keep"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:4318",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "config:DreamConfig"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:4318",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "config:DreamConfig.chronicle"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:4320",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "config:DeepDreamConfig"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:4320",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "config:DeepDreamConfig.judge_mode"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:4321",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "config:RetrievalLogConfig"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:4321",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "config:RetrievalLogConfig.enabled"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:4321",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "config:RetrievalLogConfig.retention_days"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:4321",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "config:RetrievalLogConfig.use_window_seconds"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:4321",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "tool:memory_outcome"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:4323",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "config:CortexConfig"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:4323",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "config:CortexConfig.read_tracking"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:4325",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "config:CortexConfig"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:4325",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "config:CortexConfig.pin_constraints"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:4327",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "config:MemoryConfig"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:4327",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "config:MemoryConfig.compaction"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:4327",
+      "location": "docs/guide/configuration.md:4299",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "route:POST /api/lessons/restore"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:4327",
+      "location": "docs/guide/configuration.md:4299",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "route:POST /api/world/restore"
     },
     {
       "dynamic": "unresolved",
+      "location": "docs/guide/configuration.md:4323",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "config:DreamConfig"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/guide/configuration.md:4323",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "config:DreamConfig.runs_keep"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/guide/configuration.md:4324",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "config:DreamConfig"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/guide/configuration.md:4324",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "config:DreamConfig.chronicle"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/guide/configuration.md:4326",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "config:DeepDreamConfig"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/guide/configuration.md:4326",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "config:DeepDreamConfig.judge_mode"
+    },
+    {
+      "dynamic": "unresolved",
       "location": "docs/guide/configuration.md:4327",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "tool:memory_forget"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:4329",
-      "reason": "forwarded parameters"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:4332",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "config:CoordinationConfig"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:4332",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "config:CoordinationConfig.audit_retention_days"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:4333",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "config:MemoryPolicyConfig"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:4333",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "config:MemoryPolicyConfig.ab_arms"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:4333",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "route:POST /api/episode/start"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:4333",
-      "reason": "built URL"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:4334",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:RetrievalLogConfig"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:4334",
+      "location": "docs/guide/configuration.md:4327",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:RetrievalLogConfig.enabled"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:4337",
+      "location": "docs/guide/configuration.md:4327",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "coordination:agents"
+      "surface": "config:RetrievalLogConfig.retention_days"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:4337",
+      "location": "docs/guide/configuration.md:4327",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "coordination:update"
+      "surface": "config:RetrievalLogConfig.use_window_seconds"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:4339",
+      "location": "docs/guide/configuration.md:4327",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "tool:memory_outcome"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/guide/configuration.md:4329",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "config:CortexConfig"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/guide/configuration.md:4329",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "config:CortexConfig.read_tracking"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/guide/configuration.md:4331",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "config:CortexConfig"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/guide/configuration.md:4331",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "config:CortexConfig.pin_constraints"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/guide/configuration.md:4333",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "config:MemoryConfig"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/guide/configuration.md:4333",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "config:MemoryConfig.compaction"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/guide/configuration.md:4333",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "route:POST /api/lessons/restore"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/guide/configuration.md:4333",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "route:POST /api/world/restore"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/guide/configuration.md:4333",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "tool:memory_forget"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/guide/configuration.md:4335",
+      "reason": "forwarded parameters"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/guide/configuration.md:4338",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:CoordinationConfig"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:4339",
+      "location": "docs/guide/configuration.md:4338",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "config:CoordinationConfig.wake"
+      "surface": "config:CoordinationConfig.audit_retention_days"
     },
     {
       "dynamic": "unresolved",
       "location": "docs/guide/configuration.md:4339",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "config:MemoryPolicyConfig"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/guide/configuration.md:4339",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "config:MemoryPolicyConfig.ab_arms"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/guide/configuration.md:4339",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "route:POST /api/episode/start"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/guide/configuration.md:4339",
+      "reason": "built URL"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/guide/configuration.md:4340",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "config:RetrievalLogConfig"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/guide/configuration.md:4340",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "config:RetrievalLogConfig.enabled"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/guide/configuration.md:4343",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "coordination:agents"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/guide/configuration.md:4343",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "coordination:update"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:4339",
+      "location": "docs/guide/configuration.md:4345",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "tool:memory_agents"
+      "surface": "config:CoordinationConfig"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:4343",
+      "location": "docs/guide/configuration.md:4345",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:4343",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_MCP_TOKENS"
+      "surface": "config:CoordinationConfig.wake"
     },
     {
       "dynamic": "unresolved",
@@ -68897,13 +69136,37 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:4348",
+      "location": "docs/guide/configuration.md:4345",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "tool:memory_agents"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/guide/configuration.md:4349",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/configuration.md:4348",
+      "location": "docs/guide/configuration.md:4349",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOKENS"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/guide/configuration.md:4351",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "coordination:update"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/guide/configuration.md:4354",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/guide/configuration.md:4354",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKENS"
     },
@@ -69232,73 +69495,79 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:1174",
+      "location": "docs/guide/dreaming.md:1173",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "route:GET /api/graph/proposal-evidence"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:1263",
+      "location": "docs/guide/dreaming.md:1177",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "route:GET /api/graph/proposal-evidence"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/guide/dreaming.md:1266",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:DeepDreamConfig"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:1263",
+      "location": "docs/guide/dreaming.md:1266",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:DeepDreamConfig.review_queue_alert_pending"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:1271",
+      "location": "docs/guide/dreaming.md:1274",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "route:GET /api/briefing"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:1305",
+      "location": "docs/guide/dreaming.md:1308",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "tool:memory_graph_review"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:1312",
+      "location": "docs/guide/dreaming.md:1315",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:DreamConfig"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:1312",
+      "location": "docs/guide/dreaming.md:1315",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:DreamConfig.retype_quarantined_max"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:1341",
+      "location": "docs/guide/dreaming.md:1344",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:DeepDreamConfig"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:1341",
+      "location": "docs/guide/dreaming.md:1344",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:DeepDreamConfig.max_support_overlap"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:1346",
+      "location": "docs/guide/dreaming.md:1349",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:DeepDreamConfig"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:1346",
+      "location": "docs/guide/dreaming.md:1349",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:DeepDreamConfig.max_fallback_mentions"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/dreaming.md:1395",
+      "location": "docs/guide/dreaming.md:1398",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "tool:memory_search"
     },
@@ -69791,7 +70060,7 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/memory-model.md:1003",
+      "location": "docs/guide/memory-model.md:1011",
       "reason": "forwarded parameters"
     },
     {
@@ -69909,78 +70178,78 @@
       "dynamic": "unresolved",
       "location": "docs/guide/memory-model.md:624",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "route:GET /api/curation/retired"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "docs/guide/memory-model.md:625",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "route:POST /api/world/restore"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/memory-model.md:628",
+      "location": "docs/guide/memory-model.md:626",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "route:GET /api/curation/retired"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/guide/memory-model.md:632",
       "reason": "forwarded parameters"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/memory-model.md:660",
+      "location": "docs/guide/memory-model.md:664",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:LessonsConfig"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/memory-model.md:660",
+      "location": "docs/guide/memory-model.md:664",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:LessonsConfig.synthesis_dedup_min_similarity"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/memory-model.md:675",
+      "location": "docs/guide/memory-model.md:679",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:LessonsConfig"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/memory-model.md:675",
+      "location": "docs/guide/memory-model.md:679",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:LessonsConfig.synthesis_max_signals"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/memory-model.md:679",
+      "location": "docs/guide/memory-model.md:683",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:LessonsConfig"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/memory-model.md:679",
+      "location": "docs/guide/memory-model.md:683",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:LessonsConfig.signal_retry_days"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/memory-model.md:689",
+      "location": "docs/guide/memory-model.md:693",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/memory-model.md:744",
+      "location": "docs/guide/memory-model.md:748",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "tool:memory_forget"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/memory-model.md:751",
+      "location": "docs/guide/memory-model.md:755",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "route:GET /api/curation/retired"
+      "surface": "route:POST /api/lessons/restore"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/memory-model.md:752",
+      "location": "docs/guide/memory-model.md:757",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "route:POST /api/lessons/restore"
+      "surface": "route:GET /api/curation/retired"
     },
     {
       "dynamic": "unresolved",
@@ -69990,48 +70259,48 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/memory-model.md:792",
+      "location": "docs/guide/memory-model.md:800",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:RetrievalLogConfig"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/memory-model.md:792",
+      "location": "docs/guide/memory-model.md:800",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:RetrievalLogConfig.use_window_seconds"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/memory-model.md:811",
+      "location": "docs/guide/memory-model.md:819",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:LessonsConfig"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/memory-model.md:811",
+      "location": "docs/guide/memory-model.md:819",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:LessonsConfig.rule_mode"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/memory-model.md:868",
+      "location": "docs/guide/memory-model.md:876",
       "reason": "forwarded parameters"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/memory-model.md:911",
+      "location": "docs/guide/memory-model.md:919",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_WRITER_ID"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/memory-model.md:921",
+      "location": "docs/guide/memory-model.md:929",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "tool:memory_fact_get"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/memory-model.md:983",
+      "location": "docs/guide/memory-model.md:991",
       "reason": "forwarded parameters"
     },
     {
@@ -71229,176 +71498,206 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/runbooks/deep-dream.md:107",
+      "location": "docs/runbooks/deep-dream.md:122",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "route:GET /api/graph/proposal-evidence"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/runbooks/deep-dream.md:11",
+      "location": "docs/runbooks/deep-dream.md:159",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:DeepDreamConfig"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/runbooks/deep-dream.md:11",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "config:DeepDreamConfig.judge_batch"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "docs/runbooks/deep-dream.md:144",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "config:DeepDreamConfig"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "docs/runbooks/deep-dream.md:144",
+      "location": "docs/runbooks/deep-dream.md:159",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:DeepDreamConfig.snapshot_keep"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/runbooks/deep-dream.md:15",
-      "reason": "Unknown or forwarded inventory target/shape.",
-      "surface": "inventory-gap:environment:PSEUDOLIFE_JUDGE_THIRD_API_KEY"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "docs/runbooks/deep-dream.md:150",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "config:DeepDreamConfig"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "docs/runbooks/deep-dream.md:150",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "config:DeepDreamConfig.auto_apply_safe"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "docs/runbooks/deep-dream.md:167",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "config:DeepDreamConfig"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "docs/runbooks/deep-dream.md:167",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "config:DeepDreamConfig.auto_apply_safe"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "docs/runbooks/deep-dream.md:175",
-      "reason": "forwarded parameters"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "docs/runbooks/deep-dream.md:18",
+      "location": "docs/runbooks/deep-dream.md:16",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "route:POST /api/lessons/restore"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/runbooks/deep-dream.md:201",
-      "reason": "forwarded parameters"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "docs/runbooks/deep-dream.md:205",
-      "reason": "forwarded parameters"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "docs/runbooks/deep-dream.md:22",
+      "location": "docs/runbooks/deep-dream.md:165",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "route:GET /api/dream/status"
+      "surface": "config:DeepDreamConfig"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/runbooks/deep-dream.md:236",
-      "reason": "forwarded parameters"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "docs/runbooks/deep-dream.md:250",
+      "location": "docs/runbooks/deep-dream.md:165",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "tool:memory_forget"
+      "surface": "config:DeepDreamConfig.auto_apply_safe"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/runbooks/deep-dream.md:254",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "route:POST /api/lessons/restore"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "docs/runbooks/deep-dream.md:254",
+      "location": "docs/runbooks/deep-dream.md:17",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "route:POST /api/world/restore"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/runbooks/deep-dream.md:255",
+      "location": "docs/runbooks/deep-dream.md:18",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "route:GET /api/curation/retired"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/runbooks/deep-dream.md:256",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "tool:memory_graph_review"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "docs/runbooks/deep-dream.md:256",
-      "reason": "forwarded parameters"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "docs/runbooks/deep-dream.md:258",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "route:POST /api/curation/dismiss-duplicate"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "docs/runbooks/deep-dream.md:261",
+      "location": "docs/runbooks/deep-dream.md:182",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:DeepDreamConfig"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/runbooks/deep-dream.md:261",
+      "location": "docs/runbooks/deep-dream.md:182",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "config:DeepDreamConfig.curation_top_k"
+      "surface": "config:DeepDreamConfig.auto_apply_safe"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/runbooks/deep-dream.md:19",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "route:GET /api/graph/communities"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/runbooks/deep-dream.md:190",
+      "reason": "forwarded parameters"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/runbooks/deep-dream.md:20",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "route:GET /api/graph/proposal-evidence"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/runbooks/deep-dream.md:216",
+      "reason": "forwarded parameters"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/runbooks/deep-dream.md:220",
+      "reason": "forwarded parameters"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/runbooks/deep-dream.md:251",
+      "reason": "forwarded parameters"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/runbooks/deep-dream.md:26",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "config:DeepDreamConfig"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/runbooks/deep-dream.md:26",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "config:DeepDreamConfig.judge_batch"
     },
     {
       "dynamic": "unresolved",
       "location": "docs/runbooks/deep-dream.md:265",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "route:GET /api/curation/duplicates"
+      "surface": "tool:memory_forget"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/runbooks/deep-dream.md:32",
+      "location": "docs/runbooks/deep-dream.md:269",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "route:POST /api/lessons/restore"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/runbooks/deep-dream.md:269",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "route:POST /api/world/restore"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/runbooks/deep-dream.md:270",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "route:GET /api/curation/retired"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/runbooks/deep-dream.md:271",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "tool:memory_graph_review"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/runbooks/deep-dream.md:271",
+      "reason": "forwarded parameters"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/runbooks/deep-dream.md:273",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "route:POST /api/curation/dismiss-duplicate"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/runbooks/deep-dream.md:276",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:DeepDreamConfig"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/runbooks/deep-dream.md:32",
+      "location": "docs/runbooks/deep-dream.md:276",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "config:DeepDreamConfig.curation_top_k"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/runbooks/deep-dream.md:280",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "route:GET /api/curation/duplicates"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/runbooks/deep-dream.md:30",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:environment:PSEUDOLIFE_JUDGE_THIRD_API_KEY"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/runbooks/deep-dream.md:33",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "route:POST /api/lessons/restore"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/runbooks/deep-dream.md:37",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "route:GET /api/dream/status"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/runbooks/deep-dream.md:47",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "config:DeepDreamConfig"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/runbooks/deep-dream.md:47",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:DeepDreamConfig.judges_enabled"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/runbooks/deep-dream.md:72",
+      "location": "docs/runbooks/deep-dream.md:87",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:DeepDreamConfig"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/runbooks/deep-dream.md:72",
+      "location": "docs/runbooks/deep-dream.md:87",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:DeepDreamConfig.judge_snippet_max_chars"
     },
@@ -74937,337 +75236,343 @@
     },
     {
       "dynamic": "unresolved",
+      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:10",
+      "reason": "forwarded parameters"
+    },
+    {
+      "dynamic": "unresolved",
       "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:100",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "route:GET /api/graph/communities"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:101",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "route:GET /api/graph/path"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:105",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "route:GET /api/recall"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:100",
+      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:105",
       "reason": "forwarded parameters"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:103",
+      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:108",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "route:GET /api/entry"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:104",
+      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:109",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "route:POST /api/reinforce"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:16",
+      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:12",
       "reason": "forwarded parameters"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:162",
+      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:167",
       "reason": "forwarded parameters"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:181",
+      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:186",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "route:GET /api/graph/digest"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:184",
+      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:189",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "route:GET /api/graph/digest"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:213",
+      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:21",
+      "reason": "forwarded parameters"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:218",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "route:GET /api/graph/path"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:213",
+      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:218",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "route:GET /api/recall"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:213",
+      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:218",
       "reason": "built URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:217",
+      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:222",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "route:GET /api/recall"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:217",
+      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:222",
       "reason": "forwarded parameters, built URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:218",
+      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:223",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "route:GET /api/graph/path"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:218",
+      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:223",
       "reason": "built URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:219",
+      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:224",
       "reason": "forwarded parameters"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:225",
+      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:230",
       "reason": "forwarded parameters"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:226",
+      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:231",
       "reason": "forwarded parameters"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:227",
+      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:232",
       "reason": "forwarded parameters"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:238",
+      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:243",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "route:GET /api/consolidation"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:238",
+      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:243",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/api/consolidate"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:241",
+      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:246",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "route:POST /api/consolidate"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:241",
+      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:246",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/api/consolidation"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:241",
+      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:246",
       "reason": "forwarded parameters, built URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:242",
+      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:247",
       "reason": "forwarded parameters"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:255",
+      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:260",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "route:GET /api/entry"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:255",
+      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:260",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/api/reinforce"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:259",
+      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:264",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "route:POST /api/reinforce"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:259",
+      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:264",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/api/entry"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:259",
+      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:264",
       "reason": "forwarded parameters, built URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:272",
+      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:277",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "route:POST /api/delete"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:272",
+      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:277",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "route:POST /api/facts/forget"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:272",
+      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:277",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "route:POST /api/facts/set"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:272",
+      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:277",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "route:POST /api/supersede"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:272",
+      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:277",
       "reason": "built URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:274",
+      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:279",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "route:POST /api/facts/set"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:274",
+      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:279",
       "reason": "forwarded parameters, built URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:275",
+      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:280",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "route:POST /api/facts/forget"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:275",
+      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:280",
       "reason": "forwarded parameters, built URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:276",
+      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:281",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "route:POST /api/delete"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:276",
+      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:281",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "route:POST /api/supersede"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:276",
+      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:281",
       "reason": "forwarded parameters, built URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:5",
-      "reason": "forwarded parameters"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:50",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "route:GET /api/entry"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:50",
+      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:4",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "route:GET /api/graph/communities"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:50",
+      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:55",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "route:GET /api/entry"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:55",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "route:GET /api/graph/communities"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:55",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "route:GET /api/graph/digest"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:50",
+      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:55",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "route:GET /api/graph/path"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:50",
+      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:55",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/api/reinforce"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:50",
+      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:55",
       "reason": "built URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:57",
+      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:62",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "route:GET /api/graph/digest"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:59",
+      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:64",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "route:GET /api/graph/communities"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:61",
+      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:66",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "route:GET /api/graph/path"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:67",
+      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:72",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "route:GET /api/entry"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:69",
+      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:74",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "route:POST /api/reinforce"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:7",
-      "reason": "forwarded parameters"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:91",
+      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:96",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "route:GET /api/graph"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:94",
+      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:99",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "route:GET /api/graph/digest"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:95",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "route:GET /api/graph/communities"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md:96",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "route:GET /api/graph/path"
     },
     {
       "dynamic": "unresolved",
@@ -77883,58 +78188,64 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/superpowers/specs/2026-06-25-cortex-console-v2-design.md:100",
+      "location": "docs/superpowers/specs/2026-06-25-cortex-console-v2-design.md:104",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "route:GET /api/graph/digest"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/superpowers/specs/2026-06-25-cortex-console-v2-design.md:105",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "route:GET /api/graph/communities"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/superpowers/specs/2026-06-25-cortex-console-v2-design.md:101",
+      "location": "docs/superpowers/specs/2026-06-25-cortex-console-v2-design.md:106",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "route:GET /api/graph/path"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/superpowers/specs/2026-06-25-cortex-console-v2-design.md:102",
+      "location": "docs/superpowers/specs/2026-06-25-cortex-console-v2-design.md:107",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "route:GET /api/entry"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/superpowers/specs/2026-06-25-cortex-console-v2-design.md:102",
+      "location": "docs/superpowers/specs/2026-06-25-cortex-console-v2-design.md:107",
       "reason": "built URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/superpowers/specs/2026-06-25-cortex-console-v2-design.md:103",
+      "location": "docs/superpowers/specs/2026-06-25-cortex-console-v2-design.md:108",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "route:POST /api/reinforce"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/superpowers/specs/2026-06-25-cortex-console-v2-design.md:117",
+      "location": "docs/superpowers/specs/2026-06-25-cortex-console-v2-design.md:122",
       "reason": "forwarded parameters"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/superpowers/specs/2026-06-25-cortex-console-v2-design.md:124",
+      "location": "docs/superpowers/specs/2026-06-25-cortex-console-v2-design.md:129",
       "reason": "forwarded parameters"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/superpowers/specs/2026-06-25-cortex-console-v2-design.md:152",
+      "location": "docs/superpowers/specs/2026-06-25-cortex-console-v2-design.md:157",
       "reason": "forwarded parameters"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/superpowers/specs/2026-06-25-cortex-console-v2-design.md:154",
+      "location": "docs/superpowers/specs/2026-06-25-cortex-console-v2-design.md:159",
       "reason": "forwarded parameters"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/superpowers/specs/2026-06-25-cortex-console-v2-design.md:99",
+      "location": "docs/superpowers/specs/2026-06-25-cortex-console-v2-design.md:4",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "route:GET /api/graph/digest"
+      "surface": "route:GET /api/graph/communities"
     },
     {
       "dynamic": "unresolved",
