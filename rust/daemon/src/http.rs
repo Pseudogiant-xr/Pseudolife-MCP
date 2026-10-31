@@ -422,6 +422,19 @@ pub fn parse_query(raw: Option<&str>) -> HashMap<String, String> {
         .collect()
 }
 
+fn oversized_json_integer(text: &str) -> bool {
+    // Tokenize strings as well, so quoted digits and escaped quotes cannot
+    // be mistaken for numeric literals. Keep floats outside Python's int cap.
+    static TOKENS: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(r#""(?:[^"\\]|\\.)*"|-?[0-9]+(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?"#)
+            .expect("JSON token regex")
+    });
+    TOKENS.find_iter(text).any(|token| {
+        let digits = token.as_str().trim_start_matches('-');
+        digits.len() > 4300 && digits.bytes().all(|b| b.is_ascii_digit())
+    })
+}
+
 /// Protect real object keys from serde_json's arbitrary-precision Number
 /// transport, as the doorbell reader does. Prefixing every key is injective,
 /// including escaped spellings; normal serde validation still owns syntax.
@@ -566,6 +579,11 @@ async fn api(
                     Err(error)
                 }
             });
+            if path == "/api/dream/run" && parsed.is_ok() && oversized_json_integer(text) {
+                // json.loads raises ValueError, outside the JSONDecodeError
+                // handler, before the Console adapter or dream service runs.
+                return uvicorn_500();
+            }
             match parsed {
                 Err(_) => return json_response(400, &json!({"error": "invalid_json"})),
                 Ok(v) if !v.is_object() => {

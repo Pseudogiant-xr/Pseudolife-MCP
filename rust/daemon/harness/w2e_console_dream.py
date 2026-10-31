@@ -93,6 +93,16 @@ def register(h):
             "-999999999999999999999999", "bad", "1.5", [], {}, [1])],
             *[{"op": "rest", "method": "POST", "path": PATH, "body_json": raw}
               for raw in ("{", "[]", "null", '"body"', '{"limit":NaN}', '{"limit":Infinity}')]]}
+    cases["console-dream-integer-body"] = {
+        "config": h.DREAM_RUN_CONFIG, "extractor": {"model": "stub-model", "replies": []},
+        "seed": [], "ops": [
+            {"op": "rest", "method": "POST", "path": PATH, "body_json": raw}
+            for raw in ('{"limit":' + "9" * 4300 + '}',
+                        '{"limit":' + "9" * 4301 + '}',
+                        '{"limit":-' + "9" * 4301 + '}',
+                        '{"unused":"' + "9" * 4301 + '","limit":0}',
+                        '{"unused":[' + "9" * 4301 + '],"limit":0}',
+                        '{"limit":' + "9" * 4301 + ',"limit":0}') ]}
     notes = ["The Console limit fixture has a first note.",
              "The Console limit fixture has a second note."]
     cases["console-dream-limits"] = {
