@@ -66,6 +66,13 @@ if [ "${1:-}" = "--machines" ]; then
     echo "--machines takes a comma-separated list of machine names, each optionally ending in :on-demand, such as linux,windows:on-demand (or '' for none); nothing changed" >&2
     exit 2
   fi
+  # The watcher refuses a machine named both ways, which would freeze the
+  # variable on every run, so refuse it here before the allowlist changes.
+  both=$(tr ',' '\n' <<<"$list" | sort -u | sed 's/:on-demand$//' | uniq -d | paste -sd, -)
+  if [ -n "$both" ]; then
+    echo "--machines names $both both with and without :on-demand; keep one; nothing changed" >&2
+    exit 2
+  fi
   # An older watcher would read "windows on-demand" as one machine's name.
   if [[ "$list" == *:on-demand* ]] && ! grep -qs '^ON_DEMAND = "on-demand"$' "$LIB/runner_watch.py"; then
     echo "the installed watcher does not know :on-demand; run $0 without arguments to update it, then rerun this; nothing changed" >&2

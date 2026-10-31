@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 
 import pytest
@@ -380,3 +381,53 @@ def test_the_setup_script_recognises_a_watcher_that_knows_on_demand():
     probe = "^ON_DEMAND = \"on-demand\"$"
     assert f"grep -qs '{probe}'" in (selfhosted / "setup-runner-watch.sh").read_text(encoding="utf-8")
     assert re.search(probe, (selfhosted / "runner_watch.py").read_text(encoding="utf-8"), re.MULTILINE)
+
+
+def _run_machines_block(tmp_path, listing: str, watcher_source: str) -> tuple[int, str, str | None]:
+    """Run setup-runner-watch.sh's --machines branch against tmp_path, root steps stubbed."""
+    import subprocess
+    from pathlib import Path
+
+    script = (Path(watch.__file__).parent / "setup-runner-watch.sh").read_text(encoding="utf-8")
+    block = re.search(r'^if \[ "\$\{1:-\}" = "--machines" \]; then\n.*?^fi$', script, re.MULTILINE | re.DOTALL)
+    assert block, "the --machines branch moved"
+    lib = tmp_path / "lib"
+    lib.mkdir()
+    (lib / "runner_watch.py").write_text(watcher_source, encoding="utf-8")
+    machines = tmp_path / "machines"
+    driver = ("set -euo pipefail\n"
+              f"CONFIG={tmp_path}; MACHINES={machines}; ACCOUNT=nobody; LIB={lib}\n"
+              "chown() { :; }; systemctl() { :; }\n"
+              f"{block.group(0)}\n")
+    result = subprocess.run(["bash", "-c", driver, "setup-runner-watch.sh", "--machines", listing],
+                            capture_output=True, text=True, timeout=30)
+    return result.returncode, result.stderr, machines.read_text(encoding="utf-8") if machines.exists() else None
+
+
+@pytest.mark.skipif(os.name == "nt", reason="bash here may be the WSL launcher; Linux CI runs it")
+@pytest.mark.parametrize("listing, code, machines", [
+    ("linux,windows:on-demand", 0, {"allowed": {"linux", "windows"}, "on_demand": {"windows"}}),
+    ("linux", 0, {"allowed": {"linux"}, "on_demand": set()}),
+    ("", 0, {"allowed": set(), "on_demand": set()}),
+    ("linux,windows,windows:on-demand", 2, None),
+    ("linux,windows on-demand", 2, None),
+])
+def test_setup_machines_writes_what_the_watcher_reads(tmp_path, listing, code, machines):
+    from pathlib import Path
+
+    source = (Path(watch.__file__).parent / "runner_watch.py").read_text(encoding="utf-8")
+    returncode, stderr, written = _run_machines_block(tmp_path, listing, source)
+    assert returncode == code, stderr
+    if machines is None:
+        # A refused list leaves the allowlist as it was (here: absent).
+        assert written is None and "nothing changed" in stderr
+    else:
+        parsed = watch.allowed_machines(tmp_path / "machines")
+        assert (parsed.allowed, parsed.on_demand) == (machines["allowed"], machines["on_demand"])
+
+
+@pytest.mark.skipif(os.name == "nt", reason="bash here may be the WSL launcher; Linux CI runs it")
+def test_setup_machines_refuses_on_demand_for_an_older_watcher(tmp_path):
+    returncode, stderr, written = _run_machines_block(tmp_path, "linux,windows:on-demand", "# an older watcher\n")
+    assert returncode == 1 and written is None
+    assert "without arguments" in stderr and "nothing changed" in stderr

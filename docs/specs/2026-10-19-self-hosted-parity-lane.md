@@ -838,7 +838,8 @@ watcher's token already has that permission, which also reads the
 heartbeats, so it needs nothing new. The watcher reads the heartbeats of the
 on-demand machines in the allowlist only: a plain machine is never kept by
 a heartbeat variable. A line with any other marker, or a machine named both
-with and without `on-demand`, is refused, changing nothing. A failed request
+with and without `on-demand`, is refused, changing nothing; the setup
+script refuses such a list before it rewrites the file. A failed request
 for a heartbeat is an API error like any other and changes nothing; a
 missing or unreadable heartbeat is no error, it only stops counting.
 
