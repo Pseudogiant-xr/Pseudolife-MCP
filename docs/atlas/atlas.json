@@ -1,9 +1,9 @@
 {
  "meta": {
   "title": "PseudoLife-MCP System Atlas",
-  "version": "0.19.0",
+  "version": "0.20.0",
   "schema": 58,
-  "verified": "2026-10-30"
+  "verified": "2026-10-31"
  },
  "groups": {
   "clients": {
@@ -1170,7 +1170,8 @@
     "Ends with a per-agent [x]/[-]/[!] wiring ladder; /health poll",
     "Client-only mode: -DaemonUrl with -TokenFile / -ReadToken / -PairingCode wires clients to a remote daemon, no Docker, volumes or token minting",
     "-TestLogin / --test-login: also runs test-login create in the Postgres container (a failure warns, the install stands); a client-only install ignores it with a note",
-    "A daemon install with a token ends by offering maintainer setup: --check first (in place: says so), no terminal prints the command, else one y/N (default no), then maintainer setup --yes; a failure leaves the install complete"
+    "A daemon install with a token ends by offering maintainer setup: --check first (in place: says so), no terminal prints the command, else one y/N (default no), then maintainer setup --yes; a failure leaves the install complete",
+    "A client-only install (Linux systemd --user, Windows) offers the daily client update job once, y/N (default no), answerable by --client-update-schedule ask|yes|no|HH:MM / -ClientUpdateSchedule (yes = 04:30); it runs update --schedule --daemon-url, leaves an existing job alone, and is not offered with a local daemon container, a pipx/pip shim, no terminal (prints the command) or on macOS"
    ]
   },
   {
@@ -1537,8 +1538,8 @@
    "s": "pseudolife-mcp lease · named shared-resource holds",
    "p": "pseudolife_memory/lease_cli.py",
    "d": [
-    "run | hold | check | list | break | delegate (designate: deprecated alias); the truth is an OS file lock (os_lock, ~/.pseudolife-mcp/locks) held while the command runs; the board mirrors it through POST /api/coordination/lease | release | leases and keeps the FIFO queue; without a daemon it is flock with a name",
-    "run takes the board lease first, then the OS lock, renewing every ttl/3; hold --while-pid covers a process it did not start; break and delegate are operator-only and open the bank directly; with no bank in this shell (no PSEUDOLIFE_MCP_DATABASE_URL, no lite instance) and the pseudolife-mcp-daemon container running here, it re-runs itself there (docker exec, -it at a terminal; PSEUDOLIFE_DAEMON_EXEC stops a second hop) with the same arguments and exit code (daemon_exec.py)",
+    "run | hold | check | list | break | conductor (delegate and designate: deprecated aliases); the truth is an OS file lock (os_lock, ~/.pseudolife-mcp/locks) held while the command runs; the board mirrors it through POST /api/coordination/lease | release | leases and keeps the FIFO queue; without a daemon it is flock with a name",
+    "run takes the board lease first, then the OS lock, renewing every ttl/3; hold --while-pid covers a process it did not start; break and conductor are operator-only and open the bank directly; with no bank in this shell (no PSEUDOLIFE_MCP_DATABASE_URL, no lite instance) and the pseudolife-mcp-daemon container running here, it re-runs itself there (docker exec, -it at a terminal; PSEUDOLIFE_DAEMON_EXEC stops a second hop) with the same arguments and exit code (daemon_exec.py)",
     "check exits 0 free, 1 held, 70 when the check itself failed, so a gate never reads a crash as held"
    ]
   },

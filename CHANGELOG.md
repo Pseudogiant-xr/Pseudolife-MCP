@@ -6,6 +6,1420 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-11-01 — Ingested documents and the memory counters move into the bank (schema v57), the daemon records which machines last connected and which tokens it refused (schema v58), a dead token is named when a session starts, client-only installs offer a daily job that keeps their clients on the daemon's release, the Docker daemon stops running as root, client machines update without Docker access, and the Rust daemon serves the dream, graph, recall, document and Console routes
+
+### Added (2026-10-31 — Console graph reads in the Rust daemon)
+- Serve the Console's graph, shortest path, projects, digest, entity provenance, wiki, recall and dream status GET routes through the Rust services, with the Python HTTP defaults and response shapes.
+- Cap whole-graph views with a heap-based degree peel after releasing the write lock, preserving Python's degree/name tie-breaking and output order.
+
+### Added (2026-10-31 — Rust Console graph actions)
+
+- The Rust daemon now serves Console graph review, graph editing and proposal
+  decisions, bounded rejudging, and lesson/world duplicate review and dismissal.
+  Console decisions preserve human or agent attribution in the shared audit trail.
+- Malformed duplicate stores and proposal IDs preserve Python responses and the
+  automatic-decision retirement committed before a failed rejection.
+
+### Added (2026-10-31 — on-demand parity machines stay listed while their orchestrator's heartbeat is fresh)
+- The runner watcher's allowlist takes an `on-demand` marker (`windows on-demand` in the `--machines-file`, `setup-runner-watch.sh --machines linux,windows:on-demand`). An on-demand machine's runners are VMs an orchestrator starts when a job is queued for its label, so while idle it has no runner online. The watcher used to drop such a machine from `PARITY_SELFHOSTED_RUNNERS`, so no job was ever routed to its label and nothing started a VM.
+- An on-demand machine stays listed while it has a runner online or its heartbeat is fresh. The heartbeat is the repository variable `PARITY_HEARTBEAT_<MACHINE>` (the machine name upper-cased, `-` as `_`), which the orchestrator writes with the Unix time in seconds, as `date +%s` prints it. It is fresh for `--heartbeat-minutes` (default 15) and may be up to two minutes ahead of the watcher's clock. A missing, non-numeric, stale or far-future heartbeat is not fresh, and the machine drops out after the usual grace; the line reporting the drop names the heartbeat variable and why it stopped counting.
+- Plain lines keep their meaning: a plain machine is never kept by a heartbeat variable. A line with any other marker, or a machine named both with and without the marker, is refused, changing nothing. `setup-runner-watch.sh --machines` refuses a machine given both ways before it rewrites the allowlist, and refuses `:on-demand` until the installed watcher knows it (running the script without arguments updates it). The watcher's token already has "Variables: read and write", which reads the heartbeats, so it needs no new permission.
+
+### Added (2026-10-31 — The client-only installer offers the daily client update job)
+
+- A client-only install (`ops/install.sh` on Linux, `ops/install.ps1` on Windows) now offers, near the end of the run, to keep the machine's clients on the daemon's release with the daily job `pseudolife-mcp update --schedule` installs, instead of leaving that step to the docs. It asks once, default no; `--client-update-schedule ask|yes|no|HH:MM` / `-ClientUpdateSchedule` answers in advance, and `yes` uses 04:30, an hour after the documented 03:30 daemon-host job, so an overnight daemon update reaches the clients the same morning. The installer runs the installed shim's own `update --schedule HH:MM --daemon-url <url>`; a run with no terminal skips it with one line naming that command; a rerun leaves a job already in place alone in one line (naming the command that moves it when it follows another daemon); a refusal from `--schedule` is a warning and the install still completes. It is not offered where `--schedule` would not install the client job: a daemon-host install (which refuses the flag's `yes` or a time), a machine that still has a local `pseudolife-mcp-daemon` container (where `--schedule` would install the daemon host's job instead), a shim installed with pipx or pip rather than as a shim runtime, Linux without a systemd user manager, Git Bash (pointed at `install.ps1`) and macOS; each says why in one line where the run asked for it. A disabled job is reported and offered again.
+
+### Fixed (2026-10-31 — Reject malformed deletion filters)
+
+- Reject non-string text, substring, source, episode and tag filters before matching or deleting memories in Python and Rust, including confirmed bulk deletion. An invalid tag can no longer silently widen a deletion to the whole bank; the error names the filter and asks for a string or its omission.
+
+### Added (2026-10-31 — Console writes in the Rust daemon)
+
+- The Rust daemon serves Console fact writes, contender resolution, fact forgetting,
+  reinforcement, deletion, supersession and consolidation through the existing
+  write services, preserving the Python Console's response contracts.
+
+### Changed (2026-10-31 — the conductor role is stored under its own name)
+- The maintainer's board role, called "conductor" since 2026-10-30,
+  is now stored that way too: a grant is the lease `conductor:<project>`
+  recorded as `lease_conductor`, its rings carry `reason: conductor`, a
+  conductor claiming its project's coordinator lease is refused
+  `already_conductor`, the Console's signed purposes are `grant-conductor`
+  and `revoke-conductor`, and the maintainer status's role slots are
+  `{"conductor", "coordinator"}`. Python daemon, Rust daemon and shim, and
+  the Console change together.
+- Nothing to migrate by hand. A grant made before the upgrade
+  (`delegate:<project>`, `lease_delegate`) keeps its authority until it
+  expires (at most 7 days) or the project is granted again, which moves the
+  role to `conductor:<project>` and frees the old lease in the same change
+  (`lease_break`, reason `renamed`); the Console's revoke frees either name.
+  Both names stay reserved. Wake rows recorded as `delegate` still count
+  against the authority budget and are still served, and a Console tab
+  loaded before the upgrade still grants and revokes (its challenge keeps
+  the old purpose it asked for). Before deploying, `lease break` any
+  `conductor:` lease `pseudolife-mcp lease list` shows held, since any
+  session could take one until now, and grant from a client at the
+  daemon's version (an older daemon container refuses `lease conductor`;
+  update the daemon first).
+- `pseudolife-mcp conductor-watch` is the watcher's command and
+  `pseudolife_memory.conductor_watch_cli` its module; `delegate-watch` still
+  runs it after one stderr line naming `conductor-watch`.
+- `pseudolife-mcp lease conductor PROJECT AGENT` is the operator's grant
+  command; `lease delegate` (its name until now) and `lease designate` (its
+  0.16.0 name) still run it after one stderr line naming `lease conductor`,
+  so "delegate" no longer reads like T3 Code's `delegate_task`.
+
+### Fixed (2026-10-31 — a pull request whose CI was cancelled as its gate started joins a batch)
+
+- `python ops/integrate.py build` no longer leaves a pull request out as `unverified` forever when cancelling its own CI landed while the `Parity / <os>` gate job was starting: GitHub then marks the gate `failure` with no steps at all, which the script could not tell from a real failure, and no retry could read steps that never existed (#1074 at `7cb16da6`, 2026-10-31). Such a leg (concluded `failure`, no steps) now counts as giving no verdict when its run attempt itself concluded `cancelled`; every other condition still applies (no other job of that attempt failed, timed out or needs action, a needed job was cancelled and none ran past its timeout). A stepless gate in an attempt that did not conclude `cancelled`, or whose run record describes a later attempt, still keeps the pull request out as `unverified`. If that cancel reached only the gate (every job it needs had already passed), the pull request stays out as `unverified` with a note to rerun its CI, since nothing failed but nothing gave a verdict either.
+
+### Fixed (2026-10-30 — a revoked or rotated token is named when a session starts)
+
+- A machine whose token the daemon no longer accepts (revoked, rotated away, or never issued for it) used to start its memory sessions without a word: the shim's startup check, `/health`, needs no token, so only the model's first tool call met the refusal. The shim's startup instructions fetch, already its one authenticated request, now reads a 401 or 403 (or the daemon's revoked-token refusal) for the bearer it holds as a rejected token: it writes one line to stderr, which MCP hosts log, and puts the same line at the top of the session's instructions, naming the daemon URL and the fix (`pseudolife-mcp invite <name>` on the daemon host, then `pseudolife-mcp connect <url> --read-code` on this machine, which pairs it and repoints its clients). The session keeps serving, and each tool call still returns its existing authentication refusal. A network error, a timeout or a 5xx at that fetch, a shim with no credential and a daemon that is down keep their current behaviour, and no request or wait is added at startup. The Python and Rust shims print the same text.
+
+### Fixed (2026-10-30 — a session on a machine with a dead token now says it has no memory)
+- A machine whose bearer token had been revoked or rotated away started
+  every session looking normal: the SessionStart hook got the public
+  instructions with no briefing and nothing saying why, so two machines ran
+  11 days without memory. When the caller presents a bearer the daemon
+  refuses, the session-start answer now opens with one line saying the
+  token was refused and naming the fix: `pseudolife-mcp invite <name>` on
+  the daemon host, then `pseudolife-mcp connect <daemon-url> --read-code` on
+  this machine, which pairs and repoints every client registration. A
+  caller with no bearer, a daemon with authentication off, and a bearer the
+  daemon cannot check while its principal store is unavailable get the same
+  answer as before. The Rust daemon answers
+  byte for byte the same. The line reaches the agent's context, which is
+  where the plugin hooks put SessionStart output; they have no channel that
+  shows text to the person directly.
+
+### Added (2026-10-30 — client-only machines can keep their shim on the daemon's release by themselves)
+- `pseudolife-mcp update --schedule HH:MM` on a client-only machine (its
+  command runs from a shim runtime and no daemon container runs there) used
+  to refuse with "no daemon container to update", so nothing ever moved the
+  shim on a machine whose daemon runs elsewhere, and such machines silently
+  fell releases behind. It now installs that machine's own daily job, the
+  task `Pseudolife Client Update` on Windows or
+  `pseudolife-client-update.timer` (systemd `--user`, `Persistent=true`) on
+  Linux, carrying the daemon URL. A machine that hosts the daemon keeps the
+  daemon job under its old names, unchanged. Each run, `update --unattended`,
+  installs the release the daemon's `/health` reports as a new shim runtime
+  and refreshes the plugin cache and the Codex step, never past the daemon's
+  release and never a downgrade. A daemon that does not answer changes
+  nothing (exit 2), a current shim is exit 3, a held update lock exit 4, and
+  every run is logged to `~/.pseudolife-mcp/unattended-update.log`. No
+  bearer is needed. `--schedule` refuses there when the daemon does not
+  answer, naming `--daemon-url`. `--unschedule` removes whichever job the
+  machine has. A pip install that is not a shim runtime is still refused,
+  and its refusal now says why.
+- A client update installs only a plain release number from the daemon's
+  unauthenticated `/health` (ASCII digits, `N.N` to `N.N.N.N`), in the
+  scheduled run and in an attended `update --clients-only` alike; anything
+  else is refused, and the attended run names `--tag <version>` to install a
+  release anyway. A scheduled run that installed the shim but failed a later
+  step repeats the steps at its next run instead of reporting the machine
+  current, and the client timer keeps any shim-layout variables it was
+  scheduled under.
+
+### Added (2026-10-30 — see which machines last connected, and which tokens the daemon refused)
+- `pseudolife-mcp invite --list` shows when every principal last connected,
+  stored (invited) and environment ones alike (`PSEUDOLIFE_MCP_TOKENS`, and
+  `default` for `PSEUDOLIFE_MCP_TOKEN`), in a new "last seen" column, and
+  lists the tokens the daemon refused by the first 8 characters of their
+  SHA-256 with how often and when. The JSON form carries `last_seen_at` per
+  principal and a `rejected` list. A machine whose token stopped working
+  after a rotation no longer looks the same as a machine that is switched
+  off.
+- `pseudolife-mcp doctor` prints `token_sha256_prefix`, the same 8
+  characters for the token this client sends (never the token), to match
+  against that list.
+- Schema v58: the `principal_activity` and `rejected_bearers` tables. The
+  daemon (Python and Rust) notes each request's outcome in memory and writes
+  it at most once a minute from the principals refresher, so requests pay no
+  database write; refused prefixes are capped at 1000 rows and 90 days. Both
+  tables stay out of logical exports. Additive: install and update need no
+  step of their own.
+
+### Changed (2026-10-30 — client machines are steered to pairing instead of a copied token)
+- When two machines use one copied bearer token, rotating it cuts off both
+  and neither can be revoked alone. A client-only install given a token
+  (`--token-file` / `--read-token`, `-TokenFile` / `-ReadToken`) against a
+  daemon on another machine still works, and now ends with one line beside
+  the update command: if another machine uses this same token, give each
+  its own with `pseudolife-mcp invite <name>` on the daemon's host and
+  `connect <url> --read-code` here, named with the installed shim's full
+  path; a machine already paired, or given a token no other machine uses,
+  has nothing to do. A pairing code, or a loopback daemon URL (the daemon's
+  own host or an SSH tunnel), gets no such line, and nothing is asked.
+- The installers' help, their refusals for a missing token file, the
+  client-only closing notes, the README and the "Sharing one bank across
+  machines" guide lead with `--pairing-code` / `-PairingCode` and `invite`
+  / `connect --read-code` for client machines, with the raw token kept as
+  the documented fallback. A paired machine whose token is revoked or
+  replaced pairs again (`invite <name> --replace`); only an
+  environment-token client writes a new token by hand.
+- The agent board's "the daemon rejected this token" line (`doctor`, the
+  installers, `connect`, in both the Python and the Rust shim) now names
+  both fixes: on the daemon's own host, re-run the installer so the token
+  file matches `ops/.env`; on another machine, `pseudolife-mcp invite
+  <name> --replace` on the daemon host, then `pseudolife-mcp connect <url>
+  --read-code` there.
+
+### Fixed (2026-10-30 — a stray file in the temp directory can no longer break `connect` or the install check)
+- `pseudolife-mcp connect` verifies a new credential through a `python -c`
+  child, and the client updater probes how the package is installed the
+  same way. Both ran from the shared temp directory to keep a source
+  checkout off `sys.path`, but `python -c` puts its working directory first
+  there, so any file in the temp directory named like a module they import
+  ran in its place: a stray `mcp.py` made every `connect` verification fail
+  with "the handshake exited 1", and a stray `pseudolife_memory` folder could
+  make the install check misreport an install. Each now runs from a fresh,
+  empty directory of its own.
+
+### Fixed (2026-10-30 — Codex setup finishes on a client whose system Python lacks the daemon's packages)
+- On a fresh Linux client the installer's Codex step reported "Runtime
+  defaults not confirmed", and `setup-codex-coordination.py --runtime-defaults`
+  answered only "needs-configuration" with no cause: its config backup
+  imported the coordination adapter, which needs `anyio`, and the installer
+  runs the helper under the system `python3`. The backup now uses the
+  standard-library private-file helper, so the step completes there. An
+  unexpected failure in that helper now names its exception type (still no
+  transport details), so the next one says what went wrong.
+
+### Changed (2026-10-30 — the maintainer's board role is called "conductor", not "delegate")
+- Every word a user or agent reads now calls the maintainer's per-project
+  board role the conductor: the session-start brief ("You are the
+  maintainer's conductor for ..."), the per-prompt reminder, the Stop hook's
+  park prompt (served and the hooks' fallback copies), the `memory_message`
+  description, a done park's `reopen_by`, the grant warning, `lease delegate
+  --help`, the CLI help, the Console's Roles band, role buttons, confirm
+  dialogs and toasts, and the docs. Agents had confused the role with T3
+  Code's `delegate_task` subagents.
+- `pseudolife-mcp conductor-watch` is the decision watcher's new name;
+  `delegate-watch` still runs it. The watcher registers on the board as
+  `conductor-watch` and prints that name.
+- Unchanged, so nothing needs migrating: the lease `delegate:<project>`, the
+  `lease delegate` command, role purposes (`grant-delegate`,
+  `revoke-delegate`), JSON fields and values (`"delegate"` role slots,
+  `reason: delegate`, `already_delegate`, the `lease_delegate` audit event)
+  and every stored value. A later change renames those ids with a migration.
+
+### Fixed (2026-10-30 — a session whose login now maps to another principal gets back on the board)
+
+- A session that saved its board address under one principal, and whose login the daemon now maps to a different principal on the same bank (for example a machine paired with its own token through `pseudolife-mcp invite` and `connect --read-code`, or the same bearer remapped on the daemon), was refused at every start: the saved address no longer matched, so the shim ran memory-only and every `memory_agents` update and `memory_message` was refused with `instance_authentication_required`. A restart read the same file. The Python and Rust shims now set that address aside with a `.stale` suffix (replacing an older one), print one line saying the daemon now maps this login to a different principal than the saved address was registered under, and register a new address under the current one, as a new session would. Mail sent to the old address is not carried over, and the old address's key is never sent. The address is retired only while the file is still the record the shim read, so a record another shim saved meanwhile is resumed instead. A session whose bound record was retired never falls back to an older token-derived record, also on the attempt or restart after a registration the daemon could not take (the `.stale` beside the bound file remembers the retire). A token-derived record that names this bank under another principal is left as it is and a new address registers.
+- A saved address bound to a different bank is still kept and refused, whatever its principal; unversioned state still has to prove itself to the bank before it is upgraded; and a running session whose login changes still stops background delivery until the login is restored.
+- When a shim refuses a saved address at startup, the "coordination unavailable" line (Claude Code and Codex shims, Python and Rust) now names the file, the cause (an address bound to another bank, or one the bank did not prove) and the fix (point the client back at that bank, or move the file aside and restart), instead of the generic checklist.
+- A Codex thread's coordination hint now says which part of its saved mailbox differs: another principal for this login on the same bank (restart the session to register a new address, or restore the previous login) or another bank (point the client back at it, or move the saved state aside). A mailbox the bank did not prove keeps the generic text.
+- `pseudolife-mcp doctor --agent-state` reports `principal_changed` for a saved address whose login now maps to another principal on the same bank, and says the file needs no repair: the shim registers a new address on its next start (or restart the session to do it now). The check still fails the report, as for any saved address that is not authenticated. A different bank still reports `bank_identity_mismatch` with the advice to preserve the file. For a bound record the doctor now reads the bank's binding without the mailbox first and asks for the mailbox proof only when it matches: both daemons refuse another principal's mailbox before answering, so a proof request alone reported either change as `invalid_credential`.
+
+### Added (2026-10-29 — the Rust daemon serves the full memory briefing)
+- On the Rust daemon `GET /api/briefing`, which `pseudolife-mcp briefing`
+  and the shims read, answered 501. It now answers as the Python daemon
+  does: the graph's open questions and surprising links, avoid-first
+  lessons, fresh world facts, where the last session left off, the
+  dream-stall and review-queue lines, and the other open sessions as the
+  caller may see them.
+
+### Security (2026-10-29 — Avoid running the daemon as root)
+
+- The Python Docker image transfers root-owned state in `/data` to a dedicated
+  account, then drops supplementary groups and root privileges before starting
+  the daemon. Install and update use this entrypoint automatically, including
+  existing state volumes; Compose prevents gaining new privileges and limits
+  bootstrap capabilities.
+
+### Fixed (2026-10-29 — the memory-loop guidance no longer says the surprise gate drops near-duplicates by default)
+- The memory-loop text the session hook serves (`MEMORY_LOOP_BLOCK`, kept identical to `examples/CLAUDE.memory.md`) said "the surprise gate drops near-duplicates", but the shipped `surprise_threshold` is 0.0, which stores them; it now says the gate drops near-duplicates if it is enabled, and the Rust daemon's recorded copy (`rust/daemon/harness/goldens/memory-loop-block.txt`) moves with it.
+
+### Fixed (2026-10-29 — parity harnesses keep their own disposable database names in a shared test run)
+- Each daemon parity harness now binds its own slice of disposable database names (`pgdisposable.Slice("w2f")`, or `Slice.from_env(...)` to follow the launcher's `PL_HARNESS_SLICE`), instead of setting `PL_HARNESS_SLICE` before importing the shared helper. The helper fixed its prefix at first import, so whichever harness imported it first decided every later harness's names: running `rust/ci` and `rust/daemon/harness/board/test_run.py` in one pytest process failed 8 board tests with "refusing non-disposable database name pl_cf_w2f_…", and 6 more harness tests failed the same way when the whole harness directory ran together. The name guard is unchanged: a handle admits only `pl_cf_<its slice>_` followed by 1–40 of `[a-z0-9_]`.
+
+### Fixed (2026-10-29 — clients update on a machine whose Docker the user cannot use)
+- `pseudolife-mcp update` and `update --clients-only` on a client machine
+  stopped with "docker is installed but did not answer" whenever Docker was
+  installed but refused the user (no `docker` group, say), even with
+  `--daemon-url` naming a daemon on another machine. When the command runs
+  from a shim runtime and the daemon URL names another machine whose daemon
+  answers, the update now says so in one line and moves this machine's
+  clients as it does on a machine without Docker. With a local daemon URL, or
+  a remote one that does not answer, it still stops; its refusal now names
+  `--daemon-url` for a client machine that did not say where its daemon is.
+
+### Changed (2026-10-29 — only integration batches spend hosted CI's heavy lanes)
+
+- An ordinary pull request (any head branch but `integrate/*`) now runs only the fast lanes whatever it changes: `ci.yml`'s `scope`, `guards`, `lock-resolve` and `frontend`, and `rust.yml`'s `Scope`, `Rust`, disposable-image check and `Parity` gate. Until now a pull request editing a workflow, `pyproject.toml`, a lock file or the Rust toolchain pin ran every lane on its own head: on 2026-10-28 such pull requests ran 43 Rust jobs per push, and batch #1031 sat queued for over an hour behind them under the account's 20-job hosted limit. Its batch runs every lane under the edited workflow before the edit can reach master, as the old own-head run did (`docs/dev/merge-batches.md`).
+- A newer push to an ordinary pull request cancels that pull request's in-flight runs in both workflows; master pushes, the nightly, manual and stress runs, merge groups and `integrate/*` batch runs each get a concurrency group of their own and are never cancelled, running or pending.
+- `python ops/integrate.py` no longer counts a cancelled check on a member's own head as a failure: `build` and `open` admit it like a pending one, and `status` and the batch body show it as `cancelled`. A job GitHub cancelled for running past its `timeout-minutes` (it reports no separate timed-out conclusion) still counts as failing, read from the runner's annotation on the latest attempt of that check; annotations that cannot be read keep the pull request out as `unverified`, and `open` refuses with a retry rather than a drop. A gate job that runs under `always()` (the `Parity / <os>` gate) and failed only because a cancel stopped the jobs it needs also counts as cancelled, read from the workflow at that head and the run's jobs: on 2026-10-30 #1059 was refused as failing although only its `Rust / <os>` jobs had been cancelled. The `Parity / <os>` gate gains a first step, "A needed job was cancelled", that fails exactly when a job it needs was cancelled and skips the verdict step then (the gate's result is unchanged, except that a cancelled `scope` job now fails it while every other needed job passed, which the verdict alone let through). Only a failure at that exact step, matched by position and name on every failed leg of the gate, with the gate's settings and the workflow's `defaults` and `env` as on master and no other job of that run failed, timed out or needing action, counts as cancelled. A gate that failed elsewhere, a head whose gate predates that step, or a needed job unfinished or timed out, still counts as failing. An `unverified` head now names the read that failed. `merge` still refuses a batch whose own check was cancelled or failed.
+
+### Fixed (2026-10-29 — the judges' oracle daemon starts on a self-hosted Windows runner, and says why when a parity daemon does not)
+- The judges shard's oracle daemon died at startup on the self-hosted Windows runner with `ModuleNotFoundError: No module named 'pywintypes'` from `import mcp`. A self-hosted shard installs its packages into a venv of its own. The oracle runtime reached that venv through bare path lines in `phase1_dependencies.pth`, which add a directory without running its `.pth` files, and pywin32 makes `pywintypes` importable only through one. `evals/rust_port/phase1_oracle.py` now adds each dependency location with `site.addsitedir`, as Python treats the system site-packages a hosted shard installs into.
+- When the parity harness's disposable Python daemon (`evals/rust_baseline/daemon.py`, `launched_daemon`) exits or misses its deadline during startup, the error now carries the end of the daemon's log. The log lives in a temporary directory that is removed as the launcher exits, so before this a failure left only "disposable daemon exited during startup" (run 40748991561).
+
+### Changed (2026-10-29 — Rust port PRs stop colliding on the parity register)
+
+- `rust/PARITY.md` becomes a pointer; its 475 table rows move verbatim to
+  `rust/parity/<section>/<row key>.md`, one file per row under its table's
+  header, and each section's prose and table headers to
+  `rust/parity/<section>/_section.md`, so pull requests that change
+  different rows, sections or paragraphs no longer edit the same lines.
+  Links in the moved text are rewritten relative to each file (a
+  `#section` anchor becomes that section's directory), so they resolve
+  where they sit; three environment-appendix rows that were listed twice
+  are listed once.
+- `python rust/split_parity.py`, run during `git merge` with the branch's
+  own `PARITY.md` kept, applies only that branch's changes three-way
+  against the directory and restores the pointer; `--render` prints the
+  whole register and `--check` verifies the layout. The contract inventory
+  and the briefing hook test read the rendered register.
+
+### Added (2026-10-28 — a Windows parity runner on the dev VM, kept out of nightlies until its trial passes)
+- `ops/selfhosted/setup-windows-runner.ps1` sets up one self-hosted parity runner on the Windows dev VM: a local account that is not an administrator, with a random password that is never written down; an outbound firewall rule keeping that account's own connections off the LAN (all of IPv6 included); sshd refusing it; administrator-owned tools and hooks; and the runner registered from a fresh extraction. Its job-started hook (`windows-job-started.ps1`) proves before every job that the firewall refuses the account's LAN traffic and fails the job otherwise, then runs the disk cleanup.
+- The runner watcher takes an allowlist (`setup-runner-watch.sh --machines linux,windows`, read by `runner_watch.py --machines-file`), so a machine whose runner is online is listed in `PARITY_SELFHOSTED_RUNNERS` only once allowed.
+- The Rust workflow's manual CI dispatch takes `selfhosted_runners` (JSON, such as `["windows"]`), which routes that run's self-hosted shards to the machines named instead of the variable's. This is the trial a new machine passes before the allowlist adds it. Nightlies have no inputs and are unchanged.
+- The firewall rule cannot cover connections Windows makes for a user through system services (SMB, BITS, WebDAV), so two more layers close them (maintainer decision 2026-10-29). `ops/selfhosted/setup-vm-egress-filter.sh --vmid <id>` keeps the VM off the LAN at the hypervisor. It installs a stateless bridge-family nftables table at the prerouting hook of the VM's tap interfaces alone, so frames bound for the hypervisor itself are filtered too. The table passes only the VM's own MAC addresses, ARP, IPv6 neighbour discovery, DHCP to the LAN's server, sshd replies (never a SYN), ICMP replies and public IPv4, and keeps inbound SSH. A hookscript refuses to start the VM without the table. No other guest's traffic path changes. On the Tailscale adapter, the setup script blocks SMB, NetBIOS and HTTP(S) to the tailnet for every account, and all traffic to the hosts named in `-TailnetDeny`.
+- `ops/selfhosted/windows-egress-proof.ps1` probes SMB, BITS, WebDAV, LAN IPv6, DNS and the internet from the account that runs it, for checking the filter against a listener.
+- The Windows runner reads its `.env` but not `.path`, so the setup script puts PATH in `.env`. The first trial dispatch had failed every Windows shard at the gate, with `pseudolife-mcp` missing from PATH. A rerun without `-TailnetDeny` keeps the hosts already denied.
+- The setup script seeds the runner's Python tool cache (`C:\actions-runner\toolcache`, its files read-only to the account) from its managed Python 3.11 and names it in `.env`, because `actions/setup-python`'s Windows installer needs administrator rights the account lacks. The second trial dispatch had stopped every Windows shard there.
+- The Windows runner's `.env` sets `PSEUDOLIFE_TEST_PG_HOST_PORT=127.0.0.1:9`, as the Linux one does, so a shard's default test-PostgreSQL address cannot reach the suite user's server on the VM's loopback, which the firewall does not filter.
+
+### Fixed (2026-10-28 — the self-hosted parity lane's every-night failures, and a cap on its disk use)
+- The W1-C test-login row's throwaway PostgreSQL servers now run the pg0 bundle's programs with the bundle's own `lib` directory on the loader path, as pg0 does for its own servers. The bundled libxml2 needs the bundled ICU and has no RUNPATH, so `initdb` failed on a host shipping another ICU (Debian 13, the self-hosted Linux runners), and the `w1c-connection` shard failed there every night. A failed `initdb` now says why instead of only "returned non-zero exit status 1".
+- The self-hosted shards check free disk in a step of their own, "Check the runner's free disk", before the lease gate, and record the figure in the job summary. A full disk had read as a failure of "Yield to this machine's full suite": all 14 such failures of the 2026-10-27 nightly were the 8 GB floor (6 GB free). Hosted jobs skip the step.
+- `ops/selfhosted/setup-linux-runner.sh` makes `localhost.` resolve to loopback (nss-myhostname), as it does on hosted runners. The W1-C connect and pair rows reach their "remote" fixture daemon through that name, and on the runner box neither arm reached it. It also points each runner's default test-PostgreSQL address at a port nothing can listen on, so the eval shard skips its optional real-PostgreSQL controls as on a hosted runner instead of finding another job's cluster on 127.0.0.1:5433.
+- New `ops/selfhosted/runner_cleanup.py` bounds the runner account's disk use. Before every job it trims that runner's checkout, diagnostic logs and HOME caches against fixed caps. An hourly timer trims the account's rootless Docker (sparing `pseudolife-pg:18`), its old `/tmp` entries and uv's cache. Below 25 GB free, every cap is zero. Each pass appends one JSON line to a log, even when an unexpected error stops it early.
+
+### Added (2026-10-28 — the Rust daemon issues the maintainer's passkey challenges)
+
+- The Rust daemon now answers `POST /api/maintainer/challenge`, which returned 501 `not_implemented`, behind the same gate as the maintainer's reads. For each purpose (send, enrolment, cancel, revoke, repudiate and the four role changes) it validates the request as the Python daemon does, builds the payload the passkey signs with its expiry and MAC, and returns the WebAuthn options and the preview the Console shows before the prompt. Completing a signed action still returns 501 on the Rust daemon.
+
+### Security (2026-10-28 — maintainer passkeys refuse degenerate Ed25519 keys)
+
+- The maintainer passkey verifier accepted an Ed25519 (EdDSA, COSE alg -8)
+  public key of small order: the identity, the points of order 2, 4 and 8,
+  and their non-canonical encodings. Such a key verifies a degenerate
+  signature over any message, so once enrolled anyone with a bearer could
+  sign maintainer actions as it. Enrolling one already needed the bootstrap
+  code or an approving signature. These keys are now refused (`cose_key` in
+  the daemon log) at registration and at every assertion, so a key enrolled
+  before this fix no longer verifies; revoke it and enrol a real passkey. No
+  authenticator generates such a key.
+
+### Fixed (2026-10-28 — `lease check` sees a hold of this machine's suite lease)
+- `pseudolife-mcp lease check full-suite[@<machine>]` now reads the lease as held while `lease hold` or `lease run` holds it on this machine. Those take the lease's own lock file, but for a suite lease the check probed only the test suite's `full-suite.lock`. Without a board bearer (a self-hosted parity runner's yield gate, for one), a machine reserved for reproduction work with `lease hold full-suite@<machine> --while-pid <pid>` read as free; with one, the hold's board record beside a free `full-suite.lock` read as stale. The check probes the lease's lock in the lease lock directory and in `PSEUDOLIFE_SUITE_LOCK_DIR`, in the Python CLI and the Rust shim alike.
+
+### Security (2026-10-28 — setuptools 84.2.1 and filelock 4.2.1 in the daemon image)
+- The daemon image's pinned dependencies (`ops/requirements.lock.txt`) move
+  setuptools from 83.0.0 to 84.2.1 (Dependabot alert #60, low: a Windows
+  path escape through a wheel's `namespace_packages.txt` during legacy wheel
+  installation, GHSA-xmj3-9gf7-h52w), in the lock and in
+  `ops/Dockerfile.daemon`'s explicit pin. torch 2.13.0 requires only
+  `setuptools>=77.0.3`, so the CPU torch pin is unaffected.
+- filelock moved from 3.29.0 to 4.2.1 in Dependabot's #923 (2026-10-26),
+  which had no changelog entry (alerts #61, high, and #62–#63, low: another
+  local user who can create files beside a `ReadWriteLock`'s SQLite database
+  can make the lock user's process overwrite or unlink its own files,
+  GHSA-v4x8-3wr5-3wq8, or on Windows act on side files placed there,
+  GHSA-9vhv-jxww-xfm5; on Windows an oplock on a soft lock's marker holds
+  `SoftFileLock.acquire()` past its timeout, GHSA-567q-5qvw-pf92). filelock
+  reaches the image only through torch, huggingface_hub and transformers,
+  none of which uses a read-write lock, and the image runs on Linux.
+- Dependabot's `setuptools >=82` ignore rule is retired: its own lift
+  condition (a pinned torch with no setuptools ceiling) was met on
+  2026-08-02, and since then it has kept Dependabot from proposing
+  setuptools security fixes such as #60's.
+- Users get the new image with the next release, through `pseudolife-mcp
+  update`; nothing to do by hand.
+
+### Changed (2026-10-28 — integration batches compile their Rust before CI)
+
+- `python ops/integrate.py build` now runs `cargo check --workspace --all-targets --locked` from `rust/` on the batch head whenever the batch changes anything under `rust/` but the generated census, because neither the local full suite nor the Rust harness run compiles Rust: batch #1017 failed hosted CI with E0061 after two members that each compiled alone changed and called `record()` differently. A failure drops nothing, keeps the batch branch for bisecting and exits 1, telling the operator to run the same check on master first, since cargo's output cannot tell a red batch from a broken machine; `open` refuses a batch whose check failed, did not run or predates the check, and records a pass in the batch body. The check honours `CARGO_TARGET_DIR` and runs without credential-shaped environment variables or database DSNs carrying a password; clippy and fmt stay CI's (`docs/dev/merge-batches.md`).
+
+### Changed (2026-10-28 — Rust port pull requests stop colliding on the divergence ledger and the harness's declarations)
+- The Rust daemon's declared-divergence ledger is now one file per entry
+  under `rust/daemon/divergences/` (a directory per section), instead of
+  one `divergences.md` every port pull request edited. Adding or closing a
+  divergence adds or deletes its own file. `divergences.md` is a short
+  pointer, and `python rust/daemon/split_divergences.py` converts a
+  branch's single-file ledger when it merges master forward, applying only
+  that branch's own changes; `--render` prints the whole ledger, `--check`
+  verifies the layout.
+- The differential harness (`rust/daemon/harness/run.py`) reads its
+  declared route cases and Python-only `/health` keys from one file each
+  under `harness/declared/`, and loads new scenario families, with any
+  per-route response scrub, from one module each under
+  `harness/run_scenarios/`. The scenarios, their cases, order and declared
+  markers are unchanged.
+
+### Added (2026-10-27 — finished worktrees and stale build caches are reclaimed safely)
+- `ops/prune_worktrees.py` removes git worktrees whose work has merged, and Rust build-cache dirs nobody has written to recently, keeping every check the 2026-10-27 hand cleanup used. A worktree goes only when its HEAD is on `origin/master` after a fresh fetch, `git status` shows no change, every ignored path is a known cache, nothing under it is a symlink or junction, nothing in it was written within a grace period (3 days), and it carries no keep marker. Removal is a plain `git worktree remove`, never `--force`, and local branches are kept. A cache dir goes only when it is idle (7 days), holds no link, is not pinned as a `target-dir`, and is not held open. The script is a dry run unless given `--apply`, and every removal appends a line to `~/.pseudolife-mcp/retention-ledger.jsonl`.
+- `--mine` is the primary path: a session whose work has all merged removes its own worktree and cache dir. The grace period is skipped, every other check still applies, and any failure refuses with nothing changed. Checkouts a harness manages (`.claude`, `.t3`, `.codex` worktrees) are never removed; there it cleans only the cache dir.
+- `ops/install-worktree-retention.ps1` registers a weekly Scheduled Task as the backstop. It refuses to register from a linked worktree, and a rerun with nothing changed says so in one line. Roots come only from flags or `~/.pseudolife-mcp/retention.toml`, so until they are configured the task does nothing. Runbook: `docs/dev/worktree-retention.md`.
+
+### Added (2026-10-27 — stress loops can run a binary target's unit tests)
+
+- A `mode=stress` cargo selection can now name a binary target's unit tests as `cargo:<package>/bin/<name>[::<test>]`, for example `cargo:pseudolife-daemon/bin/pseudolife-daemon::<module>::tests::<test>`. The daemon is a binary crate with no library, so an integration test cannot reach its internals, and a timing-sensitive test of them is a unit test that the 20 clean hosted `windows-latest` runs rule could not loop before. The archive is built with `--bin <name>`, and the run filters and checks the evidence by nextest's binary id `<package>::bin/<name>`. A binary that needs a non-default feature (`graph-contract`, `dream-contract`) cannot be looped, because the archive builds default features; cargo refuses it at `stress-build` before any iteration starts.
+
+### Fixed (2026-10-27 — the daemon saves its state when stopped with SIGTERM)
+
+- Stopping the HTTP daemon with SIGTERM (`kill`, a service manager, a stop
+  that is not Ctrl-C) no longer loses what changed since the last autosave,
+  up to `PSEUDOLIFE_MCP_AUTOSAVE_SECONDS` (30 s) of it: the interaction
+  counters, access counts and unsaved cortex, world-fact and lesson slots.
+  uvicorn re-raises SIGTERM after its graceful shutdown with the default
+  handler, which exits without running the `atexit` exit save; a daemon
+  running as PID 1 (the Docker image) drops that signal and was not
+  affected. The daemon now saves from the app's lifespan shutdown, which
+  runs first, and keeps `atexit` as the fallback; the save runs once even
+  when both paths reach it. Ctrl-C (SIGINT) and the embedded stdio server
+  already saved and still do.
+
+### Added (2026-10-27 — tell the user plainly when their dream extractor's CLI is signed out, and where)
+- When the dream extractor's Claude Code or Codex CLI is signed out, the surfaces where users look at dream health say which CLI, where to sign it in, as which OS user, and the one command. That covers the session-start line, `pseudolife-mcp briefing`, the board notice, the Console (the Observatory and the Dreamer card), `pseudolife-mcp doctor` and the new `stall_line` in `memory_dream(action="status")`. For example: "the Claude Code CLI is signed out on the machine running the Pseudolife daemon (box.example); sign it in there as svc: run `claude`, then `/login`" (Codex: `codex login`).
+- **Where.** The sign-in lives where the CLI shim runs.
+  - A shim on another machine than the daemon is named by its own host.
+  - Otherwise the line names the daemon's machine, by the host the session or doctor reaches it at.
+  - A loopback address (which an SSH tunnel to a remote daemon also is) gets the generic words "the machine running the Pseudolife daemon".
+- **Primary-only installs too.** The installer's `claude-only` and `openai-only` modes (no auto-mode probe) learn the identity by asking the shim's `/health` once after a dream fails with `login_expired`. The generic sign-in remedy now gives the same command.
+- **Field plumbing.**
+  - The CLI shims' `login_required` `/health` answer names its `provider` and OS `user`, to whoever can reach the shim (loopback or the Docker bridge by default).
+  - The daemon carries `provider`, `shim_user` and `shim_host` in the stall record.
+  - The daemon's unauthenticated `/health` stall object carries the provider and, for a shim on another machine, `shim_remote: true`, never its host or the user.
+- **Faster recovery.** While a shim's cached health verdict is a sign-in failure, it re-checks every 30 seconds instead of every 5 minutes, so the notice clears soon after the user signs in. Other failures keep the 5-minute pace.
+- **Rust daemon.** It mirrors the stall record's fields, the signed-out and generic wording, the primary-mode identity probe and `stall_line`. Its session-start hook is being ported separately with this line's contract.
+
+### Fixed (2026-10-27 — the CLI shims' /health says when the CLI is signed out, and how to fix it)
+- The Claude and Codex CLI shims now keep the CLI's own message when a call fails. They read both stdout and stderr and bound each one separately, keeping its start and end. A stream that printed alone gets both shares. They also say when neither stream printed anything. Before this, an expired Claude Code sign-in answered `/health` with `{"status": "cli_error", "detail": "claude -p rc=1: "}`, because the CLI printed "Failed to authenticate: OAuth session expired" on stdout and the shim read only stderr.
+- A failed health check whose message is a sign-in failure now answers 503 with `"status": "login_required"` and a `fix` naming the command to run on the shim host (`claude auth login`, or `codex login`). The check reads the CLI's whole output, so warnings printed first cannot hide the cause. Any other failure stays `"status": "cli_error"`. The daemon's probe still treats every 503 as primary-down.
+
+### Fixed (2026-10-27 — the Rust daemon survives a PostgreSQL restart instead of failing every call until it is restarted)
+- The Rust daemon opened its writer session once and never replaced it: after
+  a PostgreSQL restart, a network drop or an idle-session kill, every memory
+  call failed until the daemon itself was restarted. It now does what the
+  Python daemon does. Before each call it checks the writer session (at most
+  once a second); a dead one is replaced, the bank's writer lease is won back
+  and the lease epoch is checked. If no other writer ran in the gap, the
+  daemon keeps serving its resident copy. If another writer held the bank
+  meanwhile, it drops the resident stores and re-reads the bank before
+  serving anything.
+- If another writer still holds the lease, calls are refused with the same
+  message the Python daemon gives, `/health` reports `degraded` while that
+  writer is there, and a retry waits 5 seconds between attempts. An
+  unreachable server is retried at most every 5 seconds, as in Python.
+- `rust/daemon/harness/writer_session_cases.py` runs both daemons' services
+  through a killed session, a handover, a held lease and its release, and
+  compares their answers, `/health` and the bank after each step.
+
+### Added (2026-10-27 — the Rust daemon serves MCP on installs without a token)
+- The Rust daemon now answers `/mcp` when no bearer token is configured, as
+  the Python daemon does, instead of 501 `not_implemented`. It keeps the
+  Python daemon's DNS-rebinding protection exactly: the Host header must name
+  `127.0.0.1`, `localhost` or `[::1]` with a port (else 421), and a browser
+  Origin must be `http://` on one of those with a port (else 403), on every
+  request. A bound identity (`X-PL-Bank` / `X-PL-Principal`) on such an
+  install is still refused with `authentication_required`.
+- Fixed in the same change: a request in the 2026-07-28 MCP era (an unknown
+  `MCP-Protocol-Version` header) now passes the Content-Type, Host and Origin
+  checks before its refusal, as the MCP SDK runs them first.
+
+### Fixed (2026-10-27 — the Rust daemon stops within Docker's grace period and saves before it is killed)
+- The Rust daemon waited without limit at exit: for open requests (a
+  client parked on a board wait), for writes, for background work and for
+  its final save. A write stuck on an unresponsive database held the
+  daemon until Docker killed it, and the final save never ran. Shutdown
+  now works within 9 seconds of the stop signal, inside Docker's default
+  10-second grace: open requests are waited for up to 3 seconds, writes
+  until 6, background work until 7.5, and the final save until 9. Work
+  still running at the end is left to the exit rather than cancelled
+  part way, and a write a lingering request submits after the first
+  3 seconds is refused rather than started.
+
+### Added (2026-10-27 — the Rust daemon serves the SessionStart hook)
+- On the Rust daemon the plugin's SessionStart hook got a 501 for every
+  caller, so a session on it started with no memory briefing, no episode
+  handle and no registration, and the active-session pointer never moved.
+  The hook is now served as the Python daemon serves it: the version,
+  hooks and release notices, the dream-stall and review-queue lines, the
+  session's registration with its episode handle, the startup memory
+  policy, the daemon-side custom instructions, onboarding on an empty bank
+  and the bounded briefing (lessons, world facts and where the last
+  session left off), or a short pointer on a resume or compaction.
+
+### Fixed (2026-10-27 — the Rust daemon logs a served memory's surprise as Python does)
+
+- A retrieval event's served components on the Rust daemon carried the surprise of a memory stored in the running process rounded to 32-bit precision, where the Python daemon logs the value the store computed. They now carry that value. After a restart both daemons already logged the stored value.
+
+### Added (2026-10-27 — the Rust daemon redeems pairing codes)
+- `pseudolife-mcp pair` against the Rust daemon now redeems the code instead
+  of getting 501 `not_implemented`, as against the Python daemon: the new
+  token works at once, a retry with the same token inside ten minutes gets
+  the same answer, and a spent, expired or revoked code, a name the
+  environment already uses or a token already held is refused with the same
+  `pairing_refused`. At most two redemptions run at once (a third is told
+  `rate_limited`, not queued), a success gives its attempt back to the
+  20-a-minute failure budget, a database failure answers
+  `pairing_unavailable`, and a client that disconnects mid-redemption still
+  leaves the pairing completed and usable.
+
+### Added (2026-10-27 — the Rust daemon serves the maintainer's Console status, sent mail and inbox)
+
+- The Rust daemon now answers `GET /api/maintainer`, `/api/maintainer/sent` and `/api/maintainer/inbox`, which returned 501 `not_implemented`, behind the same gate as the Python daemon. The gate refuses an open install, a principal not admitted to the board or the reserved `maintainer` principal, a board that is off, and a `coordination.maintainer` origin that is unset or not exactly the passkey host's HTTPS origin (409 `maintainer_https_required` with the rule that failed). The status lists the passkeys, whether a key can sign, the live delegate and coordinator roles with whether maintainer mail reaches each holder, and the recent key changes.
+
+### Fixed (2026-10-27 — the Rust daemon's /health says when dreams stall, the bank is nearly full or dream tracking failed)
+- The Rust daemon's `/health` left out three of Python's warnings, so a
+  stalled dream extractor, a bank about to start deleting old memories and
+  a failed dream-tracking start were invisible there. It now reports them
+  as Python does: `extractor` reads `"stalled"` with a `stall` record
+  (reason and times only) once two dreams in a row fail, a run sets
+  aside every memory it pulled, or a due backlog goes unserved, a fallback
+  that serves instead of the primary keeps `"configured"` with the record,
+  `capacity_warning: true` appears when the last band is 80% full, and
+  `dream_tracking_error` names the failure's code. None of them changes
+  `status`, so the Docker healthcheck never restarts a daemon that is
+  still serving.
+- `/health` also logs the "daemon memory is near its limit" warning, at
+  most every ten minutes, as Python does.
+- `migration_partial` and `lesson_reconciliation_required` stay absent:
+  the Rust daemon has neither a legacy `.pt` import nor a lesson latch yet.
+
+### Fixed (2026-10-27 — the Rust daemon keeps its memory counters across restarts)
+- The Rust daemon's autosave and clean-exit flush did nothing, so the
+  counters `memory_stats` reports (interactions, retrieval queries and
+  per-band hits) and the per-band surprise history started from zero at
+  every restart. It now writes them to the bank's `cms_counters` row as the
+  Python daemon does: when the bank or its facts changed since the last
+  save (or the last write failed), from the autosave loop and at a clean
+  exit; a restart reads them back. Two counters it does not maintain yet are kept
+  as the row holds them rather than zeroed.
+- A bank whose counters still sit in an old `memory_state/weights.pt`
+  (from a Python release before schema 57) is not imported by the Rust
+  daemon, which does not read that file format. It logs this once and
+  `/health` shows `counters_import_required` with the step: start a
+  Python daemon at schema 57 or later (a release after 0.19.0) once on
+  that bank. The cutover's update step will do that
+  before switching a host to the Rust daemon.
+
+### Added (2026-10-27 — the Rust daemon serves the Console's retrieval trace)
+
+- The Rust daemon now answers `GET /api/trace`, which returned 501 `not_implemented`: a search's entries plus the structured ranking trace the Python daemon serves, each tier's candidates with their raw score, recency, multipliers and why each was kept or dropped, and the slot, BM25, timeline, reference and reranker channels, the candidate pool and the final top-k. The trace is recorded alongside the ranking without changing it, and a trace logs no retrieval event, as in Python. `memory_search(explain=true)` is still refused on the Rust daemon; its adapter over the same trace is a follow-up.
+
+### Added (2026-10-27 — the Rust daemon serves the Console's fact, stream and episode views)
+
+- The Rust daemon now answers eleven Console reads that returned 501 `not_implemented`: `GET /api/facts`, `/api/facts/history`, `/api/world`, `/api/lessons`, `/api/sources`, `/api/recent`, `/api/chain`, `/api/entry`, `/api/episodes`, `/api/episodes/summary` and `/api/consolidation`. Each serves the same body as the Python daemon, including the row cap (`count`, `total`, `truncated`), the query defaults and coercions, and the read side effects (`/api/entry` bumps the access count and credits the retrieval that served the entry). Each route reuses the service function its MCP tool already calls, without the MCP layer's reshaping.
+
+### Added (2026-10-27 — the Rust daemon serves the Console dashboard and its peer list)
+
+- The Rust daemon now answers `GET /api/overview`, the Console dashboard's one-round-trip summary, and the default view of `GET /api/agents`, the open sessions other than the caller's, where both returned 501 `not_implemented`. The overview serves every layer's count, the stats, dream and loop-health blocks as the Python daemon does, each layer falling back to its empty default rather than failing the dashboard. `/api/agents` honours its `limit` (default 5) under `coordination.awareness_limit` and answers a limit below 1 with a 400, as Python does.
+
+### Added (2026-10-27 — the Rust daemon saves the Console's settings, applied at the next start)
+
+- The Rust daemon now answers `POST /api/config`, which returned 501 `not_implemented`. It refuses what the Python daemon refuses, in the same order and with the same messages (an empty patch, the protected `coordination.maintainer` keys, an unknown knob, an out-of-range or mistyped value), and writes config.yaml byte for byte as the Python daemon does, after a timestamped backup. Unlike the Python daemon it applies no setting to the running daemon: every saved knob is reported as needing a restart, and the Console's settings read shows the saved value until then.
+- A config.yaml holding a YAML timestamp or binary value is refused (500, file untouched) rather than rewritten.
+
+### Added (2026-10-27 — the Rust daemon serves the Console's config editor read)
+
+- The Rust daemon now answers `GET /api/config`, which returned 501 `not_implemented`, with the Python daemon's knob table: every Console knob grouped as the Console shows it, each with the value the daemon runs with (as config.yaml set it at start, else the default) and, for a knob that needs a restart, the `saved` value config.yaml now holds when it differs. Saving settings (`POST /api/config`) still returns 501 on the Rust daemon.
+
+### Fixed (2026-10-27 — the Rust daemon prunes old fact versions as the Python daemon does)
+- `memory.compaction` was read but never acted on by the Rust daemon, so
+  superseded and retired versions of facts, world facts and lessons piled
+  up in its bank indefinitely. Its background sweep now compacts them as
+  the Python daemon does: per slot it keeps the newest `keep_per_slot`
+  old versions and deletes the rest once they are older than
+  `min_age_days`. Current values are never touched.
+
+### Added (2026-10-27 — the Rust daemon serves the CLI's episode routes)
+- On the Rust daemon `POST /api/episode/start` and `POST /api/episode/end`
+  answered 501, so the CLI's episode hooks and the shims could not open or
+  close a session's episode there. Both are now served as the Python daemon
+  serves them: start opens or re-finds the session's episode and registers
+  it, and end closes an explicit session, or with none only the caller's
+  own (its `X-PL-Session` header, else the active session), pruning an
+  empty one and firing the session-end dream after a session that captured
+  memories. `GET /api/briefing` follows in a later change.
+
+### Fixed (2026-10-27 — the Rust daemon orders board mail and memory writes on one clock)
+- On the Rust daemon a board message's ordering stamp came from the board's
+  own clock, separate from the clock that stamps facts, world facts and
+  lessons, so a message could sort before a memory write made just before
+  it. Board sends and the daemon's own notices now take the service clock's
+  next tick, as on the Python daemon, after the service has fully started
+  (a send now waits for startup to finish, as it does on Python).
+
+### Changed (2026-10-27 — a Rust board send retries the way the Python daemon does after a writer change)
+- When a board message send on the Rust daemon finds that the bank's writer
+  epoch moved under it, its one retry now rechecks the database session at
+  once (even inside the one-second probe interval) and runs the service's
+  initialization before trying again, as the Python daemon's retry does.
+  The send still goes through on its retry, or is refused with nothing
+  written.
+
+### Fixed (2026-10-27 — a stalled dream names the primary's real cause, not the fallback's)
+- In `auto` mode, the failed health probe that sends a dream to the fallback is now kept with it. If the fallback fails too, the stall's reason is still the primary's, and `last_error` names both. Before this, a signed-out primary CLI shim (`/health` 503) with an unreachable fallback was reported as `extractor_unreachable` / `unreachable (gaierror)`, and the session-start line told everyone to check the network. It now reads `login_expired`, with `last_error` `primary /health HTTP 503 (login_required); fallback unreachable (gaierror)`, and the remedy says to sign the CLI in again. The probe reads only the shim's `status` token, never its detail.
+- A configured fallback whose host does not resolve (a definitive not-found from DNS, such as a sidecar the stack does not run) is treated as a misconfiguration, not a transient network fault. In `auto` mode with a usable primary it is never dialled; the dream runs on the primary. With no usable primary, or in `fallback` mode, it is still dialled, so the dream fails and holds its batch rather than an empty extraction acknowledging it. A temporary DNS failure, or a fallback reached through a proxy, is never judged.
+- `memory_dream(action="status")` carries a new `fallback_warning` naming what the mode does with such a fallback and the fix: remove it, or start the extractor it names. The Python daemon also logs it at startup and once when a dream first skips it. The Rust daemon mirrors the probe, the stall record and the status field.
+
+### Fixed (2026-10-27 — a refused board name or label says which rule it broke)
+- `memory_agents(action="update", name=...)` with a name such as "Rust
+  B2a/B2d maintainer/config" answered only "invalid_name: the call was
+  refused.", so an agent could not tell why. The refusal now names the cause
+  and the fix: "the name contains the reserved word 'maintainer' (ignoring
+  case, spacing, punctuation and look-alike letters); choose a name without
+  it", or that it "reads as" a reserved word when it spells one. A name
+  holding a zero-width or bidi character says so. A refused label says the
+  same for labels. The refusal code and which names are refused are
+  unchanged, on the Python and Rust daemons alike.
+
+### Changed (2026-10-27 — the batch regenerates the producer census, so no pull request goes stale on it)
+
+- A pull request that committed a regenerated `rust/producer-census.json` went stale whenever master changed any of the files the census scans, and `python ops/integrate.py build` then held it back or dropped it until its author merged master forward and regenerated the census again; #960 and #974 went through that three times each on 2026-10-26. `build` now regenerates the census on the batch head with the head's own `rust/producer_census.py` and commits it as the batch's one generated commit (`Regenerate the producer census for this batch`, touching only that file) when it changed. The batch pull request names that commit under `## Producer census` and lists any trusted manual shape the new census withdrew. No member waits or is dropped over a stale census any more; a member is dropped only when the census script fails on the batch head and its own diff changes the census inputs. CLAUDE.md's "nothing is fixed inside a batch" gains this one exception (maintainer decision, 2026-10-27).
+- `python rust/producer_census.py --ci-check` now fails a stale census on every `integrate/*` pull request, and on a master push or merge group that changes the census inputs; an ordinary pull request's drift is only reported, even when it changes the census, so master moving never turns a member's own CI red.
+- `rust/test_producer_census.py::test_committed_census_matches_current_tree` is removed (CI and the batch's Rust harness run already deselected it); `python rust/producer_census.py --check` remains the strict local check. `rust/producer-census.json` no longer widens a pull request's parity run to every suite, since no harness reads it.
+- A release cut changes `plugin/release.json`, which the census hashes, so its batch now carries a regenerated census; `evals/rust_port/oracle_selection.py::release_cut()` accepts `rust/producer-census.json` beside a cut (like the documents it already accepts), so parity still tests the cut against its own head.
+
+### Fixed (2026-10-26 — test-login says plainly when a server has no production database)
+- `pseudolife-mcp test-login create` ended a successful run on a server with
+  no production database with "...which cannot connect to no production
+  database (none on this server)", a double negative. It now says "...logs in
+  as pseudolife_test; this server has no production database for it to be
+  kept out of." When production databases exist, the line still names them.
+  The Rust shim's port prints the same line.
+
+### Added (2026-10-26 — the Rust daemon can install the PDFium library it will read PDFs with)
+- The Rust daemon refuses PDF ingest because it has no PDF reader. The
+  maintainer chose PDFium (2026-10-26), the engine the Python daemon now
+  uses on every install, so both daemons store the same text. This adds the
+  pinned library and the command that installs it; the extraction itself
+  follows in its own change.
+- `rust/daemon/pdfium-pin.json` pins `bblanchon/pdfium-binaries`
+  chromium/8076 for seven targets (Windows, Linux glibc and musl, macOS; x64
+  and ARM): each archive's sha256 and the sha256 of the library inside it,
+  every archive checked against its GitHub build attestation when pinned.
+  `rust/daemon/pin_pdfium.py` writes it for a new release.
+- `pseudolife-daemon provision pdfium` downloads this platform's archive,
+  checks it against the pin, and installs only the library, `LICENSE` and
+  `licenses/` into `<per-user data dir>/native/pdfium/<build>-<hash>/`
+  (beside the lite tier's `native/postgresql/`), through the shared
+  provisioner: all or nothing under an install lock, one line and no change
+  on a rerun, and nothing installed when a hash differs. It needs no bank or
+  configuration. `PSEUDOLIFE_DAEMON_PDFIUM_DIR` names another install root.
+- The Rust image installs it at build time into `/opt/pdfium`. The
+  installers and `pseudolife-mcp update` do not install the Rust daemon yet;
+  when they do (the cutover's B11), they run the same command, tracked in
+  `rust/CUTOVER.md`. Until then a host running the Rust daemon from a
+  checkout runs `pseudolife-daemon provision pdfium` once.
+- The PDFium build moves only together with the Python daemon's pypdfium2
+  pin: tests on both sides fail when the two disagree.
+
+### Added (2026-10-26 — the Rust daemon ingests PDFs, with the Python daemon's text)
+- `document_ingest` on the Rust daemon refused every `.pdf`. It now reads a
+  PDF's text with PDFium, the pinned build the Python daemon's pypdfium2
+  bundles, through pypdfium2's own calls, so both daemons store the same
+  text, chunks and chunk ids for a PDF. The text is compared byte for byte
+  with the Python daemon's own output for every file of a committed corpus
+  (synthetic, browser-printed in several scripts, and hostile files) and
+  in the live differential.
+- A PDF PDFium cannot open is refused as the Python daemon refuses it
+  (`Failed to read PDF: Failed to load document (PDFium: Data format
+  error).`, a wrong password, a page-tree cycle's `Failed to load page.`),
+  after the same file-kind and size checks every document gets.
+- When the PDFium library is missing or does not match its pin, PDF ingest
+  is refused with `pdf_engine_unavailable`, naming the cause and the one
+  fix; the Python daemon reads such a PDF with pypdf instead. Text,
+  Markdown and HTML ingest never need the library.
+- One declared difference: a page whose text starts or ends with about a
+  thousand characters PDFium leaves out fails on the Python daemon
+  (pypdfium2 trims them recursively and runs out of stack); the Rust
+  daemon reads the page.
+- CI provisions the pinned library for the tests, which fail without it.
+
+### Changed (2026-10-26 — PDF documents are read with PDFium on every install)
+- `document_ingest` read a PDF's text with pypdf unless the optional `pdf`
+  extra was installed, so the same file could give different text (and
+  chunks) from one install to another. pypdfium2 (Chromium's PDFium) is now
+  a core dependency, pinned to exactly 5.14.0, so every install reads PDFs
+  with the same PDFium build, the path `document_parser` already preferred.
+  pypdf stays the fallback when pypdfium2 cannot be imported or its bundled
+  library cannot be loaded.
+- A PDF PDFium cannot open (not a PDF, truncated, a wrong password) is
+  refused with `Failed to read PDF: <PDFium's reason>`, the same
+  `ValueError` an unreadable PDF gave on the pypdf path, instead of an
+  unexpected `PdfiumError`.
+- Only new ingests change: documents already in the bank keep their stored
+  chunks. Re-ingesting a PDF first read with pypdf stores PDFium's text as
+  well, and in practice that is a second copy of nearly the whole document:
+  chunk ids hash the source, the position and the first 100 characters, and
+  a small early difference shifts every later chunk's start. No tool or
+  command removes a document's chunks, so re-ingest only when the second
+  copy is acceptable.
+- `pip install pseudolife-mcp[pdf]` still works; the extra now adds nothing.
+  Install and update need no extra step: the dependency arrives with the
+  package and in the image. The exact pin trades away pip's freedom to
+  co-install another pypdfium2 beside the package.
+- This pypdfium2 bundles the PDFium build the Rust daemon will pin, so once
+  its PDF ingest lands both daemons store byte-identical PDF text; the two
+  pins move together, and PDFium security fixes arrive through a
+  Pseudolife release.
+
+### Changed (2026-10-26 — `lease check` runs the gated command, so a held lease can't be ignored)
+- `pseudolife-mcp lease check NAME -- COMMAND [ARGS...]` now runs COMMAND
+  only when the lease is free, and exits with the command's own status. When
+  the lease is held, the command does not run: the usual report prints, one
+  stderr line names the next step (retry once free, or queue with `lease run
+  NAME -- ...`), and the exit is `75`, so a refusal is never read as the
+  command's own `1`. A failed check runs nothing and exits `70`. Nothing is
+  held while the command runs. Before this change, `check` with a command was
+  a usage error, and a bare check followed by `;` (`lease check full-suite;
+  cargo build`) started heavy work while another session's full suite held
+  the machine.
+- `check` without a command is unchanged. `check --json -- COMMAND` and an
+  empty command after `--` are usage errors (`2`) that name the right form.
+  `lease check --help` documents the gated form, with a multi-step example
+  (`-- sh -c 'cargo clippy && cargo nextest run && cargo build'`) and its exit
+  codes. The Rust shim's native `lease check` behaves the same.
+
+### Fixed (2026-10-26 — backups no longer copy installed runtimes or the lite password file)
+
+- `pseudolife-mcp backup`'s state archive now leaves out the software the
+  default data dir also holds, which reinstalls and is no bank state: the
+  shim's `runtimes/` and `bin/`, and `native/` (pinned native runtimes such
+  as the Rust lite tier's PostgreSQL). On a lite install with the default
+  data dir, each state archive had carried the shim's runtimes, hundreds
+  of MB.
+- The Rust CLI's state archive also leaves out `embedded_pg.secret`, the
+  bank's superuser password, as the Python CLI has since 2026-10-25.
+
+### Added (2026-10-25 — the Rust daemon closes sessions and serves the memory-policy hook)
+- On the Rust daemon the plugin's SessionEnd hook answered 501 for a
+  session that had one, so a session never closed: its episode stayed open
+  until the idle reaper, it kept its generic title, and the client's
+  registration row never recorded the end. The separate memory-policy
+  SessionStart hook answered 501 too. Both are now served as the Python
+  daemon serves them. SessionEnd closes the session's root and every open
+  episode below it, deletes it when it holds no entries, otherwise titles a
+  generic-named root from its entries, stamps the registration row, clears
+  the active-session pointer only while that session owns it, and fires the
+  session-end dream, as the idle reaper's close does. The memory-policy hook serves the full
+  memory-loop block to sessions whose configured variant, or A/B arm, is
+  `full_separate_hook`, and nothing on a resume or compaction. The daemon
+  now reads `memory_policy.variant` and `memory_policy.ab_arms` from
+  `config.yaml`, where before it only validated them.
+
+### Added (2026-10-25 — the Rust daemon's memory search finds ingested documents)
+- Memory search on the Rust daemon (`memory_search`, `GET /api/search`)
+  served no document hits, and `memory_stats` counted no documents, because
+  the reference pool was not ported. Both now read the bank's
+  `reference_chunks` table as the Python daemon does: up to
+  `memory.ref_top_k` chunks (3) are appended after the memories, a chunk
+  whose text a memory already serves or that scores under the floor is
+  skipped, a failed document read serves none instead of failing the search,
+  and the reranker, the timeline order and contiguity treat them as Python
+  does. `memory_stats` reports the chunk and document counts and adds the
+  chunks to `total_memories`. The consolidation query anchor reads the pool
+  too, as Python's does, then drops the chunks it cannot address.
+- This closes the second half of the Rust cutover's reference-store blocker
+  (the first was the document tools). Nothing installs the Rust daemon yet,
+  so no user setup changes.
+
+### Added (2026-10-25 — the Rust daemon serves memory_recall's llm driver)
+- With `memory.recall.driver: llm` (or `PSEUDOLIFE_RECALL_DRIVER=llm`), the
+  Rust daemon refused every non-blank `memory_recall` as `not_implemented`.
+  It now asks the dream's extraction model which known entities the question
+  names, as the Python daemon does: the same prompt and request bytes to
+  `<extractor base>/chat/completions` (the base URL, model and key from the
+  `PSEUDOLIFE_DREAM_*` variables or `memory.dream`), the bearer key only when
+  one is set, a redirect refused rather than followed, and any failure taken
+  as no seeds (`low_confidence`). A reply whose content is truthy but not text
+  (a non-zero number, `true`, a non-empty list or object) is an internal error, not "no seeds", because
+  Python raises an AttributeError there. The returned names seed the walk
+  when they are in the entity vocabulary; the expansion and re-queries are
+  unchanged.
+  The differential harness's `recall-llm` scenario compares both daemons'
+  answers and outbound requests against a stub model.
+
+### Added (2026-10-25 — the Rust daemon serves the per-turn memory-change note)
+- On the Rust daemon the plugin's UserPromptSubmit hook got a 501 for an
+  authorized session, so an agent never heard that another session had
+  written a status note or that a new lesson had landed. The hook is now
+  served as the Python daemon serves it: line 1 is the next cursor, then a
+  note when status notes from other sessions or new lessons arrived since
+  the hook's last cursor (on a session's first turn, since the session
+  started). The maintainer's delegate's extra reminder line is not served
+  yet.
+
+### Changed (2026-10-25 — the Rust daemon's sweep runs the link judge)
+- With dreaming enabled, the Rust daemon's sweep never judged pending link
+  proposals. It now runs the link judge as Python does: shadow records a
+  verdict per proposal, and asks a second model about an accept or reject
+  that fell short of its confidence gate; auto promotes a confident accept
+  to a live edge and rejects a confident reject (remembering the decision,
+  which is reconsidered when the endpoints' evidence changes), applies two
+  agreeing votes only when they came from different models, and records a
+  retype for a reviewer without applying it. The curation and candidate
+  judges are still not run by the Rust daemon.
+
+### Changed (2026-10-25 — the Rust daemon's sweep runs the junk judge)
+- With dreaming enabled, the Rust daemon's sweep ran the merge judge but not
+  the review-queue judges, so pending junk-entity proposals were never
+  judged on it. It now runs the junk judge as Python does: shadow records a
+  verdict per proposal; auto keeps a real entity (closing the proposal and
+  remembering the decision so a re-mint is not re-proposed) and deletes a
+  junk one only under the evidence bar (low degree, at most one fact),
+  writing a graph snapshot first. An automatic keep is reconsidered when the
+  entity's evidence changes. The link, curation and candidate judges are
+  still not run by the Rust daemon.
+
+### Added (2026-10-25 — the Rust daemon serves the episode curation routes)
+- `POST /api/episodes/rename`, `/merge` and `/prune` answered 501 on the
+  Rust daemon, so an agent repairing fragmented or empty episodes over REST
+  had no way to do it there; no MCP tool offers these. The Rust daemon now
+  serves all three as the Python daemon does: rename restamps the episode's
+  entries, merge folds closed episodes into an existing one or a new rollup
+  (re-pointing entries, outcome signals and child episodes, and widening the
+  span), and prune deletes episodes with no entries, closed ones by default.
+  Refusals keep Python's answers, including the 405 for a rename without an
+  `id`. One declared difference: a new rollup's `hint` must be a string or
+  null; Python accepts any value and can leave the merged entries pointing
+  at an episode row it never wrote.
+
+### Changed (2026-10-25 — the Rust daemon dreams on its own again)
+- The Rust daemon's background sweep ran only its reapers and the merge
+  judge, so with `memory.dream.enabled` on a backlog was never dreamed
+  automatically, idle sessions closed without the dream they trigger, a
+  stalled extractor was never announced on the board, and the deep dream's
+  mechanical half and the analyzer's duplicate filing never ran on their
+  own. The sweep now runs the Python sweep's steps in its order: the
+  analyzer filing tick (with its pair reconciliation), the deep tick, the
+  merge judge, `dream_status`, the stall tick (the overdue rule and the
+  begin, repeat, escalate and clear notices) and the automatic dream; the
+  session reaper's idle close fires the session-end dream in the
+  background. The link, junk, curation and candidate judges are still not
+  run by the Rust daemon.
+- `memory.dream.stall_repeat_hours` is now read (it was only validated).
+
+### Changed (2026-10-25 — the Rust daemon's dream refreshes graph insight instead of refusing)
+- `memory_dream(action="run")` on the Rust daemon refused with
+  `not_implemented` under the default configuration, because its last stage,
+  the graph-insight refresh (communities, god nodes, surprising connections
+  and suggested questions), was not ported. The Rust daemon now runs it, so a
+  default-config dream completes and `memory_graph` and `memory_stats` show
+  the communities it writes.
+- Under the maintainer's Option B decision the Rust side uses NetworkX's
+  Louvain without its seeded shuffle and exact betweenness. On graphs with
+  clear structure it writes the same communities as Python; elsewhere its
+  partition differs from Python's seed-42 one no more than another seed of
+  Python's would, measured on 16 recorded graphs (declared in
+  `rust/daemon/divergences.md`). The new `memory.graph_insight` knobs are
+  typed, and a wrong type is refused at startup like every other key.
+
+### Added (2026-10-25 — the Rust daemon ingests and searches documents)
+- `document_ingest` and `document_search` were the last two of the 38 MCP
+  tools the Rust daemon answered with its `not_implemented` stub. It now
+  serves both over the bank's `reference_chunks` table (schema v57), as the
+  Python daemon does: the same path handling and refusals, text decoding,
+  chunk windows and chunk ids, so a document ingested by either daemon is
+  found and replaced by the other. Search is the same exact cosine scan,
+  ordered by distance and then chunk id.
+- Declared differences (`rust/daemon/divergences.md`, "Document store
+  (B7)"): a `.pdf` is refused with `not_implemented` until PDF text
+  extraction is decided; `.html` always takes the tag-stripping path the
+  daemon image serves (no BeautifulSoup); the one-time import of a pre-v57
+  chromadb store stays with the Python daemon. Memory search does not yet
+  include document hits on the Rust daemon, and `memory_stats` still counts
+  no documents there; both follow in the next change.
+- Nothing installs the Rust daemon yet, so no user setup changes.
+
+### Changed (2026-10-25 — the Rust daemon's sweep runs the curation judge)
+- With dreaming enabled, the Rust daemon's sweep never judged the lesson and
+  world duplicate listings. It now runs the curation judge as Python does:
+  shadow remembers each verdict bound to the two records it saw;
+  auto-distinct also marks a pair it judges distinct as dismissed, and
+  reopens that dismissal when either record or the judging policy changes.
+  In auto, a duplicate safe to fold is recorded but not yet folded by the
+  Rust daemon; it waits for the fold to be ported (a Python daemon on the
+  same bank folds it).
+
+### Changed (2026-10-25 — the Rust daemon's sweep runs the candidate judge)
+- With dreaming enabled, the Rust daemon's sweep never judged the deep
+  dream's link candidates (unlinked near-pairs). It now runs the candidate
+  judge as Python does, one slice per tick after each deep apply: shadow
+  remembers each verdict; auto files a proposed link for the link judge to
+  settle and marks a dismissed pair distinct, remembering the dismissal and
+  reopening it when the pair's evidence changes. Its fingerprints are the
+  same bytes Python writes, so verdicts and dismissals recorded by either
+  daemon stay valid on the other. The curation judge is still not run by
+  the Rust daemon.
+
+### Fixed (2026-10-25 — preflight catches a missing buildx before the image build fails)
+- `ops/preflight.sh` and `ops/preflight.ps1` now fail when the Docker buildx plugin is missing, with the install line for the distro. Without it compose falls back to the classic builder, which cannot run the Dockerfiles' `RUN --mount` caches, so the install used to pass preflight and then die mid-build with "the --mount option requires BuildKit" (seen on Arch-based Docker Engine without `docker-buildx`).
+
+### Security (2026-10-25 — lite banks get their own superuser password instead of postgres/postgres)
+- The lite tier's embedded PostgreSQL used the fixed superuser password `postgres` with cleartext password authentication on loopback, so any process on the machine, under any account, could open and change the bank. Each bank now has a random 64-hex-character password in `<data_dir>/embedded_pg.secret`, written owner-only (an explicit owner-only ACL on Windows, mode 0600 elsewhere), and the server authenticates with `scram-sha-256`.
+- The password never travels as text. That needs libpq 16 or newer: the lite tier now requires it, and an older `psycopg` build is refused with the command that upgrades it. The password is never passed to pg0, so it appears on no command line and in none of pg0's files. The role gets it as a SCRAM verifier computed locally. Connections that know it require SCRAM authentication. `psycopg[binary]` 3.2.4 is now the minimum, the first release whose binary wheels all ship libpq 16 or newer. `pseudolife-mcp backup` hands it to `pg_dump` through `PGPASSWORD`.
+- An existing bank moves over at its next start by the daemon or a lite CLI command, with nothing to do by hand. An interrupted move is finished by the next call, whether the server was left running or was stopped. The next call works out where the move stopped from `pg_hba.conf` and from which password the server accepts. A missing secret file gets a new password the same way.
+- Two short windows remain:
+  - A new bank keeps pg0's default password with cleartext authentication from its first start until its move runs, a moment later. If that first start is killed in between, it keeps that password until the next call.
+  - A move or re-key opens a loopback-only `trust` window for one start. It is never opened while the bank's own server is running.
+- Attaching moves a running server that still accepts the old password, including one an older release started. That release's daemon keeps its open connections, but new ones fail until it restarts on this release.
+- No going back to an older release: once a bank has moved, a Pseudolife release from before this one can neither start it nor attach to it. Upgrade every runtime that opens the bank (daemon, shims and CLI) together.
+- `pg0-embedded` 0.15.2 is now the minimum version (was 0.15.1). After a reboot, 0.15.1 trusted a recorded process ID without checking it was PostgreSQL, so its stop could kill an unrelated process.
+- `pseudolife-mcp backup` leaves `embedded_pg.secret` out of its state archive: a restore loads the dump into a fresh cluster with its own password, and an old one extracted over it would lock the bank.
+- Decided by the maintainer on 2026-10-25 for the Rust port's lite tier (decision 8 in `rust/daemon/spec-lite-storage.md`); this Python fix lands first so both daemons use one credential.
+
+### Fixed (2026-10-25 — the installer says when a firewall cuts the daemon off from the dream shim)
+- In the Claude and Codex CLI shim modes on Linux, `ops/install.sh` now asks the daemon's container whether it reaches the shim, the way the endpoint modes already did. A host firewall such as ufw drops the container's traffic to the docker bridge address the shim binds, so the shim answered on the host, the install said Healthy and Done, and every dream paused. The summary now marks `[!] Extractor shim`, and the warning names the cause: the shim's unit when the shim itself is down, ufw when it is enabled with a dropping input policy (read from `/etc/ufw/ufw.conf` and `/etc/default/ufw`, no root needed), or else another firewall and the blocked port.
+- For ufw it names the narrowest rule: `sudo ufw allow from <the daemon's compose subnet> to <docker0 address> port <shim port> proto tcp`, never a broader range. New `--firewall-rule ask|yes|no` (default `ask`): the installer offers that rule once at a terminal with no as the default, then probes again to check it worked; an unattended run never changes the firewall unless `--firewall-rule yes` says so, and prints the command instead.
+
+### Fixed (2026-10-25 — document_ingest no longer hangs on a FIFO or reads a file of any size)
+- `document_ingest` checked only that its path existed, then read the whole
+  file: a FIFO blocked the call, and every other call waiting on the
+  daemon's lock, until something wrote to it; a device read without end;
+  and a file of any size was read into memory at once. It now reads only a
+  regular file of at most 64 MiB (symlinks to one are fine). A directory,
+  FIFO, socket or device is refused as `not_a_regular_file`, naming what
+  the path is, and a larger file as `document_too_large` with its size and
+  the cap, before anything is read. The file is then opened without
+  blocking, checked again on the open handle and read at most one byte past
+  the cap, so a file that grows meanwhile, or a `/proc` entry that reports
+  no size, is refused instead of read without end. 64 MiB is an estimate
+  that covers a 1,000-page manual as a PDF with figures; a text file that
+  size would take about 16 hours to embed on a CPU.
+- The Python and Rust daemons refuse the same paths with the same errors on
+  Linux (macOS takes the same calls, untested). On Windows a directory was an internal error before; it
+  is now the same `not_a_regular_file` refusal. A Windows device name such
+  as `NUL` is read by neither: Python refuses it as a character device, the
+  Rust daemon answers an internal error (`rust/daemon/divergences.md`,
+  DOC-WINDOWS-DEVICES). PDFs are read through the same bounded read.
+
+### Added (2026-10-24 — self-hosted parity runners set up by script, with a watcher)
+- `ops/selfhosted/setup-linux-runner.sh` sets up parity runners on a Linux dev box: a dedicated account with rootless Docker, no access to the local network, several runners each with its own home, and Python 3.11 in the runner tool cache.
+- `ops/selfhosted/runner_watch.py`, installed as a timer by `ops/selfhosted/setup-runner-watch.sh`, keeps `PARITY_SELFHOSTED_RUNNERS` listing only machines with an online runner, so a machine that goes down stops receiving jobs that would queue for a day.
+
+### Changed (2026-10-24 — Rust parity shards start beside the Rust job, and the longest Windows shards are split)
+
+- The Rust workflow's parity shards no longer wait for the whole `Rust` job
+  (format, clippy, nextest, the override builds). They read nothing from it
+  but the debug bind fixture, which a new `Fixtures / <os>` job now builds
+  beside the candidate, reusing the `Rust` job's dependency cache read-only.
+  The `Parity / <os>` gate still needs `Rust`, so a format, clippy or
+  nextest failure still fails it; the shards now run even when `Rust`
+  fails. On batch run 40047950017 every shard waited until minute 18 for
+  `Rust / windows-latest`, though the Windows candidate was done at minute 9.
+- The same job builds the daemon storage test executable once per OS
+  (`rust/daemon/harness/schema_ci.py --build-only`), which each `cli-daemon`
+  shard used to compile for itself.
+- The three longest Windows shards (23-26 minutes) are split in two, so no
+  Windows shard is planned past about 15 minutes: `cli` into `cli` and
+  `cli-store` (dream cursor, static, graph store, background and principal
+  steps); `cli-daemon` into `cli-daemon` (schema parity and 11 resident
+  startup cases) and `cli-daemon-2` (the other 11 cases, among them every
+  mutant's control, the startup mutants, the clock retry and the writer guard;
+  `rust/daemon/harness/startup_ci.py --part`); `w1c-connection` into
+  `w1c-connection` (test_login, move, tunnel) and `w1c-connect` (connect,
+  maintainer). Every parity check still runs once per OS (the cheap
+  self-checks and PostgreSQL preparation run in each shard that needs them),
+  and both new suites join the pull-request floor, so every pull request runs
+  what it ran before.
+- A run whose `Rust` job fails early now runs its parity shards to the end
+  (up to 33 jobs on a full matrix) before the gate fails, where before they
+  were skipped.
+
+### Changed (2026-10-24 — Rust CI spends fewer runner minutes and slots per run)
+
+- Parity shards install their Python dependencies with `pip install
+  --no-compile`: the same packages, without byte-compiling every installed
+  file (Python compiles what a shard imports, on first import). The install
+  step took about 2.3 minutes per hosted Windows shard.
+- Only the `eval` and `cli` shards, the two that run cargo or rustc, install
+  the Rust toolchain.
+- The candidate's harness build (the daemon with its mutant and harness
+  features, and the graph and dream contract binaries) runs as its own
+  `Candidate harness / <os>` job beside the candidate, so parity shards no
+  longer wait for both builds in a row. It reuses the candidate's cached
+  dependencies read-only. Its binaries ship as `rust-shim-harness-<os>`.
+- Hosted Linux runs `h5-audit`, `h5-backup` and `h5-background` one after
+  another in a single `h5-light` job (`rust/ci/coverage_plan.py`
+  `COMPOSITES`), two fewer short jobs against the account's 20-job cap.
+  Windows keeps them as separate shards, any pull request reaching one of
+  the three also runs `h5-light`, and each suite keeps its own receipts.
+- The non-gating `Parity live (non-gating) / windows-latest / cli-live` job
+  no longer runs on master pushes, only on the nightly and manual CI
+  (maintainer decision). It gated nothing and held a Windows runner for
+  about 26 minutes per push.
+
+### Changed (2026-10-24 — master pushes stop re-running jobs the merged batch already passed)
+
+- A push to master that merges an integration batch now skips each CI job
+  that passed on the batch pull request's latest run of the same workflow,
+  because the merge commit's tree is the batch head's
+  (`ops/integrate.py merge` refuses otherwise). `ops/ci_batch_passed.py`
+  checks the associated pull request, its merge commit, its `integrate/`
+  branch, the tree, and that the run completed; any doubt or API error
+  skips nothing and logs why. Only a job whose own conclusion was `success`
+  is skipped: a Rust-only batch's skipped Python lanes still run on its
+  master push.
+- In `ci.yml` this covers `lock-resolve`, `test`, the lite OS lanes and
+  `frontend`. In `rust.yml` it covers the disposable-image check and each
+  passed parity pair (OS and suite), removed from the matrix by
+  `rust/ci/parity_scope.py --batch-passed`. The `Rust` job, the candidate
+  build, `parity-live` and the `eval` and `judges` suites always run on a
+  push, since they read the event-selected oracle, which differs between a
+  pull request and a push. Pull requests, merge groups, the nightly and
+  manual runs are unchanged; the nightly stays the full backstop.
+- Both scope jobs gain `actions: read` and `pull-requests: read` for the
+  lookup; every other job keeps `contents: read`.
+
+### Added (2026-10-24 — a hosted CI budget that a change must measure and stay inside)
+
+- `rust/ci/ci_budget.json` records the measured minutes of every job a pull
+  request can start in `rust.yml` and `ci.yml`, with limits on the job
+  count, the summed runner minutes, the longest job and the critical path
+  through `needs`, because every job shares the account's 20 hosted slots.
+  `rust/ci/test_ci_budget.py` fails when the workflow and the budget
+  disagree or a limit is exceeded, when a
+  job waits on another it reads nothing from, when two jobs save one
+  rust-cache key, and when a `rust.yml` install of the checkout or torch
+  byte-compiles at install time. `python rust/ci/ci_budget.py measure
+  --workflow <file> <run id>...` re-measures from hosted runs;
+  `docs/dev/ci-budget.md` explains the rules and how to change a limit.
+- The nightly source-mutant matrix, stress loops and the wait-mail capture
+  now install with `pip install --no-compile` too, as the parity shards do.
+- Only the `audit-0` source-mutant shard saves the shared mutant build's
+  rust-cache; all 37 shards per OS used to race to save one key.
+
+### Fixed (2026-10-24 — a stale census in a batch holds back the members that cost nothing to wait, not the census changers)
+
+- When CI's producer census check would fail on a batch head, `python ops/integrate.py build` used to drop every member whose own diff changes the census inputs, although such a member's census is usually current on master and goes stale only because other members change files the census hashes. Its author then had to merge master forward, regenerate the census and relabel; #873 and #881 went through that in consecutive batches (2026-10-23/24). `build` now first checks that the census changers pass the check on their own, then merges the batch again without the other members whose own diff touches a hashed path (what master's census module lists in the batch tree, plus the paths master's and each changer's committed census hash), searching each trial head again for members a conflict had kept out (one changing the census inputs counts as a census changer, never a waiter). If that head passes it is the batch: those members are listed with the reason in the batch pull request under `## Waiting (no action needed)`, get no comment, keep their `ready-to-batch` label and join the next batch, where CI only reports the census. Otherwise the census changers are dropped as before.
+
+### Added (2026-10-23 — stress loops can run Rust integration test binaries)
+
+- A `mode=stress` loop now accepts `cargo:<package>/<test binary>[::<test>]` selections, several separated by spaces (for example `cargo:pseudolife-stdio/board_retry_contract cargo:pseudolife-stdio/shim_transport_recovery_contract`). A new `stress-build` job compiles the selected binaries once, with the Rust job's toolchain, lockfile, test profile and default features, into a nextest archive. Each iteration runs that archive under nextest's new `stress` profile, with no retries, the Rust job's 4 test threads and a JUnit report, and gets the Rust job's test environment: the Python SDK fixture dependency, the selected oracle's package metadata where the dispatch has an oracle, and no PostgreSQL. A Rust test resting on process, socket, lock or timing behaviour can now meet the 20 clean hosted `windows-latest` runs rule.
+- An iteration passes only if every selected test ran and passed. A skipped or `#[ignore]`d selected test, a flaky attempt, a missing JUnit report, a binary or test name that matched nothing, or an archive built under another checkout path fails it. Each iteration's row in `stress-report.json` lists every selected test's seconds, so a test that returned at once is visible.
+- As with the other kinds, the selection runs alone rather than beside the rest of its lane. Only the selected packages are built, and the `--no-default-features` pass is not repeated.
+
+### Fixed (2026-10-23 — the Rust daemon reports the release version, not 0.0.0)
+- The Rust daemon reported its crate's placeholder version 0.0.0 on
+  `/health`, so a shim connecting to it printed a version-mismatch notice
+  telling the user to install release 0.0.0, which does not exist (the call
+  still went through). The daemon crate now carries the release version, as
+  the native shim's crate already did, and reports 0.19.0. Like a
+  checkout-built Python daemon, a build from master between releases
+  reports the last release's version. `tests/test_plugin_packaging.py` pins
+  both native crates and their lock entries to `pyproject.toml`. A version
+  cut moves `rust/daemon/Cargo.toml` with the rest (release-procedure
+  skill), and the parity oracle's version-only release check accepts it.
+
+### Added (2026-10-23 — rehearse activating the Rust slice and rolling it back, on disposable state)
+- `rust/daemon/harness/rehearse_activation.py`, an on-demand contributor rehearsal, checks two things on disposable state only. It installs runtimes behind the real launcher and a real Claude Desktop registration and checks which runtime the registered command runs after an install, a rollback install and a removal, then makes an MCP call through that registration. It also opens one disposable bank with the Python daemon, then the Rust daemon (with a restart), then the Python daemon again, and checks that every write stays readable. It refuses to start a daemon on any database it did not create, requires every daemon stop to exit cleanly, and writes its evidence with machine paths replaced by placeholders.
+- The first run (Windows, master `bd8217a1`'s CI binaries) is in `evals/results/rust-activation-rehearsal-20261023/`: 23 of 24 steps held, covering launcher selection, a client call through the registration reaching the Rust daemon, and Python reading a Rust-written bank after rollback. The failing step and the first of two findings is that the Python daemon rewrites a newer bank's `schema_version` down to its own without a warning, and the Rust daemon reports `/health` version `0.0.0` (its crate version), so the shim's mismatch notice points users at a release that does not exist.
+
+### Fixed (2026-10-23 — an older daemon no longer stamps a newer bank down)
+- The Python daemon's startup schema step (`ensure_schema`) wrote its own
+  schema version over whatever the bank carried, so starting an older
+  release against a bank a newer release had upgraded rewrote the stamp
+  downward with no warning (a bank stamped 57 came back as 56 in the
+  activation rehearsal). A rollback then crossed a schema boundary silently,
+  and the bank claimed a version its tables no longer matched. The daemon
+  now refuses to start on a bank stamped by a newer build, before any DDL
+  runs, and leaves the stamp as it is; `/health` reports the refusal as
+  `init_refusal`, and the shim prints it. The message names both ways out:
+  run that release or a newer one (`pseudolife-mcp update`), or restore the
+  backup taken before the upgrade (`ops/restore.ps1 -Apply -BackupFile
+  <dump>` / `ops/restore.sh --apply --backup-file <dump>`). A stamp that is
+  not a positive integer is refused the same way. The Rust daemon already
+  refused both. It now gives the same text, and its startup plan runs the
+  check as its own `version_guard` step.
+- The newer-build check runs before the embedding-dimension check, so a
+  bank a newer release upgraded is named as that, not as a dimension
+  migration.
+- `pseudolife-mcp update` adds a line to its printed rollback when the
+  deploy moved the daemon's schema: an image-only rollback across that
+  change is now refused, so the backup must be restored after the image
+  rolls back (`--json`: `rollback.restore_required`). A deploy that never
+  turns healthy says the same, conditionally, beside its rollback, and a
+  `--no-backup` run says it took no backup.
+- The Rust parity scenario `stamped` now requires both daemons to refuse
+  the stamp with the same message and to leave the bank unchanged; the
+  divergence it recorded is retired.
+
+### Fixed (2026-10-23 — one unreadable identity-check answer no longer stops board delivery)
+
+- Before a board request, the shim checks this session's identity with the daemon. One answer to that check that could not be read as a bank identity (a proxy's error page, or a body cut or reshaped on the way) counted as proof that the saved board address belonged to another bank. Background board delivery stopped until the credential rotated, and a board call was refused with "Coordination identity is unavailable; reattach coordination and retry", which no tool does.
+- Such an answer is now a passing failure with its own code, `context_unreadable`, and is retried like a dropped connection. Background delivery reports "live coordination delivery unavailable; retrying in the background" and then "restored". A board call checks once more and runs. A Codex thread's check is made again at once. A check that stays unreadable refuses the call, says the check's answer could not be read and that nothing ran, and asks for a retry in a few seconds. A late board registration at startup that meets one is retried in the background.
+- A readable answer naming another bank or principal, or one whose mailbox proof fails, is still a verdict about the saved address. It stops background delivery and refuses board calls at once, as before.
+- Both the Python and the Rust stdio shims behave this way, and the board-call refusal text is the same in both. Clients pick the fix up with a release or `pseudolife-mcp update --all` and a new session; the Rust shim's half applies once clients run it.
+
+### Deprecated (2026-10-23 — file mode no longer stores documents)
+
+- File mode (the v0.1 escape hatch with no Postgres: no DSN and no lite tier)
+  has no document store from schema v57 on, because documents now live in
+  the Postgres bank: `document_ingest` refuses, naming
+  `PSEUDOLIFE_MCP_DATABASE_URL` and the lite tier, and `document_search`
+  returns nothing. A file-mode `chromadb/` directory is left on disk and is
+  imported into the bank the first time that data dir runs with Postgres.
+  File mode itself retires with the move to the Rust daemon, which keeps a
+  one-time import of its `.pt` files.
+
+### Changed (2026-10-23 — ingested documents live in the bank, schema v57)
+
+- **Schema v57:** documents ingested with `document_ingest` are stored in the
+  Postgres bank's new `reference_chunks` table instead of a chromadb store
+  under `<data_dir>/chromadb`. Every backup (`ops/backup.*`, `pseudolife-mcp
+  backup`) and every logical transfer (`pseudolife-mcp export` / `import`)
+  now carries them inside the bank. A row keeps what chromadb held for a
+  chunk: the same chunk id, the text, the vector and the metadata dict.
+- `document_search` and the reference pool of `memory_search` serve the same
+  shape as before (the same scores from `1 − cosine distance`, the same
+  fields). Search is exact (`ORDER BY embedding <=> q`, no approximate
+  index), and chunks at equal distance now come back in chunk-id order
+  instead of whatever order chromadb's index held, so equal inputs always
+  serve equal results.
+- **Existing documents migrate on their own.** The first start on a v57 bank
+  that finds a chromadb store copies every chunk in and marks the bank
+  (`reference_chroma_import` in `meta`) so the store is not read again. The
+  copy is idempotent and resumable: each page of chunks commits on its own,
+  the marker is written only after every chunk read is checked to be in the
+  bank, and a start cut short carries on where it stopped without embedding
+  anything twice. It works whether chromadb has compacted its vectors into
+  index files or not, reads a scratch copy so the store on disk stays
+  byte-identical, and never deletes the store. Vectors of another dimension
+  (documents from before the v25 embedding swap) are embedded again. A
+  restored pre-v57 backup, whose documents exist only in its state archive's
+  `chromadb/` directory, imports them at its first start. Nothing to run:
+  install and `pseudolife-mcp update` reach it by starting the daemon.
+- A document whose text, source or metadata contains a NUL character (some
+  PDFs' extracted text does) is stored with U+FFFD in its place, because
+  PostgreSQL refuses NUL; one such chunk no longer fails a whole ingest or
+  import. A failed document query inside `memory_search` serves no
+  reference hits instead of failing the search.
+- The same bump adds `cms_counters`, one row for the counters
+  `memory_state/weights.pt` held (see the counters entry); it stays out of
+  logical transfers, like the file.
+- `chromadb` stays a dependency for now, used only to read a pre-v57 store
+  once; it can go after a release has carried the import.
+
+### Fixed (2026-10-23 — token files can be written in a folder that grants Modify, not Full Control)
+- On Windows, writing a private credential file (a client's token file, client config, tunnel profiles and the other owner-only files) failed with "credential file permissions could not be protected" in any folder that grants the user Modify rather than Full Control, as many secondary drives do. Setting a file's owner needs a right such a folder withholds, even when the user already owns the file. When the owner already is the user, only the owner-only access list is now set. Any other owner, such as the Administrators default of an elevated session, must still be replaced. That needs the take-ownership privilege enabled, as in an elevated SSH session or a hosted runner but not an elevated console. Without it the write still refuses, now naming the Windows error and telling the user to keep the file in a folder they have full control of.
+
+### Changed (2026-10-23 — the memory counters live in the bank, schema v57)
+
+- The counters that `memory_stats` reports across restarts (interaction and
+  logical-turn counts, retrieval queries, per-band hits, surprise history,
+  consolidation events) are saved in the bank's `cms_counters` row instead
+  of the file `memory_state/weights.pt`, so a backup dump carries them and
+  the Rust daemon can read them. Nothing to run: the first start on a bank
+  without the row imports an existing `weights.pt` (falling back to its
+  `.bak`) once, then renames the file `weights.pt.imported` (it is never
+  deleted). A file neither copy of which can be read starts the counters
+  fresh and reports `weights_reset`, as before. A failed read of the row
+  fails the start and is retried, like any other failed load, so an autosave
+  never overwrites real counters with fresh ones; a failed write is logged
+  and the rest of the save goes on.
+- Rolling back to an older release finds no `weights.pt` and starts its
+  counters fresh. Upgrading again keeps the bank's counters and sets that
+  release's file aside: a file newer than the row is imported only when it
+  counts at least as many interactions, since counters only grow.
+- An older daemon that refuses a newer bank is rolled back by restoring the
+  backup taken before the upgrade. Restore its state archive with the dump
+  (`ops/restore.ps1 -StateArchive` / `ops/restore.sh --state-archive`) and
+  the older build finds its `weights.pt` again; restoring only the dump
+  leaves the file set aside as `weights.pt.imported` (`weights.pt.bak.imported`
+  when the backup copy was read, numbered `-2`, `-3` after later upgrades), so
+  rename the newest back to `weights.pt` before starting the older build, or
+  its counters start fresh.
+
+### Added (2026-10-23 — measure where integration batches spend their time)
+- `python ops/batch_timeline.py collect --since <date> --out <artifact.json>` reads, without writing anything to GitHub, every `integrate/` batch pull request opened since a date, every attempt and job of the Actions runs on each batch head, and each member's timeline, into one JSON artifact that keeps no logins or email addresses.
+- `python ops/batch_timeline.py report <artifact.json> [--cutoff <time>] [--json <out>]` splits each batch and member offline into awaiting admission, awaiting build, build, local validation (with the suite's own duration), CI first pass along the critical path (queue wait, which includes the concurrent-job cap, execution, dispatch), failure repair and awaiting merge. It flags reruns with their cause and whether the failed lane is required, dropped and closed-then-rebuilt members, members whose CI was not green at build, merges to master outside a batch, members carried by more than one batch, and an ambiguous critical-path step; it refuses a window whose listing reached its limit.
+- The first measurement, over the batches from 2026-10-19 to 2026-10-21, is committed in `evals/results/batch-lifecycle-20261023/` and summarized in `rust/CUTOVER.md` ("What sets the pace").
+
+### Security (2026-10-21 — vite 8.3.3 for the Console's dev server)
+- The Console frontend's build tool moves from vite 8.3.1 to 8.3.3
+  (`frontend/package.json`, `frontend/package-lock.json`; Dependabot alerts
+  #50–#52). The three advisories are in `launch-editor`, which vite's dev
+  server uses to open a file in an editor: `%` not escaped on Windows,
+  GHSA-698v-4r3x-3vcv; a Windows bypass of its file-exists check,
+  GHSA-587h-7wmj-h5pm; a path read as an editor flag under WSL,
+  GHSA-r825-w8mm-5pxw. Only a developer running `npm run dev` was exposed;
+  the daemon serves the committed build, which contains no `launch-editor`
+  code.
+- The committed Console build (`pseudolife_memory/web/static/`) is rebuilt,
+  because vite 8.3.3 also changes the helper that preloads lazily imported
+  chunks.
+
+### Added (2026-10-21 — CI flags a dependency lock the daemon image cannot install)
+- A new CI job, `lock-resolve`, replays the daemon image's constrained
+  install (`ops/Dockerfile.daemon` step 2: pyproject's dependencies and the
+  onnx extra under `pip install -c ops/requirements.lock.txt`) as a pip dry
+  run on the image's Python, using `ops/check_lock_resolves.py`. A lock whose
+  pins contradict each other now goes red on its pull request, showing pip's
+  conflict lines, instead of breaking the image build after merge.
+  Dependabot's #875 was the case: aiohttp 3.14.4 requires `yarl>=1.25.1`, the
+  lock still pinned yarl 1.24.2, and every other job was green because none
+  resolves the lock. It blocks a merge once the ruleset requires it; the
+  merge-queue spec now lists it among the checks to require.
+- Run it locally in the image's base, from the checkout (bash or PowerShell;
+  Git Bash needs `MSYS_NO_PATHCONV=1` in front):
+  `docker run --rm -v "${PWD}:/src:ro" -w /src python:3.12-slim python ops/check_lock_resolves.py`.
+  It refuses, checking nothing, on any other OS or Python version, because
+  environment markers can resolve differently there.
+
+### Fixed (2026-10-21 — a parity bank dump no longer mixes states from before and after a concurrent write)
+
+- The daemon parity harness's bank dump (`rust/daemon/harness/dbstate.py`) now reads the catalog and every table from one read-only `REPEATABLE READ` snapshot. Before, each table was its own autocommit read, so a write committing mid-dump showed in some tables and not others. The `sweep-recovery` scenario hit this on run 39422947014 (batch PR #882, ubuntu-latest): the prune committed between the reads of `dream_run_slots` and `dream_runs`, so the Python arm's dump held four slots beside two runs and differed from Rust's settled bank.
+- A snapshot holds its locks until the dump ends, and a daemon's startup schema transaction takes `ACCESS EXCLUSIVE` locks in its own order, so a waiting dump could deadlock it. The dump therefore locks every table `NOWAIT` before its snapshot exists, cuts any other lock wait at 100 ms, and on a conflict releases everything and retries for up to 60 seconds. While holding its locks it waits at most 100 ms (catalog reads of objects it did not lock), so it gives way to the daemon instead of deadlocking it.
+- Sequence `last_value` and the `pg_get_*def` catalog functions are not transactional and can still be newer than the rows.
+
+### Fixed (2026-10-21 — slow hosted runners no longer time out the H5 parity steps)
+- The Linux H5 parity steps' time limits are now five times each suite's
+  hosted ubuntu p99 (about 300 successful steps per suite, 2026-10-11 to 10-20) instead
+  of about twice a 2026-10-11 local measurement. Master f82141c4's runner ran
+  about five times slower than usual, so `h5-graph-mutants` hit its
+  14-minute limit with no mutant surviving; it now has 50 minutes, and its
+  job 65. `h5-backup`'s slowest normal step had reached its 2-minute limit.
+  Windows limits are unchanged. The distribution is recorded in
+  `rust/ci/h5_linux_measurements.json`, and `rust/ci/test_workflow.py` pins
+  the limits to it.
+
+### Changed (2026-10-21 — a change waits for hosted CI once, on its batch, not twice)
+
+- `python ops/integrate.py build` admits a `ready-to-batch` pull request whose own CI is pending or absent; only a failing head (a known failure) sits the batch out. The batch's CI is its members' CI. Of the four things that held batches up on 2026-10-20/21 (#877 breaking only against a newer master, the h5-background harness race fixed by #883, a stale producer census, #875's unresolvable lock), green CI on the member's own head caught none.
+- A batch's local gate now covers the Python tests under `rust/` that the local full suite never collects (its testpaths is `tests/`): `build` prints the targeted command (`RUST_HARNESS` in `ops/integrate.py`, mirroring rust.yml's `rust` job pytest steps and `pytest rust/ci`, about 140 s natively), and `open` requires its result as `--harness-note "<count> passed at <head>"`, recorded in the batch body beside the suite. #877's break of `rust/daemon/harness/test_w2e_lifecycle.py` passed its batch's local suite this way.
+- A push to a pull request from any branch but `integrate/*` now runs only the fast CI lanes: `ci.yml` runs `scope`, `guards`, `lock-resolve` and `frontend` and skips `test` and the lite OS lanes; `rust.yml` keeps `Scope`, the `Rust` job, the image check and the `Parity` gate, and skips the candidate build and the parity matrix. Both `scope` jobs decide from `github.head_ref` (absent means everything runs); the `Parity` gate accepts those skips only for a pull request its scope marked not full. Batch pull requests, master pushes, the nightly and manual runs are unchanged, so a batch's hosted CI no longer queues behind its members' full PR runs. A lone ready pull request becomes a batch of one (`MIN_MEMBERS = 1`) instead of merging directly, and a release cut is always batched alone, so `release_cut()` still accepts it and parity tests it against its own head. `open` re-reads each member's own CI and refuses if one turned red after `build`, and `--harness-note` must state a clean `<count> passed`.
+- `python ops/integrate.py merge` is the one path from a batch to master. Every merge uses the admin bypass, so GitHub would merge an ordinary pull request directly as readily as a batch. `merge` reads the plan `open` now keeps and merges only that batch pull request, with `gh pr merge --merge --admin --match-head-commit <built head>`, when its head branch is that `integrate/*` branch, its head is the built head, the ruleset's required checks (`test` and both `Parity` gates) have reported, the latest run of every check finished as SUCCESS, SKIPPED or NEUTRAL (a run still going or a required lane not yet reported refuses with "wait"; any other conclusion, STALE included, refuses naming it) and master has not moved past it. It then checks each member by its current head (merged, or its head on master after up to two minutes of asking; a member that pushed after `build` keeps its label for a later batch) and prints the merge commit and the next steps. A hookify rule on the maintainer's host blocks a raw `gh pr merge`; other harnesses rely on the written rule.
+
+### Security (2026-10-21 — aiohttp 3.14.4 in the daemon image)
+- The daemon image's pinned dependencies (`ops/requirements.lock.txt`) move
+  aiohttp from 3.14.3 to 3.14.4 (Dependabot alerts #47–#49: no initial
+  request/header timeout in aiohttp's server, GHSA-5wr8-gcqf-gqf3;
+  unbounded memory or CPU use, GHSA-2g87-pp6c-29x5; a shared cookie's Secure
+  attribute not enforced, GHSA-494j-54xm-rwp3). aiohttp reaches the image
+  only through chromadb's kubernetes client, and the daemon runs no aiohttp
+  server.
+- yarl moves from 1.24.2 to 1.25.1 in the same change, because aiohttp
+  3.14.4 requires `yarl>=1.25.1`; with the old pin the daemon image build
+  stops with pip's ResolutionImpossible (Dependabot's #875 changed only
+  aiohttp).
+
+### Changed (2026-10-20 — `-q` or `-n 2` no longer turns the WSL full suite into a one-process run)
+
+- `ops/wsl-suite.sh` (and `ops/wsl-suite.ps1` / `ops/remote-suite.ps1`, which run it) keeps the full suite on its automatic xdist workers when the arguments are only display options (`-q` to `-qqqq`, `-v` to `-vvvv`, `--quiet`, `--verbose`, `-r<chars>`, `--durations`, `--durations-min`, `--tb`). These replace the default `-q -rs`.
+- A worker choice (`-n N`, `-nN`, `--numprocesses`; a whole number, `auto` or `logical`) or a `--dist` mode now wins over the automatic choice instead of being added beside it. `--dist no` alone runs the suite in one process.
+- Before this change, any argument replaced the whole default, so `-q` alone ran the suite in one process.
+- Paths, node ids, `-k`, `-m`, collection and help modes, unknown options, and any `--` still go to pytest unchanged, with nothing added, and pytest judges them. The run says so ("no xdist workers added").
+- In a full-suite run, a worker or display option missing its value, a worker choice given twice, or an invalid count, distribution or number exits 2 before anything is fetched or installed.
+- The run prints its choice and where it came from (`full suite, 4 xdist workers (automatic)`, `(-n)`, `(--dist no)` or `(PSEUDOLIFE_SUITE_WORKERS)`), and for a full-suite run the exact pytest command it built.
+- `ops/integrate.py open` still accepts only a receipt with no arguments as full-suite evidence.
+
+### Changed (2026-10-20 — the required Windows CI lane runs product paths; plumbing moves nightly)
+- `test-lite-windows`, the Windows merge gate (required by repository policy; not yet one of the ruleset's required checks), now runs only the product paths that differ on Windows: the embedded provider and backup round trip, the shim's Windows daemon spawn and spawn lock, credential and tunnel ACLs and DPAPI storage, the msvcrt lock backends, the delegate watcher's Windows process checks, file claims refusing Windows junctions and reserved names, and a smoke of `install.ps1` and the native hooks. It drops from 1,865 cases in 30 files to 377, never retries, starts embedded PostgreSQL so its shim-to-daemon test runs instead of skipping, and now prints `-ra --durations=30` and uploads a junit artifact, so a Windows-only failure names its test.
+- The installer matrix, Codex hook setup and doorbell, coordination digest and adapter, wait-mail, update CLI, register-claude-desktop and the rest of the suite-lock, shim and delegate-watch tests move to a new `test-windows-nightly` job, which runs on the nightly schedule and by `workflow_dispatch` and is not a merge gate. It retries first-attempt failures once through the new `ops/pytest_retry_once.py` and keeps the first attempt's junit and an `attempts.json` in its artifact, so Windows flake rates become visible. pytest-rerunfailures was not used because its junit report records only the final result.
+- The nightly job also runs nine files whose Windows-only tests no CI lane ran before (`test_stop_wake_hook`, `test_codex_shim_health`, `test_connect`, `test_expose_cli`, `test_shim_runtimes`, `test_wake_defaults`, `test_codex_doorbell_revision`, `test_installer_legacy_hooks`, `test_ops_install_cache_retention`).
+- `tests/test_ci_windows_lanes.py` keeps each test in at most one Windows lane, keeps every file holding a Windows-only test in some Windows lane, and keeps retries out of the merge gate.
+
+### Changed (2026-10-20 — timing tests wait on events, and a guard against new sub-second budgets)
+- 27 tests that waited a fixed fraction of a second and then checked a result (and so failed on loaded CI runners) now wait on the event or ordering they test: a fixture answer or a fake `git` held until the test releases it, an Event, the board leaving its pending state, or tokio's paused clock where the code under test reads `tokio::time::Instant`. Complexity checks moved to inputs large enough that a 2 s bound sits an order of magnitude from both the linear and the backtracking cost.
+- New guard `tests/test_wall_clock_budgets.py` (run in CI's always-on guards job) fails when a test in `tests/`, a Rust `tests` directory or `*_tests.rs` module, or a parity harness adds a sleep, timeout or deadline under one second outside a loop, or asserts an elapsed time under one second. Lines a slower machine cannot turn red (negative checks, minimums, product inputs) are listed with a reason in `tests/wall_clock_budget_allowlist.txt`; two that need a product hook first are marked as debt.
+
+### Added (2026-10-20 — a profiled test run shows what each worker and the test server were waiting on)
+
+- `PSEUDOLIFE_SUITE_PROFILE=1` profiles a run of `ops/wsl-suite.ps1`, `ops/remote-suite.ps1`, `ops/wsl-suite.sh` or `ops/ci_tests.sh` without changing what it tests, its workers or its exit code. The profile goes to a new directory under `~/.pseudolife-mcp/suite-profiles` (CI: `ci-results/profile`). Its summary is folded into `summary.json` there (CI: `ci-results/profile-summary.json`), and the remote receipt names the directory.
+- `tests/suite_profile_plugin.py` now records each test's setup, call and teardown on the monotonic clock, with the worker that ran it. It also records the time spent creating, dropping and truncating databases and terminating backends, and names any fixture teardown of 0.5 s or more. The controlling process writes `manifest.json`, an allowlisted description of the run: revision, sanitised arguments, workers, versions, CPU and memory limits, the test server's version and settings, the collected inventory's size and hash (written as soon as collection ends, with `inventory.txt`), outcome counts including worker crashes, and where each skip was raised. It also writes `samples.jsonl` once a second: the run's process-tree memory, system memory, pressure and I/O wait, plus the test login's session wait events and the server's checkpoint and fsync counters. Each test's start is logged, so a killed or hung run still names the test each worker was in. The plugin never records environment dumps, connection strings, SQL text, skip messages, absolute paths, or sessions on a production bank, and a failure inside it never changes the run's result.
+- `evals/suite_profile_summary.py` adds per-worker busy and idle time and the straggler tail. It lists the slowest setups and teardowns, each with the server's wait events and checkpoint progress over the same interval, and reports peak memory and the run's checkpoint and fsync totals.
+
+### Fixed (2026-10-20 — stress loops run the episode executable tests and Linux test_login container rows)
+
+- A `mode=stress` loop over `evals/rust_port/test_episode_executable.py` now gets the stdio candidate in `PSEUDOLIFE_PORT_EPISODE_JSON`, as the eval shard does, so its native cases run instead of skipping and failing the iteration.
+- On Linux, a stress selection naming `test_login` builds the `pseudolife-pg:18` image first, as the W1-C connection shard does, so the row's container cases can start.
+
+### Fixed (2026-10-20 — a Stop-hook watcher whose session closed right after a turn no longer wakes on the next session's mail)
+
+- `plugin/hooks/stop-wake.sh` now notes whether the digest exists as soon as it knows the digest's path, before the park gate and the lease write. Before, the watch began at its first look, which comes one process spawn after arming on an idle host and seconds after on a loaded Windows one. If the shim removed the digest inside that gap (it does when Claude Code exits), the watcher took the digest for one not yet written and kept waiting. It then woke on, and marked as seen, mail meant for a later session under the same key. A digest that was absent when the Stop fired is still waited for. Native Windows runs of `test_a_digest_that_vanishes_ends_the_watch` failed 2 of 3 times on 2026-10-20 for this reason. The plugin cache moves with the client step (`pseudolife-mcp update`, or `python ops/update_clients.py` from a checkout); `plugin/hooks/hooks.json` is unchanged, so Codex asks for no new approval.
+
+### Added (2026-10-20 — the Rust daemon runs the merge judge)
+
+- The Rust daemon's background sweep now runs the deep dream's merge judge as the Python daemon does, while dreaming is enabled. It sends pending merge proposals to the configured judge endpoint with the same evidence and prompt, records each verdict, takes a second opinion from `judge_second_model` / `judge_second_url` and, for proposals the first two opinions disagree on, a third from `judge_third_model` / `judge_third_url`. In `auto-reject` and `auto` modes it applies the same gates: single and two-vote rejects at the configured confidences, two-vote folds on differential evidence only, the 2-of-3 tiebreak under `judge_tiebreak_mode: auto`, and every refusal for votes that are not from distinct models (by configured and served name). Automatic rejects are recorded and reopened when their evidence, policy or observed model changes. The other sweep steps (the analyzer and deep ticks, the link, junk, curation and candidate judges, the automatic dream) and `/api/graph/rejudge` are not served yet.
+
+### Added (2026-10-20 — the Rust daemon serves memory_dream's status, pull, commit, runs and run)
+
+- The Rust daemon's MCP endpoint now answers `memory_dream` as the Python daemon does for `status`, `pull`, `commit`, `runs` and `run`: the consolidation pass extracts claims from the pending memories through the configured model endpoint (with the fallback endpoint, holds and per-entry isolation), writes them to the cortex with the dream's tier, citation, literal and span gates, journals each write, and links relations and alias candidates afterwards. `run` is refused while lesson synthesis, outcome inference, digests or graph insight is enabled; those stages, `deep` and `rollback` follow.
+
+### Added (2026-10-20 — the Rust daemon's dream runs outcome inference, lesson synthesis and digests)
+
+- `memory_dream(action="run")` on the Rust daemon now runs the stages after consolidation as the Python daemon does: it infers outcome signals for closed sessions that recorded none, turns pending outcome signals into lessons (clustered, or one rule per signal in rule mode, with lineage audits and the 0.4 confidence of machine-inferred batches), and writes a narrative digest per closed session when digests are enabled. Only the graph-insight refresh still refuses the run while it is on.
+- `memory_graph_review(action="restore_slot")` now restores lessons whose retired rows compaction purged from their audit snapshots, as world facts already were, instead of refusing.
+
+### Added (2026-10-20 — the Rust daemon serves the deep dream)
+
+- `memory_dream(action="deep")` on the Rust daemon now runs the deep dream as the Python daemon does, instead of refusing it. A dry run previews the full-corpus graph consolidation: edges to re-score, hard type violations, exact duplicates, junk names, merge and link candidates with their evidence snippets, the pending merge proposals with per-side evidence, near-duplicate lesson and world slots, and the orphan census. With `apply=true` it first writes the graph snapshot under the data directory's `graph_snapshots`, then re-scores, supersedes and merges the provably safe class (under `auto_apply_safe`), files junk and merge proposals, deletes the zero-structure and tombstoned junk, stamps project scopes, files the analyzer's duplicates and, when enabled, sweeps unreachable orphans; the apply resets the deep-dream need signal in `memory_dream(action="status")`. Large answers are cut to the same 250,000-byte budget with `truncated` counts. `rollback` is still refused.
+
+### Fixed (2026-10-20 — Windows clients no longer lose the Rust daemon's early refusals)
+
+- The Rust daemon closed the connection after an over-budget, unread or `Expect: 100-continue` refusal while request bytes were still arriving. Its TCP stack then sent RST, and a Windows client threw away the 413/403 it had already received. A read-after-send probe against the real daemon on Windows 11 lost 34 of 2000 refusals idle and 117 of 2000 under 15 CPU burners. The Python daemon lost 0 of 3800, because uvicorn keeps the connection and discards the body.
+- Refusals are now answered at once, as uvicorn answers them. The rest of the body is then discarded, at most 8 MiB more within 250 ms. A body read to its end keeps the connection. An unread `Expect: 100-continue` body, or a declared length past that budget, is answered with `Connection: close`, so no client pools a connection that is about to close.
+- Otherwise the connection closes through a lingering close (`rust/daemon/src/linger.rs`): it sends FIN after the answer, then discards until the client closes, 250 ms pass with nothing arriving, or 2 s pass. Measured after the change: 0 of 5200 lost, idle and loaded.
+- The strict MCP parity corpus keeps two of its five 413 `connection: close` differences: `body_limit[4]` and `[5]`, the GETs that declare 9999999 bytes. `rust/daemon/harness/mcp_ci.py` declares exactly those two (`MCP-REFUSAL-CLEANUP` in `rust/daemon/divergences.md`).
+
+### Changed (2026-10-20 — a Windows live-timing flake no longer blocks merges, and a Rust pull request runs about half the jobs)
+
+- The required `Parity / ubuntu-latest` and `Parity / windows-latest` checks now gate only on work hosted Windows runs deterministically: builds, nextest, harness self-tests, goldens and replays. Linux still runs the live comparisons as well. The live Python-versus-Rust comparisons whose verdict depends on sub-second timing or Windows socket resets are the CLI rows' live arms and daemon body admission, security admission and MCP live parity. They moved to a `cli-live` suite. Linux runs it under the gate. Hosted Windows runs it in a new `Parity live (non-gating) / windows-latest / cli-live` job on master pushes, the nightly and manual CI, which reports and never blocks.
+- The hour-long Windows `cli` parity shard (61-70 minutes) is split into `cli`, `cli-daemon` and `cli-live`, each estimated at about 26 minutes on Windows from the old shard's step timings.
+- A pull request runs only the parity suites its diff reaches, never fewer than `eval`, `cli`, `cli-daemon`, `cli-live` and `h5-w1a`. Anything the selector cannot place runs every suite. Master pushes, the nightly, manual CI and merge groups always run every suite. The rule is in `rust/ci/parity_scope.py` and `docs/specs/2026-10-19-merge-queue.md`. A Rust pull request push now runs 17 to 35 jobs instead of 32 every time.
+- The Rust caches no longer go cold when the runner image's own Rust changes. Only the pinned toolchain is left installed before the cache step. Caches now save even when a job fails, and each compiling parity suite has its own key.
+- Every parity shard prints the runner image, CPU count and memory. Its pytest runs use `-ra --durations=30` and keep a junit report as an artifact.
+- Manual CI has a `stress` mode: `mode=stress` with `selection` (`row:<row>[/<case>]`, `scenario:<name>` or pytest node ids), `iterations` (default 20, at most 50) and `os` (default `windows-latest`) runs that selection once on each of that many fresh hosted runners, reusing the run's candidate build. It uploads `stress-report.json` with one row per iteration and fails unless every iteration passed. It is the evidence a new live parity row or timing-sensitive test needs before it joins a required lane.
+
+### Fixed (2026-10-20 — integration batches no longer reach CI with a stale producer census)
+
+- `python ops/integrate.py build` now runs CI's producer census check (`rust/producer_census.py --ci-check`, given a pull request event naming the batch base) on the merged batch head. When the check would fail, `build` drops every member whose own diff changes the census inputs (the census module's `CURRENCY_INPUTS`), naming the others that change them too, and merges the rest again from master. `open` comments on and unlabels each dropped member, as it does after a conflict. A stale census that no member's inputs touch is reported and left in, as CI does. `open` runs the same check before the push and refuses if it would fail. Batch #865 failed both Rust jobs on this check after its local full suite passed (2026-10-20), because the suite does not run it.
+
+### Changed (2026-10-20 — the CLI parity harness can widen the hooks' 250 ms daemon check)
+- The hooks' `/health` check and the shim's loopback startup probe read
+  `PSEUDOLIFE_HOOK_PROBE_MS` in both the Python and the Rust CLI: a positive
+  whole number of milliseconds, clamped to 60000. Unset or invalid keeps
+  250 ms, so hooks still never slow the host. This is a test-facing knob,
+  not a user setting: the CLI parity harness sets 5000 ms in both arms, so
+  a cold hosted runner stalling one arm's first connection no longer makes
+  a hook silent in one arm only. The three per-read trickle cases keep
+  250 ms.
+
+### Changed (2026-10-20 — `/health` says when the daemon is ready, and every harness waits for it)
+- `/health` gains two keys in both the Python and the Rust daemon: `ready`
+  (true once `status` is `ok` and nothing is pending) and `pending`, the
+  startup stages still unfinished: `init` (embedder loaded, stores hydrated,
+  clock reseeded) and `principals` (the stored-principal view's first read).
+  Neither changes `status` or the HTTP code, so the Docker healthcheck and
+  `pseudolife-mcp update` behave as before.
+- The test helpers, both parity harnesses and the evals' daemon starters
+  now share one wait (`pseudolife_memory/readiness.py`). Any answer before
+  `ready: true` (a 503, `ready: false`, an older daemon without the key)
+  counts as "not started". A harness whose daemon cannot finish `init` by
+  design (no embedding model in CI, an unreachable or leased bank) waits
+  for the stages it can still finish. This replaces the per-scenario
+  stored-principal polls (#826, #827), which only covered the places that
+  had already flaked.
+- A bearer the environment does not match no longer meets a 503
+  `principals_unavailable` right after a harness starts a daemon.
+
+### Fixed (2026-10-20 — Linux doorbell cleanup no longer fails when an unrelated process exits mid-scan)
+
+- The Rust shim's Linux cleanup for a cancelled doorbell queue proves its process group is dead by reading every `/proc/<pid>/stat`. Two windows in the exit of any process on the host made that scan fail although the group was gone. A process reaped between the scan's open and read made the kernel answer `ESRCH` ("No such process"). A process caught mid-release reads as state `X`, or with parent `0` and process group and session `-1` beside whatever state the kernel read first, and the parser rejected the `-1` as "invalid process stat". Both now count as absence, the same as a missing `/proc` entry; the leader's own identity reads still fail closed. This was the intermittent `cancelled_group_fences_low_priority_orphan_before_reaping_leader` failure on master's Linux Rust job (run 39283241497, 2026-10-19). Under process churn in local WSL the old code failed that test 8 times in 1,500 runs (7 `ESRCH`, 1 `X`).
+
+### Changed (2026-10-19 — the WSL full suite runs on several workers and stops minting files per test)
+
+- `ops/wsl-suite.sh` (and `ops/wsl-suite.ps1`, which runs it) now runs the default full suite under pytest-xdist with `--dist loadfile --durations=30`. The worker count is up to 4: one per two CPUs and one per 6 GB of memory, the memory being the smaller of RAM and the run's cgroup limit. That is 4 in an 8-CPU, 40 GB WSL, and at most 2 under a dispatched run's 16 GB systemd scope. `PSEUDOLIFE_SUITE_WORKERS` overrides it (0 or 1 runs one process); arguments still replace the default unchanged. Measured 2026-10-19 in WSL at 4 workers: about 11 min against 28-31 min single-process, peak 20.2 GB used.
+- The `pg_conn` fixture's per-test reset truncates only the tables that hold rows (always `meta`, which it re-seeds), and restarts the identity sequences of the rest with `setval`. `TRUNCATE` gives every table, index, TOAST table and sequence it touches a new file, which the next checkpoint must fsync. A full reset made 242, a serial suite left ~354k, and one checkpoint took 112 s. Every `DROP DATABASE` waits for a checkpoint, so under 4 workers module teardowns took 85-209 s. With this change a 4-worker run's checkpoints fsynced 158k files instead of about 590k (2026-10-19). The largest checkpoint still took 165 s; the remaining files are not yet attributed (new test databases, which copy template1 and then run the schema DDL, are the likely source).
+- `pseudolife-mcp doctor`'s disposable coordination proof waits up to 300 s for each attempt to drop its fixture bank, up from 30 s. `DROP DATABASE` waits for a checkpoint, and on a busy fixture server one took 150-172 s, so the proof reported a cleanup failure and left the bank behind although the drop would have finished.
+
+### Fixed (2026-10-19 — a short Stop-hook wait still looks for mail once, and ends at its deadline)
+
+- `plugin/hooks/stop-wake.sh` always takes its first look at the digest. Before, a `PSEUDOLIFE_AGENT_WAKE_HOOK_WAIT` shorter than the hook's own start-up (`SECONDS` counts it, and Git Bash spawns cost seconds on a loaded Windows host) gave up before looking, so mail already waiting was missed. The last sleep is also cut to the time left, so a short wait ends at its deadline instead of a whole 5 s poll later. With the default 14-day wait neither change is visible. The test file `tests/test_stop_wake_hook.py` now runs in 96 s instead of 297 s in one process (2026-10-19, WSL): its "never wakes" tests used 8 s waits so that a slow start could not skip their look, and they now use 1 s ones. The plugin cache moves with the client step (`pseudolife-mcp update`, or `python ops/update_clients.py` from a checkout); `plugin/hooks/hooks.json` is unchanged, so Codex asks for no new approval.
+
+### Added (2026-10-19 — an opt-in self-hosted comparison lane for the Rust parity shards)
+
+- The Rust workflow has a new `parity-selfhosted` job that runs the same parity shards, with the same steps, on the maintainer's dev machines, so their results and timings can be compared with the hosted runners for a week. It is not a gate: it has `continue-on-error`, no required check depends on it, and it runs only on the nightly and manual CI. It stays off until the repository variable `PARITY_SELFHOSTED_RUNNERS` lists registered runners. Before each shard it waits for that machine's full suite to finish (up to an hour, then it yields). Hosted shards run exactly as before: two new steps skip on hosted runners, artifact names gain an empty prefix, and the hosted pip and Rust caches are unchanged. The design, the registration commands and the decisions it needs are in `docs/specs/2026-10-19-self-hosted-parity-lane.md`.
+
+### Fixed (2026-10-19 — a slow disk no longer freezes the Rust shim while it saves board state)
+
+- The Rust shim runs on one thread, and it wrote its board state files on that thread: the saved coordination address, the mail digest and its `.seen`, `.agent` and `.ring` markers, and the Codex doorbell's pending notice. Each write waits for the disk to confirm it (`sync_all`), so on a slow disk every tool call stalled behind the wait. On the Windows dev VM on 2026-10-19 one save took up to 3.1 s. These writes now run on a background thread. The mail digest and its markers are also written after the shim releases its mailbox lock, so tool calls keep flowing while the disk catches up.
+- The shim's writes still land in the order it made them. The digest and its markers share one queue, so a hook or `wait-mail` never sees a newer digest before an older marker has landed. A write that has started always finishes before the shim's next step on that file, even when whatever started it was abandoned: a startup or retry timeout, a cancelled call, or shutdown. So the next registration attempt finds the saved address rather than a half-finished reservation, and shutdown's cleanup of the digest files cannot be undone by a late write.
+- The shim no longer lowers a `.seen` mark that a hook or `wait-mail` has already raised.
+- Not changed: the Codex doorbell still waits for its notice file while holding a lock that every Codex tool call also takes. This happens when a bell rings, is accepted, or an outstanding notice expires.
+
+### Fixed (2026-10-19 — the Rust shim's Codex threads recover a transient authority check)
+
+- The Rust stdio shim now does what the Python shim has done since 2026-10-08 (#637), which landed after the Rust shim was ported. Before each call, a Codex thread's existing board address is checked with the daemon. A check that fails once (a dropped connection, a timeout, or a 429, 500, 502, 503 or 504) is now made again at once with the same adapter and saved mailbox, instead of refusing the call. Nothing is replayed. A credential rotated meanwhile is never retried under the old one.
+- That check now has 6 seconds, up from the 3-second attachment budget, so a slow answer within the daemon's 5-second context timeout is used rather than cut off. Each call makes one check: the thread's identity headers come from the adapter, as in Python, not from a second request.
+- The hint a refused Codex board call carries names what failed: whether it was the thread's first attachment or a later authority check, and whether the cause was an outage (with its code), a timeout, an authentication or access refusal, another bank, a credential change, or a busy attachment. Before, most causes read "identity attachment unavailable … wait for the prior attachment lease to expire", which was wrong for all but the last.
+- A board response that stops arriving partway through its body now counts as a transport failure, as in Python, and is retried where a transport failure is. A context answer that cannot be read as a bank identity is reported as one.
+- The Rust shim is not yet what clients run. Once it is, clients pick this up with a release or `pseudolife-mcp update --all` and a new session.
+
+### Fixed (2026-10-19 — the Rust shim's board calls no longer fail on one dropped identity check)
+
+- The Rust stdio shim now matches the Python shim's fix for the same bug. A board call (`memory_agents` update, claim or release, and `memory_message`) first makes a read-only identity check with the daemon. When that one check failed (a dropped connection, a timeout, or a 5xx such as a just-started daemon's), the call was refused with "Coordination identity is unavailable; reattach coordination and retry", though the identity was intact and no tool reattaches anything. The shim now checks once more after half a second. A check that still fails refuses the call with its real cause (the check got no answer, or was answered with HTTP 500), says nothing ran and to retry in a few seconds, and names `pseudolife-mcp doctor` if it persists. A verdict about the identity itself (another bank, a refused token, a rotated credential) is refused at once, as before, and ordinary memory calls never wait for the check.
+- A call whose connection failed before reaching the daemon, while the daemon had been answering, is now sent once more after half a second, inside the same `PSEUDOLIFE_MCP_PROXY_TIMEOUT_SECONDS` deadline, before the shim reports "the memory daemon is unreachable". Nothing had run, so the resend is safe. While the shim already knows the daemon is down, calls are not resent.
+- The identity check now asks the daemon for a read-only answer, as the Python shim's does, so checking an existing identity never initializes the bank identity or its audit history. A failed check is no longer recorded as a background delivery failure, as in the Python shim; it refuses or downgrades only the call that made it. Before, the call that recovered on its retry carried a false "background delivery is degraded" note and started a reattach, and one unreadable answer (such as a proxy's error page) stopped background delivery outright.
+- The Rust shim is not yet what clients run. Once it is, clients pick this up with a release or `pseudolife-mcp update --all` and a new session.
+
+### Added (2026-10-19 — the Rust daemon serves memory_supersede and memory_reinstate)
+
+- The Rust daemon's MCP endpoint now answers `memory_supersede` and `memory_reinstate` as the Python daemon does, with the same database changes. A correction retires the old memory and stores its replacement in one transaction, by entry id or by its exact text, and reports the canonical facts that were built on the corrected memory. A reviewed reinstatement makes a retired memory live again: it needs a named principal and the exact retirement it reverses, writes an append-only audit row, and replays safely under the same operation id.
+
+### Added (2026-10-19 — the Rust daemon serves memory_recall)
+
+- The Rust daemon's MCP endpoint now answers `memory_recall` as the Python daemon does: a seed search, the entities the question names (or its top hits name), a walk out through the graph hop by hop under the hub gate and the search ceilings, a re-query per newly reached entity, then the per-hop caps, pinned constraint facts and `re_verify` cautions. The `memory.recall` settings are read. The maintainer's 2026-10-19 decision returned graph traversal to the port; `rust/PARITY.md` records it.
+
+### Added (2026-10-19 — the Rust daemon serves memory_graph)
+
+- The Rust daemon's MCP endpoint now answers `memory_graph` as the Python daemon does: an entity's neighborhood up to three hops, with derived transitive and inverse edges, each node's current facts (including facts written under an alias), community and provenance tags, an optional shortest path to a second entity, and a relation filter. An empty entity returns the whole graph with each node's sources.
+
+### Added (2026-10-19 — the Rust daemon serves the graph store's write tools)
+
+- The Rust daemon's MCP endpoint now answers `memory_graph_relate`, `memory_graph_unrelate`, `memory_alias` and `memory_relation_define` as the Python daemon does, with the same database changes. Relating two names creates any missing entity (a name that is a fact's slot key resolves to that fact's entity), refuses an unknown relation with the closest matches, warns when a typed relation meets a node of another type, and bumps an existing edge's confidence. Unrelating keeps the edge for audit and hides it; relating it again revives it. Aliases bind alternative names to an entity, and new relations grow the vocabulary; builtin relations cannot be redefined.
+
+### Added (2026-10-19 — the Rust daemon serves memory_graph_review's list and decision actions)
+
+- The Rust daemon's MCP endpoint now answers `memory_graph_review` as the Python daemon does for `list` and the decision actions: `propose`, `relate`, `dismiss_pair`, `accept_link`, `reject_link`, `accept_merge`, `accept_junk`, `reject_entity` and their batch form. `list` reports duplicates, test artifacts, weak edges, orphans, unattributed entities and the queued proposals with their judge votes and automation state; accepting a merge folds the thinner node into the busier one. `dismiss_slot_pair` and `restore_slot` (for lessons and world facts, including curated-duplicate restores) are served too; a lesson restore that needs the audit-snapshot fallback is refused until the lesson write path is ported.
+
+### Added (2026-10-19 — the Rust daemon serves memory_forget)
+
+- The Rust daemon's MCP endpoint now answers `memory_forget` as the Python daemon does, with the same database changes, for all four stores. Forgetting memories deletes the matching entries and, in the same transaction, retires what rested only on them: the canonical facts they formed, the dream's graph edges, their session's digest, and lessons whose last source they were (each with an audit row). Forgetting a fact deletes the slot; forgetting a world fact or a lesson retires it with an audit row. A match larger than `memory.delete_confirm_threshold` (20) still needs `confirm_bulk`.
+
+### Added (2026-10-19 — the Rust daemon serves memory_consolidation_candidates)
+
+- The Rust daemon's MCP endpoint now answers `memory_consolidation_candidates` as the Python daemon does: clusters of near-duplicate memories, anchored by a query (through the same retrieval as `memory_search`) or by an episode, each member a memory a correction can still address, ranked by cohesion and size.
+
+### Added (2026-10-19 — the Rust daemon serves memory_consolidate)
+
+- The Rust daemon's MCP endpoint now answers `memory_consolidate` as the Python daemon does: a list of memories, chosen by row id or unique exact text, is retired and replaced by one canonical note in a single transaction, with every unresolved target reported and nothing changed unless all of them resolve.
+
+### Fixed (2026-10-19 — a wrong park reason is refused with the accepted ones, and a status that clears a park says so)
+- `memory_agents(action="update")`'s schema now lists `park_reason`'s choices (`done`, `blocked`, `needs_approval`, `needs_info`, `needs_resource`, `waiting_peer`, or `""` to clear). A value outside them is refused with that list. Before, a long value was refused with "String should have at most 20 characters", and only a second guess showed the real choices.
+- A status update without park fields still clears a standing park: a session that is working is not parked, so its mail is hinted instead of decided on a stale park. The update's result now carries a `warning` naming the cleared reason and saying to send the park fields with the status to stay parked, and a `cleared_park` object with the values the park had, so re-parking is one call. Before, the park went silently, and a session that meant to stay parked lost its wake path. The REST update answers the same way, and so does the Rust daemon.
+
+### Added (2026-10-19 — merge batches of ready pull requests)
+- `python ops/integrate.py build` merges every open pull request labelled `ready-to-batch` onto a new local `integrate/<date>-batch-N` branch with `git merge --no-ff`, in the order the label was applied, and pushes nothing, so the local full suite runs on the batch head before any CI. A labelled pull request whose head is a draft or not green on CI sits the batch out and keeps its label; a member that conflicts is dropped, never resolved. It refuses to run with uncommitted tracked changes, off `origin/master`, or while another batch is open. `--dry-run` merges on a detached HEAD and creates nothing.
+- `python ops/integrate.py open --suite <result.json>` publishes a built batch only when the `ops/remote-suite.ps1` result shows the suite passed on exactly that head and neither the branch nor master moved since `build`. It pushes the branch (never with force), opens the batch pull request with each member's merged head, review link, CI and the suite result, and comments on each dropped member naming master or the member it collided with, removing its label. A result for a selected run is refused; `--suite-note` records a result in words that must name the head, marked as unchecked. A rerun after a failure past the push resumes on the batch's own pull request without repeating a comment.
+- `ops/remote-suite.ps1` records its pytest arguments in the result JSON (`args`, empty for the full suite).
+- `python ops/integrate.py status` lists the labelled pull requests in batch order with whether each head merges cleanly into master, its CI and its review decision.
+- The integration-batch rule now requires that suite pass before the batch is pushed. A red batch is bisected locally and the culprit dropped, and the batch pull request merges with a merge commit so its members show as merged (`CLAUDE.md`, `docs/dev/merge-batches.md`).
+
+### Changed (2026-10-19 — CI runs for GitHub merge-queue groups)
+- Both CI workflows now also run on `merge_group`, so a queued group reports the ruleset's required checks (`test`, `Parity / ubuntu-latest`, `Parity / windows-latest`) under the same names as a pull request. The queue itself stays off until the maintainer enables it in the master ruleset; `docs/specs/2026-10-19-merge-queue.md` lists the settings.
+- A group is classified like a pull request over everything it adds to master (master's tip, fetched, to the group head, so every unmerged queue entry counts): a Rust-only group skips the Python suite lanes, a documentation-only group skips the Rust jobs, and a mixed group or an unfetchable master tip runs everything. The Parity gate, the Python oracle selector, the producer-census currency check and the daemon-image input check accept the event the same way they accept a pull request.
+
+### Fixed (2026-10-19 — a board call no longer fails on one dropped identity check)
+
+- A board call (`memory_agents` update, `memory_message` receive, send or ack) through the Claude Code shim was refused with "Coordination identity is unavailable; reattach coordination and retry" whenever the read-only identity check it makes first failed once: a dropped connection after a host resume or an app sign-out, a timeout, or a 5xx such as a just-started daemon's. The identity was intact and the same call seconds later worked, but the error told the agent its identity was gone and to "reattach", which no tool does. The shim now checks once more after half a second, as Codex threads already did. A check that still fails refuses the call with the real cause (the check got no answer, or was answered with HTTP 500), says nothing ran and to retry in a few seconds, and names `pseudolife-mcp doctor` if it persists. A verdict the daemon gives about the identity itself (another bank, a refused token, a rotated credential) is refused at once, as before, and ordinary memory calls never wait for the check.
+- A call whose connection failed before reaching the daemon, while the daemon had been answering, is now sent once more after half a second before the shim reports "the memory daemon is unreachable". Nothing had run, so the resend is safe; while the shim already knows the daemon is down, calls are not resent.
+- Clients pick this up with `pseudolife-mcp update --all` (or `python ops/update_clients.py` from a checkout) and a new session.
+
+### Fixed (2026-10-18 — a refused token file says why, and how to fix it)
+
+- When the shim cannot use its token file, the error on every MCP call now names the real reason, the file, and the one fix, instead of "restore the configured credential" for every case. A file that lost its owner-only permissions (a plain rewrite during a token rotation does this) says so. On Windows the fix it names is the new `python -m pseudolife_memory.credentials repair <file>`, run with the shim's own interpreter, which rewrites the file owner-only with the same token; elsewhere it is `chmod 600 <file>`. A file another account owns (one written from an elevated prompt belongs to Administrators) now has its own reason, `credential file is owned by another account`, and names the same repair, since narrowing that file's permissions would lock the shim's account out of it. A missing file, an unreadable one, a link or junction, a redirected directory and a malformed token each name their own fix. The error's data carries the same `reason`, `recovery` and `credential_file`, and never the token. A token file replaced in the middle of a call now says the credential changed; it says to retry only when the call cannot have reached the daemon, and otherwise keeps the warning to check the call's result first.
+- `python -m pseudolife_memory.credentials repair <file>` reads the token file once (it must be one regular file holding a valid token) and rewrites it through Pseudolife's own writer: the new file is made owner-only before the token is written to it, then renamed over the old one, and only while the file it read is still in place, so a token rotation that lands meanwhile is never undone. It never prints the token.
+- Pseudolife's own token-file writer (used by Codex setup, the Claude Desktop registration and unattended updates) now replaces an existing file you own whose permissions are broader than owner-only, instead of refusing it: the new file is owner-only and yours, so writing it repairs them. On Windows that includes a file owned by Administrators when the writer itself runs elevated (an elevated process's plain writes are owned by Administrators), since it could have written that file itself. Links, hard links, non-files, files another account owns and files whose owner cannot be read are still refused.
+
+### Added (2026-10-18 — the Rust daemon serves the world cortex tools)
+
+- The Rust daemon now keeps the world cortex (sourced external facts, apart from your own facts) resident, and its MCP endpoint answers `memory_world_set` and `memory_world_search` as the Python daemon does, with the same database changes. A world fact restated from a new source is confirmed, a different value supersedes the old one, and a citation with an unsafe scheme (such as `javascript:`) is refused. Search entries carry their age-decayed confidence, a stale flag, the copy-paste correction call for aged facts, and their citation.
+
+### Added (2026-10-18 — the Rust daemon serves memory_outcome and memory_reinforce)
+
+- The Rust daemon's MCP endpoint now answers `memory_outcome` and `memory_reinforce` as the Python daemon does, with the same database changes. An outcome records its signal under the handle's session or the caller's open episode. Its `used_ids` label credits every search in the caller's session from the last hour that served each id, reports which ids were credited, served elsewhere or unmatched, and keeps that split on the signal row. A reinforce raises a memory's reinforcement counters and credits the search that served it.
+
+### Added (2026-10-18 — the Rust daemon serves lesson search and the history chain)
+
+- The Rust daemon now keeps the lesson store resident, and its MCP endpoint answers `memory_lesson_search` and `memory_history` without an `attribute` (the entity's event chain) as the Python daemon does. Lesson search flags lessons whose subject's facts changed since (`re_verify`), including through a graph alias, and logs each search. The chain merges the entity's fact history, source entries, graph edges and lessons into one timeline.
+
+### Added (2026-10-18 — the Rust daemon serves memory_history slot reads)
+
+- The Rust daemon's MCP endpoint now answers `memory_history` with an `attribute` (a fact slot's version chain, or a set slot's add and remove events) as the Python daemon does, including the `as_of` cutoff in epoch seconds or ISO-8601. Without an `attribute` (the entity's event chain) it still answers "not implemented": that mode needs the lesson store, which follows.
+
+### Added (2026-10-18 — the Rust daemon serves the episode tools)
+
+- The Rust daemon's MCP endpoint now answers `memory_episode_start`, `memory_episode_end`, `memory_session_title` and `memory_episode_summary` as the Python daemon does, with the same database changes. A start nests a sub-episode under the caller's session (or under the handle's own root), an end pops one level and never closes the session root, and a title renames the session's root, the episode stamp on its memories, and the board rows registered under the session that no agent or harness named. The summary reports an episode's entry count, tag and source counts and its twenty newest memories.
+- `rust/PARITY.md`'s MCP registration checklist now marks the sixteen tools the Rust daemon serves as ported.
+
 ## [0.19.0] - 2026-10-18 — The review-queue judges can settle their own disagreements and report how often they agree with you, the merge judge stops filling the link queue with untyped proposals, and lease break says when a COMMIT's answer was lost
 
 ### Added (2026-10-18 — a judge-agreement report, the number a shadow judge mode is promoted on)
