@@ -5,6 +5,7 @@ pub mod console;
 pub mod cortex_search;
 pub mod embed_cache;
 pub mod fact_get;
+pub mod graph;
 pub mod history;
 pub mod identity;
 pub mod maintainer;

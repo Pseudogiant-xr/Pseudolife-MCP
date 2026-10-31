@@ -238,7 +238,7 @@ fn py_int_str(s: &str) -> Option<Value> {
 
 /// Python's `int(value)` for a decoded JSON value, or the message of the
 /// TypeError / ValueError it raises.
-pub(super) fn py_int(v: &Value) -> Result<Value, String> {
+pub(crate) fn py_int(v: &Value) -> Result<Value, String> {
     match v {
         Value::Bool(b) => Ok(json!(i64::from(*b))),
         Value::Number(n) if super::is_int_literal(n) => Ok(int_value(&n.to_string())),

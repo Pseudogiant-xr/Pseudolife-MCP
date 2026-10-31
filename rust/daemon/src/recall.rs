@@ -66,9 +66,9 @@ fn py_prefix<T: Clone>(v: &[T], n: i64) -> Vec<T> {
 
 /// The caller identity a search's retrieval event carries.
 #[derive(Clone)]
-struct Ident {
-    header_session: Option<String>,
-    transport_session: Option<String>,
+pub(crate) struct Ident {
+    pub(crate) header_session: Option<String>,
+    pub(crate) transport_session: Option<String>,
 }
 
 fn mcp_memory_recall<'a>(app: &'a crate::http::App, call: ToolCall<'a>) -> ToolFuture<'a> {
@@ -1138,7 +1138,7 @@ async fn annotate(
 
 /// `service.recall` (`service.py:9109-9163`) and `recall_state_to_dict`
 /// (`memory/recall.py:385-418`).
-async fn recall(
+pub(crate) async fn recall(
     svc: &Arc<Service>,
     ready: &Arc<Ready>,
     query: &str,

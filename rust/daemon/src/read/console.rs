@@ -113,7 +113,7 @@ fn lower(d: &Map<String, Value>, key: &str) -> String {
 
 /// The `X-PL-Session` header and, under the legacy transport, the MCP
 /// session id: what `_resolve_writer` reads for a REST call.
-fn caller_session(h: &HeaderMap) -> (Option<String>, Option<String>) {
+pub(crate) fn caller_session(h: &HeaderMap) -> (Option<String>, Option<String>) {
     let last = |name: &str| {
         h.get_all(name)
             .iter()
@@ -216,7 +216,7 @@ async fn answer(
 }
 
 /// `str(exc)` for a service exception a tool body reports as a `ToolError`.
-fn tool_error_text(e: crate::mcp::dispatch::ToolError) -> String {
+pub(crate) fn tool_error_text(e: crate::mcp::dispatch::ToolError) -> String {
     use crate::mcp::dispatch::ToolError;
     match e {
         ToolError::Refused { code, detail, .. } => match detail {
