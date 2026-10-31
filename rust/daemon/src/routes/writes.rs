@@ -16,6 +16,7 @@ pub(super) const SERVED: &[(&str, &str)] = &[
     ("POST", "/api/delete"),
     ("POST", "/api/supersede"),
     ("POST", "/api/consolidate"),
+    ("POST", "/api/dream/run"),
 ];
 
 #[derive(Debug)]
@@ -190,7 +191,7 @@ pub(super) async fn route(req: &mut Request<'_>) -> Option<Response> {
         "/api/facts/forget" => &["entity"],
         "/api/reinforce" => &["entry_id"],
         "/api/supersede" | "/api/consolidate" => &["new_text"],
-        "/api/delete" => &[],
+        "/api/delete" | "/api/dream/run" => &[],
         _ => return None,
     };
     if required.iter().any(|k| !req.body.contains_key(*k)) {
@@ -210,6 +211,7 @@ async fn answer(req: &mut Request<'_>) -> Result<Value> {
     let path = req.path.to_owned();
     let mut fact = None;
     let mut id = None;
+    let mut dream_limit = None;
     match path.as_str() {
         "/api/facts/set" => {
             let confidence = float(b.get("confidence").unwrap_or(&json!(0.8)))?;
@@ -233,6 +235,19 @@ async fn answer(req: &mut Request<'_>) -> Result<Value> {
             fact = Some(a);
         }
         "/api/reinforce" => id = integer(&b["entry_id"])?,
+        "/api/dream/run" => {
+            // Console uses int(limit), without MCP's positive-limit binding.
+            // Python integers beyond i64 keep their slice-bound direction.
+            if let Some(v) = b.get("limit").filter(|v| !v.is_null() && **v != json!("")) {
+                dream_limit = Some(integer(v)?.unwrap_or_else(|| {
+                    if crate::pyjson::py_str(v).trim_start().starts_with('-') {
+                        i64::MIN
+                    } else {
+                        i64::MAX
+                    }
+                }));
+            }
+        }
         "/api/delete" => {
             if !["text", "substring", "source", "episode", "tag"]
                 .iter()
@@ -304,6 +319,16 @@ async fn answer(req: &mut Request<'_>) -> Result<Value> {
                     result["entity"] = b["entity"].clone();
                     result["attribute"] = b.get("attribute").cloned().unwrap_or(Value::Null);
                     return Ok(result);
+                }
+                "/api/dream/run" => {
+                    crate::dream::run::run_auto(
+                        &svc,
+                        r.clone(),
+                        caller,
+                        identity.writer,
+                        dream_limit,
+                    )
+                    .await
                 }
                 "/api/delete" => crate::forget_tools::delete(&r, cfg, &b).await,
                 "/api/supersede" => crate::correction_tools::supersede(&r, cfg, &caller, &b).await,

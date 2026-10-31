@@ -2157,8 +2157,12 @@ row records who, why, and the verbatim record. The undo is
 src="entity|attribute")` — restoring from the retired row while it still
 exists, or from the audit snapshot once compaction has purged it; a bare
 entity in `src` (no `|attribute`) restores every retired aspect of that
-entity. `GET /api/curation/retired` lists what's currently retired across
-both stores, and the Console's undo route is `POST /api/world/restore`.
+entity. `POST /api/world/restore` is deprecated; use the
+`memory_graph_review(action="restore_slot", store="world", src=...)`
+action above instead. `GET /api/curation/retired` is also deprecated
+(no replacement; no caller). Both are for removal in a later release under
+[D9 / Proposal A / B2r](../../rust/CUTOVER.md) (2026-10-23).
+Python handlers remain unchanged; Rust keeps its declared `501` responses.
 Only `scope="memory"` and `scope="fact"` still hard-delete.
 
 > The world cortex here is populated **manually** via `memory_world_set`.
@@ -2284,8 +2288,12 @@ row records who, why, and the verbatim record. The undo is
 src="entity|attribute")` — restoring from the retired row while it still
 exists, or from the audit snapshot once compaction has purged it; a bare
 entity in `src` (no `|attribute`) restores every retired aspect of that
-entity. `GET /api/curation/retired` lists what's currently retired across
-both stores, and the Console's undo route is `POST /api/lessons/restore`.
+entity. `POST /api/lessons/restore` is deprecated; use the
+`memory_graph_review(action="restore_slot", store="lesson", src=...)`
+action above instead. `GET /api/curation/retired` is also deprecated
+(no replacement; no caller). Both are for removal in a later release under
+[D9 / Proposal A / B2r](../../rust/CUTOVER.md) (2026-10-23).
+Python handlers remain unchanged; Rust keeps its declared `501` responses.
 Only `scope="memory"` and `scope="fact"` still hard-delete.
 
 `used_ids` is a second, unrelated payload riding the same call: the ids of
@@ -4179,7 +4187,10 @@ are `merge`, `link`, `junk`, `curation` and `candidate`, with a total limit of
 1–100. It queues work without changing automation modes or immediately calling
 a model.
 
-To review a large merge queue from outside the daemon, page through it with
+`GET /api/graph/proposal-evidence` is deprecated (no replacement; no caller).
+Deprecated under [D9 / Proposal A / B2r](../../rust/CUTOVER.md) (2026-10-23), for removal in a later release. Python handlers remain unchanged; Rust keeps its declared `501` responses.
+The following describes the retained Python handler, not a new integration path:
+page through a merge queue with
 `GET /api/graph/proposal-evidence?offset=0&limit=25` (limit 1–100). Each item
 is the evidence pack the merge judge itself reads: per-side display, degree,
 scopes and snippets at the judge's snippet cap, `low_differential`, the
@@ -5106,7 +5117,9 @@ To verify an existing mailbox without attaching or modifying it, pass
 the context endpoint's `read_only` mode, checks a version-2 file's bank/principal
 binding and never transmits its instance credential. A missing or invalid file,
 rejected bearer, changed binding, unavailable bank or older daemon without this
-capability remains a separate diagnostic. Cold storage is not initialized by
+capability remains a separate diagnostic. A file registered under a principal the daemon no
+longer maps this login to reports `principal_changed`: it needs no repair, since
+the shim registers a new address at its next start. Cold storage is not initialized by
 this check. Saved state and client settings are preserved; default doctor never
 registers, receives, acknowledges or starts a daemon.
 
@@ -6761,10 +6774,14 @@ daemon explicitly confirms that the saved address no longer exists (pruned
 after seven idle days with no retained mail, or absent from a restored
 database, where `rebind` cannot restore it either). A bank-bound client first
 verifies that the daemon is still its saved bank and principal. It keeps
-the old state file beside it with a `.stale` suffix. A rejected bearer or instance
-credential, or a different bank or principal, preserves the saved address and
-requires corrected authentication or the deliberate restore/rebind procedure;
-an HTTP status alone never proves that an address should be replaced.
+the old state file beside it with a `.stale` suffix. When the daemon now maps
+the same login to a different principal on the same bank (the machine was
+paired again under another name, say), the next start also sets the file aside with a
+`.stale` suffix and registers a new address; mail sent to the old address is
+not carried over. A rejected bearer or instance credential, or a different
+bank, preserves the saved address and requires corrected authentication or
+the deliberate restore/rebind procedure; an HTTP status alone never proves
+that an address should be replaced.
 
 A subagent that a Claude Code session spawns with its Agent tool runs in the
 same shim process, so its board calls carry the parent's identity (probed
@@ -8987,6 +9004,12 @@ Separately from the schema meta version, Docker-tier installs created
 before 2026-08-14 also need the PostgreSQL 16 → 18 volume cutover —
 [the PostgreSQL 18 migration runbook](../runbooks/postgres-18-migration.md).
 The milestones:
+
+> `POST /api/lessons/restore` and `POST /api/world/restore` in the v37
+> history below are deprecated; use `memory_graph_review(action="restore_slot")`
+> with `store="lesson"` or `store="world"` instead. Removal is in a later
+> release under [D9 / Proposal A / B2r](../../rust/CUTOVER.md) (2026-10-23);
+> Python handlers remain unchanged and Rust keeps its declared `501` responses.
 
 | Version | What it added |
 |---|---|
@@ -11896,6 +11919,18 @@ pipx install --force "pseudolife-mcp==<the daemon's version>"
 
 or, for a daemon on the 2.1 line, `pipx runpip pseudolife-mcp install
 "mcp<2.2"`.
+
+**A session starts with "the memory daemon refused this machine's token".**
+The daemon answered the token this machine holds with a 401 or 403, or as
+revoked: it was rotated or revoked on the daemon host, or never issued there.
+The session still starts, without memory: the SessionStart hook puts that
+line at the top of the instructions in place of the briefing, and the shim
+prints the same cause on stderr when it starts. The daemon cannot tell a
+revoked token from an unknown one, so the line says only "refused". Fix it by
+pairing again: on the daemon host run `pseudolife-mcp invite <name>`, then on
+this machine `pseudolife-mcp connect <daemon-url> --read-code`, which pairs
+and repoints this machine's clients (`pair` alone leaves them on the refused
+token). New sessions pick it up.
 
 **The shim exits at startup naming the credential file.** The line gives
 the path it read and the reason (missing, not owner-only, owned by another
