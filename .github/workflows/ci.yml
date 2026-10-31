@@ -562,6 +562,9 @@ jobs:
         # - test_client_install_ux, test_installer_plugin, test_codex_hooks
         #   (picks): a smoke of install.ps1 and the native Windows hooks; the
         #   full installer and hook matrix runs nightly.
+        # - test_installer_client_update_schedule: install.ps1's offer of the
+        #   daily client update task (Task Scheduler, schtasks) on a
+        #   client-only install, Windows-only installer code.
         # - test_schema_version, test_doctor_cli, test_tool_annotations (one
         #   test): schema pins and doctor, cheap and platform-sensitive.
         # - test_runner_cleanup: the parity runners' disk cleanup treats a
@@ -586,6 +589,7 @@ jobs:
           tests/test_ops_install_worktree_retention.py
           tests/test_runner_cleanup.py
           tests/test_selfhosted_windows_scripts.py
+          tests/test_installer_client_update_schedule.py
           tests/test_tunnel_profiles.py
           tests/test_tunnel_service.py
           tests/test_tunnel_cli.py
@@ -680,7 +684,7 @@ jobs:
         # the retention script's `ps` process listing.
         env:
           PSEUDOLIFE_SUITE_LOCK: "off"
-        run: python -m pytest tests/test_conductor_watch.py tests/test_wait_mail_cli.py tests/test_hooks_digest.py tests/test_stop_wake_hook.py tests/test_hook_glob_ranges.py tests/test_coordination_turn_digest.py tests/test_coordination_adapter.py tests/test_coordination_credentials.py tests/test_codex_doorbell.py tests/test_lease_cli.py tests/test_suite_lock.py tests/test_memory_changes_hook.py tests/test_client_install_ux.py tests/test_codex_hooks.py tests/test_subagent_board_guard.py tests/test_codex_hook_setup_edges.py tests/test_installer_legacy_hooks.py tests/test_plugin_packaging.py tests/test_embedded_pg.py tests/test_tunnel_bridge.py tests/test_tunnel_cli.py tests/test_tunnel_profiles.py tests/test_tunnel_runtime.py tests/test_tunnel_service.py tests/test_prune_worktrees.py -q -rs
+        run: python -m pytest tests/test_conductor_watch.py tests/test_wait_mail_cli.py tests/test_hooks_digest.py tests/test_stop_wake_hook.py tests/test_hook_glob_ranges.py tests/test_coordination_turn_digest.py tests/test_coordination_adapter.py tests/test_coordination_credentials.py tests/test_codex_doorbell.py tests/test_lease_cli.py tests/test_suite_lock.py tests/test_memory_changes_hook.py tests/test_client_install_ux.py tests/test_codex_hooks.py tests/test_subagent_board_guard.py tests/test_codex_hook_setup_edges.py tests/test_installer_legacy_hooks.py tests/test_installer_client_update_schedule.py tests/test_plugin_packaging.py tests/test_embedded_pg.py tests/test_tunnel_bridge.py tests/test_tunnel_cli.py tests/test_tunnel_profiles.py tests/test_tunnel_runtime.py tests/test_tunnel_service.py tests/test_prune_worktrees.py -q -rs
 
   test-windows-nightly:
     # Not a merge gate, and never run for a pull request or merge group: the
