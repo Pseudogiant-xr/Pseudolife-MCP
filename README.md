@@ -678,7 +678,8 @@ daily task or timer that applies a new release only while
 `updates.unattended_daemon: true` is set and no session is active on the
 agent board, with the same backup and rollback tag, and posts a board
 notice either way; on a client-only machine the same command installs a
-daily job that moves its shim and plugin cache to the daemon's release. Codex keeps its hook approvals across updates (it
+daily job that moves its shim and plugin cache to the daemon's release, and
+the client-only installer offers to set that job up. Codex keeps its hook approvals across updates (it
 approves the hook definitions, not the scripts), and an update from a
 checkout refreshes manual Codex hook copies itself. Where Codex runs the
 plugin's hooks, the client step refreshes Codex's installed plugin copy
