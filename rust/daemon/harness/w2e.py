@@ -6420,10 +6420,17 @@ def run_golden(name: str, binary: Path, root: Path, tol: dict, owned: list[str])
     tag = name.replace("-", "_")
     db = pg.name(f"pl_cf_w2e_{tag}_rs")
     owned.append(db)
-    dsn = pg.create(db)
+    console_dream = name.startswith("console-dream-")
+    # These recordings start from the Python constructor's empty template,
+    # including its declared migration metadata, just as the live run does.
+    stubs = start_stubs(scn, ("seed", "rust") if console_dream else ("rust",))
+    template = prepare_template(scn, tag, root, owned, stubs.get("seed")) if console_dream else None
+    dsn = pg.create(db, template=template)
+    if console_dream:
+        w2e_console_dream.seed_replay(dsn, golden)
     before = dbstate.dump(dsn)
-    home = daemons.make_home(root, f"{tag}-rs", scn.get("config"))
-    stubs = start_stubs(scn, ("rust",))
+    config = scenario_config(scn, stubs.get("rust")) if console_dream else scn.get("config")
+    home = daemons.make_home(root, f"{tag}-rs", config)
     renv = w1a.rust_env(side_env(scn, dsn, extractor_env(scn, stubs.get("rust"))))
     d = daemons.rust_daemon(binary, home, daemons.free_port(), daemons.base_env(home, renv))
     steps, stats, numeric = [], {}, {}
@@ -6432,9 +6439,14 @@ def run_golden(name: str, binary: Path, root: Path, tol: dict, owned: list[str])
         # so its writer-lease epoch is 2: boot the Rust bank twice as well.
         d.start(300)
         w1a.wait_settled([d.port], token=TOKEN)
-        d.stop()
-        d.start(300)
-        w1a.wait_settled([d.port], token=TOKEN)
+        if not console_dream:
+            d.stop()
+            d.start(300)
+            w1a.wait_settled([d.port], token=TOKEN)
+        elif warmup_expected(scn):
+            diffs = wait_warmups({"rust": dsn}, {"rust": before})
+            if diffs:
+                raise AssertionError(diffs)
         client = Mcp(d.port)
         client.init()
         for i, rec in enumerate(golden["steps"]):
@@ -6455,7 +6467,7 @@ def run_golden(name: str, binary: Path, root: Path, tol: dict, owned: list[str])
                 row["extractor"] = {"rust": extractor_summary(sent)}
                 row["diffs"] += extractor_unanswered("rust", sent)
             raw = dbstate.dump(dsn)
-            sr, nr, er = normalize_state(raw, before)
+            sr, nr, er = normalize_state(raw, before, ts_tokens(raw) if console_dream else None)
             if rs is not None and w2e_documents.is_search(op):
                 rs = w2e_documents.answer_tokens(rs, clock_ranks(raw))
             if rs is not None:

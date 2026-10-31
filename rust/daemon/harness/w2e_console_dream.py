@@ -46,6 +46,22 @@ def concurrent(port, dsn, client, stub, h):
         stub._handle = original
 
 
+def seed_replay(dsn, golden):
+    """Replay the oracle's initial random secret and migration stamp.
+
+    Only constructor metadata is restored, before Rust starts; all changes
+    during the replay still compare against the recorded oracle.
+    """
+    import psycopg
+    from psycopg.types.json import Jsonb
+
+    meta = golden["steps"][0]["state"]["rows"]["public.meta"]
+    with psycopg.connect(dsn) as conn:
+        for key, value in meta["rows"]:
+            if key in ("dream_ack_secret_v1", "curation_listing_spelling_v2"):
+                conn.execute("UPDATE meta SET value = %s WHERE key = %s", (Jsonb(value), key))
+
+
 def gate(op, port, h):
     headers = [] if op.get("anonymous") else [h.AUTH]
     headers += [tuple(v) for v in op.get("headers", [])]
