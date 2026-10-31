@@ -6471,7 +6471,8 @@ def run_golden(name: str, binary: Path, root: Path, tol: dict, owned: list[str])
             if rs is not None and w2e_documents.is_search(op):
                 rs = w2e_documents.answer_tokens(rs, clock_ranks(raw))
             if rs is not None:
-                if w2e_console_dream.is_dream(op):
+                if console_dream and (w2e_console_dream.is_dream(op)
+                                      or op.get("name") == "memory_dream"):
                     rs = dream_tokens(rs, ts_tokens(raw))
                 row["rust"] = rename_prefixes(rs, er)
                 row["diffs"] += compare_response(rec["python"], row["rust"], tol, stats)
