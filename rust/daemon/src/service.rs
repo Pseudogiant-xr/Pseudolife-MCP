@@ -827,8 +827,8 @@ impl crate::background::Duties for Service {
             // `run_sweep_once` (`memory/dream.py:2398-2547`): the steps after
             // the reapers run only while dreaming is enabled: the analyzer
             // and deep ticks, the merge judge, `dream_status`, the stall tick
-            // and the automatic dream (`dream/ticks.rs`). The review-queue
-            // judges are not run yet (divergences.md).
+            // and the automatic dream (`dream/ticks.rs`), including all
+            // review-queue judges.
             if !self.config.dream.enabled {
                 return Ok(());
             }
@@ -903,7 +903,44 @@ impl crate::background::Duties for Service {
                         .unwrap_or(now)
                 },
             );
-            sessions.persist_reap(ready.storage.client(), &result).await;
+            // Python titles nonempty roots before persisting their close, even
+            // when a malformed resume setting later aborts the sweep. Reuse
+            // explicit close's band-order ties and resident/durable stamps.
+            let band_order: Vec<String> = self
+                .config
+                .memory
+                .band_specs
+                .iter()
+                .map(|b| b.name.clone())
+                .collect();
+            let counts = crate::session_close::entry_counts(&ready);
+            for (_, id, _) in &result.ended_sessions {
+                let Some(root) = write.log.index(id) else {
+                    continue;
+                };
+                let subtree: std::collections::HashSet<String> = (0..write.log.episodes.len())
+                    .filter(|&i| write.log.descends_from(i, id))
+                    .map(|i| write.log.episodes[i].id.clone())
+                    .chain(std::iter::once(id.clone()))
+                    .collect();
+                if subtree
+                    .iter()
+                    .any(|id| counts.get(id).is_some_and(|&n| n > 0))
+                {
+                    crate::session_close::auto_title(
+                        &ready,
+                        &mut write,
+                        root,
+                        &subtree,
+                        &band_order,
+                    )
+                    .await;
+                }
+            }
+            write
+                .log
+                .persist_reap(ready.storage.client(), &result)
+                .await;
             drop(write);
             drop(_service_lock);
             if let Some(error) = result.failure {

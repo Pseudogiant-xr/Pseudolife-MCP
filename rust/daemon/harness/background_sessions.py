@@ -30,6 +30,7 @@ def register(harness):
         restart = False
         expected_triggers = 1
         resume_refusal = False
+        auto_title = False
 
         def configure_daemons(self, procs):
             if "python" not in procs: return
@@ -80,6 +81,8 @@ with patch("time.time", return_value=1700000000.0):
 svc.flush()
 svc._storage.close()
 '''
+            if self.auto_title:
+                code = code.replace('"work fixture"', '"session - 2023-11-14 22:13"')
             env = daemons.base_env(home, {"PSEUDOLIFE_MCP_DATABASE_URL": dsn})
             env.update(fixture_env)
             log = home / "seed.log"
@@ -161,6 +164,17 @@ svc._storage.close()
             episodes = [dict(zip(table["columns"], row)) for row in table["rows"]]
             if not any(ep["session_key"] == "history" for ep in episodes):
                 raise RuntimeError("reaper deleted previously nonempty history")
+            if self.auto_title:
+                work = next(ep for ep in episodes if ep["session_key"] == "work")
+                if not work["title"].startswith("fixture - "):
+                    raise RuntimeError("reaper did not persist a content-derived root title")
+                table = state["rows"]["public.entries"]
+                entries = [dict(zip(table["columns"], row)) for row in table["rows"]]
+                stamps = [e["episode_title"] for e in entries if e["episode_id"] == work["id"]]
+                if not stamps or any(title != work["title"] for title in stamps):
+                    raise RuntimeError("reaper did not persist the root entry title stamps")
+                if next(ep for ep in episodes if ep["title"] == "child")["parent_id"] != work["id"]:
+                    raise RuntimeError("reaper changed child attribution")
             meta = {row[0]: row[1] for row in state["rows"]["public.meta"]["rows"]}
             if self.sweep and not meta.get("episode_tombstones"):
                 raise RuntimeError("empty sweep did not persist a tombstone")
@@ -175,10 +189,12 @@ svc._storage.close()
         env = dict(SessionReap.env, PSEUDOLIFE_SESSION_RESUME_SECONDS="bad")
         expected_triggers = 0
         resume_refusal = True
+        auto_title = True
 
     class SessionRestart(SessionReap):
         name = "session-restart"
         restart = True
+        auto_title = True
 
     class TombstoneRestart(SessionSweep):
         name = "session-tombstone-restart"
