@@ -791,6 +791,60 @@ What it cannot do: jobs already queued for a machine that then goes down
 stay queued. GitHub has no API to cancel one job of a run, so the
 nightly's next run still cancels them ("Switching the lane on").
 
+### On-demand machines
+
+An on-demand machine's runners are VMs kept stopped until a job is queued
+for its label. An orchestrator outside this repository starts one, the job
+runs, and the VM powers off again. While idle, such a machine has no runner
+online by design, so the watcher alone would drop it, no job would be
+routed to its label, and nothing would ever start a VM.
+
+The allowlist marks it with `on-demand` after the name:
+
+```text
+linux
+windows on-demand
+```
+
+`setup-runner-watch.sh --machines linux,windows:on-demand` writes that file.
+An on-demand machine is listed while one of its runners is online, as any
+machine is, or while its orchestrator's heartbeat is fresh. The heartbeat is
+the contract with the orchestrator, so its name and format stay stable:
+
+- **Name:** the repository Actions variable `PARITY_HEARTBEAT_<MACHINE>`,
+  the machine name upper-cased with `-` written as `_`
+  (`PARITY_HEARTBEAT_WINDOWS` for `windows`). GitHub matches variable names
+  without regard to case, and upper case is how it stores them. An
+  on-demand machine's name takes only letters, digits and `-`.
+- **Value:** the Unix time in seconds when the orchestrator last confirmed
+  it is alive, as decimal digits, as `date +%s` prints it. Surrounding
+  whitespace and a fractional part are accepted; a sign, an exponent or
+  anything else is not.
+- **Fresh:** at most `--heartbeat-minutes` old (default 15) and at most
+  two minutes ahead of the watcher's clock (`HEARTBEAT_SKEW_SECONDS`). A
+  missing, non-numeric, stale or far-future heartbeat is not fresh.
+
+The orchestrator writes it on a period well inside the window, for example
+every five minutes:
+
+```bash
+gh variable set PARITY_HEARTBEAT_WINDOWS --repo Pseudogiant-xr/Pseudolife-MCP --body "$(date +%s)"
+```
+
+Its token needs "Variables: read and write" on this repository. The
+watcher's token already has that permission, which also reads the
+heartbeats, so it needs nothing new. The watcher reads the heartbeats of the
+on-demand machines in the allowlist only: a plain machine is never kept by
+a heartbeat variable, and a line with any other marker is refused, changing
+nothing. A failed request for a heartbeat is an API error like any other and
+changes nothing; a missing or unreadable heartbeat is no error, it only
+stops counting.
+
+When the orchestrator stops, the machine stays listed until its last
+heartbeat is `--heartbeat-minutes` old and then for the usual grace: about
+25 minutes with the defaults. Jobs routed to it in that window queue as they
+would for any machine that went down.
+
 ## Commands for the maintainer
 
 These are the manual steps behind the scripts above, kept as the reference
