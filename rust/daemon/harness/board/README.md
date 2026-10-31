@@ -39,6 +39,20 @@ signed fields and authenticator counters remain compared. Maintainer clocks
 must match the captured request windows, including the 24-hour quarantine.
 Comparator checks are in `python -m pytest board/test_maintainer.py`.
 
+Additional boundary scenarios are selectable separately:
+`maintainer-bootstrap-refusals`, `maintainer-key-refusals`,
+`maintainer-recipient-refusals`, `maintainer-mail-refusals`,
+`maintainer-assertion-refusals` and `maintainer-zero-counter-replay`.
+They exercise exhausted and expired host codes, key and approver state
+changes, recipient deletion and role changes after preview, sender and
+mailbox capacity, malformed assertions, caller admission on all six actions,
+and authenticators without a signature counter. Capacity fixtures copy one
+genuine signed message into the disposable table; the queue fixture's old
+`created_at=1` and the expired code's `expires_at=1` are explicit inputs
+compared exactly. They do not wait for wall-clock expiry or send hundreds of
+HTTP requests. Retrying the exact refused queue assertion after freeing the
+mailbox proves its nonce and counter were rolled back.
+
 Per step it compares the status, the headers clients read (`content-type`,
 `cache-control`, `x-pl-board`) and the body by value. After every write it
 dumps the board's tables on both arms (agents, messages, events, leases,

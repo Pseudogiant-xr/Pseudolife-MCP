@@ -109,3 +109,26 @@ def test_runner_registers_all_six_actions_and_compares_maintainer_tables():
         routes.update(step.path for step in scenario().steps() if isinstance(step.path, str))
     assert {"/api/maintainer/" + route for route in
             ("enrol", "role", "send", "cancel", "repudiate", "revoke")} <= routes
+
+
+def test_refusal_fixtures_preserve_explicit_old_timestamps():
+    from board.maintainer_refusals import FixtureNormalizer
+
+    windows = Windows()
+    windows.steps = [(NOW, NOW + 0.5)]
+    norm = FixtureNormalizer(windows)
+    assert norm.value(1, "created_at") == 1
+    assert norm.value(1, "expires_at") == 1
+    assert norm.value(NOW + 120, "expires_at") == "T0+120"
+    norm.value(2, "expires_at")
+    assert norm.problems
+
+
+def test_additional_refusal_scenarios_are_selectable():
+    from board import run
+    from board.maintainer_refusals import SCENARIOS
+
+    assert len(SCENARIOS) == 6
+    for name, scenario in SCENARIOS.items():
+        assert run.S.SCENARIOS[name] is scenario
+        assert any(hasattr(step, "check") for step in scenario().steps())
