@@ -165,7 +165,10 @@ svc._storage.close()
             if not any(ep["session_key"] == "history" for ep in episodes):
                 raise RuntimeError("reaper deleted previously nonempty history")
             if self.auto_title:
-                work = next(ep for ep in episodes if ep["session_key"] == "work")
+                # Children inherit the session key and may sort before the
+                # root, but only the root receives an automatic title.
+                work = next(ep for ep in episodes
+                            if ep["session_key"] == "work" and ep["parent_id"] is None)
                 if not work["title"].startswith("fixture - "):
                     raise RuntimeError("reaper did not persist a content-derived root title")
                 table = state["rows"]["public.entries"]
