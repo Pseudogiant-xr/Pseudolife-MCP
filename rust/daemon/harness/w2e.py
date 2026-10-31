@@ -1852,6 +1852,12 @@ SCENARIOS.update({
         "config": "memory:\n  delete_confirm_threshold: 2\n",
         "seed": FORGET_SEED,
         "ops": [
+            # Malformed filters must never widen a confirmed deletion, even
+            # alongside a valid selector. MCP bindings reject these first.
+            *[forget("memory", **{"substring": "deploy", field: value,
+                                  "confirm_bulk": True})
+              for field in ("text", "substring", "source", "episode", "tag")
+              for value in (5, True, [], {})],
             # a filter is required; an empty string is no filter here
             forget("memory"),
             forget("memory", text=""),
@@ -6484,6 +6490,7 @@ SCENARIOS.update({
 import w2e_episodes  # noqa: E402
 
 SCENARIOS.update(w2e_episodes.register(sys.modules[__name__]))
+import w2e_graph_actions; SCENARIOS.update(w2e_graph_actions.register(sys.modules[__name__]))
 MUTANTS += w2e_episodes.MUTANTS
 
 

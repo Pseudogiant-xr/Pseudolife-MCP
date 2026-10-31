@@ -225,7 +225,7 @@ struct Writer<'a> {
 // ── dismiss_slot_pair ────────────────────────────────────────────────────
 
 /// `service.curation_dismiss_duplicate` with the listing keys decoded.
-async fn dismiss(
+pub(crate) async fn dismiss(
     ready: &Ready,
     store: &str,
     a: &(String, String),
