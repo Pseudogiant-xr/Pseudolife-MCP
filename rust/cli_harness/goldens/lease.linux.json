@@ -2285,7 +2285,7 @@
    "utc_offset": 39600,
    "exit": 120,
    "stdout": "",
-   "stderr": "bGVhc2U6IGJvYXJkIHNraXBwZWQ6IC0tbm8tYm9hcmQgd2FzIGdpdmVuOyB3YWl0aW5nIG9uIHRoZSBsb2NhbCBsb2NrIGZvciAnZml4dHVyZScgYWxvbmUgKG5vdCBGSUZPKQplcnIA/kV4Y2VwdGlvbiBpZ25vcmVkIHdoaWxlIGZsdXNoaW5nIHN5cy5zdGRvdXQ6CkJyb2tlblBpcGVFcnJvcjogW0Vycm5vIDMyXSBCcm9rZW4gcGlwZQo=",
+   "stderr": "bGVhc2U6IGJvYXJkIHNraXBwZWQ6IC0tbm8tYm9hcmQgd2FzIGdpdmVuOyB3YWl0aW5nIG9uIHRoZSBsb2NhbCBsb2NrIGZvciAnZml4dHVyZScgYWxvbmUgKG5vdCBGSUZPKQplcnIA/kV4Y2VwdGlvbiBpZ25vcmVkIGluOiA8X2lvLlRleHRJT1dyYXBwZXIgbmFtZT0nPHN0ZG91dD4nIG1vZGU9J3cnIGVuY29kaW5nPSd1dGYtOCc+CkJyb2tlblBpcGVFcnJvcjogW0Vycm5vIDMyXSBCcm9rZW4gcGlwZQo=",
    "window": [
     1793382440.727933,
     1793382440.9310846
