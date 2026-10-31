@@ -410,6 +410,8 @@ def _run_machines_block(tmp_path, listing: str, watcher_source: str) -> tuple[in
     ("linux", 0, {"allowed": {"linux"}, "on_demand": set()}),
     ("", 0, {"allowed": set(), "on_demand": set()}),
     ("linux,windows,windows:on-demand", 2, None),
+    # Codex review of be9f9365: "linux-a" sorts between the two spellings of "linux".
+    ("linux,linux-a,linux:on-demand", 2, None),
     ("linux,windows on-demand", 2, None),
 ])
 def test_setup_machines_writes_what_the_watcher_reads(tmp_path, listing, code, machines):

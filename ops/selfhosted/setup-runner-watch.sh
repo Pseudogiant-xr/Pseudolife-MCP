@@ -68,7 +68,7 @@ if [ "${1:-}" = "--machines" ]; then
   fi
   # The watcher refuses a machine named both ways, which would freeze the
   # variable on every run, so refuse it here before the allowlist changes.
-  both=$(tr ',' '\n' <<<"$list" | sort -u | sed 's/:on-demand$//' | uniq -d | paste -sd, -)
+  both=$(tr ',' '\n' <<<"$list" | sort -u | sed 's/:on-demand$//' | sort | uniq -d | paste -sd, -)
   if [ -n "$both" ]; then
     echo "--machines names $both both with and without :on-demand; keep one; nothing changed" >&2
     exit 2
