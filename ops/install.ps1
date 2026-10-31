@@ -65,6 +65,12 @@
 #   it must not exist yet). An interactive run also takes a code pasted
 #   where it asks for the token, which keeps it off the command line (and
 #   the shell history).
+# -ClientUpdateSchedule ask|yes|no|HH:MM: client-only, Windows - keep this
+#   machine's clients on the daemon's release with a daily scheduled task
+#   (pseudolife-mcp update --schedule): ask (default) prompts once, default
+#   no, and unattended runs skip it and print the command; yes sets it up at
+#   04:30, HH:MM at that time; no skips it. A task already in place is left
+#   alone.
 # One token file is one principal: every client a run wires shares it. For
 # per-client attribution on the board, run the installer once per client,
 # each run with that client's own token file.
@@ -131,6 +137,8 @@ param(
     [switch]$ClientOnly,
     [switch]$ReadToken,
     [string]$PairingCode = "",
+    # Client-only: the daily client update task (see the header).
+    [string]$ClientUpdateSchedule = "ask",
     # Optional guided ChatGPT Secure MCP Tunnel setup after local installation.
     [switch]$Tunnel,
     # Also give the test suite its own Postgres login (see the header).
@@ -151,6 +159,12 @@ $LegacyShimOverrideMarker = "# pseudolife-mcp install: managed override (shim-on
 $EnvBegin = "# >>> pseudolife-mcp install (managed block — installer rewrites between markers) >>>"
 $EnvEnd = "# <<< pseudolife-mcp install <<<"
 $interactive = [Environment]::UserInteractive -and -not [Console]::IsInputRedirected
+# >>> client update schedule flag >>>
+if ("$ClientUpdateSchedule" -notmatch '^(ask|yes|no|([01]?[0-9]|2[0-3]):[0-5][0-9])$') {
+    Write-Host "invalid -ClientUpdateSchedule '$ClientUpdateSchedule' (ask|yes|no, or a time of day as HH:MM)"
+    exit 2
+}
+# <<< client update schedule flag <<<
 
 # Needed from here on: the client-only mode block asks this checkout's shim
 # code whether a daemon URL is loopback.
@@ -399,7 +413,9 @@ function Show-ClientOnlyNotes {
     from the daemon's environment writes the new token into its
     token file here (the shims and the Claude Code hooks read it on
     every call), and into Codex's own copy in ~/.codex/pseudolife/token.
-  - A daemon upgrade there: run the update command below with
+  - A daemon upgrade there: the daily client update job (offered
+    below, on Linux and Windows) moves the shim to the daemon's
+    release; without it, run the update command below with
     --clients-only here, so the shim matches the daemon.
 '@
 }
@@ -750,6 +766,12 @@ if ($ClientOnly) {
     }
 } elseif ($TokenFile -or $ReadToken -or $PairingCode) {
     Write-Host "client-only install: -TokenFile, -ReadToken and -PairingCode name a remote daemon's credential, and a local install keeps its token in ops/.env. Add -ClientOnly -DaemonUrl <url>, or drop them"
+    exit 2
+}
+# The client update job follows a daemon on another machine; a daemon host
+# keeps its own job (pseudolife-mcp update --schedule there).
+if (-not $ClientOnly -and "$ClientUpdateSchedule" -notin "", "ask", "no") {
+    Write-Host "-ClientUpdateSchedule $ClientUpdateSchedule asks for the client update job, which only a client-only install (the daemon runs elsewhere) gets; on the daemon's host, pseudolife-mcp update --schedule HH:MM installs the daemon's own job. Drop it, or add -ClientOnly -DaemonUrl <url>"
     exit 2
 }
 # <<< client-only mode <<<
@@ -3223,7 +3245,8 @@ if (-not $ClientOnly) { Invoke-MaintainerSetupOffer }
 # The installers do not put the shim launcher's directory on PATH, so a bare
 # `pseudolife-mcp` finds an older pipx install, or nothing: name the shim this
 # run installed by its path until PATH finds it.
-function Write-UpdateLine([string]$ShimPath, [switch]$ClientOnly, [string]$PairingHintUrl = "") {
+function Get-UpdateCommand([string]$ShimPath) {
+    # The command, and a PATH note while PATH does not find the shim this run installed.
     $updCmd = "pseudolife-mcp"
     $updPath = ""
     if ($ShimPath) {
@@ -3235,8 +3258,17 @@ function Write-UpdateLine([string]$ShimPath, [switch]$ClientOnly, [string]$Pairi
             $updPath = " (add $(Split-Path -Parent $ShimPath) to PATH to run it as plain pseudolife-mcp)"
         }
     }
+    return @($updCmd, $updPath)
+}
+function Write-UpdateLine([string]$ShimPath, [switch]$ClientOnly, [string]$PairingHintUrl = "", [switch]$Scheduled) {
+    $updCmd, $updPath = Get-UpdateCommand $ShimPath
     if ($ClientOnly) {
-        Write-Host "Update this machine's clients later with one command, no checkout needed: $updCmd update --clients-only (installs the daemon's release as a new shim runtime and refreshes the plugin cache; the daemon is updated on its own host)$updPath."
+        $lead = if ($Scheduled) {
+            "The daily client update job keeps this machine's clients on the daemon's release; to update them now, no checkout needed:"
+        } else {
+            "Update this machine's clients later with one command, no checkout needed:"
+        }
+        Write-Host "$lead $updCmd update --clients-only (installs the daemon's release as a new shim runtime and refreshes the plugin cache; the daemon is updated on its own host)$updPath."
         if ($PairingHintUrl) {
             Write-Host "If another machine uses this same token, rotating it breaks both and neither can be revoked alone: give each machine its own with pseudolife-mcp invite <name> on the daemon's host and $updCmd connect $PairingHintUrl --read-code here. A machine paired with invite, or given a token no other machine uses, already has its own: nothing to do."
         }
@@ -3245,7 +3277,96 @@ function Write-UpdateLine([string]$ShimPath, [switch]$ClientOnly, [string]$Pairi
     }
 }
 # <<< update line <<<
-Write-UpdateLine -ShimPath $script:shimInstallPath -ClientOnly:([bool]$ClientOnly) -PairingHintUrl "$script:pairingHintUrl"
+# >>> client update schedule offer >>>
+# A client-only machine's shim and plugin move to the daemon's release only
+# when something moves them: `pseudolife-mcp update --schedule` registers the
+# daily job that does (pseudolife_memory/unattended_update.py). That is a
+# persistent job the user did not choose by running the installer, so it is
+# asked once, default no, and -ClientUpdateSchedule answers it. 04:30 is an
+# hour after the 03:30 the docs give a daemon host's own job, so a daemon
+# updated overnight is matched the same morning. --schedule registers a
+# Windows task here (a systemd --user timer from install.sh).
+$ClientScheduleDefault = "04:30"
+$ClientScheduleTask = "Pseudolife Client Update"   # unattended_update.CLIENT_TASK_NAME
+$script:clientScheduleState = ""
+function Get-ClientScheduleJob {
+    # The task --schedule registered: the daemon URL and time it runs with, or $null.
+    $xml = ""
+    $global:LASTEXITCODE = 1
+    try { $xml = (& schtasks /Query /TN $ClientScheduleTask /XML 2>$null | Out-String) } catch { $global:LASTEXITCODE = 1 }
+    if ($LASTEXITCODE -ne 0) { return $null }
+    # --schedule leaves the default daemon URL off the command line.
+    $url = if ($xml -match '--daemon-url[= ]+"?([^\s"<]+)') { $Matches[1] } else { "http://127.0.0.1:8765" }
+    $time = if ($xml -match '<StartBoundary>[^<T]*T(\d\d:\d\d)') { $Matches[1] } else { $null }
+    return [pscustomobject]@{ Url = $url; Time = $time }
+}
+function Invoke-ClientUpdateScheduleOffer {
+    $mode = if ("$ClientUpdateSchedule") { "$ClientUpdateSchedule" } else { "ask" }
+    $url = "$clientDaemonUrl".TrimEnd("/")
+    $time = if ($mode -in "ask", "yes", "no") { $ClientScheduleDefault } else { $mode }
+    $haveShim = (Install-ShimOnce) -and $script:shimInstallPath
+    $updCmd = (Get-UpdateCommand $script:shimInstallPath)[0]
+    $command = "$updCmd update --schedule $time --daemon-url $url"
+    if ($mode -eq "no") {
+        $script:clientScheduleState = "declined"
+        Write-Host "Automatic client updates: not set up (-ClientUpdateSchedule no); $command sets them up later."
+        return
+    }
+    if ($env:OS -ne "Windows_NT") {
+        if ($mode -ne "ask") {
+            Write-Host "Automatic client updates: -ClientUpdateSchedule $mode does nothing here, since the daily job needs Task Scheduler (Windows) or systemd (Linux, from ops/install.sh); run $updCmd update --clients-only after the daemon upgrades."
+        }
+        return
+    }
+    if (-not $haveShim) {
+        $script:clientScheduleState = "failed"
+        Write-Warning "The pseudolife-mcp shim is unavailable (see above), so automatic client updates were not set up: run pseudolife-mcp update --schedule $time --daemon-url $url once it is installed."
+        return
+    }
+    $job = Get-ClientScheduleJob
+    if ($job) {
+        $at = if ($job.Time) { $job.Time } else { "its set time" }
+        if ("$($job.Url)".TrimEnd("/") -eq $url) {
+            $script:clientScheduleState = "scheduled"
+            Write-Host "Automatic client updates: already scheduled (daily at $at, the scheduled task '$ClientScheduleTask'); nothing changed."
+        } else {
+            $script:clientScheduleState = "elsewhere"
+            $moveAt = if ($job.Time) { $job.Time } else { $time }
+            Write-Host "Automatic client updates: already scheduled (daily at $at, the scheduled task '$ClientScheduleTask'), following the daemon at $($job.Url) rather than $url; nothing changed: $updCmd update --schedule $moveAt --daemon-url $url moves it."
+        }
+        return
+    }
+    if ($mode -eq "ask") {
+        if (-not $interactive) {
+            $script:clientScheduleState = "skipped"
+            Write-Host "Automatic client updates: not set up (no terminal to ask on): $command sets them up, or re-run with -ClientUpdateSchedule yes."
+            return
+        }
+        $reply = Read-BankAnswer "A daily job at $time can keep this machine's Pseudolife clients on the daemon's release: it runs pseudolife-mcp update --unattended, which moves the shim and plugin to the release the daemon at $url runs, never past it. Set it up? [y/N]"
+        if ((Get-BankReply $reply) -cnotin "y", "Y", "yes", "Yes", "YES") {
+            $script:clientScheduleState = "declined"
+            Write-Host "  Not now: $command sets them up later (any time of day as HH:MM)."
+            return
+        }
+    }
+    try {
+        $global:LASTEXITCODE = 0
+        & $script:shimInstallPath update --schedule $time --daemon-url $url
+        $scheduleExit = $LASTEXITCODE
+    } catch {
+        Write-Host "  $($_.Exception.Message)"
+        $scheduleExit = 1
+    }
+    if ($scheduleExit -ne 0) {
+        $script:clientScheduleState = "failed"
+        Write-Warning "pseudolife-mcp update --schedule exited $scheduleExit (see its message above), so nothing was scheduled. The install itself is complete: run $command once that is fixed."
+        return
+    }
+    $script:clientScheduleState = "scheduled"
+}
+# <<< client update schedule offer <<<
+if ($ClientOnly) { Invoke-ClientUpdateScheduleOffer }
+Write-UpdateLine -ShimPath $script:shimInstallPath -ClientOnly:([bool]$ClientOnly) -PairingHintUrl "$script:pairingHintUrl" -Scheduled:($script:clientScheduleState -eq "scheduled")
 if ($Tunnel) {
     if (-not $script:shimInstallPath) {
         throw "Secure MCP Tunnel setup needs the installed shim; repair its installation, then run pseudolife-mcp tunnel setup."

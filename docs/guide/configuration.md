@@ -4181,8 +4181,22 @@ the daemon. Every run appends to `~/.pseudolife-mcp/unattended-update.log`.
 `--schedule` refuses on a client machine whose daemon does not answer
 `/health` at the time, naming `--daemon-url`, since the job would change
 nothing every day. A pip install that is not a shim runtime is refused as
-above. The installer does not offer the schedule yet: run `--schedule`
-once after a client-only install.
+above.
+
+A client-only install offers this job near the end of the run, on Linux and
+Windows: one question, default no, since it is a persistent job you did not
+ask for by running the installer. `--client-update-schedule ask|yes|no|HH:MM`
+(`ops/install.sh`) or `-ClientUpdateSchedule` (`ops/install.ps1`) answers it
+in advance: `yes` sets it up at 04:30, an hour after the 03:30 used for a
+daemon host's job above, so a daemon updated overnight reaches the clients
+the same morning. The installer runs the installed shim's own `update
+--schedule HH:MM --daemon-url <the url it connected to>`. A run with no
+terminal skips it with one line naming that command. A rerun leaves a job
+already in place alone and says so in one line, naming the `--schedule`
+command that moves it when it follows another daemon. A refusal from
+`--schedule` is printed as a warning and the install still completes. A
+daemon-host install is never offered it and refuses the flag's `yes` or a
+time; macOS has no scheduler here.
 
 ### Codex hook re-approval, on every update path
 
