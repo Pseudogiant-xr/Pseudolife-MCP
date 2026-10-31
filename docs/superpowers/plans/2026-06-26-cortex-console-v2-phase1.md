@@ -1,5 +1,10 @@
 # Cortex Console v2 — Phase 1 (Close the Backend Gap) Implementation Plan
 
+> Archival note: [D9 / Proposal A / B2r](../../../rust/CUTOVER.md) (2026-10-23)
+> supersedes the route scope below: `GET /api/graph/communities` is
+> deprecated for removal in a later release; no replacement; no caller.
+> Python handlers remain unchanged; Rust keeps its declared `501` responses.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Surface the backend capabilities the console doesn't expose yet — graph-insight digest, communities, path, multi-hop recall, consolidation review, engram traces — and the safe write actions.
