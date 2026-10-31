@@ -204,7 +204,7 @@ _PARK_CLEARED = {"park_reason": None, "park_needs": "", "park_clear_by": "", "pa
 # What an update result says when a status without park fields cleared a
 # standing park. The clear itself is the v49 contract (a working session is
 # not parked: its mail is hinted, not decided on a stale park); a silent one
-# cost the maintainer's delegate its wake path on 2026-10-19.
+# cost the maintainer's conductor its wake path on 2026-10-19.
 PARK_CLEARED_WARNING = (
     "This status cleared your park ({reason}): a status without park fields means "
     "you are working again. To stay parked, send park_reason (and park_needs, "
@@ -215,36 +215,55 @@ PARK_CLEARED_WARNING = (
 # 2026-10-03: a coordinator's review of a finished PR could not reach the
 # session that opened it). Urgent mail reopens it when the sender is the
 # maintainer (a principal in ``coordination.maintainer_principals``), the
-# maintainer's delegate for the recipient's project, or the agent the park
+# maintainer's conductor for the recipient's project, or the agent the park
 # names in ``park_clear_by``. Each comes from the sender's authenticated
 # bearer, the lease table or the recipient's own park, never from anything a
 # message says. The first two are AUTHORITY_REASONS, which spend their own
 # hourly budget instead of the plain urgent allowance.
-AUTHORITY_REASONS = ("maintainer", "delegate")
+AUTHORITY_REASONS = ("maintainer", "conductor")
 REOPEN_REASONS = (*AUTHORITY_REASONS, "clearer")
-# 0.16.0 recorded the delegate's rings as ``coordinator`` (renamed
-# 2026-10-04, maintainer decision: the open ``coordinator:<project>`` role
-# keeps that word). Rows written before the upgrade are history that still
-# counts against the authority budget and is still served.
-_AUTHORITY_ROW_REASONS = (*AUTHORITY_REASONS, "coordinator")
-_REOPEN_ROW_REASONS = (*REOPEN_REASONS, "coordinator")
-# Leases only the operator grants (``pseudolife-mcp lease delegate``, which
+# Rows written under the role's older names are history that still counts
+# against the authority budget and is still served: 0.16.0 recorded the
+# conductor's rings as ``coordinator`` (renamed 2026-10-04, maintainer
+# decision: the open ``coordinator:<project>`` role keeps that word), and
+# releases until 2026-10-31 as ``delegate``.
+_LEGACY_AUTHORITY_REASONS = ("delegate", "coordinator")
+_AUTHORITY_ROW_REASONS = (*AUTHORITY_REASONS, *_LEGACY_AUTHORITY_REASONS)
+_REOPEN_ROW_REASONS = (*REOPEN_REASONS, *_LEGACY_AUTHORITY_REASONS)
+# Leases only the operator grants (``pseudolife-mcp lease conductor``, which
 # opens the bank directly like ``lease break``): an agent's acquire is
 # refused ``reserved_lease``, while its release (resigning) and the
 # operator's break work as for any lease. The power to reopen done parks is
-# the live ``delegate:<project>`` hold, one agent id, never the open
+# the live ``conductor:<project>`` hold, one agent id, never the open
 # ``coordinator:<project>`` lease: any session can claim that one, and every
 # session on a host may share one principal (review of #549, 2026-10-03).
 # ``designated:`` was the namespace before 0.16.1 and stays reserved; a
 # ``designated:coordinator:<project>`` hold left on an upgraded bank grants
-# nothing (the operator re-grants with ``lease delegate``).
-DELEGATE_PREFIX = "delegate:"
-RESERVED_LEASE_PREFIXES = (DELEGATE_PREFIX, "designated:")
+# nothing (the operator re-grants with ``lease conductor``).
+CONDUCTOR_PREFIX = "conductor:"
+# The conductor's lease and grant record were ``delegate:<project>`` and
+# ``lease_delegate`` until 2026-10-31. A hold granted under those names
+# keeps its authority until it expires (at most DELEGATION_MAX) or a new
+# grant for the project vacates it: the audit log is hash-chained, so the
+# old records cannot be renamed, and every reader takes both names.
+LEGACY_CONDUCTOR_PREFIX = "delegate:"
+CONDUCTOR_PREFIXES = (CONDUCTOR_PREFIX, LEGACY_CONDUCTOR_PREFIX)
+CONDUCTOR_EVENT = "lease_conductor"
+CONDUCTOR_EVENTS = (CONDUCTOR_EVENT, "lease_delegate")
+RESERVED_LEASE_PREFIXES = (*CONDUCTOR_PREFIXES, "designated:")
+
+
+def conductor_project(name):
+    """The project of a conductor lease under either of its names, else None."""
+    for prefix in CONDUCTOR_PREFIXES:
+        if name.startswith(prefix):
+            return name[len(prefix):]
+    return None
 # The open per-project coordinator lease any session may claim. The
 # maintainer may also assign or free it from the Console with a passkey
 # (``assign_coordinator`` / ``break_lease``, v54).
 COORDINATOR_PREFIX = "coordinator:"
-# Who may write a role record (``lease_delegate``, ``lease_assign``, a
+# Who may write a role record (``lease_conductor``, ``lease_assign``, a
 # ``lease_break``): the operator through the host CLI, or the maintainer
 # through a passkey-signed Console route (v54, addendum 2026-10-04). Never
 # an agent: no bearer-callable path passes either.
@@ -278,7 +297,7 @@ FALLBACK_CLAUDE = (
     "board cannot tell) does its host's session send_message reach it now; a Claude Code "
     "CLI session is reached by the maintainer typing into its window.")
 # What a role grant tells the maintainer or operator when the holder has no
-# live wake path now (maintainer requirement 2026-10-05: the delegate above
+# live wake path now (maintainer requirement 2026-10-05: the conductor above
 # all must be reachable). Keyed by ``_listener_path``'s reasons.
 UNREACHABLE_REASONS = {
     "listener_expired": "its listener lapsed",
@@ -2111,7 +2130,7 @@ class CoordinationStore:
         return row
 
     def _drop_reserved_waiters(self, name, events):
-        """Empty the queue of an operator-only (``delegate:``) lease, one
+        """Empty the queue of an operator-only (``conductor:``) lease, one
         ``lease_dequeue`` (reason ``reserved``) per waiter. Only an agent
         queued before the namespace was reserved can be there."""
         for r in self._all("DELETE FROM coordination_lease_waiters WHERE name=%s "
@@ -2186,7 +2205,7 @@ class CoordinationStore:
             agent = self._auth(principal, agent_id, credential)
             now = self.clock()
             if name.startswith(COORDINATOR_PREFIX):
-                # A session holds one role per project: the delegate neither
+                # A session holds one role per project: the conductor neither
                 # claims nor queues for the coordinator lease (security
                 # review, 2026-10-04: only the signed routes kept the rule).
                 # Both role leases lock in the order the role changes take.
@@ -2197,9 +2216,10 @@ class CoordinationStore:
                 self._lock_role_leases(project)
                 live = "SELECT 1 AS d FROM coordination_leases WHERE name=%s " \
                        "AND holder_agent_id=%s AND expires_at>%s"
-                if (self._one(live, (DELEGATE_PREFIX + project, agent_id, now)) is not None
+                if (any(self._one(live, (prefix + project, agent_id, now)) is not None
+                        for prefix in CONDUCTOR_PREFIXES)
                         and self._one(live, (name, agent_id, now)) is None):
-                    raise CoordinationError("already_delegate")
+                    raise CoordinationError("already_conductor")
             self.storage.conn.execute(
                 "INSERT INTO coordination_leases (name) VALUES (%s) ON CONFLICT (name) DO NOTHING",
                 (name,))
@@ -2355,12 +2375,13 @@ class CoordinationStore:
         return prefix + project
 
     def _lock_role_leases(self, project):
-        """Create and lock both role leases of ``project`` in name order
-        (``coordinator:`` before ``delegate:``), the order ``_settle_due``
-        locks leases in, before any waiter or agent row is touched."""
+        """Create and lock the role leases of ``project`` (the conductor's
+        under both its names, and the coordinator's) in name order, the
+        order ``_settle_due`` locks leases in, before any waiter or agent
+        row is touched."""
         # A name past MAX_LEASE_NAME can hold no lease (acquire refuses it).
         names = sorted(name for name in (COORDINATOR_PREFIX + project,
-                                          DELEGATE_PREFIX + project)
+                                          *(prefix + project for prefix in CONDUCTOR_PREFIXES))
                        if len(name) <= MAX_LEASE_NAME)
         for name in names:
             self.storage.conn.execute(
@@ -2396,6 +2417,25 @@ class CoordinationStore:
         self._settle(name, now, events)
         return name
 
+    def _retire_legacy_conductor(self, project, now, events, *, actor):
+        """Inside a conductor change: vacate the project's hold under the
+        role's old lease name (``delegate:<project>``), whoever holds it, so
+        the board never shows two conductors. Its queue is dropped first as
+        any reserved lease's. Returns the holder when the hold was live."""
+        name = LEGACY_CONDUCTOR_PREFIX + project
+        if self._one("SELECT 1 AS hit FROM coordination_leases WHERE name=%s",
+                     (name,)) is None:
+            return None
+        self._drop_reserved_waiters(name, events)
+        row = self._settle(name, now, events)
+        if row["holder_agent_id"] is None:
+            return None
+        self._vacate(name, now)
+        events.append(self._event("lease_break", {"name": name, "fence": row["fence"],
+                                                  "reason": "renamed"},
+                                  actor=actor, agent_id=row["holder_agent_id"]))
+        return row["holder_agent_id"]
+
     def break_lease(self, name, *, actor="operator"):
         """Operator only (the offline CLI; never exposed to agents), or the
         maintainer through a passkey-signed Console route (v54, ``actor``
@@ -2415,19 +2455,21 @@ class CoordinationStore:
             self._append(events, now)
         return {"name": name, "broken": True, "was_held_by": row["holder_agent_id"]}
 
-    def grant_delegate(self, project, agent_id, *, hold, actor="operator"):
+    def grant_conductor(self, project, agent_id, *, hold, actor="operator"):
         """Operator only (the offline CLI; never exposed to agents), or the
         maintainer through a passkey-signed Console route (v54, ``actor``
         ``maintainer``): make ``agent_id`` (or a unique prefix of a
-        registered one) the maintainer's delegate for ``project`` for
+        registered one) the maintainer's conductor for ``project`` for
         ``hold`` seconds, replacing any current one. The hold is the lease
-        ``delegate:<project>``, so it expires, shows on the board and is
-        revoked with ``break_lease`` like any lease; the delegate may
-        release it, never take or renew it. A session holds one role per
-        project: the new delegate's live ``coordinator:<project>`` hold is
-        broken in the same transaction (``also_broken``)."""
+        ``conductor:<project>``, so it expires, shows on the board and is
+        revoked with ``break_lease`` like any lease; the conductor may
+        release it, never take or renew it. A hold under the role's old
+        name (``delegate:<project>``) is vacated, its holder ``replaced``
+        when the new name had none. A session holds one role per project:
+        the new conductor's live ``coordinator:<project>`` hold is broken in
+        the same transaction (``also_broken``)."""
         self._role_actor(actor)
-        name = self._role_project(project, DELEGATE_PREFIX)
+        name = self._role_project(project, CONDUCTOR_PREFIX)
         if type(hold) is not int or not DELEGATION_MIN <= hold <= DELEGATION_MAX:
             raise CoordinationError("invalid_ttl")
         self._lease_args(name)
@@ -2437,7 +2479,7 @@ class CoordinationStore:
             agent = self._role_agent(agent_id)
             agent_id = agent["agent_id"]
             events = []
-            # Queued for the coordinator lease, the new delegate leaves that
+            # Queued for the coordinator lease, the new conductor leaves that
             # queue rather than be handed the second role later.
             if self._one("DELETE FROM coordination_lease_waiters WHERE name=%s AND agent_id=%s "
                          "RETURNING ticket", (COORDINATOR_PREFIX + project, agent_id)) is not None:
@@ -2449,11 +2491,12 @@ class CoordinationStore:
             # A waiter queued before the namespace was reserved never takes
             # it; dropped here too, since a held lease's settle keeps its queue.
             self._drop_reserved_waiters(name, events)
+            legacy = self._retire_legacy_conductor(project, now, events, actor=actor)
             row = self._settle(name, now, events)
-            replaced = row["holder_agent_id"]
+            replaced = row["holder_agent_id"] or legacy
             row = self._grant(name, agent_id, agent["principal"], now=now, hold=hold,
                               expect=None, purpose=f"granted by the {actor}")
-            events.append(self._event("lease_delegate",
+            events.append(self._event(CONDUCTOR_EVENT,
                                       {"name": name, "fence": row["fence"], "hold": hold,
                                        "replaced": replaced},
                                       actor=actor, agent_id=agent_id,
@@ -2463,8 +2506,6 @@ class CoordinationStore:
                "expires_at": row["expires_at"], "replaced": replaced}
         if also:
             out["also_broken"] = also
-        # ``role`` only names the role in the warning: the stored id stays
-        # ``delegate``, the name a user reads is "conductor".
         return {**out, **self.reachability(agent, now, role="conductor")}
 
     @classmethod
@@ -2487,8 +2528,8 @@ class CoordinationStore:
         ordinary lease: the holder renews or releases it, others queue, and
         the queue is left as it was (the assignee leaves it). A session
         holds one role per project: the assignee's live
-        ``delegate:<project>`` hold is broken in the same transaction
-        (``also_broken``)."""
+        ``conductor:<project>`` hold (under either of its names) is broken
+        in the same transaction (``also_broken``)."""
         self._role_actor(actor)
         name = self._role_project(project, COORDINATOR_PREFIX)
         if type(hold) is not int or not DELEGATION_MIN <= hold <= DELEGATION_MAX:
@@ -2500,8 +2541,10 @@ class CoordinationStore:
             agent = self._role_agent(agent_id)
             agent_id = agent["agent_id"]
             events = []
-            also = self._break_held(DELEGATE_PREFIX + project, agent_id, now, events,
-                                    actor=actor)
+            also = None
+            for prefix in CONDUCTOR_PREFIXES:
+                also = self._break_held(prefix + project, agent_id, now, events,
+                                        actor=actor) or also
             row = self._one("SELECT * FROM coordination_leases WHERE name=%s", (name,))
             replaced = None
             if row["holder_agent_id"] is not None and row["expires_at"] <= now:
@@ -2857,15 +2900,15 @@ class CoordinationStore:
 
     def _authority(self, sender, recipient, now):
         """``maintainer`` when the sender's bearer principal is one the
-        operator listed, ``delegate`` when the operator made the sending
-        agent the maintainer's delegate for the recipient's (non-empty)
-        project (the live ``delegate:<project>`` hold), else None. Read from
+        operator listed, ``conductor`` when the operator made the sending
+        agent the maintainer's conductor for the recipient's (non-empty)
+        project (the live ``conductor:<project>`` hold), else None. Read from
         the authenticated sender row, the lease table and the audit log only:
         nothing a message says can claim either, and holding the open
         ``coordinator:<project>`` lease counts for nothing. An expired grant
         counts for nothing even before a settle vacates it.
 
-        The hold counts only with the operator's ``lease_delegate`` record
+        The hold counts only with the operator's ``lease_conductor`` record
         for its current fence (coordinator review of #559, 2026-10-04):
         0.16.0 reserved only ``designated:``, so a session could hold an
         ordinary lease named ``delegate:<project>`` across the upgrade.
@@ -2880,43 +2923,48 @@ class CoordinationStore:
         if sender["principal"] in self.maintainer_principals:
             return "maintainer"
         project = recipient.get("project") or ""
-        if project and self.delegate_projects(sender["agent_id"], now, project=project):
-            return "delegate"
+        if project and self.conductor_projects(sender["agent_id"], now, project=project):
+            return "conductor"
         return None
 
-    def delegate_projects(self, agent_id, now, *, project=None):
-        """The projects ``agent_id`` is the maintainer's delegate for at
-        ``now``, sorted: each a live ``delegate:<project>`` hold with the
-        operator's or maintainer's ``lease_delegate`` record for its current
-        fence, the proof ``_authority`` applies (see there). Given
-        ``project``, that one only. Read from the lease table and the audit
-        log; a held lease alone, or a record by any other actor, is no
-        proof."""
-        return [row["name"][len(DELEGATE_PREFIX):]
-                for row in self._delegate_rows(agent_id, now, project=project)]
+    def conductor_projects(self, agent_id, now, *, project=None):
+        """The projects ``agent_id`` is the maintainer's conductor for at
+        ``now``, sorted: each a live ``conductor:<project>`` hold (or one
+        under the old name, ``delegate:<project>``) with the operator's or
+        maintainer's grant record (``lease_conductor``, or ``lease_delegate``
+        before the rename) for its name and current fence, the proof
+        ``_authority`` applies (see there). Given ``project``, that one
+        only. Read from the lease table and the audit log; a held lease
+        alone, or a record by any other actor, is no proof."""
+        return sorted({conductor_project(row["name"])
+                       for row in self._conductor_rows(agent_id, now, project=project)})
 
-    def _delegate_rows(self, agent_id, now, *, project=None):
-        """``delegate_projects``' proven leases: their names and expiries."""
+    def _conductor_rows(self, agent_id, now, *, project=None):
+        """``conductor_projects``' proven leases: their names and expiries."""
         if project is None:
             # The prefix is matched with left(), not LIKE: a name's own
             # characters are never a pattern.
-            match, params = "left(l.name, %s)=%s", (len(DELEGATE_PREFIX), DELEGATE_PREFIX)
+            match = "(" + " OR ".join("left(l.name, %s)=%s" for _ in CONDUCTOR_PREFIXES) + ")"
+            params = tuple(v for prefix in CONDUCTOR_PREFIXES for v in (len(prefix), prefix))
         else:
-            match, params = "l.name=%s", (DELEGATE_PREFIX + project,)
+            match, params = "l.name=ANY(%s)", ([p + project for p in CONDUCTOR_PREFIXES],)
+        # The record names the lease it granted, so an old-named hold is
+        # proven by its old-named record and a new one by its new one.
         return self._all(
             "SELECT l.name, l.expires_at FROM coordination_leases l WHERE " + match + " "
             "AND l.holder_agent_id=%s AND l.expires_at>%s AND EXISTS (SELECT 1 "
-            "FROM coordination_events e WHERE e.event='lease_delegate' "
+            "FROM coordination_events e WHERE e.event=ANY(%s) "
             "AND e.actor=ANY(%s) AND e.agent_id=l.holder_agent_id "
-            "AND CASE WHEN e.event='lease_delegate' THEN "
+            "AND CASE WHEN e.event=ANY(%s) THEN "
             "e.payload::jsonb->>'name'=l.name "
             "AND (e.payload::jsonb->>'fence')::bigint=l.fence ELSE false END) "
             "ORDER BY l.name",
-            (*params, agent_id, now, list(ROLE_ACTORS)))
+            (*params, agent_id, now, list(CONDUCTOR_EVENTS), list(ROLE_ACTORS),
+             list(CONDUCTOR_EVENTS)))
 
-    def delegate_of(self, agent_id, principal):
-        """``delegate_projects`` now, for the hook endpoints that brief the
-        delegate (spec 2026-10-14), as ``{"projects": [...], "remaining":
+    def conductor_of(self, agent_id, principal):
+        """``conductor_projects`` now, for the hook endpoints that brief the
+        conductor (spec 2026-10-14), as ``{"projects": [...], "remaining":
         seconds}``: ``remaining`` until the earliest of those leases expires
         (a cache must not outlive it), None without one. No projects for an
         address the caller's principal does not own, or none at all, as
@@ -2927,8 +2975,8 @@ class CoordinationStore:
         if row is None:
             return {"projects": [], "remaining": None}
         now = self.clock()
-        rows = self._delegate_rows(agent_id, now)
-        return {"projects": [r["name"][len(DELEGATE_PREFIX):] for r in rows],
+        rows = self._conductor_rows(agent_id, now)
+        return {"projects": sorted({conductor_project(r["name"]) for r in rows}),
                 "remaining": min(r["expires_at"] for r in rows) - now if rows else None}
 
     def _wake_decision(self, sender, recipient, now, *, clears, urgent, message_id,
@@ -2946,10 +2994,10 @@ class CoordinationStore:
         sender set ``urgent`` (each within its cap), else ``withheld`` with
         the need and ``retry`` so the sender knows what would wake it.
         A done park rings only for ``urgent`` mail from the maintainer, the
-        maintainer's delegate for the project or the park's named clearer
+        maintainer's conductor for the project or the park's named clearer
         (``reopened``; 2026-10-03), else ``not_needed`` with ``reopen_by``.
-        Urgent mail from the maintainer or the delegate is decided
-        ``maintainer`` or ``delegate`` wherever plain urgency would ring,
+        Urgent mail from the maintainer or the conductor is decided
+        ``maintainer`` or ``conductor`` wherever plain urgency would ring,
         and spends the sender's ``authority_per_sender_per_hour`` instead of its urgent
         allowance; the per-recipient, nightly and stagger caps bind every
         ring alike. Unparked Codex
@@ -3554,8 +3602,9 @@ class CoordinationStore:
                                             urgent=urgent, message_id=message_id,
                                             maintainer=maintainer))
                 # The send event names the authority a ring used (maintainer,
-                # delegate, clearer, urgent, ...; ``coordinator`` on events
-                # from before the 2026-10-04 rename), so board-audit export
+                # conductor, clearer, urgent, ...; ``delegate`` on events from
+                # before the 2026-10-31 rename, ``coordinator`` before the
+                # 2026-10-04 one), so board-audit export
                 # shows it without the wake table, which it does not carry.
                 ring = wake.pop("_ring", None)
                 audited = {"wake_reason": ring} if ring is not None else {}

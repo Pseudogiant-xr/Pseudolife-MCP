@@ -1,0 +1,1 @@
+usage: pseudolife-mcp lease conductor [-h] [--for DURATION] PROJECT AGENT

@@ -2,7 +2,7 @@
 
 Spec: docs/superpowers/specs/2026-10-04-board-roles-passkey.md. Four signed
 purposes complete at ``maintainer_role`` (``POST /api/maintainer/role``):
-grant-delegate, revoke-delegate, assign-coordinator, revoke-coordinator. A
+grant-conductor, revoke-conductor, assign-coordinator, revoke-coordinator. A
 bearer alone cannot change a role; the delegate's authority counts with an
 operator's or the maintainer's grant record, and nothing else.
 """
@@ -48,38 +48,38 @@ def events(service, kind):
 
 # ── each purpose ───────────────────────────────────────────────────────────
 
-def test_grant_and_revoke_the_delegate(svc):
+def test_grant_and_revoke_the_conductor(svc):
     auth = bootstrap(svc)
     agent, other = peer(svc), peer(svc, label="other")
-    out, challenge = role(svc, auth, "grant-delegate", project="p", agent_id=agent["agent_id"],
+    out, challenge = role(svc, auth, "grant-conductor", project="p", agent_id=agent["agent_id"],
                           hold=HOUR)
     assert set(out) == {"name", "agent_id", "fence", "expires_at", "replaced", "reachable",
                         "reason", "warning"}
-    assert (out["name"], out["agent_id"], out["replaced"]) == ("delegate:p", agent["agent_id"],
+    assert (out["name"], out["agent_id"], out["replaced"]) == ("conductor:p", agent["agent_id"],
                                                                None)
     preview = challenge["preview"]
-    assert (preview["role"], preview["action"], preview["project"]) == ("delegate", "grant", "p")
+    assert (preview["role"], preview["action"], preview["project"]) == ("conductor", "grant", "p")
     assert preview["agent_id_prefix"] == agent["agent_id"][:12] and preview["replaces"] is None
-    [(actor, payload, agent_id)] = events(svc, "lease_delegate")
+    [(actor, payload, agent_id)] = events(svc, "lease_conductor")
     assert (actor, agent_id, payload["fence"]) == ("maintainer", agent["agent_id"], out["fence"])
     # A new grant replaces the old one and says whom it replaced.
-    out, challenge = role(svc, auth, "grant-delegate", project="p",
+    out, challenge = role(svc, auth, "grant-conductor", project="p",
                           agent_id=other["agent_id"], hold=HOUR)
     assert challenge["preview"]["replaces"] == agent["agent_id"]
-    assert out["replaced"] == agent["agent_id"] and holder(svc, "delegate:p") == other["agent_id"]
-    out, challenge = role(svc, auth, "revoke-delegate", project="p")
+    assert out["replaced"] == agent["agent_id"] and holder(svc, "conductor:p") == other["agent_id"]
+    out, challenge = role(svc, auth, "revoke-conductor", project="p")
     assert challenge["preview"]["current_holder"] == other["agent_id"]
-    assert out == {"name": "delegate:p", "broken": True, "was_held_by": other["agent_id"]}
+    assert out == {"name": "conductor:p", "broken": True, "was_held_by": other["agent_id"]}
     assert events(svc, "lease_break")[-1][0] == "maintainer"
-    assert holder(svc, "delegate:p") is None
+    assert holder(svc, "conductor:p") is None
 
 
-def test_extending_the_delegate_is_a_new_hold_from_now(svc):
+def test_extending_the_conductor_is_a_new_hold_from_now(svc):
     auth = bootstrap(svc)
     agent = peer(svc)
-    first, _ = role(svc, auth, "grant-delegate", project="p", agent_id=agent["agent_id"],
+    first, _ = role(svc, auth, "grant-conductor", project="p", agent_id=agent["agent_id"],
                     hold=HOUR)
-    again, _ = role(svc, auth, "grant-delegate", project="p", agent_id=agent["agent_id"],
+    again, _ = role(svc, auth, "grant-conductor", project="p", agent_id=agent["agent_id"],
                     hold=8 * HOUR)
     assert again["replaced"] == agent["agent_id"] and again["fence"] > first["fence"]
     assert again["expires_at"] - first["expires_at"] >= 7 * HOUR - 60
@@ -121,27 +121,27 @@ def test_revoking_a_free_role_reports_nothing_broken(svc):
 def test_status_lists_live_roles_per_project(svc):
     auth = bootstrap(svc)
     a, b = peer(svc), peer(svc, label="b")
-    role(svc, auth, "grant-delegate", project="p", agent_id=a["agent_id"], hold=HOUR)
+    role(svc, auth, "grant-conductor", project="p", agent_id=a["agent_id"], hold=HOUR)
     role(svc, auth, "assign-coordinator", project="p", agent_id=b["agent_id"], hold=HOUR)
     roles = call(svc, "status")["roles"]
     assert set(roles) == {"p"}
-    assert roles["p"]["delegate"]["agent_id"] == a["agent_id"]
-    assert roles["p"]["delegate"]["granted_by"] == "maintainer"
+    assert roles["p"]["conductor"]["agent_id"] == a["agent_id"]
+    assert roles["p"]["conductor"]["granted_by"] == "maintainer"
     assert roles["p"]["coordinator"]["agent_id"] == b["agent_id"]
     assert set(roles["p"]["coordinator"]) == {"agent_id", "expires_at", "reachable", "reason"}
 
 
 def test_status_names_an_operator_grant_and_skips_an_unrecorded_hold(svc):
     a, b = peer(svc, project="q"), peer(svc, project="r")
-    board(svc).grant_delegate("q", a["agent_id"], hold=HOUR)
-    # A hold on delegate:r with no grant record (an ordinary lease from
+    board(svc).grant_conductor("q", a["agent_id"], hold=HOUR)
+    # A hold on conductor:r with no grant record (an ordinary lease from
     # before the namespace was reserved) grants nothing and is not listed.
     sql(svc, "INSERT INTO coordination_leases (name,holder_agent_id,holder_principal,fence,"
-             "acquired_at,expires_at) VALUES ('delegate:r',%s,%s,999,0,9e12)",
+             "acquired_at,expires_at) VALUES ('conductor:r',%s,%s,999,0,9e12)",
         (b["agent_id"], PRINCIPAL))
     roles = call(svc, "status")["roles"]
-    assert roles == {"q": {"delegate": {"agent_id": a["agent_id"],
-                                        "expires_at": roles["q"]["delegate"]["expires_at"],
+    assert roles == {"q": {"conductor": {"agent_id": a["agent_id"],
+                                        "expires_at": roles["q"]["conductor"]["expires_at"],
                                         "granted_by": "operator", "reachable": False,
                                         "reason": "wake_disabled"},
                            "coordinator": None}}
@@ -156,11 +156,11 @@ def test_a_grant_warns_when_the_grantee_has_no_live_listener(svc):
     it would wait for its next turn."""
     auth = bootstrap(svc)
     deaf, live = peer(svc), peer(svc, wake=True, label="live")
-    out, _ = role(svc, auth, "grant-delegate", project="p", agent_id=deaf["agent_id"], hold=HOUR)
+    out, _ = role(svc, auth, "grant-conductor", project="p", agent_id=deaf["agent_id"], hold=HOUR)
     assert (out["reachable"], out["reason"]) == (False, "wake_disabled")
     assert out["warning"] == coordination_store.UNREACHABLE_WARNING.format(
         role="conductor", reason=coordination_store.UNREACHABLE_REASONS["wake_disabled"])
-    out, _ = role(svc, auth, "grant-delegate", project="p", agent_id=live["agent_id"], hold=HOUR)
+    out, _ = role(svc, auth, "grant-conductor", project="p", agent_id=live["agent_id"], hold=HOUR)
     assert (out["reachable"], out["reason"]) == (True, None) and "warning" not in out
     out, _ = role(svc, auth, "assign-coordinator", project="p", agent_id=deaf["agent_id"],
                   hold=HOUR)
@@ -177,43 +177,43 @@ def test_status_shows_whether_each_role_holder_is_reachable_now(svc):
         attached = store.attach(PRINCIPAL, agent["agent_id"], agent["credential"],
                                 attachment_id="a1", ring=True,
                                 ring_armed_until=store.clock() + 30)
-    store.grant_delegate("p", agent["agent_id"], hold=HOUR)
-    delegate = call(svc, "status")["roles"]["p"]["delegate"]
+    store.grant_conductor("p", agent["agent_id"], hold=HOUR)
+    delegate = call(svc, "status")["roles"]["p"]["conductor"]
     assert (delegate["reachable"], delegate["reason"]) == (True, None)
     with svc._coordination_lock:
         store.heartbeat(PRINCIPAL, agent["agent_id"], agent["credential"], attachment_id="a1",
                         generation=attached["generation"], ring_armed_until=0)
-    delegate = call(svc, "status")["roles"]["p"]["delegate"]
+    delegate = call(svc, "status")["roles"]["p"]["conductor"]
     assert (delegate["reachable"], delegate["reason"]) == (False, "listener_expired")
 
 
 # ── one role per session ───────────────────────────────────────────────────
 
-def test_granting_the_delegate_to_the_coordinator_breaks_its_coordinator_lease(svc):
+def test_granting_the_conductor_to_the_coordinator_breaks_its_coordinator_lease(svc):
     auth = bootstrap(svc)
     agent, waiter = peer(svc), peer(svc, label="waiter")
     role(svc, auth, "assign-coordinator", project="p", agent_id=agent["agent_id"], hold=HOUR)
     board(svc).acquire_lease(PRINCIPAL, waiter["agent_id"], waiter["credential"],
                              name="coordinator:p", ttl=HOUR)
-    out, challenge = role(svc, auth, "grant-delegate", project="p",
+    out, challenge = role(svc, auth, "grant-conductor", project="p",
                           agent_id=agent["agent_id"], hold=HOUR)
     assert challenge["preview"]["also_breaks"] == "coordinator:p"
     assert out["also_broken"] == "coordinator:p"
-    assert holder(svc, "delegate:p") == agent["agent_id"]
+    assert holder(svc, "conductor:p") == agent["agent_id"]
     assert holder(svc, "coordinator:p") == waiter["agent_id"]
     (actor, payload, agent_id) = events(svc, "lease_break")[-1]
     assert (actor, agent_id, payload["reason"]) == ("maintainer", agent["agent_id"], "one_role")
 
 
-def test_assigning_the_coordinator_to_the_delegate_breaks_its_delegate_lease(svc):
+def test_assigning_the_coordinator_to_the_conductor_breaks_its_conductor_lease(svc):
     auth = bootstrap(svc)
     agent = peer(svc)
-    role(svc, auth, "grant-delegate", project="p", agent_id=agent["agent_id"], hold=HOUR)
+    role(svc, auth, "grant-conductor", project="p", agent_id=agent["agent_id"], hold=HOUR)
     out, _ = role(svc, auth, "assign-coordinator", project="p", agent_id=agent["agent_id"],
                   hold=HOUR)
-    assert out["also_broken"] == "delegate:p"
+    assert out["also_broken"] == "conductor:p"
     assert holder(svc, "coordinator:p") == agent["agent_id"]
-    assert holder(svc, "delegate:p") is None
+    assert holder(svc, "conductor:p") is None
 
 
 def test_the_operator_cli_grant_keeps_the_one_role_rule(svc):
@@ -221,30 +221,30 @@ def test_the_operator_cli_grant_keeps_the_one_role_rule(svc):
     store = board(svc)
     store.acquire_lease(PRINCIPAL, agent["agent_id"], agent["credential"],
                         name="coordinator:p", ttl=HOUR)
-    out = store.grant_delegate("p", agent["agent_id"], hold=HOUR)
+    out = store.grant_conductor("p", agent["agent_id"], hold=HOUR)
     assert out["also_broken"] == "coordinator:p"
     assert events(svc, "lease_break")[-1][0] == "operator"
 
 
-def test_the_delegate_cannot_claim_or_queue_for_the_coordinator_lease(svc):
+def test_the_conductor_cannot_claim_or_queue_for_the_coordinator_lease(svc):
     """Security review 2026-10-04: the one-role rule held only on the signed
     routes, so a delegate took ``coordinator:<project>`` with an ordinary
     claim and held both roles."""
     auth = bootstrap(svc)
     agent, other = peer(svc), peer(svc, label="other")
-    role(svc, auth, "grant-delegate", project="p", agent_id=agent["agent_id"], hold=HOUR)
-    with pytest.raises(coordination.CoordinationRefused, match="already_delegate"):
+    role(svc, auth, "grant-conductor", project="p", agent_id=agent["agent_id"], hold=HOUR)
+    with pytest.raises(coordination.CoordinationRefused, match="already_conductor"):
         dispatch(svc, "lease", {"name": "coordinator:p", "ttl": HOUR},
                  headers=headers_of(agent), principal=PRINCIPAL)
     assert holder(svc, "coordinator:p") is None
     # Held by another session, the delegate cannot queue for it either.
     board(svc).acquire_lease(PRINCIPAL, other["agent_id"], other["credential"],
                              name="coordinator:p", ttl=HOUR)
-    with pytest.raises(coordination.CoordinationRefused, match="already_delegate"):
+    with pytest.raises(coordination.CoordinationRefused, match="already_conductor"):
         dispatch(svc, "lease", {"name": "coordinator:p", "ttl": HOUR},
                  headers=headers_of(agent), principal=PRINCIPAL)
     assert sql(svc, "SELECT agent_id FROM coordination_lease_waiters") == []
-    assert holder(svc, "delegate:p") == agent["agent_id"]
+    assert holder(svc, "conductor:p") == agent["agent_id"]
     # Another project's coordinator lease is not a second role here.
     dispatch(svc, "lease", {"name": "coordinator:q", "ttl": HOUR},
              headers=headers_of(agent), principal=PRINCIPAL)
@@ -262,11 +262,11 @@ def test_a_session_holding_both_roles_from_before_v54_still_renews_its_coordinat
     store.acquire_lease(PRINCIPAL, agent["agent_id"], agent["credential"],
                         name="coordinator:p", ttl=HOUR)
     now = store.clock()
-    sql(svc, "INSERT INTO coordination_leases (name) VALUES ('delegate:p') "
+    sql(svc, "INSERT INTO coordination_leases (name) VALUES ('conductor:p') "
              "ON CONFLICT (name) DO NOTHING")
     sql(svc, "UPDATE coordination_leases SET holder_agent_id=%s,holder_principal=%s,"
              "purpose='granted by the operator',fence=nextval('coordination_lease_fence'),"
-             "acquired_at=%s,expires_at=%s WHERE name='delegate:p'",
+             "acquired_at=%s,expires_at=%s WHERE name='conductor:p'",
         (agent["agent_id"], PRINCIPAL, now, now + HOUR))
     before = sql(svc, "SELECT expires_at,fence FROM coordination_leases "
                       "WHERE name='coordinator:p'")[0]
@@ -276,16 +276,16 @@ def test_a_session_holding_both_roles_from_before_v54_still_renews_its_coordinat
     after = sql(svc, "SELECT expires_at,fence FROM coordination_leases "
                      "WHERE name='coordinator:p'")[0]
     assert after[1] == before[1] and after[0] > before[0]
-    assert holder(svc, "delegate:p") == agent["agent_id"]
+    assert holder(svc, "conductor:p") == agent["agent_id"]
     # Once that hold lapses, claiming it again is a second role.
     sql(svc, "UPDATE coordination_leases SET expires_at=%s WHERE name='coordinator:p'",
         (now - 1,))
-    with pytest.raises(coordination.CoordinationRefused, match="already_delegate"):
+    with pytest.raises(coordination.CoordinationRefused, match="already_conductor"):
         dispatch(svc, "lease", {"name": "coordinator:p", "ttl": HOUR},
                  headers=headers_of(agent), principal=PRINCIPAL)
 
 
-def test_a_coordinator_waiter_made_delegate_leaves_the_queue(svc):
+def test_a_coordinator_waiter_made_conductor_leaves_the_queue(svc):
     """A session queued for ``coordinator:<project>`` when it is made the
     delegate leaves that queue, so the lease never passes to the delegate."""
     auth = bootstrap(svc)
@@ -295,31 +295,31 @@ def test_a_coordinator_waiter_made_delegate_leaves_the_queue(svc):
                         name="coordinator:p", ttl=HOUR)
     store.acquire_lease(PRINCIPAL, agent["agent_id"], agent["credential"],
                         name="coordinator:p", ttl=HOUR)
-    role(svc, auth, "grant-delegate", project="p", agent_id=agent["agent_id"], hold=HOUR)
+    role(svc, auth, "grant-conductor", project="p", agent_id=agent["agent_id"], hold=HOUR)
     (actor, payload, agent_id) = events(svc, "lease_dequeue")[-1]
     assert (actor, agent_id, payload) == ("daemon", agent["agent_id"],
                                           {"name": "coordinator:p", "reason": "one_role"})
     store.release_lease(PRINCIPAL, other["agent_id"], other["credential"], name="coordinator:p")
     assert holder(svc, "coordinator:p") is None
-    assert holder(svc, "delegate:p") == agent["agent_id"]
+    assert holder(svc, "conductor:p") == agent["agent_id"]
 
 
 # ── refusals ───────────────────────────────────────────────────────────────
 
-@pytest.mark.parametrize("purpose", ["grant-delegate", "revoke-delegate", "assign-coordinator",
+@pytest.mark.parametrize("purpose", ["grant-conductor", "revoke-conductor", "assign-coordinator",
                                      "revoke-coordinator"])
 @pytest.mark.parametrize("route", ["send", "cancel", "revoke", "repudiate", "enrol"])
 def test_a_role_payload_is_refused_on_every_other_route(svc, purpose, route):
     auth = bootstrap(svc)
     agent = peer(svc)
     fields = {"project": "p"}
-    if purpose in ("grant-delegate", "assign-coordinator"):
+    if purpose in ("grant-conductor", "assign-coordinator"):
         fields.update(agent_id=agent["agent_id"], hold=HOUR)
     challenge = call(svc, "challenge", {"purpose": purpose, **fields})
     body = {"payload": challenge["payload"], "mac": challenge["mac"],
             "assertion": auth.assertion(challenge_bytes(challenge["payload"]))}
     refused("assertion_invalid", call, svc, route, body)
-    assert holder(svc, "delegate:p") is None and holder(svc, "coordinator:p") is None
+    assert holder(svc, "conductor:p") is None and holder(svc, "coordinator:p") is None
 
 
 @pytest.mark.parametrize("purpose,fields", [
@@ -349,7 +349,7 @@ def call_send(svc, auth, agent):
 def test_a_role_payload_edited_under_a_kept_mac_is_refused(svc, edit):
     auth = bootstrap(svc)
     agent, other = peer(svc), peer(svc, label="other")
-    challenge = call(svc, "challenge", {"purpose": "grant-delegate", "project": "p",
+    challenge = call(svc, "challenge", {"purpose": "grant-conductor", "project": "p",
                                         "agent_id": agent["agent_id"], "hold": HOUR})
     field, before, after = edit
     if field == "agent_id":
@@ -360,10 +360,10 @@ def test_a_role_payload_edited_under_a_kept_mac_is_refused(svc, edit):
         body = {"payload": edited, "mac": challenge["mac"],
                 "assertion": auth.assertion(challenge_bytes(signed_over))}
         refused("assertion_invalid", call, svc, "role", body)
-    assert holder(svc, "delegate:p") is None
+    assert holder(svc, "conductor:p") is None
 
 
-@pytest.mark.parametrize("purpose", ["grant-delegate", "assign-coordinator"])
+@pytest.mark.parametrize("purpose", ["grant-conductor", "assign-coordinator"])
 def test_a_recipient_on_another_project_is_refused(svc, purpose):
     bootstrap(svc)
     agent = peer(svc, project="other")
@@ -374,17 +374,17 @@ def test_a_recipient_on_another_project_is_refused(svc, purpose):
 def test_a_recipient_that_moved_project_before_the_tap_is_refused(svc):
     auth = bootstrap(svc)
     agent = peer(svc)
-    challenge = call(svc, "challenge", {"purpose": "grant-delegate", "project": "p",
+    challenge = call(svc, "challenge", {"purpose": "grant-conductor", "project": "p",
                                         "agent_id": agent["agent_id"], "hold": HOUR})
     sql(svc, "UPDATE coordination_agents SET project='elsewhere' WHERE agent_id=%s",
         (agent["agent_id"],))
     body = {"payload": challenge["payload"], "mac": challenge["mac"],
             "assertion": auth.assertion(challenge_bytes(challenge["payload"]))}
     refused("invalid_request", call, svc, "role", body)
-    assert holder(svc, "delegate:p") is None
+    assert holder(svc, "conductor:p") is None
 
 
-@pytest.mark.parametrize("purpose", ["grant-delegate", "assign-coordinator"])
+@pytest.mark.parametrize("purpose", ["grant-conductor", "assign-coordinator"])
 @pytest.mark.parametrize("kind", ["subagent", "reserved", "unknown", "prefix", "revoked"])
 def test_subagent_reserved_and_unknown_recipients_are_refused(svc, purpose, kind):
     bootstrap(svc)
@@ -415,7 +415,7 @@ def test_a_hold_out_of_range_is_refused(svc, hold):
     bootstrap(svc)
     agent = peer(svc)
     refused("invalid_request", call, svc, "challenge",
-            {"purpose": "grant-delegate", "project": "p", "agent_id": agent["agent_id"],
+            {"purpose": "grant-conductor", "project": "p", "agent_id": agent["agent_id"],
              "hold": hold})
 
 
@@ -423,7 +423,7 @@ def test_a_hold_out_of_range_is_refused(svc, hold):
 def test_a_bad_project_is_refused(svc, project):
     bootstrap(svc)
     refused("invalid_request", call, svc, "challenge",
-            {"purpose": "revoke-delegate", "project": project})
+            {"purpose": "revoke-conductor", "project": project})
 
 
 def test_a_role_from_a_quarantined_key_is_refused(svc):
@@ -431,14 +431,14 @@ def test_a_role_from_a_quarantined_key_is_refused(svc):
     first = bootstrap(svc)
     newcomer, _ = _enrol_second(svc, first)
     agent = peer(svc)
-    refused("assertion_invalid", role, svc, newcomer, "grant-delegate", project="p",
+    refused("assertion_invalid", role, svc, newcomer, "grant-conductor", project="p",
             agent_id=agent["agent_id"], hold=HOUR)
 
 
 def test_a_spent_role_payload_is_refused(svc):
     auth = bootstrap(svc)
     agent = peer(svc)
-    _, challenge = role(svc, auth, "revoke-delegate", project="p")
+    _, challenge = role(svc, auth, "revoke-conductor", project="p")
     body = {"payload": challenge["payload"], "mac": challenge["mac"],
             "assertion": auth.assertion(challenge_bytes(challenge["payload"]))}
     refused("challenge_spent", call, svc, "role", body)
@@ -447,26 +447,26 @@ def test_a_spent_role_payload_is_refused(svc):
 
 # ── no bearer-only path changes a role ─────────────────────────────────────
 
-def test_a_bearer_cannot_claim_the_delegate_lease(svc, monkeypatch):
+def test_a_bearer_cannot_claim_the_conductor_lease(svc, monkeypatch):
     """MCP ``memory_agents claim`` on ``delegate:<project>`` stays
     ``reserved_lease`` (the tool's claim is dispatch's ``lease``)."""
     from pseudolife_memory.writer_context import bind_request_headers, unbind_request_headers
     monkeypatch.setenv("PSEUDOLIFE_MCP_TOKENS", f"role-test-bearer:{PRINCIPAL}")
     agent = peer(svc)
     with pytest.raises(coordination.CoordinationRefused, match="reserved_lease"):
-        dispatch(svc, "lease", {"name": "delegate:p", "ttl": HOUR},
+        dispatch(svc, "lease", {"name": "conductor:p", "ttl": HOUR},
                  headers=headers_of(agent), principal=PRINCIPAL)
     token = bind_request_headers({"authorization": "Bearer role-test-bearer",
                                   **headers_of(agent)}, principal=PRINCIPAL)
     try:
         with pytest.raises(coordination.CoordinationRefused, match="reserved_lease"):
-            coordination.agents(svc, action="claim", lease="delegate:p")
+            coordination.agents(svc, action="claim", lease="conductor:p")
     finally:
         unbind_request_headers(token)
-    assert holder(svc, "delegate:p") is None
+    assert holder(svc, "conductor:p") is None
 
 
-_ROLE_METHODS = {"grant_delegate", "assign_coordinator", "break_lease"}
+_ROLE_METHODS = {"grant_conductor", "assign_coordinator", "break_lease"}
 # The only modules that may call a role change: the host CLI (the operator,
 # who opens the bank directly) and the passkey route, which calls them only
 # inside ``MaintainerStore.complete`` (the assertion is verified first).
@@ -520,22 +520,22 @@ def _authority(svc, sender, recipient):
 def test_authority_honours_a_maintainer_grant_and_an_operator_grant(svc):
     auth = bootstrap(svc)
     delegate, recipient = peer(svc), peer(svc, label="recipient")
-    role(svc, auth, "grant-delegate", project="p", agent_id=delegate["agent_id"], hold=HOUR)
-    assert _authority(svc, delegate, recipient) == "delegate"
-    board(svc).grant_delegate("p", delegate["agent_id"], hold=HOUR)
-    assert _authority(svc, delegate, recipient) == "delegate"
+    role(svc, auth, "grant-conductor", project="p", agent_id=delegate["agent_id"], hold=HOUR)
+    assert _authority(svc, delegate, recipient) == "conductor"
+    board(svc).grant_conductor("p", delegate["agent_id"], hold=HOUR)
+    assert _authority(svc, delegate, recipient) == "conductor"
 
 
 def test_authority_refuses_a_plain_hold_and_a_record_by_any_other_actor(svc):
     delegate, recipient = peer(svc), peer(svc, label="recipient")
     sql(svc, "INSERT INTO coordination_leases (name,holder_agent_id,holder_principal,fence,"
-             "acquired_at,expires_at) VALUES ('delegate:p',%s,%s,4242,0,9e12)",
+             "acquired_at,expires_at) VALUES ('conductor:p',%s,%s,4242,0,9e12)",
         (delegate["agent_id"], PRINCIPAL))
     assert _authority(svc, delegate, recipient) is None
     with svc._coordination_lock:
         store = coordination._store(svc)
         with store.storage._txn():
-            store._append([store._event("lease_delegate", {"name": "delegate:p", "fence": 4242,
+            store._append([store._event("lease_conductor", {"name": "conductor:p", "fence": 4242,
                                                            "hold": HOUR, "replaced": None},
                                         actor="agent", agent_id=delegate["agent_id"])],
                           store.clock())
@@ -545,26 +545,26 @@ def test_authority_refuses_a_plain_hold_and_a_record_by_any_other_actor(svc):
 def test_only_the_role_actors_may_write_a_role_record(svc):
     agent = peer(svc)
     store = board(svc)
-    for change in (lambda: store.grant_delegate("p", agent["agent_id"], hold=HOUR,
+    for change in (lambda: store.grant_conductor("p", agent["agent_id"], hold=HOUR,
                                                 actor="agent"),
                    lambda: store.assign_coordinator("p", agent["agent_id"], hold=HOUR,
                                                     actor="agent"),
                    lambda: store.break_lease("coordinator:p", actor="agent")):
         with pytest.raises(coordination.CoordinationError, match="invalid_request"):
             change()
-    assert events(svc, "lease_delegate") == [] and events(svc, "lease_assign") == []
+    assert events(svc, "lease_conductor") == [] and events(svc, "lease_assign") == []
 
 
 def test_a_role_route_without_an_assertion_changes_nothing(svc):
     bootstrap(svc)
     agent = peer(svc)
-    challenge = call(svc, "challenge", {"purpose": "grant-delegate", "project": "p",
+    challenge = call(svc, "challenge", {"purpose": "grant-conductor", "project": "p",
                                         "agent_id": agent["agent_id"], "hold": HOUR})
     for assertion in (None, {}, {"id": SoftAuthenticator().id}):
         refused("assertion_invalid", call, svc, "role",
                 {"payload": challenge["payload"], "mac": challenge["mac"],
                  "assertion": assertion})
-    assert holder(svc, "delegate:p") is None
+    assert holder(svc, "conductor:p") is None
 
 
 def test_a_revoke_signed_for_one_holder_cannot_evict_another(svc):
@@ -588,14 +588,14 @@ def test_a_revoke_signed_for_one_holder_cannot_evict_another(svc):
 def test_a_grant_signed_over_a_free_slot_does_not_replace_a_newcomer(svc):
     auth = bootstrap(svc)
     a, b = peer(svc), peer(svc, label="b")
-    challenge = call(svc, "challenge", {"purpose": "grant-delegate", "project": "p",
+    challenge = call(svc, "challenge", {"purpose": "grant-conductor", "project": "p",
                                         "agent_id": a["agent_id"], "hold": HOUR})
     assert json.loads(challenge["payload"])["holder"] is None
-    board(svc).grant_delegate("p", b["agent_id"], hold=HOUR)     # the operator, meanwhile
+    board(svc).grant_conductor("p", b["agent_id"], hold=HOUR)     # the operator, meanwhile
     body = {"payload": challenge["payload"], "mac": challenge["mac"],
             "assertion": auth.assertion(challenge_bytes(challenge["payload"]))}
     refused("role_changed", call, svc, "role", body)
-    assert holder(svc, "delegate:p") == b["agent_id"]
+    assert holder(svc, "conductor:p") == b["agent_id"]
 
 
 def test_a_grant_whose_grantee_took_the_coordinator_lease_since_the_preview_is_refused(svc):
@@ -604,7 +604,7 @@ def test_a_grant_whose_grantee_took_the_coordinator_lease_since_the_preview_is_r
     grant broke it anyway. The other role's holder is signed too."""
     auth = bootstrap(svc)
     agent = peer(svc)
-    challenge = call(svc, "challenge", {"purpose": "grant-delegate", "project": "p",
+    challenge = call(svc, "challenge", {"purpose": "grant-conductor", "project": "p",
                                         "agent_id": agent["agent_id"], "hold": HOUR})
     assert challenge["preview"]["also_breaks"] is None
     board(svc).acquire_lease(PRINCIPAL, agent["agent_id"], agent["credential"],
@@ -613,20 +613,20 @@ def test_a_grant_whose_grantee_took_the_coordinator_lease_since_the_preview_is_r
             "assertion": auth.assertion(challenge_bytes(challenge["payload"]))}
     refused("role_changed", call, svc, "role", body)
     assert holder(svc, "coordinator:p") == agent["agent_id"]
-    assert holder(svc, "delegate:p") is None
+    assert holder(svc, "conductor:p") is None
 
 
-def test_an_assign_whose_assignee_was_made_delegate_since_the_preview_is_refused(svc):
+def test_an_assign_whose_assignee_was_made_conductor_since_the_preview_is_refused(svc):
     auth = bootstrap(svc)
     agent = peer(svc)
     challenge = call(svc, "challenge", {"purpose": "assign-coordinator", "project": "p",
                                         "agent_id": agent["agent_id"], "hold": HOUR})
     assert challenge["preview"]["also_breaks"] is None
-    board(svc).grant_delegate("p", agent["agent_id"], hold=HOUR)  # the operator, meanwhile
+    board(svc).grant_conductor("p", agent["agent_id"], hold=HOUR)  # the operator, meanwhile
     body = {"payload": challenge["payload"], "mac": challenge["mac"],
             "assertion": auth.assertion(challenge_bytes(challenge["payload"]))}
     refused("role_changed", call, svc, "role", body)
-    assert holder(svc, "delegate:p") == agent["agent_id"]
+    assert holder(svc, "conductor:p") == agent["agent_id"]
     assert holder(svc, "coordinator:p") is None
 
 
@@ -638,39 +638,39 @@ _TOKENS = {"t-user": PRINCIPAL, "t-other": "other-user"}
 def _asks(svc, agent, bearer="t-user"):
     """What the hook endpoints ask: the projects ``agent`` is the
     operator-granted delegate for, as the bearer ``bearer`` sees it."""
-    svc._delegate_cache = {}
-    return coordination.delegate_projects(svc, {"authorization": f"Bearer {bearer}"},
+    svc._conductor_cache = {}
+    return coordination.conductor_projects(svc, {"authorization": f"Bearer {bearer}"},
                                           agent=agent["agent_id"], token_map=_TOKENS)
 
 
-def test_delegate_projects_follow_the_same_proof_as_authority(svc):
+def test_conductor_projects_follow_the_same_proof_as_authority(svc):
     """The brief goes to the session ``_authority`` treats as the delegate,
     and to no other: an operator or maintainer grant counts, a plain hold
     or a record by any other actor does not."""
     auth = bootstrap(svc)
     delegate, other = peer(svc), peer(svc, label="other")
     assert _asks(svc, delegate) == [] and _asks(svc, other) == []
-    role(svc, auth, "grant-delegate", project="p", agent_id=delegate["agent_id"], hold=HOUR)
+    role(svc, auth, "grant-conductor", project="p", agent_id=delegate["agent_id"], hold=HOUR)
     assert _asks(svc, delegate) == ["p"] and _asks(svc, other) == []
-    board(svc).grant_delegate("q", delegate["agent_id"], hold=HOUR)    # the operator
+    board(svc).grant_conductor("q", delegate["agent_id"], hold=HOUR)    # the operator
     assert _asks(svc, delegate) == ["p", "q"] and _asks(svc, other) == []
     with svc._coordination_lock:
         store = coordination._store(svc)
-        assert store.delegate_projects(delegate["agent_id"], store.clock()) == ["p", "q"]
-        assert store.delegate_projects(delegate["agent_id"], store.clock(), project="q") == ["q"]
-        assert store.delegate_projects(delegate["agent_id"], store.clock(), project="r") == []
+        assert store.conductor_projects(delegate["agent_id"], store.clock()) == ["p", "q"]
+        assert store.conductor_projects(delegate["agent_id"], store.clock(), project="q") == ["q"]
+        assert store.conductor_projects(delegate["agent_id"], store.clock(), project="r") == []
 
 
 def test_no_brief_for_a_plain_hold_or_a_record_by_any_other_actor(svc):
     delegate = peer(svc)
     sql(svc, "INSERT INTO coordination_leases (name,holder_agent_id,holder_principal,fence,"
-             "acquired_at,expires_at) VALUES ('delegate:p',%s,%s,4242,0,9e12)",
+             "acquired_at,expires_at) VALUES ('conductor:p',%s,%s,4242,0,9e12)",
         (delegate["agent_id"], PRINCIPAL))
     assert _asks(svc, delegate) == []
     with svc._coordination_lock:
         store = coordination._store(svc)
         with store.storage._txn():
-            store._append([store._event("lease_delegate", {"name": "delegate:p", "fence": 4242,
+            store._append([store._event("lease_conductor", {"name": "conductor:p", "fence": 4242,
                                                            "hold": HOUR, "replaced": None},
                                         actor="agent", agent_id=delegate["agent_id"])],
                           store.clock())
@@ -679,55 +679,55 @@ def test_no_brief_for_a_plain_hold_or_a_record_by_any_other_actor(svc):
 
 def test_no_brief_after_the_grant_expires_or_is_revoked(svc):
     delegate = peer(svc)
-    board(svc).grant_delegate("p", delegate["agent_id"], hold=HOUR)
+    board(svc).grant_conductor("p", delegate["agent_id"], hold=HOUR)
     assert _asks(svc, delegate) == ["p"]
-    sql(svc, "UPDATE coordination_leases SET expires_at=1 WHERE name='delegate:p'")
+    sql(svc, "UPDATE coordination_leases SET expires_at=1 WHERE name='conductor:p'")
     assert _asks(svc, delegate) == []
-    board(svc).grant_delegate("p", delegate["agent_id"], hold=HOUR)
+    board(svc).grant_conductor("p", delegate["agent_id"], hold=HOUR)
     assert _asks(svc, delegate) == ["p"]
-    board(svc).break_lease("delegate:p")
+    board(svc).break_lease("conductor:p")
     assert _asks(svc, delegate) == []
 
 
-def test_the_lookup_reports_how_long_the_delegate_lease_has_left(svc):
+def test_the_lookup_reports_how_long_the_conductor_lease_has_left(svc):
     delegate = peer(svc)
-    board(svc).grant_delegate("p", delegate["agent_id"], hold=HOUR)
-    board(svc).grant_delegate("q", delegate["agent_id"], hold=HOUR)
+    board(svc).grant_conductor("p", delegate["agent_id"], hold=HOUR)
+    board(svc).grant_conductor("q", delegate["agent_id"], hold=HOUR)
     store = board(svc)
-    sql(svc, "UPDATE coordination_leases SET expires_at=%s WHERE name='delegate:q'",
+    sql(svc, "UPDATE coordination_leases SET expires_at=%s WHERE name='conductor:q'",
         (store.clock() + 10,))
     with svc._coordination_lock:
-        out = store.delegate_of(delegate["agent_id"], PRINCIPAL)
+        out = store.conductor_of(delegate["agent_id"], PRINCIPAL)
     assert out["projects"] == ["p", "q"] and 0 < out["remaining"] <= 10
     with svc._coordination_lock:
-        assert coordination._store(svc).delegate_of(delegate["agent_id"], "other-user") == {
+        assert coordination._store(svc).conductor_of(delegate["agent_id"], "other-user") == {
             "projects": [], "remaining": None}
 
 
 def test_no_brief_for_another_principals_agent_or_a_malformed_id(svc):
     svc.config.coordination.allowed_principals = [PRINCIPAL, "other-user"]
     delegate = peer(svc)
-    board(svc).grant_delegate("p", delegate["agent_id"], hold=HOUR)
+    board(svc).grant_conductor("p", delegate["agent_id"], hold=HOUR)
     assert _asks(svc, delegate, bearer="t-other") == []
     assert _asks(svc, delegate, bearer="t-wrong") == []
     for bad in (None, "", delegate["agent_id"].upper(), delegate["agent_id"][:31],
                 delegate["agent_id"] + "0", "g" * 32):
-        svc._delegate_cache = {}
-        assert coordination.delegate_projects(svc, {"authorization": "Bearer t-user"},
+        svc._conductor_cache = {}
+        assert coordination.conductor_projects(svc, {"authorization": "Bearer t-user"},
                                               agent=bad, token_map=_TOKENS) == []
 
 
-def test_the_hook_endpoints_serve_the_brief_and_the_reminder_to_the_delegate_only(
+def test_the_hook_endpoints_serve_the_brief_and_the_reminder_to_the_conductor_only(
         svc, monkeypatch):
-    from pseudolife_memory.coordination import CHECKIN_TEXT, DELEGATE_REMINDER
+    from pseudolife_memory.coordination import CHECKIN_TEXT, CONDUCTOR_REMINDER
     # A loaded host's first lookup may pass the hooks' budget; this test is
     # about who gets the text, not how fast (the budget has its own test).
-    monkeypatch.setattr(coordination, "DELEGATE_LOOKUP_BUDGET", 30)
+    monkeypatch.setattr(coordination, "CONDUCTOR_LOOKUP_BUDGET", 30)
     from pseudolife_memory.web.api import build_console_app
     from tests.asgi_helpers import call as asgi_call, stub_mcp
     delegate, other = peer(svc), peer(svc, label="other")
-    board(svc).grant_delegate("p", delegate["agent_id"], hold=HOUR)
-    svc._delegate_cache = {}
+    board(svc).grant_conductor("p", delegate["agent_id"], hold=HOUR)
+    svc._conductor_cache = {}
     app = build_console_app(stub_mcp, None, lambda: {}, svc, token_map=_TOKENS)
     bearer = [(b"authorization", b"Bearer t-user")]
 
@@ -746,7 +746,136 @@ def test_the_hook_endpoints_serve_the_brief_and_the_reminder_to_the_delegate_onl
 
     assert start() == start(other) == CHECKIN_TEXT + "\n"
     assert start(delegate) == (CHECKIN_TEXT + "\n\n"
-                               + coordination.render_delegate_brief(["p"]) + "\n")
+                               + coordination.render_conductor_brief(["p"]) + "\n")
     assert prompt()[1] == prompt(other)[1] == ""
     cursor, rest = prompt(delegate)
-    assert float(cursor) > 0 and rest == DELEGATE_REMINDER + "\n"
+    assert float(cursor) > 0 and rest == CONDUCTOR_REMINDER + "\n"
+
+
+# ── the role's old lease name (``delegate:<project>``, until 2026-10-31) ───
+
+def legacy_grant(service, agent, project="p", *, fence=4343, actor="operator"):
+    """What a grant wrote before the rename: the hold ``delegate:<project>``
+    and its ``lease_delegate`` record for the same fence."""
+    store = board(service)
+    sql(service, "INSERT INTO coordination_leases (name,holder_agent_id,holder_principal,fence,"
+                 "acquired_at,expires_at) VALUES (%s,%s,%s,%s,0,%s)",
+        ("delegate:" + project, agent["agent_id"], PRINCIPAL, fence, store.clock() + HOUR))
+    with service._coordination_lock:
+        with store.storage._txn():
+            store._append([store._event("lease_delegate",
+                                        {"name": "delegate:" + project, "fence": fence,
+                                         "hold": HOUR, "replaced": None},
+                                        actor=actor, agent_id=agent["agent_id"])],
+                          store.clock())
+
+
+def test_a_grant_made_under_the_old_name_keeps_its_authority(svc):
+    """A board upgraded mid-grant keeps its conductor: the old-named hold
+    with its old-named record still proves the role, everywhere the role is
+    read, and an agent still cannot take either name."""
+    conductor, recipient = peer(svc), peer(svc, label="recipient")
+    legacy_grant(svc, conductor)
+    assert _authority(svc, conductor, recipient) == "conductor"
+    store = board(svc)
+    assert store.conductor_projects(conductor["agent_id"], store.clock()) == ["p"]
+    assert store.conductor_projects(conductor["agent_id"], store.clock(), project="p") == ["p"]
+    assert store.conductor_of(conductor["agent_id"], PRINCIPAL)["projects"] == ["p"]
+    roles = call(svc, "status")["roles"]
+    assert roles["p"]["conductor"]["agent_id"] == conductor["agent_id"]
+    assert roles["p"]["conductor"]["granted_by"] == "operator"
+    for name in ("delegate:p", "conductor:p"):
+        with pytest.raises(coordination_store.CoordinationError) as caught:
+            store.acquire_lease(PRINCIPAL, recipient["agent_id"], recipient["credential"],
+                                name=name, ttl=60)
+        assert caught.value.code == "reserved_lease"
+    # One role per session holds across the rename too.
+    with pytest.raises(coordination_store.CoordinationError) as caught:
+        store.acquire_lease(PRINCIPAL, conductor["agent_id"], conductor["credential"],
+                            name="coordinator:p", ttl=60)
+    assert caught.value.code == "already_conductor"
+
+
+def test_an_old_name_needs_its_own_record_and_a_new_name_its_own(svc):
+    """The record proves the lease it names: an old-named record does not
+    prove a new-named hold at the same fence, nor the reverse."""
+    conductor, recipient = peer(svc), peer(svc, label="recipient")
+    sql(svc, "INSERT INTO coordination_leases (name,holder_agent_id,holder_principal,fence,"
+             "acquired_at,expires_at) VALUES ('conductor:p',%s,%s,4343,0,9e12)",
+        (conductor["agent_id"], PRINCIPAL))
+    store = board(svc)
+    with svc._coordination_lock:
+        with store.storage._txn():
+            store._append([store._event("lease_delegate",
+                                        {"name": "delegate:p", "fence": 4343, "hold": HOUR,
+                                         "replaced": None},
+                                        actor="operator", agent_id=conductor["agent_id"])],
+                          store.clock())
+    assert _authority(svc, conductor, recipient) is None
+
+
+def test_a_new_grant_vacates_the_old_named_hold(svc):
+    """Granting the role again (Extend in the Console, or ``lease delegate``)
+    moves it to the new name: the old-named hold is broken in the same
+    change, so the board never shows two conductors."""
+    auth = bootstrap(svc)
+    old, new = peer(svc, label="old"), peer(svc, label="new")
+    legacy_grant(svc, old)
+    out, challenge = role(svc, auth, "grant-conductor", project="p", agent_id=new["agent_id"],
+                          hold=HOUR)
+    assert challenge["preview"]["current_holder"] == old["agent_id"]
+    assert challenge["preview"]["replaces"] == old["agent_id"]
+    assert (out["name"], out["replaced"]) == ("conductor:p", old["agent_id"])
+    assert holder(svc, "delegate:p") is None and holder(svc, "conductor:p") == new["agent_id"]
+    [(actor, payload, agent_id)] = events(svc, "lease_break")
+    assert (actor, agent_id, payload["name"], payload["reason"]) == (
+        "maintainer", old["agent_id"], "delegate:p", "renamed")
+    assert call(svc, "status")["roles"]["p"]["conductor"]["agent_id"] == new["agent_id"]
+    # The same session re-granted (the operator's CLI): it moves names and
+    # keeps the role.
+    legacy_grant(svc, old, project="q", fence=4444)
+    out = board(svc).grant_conductor("q", old["agent_id"], hold=HOUR)
+    assert (out["name"], out["replaced"]) == ("conductor:q", old["agent_id"])
+    assert holder(svc, "delegate:q") is None and holder(svc, "conductor:q") == old["agent_id"]
+
+
+def test_revoking_the_conductor_frees_the_old_named_hold(svc):
+    auth = bootstrap(svc)
+    old = peer(svc)
+    legacy_grant(svc, old)
+    out, challenge = role(svc, auth, "revoke-conductor", project="p")
+    assert challenge["preview"]["current_holder"] == old["agent_id"]
+    assert out == {"name": "delegate:p", "broken": True, "was_held_by": old["agent_id"]}
+    assert holder(svc, "delegate:p") is None
+    assert call(svc, "status")["roles"] == {}
+
+
+def test_assigning_the_coordinator_to_an_old_named_conductor_breaks_that_hold(svc):
+    auth = bootstrap(svc)
+    old = peer(svc)
+    legacy_grant(svc, old)
+    out, challenge = role(svc, auth, "assign-coordinator", project="p",
+                          agent_id=old["agent_id"], hold=HOUR)
+    assert challenge["preview"]["also_breaks"] == "conductor:p"
+    assert out["also_broken"] == "delegate:p"
+    assert holder(svc, "delegate:p") is None and holder(svc, "coordinator:p") == old["agent_id"]
+
+
+@pytest.mark.parametrize("purpose", ["grant-delegate", "revoke-delegate"])
+def test_a_tab_loaded_before_the_rename_still_grants_and_revokes(svc, purpose):
+    """A Console tab loaded before the upgrade asks for the old purposes and
+    refuses to sign a payload whose purpose differs from its request (Codex
+    review, 2026-10-31), so the payload keeps the old name and the preview
+    the old role word; the completing route acts as the new purpose."""
+    auth = bootstrap(svc)
+    agent = peer(svc)
+    fields = {"project": "p"}
+    if purpose.startswith("grant"):
+        fields.update(agent_id=agent["agent_id"], hold=HOUR)
+    out, challenge = role(svc, auth, purpose, **fields)
+    assert json.loads(challenge["payload"])["purpose"] == purpose
+    assert challenge["preview"]["role"] == "delegate"
+    if purpose.startswith("grant"):
+        assert holder(svc, "conductor:p") == agent["agent_id"]
+    else:
+        assert out == {"name": "conductor:p", "broken": False, "was_held_by": None}

@@ -136,8 +136,8 @@
       shortId(text(pv.agent_id) || text(fields.to) || text(fields.agent_id), 12),
   );
   const ROLE_OF: Record<string, string> = {
-    "grant-delegate": "make your conductor",
-    "revoke-delegate": "revoke your conductor",
+    "grant-conductor": "make your conductor",
+    "revoke-conductor": "revoke your conductor",
     "assign-coordinator": "make the coordinator",
     "revoke-coordinator": "revoke the coordinator",
   };

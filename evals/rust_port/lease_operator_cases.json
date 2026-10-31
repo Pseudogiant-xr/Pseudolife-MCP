@@ -31,7 +31,7 @@
     {"id": "break-held-no-waiter", "assert": "Vacate exactly holder/purpose/acquired/expires/expect/expected_end, preserve fence, set freed_at to fixed clock, append one operator lease_break event"},
     {"id": "break-fifo-grant", "assert": "Grant earliest eligible ticket; nextval fence, min(ttl,300), exact principal/purpose/expect/end; break then daemon grant chain"},
     {"id": "break-departed-and-revoked", "assert": "Dequeue departed with retention3600/604800 policy; retain but skip revoked waiter, then grant eligible head"},
-    {"id": "break-reserved-queue", "names": ["delegate:fixture", "designated:fixture"], "assert": "Dequeue reserved waiters, never grant agent-owned role"},
+    {"id": "break-reserved-queue", "names": ["conductor:fixture", "delegate:fixture", "designated:fixture"], "assert": "Dequeue reserved waiters, never grant agent-owned role"},
     {"id": "break-already-free", "assert": "No settlement/dequeue/audit, exactly unchanged state"},
     {"id": "break-does-not-own-local-lock", "assert": "An independently held byte0 lock, stamp and holder PID remain unchanged/running"},
     {"id": "break-audit-insert-failure", "assert": "Force deterministic audit insert rejection after mutation; exit1/empty stdout/native diagnostic, exact whole transaction rollback"},

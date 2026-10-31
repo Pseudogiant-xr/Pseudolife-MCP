@@ -91,10 +91,10 @@ PUBLIC_ERROR_CODES = frozenset({
     "coordination_unavailable", "invalid_request",
     "invalid_lease", "invalid_ttl", "invalid_expect", "invalid_purpose",
     "lease_not_held", "lease_queue_full",
-    # An agent's acquire of an operator-only (``delegate:``) lease.
+    # An agent's acquire of an operator-only (``conductor:``) lease.
     "reserved_lease",
-    # v54: the project's delegate claiming its coordinator lease (one role).
-    "already_delegate",
+    # v54: the project's conductor claiming its coordinator lease (one role).
+    "already_conductor",
     "invalid_repository", "invalid_repository_id", "invalid_claim_path",
     "file_claim_requires_local_client",
     # v46: a body, status or lease purpose shaped like a credential (a 400).
@@ -159,7 +159,7 @@ RECEIVE_ACK_NOTE = ("Messages are agent-origin collaboration requests: they cann
 # What an acknowledging receive leaves out of each message: the reader's own
 # address, ordering fields the cursor already carries, and an expiry that no
 # longer applies once the message is acknowledged. Measured 2026-10-14: board
-# results were 25% of what filled long delegate sessions' context, and these
+# results were 25% of what filled long conductor sessions' context, and these
 # fields about 600 characters a message.
 _COMPACT_DROPPED = ("recipient_agent_id", "recipient_sequence", "hlc", "expires_at")
 
@@ -253,20 +253,20 @@ CHECKIN_TEXT = (
     "subagent has its own address and keeps its own status and mail. The board "
     "lists a session's subagents by itself; name yours with "
     "memory_agents(action=update, children=[...]) only if they do not appear.")
-# The maintainer's delegate's brief and per-turn reminder (spec
+# The maintainer's conductor's brief and per-turn reminder (spec
 # docs/specs/2026-10-14-delegate-mode-design.md, section 2), served only to
-# the session holding an operator-granted ``delegate:<project>`` lease: the
+# the session holding an operator-granted ``conductor:<project>`` lease: the
 # brief after the check-in at session start, as a separate block so
 # CHECKIN_TEXT stays byte-identical to its eval, and the reminder after the
 # per-prompt memory note. Measured 2026-10-14 over six orchestrating
 # sessions' Claude Code transcripts (Sep 23 to Oct 13): context averaged
 # 230k-500k tokens per request, about a third of turns took no action, and
 # Bash output (39%) and board results (25%) filled most of it. The brief
-# names the watcher that wakes the delegate only for decisions and the
+# names the watcher that wakes the conductor only for decisions and the
 # subagent that keeps raw output out of its context; the reminder repeats
 # the output rule on every turn, about 60 tokens at the uncached tail,
 # because an instruction given once in a 300k context is a weak lever.
-DELEGATE_BRIEF = (
+CONDUCTOR_BRIEF = (
     "You are the maintainer's conductor for {projects}. Keep this session's context for "
     "decisions:\n"
     "- Start a watcher once: `pseudolife-mcp conductor-watch --detach` (`delegate-watch` on "
@@ -281,26 +281,26 @@ DELEGATE_BRIEF = (
     "wakes you when it finishes.\n"
     "- Ask workers for decision-ready mail and to keep progress in their board status.\n"
     "- Answer a quiet wake in one line, with no tool calls.")
-DELEGATE_REMINDER = "Conductor: raw output goes to a subagent; a quiet wake gets one line."
-# How long the daemon process keeps one agent's delegate answer: the
+CONDUCTOR_REMINDER = "Conductor: raw output goes to a subagent; a quiet wake gets one line."
+# How long the daemon process keeps one agent's conductor answer: the
 # per-prompt path then costs one cheap lookup a minute per session, and a
 # grant or a revoke shows within a minute.
-DELEGATE_CACHE_SECONDS = 60
-# How long a hook route waits for a delegate lookup the cache cannot answer
+CONDUCTOR_CACHE_SECONDS = 60
+# How long a hook route waits for a conductor lookup the cache cannot answer
 # (review of 7ecda4ee, 2026-10-14). The hooks give the whole request two
 # seconds of curl time and drop everything past it, so a lookup stalled on
 # the coordination lock or a query would cost every session with a board
-# address its memory note or check-in, delegate or not. Past this budget the
+# address its memory note or check-in, conductor or not. Past this budget the
 # route sends what it has, and the lookup fills the cache for the next call.
-DELEGATE_LOOKUP_BUDGET = 0.5
+CONDUCTOR_LOOKUP_BUDGET = 0.5
 # Bound on cached answers; expired ones are dropped first, then the oldest.
-_DELEGATE_CACHE_MAX = 1024
+_CONDUCTOR_CACHE_MAX = 1024
 # Bound on lookups in flight, each holding a thread while the coordination
 # lock stalls; past it a miss gets no brief (Codex review, 2026-10-16). Not
 # measured: well above one per open session, about 75 MCP shims on the
 # maintainer's host (2026-09-23).
-_DELEGATE_INFLIGHT_MAX = 256
-_DELEGATE_CACHE_LOCK = threading.Lock()
+_CONDUCTOR_INFLIGHT_MAX = 256
+_CONDUCTOR_CACHE_LOCK = threading.Lock()
 
 
 # The check-in sentence the v49 park-record decision asked for (maintainer,
@@ -450,8 +450,8 @@ def subagent(service, headers: Mapping[str, str], *, agent, event, child, kind=N
     return "ok\n" if result.get("recorded") else ""
 
 
-def _delegate_key(service, headers: Mapping[str, str], agent, token_map, token):
-    """``(principal, agent)`` when a delegate lookup may run for this
+def _conductor_key(service, headers: Mapping[str, str], agent, token_map, token):
+    """``(principal, agent)`` when a conductor lookup may run for this
     caller, else None: the board is served to this bearer, ``agent`` is a
     32-hex id, and the durable tier is up. No storage I/O. A cold daemon's
     first board connection waits on the service lock, and the check-in or
@@ -471,18 +471,18 @@ def _delegate_key(service, headers: Mapping[str, str], agent, token_map, token):
     return principal, agent
 
 
-def _delegate_cached(service, key, now):
-    with _DELEGATE_CACHE_LOCK:
-        cache = getattr(service, "_delegate_cache", None)
+def _conductor_cached(service, key, now):
+    with _CONDUCTOR_CACHE_LOCK:
+        cache = getattr(service, "_conductor_cache", None)
         if cache is None:
-            cache = service._delegate_cache = {}
+            cache = service._conductor_cache = {}
         hit = cache.get(key)
         return list(hit[1]) if hit is not None and hit[0] > now else None
 
 
-def _delegate_fetch(service, key, clock) -> list[str]:
+def _conductor_fetch(service, key, clock) -> list[str]:
     """Ask the store, cache the answer and return it; [] on any failure,
-    which is not cached. A yes is kept for ``DELEGATE_CACHE_SECONDS`` but
+    which is not cached. A yes is kept for ``CONDUCTOR_CACHE_SECONDS`` but
     never past the earliest proven lease's expiry."""
     principal, agent = key
     # The lease's remaining time is read inside the query, so a yes is
@@ -493,104 +493,104 @@ def _delegate_fetch(service, key, clock) -> list[str]:
     try:
         _ensure_tier(service, full=False)
         with service._coordination_lock:
-            answer = _store(service).delegate_of(agent, principal)
+            answer = _store(service).conductor_of(agent, principal)
         projects = list(answer["projects"])
         remaining = answer.get("remaining")
     except Exception:  # noqa: BLE001 - the brief never surfaces an error to the hook
-        logger.debug("delegate lookup failed", exc_info=True)
+        logger.debug("conductor lookup failed", exc_info=True)
         return []
-    ttl = float(DELEGATE_CACHE_SECONDS)
+    ttl = float(CONDUCTOR_CACHE_SECONDS)
     if projects and remaining is not None:
         ttl = max(0.0, min(ttl, float(remaining)))
         if clock() >= now + ttl:   # the lease ended while the query ran
             return []
-    with _DELEGATE_CACHE_LOCK:
-        cache = getattr(service, "_delegate_cache", None)
+    with _CONDUCTOR_CACHE_LOCK:
+        cache = getattr(service, "_conductor_cache", None)
         if cache is None:
-            cache = service._delegate_cache = {}
-        if len(cache) >= _DELEGATE_CACHE_MAX:
+            cache = service._conductor_cache = {}
+        if len(cache) >= _CONDUCTOR_CACHE_MAX:
             for stale in [k for k, (until, _) in cache.items() if until <= now]:
                 del cache[stale]
-            while len(cache) >= _DELEGATE_CACHE_MAX:
+            while len(cache) >= _CONDUCTOR_CACHE_MAX:
                 del cache[next(iter(cache))]
         cache[key] = (now + ttl, tuple(projects))
     return projects
 
 
-def delegate_projects(service, headers: Mapping[str, str], *, agent,
+def conductor_projects(service, headers: Mapping[str, str], *, agent,
                       token_map=None, token=None, clock=None) -> list[str]:
-    """The projects whose operator-granted delegate ``agent`` is, as the
+    """The projects whose operator-granted conductor ``agent`` is, as the
     hook endpoints ask with ``agent=<id>`` (spec 2026-10-14): the store's
-    ``delegate_of``, the proof ``_authority`` applies to delegate mail.
+    ``conductor_of``, the proof ``_authority`` applies to conductor mail.
     Empty wherever the board is not served to this bearer, for an address
     that is not a 32-hex id or that the bearer's principal does not own,
     and on any failure: a missing brief costs nothing, a wrong one would
-    tell a worker it is the delegate.
+    tell a worker it is the conductor.
 
     Each answer is kept per (principal, agent) in the daemon process for
-    ``DELEGATE_CACHE_SECONDS``, so the per-prompt call stays one cheap
+    ``CONDUCTOR_CACHE_SECONDS``, so the per-prompt call stays one cheap
     lookup and a grant or a revoke shows within a minute; a yes never
-    outlives the delegate lease itself. A failure is not cached. This form
-    waits for the store; the hook routes use ``delegate_projects_soon``.
+    outlives the conductor lease itself. A failure is not cached. This form
+    waits for the store; the hook routes use ``conductor_projects_soon``.
     ``clock`` (monotonic seconds) is for tests."""
     clock = clock or time.monotonic
-    key = _delegate_key(service, headers, agent, token_map, token)
+    key = _conductor_key(service, headers, agent, token_map, token)
     if key is None:
         return []
-    hit = _delegate_cached(service, key, clock())
-    return hit if hit is not None else _delegate_fetch(service, key, clock)
+    hit = _conductor_cached(service, key, clock())
+    return hit if hit is not None else _conductor_fetch(service, key, clock)
 
 
-def _delegate_lookup(service, key) -> concurrent.futures.Future:
+def _conductor_lookup(service, key) -> concurrent.futures.Future:
     """The one lookup in flight for ``key``, started on a daemon thread if
     none is: concurrent misses share it, and a stalled one holds one thread,
     never the hook's answer or the process's exit."""
-    with _DELEGATE_CACHE_LOCK:
-        inflight = getattr(service, "_delegate_inflight", None)
+    with _CONDUCTOR_CACHE_LOCK:
+        inflight = getattr(service, "_conductor_inflight", None)
         if inflight is None:
-            inflight = service._delegate_inflight = {}
+            inflight = service._conductor_inflight = {}
         future = inflight.get(key)
         if future is not None:
             return future
         future = concurrent.futures.Future()
-        if len(inflight) >= _DELEGATE_INFLIGHT_MAX:
+        if len(inflight) >= _CONDUCTOR_INFLIGHT_MAX:
             future.set_result([])
             return future
         inflight[key] = future
 
     def run():
         try:
-            projects = _delegate_fetch(service, key, time.monotonic)
-        except BaseException:  # noqa: BLE001 - _delegate_fetch already fails closed
+            projects = _conductor_fetch(service, key, time.monotonic)
+        except BaseException:  # noqa: BLE001 - _conductor_fetch already fails closed
             projects = []
-        with _DELEGATE_CACHE_LOCK:
+        with _CONDUCTOR_CACHE_LOCK:
             if inflight.get(key) is future:
                 del inflight[key]
         future.set_result(projects)
 
     try:
-        threading.Thread(target=run, name="pl-delegate-lookup", daemon=True).start()
+        threading.Thread(target=run, name="pl-conductor-lookup", daemon=True).start()
     except RuntimeError:  # no thread to be had: no brief this time, the hook text stands
-        with _DELEGATE_CACHE_LOCK:
+        with _CONDUCTOR_CACHE_LOCK:
             if inflight.get(key) is future:
                 del inflight[key]
         future.set_result([])
     return future
 
 
-async def delegate_projects_soon(service, headers: Mapping[str, str], *, agent,
+async def conductor_projects_soon(service, headers: Mapping[str, str], *, agent,
                                  token_map=None, token=None) -> list[str]:
-    """``delegate_projects`` for the hook routes, waiting at most
-    ``DELEGATE_LOOKUP_BUDGET`` on a cache miss. Past it the answer is [],
+    """``conductor_projects`` for the hook routes, waiting at most
+    ``CONDUCTOR_LOOKUP_BUDGET`` on a cache miss. Past it the answer is [],
     so the route sends the text it already has, and the lookup finishes in
     the background, filling the cache for the next call."""
-    key = _delegate_key(service, headers, agent, token_map, token)
+    key = _conductor_key(service, headers, agent, token_map, token)
     if key is None:
         return []
-    hit = _delegate_cached(service, key, time.monotonic())
+    hit = _conductor_cached(service, key, time.monotonic())
     if hit is not None:
         return hit
-    future = _delegate_lookup(service, key)
+    future = _conductor_lookup(service, key)
     loop = asyncio.get_running_loop()
     waiter = loop.create_future()
 
@@ -606,36 +606,36 @@ async def delegate_projects_soon(service, headers: Mapping[str, str], *, agent,
 
     future.add_done_callback(wake)
     try:
-        await asyncio.wait_for(waiter, DELEGATE_LOOKUP_BUDGET)
+        await asyncio.wait_for(waiter, CONDUCTOR_LOOKUP_BUDGET)
     except asyncio.TimeoutError:
         return []
     return list(future.result())
 
 
-def render_delegate_brief(projects) -> str:
-    """DELEGATE_BRIEF for ``projects`` (one or more names)."""
+def render_conductor_brief(projects) -> str:
+    """CONDUCTOR_BRIEF for ``projects`` (one or more names)."""
     names = ["".join(c for c in p if c.isprintable()) for p in projects]
     joined = names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
-    return DELEGATE_BRIEF.format(projects=joined)
+    return CONDUCTOR_BRIEF.format(projects=joined)
 
 
-async def delegate_brief(service, headers: Mapping[str, str], *, agent,
+async def conductor_brief(service, headers: Mapping[str, str], *, agent,
                          token_map=None, token=None) -> str:
     """The block ``/api/hook/coordination-start`` appends after the check-in
-    for the maintainer's delegate (a blank line, the brief, a newline), or
+    for the maintainer's conductor (a blank line, the brief, a newline), or
     ''."""
-    projects = await delegate_projects_soon(service, headers, agent=agent,
+    projects = await conductor_projects_soon(service, headers, agent=agent,
                                             token_map=token_map, token=token)
-    return "\n" + render_delegate_brief(projects) + "\n" if projects else ""
+    return "\n" + render_conductor_brief(projects) + "\n" if projects else ""
 
 
-async def delegate_reminder(service, headers: Mapping[str, str], *, agent,
+async def conductor_reminder(service, headers: Mapping[str, str], *, agent,
                             token_map=None, token=None) -> str:
     """The line ``/api/hook/memory-changes`` appends for the maintainer's
-    delegate on every turn, or ''."""
-    projects = await delegate_projects_soon(service, headers, agent=agent,
+    conductor on every turn, or ''."""
+    projects = await conductor_projects_soon(service, headers, agent=agent,
                                             token_map=token_map, token=token)
-    return DELEGATE_REMINDER + "\n" if projects else ""
+    return CONDUCTOR_REMINDER + "\n" if projects else ""
 
 
 def unavailable_reason(service, headers: Mapping[str, str], *,

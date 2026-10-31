@@ -3,11 +3,14 @@ use super::{Error, Event, append, audit_timestamp, commit, settle, vacate, valid
 use crate::pg::{Row, Session, Transaction};
 use serde_json::{Value, json};
 
-const DELEGATE: &str = "delegate:";
+const CONDUCTOR: &str = "conductor:";
+/// The conductor's lease name until 2026-10-31: a hold granted under it
+/// keeps its authority until it expires or a new grant vacates it.
+const LEGACY_CONDUCTOR: &str = "delegate:";
 const COORDINATOR: &str = "coordinator:";
 
 fn project_name(project: &str) -> Result<String, Error> {
-    let name = format!("{DELEGATE}{project}");
+    let name = format!("{CONDUCTOR}{project}");
     if project.is_empty()
         || project.trim_matches(super::super::super::whitespace) != project
         || name.chars().count() > 120
@@ -137,9 +140,89 @@ impl Granted {
     }
 }
 
-/// Resolve a registered recipient after locking both role leases, then commit
+/// `_retire_legacy_conductor`: inside the grant, vacate the project's hold
+/// under the role's old lease name, whoever holds it, so the board never
+/// shows two conductors. Its queue is dropped first as any reserved lease's.
+/// Returns the holder when the hold was live.
+async fn retire_legacy(
+    tx: &Transaction<'_>,
+    project: &str,
+    now: f64,
+    events: &mut Vec<Event>,
+) -> Result<Option<String>, Error> {
+    let name = format!("{LEGACY_CONDUCTOR}{project}");
+    if tx
+        .query_opt(
+            "SELECT 1 AS hit FROM coordination_leases WHERE name=$1",
+            &[&name],
+        )
+        .await?
+        .is_none()
+    {
+        return Ok(None);
+    }
+    drop_reserved_waiters(tx, &name, events).await?;
+    let row = tx
+        .query_one(
+            "SELECT * FROM coordination_leases WHERE name=$1 FOR UPDATE",
+            &[&name],
+        )
+        .await?;
+    let holder: Option<String> = row.try_get("holder_agent_id")?;
+    let expiry: Option<f64> = row.try_get("expires_at")?;
+    let fence: i64 = row.try_get("fence")?;
+    let Some(holder) = holder else {
+        settle(tx, &name, now, events).await?;
+        return Ok(None);
+    };
+    if expiry.is_some_and(|until| until <= now) {
+        events.push(Event::new(
+            "lease_expire",
+            "daemon",
+            holder,
+            json!({"fence": fence, "name": name}),
+        ));
+        vacate(tx, &name, now).await?;
+        settle(tx, &name, now, events).await?;
+        return Ok(None);
+    }
+    vacate(tx, &name, now).await?;
+    events.push(Event::new(
+        "lease_break",
+        "operator",
+        holder.clone(),
+        json!({"fence": fence, "name": name, "reason": "renamed"}),
+    ));
+    Ok(Some(holder))
+}
+
+/// `_drop_reserved_waiters`: one `lease_dequeue` (reason `reserved`) per
+/// waiter queued for an operator-only lease.
+async fn drop_reserved_waiters(
+    tx: &Transaction<'_>,
+    name: &str,
+    events: &mut Vec<Event>,
+) -> Result<(), Error> {
+    for row in tx
+        .query(
+            "DELETE FROM coordination_lease_waiters WHERE name=$1 RETURNING agent_id",
+            &[&name],
+        )
+        .await?
+    {
+        events.push(Event::new(
+            "lease_dequeue",
+            "daemon",
+            row.try_get("agent_id")?,
+            json!({"name": name, "reason": "reserved"}),
+        ));
+    }
+    Ok(())
+}
+
+/// Resolve a registered recipient after locking the role leases, then commit
 /// the replacement, queue changes and chained audit rows in one transaction.
-pub async fn grant_delegate(
+pub async fn grant_conductor(
     session: &mut Session,
     project: &str,
     agent: &str,
@@ -155,11 +238,14 @@ pub async fn grant_delegate(
     let now = clock();
     audit_timestamp(now)?;
     let coordinator = format!("{COORDINATOR}{project}");
-    let names: Vec<String> = [coordinator.clone(), name.clone()]
+    let legacy = format!("{LEGACY_CONDUCTOR}{project}");
+    let mut names: Vec<String> = [coordinator.clone(), name.clone(), legacy]
         .into_iter()
         .filter(|name| name.chars().count() <= 120)
         .collect();
-    // coordinator: sorts before delegate:, including when only the latter fits.
+    // `_lock_role_leases`: name order (conductor:, coordinator:, delegate:),
+    // the order a settle locks leases in. Byte order is code point order.
+    names.sort();
     for role in &names {
         tx.execute(
             "INSERT INTO coordination_leases (name) VALUES ($1) ON CONFLICT (name) DO NOTHING",
@@ -214,20 +300,8 @@ pub async fn grant_delegate(
             also_broken = Some(coordinator);
         }
     }
-    for row in tx
-        .query(
-            "DELETE FROM coordination_lease_waiters WHERE name=$1 RETURNING agent_id",
-            &[&name],
-        )
-        .await?
-    {
-        events.push(Event::new(
-            "lease_dequeue",
-            "daemon",
-            row.try_get("agent_id")?,
-            json!({"name": name, "reason": "reserved"}),
-        ));
-    }
+    drop_reserved_waiters(&tx, &name, &mut events).await?;
+    let legacy = retire_legacy(&tx, project, now, &mut events).await?;
     let row = tx
         .query_one(
             "SELECT * FROM coordination_leases WHERE name=$1 FOR UPDATE",
@@ -252,6 +326,8 @@ pub async fn grant_delegate(
     if replaced.is_none() {
         settle(&tx, &name, now, &mut events).await?;
     }
+    // A hold under the old name is the one replaced when the new name had none.
+    let replaced = replaced.or(legacy);
     let expires_at = now + hold as f64;
     let attachment: Option<String> = agent.try_get("attachment_id")?;
     let until: Option<f64> = agent.try_get("lease_until")?;
@@ -268,7 +344,7 @@ pub async fn grant_delegate(
     let fence: i64 = row.try_get("fence")?;
     events.push(
         Event::new(
-            "lease_delegate",
+            "lease_conductor",
             "operator",
             agent_id.clone(),
             json!({"fence": fence, "hold": hold, "name": name, "replaced": replaced}),
@@ -294,9 +370,9 @@ mod tests {
 
     #[test]
     fn project_namespace_boundaries_preserve_unicode_and_error_priority() {
-        assert_eq!(project_name("资源").unwrap(), "delegate:资源");
-        assert!(project_name(&"a".repeat(111)).is_ok());
-        for value in ["", " a", "a\u{001c}", &"a".repeat(112)] {
+        assert_eq!(project_name("资源").unwrap(), "conductor:资源");
+        assert!(project_name(&"a".repeat(110)).is_ok());
+        for value in ["", " a", "a\u{001c}", &"a".repeat(111)] {
             assert!(matches!(
                 project_name(value),
                 Err(Error::Refused("invalid_project"))
@@ -373,7 +449,7 @@ mod tests {
     #[test]
     fn grant_output_retains_order_float_and_ascii_with_optional_role_break() {
         let mut grant = Granted {
-            name: "delegate:资源".into(),
+            name: "conductor:资源".into(),
             agent_id: "a".repeat(32),
             fence: 7,
             expires_at: 1000.0,
@@ -383,7 +459,7 @@ mod tests {
         };
         assert_eq!(
             grant.json_line().unwrap(),
-            "{\"name\": \"delegate:\\u8d44\\u6e90\", \"agent_id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"fence\": 7, \"expires_at\": 1000.0, \"replaced\": null, \"also_broken\": \"coordinator:\\u8d44\\u6e90\", \"reachable\": true, \"reason\": null}\n"
+            "{\"name\": \"conductor:\\u8d44\\u6e90\", \"agent_id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"fence\": 7, \"expires_at\": 1000.0, \"replaced\": null, \"also_broken\": \"coordinator:\\u8d44\\u6e90\", \"reachable\": true, \"reason\": null}\n"
         );
         grant.reason = Some("wake_disabled");
         let text = grant.json_line().unwrap();

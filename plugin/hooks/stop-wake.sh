@@ -84,7 +84,7 @@
 # Budget: hooks.json sets "timeout": 1209600, which Claude Code enforces on
 # asyncRewake hooks, and the wait ends at MAX_WAIT, before the kill. A
 # session stays reachable for as long as it is open (maintainer requirement
-# 2026-10-05): fourteen days is twice the longest delegate lease, so a lease
+# 2026-10-05): fourteen days is twice the longest conductor lease, so a lease
 # granted any time in the week after the session's last turn is covered to
 # its end. Claude Code takes the timeout as is (timeout * 1000 ms, no
 # ceiling, in the 2.1.286 and 2.1.287 bundles read 2026-10-05) into a Node

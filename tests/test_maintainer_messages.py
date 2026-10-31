@@ -237,7 +237,7 @@ def test_a_payload_signed_for_another_challenge_is_refused(svc):
 @pytest.mark.parametrize("purpose,route", [
     ("cancel", "send"), ("send", "cancel"), ("send", "revoke"), ("send", "repudiate"),
     ("send", "enrol"), ("revoke-self", "repudiate"), ("send", "role"),
-    ("grant-delegate", "send"),
+    ("grant-conductor", "send"),
 ])
 def test_a_wrong_purpose_payload_is_refused_on_each_route(svc, purpose, route):
     auth = bootstrap(svc)
@@ -245,7 +245,7 @@ def test_a_wrong_purpose_payload_is_refused_on_each_route(svc, purpose, route):
     fields = {"send": {"to": agent["agent_id"], "text": "hello"},
               "cancel": {"credential_id": "x" * 22},
               "revoke-self": {"credential_id": auth.id},
-              "grant-delegate": {"project": "p", "agent_id": agent["agent_id"], "hold": 3600},
+              "grant-conductor": {"project": "p", "agent_id": agent["agent_id"], "hold": 3600},
               }[purpose]
     challenge = call(svc, "challenge", {"purpose": purpose, **fields})
     body = {"payload": challenge["payload"], "mac": challenge["mac"],

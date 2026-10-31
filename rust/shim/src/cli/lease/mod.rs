@@ -58,13 +58,15 @@ pub async fn main(arguments: &[String]) -> i32 {
         "check" => view::check(&args).await,
         "list" => view::list(&args).await,
         "hold" => hold::hold(args).await,
-        "break" | "delegate" => {
+        "break" | "conductor" => {
+            // The daemon container re-runs the renamed argv, as Python's
+            // run_in_daemon does after lease_cli.main rewrote argv[0].
             let mut forwarded = arguments.to_vec();
-            if forwarded
+            if let Some(new) = forwarded
                 .first()
-                .is_some_and(|action| action == "designate")
+                .and_then(|action| args::replacement(action))
             {
-                forwarded[0] = "delegate".into();
+                forwarded[0] = new.into();
             }
             operator::command(&args, &forwarded).await
         }

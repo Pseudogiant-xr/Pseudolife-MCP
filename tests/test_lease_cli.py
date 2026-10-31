@@ -223,15 +223,15 @@ def test_a_refused_duration_names_days_among_its_examples():
         lease_cli.parse_duration("abc")
 
 
-def test_delegate_for_takes_days_up_to_its_one_week_bound():
-    """The docs say ``lease delegate ... --for 7d``; 0.16.0 and 0.16.1 refused
+def test_conductor_for_takes_days_up_to_its_one_week_bound():
+    """The docs say ``lease conductor ... --for 7d``; 0.16.0 and 0.16.1 refused
     it (only seconds, m and h parsed) and needed ``--for 168h`` (2026-10-04)."""
     _, _, actions = lease_cli._parsers()
-    delegate = actions["delegate"]
-    assert delegate.parse_args(["proj", "abcd1234", "--for", "7d"]).hold == 7 * 86400
-    assert delegate.parse_args(["proj", "abcd1234", "--for", "168h"]).hold == 7 * 86400
+    conductor = actions["conductor"]
+    assert conductor.parse_args(["proj", "abcd1234", "--for", "7d"]).hold == 7 * 86400
+    assert conductor.parse_args(["proj", "abcd1234", "--for", "168h"]).hold == 7 * 86400
     with pytest.raises(SystemExit):
-        delegate.parse_args(["proj", "abcd1234", "--for", "8d"])
+        conductor.parse_args(["proj", "abcd1234", "--for", "8d"])
 
 
 def test_renewal_runs_at_a_third_of_the_ttl():
@@ -1061,23 +1061,27 @@ def test_the_usage_line_names_every_action(lease_env, capsys):
     braces = re.search(r"\{([a-z,]+)\}", usage)
     assert braces is not None, usage
     assert braces.group(1).split(",") == list(actions)
-    assert "delegate" in braces.group(1).split(",")
+    assert "conductor" in braces.group(1).split(",")
+    assert "delegate" not in braces.group(1).split(",")
 
 
-def test_a_deprecated_action_is_never_advertised_and_always_named(lease_env, capsys):
-    """``designate`` (0.16.0's name for ``delegate``) still runs, but no help
-    text offers it, and every use of it, even ``--help`` or a bad argument,
-    says once which command replaces it."""
-    assert lease_cli.DEPRECATED_ACTIONS == {"designate": "delegate"}
+@pytest.mark.parametrize("old", ["delegate", "designate"])
+def test_a_deprecated_action_is_never_advertised_and_always_named(lease_env, capsys, old):
+    """``delegate`` (``conductor``'s name until 2026-10-31) and ``designate``
+    (0.16.0's) still run, but no help text offers them, and every use of
+    one, even ``--help`` or a bad argument, says once which command
+    replaces it."""
+    assert lease_cli.DEPRECATED_ACTIONS == {"delegate": "conductor", "designate": "conductor"}
     assert _run(["--help"], FakeDaemon()) == 0
-    assert "designate" not in capsys.readouterr().out
-    for argv, code in ((["designate", "--help"], 0), (["designate"], lease_cli.EXIT_USAGE)):
+    out = capsys.readouterr().out
+    assert "designate" not in out and "delegate " not in out
+    for argv, code in (([old, "--help"], 0), ([old], lease_cli.EXIT_USAGE)):
         assert _run(argv, FakeDaemon()) == code
         captured = capsys.readouterr()
         notice = [line for line in captured.err.splitlines() if "deprecated" in line]
-        assert notice == ["pseudolife-mcp lease designate is deprecated: use "
-                          "pseudolife-mcp lease delegate"]
-        assert "lease delegate" in captured.out + captured.err
+        assert notice == [f"pseudolife-mcp lease {old} is deprecated: use "
+                          "pseudolife-mcp lease conductor"]
+        assert "lease conductor" in captured.out + captured.err
 
 
 # --- lease list -----------------------------------------------------------------
@@ -1175,8 +1179,8 @@ def test_the_console_usage_lists_lease():
 def test_the_console_usage_names_the_operator_commands():
     usage = " ".join(console._USAGE.split())
     assert "`lease break NAME`" in usage
-    assert "`lease delegate PROJECT AGENT`" in usage
-    assert "designate" not in usage
+    assert "`lease conductor PROJECT AGENT`" in usage
+    assert "designate" not in usage and "lease delegate" not in usage
 
 
 def test_the_console_dispatches_lease(lease_env, tmp_path, monkeypatch):
@@ -2008,7 +2012,7 @@ class _CommitAnswerLost:
 @pytest.mark.parametrize("fails_in_block", [False, True], ids=["at-commit", "before-commit"])
 def test_an_operator_commit_without_an_answer_says_it_may_have_committed(
         monkeypatch, capsys, fails_in_block):
-    """``lease break`` / ``lease delegate`` cannot know the outcome when
+    """``lease break`` / ``lease conductor`` cannot know the outcome when
     COMMIT went out and no answer came back, so they must not claim that
     nothing was changed (Opus gate review of #676, 2026-10-17). The near-
     miss: the same error class raised inside the block, before COMMIT,

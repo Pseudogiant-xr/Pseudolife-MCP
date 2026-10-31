@@ -13,7 +13,7 @@ from .oracle_selection import selected_oracle
 ORACLE_HEAD = "1d444aa1bc432431e5fcbc07a55e1fe661c0f8e4"
 ASSET_DIRECTORY = "rust/shim/src/cli/lease/assets"
 ASSETS = tuple(f"{action}_{kind}.txt"
-               for action in ("top", "run", "hold", "check", "list", "break", "delegate")
+               for action in ("top", "run", "hold", "check", "list", "break", "conductor")
                for kind in ("help", "usage"))
 ORACLE_SOURCES = ("__init__.py", "lease_cli.py", "os_lock.py", "daemon_exec.py")
 

@@ -17,7 +17,9 @@ use sha2::{Digest, Sha256};
 use tokio_postgres::Client;
 
 use crate::board::error::BoardError;
-use crate::board::lease::{COORDINATOR_PREFIX, DELEGATE_PREFIX};
+use crate::board::lease::{
+    CONDUCTOR_PREFIX, CONDUCTOR_PREFIXES, COORDINATOR_PREFIX, conductor_project,
+};
 use crate::board::mail::{MAINTAINER_ORIGIN, MAX_TEXT_BYTES};
 use crate::board::store::{ATTACHED_IDLE_WINDOW, MAINTAINER_PRINCIPAL, RESERVED_SENDERS};
 use crate::http::{App, json_response};
@@ -39,10 +41,19 @@ const DELEGATION_MAX: i64 = 7 * 86400;
 const SUPPORTED_ALGS: [i64; 3] = [-7, -8, -257];
 /// `ROLE_PURPOSES`.
 const ROLE_PURPOSES: [&str; 4] = [
-    "grant-delegate",
-    "revoke-delegate",
+    "grant-conductor",
+    "revoke-conductor",
     "assign-coordinator",
     "revoke-coordinator",
+];
+/// `LEGACY_ROLE_PURPOSES`: the conductor's purposes until 2026-10-31. A
+/// Console tab loaded before the upgrade asks for one and refuses a payload
+/// whose purpose differs from its request, so the challenge is issued under
+/// the requested name (and previews the role as `delegate`); everything
+/// else reads it as the new one.
+const LEGACY_ROLE_PURPOSES: [(&str, &str); 2] = [
+    ("grant-delegate", "grant-conductor"),
+    ("revoke-delegate", "revoke-conductor"),
 ];
 
 /// `_CHALLENGE_FIELDS`: each purpose's fields besides `purpose`, in
@@ -54,9 +65,9 @@ const CHALLENGE_FIELDS: [(&str, &[&str]); 10] = [
     ("cancel", &["credential_id"]),
     ("revoke-self", &["credential_id"]),
     ("repudiate", &["message_id"]),
-    ("grant-delegate", &["project", "agent_id", "hold"]),
+    ("grant-conductor", &["project", "agent_id", "hold"]),
     ("assign-coordinator", &["project", "agent_id", "hold"]),
-    ("revoke-delegate", &["project"]),
+    ("revoke-conductor", &["project"]),
     ("revoke-coordinator", &["project"]),
 ];
 
@@ -325,13 +336,22 @@ async fn recipient(c: &Client, agent_id: Option<&Value>, now: f64) -> Outcome<Ma
     Ok(out)
 }
 
-/// `role_holder`: the live holder of a role lease.
+/// `role_holder`: the live holder of a role lease; for
+/// `conductor:<project>` a hold under the role's old name
+/// (`delegate:<project>`) counts too, the new name first.
 async fn role_holder(c: &Client, name: &str, now: f64) -> Outcome<Value> {
+    let names: Vec<String> = match conductor_project(name) {
+        Some(project) if name.starts_with(CONDUCTOR_PREFIX) => CONDUCTOR_PREFIXES
+            .iter()
+            .map(|prefix| format!("{prefix}{project}"))
+            .collect(),
+        _ => vec![name.to_string()],
+    };
     let row = c
         .query_opt(
-            "SELECT holder_agent_id FROM coordination_leases WHERE name=$1 \
-             AND holder_agent_id IS NOT NULL AND expires_at>$2",
-            &[&name, &now],
+            "SELECT holder_agent_id FROM coordination_leases WHERE name=ANY($1) \
+             AND holder_agent_id IS NOT NULL AND expires_at>$2 ORDER BY name LIMIT 1",
+            &[&names, &now],
         )
         .await?;
     Ok(row.map_or(Value::Null, |r| json!(r.get::<_, String>(0))))
@@ -454,17 +474,17 @@ async fn role_preview(
     fields: &Map<String, Value>,
     now: f64,
 ) -> Outcome<Map<String, Value>> {
-    let delegate = purpose.ends_with("delegate");
-    let (role, prefix, other) = if delegate {
-        ("delegate", DELEGATE_PREFIX, COORDINATOR_PREFIX)
+    let conductor = purpose.ends_with("conductor");
+    let (role, prefix, other) = if conductor {
+        ("conductor", CONDUCTOR_PREFIX, COORDINATOR_PREFIX)
     } else {
-        ("coordinator", COORDINATOR_PREFIX, DELEGATE_PREFIX)
+        ("coordinator", COORDINATOR_PREFIX, CONDUCTOR_PREFIX)
     };
     let project = fields["project"].as_str().expect("checked project");
     let holder = role_holder(c, &format!("{prefix}{project}"), now).await?;
     let action = if purpose.starts_with("revoke") {
         "revoke"
-    } else if delegate {
+    } else if conductor {
         "grant"
     } else {
         "assign"
@@ -498,8 +518,15 @@ async fn role_preview(
 
 /// `_challenge`.
 async fn challenge(c: &Client, rp_id: &str, body: &Map<String, Value>, now: f64) -> Outcome<Value> {
+    let legacy = match body.get("purpose") {
+        Some(Value::String(p)) => LEGACY_ROLE_PURPOSES.iter().find(|(old, _)| old == p),
+        _ => None,
+    };
     let purpose = match body.get("purpose") {
-        Some(Value::String(p)) => CHALLENGE_FIELDS.iter().find(|(name, _)| name == p),
+        Some(Value::String(p)) => {
+            let p = legacy.map_or(p.as_str(), |(_, new)| new);
+            CHALLENGE_FIELDS.iter().find(|(name, _)| *name == p)
+        }
         _ => None,
     };
     let Some(&(purpose, allowed)) = purpose else {
@@ -554,7 +581,7 @@ async fn challenge(c: &Client, rp_id: &str, body: &Map<String, Value>, now: f64)
             }
             fields.insert("message_id".into(), body["message_id"].clone());
         }
-        "grant-delegate" | "assign-coordinator" => {
+        "grant-conductor" | "assign-coordinator" => {
             fields.insert("project".into(), json!(project(body.get("project"))?));
             fields.insert(
                 "agent_id".into(),
@@ -574,6 +601,10 @@ async fn challenge(c: &Client, rp_id: &str, body: &Map<String, Value>, now: f64)
             preview = Some(role_preview(c, purpose, &fields, now).await?);
         }
     }
+    if let (Some(_), Some(preview)) = (legacy, preview.as_mut()) {
+        // The role as that tab names it.
+        preview.insert("role".into(), json!("delegate"));
+    }
     let project_name = fields
         .get("project")
         .and_then(Value::as_str)
@@ -581,26 +612,27 @@ async fn challenge(c: &Client, rp_id: &str, body: &Map<String, Value>, now: f64)
     if ROLE_PURPOSES.contains(&purpose) {
         // Who the change replaces or evicts decides its outcome, so it is
         // signed too.
-        let prefix = if purpose.ends_with("delegate") {
-            DELEGATE_PREFIX
+        let prefix = if purpose.ends_with("conductor") {
+            CONDUCTOR_PREFIX
         } else {
             COORDINATOR_PREFIX
         };
         let name = format!("{prefix}{}", project_name.as_deref().unwrap_or(""));
         fields.insert("holder".into(), role_holder(c, &name, now).await?);
     }
-    if matches!(purpose, "grant-delegate" | "assign-coordinator") {
+    if matches!(purpose, "grant-conductor" | "assign-coordinator") {
         // So is the other role's holder, which the change breaks when it
         // is the recipient.
-        let other = if purpose == "grant-delegate" {
+        let other = if purpose == "grant-conductor" {
             COORDINATOR_PREFIX
         } else {
-            DELEGATE_PREFIX
+            CONDUCTOR_PREFIX
         };
         let name = format!("{other}{}", project_name.as_deref().unwrap_or(""));
         fields.insert("other_holder".into(), role_holder(c, &name, now).await?);
     }
-    let (payload, mac) = issue(c, purpose, fields, now).await?;
+    let issued = legacy.map_or(purpose, |(old, _)| old);
+    let (payload, mac) = issue(c, issued, fields, now).await?;
     let options = get_options(rp_id, &payload, &signing_keys(c, now).await?);
     let mut out = json!({"payload": payload, "mac": mac, "publicKey": options});
     if let Some(preview) = preview {

@@ -113,7 +113,7 @@ def seed_rich(conn) -> dict:
     store.acquire_lease(*_creds(c, "bob"), name="suite", ttl=600)
     store.break_lease("suite")
     later()
-    store.grant_delegate("p", a["agent_id"], hold=3600)
+    store.grant_conductor("p", a["agent_id"], hold=3600)
     later()
     store.woke(b["agent_id"], "alice")
     later()

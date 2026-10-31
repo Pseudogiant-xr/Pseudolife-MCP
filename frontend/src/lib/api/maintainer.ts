@@ -35,7 +35,7 @@ export interface RoleReach {
   reason?: string | null;
 }
 
-export interface DelegateRole extends RoleReach {
+export interface ConductorRole extends RoleReach {
   agent_id: string;
   expires_at: Epoch | null;
   granted_by: "operator" | "maintainer" | string;
@@ -47,7 +47,7 @@ export interface CoordinatorRole extends RoleReach {
 }
 
 export interface ProjectRoles {
-  delegate: DelegateRole | null;
+  conductor: ConductorRole | null;
   coordinator: CoordinatorRole | null;
 }
 
@@ -86,12 +86,12 @@ export interface MaintainerStatus {
   key_changes?: KeyChange[];
 }
 
-export type RolePurpose = "grant-delegate" | "revoke-delegate" | "assign-coordinator" | "revoke-coordinator";
+export type RolePurpose = "grant-conductor" | "revoke-conductor" | "assign-coordinator" | "revoke-coordinator";
 
 export type ChallengeBody =
   | { purpose: "send"; to: string; text: string; urgent: boolean }
-  | { purpose: "grant-delegate" | "assign-coordinator"; project: string; agent_id: string; hold: number }
-  | { purpose: "revoke-delegate" | "revoke-coordinator"; project: string }
+  | { purpose: "grant-conductor" | "assign-coordinator"; project: string; agent_id: string; hold: number }
+  | { purpose: "revoke-conductor" | "revoke-coordinator"; project: string }
   | { purpose: "cancel" | "revoke-self"; credential_id: string }
   | { purpose: "repudiate"; message_id: string }
   | { purpose: "enrol-bootstrap" | "enrol-approve"; label: string };
@@ -113,7 +113,7 @@ export interface Preview {
   principal?: string | null;
   host?: string | null;
   duplicate_name?: boolean;
-  /** Role previews: "delegate" | "coordinator". */
+  /** Role previews: "conductor" | "coordinator". */
   role?: string | null;
   project?: string | null;
   /** Role previews: "grant" | "assign" | "revoke". */
@@ -122,7 +122,8 @@ export interface Preview {
   current_holder?: string | null;
   /** Grant/assign: the agent id this displaces, or null. */
   replaces?: string | null;
-  /** Grant/assign: the other role's lease the recipient loses ("coordinator:<p>"), or null. */
+  /** Grant/assign: the other role's lease the recipient loses ("coordinator:<p>",
+   *  "conductor:<p>", or "delegate:<p>" for a conductor granted before the rename), or null. */
   also_breaks?: string | null;
   [key: string]: unknown;
 }

@@ -48,7 +48,7 @@ impl Default for Timing {
             registry_retry: Duration::from_secs(5),
             // A board call re-checks its identity once after this pause before
             // it is refused (Python `_BOARD_CHECK_RETRY_DELAYS`). On 2026-10-19
-            // a delegate's board update and receive were refused as "identity
+            // the conductor's board update and receive were refused as "identity
             // unavailable" when that one read-only check had failed; the same
             // call seconds later worked.
             identity_check_retry: Duration::from_millis(500),

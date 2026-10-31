@@ -1,5 +1,5 @@
 <script lang="ts">
-  // Make/Revoke delegate and Make/Revoke coordinator for one session. Each
+  // Make/Revoke conductor and Make/Revoke coordinator for one session. Each
   // opens the passkey confirm (lib/maintainerFlow.svelte.ts); a role only
   // ever applies to the session's own project.
   import type { BoardAgent, Lease } from "../../lib/api/types";
@@ -7,11 +7,11 @@
   import { roleEligible, rolesFor, type RoleHolder } from "../../lib/maintainer";
   import {
     assignCoordinator,
-    grantDelegate,
+    grantConductor,
     maintainer,
     readiness,
     revokeCoordinator,
-    revokeDelegate,
+    revokeConductor,
   } from "../../lib/maintainerFlow.svelte";
 
   let {
@@ -29,9 +29,9 @@
 
   const eligible = $derived(roleEligible(agent));
   const holders = $derived(
-    agent.project ? rolesFor(agent.project, maintainer.status, leases) : { delegate: null, coordinator: null },
+    agent.project ? rolesFor(agent.project, maintainer.status, leases) : { conductor: null, coordinator: null },
   );
-  const isDelegate = $derived(holders.delegate?.agent_id === agent.agent_id);
+  const isConductor = $derived(holders.conductor?.agent_id === agent.agent_id);
   const isCoordinator = $derived(holders.coordinator?.agent_id === agent.agent_id);
   const ready = $derived(readiness());
   const blocked = $derived(!eligible.ok ? eligible.why : !ready.ok ? ready.title : "");
@@ -39,25 +39,25 @@
 
   const current = (h: RoleHolder | null) => (h ? { holder: h, name: nameOf(h.agent_id) } : null);
 
-  function delegateAction() {
-    if (isDelegate) void revokeDelegate(target);
-    else void grantDelegate(target, current(holders.delegate), isCoordinator);
+  function conductorAction() {
+    if (isConductor) void revokeConductor(target);
+    else void grantConductor(target, current(holders.conductor), isCoordinator);
   }
   function coordinatorAction() {
     if (isCoordinator) void revokeCoordinator(target);
-    else void assignCoordinator(target, current(holders.coordinator), isDelegate);
+    else void assignCoordinator(target, current(holders.coordinator), isConductor);
   }
 </script>
 
 <div class="roles" class:wide role="group" aria-label="Roles for {agentName(agent)}">
   <button
     type="button"
-    class="role-btn {isDelegate ? 'revoke' : 'canon'}"
+    class="role-btn {isConductor ? 'revoke' : 'canon'}"
     disabled={!!blocked}
     title={blocked || undefined}
-    onclick={delegateAction}
+    onclick={conductorAction}
   >
-    {isDelegate ? "Revoke conductor" : "Make conductor"}
+    {isConductor ? "Revoke conductor" : "Make conductor"}
   </button>
   <button
     type="button"

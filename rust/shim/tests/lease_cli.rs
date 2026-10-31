@@ -236,7 +236,7 @@ fn seven_days_is_a_run_expectation_and_operator_actions_remain_deferred() {
     }
     for arguments in [
         vec!["lease", "break", "resource"],
-        vec!["lease", "delegate", "resource", "fixture-agent"],
+        vec!["lease", "conductor", "resource", "fixture-agent"],
     ] {
         assert_eq!(home.call(&arguments).status.code(), Some(1));
     }

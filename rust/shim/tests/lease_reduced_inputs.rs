@@ -139,12 +139,16 @@ fn operator_actions_refuse_invalid_explicit_dsn_before_state() {
             "cannot open the bank (PostgreSQL DSN is not understood)\n",
         ),
         (
-            vec!["lease", "delegate", "resource", "fixture-agent"],
+            vec!["lease", "conductor", "resource", "fixture-agent"],
             "cannot open the bank (PostgreSQL DSN is not understood)\n",
         ),
         (
+            vec!["lease", "delegate", "resource", "fixture-agent"],
+            "pseudolife-mcp lease delegate is deprecated: use pseudolife-mcp lease conductor\ncannot open the bank (PostgreSQL DSN is not understood)\n",
+        ),
+        (
             vec!["lease", "designate", "resource", "fixture-agent"],
-            "pseudolife-mcp lease designate is deprecated: use pseudolife-mcp lease delegate\ncannot open the bank (PostgreSQL DSN is not understood)\n",
+            "pseudolife-mcp lease designate is deprecated: use pseudolife-mcp lease conductor\ncannot open the bank (PostgreSQL DSN is not understood)\n",
         ),
     ] {
         let home = Home::new();

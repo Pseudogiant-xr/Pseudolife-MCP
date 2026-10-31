@@ -1,1 +1,0 @@
-usage: pseudolife-mcp lease delegate [-h] [--for DURATION] PROJECT AGENT

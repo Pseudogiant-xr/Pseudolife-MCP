@@ -118,7 +118,7 @@ _MX_KEY_CHANGE_KEYS = {"at", "principal", "change", "credential_id", "label", "b
 _MX_PASSKEY_KEYS = {"credential_id", "label", "state", "enrolled_by", "active_from",
                     "created_at", "last_used_at", "revoked_at", "revoked_by", "flagged_at"}
 # reachable/reason: whether maintainer mail rings the holder now (2026-10-05).
-_MX_DELEGATE_KEYS = {"agent_id", "expires_at", "granted_by", "reachable", "reason"}
+_MX_CONDUCTOR_KEYS = {"agent_id", "expires_at", "granted_by", "reachable", "reason"}
 _MX_COORDINATOR_KEYS = {"agent_id", "expires_at", "reachable", "reason"}
 _MX_RECIPIENT_KEYS = {"agent_id_prefix", "name", "label", "principal", "host", "client",
                       "project", "task", "last_activity", "duplicate_name"}
@@ -146,7 +146,7 @@ def _real_maintainer_store():
         "enrolled_by": "bootstrap", "active_from": now - 60, "created_at": now - 120,
         "last_used_at": None, "revoked_at": None, "revoked_by": None, "flagged_at": None,
         # leases (roles, role_holder)
-        "name": "delegate:p", "holder_agent_id": _MX_AGENT, "expires_at": now + 3600,
+        "name": "conductor:p", "holder_agent_id": _MX_AGENT, "expires_at": now + 3600,
         "granted_by": "maintainer",
         # the holder's agent row, joined for reachability (roles)
         "row_agent_id": _MX_AGENT, "attachment_id": None, "lease_until": 0,
@@ -189,10 +189,10 @@ def _assert_status_shape(status, who):
         assert change["path"] in ("console", "host"), who
     assert status["roles"], f"{who}: no roles"
     for project, slots in status["roles"].items():
-        assert set(slots) == {"delegate", "coordinator"}, f"{who} {project}: {sorted(slots)}"
-        if slots["delegate"]:
-            assert set(slots["delegate"]) == _MX_DELEGATE_KEYS, (
-                f"{who} delegate keys: {sorted(slots['delegate'])}")
+        assert set(slots) == {"conductor", "coordinator"}, f"{who} {project}: {sorted(slots)}"
+        if slots["conductor"]:
+            assert set(slots["conductor"]) == _MX_CONDUCTOR_KEYS, (
+                f"{who} conductor keys: {sorted(slots['conductor'])}")
         if slots["coordinator"]:
             assert set(slots["coordinator"]) == _MX_COORDINATOR_KEYS, (
                 f"{who} coordinator keys: {sorted(slots['coordinator'])}")
@@ -207,8 +207,8 @@ def test_maintainer_status_matches_console_contract():
 def test_maintainer_role_previews_match_console_contract():
     from pseudolife_memory.maintainer import _role_preview
     store = _real_maintainer_store()
-    grant = _role_preview(store, "grant-delegate", {"project": "p", "agent_id": _MX_AGENT})
-    revoke = _role_preview(store, "revoke-delegate", {"project": "p"})
+    grant = _role_preview(store, "grant-conductor", {"project": "p", "agent_id": _MX_AGENT})
+    revoke = _role_preview(store, "revoke-conductor", {"project": "p"})
     assert set(grant) == _MX_GRANT_PREVIEW_KEYS, f"real grant preview: {sorted(grant)}"
     assert set(revoke) == _MX_ROLE_PREVIEW_KEYS, f"real revoke preview: {sorted(revoke)}"
 
@@ -216,7 +216,7 @@ def test_maintainer_role_previews_match_console_contract():
     roles = fx.maintainer_status()["roles"]
     project = next(iter(roles))
     agent = roles[project]["coordinator"]["agent_id"]
-    fx_grant = fx.maintainer_challenge({"purpose": "grant-delegate", "project": project,
+    fx_grant = fx.maintainer_challenge({"purpose": "grant-conductor", "project": project,
                                         "agent_id": agent, "hold": 3600})
     fx_revoke = fx.maintainer_challenge({"purpose": "revoke-coordinator", "project": project})
     assert set(fx_grant["preview"]) == _MX_GRANT_PREVIEW_KEYS, sorted(fx_grant["preview"])
@@ -230,7 +230,7 @@ def test_maintainer_send_preview_matches_console_contract():
     real = _real_maintainer_store().recipient(_MX_AGENT)
     assert set(real) == _MX_RECIPIENT_KEYS, f"real recipient preview: {sorted(real)}"
     fx = FixtureService()
-    agent = next(iter(fx.maintainer_status()["roles"].values()))["delegate"]["agent_id"]
+    agent = next(iter(fx.maintainer_status()["roles"].values()))["conductor"]["agent_id"]
     out = fx.maintainer_challenge({"purpose": "send", "to": agent, "text": "hi", "urgent": True})
     assert set(out) == {"payload", "mac", "publicKey", "preview"}
     assert set(out["preview"]) == _MX_RECIPIENT_KEYS, sorted(out["preview"])
@@ -261,7 +261,7 @@ def test_fixture_maintainer_answers_match_the_real_service():
     fx = FixtureService()
     roles = fx.maintainer_status()["roles"]
     project = next(iter(roles))
-    delegate = roles[project]["delegate"]["agent_id"]
+    delegate = roles[project]["conductor"]["agent_id"]
 
     def signed(purpose, route, **fields):
         c = fx.maintainer_challenge({"purpose": purpose, **fields})
@@ -271,7 +271,7 @@ def test_fixture_maintainer_answers_match_the_real_service():
     # A grant says whether its grantee is reachable, and warns when not; the
     # demo's coordinator is the session whose listener lapsed.
     coordinator = roles[project]["coordinator"]["agent_id"]
-    granted, _ = signed("grant-delegate", "role", project=project, agent_id=delegate, hold=3600)
+    granted, _ = signed("grant-conductor", "role", project=project, agent_id=delegate, hold=3600)
     assert (granted["reachable"], granted["reason"]) == (True, None) and "warning" not in granted
     lapsed, _ = signed("assign-coordinator", "role", project=project, agent_id=coordinator,
                        hold=3600)
@@ -284,7 +284,7 @@ def test_fixture_maintainer_answers_match_the_real_service():
     assert set(rep) == {"message_id", "repudiated_at", "follow_up"}
 
     # A grant also carries the other role's holder, as the real route signs it.
-    c = fx.maintainer_challenge({"purpose": "grant-delegate", "project": project,
+    c = fx.maintainer_challenge({"purpose": "grant-conductor", "project": project,
                                  "agent_id": delegate, "hold": 3600})
     coordinator = roles[project]["coordinator"]["agent_id"]
     assert json.loads(c["payload"])["other_holder"] == coordinator
@@ -300,9 +300,9 @@ def test_fixture_maintainer_answers_match_the_real_service():
 
     # A role payload carries the holder the daemon read; a change in between
     # is role_changed, as the real route answers.
-    c = fx.maintainer_challenge({"purpose": "revoke-delegate", "project": project})
+    c = fx.maintainer_challenge({"purpose": "revoke-conductor", "project": project})
     assert json.loads(c["payload"])["holder"] == delegate
-    fx._mx()["roles"][project]["delegate"]["agent_id"] = roles[project]["coordinator"]["agent_id"]
+    fx._mx()["roles"][project]["conductor"]["agent_id"] = roles[project]["coordinator"]["agent_id"]
     try:
         fx.maintainer_role({"payload": c["payload"], "mac": c["mac"], "assertion": _MX_DUMMY})
     except ValueError as exc:
@@ -312,7 +312,7 @@ def test_fixture_maintainer_answers_match_the_real_service():
 
     # Extra challenge fields are refused, as the real route refuses them.
     try:
-        fx.maintainer_challenge({"purpose": "revoke-delegate", "project": project,
+        fx.maintainer_challenge({"purpose": "revoke-conductor", "project": project,
                                  "holder": delegate})
     except ValueError as exc:
         assert str(exc) == "invalid_request"

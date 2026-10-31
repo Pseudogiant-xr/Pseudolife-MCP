@@ -130,7 +130,7 @@ fn own_resolution_precedes_embedded_then_preserves_container_argv() {
     ));
     assert!(resolution::select(Some("host=localhost options=unsafe"), &directory.0, true).is_err());
     let args = vec![
-        "delegate".into(),
+        "conductor".into(),
         "project".into(),
         "agent".into(),
         "--for".into(),

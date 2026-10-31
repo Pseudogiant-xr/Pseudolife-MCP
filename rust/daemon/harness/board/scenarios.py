@@ -105,6 +105,37 @@ def age(seconds):
     return Step(f"age {seconds}", kind="age", seconds=seconds)
 
 
+def seed(title, fn):
+    """Setup no daemon route can do (rows an older release wrote), through
+    Python's own store on the arm's bank so the audit chain stays valid:
+    ``fn(store, ctx)`` inside one transaction. Not compared."""
+    step = Step(title, kind="seed", write=False)
+    step.fn = fn
+    return step
+
+
+def seed_bank(dsn: str, fn, ctx) -> None:
+    import time
+    from contextlib import contextmanager
+
+    import psycopg
+    from pseudolife_memory.storage.coordination import CoordinationStore
+
+    class _Storage:
+        def __init__(self, conn):
+            self.conn = conn
+
+        @contextmanager
+        def _txn(self):
+            with self.conn.transaction():
+                yield
+
+    with psycopg.connect(dsn, autocommit=True) as conn:
+        store = CoordinationStore(_Storage(conn), clock=time.time)
+        with store.storage._txn():
+            fn(store, ctx)
+
+
 def age_bank(dsn: str, seconds: float) -> None:
     import psycopg
     n = float(seconds)
@@ -489,6 +520,7 @@ class Leases(Scenario):
             act("C release not held", "release", token="bob", agent="C", body={"name": "gpu"}),
             act("A releases gpu (grant B)", "release", agent="A", body={"name": "gpu"}),
             act("leases after grant", "leases"),
+            act("conductor reserved", "lease", agent="A", body={"name": "conductor:p1", "ttl": 60}),
             act("delegate reserved", "lease", agent="A", body={"name": "delegate:p1", "ttl": 60}),
             act("designated reserved", "lease", agent="A", body={"name": "designated:x", "ttl": 60}),
             act("coordinator lease", "lease", agent="A", body={"name": "coordinator:p1", "ttl": 3600}),
@@ -504,6 +536,70 @@ class Leases(Scenario):
             age(400),
             act("leases settles expiry", "leases"),
             act("B renews after window", "lease", token="alice", agent="B", body={"name": "gpu", "ttl": 60}),
+        ]
+
+
+def _conductor_grant(lease, who, record=None):
+    """A conductor hold ``lease`` for agent ``who`` with the operator's
+    grant record for its fence, as a grant before the role's rename wrote
+    it (``delegate:<project>`` and ``lease_delegate``). ``record`` names the
+    lease the record claims, by default the hold's own."""
+    def fn(store, ctx):
+        agent_id = ctx.id(who)
+        principal = store._one("SELECT principal FROM coordination_agents WHERE agent_id=%s",
+                               (agent_id,))["principal"]
+        now = store.clock()
+        fence = store._one(
+            "INSERT INTO coordination_leases (name,holder_agent_id,holder_principal,purpose,fence,"
+            "acquired_at,expires_at) VALUES (%s,%s,%s,'granted by the operator',"
+            "nextval('coordination_lease_fence'),%s,%s) RETURNING fence",
+            (lease, agent_id, principal, now, now + 3600))["fence"]
+        store._append([store._event("lease_delegate",
+                                    {"name": record or lease, "fence": fence, "hold": 3600,
+                                     "replaced": None},
+                                    actor="operator", agent_id=agent_id)], now)
+    return fn
+
+
+class ConductorLegacy(Scenario):
+    """The conductor's role across its rename (2026-10-31): a hold under
+    the old lease name with its old-named record keeps its authority and
+    its one-role rule; a record proves only the lease it names."""
+    name = "conductor-legacy"
+
+    def steps(self):
+        return [
+            reg("register A", "A", label="codex", project="p1"),
+            reg("register B", "B", token="alice", label="claude-code", project="p1",
+                capabilities={"ring": True}),
+            reg("register C", "C", label="codex", project="p2"),
+            reg("register D", "D", token="alice", label="claude-code", project="p2",
+                capabilities={"ring": True}),
+            seed("A granted under the old name", _conductor_grant("delegate:p1", "A")),
+            seed("C holds the new name, record names the old",
+                 _conductor_grant("conductor:p2", "C", record="delegate:p2")),
+            act("attach B listening", "attach", token="alice", agent="B",
+                body=lambda c: {"attachment_id": "att-b", "wake_enabled": False, "ring": True,
+                                "ring_armed_until": c.now + 60}),
+            act("attach D listening", "attach", token="alice", agent="D",
+                body=lambda c: {"attachment_id": "att-d", "wake_enabled": False, "ring": True,
+                                "ring_armed_until": c.now + 60}),
+            act("B parks done", "update", token="alice", agent="B", body={"park_reason": "done"}),
+            act("D parks done", "update", token="alice", agent="D", body={"park_reason": "done"}),
+            sleep(1.3),
+            msg("A urgent reopens done (old-named conductor)", "A", "B", "conductor reopens",
+                urgent=True),
+            msg("C urgent to done park (record names another lease)", "C", "D", "no authority",
+                urgent=True),
+            act("A coordinator refused (one role)", "lease", agent="A",
+                body={"name": "coordinator:p1", "ttl": 60}),
+            act("C coordinator refused (one role)", "lease", agent="C",
+                body={"name": "coordinator:p2", "ttl": 60}),
+            act("A takes conductor name refused", "lease", agent="A",
+                body={"name": "conductor:p1", "ttl": 60}),
+            act("A takes delegate name refused", "lease", agent="A",
+                body={"name": "delegate:p1", "ttl": 60}),
+            act("leases list", "leases"),
         ]
 
 
@@ -715,5 +811,5 @@ class McpTools(Scenario):
 
 
 MIXED = Mixed()
-SCENARIOS = {s.name: s for s in (Identity, Mail, Wake, Leases, Hooks, Prune, Tokenless, Disabled,
-                                  Console, McpTools)}
+SCENARIOS = {s.name: s for s in (Identity, Mail, Wake, Leases, ConductorLegacy, Hooks, Prune,
+                                  Tokenless, Disabled, Console, McpTools)}

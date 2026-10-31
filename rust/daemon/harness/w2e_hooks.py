@@ -370,7 +370,7 @@ def register(h) -> dict[str, dict]:
                 changes("since=99999999999.5"),
                 changes("since=not-a-cursor"),
                 changes("session_id=no-such-session"),
-                # An agent that is not the maintainer's delegate adds nothing.
+                # An agent that is not the maintainer's conductor adds nothing.
                 changes("session_id=mc-a&agent=0123456789abcdef"),
                 # Unauthorized: the empty body.
                 changes("session_id=mc-a", auth=False),

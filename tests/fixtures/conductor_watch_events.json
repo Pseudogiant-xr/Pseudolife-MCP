@@ -1,5 +1,5 @@
 {
-  "about": "Pure event classification of pseudolife-mcp delegate-watch: JSON in, exact lines out. tests/test_delegate_watch.py drives pseudolife_memory/delegate_watch_cli.py from this file, and the Rust port's contract tests read the same file. Snapshot maps keep their insertion order, which is the order events are reported in.",
+  "about": "Pure event classification of pseudolife-mcp conductor-watch: JSON in, exact lines out. tests/test_conductor_watch.py drives pseudolife_memory/conductor_watch_cli.py from this file, and the Rust port's contract tests read the same file. Snapshot maps keep their insertion order, which is the order events are reported in.",
   "checks_state": [
     {"name": "no checks", "rollup": [], "expected": ["none", []]},
     {"name": "no rollup at all", "rollup": null, "expected": ["none", []]},

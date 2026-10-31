@@ -23,8 +23,8 @@ fn asset(action: &str, help: bool) -> &'static str {
         ("hold", false) => include_str!("assets/hold_usage.txt"),
         ("break", true) => include_str!("assets/break_help.txt"),
         ("break", false) => include_str!("assets/break_usage.txt"),
-        ("delegate", true) => include_str!("assets/delegate_help.txt"),
-        ("delegate", false) => include_str!("assets/delegate_usage.txt"),
+        ("conductor", true) => include_str!("assets/conductor_help.txt"),
+        ("conductor", false) => include_str!("assets/conductor_usage.txt"),
         ("run", true) => include_str!("assets/run_help.txt"),
         ("run", false) => include_str!("assets/run_usage.txt"),
         ("check", true) => include_str!("assets/check_help.txt"),
@@ -220,16 +220,35 @@ fn process_id(text: &str) -> Result<u32, String> {
     Ok(pid)
 }
 
+/// Old action names that still run, each with the action replacing it
+/// (lease_cli.DEPRECATED_ACTIONS): `conductor` was `delegate` until
+/// 2026-10-31 and `designate` in 0.16.0.
+const DEPRECATED_ACTIONS: &[(&str, &str)] =
+    &[("delegate", "conductor"), ("designate", "conductor")];
+
+/// The action replacing a deprecated action name.
+pub(super) fn replacement(action: &str) -> Option<&'static str> {
+    DEPRECATED_ACTIONS
+        .iter()
+        .find(|(old, _)| *old == action)
+        .map(|(_, new)| *new)
+}
+
 /// The public separator is consumed before parsing, just as lease_cli.main does.
 pub fn parse(argv: &[String]) -> Result<Args, i32> {
     let mut renamed;
-    let argv = if argv.first().is_some_and(|action| action == "designate") {
+    let argv = if let Some(new) = argv.first().and_then(|action| replacement(action)) {
+        // Renamed before parsing, so help and every parse error speak of the
+        // new name, and no help text advertises the old one.
         out(
-            "pseudolife-mcp lease designate is deprecated: use pseudolife-mcp lease delegate\n",
+            &format!(
+                "pseudolife-mcp lease {} is deprecated: use pseudolife-mcp lease {new}\n",
+                argv[0]
+            ),
             true,
         );
         renamed = argv.to_vec();
-        renamed[0] = "delegate".into();
+        renamed[0] = new.into();
         &renamed
     } else {
         argv
@@ -257,19 +276,19 @@ pub fn parse(argv: &[String]) -> Result<Args, i32> {
         }
         out(asset("top", false), true);
         out(
-            "pseudolife-mcp lease: choose run, hold, check, list, break or delegate (--help explains each)\n",
+            "pseudolife-mcp lease: choose run, hold, check, list, break or conductor (--help explains each)\n",
             true,
         );
         return Err(2);
     };
     if !matches!(
         action.as_str(),
-        "run" | "hold" | "check" | "list" | "break" | "delegate"
+        "run" | "hold" | "check" | "list" | "break" | "conductor"
     ) {
         return Err(error(
             "top",
             &format!(
-                "argument {{run,hold,check,list,break,delegate}}: invalid choice: {} (choose from 'run', 'hold', 'check', 'list', 'break', 'delegate')",
+                "argument {{run,hold,check,list,break,conductor}}: invalid choice: {} (choose from 'run', 'hold', 'check', 'list', 'break', 'conductor')",
                 repr(action)
             ),
         ));
@@ -302,7 +321,7 @@ pub fn parse(argv: &[String]) -> Result<Args, i32> {
         ]
     } else if action == "break" {
         &["--help"]
-    } else if action == "delegate" {
+    } else if action == "conductor" {
         &["--help", "--for"]
     } else if action == "run" {
         &[
@@ -433,7 +452,7 @@ pub fn parse(argv: &[String]) -> Result<Args, i32> {
                     _ => unreachable!("bounded duration option"),
                 }
             }
-        } else if action == "delegate"
+        } else if action == "conductor"
             && args.name.is_some()
             && args.agent.is_none()
             && argument_value(item, options)
@@ -447,7 +466,7 @@ pub fn parse(argv: &[String]) -> Result<Args, i32> {
                     action,
                     &format!(
                         "argument {}: a lease name is 1 to 120 characters, not blank, without control characters",
-                        if action == "delegate" {
+                        if action == "conductor" {
                             "PROJECT"
                         } else {
                             "NAME"
@@ -460,7 +479,7 @@ pub fn parse(argv: &[String]) -> Result<Args, i32> {
     }
     let mut missing = Vec::new();
     if args.name.is_none() && action != "list" {
-        missing.push(if action == "delegate" {
+        missing.push(if action == "conductor" {
             "PROJECT"
         } else {
             "NAME"
@@ -469,7 +488,7 @@ pub fn parse(argv: &[String]) -> Result<Args, i32> {
     if action == "hold" && args.while_pid.is_none() {
         missing.push("--while-pid");
     }
-    if action == "delegate" && args.agent.is_none() {
+    if action == "conductor" && args.agent.is_none() {
         missing.push("AGENT");
     }
     if !missing.is_empty() {
@@ -548,15 +567,17 @@ mod argv_tests {
                 value
             );
             assert_eq!(
-                parsed(&["delegate", "project", value]).agent.as_deref(),
+                parsed(&["conductor", "project", value]).agent.as_deref(),
                 Some(value)
             );
             assert_eq!(
-                parsed(&["delegate", value, "agent"]).name.as_deref(),
+                parsed(&["conductor", value, "agent"]).name.as_deref(),
                 Some(value)
             );
         }
-        assert_eq!(parsed(&["designate", "project", "-"]).action, "delegate");
+        for old in ["delegate", "designate"] {
+            assert_eq!(parsed(&[old, "project", "-"]).action, "conductor");
+        }
     }
 
     #[test]
