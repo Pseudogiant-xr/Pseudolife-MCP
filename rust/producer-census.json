@@ -12,7 +12,7 @@
     "docs/cortex-mcp-spec.md": "43fba1fe5e5cd3710f59d7e99b414f7b78ea15eaa70b620b23716f3fae308d32",
     "docs/dev/ci-budget.md": "21fed3dc7ba96010612ab32bb8335927d12c67150a5dbd019411f8dbaf931ba3",
     "docs/dev/dev-machines.md": "802349bb1973a19f1e9a93db4195a54fdf5e8c1c3b7a79554c4a6e5e855ba6f9",
-    "docs/dev/merge-batches.md": "95c44fb1092c68447f470cfb5ad5718a66c696e4e8da6f1a6cbe84ce51330193",
+    "docs/dev/merge-batches.md": "5ca26a343b58ab26302bd85ae51347486e2f5107a83399a5913eb3354a20cb80",
     "docs/dev/worktree-retention.md": "23464a303672be4f546ecbf7c8e357c41c4bd2c684202e05cfebec6df78d7355",
     "docs/evidence/rust-stream-c-episode-20261009.json": "6dda143104a5b745eb322041190496caa9af3b61a219620c41633f6477d15079",
     "docs/guide/agent-isolation.md": "465b0c24a386ae3a92bf1a3d46e01114db061dc6ddd4a68836512fd191ff23f4",
@@ -104,7 +104,7 @@
     "docs/specs/2026-09-12-codex-coordination.md": "bc53ec0d2cc117c9e1140227c377d9e9010d9fad5e0c217715ea40d63bf351be",
     "docs/specs/2026-10-14-delegate-mode-design.md": "fe5bf5edf1e4b96fc7684b8aca4716fe450bc52b2aa9fdcb83dc461d3af50071",
     "docs/specs/2026-10-19-merge-queue.md": "181217265899601a4205b0afd352a6ef8d94e4d56188216f47b965ef38bb7009",
-    "docs/specs/2026-10-19-self-hosted-parity-lane.md": "db45bac2735e5388f879f6bf9113d608989566ec5d2a1ab0c5afae169420951d",
+    "docs/specs/2026-10-19-self-hosted-parity-lane.md": "39cdfc17adb157852cb4e28c83da0f4f9553230e7d60cfc72187b8c6c73edb01",
     "docs/specs/2026-10-20-suite-ci-optimization-plan.md": "5dd06d09718ddc4059b5744000959b99d1da4171c98bea281527fa9c44e3eb83",
     "docs/superpowers/plans/2026-06-25-cortex-console-v2-phase0.md": "131e2b6577abedcfb73428ba2d2e53686a73334c1a2cf6b789ebb05b5ce0a7f9",
     "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md": "93274a9c8d11f869bc844967510a8e13870df5f55425f739b2545ef08ca7308b",
@@ -243,7 +243,7 @@
     "ops/install-worktree-retention.ps1": "1ff8d9a77f2cca9a19e38c89d85959a2d4ce03400e73eda3b8c79f1dabf52d29",
     "ops/install.ps1": "b0a3ea42d9d361a0f718af43e1acd1a01b12d4e86279be789f7e597ada47353a",
     "ops/install.sh": "130597f3b79ac825525ef229bd572048c2768c40a935633634d5bce12213fcb7",
-    "ops/integrate.py": "0ee5ee696fb53621c227a8b00b0be71d6563dfac0f78d939ddf2233ca44e0cea",
+    "ops/integrate.py": "d40dbb28b1f4f78dd60fae5df67a22adfd32fb61a68294f43f1f2ba7bae23b9f",
     "ops/measure_reverify_population.py": "413ff8baa0e0b25b8a727b6bead248df753d4d26e7c697aa6a0542b68715cfa5",
     "ops/migrate-pg18.ps1": "a2a8bd96ab754249395a9d42b26bfd8e6b5ecf8d6da1cd72383ebf745c0acde8",
     "ops/migrate_drop_age.py": "bad14579affef14699a3e1898afd4ba6326944f5db1e9b5c0486ee2b23153eac",
@@ -266,9 +266,9 @@
     "ops/restore_from_pt.py": "bceaeb79d8ff9a537ab41d2a8ac783a167cd370e75786275211ba5baa30c213e",
     "ops/retire_by_writer.py": "5fb2b8152e3fa249a00295714f88f5fbcb6c7d61bdd6d22ef6ad6cfb9a6ee801",
     "ops/selfhosted/runner_cleanup.py": "9725b580f842094359d185ac6e4740d6871ebb75312bbddf351311a07b0e5213",
-    "ops/selfhosted/runner_watch.py": "e9743dae96f68093e77aabb4ec38f4590ebe62ae86fefcc28cb7d44d61fe8c2c",
+    "ops/selfhosted/runner_watch.py": "58daa011b49675737b633b3998420dd6e6bfc728fad038319e39a64e759e0986",
     "ops/selfhosted/setup-linux-runner.sh": "99f406143cfe9c643f3b30d1d441e945e06be5d01bf53476e5a29087d1bcbeec",
-    "ops/selfhosted/setup-runner-watch.sh": "4560861bb5cf39285bd8862d40fd7da07a128384e8183d038749e3c9006bd001",
+    "ops/selfhosted/setup-runner-watch.sh": "0c661e7a274bfa2fcbb79236c32cb83630f66b9c2b27c0f7706da7ed4f559988",
     "ops/selfhosted/setup-vm-egress-filter.sh": "2d3bba1e3f16b97dbbbf39096aa97eb5e3a63a06c2017da160a634fef0280e0e",
     "ops/selfhosted/setup-windows-runner.ps1": "39abc4963c382af5f33c32433b8e5489d71acdd50c5e4eaf9d233b8db303d6f3",
     "ops/selfhosted/windows-egress-proof.ps1": "3289ce4646e56c413ac878a927cd91e453da0f6825d3e60c9ef682dfd8b2991c",
@@ -40318,7 +40318,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/dev/merge-batches.md:162",
+          "location": "docs/dev/merge-batches.md:165",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -40333,7 +40333,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/dev/merge-batches.md:309",
+          "location": "docs/dev/merge-batches.md:312",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -40363,7 +40363,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/integrate.py:1242",
+          "location": "ops/integrate.py:1260",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -64414,7 +64414,7 @@
     {
       "evidence": "documented",
       "kind": "environment",
-      "location": "docs/specs/2026-10-19-self-hosted-parity-lane.md:854",
+      "location": "docs/specs/2026-10-19-self-hosted-parity-lane.md:917",
       "name": "PSEUDOLIFE_PARITY_LEASE",
       "shape": {
         "channel": "environment",
@@ -64430,7 +64430,7 @@
     {
       "evidence": "documented",
       "kind": "environment",
-      "location": "docs/specs/2026-10-19-self-hosted-parity-lane.md:855",
+      "location": "docs/specs/2026-10-19-self-hosted-parity-lane.md:918",
       "name": "PSEUDOLIFE_PARITY_LOCK_DIR",
       "shape": {
         "channel": "environment",
@@ -64446,7 +64446,7 @@
     {
       "evidence": "documented",
       "kind": "environment",
-      "location": "docs/specs/2026-10-19-self-hosted-parity-lane.md:929",
+      "location": "docs/specs/2026-10-19-self-hosted-parity-lane.md:992",
       "name": "PSEUDOLIFE_PARITY_LEASE",
       "shape": {
         "channel": "environment",
@@ -64462,7 +64462,7 @@
     {
       "evidence": "documented",
       "kind": "environment",
-      "location": "docs/specs/2026-10-19-self-hosted-parity-lane.md:930",
+      "location": "docs/specs/2026-10-19-self-hosted-parity-lane.md:993",
       "name": "PSEUDOLIFE_PARITY_LOCK_DIR",
       "shape": {
         "channel": "environment",
@@ -66370,7 +66370,7 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/dev/merge-batches.md:359",
+      "location": "docs/dev/merge-batches.md:362",
       "reason": "forwarded parameters"
     },
     {
@@ -74635,17 +74635,17 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/specs/2026-10-19-self-hosted-parity-lane.md:843",
+      "location": "docs/specs/2026-10-19-self-hosted-parity-lane.md:906",
       "reason": "request target supplied dynamically or external"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/specs/2026-10-19-self-hosted-parity-lane.md:849",
+      "location": "docs/specs/2026-10-19-self-hosted-parity-lane.md:912",
       "reason": "request target supplied dynamically or external"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/specs/2026-10-19-self-hosted-parity-lane.md:923",
+      "location": "docs/specs/2026-10-19-self-hosted-parity-lane.md:986",
       "reason": "request target supplied dynamically or external"
     },
     {
