@@ -5,6 +5,7 @@ reading the budget, then closed with the overshoot unread, so its stack reset
 the connection; it now discards the rest and closes by lingering. These
 servers still close that way over real sockets.
 """
+from contextlib import nullcontext
 import http.client
 import os
 import socket
@@ -114,14 +115,11 @@ def test_body_limit_refusal_survives_the_reset_repeatedly(overshoot, request):
     listener, seen = budget_server(4 * 1024 * 1024)
     body = b"a" * (4 * 1024 * 1024 + overshoot)
     with listener:
-        lost = sample_refusals(listener, body, 300)
-    request.node.user_properties.extend([
-        ("refusal_calls", 300), ("refusal_received", 300 - lost), ("refusal_reset_losses", lost),
-    ])
+        sample_refusals(listener, body, 300, properties=request.node.user_properties)
     assert seen == [4 * 1024 * 1024] * 300
 
 
-def sample_refusals(listener, body, calls, *, windows=os.name == "nt"):
+def sample_refusals(listener, body, calls, *, windows=os.name == "nt", properties=None):
     """Sample once per connection; only Winsock's reset/abort may lose an answer."""
     lost = 0
     for _ in range(calls):
@@ -135,6 +133,10 @@ def sample_refusals(listener, body, calls, *, windows=os.name == "nt"):
             lost += 1
             continue
         assert (r["status"], r["body"]) == (413, REFUSAL)
+    if properties is not None:
+        properties.extend([
+            ("refusal_calls", calls), ("refusal_received", calls - lost), ("refusal_reset_losses", lost),
+        ])
     assert lost * 2 < calls, f"{lost} of {calls} refusals lost to the reset"
     return lost
 
@@ -194,6 +196,30 @@ def test_reset_sample_requires_a_majority_of_complete_refusals(losses, total, mo
     with pytest.raises(AssertionError, match=f"{losses} of {total} refusals lost"):
         sample_refusals(None, b"body", total, windows=True)
     assert len(calls) == total
+
+
+def test_reset_sample_records_counters_before_rejecting_losses(monkeypatch, request):
+    calls = []
+    sample = sample_refusals
+
+    def send(listener, body):
+        calls.append(1)
+        if len(calls) <= 150:
+            raise reset_error()
+        return {"status": 413, "body": REFUSAL}
+
+    def windows_sample(*args, **kwargs):
+        return sample(*args, windows=True, **kwargs)
+
+    monkeypatch.setattr(sys.modules[__name__], "post", send)
+    monkeypatch.setattr(sys.modules[__name__], "sample_refusals", windows_sample)
+    monkeypatch.setattr(sys.modules[__name__], "budget_server", lambda budget: (nullcontext(), []))
+    with pytest.raises(AssertionError, match="150 of 300 refusals lost"):
+        test_body_limit_refusal_survives_the_reset_repeatedly(47, request)
+    assert len(calls) == 300
+    assert request.node.user_properties == [
+        ("refusal_calls", 300), ("refusal_received", 150), ("refusal_reset_losses", 150),
+    ]
 
 
 @pytest.mark.parametrize("response", [
