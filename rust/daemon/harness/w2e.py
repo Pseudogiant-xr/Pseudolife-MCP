@@ -5968,6 +5968,8 @@ def with_pull_token(op: dict, token: str | None) -> dict:
 
 
 def run_op(op: dict, port: int, mcp: Mcp, dsn: str) -> dict | None:
+    if op["op"] == "console_dream_gate":
+        return w2e_console_dream.gate(op, port, sys.modules[__name__])
     if op["op"] == "sleep":
         time.sleep(op["s"])
         return {"isError": False, "value": None}
@@ -6274,6 +6276,10 @@ def _run_live(name: str, scn: dict, tag: str, binary: Path, root: Path, record: 
                 elif op["op"] == "restart":
                     clients = restart_sides(op, scn, procs, homes, envs, stubs, binary)
                     py = rs = {"isError": False, "value": None}
+                elif op["op"] == "console_dream_concurrent":
+                    py, rs = [w2e_console_dream.concurrent(procs[side].port, dsns[side],
+                              clients[side], stubs[side], sys.modules[__name__])
+                              for side in ("python", "rust")]
                 elif op["op"] == "counters":
                     if op["stop"]:
                         for d in procs.values():
@@ -6317,7 +6323,7 @@ def _run_live(name: str, scn: dict, tag: str, binary: Path, root: Path, record: 
             sp, np_, ep = normalize_state(raw_py, before["python"], tsm_py)
             sr, nr, er = normalize_state(raw_rs, before["rust"], tsm_rs)
             if op["op"] != "init":
-                if op.get("name") == "memory_dream":
+                if op.get("name") == "memory_dream" or w2e_console_dream.is_dream(op):
                     row["diffs"] += idle_diffs(row["python"], row["rust"],
                                                max_wall + IDLE_SLACK_S)
                     row["diffs"] += orphan_age_diffs(row["python"], row["rust"])
@@ -6434,7 +6440,11 @@ def run_golden(name: str, binary: Path, root: Path, tol: dict, owned: list[str])
         for i, rec in enumerate(golden["steps"]):
             op = rec["op"]
             row = {"step": i, "op": op, "diffs": []}
-            rs = run_op(op, d.port, client, dsn) if op["op"] != "init" else None
+            if op["op"] == "console_dream_concurrent":
+                rs = w2e_console_dream.concurrent(d.port, dsn, client, stubs["rust"],
+                                                  sys.modules[__name__])
+            else:
+                rs = run_op(op, d.port, client, dsn) if op["op"] != "init" else None
             rs = w2e_documents.scrub(rs)
             if stubs:
                 if rs is not None:
@@ -6449,6 +6459,8 @@ def run_golden(name: str, binary: Path, root: Path, tol: dict, owned: list[str])
             if rs is not None and w2e_documents.is_search(op):
                 rs = w2e_documents.answer_tokens(rs, clock_ranks(raw))
             if rs is not None:
+                if w2e_console_dream.is_dream(op):
+                    rs = dream_tokens(rs, ts_tokens(raw))
                 row["rust"] = rename_prefixes(rs, er)
                 row["diffs"] += compare_response(rec["python"], row["rust"], tol, stats)
             unpack_numeric(rec["numeric_new"], numeric)
@@ -6497,6 +6509,11 @@ MUTANTS += w2e_episodes.MUTANTS
 
 import w2e_reads
 SCENARIOS.update(w2e_reads.register(sys.modules[__name__]))
+
+import w2e_console_dream  # noqa: E402
+
+SCENARIOS.update(w2e_console_dream.register(sys.modules[__name__]))
+
 
 def main() -> int:
     ap = argparse.ArgumentParser()

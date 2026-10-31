@@ -557,7 +557,16 @@ async fn api(
                     uvicorn_500()
                 };
             };
-            match parse_body_json(text) {
+            // The dream Console adapter uses Python json.loads, including
+            // its non-finite constants, before int(limit) reports its error.
+            let parsed = parse_body_json(text).or_else(|error| {
+                if path == "/api/dream/run" {
+                    crate::mcp::py_loads::loads(text).ok_or(error)
+                } else {
+                    Err(error)
+                }
+            });
+            match parsed {
                 Err(_) => return json_response(400, &json!({"error": "invalid_json"})),
                 Ok(v) if !v.is_object() => {
                     return json_response(400, &json!({"error": "body_must_be_object"}));
