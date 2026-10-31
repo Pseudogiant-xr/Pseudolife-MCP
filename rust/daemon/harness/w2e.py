@@ -5976,6 +5976,8 @@ def with_pull_token(op: dict, token: str | None) -> dict:
 
 
 def run_op(op: dict, port: int, mcp: Mcp, dsn: str) -> dict | None:
+    if op["op"] == "console_dream_gate":
+        return w2e_console_dream.gate(op, port, sys.modules[__name__])
     if op["op"] == "sleep":
         time.sleep(op["s"])
         return {"isError": False, "value": None}
@@ -6282,6 +6284,10 @@ def _run_live(name: str, scn: dict, tag: str, binary: Path, root: Path, record: 
                 elif op["op"] == "restart":
                     clients = restart_sides(op, scn, procs, homes, envs, stubs, binary)
                     py = rs = {"isError": False, "value": None}
+                elif op["op"] == "console_dream_concurrent":
+                    py, rs = [w2e_console_dream.concurrent(procs[side].port, dsns[side],
+                              clients[side], stubs[side], sys.modules[__name__])
+                              for side in ("python", "rust")]
                 elif op["op"] == "counters":
                     if op["stop"]:
                         for d in procs.values():
@@ -6325,7 +6331,7 @@ def _run_live(name: str, scn: dict, tag: str, binary: Path, root: Path, record: 
             sp, np_, ep = normalize_state(raw_py, before["python"], tsm_py)
             sr, nr, er = normalize_state(raw_rs, before["rust"], tsm_rs)
             if op["op"] != "init":
-                if op.get("name") == "memory_dream":
+                if op.get("name") == "memory_dream" or w2e_console_dream.is_dream(op):
                     row["diffs"] += idle_diffs(row["python"], row["rust"],
                                                max_wall + IDLE_SLACK_S)
                     row["diffs"] += orphan_age_diffs(row["python"], row["rust"])
@@ -6422,10 +6428,17 @@ def run_golden(name: str, binary: Path, root: Path, tol: dict, owned: list[str])
     tag = name.replace("-", "_")
     db = pg.name(f"pl_cf_w2e_{tag}_rs")
     owned.append(db)
-    dsn = pg.create(db)
+    console_dream = name.startswith("console-dream-")
+    # These recordings start from the Python constructor's empty template,
+    # including its declared migration metadata, just as the live run does.
+    stubs = start_stubs(scn, ("seed", "rust") if console_dream else ("rust",))
+    template = prepare_template(scn, tag, root, owned, stubs.get("seed")) if console_dream else None
+    dsn = pg.create(db, template=template)
+    if console_dream:
+        w2e_console_dream.seed_replay(dsn, golden)
     before = dbstate.dump(dsn)
-    home = daemons.make_home(root, f"{tag}-rs", scn.get("config"))
-    stubs = start_stubs(scn, ("rust",))
+    config = scenario_config(scn, stubs.get("rust")) if console_dream else scn.get("config")
+    home = daemons.make_home(root, f"{tag}-rs", config)
     renv = w1a.rust_env(side_env(scn, dsn, extractor_env(scn, stubs.get("rust"))))
     d = daemons.rust_daemon(binary, home, daemons.free_port(), daemons.base_env(home, renv))
     steps, stats, numeric = [], {}, {}
@@ -6434,15 +6447,24 @@ def run_golden(name: str, binary: Path, root: Path, tol: dict, owned: list[str])
         # so its writer-lease epoch is 2: boot the Rust bank twice as well.
         d.start(300)
         w1a.wait_settled([d.port], token=TOKEN)
-        d.stop()
-        d.start(300)
-        w1a.wait_settled([d.port], token=TOKEN)
+        if not console_dream:
+            d.stop()
+            d.start(300)
+            w1a.wait_settled([d.port], token=TOKEN)
+        elif warmup_expected(scn):
+            diffs = wait_warmups({"rust": dsn}, {"rust": before})
+            if diffs:
+                raise AssertionError(diffs)
         client = Mcp(d.port)
         client.init()
         for i, rec in enumerate(golden["steps"]):
             op = rec["op"]
             row = {"step": i, "op": op, "diffs": []}
-            rs = run_op(op, d.port, client, dsn) if op["op"] != "init" else None
+            if op["op"] == "console_dream_concurrent":
+                rs = w2e_console_dream.concurrent(d.port, dsn, client, stubs["rust"],
+                                                  sys.modules[__name__])
+            else:
+                rs = run_op(op, d.port, client, dsn) if op["op"] != "init" else None
             rs = w2e_documents.scrub(rs)
             if stubs:
                 if rs is not None:
@@ -6453,10 +6475,13 @@ def run_golden(name: str, binary: Path, root: Path, tol: dict, owned: list[str])
                 row["extractor"] = {"rust": extractor_summary(sent)}
                 row["diffs"] += extractor_unanswered("rust", sent)
             raw = dbstate.dump(dsn)
-            sr, nr, er = normalize_state(raw, before)
+            sr, nr, er = normalize_state(raw, before, ts_tokens(raw) if console_dream else None)
             if rs is not None and w2e_documents.is_search(op):
                 rs = w2e_documents.answer_tokens(rs, clock_ranks(raw))
             if rs is not None:
+                if console_dream and (w2e_console_dream.is_dream(op)
+                                      or op.get("name") == "memory_dream"):
+                    rs = dream_tokens(rs, ts_tokens(raw))
                 row["rust"] = rename_prefixes(rs, er)
                 row["diffs"] += compare_response(rec["python"], row["rust"], tol, stats)
             unpack_numeric(rec["numeric_new"], numeric)
@@ -6505,6 +6530,11 @@ MUTANTS += w2e_episodes.MUTANTS
 
 import w2e_reads
 SCENARIOS.update(w2e_reads.register(sys.modules[__name__]))
+
+import w2e_console_dream  # noqa: E402
+
+SCENARIOS.update(w2e_console_dream.register(sys.modules[__name__]))
+
 
 def main() -> int:
     ap = argparse.ArgumentParser()
