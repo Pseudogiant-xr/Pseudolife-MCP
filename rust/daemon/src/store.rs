@@ -44,6 +44,23 @@ impl WriteTasks {
         self.tasks.spawn(task)
     }
 
+    /// Run CPU work that mutates resident state through the write admission
+    /// gate. Its lifetime includes the blocking closure, even if its caller
+    /// drops the join handle while shutting down.
+    pub fn spawn_blocking<F, T>(&self, task: F) -> tokio::task::JoinHandle<T>
+    where
+        F: FnOnce() -> T + Send + 'static,
+        T: Send + 'static,
+    {
+        let closed = self.closed.read().expect("write admission lock");
+        if *closed {
+            let refused = tokio::spawn(std::future::pending::<T>());
+            refused.abort();
+            return refused;
+        }
+        self.tasks.spawn_blocking(task)
+    }
+
     pub async fn drain(&self) {
         self.tasks.close();
         self.tasks.wait().await;
@@ -720,6 +737,45 @@ mod admission_tests {
     use super::WriteTasks;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
+
+    #[tokio::test]
+    async fn blocking_counter_update_drains_before_the_final_snapshot() {
+        let writes = WriteTasks::default();
+        let count = Arc::new(std::sync::atomic::AtomicU64::new(0));
+        let changed = count.clone();
+        let (started, entered) = tokio::sync::oneshot::channel();
+        let (release, wait) = std::sync::mpsc::channel();
+        let task = writes.spawn_blocking(move || {
+            started.send(()).unwrap();
+            wait.recv().unwrap();
+            changed.store(1, Ordering::SeqCst);
+        });
+        entered.await.unwrap();
+        drop(task); // A disconnected caller must not detach the mutation.
+        writes.close_admission();
+        let final_snapshot = async {
+            writes.drain().await;
+            count.load(Ordering::SeqCst)
+        };
+        tokio::pin!(final_snapshot);
+        let pending = futures::poll!(&mut final_snapshot).is_pending();
+        // Release even on failure, so the test runtime cannot hang on the
+        // owned blocking task. No elapsed-time assertion decides the result.
+        release.send(()).unwrap();
+        assert!(pending, "save must wait for the admitted counter update");
+        assert_eq!(final_snapshot.await, 1);
+    }
+
+    #[tokio::test]
+    async fn blocking_counter_update_after_shutdown_is_refused() {
+        let writes = WriteTasks::default();
+        writes.close_admission();
+        let count = Arc::new(std::sync::atomic::AtomicU64::new(0));
+        let changed = count.clone();
+        let task = writes.spawn_blocking(move || changed.fetch_add(1, Ordering::SeqCst));
+        assert!(task.await.is_err_and(|e| e.is_cancelled()));
+        assert_eq!(count.load(Ordering::SeqCst), 0);
+    }
 
     #[tokio::test]
     async fn a_write_after_admission_closes_is_refused_and_never_runs() {

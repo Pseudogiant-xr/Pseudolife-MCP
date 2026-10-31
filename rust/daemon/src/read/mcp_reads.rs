@@ -240,6 +240,9 @@ pub(crate) async fn get_entry(
     id: i64,
     session: (Option<String>, Option<String>),
 ) -> anyhow::Result<Value> {
+    // The durable bump and its resident mirror must be indivisible with
+    // the autosave's bulk access-count snapshot and write.
+    let _write = ready.write.lock().await;
     let db = ready.storage.client();
     // The read and its bump in one transaction, the row locked: Python
     // holds the service lock across both, so a concurrent get answers
