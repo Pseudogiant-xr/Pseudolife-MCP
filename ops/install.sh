@@ -99,6 +99,16 @@
 #                                    run also takes a code pasted where it
 #                                    asks for the token, which keeps it off
 #                                    the command line (and shell history)
+#   --client-update-schedule ask|yes|no|HH:MM
+#                                    client-only, Linux: keep this machine's
+#                                    clients on the daemon's release with a
+#                                    daily systemd --user timer
+#                                    (pseudolife-mcp update --schedule): ask
+#                                    (default) prompts once, default no, and
+#                                    unattended runs skip it and print the
+#                                    command; yes sets it up at 04:30, HH:MM
+#                                    at that time; no skips it. A job already
+#                                    in place is left alone
 # One token file is one principal: every client a run wires shares it. For
 # per-client attribution on the board, run the installer once per client,
 # each run with that client's own token file.
@@ -148,6 +158,7 @@ TOKEN_FILE=""
 CLIENT_ONLY=""
 READ_TOKEN=""
 PAIRING_CODE=""
+CLIENT_UPDATE_SCHEDULE=ask
 
 usage() {
     sed -n '/^# >>> usage >>>$/,/^# <<< usage <<<$/p' "$0" \
@@ -180,6 +191,7 @@ while [ $# -gt 0 ]; do
         --client-only) CLIENT_ONLY=1; shift ;;
         --read-token) READ_TOKEN=1; shift ;;
         --pairing-code) PAIRING_CODE="$2"; shift 2 ;;
+        --client-update-schedule) CLIENT_UPDATE_SCHEDULE="$2"; shift 2 ;;
         -h|--help)   usage 0 ;;
         *) echo "unknown argument: $1" >&2; usage ;;
     esac
@@ -311,6 +323,17 @@ esac
 case "$FIREWALL_RULE" in ask|yes|no) ;; *)
     echo "invalid --firewall-rule '$FIREWALL_RULE' (ask|yes|no)" >&2; exit 2 ;;
 esac
+# >>> client update schedule flag >>>
+CLIENT_UPDATE_SCHEDULE="$(printf '%s' "$CLIENT_UPDATE_SCHEDULE" | tr '[:upper:]' '[:lower:]')"
+case "$CLIENT_UPDATE_SCHEDULE" in
+    ask|yes|no) ;;
+    *)
+        if ! [[ $CLIENT_UPDATE_SCHEDULE =~ ^([01]?[0-9]|2[0-3]):[0-5][0-9]$ ]]; then
+            echo "invalid --client-update-schedule '$CLIENT_UPDATE_SCHEDULE' (ask|yes|no, or a time of day as HH:MM)" >&2
+            exit 2
+        fi ;;
+esac
+# <<< client update schedule flag <<<
 
 # Both are needed from here on: the client-only mode block asks this
 # checkout's shim code whether a daemon URL is loopback.
@@ -458,7 +481,9 @@ show_client_only_notes() {
     from the daemon's environment writes the new token into its
     token file here (the shims and the Claude Code hooks read it on
     every call), and into Codex's own copy in ~/.codex/pseudolife/token.
-  - A daemon upgrade there: run the update command below with
+  - A daemon upgrade there: the daily client update job (offered
+    below, on Linux and Windows) moves the shim to the daemon's
+    release; without it, run the update command below with
     --clients-only here, so the shim matches the daemon.
 PL_CLIENT_ONLY
 }
@@ -802,6 +827,14 @@ elif [ -n "$TOKEN_FILE" ] || [ -n "$READ_TOKEN" ] || [ -n "${PAIRING_CODE:-}" ];
     echo "client-only install: --token-file, --read-token and --pairing-code name a remote daemon's credential, and a local install keeps its token in ops/.env. Add --client-only --daemon-url <url>, or drop them" >&2
     exit 2
 fi
+# The client update job follows a daemon on another machine; a daemon host
+# keeps its own job (pseudolife-mcp update --schedule there).
+case "${CLIENT_UPDATE_SCHEDULE:-ask}" in ask|no) ;; *)
+    if [ -z "$CLIENT_ONLY" ]; then
+        echo "--client-update-schedule ${CLIENT_UPDATE_SCHEDULE} asks for the client update job, which only a client-only install (the daemon runs elsewhere) gets; on the daemon's host, pseudolife-mcp update --schedule HH:MM installs the daemon's own job. Drop it, or add --client-only --daemon-url <url>" >&2
+        exit 2
+    fi ;;
+esac
 # <<< client-only mode <<<
 
 # ── 1. provider selection (before preflight, so it checks what you picked) ─
@@ -3387,7 +3420,7 @@ if [ -z "$CLIENT_ONLY" ]; then offer_maintainer_setup; fi
 # The installers do not put the shim launcher's directory on PATH, so a bare
 # `pseudolife-mcp` finds an older pipx install, or nothing: name the shim this
 # run installed by its path until PATH finds it.
-print_update_line() {
+update_command() {  # sets upd_cmd, and upd_path while PATH does not find the shim this run installed
     upd_cmd="pseudolife-mcp"
     upd_path=""
     if [ -n "${SHIM_PATH:-}" ]; then
@@ -3397,8 +3430,16 @@ print_update_line() {
             upd_path=" (add $(dirname "$SHIM_PATH") to PATH to run it as plain pseudolife-mcp)"
         fi
     fi
+}
+print_update_line() {
+    update_command
     if [ -n "${CLIENT_ONLY:-}" ]; then
-        echo "Update this machine's clients later with one command, no checkout needed: $upd_cmd update --clients-only (installs the daemon's release as a new shim runtime and refreshes the plugin cache; the daemon is updated on its own host)$upd_path."
+        if [ "${CLIENT_SCHEDULE_STATE:-}" = scheduled ]; then
+            upd_lead="The daily client update job keeps this machine's clients on the daemon's release; to update them now, no checkout needed:"
+        else
+            upd_lead="Update this machine's clients later with one command, no checkout needed:"
+        fi
+        echo "$upd_lead $upd_cmd update --clients-only (installs the daemon's release as a new shim runtime and refreshes the plugin cache; the daemon is updated on its own host)$upd_path."
         if [ -n "${PAIRING_HINT_URL:-}" ]; then
             echo "If another machine uses this same token, rotating it breaks both and neither can be revoked alone: give each machine its own with pseudolife-mcp invite <name> on the daemon's host and $upd_cmd connect $PAIRING_HINT_URL --read-code here. A machine paired with invite, or given a token no other machine uses, already has its own: nothing to do."
         fi
@@ -3407,6 +3448,137 @@ print_update_line() {
     fi
 }
 # <<< update line <<<
+# >>> client update schedule offer >>>
+# A client-only machine's shim and plugin move to the daemon's release only
+# when something moves them: `pseudolife-mcp update --schedule` registers the
+# daily job that does (pseudolife_memory/unattended_update.py). That is a
+# persistent job the user did not choose by running the installer, so it is
+# asked once, default no, and --client-update-schedule answers it. 04:30 is
+# an hour after the 03:30 the docs give a daemon host's own job, so a daemon
+# updated overnight is matched the same morning. --schedule installs a
+# systemd --user timer here (a Windows task from install.ps1), never on macOS.
+CLIENT_SCHEDULE_DEFAULT=04:30
+CLIENT_SCHEDULE_UNIT=pseudolife-client-update   # unattended_update.CLIENT_UNIT_NAME
+CLIENT_SCHEDULE_CONTAINER=pseudolife-mcp-daemon  # update_cli.DAEMON_CONTAINER
+CLIENT_SCHEDULE_STATE=""
+# Status 0 when the job's timer is installed and enabled, 2 when its files
+# are there but the timer is not enabled (it never runs), 1 when there is
+# none; sets its path, and with 0 the daemon URL and time it runs with.
+client_schedule_existing() {
+    sched_units="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
+    CLIENT_SCHEDULE_WHERE="$sched_units/$CLIENT_SCHEDULE_UNIT.timer"
+    [ -f "$CLIENT_SCHEDULE_WHERE" ] || return 1
+    systemctl --user is-enabled --quiet "$CLIENT_SCHEDULE_UNIT.timer" >/dev/null 2>&1 || return 2
+    CLIENT_SCHEDULE_URL="$(sed -n 's/^ExecStart=.*--daemon-url[= ]"\{0,1\}\([^" ]*\).*/\1/p' \
+        "$sched_units/$CLIENT_SCHEDULE_UNIT.service" 2>/dev/null | head -n 1 || true)"
+    # --schedule leaves the default daemon URL off the command line.
+    CLIENT_SCHEDULE_URL="${CLIENT_SCHEDULE_URL:-http://127.0.0.1:8765}"
+    CLIENT_SCHEDULE_TIME="$(sed -n 's/^OnCalendar=[^ ]* \([0-9][0-9]:[0-9][0-9]\).*/\1/p' \
+        "$CLIENT_SCHEDULE_WHERE" 2>/dev/null | head -n 1 || true)"
+    return 0
+}
+offer_client_update_schedule() {
+    sched_mode="$(printf '%s' "${CLIENT_UPDATE_SCHEDULE:-ask}" | tr '[:upper:]' '[:lower:]')"
+    sched_url="${CLIENT_DAEMON_URL%/}"
+    case "$sched_mode" in
+        ask|yes|no) sched_time="$CLIENT_SCHEDULE_DEFAULT" ;;
+        *) sched_time="$(printf '%02d:%s' "$((10#${sched_mode%%:*}))" "${sched_mode#*:}")" ;;
+    esac
+    ensure_shim
+    update_command
+    sched_cmd="$upd_cmd update --schedule $sched_time --daemon-url $sched_url"
+    if [ "$sched_mode" = no ]; then
+        CLIENT_SCHEDULE_STATE=declined
+        echo "Automatic client updates: not set up (--client-update-schedule no); $sched_cmd sets them up later."
+        return 0
+    fi
+    case "$(uname -s 2>/dev/null || true)" in
+        Linux) ;;
+        MINGW*|MSYS*|CYGWIN*)
+            echo "Automatic client updates: not offered from Git Bash; ops\\install.ps1 offers them on Windows, or $sched_cmd sets them up."
+            return 0 ;;
+        *)
+            if [ "$sched_mode" != ask ]; then
+                echo "Automatic client updates: --client-update-schedule $sched_mode does nothing here, since the daily job needs systemd (Linux) or Task Scheduler (Windows); run $upd_cmd update --clients-only after the daemon upgrades." >&2
+            fi
+            return 0 ;;
+    esac
+    if ! systemctl --user show-environment >/dev/null 2>&1; then
+        CLIENT_SCHEDULE_STATE=skipped
+        echo "Automatic client updates: not set up, since no systemd user manager answers here (systemctl --user) to run the daily job; once one does (a login session, or loginctl enable-linger), $sched_cmd sets them up."
+        return 0
+    fi
+    if [ -z "${SHIM_OK:-}" ] || [ -z "${SHIM_PATH:-}" ]; then
+        CLIENT_SCHEDULE_STATE=failed
+        echo "WARNING: the pseudolife-mcp shim is unavailable (see above), so automatic client updates were not set up: run pseudolife-mcp update --schedule $sched_time --daemon-url $sched_url once it is installed." >&2
+        return 0
+    fi
+    # --schedule takes the client path only from a shim runtime.
+    if [ "${SHIM_MANAGER_KIND:-}" != runtime ]; then
+        CLIENT_SCHEDULE_STATE=skipped
+        echo "Automatic client updates: not offered, since the shim is not installed as a shim runtime here (see above for why), and pseudolife-mcp update --schedule installs the client job only from one; re-run the installer once the runtime installs to be offered them."
+        return 0
+    fi
+    # With a daemon container here, even a stopped one, --schedule installs
+    # the daemon host's job, which this question never offered.
+    if command -v docker >/dev/null 2>&1 &&
+            docker inspect -f '{{.Id}}' "$CLIENT_SCHEDULE_CONTAINER" >/dev/null 2>&1; then
+        CLIENT_SCHEDULE_STATE=skipped
+        echo "Automatic client updates: not offered, since this machine still has a local daemon container ($CLIENT_SCHEDULE_CONTAINER), so pseudolife-mcp update --schedule here would install the daemon host's job rather than the client's; once that container is removed (docker rm $CLIENT_SCHEDULE_CONTAINER keeps its volumes and bank), $sched_cmd sets them up."
+        return 0
+    fi
+    sched_found=0
+    client_schedule_existing || sched_found=$?
+    if [ "$sched_found" = 0 ]; then
+        sched_at="${CLIENT_SCHEDULE_TIME:-its set time}"
+        sched_move=""
+        if [ "${CLIENT_SCHEDULE_URL%/}" != "$sched_url" ]; then
+            CLIENT_SCHEDULE_STATE=elsewhere
+            sched_move=", following the daemon at $CLIENT_SCHEDULE_URL rather than $sched_url"
+            case "$sched_mode" in ask|yes) sched_time="${CLIENT_SCHEDULE_TIME:-$sched_time}" ;; esac
+        else
+            CLIENT_SCHEDULE_STATE=scheduled
+            case "$sched_mode" in ask|yes) ;; *)
+                [ "$sched_time" = "${CLIENT_SCHEDULE_TIME:-}" ] || sched_move=", rather than at $sched_time" ;;
+            esac
+        fi
+        if [ -n "$sched_move" ]; then
+            echo "Automatic client updates: already scheduled (daily at $sched_at, $CLIENT_SCHEDULE_WHERE)$sched_move; nothing changed: $upd_cmd update --schedule $sched_time --daemon-url $sched_url moves it."
+        else
+            echo "Automatic client updates: already scheduled (daily at $sched_at, $CLIENT_SCHEDULE_WHERE); nothing changed."
+        fi
+        return 0
+    fi
+    if [ "$sched_found" = 2 ]; then
+        echo "Automatic client updates: $CLIENT_SCHEDULE_WHERE is installed but its timer is not enabled, so it never runs."
+    fi
+    if [ "$sched_mode" = ask ]; then
+        if ! bank_can_ask; then
+            CLIENT_SCHEDULE_STATE=skipped
+            echo "Automatic client updates: not set up (no terminal to ask on): $sched_cmd sets them up, or re-run with --client-update-schedule yes."
+            return 0
+        fi
+        bank_read "A daily job at $sched_time can keep this machine's Pseudolife clients on the daemon's release: it runs pseudolife-mcp update --unattended, which moves the shim and plugin to the release the daemon at $sched_url runs, never past it. Set it up? [y/N]: " ||
+            BANK_REPLY=""
+        case "$(bank_trimmed "$BANK_REPLY")" in
+            y|Y|yes|Yes|YES) ;;
+            *)
+                CLIENT_SCHEDULE_STATE=declined
+                echo "  Not now: $sched_cmd sets them up later (any time of day as HH:MM)."
+                return 0 ;;
+        esac
+    fi
+    sched_rc=0
+    "$SHIM_PATH" update --schedule "$sched_time" --daemon-url "$sched_url" </dev/null || sched_rc=$?
+    if [ "$sched_rc" -ne 0 ]; then
+        CLIENT_SCHEDULE_STATE=failed
+        echo "WARNING: pseudolife-mcp update --schedule exited $sched_rc (see its message above), so nothing was scheduled. The install itself is complete: run $sched_cmd once that is fixed." >&2
+        return 0
+    fi
+    CLIENT_SCHEDULE_STATE=scheduled
+}
+# <<< client update schedule offer <<<
+if [ -n "$CLIENT_ONLY" ]; then offer_client_update_schedule; fi
 print_update_line
 if [ -n "$TUNNEL" ]; then
     if [ -z "${SHIM_PATH:-}" ]; then
