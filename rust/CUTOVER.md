@@ -8,7 +8,8 @@ independent batches run at the same time, and every decision that is the
 maintainer's to make is named. Nothing here authorizes a default switch, a
 release, an update, a deploy or any live-bank change.
 
-Status audit: master `75a8015e`, 2026-11-01, derived from the registries,
+Status audit: master `75a8015e`, rechecked unchanged after merging
+`23432a52` on 2026-11-01, derived from the registries,
 route dispatch, services and workflow commands, not release notes. Counts
 mean implemented bodies, not acceptance closure. The ordered plan and its
 2026-10-23 decisions remain the planning baseline; dated notes below identify
@@ -45,7 +46,7 @@ count commands. Per-item evidence remains in the [parity register](parity/).
 | # | Blocker | Status and code evidence | Remaining batch |
 |---|---|---|---|
 | 1 | Tokenless MCP Host/Origin rebinding | **Closed**: `routes/mcp.rs` mounts tokenless MCP; `mcp/security` checks the allowlist, with legitimate near misses and refusals in route tests and `mcp_ci.py`'s tokenless corpus (#987). | B6 landed |
-| 2 | Reference store/document tools | **Closed**: schema v57 added `reference_chunks` and `cms_counters` (#903); current schema is v58. `documents/` serves ingest/search (#934), and `read/search` and stats include references (#939); PDFium parity/provisioning followed in #965/#967. | B7 implementation landed; installed migration proof remains B11 |
+| 2 | Reference store/document tools | **Closed**: schema v57 added `reference_chunks` and `cms_counters` (#903); current schema is v58. `documents.rs` serves ingest/search (#934), and `read/search.rs` and stats include references (#939); PDFium parity/provisioning followed in #965/#967. | B7 implementation landed; installed migration proof remains B11 |
 | 3 | W2F-PAIRING-HTTP | **Closed**: `routes/pair.rs` calls `principals::redeem`, publishes the principal, and owns redemption across disconnect, with saturation/refund tests (#1001). | B5 landed |
 | 4 | W2F-CLOCK-RETRY | **Closed**: `board/dispatch.rs` calls `Service::refresh_writer_session` before retry (#1015); `board/clock_retry_tests.rs` covers reconnect and fencing. The forced half-open reprobe outcome remains unproved, and captured-epoch timing remains declared. | B5 landed |
 | 5 | W2F-SHARED-HLC | **Closed**: `board/dispatch.rs::stamp` uses `Ready::tick_hlc`; `board/clock_tests.rs` interleaves board and memory stamps (#993). | B5 landed |
