@@ -1,5 +1,10 @@
 # HTTP-WRITES
 
+> Archival note: [D9 / Proposal A / B2r](../CUTOVER.md) (2026-10-23)
+> supersedes the route scope below: `POST /api/lessons/restore` and `POST /api/world/restore`
+> deprecated for removal in a later release; use `memory_graph_review(action="restore_slot")` instead.
+> Python handlers remain unchanged; Rust keeps its declared `501` responses.
+
 Source: `3b4de2c515bee07e97cd35b6e1473ea48511ec77`. Every source location refers to that commit. This dossier inventories the complete ConsoleRoutes POST registry and config persistence implementation; the transitive storage graph for delegated service mutations is **incomplete** and belongs to the named owner slices. No tests or harness cells were run.
 
 ## 1. What the row promises
