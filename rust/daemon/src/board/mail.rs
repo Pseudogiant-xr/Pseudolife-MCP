@@ -516,6 +516,23 @@ impl Store {
         credential: &str,
         args: SendArgs<'_>,
     ) -> Result<Value> {
+        let tx = client.transaction().await?;
+        let result = self
+            .send_in(&tx, principal, agent_id, credential, args)
+            .await?;
+        super::db::commit(tx).await?;
+        Ok(result)
+    }
+
+    /// Send within the signed action's transaction, sharing its rollback.
+    pub(crate) async fn send_in(
+        &self,
+        tx: &tokio_postgres::Transaction<'_>,
+        principal: &str,
+        agent_id: &str,
+        credential: &str,
+        args: SendArgs<'_>,
+    ) -> Result<Value> {
         if args.notice && principal != DAEMON_PRINCIPAL {
             return Err(BoardError::code("invalid_request"));
         }
@@ -602,19 +619,18 @@ impl Store {
         if maintainer && (fanout.is_some() || !to.as_deref().is_some_and(is_full_agent_id)) {
             return Err(BoardError::code("invalid_recipient"));
         }
-        let tx = client.transaction().await?;
         let now = now();
         let sender = self
-            .auth(&tx, principal, agent_id, credential, false)
+            .auth(tx, principal, agent_id, credential, false)
             .await?;
         if sender.parent_thread.is_some() {
             return Err(BoardError::detail("child_send_refused", CHILD_SEND_REFUSED));
         }
-        let existing = self.existing(&tx, agent_id, &request_id).await?;
+        let existing = self.existing(tx, agent_id, &request_id).await?;
         if !existing.is_empty() {
             return self
                 .replayed(
-                    &tx,
+                    tx,
                     &existing,
                     to.as_deref(),
                     fanout.is_some(),
@@ -629,7 +645,7 @@ impl Store {
         let targets: Vec<String> = if to.is_none() {
             let rt = self
                 .resolve_message(
-                    &tx,
+                    tx,
                     reply_to.as_deref().expect("reply required"),
                     None,
                     agent_id,
@@ -652,7 +668,7 @@ impl Store {
         } else if fanout.is_none() {
             let target = self
                 .resolve_agent(
-                    &tx,
+                    tx,
                     to.as_deref().expect("direct send"),
                     "recipient_not_found",
                     "ambiguous_recipient",
@@ -661,7 +677,7 @@ impl Store {
             if let Some(rt) = &reply_to {
                 reply_to = Some(
                     self.resolve_message(
-                        &tx,
+                        tx,
                         rt,
                         Some(&target),
                         agent_id,
@@ -674,9 +690,9 @@ impl Store {
             vec![target]
         } else {
             let target = fanout.as_ref().expect("burst");
-            let rows = self.fanout_rows(&tx, agent_id, target, now, None).await?;
+            let rows = self.fanout_rows(tx, agent_id, target, now, None).await?;
             if rows.len() as i64 > FANOUT_MAX {
-                let n = self.fanout_count(&tx, agent_id, target, now).await?;
+                let n = self.fanout_count(tx, agent_id, target, now).await?;
                 return Err(BoardError::detail(
                     "fanout_too_large",
                     format!("{n} recipients, limit {FANOUT_MAX}"),
@@ -707,13 +723,13 @@ impl Store {
         )
         .await?;
         let sender = self
-            .auth(&tx, principal, agent_id, credential, false)
+            .auth(tx, principal, agent_id, credential, false)
             .await?;
-        let existing = self.existing(&tx, agent_id, &request_id).await?;
+        let existing = self.existing(tx, agent_id, &request_id).await?;
         if !existing.is_empty() {
             return self
                 .replayed(
-                    &tx,
+                    tx,
                     &existing,
                     to.as_deref(),
                     fanout.is_some(),
@@ -746,7 +762,7 @@ impl Store {
         }
         let recipients: Vec<AgentRow> = if let Some(fanout) = &fanout {
             let rows = self
-                .fanout_rows(&tx, agent_id, fanout, now, Some(&targets))
+                .fanout_rows(tx, agent_id, fanout, now, Some(&targets))
                 .await?;
             if rows.is_empty() {
                 return Err(BoardError::code("no_recipients"));
@@ -847,7 +863,7 @@ impl Store {
                 m
             } else {
                 wake::wake_decision(
-                    &tx,
+                    tx,
                     &self.wake,
                     &self.maintainer_principals,
                     &sender,
@@ -945,8 +961,7 @@ impl Store {
             )
             .await?;
         }
-        append(&tx, events, now, None).await?;
-        super::db::commit(tx).await?;
+        append(tx, events, now, None).await?;
         let agents = recipients
             .into_iter()
             .map(|r| (r.agent_id.clone(), r))

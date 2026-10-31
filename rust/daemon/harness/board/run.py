@@ -41,6 +41,11 @@ import daemons  # noqa: E402
 import pgdisposable  # noqa: E402
 from board import scenarios as S  # noqa: E402
 from board.norm import Normalizer, Windows  # noqa: E402
+from board.maintainer import SCENARIOS as MAINTAINER_SCENARIOS  # noqa: E402
+from board.maintainer_refusals import SCENARIOS as MAINTAINER_REFUSALS  # noqa: E402
+
+S.SCENARIOS.update(MAINTAINER_SCENARIOS)
+S.SCENARIOS.update(MAINTAINER_REFUSALS)
 
 # This harness admits only its own slice's disposable database names.
 pg = pgdisposable.Slice("w2f")
@@ -126,13 +131,13 @@ def mcp_call(port: int, headers, tool: str, args: dict, timeout=180.0) -> dict:
 
 # ---- bank state ----------------------------------------------------------------------
 
-def dump(dsn: str) -> dict:
+def dump(dsn: str, extra_tables=()) -> dict:
     import psycopg
     from psycopg.rows import dict_row
     out = {}
     with psycopg.connect(dsn, autocommit=True, row_factory=dict_row) as conn:
         conn.execute("SET extra_float_digits = 3")
-        for t in BOARD_TABLES:
+        for t in (*BOARD_TABLES, *extra_tables):
             out[t] = conn.execute(f"SELECT * FROM {t}").fetchall()
         out["meta"] = conn.execute("SELECT key, value FROM meta WHERE key = ANY(%s) ORDER BY key",
                                    (list(META_KEYS),)).fetchall()
@@ -144,7 +149,7 @@ def dump(dsn: str) -> dict:
 
 def normalize_state(state: dict, norm: Normalizer) -> dict:
     out = {}
-    for t in BOARD_TABLES:
+    for t in (key for key in state if key not in ("meta", "sequences")):
         rows = []
         for r in state[t]:
             r = dict(r)
@@ -232,6 +237,7 @@ class Arm:
     def run(self, step: S.Step) -> dict:
         t0 = time.time()
         self.ctx.now = t0
+        before = step.before(self.dsn, self.ctx) if hasattr(step, "before") else None
         if step.kind == "sleep":
             time.sleep(step.seconds)
             resp = {"status": 0}
@@ -255,6 +261,8 @@ class Arm:
                     pass  # Malformed request cases have no deadline to preserve.
             resp = call(self.daemon.port, method, path, headers, body, timeout=step.timeout)
         self.windows.steps.append((t0, time.time()))
+        if hasattr(step, "check"):
+            step.check(self.dsn, self.ctx, resp, before)
         if step.save and resp.get("json") is not None:
             step.save(self.ctx, resp["json"])
         if "json" in resp:
@@ -356,6 +364,8 @@ def run_scenario(scn: S.Scenario, binary: Path, root: Path, mode: str, record: b
             procs[side] = start(side, scn, binary, root, dsn, tag)
             cleanup.callback(procs[side].stop)
             arms[side] = Arm(side, procs[side], dsn, retention_days)
+            if hasattr(scn, "normalizer"):
+                arms[side].norm = scn.normalizer(arms[side].windows, retention_days)
         for side, proc in procs.items():
             # Both arms finish initializing: a send ticks the service clock,
             # which only the initialized service holds (W2F-SHARED-HLC), and
@@ -375,7 +385,8 @@ def run_scenario(scn: S.Scenario, binary: Path, root: Path, mode: str, record: b
             if record:
                 recorded["responses"][str(i)] = py
             if step.write:
-                states = {side: normalize_state(dump(arms[side].dsn), arms[side].norm) for side in sides}
+                states = {side: normalize_state(dump(arms[side].dsn, getattr(scn, "extra_tables", ())),
+                                                arms[side].norm) for side in sides}
                 ref = states.get("python") or golden["states"].get(str(i))
                 if record:
                     recorded["states"][str(i)] = states["python"]

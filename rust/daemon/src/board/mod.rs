@@ -58,6 +58,7 @@ pub struct Board {
     pub(crate) service: Arc<Service>,
     pub(crate) principals: Arc<PrincipalStore>,
     /// The daemon's own board address, registered by its first notice.
+    pub(crate) maintainer_identity: Mutex<Option<(String, String)>>,
     pub(crate) daemon_identity: Mutex<Option<(String, String)>>,
     /// Test seam: a send's first attempt waits on this after it took its
     /// ready service and before it stamps (`clock_retry_tests`).
@@ -103,6 +104,7 @@ impl Board {
             service,
             principals,
             daemon_identity: Mutex::new(None),
+            maintainer_identity: Mutex::new(None),
             #[cfg(test)]
             stamp_gate: Mutex::new(None),
             #[cfg(test)]
