@@ -189,7 +189,7 @@ if [ "${1:-}" = memory-changes ]; then
     case "$SINCE" in ''|*[!0123456789.]*) SINCE="" ;; esac
     [ "${#SINCE}" -le 22 ] || SINCE=""
     # The session's board address (<key>.agent, which the shim writes beside
-    # its digest): the daemon appends the maintainer's delegate's one-line
+    # its digest): the daemon appends the maintainer's conductor's one-line
     # reminder to this same answer, and nothing for any other session. The
     # shim keys its files by its launch id, so a Claude Code hook follows the
     # process record while line 2 confirms it for this session, as

@@ -805,7 +805,8 @@ class FixtureService:
         "8d2fedbd6a3c4f1e9b8a7d6c5e4f3a2b": ("Console board roles", "laptop"),
         "3b7c91e04d2a4b6c8e1f0a9b8c7d6e5f": ("Forget cascade fix", "box"),
     }
-    _MX_ROLE_PURPOSES = ("grant-delegate", "revoke-delegate", "assign-coordinator",
+    _MX_LEGACY = {"grant-delegate": "grant-conductor", "revoke-delegate": "revoke-conductor"}
+    _MX_ROLE_PURPOSES = ("grant-conductor", "revoke-conductor", "assign-coordinator",
                          "revoke-coordinator")
     # As the real route: any other field in a challenge body is refused.
     _MX_FIELDS = {
@@ -813,9 +814,9 @@ class FixtureService:
         "enrol-approve": {"label"}, "enrol-bootstrap": {"label"},
         "cancel": {"credential_id"}, "revoke-self": {"credential_id"},
         "repudiate": {"message_id"},
-        "grant-delegate": {"project", "agent_id", "hold"},
+        "grant-conductor": {"project", "agent_id", "hold"},
         "assign-coordinator": {"project", "agent_id", "hold"},
-        "revoke-delegate": {"project"}, "revoke-coordinator": {"project"},
+        "revoke-conductor": {"project"}, "revoke-coordinator": {"project"},
     }
 
     def _mx(self) -> dict:
@@ -841,7 +842,7 @@ class FixtureService:
                     self._mx_change("enrol", key_id, "Demo laptop (fixture)", "bootstrap",
                                     now - 6 * _D)],
                 "roles": {self._MX_PROJECT: {
-                    "delegate": {"agent_id": relay, "expires_at": now + 22 * _H,
+                    "conductor": {"agent_id": relay, "expires_at": now + 22 * _H,
                                  "granted_by": "maintainer", "reachable": True,
                                  "reason": None},
                     # Shows the band's no-listener line.
@@ -857,7 +858,7 @@ class FixtureService:
                              "ring_at": now - 2 * _H + 1},
                     "first_read_at": now - 2 * _H + 60,
                     "acknowledged_at": now - 2 * _H + 420, "repudiated_at": None},
-                    # A longer exchange, so the delegate card's thread pane
+                    # A longer exchange, so the conductor card's thread pane
                     # scrolls in the demo.
                     *[{"message_id": f"f1c0ffee0000000000000000000001{i:02x}",
                        "recipient_agent_id": relay, "recipient_label": "Release relay",
@@ -989,17 +990,17 @@ class FixtureService:
         now = time.time()
         out = {}
         for project, slots in self._mx()["roles"].items():
-            d, c = slots.get("delegate"), slots.get("coordinator")
-            entry = {"delegate": dict(d) if d and d["expires_at"] > now else None,
+            d, c = slots.get("conductor"), slots.get("coordinator")
+            entry = {"conductor": dict(d) if d and d["expires_at"] > now else None,
                      "coordinator": dict(c) if c and c["expires_at"] > now else None}
-            if entry["delegate"] or entry["coordinator"]:
+            if entry["conductor"] or entry["coordinator"]:
                 out[project] = entry
         return out
 
     # ── coordination board: DEMO ONLY ────────────────────────────────────────
     # A Console board snapshot (GET /api/agents?view=coordination) whose
     # roster carries v55 board names from every source, an unnamed row (read
-    # as label and short id), the maintainer demo's delegate and coordinator,
+    # as label and short id), the maintainer demo's conductor and coordinator,
     # unread mail, and enough rows that the roster scrolls in its own pane.
     # Served only where ``demo_board`` is on: the devserver sets it, while
     # tests drive the real console_snapshot path through a FixtureService.
@@ -1056,7 +1057,7 @@ class FixtureService:
             })
         names = {a["agent_id"]: a for a in agents}
         leases = []
-        for role in ("coordinator", "delegate"):
+        for role in ("coordinator", "conductor"):
             held = roles.get(role)
             if not held or held["agent_id"] not in names:
                 continue
@@ -1085,7 +1086,11 @@ class FixtureService:
         return out
 
     def maintainer_challenge(self, body: dict) -> dict:
-        purpose = body.get("purpose")
+        # As the real route: the conductor's old purpose names still work,
+        # issued under the name asked for.
+        requested = body.get("purpose")
+        purpose = (self._MX_LEGACY.get(requested, requested)
+                   if isinstance(requested, str) else requested)
         if purpose not in self._MX_FIELDS or set(body) - {"purpose"} - self._MX_FIELDS[purpose]:
             raise ValueError("invalid_request")
         if purpose == "enrol-bootstrap":
@@ -1105,14 +1110,14 @@ class FixtureService:
             if project != self._MX_PROJECT:
                 raise ValueError("invalid_request")
             fields = {"project": project}
-            role = "delegate" if purpose.endswith("delegate") else "coordinator"
-            other = "coordinator" if role == "delegate" else "delegate"
+            role = "conductor" if purpose.endswith("conductor") else "coordinator"
+            other = "coordinator" if role == "conductor" else "conductor"
             holder = self._mx_holder(role, project)
             preview = {"role": role, "project": project,
                        "action": "revoke" if purpose.startswith("revoke") else (
-                           "grant" if role == "delegate" else "assign"),
+                           "grant" if role == "conductor" else "assign"),
                        "current_holder": holder}
-            if purpose in ("grant-delegate", "assign-coordinator"):
+            if purpose in ("grant-conductor", "assign-coordinator"):
                 agent_id, hold = body.get("agent_id"), body.get("hold")
                 if type(hold) is not int or not 60 <= hold <= 604800:
                     raise ValueError("invalid_request")
@@ -1124,6 +1129,8 @@ class FixtureService:
                 fields["other_holder"] = self._mx_holder(other, project)
             # The holder the change displaces is signed too, as the real route does.
             fields["holder"] = holder
+            if requested in self._MX_LEGACY:
+                preview["role"] = "delegate"
         elif purpose in ("cancel", "revoke-self"):
             fields = {"credential_id": body.get("credential_id")}
         elif purpose == "repudiate":
@@ -1135,7 +1142,7 @@ class FixtureService:
             fields = {"label": label.strip()}
         else:
             raise ValueError("invalid_request")
-        payload, mac = self._mx_issue(purpose, fields)
+        payload, mac = self._mx_issue(requested, fields)
         out = {"payload": payload, "mac": mac,
                "publicKey": self._mx_options(payload, create=purpose == "enrol-bootstrap")}
         if preview is not None:
@@ -1199,18 +1206,19 @@ class FixtureService:
         return {"message_id": message_id, "wake": wake}
 
     def maintainer_role(self, body: dict) -> dict:
-        purpose = self._mx_purpose(body)
+        signed = self._mx_purpose(body)
+        purpose = self._MX_LEGACY.get(signed, signed)
         if purpose not in self._MX_ROLE_PURPOSES:
             raise ValueError("assertion_invalid")
-        fields = self._mx_open(body, purpose)
+        fields = self._mx_open(body, signed)
         now = time.time()
         project = fields["project"]
-        slots = self._mx()["roles"].setdefault(project, {"delegate": None, "coordinator": None})
-        role = "delegate" if purpose.endswith("delegate") else "coordinator"
+        slots = self._mx()["roles"].setdefault(project, {"conductor": None, "coordinator": None})
+        role = "conductor" if purpose.endswith("conductor") else "coordinator"
         name = f"{role}:{project}"
         if self._mx_holder(role, project) != fields.get("holder"):
             raise ValueError("role_changed")
-        other = "coordinator" if role == "delegate" else "delegate"
+        other = "coordinator" if role == "conductor" else "conductor"
         if (not purpose.startswith("revoke")
                 and self._mx_holder(other, project) != fields.get("other_holder")):
             raise ValueError("role_changed")
@@ -1234,10 +1242,10 @@ class FixtureService:
                  else CoordinationStore.reachability(
                      {"attachment_id": None, "lease_until": 0, "wake_enabled": False,
                       "capabilities": {"ring": True, "ring_armed_until": 0}},
-                     now, role="conductor" if role == "delegate" else role))
+                     now, role=role))
         entry = {"agent_id": agent_id, "expires_at": now + fields["hold"],
                  "reachable": reach["reachable"], "reason": reach["reason"]}
-        if role == "delegate":
+        if role == "conductor":
             entry["granted_by"] = "maintainer"
         slots[role] = entry
         self._mx()["fence"] += 1

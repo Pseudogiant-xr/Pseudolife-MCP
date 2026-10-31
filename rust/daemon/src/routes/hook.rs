@@ -67,7 +67,7 @@ pub(crate) async fn route(
     match path {
         // Status notes and lessons are memory content: an unauthorized
         // caller gets the empty body, and the hook keeps its cursor. The
-        // maintainer's delegate's reminder line (`?agent=`) is not ported
+        // maintainer's conductor's reminder line (`?agent=`) is not ported
         // (declared in divergences.md).
         "/api/hook/memory-changes" => {
             if !authorized(app, h) {

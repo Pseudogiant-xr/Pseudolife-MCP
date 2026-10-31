@@ -615,8 +615,11 @@ def _passkey(cid: str, state: str, active_from: str, created: int, label: str) -
 # The maintainer's board state, as rows (the reads verify no audit chain
 # and hold no resident copy): passkeys in each state, the maintainer's
 # address and two sessions, its sent mail and the replies, a granted and an
-# unrecorded delegate hold, a coordinator, and key-change records (one
-# with a payload that is not an object, which the listing skips).
+# unrecorded conductor hold under the role's old name (delegate:, with its
+# old-named lease_delegate record), a new-named grant, a project held under
+# both names (the new name wins its slot), a coordinator, and key-change
+# records (one with a payload that is not an object, which the listing
+# skips).
 MAINTAINER_SEED = [
     _passkey("cred-active-0001", "active", "0", 100, "laptop"),
     _passkey("cred-pending-0002", "pending", "NULL", 200, "phone"),
@@ -639,6 +642,15 @@ MAINTAINER_SEED = [
            agent_id="agent-alpha-0001"),
     _lease("delegate:Other", "agent-beta-0002", 1),
     _lease("coordinator:Pseudolife-MCP", "agent-beta-0002", 2),
+    _lease("conductor:Proj3", "agent-beta-0002", 5),
+    _event("lease_conductor", "maintainer", '{"name": "conductor:Proj3", "fence": 5}',
+           agent_id="agent-beta-0002"),
+    _lease("conductor:Both", "agent-alpha-0001", 6),
+    _event("lease_conductor", "operator", '{"name": "conductor:Both", "fence": 6}',
+           agent_id="agent-alpha-0001"),
+    _lease("delegate:Both", "agent-beta-0002", 7),
+    _event("lease_delegate", "operator", '{"name": "delegate:Both", "fence": 7}',
+           agent_id="agent-beta-0002"),
     _event("maintainer_key", "daemon", '{"change": "enrolled", "credential_id": '
            '"cred-active-0001", "label": "laptop", "by": "bootstrap", "path": "console"}',
            principal="default", ago=50),
@@ -800,11 +812,15 @@ CHALLENGE_OPS = [
     challenge(purpose="cancel", credential_id="cred-pending-0002"),
     challenge(purpose="revoke-self", credential_id="cred-active-0001"),
     challenge(purpose="repudiate", message_id="m-sent-1"),
-    challenge(purpose="grant-delegate", project="Pseudolife-MCP", agent_id=G1, hold=3600),
+    challenge(purpose="grant-conductor", project="Pseudolife-MCP", agent_id=G1, hold=3600),
     challenge(purpose="assign-coordinator", project="Pseudolife-MCP", agent_id=G1, hold=60),
-    challenge(purpose="grant-delegate", project="Proj2", agent_id=G3, hold=604800),
-    challenge(purpose="revoke-delegate", project="Pseudolife-MCP"),
+    challenge(purpose="grant-conductor", project="Proj2", agent_id=G3, hold=604800),
+    challenge(purpose="revoke-conductor", project="Pseudolife-MCP"),
+    challenge(purpose="revoke-conductor", project="Both"),
     challenge(purpose="revoke-coordinator", project="Nobody"),
+    # The conductor's purposes until 2026-10-31, issued under the new names.
+    challenge(purpose="grant-delegate", project="Pseudolife-MCP", agent_id=G1, hold=3600),
+    challenge(purpose="revoke-delegate", project="Pseudolife-MCP"),
     # Refusals, in _challenge's order.
     challenge(purpose="bogus"),
     challenge(),
@@ -825,10 +841,12 @@ CHALLENGE_OPS = [
     challenge(purpose="cancel", credential_id="c" * 1401),
     challenge(purpose="repudiate", message_id="m-reply-1"),
     challenge(purpose="repudiate", message_id=7),
-    challenge(purpose="grant-delegate", project=" Pseudolife-MCP", agent_id=G1, hold=3600),
-    challenge(purpose="grant-delegate", project="Pseudolife-MCP", agent_id=G1, hold=59),
-    challenge(purpose="grant-delegate", project="Pseudolife-MCP", agent_id=G1, hold=60.0),
-    challenge(purpose="grant-delegate", project="Pseudolife-MCP", agent_id=G2, hold=3600),
+    challenge(purpose="grant-conductor", project=" Pseudolife-MCP", agent_id=G1, hold=3600),
+    challenge(purpose="grant-conductor", project="Pseudolife-MCP", agent_id=G1, hold=59),
+    challenge(purpose="grant-conductor", project="Pseudolife-MCP", agent_id=G1, hold=60.0),
+    challenge(purpose="grant-conductor", project="Pseudolife-MCP", agent_id=G2, hold=3600),
+    # A legacy purpose is checked under its new name's fields.
+    challenge(purpose="revoke-delegate", project="Pseudolife-MCP", agent_id=G1),
     challenge(purpose="assign-coordinator", project="Pseudolife-MCP", agent_id=None, hold=60),
 ]
 

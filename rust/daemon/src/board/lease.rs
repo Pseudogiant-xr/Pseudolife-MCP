@@ -19,12 +19,30 @@ pub const LEASE_EXPECT_MAX: i64 = 7 * 86400;
 pub const LEASE_QUEUE_MAX: i64 = 64;
 pub const LEASE_GRANT_WINDOW: i32 = 300;
 pub const LEASE_LIST_QUEUE: i64 = 10;
-pub const DELEGATE_PREFIX: &str = "delegate:";
-pub const RESERVED_LEASE_PREFIXES: [&str; 2] = [DELEGATE_PREFIX, "designated:"];
+pub const CONDUCTOR_PREFIX: &str = "conductor:";
+/// The conductor's lease name until 2026-10-31 (`LEGACY_CONDUCTOR_PREFIX`):
+/// a hold granted under it keeps its authority until it expires or a new
+/// grant vacates it, so every reader takes both names.
+pub const LEGACY_CONDUCTOR_PREFIX: &str = "delegate:";
+pub const CONDUCTOR_PREFIXES: [&str; 2] = [CONDUCTOR_PREFIX, LEGACY_CONDUCTOR_PREFIX];
+/// `CONDUCTOR_EVENT` and `CONDUCTOR_EVENTS`: the grant record, under its
+/// current name and the one it had until 2026-10-31.
+pub const CONDUCTOR_EVENT: &str = "lease_conductor";
+pub const CONDUCTOR_EVENTS: [&str; 2] = [CONDUCTOR_EVENT, "lease_delegate"];
+pub const RESERVED_LEASE_PREFIXES: [&str; 3] =
+    [CONDUCTOR_PREFIX, LEGACY_CONDUCTOR_PREFIX, "designated:"];
 pub const COORDINATOR_PREFIX: &str = "coordinator:";
 /// `EPHEMERAL_AGENT_RETENTION` and `AGENT_RETENTION`.
 pub const EPHEMERAL_AGENT_RETENTION: f64 = 3600.0;
 pub const AGENT_RETENTION: f64 = 7.0 * 86400.0;
+
+/// `conductor_project`: the project of a conductor lease under either of
+/// its names, else None.
+pub fn conductor_project(name: &str) -> Option<&str> {
+    CONDUCTOR_PREFIXES
+        .iter()
+        .find_map(|prefix| name.strip_prefix(prefix))
+}
 
 fn reserved(name: &str) -> bool {
     RESERVED_LEASE_PREFIXES.iter().any(|p| name.starts_with(p))
@@ -360,7 +378,8 @@ async fn lease_view(c: &impl GenericClient, name: &str, agent_id: &str) -> Resul
 async fn lock_role_leases(c: &impl GenericClient, project: &str) -> Result<()> {
     let mut names: Vec<String> = [
         format!("{COORDINATOR_PREFIX}{project}"),
-        format!("{DELEGATE_PREFIX}{project}"),
+        format!("{CONDUCTOR_PREFIX}{project}"),
+        format!("{LEGACY_CONDUCTOR_PREFIX}{project}"),
     ]
     .into_iter()
     .filter(|n| text::py_len(n) <= MAX_LEASE_NAME)
@@ -415,15 +434,24 @@ impl Store {
             lock_role_leases(&tx, project).await?;
             let live = "SELECT 1 AS d FROM coordination_leases WHERE name=$1 \
                         AND holder_agent_id=$2 AND expires_at>$3";
-            let delegate = tx
-                .query_opt(
-                    live,
-                    &[&format!("{DELEGATE_PREFIX}{project}"), &agent_id, &now],
-                )
-                .await?;
-            let coordinator = tx.query_opt(live, &[&name, &agent_id, &now]).await?;
-            if delegate.is_some() && coordinator.is_none() {
-                return Err(BoardError::code("already_delegate"));
+            let mut conductor = false;
+            for prefix in CONDUCTOR_PREFIXES {
+                if tx
+                    .query_opt(live, &[&format!("{prefix}{project}"), &agent_id, &now])
+                    .await?
+                    .is_some()
+                {
+                    conductor = true;
+                    break;
+                }
+            }
+            if conductor
+                && tx
+                    .query_opt(live, &[&name, &agent_id, &now])
+                    .await?
+                    .is_none()
+            {
+                return Err(BoardError::code("already_conductor"));
             }
         }
         tx.execute(

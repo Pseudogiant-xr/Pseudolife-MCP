@@ -32,7 +32,7 @@ WRAPPER = "ops/pytest_retry_once.py"
 # The required lane's files on 2026-10-20, before the split: each keeps
 # Windows coverage in one lane or the other unless it leaves the tree.
 LANE_ON_2026_10_20 = {
-    "test_memory_changes_hook", "test_coordination_turn_digest", "test_delegate_watch",
+    "test_memory_changes_hook", "test_coordination_turn_digest", "test_conductor_watch",
     "test_embedded_pg", "test_backup_cli", "test_shim", "test_schema_version",
     "test_credentials", "test_coordination_credentials", "test_coordination_adapter",
     "test_wait_mail_cli", "test_codex_hooks", "test_subagent_board_guard",

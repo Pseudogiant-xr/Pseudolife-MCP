@@ -49,8 +49,9 @@ from pseudolife_memory.maintainer_webauthn import (
     verify_registration,
 )
 from pseudolife_memory.storage.coordination import (
-    ATTACHED_IDLE_WINDOW, COORDINATOR_PREFIX, DELEGATE_PREFIX, MAINTAINER_ORIGIN,
-    MAINTAINER_PRINCIPAL, MESSAGE_ORIGIN, REPUDIATE_EVENT, RESERVED_SENDERS, CoordinationStore,
+    ATTACHED_IDLE_WINDOW, CONDUCTOR_EVENTS, CONDUCTOR_PREFIX, CONDUCTOR_PREFIXES,
+    COORDINATOR_PREFIX, MAINTAINER_ORIGIN, MAINTAINER_PRINCIPAL, MESSAGE_ORIGIN, REPUDIATE_EVENT,
+    RESERVED_SENDERS, CoordinationStore, conductor_project,
 )
 
 logger = logging.getLogger("pseudolife-mcp.maintainer")
@@ -86,8 +87,13 @@ MAX_PASSKEY_LABEL = 64
 # The payload a completing route accepts: the daemon wrote it, so anything
 # far larger than a full send payload is not one of ours.
 MAX_PAYLOAD_CHARS = 16384
-ROLE_PURPOSES = ("grant-delegate", "revoke-delegate", "assign-coordinator",
+ROLE_PURPOSES = ("grant-conductor", "revoke-conductor", "assign-coordinator",
                  "revoke-coordinator")
+# The conductor's purposes until 2026-10-31: a challenge asked for under one
+# (a Console tab loaded before the upgrade) is issued and signed under the
+# new name.
+LEGACY_ROLE_PURPOSES = {"grant-delegate": "grant-conductor",
+                        "revoke-delegate": "revoke-conductor"}
 CHALLENGE_PURPOSES = ("send", "enrol-approve", "enrol-bootstrap", "cancel", "revoke-self",
                       "repudiate", *ROLE_PURPOSES)
 _FULL_AGENT_ID = re.compile(r"[0-9a-f]{32}")
@@ -677,16 +683,18 @@ class MaintainerStore:
             message_id=row["message_id"])], row["repudiated_at"])
 
     def roles(self) -> dict:
-        """Every project with a live role lease: its delegate (with who
+        """Every project with a live role lease: its conductor (with who
         granted it, read from the grant's audit record for the current
         fence; a hold without one grants nothing and is left out) and its
-        coordinator, each with whether maintainer mail rings it now."""
+        coordinator, each with whether maintainer mail rings it now. A
+        conductor hold under the role's old name (``delegate:<project>``)
+        fills the same slot; a project's new-named hold wins over it."""
         now = self.clock()
         out: dict = {}
         for row in self._all(
                 "SELECT l.name,l.holder_agent_id,l.expires_at,(SELECT e.actor FROM "
-                "coordination_events e WHERE e.event='lease_delegate' "
-                "AND e.agent_id=l.holder_agent_id AND CASE WHEN e.event='lease_delegate' "
+                "coordination_events e WHERE e.event=ANY(%s) "
+                "AND e.agent_id=l.holder_agent_id AND CASE WHEN e.event=ANY(%s) "
                 "THEN e.payload::jsonb->>'name'=l.name "
                 "AND (e.payload::jsonb->>'fence')::bigint=l.fence ELSE false END "
                 "ORDER BY e.seq DESC LIMIT 1) AS granted_by,"
@@ -694,29 +702,40 @@ class MaintainerStore:
                 "a.capabilities "
                 "FROM coordination_leases l LEFT JOIN coordination_agents a "
                 "ON a.agent_id=l.holder_agent_id WHERE l.holder_agent_id IS NOT NULL "
-                "AND l.expires_at>%s AND (l.name LIKE %s OR l.name LIKE %s) ORDER BY l.name",
-                (now, DELEGATE_PREFIX + "%", COORDINATOR_PREFIX + "%")):
+                "AND l.expires_at>%s AND (l.name LIKE %s OR l.name LIKE %s OR l.name LIKE %s) "
+                "ORDER BY l.name",
+                (list(CONDUCTOR_EVENTS), list(CONDUCTOR_EVENTS), now,
+                 *(prefix + "%" for prefix in CONDUCTOR_PREFIXES), COORDINATOR_PREFIX + "%")):
             reach = CoordinationStore.reachability(
                 row if row["row_agent_id"] is not None else None, now)
-            if row["name"].startswith(DELEGATE_PREFIX):
+            project = conductor_project(row["name"])
+            if project is not None:
                 if row["granted_by"] not in ("operator", "maintainer"):
                     continue
-                project = row["name"][len(DELEGATE_PREFIX):]
                 entry = {"agent_id": row["holder_agent_id"], "expires_at": row["expires_at"],
                          "granted_by": row["granted_by"], **reach}
-                slot = "delegate"
+                slot = "conductor"
+                # ``conductor:`` sorts before ``delegate:``, so a project's
+                # old-named hold never replaces its new-named one.
+                if (out.get(project) or {}).get(slot) is not None:
+                    continue
             else:
                 project = row["name"][len(COORDINATOR_PREFIX):]
                 entry = {"agent_id": row["holder_agent_id"], "expires_at": row["expires_at"],
                          **reach}
                 slot = "coordinator"
-            out.setdefault(project, {"delegate": None, "coordinator": None})[slot] = entry
+            out.setdefault(project, {"conductor": None, "coordinator": None})[slot] = entry
         return out
 
     def role_holder(self, name) -> str | None:
-        row = self._one("SELECT holder_agent_id FROM coordination_leases WHERE name=%s "
-                        "AND holder_agent_id IS NOT NULL AND expires_at>%s",
-                        (name, self.clock()))
+        """The live holder of role lease ``name``; for ``conductor:<project>``
+        a hold under the role's old name counts too, the new name first."""
+        project = conductor_project(name)
+        names = ([prefix + project for prefix in CONDUCTOR_PREFIXES]
+                 if name.startswith(CONDUCTOR_PREFIX) else [name])
+        row = self._one("SELECT holder_agent_id FROM coordination_leases WHERE name=ANY(%s) "
+                        "AND holder_agent_id IS NOT NULL AND expires_at>%s "
+                        "ORDER BY name LIMIT 1", (names, self.clock()))
         return row["holder_agent_id"] if row else None
 
     # -- host-side operations (pseudolife-mcp maintainer) --------------------

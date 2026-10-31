@@ -221,7 +221,7 @@ def test_hooks_json_binds_stop_as_an_async_rewake_command():
     assert _constant("MAX_WAIT") < hook["timeout"]
 
 
-def test_the_watcher_outlasts_any_delegate_lease_granted_after_the_last_turn():
+def test_the_watcher_outlasts_any_conductor_lease_granted_after_the_last_turn():
     """A session stays reachable while it is open (maintainer requirement
     2026-10-05), the delegate above all. The watcher armed at a turn end
     lasts twice the longest delegate lease, so a lease granted any time in

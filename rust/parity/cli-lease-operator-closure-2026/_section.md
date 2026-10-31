@@ -56,6 +56,15 @@ existing Parity matrix runs these controls and operator live/golden comparisons
 after its disposable PostgreSQL preparation; closing-head CI and independent
 review are required before merge.
 
+Rename (2026-10-31). The grant action is `lease conductor`, following the
+Python oracle; `delegate` and `designate` print one stderr line naming it and
+run it, renamed before parsing (so help, parse errors, refusals and the
+container's argv say `conductor`). The cases that exercise the action are
+named `conductor-*`, with `delegate-normal`, `designate-normal`, their help and
+container cases kept for the deprecated names: 42 Windows and 41 Linux cases,
+four fake-Docker cases. The mutant ids follow (`lease-conductor-duration`,
+`lease-deprecated-warning`, `lease-conductor-commit-ignored`).
+
 The [specification](../../cli_harness/specs/CLI-LEASE.md) declares the retained
 `phase4-embedded-pg-deferred` refusal, safe native PostgreSQL diagnostics and
 native signal lifecycle. External DSNs and retained container transport are

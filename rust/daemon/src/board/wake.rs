@@ -5,16 +5,25 @@
 use super::canon::{self, float_value};
 use super::db::AgentRow;
 use super::error::Result;
+use super::lease::{CONDUCTOR_EVENTS, CONDUCTOR_PREFIXES};
 use super::store::{WakePolicy, listener_path};
 use super::text;
 use serde_json::{Map, Value, json};
 use tokio_postgres::GenericClient;
 
-pub const AUTHORITY_REASONS: [&str; 2] = ["maintainer", "delegate"];
-const AUTHORITY_ROW_REASONS: [&str; 3] = ["maintainer", "delegate", "coordinator"];
-const REOPEN_ROW_REASONS: [&str; 4] = ["maintainer", "delegate", "clearer", "coordinator"];
+pub const AUTHORITY_REASONS: [&str; 2] = ["maintainer", "conductor"];
+// Rows written under the role's older names still count against the
+// authority budget and are still served: `delegate` (until 2026-10-31) and
+// `coordinator` (0.16.0, renamed 2026-10-04).
+const AUTHORITY_ROW_REASONS: [&str; 4] = ["maintainer", "conductor", "delegate", "coordinator"];
+const REOPEN_ROW_REASONS: [&str; 5] = [
+    "maintainer",
+    "conductor",
+    "clearer",
+    "delegate",
+    "coordinator",
+];
 pub const MAINTAINER_WAKE_REASON: &str = "maintainer_message";
-pub const DELEGATE_PREFIX: &str = "delegate:";
 const ROLE_ACTORS: [&str; 2] = ["operator", "maintainer"];
 const WAKE_SERVE_REPEAT: f64 = 25.0;
 const LEASE_CLEAR_GRACE: f64 = 60.0;
@@ -133,24 +142,27 @@ async fn authority(
         return Ok(None);
     }
     let actors: Vec<String> = ROLE_ACTORS.iter().map(|s| s.to_string()).collect();
+    let names: Vec<String> = CONDUCTOR_PREFIXES
+        .iter()
+        .map(|prefix| format!("{prefix}{}", recipient.project))
+        .collect();
+    let events: Vec<String> = CONDUCTOR_EVENTS.iter().map(|s| s.to_string()).collect();
+    // `_conductor_rows`: a live hold under either of the role's names, with
+    // a grant record under either event name that names that same lease, so
+    // an old-named hold is proven by its old-named record only.
     let hit = c
         .query_opt(
-            "SELECT 1 AS hit FROM coordination_leases l WHERE l.name=$1 \
+            "SELECT 1 AS hit FROM coordination_leases l WHERE l.name=ANY($1) \
              AND l.holder_agent_id=$2 AND l.expires_at>$3 AND EXISTS (SELECT 1 \
-             FROM coordination_events e WHERE e.event='lease_delegate' \
+             FROM coordination_events e WHERE e.event=ANY($5) \
              AND e.actor=ANY($4) AND e.agent_id=l.holder_agent_id \
-             AND CASE WHEN e.event='lease_delegate' THEN \
+             AND CASE WHEN e.event=ANY($5) THEN \
              e.payload::jsonb->>'name'=l.name \
-             AND (e.payload::jsonb->>'fence')::bigint=l.fence ELSE false END)",
-            &[
-                &format!("{DELEGATE_PREFIX}{}", recipient.project),
-                &sender.agent_id,
-                &now,
-                &actors,
-            ],
+             AND (e.payload::jsonb->>'fence')::bigint=l.fence ELSE false END) LIMIT 1",
+            &[&names, &sender.agent_id, &now, &actors, &events],
         )
         .await?;
-    Ok(hit.map(|_| "delegate"))
+    Ok(hit.map(|_| "conductor"))
 }
 
 fn count(row: &tokio_postgres::Row) -> i64 {

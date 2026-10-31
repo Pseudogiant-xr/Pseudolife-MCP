@@ -114,8 +114,8 @@ function Get-DigestKey([string]$SessionId) {
 # The thread's board address, which the shim names in <key>.agent beside its
 # digest: 32 lower-case hex from a regular file (no reparse point), else ''.
 # The hook endpoints take it as agent=<id>, and the daemon appends the
-# maintainer's delegate's brief or reminder for a session holding an
-# operator-granted delegate:<project> lease (spec 2026-10-14).
+# maintainer's conductor's brief or reminder for a session holding an
+# operator-granted conductor:<project> lease (spec 2026-10-14).
 function Get-SessionAgent([string]$SessionId) {
     try {
         if ($SessionId -cnotmatch '^[A-Za-z0-9._-]{1,128}\z') { return '' }

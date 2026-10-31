@@ -3,9 +3,9 @@ bundled daemon container when this shell has no bank (2026-10-05).
 
 On a Docker-tier host the bank's database URL lives in the
 ``pseudolife-mcp-daemon`` container's environment, not the operator's shell:
-``pseudolife-mcp lease delegate`` from a root shell on the box printed "no bank
+``pseudolife-mcp lease delegate`` (now ``lease conductor``) from a root shell on the box printed "no bank
 found" and only worked as ``docker exec pseudolife-mcp-daemon pseudolife-mcp
-lease delegate ...``. ``lease break|delegate``, every ``maintainer`` action and
+lease delegate ...``. ``lease break|conductor``, every ``maintainer`` action and
 every ``board-audit`` action that reads the bank now do that ``docker exec``
 themselves. A fake docker stands in for the real one: it records each argv,
 answers ``inspect`` and plays the container's output and exit code.
@@ -78,13 +78,13 @@ def docker(monkeypatch, tmp_path):
 
 # ── lease ───────────────────────────────────────────────────────────────────
 
-def test_lease_delegate_runs_inside_the_daemon_container(docker, capsys):
-    answer = {"name": "delegate:Pseudolife-MCP", "holder": "abc", "fence": 7}
+def test_lease_conductor_runs_inside_the_daemon_container(docker, capsys):
+    answer = {"name": "conductor:Pseudolife-MCP", "holder": "abc", "fence": 7}
     docker.out = json.dumps(answer) + "\n"
-    code = lease_cli.main(["delegate", "Pseudolife-MCP", "abc", "--for", "168h"])
+    code = lease_cli.main(["conductor", "Pseudolife-MCP", "abc", "--for", "168h"])
     assert code == 0
     assert docker.execs == [PREFIX + ["-i"] + TAIL
-                            + ["lease", "delegate", "Pseudolife-MCP", "abc", "--for", "168h"]]
+                            + ["lease", "conductor", "Pseudolife-MCP", "abc", "--for", "168h"]]
     output = capsys.readouterr()
     assert json.loads(output.out) == answer          # stdout is the container's, untouched
     [line] = output.err.splitlines()                 # one line says where it ran
@@ -97,9 +97,10 @@ def test_lease_break_propagates_the_containers_exit_code(docker):
     assert docker.execs[0][-3:] == ["lease", "break", "gpu"]
 
 
-def test_the_deprecated_designate_runs_inside_as_delegate(docker):
-    assert lease_cli.main(["designate", "P", "abc"]) == 0
-    assert docker.execs[0][-4:] == ["lease", "delegate", "P", "abc"]
+@pytest.mark.parametrize("old", ["delegate", "designate"])
+def test_a_deprecated_name_runs_inside_as_conductor(docker, old):
+    assert lease_cli.main([old, "P", "abc"]) == 0
+    assert docker.execs[0][-4:] == ["lease", "conductor", "P", "abc"]
 
 
 # ── maintainer ──────────────────────────────────────────────────────────────
@@ -224,7 +225,7 @@ def test_board_audit_verify_and_redact_forward_their_arguments(docker):
 
 @pytest.mark.parametrize("running", [None, False])
 @pytest.mark.parametrize("command, code", [
-    (lambda: lease_cli.main(["delegate", "P", "abc"]), 1),
+    (lambda: lease_cli.main(["conductor", "P", "abc"]), 1),
     (lambda: maintainer_cli.main(["list"]), 2),
     (lambda: board_audit_cli.main(["export"]), 2),
 ])

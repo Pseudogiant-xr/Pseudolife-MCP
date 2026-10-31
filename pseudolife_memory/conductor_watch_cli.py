@@ -1,8 +1,7 @@
 """Wake the conductor session with board mail only when something needs a decision.
 
-The conductor session (the maintainer's board role, stored as ``delegate``:
-the one the maintainer talks to, which dispatches work, orders suites and
-merges) pays a full-context request for every wake.
+The conductor session (the maintainer's board role: the one the maintainer
+talks to, which dispatches work, orders suites and merges) pays a full-context request for every wake.
 Measured 2026-10-14 over six such sessions (Sep 23 - Oct 13): 2,504 turns
 began with a background-task notification and 557 with board mail, and about
 a third of all their turns took no action. Cache reads were 96% of their
@@ -66,6 +65,10 @@ EXIT_OK = 0
 EXIT_SETUP = 2
 
 LABEL = "conductor-watch"
+# What ``pseudolife-mcp delegate-watch``, the mode's name until 2026-10-31,
+# prints on stderr before it runs as conductor-watch.
+DEPRECATED_MODE = ("pseudolife-mcp delegate-watch is deprecated: use "
+                   "pseudolife-mcp conductor-watch")
 CLEARS = "decision events"
 REMINDER = "Conductor: raw output goes to a subagent; a quiet wake gets one line."
 # 55 minutes keeps a quiet wake inside the one-hour prompt-cache lifetime
@@ -85,7 +88,7 @@ MAX_TEXT_BYTES = 8192
 DEFAULT_LEASES = ("full-suite", "full-suite@box")
 PR_FIELDS = "number,title,headRefOid,mergeable,mergeStateStatus,isDraft,statusCheckRollup"
 RUN_FIELDS = "attempt,databaseId,workflowDatabaseId,workflowName,status,conclusion,headSha,event"
-# CANCELLED is not a failure: a cancelled run is usually one the delegate
+# CANCELLED is not a failure: a cancelled run is usually one the conductor
 # stopped itself, and each of its jobs concluding woke it again as "failing"
 # (2026-10-16, three wakes in 15 minutes for one head of PR #784).
 FAILED_CONCLUSIONS = {"FAILURE", "TIMED_OUT", "ACTION_REQUIRED", "STARTUP_FAILURE"}
@@ -119,7 +122,7 @@ def run(cmd: list[str]) -> tuple[int, str, str]:
 
 
 # ── pure classification: JSON in, exact lines out ────────────────────────────
-# tests/fixtures/delegate_watch_events.json holds cases for each function;
+# tests/fixtures/conductor_watch_events.json holds cases for each function;
 # the Rust port's contract tests read the same file.
 
 def checks_state(rollup) -> tuple[str, list[str]]:
@@ -625,7 +628,8 @@ def parser():
         prog="pseudolife-mcp conductor-watch", description=__doc__.split("\n\n")[0],
         epilog=("Start it from the conductor session with --detach; it prints its board id. "
                 f'Then park waiting_peer with park_needs="{CLEARS}" and park_clear_by=<that id>. '
-                "Stop it with --stop. delegate-watch is its older name and still works."))
+                "Stop it with --stop. delegate-watch, its older name, still works and is "
+                "deprecated."))
     p.add_argument("--owner", help="the board agent id to send to (32 lowercase hex; default: "
                                    "this session's, from the .agent file beside its digest)")
     p.add_argument("--detach", action="store_true",
@@ -762,7 +766,7 @@ def _detach(argv: list[str], args, owner: str, state: Path, spawn, clock, sleep)
         child += ["--state", str(state)]
     pid_path = state.with_suffix(".pid")
     log = state.with_suffix(".log")
-    pid = spawn([sys.executable, "-m", "pseudolife_memory.cli", "delegate-watch", *child], log)
+    pid = spawn([sys.executable, "-m", "pseudolife_memory.cli", "conductor-watch", *child], log)
     deadline = clock() + DETACH_WAIT
     while True:
         try:

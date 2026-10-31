@@ -41,15 +41,15 @@ export function matchesQuery(a: BoardAgent, query: string): boolean {
   return terms.every((t) => hay.includes(t));
 }
 
-export type Pin = "delegate" | "coordinator" | "mail";
-const PIN_ORDER: Pin[] = ["delegate", "coordinator", "mail"];
+export type Pin = "conductor" | "coordinator" | "mail";
+const PIN_ORDER: Pin[] = ["conductor", "coordinator", "mail"];
 
 /** The roster with the sessions the maintainer looks for first pinned to the
- *  top: the delegate, the coordinator, then any with unread mail. Everything
+ *  top: the conductor, the coordinator, then any with unread mail. Everything
  *  else keeps the server's order (reachable first, most recently active). */
 export function orderRoster(
   agents: BoardAgent[],
-  role: (a: BoardAgent) => "delegate" | "coordinator" | null,
+  role: (a: BoardAgent) => "conductor" | "coordinator" | null,
 ): { agent: BoardAgent; pin: Pin | null }[] {
   const rows = agents.map((agent) => ({
     agent,
