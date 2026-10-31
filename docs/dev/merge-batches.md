@@ -116,7 +116,10 @@ gate step is a `run` step with a unique literal name, the gate sets no
 `defaults`, `env`, `container` or `services`, and its other settings and
 the workflow's `defaults` and `env` equal the checkout's copy; that step is,
 by position and name, the only one that failed, on every failed leg of the
-gate in that run attempt, listed in the rollup or not; no other job in that
+gate in that run attempt, listed in the rollup or not, except a leg that
+ran no step at all in a run attempt that itself concluded `cancelled` (a
+cancel that lands while the gate is starting fails it before any step, so
+it gave no verdict); no other job in that
 run attempt failed, timed out or needs action; and the jobs it needs
 include a cancelled one, none unfinished and none that ran past its
 timeout. A head that changes the gate's settings therefore stays failing
