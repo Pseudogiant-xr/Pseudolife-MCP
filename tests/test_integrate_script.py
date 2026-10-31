@@ -1102,6 +1102,41 @@ def test_a_gate_with_no_steps_in_a_cancelled_attempt_carries_no_verdict(
     out = capsys.readouterr().out
     assert FAILING not in out, out
     assert (UNVERIFIED not in out) is admitted, out
+    assert ("merged #11 " in out) is admitted, out
+
+
+@pytest.mark.parametrize("sibling", [
+    [("Set up job", "failure")],
+    OLD_GATE_STEPS,
+    [("Set up job", "success"), (CANCEL_STEP, "skipped"), (VERDICT_STEP, "failure"),
+     ("Complete job", "success")],
+], ids=["setup-failed", "old-gate", "verdict-failed"])
+def test_a_stepless_leg_does_not_excuse_a_sibling_leg_that_failed(world, capsys, sibling):
+    _gate_world(world, rollup=list(GATES))
+    world.gh.actions_jobs["508"]["steps"] = []
+    world.gh.actions_jobs["509"]["steps"] = _steps(sibling)
+    world.gh.runs[RUN]["conclusion"] = "cancelled"
+
+    assert _build() == 0, capsys.readouterr()
+
+    out = capsys.readouterr().out
+    assert FAILING in out and "merged #11 " not in out, out
+
+
+def test_a_stepless_gate_with_no_cancelled_need_is_unverified(world, capsys):
+    # The cancel landed after every job the gate needs had passed: nothing
+    # failed, but the gate gave no verdict, so it is not admitted either.
+    _gate_world(world, run=_with(_RUN_1059, j501="success", j502="success", j503="success"),
+                rollup=list(GATES))
+    for job in GATES:
+        world.gh.actions_jobs[job]["steps"] = []
+    world.gh.runs[RUN]["conclusion"] = "cancelled"
+
+    assert _build() == 0, capsys.readouterr()
+
+    out = capsys.readouterr().out
+    assert FAILING not in out and "merged #11 " not in out, out
+    assert "gate job 508 was cancelled before it ran a step" in out, out
 
 
 def test_a_stepless_gate_still_needs_its_other_jobs_clean(world, capsys):

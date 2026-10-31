@@ -584,13 +584,16 @@ def _gate_cancelled(check: dict, runs: dict, probes: dict,
             if owners(str(other["name"])) == {gate_id} and other.get("id") != meta.get("id")
             and other.get("conclusion") is not None
             and other.get("conclusion") not in _NO_VERDICT]
+        stepless = []
         for leg in legs:
             what = f"job {leg}"
-            steps = job_meta(leg).get("steps")
-            if steps == [] and ended == "cancelled":
+            leg_meta = job_meta(leg)
+            steps = leg_meta.get("steps")
+            if steps == [] and ended == "cancelled" and leg_meta.get("conclusion") == "failure":
                 # Cancelling the attempt while this leg was starting failed it
                 # before any step ran (#1074's 7cb16da6), so it gave no
                 # verdict; the needed jobs below still decide.
+                stepless.append(leg)
                 continue
             if not isinstance(steps, list) or not steps:
                 return None, f"the steps of job {leg} could not be read (none listed)"
@@ -615,6 +618,11 @@ def _gate_cancelled(check: dict, runs: dict, probes: dict,
     except (Refusal, ValueError, KeyError, TypeError, AttributeError) as exc:
         return None, _unread(what, exc)
     if not cancelled:
+        if stepless:
+            # The cancel reached only the gate: nothing failed, but no
+            # verdict was given either, so a rerun of its CI decides.
+            return None, (f"gate job {stepless[0]} was cancelled before it ran a step "
+                          "and no job it needs was cancelled (rerun its CI)")
         return False, ""                    # no needed job was cancelled
     verdict: tuple[bool | None, str] = (True, "")
     for job_id in cancelled:
