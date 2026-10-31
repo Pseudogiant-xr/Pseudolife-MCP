@@ -9,13 +9,18 @@
 #   setup-runner-watch.sh --token    # then paste the token on stdin
 #   setup-runner-watch.sh --machines linux,windows
 #                                    # the machines nightly jobs may route to
+#   setup-runner-watch.sh --machines linux,windows:on-demand
+#                                    # windows's runners are VMs started per job
 #
 # The allowlist (/etc/pseudolife-runner-watch/machines) keeps a machine whose
 # runner is online for a trial dispatch out of the variable until the trial
-# passes. Without the file every online machine is listed.
+# passes. Without the file every online machine is listed. A machine marked
+# :on-demand (written as "<machine> on-demand") also stays listed while its
+# orchestrator's heartbeat variable, PARITY_HEARTBEAT_<MACHINE>, is fresh.
 #
 # The token is a fine-grained token for this repository alone with
-# "Administration: read" and "Variables: read and write". It is stored
+# "Administration: read" and "Variables: read and write" (which also reads
+# the heartbeats). It is stored
 # readable by the watcher's own system account only. Until it exists the
 # timer's runs are skipped. Rerunning is safe.
 set -euo pipefail
@@ -57,12 +62,25 @@ if [ "${1:-}" = "--machines" ]; then
   # the explicit way to allow no machine.
   [ $# -ge 2 ] || { echo "--machines needs a list such as linux,windows (or '' for none); nothing changed" >&2; exit 2; }
   list=$2
-  if [[ -n "$list" && ! "$list" =~ ^[a-z0-9-]+(,[a-z0-9-]+)*$ ]]; then
-    echo "--machines takes a comma-separated list of machine names such as linux,windows (or '' for none); nothing changed" >&2
+  if [[ -n "$list" && ! "$list" =~ ^[a-z0-9-]+(:on-demand)?(,[a-z0-9-]+(:on-demand)?)*$ ]]; then
+    echo "--machines takes a comma-separated list of machine names, each optionally ending in :on-demand, such as linux,windows:on-demand (or '' for none); nothing changed" >&2
     exit 2
   fi
+  # The watcher refuses a machine named both ways, which would freeze the
+  # variable on every run, so refuse it here before the allowlist changes.
+  both=$(tr ',' '\n' <<<"$list" | sort -u | sed 's/:on-demand$//' | sort | uniq -d | paste -sd, -)
+  if [ -n "$both" ]; then
+    echo "--machines names $both both with and without :on-demand; keep one; nothing changed" >&2
+    exit 2
+  fi
+  # An older watcher would read "windows on-demand" as one machine's name.
+  if [[ "$list" == *:on-demand* ]] && ! grep -qs '^ON_DEMAND = "on-demand"$' "$LIB/runner_watch.py"; then
+    echo "the installed watcher does not know :on-demand; run $0 without arguments to update it, then rerun this; nothing changed" >&2
+    exit 1
+  fi
   { echo "# Machines nightly parity jobs may route to (setup-runner-watch.sh --machines).";
-    [ -z "$list" ] || tr ',' '\n' <<<"$list"; } > "$MACHINES.part"
+    echo "# '<machine> on-demand' also stays listed while PARITY_HEARTBEAT_<MACHINE> is fresh.";
+    [ -z "$list" ] || tr ',' '\n' <<<"$list" | sed 's/:on-demand$/ on-demand/'; } > "$MACHINES.part"
   chown "root:$ACCOUNT" "$MACHINES.part"
   chmod 0640 "$MACHINES.part"
   mv "$MACHINES.part" "$MACHINES"

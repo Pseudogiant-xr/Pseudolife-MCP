@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
+import re
 
 import pytest
 
@@ -18,10 +20,14 @@ def runner(name: str, status: str, *labels: str) -> dict:
 
 
 class FakeGitHub:
-    def __init__(self, runners: list[dict], value: str | None = None, fail: str | None = None):
+    def __init__(self, runners: list[dict], value: str | None = None, fail: str | None = None,
+                 variables: dict[str, object] | None = None):
         self.runners = runners
         self.value = value
         self.fail = fail
+        # Other repository variables by name (the heartbeats); absent ones 404.
+        self.variables = dict(variables or {})
+        self.reads: list[str] = []
         self.writes: list[tuple[str, str, dict | None]] = []
 
     def __call__(self, method: str, path: str, body: dict | None) -> tuple[int, object]:
@@ -33,6 +39,10 @@ class FakeGitHub:
             return 200, {"total_count": len(self.runners), "runners": chunk}
         if method == "GET" and path == VARIABLE_PATH:
             return (404, None) if self.value is None else (200, {"name": watch.VARIABLE, "value": self.value})
+        if method == "GET" and path.startswith(f"/repos/{REPO}/actions/variables/"):
+            self.reads.append(path)
+            name = path.rsplit("/", 1)[1]
+            return (200, {"name": name, "value": self.variables[name]}) if name in self.variables else (404, None)
         self.writes.append((method, path, body))
         if method == "DELETE":
             self.value = None
@@ -193,3 +203,233 @@ def test_an_unreadable_allowlist_changes_nothing(tmp_path, capsys):
     assert watch.main(["--state-file", str(tmp_path / "s.json"), "--repository", REPO,
                        "--machines-file", str(allowed)], call=fake) == 1
     assert fake.writes == [] and "nothing changed" in capsys.readouterr().err
+
+
+# --- on-demand machines: kept listed by their orchestrator's heartbeat ---
+
+HEARTBEAT = "PARITY_HEARTBEAT_WINDOWS"
+HEARTBEAT_PATH = f"/repos/{REPO}/actions/variables/{HEARTBEAT}"
+
+
+def watch_at(fake: FakeGitHub, tmp_path, monkeypatch, now: float, machines: str, *extra: str) -> int:
+    allowed = tmp_path / "machines"
+    allowed.write_text(machines, encoding="utf-8")
+    monkeypatch.setattr(watch.time, "time", lambda: now)
+    return watch.main(["--state-file", str(tmp_path / "state.json"), "--repository", REPO,
+                       "--machines-file", str(allowed), *extra], call=fake)
+
+
+def test_the_heartbeat_variable_name_is_stable():
+    # An orchestrator outside this repository writes it, so a rename breaks
+    # every on-demand machine (docs/specs/2026-10-19-self-hosted-parity-lane.md).
+    assert watch.heartbeat_variable("windows") == "PARITY_HEARTBEAT_WINDOWS"
+    assert watch.heartbeat_variable("win-vm2") == "PARITY_HEARTBEAT_WIN_VM2"
+
+
+def test_an_on_demand_machine_with_a_fresh_heartbeat_is_listed_without_a_runner(tmp_path, monkeypatch, capsys):
+    fake = FakeGitHub([runner("w", "offline", "pseudolife-parity-windows")], variables={HEARTBEAT: "99500"})
+    assert watch_at(fake, tmp_path, monkeypatch, 100000, "linux\nwindows  on-demand   # VMs started per job\n") == 0
+    assert fake.value == '["windows"]'
+    assert HEARTBEAT_PATH in fake.reads
+
+
+def test_an_on_demand_machine_with_a_stale_heartbeat_drops_after_the_grace(tmp_path, monkeypatch, capsys):
+    fake = FakeGitHub([], variables={HEARTBEAT: "100000"})
+    machines = "windows on-demand\n"
+    assert watch_at(fake, tmp_path, monkeypatch, 100000, machines) == 0
+    assert fake.value == '["windows"]'
+    # The heartbeat is 14 minutes old: fresh under the 15-minute default.
+    assert watch_at(fake, tmp_path, monkeypatch, 100000 + 14 * 60, machines) == 0
+    # At 16 minutes it is stale, but it was last fresh 2 minutes ago: within the grace.
+    assert watch_at(fake, tmp_path, monkeypatch, 100000 + 16 * 60, machines) == 0
+    assert fake.value == '["windows"]'
+    # The 10-minute grace since it was last fresh has passed.
+    assert watch_at(fake, tmp_path, monkeypatch, 100000 + 25 * 60, machines) == 0
+    assert fake.value is None
+    assert "deleted" in capsys.readouterr().out
+
+
+def test_heartbeat_minutes_sets_the_freshness_window(tmp_path, monkeypatch, capsys):
+    fake = FakeGitHub([], variables={HEARTBEAT: "100000"})
+    assert watch_at(fake, tmp_path, monkeypatch, 100000 + 6 * 60, "windows on-demand\n",
+                    "--heartbeat-minutes", "5") == 0
+    assert fake.value is None and fake.writes == []
+    assert watch_at(fake, tmp_path, monkeypatch, 100000 + 6 * 60, "windows on-demand\n",
+                    "--heartbeat-minutes", "7") == 0
+    assert fake.value == '["windows"]'
+
+
+@pytest.mark.parametrize("heartbeat", [None, "", "soon", "1e5", "nan", "inf", "-100000", "0x186a0",
+                                       "100000 100000", "１００000", 100000, ["100000"]])
+def test_a_missing_or_unreadable_heartbeat_is_stale(tmp_path, monkeypatch, capsys, heartbeat):
+    variables = {} if heartbeat is None else {HEARTBEAT: heartbeat}
+    fake = FakeGitHub([], value='["windows"]', variables=variables)
+    assert watch_at(fake, tmp_path, monkeypatch, 100000, "windows on-demand\n") == 0
+    assert fake.value is None
+
+
+@pytest.mark.parametrize("heartbeat", ["100000", " 100000\n", "100000.75"])
+def test_a_heartbeat_as_date_prints_it_is_fresh(tmp_path, monkeypatch, capsys, heartbeat):
+    fake = FakeGitHub([], variables={HEARTBEAT: heartbeat})
+    assert watch_at(fake, tmp_path, monkeypatch, 100000, "windows on-demand\n") == 0
+    assert fake.value == '["windows"]'
+
+
+def test_a_plain_machine_is_not_kept_by_a_heartbeat(tmp_path, monkeypatch, capsys):
+    # The near-miss: the variable exists and is fresh, but without the marker
+    # only a runner keeps the machine listed.
+    fake = FakeGitHub([runner("w", "online", "pseudolife-parity-windows")], variables={HEARTBEAT: "100000"})
+    assert watch_at(fake, tmp_path, monkeypatch, 100000, "windows\n") == 0
+    assert fake.value == '["windows"]'
+    fake.runners[0]["status"] = "offline"
+    fake.variables[HEARTBEAT] = str(100000 + 11 * 60)
+    assert watch_at(fake, tmp_path, monkeypatch, 100000 + 11 * 60, "windows\n") == 0
+    assert fake.value is None
+    assert fake.reads == []
+
+
+def test_without_a_machines_file_no_heartbeat_is_read(tmp_path, capsys):
+    fake = FakeGitHub([], value='["windows"]', variables={HEARTBEAT: "1000"})
+    assert watch.main(["--state-file", str(tmp_path / "s.json"), "--repository", REPO], call=fake) == 0
+    assert fake.value is None and fake.reads == []
+
+
+def test_a_heartbeat_from_the_future_beyond_the_skew_is_stale(tmp_path, monkeypatch, capsys):
+    ahead = 100000 + watch.HEARTBEAT_SKEW_SECONDS
+    fake = FakeGitHub([], variables={HEARTBEAT: str(ahead + 1)})
+    assert watch_at(fake, tmp_path, monkeypatch, 100000, "windows on-demand\n") == 0
+    assert fake.value is None
+    # Within the skew it counts: the orchestrator's clock may run a little ahead.
+    fake.variables[HEARTBEAT] = str(ahead)
+    assert watch_at(fake, tmp_path, monkeypatch, 100000, "windows on-demand\n") == 0
+    assert fake.value == '["windows"]'
+
+
+def test_an_on_demand_machine_with_a_runner_online_needs_no_heartbeat(tmp_path, monkeypatch, capsys):
+    fake = FakeGitHub([runner("w", "online", "pseudolife-parity-windows")])
+    assert watch_at(fake, tmp_path, monkeypatch, 100000, "windows on-demand\n") == 0
+    assert fake.value == '["windows"]'
+    # Its heartbeat is not read, so a heartbeat API error cannot fail the run.
+    assert fake.reads == []
+
+
+@pytest.mark.parametrize("heartbeat, why", [(None, "missing"), ("soon", "unreadable"),
+                                            ("100000", "stale"), (str(100000 + 26 * 60 + 121), "ahead")])
+def test_a_dropped_on_demand_machine_names_its_heartbeat_and_why(tmp_path, monkeypatch, capsys, heartbeat, why):
+    # The orchestrator lives outside this repository, so the change line
+    # says which variable to look at.
+    fake = FakeGitHub([runner("a", "online", "pseudolife-parity-linux")], variables={HEARTBEAT: "100000"})
+    machines = "linux\nwindows on-demand\n"
+    assert watch_at(fake, tmp_path, monkeypatch, 100000, machines) == 0
+    assert json.loads(fake.value) == ["linux", "windows"]
+    capsys.readouterr()
+    fake.variables.pop(HEARTBEAT)
+    if heartbeat is not None:
+        fake.variables[HEARTBEAT] = heartbeat
+    assert watch_at(fake, tmp_path, monkeypatch, 100000 + 26 * 60, machines) == 0
+    assert fake.value == '["linux"]'
+    assert capsys.readouterr().out == (f'runner_watch: {watch.VARIABLE} changed from ["linux", "windows"] to '
+                                       f'["linux"] (windows: {HEARTBEAT} {why})\n')
+
+
+def test_a_dropped_on_demand_machine_names_its_heartbeat_when_the_lane_goes_off(tmp_path, monkeypatch, capsys):
+    fake = FakeGitHub([], value='["windows"]')
+    assert watch_at(fake, tmp_path, monkeypatch, 100000, "windows on-demand\n") == 0
+    assert fake.value is None
+    assert f"(windows: {HEARTBEAT} missing)" in capsys.readouterr().out
+
+
+def test_a_machine_named_both_plain_and_on_demand_is_refused(tmp_path, monkeypatch, capsys):
+    fake = FakeGitHub([runner("a", "online", "pseudolife-parity-linux")], value='["windows"]')
+    assert watch_at(fake, tmp_path, monkeypatch, 100000, "linux\nwindows\nwindows on-demand\n") == 1
+    assert fake.writes == [] and fake.value == '["windows"]'
+    err = capsys.readouterr().err
+    assert "line 3" in err and "windows" in err and "nothing changed" in err and err.count("\n") == 1
+    # The same line twice is harmless and still allowed.
+    assert watch_at(fake, tmp_path, monkeypatch, 100000, "linux\nlinux\n") == 0
+    assert fake.value == '["linux"]'
+
+
+@pytest.mark.parametrize("line", ["windows on_demand", "windows ondemand on-demand", "windows on-demand extra",
+                                  "win.vm on-demand"])
+def test_an_unknown_marker_is_refused_and_changes_nothing(tmp_path, monkeypatch, capsys, line):
+    fake = FakeGitHub([runner("a", "online", "pseudolife-parity-linux")], value='["windows"]',
+                      variables={HEARTBEAT: "100000"})
+    assert watch_at(fake, tmp_path, monkeypatch, 100000, f"linux\n{line}\n") == 1
+    assert fake.writes == [] and fake.value == '["windows"]'
+    err = capsys.readouterr().err
+    assert "line 2" in err and "on-demand" in err and "nothing changed" in err and err.count("\n") == 1
+
+
+def test_a_heartbeat_api_error_changes_nothing(tmp_path, monkeypatch, capsys):
+    # A transient API failure must not start the grace clock on the machine.
+    fake = FakeGitHub([], value='["windows"]', fail=f"GET {HEARTBEAT_PATH}")
+    state = tmp_path / "state.json"
+    state.write_text('{"windows": 99000}', encoding="utf-8")
+    assert watch_at(fake, tmp_path, monkeypatch, 100000, "windows on-demand\n") == 1
+    assert fake.writes == [] and fake.value == '["windows"]'
+    assert state.read_text(encoding="utf-8") == '{"windows": 99000}'
+    assert "nothing changed" in capsys.readouterr().err
+
+
+def test_the_setup_script_recognises_a_watcher_that_knows_on_demand():
+    # setup-runner-watch.sh refuses :on-demand while the installed watcher
+    # predates it, by finding this line in the installed copy.
+    from pathlib import Path
+
+    selfhosted = Path(watch.__file__).parent
+    probe = "^ON_DEMAND = \"on-demand\"$"
+    assert f"grep -qs '{probe}'" in (selfhosted / "setup-runner-watch.sh").read_text(encoding="utf-8")
+    assert re.search(probe, (selfhosted / "runner_watch.py").read_text(encoding="utf-8"), re.MULTILINE)
+
+
+def _run_machines_block(tmp_path, listing: str, watcher_source: str) -> tuple[int, str, str | None]:
+    """Run setup-runner-watch.sh's --machines branch against tmp_path, root steps stubbed."""
+    import subprocess
+    from pathlib import Path
+
+    script = (Path(watch.__file__).parent / "setup-runner-watch.sh").read_text(encoding="utf-8")
+    block = re.search(r'^if \[ "\$\{1:-\}" = "--machines" \]; then\n.*?^fi$', script, re.MULTILINE | re.DOTALL)
+    assert block, "the --machines branch moved"
+    lib = tmp_path / "lib"
+    lib.mkdir()
+    (lib / "runner_watch.py").write_text(watcher_source, encoding="utf-8")
+    machines = tmp_path / "machines"
+    driver = ("set -euo pipefail\n"
+              f"CONFIG={tmp_path}; MACHINES={machines}; ACCOUNT=nobody; LIB={lib}\n"
+              "chown() { :; }; systemctl() { :; }\n"
+              f"{block.group(0)}\n")
+    result = subprocess.run(["bash", "-c", driver, "setup-runner-watch.sh", "--machines", listing],
+                            capture_output=True, text=True, timeout=30)
+    return result.returncode, result.stderr, machines.read_text(encoding="utf-8") if machines.exists() else None
+
+
+@pytest.mark.skipif(os.name == "nt", reason="bash here may be the WSL launcher; Linux CI runs it")
+@pytest.mark.parametrize("listing, code, machines", [
+    ("linux,windows:on-demand", 0, {"allowed": {"linux", "windows"}, "on_demand": {"windows"}}),
+    ("linux", 0, {"allowed": {"linux"}, "on_demand": set()}),
+    ("", 0, {"allowed": set(), "on_demand": set()}),
+    ("linux,windows,windows:on-demand", 2, None),
+    # Codex review of be9f9365: "linux-a" sorts between the two spellings of "linux".
+    ("linux,linux-a,linux:on-demand", 2, None),
+    ("linux,windows on-demand", 2, None),
+])
+def test_setup_machines_writes_what_the_watcher_reads(tmp_path, listing, code, machines):
+    from pathlib import Path
+
+    source = (Path(watch.__file__).parent / "runner_watch.py").read_text(encoding="utf-8")
+    returncode, stderr, written = _run_machines_block(tmp_path, listing, source)
+    assert returncode == code, stderr
+    if machines is None:
+        # A refused list leaves the allowlist as it was (here: absent).
+        assert written is None and "nothing changed" in stderr
+    else:
+        parsed = watch.allowed_machines(tmp_path / "machines")
+        assert (parsed.allowed, parsed.on_demand) == (machines["allowed"], machines["on_demand"])
+
+
+@pytest.mark.skipif(os.name == "nt", reason="bash here may be the WSL launcher; Linux CI runs it")
+def test_setup_machines_refuses_on_demand_for_an_older_watcher(tmp_path):
+    returncode, stderr, written = _run_machines_block(tmp_path, "linux,windows:on-demand", "# an older watcher\n")
+    assert returncode == 1 and written is None
+    assert "without arguments" in stderr and "nothing changed" in stderr

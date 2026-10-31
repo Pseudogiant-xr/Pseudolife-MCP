@@ -259,6 +259,15 @@ def register(h) -> dict[str, dict]:
                 rest(reinforce, {"entry_id": 999999}),
             ],
         },
+        "console-delete-filter-types": {
+            "config": None, "seed": [h.store("Console invalid filter survivor.")],
+            "ops": [checked(delete, {"text": "Console invalid filter survivor.", field: 5,
+                                      "confirm_bulk": True},
+                            "SELECT count(*) = 1 FROM entries WHERE text = 'Console invalid filter survivor.'")
+                    for field in ("text", "substring", "source", "episode", "tag")]
+                   + [checked(delete, {"tag": 5, "confirm_bulk": True},
+                              "SELECT count(*) = 1 FROM entries WHERE text = 'Console invalid filter survivor.'")],
+        },
         "console-delete": {
             "config": "memory:\n  delete_confirm_threshold: 2\n",
             "seed": [
