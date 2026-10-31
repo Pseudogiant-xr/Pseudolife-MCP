@@ -16,6 +16,29 @@ python -m board.boundary --shared-clock
 python -m board.boundary --json-keys
 ```
 
+The signed Console actions run with
+`--only maintainer-enrol maintainer-roles maintainer-mail maintainer-refusals`.
+These scenarios additionally compare `maintainer_passkeys`,
+`maintainer_bootstrap` and `maintainer_nonces` after each request. They cover
+bootstrap and approved enrolment, quarantine cancellation, self-revocation,
+conductor and coordinator changes (including legacy purposes), signed mail
+and both unread and acknowledged withdrawals. Refusals check signatures,
+MACs, purpose, expiry, nonce replay, caller admission and counter regression.
+A stale role preview is retried with the exact same assertion after restoring
+the signed holder, proving the refusal rolls back its nonce and sign count.
+The request checks require the expected status on each arm, so two identical
+refusals cannot pass as a successful action. Refused transactions also get an
+exact before/after state check, except for documented side effects (wrong
+bootstrap guesses, counter flags and the lazy maintainer address).
+
+The fixture uses deterministic software Ed25519 keys and a fixed secret in
+each disposable bank. Challenge MACs and WebAuthn challenge bytes are verified
+against their raw payloads, and stored mail proofs are cryptographically
+verified before their varying signatures and challenges are normalized;
+signed fields and authenticator counters remain compared. Maintainer clocks
+must match the captured request windows, including the 24-hour quarantine.
+Comparator checks are in `python -m pytest board/test_maintainer.py`.
+
 Per step it compares the status, the headers clients read (`content-type`,
 `cache-control`, `x-pl-board`) and the body by value. After every write it
 dumps the board's tables on both arms (agents, messages, events, leases,
