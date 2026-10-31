@@ -40,6 +40,17 @@ fn opt_str<'a>(a: &'a Map<String, Value>, k: &str) -> Option<&'a str> {
     a.get(k).and_then(Value::as_str)
 }
 
+fn validate_delete_filters(a: &Map<String, Value>) -> Result<(), ToolError> {
+    for field in FILTERS {
+        if a.get(field).is_some_and(|v| !v.is_null() && !v.is_string()) {
+            return Err(ToolError::Invalid(format!(
+                "Delete filter '{field}' must be a string; supply a string or omit the filter."
+            )));
+        }
+    }
+    Ok(())
+}
+
 /// `memory_forget` on the MCP surface (`mcp_server.py:2098-2156`): the
 /// selector checks, then the scope's service body, detached from the
 /// request under the service lock.
@@ -123,6 +134,7 @@ async fn delete(
     cfg: &MemoryConfig,
     a: &Map<String, Value>,
 ) -> Result<Value, ToolError> {
+    validate_delete_filters(a)?;
     let threshold = cfg.delete_confirm_threshold;
     let confirm = a
         .get("confirm_bulk")
@@ -929,6 +941,38 @@ pub(crate) async fn save_lessons(svc: &Service, ready: &Ready) -> Result<(), Too
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn delete_rejects_non_string_filters_before_matching() {
+        for field in FILTERS {
+            for value in [json!(5), json!(true), json!([]), json!({})] {
+                for mixed in [false, true] {
+                    let mut args = json!({"confirm_bulk": true}).as_object().unwrap().clone();
+                    if mixed {
+                        args.insert("substring".into(), json!("keep"));
+                    }
+                    args.insert(field.into(), value.clone());
+                    let err = validate_delete_filters(&args).unwrap_err();
+                    assert!(
+                        matches!(err, ToolError::Invalid(message) if message == format!(
+                            "Delete filter '{field}' must be a string; supply a string or omit the filter."
+                        ))
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn delete_accepts_string_and_null_filters() {
+        for field in FILTERS {
+            for value in [json!(" SCRATCH "), json!(""), Value::Null] {
+                let mut args = Map::new();
+                args.insert(field.into(), value);
+                validate_delete_filters(&args).unwrap();
+            }
+        }
+    }
 
     #[test]
     fn digest_cursor_matches_load_and_union() {
