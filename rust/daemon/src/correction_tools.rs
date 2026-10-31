@@ -145,7 +145,10 @@ async fn resolve_targets(
         ));
     }
     if by_id {
-        if selectors.iter().any(|v| !v.is_number() || !int_value(v).0) {
+        if selectors
+            .iter()
+            .any(|v| !v.is_number() || v.to_string().contains(['.', 'e', 'E']) || !int_value(v).0)
+        {
             return Err(noop(
                 "invalid_selector",
                 "Entry IDs must be positive integers, not coerced values.",
@@ -403,7 +406,7 @@ fn mcp_memory_consolidate<'a>(app: &'a crate::http::App, call: ToolCall<'a>) -> 
 
 /// `service.supersede` (`service.py:3201-3229`): one target, by id or exact
 /// text, source `correction`, no tags, the derived slots reported.
-async fn supersede(
+pub(crate) async fn supersede(
     ready: &Arc<Ready>,
     cfg: &MemoryConfig,
     caller: &Caller,
@@ -434,6 +437,7 @@ async fn supersede(
     };
     let correction = Correction {
         source: "correction",
+        raw_source: None,
         tags: Vec::new(),
         report_derivations: true,
     };
@@ -443,7 +447,7 @@ async fn supersede(
 /// `service.consolidate` (`service.py:7462-7519`): a list of targets, by ids
 /// or exact texts, source `consolidation` unless the caller's is truthy, the
 /// caller's tags, no derived-slot report.
-async fn consolidate(
+pub(crate) async fn consolidate(
     ready: &Arc<Ready>,
     cfg: &MemoryConfig,
     caller: &Caller,
@@ -477,15 +481,38 @@ async fn consolidate(
         Ok(t) => t,
         Err(answer) => return Ok(answer),
     };
-    // `source or "consolidation"`: an empty source takes the default.
-    let source = match args.get("source").and_then(Value::as_str) {
-        Some(s) if !s.is_empty() => s,
-        _ if crate::mutants::active("mcp-consolidate-default-source") => "correction",
-        _ => "consolidation",
+    // Python defaults only falsey sources; raw non-strings reach psycopg.
+    let raw_source = args
+        .get("source")
+        .filter(|v| crate::board::store::py_truthy(v));
+    // Console bodies reach the service without MCP's list binding. Python
+    // iterates string characters and dict keys, but a truthy scalar raises.
+    let tags = match args.get("tags") {
+        Some(Value::String(s)) => json!(s.chars().map(|c| c.to_string()).collect::<Vec<_>>()),
+        Some(Value::Object(m)) => json!(m.keys().collect::<Vec<_>>()),
+        Some(v) if !crate::board::store::py_truthy(v) => json!([]),
+        Some(v @ Value::Array(_)) => v.clone(),
+        None => json!([]),
+        Some(v) => {
+            let kind = match v {
+                Value::Bool(_) => "bool",
+                Value::Number(n) if n.to_string().contains(['.', 'e', 'E']) => "float",
+                _ => "int",
+            };
+            return Err(internal(format!("'{kind}' object is not iterable")));
+        }
+    };
+    let source = match raw_source {
+        Some(Value::String(s)) => s.as_str(),
+        // A non-string is never the special "user" role during admission.
+        Some(_) => "",
+        None if crate::mutants::active("mcp-consolidate-default-source") => "correction",
+        None => "consolidation",
     };
     let correction = Correction {
         source,
-        tags: store::normalize_tags(args.get("tags")),
+        raw_source: raw_source.filter(|v| !v.is_string()),
+        tags: store::normalize_tags(Some(&tags)),
         report_derivations: crate::mutants::active("mcp-consolidate-derived-keys"),
     };
     apply_correction(ready, cfg, &mut ws, caller, targets, new_text, correction).await
@@ -494,6 +521,7 @@ async fn consolidate(
 /// What distinguishes one correction tool's store from another's.
 struct Correction<'a> {
     source: &'a str,
+    raw_source: Option<&'a Value>,
     tags: Vec<String>,
     /// `report_derivations`: read the derived slots and answer them.
     report_derivations: bool,
@@ -561,13 +589,23 @@ async fn apply_correction(
     } else {
         &ids[..]
     };
-    let admission = match store::admit(ready, cfg, ws, new, bypass, retiring)
+    let mut admission = match store::admit(ready, cfg, ws, new, bypass, retiring)
         .await
         .map_err(from_store)?
     {
         Admit::Admitted(adm) => Some(adm),
         Admit::Filtered | Admit::BelowGate { .. } => None,
     };
+    // A filtered replacement never reaches psycopg in Python. Keep source
+    // adaptation after admission, without publishing any staged mutation.
+    if let (Some(adm), Some(source)) = (admission.as_mut(), correction.raw_source) {
+        adm.entry.source = crate::txn::with_client(ready.storage.client(), |db| async move {
+            crate::pyjson::pg_text(db, source).await
+        })
+        .await
+        .map_err(internal)?
+        .unwrap_or_default();
+    }
     let victim = admission.as_ref().and_then(|adm| {
         let bank = ready.bank.read().expect("bank lock");
         adm.victim.map(|i| {

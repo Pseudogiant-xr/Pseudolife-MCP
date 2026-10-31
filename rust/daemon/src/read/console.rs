@@ -659,6 +659,18 @@ async fn facts_dump(svc: &Service, ready: &Ready) -> anyhow::Result<Vec<Value>> 
             })
             .collect()
     };
+    // Python sorts resident records by the raw fields' .lower(), even after
+    // a write whose PostgreSQL adaptation failed.
+    for (d, _) in &rows {
+        for key in ["entity", "attribute"] {
+            if !d[key].is_string() {
+                anyhow::bail!(
+                    "'{}' object has no attribute 'lower'",
+                    crate::pyjson::type_name(&d[key])
+                );
+            }
+        }
+    }
     rows.sort_by_cached_key(|(d, _)| (lower(d, "entity"), lower(d, "attribute")));
     if knobs.stale_policy == "demote" {
         rows.sort_by_key(|(d, _)| d.get("stale") == Some(&Value::Bool(true)));

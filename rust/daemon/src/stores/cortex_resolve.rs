@@ -80,8 +80,10 @@ impl CortexStore {
             });
         }
         self.dirty_slots.insert(key.clone());
+        let raw_value = self.records[c].field("value", &value);
+        let raw_old = cur.and_then(|i| self.records[i].raw.get("value").cloned());
         let row = |reason| LogRow {
-            new_value: &value,
+            new_value: raw_value.clone(),
             new_conf: confidence,
             t: now,
             decision: "resolved",
@@ -95,6 +97,8 @@ impl CortexStore {
                 old.status = "superseded".into();
                 old.superseded_at = Some(now);
                 old.superseded_by_value = Some(value.clone());
+                old.raw
+                    .insert("superseded_by_value".into(), raw_value.clone());
                 old.value.clone()
             });
             // An unrecognised tier fails closed to "agent" (`cortex.py:1497`).
@@ -113,6 +117,10 @@ impl CortexStore {
             }
             if cur_value.is_some() {
                 rec.supersedes_value = cur_value;
+                rec.raw.remove("supersedes_value");
+                if let Some(value) = raw_old {
+                    rec.raw.insert("supersedes_value".into(), value);
+                }
             }
             self.current.insert(key, c);
             self.log_row(&anchor, &row("accepted"));

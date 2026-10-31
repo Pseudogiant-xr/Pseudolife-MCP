@@ -142,6 +142,14 @@ async fn replace_slot_rows(
         let value_norm = (r.kind == "member").then(|| norm_value(&r.value));
         let version = if r.version == 0 { 1 } else { r.version };
         let (entity_norm, attribute_norm) = (norm_key(&r.entity), norm_key(&r.attribute));
+        let entity = crate::pyjson::pg_text(db, &r.field("entity", &r.entity)).await?;
+        let attribute = crate::pyjson::pg_text(db, &r.field("attribute", &r.attribute)).await?;
+        let value = crate::pyjson::pg_text(db, &r.field("value", &r.value)).await?;
+        let supersedes =
+            crate::pyjson::pg_text(db, &r.link("supersedes_value", &r.supersedes_value)).await?;
+        let superseded_by =
+            crate::pyjson::pg_text(db, &r.link("superseded_by_value", &r.superseded_by_value))
+                .await?;
         let id: i64 = db
             .query_one(
                 "INSERT INTO facts (entity, attribute, entity_norm, attribute_norm, value, \
@@ -154,11 +162,11 @@ async fn replace_slot_rows(
                  $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32) \
                  RETURNING id",
                 &[
-                    &r.entity,
-                    &r.attribute,
+                    &entity,
+                    &attribute,
                     &entity_norm,
                     &attribute_norm,
-                    &r.value,
+                    &value,
                     &r.polarity,
                     &r.status,
                     &r.confidence,
@@ -167,8 +175,8 @@ async fn replace_slot_rows(
                     &provenance,
                     &r.asserted_at,
                     &r.last_confirmed,
-                    &r.supersedes_value,
-                    &r.superseded_by_value,
+                    &supersedes,
+                    &superseded_by,
                     &r.superseded_at,
                     &embedding,
                     &row.entity_id,
