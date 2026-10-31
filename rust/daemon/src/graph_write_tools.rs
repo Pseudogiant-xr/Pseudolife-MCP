@@ -252,6 +252,59 @@ fn s<'a>(v: &'a Value, k: &str) -> &'a str {
 
 /// `service.graph_relate` (`service.py:7659-7713`).
 pub(crate) async fn relate(ready: &Ready, a: &Map<String, Value>) -> Result<Value, ToolError> {
+    relate_impl(ready, a, false).await
+}
+
+/// Console arguments reach the service without MCP's string binding.
+pub(crate) async fn relate_console(
+    ready: &Ready,
+    a: &Map<String, Value>,
+) -> Result<Value, ToolError> {
+    relate_impl(ready, a, true).await
+}
+
+async fn resolve_console(client: &Client, value: &Value) -> Result<Value, ToolError> {
+    if let Some(name) = value.as_str() {
+        return resolve_or_create(client, name, None).await;
+    }
+    let falsy = match value {
+        Value::Null => true,
+        Value::Bool(b) => !b,
+        Value::Number(n) => n.as_f64() == Some(0.0),
+        Value::Array(a) => a.is_empty(),
+        Value::Object(o) => o.is_empty(),
+        _ => false,
+    };
+    if falsy {
+        let mut found = graph::find_entity(client, "").await.map_err(internal)?;
+        if !found.is_null() {
+            found["created"] = json!(false);
+            return Ok(found);
+        }
+        if let Some(owner) = find_fact_slot_entity(client, "").await?
+            && !norm_name(&owner).is_empty()
+        {
+            return resolve_or_create(client, &owner, None).await;
+        }
+    }
+    let kind = match value {
+        Value::Null => "NoneType",
+        Value::Bool(_) => "bool",
+        Value::Number(n) if n.is_i64() || n.is_u64() => "int",
+        Value::Number(_) => "float",
+        Value::Array(_) => "list",
+        _ => "dict",
+    };
+    Err(internal(format!(
+        "'{kind}' object has no attribute 'strip'"
+    )))
+}
+
+async fn relate_impl(
+    ready: &Ready,
+    a: &Map<String, Value>,
+    console: bool,
+) -> Result<Value, ToolError> {
     let client = ready.storage.client();
     let relation = req_str(a, "relation");
     let reg = registry(client).await?;
@@ -264,8 +317,16 @@ pub(crate) async fn relate(ready: &Ready, a: &Map<String, Value>) -> Result<Valu
             "hint": "Define it with memory_relation_define, or use 'related-to' as the lawful fallback.",
         }));
     };
-    let src_e = resolve_or_create(client, req_str(a, "src"), opt_str(a, "src_type")).await?;
-    let dst_e = resolve_or_create(client, req_str(a, "dst"), opt_str(a, "dst_type")).await?;
+    let src_e = if console {
+        resolve_console(client, &a["src"]).await?
+    } else {
+        resolve_or_create(client, req_str(a, "src"), opt_str(a, "src_type")).await?
+    };
+    let dst_e = if console {
+        resolve_console(client, &a["dst"]).await?
+    } else {
+        resolve_or_create(client, req_str(a, "dst"), opt_str(a, "dst_type")).await?
+    };
     let rmeta = reg
         .iter()
         .find(|r| r.get("name").and_then(Value::as_str) == Some(resolved.as_str()))
@@ -319,7 +380,7 @@ pub(crate) async fn relate(ready: &Ready, a: &Map<String, Value>) -> Result<Valu
 
 /// `service.graph_unrelate` (`service.py:7729-7750`): the edge is superseded
 /// (kept for audit), never deleted.
-async fn unrelate(ready: &Ready, a: &Map<String, Value>) -> Result<Value, ToolError> {
+pub(crate) async fn unrelate(ready: &Ready, a: &Map<String, Value>) -> Result<Value, ToolError> {
     let client = ready.storage.client();
     let relation = req_str(a, "relation");
     let reg = registry(client).await?;

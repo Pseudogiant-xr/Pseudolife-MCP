@@ -794,7 +794,7 @@ async fn apply_auto_distinct(
 /// `refresh_auto_dismissals(service, locked=True, ...)`: reopen the
 /// automatic dismissals evidence or a known policy invalidated. Caller
 /// holds the writer lock.
-async fn refresh_auto_dismissals(
+pub(crate) async fn refresh_auto_dismissals(
     client: &Client,
     ready: &Ready,
     check: Option<(&str, Option<&str>, Option<&str>, i64)>,
