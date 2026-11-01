@@ -996,6 +996,23 @@ def test_merge_queue_trigger_and_image_base():
                                        "github.event.merge_group.base_sha || github.event.before }}")
 
 
+def test_image_job_proves_cached_models_without_network_and_retains_result():
+    steps = workflow()["jobs"]["daemon-image"]["steps"]
+    proof = next(step for step in steps if step.get("name") == "Prove network-disabled model reads after a cold restart")
+    provision = next(step for step in steps if step.get("name") == "Prove offline health and authenticated CPU query inference")
+    assert steps.index(proof) > steps.index(provision)
+    assert proof["if"] == "steps.image-inputs.outputs.needed == 'true'"
+    require_command(commands(proof["run"]), ("python", "rust/daemon/harness/image_model_proof.py"),
+                    ("--image", "--postgres-image", "--models", "--out"))
+    assert "w3j-daemon-rust:prep" in proof["run"]
+    assert "pgvector/pgvector:pg18" in proof["run"]
+    assert '"$RUNNER_TEMP/daemon-models"' in proof["run"]
+    upload = next(step for step in steps if step.get("name") == "Retain network-disabled model proof")
+    assert upload["if"] == "always() && steps.image-inputs.outputs.needed == 'true'"
+    assert upload["with"]["path"] == "${{ runner.temp }}/image-model-proof.json"
+    assert upload["with"]["if-no-files-found"] == "error"
+
+
 @pytest.mark.parametrize("event, runs", [("pull_request", False), ("merge_group", False), ("push", False),
                                          ("schedule", True), ("workflow_dispatch", True)])
 def test_source_mutants_run_nightly_and_on_manual_ci_only(event, runs):
