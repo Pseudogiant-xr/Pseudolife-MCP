@@ -126,6 +126,169 @@ async fn side_client(dsn: &str) -> (Client, JoinHandle<()>) {
         .unwrap()
 }
 
+struct TemporaryRole {
+    config: Config,
+    name: Option<String>,
+    grants: bool,
+}
+
+impl TemporaryRole {
+    async fn create(dsn: &str, client: &Client, suffix: &str) -> Option<Self> {
+        let row = client
+            .query_one(
+                "SELECT rolcreaterole OR rolsuper, rolsuper FROM pg_roles WHERE rolname = current_user",
+                &[],
+            )
+            .await
+            .unwrap();
+        if !row.get::<_, bool>(0) {
+            eprintln!("test login lacks CREATEROLE: skipping temporary-role database test");
+            return None;
+        }
+        let pid: i32 = client
+            .query_one("SELECT pg_backend_pid()", &[])
+            .await
+            .unwrap()
+            .get(0);
+        let name = format!("s3_shadow_{suffix}_{pid}");
+        let config = parse_dsn(dsn).unwrap();
+        // Activate cleanup only after CREATE succeeds: a name collision must
+        // never give the guard ownership of somebody else's role.
+        client
+            .batch_execute(&format!("CREATE ROLE {name} NOLOGIN"))
+            .await
+            .unwrap();
+        let mut guard = Self {
+            config,
+            name: Some(name.clone()),
+            grants: false,
+        };
+        let can_set = row.get::<_, bool>(1)
+            || client
+                .query_one(
+                    "SELECT pg_has_role(current_user, $1::name, CASE WHEN \
+                     current_setting('server_version_num')::int >= 160000 \
+                     THEN 'SET' ELSE 'MEMBER' END)",
+                    &[&name],
+                )
+                .await
+                .unwrap()
+                .get::<_, bool>(0);
+        if !can_set {
+            guard.cleanup().expect("remove unusable temporary role");
+            eprintln!(
+                "test login cannot SET the temporary role: skipping temporary-role database test"
+            );
+            return None;
+        }
+        Some(guard)
+    }
+
+    fn name(&self) -> &str {
+        self.name.as_deref().unwrap()
+    }
+
+    fn cleanup(&mut self) -> Result<(), String> {
+        let Some(name) = self.name.clone() else {
+            return Ok(());
+        };
+        let config = self.config.clone();
+        let revoke = if self.grants {
+            format!(
+                "REVOKE ALL ON ALL TABLES IN SCHEMA public FROM {name}; REVOKE ALL ON SCHEMA public FROM {name};"
+            )
+        } else {
+            String::new()
+        };
+        // Drop also runs during unwinding and runtime shutdown, so cleanup
+        // must not depend on the test's Tokio executor making progress.
+        std::thread::spawn(move || {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .map_err(|_| "create temporary-role cleanup runtime".to_string())?
+                .block_on(async move {
+                    let (client, task) = connect(&config, Duration::from_secs(10))
+                        .await
+                        .map_err(|_| "connect for temporary-role cleanup".to_string())?;
+                    let result = client
+                        .batch_execute(&format!(
+                            "SET lock_timeout = '5s'; SET statement_timeout = '10s'; \
+                             {revoke} DROP ROLE {name}"
+                        ))
+                        .await
+                        .map_err(|error| error.to_string());
+                    drop(client);
+                    let _ = task.await;
+                    result
+                })
+        })
+        .join()
+        .map_err(|_| "temporary-role cleanup thread panicked".to_string())??;
+        self.name = None;
+        Ok(())
+    }
+}
+
+impl Drop for TemporaryRole {
+    fn drop(&mut self) {
+        if let Err(error) = self.cleanup() {
+            if std::thread::panicking() {
+                eprintln!("temporary-role cleanup failed during panic: {error}");
+            } else {
+                panic!("temporary-role cleanup failed: {error}");
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn db_temporary_role_is_removed_after_panic() {
+    let Some(dsn) = test_dsn() else { return };
+    let _guard = DB.lock().await;
+    let (client, task) = side_client(&dsn).await;
+    let Some(mut role) = TemporaryRole::create(&dsn, &client, "panic").await else {
+        drop(client);
+        let _ = task.await;
+        return;
+    };
+    let name = role.name().to_string();
+    let writer = Storage::open(&dsn).await.unwrap();
+    role.grants = true;
+    client
+        .batch_execute(&format!(
+            "GRANT USAGE ON SCHEMA public TO {name}; \
+             GRANT SELECT ON ALL TABLES IN SCHEMA public TO {name}"
+        ))
+        .await
+        .unwrap();
+    assert!(
+        client
+            .query_one(
+                "SELECT has_table_privilege($1::name, 'public.episodes', 'SELECT')",
+                &[&name],
+            )
+            .await
+            .unwrap()
+            .get::<_, bool>(0)
+    );
+    let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+        let _role = role;
+        panic!("exercise temporary-role cleanup during panic");
+    }));
+    assert!(panic.is_err());
+    assert!(
+        client
+            .query_opt("SELECT 1 FROM pg_roles WHERE rolname = $1", &[&name])
+            .await
+            .unwrap()
+            .is_none()
+    );
+    writer.close().await;
+    drop(client);
+    let _ = task.await;
+}
+
 #[tokio::test]
 async fn db_second_writer_is_refused_and_epoch_counts() {
     let Some(dsn) = test_dsn() else { return };
@@ -159,6 +322,12 @@ async fn db_second_writer_is_refused_and_epoch_counts() {
 async fn db_shadow_never_takes_the_lease_even_after_reconnect() {
     let Some(dsn) = test_dsn() else { return };
     let _guard = DB.lock().await;
+    let (client, task) = side_client(&dsn).await;
+    let role = TemporaryRole::create(&dsn, &client, "reader").await;
+    drop(client);
+    let _ = task.await;
+    let Some(mut role_guard) = role else { return };
+    let role = role_guard.name().to_string();
     let writer = Storage::open(&dsn).await.unwrap();
     let epoch = writer.lease_epoch();
     let refused = Storage::open_read_only(&dsn)
@@ -166,20 +335,41 @@ async fn db_shadow_never_takes_the_lease_even_after_reconnect() {
         .err()
         .expect("writer credentials must be refused");
     assert!(format!("{refused:?}").contains("pseudolife_shadow DSN"));
-    let pid: i32 = writer
-        .client()
-        .query_one("SELECT pg_backend_pid()", &[])
-        .await
-        .unwrap()
-        .get(0);
-    let role = format!("s3_shadow_reader_{pid}");
-    writer.client().batch_execute(&format!("CREATE ROLE {role} NOLOGIN; GRANT USAGE ON SCHEMA public TO {role}; GRANT SELECT ON ALL TABLES IN SCHEMA public TO {role}")).await.unwrap();
+    role_guard.grants = true;
+    writer.client().batch_execute(&format!("GRANT USAGE ON SCHEMA public TO {role}; GRANT SELECT ON ALL TABLES IN SCHEMA public TO {role}")).await.unwrap();
     let mut reader_config = parse_dsn(&dsn).unwrap();
     let options = format!(
         "{} -c role={role}",
         reader_config.get_options().unwrap_or("")
     );
     reader_config.options(&options);
+    for table in [
+        "entries",
+        "facts",
+        "world_facts",
+        "lessons",
+        "episodes",
+        "cms_counters",
+        "meta",
+    ] {
+        for privilege in ["INSERT", "UPDATE", "DELETE", "TRUNCATE"] {
+            writer
+                .client()
+                .batch_execute(&format!("GRANT {privilege} ON {table} TO {role}"))
+                .await
+                .unwrap();
+            let refused = Storage::read_only_session(reader_config.clone())
+                .await
+                .err()
+                .expect("hydrated-table write privilege must refuse startup");
+            assert!(format!("{refused:?}").contains("pseudolife_shadow DSN"));
+            writer
+                .client()
+                .batch_execute(&format!("REVOKE {privilege} ON {table} FROM {role}"))
+                .await
+                .unwrap();
+        }
+    }
     let shadow = Storage::read_only_session(reader_config).await.unwrap();
     assert!(shadow.read_only());
     let marker = shadow.shadow_marker().await.unwrap();
@@ -257,7 +447,15 @@ async fn db_shadow_never_takes_the_lease_even_after_reconnect() {
     replacement2.close().await;
     replacement.close().await;
     shadow.close().await;
-    next_writer.client().batch_execute(&format!("REVOKE ALL ON ALL TABLES IN SCHEMA public FROM {role}; REVOKE ALL ON SCHEMA public FROM {role}; DROP ROLE {role}")).await.unwrap();
+    role_guard.cleanup().expect("remove shadow reader role");
+    assert!(
+        next_writer
+            .client()
+            .query_opt("SELECT 1 FROM pg_roles WHERE rolname = $1", &[&role])
+            .await
+            .unwrap()
+            .is_none()
+    );
     next_writer.close().await;
 }
 

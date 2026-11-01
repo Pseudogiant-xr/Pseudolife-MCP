@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 from concurrent.futures import ThreadPoolExecutor
 import hashlib
+import http.client
 import json
 import os
 from pathlib import Path
@@ -56,6 +57,38 @@ def lease_holders(dsn):
             "SELECT pid FROM pg_locks WHERE locktype='advisory' AND granted AND database=(SELECT oid FROM pg_database WHERE datname=current_database()) "
             "AND classid=((hashtextextended('pseudolife-bank-writer',0) >> 32) & 4294967295)::oid "
             "AND objid=(hashtextextended('pseudolife-bank-writer',0) & 4294967295)::oid AND objsubid=1 ORDER BY pid")]
+
+
+def bound_reads(port, bank_id):
+    headers = {"Authorization": "Bearer synthetic-shadow-proof", "X-PL-Bank": bank_id,
+               "X-PL-Principal": "default", "Content-Type": "application/json",
+               "Accept": "application/json, text/event-stream", "MCP-Protocol-Version": "2025-11-25"}
+    for number, method, params in (
+            (1, "initialize", {"protocolVersion": "2025-11-25", "capabilities": {},
+                               "clientInfo": {"name": "bound-shadow-proof", "version": "1"}}),
+            (None, "notifications/initialized", {}),
+            (2, "tools/call", {"name": "memory_search", "arguments": {"query": "writer lease"}})):
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=30)
+        try:
+            payload = {"jsonrpc": "2.0", "method": method, "params": params}
+            if number is not None:
+                payload["id"] = number
+            conn.request("POST", "/mcp", json.dumps(payload), headers)
+            response = conn.getresponse()
+            raw = response.read()
+            if number is None:
+                assert response.status == 202
+                continue
+            if "text/event-stream" in (response.getheader("content-type") or ""):
+                messages = [json.loads(line[5:]) for line in raw.decode().splitlines() if line.startswith("data:")]
+                body = next((message for message in messages if message.get("id") == number), {})
+            else:
+                body = json.loads(raw)
+            assert response.status == 200 and "result" in body and not body["result"].get("isError"), "valid bound MCP request failed"
+            if response.getheader("mcp-session-id"):
+                headers["Mcp-Session-Id"] = response.getheader("mcp-session-id")
+        finally:
+            conn.close()
 
 
 def apply_role(container, user, database, password, expect_failure=False):
@@ -104,6 +137,8 @@ memory:
     enabled: false
 updates:
   check_releases: false
+coordination:
+  enabled: true
 """
         writer_home = daemons.make_home(root, "python", config)
         env = daemons.base_env(writer_home, {
@@ -184,6 +219,9 @@ updates:
         # Include reads of access-counted entries and GETs, with no Python
         # requests during the table-invariance interval.
         with psycopg.connect(dsn) as conn:
+            bank_id = str(uuid.uuid4())
+            conn.execute("INSERT INTO meta(key,value) VALUES ('coordination_bank_id',%s::jsonb) "
+                         "ON CONFLICT(key) DO UPDATE SET value=excluded.value", (json.dumps(bank_id),))
             entry_id = conn.execute("SELECT min(id) FROM entries").fetchone()[0]
             # The duplicates GET used to clean this stale marker, making a
             # nominal read attempt DELETE/UPDATE on a nonempty bank.
@@ -221,6 +259,7 @@ updates:
         shadow = daemons.rust_daemon(binary.resolve(), home, daemons.free_port(), rust_env).start(wait_s=180)
         rust = compare.Endpoint(f"http://127.0.0.1:{shadow.port}", "synthetic-shadow-proof")
         rust.initialize()
+        bound_reads(shadow.port, bank_id)
         status, effective_config = rust.request("GET", "/api/config")
         assert status == 200
         effective_values = {k["path"]: k["value"] for group in effective_config["groups"] for k in group["knobs"]}
@@ -265,6 +304,7 @@ updates:
         writer_paused = False
         shadow.start(wait_s=180)
         rust = compare.Endpoint(f"http://127.0.0.1:{shadow.port}", "synthetic-shadow-proof")
+        python = compare.Endpoint(f"http://127.0.0.1:{writer.port}", "synthetic-shadow-proof")
         summary = compare.compare(python, rust, cases, triage)
         assert python.read({"tool": "memory_search", "args": {"query": "shadow-replay-only-fixture"}})[0] == 200
         replay_corpus = compare.corpus(dsn=dsn, limit=100)
@@ -277,6 +317,7 @@ updates:
         _, answer = python.rpc("tools/call", {"name": "memory_fact_set", "arguments": {
             "entity": "shadow-refresh-probe", "attribute": "phase", "value": "committed-after-hydration"}})
         assert not answer.get("result", {}).get("isError") and "result" in answer
+        time.sleep(1.1)  # The shadow deliberately reuses a successful probe for 1 s.
         status, fact = rust.read({"tool": "memory_fact_get", "args": {
             "entity": "shadow-refresh-probe", "attribute": "phase"}})
         assert status == 200 and fact.get("record") and fact["record"]["value"] == "committed-after-hydration", "shadow resident state is stale"
@@ -292,17 +333,22 @@ updates:
         # refresh even when this GET is the only read after an episode change.
         assert rust.request("GET", "/api/agents")[0] == 200
         refreshes_before_change = shadow.log.read_text(errors="replace").count(refresh_line)
+        probe_line = "read-only shadow: resident state probed"
+        probes_before_change = shadow.log.read_text(errors="replace").count(probe_line)
         with psycopg.connect(dsn, autocommit=True) as conn:
             conn.execute("INSERT INTO episodes(id,title,started_at,session_key) VALUES (%s,%s,%s,%s)",
                          ("shadow-awareness-probe", "Fresh writer session", time.time(), "shadow-awareness-probe"))
+        time.sleep(1.1)
         def awareness(_):
             return compare.Endpoint(f"http://127.0.0.1:{shadow.port}", "synthetic-shadow-proof").request("GET", "/api/agents")
         with ThreadPoolExecutor(max_workers=16) as pool:
             for status, agents in pool.map(awareness, range(16)):
                 assert status == 200 and "shadow-awareness-probe" in json.dumps(agents), "shadow awareness is stale"
         assert shadow.log.read_text(errors="replace").count(refresh_line) == refreshes_before_change + 1, "concurrent refreshes were not coalesced"
+        assert shadow.log.read_text(errors="replace").count(probe_line) == probes_before_change + 1, "concurrent readers did not share a probe"
         with psycopg.connect(dsn, autocommit=True) as conn:
             conn.execute("UPDATE episodes SET ended_at=%s WHERE id='shadow-awareness-probe'", (time.time(),))
+        time.sleep(1.1)
         assert "shadow-awareness-probe" not in json.dumps(rust.request("GET", "/api/agents")[1])
         # A transaction that began earlier can commit after a newer row;
         # a max(xmin)/max(updated_at) marker alone would miss this change.
@@ -312,8 +358,10 @@ updates:
             with psycopg.connect(dsn, autocommit=True) as newer:
                 newer.execute("INSERT INTO episodes(id,title,started_at,session_key) VALUES (%s,%s,%s,%s)",
                               ("shadow-newer-probe", "Newer transaction", time.time(), "shadow-newer-probe"))
+            time.sleep(1.1)
             assert "shadow-awareness-probe" not in json.dumps(rust.request("GET", "/api/agents")[1])
             older.commit()
+        time.sleep(1.1)
         assert "Older transaction committed late" in json.dumps(rust.request("GET", "/api/agents")[1]), "late commit was missed"
         os.kill(writer.proc.pid, signal.SIGCONT)
         writer_paused = False
@@ -353,6 +401,8 @@ updates:
                             "awareness_episode_changes_visible": True,
                             "unchanged_burst_hydrations": initial_refreshes,
                             "concurrent_readers": 16, "coalesced_refreshes": 1,
+                            "coalesced_probes": 1, "probe_reuse_seconds": 1,
+                            "bound_mcp_initialization_and_search": True,
                             "older_transaction_late_commit_visible": True,
                             "tagged_replays_excluded": True, "effective_config_overrides": True,
                             "surviving_membership_refused": bool(membership_roles),

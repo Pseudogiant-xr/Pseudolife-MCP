@@ -41,9 +41,9 @@ prepared model cache. Native administrative subcommands are not daemon
 request paths.
 
 Storage, board and principal-refresher sessions default to read-only in
-addition to the SELECT-only role. Startup refuses a DSN with INSERT, UPDATE
-or DELETE rights on `entries`, including column grants, and names the shadow
-DSN as the fix. The role script checks every bank table and asserts that no
+addition to the SELECT-only role. Startup refuses a DSN with INSERT, UPDATE,
+DELETE or TRUNCATE rights on any hydrated table, including column grants,
+and names the shadow DSN as the fix. The role script checks every bank table and asserts that no
 memberships survived revocation. This is defense in depth, not the
 absence-of-writes proof: swallowed
 permission errors do not count as success. `test_shadow_mode.py` snapshots
@@ -54,7 +54,9 @@ auth telemetry cannot pollute the snapshot; it resumes for the comparator.
 No columns or tables are normalized away. Required MCP reads must succeed;
 the comparator separately records Console refusals and response differences.
 
-Every shadow request probes row counts and two independently seeded hashes
+Every shadow request checks whether the last successful probe is less than
+one second old; a burst reuses that probe. After expiry, the next request
+probes row counts and two independently seeded hashes
 of visible tuple versions (`ctid` and `xmin`) for the resident stores' inputs.
 This scans tuple headers without loading text or embedding payloads; it is
 still linear in row count, not a constant-time probe. The signatures detect
@@ -65,7 +67,14 @@ the service lock coalesces concurrent refreshes. A multi-query hydration can
 still observe an active writer across more than one committed state; retaining
 the pre-hydration marker makes the next request detect a concurrent commit.
 The Linux proof asserts one initial hydration for an unchanged read burst and
-one refresh for 16 concurrent readers following a writer change.
+one probe and one refresh for 16 concurrent readers following a writer change.
+A disposable bank containing 100,000 resident rows measured 45.6 ms per probe
+(median), or 721.6 ms for 16 sequential probes; the one-second reuse window
+amortizes that cost. Python board traffic that updates
+`coordination_hlc_highwater`, and autosave access-count syncs, can still trigger
+periodic rehydration. That cost and up to one second of cache reuse are accepted
+for shadow comparisons. Bound MCP initialization and read requests look up the
+existing coordination identity with `read_only: true`, without inserting it.
 
 Python has no daemon-wide shadow equivalent. Its coordination `context`
 has a narrower `read_only` argument, and read tools still record telemetry.

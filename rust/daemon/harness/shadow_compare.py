@@ -257,7 +257,6 @@ def compare(python, rust, cases, triage=()):
         rules[item["case"], item["path"]] = item
     versions = {}
     for label, endpoint in (("python", python), ("rust", rust)):
-        endpoint.replay_session = REPLAY_SESSION_PREFIX + uuid.uuid4().hex
         info = endpoint.initialize()
         status, health = endpoint.request("GET", "/health")
         if status != 200 or not isinstance(health, dict) or not health.get("ready"):

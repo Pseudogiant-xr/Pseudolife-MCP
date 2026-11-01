@@ -16,6 +16,11 @@ use std::time::{Duration, Instant};
 const RETRY_BASE_S: f64 = 5.0;
 const RETRY_MAX_S: f64 = 60.0;
 
+// A disposable 100,000-row bank measured 45.6 ms/probe (median), 721.6 ms
+// for 16 probes. Reuse for one second to amortize bursts; the shadow proof
+// verifies that 16 concurrent readers share one probe after expiry.
+const SHADOW_PROBE_REUSE: Duration = Duration::from_secs(1);
+
 pub const READ_ONLY_MESSAGE: &str = "read-only shadow: this daemon cannot change the bank; send writes to the active writer daemon instead";
 
 /// What a request needs once init has completed.
@@ -112,6 +117,7 @@ struct Inner {
     embedder: Option<Arc<Embedder>>,
     ready: Option<Arc<Ready>>,
     shadow_marker: Option<Vec<(i64, String, String)>>,
+    shadow_probed_at: Option<Instant>,
     failures: u32,
     backoff_s: f64,
     retry_at: Option<Instant>,
@@ -409,15 +415,23 @@ impl Service {
         // concurrent refreshes: waiters reuse the first published snapshot.
         // Keep the pre-hydration marker so a commit during hydration causes
         // the next request to refresh instead of blessing a mixed snapshot.
-        let shadow_marker = if self.config.read_only {
+        let shadow_marker = if self.config.read_only
+            && (reprobe
+                || inner.ready.is_none()
+                || inner
+                    .shadow_probed_at
+                    .is_none_or(|at| at.elapsed() >= SHADOW_PROBE_REUSE))
+        {
             let storage = self.ensure_storage(&mut inner).await?;
             let marker = storage.shadow_marker().await?;
+            inner.shadow_probed_at = Some(Instant::now());
+            eprintln!("read-only shadow: resident state probed");
             if inner.shadow_marker.as_ref() != Some(&marker) {
                 inner.ready = None;
             }
             Some(marker)
         } else {
-            None
+            inner.shadow_marker.clone()
         };
         if let Some(r) = &inner.ready {
             if crate::mutants::active("startup-clock-reloads")

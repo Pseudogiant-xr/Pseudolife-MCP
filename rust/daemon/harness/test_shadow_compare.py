@@ -110,6 +110,17 @@ class ShadowCompareTests(unittest.TestCase):
         self.assertIn("fixture", shadow.digest(summary))
         json.dumps(summary)
 
+    def test_compare_preserves_replay_opt_out_and_existing_tag(self):
+        python = shadow.Endpoint("http://localhost", replay=False)
+        rust = shadow.Endpoint("http://localhost")
+        tag = rust.replay_session
+        with patch.object(shadow.Endpoint, "initialize", return_value={}), patch.object(
+                shadow.Endpoint, "request", return_value=(200, {"ready": True, "read_only": True})):
+            shadow.compare(python, rust, [])
+            shadow.compare(python, rust, [])
+        self.assertIsNone(python.replay_session)
+        self.assertEqual(rust.replay_session, tag)
+
 
 if __name__ == "__main__":
     unittest.main()

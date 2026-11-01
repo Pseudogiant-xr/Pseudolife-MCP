@@ -118,7 +118,7 @@ pub async fn check_read_only(client: &Client) -> Result<(), SchemaError> {
         )));
     }
     let writes: bool = client.query_one(
-        "SELECT has_table_privilege(current_user, 'public.entries', 'INSERT,UPDATE,DELETE') OR has_any_column_privilege(current_user, 'public.entries', 'INSERT,UPDATE')",
+        "SELECT EXISTS (SELECT 1 FROM unnest(ARRAY['public.entries','public.facts','public.world_facts','public.lessons','public.episodes','public.cms_counters','public.meta']) AS bank_table(name) WHERE has_table_privilege(current_user, name, 'INSERT,UPDATE,DELETE,TRUNCATE') OR has_any_column_privilege(current_user, name, 'INSERT,UPDATE'))",
         &[],
     ).await?.get(0);
     if writes {
