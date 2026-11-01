@@ -5,7 +5,7 @@ import argparse
 import base64
 import copy
 from contextlib import ExitStack
-from datetime import datetime
+from datetime import date, datetime
 import json
 import math
 import os
@@ -21,6 +21,7 @@ from .registration_policy import POLICY_NAME, REGISTRATION_CASES, generated_name
 
 ROOT = Path(__file__).resolve().parents[2]
 SEED = json.loads(Path(__file__).with_name("full_seed.json").read_text(encoding="utf-8"))["seed"]
+COMPACT_DATE_RULE = "search-entry-local-date-in-arm-window"
 
 
 def locations(document, pointer):
@@ -149,6 +150,24 @@ class Normalizer:
             for parent, key, value in locations(document, path):
                 self.clock(value, kind)
                 parent[key] = None if value is None else self.symbol(kind, kind, value)
+        for path, window in rules.get("local_dates", {}).items():
+            if window is None or window[0] > window[1]:
+                raise ValueError("local date normalization requires an ordered capture window")
+            for parent, key, value in locations(document, path):
+                # The compact projection uses the daemon's local calendar.
+                # Invalid dates remain literal so parity reports their field.
+                if value == "<local-date:YYYY-MM-DD>":
+                    # A malformed literal cannot impersonate the valid symbol.
+                    parent[key] = "<invalid-local-date>"
+                    continue
+                if not isinstance(value, str) or not re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", value):
+                    continue
+                try:
+                    written = date.fromisoformat(value)
+                except ValueError:
+                    continue
+                if window[0].date() <= written <= window[1].date():
+                    parent[key] = "<local-date:YYYY-MM-DD>"
         for parent, key in embedded:
             parent[key] = json.dumps(parent[key], sort_keys=True, separators=(",", ":"))
         return document
@@ -226,7 +245,7 @@ FACT_CLOCKS = {"asserted_at": "epoch", "last_confirmed": "epoch", "superseded_at
                "tx_time": "epoch", "valid_time": "nullable_epoch"}
 
 
-def normalize_payload(normal, payload, operation):
+def normalize_payload(normal, payload, operation, *, capture_window=None):
     """Only declared response shapes receive clock or identity normalization."""
     rules = {}
     if operation.startswith("register-"):
@@ -300,6 +319,8 @@ def normalize_payload(normal, payload, operation):
         rules = {"times": {f"/entries/{i}/{key}": kind for i, entry in enumerate(payload["entries"])
                             for key, kind in {"timestamp": "epoch", "superseded_at": "nullable_epoch"}.items()
                             if key in entry}}
+        rules["local_dates"] = {f"/entries/{i}/date": capture_window
+                                for i, entry in enumerate(payload["entries"]) if "date" in entry}
     elif operation == "seed-store" and payload.get("stored") is not True:
         raise ValueError("synthetic seed store rejected")
     elif operation == "store-empty" and (payload.get("stored") is not False or payload.get("reason") != "empty"):
@@ -314,6 +335,7 @@ def normalize_payload(normal, payload, operation):
 
 def observe(corpus, url, token, *, candidate=False):
     from .wire import normalize_content_length
+    capture_started = datetime.now()
     normal, client, records = Normalizer(), HttpClient(url, timeout=120, retain_wire=True), []
     for case in corpus["cases"]:
         request = normal.resolve(case["request"])
@@ -328,6 +350,7 @@ def observe(corpus, url, token, *, candidate=False):
                             "X-PL-Agent-Key": normal.bindings[key_actor + ".credential"]})
         operation = lambda: client.execute(request, case["surface"], runtime_headers=headers)
         response = observe_boundary(operation, client) if candidate else operation()
+        capture_window = (capture_started, datetime.now())
         if "boundary_error" in response:
             records.append({**case, "response": response})
             continue
@@ -343,13 +366,16 @@ def observe(corpus, url, token, *, candidate=False):
             if not envelope_matches and not candidate:
                 raise ValueError("tool contract failed: " + case["id"])
             if "structuredContent" in result and envelope_matches:
-                result["structuredContent"] = normalize_payload(normal, result["structuredContent"], case["operation"])
+                result["structuredContent"] = normalize_payload(normal, result["structuredContent"], case["operation"],
+                                                                capture_window=capture_window)
             for item in result.get("content", []):
                 if item.get("type") == "text" and not result.get("isError") and envelope_matches:
-                    payload = normalize_payload(normal, strict_json_loads(item["text"]), case["operation"])
+                    payload = normalize_payload(normal, strict_json_loads(item["text"]), case["operation"],
+                                                capture_window=capture_window)
                     item["text"] = json.dumps(payload, sort_keys=True, separators=(",", ":"))
         elif response["status"] == 200 and case["surface"] == "http":
-            response["body"] = normalize_payload(normal, response["body"], case["operation"])
+            response["body"] = normalize_payload(normal, response["body"], case["operation"],
+                                                 capture_window=capture_window)
         if raw is not None:
             normalize_content_length(response, raw, original_body)
         records.append({**case, "response": response})
@@ -494,7 +520,7 @@ def run(corpus, board_checked_at=None, score_abs_tol=1e-6, oracle_root=ROOT, *,
                              for arm, records in enumerate(passes) for record in records
                              if "policy_evidence" in record],
         "compared_http_headers": list(HTTP_HEADER_ALLOWLIST),
-        "normalization_rules": [*NORMALIZATION_RULES, POLICY_NAME],
+        "normalization_rules": [*NORMALIZATION_RULES, POLICY_NAME, COMPACT_DATE_RULE],
         "ranking_order": "strict; sequential integer memory IDs retained exactly"}
 
 
