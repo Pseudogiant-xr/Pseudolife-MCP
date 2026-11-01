@@ -29,13 +29,18 @@ services:
     environment:
       PSEUDOLIFE_MCP_DATABASE_URL: postgresql://w3j:w3j-disposable@postgres:5432/pl_cf_w3j_container
       PSEUDOLIFE_MCP_TOKEN: ${W3J_RUST_TOKEN:?Set a disposable W3J_RUST_TOKEN}
+      PSEUDOLIFE_DAEMON_MODELS_DIR: /models
     ports:
       - "127.0.0.1:${W3J_RUST_PORT:-8766}:8765"
     tmpfs:
       - /data
+    volumes:
+      - models:/models
     depends_on:
       postgres:
         condition: service_healthy
     networks: [offline]
 networks:
   offline: {}
+volumes:
+  models: {}

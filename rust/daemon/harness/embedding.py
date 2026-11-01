@@ -26,10 +26,20 @@ PREFIX = "Instruct: Given a web search query, retrieve relevant passages that an
 # ORT1.27; torch2.13 Linux / torch2.10 Windows. No token/cache/rank tolerance.
 FP32_MAX_ABS = 1e-6
 FP32_MIN_COSINE = 0.99999999997
-ACCEPTED_FP32_IDENTITIES = [
+QWEN_FP32_IDENTITIES = [
     {"onnx/model.onnx": "f5fdee679d0ffb98e1cb0bb178e8ee2b86739ab7ab035a3a9327761d5c6b1f0b",
      "onnx/model.onnx_data": "a585477de21c0a89e021dd64f4d3be34483eb4aaed7ae93fc047e3edf74545da",
      "tokenizer.json": "def76fb086971c7867b829c23a26261e38d9d74e02139253b38aeb9df8b4b50a"},
+    # The provisioned public export is measured independently of the
+    # historical export above; it uses the same bounds and exact checks.
+    # Admission evidence (default corpus, ORT 1.27 image binary):
+    # https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/1114
+    {"onnx/model.onnx": "cec22565ec783289a5e51bd94950f70b8cb7ca6c0b7ced255b5e8dbf3c60536b",
+     "onnx/model.onnx_data": "a585477de21c0a89e021dd64f4d3be34483eb4aaed7ae93fc047e3edf74545da",
+     "tokenizer.json": "def76fb086971c7867b829c23a26261e38d9d74e02139253b38aeb9df8b4b50a"},
+]
+ACCEPTED_FP32_IDENTITIES = [
+    *QWEN_FP32_IDENTITIES,
     {"onnx/model.onnx": "6fd5d72fe4589f189f8ebc006442dbb529bb7ce38f8082112682524616046452",
      "tokenizer.json": "be50c3628f2bf5bb5e3a7f17b1f74611b2561a3a27eeab05e5aa30f411572037"},
 ]
@@ -240,7 +250,8 @@ def run(args):
     report["binary_sha256"] = digest(args.rust_bin)
     report["source_sha256"] = {p.relative_to(REPO).as_posix(): digest(p) for p in
         [REPO / "rust/daemon/src/embed.rs", REPO / "rust/daemon/src/embedding_math.rs",
-         REPO / "rust/daemon/src/onnx_artifacts.rs", REPO / "rust/daemon/src/onnx_runtime.rs", Path(__file__)]}
+         REPO / "rust/daemon/src/onnx_artifacts.rs", REPO / "rust/daemon/src/model_provision.rs",
+         REPO / "rust/daemon/src/onnx_runtime.rs", Path(__file__)]}
     report["ranking_pairs"] = ranking_pairs
     with tempfile.TemporaryDirectory(prefix="pl_cf_emb_") as tmp:
         tmp = Path(tmp)
@@ -294,7 +305,8 @@ def finish_report(report, args):
             known_qwen_failure = (backend == "onnx" and args.qwen_position_ids_deferred
                 and py.get("error") == "ValueError: Input position_ids is required by model but not provided."
                 and "error" not in rs
-                and all(rs.get("identities", {}).get(k) == v for k, v in ACCEPTED_FP32_IDENTITIES[0].items()))
+                and any(all(rs.get("identities", {}).get(k) == v for k, v in allowed.items())
+                        for allowed in QWEN_FP32_IDENTITIES))
             if known_qwen_failure:
                 report["declared"].append("Qwen Python ONNX wrapper fails missing position_ids; shipped torch fp32 is the oracle, ONNX comparison unavailable")
                 continue
