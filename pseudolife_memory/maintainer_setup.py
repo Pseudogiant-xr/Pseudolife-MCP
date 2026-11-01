@@ -65,7 +65,7 @@ import time
 from urllib.parse import urlsplit
 
 from pseudolife_memory import expose_cli
-from pseudolife_memory.daemon_exec import CONTAINER as DAEMON_CONTAINER, docker_cmd
+from pseudolife_memory.daemon_exec import CONTAINER as DAEMON_CONTAINER, docker_cmd, rust_operator_refusal
 
 EXIT_OK = 0
 EXIT_USAGE = 2
@@ -281,6 +281,10 @@ def _tier() -> str:
     if proc.returncode == 0:
         if proc.stdout.strip() != "true":
             raise _Refused(f"the {DAEMON_CONTAINER} container is not running: start it first")
+        if rust_operator_refusal(docker, runner=lambda command: run(command, timeout=60)):
+            raise _Refused("the Rust daemon image has no Python setup runtime: run "
+                           "`pseudolife-mcp update --engine python --checkout <repo>`, "
+                           "then retry maintainer setup; nothing was changed")
         return "docker"
     if "no such" in (proc.stderr + proc.stdout).lower():
         return "local"

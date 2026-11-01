@@ -86,6 +86,33 @@ async fn container(arguments: &[String]) -> i32 {
     {
         return no_bank();
     }
+    let inspect = resolution::container_engine_inspect(&docker);
+    let mut command = Command::new(&inspect[0]);
+    command
+        .args(&inspect[1..])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    configure(&mut command);
+    // Match daemon_exec.rust_operator_refusal: a missing label or failed
+    // label probe keeps the ordinary Python-container execution path.
+    let engine = match command.spawn() {
+        Ok(child) => tokio::time::timeout(Duration::from_secs(30), child.wait_with_output())
+            .await
+            .ok()
+            .and_then(Result::ok),
+        Err(_) => None,
+    };
+    if engine.is_some_and(|output| {
+        output.status.success()
+            && String::from_utf8_lossy(&output.stdout).trim_matches(super::whitespace) == "rust"
+    }) {
+        say(&format!(
+            "pseudolife-mcp lease: {}",
+            resolution::RUST_OPERATOR_REFUSAL
+        ));
+        return 2;
+    }
     let terminal = std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
     let arguments: Vec<OsString> = arguments.iter().map(OsString::from).collect();
     let invocation = resolution::container_exec(&docker, terminal, "lease", &arguments);
