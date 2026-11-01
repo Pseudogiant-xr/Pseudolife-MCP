@@ -31,7 +31,8 @@ _SCRUB_PREFIXES = ("PSEUDOLIFE_",)
 # Keep the oracle's explicit precision too: body evidence uses fp32 on
 # every runner, including CPUs whose product default would choose bf16.
 _KEEP = {"PSEUDOLIFE_TEST_PG_HOST_PORT", "PSEUDOLIFE_TEST_PG_LOGIN_FILE",
-         "PSEUDOLIFE_DAEMON_PDFIUM_DIR", "PSEUDOLIFE_EMBEDDING_CPU_DTYPE"}
+         "PSEUDOLIFE_DAEMON_PDFIUM_DIR", "PSEUDOLIFE_EMBEDDING_CPU_DTYPE",
+         "PSEUDOLIFE_DAEMON_RERANK_DIR"}
 
 
 def free_port() -> int:

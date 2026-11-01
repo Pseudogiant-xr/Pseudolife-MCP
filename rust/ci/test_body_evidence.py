@@ -121,6 +121,17 @@ def test_smoke_cells_cannot_be_published_as_full_nightly_evidence(tmp_path, monk
     assert result["status"] == "fail"  # successful exits alone are never evidence
 
 
+def test_w2e_receives_the_provisioned_reranker_after_environment_scrubbing(tmp_path, monkeypatch):
+    import importlib
+
+    monkeypatch.syspath_prepend(str(evidence.HARNESS))
+    harness = importlib.import_module("w2e")
+    root = str(tmp_path / "models/reranker")
+    monkeypatch.setenv("PSEUDOLIFE_DAEMON_RERANK_DIR", root)
+    env = harness.daemons.base_env(tmp_path, harness.w1a.rust_env({}))
+    assert env["PSEUDOLIFE_DAEMON_RERANK_DIR"] == root
+
+
 def test_partial_report_names_the_scenarios_that_did_not_run():
     report = {"complete": False, "planned_scenarios": ["first", "second"],
               "scenarios": [{"scenario": "first", "steps": [{"diffs": []}]}]}
