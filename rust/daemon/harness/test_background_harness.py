@@ -263,3 +263,40 @@ def test_only_one_proven_warmup_sequence_increment_is_waived():
     raw = copy.deepcopy(changed)
     assert harness.scrub_declared_rows(changed, prior)["state"] == prior
     assert changed == raw
+
+
+def titled_session_state(child_first):
+    root = ["z-root", None, "work", "fixture - durable title"]
+    child = ["a-child", "z-root", "work", "child"]
+    history = ["h-history", None, "history", "history"]
+    return {"rows": {
+        "public.episodes": {"columns": ["id", "parent_id", "session_key", "title"],
+                            "rows": [child, history, root] if child_first else [root, child, history]},
+        "public.entries": {"columns": ["episode_id", "episode_title"],
+                           "rows": [["z-root", root[3]]]},
+        "public.meta": {"columns": ["key", "value"], "rows": []},
+    }}
+
+
+@pytest.mark.parametrize("scenario", ["session-restart", "session-resume-refusal"])
+@pytest.mark.parametrize("child_first", [False, True])
+def test_reaper_title_validation_selects_root_despite_inherited_session_key(scenario, child_first):
+    import run as harness
+    # PostgreSQL row order can put the child first; it shares the root's
+    # session key but deliberately keeps its explicit child title.
+    harness.SCENARIOS[scenario]().validate_expected(titled_session_state(child_first))
+
+
+@pytest.mark.parametrize("scenario", ["session-restart", "session-resume-refusal"])
+@pytest.mark.parametrize("broken", ["root-title", "entry-stamp"])
+def test_reaper_title_validation_still_rejects_missing_durable_effect(scenario, broken):
+    import run as harness
+    snapshot = titled_session_state(True)
+    if broken == "root-title":
+        snapshot["rows"]["public.episodes"]["rows"][-1][3] = "work fixture"
+        message = "content-derived root title"
+    else:
+        snapshot["rows"]["public.entries"]["rows"][0][1] = "work fixture"
+        message = "root entry title stamps"
+    with pytest.raises(RuntimeError, match=message):
+        harness.SCENARIOS[scenario]().validate_expected(snapshot)

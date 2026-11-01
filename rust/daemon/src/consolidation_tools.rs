@@ -230,7 +230,7 @@ pub(crate) async fn candidates(
         min_cluster_size,
         max_clusters,
     } = args;
-    let _ws = ready.write.lock().await;
+    let ws = ready.write.clone().lock_owned().await;
 
     let query_anchor = query.as_deref().is_some_and(|q| !q.is_empty());
     let episode_anchor = episode.as_deref().is_some_and(|e| !e.is_empty());
@@ -292,10 +292,11 @@ pub(crate) async fn candidates(
         None => Vec::new(),
     };
     let (r2, cfg) = (ready.clone(), svc.config.memory.clone());
-    let mut candidates =
-        tokio::task::spawn_blocking(move || pool(&r2, &cfg, qv.as_deref(), &pool_args, &refs))
-            .await
-            .map_err(internal)?;
+    let (mut candidates, _ws) = ready
+        .writes
+        .spawn_blocking(move || (pool(&r2, &cfg, qv.as_deref(), &pool_args, &refs), ws))
+        .await
+        .map_err(internal)?;
 
     // Filter unavailable rows individually; a read failure keeps them.
     if !candidates.is_empty() && !crate::mutants::active("mcp-consolidation-unverified") {

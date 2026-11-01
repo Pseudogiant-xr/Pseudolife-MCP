@@ -5,10 +5,12 @@ reading the budget, then closed with the overshoot unread, so its stack reset
 the connection; it now discards the rest and closes by lingering. These
 servers still close that way over real sockets.
 """
+from contextlib import nullcontext
 import http.client
 import os
 import socket
 import struct
+import sys
 import threading
 import time
 
@@ -99,18 +101,135 @@ def test_refusal_with_most_of_the_body_unread_is_read():
 
 
 @pytest.mark.parametrize("overshoot", [47, 1])
-def test_body_limit_refusal_survives_the_reset_repeatedly(overshoot):
+def test_body_limit_refusal_survives_the_reset_repeatedly(overshoot, request):
     # The live body_limit shapes: a 4 MiB budget and a 47- or 1-byte
     # overshoot. Read after send lost the 413 to WinError 10054 in about 1 of
     # 100 calls on an idle Windows 11 host, and a reader waiting under a
     # CPython timeout in 21-30 of 3000; this reader lost 0 of 6000 (2026-10-18).
+    # That was a measurement, not a zero-loss guarantee: #1099 lost the first
+    # receive on Server 2025 too. This Python server deliberately closes with
+    # bytes unread, unlike the daemon since #860. Count Windows' residual
+    # without replaying it; keep every complete answer byte-exact and losses
+    # a minority, as test_body_cases does. The zero-send-buffer case above
+    # still guards against reverting to read-after-send.
     listener, seen = budget_server(4 * 1024 * 1024)
     body = b"a" * (4 * 1024 * 1024 + overshoot)
     with listener:
-        for _ in range(300):
-            r = post(listener, body)
-            assert (r["status"], r["body"]) == (413, REFUSAL)
+        sample_refusals(listener, body, 300, properties=request.node.user_properties)
     assert seen == [4 * 1024 * 1024] * 300
+
+
+def sample_refusals(listener, body, calls, *, windows=os.name == "nt", properties=None):
+    """Sample once per connection; only Winsock's reset/abort may lose an answer."""
+    lost = 0
+    for _ in range(calls):
+        try:
+            r = post(listener, body)
+        except http.client.RemoteDisconnected:
+            raise  # A clean EOF without a status is not a reset residual.
+        except (ConnectionResetError, ConnectionAbortedError) as exc:
+            if not windows or getattr(exc, "winerror", None) not in (10053, 10054):
+                raise
+            lost += 1
+            continue
+        assert (r["status"], r["body"]) == (413, REFUSAL)
+    if properties is not None:
+        properties.extend([
+            ("refusal_calls", calls), ("refusal_received", calls - lost), ("refusal_reset_losses", lost),
+        ])
+    assert lost * 2 < calls, f"{lost} of {calls} refusals lost to the reset"
+    return lost
+
+
+def reset_error(kind=ConnectionResetError, code=10054):
+    error = kind(code, "synthetic socket failure")
+    error.winerror = code
+    return error
+
+
+def test_reset_sample_counts_losses_without_replaying(monkeypatch):
+    outcomes = iter([reset_error(), {"status": 413, "body": REFUSAL},
+                     {"status": 413, "body": REFUSAL}, reset_error(ConnectionAbortedError, 10053),
+                     {"status": 413, "body": REFUSAL}])
+    attempts = []
+
+    def send(listener, body):
+        attempts.append((listener, body))
+        result = next(outcomes)
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+    monkeypatch.setattr(sys.modules[__name__], "post", send)
+    assert sample_refusals(None, b"body", 5, windows=True) == 2
+    assert attempts == [(None, b"body")] * 5
+
+
+@pytest.mark.parametrize("windows, error", [
+    (False, reset_error()),
+    (True, reset_error(ConnectionAbortedError, 12345)),
+    (True, http.client.RemoteDisconnected("clean EOF")),
+    (True, http.client.IncompleteRead(b"partial", 10)),
+    (True, TimeoutError("timed out")),
+])
+def test_reset_sample_rejects_other_failures(windows, error, monkeypatch):
+    def send(listener, body):
+        raise error
+
+    monkeypatch.setattr(sys.modules[__name__], "post", send)
+    with pytest.raises(type(error)) as caught:
+        sample_refusals(None, b"body", 5, windows=windows)
+    assert caught.value is error
+
+
+@pytest.mark.parametrize("losses, total", [(2, 4), (5, 5)])
+def test_reset_sample_requires_a_majority_of_complete_refusals(losses, total, monkeypatch):
+    calls = []
+
+    def send(listener, body):
+        calls.append(1)
+        if len(calls) <= losses:
+            raise reset_error()
+        return {"status": 413, "body": REFUSAL}
+
+    monkeypatch.setattr(sys.modules[__name__], "post", send)
+    with pytest.raises(AssertionError, match=f"{losses} of {total} refusals lost"):
+        sample_refusals(None, b"body", total, windows=True)
+    assert len(calls) == total
+
+
+def test_reset_sample_records_counters_before_rejecting_losses(monkeypatch, request):
+    calls = []
+    sample = sample_refusals
+
+    def send(listener, body):
+        calls.append(1)
+        if len(calls) <= 150:
+            raise reset_error()
+        return {"status": 413, "body": REFUSAL}
+
+    def windows_sample(*args, **kwargs):
+        return sample(*args, windows=True, **kwargs)
+
+    monkeypatch.setattr(sys.modules[__name__], "post", send)
+    monkeypatch.setattr(sys.modules[__name__], "sample_refusals", windows_sample)
+    monkeypatch.setattr(sys.modules[__name__], "budget_server", lambda budget: (nullcontext(), []))
+    with pytest.raises(AssertionError, match="150 of 300 refusals lost"):
+        test_body_limit_refusal_survives_the_reset_repeatedly(47, request)
+    assert len(calls) == 300
+    assert request.node.user_properties == [
+        ("refusal_calls", 300), ("refusal_received", 150), ("refusal_reset_losses", 150),
+    ]
+
+
+@pytest.mark.parametrize("response", [
+    {"status": 200, "body": REFUSAL},
+    {"status": 413, "body": REFUSAL[:10]},
+])
+def test_reset_sample_rejects_wrong_or_incomplete_answers(response, monkeypatch):
+    monkeypatch.setattr(sys.modules[__name__], "post", lambda listener, body: response)
+    with pytest.raises(AssertionError):
+        sample_refusals(None, b"body", 5, windows=True)
 
 
 @pytest.mark.skipif(os.name != "nt", reason="only Windows discards received data on a reset")
