@@ -195,7 +195,7 @@ still open. B4's autosave, shutdown and compaction work landed
 are implemented (including #931/#932/#937 and the queue judges), but this
 is not a declaration that all three acceptance proofs have landed.
 The plan's B2d label says seven maintainer POSTs: the challenge is now
-served, leaving six actions. B10f's briefing and episode routes landed
+served, leaving six actions (all six served since #1092). B10f's briefing and episode routes landed
 (#1030/#1005); the CLI modes' other deferrals remain. B9's lite lifecycle
 exists (#946/#962/#963), so the historical DSN-only premise is stale;
 its CLI, retirement and installed-path obligations still apply.
