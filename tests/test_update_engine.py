@@ -576,6 +576,117 @@ def test_imported_counters_row_allows_unrenamed_weights_file(engine_host):
     assert eng._selection(s["repo"])["labels"][eng.ENGINE_LABEL] == "rust"
 
 
+@pytest.mark.parametrize("mode,args", [
+    ("lease", ["break", "fixture-lease"]),
+    ("maintainer", ["list"]),
+    ("maintainer", ["setup", "--local", "--yes"]),
+    ("board-audit", ["export"]),
+    ("invite", ["fixture-machine"]),
+    ("invite", ["fixture-machine", "--json"]),
+])
+def test_operator_after_rust_activation_names_python_runtime_fix(engine_host, monkeypatch, capsys, mode, args):
+    from pseudolife_memory import (board_audit_cli, daemon_exec, invite_cli,
+                                   lease_cli, maintainer_cli, maintainer_setup, update_engine as eng)
+    s = engine_host
+    eng.deploy_engine(s["update"](), s["repo"])
+    monkeypatch.delenv("PSEUDOLIFE_MCP_DATABASE_URL", raising=False)
+    monkeypatch.delenv(daemon_exec.NESTED_ENV, raising=False)
+    monkeypatch.setenv("PSEUDOLIFE_MCP_DATA_DIR", str(s["repo"] / "empty-bank"))
+    monkeypatch.setenv("PSEUDOLIFE_DOCKER", "fixture-docker")
+    monkeypatch.setattr(invite_cli, "local_database", lambda: (None, None))
+    monkeypatch.setattr(invite_cli, "docker_available", lambda: True)
+    monkeypatch.setattr(maintainer_setup, "health", lambda url: {"status": "ok", "auth": True})
+    commands = []
+    def docker(argv, **kw):
+        commands.append(argv)
+        if argv[1] == "inspect":
+            value = "true" if ".State.Running" in argv[3] else s["running"]["Config"]["Labels"][eng.ENGINE_LABEL]
+            return subprocess.CompletedProcess(argv, 0, value, "")
+        # Reproduce Docker's missing executable without touching a real host.
+        return subprocess.CompletedProcess(argv, 127, "", 'exec: "python": executable file not found in $PATH')
+    for module in (daemon_exec, invite_cli, maintainer_setup):
+        monkeypatch.setattr(module, "run", docker)
+    main = {"lease": lease_cli.main, "maintainer": maintainer_cli.main,
+            "board-audit": board_audit_cli.main, "invite": invite_cli.main}[mode]
+    assert main(args) in (1, 2, 4)
+    out, err = capsys.readouterr()
+    message = json.loads(out)["error"] if "--json" in args else err
+    assert "Rust" in message and "Python" in message
+    assert "--engine python --checkout" in message
+    assert "nothing was changed" in message
+    assert not any("exec" in argv for argv in commands)
+
+
+@pytest.mark.parametrize("returned_from_rust", [False, True])
+def test_python_operator_path_remains_available(engine_host, monkeypatch, returned_from_rust):
+    from pseudolife_memory import daemon_exec, maintainer_cli, update_engine as eng
+    s = engine_host
+    if returned_from_rust:
+        eng.deploy_engine(s["update"](), s["repo"])
+        eng.deploy_engine(s["update"]("python"), s["repo"])
+    monkeypatch.delenv("PSEUDOLIFE_MCP_DATABASE_URL", raising=False)
+    monkeypatch.delenv(daemon_exec.NESTED_ENV, raising=False)
+    monkeypatch.setenv("PSEUDOLIFE_MCP_DATA_DIR", str(s["repo"] / "empty-bank"))
+    monkeypatch.setenv("PSEUDOLIFE_DOCKER", "fixture-docker")
+    commands = []
+    def docker(argv, **kw):
+        commands.append(argv)
+        value = s["running"]["Config"]["Labels"].get(eng.ENGINE_LABEL, "<no value>")
+        if argv[1] == "inspect" and ".State.Running" in argv[3]:
+            value = "true"
+        return subprocess.CompletedProcess(argv, 0, value, "")
+    monkeypatch.setattr(daemon_exec, "run", docker)
+    assert maintainer_cli.main(["list"]) == 0
+    assert commands[-1][-3:] == ["pseudolife_memory.cli", "maintainer", "list"]
+    assert commands[-1][1] == "exec"
+
+
+@pytest.mark.parametrize("docker_exit", [0, 7])
+@pytest.mark.parametrize("auth_source", ["shell", "env-file"])
+def test_rust_rollback_commits_selection_only_after_recreate(engine_host, monkeypatch, docker_exit, auth_source):
+    import os
+    from tests.ops_harness import BASH, PWSH
+    from pseudolife_memory import update_engine as eng
+    s = engine_host
+    monkeypatch.setenv("PSEUDOLIFE_MCP_TOKEN", "fixture-bearer")
+    if auth_source == "env-file":
+        (s["repo"] / "ops/.env").write_text("PSEUDOLIFE_MCP_TOKEN=fixture-bearer\n")
+    eng.deploy_engine(s["update"](), s["repo"])
+    update = s["update"]()
+    eng.deploy_engine(update, s["repo"])
+    selected = s["repo"] / eng.SELECTION
+    accepted = selected.read_bytes()
+    during, arguments = s["repo"] / "during.json", s["repo"] / "arguments.txt"
+    commands = "\n".join(line for line in update.rollback_lines if not line.startswith("      "))
+    if os.name == "nt":
+        if not PWSH:
+            pytest.skip("PowerShell unavailable")
+        script = s["repo"] / "rollback.ps1"
+        script.write_text(f"function docker {{ Copy-Item -LiteralPath '{selected}' -Destination '{during}'; "
+                          f"$args | Set-Content -LiteralPath '{arguments}'; $global:LASTEXITCODE = {docker_exit} }}\n" + commands)
+        argv = [PWSH, "-NoProfile", "-File", str(script)]
+    else:
+        if not BASH:
+            pytest.skip("Bash unavailable")
+        import shlex
+        script = s["repo"] / "rollback.sh"
+        script.write_text(f"docker() {{ cp -- {shlex.quote(str(selected))} {shlex.quote(str(during))}; "
+                          f"printf '%s\\n' \"$@\" > {shlex.quote(str(arguments))}; return {docker_exit}; }}\n" + commands)
+        argv = [BASH, str(script)]
+    result = subprocess.run(argv, capture_output=True, text=True, timeout=30)
+    assert during.read_bytes() == accepted, "the accepted selection must not change before recreation"
+    args = arguments.read_text().splitlines()
+    assert args[max(i for i, value in enumerate(args) if value == "-f") + 1] == update.report.rollback["overlay"]
+    if docker_exit:
+        assert result.returncode != 0
+        assert selected.read_bytes() == accepted
+    else:
+        assert result.returncode == 0, result.stderr
+        assert selected.read_bytes() == Path(update.report.rollback["overlay"]).read_bytes()
+        s["running"]["Config"]["Labels"] = eng._selection(s["repo"])["labels"]
+    assert eng.selected_checkout(s["update"](None)) == s["repo"]
+
+
 @pytest.mark.parametrize("retry_engine", [None, "python", "rust"])
 @pytest.mark.parametrize("failure", ["version", "schema", "counters_import_required"])
 def test_failed_python_replacement_never_becomes_rollback(engine_host, monkeypatch, retry_engine, failure):

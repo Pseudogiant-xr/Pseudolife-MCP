@@ -346,7 +346,7 @@ class EngineUpdate:
         rollback_file = self.repo / "data/update-engine" / f"docker-compose.rollback-{up._stamp()}.json"
         _write_overlay(rollback_file, old_service)
         selected_file = self.repo / SELECTION
-        rollback_args = [*self.base, "-f", str(selected_file if old_engine == "rust" else rollback_file)]
+        rollback_args = [*self.base, "-f", str(rollback_file)]
         shown = " ".join('"' + str(a).replace('"', '\\"') + '"' for a in rollback_args)
         accepted_file = selected_file if old_engine == "rust" else self.repo / PYTHON_ACCEPTED
         copy = (f'Copy-Item -LiteralPath "{rollback_file}" -Destination "{accepted_file}" -ErrorAction Stop' if os.name == "nt"
@@ -354,16 +354,20 @@ class EngineUpdate:
         clear = ("Remove-Item Env:PSEUDOLIFE_MCP_TOKEN,Env:PSEUDOLIFE_MCP_TOKENS -ErrorAction SilentlyContinue" if os.name == "nt"
                  else "unset PSEUDOLIFE_MCP_TOKEN PSEUDOLIFE_MCP_TOKENS")
         restore = f"docker compose {shown} up -d --no-deps --no-build {up.DAEMON_SERVICE}"
+        commit = copy
         if old_engine == "python":
-            restore += (f'; if ($LASTEXITCODE -eq 0) {{ Remove-Item -LiteralPath "{selected_file}" -ErrorAction SilentlyContinue }}'
-                        if os.name == "nt" else f' && rm -f -- "{selected_file}"')
+            commit += (f'; Remove-Item -LiteralPath "{selected_file}" -ErrorAction SilentlyContinue'
+                       if os.name == "nt" else f' && rm -f -- "{selected_file}"')
+        # The accepted deployment stays valid if Compose cannot replace it.
+        restore += (f'; if ($LASTEXITCODE -eq 0) {{ {commit} }} else {{ throw "Rollback recreation failed; accepted engine selection was not changed" }}'
+                    if os.name == "nt" else " && " + commit)
         if up._env_file_sets_credentials(self.env_file):
-            commands = [clear, copy, restore]
+            commands = [clear, restore]
         else:
             fix = "Restore PSEUDOLIFE_MCP_TOKEN or PSEUDOLIFE_MCP_TOKENS in this shell before rollback"
-            restore = (f'if ($env:PSEUDOLIFE_MCP_TOKEN -or $env:PSEUDOLIFE_MCP_TOKENS) {{ {copy}; {restore} }} else {{ throw "{fix}" }}'
+            restore = (f'if ($env:PSEUDOLIFE_MCP_TOKEN -or $env:PSEUDOLIFE_MCP_TOKENS) {{ {restore} }} else {{ throw "{fix}" }}'
                        if os.name == "nt" else
-                       'if [ -n "${PSEUDOLIFE_MCP_TOKEN:-}${PSEUDOLIFE_MCP_TOKENS:-}" ]; then ' + copy + " && " + restore +
+                       'if [ -n "${PSEUDOLIFE_MCP_TOKEN:-}${PSEUDOLIFE_MCP_TOKENS:-}" ]; then ' + restore +
                        f'; else echo "{fix}" >&2; false; fi')
             commands = [restore]
         self.u.rollback_lines = [*commands, *self.u._schema_rollback_note(None)]

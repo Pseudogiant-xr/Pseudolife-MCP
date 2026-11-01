@@ -19,7 +19,7 @@ import os
 import shutil
 import subprocess
 import sys
-from typing import Sequence
+from typing import Callable, Sequence
 
 CONTAINER = "pseudolife-mcp-daemon"
 NESTED_ENV = "PSEUDOLIFE_DAEMON_EXEC"
@@ -62,6 +62,26 @@ def _terminal() -> bool:
         return False
 
 
+def rust_operator_refusal(docker: str, *, runner: Callable | None = None) -> str | None:
+    """Inspect only the engine label before attempting a Python operator command.
+
+    Invite and guided setup supply their existing bounded subprocess runner.
+    Missing labels preserve the ordinary Python image's operator path.
+    """
+    command = [docker, "inspect", "-f", '{{index .Config.Labels "org.pseudolife.engine"}}', CONTAINER]
+    try:
+        proc = (runner(command) if runner else
+                run(command, capture_output=True, text=True, errors="replace",
+                    stdin=subprocess.DEVNULL, timeout=INSPECT_TIMEOUT_S, check=False))
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if proc.returncode == 0 and (proc.stdout or "").strip() == "rust":
+        return ("the Rust daemon image has no Python operator runtime: run bank commands on a Python host "
+                "with PSEUDOLIFE_MCP_DATABASE_URL set, or switch back with "
+                "`pseudolife-mcp update --engine python --checkout <repo>`; nothing was changed")
+    return None
+
+
 def run_in_daemon(mode: str, argv: Sequence[str], *, stdin=None,
                   stdout=None) -> subprocess.CompletedProcess | None:
     """``pseudolife-mcp <mode> <argv>`` inside the daemon container, or
@@ -74,6 +94,10 @@ def run_in_daemon(mode: str, argv: Sequence[str], *, stdin=None,
     docker = docker_cmd()
     if not _running(docker):
         return None
+    refusal = rust_operator_refusal(docker)
+    if refusal:
+        print(f"pseudolife-mcp {mode}: {refusal}", file=sys.stderr)
+        return subprocess.CompletedProcess([docker], 2)
     tty = stdin is None and stdout is None and _terminal()
     command = [docker, "exec", "-it" if tty else "-i", "-e", f"{NESTED_ENV}=1", CONTAINER,
                "python", "-m", "pseudolife_memory.cli", mode, *argv]
