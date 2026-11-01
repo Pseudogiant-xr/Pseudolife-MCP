@@ -1670,22 +1670,44 @@ jobs:
       - name: Build the CPU image without publishing
         if: steps.image-inputs.outputs.needed == 'true'
         run: docker build --progress=plain -f ops/Dockerfile.daemon-rust -t w3j-daemon-rust:prep --build-arg GIT_SHA="$GITHUB_SHA" --build-arg GIT_DIRTY=false --build-arg BUILD_SOURCE=ci .
+      - name: Restore the pinned model cache
+        if: steps.image-inputs.outputs.needed == 'true'
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/daemon-models
+          key: daemon-models-fp32-${{ runner.os }}-${{ hashFiles('rust/daemon/src/model_provision.rs') }}
       - name: Prove offline health and authenticated CPU query inference
         if: steps.image-inputs.outputs.needed == 'true'
         env:
           W3J_RUST_TOKEN: w3j-disposable-ci-token
+          W3J_MODELS_CACHE: ${{ runner.temp }}/daemon-models
         run: |
           project="w3j-ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          mkdir -p "$W3J_MODELS_CACHE"
+          cat > "$RUNNER_TEMP/model-cache.yml" <<'YAML'
+          volumes:
+            models:
+              driver: local
+              driver_opts:
+                type: none
+                o: bind
+                device: ${W3J_MODELS_CACHE}
+          YAML
+          compose() {
+            docker compose -p "$project" -f ops/docker-compose.rust.yml -f "$RUNNER_TEMP/model-cache.yml" "$@"
+          }
           cleanup() {
             result=$?
-            if [ "$result" -ne 0 ]; then docker compose -p "$project" -f ops/docker-compose.rust.yml logs || true; fi
-            docker compose -p "$project" -f ops/docker-compose.rust.yml down || result=1
+            if [ "$result" -ne 0 ]; then compose logs || true; fi
+            compose down --volumes || result=1
+            sudo chown -R "$(id -u):$(id -g)" "$W3J_MODELS_CACHE" || result=1
             exit "$result"
           }
           trap cleanup EXIT
-          docker compose -p "$project" -f ops/docker-compose.rust.yml up --no-build --wait --wait-timeout 180
+          compose run --rm --no-deps rust-daemon pseudolife-daemon provision models
+          compose up --no-build --wait --wait-timeout 180
           python rust/daemon/container_probe.py --timeout 180
-          docker compose -p "$project" -f ops/docker-compose.rust.yml logs --no-color rust-daemon > "$RUNNER_TEMP/rust-daemon-startup.log"
+          compose logs --no-color rust-daemon > "$RUNNER_TEMP/rust-daemon-startup.log"
           python rust/daemon/container_probe.py --startup-log "$RUNNER_TEMP/rust-daemon-startup.log"
   parity:
     # Only a PR, a merge group or a master push may skip the CLI source

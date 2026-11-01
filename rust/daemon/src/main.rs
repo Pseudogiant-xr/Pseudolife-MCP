@@ -320,6 +320,7 @@ fn main() {
             dsn,
             auth_configured,
         ));
+        read::search_route::LazyReranker::prepare();
         let background = background::Background::default();
         background.start_background_durability(service.clone(), autosave_every);
         if !read_only {
