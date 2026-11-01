@@ -1,5 +1,6 @@
 """Opt-in engine selection: refusal, persistence, activation and rollback."""
 import json
+import os
 import gzip
 import io
 import tarfile
@@ -341,6 +342,88 @@ def test_shadow_failed_gate_removes_companion_and_preserves_python(shadow_host, 
     assert s["shadow"] is None
     assert json.dumps(s["running"], sort_keys=True) == before
     assert not (s["repo"] / eng.SELECTION).exists()
+
+
+@pytest.mark.parametrize("phase", ["startup", "gate"])
+@pytest.mark.parametrize("exception", [KeyboardInterrupt, SystemExit, RuntimeError])
+def test_shadow_interruption_removes_companion_and_reraises(shadow_host, monkeypatch, phase, exception):
+    from pseudolife_memory import update_engine as eng
+    s = shadow_host
+    before = json.dumps(s["running"], sort_keys=True)
+    failure = exception("interrupted")
+    run = up.run_cli
+
+    def interrupt(argv, **kw):
+        result = run(argv, **kw)
+        if phase == "startup" and "up" in argv:
+            raise failure
+        return result
+
+    def gate(*a, **kw):
+        raise failure
+
+    monkeypatch.setattr(up, "run_cli", interrupt)
+    if phase == "gate":
+        monkeypatch.setattr(eng.EngineUpdate, "gate", gate)
+    with pytest.raises(exception) as caught:
+        eng.deploy_engine(s["update"](shadow=True), s["repo"])
+    assert caught.value is failure
+    assert s["shadow"] is None
+    assert any("rm" in a and a[-1] == eng.SHADOW_SERVICE for a in s["calls"])
+    assert json.dumps(s["running"], sort_keys=True) == before
+
+
+def test_shadow_password_preserves_existing_env_file_access(shadow_host):
+    from pseudolife_memory import update_engine as eng
+    s = shadow_host
+    env_file = s["repo"] / "ops/.env"
+    original = b"# shared host settings\r\nPSEUDOLIFE_MCP_TOKEN=fixture-bearer\r\n"
+    env_file.write_bytes(original)
+    if os.name != "nt":
+        env_file.chmod(0o640)
+    before = env_file.stat()
+    eng.deploy_engine(s["update"](shadow=True), s["repo"])
+    after = env_file.stat()
+    # Keep the original file itself, including its owner, group and ACLs.
+    assert after.st_ino == before.st_ino
+    assert (after.st_mode, after.st_uid, after.st_gid) == (before.st_mode, before.st_uid, before.st_gid)
+    assert env_file.read_bytes().startswith(original)
+    assert env_file.read_text().count("PSEUDOLIFE_SHADOW_DB_PASSWORD=") == 1
+
+
+@pytest.mark.parametrize("exception", [OSError, KeyboardInterrupt])
+def test_shadow_failed_password_append_restores_original_bytes(shadow_host, monkeypatch, exception):
+    from pseudolife_memory import update_engine as eng
+    s = shadow_host
+    env_file = s["repo"] / "ops/.env"
+    original = env_file.read_bytes()
+    inode = env_file.stat().st_ino
+    fsync = os.fsync
+
+    def interrupt(fd):
+        monkeypatch.setattr(os, "fsync", fsync)
+        raise exception("interrupted append")
+
+    monkeypatch.setattr(os, "fsync", interrupt)
+    with pytest.raises(up.UpdateError if exception is OSError else KeyboardInterrupt):
+        eng.deploy_engine(s["update"](shadow=True), s["repo"])
+    assert env_file.read_bytes() == original
+    assert env_file.stat().st_ino == inode
+    assert not any("up" in a or "cp" in a for a in s["calls"])
+
+
+def test_shadow_new_env_file_is_private(shadow_host):
+    from pseudolife_memory import credentials, update_engine as eng
+    s = shadow_host
+    env_file = s["repo"] / "ops/.env"
+    env_file.unlink()
+    eng.deploy_engine(s["update"](shadow=True), s["repo"])
+    if os.name == "nt":
+        with env_file.open("rb") as stream:
+            assert credentials._windows_owner_only(stream.fileno())
+    else:
+        assert env_file.stat().st_mode & 0o777 == 0o600
+    assert env_file.read_text().count("PSEUDOLIFE_SHADOW_DB_PASSWORD=") == 1
 
 
 def test_shadow_waits_for_model_provisioning_before_authenticated_gate(shadow_host):

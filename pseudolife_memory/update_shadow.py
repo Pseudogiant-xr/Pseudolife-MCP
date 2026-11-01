@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import secrets
 import tempfile
@@ -77,7 +78,7 @@ class ShadowUpdate:
         if assignments and (len(assignments) != 1 or not re.fullmatch(r"[A-Za-z0-9_-]+", assignments[0].strip())):
             raise up.UpdateError("PSEUDOLIFE_SHADOW_DB_PASSWORD must be one URL-safe value in the host env file; fix it and retry; nothing was changed", 2)
         self.password = assignments[0].strip() if assignments else secrets.token_urlsafe(32)
-        self.original, self.save_password = original, not assignments
+        self.save_password = not assignments
         self.env[PASSWORD] = self.password  # Host file wins over an inherited shell value.
         self.env["PSEUDOLIFE_SHADOW_DB_NAME"] = quote(e.pg_db, safe="")
         base = e.config(e.base)
@@ -135,6 +136,28 @@ class ShadowUpdate:
                 if code:
                     raise up.UpdateError(f"could not remove the private role script from the PostgreSQL container; remove {remote} there before retrying")
 
+    def persist_password(self):
+        addition = ("\n" + PASSWORD + "=" + self.password + "\n").encode()
+        if self.original_bytes is None:
+            _write_private(self.e.env_file, addition)
+            return
+        # Append to the existing file: replacing it would change its owner,
+        # mode or Windows ACL and break other accounts using this host config.
+        with self.e.env_file.open("r+b") as stream:
+            if stream.read() != self.original_bytes:
+                raise up.UpdateError("the host env file changed during the shadow build; its edits were preserved; retry after the configuration is settled")
+            try:
+                stream.write(addition)
+                stream.flush()
+                os.fsync(stream.fileno())
+            except BaseException:
+                # An interrupted/failed append must not leave a partial key;
+                # the original settings have never been rewritten.
+                stream.truncate(len(self.original_bytes))
+                stream.flush()
+                os.fsync(stream.fileno())
+                raise
+
     def start(self):
         self.prepare()
         e = self.e
@@ -162,7 +185,7 @@ class ShadowUpdate:
             if current_env != self.original_bytes:
                 raise up.UpdateError("the host env file changed during the shadow build; its edits were preserved; retry after the configuration is settled")
             if self.save_password:
-                _write_private(e.env_file, (self.original.rstrip() + "\n" + PASSWORD + "=" + self.password + "\n").encode())
+                self.persist_password()
             self.apply_role()
             started = True
             # S1 permits 30 minutes of first-start provisioning plus 90 seconds
@@ -171,11 +194,15 @@ class ShadowUpdate:
             if code:
                 raise up.UpdateError("shadow startup did not become ready within its provisioning budget")
             e.gate(self.url, announce=False)
-        except (up.UpdateError, OSError) as exc:
+        except BaseException as exc:
             cleanup = 0
             if started:
                 cleanup, _ = self.command(["rm", "--stop", "--force", SERVICE], timeout=120)
+            if not isinstance(exc, (up.UpdateError, OSError)):
+                if cleanup:
+                    self.u.step(f"shadow cleanup failed; remove it with {REMOVE}; Python is unchanged")
+                raise
             recovery = f"remove it with {REMOVE}, then retry {RETRY}" if cleanup else f"retry {RETRY}"
-            reason = str(exc) if isinstance(exc, up.UpdateError) else "cannot save the private shadow setup files"
+            reason = str(exc) if isinstance(exc, up.UpdateError) else "cannot save the shadow setup files"
             raise up.UpdateError(f"{reason}; Python is unchanged; {recovery} (the saved password is retained)") from None
         self.u.step(f"read-only Rust shadow answers at {self.url}; Python is unchanged; remove it with {REMOVE}")
