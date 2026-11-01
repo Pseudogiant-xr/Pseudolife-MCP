@@ -81,11 +81,12 @@ _DUMP_MARKER = "PostgreSQL database dump complete"
 # ── seams ───────────────────────────────────────────────────────────────────
 
 def run_cli(argv, *, timeout: int = 3600, cwd: str | None = None,
-            env: dict | None = None, stream: bool = False) -> tuple[int, str]:
+            env: dict | None = None, stream: bool = False, stdout_only: bool = False) -> tuple[int, str]:
     """Run a command and return ``(returncode, combined output)``. With
     ``stream`` the child writes to this process's stdout/stderr (a build
     is long and its progress belongs on the terminal) and the output
-    returned is empty."""
+    returned is empty. ``stdout_only`` keeps stderr diagnostics out of
+    machine-readable output without printing potentially secret warnings."""
     try:
         if stream:
             # The child writes to the file descriptors directly, past this
@@ -101,7 +102,7 @@ def run_cli(argv, *, timeout: int = 3600, cwd: str | None = None,
                               stdin=subprocess.DEVNULL, cwd=cwd, env=env)
     except (OSError, subprocess.TimeoutExpired) as exc:
         return 1, f"{type(exc).__name__}: {exc}"
-    return proc.returncode, (proc.stdout or "") + (proc.stderr or "")
+    return proc.returncode, (proc.stdout or "") + ("" if stdout_only else (proc.stderr or ""))
 
 
 def _flush_output() -> None:

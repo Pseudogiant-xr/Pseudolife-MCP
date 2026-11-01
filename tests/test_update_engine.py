@@ -10,6 +10,7 @@ import pytest
 
 from pseudolife_memory import update_cli as up
 
+REAL_RUN_CLI = up.run_cli
 
 def test_engine_flags_reach_options():
     options = up.options_from_args(up.build_parser().parse_args(["--engine", "rust", "--shadow"]))
@@ -102,7 +103,8 @@ def engine_host(tmp_path, monkeypatch):
         if state["fail"] == "backup" and any("backup." in a for a in argv):
             return 1, "backup failed"
         if any("backup." in a for a in argv):
-            directory = repo / "data/backups"
+            output_flag = "-OutDir" if "-OutDir" in argv else "--out-dir"
+            directory = Path(argv[argv.index(output_flag) + 1])
             directory.mkdir(parents=True, exist_ok=True)
             count = state.get("backup_count", 0) + 1
             state["backup_count"] = count
@@ -315,7 +317,7 @@ def test_persisted_engine_honors_all_and_retention(engine_host, monkeypatch):
     monkeypatch.setattr(update, "prune_rollbacks", lambda repo, image: completed.append(image))
     monkeypatch.setattr(update, "prune_cache", lambda *a: completed.append("cache"))
     eng.deploy_engine(update, s["repo"])
-    assert completed == ["clients", "pseudolife-daemon-python", "pseudolife-daemon-rust", "cache"]
+    assert completed == ["pseudolife-daemon-python", "pseudolife-daemon-rust", "clients", "cache"]
 
 
 def test_state_archive_failure_stops_before_tag_even_when_backup_script_exits_zero(engine_host):
@@ -398,3 +400,79 @@ def test_force_rollback_tag_uses_validated_running_image(engine_host, monkeypatc
     else:
         eng.deploy_engine(update, s["repo"])
         assert any(a[1:3] == ["tag", "sha256:validated-python"] for a in s["calls"])
+
+
+def test_retention_preserves_this_runs_old_image_rollback(engine_host, monkeypatch):
+    from pseudolife_memory import update_engine as eng
+    s = engine_host
+    refs = {"pseudolife-daemon-python:0.21.0-pre-newer1": ("2026-10-02", "sha256:newer1"),
+            "pseudolife-daemon-python:0.21.0-pre-newer2": ("2026-10-03", "sha256:newer2")}
+    run = up.run_cli
+    def docker(argv, **kw):
+        args = list(map(str, argv))
+        if args[1:2] == ["tag"]:
+            refs[args[3]] = ("2026-10-01", args[2])
+        if args[1:3] == ["ps", "-q"]:
+            return 0, "fixture-daemon"
+        if args[1:3] == ["inspect", "--format"]:
+            return 0, s["running"]["Image"]
+        if args[1:3] == ["image", "ls"]:
+            return 0, "\n".join(r for r in refs if r.startswith(args[3] + ":"))
+        if args[1:4] == ["image", "inspect", "--format"]:
+            return 0, "|".join(refs[args[-1]])
+        if args[1:2] == ["rmi"]:
+            del refs[args[2]]
+            return 0, ""
+        result = run(argv, **kw)
+        if args[1:2] == ["compose"] and "up" in args:
+            s["running"]["Image"] = "sha256:new-rust"
+        return result
+    monkeypatch.setattr(up, "run_cli", docker)
+    update = s["update"](keep_rollbacks=2)
+    eng.deploy_engine(update, s["repo"])
+    assert update.report.rollback["tag"] in refs
+    assert refs[update.report.rollback["tag"]][1] == "sha256:validated-python"
+
+
+def test_stale_checkout_selection_refuses_after_other_checkout_returns_python(engine_host, tmp_path):
+    import shutil
+    from pseudolife_memory import update_engine as eng
+    s = engine_host
+    eng.deploy_engine(s["update"](), s["repo"])
+    other = tmp_path / "checkout-b"
+    shutil.copytree(s["repo"], other)
+    update = s["update"]("python")
+    update.o.checkout = other
+    eng.deploy_engine(update, other)
+    assert eng._selection(s["repo"])["labels"][eng.ENGINE_LABEL] == "rust"
+    with pytest.raises(up.UpdateError, match="--engine python"):
+        eng.selected_checkout(s["update"](None))
+
+
+def test_compose_json_ignores_stderr_warning(engine_host, monkeypatch):
+    from pseudolife_memory import update_engine as eng
+    s = engine_host
+    engine = eng.EngineUpdate(s["update"](), s["repo"])
+    # Exercise the real command capture, not a JSON-normalizing mock.
+    monkeypatch.setattr(up, "run_cli", REAL_RUN_CLI)
+    monkeypatch.setattr(up.subprocess, "run", lambda *a, **kw: subprocess.CompletedProcess(a[0], 0,
+                        json.dumps(s["config"]), "warning: version is obsolete\n"))
+    assert engine.config(engine.base) == s["config"]
+
+
+@pytest.mark.parametrize("raw,expected", [
+    (" malformed, :reader, reserved:default,  fixture:colon : Reader , next:other ", "fixture:colon"),
+    ("  fixture inner : Reader  ", "fixture inner"),
+])
+def test_mapped_bearer_matches_daemon_whitespace_and_malformed_entries(engine_host, monkeypatch, raw, expected):
+    from pseudolife_memory import update_engine as eng
+    from pseudolife_memory.principals import env_auth, presented_bearer
+    s = engine_host
+    env = {"PSEUDOLIFE_MCP_TOKENS": raw}
+    s["config"]["services"][up.DAEMON_SERVICE]["environment"] = env
+    tokens, _ = env_auth(env)
+    assert expected in tokens and presented_bearer("Bearer " + expected) == expected
+    seen = []
+    monkeypatch.setattr(eng, "authenticated_read", lambda url, token: seen.append(token) or token in tokens)
+    eng.deploy_engine(s["update"](), s["repo"])
+    assert seen == [expected, expected]

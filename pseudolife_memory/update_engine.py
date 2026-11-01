@@ -49,19 +49,34 @@ def _selection(repo: Path) -> dict | None:
 
 def selected_checkout(update) -> Path | None:
     o = update.o
+    selected = None
+    container = up.DAEMON_CONTAINER
     if o.checkout is not None:
         repo = Path(o.checkout).resolve()
         selected = _selection(repo)
-        if o.engine or (selected and selected["labels"][ENGINE_LABEL] == "rust"):
+        if o.engine:
             return repo
         if not o.allow_dirty and up.tree_state(repo)["dirty"] != "false":
             # Keep the existing clean-tree refusal ahead of all Docker calls.
             return None
-    code, out = up.run_cli([update.docker, "inspect", "-f", "{{json .Config.Labels}}", up.DAEMON_CONTAINER], timeout=60)
+        env_file = repo / "ops/.env"
+        compose = update._compose_args([repo / "ops/docker-compose.yml", repo / "ops/docker-compose.override.yml"], env_file)
+        code, out = up.run_cli([update.docker, "compose", *compose, "ps", "-a", "-q", up.DAEMON_SERVICE],
+                               env=up.compose_environment(env_file), timeout=60, stdout_only=True)
+        ids = out.split() if code == 0 else []
+        if len(ids) == 1:
+            container = ids[0]
+        elif selected:
+            raise up.UpdateError("cannot find this checkout's selected daemon; restore its Compose project and retry; nothing was changed", 2)
+    code, out = up.run_cli([update.docker, "inspect", "-f", "{{json .Config.Labels}}", container], timeout=60, stdout_only=True)
     try:
         labels = json.loads(out) if code == 0 else {}
     except ValueError:
         labels = {}
+    current = "rust" if labels.get(ENGINE_LABEL) == "rust" else "python"
+    if selected and selected["labels"][ENGINE_LABEL] != current:
+        raise up.UpdateError("this checkout's engine selection disagrees with the host; use --engine python --checkout <repo> "
+                             "to restore the default, or --engine rust --checkout <repo> to explicitly activate Rust; nothing was changed", 2)
     if labels.get(ENGINE_LABEL) != "rust":
         if o.engine == "python":
             o.daemon_only = True
@@ -154,7 +169,7 @@ class EngineUpdate:
         self.env = up.compose_environment(self.env_file)
 
     def command(self, args, **kw):
-        return up.run_cli([self.u.docker, *args], **kw)
+        return up.run_cli([self.u.docker, *args], stdout_only=not kw.get("stream", False), **kw)
 
     def config(self, compose, env=None):
         code, out = self.command(["compose", *compose, "config", "--format", "json"], env=env or self.env, timeout=60)
@@ -225,7 +240,7 @@ class EngineUpdate:
             raise up.UpdateError(f"engine verification must reach this project's loopback port; use --daemon-url http://127.0.0.1:{port}; nothing was changed", 2)
         from pseudolife_memory.principals import parse_token_map
         self.token = daemon_env.get("PSEUDOLIFE_MCP_TOKEN") or next(iter(parse_token_map(daemon_env.get("PSEUDOLIFE_MCP_TOKENS"))), "")
-        if not self.token or any(c.isspace() for c in self.token):
+        if not self.token or "\r" in self.token or "\n" in self.token:
             raise up.UpdateError("the engine health gate needs bearer auth; set PSEUDOLIFE_MCP_TOKEN in the host env file and retry; nothing was changed", 2)
         if self.o.shadow:
             if self.running["Config"].get("Labels", {}).get(ENGINE_LABEL) == "rust":
@@ -319,6 +334,10 @@ class EngineUpdate:
                         if os.name == "nt" else f' && rm -f -- "{selected_file}"')
         self.u.rollback_lines = ([copy] if old_engine == "rust" else []) + [clear, restore, *self.u._schema_rollback_note(None)]
         self.u.report.rollback = {"tag": rollback, "state": "tagged", "overlay": str(rollback_file), **self.backup_paths}
+        # Retention protects images used by running containers. Prune while
+        # the image this run tagged is still running, even after a downgrade.
+        for engine in ("python", "rust"):
+            self.u.prune_rollbacks(self.repo, f"pseudolife-daemon-{engine}")
         image = f"pseudolife-daemon-{self.engine}:checkout"
         service = {"image": image, "build": {"dockerfile": f"ops/Dockerfile.daemon{'-rust' if self.engine == 'rust' else ''}"},
                    "labels": {ENGINE_LABEL: self.engine, CHECKOUT_LABEL: str(self.repo)}}
@@ -353,8 +372,6 @@ class EngineUpdate:
         for line in self.u.rollback_lines:
             self.u.step(line)
         self.u.checkout_post_deploy(self.repo, self.previous_digest, health)
-        for engine in ("python", "rust"):
-            self.u.prune_rollbacks(self.repo, f"pseudolife-daemon-{engine}")
         self.u.prune_cache(self.repo)
 
     def shadow(self):

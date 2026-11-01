@@ -672,7 +672,7 @@ def _checkout(world: World, tmp_path: Path, *, repo: bool = True, dirty: int = 0
 
 def _compose_call(world: World):
     for argv, env in zip(world.calls, world.envs):
-        if argv[1:2] == ["compose"]:
+        if argv[1:2] == ["compose"] and "up" in argv:
             return argv, env
     return None, None
 
@@ -904,7 +904,7 @@ def test_the_checkouts_scripts_run_with_their_mapped_flags(world, clients, tmp_p
     for c in world.calls:
         if str(scripts["backup"]) in c:
             kinds.append("backup")
-        elif c[1:2] == ["compose"]:
+        elif c[1:2] == ["compose"] and "up" in c:
             kinds.append("compose")
         elif str(scripts["prune-build-cache"]) in c:
             kinds.append("prune-build-cache")
@@ -1314,7 +1314,7 @@ def test_a_checkout_deploy_creates_the_missing_test_login(world, clients, test_l
     assert test_login["seen"] == [["create"]]                 # never --rotate
     out = capsys.readouterr().out
     assert "role pseudolife_test: created" in out and "test login" in out
-    compose = next(i for i, c in enumerate(world.calls) if c[1:2] == ["compose"])
+    compose = next(i for i, c in enumerate(world.calls) if c[1:2] == ["compose"] and "up" in c)
     inspect = next(i for i, c in enumerate(world.calls) if c[-1] == PG)
     assert compose < inspect                                  # after the daemon is back
 
