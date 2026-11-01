@@ -699,11 +699,8 @@ async fn dispatch(
     body: &mut RequestBody,
 ) -> Response {
     if app.service.config.read_only
-        && (matches!(
-            path,
-            "/api/pair" | "/api/dream/status" | "/api/curation/duplicates"
-        ) || (path.starts_with("/api/hook/")
-            && !matches!(path, "/api/hook/memory-policy" | "/api/hook/memory-changes")))
+        && ((method == "GET" && !shadow_safe_get(path))
+            || (path.starts_with("/api/") && method != "GET"))
     {
         return shadow_refusal();
     }
@@ -782,6 +779,56 @@ fn shadow_refusal() -> Response {
     )
 }
 
+// Classified from state mutations, not the HTTP verb. New GET handlers are
+// refused until audited; UI assets and MCP transport never touch bank state.
+const SHADOW_SAFE_GETS: &[&str] = &[
+    "/api/agents",
+    "/api/briefing",
+    "/api/chain",
+    "/api/config",
+    "/api/consolidation",
+    "/api/curation/retired",
+    "/api/entry",
+    "/api/episodes",
+    "/api/episodes/summary",
+    "/api/facts",
+    "/api/facts/history",
+    "/api/graph",
+    "/api/graph/communities",
+    "/api/graph/digest",
+    "/api/graph/entity-provenance",
+    "/api/graph/path",
+    "/api/graph/projects",
+    "/api/graph/proposal-evidence",
+    "/api/graph/review",
+    "/api/lessons",
+    "/api/maintainer",
+    "/api/maintainer/inbox",
+    "/api/maintainer/sent",
+    "/api/overview",
+    "/api/recall",
+    "/api/recent",
+    "/api/search",
+    "/api/sources",
+    "/api/stats",
+    "/api/trace",
+    "/api/wiki",
+    "/api/world",
+];
+
+fn shadow_safe_get(path: &str) -> bool {
+    SHADOW_SAFE_GETS.contains(&path)
+        || matches!(
+            path,
+            "/" | "/health"
+                | "/ui"
+                | "/mcp"
+                | "/api/hook/memory-policy"
+                | "/api/hook/memory-changes"
+        )
+        || path.starts_with("/ui/")
+}
+
 // ---- GET /api/search (spec.md S1-S7) -------------------------------------
 
 /// Python `str.strip()`: Unicode whitespace plus the U+001C..U+001F separators.
@@ -791,6 +838,28 @@ pub fn py_strip(s: &str) -> &str {
 
 #[cfg(test)]
 pub(crate) mod tests {
+    #[test]
+    fn shadow_get_inventory_is_explicit_and_new_routes_are_refused() {
+        let routes: serde_json::Value =
+            serde_json::from_str(include_str!("../harness/goldens/routes.json")).unwrap();
+        let refused = ["/api/dream/status", "/api/curation/duplicates"];
+        for path in routes["GET"].as_array().unwrap() {
+            let path = path.as_str().unwrap();
+            assert!(
+                super::SHADOW_SAFE_GETS.contains(&path) || refused.contains(&path),
+                "classify new GET before enabling shadow: {path}"
+            );
+            assert_eq!(super::shadow_safe_get(path), !refused.contains(&path));
+        }
+        for path in [
+            "/api/future-read",
+            "/api/hook/session-start",
+            "/api/pair",
+            "/future",
+        ] {
+            assert!(!super::shadow_safe_get(path));
+        }
+    }
     use super::*;
     use std::time::Instant;
 

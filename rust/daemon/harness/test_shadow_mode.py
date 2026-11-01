@@ -9,6 +9,7 @@ and drops the database in finally. No live backup is read or restored.
 from __future__ import annotations
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import json
 import os
@@ -65,7 +66,8 @@ def apply_role(container, user, database, password, expect_failure=False):
                              "psql", "-X", "-q", "-U", user, "-d", database],
                             input=payload, text=True, capture_output=True)
     if expect_failure:
-        assert result.returncode and "PUBLIC grants" in result.stderr, "unsafe inherited grants were accepted"
+        expected = "PUBLIC grants" if expect_failure is True else expect_failure
+        assert result.returncode and expected in result.stderr, "unsafe inherited grants were accepted"
     elif result.returncode:
         error = next((line.split("ERROR:", 1)[1].strip() for line in result.stderr.splitlines()
                       if "ERROR:" in line), "PostgreSQL administrator access is required")
@@ -87,6 +89,7 @@ def proof(binary, out, container, triage=()):
     writer_paused = False
     created = False
     owns_role = False
+    membership_roles = []
     try:
         with psycopg.connect(dbname="postgres", autocommit=True, **admin) as conn:
             conn.execute(sql.SQL("CREATE DATABASE {} TEMPLATE template0").format(sql.Identifier(name)))
@@ -128,6 +131,19 @@ updates:
             conn.execute("ALTER DEFAULT PRIVILEGES GRANT ALL ON TABLES TO pseudolife_shadow")
         apply_role(container, user, name, password)  # Idempotency.
         with psycopg.connect(dsn, autocommit=True) as conn:
+            if conn.info.server_version >= 160000:
+                parent, grantor = name + "_parent", name + "_grantor"
+                for role in (parent, grantor):
+                    conn.execute(sql.SQL("CREATE ROLE {} NOLOGIN").format(sql.Identifier(role)))
+                    membership_roles.append(role)
+                conn.execute(sql.SQL("GRANT {} TO {} WITH ADMIN OPTION").format(sql.Identifier(parent), sql.Identifier(grantor)))
+                conn.execute(sql.SQL("SET ROLE {}").format(sql.Identifier(grantor)))
+                conn.execute(sql.SQL("GRANT {} TO pseudolife_shadow").format(sql.Identifier(parent)))
+                conn.execute("RESET ROLE")
+                apply_role(container, user, name, password, expect_failure="still has role memberships")
+                conn.execute(sql.SQL("REVOKE {} FROM pseudolife_shadow GRANTED BY {}").format(sql.Identifier(parent), sql.Identifier(grantor)))
+        apply_role(container, user, name, password)
+        with psycopg.connect(dsn, autocommit=True) as conn:
             conn.execute("CREATE SEQUENCE shadow_fixture_seq")
             conn.execute("GRANT USAGE ON SEQUENCE shadow_fixture_seq TO PUBLIC")
         apply_role(container, user, name, password, expect_failure=True)
@@ -158,7 +174,7 @@ updates:
                 else:
                     raise AssertionError("shadow role unexpectedly has write privileges")
         writer = daemons.python_daemon(writer_home, daemons.free_port(), env).start(wait_s=180)
-        python = compare.Endpoint(f"http://127.0.0.1:{writer.port}", "synthetic-shadow-proof")
+        python = compare.Endpoint(f"http://127.0.0.1:{writer.port}", "synthetic-shadow-proof", replay=False)
         python.initialize()
         for query in ("writer lease", "deployment rollback", "database host"):
             status, body = python.read({"tool": "memory_search", "args": {"query": query}})
@@ -193,7 +209,8 @@ updates:
         before = snapshot(dsn)
         held = lease_holders(dsn)
         assert len(held) == 1, "Python must own the writer lease"
-        home = daemons.make_home(root, "rust", config)
+        shadow_config = config.replace("  dream:\n    enabled: false", "  dream:\n    enabled: true\n  retrieval_log:\n    enabled: true")
+        home = daemons.make_home(root, "rust", shadow_config)
         rust_env = daemons.base_env(home, dict(env, PSEUDOLIFE_MCP_DATA_DIR=str(home / "data"),
                                               PSEUDOLIFE_MCP_DATABASE_URL=shadow_dsn,
                                               PSEUDOLIFE_READ_ONLY="1", PSEUDOLIFE_MCP_AUTOSAVE_SECONDS="0.1",
@@ -204,6 +221,15 @@ updates:
         shadow = daemons.rust_daemon(binary.resolve(), home, daemons.free_port(), rust_env).start(wait_s=180)
         rust = compare.Endpoint(f"http://127.0.0.1:{shadow.port}", "synthetic-shadow-proof")
         rust.initialize()
+        status, effective_config = rust.request("GET", "/api/config")
+        assert status == 200
+        effective_values = {k["path"]: k["value"] for group in effective_config["groups"] for k in group["knobs"]}
+        for key in ("memory.retrieval_log.enabled", "memory.dream.enabled"):
+            assert effective_values[key] is False, "config reports an overridden shadow setting as enabled"
+        assert rust.request("GET", "/api/agents")[0] == 200
+        refresh_line = "read-only shadow: resident state refreshed"
+        initial_refreshes = shadow.log.read_text(errors="replace").count(refresh_line)
+        assert initial_refreshes == 1
         observations = []
         for case in cases:
             status, body = rust.read(case)
@@ -230,6 +256,7 @@ updates:
         after = snapshot(dsn)
         assert before == after, "Rust burst changed table or sequence state"
         daemon_log = shadow.log.read_text(errors="replace")
+        assert daemon_log.count(refresh_line) == initial_refreshes, "unchanged reads rehydrated the bank"
         assert "read-only transaction" not in daemon_log and "permission denied" not in daemon_log, "a read attempted a forbidden write"
         # Exercise clean exit's autosave path too.
         shadow.stop()
@@ -239,6 +266,12 @@ updates:
         shadow.start(wait_s=180)
         rust = compare.Endpoint(f"http://127.0.0.1:{shadow.port}", "synthetic-shadow-proof")
         summary = compare.compare(python, rust, cases, triage)
+        assert python.read({"tool": "memory_search", "args": {"query": "shadow-replay-only-fixture"}})[0] == 200
+        replay_corpus = compare.corpus(dsn=dsn, limit=100)
+        assert not any(c.get("args", {}).get("query") == "shadow-replay-only-fixture" for c in replay_corpus)
+        with psycopg.connect(dsn) as conn:
+            assert conn.execute("SELECT 1 FROM retrieval_events WHERE query_text='shadow-replay-only-fixture' "
+                                "AND session_id LIKE 'shadow-compare:%%'").fetchone()
         # A writer commit after shadow hydration must be visible on the next
         # shadow read; keeping the startup resident snapshot would miss it.
         _, answer = python.rpc("tools/call", {"name": "memory_fact_set", "arguments": {
@@ -247,17 +280,43 @@ updates:
         status, fact = rust.read({"tool": "memory_fact_get", "args": {
             "entity": "shadow-refresh-probe", "attribute": "phase"}})
         assert status == 200 and fact.get("record") and fact["record"]["value"] == "committed-after-hydration", "shadow resident state is stale"
+        os.kill(writer.proc.pid, signal.SIGSTOP)
+        writer_paused = True
+        deadline = time.monotonic() + 10
+        with psycopg.connect(dsn, autocommit=True) as conn:
+            while conn.execute("SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() "
+                               "AND pid<>pg_backend_pid() AND state='active'").fetchone()[0]:
+                assert time.monotonic() < deadline, "writer did not quiesce"
+                time.sleep(.05)
         # Awareness has a non-initializing writer fast path. The shadow must
         # refresh even when this GET is the only read after an episode change.
         assert rust.request("GET", "/api/agents")[0] == 200
+        refreshes_before_change = shadow.log.read_text(errors="replace").count(refresh_line)
         with psycopg.connect(dsn, autocommit=True) as conn:
             conn.execute("INSERT INTO episodes(id,title,started_at,session_key) VALUES (%s,%s,%s,%s)",
                          ("shadow-awareness-probe", "Fresh writer session", time.time(), "shadow-awareness-probe"))
-        status, agents = rust.request("GET", "/api/agents")
-        assert status == 200 and "shadow-awareness-probe" in json.dumps(agents), "shadow awareness is stale"
+        def awareness(_):
+            return compare.Endpoint(f"http://127.0.0.1:{shadow.port}", "synthetic-shadow-proof").request("GET", "/api/agents")
+        with ThreadPoolExecutor(max_workers=16) as pool:
+            for status, agents in pool.map(awareness, range(16)):
+                assert status == 200 and "shadow-awareness-probe" in json.dumps(agents), "shadow awareness is stale"
+        assert shadow.log.read_text(errors="replace").count(refresh_line) == refreshes_before_change + 1, "concurrent refreshes were not coalesced"
         with psycopg.connect(dsn, autocommit=True) as conn:
             conn.execute("UPDATE episodes SET ended_at=%s WHERE id='shadow-awareness-probe'", (time.time(),))
         assert "shadow-awareness-probe" not in json.dumps(rust.request("GET", "/api/agents")[1])
+        # A transaction that began earlier can commit after a newer row;
+        # a max(xmin)/max(updated_at) marker alone would miss this change.
+        with psycopg.connect(dsn) as older:
+            older.execute("UPDATE episodes SET ended_at=NULL,title='Older transaction committed late' "
+                          "WHERE id='shadow-awareness-probe'")
+            with psycopg.connect(dsn, autocommit=True) as newer:
+                newer.execute("INSERT INTO episodes(id,title,started_at,session_key) VALUES (%s,%s,%s,%s)",
+                              ("shadow-newer-probe", "Newer transaction", time.time(), "shadow-newer-probe"))
+            assert "shadow-awareness-probe" not in json.dumps(rust.request("GET", "/api/agents")[1])
+            older.commit()
+        assert "Older transaction committed late" in json.dumps(rust.request("GET", "/api/agents")[1]), "late commit was missed"
+        os.kill(writer.proc.pid, signal.SIGCONT)
+        writer_paused = False
         shadow.stop()
         writer.stop()
         # The gates must not leak into the default writer mode. This same
@@ -292,6 +351,11 @@ updates:
                             "writer_telemetry_and_dream_initialization": True,
                             "later_writer_commit_visible": True,
                             "awareness_episode_changes_visible": True,
+                            "unchanged_burst_hydrations": initial_refreshes,
+                            "concurrent_readers": 16, "coalesced_refreshes": 1,
+                            "older_transaction_late_commit_visible": True,
+                            "tagged_replays_excluded": True, "effective_config_overrides": True,
+                            "surviving_membership_refused": bool(membership_roles),
                             "reads": observations}
         out.write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
         out.with_suffix(".txt").write_text(compare.digest(summary), encoding="utf-8")
@@ -309,6 +373,8 @@ updates:
         if owns_role:
             with psycopg.connect(dbname="postgres", autocommit=True, **admin) as conn:
                 conn.execute("DROP ROLE IF EXISTS pseudolife_shadow")
+                for role in reversed(membership_roles):
+                    conn.execute(sql.SQL("DROP ROLE {}").format(sql.Identifier(role)))
 
 
 if __name__ == "__main__":

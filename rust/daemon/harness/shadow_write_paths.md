@@ -9,7 +9,8 @@ rg -n 'INSERT INTO|UPDATE [a-z_]+ SET|DELETE FROM|TRUNCATE|\.execute\(|\.write\(
 
 Test-only occurrences and process-local locks/caches are distinguished from
 bank mutations below. This is an inventory of the current implementation;
-the MCP allowlist refuses newly added tools until audited.
+the MCP and HTTP GET allowlists refuse newly added tools and routes until
+audited. A route-inventory test requires every GET to be explicitly classified.
 
 | State / mutation sources | Shadow boundary |
 |---|---|
@@ -39,8 +40,12 @@ sessions. Model provisioning is separate from the bank and should use a
 prepared model cache. Native administrative subcommands are not daemon
 request paths.
 
-The database session defaults to read-only in addition to the SELECT-only
-role. This is defense in depth, not the absence-of-writes proof: swallowed
+Storage, board and principal-refresher sessions default to read-only in
+addition to the SELECT-only role. Startup refuses a DSN with INSERT, UPDATE
+or DELETE rights on `entries`, including column grants, and names the shadow
+DSN as the fix. The role script checks every bank table and asserts that no
+memberships survived revocation. This is defense in depth, not the
+absence-of-writes proof: swallowed
 permission errors do not count as success. `test_shadow_mode.py` snapshots
 every non-system table and sequence before Rust startup and after a burst
 of reads, refused writes and clean shutdown while Python holds the lease.
@@ -49,12 +54,37 @@ auth telemetry cannot pollute the snapshot; it resumes for the comparator.
 No columns or tables are normalized away. Required MCP reads must succeed;
 the comparator separately records Console refusals and response differences.
 
-Every shadow request rehydrates resident stores, retaining the loaded
-embedder, so later Python writes are visible on the next read. This is a
-diagnostic mode, not a performance claim; a multi-query hydration can still
-observe an active writer across more than one committed state.
+Every shadow request probes row counts and two independently seeded hashes
+of visible tuple versions (`ctid` and `xmin`) for the resident stores' inputs.
+This scans tuple headers without loading text or embedding payloads; it is
+still linear in row count, not a constant-time probe. The signatures detect
+inserts, updates and deletes, including older transactions committing late;
+hash collisions are theoretically possible. Unrelated telemetry does not
+invalidate the cache. Only a changed signature triggers full hydration, and
+the service lock coalesces concurrent refreshes. A multi-query hydration can
+still observe an active writer across more than one committed state; retaining
+the pre-hydration marker makes the next request detect a concurrent commit.
+The Linux proof asserts one initial hydration for an unchanged read burst and
+one refresh for 16 concurrent readers following a writer change.
 
 Python has no daemon-wide shadow equivalent. Its coordination `context`
 has a narrower `read_only` argument, and read tools still record telemetry.
+Comparator replays tag both daemons with `X-PL-Session: shadow-compare:<uuid>`;
+retrieval-log corpus selection excludes that prefix before grouping queries.
+Python's ordinary telemetry remains in the bank, but these tagged replays
+cannot feed subsequent corpora. Older, untagged runs cannot be distinguished.
 The shadow refusal therefore explicitly names this mode and directs writes
 to the active writer daemon.
+
+## Running a comparison
+
+Start the Rust daemon with `PSEUDOLIFE_READ_ONLY=1` and the
+`pseudolife_shadow` DSN provisioned by `ops/sql/shadow_reader_role.sql`
+(`shadow_password` is its required psql variable). Supply the two base URLs
+and bearer environment-variable names to `shadow_compare.py --help`.
+Use `--queries` for a JSON read corpus or `--database-url-env` for a
+SELECT-only retrieval-log snapshot. Replays still produce Python telemetry;
+the reserved session prefix described above keeps it out of later corpora.
+Keep the JSON and digest together: tolerated differences are reported, not
+discarded. `test_shadow_mode.py` is a Linux-only disposable-bank proof;
+the storage reconnect unit test runs natively on Windows as well.

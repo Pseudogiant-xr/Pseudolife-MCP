@@ -117,6 +117,13 @@ pub async fn check_read_only(client: &Client) -> Result<(), SchemaError> {
             "read-only shadow requires an initialized bank at schema {SCHEMA_META_VERSION}; run pseudolife-mcp update on the active writer first"
         )));
     }
+    let writes: bool = client.query_one(
+        "SELECT has_table_privilege(current_user, 'public.entries', 'INSERT,UPDATE,DELETE') OR has_any_column_privilege(current_user, 'public.entries', 'INSERT,UPDATE')",
+        &[],
+    ).await?.get(0);
+    if writes {
+        return Err(SchemaError::Refused("read-only shadow requires SELECT-only bank credentials; use the pseudolife_shadow DSN instead of the writer DSN".into()));
+    }
     Ok(())
 }
 

@@ -75,6 +75,19 @@ class ShadowCompareTests(unittest.TestCase):
                 endpoint.request("GET", "/health")
             self.assertEqual(connection.call_count, 1)
 
+    def test_every_replay_request_has_a_reserved_session_tag(self):
+        with patch("http.client.HTTPConnection") as connection:
+            response = connection.return_value.getresponse.return_value
+            response.status = 200
+            response.read.return_value = b'{}'
+            response.getheader.return_value = None
+            endpoint = shadow.Endpoint("http://localhost")
+            for method, path in (("GET", "/api/search"), ("POST", "/mcp")):
+                endpoint.request(method, path)
+                headers = connection.return_value.request.call_args.args[3]
+                self.assertTrue(headers["X-PL-Session"].startswith(shadow.REPLAY_SESSION_PREFIX))
+                self.assertEqual(headers["X-PL-Session"], endpoint.replay_session)
+
     def test_shadow_required_and_equal_errors_fail(self):
         class Fake:
             def __init__(self, read_only=True):

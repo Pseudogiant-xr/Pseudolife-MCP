@@ -688,6 +688,38 @@ impl Storage {
         self.read_only
     }
 
+    /// A compact MVCC signature of the resident stores' inputs. This scans
+    /// tuple headers, never detoasts text or embedding payloads. Two seeded
+    /// hashes plus row count detect inserts, in-place updates and deletions,
+    /// including an older transaction committing after a newer transaction.
+    /// Retrieval logs and unrelated meta do not invalidate resident stores.
+    pub async fn shadow_marker(&self) -> Result<Vec<(i64, String, String)>, String> {
+        let tables = [
+            "entries",
+            "facts",
+            "world_facts",
+            "lessons",
+            "episodes",
+            "cms_counters",
+            "meta",
+        ];
+        let parts: Vec<String> = tables.iter().enumerate().map(|(index, table)| {
+            let filter = if *table == "meta" {
+                " WHERE key IN ('active_session_pointer', 'episode_tombstones', 'deferred_empty_roots', 'cortex_supersession_log', 'cortex_dream_cursor', 'coordination_hlc_highwater', 'bank_id')"
+            } else { "" };
+            format!("SELECT {index}, count(*)::bigint, coalesce(sum(hashtextextended(ctid::text || ':' || xmin::text, 0)::numeric),0)::text, coalesce(sum(hashtextextended(ctid::text || ':' || xmin::text, 1)::numeric),0)::text FROM public.{table}{filter}")
+        }).collect();
+        self.client
+            .query(&(parts.join(" UNION ALL ") + " ORDER BY 1"), &[])
+            .await
+            .map(|rows| {
+                rows.iter()
+                    .map(|r| (r.get(1), r.get(2), r.get(3)))
+                    .collect()
+            })
+            .map_err(|e| error_text(&e))
+    }
+
     /// `PostgresStorage.__init__` (postgres.py:383-430), statement for
     /// statement: session (P1), writer lease (P2), `ensure_schema` (P3),
     /// relation seeds (P4), lease epoch (P5). `register_vector` only reads

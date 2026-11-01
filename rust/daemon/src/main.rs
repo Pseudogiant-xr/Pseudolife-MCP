@@ -310,6 +310,7 @@ fn main() {
             store.clone(),
             env_principals,
             activity.clone(),
+            read_only,
         );
         let service_dsn = dsn.clone();
         let service = Arc::new(service::Service::new(

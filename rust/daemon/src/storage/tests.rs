@@ -161,8 +161,76 @@ async fn db_shadow_never_takes_the_lease_even_after_reconnect() {
     let _guard = DB.lock().await;
     let writer = Storage::open(&dsn).await.unwrap();
     let epoch = writer.lease_epoch();
-    let shadow = Storage::open_read_only(&dsn).await.unwrap();
+    let refused = Storage::open_read_only(&dsn)
+        .await
+        .err()
+        .expect("writer credentials must be refused");
+    assert!(format!("{refused:?}").contains("pseudolife_shadow DSN"));
+    let pid: i32 = writer
+        .client()
+        .query_one("SELECT pg_backend_pid()", &[])
+        .await
+        .unwrap()
+        .get(0);
+    let role = format!("s3_shadow_reader_{pid}");
+    writer.client().batch_execute(&format!("CREATE ROLE {role} NOLOGIN; GRANT USAGE ON SCHEMA public TO {role}; GRANT SELECT ON ALL TABLES IN SCHEMA public TO {role}")).await.unwrap();
+    let mut reader_config = parse_dsn(&dsn).unwrap();
+    let options = format!(
+        "{} -c role={role}",
+        reader_config.get_options().unwrap_or("")
+    );
+    reader_config.options(&options);
+    let shadow = Storage::read_only_session(reader_config).await.unwrap();
     assert!(shadow.read_only());
+    let marker = shadow.shadow_marker().await.unwrap();
+    assert_eq!(shadow.shadow_marker().await.unwrap(), marker);
+    writer
+        .client()
+        .execute(
+            "INSERT INTO episodes(id,title,started_at) VALUES ('shadow-marker','before',1)",
+            &[],
+        )
+        .await
+        .unwrap();
+    let inserted = shadow.shadow_marker().await.unwrap();
+    assert_ne!(inserted, marker);
+    writer
+        .client()
+        .execute(
+            "UPDATE episodes SET title='after' WHERE id='shadow-marker'",
+            &[],
+        )
+        .await
+        .unwrap();
+    assert_ne!(shadow.shadow_marker().await.unwrap(), inserted);
+    writer
+        .client()
+        .execute("DELETE FROM episodes WHERE id='shadow-marker'", &[])
+        .await
+        .unwrap();
+    assert_eq!(shadow.shadow_marker().await.unwrap(), marker);
+    let mut board = crate::board::db::Conn::new(dsn.clone()).with_read_only(true);
+    let board_client = board.client().await.unwrap();
+    assert!(
+        board_client
+            .query_one(
+                "SELECT current_setting('default_transaction_read_only')='on'",
+                &[]
+            )
+            .await
+            .unwrap()
+            .get::<_, bool>(0)
+    );
+    assert!(
+        board_client
+            .execute(
+                "INSERT INTO meta VALUES ('shadow_board_forbidden','true')",
+                &[]
+            )
+            .await
+            .is_err()
+    );
+    drop(board);
     shadow.ping().await.unwrap();
     assert_eq!(
         read_lease_epoch(shadow.client()).await.unwrap(),
@@ -189,6 +257,7 @@ async fn db_shadow_never_takes_the_lease_even_after_reconnect() {
     replacement2.close().await;
     replacement.close().await;
     shadow.close().await;
+    next_writer.client().batch_execute(&format!("REVOKE ALL ON ALL TABLES IN SCHEMA public FROM {role}; REVOKE ALL ON SCHEMA public FROM {role}; DROP ROLE {role}")).await.unwrap();
     next_writer.close().await;
 }
 

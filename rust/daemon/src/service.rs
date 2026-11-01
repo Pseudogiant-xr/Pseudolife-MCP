@@ -111,6 +111,7 @@ struct Inner {
     storage: Option<Arc<Storage>>,
     embedder: Option<Arc<Embedder>>,
     ready: Option<Arc<Ready>>,
+    shadow_marker: Option<Vec<(i64, String, String)>>,
     failures: u32,
     backoff_s: f64,
     retry_at: Option<Instant>,
@@ -177,6 +178,13 @@ impl Service {
             config.memory.retrieval_log_enabled = false;
             config.memory.cortex.read_tracking = false;
             config.dream.enabled = false;
+            for key in [
+                "memory.retrieval_log.enabled",
+                "memory.cortex.read_tracking",
+                "memory.dream.enabled",
+            ] {
+                config.user_leaves.insert(key.into(), json!(false));
+            }
         }
         let model_dir = std::env::var_os("PSEUDOLIFE_DAEMON_ONNX_DIR").map(PathBuf::from);
         let ort_threads = std::env::var("PSEUDOLIFE_DAEMON_ORT_THREADS")
@@ -397,11 +405,20 @@ impl Service {
             }
         }
         self.rehydrate_if_bank_changed_hands(&mut inner);
-        // Another daemon owns the bank and may have changed any resident
-        // store since the previous call. A shadow never serves that cache.
-        if self.config.read_only {
-            inner.ready = None;
-        }
+        // Probe tuple versions, not embeddings. The service lock coalesces
+        // concurrent refreshes: waiters reuse the first published snapshot.
+        // Keep the pre-hydration marker so a commit during hydration causes
+        // the next request to refresh instead of blessing a mixed snapshot.
+        let shadow_marker = if self.config.read_only {
+            let storage = self.ensure_storage(&mut inner).await?;
+            let marker = storage.shadow_marker().await?;
+            if inner.shadow_marker.as_ref() != Some(&marker) {
+                inner.ready = None;
+            }
+            Some(marker)
+        } else {
+            None
+        };
         if let Some(r) = &inner.ready {
             if crate::mutants::active("startup-clock-reloads")
                 && r.startup.clock_state().hlc_reseed_pending
@@ -511,6 +528,10 @@ impl Service {
                     s.startup = Some(startup);
                     s.ready = Some(published);
                 });
+                inner.shadow_marker = shadow_marker;
+                if self.config.read_only {
+                    eprintln!("read-only shadow: resident state refreshed");
+                }
                 Ok(ready)
             }
             Err(e) => {
@@ -1034,16 +1055,24 @@ mod tests {
         use crate::background::Duties;
         let env =
             DaemonEnv::from_env(&|k| (k == "PSEUDOLIFE_READ_ONLY").then(|| "1".into())).unwrap();
-        let service = Service::new(
-            Config::default(),
-            env,
-            PathBuf::from("unused"),
-            String::new(),
-            false,
-        );
+        let mut config = Config::default();
+        for key in [
+            "memory.retrieval_log.enabled",
+            "memory.dream.enabled",
+            "memory.cortex.read_tracking",
+        ] {
+            config.user_leaves.insert(key.into(), json!(true));
+        }
+        let service = Service::new(config, env, PathBuf::from("unused"), String::new(), false);
         assert!(!service.config.memory.retrieval_log_enabled);
         assert!(!service.config.memory.cortex.read_tracking);
         assert!(!service.config.dream.enabled);
+        for key in ["memory.retrieval_log.enabled", "memory.dream.enabled"] {
+            assert_eq!(
+                crate::config_io::running(&service.config, crate::config_io::knob(key).unwrap()),
+                json!(false)
+            );
+        }
         service.autosave().await.unwrap();
         service.reap(0.0).await.unwrap();
         service

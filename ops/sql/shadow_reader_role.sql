@@ -86,6 +86,10 @@ FROM (SELECT current_user AS owner UNION SELECT pg_get_userbyid(c.relowner)
 -- change other callers' permissions to manufacture a restricted reader.
 DO $$
 BEGIN
+    IF EXISTS (SELECT 1 FROM pg_auth_members m JOIN pg_roles r ON r.oid = m.member
+               WHERE r.rolname = 'pseudolife_shadow') THEN
+        RAISE EXCEPTION 'pseudolife_shadow still has role memberships; revoke each membership as its grantor, then rerun this script';
+    END IF;
     IF has_schema_privilege('pseudolife_shadow', 'public', 'CREATE')
        OR has_database_privilege('pseudolife_shadow', current_database(), 'CREATE')
        OR EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace

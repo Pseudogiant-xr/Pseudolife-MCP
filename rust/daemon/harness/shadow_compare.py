@@ -5,6 +5,8 @@ lists of {"tool": ..., "args": {...}} or {"path": "/api/...", "params": {...}}.
 A list of query strings expands to search, lesson, world, recall and Console
 search cases. --database-url-env additionally reads the bank's retrieval
 log and samples fact slots and graph entities using a read-only transaction.
+Replays carry X-PL-Session: shadow-compare:<uuid>. Python still records its
+ordinary telemetry; future corpora exclude that reserved session prefix.
 
 Normalization is deliberately narrow: numeric-string IDs and UUID casing;
 ISO timestamps versus epoch seconds; absolute score tolerance 0.0002;
@@ -52,6 +54,7 @@ NOISE_KEYS = {"elapsed_ms", "duration_ms", "access_count"}
 SCORE_TOL = 2e-4
 TIME_TOL = 2.0
 HERE = Path(__file__).resolve().parent
+REPLAY_SESSION_PREFIX = "shadow-compare:"
 
 
 def validate_case(case):
@@ -93,6 +96,7 @@ def corpus(query_file=None, dsn=None, limit=20):
         with psycopg.connect(dsn, options="-c default_transaction_read_only=on") as conn:
             conn.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
             rows = conn.execute("SELECT query_text FROM retrieval_events WHERE query_text <> '' "
+                                "AND coalesce(session_id, '') NOT LIKE 'shadow-compare:%%' "
                                 "GROUP BY query_text ORDER BY max(created_at) DESC, query_text LIMIT %s", (limit,))
             for (query,) in rows:
                 cases.extend(query_cases(query))
@@ -114,17 +118,20 @@ def corpus(query_file=None, dsn=None, limit=20):
 
 
 class Endpoint:
-    def __init__(self, base, token=None, timeout=120):
+    def __init__(self, base, token=None, timeout=120, replay=True):
         self.url = urlsplit(base)
         if (self.url.scheme not in ("http", "https") or not self.url.hostname
                 or self.url.username or self.url.password or self.url.query or self.url.fragment):
             raise ValueError("base URL must be HTTP(S), without credentials, query or fragment")
         self.token, self.timeout, self.sid, self.seq = token, timeout, None, 0
+        self.replay_session = REPLAY_SESSION_PREFIX + uuid.uuid4().hex if replay else None
 
     def request(self, method, path, payload=None):
         cls = http.client.HTTPSConnection if self.url.scheme == "https" else http.client.HTTPConnection
         conn = cls(self.url.hostname, self.url.port, timeout=self.timeout)
         headers = {"Accept": "application/json, text/event-stream"}
+        if self.replay_session:
+            headers["X-PL-Session"] = self.replay_session
         if self.token:
             headers["Authorization"] = "Bearer " + self.token
         if self.sid:
@@ -250,6 +257,7 @@ def compare(python, rust, cases, triage=()):
         rules[item["case"], item["path"]] = item
     versions = {}
     for label, endpoint in (("python", python), ("rust", rust)):
+        endpoint.replay_session = REPLAY_SESSION_PREFIX + uuid.uuid4().hex
         info = endpoint.initialize()
         status, health = endpoint.request("GET", "/health")
         if status != 200 or not isinstance(health, dict) or not health.get("ready"):
