@@ -374,6 +374,29 @@ def test_shadow_removal_cli_dispatches_without_post_deploy_steps(shadow_host, mo
     assert s["shadow"] is None
 
 
+@pytest.mark.parametrize("saved_password", [False, True])
+def test_shadow_build_preserves_intervening_env_edit(shadow_host, monkeypatch, saved_password):
+    from pseudolife_memory import update_engine as eng
+    s = shadow_host
+    env_file = s["repo"] / "ops/.env"
+    if saved_password:
+        env_file.write_text("PSEUDOLIFE_SHADOW_DB_PASSWORD=existing-password\n")
+    edited = env_file.read_text() + "PSEUDOLIFE_MCP_TOKEN=rotated-during-build\n"
+    original_run = up.run_cli
+
+    def run(argv, **kw):
+        if "build" in argv:
+            env_file.write_text(edited)
+        return original_run(argv, **kw)
+
+    monkeypatch.setattr(up, "run_cli", run)
+    with pytest.raises(up.UpdateError, match="host env file changed.*retry"):
+        eng.deploy_engine(s["update"](shadow=True), s["repo"])
+    assert env_file.read_text() == edited
+    assert s["shadow"] is None
+    assert not any("cp" in a or "up" in a for a in s["calls"])
+
+
 def test_shadow_build_failure_does_not_save_password(shadow_host):
     from pseudolife_memory import update_engine as eng
     s = shadow_host

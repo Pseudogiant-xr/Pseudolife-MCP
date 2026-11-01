@@ -71,7 +71,8 @@ class ShadowUpdate:
 
     def prepare(self):
         e = self.e
-        original = e.env_file.read_text(encoding="utf-8") if e.env_file.is_file() else ""
+        self.original_bytes = e.env_file.read_bytes() if e.env_file.is_file() else None
+        original = self.original_bytes.decode("utf-8") if self.original_bytes is not None else ""
         assignments = re.findall(r"^\s*(?:export\s+)?PSEUDOLIFE_SHADOW_DB_PASSWORD\s*=(.*)$", original, re.M)
         if assignments and (len(assignments) != 1 or not re.fullmatch(r"[A-Za-z0-9_-]+", assignments[0].strip())):
             raise up.UpdateError("PSEUDOLIFE_SHADOW_DB_PASSWORD must be one URL-safe value in the host env file; fix it and retry; nothing was changed", 2)
@@ -157,6 +158,9 @@ class ShadowUpdate:
             raise up.UpdateError(f"the checkout moved during the shadow build; Python is unchanged; retry {RETRY}")
         started = False
         try:
+            current_env = e.env_file.read_bytes() if e.env_file.is_file() else None
+            if current_env != self.original_bytes:
+                raise up.UpdateError("the host env file changed during the shadow build; its edits were preserved; retry after the configuration is settled")
             if self.save_password:
                 _write_private(e.env_file, (self.original.rstrip() + "\n" + PASSWORD + "=" + self.password + "\n").encode())
             self.apply_role()
