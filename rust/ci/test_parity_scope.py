@@ -207,9 +207,45 @@ def test_the_scope_job_skips_rust_for_docs_and_their_regenerated_census(tmp_path
 def test_the_documentation_rule_is_the_scope_jobs():
     step = next(s for s in raw_workflow()["jobs"]["scope"]["steps"] if s.get("id") == "scope")
     rule = re.search(r"\$docs = '([^']+)'", step["run"]).group(1)
-    assert rule == ("^(?!(?i:rust|evals|pseudolife_memory|plugin|ops|tests|\\.github)/)"
+    assert rule == ("^(rust/(CUTOVER|DEV|SEMANTICS-CHECKLIST)\\.md"
+                    "|(?!(?i:rust|evals|pseudolife_memory|plugin|ops|tests|\\.github)/)"
                     "([^/\"].*\\.md|llms(-full)?\\.txt|docs/.*(?<!\\.(py|ps1|psm1|sh|bash|bat|cmd|js|mjs|cjs|ts|rs"
-                    "|toml|yml|yaml)))$"), "the scope job's docs rule changed; update parity_scope.is_docs"
+                    "|toml|yml|yaml))))$"), "the scope job's docs rule changed; update parity_scope.is_docs"
+
+
+def test_the_plan_pages_counted_as_docs_are_read_by_no_code():
+    # The scope job skips every Rust and parity job for a pull request that
+    # changes only these pages, so no tracked file outside tests/ (the Python
+    # suite, which a batch runs locally) may read them: code may name one
+    # only on a comment line, and data files not at all. Documents and the
+    # classifier's own files, which list the pages, are exempt.
+    classifier = {"rust/ci/parity_scope.py", "rust/ci/test_parity_scope.py", "rust/ci/test_workflow.py"}
+    import subprocess
+    root = Path(__file__).resolve().parents[2]
+    assert parity_scope.RUST_PLAN_DOCS == {"rust/CUTOVER.md", "rust/DEV.md", "rust/SEMANTICS-CHECKLIST.md"}
+    for doc in parity_scope.RUST_PLAN_DOCS:
+        assert (root / doc).is_file(), doc
+    tracked = subprocess.run(["git", "ls-files", "-z"], cwd=root, check=True,
+                             capture_output=True).stdout.decode("utf-8").split("\0")
+    names = [doc.split("/", 1)[1] for doc in sorted(parity_scope.RUST_PLAN_DOCS)]
+    readers = []
+    for path in tracked:
+        if (not path or path.endswith(".md") or parity_scope.is_docs(path) or path.startswith("tests/")
+                or path in classifier):
+            continue
+        try:
+            text = (root / path).read_text(encoding="utf-8")
+        except (UnicodeDecodeError, OSError):
+            continue
+        for number, line in enumerate(text.splitlines(), 1):
+            # A comment line may name a page; a Rust attribute (#[doc = ...],
+            # #![doc = include_str!(...)]) reads it. A text match cannot see a
+            # glob or a built-up name, so review still matters there.
+            text_line = line.lstrip()
+            if text_line.startswith(("#", "//", "*", "<!--")) and not text_line.startswith(("#[", "#![")):
+                continue
+            readers += [f"{path}:{number}: {name}" for name in names if name in line]
+    assert not readers, "code reads a plan page the scope job treats as docs: " + "; ".join(readers)
 
 
 def test_every_row_has_a_suite_and_w1c_rows_match_their_shards():
