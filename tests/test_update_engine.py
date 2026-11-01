@@ -1,5 +1,8 @@
 """Opt-in engine selection: refusal, persistence, activation and rollback."""
 import json
+import gzip
+import io
+import tarfile
 import subprocess
 from pathlib import Path
 
@@ -93,6 +96,19 @@ def engine_host(tmp_path, monkeypatch):
             return int(state["pending"]), ""
         if state["fail"] == "backup" and any("backup." in a for a in argv):
             return 1, "backup failed"
+        if any("backup." in a for a in argv):
+            directory = repo / "data/backups"
+            directory.mkdir(parents=True, exist_ok=True)
+            count = state.get("backup_count", 0) + 1
+            state["backup_count"] = count
+            stamp = f"20260101-{count:06d}"
+            (directory / f"pseudolife_memory-{stamp}.sql.gz").write_bytes(gzip.compress(b"-- PostgreSQL database dump complete\n"))
+            if not state.get("state_failed"):
+                with tarfile.open(directory / f"pseudolife_state-{stamp}.tgz", "w:gz") as archive:
+                    member = tarfile.TarInfo("config.yaml")
+                    member.size = 1
+                    archive.addfile(member, io.BytesIO(b"x"))
+            return 0, ""
         return 0, ""
 
     monkeypatch.setattr(up, "run_cli", run)
@@ -259,3 +275,37 @@ def test_unattended_release_never_replaces_a_selected_rust_engine(engine_host, m
     monkeypatch.setattr(update, "target_version", lambda: pytest.fail("release selection must be refused first"))
     with pytest.raises(up.UpdateError, match="checkout engine"):
         update.deploy_release()
+
+
+def test_another_checkout_inherits_running_engine(engine_host, monkeypatch, tmp_path):
+    from pseudolife_memory import update_engine as eng
+    s = engine_host
+    other = tmp_path / "other-checkout"
+    other.mkdir()
+    labels = {eng.ENGINE_LABEL: "rust", eng.CHECKOUT_LABEL: str(s["repo"])}
+    monkeypatch.setattr(up, "run_cli", lambda *a, **kw: (0, json.dumps(labels)))
+    update = up.Update(up.Options(checkout=other))
+    assert eng.selected_checkout(update) == other
+    assert update._selected_engine == "rust"
+
+
+def test_persisted_engine_honors_all_and_retention(engine_host, monkeypatch):
+    from pseudolife_memory import update_engine as eng
+    s = engine_host
+    eng.deploy_engine(s["update"](), s["repo"])
+    update = s["update"](None, all_clients=True)
+    completed = []
+    monkeypatch.setattr(update, "clients", lambda *a: completed.append("clients"))
+    monkeypatch.setattr(update, "prune_rollbacks", lambda repo, image: completed.append(image))
+    monkeypatch.setattr(update, "prune_cache", lambda *a: completed.append("cache"))
+    eng.deploy_engine(update, s["repo"])
+    assert completed == ["clients", "pseudolife-daemon-python", "pseudolife-daemon-rust", "cache"]
+
+
+def test_state_archive_failure_stops_before_tag_even_when_backup_script_exits_zero(engine_host):
+    from pseudolife_memory import update_engine as eng
+    s = engine_host
+    s["state_failed"] = True
+    with pytest.raises(up.UpdateError, match="state backup"):
+        eng.deploy_engine(s["update"](), s["repo"])
+    assert not any(a[1:2] == ["tag"] or "build" in a or "up" in a for a in s["calls"])

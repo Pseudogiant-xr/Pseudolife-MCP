@@ -7,10 +7,12 @@ engine selection, so an unhealthy replacement cannot become the next rollback.
 from __future__ import annotations
 
 import json
+import gzip
 import os
 import re
 import secrets
 import tempfile
+import tarfile
 import time
 import urllib.error
 import urllib.parse
@@ -49,7 +51,11 @@ def selected_checkout(update) -> Path | None:
     o = update.o
     if o.checkout is not None:
         repo = Path(o.checkout).resolve()
-        return repo if o.engine or _selection(repo) else None
+        if o.engine or _selection(repo):
+            return repo
+        if not o.allow_dirty and up.tree_state(repo)["dirty"] != "false":
+            # Keep the existing clean-tree refusal ahead of all Docker calls.
+            return None
     code, out = up.run_cli([update.docker, "inspect", "-f", "{{json .Config.Labels}}", up.DAEMON_CONTAINER], timeout=60)
     try:
         labels = json.loads(out) if code == 0 else {}
@@ -59,6 +65,9 @@ def selected_checkout(update) -> Path | None:
         if o.engine == "python":
             o.daemon_only = True
         return None
+    if o.checkout is not None:
+        update._selected_engine = labels[ENGINE_LABEL]
+        return repo
     if o.clients_only:
         return None
     repo = Path(labels.get(CHECKOUT_LABEL, ""))
@@ -92,6 +101,38 @@ def _write_overlay(path: Path, service: dict) -> None:
     temporary.replace(path)
 
 
+def _backup_files(directory: Path) -> dict:
+    return {p.name: (p.stat().st_mtime_ns, p.stat().st_size) for p in directory.glob("pseudolife_*") if p.is_file()}
+
+
+def _verify_backup(directory: Path, before: dict) -> dict:
+    after = _backup_files(directory)
+    dumps = [name for name in after if re.fullmatch(r"pseudolife_memory-\d{8}-\d{6}\.sql\.gz", name)
+             and after[name] != before.get(name)]
+    if len(dumps) != 1:
+        raise up.UpdateError("cannot identify this run's bank and state backup; check the backup directory and retry; nothing was deployed")
+    dump = directory / dumps[0]
+    state_name = dumps[0].replace("pseudolife_memory-", "pseudolife_state-").replace(".sql.gz", ".tgz")
+    state = directory / state_name
+    try:
+        if after.get(state_name) == before.get(state_name) or not up._dump_complete(dump):
+            raise ValueError("missing or unchanged backup")
+        # A zero-exit backup script may still have warned that /data failed.
+        # Read the complete tar and gzip trailer, without extracting anything.
+        with gzip.open(state, "rb") as stream:
+            with tarfile.open(fileobj=stream, mode="r|") as archive:
+                for member in archive:
+                    if member.isfile():
+                        with archive.extractfile(member) as content:
+                            while content.read(1024 * 1024):
+                                pass
+            while stream.read(1024 * 1024):
+                pass
+    except (OSError, ValueError, EOFError, tarfile.TarError) as exc:
+        raise up.UpdateError("the bank or state backup is missing or incomplete; fix the backup error and retry; nothing was deployed") from exc
+    return {"dump": str(dump), "state_archive": str(state)}
+
+
 def deploy_engine(update, repo: Path) -> None:
     EngineUpdate(update, repo).run()
 
@@ -102,7 +143,8 @@ class EngineUpdate:
         self.ops = repo / "ops"
         self.env_file = self.ops / ".env"
         self.selected = _selection(repo)
-        self.engine = self.o.engine or self.selected["labels"][ENGINE_LABEL]
+        self.engine = self.o.engine or (self.selected["labels"][ENGINE_LABEL] if self.selected
+                                        else update._selected_engine)
         self.base = update._compose_args([self.ops / "docker-compose.yml", self.ops / "docker-compose.override.yml"], self.env_file)
         self.env = up.compose_environment(self.env_file)
 
@@ -209,10 +251,14 @@ class EngineUpdate:
         args = self.u._script_argv(script)
         for key, value in zip(keys, (self.pg, self.daemon, self.pg_user, self.pg_db)):
             args.extend([key, value])
+        directory = self.repo / "data/backups"
+        before = _backup_files(directory)
+        args.extend(["-OutDir" if script.suffix == ".ps1" else "--out-dir", str(directory)])
         self.u.step("backing up the bank and /data before switching engines...")
         code, _ = up.run_cli(args, timeout=3600, stream=not self.o.as_json)
         if code:
             raise up.UpdateError("the backup failed; nothing was deployed")
+        self.backup_paths = _verify_backup(directory, before)
 
     def gate(self, url):
         for attempt in range(self.o.health_retries):
@@ -222,7 +268,7 @@ class EngineUpdate:
                     and (not self.o.shadow or health.get("read_only") is True)
                     and authenticated_read(url, self.token)):
                 self.u.step(f"{self.engine} health gate passed: version {self.version}, schema {self.schema}, authenticated bank read")
-                return
+                return health
             if attempt + 1 < self.o.health_retries:
                 up.sleep(self.o.health_delay_ms / 1000)
         raise up.UpdateError("the engine failed its version, schema or authenticated-read gate; to roll back:\n" + "\n".join(self.u.rollback_lines))
@@ -236,7 +282,7 @@ class EngineUpdate:
         suffix = self.o.rollback_suffix or f"pre-update-{up._stamp()}"
         if not re.fullmatch(r"[A-Za-z0-9_.-]+", suffix):
             raise up.UpdateError("--rollback-tag must contain only letters, digits, dots, underscores or hyphens; nothing was deployed", 2)
-        rollback = f"pseudolife-daemon-{old_engine}:{suffix}"
+        rollback = f"pseudolife-daemon-{old_engine}:{self.version}-{suffix}"
         exists, prior = self.command(["image", "inspect", "-f", "{{.Id}}", rollback], timeout=60)
         if exists == 0 and prior.strip() and prior.strip() != self.running["Image"]:
             raise up.UpdateError("that rollback tag already names another image; choose a new --rollback-tag suffix; nothing was deployed", 2)
@@ -256,8 +302,8 @@ class EngineUpdate:
                  else "unset PSEUDOLIFE_MCP_TOKEN PSEUDOLIFE_MCP_TOKENS")
         self.u.rollback_lines = [copy, clear, f"docker compose {shown} up -d --no-deps --no-build {up.DAEMON_SERVICE}",
                                  *self.u._schema_rollback_note(None)]
-        self.u.report.rollback = {"tag": rollback, "state": "tagged", "overlay": str(rollback_file)}
-        image = f"pseudolife-daemon-{self.engine}:checkout-{self.tree['sha'][:12]}"
+        self.u.report.rollback = {"tag": rollback, "state": "tagged", "overlay": str(rollback_file), **self.backup_paths}
+        image = f"pseudolife-daemon-{self.engine}:checkout"
         service = {"image": image, "build": {"dockerfile": f"ops/Dockerfile.daemon{'-rust' if self.engine == 'rust' else ''}"},
                    "labels": {ENGINE_LABEL: self.engine, CHECKOUT_LABEL: str(self.repo)}}
         candidate = self.repo / "data/update-engine/docker-compose.engine-candidate.json"
@@ -277,7 +323,7 @@ class EngineUpdate:
             code, _ = self.command(["compose", *compose, "up", "-d", "--no-deps", "--no-build", up.DAEMON_SERVICE], env=self.env, timeout=120, stream=not self.o.as_json)
             if code:
                 raise up.UpdateError("engine recreate failed")
-            self.gate(self.o.daemon_url)
+            health = self.gate(self.o.daemon_url)
             _write_overlay(selected_file, service)
         except up.UpdateError as exc:
             raise up.UpdateError(str(exc) + "\nto roll back:\n" + "\n".join(self.u.rollback_lines)) from exc
@@ -286,6 +332,11 @@ class EngineUpdate:
         self.u.step(f"selected {self.engine}; future updates retain this engine; rollback commands:")
         for line in self.u.rollback_lines:
             self.u.step(line)
+        if self.o.all_clients:
+            self.u.clients(self.repo, str(self.repo), health)
+        for engine in ("python", "rust"):
+            self.u.prune_rollbacks(self.repo, f"pseudolife-daemon-{engine}")
+        self.u.prune_cache(self.repo)
 
     def shadow(self):
         from pseudolife_memory.client_config import _write_private

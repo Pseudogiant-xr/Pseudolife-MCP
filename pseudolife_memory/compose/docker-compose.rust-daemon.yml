@@ -8,4 +8,3 @@ services:
       dockerfile: ops/Dockerfile.daemon-rust
     labels:
       org.pseudolife.engine: rust
-
