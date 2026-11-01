@@ -258,7 +258,9 @@ pub(crate) fn browser_gate(app: &App, h: &HeaderMap) -> Result<Option<&'static s
 pub(crate) fn resolve(app: &App, h: &HeaderMap) -> Resolved {
     let header = authorization(h);
     let (resolved, source) = auth::resolve_detailed(header.as_deref(), &app.env_tokens, &app.store);
-    if let Some(activity) = &app.activity {
+    if !app.service.config.read_only
+        && let Some(activity) = &app.activity
+    {
         activity.note(header.as_deref(), &resolved, source);
     }
     resolved
@@ -533,6 +535,9 @@ async fn api(
     if method != "GET" && method != "POST" {
         return method_not_allowed();
     }
+    if app.service.config.read_only && method == "POST" {
+        return shadow_refusal();
+    }
     if method == "POST" && OPERATOR_POST_PATHS.contains(&path) && stored {
         return json_response(403, &json!({"error": "operator_principal_required"}));
     }
@@ -693,6 +698,12 @@ async fn dispatch(
     raw_query: Option<&str>,
     body: &mut RequestBody,
 ) -> Response {
+    if app.service.config.read_only
+        && ((method == "GET" && !shadow_safe_get(path))
+            || (path.starts_with("/api/") && method != "GET"))
+    {
+        return shadow_refusal();
+    }
     if path == "/health" {
         let payload = health::payload(&app.service, &app.store).await;
         let status = if payload["status"] == "ok" { 200 } else { 503 };
@@ -761,6 +772,63 @@ async fn dispatch(
     crate::routes::mcp::route(app, path, method, h, raw_query, body).await
 }
 
+fn shadow_refusal() -> Response {
+    json_response(
+        403,
+        &json!({"error": "read_only_shadow", "message": crate::service::READ_ONLY_MESSAGE}),
+    )
+}
+
+// Classified from state mutations, not the HTTP verb. New GET handlers are
+// refused until audited; UI assets and MCP transport never touch bank state.
+const SHADOW_SAFE_GETS: &[&str] = &[
+    "/api/agents",
+    "/api/briefing",
+    "/api/chain",
+    "/api/config",
+    "/api/consolidation",
+    "/api/curation/retired",
+    "/api/entry",
+    "/api/episodes",
+    "/api/episodes/summary",
+    "/api/facts",
+    "/api/facts/history",
+    "/api/graph",
+    "/api/graph/communities",
+    "/api/graph/digest",
+    "/api/graph/entity-provenance",
+    "/api/graph/path",
+    "/api/graph/projects",
+    "/api/graph/proposal-evidence",
+    "/api/graph/review",
+    "/api/lessons",
+    "/api/maintainer",
+    "/api/maintainer/inbox",
+    "/api/maintainer/sent",
+    "/api/overview",
+    "/api/recall",
+    "/api/recent",
+    "/api/search",
+    "/api/sources",
+    "/api/stats",
+    "/api/trace",
+    "/api/wiki",
+    "/api/world",
+];
+
+fn shadow_safe_get(path: &str) -> bool {
+    SHADOW_SAFE_GETS.contains(&path)
+        || matches!(
+            path,
+            "/" | "/health"
+                | "/ui"
+                | "/mcp"
+                | "/api/hook/memory-policy"
+                | "/api/hook/memory-changes"
+        )
+        || path.starts_with("/ui/")
+}
+
 // ---- GET /api/search (spec.md S1-S7) -------------------------------------
 
 /// Python `str.strip()`: Unicode whitespace plus the U+001C..U+001F separators.
@@ -770,6 +838,28 @@ pub fn py_strip(s: &str) -> &str {
 
 #[cfg(test)]
 pub(crate) mod tests {
+    #[test]
+    fn shadow_get_inventory_is_explicit_and_new_routes_are_refused() {
+        let routes: serde_json::Value =
+            serde_json::from_str(include_str!("../harness/goldens/routes.json")).unwrap();
+        let refused = ["/api/dream/status", "/api/curation/duplicates"];
+        for path in routes["GET"].as_array().unwrap() {
+            let path = path.as_str().unwrap();
+            assert!(
+                super::SHADOW_SAFE_GETS.contains(&path) || refused.contains(&path),
+                "classify new GET before enabling shadow: {path}"
+            );
+            assert_eq!(super::shadow_safe_get(path), !refused.contains(&path));
+        }
+        for path in [
+            "/api/future-read",
+            "/api/hook/session-start",
+            "/api/pair",
+            "/future",
+        ] {
+            assert!(!super::shadow_safe_get(path));
+        }
+    }
     use super::*;
     use std::time::Instant;
 

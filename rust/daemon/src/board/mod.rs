@@ -99,7 +99,9 @@ impl Board {
                 maintainer_principals: config.maintainer_principals.clone(),
             },
             config,
-            conn: tokio::sync::Mutex::new(db::Conn::new(dsn.clone())),
+            conn: tokio::sync::Mutex::new(
+                db::Conn::new(dsn.clone()).with_read_only(service.config.read_only),
+            ),
             dsn,
             pruned_at: Mutex::new(None),
             hub: hub::Hub::default(),

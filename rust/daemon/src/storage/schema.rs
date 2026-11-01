@@ -96,6 +96,37 @@ fn generated_plan() -> serde_json::Value {
         .expect("generated schema plan is valid JSON")
 }
 
+/// Shadow startup only observes the schema. Migration and repair belong to
+/// the active writer; accepting an older schema would defer failure to reads.
+pub async fn check_read_only(client: &Client) -> Result<(), SchemaError> {
+    refuse_on_embedding_dim_mismatch(client).await?;
+    refuse_future_or_malformed_version(client).await?;
+    let present = simple_value(client, "SELECT to_regclass('public.meta')").await?;
+    let version = if matches!(present, Some(Some(_))) {
+        simple_value(
+            client,
+            "SELECT value::text FROM public.meta WHERE key = 'schema_version'",
+        )
+        .await?
+        .flatten()
+    } else {
+        None
+    };
+    if version.as_deref() != Some(SCHEMA_META_VERSION.to_string().as_str()) {
+        return Err(SchemaError::Refused(format!(
+            "read-only shadow requires an initialized bank at schema {SCHEMA_META_VERSION}; run pseudolife-mcp update on the active writer first"
+        )));
+    }
+    let writes: bool = client.query_one(
+        "SELECT EXISTS (SELECT 1 FROM unnest(ARRAY['public.entries','public.facts','public.world_facts','public.lessons','public.episodes','public.cms_counters','public.meta']) AS bank_table(name) WHERE has_table_privilege(current_user, name, 'INSERT,UPDATE,DELETE,TRUNCATE') OR has_any_column_privilege(current_user, name, 'INSERT,UPDATE'))",
+        &[],
+    ).await?.get(0);
+    if writes {
+        return Err(SchemaError::Refused("read-only shadow requires SELECT-only bank credentials; use the pseudolife_shadow DSN instead of the writer DSN".into()));
+    }
+    Ok(())
+}
+
 /// Execute the generated, ordered plan inside the caller's DDL transaction.
 /// Constant loops are expanded by the generator; database-dependent branches
 /// are evaluated here, preserving Python's one-time repairs and healing.

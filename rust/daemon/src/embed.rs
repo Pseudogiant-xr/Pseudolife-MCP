@@ -53,6 +53,24 @@ fn validate_saved_prompt(config: &Value) -> Result<()> {
     Ok(())
 }
 
+fn harness_fixture(root: &Path) -> bool {
+    // Existing differential fixtures use a tiny WordLevel BERT graph with
+    // Qwen's dimensions. Only explicitly instrumented builds admit those;
+    // the shipped daemon has no fixture or checksum-bypass environment flag.
+    #[cfg(any(feature = "harness", feature = "mutants"))]
+    {
+        let config = metadata(root, "config.json", false).unwrap_or(Value::Null);
+        let small =
+            std::fs::metadata(root.join("onnx/model.onnx")).is_ok_and(|m| m.len() < 64 * 1024);
+        small && config["model_type"] == "bert" && config["vocab_size"] == 9
+    }
+    #[cfg(not(any(feature = "harness", feature = "mutants")))]
+    {
+        let _ = root;
+        false
+    }
+}
+
 fn cache_root() -> PathBuf {
     cache_root_from(|key| std::env::var_os(key))
 }
@@ -115,6 +133,9 @@ impl Embedder {
             .map(|p| p.to_string_lossy().into_owned())
             .unwrap_or_else(|| config.model_name.clone());
         let (root, hub) = artifacts::resolve(&model, &file, &cache_root())?;
+        if config.model_name == artifacts::provision::EMBEDDING_MODEL && !harness_fixture(&root) {
+            artifacts::provision::verify_embedding(&root, &file, hub)?;
+        }
         if root.join("config_sentence_transformers.json").exists() {
             validate_saved_prompt(&metadata(&root, "config_sentence_transformers.json", hub)?)?;
         }
@@ -601,6 +622,32 @@ pub fn probe() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn custom_qwen_architecture_is_not_the_pinned_checkpoint() {
+        let root = std::env::temp_dir().join(format!("pl-custom-qwen-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(root.join("onnx")).unwrap();
+        std::fs::write(root.join("onnx/model.onnx"), b"not a valid graph").unwrap();
+        std::fs::write(root.join("config.json"), br#"{"model_type":"qwen3"}"#).unwrap();
+        for name in [
+            "Qwen/Qwen3-Embedding-4B",
+            "Qwen/Qwen3-Embedding-8B",
+            "custom/qwen",
+        ] {
+            let config = EmbeddingConfig {
+                model_name: name.into(),
+                ..Default::default()
+            };
+            let error = Embedder::load_config(&config, Some(&root), 1)
+                .err()
+                .unwrap()
+                .to_string();
+            // A deliberately incomplete custom config must report its actual
+            // missing field, not prescribe installation of the 0.6B checkpoint.
+            assert_eq!(error, "model has no hidden_size");
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn saved_default_prompts_are_explicitly_deferred() {

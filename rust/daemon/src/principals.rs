@@ -246,6 +246,7 @@ pub async fn redeem(
 /// `PrincipalRefresher` (principal_store.py:251-325): one connection of its
 /// own, reused while it lives.
 pub struct Refresher {
+    read_only: bool,
     dsn: String,
     store: Arc<auth::PrincipalStore>,
     env_principals: Vec<String>,
@@ -259,6 +260,7 @@ pub struct Refresher {
 impl Refresher {
     pub fn new(dsn: String, store: Arc<auth::PrincipalStore>, env_principals: Vec<String>) -> Self {
         Refresher {
+            read_only: false,
             dsn,
             store,
             env_principals,
@@ -274,11 +276,19 @@ impl Refresher {
         self
     }
 
+    pub fn with_read_only(mut self, read_only: bool) -> Self {
+        self.read_only = read_only;
+        self
+    }
+
     /// `flush_activity`: write the recorder's batch when due, on the live
     /// connection only (none: the batch waits). A failed write keeps the
     /// batch and is logged once; a bank whose schema is not applied yet is
     /// not a failure.
     pub async fn flush_activity(&mut self) -> bool {
+        if self.read_only {
+            return false;
+        }
         let Some(activity) = self.activity.clone() else {
             return false;
         };
@@ -318,6 +328,12 @@ impl Refresher {
                 .batch_execute("SET statement_timeout = '5s'")
                 .await
                 .map_err(|e| storage::error_text(&e))?;
+            if self.read_only {
+                client
+                    .batch_execute("SET default_transaction_read_only = on")
+                    .await
+                    .map_err(|e| storage::error_text(&e))?;
+            }
         }
         let (client, _) = self.conn.as_ref().unwrap();
         load_rows(client).await.map_err(|e| storage::error_text(&e))
@@ -382,10 +398,12 @@ pub fn spawn_refresher(
     store: Arc<auth::PrincipalStore>,
     env_principals: Vec<String>,
     activity: Option<Arc<Recorder>>,
+    read_only: bool,
 ) -> JoinHandle<()> {
     tokio::spawn(
         Refresher::new(dsn, store, env_principals)
             .with_activity(activity)
+            .with_read_only(read_only)
             .run(),
     )
 }
@@ -415,6 +433,42 @@ mod tests {
             eprintln!("PL_W1A_TEST_DSN unset: skipping database test");
         }
         dsn
+    }
+
+    #[tokio::test]
+    async fn db_shadow_refresher_connections_are_read_only() {
+        let Some(dsn) = test_dsn() else { return };
+        let recorder = Arc::new(Recorder::new());
+        let mut r = Refresher::new(dsn, Arc::new(auth::PrincipalStore::new()), vec![])
+            .with_activity(Some(recorder.clone()))
+            .with_read_only(true);
+        for _ in 0..2 {
+            assert!(r.refresh_once().await);
+            let client = &r.conn.as_ref().unwrap().0;
+            assert!(
+                client
+                    .query_one(
+                        "SELECT current_setting('default_transaction_read_only')='on'",
+                        &[]
+                    )
+                    .await
+                    .unwrap()
+                    .get::<_, bool>(0)
+            );
+            assert!(
+                client
+                    .execute(
+                        "INSERT INTO meta VALUES ('shadow_principal_forbidden','true')",
+                        &[]
+                    )
+                    .await
+                    .is_err()
+            );
+            recorder.seen("shadow-refresher");
+            assert!(!r.flush_activity().await);
+            assert!(recorder.take().is_some());
+            r.drop_conn().await;
+        }
     }
 
     #[tokio::test]

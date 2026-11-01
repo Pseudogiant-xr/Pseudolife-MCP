@@ -26,6 +26,8 @@ use yaml_rust2::scanner::{Marker, TScalarStyle};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Config {
+    /// Serve a read-only shadow of an already initialized bank.
+    pub read_only: bool,
     pub memory: MemoryConfig,
     pub time: TimeConfig,
     pub embedding: EmbeddingConfig,
@@ -767,6 +769,7 @@ fn refuse(message: impl Into<String>) -> ConfigError {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct DaemonEnv {
+    pub read_only: bool,
     pub host: String,
     /// Python `int()` of the variable; the range is checked at bind.
     pub port: i64,
@@ -808,7 +811,8 @@ const RETIRED_WAKE_KEYS: [&str; 1] = ["nudge_interval_seconds"];
 const DEFAULT_PRINCIPAL: &str = "default";
 const DAEMON_PRINCIPAL: &str = "daemon";
 /// The sections `load_config` tests with `in raw`, in its order.
-const SECTIONS: [&str; 8] = [
+const SECTIONS: [&str; 9] = [
+    "read_only",
     "embedding",
     "memory",
     "context",
@@ -1015,6 +1019,7 @@ impl Default for Config {
     /// No config file: `AppConfig()` plus the MCP overlay.
     fn default() -> Self {
         Config {
+            read_only: false,
             memory: MemoryConfig {
                 recency_base_half_life_s: MCP_HALF_LIFE_S,
                 ..MemoryConfig::default()
@@ -1198,6 +1203,11 @@ impl DaemonEnv {
             source: non_empty("PSEUDOLIFE_BUILD_SOURCE").unwrap_or_else(|| "unknown".to_string()),
         });
         Ok(DaemonEnv {
+            read_only: match env("PSEUDOLIFE_READ_ONLY").as_deref() {
+                None | Some("") | Some("0") => false,
+                Some("1") => true,
+                _ => return Err(refuse("PSEUDOLIFE_READ_ONLY must be 0 or 1")),
+            },
             host,
             port,
             token: non_empty("PSEUDOLIFE_MCP_TOKEN"),
@@ -1859,6 +1869,13 @@ fn load_str(text: &str) -> Result<Config, ConfigError> {
     let user_set = |key: &str| leaves.contains_key(key);
 
     let mut config = Config::default();
+
+    if let Some(value) = lookup(entries, "read_only") {
+        config.read_only = match value {
+            Node::Bool(value) => *value,
+            _ => return Err(refuse("read_only must be true or false")),
+        };
+    }
 
     // embedding: the overlay's `config.embedding.batch_size = 16` fails on
     // anything but a mapping (exact).
@@ -2992,6 +3009,32 @@ mod tests {
         }
     }
 
+    #[test]
+    fn shadow_config_and_environment_are_explicit() {
+        assert!(!cfg("").read_only);
+        assert!(cfg("read_only: true").read_only);
+        assert!(!cfg("read_only: false").read_only);
+        assert!(load_str("read_only: 1").is_err());
+        assert!(load_str("read_only: 'yes'").is_err());
+        assert!(load_str("read_only: {enabled: true}").is_err());
+        assert!(load_str("read_only: {}").is_err());
+        assert!(load_str("read_only: [true]").is_err());
+        assert!(load_str("read_only: null").is_err());
+        assert!(load_str("'read_only: true'").is_err());
+        assert!(load_str("[read_only]").is_err());
+        assert!(
+            DaemonEnv::from_env(&env_of(&[("PSEUDOLIFE_READ_ONLY", "1")]))
+                .unwrap()
+                .read_only
+        );
+        assert!(
+            !DaemonEnv::from_env(&env_of(&[("PSEUDOLIFE_READ_ONLY", "0")]))
+                .unwrap()
+                .read_only
+        );
+        assert!(DaemonEnv::from_env(&env_of(&[("PSEUDOLIFE_READ_ONLY", "true")])).is_err());
+    }
+
     fn refused(text: &str) -> bool {
         matches!(load_str(text), Err(ConfigError::Refused(_)))
     }
@@ -3617,6 +3660,7 @@ mod tests {
         assert_eq!(
             e,
             DaemonEnv {
+                read_only: false,
                 host: "127.0.0.1".into(),
                 port: 8765,
                 token: None,

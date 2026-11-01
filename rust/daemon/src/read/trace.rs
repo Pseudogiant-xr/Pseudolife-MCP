@@ -135,7 +135,8 @@ async fn trace(svc: &Arc<Service>, ready: &Arc<Ready>, req: Request) -> Result<V
     };
     let ref_k = cfg.ref_top_k;
     // A served reference hit's `access_count` (its entry is built per call).
-    let ref_accesses = i64::from(!crate::mutants::active("search-no-access-bump"));
+    let ref_accesses =
+        i64::from(!svc.config.read_only && !crate::mutants::active("search-no-access-bump"));
     let r2 = ready.clone();
     let query = req.query.clone();
     let write = ready.write.clone().lock_owned().await;

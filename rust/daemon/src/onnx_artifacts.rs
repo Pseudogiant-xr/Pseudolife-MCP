@@ -4,6 +4,9 @@ use anyhow::{Result, bail};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 
+#[path = "model_provision.rs"]
+pub mod provision;
+
 pub fn relative_parts(value: &str) -> Result<Vec<&str>> {
     if value.is_empty() {
         return Ok(vec![]);
@@ -145,6 +148,17 @@ pub fn resolve(model: &str, file_name: &str, cache: &Path) -> Result<(PathBuf, b
     if !normalized.ends_with(".onnx") {
         bail!("embedding.onnx_file_name must be a relative .onnx path");
     }
+    if model == provision::EMBEDDING_MODEL {
+        let root = provision::embedding_root()?;
+        if layout_available(&root, &normalized, false) {
+            return Ok((root, false));
+        }
+        bail!(
+            "Qwen model artifact is missing or incomplete in {}; {}",
+            root.display(),
+            provision::missing_repair(&root)
+        );
+    }
     let home =
         std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).map(PathBuf::from);
     let local = expand_home(model, home.as_deref())?;
@@ -172,12 +186,28 @@ pub fn resolve(model: &str, file_name: &str, cache: &Path) -> Result<(PathBuf, b
             }
         }
     }
-    bail!("configured ONNX artifact is not available in the local model or Hub cache")
+    bail!(
+        "configured ONNX artifact {normalized:?} for {model:?} is not available in the local model or Hub cache; run `pseudolife-daemon provision models` for the default models, or restore the configured local model"
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn missing_model_names_the_provisioning_fix() {
+        let cache =
+            std::env::temp_dir().join(format!("pl_models_missing_{}", uuid::Uuid::new_v4()));
+        let error = resolve("missing/model", "onnx/model.onnx", &cache)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("missing/model"), "{error}");
+        assert!(
+            error.contains("pseudolife-daemon provision models"),
+            "{error}"
+        );
+    }
 
     #[test]
     fn current_home_model_path_is_resolved_before_hub_lookup() {

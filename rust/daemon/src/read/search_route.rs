@@ -74,7 +74,8 @@ pub(crate) fn normalize_tags(tags: &[String]) -> Vec<String> {
     out
 }
 
-/// The cross-encoder, loaded on first use from `PSEUDOLIFE_DAEMON_RERANK_DIR`
+/// The cross-encoder, prepared at startup from the provisioned model cache
+/// or `PSEUDOLIFE_DAEMON_RERANK_DIR`
 /// (`reranker.py:_ensure_loaded`): a failed load disables it for the life of
 /// the process.
 pub(crate) struct LazyReranker {
@@ -82,6 +83,13 @@ pub(crate) struct LazyReranker {
 }
 
 impl LazyReranker {
+    pub(crate) fn prepare() {
+        // Requests can enable reranking even when its config default is off.
+        // Optional loading never blocks readiness. Search reuses this same
+        // state, including a logged refusal, without hashing again.
+        tokio::task::spawn_blocking(|| Self::get().model());
+    }
+
     pub(crate) fn get() -> &'static LazyReranker {
         static SLOT: OnceLock<LazyReranker> = OnceLock::new();
         SLOT.get_or_init(|| LazyReranker {
@@ -91,20 +99,27 @@ impl LazyReranker {
 
     fn model(&self) -> Option<Arc<rerank::Reranker>> {
         self.model_with(|| {
-            let Some(dir) = std::env::var_os("PSEUDOLIFE_DAEMON_RERANK_DIR") else {
-                eprintln!(
-                    "PSEUDOLIFE_DAEMON_RERANK_DIR is unset; disabling cross-encoder reranker."
-                );
-                return None;
-            };
-            match rerank::Reranker::load(std::path::Path::new(&dir), 1) {
-                Ok(r) => Some(Arc::new(r)),
-                Err(e) => {
-                    eprintln!("Cross-encoder reranker failed to load ({e}) — disabling.");
-                    None
+            let dir = match crate::onnx_artifacts::provision::reranker_root() {
+                Ok(dir) => dir,
+                Err(error) => {
+                    eprintln!("Cross-encoder reranker cache unavailable ({error}) — disabling.");
+                    return None;
                 }
-            }
+            };
+            Self::load_from_dir(&dir)
         })
+    }
+
+    fn load_from_dir(dir: &std::path::Path) -> Option<Arc<rerank::Reranker>> {
+        match rerank::Reranker::load(dir, 1) {
+            Ok(r) => Some(Arc::new(r)),
+            Err(e) => {
+                eprintln!(
+                    "Cross-encoder reranker failed to load ({e:#}) — disabling reranking; store and search remain available."
+                );
+                None
+            }
+        }
     }
 
     fn model_with(
@@ -126,9 +141,13 @@ impl LazyReranker {
     }
 
     fn disabled(&self) -> bool {
-        self.state
-            .lock()
-            .map_or(true, |st| matches!(*st, Some(None)))
+        // Ranking probes availability even when reranking is off. Loading
+        // is not a known failure, and this probe must never wait for it.
+        match self.state.try_lock() {
+            Ok(st) => matches!(*st, Some(None)),
+            Err(std::sync::TryLockError::WouldBlock) => false,
+            Err(std::sync::TryLockError::Poisoned(_)) => true,
+        }
     }
 }
 
@@ -238,7 +257,7 @@ pub(crate) fn params_for(svc: &Service, req: &Request, k: usize) -> Params {
             skip_margin: cfg.reranker.skip_margin,
             model_name: cfg.reranker.model_name.clone(),
         },
-        count_access: req.count_access,
+        count_access: req.count_access && !svc.config.read_only,
         now: now(),
         filters_json: json!({
             "bands": req.bands,
@@ -272,8 +291,11 @@ pub async fn run(svc: &Service, ready: &Arc<Ready>, req: Request) -> anyhow::Res
     };
     let hide_superseded = cfg.hide_superseded;
     // A served reference hit's `access_count` (its entry is built per search).
-    let ref_accesses =
-        i64::from(req.count_access && !crate::mutants::active("search-no-access-bump"));
+    let ref_accesses = i64::from(
+        req.count_access
+            && !svc.config.read_only
+            && !crate::mutants::active("search-no-access-bump"),
+    );
     let floor = cfg.search_confidence_floor;
     let cache_size = svc.config.embedding.cache_size;
     let embedder = ready.embedder.clone();
@@ -699,6 +721,72 @@ pub async fn warmup_probe(svc: &Service, ready: &Arc<Ready>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn non_reranked_search_does_not_wait_for_reranker_preparation() {
+        let reranker = Arc::new(LazyReranker {
+            state: Mutex::new(None),
+        });
+        let (send, receive) = std::sync::mpsc::channel();
+        let (mut searched, mut worker) = (None, None);
+        reranker.model_with(|| {
+            // model_with holds the same mutex throughout startup loading.
+            // Keep it held until the real ranking call returns, or until the
+            // regression timeout lets us release it and join the worker.
+            let reranker = reranker.clone();
+            worker = Some(std::thread::spawn(move || {
+                let bank = crate::bank::Bank {
+                    dim: 2,
+                    entries: vec![crate::bank::Entry {
+                        id: 1,
+                        text: "needle".into(),
+                        band: "flat".into(),
+                        embedding: vec![1.0, 0.0],
+                        ..Default::default()
+                    }],
+                    matrix: vec![1.0, 0.0],
+                };
+                let params = search::fixture_params("needle", 1);
+                assert!(!params.rerank_enabled);
+                let ranked = search::rank(&bank, &[1.0, 0.0], &params, Some(&*reranker), &[], None);
+                send.send(ranked.hits.len()).unwrap();
+            }));
+            searched = Some(receive.recv_timeout(std::time::Duration::from_secs(10)));
+            None
+        });
+        worker.unwrap().join().unwrap();
+        assert_eq!(
+            searched
+                .unwrap()
+                .expect("rerank=false waited for model preparation"),
+            1
+        );
+        assert!(reranker.disabled());
+    }
+
+    #[test]
+    fn missing_or_tampered_reranker_is_disabled_without_loading() {
+        let root =
+            std::env::temp_dir().join(format!("pl-optional-reranker-{}", uuid::Uuid::new_v4()));
+        for tampered in [false, true] {
+            if tampered {
+                std::fs::create_dir_all(&root).unwrap();
+                std::fs::write(root.join("model.onnx"), b"changed graph").unwrap();
+            }
+            let reranker = LazyReranker {
+                state: Mutex::new(None),
+            };
+            assert!(
+                reranker
+                    .model_with(|| LazyReranker::load_from_dir(&root))
+                    .is_none()
+            );
+            assert!(reranker.disabled());
+            assert!(!reranker.available());
+            assert!(reranker.scores("query", &["candidate"]).is_empty());
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn gate_poisoned_reranker_stays_disabled() {

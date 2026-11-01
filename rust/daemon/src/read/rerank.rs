@@ -40,6 +40,7 @@ pub struct Reranker {
 impl Reranker {
     /// dir holds model.onnx and tokenizer.json (an optimum text-classification export).
     pub fn load(dir: &Path, threads: usize) -> Result<Reranker> {
+        crate::onnx_artifacts::provision::verify_reranker(dir)?;
         let mut tokenizer =
             Tokenizer::from_file(dir.join("tokenizer.json")).map_err(|e| anyhow!("{e}"))?;
         // The exported tokenizer.json carries no truncation; Python passes

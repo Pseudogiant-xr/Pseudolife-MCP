@@ -195,6 +195,7 @@ pub fn error_text(e: &tokio_postgres::Error) -> String {
 
 /// The open writer session plus what `ping` and `cached_bank_id` need.
 pub struct Storage {
+    read_only: bool,
     client: Client,
     conn_task: JoinHandle<()>,
     /// The DSN as parsed, without the application-name fallback: Python's
@@ -642,6 +643,83 @@ pub fn py_strip(s: &str) -> &str {
 }
 
 impl Storage {
+    /// A shadow never acquires the writer lock, seeds rows or advances the
+    /// lease epoch. The session default also blocks any missed SQL mutation.
+    pub async fn open_read_only(dsn: &str) -> Result<Storage, OpenError> {
+        let base = parse_dsn(dsn).map_err(OpenError::Failed)?;
+        Self::read_only_session(base).await
+    }
+
+    async fn read_only_session(base: Config) -> Result<Storage, OpenError> {
+        let (client, conn_task) = connect_session(&base).await?;
+        let checked = async {
+            client
+                .batch_execute("SET default_transaction_read_only = on")
+                .await?;
+            schema::check_read_only(&client).await.map_err(|e| match e {
+                schema::SchemaError::Refused(m) => OpenError::Refused(m),
+                schema::SchemaError::Db(e) => e.into(),
+            })
+        }
+        .await;
+        if let Err(error) = checked {
+            drop(client);
+            let _ = conn_task.await;
+            return Err(error);
+        }
+        Ok(Storage {
+            read_only: true,
+            client,
+            conn_task,
+            base,
+            lease_epoch: 0,
+            session: Mutex::new(SessionState {
+                ok_at: Some(Instant::now()),
+                ..SessionState::default()
+            }),
+            bank_id: Mutex::new(BankIdCache {
+                id: None,
+                retry_at: None,
+            }),
+        })
+    }
+
+    pub fn read_only(&self) -> bool {
+        self.read_only
+    }
+
+    /// A compact MVCC signature of the resident stores' inputs. This scans
+    /// tuple headers, never detoasts text or embedding payloads. Two seeded
+    /// hashes plus row count detect inserts, in-place updates and deletions,
+    /// including an older transaction committing after a newer transaction.
+    /// Retrieval logs and unrelated meta do not invalidate resident stores.
+    pub async fn shadow_marker(&self) -> Result<Vec<(i64, String, String)>, String> {
+        let tables = [
+            "entries",
+            "facts",
+            "world_facts",
+            "lessons",
+            "episodes",
+            "cms_counters",
+            "meta",
+        ];
+        let parts: Vec<String> = tables.iter().enumerate().map(|(index, table)| {
+            let filter = if *table == "meta" {
+                " WHERE key IN ('active_session_pointer', 'episode_tombstones', 'deferred_empty_roots', 'cortex_supersession_log', 'cortex_dream_cursor', 'coordination_hlc_highwater', 'bank_id')"
+            } else { "" };
+            format!("SELECT {index}, count(*)::bigint, coalesce(sum(hashtextextended(ctid::text || ':' || xmin::text, 0)::numeric),0)::text, coalesce(sum(hashtextextended(ctid::text || ':' || xmin::text, 1)::numeric),0)::text FROM public.{table}{filter}")
+        }).collect();
+        self.client
+            .query(&(parts.join(" UNION ALL ") + " ORDER BY 1"), &[])
+            .await
+            .map(|rows| {
+                rows.iter()
+                    .map(|r| (r.get(1), r.get(2), r.get(3)))
+                    .collect()
+            })
+            .map_err(|e| error_text(&e))
+    }
+
     /// `PostgresStorage.__init__` (postgres.py:383-430), statement for
     /// statement: session (P1), writer lease (P2), `ensure_schema` (P3),
     /// relation seeds (P4), lease epoch (P5). `register_vector` only reads
@@ -664,6 +742,7 @@ impl Storage {
         };
         match built.await {
             Ok(lease_epoch) => Ok(Storage {
+                read_only: false,
                 client,
                 conn_task,
                 base,
@@ -887,6 +966,14 @@ impl Storage {
     /// gap: the replacement carries the `resident_invalidated` refusal and
     /// starts with no cached bank id. Closed again on any failure.
     async fn reopen(&self) -> Result<Storage, Reopen> {
+        if self.read_only {
+            return Self::read_only_session(self.base.clone())
+                .await
+                .map_err(|e| match e {
+                    OpenError::Failed(m) => Reopen::Unreachable(m),
+                    OpenError::Refused(m) | OpenError::LeaseHeld(m) => Reopen::Failed(m),
+                });
+        }
         let (client, conn_task) = connect_session(&self.base).await.map_err(|e| match e {
             OpenError::LeaseHeld(m) => Reopen::LeaseHeld(m),
             // `_connect`'s failures are psycopg OperationalErrors (a refused
@@ -945,6 +1032,7 @@ impl Storage {
             }
         };
         Ok(Storage {
+            read_only: false,
             client,
             conn_task,
             base: self.base.clone(),
