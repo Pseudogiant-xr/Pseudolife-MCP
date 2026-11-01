@@ -1,6 +1,7 @@
 """Opt-in Docker engine changes, using the existing update lock and backup scripts.
 
 The host selection is a Compose overlay, saved only after the health gate.
+Python's separate acceptance record validates retries without selecting a checkout.
 Rollback overlays name the actual running image ID's tag and carry the old
 engine selection, so an unhealthy replacement cannot become the next rollback.
 """
@@ -22,6 +23,7 @@ from pathlib import Path
 from pseudolife_memory import update_cli as up
 
 SELECTION = "data/update-engine/docker-compose.engine.json"
+PYTHON_ACCEPTED = "data/update-engine/docker-compose.python-accepted.json"
 ENGINE_LABEL = "org.pseudolife.engine"
 CHECKOUT_LABEL = "org.pseudolife.checkout"
 ACTIVATION_LABEL = "org.pseudolife.activation"
@@ -35,8 +37,8 @@ def require_imported_bank(schema, pending: bool) -> None:
                              "memory_state/weights.pt into cms_counters, then retry; nothing was changed", 2)
 
 
-def _selection(repo: Path) -> dict | None:
-    path = repo / SELECTION
+def _selection(repo: Path, filename: str = SELECTION) -> dict | None:
+    path = repo / filename
     if not path.exists():
         return None
     try:
@@ -48,12 +50,13 @@ def _selection(repo: Path) -> dict | None:
         raise up.UpdateError(f"invalid engine selection at {path}; restore its rollback copy before updating", 2) from exc
 
 
-def _validated_rust_selection(labels: dict) -> dict:
+def _validated_engine_selection(labels: dict) -> dict:
+    engine = labels.get(ENGINE_LABEL, "python")
     origin = labels.get(CHECKOUT_LABEL)
-    selected = _selection(Path(origin)) if origin else None
-    if (not selected or selected["labels"][ENGINE_LABEL] != "rust"
+    selected = _selection(Path(origin), SELECTION if engine == "rust" else PYTHON_ACCEPTED) if origin else None
+    if (not selected or selected["labels"][ENGINE_LABEL] != engine
             or selected["labels"].get(ACTIVATION_LABEL) != labels.get(ACTIVATION_LABEL)):
-        raise up.UpdateError("the running Rust container has no valid engine selection; use the previous update's "
+        raise up.UpdateError(f"the running {engine} container has no valid accepted activation; use the previous update's "
                              "rollback commands (the Python rollback for a first activation) before retrying; nothing was changed", 2)
     return selected
 
@@ -84,6 +87,8 @@ def selected_checkout(update) -> Path | None:
         labels = (json.loads(out) or {}) if code == 0 else {}
     except ValueError:
         labels = {}
+    if labels.get(ENGINE_LABEL) == "python" and labels.get(ACTIVATION_LABEL):
+        _validated_engine_selection(labels)
     current = "rust" if labels.get(ENGINE_LABEL) == "rust" else "python"
     if selected and selected["labels"][ENGINE_LABEL] != current:
         raise up.UpdateError("this checkout's engine selection disagrees with the host; use --engine python --checkout <repo> "
@@ -95,7 +100,7 @@ def selected_checkout(update) -> Path | None:
     if o.clients_only:
         return None
     origin = Path(labels.get(CHECKOUT_LABEL, ""))
-    selected = _validated_rust_selection(labels)
+    selected = _validated_engine_selection(labels)
     if o.checkout is not None:
         update._selected_engine = selected["labels"][ENGINE_LABEL]
         return repo
@@ -227,10 +232,10 @@ class EngineUpdate:
         self.daemon, self.pg = self.container(up.DAEMON_SERVICE), self.container("pseudolife-pg")
         self.running = self.inspect(self.daemon)
         self.running_labels = self.running["Config"].get("Labels") or {}
-        if self.running_labels.get(ENGINE_LABEL) == "rust":
-            # Explicit engine flags cannot promote a replacement that never
-            # passed its gate, including a failed Rust-to-Rust update.
-            _validated_rust_selection(self.running_labels)
+        if self.running_labels.get(ENGINE_LABEL) == "rust" or self.running_labels.get(ACTIVATION_LABEL):
+            # Explicit engine flags cannot promote a replacement of either
+            # engine that never passed its gate.
+            _validated_engine_selection(self.running_labels)
         if not self.running.get("State", {}).get("Running"):
             raise up.UpdateError("the current daemon must be running for the backup and rollback tag; start it and retry", 2)
         daemon_env = config["services"][up.DAEMON_SERVICE].get("environment", {})
@@ -266,9 +271,12 @@ class EngineUpdate:
                 schema = int(raw.strip('"'))
             except ValueError:
                 schema = None
-            code, _ = self.command(["exec", self.daemon, "sh", "-c",
-                                    "test ! -e /data/memory_state/weights.pt && test ! -e /data/memory_state/weights.pt.bak"], timeout=60)
-            require_imported_bank(schema, code != 0)
+            require_imported_bank(schema, False)
+            has_row = self.sql("SELECT EXISTS (SELECT 1 FROM cms_counters WHERE id = 1)") == "t"
+            if not has_row:
+                code, _ = self.command(["exec", self.daemon, "sh", "-c",
+                                        "test ! -e /data/memory_state/weights.pt && test ! -e /data/memory_state/weights.pt.bak"], timeout=60)
+                require_imported_bank(schema, code != 0)
         before = self.u.daemon_health() or {}
         if before.get("status") != "ok" or not authenticated_read(self.o.daemon_url, self.token):
             raise up.UpdateError("the running daemon did not pass an authenticated bank read; use the previous update's rollback commands before retrying; no rollback tag was moved", 2)
@@ -340,15 +348,25 @@ class EngineUpdate:
         selected_file = self.repo / SELECTION
         rollback_args = [*self.base, "-f", str(selected_file if old_engine == "rust" else rollback_file)]
         shown = " ".join('"' + str(a).replace('"', '\\"') + '"' for a in rollback_args)
-        copy = (f'Copy-Item -LiteralPath "{rollback_file}" -Destination "{selected_file}"' if os.name == "nt"
-                else f'cp -- "{rollback_file}" "{selected_file}"')
+        accepted_file = selected_file if old_engine == "rust" else self.repo / PYTHON_ACCEPTED
+        copy = (f'Copy-Item -LiteralPath "{rollback_file}" -Destination "{accepted_file}" -ErrorAction Stop' if os.name == "nt"
+                else f'cp -- "{rollback_file}" "{accepted_file}"')
         clear = ("Remove-Item Env:PSEUDOLIFE_MCP_TOKEN,Env:PSEUDOLIFE_MCP_TOKENS -ErrorAction SilentlyContinue" if os.name == "nt"
                  else "unset PSEUDOLIFE_MCP_TOKEN PSEUDOLIFE_MCP_TOKENS")
         restore = f"docker compose {shown} up -d --no-deps --no-build {up.DAEMON_SERVICE}"
         if old_engine == "python":
             restore += (f'; if ($LASTEXITCODE -eq 0) {{ Remove-Item -LiteralPath "{selected_file}" -ErrorAction SilentlyContinue }}'
                         if os.name == "nt" else f' && rm -f -- "{selected_file}"')
-        self.u.rollback_lines = ([copy] if old_engine == "rust" else []) + [clear, restore, *self.u._schema_rollback_note(None)]
+        if up._env_file_sets_credentials(self.env_file):
+            commands = [clear, copy, restore]
+        else:
+            fix = "Restore PSEUDOLIFE_MCP_TOKEN or PSEUDOLIFE_MCP_TOKENS in this shell before rollback"
+            restore = (f'if ($env:PSEUDOLIFE_MCP_TOKEN -or $env:PSEUDOLIFE_MCP_TOKENS) {{ {copy}; {restore} }} else {{ throw "{fix}" }}'
+                       if os.name == "nt" else
+                       'if [ -n "${PSEUDOLIFE_MCP_TOKEN:-}${PSEUDOLIFE_MCP_TOKENS:-}" ]; then ' + copy + " && " + restore +
+                       f'; else echo "{fix}" >&2; false; fi')
+            commands = [restore]
+        self.u.rollback_lines = [*commands, *self.u._schema_rollback_note(None)]
         self.u.report.rollback = {"tag": rollback, "state": "tagged", "overlay": str(rollback_file), **self.backup_paths}
         # Retention protects images used by running containers. Prune while
         # the image this run tagged is still running, even after a downgrade.
@@ -378,6 +396,7 @@ class EngineUpdate:
             if self.engine == "rust":
                 _write_overlay(selected_file, service)
             else:
+                _write_overlay(self.repo / PYTHON_ACCEPTED, service)
                 selected_file.unlink(missing_ok=True)
         except (up.UpdateError, OSError) as exc:
             raise up.UpdateError(str(exc) + "\nto roll back:\n" + "\n".join(self.u.rollback_lines)) from exc

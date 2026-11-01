@@ -97,6 +97,8 @@ def engine_host(tmp_path, monkeypatch):
                 return 0, json.dumps(state["running"]["Config"]["Labels"])
             return 0, json.dumps([state["running"]])
         if "psql" in argv and "-Atc" in argv:
+            if "FROM cms_counters" in argv[-1]:
+                return 0, "t" if state.get("counters_row") else "f"
             return 0, state["schema"]
         if "test ! -e /data/memory_state/weights.pt" in " ".join(argv):
             return int(state["pending"]), ""
@@ -356,17 +358,22 @@ def test_engine_runs_normal_post_deploy_steps(engine_host, monkeypatch):
 
 
 @pytest.mark.parametrize("docker_exit", [0, 7])
-def test_printed_python_rollback_clears_selection_only_after_recreate(engine_host, docker_exit):
+@pytest.mark.parametrize("previously_activated", [False, True])
+def test_printed_python_rollback_clears_selection_only_after_recreate(engine_host, monkeypatch, docker_exit, previously_activated):
     import os
     from tests.ops_harness import BASH, PWSH
     from pseudolife_memory import update_engine as eng
     s = engine_host
+    monkeypatch.setenv("PSEUDOLIFE_MCP_TOKEN", "fixture-bearer")
+    if previously_activated:
+        eng.deploy_engine(s["update"](), s["repo"])
+        eng.deploy_engine(s["update"]("python"), s["repo"])
     update = s["update"]()
     eng.deploy_engine(update, s["repo"])
     binary = PWSH if os.name == "nt" else BASH
     if binary is None:
         pytest.skip("native rollback shell unavailable")
-    commands = "\n".join(update.rollback_lines[:2])
+    commands = "\n".join(line for line in update.rollback_lines if not line.startswith("      "))
     if os.name == "nt":
         script = s["repo"] / "rollback.ps1"
         script.write_text(f"function docker {{ $global:LASTEXITCODE = {docker_exit} }}\n" + commands)
@@ -379,7 +386,8 @@ def test_printed_python_rollback_clears_selection_only_after_recreate(engine_hos
     assert (s["repo"] / eng.SELECTION).exists() == (docker_exit != 0), result.stderr
     if docker_exit == 0:
         assert result.returncode == 0, result.stderr
-        s["running"]["Config"]["Labels"][eng.ENGINE_LABEL] = "python"
+        rollback = json.loads(Path(update.report.rollback["overlay"]).read_text())
+        s["running"]["Config"]["Labels"] = rollback["services"][up.DAEMON_SERVICE]["labels"]
         assert eng.selected_checkout(up.Update(up.Options(tag="0.21.0"))) is None
 
 
@@ -557,3 +565,98 @@ def test_first_activation_accepts_null_config_labels(engine_host):
     eng.deploy_engine(update, s["repo"])
     assert update.report.rollback["tag"].startswith("pseudolife-daemon-python:")
     assert eng._selection(s["repo"])["labels"][eng.ENGINE_LABEL] == "rust"
+
+
+def test_imported_counters_row_allows_unrenamed_weights_file(engine_host):
+    from pseudolife_memory import update_engine as eng
+    s = engine_host
+    s["pending"] = True
+    s["counters_row"] = True
+    eng.deploy_engine(s["update"](), s["repo"])
+    assert eng._selection(s["repo"])["labels"][eng.ENGINE_LABEL] == "rust"
+
+
+@pytest.mark.parametrize("retry_engine", [None, "python", "rust"])
+@pytest.mark.parametrize("failure", ["version", "schema", "counters_import_required"])
+def test_failed_python_replacement_never_becomes_rollback(engine_host, monkeypatch, retry_engine, failure):
+    from pseudolife_memory import update_engine as eng
+    s = engine_host
+    eng.deploy_engine(s["update"](), s["repo"])
+    accepted = (s["repo"] / eng.SELECTION).read_bytes()
+    s["health"][failure] = True if failure == "counters_import_required" else "wrong"
+    with pytest.raises(up.UpdateError, match="to roll back:"):
+        eng.deploy_engine(s["update"]("python"), s["repo"])
+    s["health"] = {"status": "ok", "version": "0.21.0", "schema": 58}
+    s["calls"].clear()
+    monkeypatch.setattr(up, "UpdateLock", __import__("contextlib").nullcontext)
+    with pytest.raises(up.UpdateError, match="rollback"):
+        s["update"](retry_engine)._run()
+    assert (s["repo"] / eng.SELECTION).read_bytes() == accepted
+    assert not any(a[1:2] in (["tag"], ["rmi"]) or "build" in a or "up" in a
+                   or any("backup." in x or "prune-" in x for x in a) for a in s["calls"])
+
+
+@pytest.mark.parametrize("credential", ["PSEUDOLIFE_MCP_TOKEN", "PSEUDOLIFE_MCP_TOKENS"])
+@pytest.mark.parametrize("source", ["shell", "env-file", "missing-shell"])
+def test_printed_rollback_preserves_http_auth(engine_host, monkeypatch, credential, source):
+    import os
+    import sys
+    from tests.ops_harness import BASH, PWSH
+    from tests.asgi_helpers import call, stub_mcp
+    from pseudolife_memory.web.api import build_console_app
+    from pseudolife_memory.web.fixtures import FixtureService
+    from pseudolife_memory.principals import env_auth
+    from pseudolife_memory import update_engine as eng
+    s = engine_host
+    value = "fixture-auth" + (":reader" if credential.endswith("TOKENS") else "")
+    s["config"]["services"][up.DAEMON_SERVICE]["environment"] = {credential: value}
+    monkeypatch.delenv("PSEUDOLIFE_MCP_TOKEN", raising=False)
+    monkeypatch.delenv("PSEUDOLIFE_MCP_TOKENS", raising=False)
+    monkeypatch.setenv(credential, value if source != "env-file" else "wrong-inherited-value")
+    if source == "env-file":
+        (s["repo"] / "ops/.env").write_text(credential + "=" + value + "\n")
+    update = s["update"]()
+    eng.deploy_engine(update, s["repo"])
+    # A stub Docker command captures only the effective fixture auth that
+    # Compose would pass; the real daemon HTTP gate verifies that result.
+    snapshot = s["repo"] / "auth.json"
+    capture = s["repo"] / "capture.py"
+    capture.write_text("import json,os,pathlib\n"
+                       "keys=('PSEUDOLIFE_MCP_TOKEN','PSEUDOLIFE_MCP_TOKENS')\n"
+                       "env={k:os.environ.get(k,'') for k in keys}\n"
+                       "for line in pathlib.Path('ops/.env').read_text().splitlines():\n"
+                       " if '=' in line and line.split('=',1)[0] in keys:\n"
+                       "  k,v=line.split('=',1)\n"
+                       "  env[k]=os.environ.get(k,v)\n"
+                       "pathlib.Path('auth.json').write_text(json.dumps(env))\n")
+    commands = "\n".join(line for line in update.rollback_lines if not line.startswith("      "))
+    if os.name == "nt":
+        if not PWSH:
+            pytest.skip("PowerShell unavailable")
+        script = s["repo"] / "rollback.ps1"
+        script.write_text(f"function docker {{ & '{sys.executable}' '{capture}'; $global:LASTEXITCODE = 0 }}\n" + commands)
+        argv = [PWSH, "-NoProfile", "-File", str(script)]
+    else:
+        if not BASH:
+            pytest.skip("Bash unavailable")
+        import shlex
+        script = s["repo"] / "rollback.sh"
+        script.write_text(f"docker() {{ {shlex.quote(sys.executable)} {shlex.quote(str(capture))}; }}\n" + commands)
+        argv = [BASH, str(script)]
+    environment = dict(os.environ)
+    if source == "missing-shell":
+        environment.pop("PSEUDOLIFE_MCP_TOKEN", None)
+        environment.pop("PSEUDOLIFE_MCP_TOKENS", None)
+    result = subprocess.run(argv, cwd=s["repo"], env=environment, capture_output=True, text=True, timeout=30)
+    if source == "missing-shell":
+        assert result.returncode != 0
+        assert not snapshot.exists(), "rollback must refuse before Docker can start without auth"
+        assert not (s["repo"] / eng.PYTHON_ACCEPTED).exists()
+        assert "Restore PSEUDOLIFE_MCP_TOKEN" in result.stderr
+        return
+    assert result.returncode == 0, result.stderr
+    tokens, single = env_auth(json.loads(snapshot.read_text()))
+    app = build_console_app(stub_mcp, single, lambda: {}, FixtureService(), token_map=tokens)
+    assert call(app, "POST", "/mcp")[0] == 401
+    # 501 is the mounted MCP stub: authentication allowed it through.
+    assert call(app, "POST", "/mcp", headers=[(b"authorization", b"Bearer fixture-auth")])[0] == 501
