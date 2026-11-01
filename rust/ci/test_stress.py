@@ -13,7 +13,7 @@ import stress
 
 ROOT = Path(__file__).resolve().parents[2]
 CI_ONLY = "(github.event_name != 'workflow_dispatch' || inputs.mode == 'ci')"
-NOT_CAPTURE = "(github.event_name != 'workflow_dispatch' || inputs.mode != 'wait-mail')"
+CI_OR_STRESS = "github.event_name != 'workflow_dispatch' || (inputs.mode == 'ci' || inputs.mode == 'stress')"
 
 
 def raw_workflow():
@@ -612,7 +612,7 @@ def test_the_report_has_one_row_per_iteration_and_passes_only_when_all_pass_at_o
 
 def test_dispatch_inputs():
     inputs = raw_workflow().get("on", raw_workflow().get(True))["workflow_dispatch"]["inputs"]
-    assert inputs["mode"]["options"] == ["ci", "wait-mail", "stress"]
+    assert inputs["mode"]["options"] == ["ci", "wait-mail", "stress", "body-evidence"]
     assert inputs["selection"]["type"] == "string"
     assert inputs["iterations"] == {**inputs["iterations"], "type": "number", "default": 20}
     assert inputs["os"]["options"] == ["windows-latest", "ubuntu-latest"]
@@ -669,7 +669,7 @@ def test_stress_jobs_run_only_in_stress_mode_and_reuse_the_candidate():
     assert upload["if"] == "always()" and upload["with"]["path"] == "stress-report.json"
     # The candidate build (and scope, which it needs) runs for a stress loop.
     for name in ("scope", "candidate"):
-        assert NOT_CAPTURE.strip("()") in jobs[name]["if"], name
+        assert CI_OR_STRESS in jobs[name]["if"], name
 
 
 def step_named(job, name):
