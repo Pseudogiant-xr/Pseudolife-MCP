@@ -516,6 +516,9 @@ def _in_container(args, report: _Report) -> int:
         return report.fail(EXIT_REFUSED, (
             f"the {CONTAINER} container is not running: start the daemon (an invite needs it to "
             "report its bank), then re-run"))
+    refusal = daemon_exec.rust_operator_refusal("docker", runner=run)
+    if refusal:
+        return report.fail(EXIT_REFUSED, refusal)
     base = ["docker", "exec", CONTAINER, "python", "-m", "pseudolife_memory.cli", "invite"]
     check = run([*base, "--version-check"])
     if check.returncode != 0 or not (check.stdout or "").startswith(VERSION_LINE):

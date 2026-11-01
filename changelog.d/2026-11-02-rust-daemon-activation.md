@@ -1,0 +1,5 @@
+### Added (2026-11-02 — Opt-in Docker daemon engine selection)
+- Checkout updates accept `--engine rust` and `--engine python`, retain a validated Rust selection, back up the bank and state volume, tag the running image for rollback, and verify the replacement's version, schema and authenticated bank read before accepting it. Switching back to Python restores the ordinary update path. Python remains the default and client installations are unchanged.
+- Rust activation refuses pre-v57 banks and pending Python weights imports. Release-mode Rust selection names checkout mode until a Rust release image exists.
+- Operator commands that require Python inside the daemon container refuse on Rust with the host-database or Python-switch-back fix; the Rust CLI's lease operators give the same refusal. Rollback updates the accepted engine record only after the replacement succeeds.
+- `--engine rust --shadow` provides an isolated loopback companion with a SELECT-only database role and read-only bank state, gated on the checkout containing read-only daemon support.

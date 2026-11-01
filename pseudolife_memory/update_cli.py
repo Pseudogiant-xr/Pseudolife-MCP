@@ -81,11 +81,12 @@ _DUMP_MARKER = "PostgreSQL database dump complete"
 # ── seams ───────────────────────────────────────────────────────────────────
 
 def run_cli(argv, *, timeout: int = 3600, cwd: str | None = None,
-            env: dict | None = None, stream: bool = False) -> tuple[int, str]:
+            env: dict | None = None, stream: bool = False, stdout_only: bool = False) -> tuple[int, str]:
     """Run a command and return ``(returncode, combined output)``. With
     ``stream`` the child writes to this process's stdout/stderr (a build
     is long and its progress belongs on the terminal) and the output
-    returned is empty."""
+    returned is empty. ``stdout_only`` keeps stderr diagnostics out of
+    machine-readable output without printing potentially secret warnings."""
     try:
         if stream:
             # The child writes to the file descriptors directly, past this
@@ -101,7 +102,7 @@ def run_cli(argv, *, timeout: int = 3600, cwd: str | None = None,
                               stdin=subprocess.DEVNULL, cwd=cwd, env=env)
     except (OSError, subprocess.TimeoutExpired) as exc:
         return 1, f"{type(exc).__name__}: {exc}"
-    return proc.returncode, (proc.stdout or "") + (proc.stderr or "")
+    return proc.returncode, (proc.stdout or "") + ("" if stdout_only else (proc.stderr or ""))
 
 
 def _flush_output() -> None:
@@ -252,6 +253,8 @@ def lite_installed() -> bool:
 
 @dataclass
 class Options:
+    engine: str | None = None          # opt-in Docker engine; unset preserves the host selection
+    shadow: bool = False               # read-only Rust beside the selected Python daemon
     checkout: Path | None = None       # rebuild from this tree (the wrappers); None = a release
     tag: str | None = None             # release version to install; default: the newest on PyPI
     rollback_suffix: str = ""          # -Tag / --tag of the wrappers: the rollback tag's suffix
@@ -499,6 +502,12 @@ class Update:
         return self.report.exit_code
 
     def _run(self) -> None:
+        if self.o.shadow and self.o.engine != "rust":
+            raise UpdateError("--shadow requires --engine rust --checkout <repo>; nothing was changed", 2)
+        if self.o.engine == "rust" and self.o.checkout is None:
+            raise UpdateError("Rust images are not published; use --engine rust --checkout <repo> (checkout mode); nothing was changed", 2)
+        if (self.o.engine or self.o.shadow) and (self.o.clients_only or self.o.all_clients or self.o.unattended or self.o.schedule):
+            raise UpdateError("engine selection updates only the Docker daemon; remove client/schedule options and retry", 2)
         if self.o.checkout is not None:
             for name, value in (("--clients-only", self.o.clients_only), ("--tag", self.o.tag),
                                 ("--reinstall", self.o.reinstall), ("--allow-downgrade", self.o.allow_downgrade),
@@ -533,6 +542,8 @@ class Update:
             return
         tier = self.detect_tier()
         self.report.tier = tier
+        if self.o.engine and tier != "docker":
+            raise UpdateError("--engine requires a Docker host; run update --engine <engine> --checkout <repo> there; nothing was changed", 2)
         if self.o.check:
             self.check_for_release(tier)
             return
@@ -552,7 +563,12 @@ class Update:
         # Held from before the daemon's version is read until the run ends,
         # so an unattended run (or a second terminal) cannot interleave.
         with UpdateLock():
-            if self.o.checkout is not None:
+            from pseudolife_memory.update_engine import selected_checkout, deploy_engine
+            engine_checkout = selected_checkout(self)
+            if engine_checkout is not None:
+                self.report.mode = "checkout"
+                deploy_engine(self, engine_checkout)
+            elif self.o.checkout is not None:
                 self.report.mode = "checkout"
                 self.deploy_checkout()
             else:
@@ -560,7 +576,7 @@ class Update:
                 self.deploy_release()
         # After the lock: the setup may wait minutes for the Console, and an
         # unattended run must not find the lock held all that time.
-        if not self.o.clients_only:
+        if not self.o.clients_only and not self.o.shadow:
             try:
                 self.maintainer_passkeys()
             except Exception as exc:  # noqa: BLE001 - the update itself succeeded
@@ -1069,6 +1085,11 @@ class Update:
         if code != 0:
             raise UpdateError("daemon rebuild failed" + (f" ({_last_line(out)})" if out.strip() else ""))
         health = self.wait_health()
+        self.checkout_post_deploy(repo, previous_digest, health)
+        self.prune_cache(repo)
+
+    def checkout_post_deploy(self, repo: Path, previous_digest: str | None, health: dict | None) -> None:
+        """Keep both daemon engines on the ordinary checkout completion path."""
         if self.o.all_clients:
             self.clients(repo, str(repo), health)
         else:
@@ -1079,7 +1100,6 @@ class Update:
             except Exception as exc:  # noqa: BLE001 - the deploy itself succeeded
                 self.warn(f"the test suite's login step failed ({type(exc).__name__}: {exc}); the deploy "
                           f"itself succeeded. Later: pseudolife-mcp test-login create")
-        self.prune_cache(repo)
 
     def ensure_test_login(self) -> None:
         """Checkout mode is a contributor's host: give its test suite the
@@ -1176,6 +1196,9 @@ class Update:
         backup and before the rollback tag moves; it may raise
         ``UpdateError`` to stop there (the unattended run re-reads the
         board at that point)."""
+        from pseudolife_memory.update_engine import selected_checkout
+        if not self.o.clients_only and selected_checkout(self) is not None:
+            raise UpdateError("this host selected a checkout engine; run update --checkout <repo>; release updates leave it unchanged", 2)
         target = self.target_version()
         self.report.target = target
         if current is None:
@@ -1436,6 +1459,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="pseudolife-mcp update",
                                      description="update the daemon and the client side (shim, plugin cache, Codex hooks)")
     parser.add_argument("--tag", default=None, help="release version to install (default: the newest on PyPI)")
+    parser.add_argument("--engine", choices=("python", "rust"), help="opt-in Docker daemon engine (Rust requires checkout mode)")
+    parser.add_argument("--shadow", action="store_true", help="start read-only Rust on loopback port 8766 beside Python")
     parser.add_argument("--result-file", default=None,
                         help="write the exit code to this file at the end (the shim's unattended client update reads it)")
     parser.add_argument("--unattended", action="store_true",
@@ -1481,7 +1506,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def options_from_args(args) -> Options:
-    return Options(checkout=Path(args.checkout) if args.checkout else None, tag=args.tag,
+    return Options(engine=args.engine, shadow=args.shadow, checkout=Path(args.checkout) if args.checkout else None, tag=args.tag,
                    rollback_suffix=args.rollback_tag, no_backup=args.no_backup, keep_rollbacks=args.keep_rollbacks,
                    keep_cache_hours=args.keep_cache_hours, no_cache_prune=args.no_cache_prune,
                    force_rollback_tag=args.force_rollback_tag, allow_dirty=args.allow_dirty,
