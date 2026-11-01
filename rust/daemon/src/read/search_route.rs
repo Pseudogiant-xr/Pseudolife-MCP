@@ -74,7 +74,8 @@ pub(crate) fn normalize_tags(tags: &[String]) -> Vec<String> {
     out
 }
 
-/// The cross-encoder, loaded on first use from `PSEUDOLIFE_DAEMON_RERANK_DIR`
+/// The cross-encoder, loaded on first use from the provisioned model cache
+/// or `PSEUDOLIFE_DAEMON_RERANK_DIR`
 /// (`reranker.py:_ensure_loaded`): a failed load disables it for the life of
 /// the process.
 pub(crate) struct LazyReranker {
@@ -91,13 +92,14 @@ impl LazyReranker {
 
     fn model(&self) -> Option<Arc<rerank::Reranker>> {
         self.model_with(|| {
-            let Some(dir) = std::env::var_os("PSEUDOLIFE_DAEMON_RERANK_DIR") else {
-                eprintln!(
-                    "PSEUDOLIFE_DAEMON_RERANK_DIR is unset; disabling cross-encoder reranker."
-                );
-                return None;
+            let dir = match crate::onnx_artifacts::provision::reranker_root() {
+                Ok(dir) => dir,
+                Err(error) => {
+                    eprintln!("Cross-encoder reranker cache unavailable ({error}) — disabling.");
+                    return None;
+                }
             };
-            match rerank::Reranker::load(std::path::Path::new(&dir), 1) {
+            match rerank::Reranker::load(&dir, 1) {
                 Ok(r) => Some(Arc::new(r)),
                 Err(e) => {
                     eprintln!("Cross-encoder reranker failed to load ({e}) — disabling.");

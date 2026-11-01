@@ -53,6 +53,24 @@ fn validate_saved_prompt(config: &Value) -> Result<()> {
     Ok(())
 }
 
+fn harness_fixture(root: &Path) -> bool {
+    // Existing differential fixtures use a tiny WordLevel BERT graph with
+    // Qwen's dimensions. Only explicitly instrumented builds admit those;
+    // the shipped daemon has no fixture or checksum-bypass environment flag.
+    #[cfg(any(feature = "harness", feature = "mutants"))]
+    {
+        let config = metadata(root, "config.json", false).unwrap_or(Value::Null);
+        let small =
+            std::fs::metadata(root.join("onnx/model.onnx")).is_ok_and(|m| m.len() < 64 * 1024);
+        small && config["model_type"] == "bert" && config["vocab_size"] == 9
+    }
+    #[cfg(not(any(feature = "harness", feature = "mutants")))]
+    {
+        let _ = root;
+        false
+    }
+}
+
 fn cache_root() -> PathBuf {
     cache_root_from(|key| std::env::var_os(key))
 }
@@ -115,6 +133,10 @@ impl Embedder {
             .map(|p| p.to_string_lossy().into_owned())
             .unwrap_or_else(|| config.model_name.clone());
         let (root, hub) = artifacts::resolve(&model, &file, &cache_root())?;
+        if config.model_name == artifacts::provision::EMBEDDING_MODEL && !harness_fixture(&root) {
+            artifacts::provision::verify_embedding(&root, &file, hub)?;
+            artifacts::provision::verify_reranker(&artifacts::provision::reranker_root()?)?;
+        }
         if root.join("config_sentence_transformers.json").exists() {
             validate_saved_prompt(&metadata(&root, "config_sentence_transformers.json", hub)?)?;
         }
@@ -163,6 +185,13 @@ impl Embedder {
             }
         };
         let model_config = metadata(&root, &sub("config.json"), hub)?;
+        // A local path does not turn a Qwen model into an unpinned custom
+        // artifact. Check it too when model_name names the directory.
+        if config.model_name != artifacts::provision::EMBEDDING_MODEL
+            && model_config["model_type"] == "qwen3"
+        {
+            artifacts::provision::verify_embedding(&root, &file, hub)?;
+        }
         let dim = model_config["hidden_size"]
             .as_u64()
             .ok_or_else(|| anyhow!("model has no hidden_size"))? as usize;

@@ -12,7 +12,7 @@ pub mod native_provision;
 pub mod pdf_text;
 pub mod pdfium;
 
-const USAGE: &str = "usage: pseudolife-daemon provision pdfium";
+const USAGE: &str = "usage: pseudolife-daemon provision <pdfium|models>";
 
 /// `pseudolife-daemon provision <runtime>`: installs a pinned native
 /// runtime and exits; it needs no bank, configuration or token. Returns the
@@ -28,6 +28,7 @@ pub fn command(args: &[OsString]) -> i32 {
     };
     match runtime.as_ref() {
         "pdfium" => provision_pdfium(),
+        "models" => crate::onnx_artifacts::provision::command(),
         other => {
             eprintln!("pseudolife-daemon provision: no runtime named {other:?}; {USAGE}");
             2

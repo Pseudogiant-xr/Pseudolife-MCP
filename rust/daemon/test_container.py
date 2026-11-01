@@ -59,6 +59,7 @@ class ContainerTests(unittest.TestCase):
         gate = load("container_inputs")
         for path in (".dockerignore", "rust/daemon/src/embed.rs", "rust/Cargo.toml", "rust/Cargo.lock",
                      "ops/Dockerfile.daemon-rust", "ops/docker-compose.rust.yml",
+                     "ops/provision-daemon-models.sh",
                      ".github/workflows/rust.yml", "plugin/hooks/session-start.sh"):
             with self.subTest(path=path):
                 self.assertTrue(gate.needs_image([path]))
