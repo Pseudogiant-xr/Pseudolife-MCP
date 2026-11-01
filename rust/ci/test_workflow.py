@@ -809,6 +809,9 @@ DOCS_ONLY_CHANGES = [
     ["docs/guide/configuration.md", "docs/atlas/atlas.json", "llms.txt", "llms-full.txt"],
     ["examples/CLAUDE.memory.md", "frontend/README.md", "README.zh-CN.md"],
     ["docs/images/diagram.svg"],
+    # The port's plan pages no Rust or parity job reads (parity_scope.RUST_PLAN_DOCS).
+    ["rust/CUTOVER.md"],
+    ["rust/CUTOVER.md", "rust/DEV.md", "rust/SEMANTICS-CHECKLIST.md", "CLAUDE.md"],
 ]
 CODE_CHANGES = [
     ["CLAUDE.md", "rust/README.md"],
@@ -831,6 +834,16 @@ CODE_CHANGES = [
     ["notes.txt"],
     ["src.md.py"],
     ["RUST/README.md"],
+    # Near misses of the plan pages: one a job reads, another directory, case,
+    # suffix, and a plan page beside code.
+    ["rust/PARITY.md"],
+    ["rust/PORTING.md"],
+    ["rust/PORT-STATE.md"],
+    ["rust/daemon/CUTOVER.md"],
+    ["RUST/CUTOVER.md"],
+    ["rust/cutover.md"],
+    ["rust/CUTOVER.md.txt"],
+    ["rust/CUTOVER.md", "rust/daemon/src/main.rs"],
     ["Rust/daemon/notes.md"],
     ["Plugin/skills/x/SKILL.md"],
     ['"docs/caf\\303\\251.md"'],

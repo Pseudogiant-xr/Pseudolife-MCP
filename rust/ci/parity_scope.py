@@ -166,10 +166,16 @@ SHIM_COMMANDS = {
 # verbatim (its lookbehind is variable-width); tests check both agree.
 CODE_DIRS = re.compile(r"(?i)(rust|evals|pseudolife_memory|plugin|ops|tests|\.github)/")
 CODE_SUFFIX = re.compile(r"\.(py|ps1|psm1|sh|bash|bat|cmd|js|mjs|cjs|ts|rs|toml|yml|yaml)$")
+# The port's plan pages under rust/ that no Rust or parity job reads; the
+# scope job names them too. A page a job reads (PARITY.md) or one an evidence
+# file hashes (PORTING.md, PORT-STATE.md, PHASE3-READ-PATH.md) stays code.
+RUST_PLAN_DOCS = frozenset({"rust/CUTOVER.md", "rust/DEV.md", "rust/SEMANTICS-CHECKLIST.md"})
 
 
 def is_docs(path: str) -> bool:
     """A file no Rust or parity job reads (CLAUDE.md "Docs-only changes")."""
+    if path in RUST_PLAN_DOCS:
+        return True
     if CODE_DIRS.match(path):
         return False
     if re.fullmatch(r'[^/"].*\.md', path) or re.fullmatch(r"llms(-full)?\.txt", path):
