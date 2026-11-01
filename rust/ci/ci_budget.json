@@ -156,7 +156,7 @@
       }
     },
     "fingerprints": {
-      "scope": "d10e8ec27d84d0e9",
+      "scope": "1fb3a6e5a5dc0082",
       "rust": "59cc6066e4ac1f82",
       "fixtures": "defc5e07c5ac3f94",
       "candidate": "77b0c5fa6b2afcbf",
@@ -205,6 +205,11 @@
         "job": "parity",
         "fingerprint": "aa4ba434de948ea6",
         "reason": "Adds a run: exit 1 step that runs only when a needed job was cancelled, and skips the verdict step then; the gate runs one of two trivial steps, so its minutes are unchanged"
+      },
+      {
+        "job": "scope",
+        "fingerprint": "1fb3a6e5a5dc0082",
+        "reason": "2026-11-02: the docs rule also counts the port's three unread plan pages (parity_scope.RUST_PLAN_DOCS) as docs; the same single classify step runs, so its minutes are unchanged"
       }
     ]
   },

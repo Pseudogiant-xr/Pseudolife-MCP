@@ -89,7 +89,11 @@ jobs:
     # parent; a merge group's master tip, fetched here, to its head): Markdown, llms.txt /
     # llms-full.txt, and non-script files under docs/ (CLAUDE.md "Docs-only
     # changes"), none of them under rust/, evals/, pseudolife_memory/,
-    # plugin/, ops/, tests/ or .github/. An empty or unreadable diff runs
+    # plugin/, ops/, tests/ or .github/, except the port's plan pages that no
+    # job reads (rust/CUTOVER.md, rust/DEV.md, rust/SEMANTICS-CHECKLIST.md;
+    # parity_scope.RUST_PLAN_DOCS, whose test fails once code reads one). A
+    # recount in CUTOVER.md on 2026-11-02 (#1108) otherwise ran the whole
+    # Rust and parity matrix. An empty or unreadable diff runs
     # everything. A failed scope job runs the Rust and candidate jobs, but
     # the parity matrix comes from scope's parity output, so parity-checks
     # and the Parity gate then fail (closed) and the run needs a rerun. On
@@ -157,7 +161,7 @@ jobs:
         run: |
           $ordinary = $env:EVENT_NAME -ceq 'pull_request' -and $env:HEAD_REF -and -not $env:HEAD_REF.StartsWith('integrate/', [System.StringComparison]::Ordinal)
           $full = 'true'
-          $docs = '^(?!(?i:rust|evals|pseudolife_memory|plugin|ops|tests|\.github)/)([^/"].*\.md|llms(-full)?\.txt|docs/.*(?<!\.(py|ps1|psm1|sh|bash|bat|cmd|js|mjs|cjs|ts|rs|toml|yml|yaml)))$'
+          $docs = '^(rust/(CUTOVER|DEV|SEMANTICS-CHECKLIST)\.md|(?!(?i:rust|evals|pseudolife_memory|plugin|ops|tests|\.github)/)([^/"].*\.md|llms(-full)?\.txt|docs/.*(?<!\.(py|ps1|psm1|sh|bash|bat|cmd|js|mjs|cjs|ts|rs|toml|yml|yaml))))$'
           $rust = 'true'
           $base = $null
           if ($env:EVENT_NAME -ceq 'pull_request') {
