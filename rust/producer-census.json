@@ -212,7 +212,7 @@
     "examples/hook-instructions.md": "d17b3b4173a0955f0f68c822e500a4a617dff6786fae8bc424d95906b681a0bc",
     "ops/.env.example": "60d44256635f0a131092c54104994cfa65c6e5ab93f94fd8b4f7339442185e0d",
     "ops/Dockerfile.daemon": "91924b87f19bf50e14e6764687ee13b0dc3aa2ba3edd89dba521203260e91166",
-    "ops/Dockerfile.daemon-rust": "b1f94d4f33bad1cd299df381878960aaa040808033c0efec0ac8a93b4601d08e",
+    "ops/Dockerfile.daemon-rust": "a1effc757318d7841b26aa41dd38b311f3395a9950be020d2d0031f44f717eda",
     "ops/Dockerfile.extractor": "cfd9068d7ba58aad49e00b000ca82ebe83add0e4d8ba7f75043c424243e3451d",
     "ops/Dockerfile.pg": "06308c96aaa3ceedf2fc988c1fccfe8573e4ae1836143546ce1fb7d996707201",
     "ops/assemble_changelog.py": "5462bfcb97a59e280311f0a1628e406fd3a47a45ed3ef39418e1e263b422fb38",
@@ -228,7 +228,9 @@
     "ops/coordination_probe.py": "9fb8b31f002694021b5ad0aaaa4d8528187e833c8c7dac27812f9bd2a630df26",
     "ops/dedup_cortex.py": "483aa26a4edaa5e75dc41b6133f7e663e0d826dbf61ebd83a20a9b3b29ac2727",
     "ops/docker-compose.ghcr.yml": "a64059a8d81e18ccb441bedd3510c366e90172e3d70681ce7a91e8aa58d174de",
-    "ops/docker-compose.rust.yml": "128ea0dd72104ef8f436115750e26be6417d24845027759086238cdf526411a1",
+    "ops/docker-compose.rust-daemon.yml": "035e8a3b34d6738fb16d1770719419e98d11940629a01895b57b49ffadf1647b",
+    "ops/docker-compose.rust-shadow.yml": "6e542f24e52cd05f03fbc0147091bfc6bb7e28f567c470edbe1f72818d609eed",
+    "ops/docker-compose.rust.yml": "29b3590c58a8cd7a13a581d0e0488e48b2f934ad10844b4bf7b0b2eed4670ce0",
     "ops/docker-compose.yml": "dc564d1296a8179eb14c5c552334c827d5c3fa673539dd409a5ae0cf31bc7d5d",
     "ops/gen_llms_txt.py": "de91c3fc65ea1960cb1dd25c913cf8bf7dfef6302454468fcd03e42a9bbb2803",
     "ops/install-autostart.ps1": "453da0472d4b9566f6774aca6128b531341a2ef91e79d44f980e0b571a22671b",
@@ -251,6 +253,7 @@
     "ops/plugin_marketplace.py": "97f1b9d8089f9906359b93bd1de0dfd2722ea0e87854fe99379285d8dcdc4d30",
     "ops/preflight.ps1": "619532e01ccdae906aee5f7821f3bbbfbb4cba67c34b852a2bf252ce67a4f1ec",
     "ops/preflight.sh": "93b7b538811fe3116a34b9ba033547bd498503964d741d589a140959a2a08f2f",
+    "ops/provision-daemon-models.sh": "e2c103f95d59ac73560dfb8cf7954d73d91ffc3985dc4caea6a53ea079d6c187",
     "ops/provision_embedding_models.py": "edab5d3ec0acf39881bcac89b6869cc20fef51e531fe1f81b64de28f08b6028a",
     "ops/prune-build-cache.ps1": "993ebe31056254e44efbf8547f49fdcc64ee8f7f3fadd5b2090b5f2102cb1c23",
     "ops/prune-build-cache.sh": "28a1b21db8fd25e92a0d4f8575aba71adaf83d8b3d1c1788717586427bafbac0",
@@ -278,9 +281,9 @@
     "ops/shim_autostart.py": "3f159a5be7c73c8070da787322abf79701404a1b273b990c691cb51872a25ec3",
     "ops/shim_python.py": "599b057c0f09fa0b4c44e6ea2d8bc7a65e828297e44780af8291d13213856e81",
     "ops/shim_runtime.py": "57953837cdabe25e5919697261a92ddacca12f7de5e4ca01eaaa1e6f9b55e4e3",
-    "ops/update.ps1": "5436f57c65c7f160f420fd8f304de7dcf98efa31ad6fb9def818ba72be05b48b",
-    "ops/update.py": "9372b56743396c26f7684749e756db787a570d454ec1550a46bf0f90cbfa0844",
-    "ops/update.sh": "05e9a441782b384a90a417b0c458fc1e6b82cbcd544dfec4787f912f8766d740",
+    "ops/update.ps1": "3ef7d9b72791515878d6f79621a4132b943ab8118fbdd60442d309ec47bf2d40",
+    "ops/update.py": "84f82d013c74ab0b40b6c338f147d2724b337ddeceb81560b3c00ae009f22243",
+    "ops/update.sh": "653aa10528296ba69cb12c84b8b3b918b9988902437114262bf65992760f099f",
     "ops/update_clients.py": "ace386b85e2c610414c52afdc8dbf46270bfca05e72d22da60259c6745a6e417",
     "ops/wsl-suite.ps1": "67c14179b734a7294003349e1c86584c0bdffcdd3678118ff280bd8bac86ad77",
     "ops/wsl-suite.sh": "ee90264725903552d27927b44c77745d0967f0dc77605c26bf2688920a29f57a",
@@ -23518,6 +23521,19 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
+          "location": "ops/docker-compose.rust-shadow.yml:10",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "-unknown}",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "assignment-candidate"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
           "location": "ops/docker-compose.rust.yml:25",
           "shape": {
             "channel": "environment",
@@ -23543,7 +23559,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/Dockerfile.daemon-rust:59",
+          "location": "ops/Dockerfile.daemon-rust:58",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -23582,6 +23598,19 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
+          "location": "ops/docker-compose.rust-shadow.yml:9",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "-unknown}",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "assignment-candidate"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
           "location": "ops/docker-compose.rust.yml:24",
           "shape": {
             "channel": "environment",
@@ -23607,7 +23636,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/Dockerfile.daemon-rust:58",
+          "location": "ops/Dockerfile.daemon-rust:57",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -23645,7 +23674,7 @@
       "producers": [
         {
           "evidence": "static",
-          "location": "ops/Dockerfile.daemon-rust:61",
+          "location": "ops/Dockerfile.daemon-rust:60",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -23684,6 +23713,19 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
+          "location": "ops/docker-compose.rust-shadow.yml:11",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "-unknown}",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "assignment-candidate"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
           "location": "ops/docker-compose.rust.yml:26",
           "shape": {
             "channel": "environment",
@@ -23709,7 +23751,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/Dockerfile.daemon-rust:60",
+          "location": "ops/Dockerfile.daemon-rust:59",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -25014,6 +25056,32 @@
             "parameters": {}
           },
           "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "ops/docker-compose.rust-shadow.yml:16",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "-6g}",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "assignment-candidate"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "ops/docker-compose.rust-shadow.yml:17",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "-6g}",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "assignment-candidate"
         },
         {
           "dynamic": "unresolved",
@@ -30613,6 +30681,19 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
+          "location": "ops/docker-compose.rust-shadow.yml:23",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "postgresql://pseudolife_shadow:${PSEUDOLIFE_SHADOW_DB_PASSWORD:?Run update --engine rust --shadow}@pseudolife-pg:5432/pseudolife_memory",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "assignment-candidate"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
           "location": "ops/docker-compose.rust.yml:30",
           "shape": {
             "channel": "environment",
@@ -31342,6 +31423,19 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
+          "location": "ops/docker-compose.rust-shadow.yml:26",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "/data",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "assignment-candidate"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
           "location": "ops/docker-compose.yml:156",
           "shape": {
             "channel": "environment",
@@ -31644,6 +31738,19 @@
             "parameters": {}
           },
           "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "ops/docker-compose.rust-shadow.yml:24",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "0.0.0.0",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "assignment-candidate"
         },
         {
           "dynamic": "unresolved",
@@ -32752,6 +32859,19 @@
             "parameters": {}
           },
           "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "ops/docker-compose.rust-shadow.yml:25",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "\"8765\"",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "assignment-candidate"
         },
         {
           "dynamic": "unresolved",
@@ -34147,6 +34267,19 @@
             "parameters": {}
           },
           "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "ops/docker-compose.rust-shadow.yml:29",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "${PSEUDOLIFE_MCP_TOKEN:-}",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "assignment-candidate"
         },
         {
           "dynamic": "unresolved",
@@ -35607,6 +35740,19 @@
             "parameters": {}
           },
           "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "ops/docker-compose.rust-shadow.yml:30",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "${PSEUDOLIFE_MCP_TOKENS:-}",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "assignment-candidate"
         },
         {
           "dynamic": "unresolved",
@@ -38631,6 +38777,19 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
+          "location": "ops/docker-compose.rust-shadow.yml:28",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "\"1\"",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "assignment-candidate"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
           "location": "ops/docker-compose.yml:164",
           "shape": {
             "channel": "environment",
@@ -38684,7 +38843,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/Dockerfile.daemon-rust:47",
+          "location": "ops/Dockerfile.daemon-rust:46",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -58507,6 +58666,25 @@
     {
       "dynamic": "unresolved",
       "evidence": "documented",
+      "kind": "environment",
+      "location": "ops/Dockerfile.daemon-rust:35",
+      "name": "PSEUDOLIFE_DAEMON_ONNX_DIR",
+      "shape": {
+        "channel": "environment",
+        "complete": false,
+        "expression": "<model-root> and PSEUDOLIFE_DAEMON_RERANK_DIR",
+        "parameters": {
+          "value": {
+            "expression": "<model-root>",
+            "placeholder": true
+          }
+        }
+      },
+      "usage": "assignment-example"
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "documented",
       "kind": "route",
       "location": "docs/guide/configuration.md:1572",
       "method": "POST",
@@ -60087,6 +60265,20 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
+      "location": "ops/Dockerfile.daemon-rust:35",
+      "name": "PSEUDOLIFE_DAEMON_RERANK_DIR",
+      "shape": {
+        "channel": "environment",
+        "complete": false,
+        "expression": "reference",
+        "parameters": {}
+      },
+      "usage": "reference"
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "static",
+      "kind": "environment",
       "location": "ops/ci_tests.sh:64",
       "name": "PSEUDOLIFE_SUITE_PROFILE",
       "shape": {
@@ -60101,12 +60293,124 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
+      "location": "ops/docker-compose.rust-daemon.yml:5",
+      "name": "PSEUDOLIFE_RUST_IMAGE",
+      "shape": {
+        "channel": "environment",
+        "complete": false,
+        "expression": "-pseudolife-daemon-rust:checkout}",
+        "parameters": {}
+      },
+      "usage": "assignment-candidate"
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "static",
+      "kind": "environment",
+      "location": "ops/docker-compose.rust-shadow.yml:22",
+      "name": "PSEUDOLIFE_READ_ONLY",
+      "shape": {
+        "channel": "environment",
+        "complete": false,
+        "expression": "\"1\"",
+        "parameters": {}
+      },
+      "usage": "assignment-candidate"
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "static",
+      "kind": "environment",
+      "location": "ops/docker-compose.rust-shadow.yml:23",
+      "name": "PSEUDOLIFE_SHADOW_DB_PASSWORD",
+      "shape": {
+        "channel": "environment",
+        "complete": false,
+        "expression": "?Run update --engine rust --shadow}@pseudolife-pg:5432/pseudolife_memory",
+        "parameters": {}
+      },
+      "usage": "assignment-candidate"
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "static",
+      "kind": "environment",
+      "location": "ops/docker-compose.rust-shadow.yml:27",
+      "name": "PSEUDOLIFE_DAEMON_MODELS_DIR",
+      "shape": {
+        "channel": "environment",
+        "complete": false,
+        "expression": "/models",
+        "parameters": {}
+      },
+      "usage": "assignment-candidate"
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "static",
+      "kind": "environment",
+      "location": "ops/docker-compose.rust-shadow.yml:33",
+      "name": "PSEUDOLIFE_SHADOW_PORT",
+      "shape": {
+        "channel": "environment",
+        "complete": false,
+        "expression": "-8766}:8765\"",
+        "parameters": {}
+      },
+      "usage": "assignment-candidate"
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "static",
+      "kind": "environment",
+      "location": "ops/docker-compose.rust-shadow.yml:4",
+      "name": "PSEUDOLIFE_RUST_IMAGE",
+      "shape": {
+        "channel": "environment",
+        "complete": false,
+        "expression": "-pseudolife-daemon-rust:checkout}",
+        "parameters": {}
+      },
+      "usage": "assignment-candidate"
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "static",
+      "kind": "environment",
+      "location": "ops/docker-compose.rust.yml:32",
+      "name": "PSEUDOLIFE_DAEMON_MODELS_DIR",
+      "shape": {
+        "channel": "environment",
+        "complete": false,
+        "expression": "/models",
+        "parameters": {}
+      },
+      "usage": "assignment-candidate"
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "static",
+      "kind": "environment",
       "location": "ops/docker-compose.yml:234",
       "name": "PSEUDOLIFE_JUDGE_THIRD_API_KEY",
       "shape": {
         "channel": "environment",
         "complete": false,
         "expression": "${PSEUDOLIFE_JUDGE_THIRD_API_KEY:-}",
+        "parameters": {}
+      },
+      "usage": "assignment-candidate"
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "static",
+      "kind": "environment",
+      "location": "ops/provision-daemon-models.sh:40",
+      "name": "PSEUDOLIFE_DAEMON_ONNX_DIR",
+      "shape": {
+        "channel": "environment",
+        "complete": false,
+        "expression": "-}\" ]; then",
         "parameters": {}
       },
       "usage": "assignment-candidate"
@@ -63576,20 +63880,6 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "ops/Dockerfile.daemon-rust:64",
-      "method": null,
-      "name": "/health",
-      "shape": {
-        "channel": "body",
-        "complete": false,
-        "expression": "Request helper, URL suffix or body requires resolution at this location.",
-        "parameters": {}
-      }
-    },
-    {
-      "dynamic": "unresolved",
-      "evidence": "unverified",
-      "kind": "route",
       "location": "ops/Dockerfile.daemon:155",
       "method": null,
       "name": "/health",
@@ -63969,6 +64259,20 @@
       "evidence": "unverified",
       "kind": "route",
       "location": "ops/migrate_embeddings.py:31",
+      "method": null,
+      "name": "/health",
+      "shape": {
+        "channel": "body",
+        "complete": false,
+        "expression": "Request helper, URL suffix or body requires resolution at this location.",
+        "parameters": {}
+      }
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "unverified",
+      "kind": "route",
+      "location": "ops/provision-daemon-models.sh:11",
       "method": null,
       "name": "/health",
       "shape": {
@@ -65692,22 +65996,6 @@
       "evidence": "static",
       "kind": "environment",
       "location": "ops/Dockerfile.daemon-rust:43",
-      "name": "PSEUDOLIFE_DAEMON_ONNX_DIR",
-      "shape": {
-        "channel": "environment",
-        "complete": true,
-        "parameters": {
-          "value": {
-            "literal": "/opt/models/qwen3"
-          }
-        }
-      },
-      "usage": "assignment"
-    },
-    {
-      "evidence": "static",
-      "kind": "environment",
-      "location": "ops/Dockerfile.daemon-rust:44",
       "name": "PSEUDOLIFE_DAEMON_ORT_THREADS",
       "shape": {
         "channel": "environment",
@@ -65723,7 +66011,7 @@
     {
       "evidence": "static",
       "kind": "environment",
-      "location": "ops/Dockerfile.daemon-rust:46",
+      "location": "ops/Dockerfile.daemon-rust:45",
       "name": "PSEUDOLIFE_DAEMON_PDFIUM_DIR",
       "shape": {
         "channel": "environment",
@@ -80283,19 +80571,20 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/Dockerfile.daemon-rust:28",
+      "location": "ops/Dockerfile.daemon-rust:26",
       "reason": "request target supplied dynamically or external"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/Dockerfile.daemon-rust:64",
+      "location": "ops/Dockerfile.daemon-rust:35",
       "reason": "Unknown or forwarded inventory target/shape.",
-      "surface": "inventory-gap:route:/health"
+      "surface": "inventory-gap:environment:PSEUDOLIFE_DAEMON_ONNX_DIR"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/Dockerfile.daemon-rust:64",
-      "reason": "request target supplied dynamically or external"
+      "location": "ops/Dockerfile.daemon-rust:35",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:environment:PSEUDOLIFE_DAEMON_RERANK_DIR"
     },
     {
       "dynamic": "unresolved",
@@ -80459,6 +80748,114 @@
     },
     {
       "dynamic": "unresolved",
+      "location": "ops/docker-compose.rust-daemon.yml:5",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:environment:PSEUDOLIFE_RUST_IMAGE"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/docker-compose.rust-shadow.yml:10",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_BUILD_DIRTY"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/docker-compose.rust-shadow.yml:11",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_BUILD_TIME"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/docker-compose.rust-shadow.yml:16",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_DAEMON_MEM_LIMIT"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/docker-compose.rust-shadow.yml:17",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_DAEMON_MEM_LIMIT"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/docker-compose.rust-shadow.yml:22",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:environment:PSEUDOLIFE_READ_ONLY"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/docker-compose.rust-shadow.yml:23",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_DATABASE_URL"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/docker-compose.rust-shadow.yml:23",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:environment:PSEUDOLIFE_SHADOW_DB_PASSWORD"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/docker-compose.rust-shadow.yml:24",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_HOST"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/docker-compose.rust-shadow.yml:25",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_PORT"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/docker-compose.rust-shadow.yml:26",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_DATA_DIR"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/docker-compose.rust-shadow.yml:27",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:environment:PSEUDOLIFE_DAEMON_MODELS_DIR"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/docker-compose.rust-shadow.yml:28",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TRUST_BIND"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/docker-compose.rust-shadow.yml:29",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/docker-compose.rust-shadow.yml:30",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOKENS"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/docker-compose.rust-shadow.yml:33",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:environment:PSEUDOLIFE_SHADOW_PORT"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/docker-compose.rust-shadow.yml:4",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:environment:PSEUDOLIFE_RUST_IMAGE"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/docker-compose.rust-shadow.yml:9",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_BUILD_GIT_SHA"
+    },
+    {
+      "dynamic": "unresolved",
       "location": "ops/docker-compose.rust.yml:24",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_BUILD_GIT_SHA"
@@ -80486,6 +80883,12 @@
       "location": "ops/docker-compose.rust.yml:31",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/docker-compose.rust.yml:32",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:environment:PSEUDOLIFE_DAEMON_MODELS_DIR"
     },
     {
       "dynamic": "unresolved",
@@ -82928,6 +83331,23 @@
       "location": "ops/plugin_marketplace.py:8",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:update"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/provision-daemon-models.sh:11",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:route:/health"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/provision-daemon-models.sh:11",
+      "reason": "request target supplied dynamically or external"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/provision-daemon-models.sh:40",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:environment:PSEUDOLIFE_DAEMON_ONNX_DIR"
     },
     {
       "dynamic": "unresolved",
