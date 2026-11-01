@@ -182,6 +182,52 @@ jobs:
           docker buildx imagetools inspect "ghcr.io/${OWNER_LC}/pseudolife-daemon:${VERSION}"
           docker buildx imagetools inspect "ghcr.io/${OWNER_LC}/pseudolife-pg:18-${VERSION}"
 
+  # Draft proposal: leave the repository variable unset until the maintainer
+  # approves publishing this additional artifact and its measured runner cost.
+  # This does not select Rust in install or update; that is a separate decision.
+  rust-image:
+    if: ${{ vars.PSEUDOLIFE_PUBLISH_RUST_DAEMON == 'true' }}
+    needs: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve version and image name
+        run: |
+          echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+          echo "OWNER_LC=$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_ENV"
+          echo "BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push the opt-in Rust daemon image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ops/Dockerfile.daemon-rust
+          push: true
+          build-args: |
+            GIT_SHA=${{ github.sha }}
+            GIT_DIRTY=false
+            BUILD_TIME=${{ env.BUILD_TIME }}
+            BUILD_SOURCE=release
+          tags: |
+            ghcr.io/${{ env.OWNER_LC }}/pseudolife-daemon-rust:${{ env.VERSION }}
+            ghcr.io/${{ env.OWNER_LC }}/pseudolife-daemon-rust:latest
+
+      - name: Verify the pushed Rust image is pullable by digest
+        run: docker buildx imagetools inspect "ghcr.io/${OWNER_LC}/pseudolife-daemon-rust:${VERSION}"
+
   registry:
     needs: publish
     runs-on: ubuntu-latest
