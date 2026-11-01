@@ -677,6 +677,14 @@ def _compose_call(world: World):
     return None, None
 
 
+def test_plain_checkout_update_with_null_daemon_labels(world, clients, tmp_path):
+    root, _ = _checkout(world, tmp_path)
+    world.container["labels"] = None
+    assert _run(["--checkout", str(root), "--no-backup", "--no-cache-prune"]) == 0
+    argv, _ = _compose_call(world)
+    assert argv[-5:] == ["up", "-d", "--no-deps", "--build", "pseudolife-daemon"]
+
+
 def test_a_clean_checkout_is_built_with_its_commit_stamp(world, clients, tmp_path):
     root, sha = _checkout(world, tmp_path)
     assert _run(["--checkout", str(root), "--no-backup", "--no-cache-prune", "--rollback-tag", "unittest"]) == 0

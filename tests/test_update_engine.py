@@ -529,3 +529,31 @@ def test_selection_write_error_reports_rollback_once(engine_host, monkeypatch, c
     assert all(line in str(caught.value) for line in update.rollback_lines)
     assert update.report.rollback["tag"].startswith("pseudolife-daemon-python:")
     assert not (s["repo"] / eng.SELECTION).exists()
+
+
+@pytest.mark.parametrize("checkout", [False, True])
+def test_plain_python_update_accepts_null_container_labels(engine_host, monkeypatch, checkout):
+    s = engine_host
+    s["running"]["Config"]["Labels"] = None
+    update = s["update"](None)
+    if not checkout:
+        update.o.checkout = None
+    completed = []
+    monkeypatch.setattr(up, "UpdateLock", __import__("contextlib").nullcontext)
+    monkeypatch.setattr(update, "detect_tier", lambda: "docker")
+    monkeypatch.setattr(update, "deploy_checkout", lambda: completed.append("checkout"))
+    monkeypatch.setattr(update, "deploy_release", lambda: completed.append("release"))
+    monkeypatch.setattr(update, "maintainer_passkeys", lambda: None)
+    update._run()
+    assert completed == ["checkout" if checkout else "release"]
+    assert any("{{json .Config.Labels}}" in a for a in s["calls"])
+
+
+def test_first_activation_accepts_null_config_labels(engine_host):
+    from pseudolife_memory import update_engine as eng
+    s = engine_host
+    s["running"]["Config"]["Labels"] = None
+    update = s["update"]()
+    eng.deploy_engine(update, s["repo"])
+    assert update.report.rollback["tag"].startswith("pseudolife-daemon-python:")
+    assert eng._selection(s["repo"])["labels"][eng.ENGINE_LABEL] == "rust"

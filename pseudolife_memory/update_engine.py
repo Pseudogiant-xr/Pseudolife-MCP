@@ -81,7 +81,7 @@ def selected_checkout(update) -> Path | None:
             raise up.UpdateError("cannot find this checkout's selected daemon; restore its Compose project and retry; nothing was changed", 2)
     code, out = up.run_cli([update.docker, "inspect", "-f", "{{json .Config.Labels}}", container], timeout=60, stdout_only=True)
     try:
-        labels = json.loads(out) if code == 0 else {}
+        labels = (json.loads(out) or {}) if code == 0 else {}
     except ValueError:
         labels = {}
     current = "rust" if labels.get(ENGINE_LABEL) == "rust" else "python"
@@ -226,11 +226,11 @@ class EngineUpdate:
         self.pg_user, self.pg_db = pg_env["POSTGRES_USER"], pg_env["POSTGRES_DB"]
         self.daemon, self.pg = self.container(up.DAEMON_SERVICE), self.container("pseudolife-pg")
         self.running = self.inspect(self.daemon)
-        labels = self.running["Config"].get("Labels", {})
-        if labels.get(ENGINE_LABEL) == "rust":
+        self.running_labels = self.running["Config"].get("Labels") or {}
+        if self.running_labels.get(ENGINE_LABEL) == "rust":
             # Explicit engine flags cannot promote a replacement that never
             # passed its gate, including a failed Rust-to-Rust update.
-            _validated_rust_selection(labels)
+            _validated_rust_selection(self.running_labels)
         if not self.running.get("State", {}).get("Running"):
             raise up.UpdateError("the current daemon must be running for the backup and rollback tag; start it and retry", 2)
         daemon_env = config["services"][up.DAEMON_SERVICE].get("environment", {})
@@ -256,7 +256,7 @@ class EngineUpdate:
         if not self.token or "\r" in self.token or "\n" in self.token:
             raise up.UpdateError("the engine health gate needs bearer auth; set PSEUDOLIFE_MCP_TOKEN in the host env file and retry; nothing was changed", 2)
         if self.o.shadow:
-            if self.running["Config"].get("Labels", {}).get(ENGINE_LABEL) == "rust":
+            if self.running_labels.get(ENGINE_LABEL) == "rust":
                 raise up.UpdateError("shadow mode needs the Python daemon; run update --engine python --checkout <repo> first", 2)
             if not (self.ops / "sql/shadow_reader_role.sql").is_file() or "PSEUDOLIFE_READ_ONLY" not in (self.repo / "rust/daemon/src/config.rs").read_text(encoding="utf-8"):
                 raise up.UpdateError("shadow support is missing (ops/sql/shadow_reader_role.sql and PSEUDOLIFE_READ_ONLY); update the checkout after the read-only support lands, then retry; nothing was changed", 2)
@@ -316,7 +316,7 @@ class EngineUpdate:
         if self.o.shadow:
             return self.shadow()
         self.backup()
-        old_engine = self.running["Config"].get("Labels", {}).get(ENGINE_LABEL, "python")
+        old_engine = self.running_labels.get(ENGINE_LABEL, "python")
         suffix = self.o.rollback_suffix or f"pre-update-{up._stamp()}"
         if not re.fullmatch(r"[A-Za-z0-9_.-]+", suffix):
             raise up.UpdateError("--rollback-tag must contain only letters, digits, dots, underscores or hyphens; nothing was deployed", 2)
@@ -332,7 +332,7 @@ class EngineUpdate:
             raise up.UpdateError("could not tag the running image for rollback; nothing was deployed")
         old_service = {"image": rollback, "build": {"dockerfile": f"ops/Dockerfile.daemon{'-rust' if old_engine == 'rust' else ''}"},
                        "labels": {ENGINE_LABEL: old_engine, CHECKOUT_LABEL: str(self.repo)}}
-        activation = self.running["Config"].get("Labels", {}).get(ACTIVATION_LABEL)
+        activation = self.running_labels.get(ACTIVATION_LABEL)
         if activation:
             old_service["labels"][ACTIVATION_LABEL] = activation
         rollback_file = self.repo / "data/update-engine" / f"docker-compose.rollback-{up._stamp()}.json"
