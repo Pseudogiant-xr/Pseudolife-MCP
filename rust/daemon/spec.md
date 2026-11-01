@@ -222,8 +222,10 @@ store, waits for idle close and compares the full episode and deferred-root
 state with Python. Native coverage also checks that handle touches postpone
 reaping and that a sweep publishes its tombstone to the same owner.
 The standalone episode tools share this state ("Episode tools over MCP").
-Nonempty-session automatic titles and tensor autosave/exit persistence
-remain named follow-ups in `divergences.md`.
+Nonempty generic roots receive the same content-derived titles as explicit
+close, including root entry stamps in memory and PostgreSQL. The restart and
+malformed-resume scenarios check those durable effects. Autosave and exit
+persistence use the counters table; remaining differences are in `divergences.md`.
 
 
 # Contract spec: coordination board (slice W2-F)
