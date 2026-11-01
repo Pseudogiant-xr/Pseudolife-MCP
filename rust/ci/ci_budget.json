@@ -162,7 +162,7 @@
       "candidate": "d71c5590ce6f866a",
       "candidate-harness": "43b859ee9d5fd738",
       "parity-checks": "06054831b8e7b5d2",
-      "daemon-image": "77d7667c1679a414",
+      "daemon-image": "b52520e079f13dc1",
       "parity": "aa4ba434de948ea6"
     },
     "accepted": [
@@ -230,6 +230,11 @@
         "job": "daemon-image",
         "fingerprint": "77d7667c1679a414",
         "reason": "Moves the same Qwen download from image build to explicit pre-start provisioning; a checksum-keyed model cache avoids repeated downloads. The small reranker download and native checksum verification fit the existing cold-build allowance. Re-measure the batch if hosted timing disagrees."
+      },
+      {
+        "job": "daemon-image",
+        "fingerprint": "b52520e079f13dc1",
+        "reason": "Reuses the built daemon, already-pulled PostgreSQL image and provisioned model cache; adds one small psycopg wheel and a short cold-restart smoke with no new job, image build or model download. Keep the existing cold-build allowance and re-measure if the batch timing disagrees."
       }
     ]
   },
