@@ -19,6 +19,9 @@ const USAGE: &str = "usage: pseudolife-daemon provision <pdfium|models>";
 /// exit code: 0 installed or already there, 1 failed (nothing installed),
 /// 2 a usage error.
 pub fn command(args: &[OsString]) -> i32 {
+    if matches!(args, [runtime, flag] if runtime == "models" && flag == "--if-missing") {
+        return crate::onnx_artifacts::provision::command(true);
+    }
     let runtime = match args {
         [one] => one.to_string_lossy(),
         _ => {
@@ -28,7 +31,7 @@ pub fn command(args: &[OsString]) -> i32 {
     };
     match runtime.as_ref() {
         "pdfium" => provision_pdfium(),
-        "models" => crate::onnx_artifacts::provision::command(),
+        "models" => crate::onnx_artifacts::provision::command(false),
         other => {
             eprintln!("pseudolife-daemon provision: no runtime named {other:?}; {USAGE}");
             2

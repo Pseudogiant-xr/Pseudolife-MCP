@@ -3,6 +3,10 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import re
+import os
+import subprocess
+import tempfile
 from pathlib import Path
 import threading
 import unittest
@@ -109,6 +113,30 @@ class ContainerTests(unittest.TestCase):
         self.assertLess(job.index("run --rm --no-deps rust-daemon pseudolife-daemon provision models"),
                         job.index("up --no-build --wait --wait-timeout 180"))
 
+    @unittest.skipIf(os.name == "nt", "the image entrypoint runs on Linux")
+    def test_entrypoint_defers_existing_verification_and_respects_local_override(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            calls = root / "calls"
+            daemon = root / "pseudolife-daemon"
+            daemon.write_text('#!/bin/sh\nprintf "%s\\n" "$*" >> "$CALLS"\n')
+            daemon.chmod(0o755)
+            env = dict(os.environ, PATH=str(root) + os.pathsep + os.environ["PATH"], CALLS=str(calls))
+            env.pop("PSEUDOLIFE_DAEMON_ONNX_DIR", None)
+            entrypoint = str(ROOT / "ops/provision-daemon-models.sh")
+            for args, override, expected in [
+                ([], None, ["provision models --if-missing", ""]),
+                (["pseudolife-daemon"], "/local/model", [""]),
+                (["pseudolife-daemon", "provision", "models"], None, ["provision models"]),
+            ]:
+                calls.unlink(missing_ok=True)
+                env.pop("PSEUDOLIFE_DAEMON_ONNX_DIR", None)
+                if override:
+                    env["PSEUDOLIFE_DAEMON_ONNX_DIR"] = override
+                subprocess.run(["sh", entrypoint, *args], env=env, check=True)
+                self.assertEqual(calls.read_text().splitlines(), expected)
+        self.assertIn("--start-period=30m", (ROOT / "ops/Dockerfile.daemon-rust").read_text())
+
     def test_provisioned_layout_matches_the_default_loader(self):
         import tempfile
         from unittest.mock import patch
@@ -141,6 +169,25 @@ class ContainerTests(unittest.TestCase):
         recorded = next(row["identities"] for row in receipt["runs"] if row["model"] == "Qwen")
         for name in ("modules.json", "1_Pooling/config.json", "config.json", "tokenizer_config.json"):
             self.assertEqual(provision.FILES[name], recorded[name])
+
+    def test_export_and_harness_pins_match_the_native_manifest(self):
+        source = (ROOT / "rust/daemon/src/model_provision.rs").read_text()
+        rows = re.findall(r'artifact!\(\s*"([^"]+)"\s*,\s*"([^"]+)"\s*,\s*"([^"]+)"'
+                          r'\s*,\s*"([^"]+)"\s*,\s*"([0-9a-f]{64})"\s*,\s*(\d+)\s*\)', source)
+        self.assertEqual(len(rows), 12)
+        pins = {path: digest for path, _, _, _, digest, _ in rows}
+        self.assertTrue(all(int(size) > 0 for *_, size in rows))
+        legacy = load("provision_container_model")
+        for name, digest in legacy.FILES.items():
+            path = "embedding/" + ("onnx/" if name.startswith("model.onnx") else "") + name
+            self.assertEqual(digest, pins[path], path)
+        spec = importlib.util.spec_from_file_location("embedding_pin_check", ROOT / "rust/daemon/harness/embedding.py")
+        harness = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(harness)
+        current = harness.QWEN_FP32_IDENTITIES[1]
+        self.assertEqual(set(current), {"onnx/model.onnx", "onnx/model.onnx_data", "tokenizer.json"})
+        for name, digest in current.items():
+            self.assertEqual(digest, pins["embedding/" + name], name)
 
     def test_startup_policy_refuses_missing_or_different_metadata(self):
         probe = load("container_probe")

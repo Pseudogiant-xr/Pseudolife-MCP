@@ -32,6 +32,8 @@ QWEN_FP32_IDENTITIES = [
      "tokenizer.json": "def76fb086971c7867b829c23a26261e38d9d74e02139253b38aeb9df8b4b50a"},
     # The provisioned public export is measured independently of the
     # historical export above; it uses the same bounds and exact checks.
+    # Admission evidence (default corpus, ORT 1.27 image binary):
+    # https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/1114
     {"onnx/model.onnx": "cec22565ec783289a5e51bd94950f70b8cb7ca6c0b7ced255b5e8dbf3c60536b",
      "onnx/model.onnx_data": "a585477de21c0a89e021dd64f4d3be34483eb4aaed7ae93fc047e3edf74545da",
      "tokenizer.json": "def76fb086971c7867b829c23a26261e38d9d74e02139253b38aeb9df8b4b50a"},

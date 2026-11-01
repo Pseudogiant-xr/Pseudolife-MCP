@@ -135,7 +135,6 @@ impl Embedder {
         let (root, hub) = artifacts::resolve(&model, &file, &cache_root())?;
         if config.model_name == artifacts::provision::EMBEDDING_MODEL && !harness_fixture(&root) {
             artifacts::provision::verify_embedding(&root, &file, hub)?;
-            artifacts::provision::verify_reranker(&artifacts::provision::reranker_root()?)?;
         }
         if root.join("config_sentence_transformers.json").exists() {
             validate_saved_prompt(&metadata(&root, "config_sentence_transformers.json", hub)?)?;
@@ -185,13 +184,6 @@ impl Embedder {
             }
         };
         let model_config = metadata(&root, &sub("config.json"), hub)?;
-        // A local path does not turn a Qwen model into an unpinned custom
-        // artifact. Check it too when model_name names the directory.
-        if config.model_name != artifacts::provision::EMBEDDING_MODEL
-            && model_config["model_type"] == "qwen3"
-        {
-            artifacts::provision::verify_embedding(&root, &file, hub)?;
-        }
         let dim = model_config["hidden_size"]
             .as_u64()
             .ok_or_else(|| anyhow!("model has no hidden_size"))? as usize;
@@ -630,6 +622,32 @@ pub fn probe() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn custom_qwen_architecture_is_not_the_pinned_checkpoint() {
+        let root = std::env::temp_dir().join(format!("pl-custom-qwen-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(root.join("onnx")).unwrap();
+        std::fs::write(root.join("onnx/model.onnx"), b"not a valid graph").unwrap();
+        std::fs::write(root.join("config.json"), br#"{"model_type":"qwen3"}"#).unwrap();
+        for name in [
+            "Qwen/Qwen3-Embedding-4B",
+            "Qwen/Qwen3-Embedding-8B",
+            "custom/qwen",
+        ] {
+            let config = EmbeddingConfig {
+                model_name: name.into(),
+                ..Default::default()
+            };
+            let error = Embedder::load_config(&config, Some(&root), 1)
+                .err()
+                .unwrap()
+                .to_string();
+            // A deliberately incomplete custom config must report its actual
+            // missing field, not prescribe installation of the 0.6B checkpoint.
+            assert_eq!(error, "model has no hidden_size");
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn saved_default_prompts_are_explicitly_deferred() {

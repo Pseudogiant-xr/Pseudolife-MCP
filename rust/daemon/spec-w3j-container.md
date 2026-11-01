@@ -51,10 +51,14 @@ but a recorded checksum is never trusted instead of hashing the actual bytes.
 model-root overrides. They do not override checksums. Qwen's graph path is
 `embedding/onnx/model.onnx`, its external tensors are beside it, and the
 reranker's graph is `reranker/model.onnx`. Both roots contain `tokenizer.json`
-and pinned metadata. The default Qwen loader verifies both models before
-becoming ready; the reranker independently verifies its inputs before loading.
-Ordinary loading never downloads. Missing or changed inputs therefore refuse
-readiness with their cause and provisioning instruction. Instrumented harness
+and pinned metadata. The configured default Qwen checkpoint is verified before
+embedding readiness; architecture alone never selects that checkpoint's pins.
+The optional reranker independently verifies its inputs before first use.
+Missing or changed reranker files disable reranking with a prominent log naming
+the cause and repair, while store/search remain available. The existing health
+schema has no reranker field. Ordinary loading never downloads. Missing or
+changed embedding inputs refuse readiness with their cause and provisioning
+instruction. Instrumented harness
 builds also admit the existing tiny synthetic BERT fixtures; production builds
 have no fixture bypass flag. Other explicitly configured embedding models keep
 their existing local/cached loading contract and have no new parity claim.
@@ -66,13 +70,20 @@ their existing local/cached loading contract and have no new parity claim.
 | MiniLM reranker fp32 graph | `cross-encoder/ms-marco-MiniLM-L6-v2`, revision `c5ee24cb16019beea0893ab7796b1df96625c6b8`, `onnx/model.onnx` | `5d3e70fd0c9ff14b9b5169a51e957b7a9c74897afd0a35ce4bd318150c1d4d4a` |
 
 Every download uses `https://huggingface.co/<repository>/resolve/<revision>/<file>`.
-The complete URL, tokenizer and metadata pins are compiled in
+The complete URL, tokenizer, metadata and exact byte-size pins are compiled in
 `src/model_provision.rs`. Only one fp32 export per model ships. Historical
 embedding identities remain in the harness for old-result comparisons, not
 as alternative daemon pins. bf16 ONNX remains out of scope.
 
-The image entrypoint runs `provision models` before its default daemon command,
-then `exec`s the daemon. An explicit `pseudolife-daemon provision models` image
+The image entrypoint runs `provision models --if-missing` before its default
+daemon command, then `exec`s the daemon. This presence-only preparation mode
+installs an absent bundle and leaves existing bytes for the loader to verify;
+it never asserts readiness. A cached container start hashes the embedding once,
+and the optional reranker once at first use. Fresh installation also verifies
+downloads and the staged/published bundle before loading. A configured
+`PSEUDOLIFE_DAEMON_ONNX_DIR` skips automatic provisioning, so an offline local
+model override does not trigger unrelated downloads. An explicit
+`pseudolife-daemon provision models` image
 command provisions once and exits. `/data/models` persists across container
 replacement; a separate writable model volume can be selected with
 `PSEUDOLIFE_DAEMON_MODELS_DIR` when `/data` is read-only. An already provisioned
@@ -87,7 +98,14 @@ compiled pin source and binds that cache to the same named volume. It runs
 `compose run --rm --no-deps rust-daemon pseudolife-daemon provision models`
 before `compose up --wait`, so download time is outside the service readiness
 deadline. Direct first start still provisions automatically; a health-timed
-launcher should likewise provision before starting its readiness timer.
+launcher should likewise provision before starting its readiness timer. The
+entrypoint announces the provisioning phase and each artifact download; the
+image grants that phase a 30-minute health start period instead of 90 seconds.
+
+Downloads are capped at each artifact's pinned byte size before bytes reach
+the disk sink; short bodies are also refused. The shared HTTPS-only client
+rejects redirects to HTTP as well as initial HTTP URLs. SHA256 remains the
+integrity check, including for restored caches.
 
 The explicit native provision command uses HTTPS directly, independent of
 the Python-library flags `HF_HUB_OFFLINE` and `TRANSFORMERS_OFFLINE`. Those

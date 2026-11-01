@@ -99,14 +99,20 @@ impl LazyReranker {
                     return None;
                 }
             };
-            match rerank::Reranker::load(&dir, 1) {
-                Ok(r) => Some(Arc::new(r)),
-                Err(e) => {
-                    eprintln!("Cross-encoder reranker failed to load ({e}) — disabling.");
-                    None
-                }
-            }
+            Self::load_from_dir(&dir)
         })
+    }
+
+    fn load_from_dir(dir: &std::path::Path) -> Option<Arc<rerank::Reranker>> {
+        match rerank::Reranker::load(dir, 1) {
+            Ok(r) => Some(Arc::new(r)),
+            Err(e) => {
+                eprintln!(
+                    "Cross-encoder reranker failed to load ({e:#}) — disabling reranking; store and search remain available."
+                );
+                None
+            }
+        }
     }
 
     fn model_with(
@@ -701,6 +707,30 @@ pub async fn warmup_probe(svc: &Service, ready: &Arc<Ready>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn missing_or_tampered_reranker_is_disabled_without_loading() {
+        let root =
+            std::env::temp_dir().join(format!("pl-optional-reranker-{}", uuid::Uuid::new_v4()));
+        for tampered in [false, true] {
+            if tampered {
+                std::fs::create_dir_all(&root).unwrap();
+                std::fs::write(root.join("model.onnx"), b"changed graph").unwrap();
+            }
+            let reranker = LazyReranker {
+                state: Mutex::new(None),
+            };
+            assert!(
+                reranker
+                    .model_with(|| LazyReranker::load_from_dir(&root))
+                    .is_none()
+            );
+            assert!(reranker.disabled());
+            assert!(!reranker.available());
+            assert!(reranker.scores("query", &["candidate"]).is_empty());
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn gate_poisoned_reranker_stays_disabled() {

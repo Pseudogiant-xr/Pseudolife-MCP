@@ -9,7 +9,7 @@ use sha2::{Digest, Sha256};
 use std::{
     ffi::OsString,
     fs,
-    io::Read,
+    io::{Read, Write},
     path::{Path, PathBuf},
 };
 
@@ -21,6 +21,7 @@ struct Artifact {
     path: &'static str,
     url: &'static str,
     sha256: &'static str,
+    bytes: u64,
 }
 
 impl Pinned for Artifact {
@@ -33,7 +34,7 @@ impl Pinned for Artifact {
 }
 
 macro_rules! artifact {
-    ($path:literal, $repo:literal, $revision:literal, $source:literal, $sha:literal) => {
+    ($path:literal, $repo:literal, $revision:literal, $source:literal, $sha:literal, $bytes:literal) => {
         Artifact {
             path: $path,
             url: concat!(
@@ -45,6 +46,7 @@ macro_rules! artifact {
                 $source
             ),
             sha256: $sha,
+            bytes: $bytes,
         }
     };
 }
@@ -57,84 +59,96 @@ const ARTIFACTS: &[Artifact] = &[
         "onnx-community/ONNX_Qwen3-Embedding-0.6B",
         "462e5a71e724575c710975d9b79309b690fd22ce",
         "model.onnx",
-        "cec22565ec783289a5e51bd94950f70b8cb7ca6c0b7ced255b5e8dbf3c60536b"
+        "cec22565ec783289a5e51bd94950f70b8cb7ca6c0b7ced255b5e8dbf3c60536b",
+        1241005
     ),
     artifact!(
         "embedding/onnx/model.onnx_data",
         "onnx-community/ONNX_Qwen3-Embedding-0.6B",
         "462e5a71e724575c710975d9b79309b690fd22ce",
         "model.onnx_data",
-        "a585477de21c0a89e021dd64f4d3be34483eb4aaed7ae93fc047e3edf74545da"
+        "a585477de21c0a89e021dd64f4d3be34483eb4aaed7ae93fc047e3edf74545da",
+        2383106304
     ),
     artifact!(
         "embedding/tokenizer.json",
         "onnx-community/ONNX_Qwen3-Embedding-0.6B",
         "462e5a71e724575c710975d9b79309b690fd22ce",
         "tokenizer.json",
-        "def76fb086971c7867b829c23a26261e38d9d74e02139253b38aeb9df8b4b50a"
+        "def76fb086971c7867b829c23a26261e38d9d74e02139253b38aeb9df8b4b50a",
+        11423705
     ),
     artifact!(
         "embedding/modules.json",
         "Qwen/Qwen3-Embedding-0.6B",
         "97b0c614be4d77ee51c0cef4e5f07c00f9eb65b3",
         "modules.json",
-        "84e40c8e006c9b1d6c122e02cba9b02458120b5fb0c87b746c41e0207cf642cf"
+        "84e40c8e006c9b1d6c122e02cba9b02458120b5fb0c87b746c41e0207cf642cf",
+        349
     ),
     artifact!(
         "embedding/1_Pooling/config.json",
         "Qwen/Qwen3-Embedding-0.6B",
         "97b0c614be4d77ee51c0cef4e5f07c00f9eb65b3",
         "1_Pooling/config.json",
-        "37bf193fa101f19101bfad9c31d3eb0f786e247b7b1e5cb7f007d730eed1ddbd"
+        "37bf193fa101f19101bfad9c31d3eb0f786e247b7b1e5cb7f007d730eed1ddbd",
+        313
     ),
     artifact!(
         "embedding/config.json",
         "Qwen/Qwen3-Embedding-0.6B",
         "97b0c614be4d77ee51c0cef4e5f07c00f9eb65b3",
         "config.json",
-        "b5bf1f51fc45be473a54718cef92448d90a1be001bf9b9a44b8c7f10a19feaa9"
+        "b5bf1f51fc45be473a54718cef92448d90a1be001bf9b9a44b8c7f10a19feaa9",
+        727
     ),
     artifact!(
         "embedding/tokenizer_config.json",
         "Qwen/Qwen3-Embedding-0.6B",
         "97b0c614be4d77ee51c0cef4e5f07c00f9eb65b3",
         "tokenizer_config.json",
-        "253153d0738ceb4c668d2eff957714dd2bea0b56de772a9fdccd96cbf517e6a0"
+        "253153d0738ceb4c668d2eff957714dd2bea0b56de772a9fdccd96cbf517e6a0",
+        9706
     ),
     artifact!(
         "embedding/config_sentence_transformers.json",
         "Qwen/Qwen3-Embedding-0.6B",
         "97b0c614be4d77ee51c0cef4e5f07c00f9eb65b3",
         "config_sentence_transformers.json",
-        "10667c72ddb772627bf1780cb7f86af8e2ae0032b8c243c731172064105c6961"
+        "10667c72ddb772627bf1780cb7f86af8e2ae0032b8c243c731172064105c6961",
+        215
     ),
     artifact!(
         "reranker/model.onnx",
         "cross-encoder/ms-marco-MiniLM-L6-v2",
         "c5ee24cb16019beea0893ab7796b1df96625c6b8",
         "onnx/model.onnx",
-        "5d3e70fd0c9ff14b9b5169a51e957b7a9c74897afd0a35ce4bd318150c1d4d4a"
+        "5d3e70fd0c9ff14b9b5169a51e957b7a9c74897afd0a35ce4bd318150c1d4d4a",
+        91011230
     ),
     artifact!(
         "reranker/tokenizer.json",
         "cross-encoder/ms-marco-MiniLM-L6-v2",
         "c5ee24cb16019beea0893ab7796b1df96625c6b8",
         "tokenizer.json",
-        "d241a60d5e8f04cc1b2b3e9ef7a4921b27bf526d9f6050ab90f9267a1f9e5c66"
+        "d241a60d5e8f04cc1b2b3e9ef7a4921b27bf526d9f6050ab90f9267a1f9e5c66",
+        711396
     ),
     artifact!(
         "reranker/config.json",
         "cross-encoder/ms-marco-MiniLM-L6-v2",
         "c5ee24cb16019beea0893ab7796b1df96625c6b8",
         "config.json",
-        "380e02c93f431831be65d99a4e7e5f67c133985bf2e77d9d4eba46847190bacc"
+        "380e02c93f431831be65d99a4e7e5f67c133985bf2e77d9d4eba46847190bacc",
+        794
     ),
     artifact!(
         "reranker/tokenizer_config.json",
         "cross-encoder/ms-marco-MiniLM-L6-v2",
         "c5ee24cb16019beea0893ab7796b1df96625c6b8",
         "tokenizer_config.json",
-        "a5c2e5a7b1a29a0702cd28c08a399b5ecc110c263009d17f7e3b415f25905fd8"
+        "a5c2e5a7b1a29a0702cd28c08a399b5ecc110c263009d17f7e3b415f25905fd8",
+        1330
     ),
 ];
 
@@ -277,6 +291,57 @@ pub fn verify_reranker(root: &Path) -> Result<()> {
     verify_model(root, "reranker/", false)
 }
 
+/// Limit bytes before they reach the shared provisioner's disk sink. The
+/// checksum still decides integrity; this cap bounds a bad server's disk use.
+struct SizedFetch<'a> {
+    artifacts: &'a [Artifact],
+    inner: &'a dyn Fetch,
+}
+
+struct LimitedWriter<'a> {
+    sink: &'a mut dyn Write,
+    remaining: u64,
+}
+
+impl Write for LimitedWriter<'_> {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        if bytes.len() as u64 > self.remaining {
+            return Err(std::io::Error::other(
+                "download exceeds the pinned artifact byte size",
+            ));
+        }
+        let written = self.sink.write(bytes)?;
+        self.remaining -= written as u64;
+        Ok(written)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.sink.flush()
+    }
+}
+
+impl Fetch for SizedFetch<'_> {
+    fn fetch(&self, url: &str, sink: &mut dyn Write) -> std::result::Result<(), String> {
+        let artifact = self
+            .artifacts
+            .iter()
+            .find(|a| a.url == url)
+            .ok_or("download is not in the pinned manifest")?;
+        let mut limited = LimitedWriter {
+            sink,
+            remaining: artifact.bytes,
+        };
+        self.inner.fetch(url, &mut limited)?;
+        if limited.remaining != 0 {
+            return Err(format!(
+                "download is shorter than the pinned {} bytes",
+                artifact.bytes
+            ));
+        }
+        Ok(())
+    }
+}
+
 fn install(
     root: &Path,
     artifacts: &[Artifact],
@@ -284,7 +349,11 @@ fn install(
     log: &mut dyn FnMut(&str),
 ) -> Result<(PathBuf, bool)> {
     let manifest = manifest(artifacts);
-    native::provision(root, &manifest, fetch, &mut |line| {
+    let fetch = SizedFetch {
+        artifacts,
+        inner: fetch,
+    };
+    native::provision(root, &manifest, &fetch, &mut |line| {
         // A successful rerun has exactly one user-facing line below.
         if !line.contains(" already installed at ") { log(line); }
     }, &mut |artifact, download, tree| {
@@ -308,8 +377,30 @@ fn install(
     })
 }
 
-pub fn command() -> i32 {
+fn needs_install(root: &Path, artifacts: &[Artifact]) -> Result<bool> {
+    let bundle = manifest(artifacts).install_dir(root);
+    match bundle.symlink_metadata() {
+        Ok(_) => Ok(false),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(true),
+        Err(error) => {
+            Err(error).with_context(|| format!("cannot inspect model bundle {}", bundle.display()))
+        }
+    }
+}
+
+pub fn command(if_missing: bool) -> i32 {
     let result = cache_root().and_then(|root| {
+        // The entrypoint only installs an absent bundle. It never asserts
+        // readiness: the daemon hashes the embedding at load and the optional
+        // reranker hashes its own inputs at first use. Explicit provisioning
+        // without this flag retains full installed-bundle verification.
+        if if_missing && !needs_install(&root, ARTIFACTS)? {
+            println!("model bundle present; the daemon will verify each model before loading");
+            return Ok((root, true));
+        }
+        if if_missing {
+            println!("model provisioning phase: installing pinned artifacts; daemon readiness follows this phase");
+        }
         install(&root, ARTIFACTS, &native::HttpFetch, &mut |line| {
             println!("{line}")
         })
@@ -337,6 +428,7 @@ mod tests {
         path: "embedding/onnx/model.onnx",
         url: "https://example.com/model.onnx",
         sha256: GOOD,
+        bytes: 4,
     }];
     struct Bytes(&'static [u8]);
     impl Fetch for Bytes {
@@ -357,6 +449,7 @@ mod tests {
     #[test]
     fn complete_bundle_is_idempotent_offline_and_tampering_is_refused() {
         let root = temp();
+        assert!(needs_install(&root, FIXTURE).unwrap());
         let (installed, fresh) = install(&root, FIXTURE, &Bytes(b"good"), &mut |_| {}).unwrap();
         assert!(fresh);
         let mut messages = vec![];
@@ -368,6 +461,9 @@ mod tests {
         assert_eq!(again, installed);
         assert!(messages.is_empty());
         fs::write(installed.join(FIXTURE[0].path), b"bad").unwrap();
+        // The entrypoint only checks presence; it does not attest integrity.
+        assert!(!needs_install(&root, FIXTURE).unwrap());
+        assert!(verify_file(&installed, FIXTURE[0].path, GOOD, false).is_err());
         let error = install(&root, FIXTURE, &Offline, &mut |_| {})
             .unwrap_err()
             .to_string();
@@ -387,7 +483,9 @@ mod tests {
     #[test]
     fn bad_download_never_publishes_and_a_retry_recovers() {
         let root = temp();
-        assert!(install(&root, FIXTURE, &Bytes(b"bad"), &mut |_| {}).is_err());
+        for body in [&b"bad"[..], &b"too large"[..]] {
+            assert!(install(&root, FIXTURE, &Bytes(body), &mut |_| {}).is_err());
+        }
         assert!(!manifest(FIXTURE).install_dir(&root).exists());
         assert!(!fs::read_dir(&root).unwrap().any(|e| {
             e.unwrap()
@@ -401,6 +499,33 @@ mod tests {
                 .1
         );
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn download_size_cap_rejects_excess_and_short_bodies() {
+        let mut sink = Vec::new();
+        let fetch = SizedFetch {
+            artifacts: FIXTURE,
+            inner: &Bytes(b"too large"),
+        };
+        assert!(
+            fetch
+                .fetch(FIXTURE[0].url, &mut sink)
+                .unwrap_err()
+                .contains("exceeds")
+        );
+        assert!(sink.is_empty());
+        let fetch = SizedFetch {
+            artifacts: FIXTURE,
+            inner: &Bytes(b"bad"),
+        };
+        assert!(
+            fetch
+                .fetch(FIXTURE[0].url, &mut sink)
+                .unwrap_err()
+                .contains("shorter")
+        );
+        assert_eq!(sink, b"bad");
     }
 
     #[test]
