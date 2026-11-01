@@ -6604,6 +6604,9 @@ def main() -> int:
             args.out.write_text(json.dumps(summary, indent=1), encoding="utf-8")
         return 1 if summary["uncaught"] else 0
     for n in names:
+        if args.out:
+            args.out.write_text(json.dumps({"complete": False, "planned_scenarios": names,
+                                           "scenarios": results}, default=str), encoding="utf-8")
         r = run_scenario(n, args.rust_bin, root, "golden" if args.mode == "golden" else "live",
                          args.record, tol)
         results.append(r)
@@ -6619,7 +6622,8 @@ def main() -> int:
     summary = {"scenarios": len(results), "steps": steps, "diff_steps": diff_steps, "stats": stats}
     print(json.dumps(summary))
     if args.out:
-        args.out.write_text(json.dumps({"summary": summary, "scenarios": results}, indent=1,
+        args.out.write_text(json.dumps({"complete": True, "planned_scenarios": names,
+                                       "summary": summary, "scenarios": results}, indent=1,
                                        default=str), encoding="utf-8")
     if args.mode == "calibrate":
         return 0

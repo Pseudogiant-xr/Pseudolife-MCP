@@ -464,12 +464,26 @@ def main() -> int:
     if args.mode == "golden" and not any(n in S.SCENARIOS for n in names):
         ap.error("golden mode requires at least one recorded scenario")
     root = daemons.scratch_root()
+    planned = [n for n in names if n in S.SCENARIOS]
+    if "mixed" in names and args.mode != "golden":
+        planned += ["mixed-chain (python first)", "mixed-chain (rust first)"]
+
+    def checkpoint(results):
+        if args.out and args.mode != "mutants":
+            args.out.write_text(json.dumps({"complete": False, "planned_scenarios": planned,
+                                           "results": results}, default=str), encoding="utf-8")
 
     def one_pass(mode: str):
-        results = [run_scenario(S.SCENARIOS[n](), args.rust_bin, root, mode, args.record)
-                   for n in names if n in S.SCENARIOS]
+        results = []
+        checkpoint(results)
+        for n in names:
+            if n in S.SCENARIOS:
+                results.append(run_scenario(S.SCENARIOS[n](), args.rust_bin, root, mode, args.record))
+                checkpoint(results)
         if "mixed" in names and mode != "golden":
-            results += [run_mixed(args.rust_bin, root, "python"), run_mixed(args.rust_bin, root, "rust")]
+            for first in ("python", "rust"):
+                results.append(run_mixed(args.rust_bin, root, first))
+                checkpoint(results)
         return results
 
     if args.mode == "mutants":
@@ -523,7 +537,8 @@ def main() -> int:
                "chain_problems": chain, "scenarios": len(results)}
     print(json.dumps(summary))
     if args.out:
-        args.out.write_text(json.dumps({"summary": summary, "results": results}, indent=1,
+        args.out.write_text(json.dumps({"complete": True, "planned_scenarios": planned,
+                                       "summary": summary, "results": results}, indent=1,
                                        default=str), encoding="utf-8")
     return 1 if diff_steps or state or chain else 0
 

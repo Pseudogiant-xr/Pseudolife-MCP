@@ -28,8 +28,11 @@ from pseudolife_memory import readiness  # noqa: E402  the one readiness contrac
 _SCRUB_PREFIXES = ("PSEUDOLIFE_",)
 # The provisioned PDFium root is the caller's, like the model cache: a
 # daemon's disposable home has none, and PDF ingest needs it.
+# Keep the oracle's explicit precision too: body evidence uses fp32 on
+# every runner, including CPUs whose product default would choose bf16.
 _KEEP = {"PSEUDOLIFE_TEST_PG_HOST_PORT", "PSEUDOLIFE_TEST_PG_LOGIN_FILE",
-         "PSEUDOLIFE_DAEMON_PDFIUM_DIR"}
+         "PSEUDOLIFE_DAEMON_PDFIUM_DIR", "PSEUDOLIFE_EMBEDDING_CPU_DTYPE",
+         "PSEUDOLIFE_DAEMON_RERANK_DIR"}
 
 
 def free_port() -> int:
