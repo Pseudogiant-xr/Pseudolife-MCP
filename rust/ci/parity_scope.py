@@ -167,8 +167,8 @@ SHIM_COMMANDS = {
 CODE_DIRS = re.compile(r"(?i)(rust|evals|pseudolife_memory|plugin|ops|tests|\.github)/")
 CODE_SUFFIX = re.compile(r"\.(py|ps1|psm1|sh|bash|bat|cmd|js|mjs|cjs|ts|rs|toml|yml|yaml)$")
 # The port's plan pages under rust/ that no Rust or parity job reads; the
-# scope job names them too. A page a job reads (PARITY.md, PORTING.md) or one
-# an evidence file hashes (PORT-STATE.md, PHASE3-READ-PATH.md) stays code.
+# scope job names them too. A page a job reads (PARITY.md) or one an evidence
+# file hashes (PORTING.md, PORT-STATE.md, PHASE3-READ-PATH.md) stays code.
 RUST_PLAN_DOCS = frozenset({"rust/CUTOVER.md", "rust/DEV.md", "rust/SEMANTICS-CHECKLIST.md"})
 
 

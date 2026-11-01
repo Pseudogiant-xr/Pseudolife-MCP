@@ -238,7 +238,11 @@ def test_the_plan_pages_counted_as_docs_are_read_by_no_code():
         except (UnicodeDecodeError, OSError):
             continue
         for number, line in enumerate(text.splitlines(), 1):
-            if line.lstrip().startswith(("#", "//", "*", "<!--")):
+            # A comment line may name a page; a Rust attribute (#[doc = ...],
+            # #![doc = include_str!(...)]) reads it. A text match cannot see a
+            # glob or a built-up name, so review still matters there.
+            text_line = line.lstrip()
+            if text_line.startswith(("#", "//", "*", "<!--")) and not text_line.startswith(("#[", "#![")):
                 continue
             readers += [f"{path}:{number}: {name}" for name in names if name in line]
     assert not readers, "code reads a plan page the scope job treats as docs: " + "; ".join(readers)
