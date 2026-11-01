@@ -1541,15 +1541,17 @@ jobs:
     env:
       PARITY_YIELD_MINUTES: '60'
       PARITY_MIN_FREE_GB: '8'
-      CARGO_TARGET_DIR: ${{ runner.temp }}/body-target
-      HF_HOME: ${{ runner.temp }}/body-huggingface
-      PSEUDOLIFE_DAEMON_MODELS_DIR: ${{ runner.temp }}/body-models
-      PSEUDOLIFE_DAEMON_PDFIUM_DIR: ${{ runner.temp }}/body-pdfium
       PSEUDOLIFE_DAEMON_ORT_THREADS: '1'
       PYTHONUNBUFFERED: '1'
     steps:
       - *selfhosted_disk
       - *selfhosted_lease
+      - name: Select body evidence directories
+        run: |
+          echo "CARGO_TARGET_DIR=$RUNNER_TEMP/body-target" >> "$GITHUB_ENV"
+          echo "HF_HOME=$RUNNER_TEMP/body-huggingface" >> "$GITHUB_ENV"
+          echo "PSEUDOLIFE_DAEMON_MODELS_DIR=$RUNNER_TEMP/body-models" >> "$GITHUB_ENV"
+          echo "PSEUDOLIFE_DAEMON_PDFIUM_DIR=$RUNNER_TEMP/body-pdfium" >> "$GITHUB_ENV"
       - uses: actions/checkout@v4
       - name: Body evidence / plan
         run: python3 rust/ci/body_evidence.py plan --out "$RUNNER_TEMP/body-evidence"

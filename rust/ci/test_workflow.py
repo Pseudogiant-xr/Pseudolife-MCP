@@ -1905,6 +1905,13 @@ def test_body_evidence_trigger_is_nightly_or_its_isolated_dispatch(event, mode, 
             assert Dispatch(event, [], set()).run(condition_text(jobs[name]["if"])) is False, name
 
 
+def test_job_environments_use_only_pre_runner_contexts():
+    # GitHub rejects the entire workflow before dispatch when runner.temp
+    # is used in job-level env; it is available only after a runner starts.
+    for name, job in workflow()["jobs"].items():
+        assert not re.search(r"\brunner[.\[]", json.dumps(job.get("env", {}))), name
+
+
 def test_body_evidence_reuses_runner_guards_and_never_gates():
     jobs = workflow()["jobs"]
     lane = jobs["body-evidence"]
