@@ -11,6 +11,8 @@ services:
         BUILD_TIME: ${PSEUDOLIFE_BUILD_TIME:-unknown}
         BUILD_SOURCE: checkout
     restart: unless-stopped
+    labels:
+      org.pseudolife.shadow.configuration: ${PSEUDOLIFE_SHADOW_CONFIGURATION:-}
     security_opt: [no-new-privileges:true]
     cap_drop: [ALL]
     mem_limit: ${PSEUDOLIFE_DAEMON_MEM_LIMIT:-6g}
@@ -20,7 +22,7 @@ services:
       options: {max-size: "10m", max-file: "3"}
     environment:
       PSEUDOLIFE_READ_ONLY: "1"
-      PSEUDOLIFE_MCP_DATABASE_URL: postgresql://pseudolife_shadow:${PSEUDOLIFE_SHADOW_DB_PASSWORD:?Run update --engine rust --shadow}@pseudolife-pg:5432/pseudolife_memory
+      PSEUDOLIFE_MCP_DATABASE_URL: postgresql://pseudolife_shadow:${PSEUDOLIFE_SHADOW_DB_PASSWORD:?Run update --engine rust --shadow}@pseudolife-pg:5432/${PSEUDOLIFE_SHADOW_DB_NAME:-pseudolife_memory}
       PSEUDOLIFE_MCP_HOST: 0.0.0.0
       PSEUDOLIFE_MCP_PORT: "8765"
       PSEUDOLIFE_MCP_DATA_DIR: /data

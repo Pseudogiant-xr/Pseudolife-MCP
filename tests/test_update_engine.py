@@ -222,13 +222,9 @@ def test_shadow_missing_support_refuses_without_changes(engine_host):
     assert not any("build" in a or "up" in a or a[1:2] == ["tag"] for a in s["calls"])
 
 
-def test_shadow_uses_only_shadow_service_and_keeps_password_on_rerun(engine_host, monkeypatch):
+def test_shadow_uses_only_shadow_service_and_keeps_password_on_rerun(shadow_host, monkeypatch):
     from pseudolife_memory import update_engine as eng
-    s = engine_host
-    (s["repo"] / "ops/sql").mkdir()
-    (s["repo"] / "ops/sql/shadow_reader_role.sql").write_text("SELECT 1;\n")
-    (s["repo"] / "rust/daemon/src/config.rs").write_text("PSEUDOLIFE_READ_ONLY\n")
-    s["health"]["read_only"] = True
+    s = shadow_host
     eng.deploy_engine(s["update"](shadow=True), s["repo"])
     saved = (s["repo"] / "ops/.env").read_bytes()
     monkeypatch.setattr(eng.secrets, "token_urlsafe", lambda *a: pytest.fail("password rotated"))
@@ -240,6 +236,171 @@ def test_shadow_uses_only_shadow_service_and_keeps_password_on_rerun(engine_host
         if "build" in a or "up" in a:
             assert a[-1] == eng.SHADOW_SERVICE
         assert "shadow_password" not in " ".join(a)
+
+
+@pytest.fixture
+def shadow_host(engine_host, monkeypatch):
+    from pseudolife_memory import update_engine as eng
+    s = engine_host
+    repo = s["repo"]
+    (repo / "ops/sql").mkdir()
+    (repo / "ops/sql/shadow_reader_role.sql").write_text("BEGIN;\nSELECT :'shadow_password';\nCOMMIT;\n")
+    (repo / "ops/Dockerfile.daemon-rust").write_text("FROM scratch\n")
+    (repo / "rust/daemon/src/config.rs").write_text("PSEUDOLIFE_READ_ONLY\n")
+    s["health"].update(read_only=True, ready=True, db="ok")
+    dsn = "postgresql://fixture:fixture@pseudolife-pg:5432/fixture"
+    main = s["config"]["services"][up.DAEMON_SERVICE]
+    main["environment"]["PSEUDOLIFE_MCP_DATABASE_URL"] = dsn
+    s["running"]["Config"]["Env"] = ["PSEUDOLIFE_MCP_DATABASE_URL=" + dsn]
+    shadow = s["config"]["services"][eng.SHADOW_SERVICE]
+    shadow.update(image="fixture-rust:checkout", build={"args": {"GIT_SHA": "a" * 40}},
+                  volumes=[{"type": "volume", "source": "state", "target": "/data", "read_only": True}],
+                  environment={"PSEUDOLIFE_READ_ONLY": "1", "PSEUDOLIFE_MCP_TOKEN": "fixture-bearer"}, labels={})
+    shadow["ports"][0]["target"] = 8765
+    original_run = up.run_cli
+    s["shadow"] = None
+
+    def run(argv, **kw):
+        args = list(map(str, argv))
+        env = kw.get("env") or {}
+        if "config" in args and any("rust-shadow" in a for a in args):
+            shadow["environment"]["PSEUDOLIFE_MCP_DATABASE_URL"] = (
+                "postgresql://pseudolife_shadow:" + env.get("PSEUDOLIFE_SHADOW_DB_PASSWORD", "missing")
+                + "@pseudolife-pg:5432/fixture")
+        if "ps" in args and args[-1] == eng.SHADOW_SERVICE:
+            s["calls"].append(args)
+            return 0, "fixture-shadow" if s["shadow"] else ""
+        if args[1:] == ["inspect", "fixture-shadow"]:
+            s["calls"].append(args)
+            return 0, json.dumps([s["shadow"]])
+        if "up" in args and args[-1] == eng.SHADOW_SERVICE and s["fail"] != "up":
+            s["shadow"] = {"State": {"Running": True}, "Config": {"Labels": {
+                "org.pseudolife.shadow.configuration": env.get("PSEUDOLIFE_SHADOW_CONFIGURATION")}}}
+        if "rm" in args and args[-1] == eng.SHADOW_SERVICE:
+            s["shadow"] = None
+        return original_run(argv, **kw)
+
+    monkeypatch.setattr(up, "run_cli", run)
+    return s
+
+
+def test_shadow_rerun_is_a_noop_and_python_removal_only_removes_shadow(shadow_host):
+    from pseudolife_memory import update_engine as eng
+    s = shadow_host
+    before = json.dumps(s["running"], sort_keys=True)
+    eng.deploy_engine(s["update"](shadow=True), s["repo"])
+    env_file = s["repo"] / "ops/.env"
+    saved = env_file.read_bytes(), env_file.stat().st_mtime_ns
+    s["calls"].clear()
+    eng.deploy_engine(s["update"](shadow=True), s["repo"])
+    assert not any("build" in a or "up" in a or "cp" in a for a in s["calls"])
+    assert (env_file.read_bytes(), env_file.stat().st_mtime_ns) == saved
+    s["calls"].clear()
+    eng.deploy_engine(s["update"]("python", shadow=True), s["repo"])
+    assert s["shadow"] is None
+    assert any("rm" in a and a[-1] == eng.SHADOW_SERVICE for a in s["calls"])
+    assert not any("up" in a or "build" in a or "psql" in a for a in s["calls"])
+    assert json.dumps(s["running"], sort_keys=True) == before
+    assert not (s["repo"] / eng.SELECTION).exists()
+    assert (env_file.read_bytes(), env_file.stat().st_mtime_ns) == saved
+
+
+@pytest.mark.parametrize("missing", ["overlay", "dockerfile", "sql", "setting", "loopback", "volume", "bank", "auth"])
+def test_shadow_preflight_refuses_before_password_or_mutation(shadow_host, missing):
+    from pseudolife_memory import update_engine as eng
+    s = shadow_host
+    paths = {"overlay": "ops/docker-compose.rust-shadow.yml", "dockerfile": "ops/Dockerfile.daemon-rust",
+             "sql": "ops/sql/shadow_reader_role.sql", "setting": "rust/daemon/src/config.rs"}
+    if missing in paths:
+        (s["repo"] / paths[missing]).unlink()
+    else:
+        service = s["config"]["services"][eng.SHADOW_SERVICE]
+        if missing == "loopback":
+            service["ports"][0]["host_ip"] = "0.0.0.0"
+        elif missing == "volume":
+            service["volumes"][0]["read_only"] = False
+        elif missing == "bank":
+            s["config"]["services"]["pseudolife-pg"]["environment"]["POSTGRES_DB"] = "another"
+        else:
+            service["environment"]["PSEUDOLIFE_MCP_TOKEN"] = ""
+    original = (s["repo"] / "ops/.env").read_bytes()
+    with pytest.raises(up.UpdateError, match="nothing was changed"):
+        eng.deploy_engine(s["update"](shadow=True), s["repo"])
+    assert (s["repo"] / "ops/.env").read_bytes() == original
+    assert not any("build" in a or "up" in a or "cp" in a or "-f" in a and "psql" in a for a in s["calls"])
+
+
+@pytest.mark.parametrize("field,value", [("read_only", False), ("ready", False), ("db", "error")])
+def test_shadow_failed_gate_removes_companion_and_preserves_python(shadow_host, field, value):
+    from pseudolife_memory import update_engine as eng
+    s = shadow_host
+    before = json.dumps(s["running"], sort_keys=True)
+    s["health"][field] = value
+    with pytest.raises(up.UpdateError, match="Python is unchanged"):
+        eng.deploy_engine(s["update"](shadow=True), s["repo"])
+    assert s["shadow"] is None
+    assert json.dumps(s["running"], sort_keys=True) == before
+    assert not (s["repo"] / eng.SELECTION).exists()
+
+
+def test_shadow_waits_for_model_provisioning_before_authenticated_gate(shadow_host):
+    from pseudolife_memory import update_engine as eng
+    s = shadow_host
+    eng.deploy_engine(s["update"](shadow=True), s["repo"])
+    launch = next(a for a in s["calls"] if "up" in a)
+    assert "--wait" in launch
+    assert int(launch[launch.index("--wait-timeout") + 1]) >= 1890
+
+
+def test_shadow_remove_needs_no_healthy_writer_or_read_only_sources(shadow_host):
+    from pseudolife_memory import update_engine as eng
+    s = shadow_host
+    s["shadow"] = {"State": {"Running": False}}
+    (s["repo"] / "ops/sql/shadow_reader_role.sql").unlink()
+    s["health"] = None
+    eng.deploy_engine(s["update"]("python", shadow=True), s["repo"])
+    assert s["shadow"] is None
+    assert not any("psql" in a or "up" in a or "build" in a for a in s["calls"])
+
+
+def test_shadow_removal_cli_dispatches_without_post_deploy_steps(shadow_host, monkeypatch):
+    from contextlib import nullcontext
+    s = shadow_host
+    s["shadow"] = {"State": {"Running": False}}
+    monkeypatch.setattr(up, "UpdateLock", nullcontext)
+    monkeypatch.setattr(up.Update, "checkout_post_deploy", lambda *a: pytest.fail("writer post-deploy"))
+    monkeypatch.setattr(up.Update, "maintainer_passkeys", lambda *a: pytest.fail("interactive setup"))
+    assert up.main(["--engine", "python", "--shadow", "--checkout", str(s["repo"])]) == 0
+    assert s["shadow"] is None
+
+
+def test_shadow_build_failure_does_not_save_password(shadow_host):
+    from pseudolife_memory import update_engine as eng
+    s = shadow_host
+    s["fail"] = "build"
+    original = (s["repo"] / "ops/.env").read_bytes()
+    with pytest.raises(up.UpdateError, match="build failed; Python is unchanged"):
+        eng.deploy_engine(s["update"](shadow=True), s["repo"])
+    assert (s["repo"] / "ops/.env").read_bytes() == original
+    assert s["shadow"] is None
+
+
+def test_shadow_role_failure_names_fix_and_never_starts_companion(shadow_host, monkeypatch):
+    from pseudolife_memory import update_engine as eng
+    s = shadow_host
+    run = up.run_cli
+
+    def fail_role(argv, **kw):
+        if "psql" in argv and "-f" in argv:
+            return 1, "private server diagnostics must not be printed"
+        return run(argv, **kw)
+
+    monkeypatch.setattr(up, "run_cli", fail_role)
+    with pytest.raises(up.UpdateError, match="SELECT-only shadow role.*Python is unchanged") as failure:
+        eng.deploy_engine(s["update"](shadow=True), s["repo"])
+    assert "private server" not in str(failure.value)
+    assert not any("up" in a for a in s["calls"])
+    assert s["shadow"] is None
 
 
 @pytest.mark.parametrize("changed", ["bank", "state", "port"])
