@@ -143,18 +143,22 @@ class ShadowUpdate:
             return
         # Append to the existing file: replacing it would change its owner,
         # mode or Windows ACL and break other accounts using this host config.
-        with self.e.env_file.open("r+b") as stream:
+        with self.e.env_file.open("r+b", buffering=0) as stream:
             if stream.read() != self.original_bytes:
                 raise up.UpdateError("the host env file changed during the shadow build; its edits were preserved; retry after the configuration is settled")
             try:
-                stream.write(addition)
-                stream.flush()
+                remaining = memoryview(addition)
+                while remaining:
+                    written = stream.write(remaining)
+                    if not written:
+                        raise OSError("env append made no progress")
+                    remaining = remaining[written:]
                 os.fsync(stream.fileno())
             except BaseException:
                 # An interrupted/failed append must not leave a partial key;
-                # the original settings have never been rewritten.
-                stream.truncate(len(self.original_bytes))
-                stream.flush()
+                # truncate the descriptor directly, without flushing pending
+                # output back onto a disk that may still be full.
+                os.ftruncate(stream.fileno(), len(self.original_bytes))
                 os.fsync(stream.fileno())
                 raise
 

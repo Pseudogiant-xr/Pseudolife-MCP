@@ -1,6 +1,7 @@
 """Opt-in engine selection: refusal, persistence, activation and rollback."""
 import json
 import os
+import errno
 import gzip
 import io
 import tarfile
@@ -410,6 +411,79 @@ def test_shadow_failed_password_append_restores_original_bytes(shadow_host, monk
     assert env_file.read_bytes() == original
     assert env_file.stat().st_ino == inode
     assert not any("up" in a or "cp" in a for a in s["calls"])
+
+
+@pytest.mark.parametrize("short_write", [False, True])
+def test_shadow_persistent_enospc_restores_env_without_retrying_buffered_output(shadow_host, monkeypatch, short_write):
+    from pseudolife_memory import update_engine as eng
+    s = shadow_host
+    env_file = s["repo"] / "ops/.env"
+    original = env_file.read_bytes()
+    inode = env_file.stat().st_ino
+    open_file = Path.open
+    writes = []
+
+    class FullDisk(io.FileIO):
+        def write(self, data):
+            writes.append(len(data))
+            if short_write and len(writes) == 1:
+                return super().write(data[:len(b"\nPSEUDOLIFE_SHADOW_DB_PASSWORD=")])
+            # Persistent failure, including every attempted buffer flush.
+            raise OSError(errno.ENOSPC, "synthetic full disk")
+
+    def open_full_disk(path, mode="r", buffering=-1, **kw):
+        if path == env_file and mode == "r+b":
+            raw = FullDisk(path, mode)
+            return raw if buffering == 0 else io.BufferedRandom(raw)
+        return open_file(path, mode, buffering=buffering, **kw)
+
+    monkeypatch.setattr(Path, "open", open_full_disk)
+    with pytest.raises(up.UpdateError, match="cannot save the shadow setup files"):
+        eng.deploy_engine(s["update"](shadow=True), s["repo"])
+    assert env_file.read_bytes() == original
+    assert env_file.stat().st_ino == inode
+    assert len(writes) == (2 if short_write else 1)
+    assert not any("up" in a or "cp" in a for a in s["calls"])
+    # With space available again, the ordinary retry needs no file repair.
+    monkeypatch.setattr(Path, "open", open_file)
+    eng.deploy_engine(s["update"](shadow=True), s["repo"])
+    assert s["shadow"] is not None
+    assert env_file.read_text().count("PSEUDOLIFE_SHADOW_DB_PASSWORD=") == 1
+
+
+@pytest.mark.parametrize("write_limit", [0, 3])
+def test_shadow_raw_append_handles_short_writes_and_zero_progress(shadow_host, monkeypatch, write_limit):
+    from pseudolife_memory import update_engine as eng
+    s = shadow_host
+    env_file = s["repo"] / "ops/.env"
+    original = env_file.read_bytes()
+    open_file = Path.open
+
+    class LimitedWrite(io.FileIO):
+        attempts = 0
+
+        def write(self, data):
+            self.attempts += 1
+            assert write_limit or self.attempts == 1, "zero-progress append retried"
+            return super().write(data[:write_limit])
+
+    def open_limited(path, mode="r", buffering=-1, **kw):
+        if path == env_file and mode == "r+b":
+            assert buffering == 0
+            return LimitedWrite(path, mode)
+        return open_file(path, mode, buffering=buffering, **kw)
+
+    monkeypatch.setattr(Path, "open", open_limited)
+    if write_limit == 0:
+        with pytest.raises(up.UpdateError, match="cannot save the shadow setup files"):
+            eng.deploy_engine(s["update"](shadow=True), s["repo"])
+        assert env_file.read_bytes() == original
+        assert s["shadow"] is None
+    else:
+        eng.deploy_engine(s["update"](shadow=True), s["repo"])
+        assert s["shadow"] is not None
+        assert env_file.read_bytes().startswith(original)
+        assert env_file.read_text().count("PSEUDOLIFE_SHADOW_DB_PASSWORD=") == 1
 
 
 def test_shadow_new_env_file_is_private(shadow_host):
