@@ -6,7 +6,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-## [0.21.0] - 2026-11-01 — The Rust daemon completes the passkey-signed maintainer actions and runs dreams from the Console, keeps search counts and idle-session titles across restarts, `doctor` stops blaming the MCP SDK for a stray `mcp.py`, and five unused Console routes are deprecated
+## [0.21.0] - 2026-11-01 — The Rust daemon completes the passkey-signed maintainer actions and runs dreams from the Console, keeps search counts across restarts and gives idle sessions meaningful titles, `doctor` stops blaming the MCP SDK for a stray `mcp.py`, and five unused Console routes are deprecated
 
 ### Fixed (2026-11-01 — Preserve search access counts across daemon restarts)
 - Rust autosave and clean-exit saves now synchronize resident entry access counts with PostgreSQL alongside the counters row. Search counter updates participate in write admission and shutdown draining, and saves cannot split a ranking update or overwrite a concurrent entry-access increment.
