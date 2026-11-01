@@ -53,7 +53,9 @@ model-root overrides. They do not override checksums. Qwen's graph path is
 reranker's graph is `reranker/model.onnx`. Both roots contain `tokenizer.json`
 and pinned metadata. The configured default Qwen checkpoint is verified before
 embedding readiness; architecture alone never selects that checkpoint's pins.
-The optional reranker independently verifies its inputs before first use.
+The optional reranker independently verifies its inputs in a startup task,
+off the readiness path, in both normal and read-only shadow mode. Search reuses
+that task's cached result, including a refusal, without loading or logging twice.
 Missing or changed reranker files disable reranking with a prominent log naming
 the cause and repair, while store/search remain available. The existing health
 schema has no reranker field. Ordinary loading never downloads. Missing or
@@ -79,7 +81,7 @@ The image entrypoint runs `provision models --if-missing` before its default
 daemon command, then `exec`s the daemon. This presence-only preparation mode
 installs an absent bundle and leaves existing bytes for the loader to verify;
 it never asserts readiness. A cached container start hashes the embedding once,
-and the optional reranker once at first use. Fresh installation also verifies
+and the optional reranker once in its startup task. Fresh installation also verifies
 downloads and the staged/published bundle before loading. A configured
 `PSEUDOLIFE_DAEMON_ONNX_DIR` skips automatic provisioning, so an offline local
 model override does not trigger unrelated downloads. An explicit
@@ -99,8 +101,14 @@ compiled pin source and binds that cache to the same named volume. It runs
 before `compose up --wait`, so download time is outside the service readiness
 deadline. Direct first start still provisions automatically; a health-timed
 launcher should likewise provision before starting its readiness timer. The
-entrypoint announces the provisioning phase and each artifact download; the
-image grants that phase a 30-minute health start period instead of 90 seconds.
+entrypoint announces the provisioning phase and each artifact download. A
+timestamp marker grants only that active phase up to 30 minutes of health
+grace; completion, failure and restart clear it. Outside that phase, health
+requires the daemon's `ready: true`, with the normal 90-second start period
+and five 15-second retries. A warm failure therefore becomes unhealthy in
+about 2.5 minutes instead of waiting 30 minutes. During provisioning Docker
+reports healthy with `starting: model provisioning` in the healthcheck output;
+clients must still wait for the daemon's readiness response.
 
 Downloads are capped at each artifact's pinned byte size before bytes reach
 the disk sink; short bodies are also refused. The shared HTTPS-only client
@@ -113,6 +121,17 @@ flags can remain set in the image. Network isolation is tested with Docker
 `--network none`, not inferred from environment flags.
 
 ### Correctness evidence and limits
+
+`test_container.py::test_default_embedder_stores_and_searches_without_a_reranker`
+is an opt-in Linux integration test. Set `PSEUDOLIFE_TEST_MODEL_BINARY` to the
+native binary, `PSEUDOLIFE_TEST_MODEL_ROOT` to the pinned embedding directory,
+`ORT_DYLIB_PATH` to its CPU runtime, and `PSEUDOLIFE_TEST_MODEL_DATABASE_URL`
+to an initialized disposable database named `s1_*` or `pl_cf_*`. Run
+`python -m unittest discover -s rust/daemon -p test_container.py`. It checks
+the missing-reranker diagnostic before the first request, then successful
+store/search and readiness with no second diagnostic. The test runner owns
+database creation and cleanup. The W2-D search differential separately refuses
+to claim rerank agreement when a requested reranker was disabled.
 
 Run `harness/embedding.py --accepted-fp32 --qwen-position-ids-deferred` with
 the provisioned embedding directory and a Python checkpoint from the pinned

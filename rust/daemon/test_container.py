@@ -6,7 +6,9 @@ import json
 import re
 import os
 import subprocess
+import sys
 import tempfile
+import time
 from pathlib import Path
 import threading
 import unittest
@@ -119,9 +121,14 @@ class ContainerTests(unittest.TestCase):
             root = Path(temporary)
             calls = root / "calls"
             daemon = root / "pseudolife-daemon"
-            daemon.write_text('#!/bin/sh\nprintf "%s\\n" "$*" >> "$CALLS"\n')
+            daemon.write_text('#!/bin/sh\n'
+                              'if [ "$*" = "provision models --if-missing" ]; then\n'
+                              '  test -s "$TMPDIR/pseudolife-model-provisioning" || exit 8\n'
+                              '  test "${FAIL:-0}" = 0 || exit 7\n'
+                              'else test ! -e "$TMPDIR/pseudolife-model-provisioning" || exit 9; fi\n'
+                              'printf "%s\\n" "$*" >> "$CALLS"\n')
             daemon.chmod(0o755)
-            env = dict(os.environ, PATH=str(root) + os.pathsep + os.environ["PATH"], CALLS=str(calls))
+            env = dict(os.environ, PATH=str(root) + os.pathsep + os.environ["PATH"], CALLS=str(calls), TMPDIR=str(root))
             env.pop("PSEUDOLIFE_DAEMON_ONNX_DIR", None)
             entrypoint = str(ROOT / "ops/provision-daemon-models.sh")
             for args, override, expected in [
@@ -135,7 +142,75 @@ class ContainerTests(unittest.TestCase):
                     env["PSEUDOLIFE_DAEMON_ONNX_DIR"] = override
                 subprocess.run(["sh", entrypoint, *args], env=env, check=True)
                 self.assertEqual(calls.read_text().splitlines(), expected)
-        self.assertIn("--start-period=30m", (ROOT / "ops/Dockerfile.daemon-rust").read_text())
+            env["FAIL"] = "1"
+            result = subprocess.run(["sh", entrypoint], env=env)
+            self.assertEqual(result.returncode, 7)
+            self.assertFalse((root / "pseudolife-model-provisioning").exists())
+
+    @unittest.skipIf(os.name == "nt", "the image healthcheck runs on Linux")
+    def test_health_grace_only_covers_the_active_bounded_provisioning_phase(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for name, script in {"date": 'printf "%s\\n" "$NOW"',
+                                 "curl": 'printf "%s\\n" "$HEALTH_BODY"; exit "$CURL_EXIT"'}.items():
+                command = root / name
+                command.write_text("#!/bin/sh\n" + script + "\n")
+                command.chmod(0o755)
+            env = dict(os.environ, PATH=str(root) + os.pathsep + os.environ["PATH"],
+                       TMPDIR=str(root), NOW="101", HEALTH_BODY='{"ready":false}', CURL_EXIT="0")
+            marker = root / "pseudolife-model-provisioning"
+            def check():
+                return subprocess.run(["sh", str(ROOT / "ops/provision-daemon-models.sh"), "--healthcheck"],
+                                      env=env, capture_output=True).returncode
+            self.assertNotEqual(check(), 0)  # HTTP 200 is not readiness.
+            env["HEALTH_BODY"] = '{"ready": true}'
+            self.assertEqual(check(), 0)
+            env["CURL_EXIT"] = "7"  # No daemon during provisioning.
+            marker.write_text("100\n")
+            self.assertEqual(check(), 0)
+            env["NOW"] = "1900"
+            self.assertNotEqual(check(), 0)  # A stuck download has a bound.
+            marker.unlink()
+            env["NOW"] = "101"
+            self.assertNotEqual(check(), 0)  # Warm failure gets no phase grace.
+
+    @unittest.skipUnless(os.name != "nt" and os.environ.get("PSEUDOLIFE_TEST_MODEL_BINARY"),
+                         "opt-in Linux integration: model binary/root and initialized disposable DSN")
+    def test_default_embedder_stores_and_searches_without_a_reranker(self):
+        import psycopg.conninfo
+        sys.path.insert(0, str(ROOT / "rust/daemon/harness"))
+        import w2d_search as search
+        dsn = os.environ["PSEUDOLIFE_TEST_MODEL_DATABASE_URL"]
+        self.assertTrue(psycopg.conninfo.conninfo_to_dict(dsn)["dbname"].startswith(("s1_", "pl_cf_")),
+                        "the model startup test requires a disposable database")
+        with tempfile.TemporaryDirectory() as temporary:
+            home = search.daemons.make_home(Path(temporary), "without-reranker", search.config_for(search.Scenario()))
+            env = search.daemons.base_env(home, dict(search.common_env(dsn),
+                ORT_DYLIB_PATH=os.environ["ORT_DYLIB_PATH"],
+                PSEUDOLIFE_DAEMON_ONNX_DIR=os.environ["PSEUDOLIFE_TEST_MODEL_ROOT"],
+                PSEUDOLIFE_DAEMON_ORT_THREADS="3"))
+            self.assertNotIn("PSEUDOLIFE_DAEMON_RERANK_DIR", env)
+            daemon = search.daemons.rust_daemon(Path(os.environ["PSEUDOLIFE_TEST_MODEL_BINARY"]),
+                                               home, search.daemons.free_port(), env)
+            try:
+                daemon.start(wait_s=180)
+                cause = "Cross-encoder reranker failed to load (model artifact is missing or unsafe:"
+                deadline = time.monotonic() + 10
+                while cause not in daemon.log.read_text() and time.monotonic() < deadline:
+                    time.sleep(0.05)
+                self.assertEqual(daemon.log.read_text().count(cause), 1, daemon.log.read_text())  # Before any store/search.
+                text = "Default pinned embedding works without the optional reranker."
+                stored = search.mcp_call(daemon.port, search.mcp_case("store", {"text": text}, tool="memory_store"), None)
+                self.assertEqual(stored["status"], 200, stored)
+                found = search.mcp_call(daemon.port, search.mcp_case("search", {"query": text, "rerank": True}), None)
+                self.assertEqual(found["status"], 200, found)
+                self.assertIn(text, json.dumps(found))
+                self.assertEqual(daemon.log.read_text().count(cause), 1)  # Reuses the disabled state.
+                health = search.call(daemon.port, "GET", "/health", [])
+                self.assertTrue(health["json"]["ready"])
+                self.assertEqual(health["json"]["embedder"]["backend"], "onnx")
+            finally:
+                daemon.stop()
 
     def test_provisioned_layout_matches_the_default_loader(self):
         import tempfile

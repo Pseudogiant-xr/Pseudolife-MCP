@@ -59,9 +59,9 @@ ENV PSEUDOLIFE_BUILD_GIT_SHA=$GIT_SHA \
     PSEUDOLIFE_BUILD_TIME=$BUILD_TIME \
     PSEUDOLIFE_BUILD_SOURCE=$BUILD_SOURCE
 EXPOSE 8765
-# A cold first start can download models before the daemon starts. Health is
-# still reported immediately once ready; CI provisions before its own timer.
-HEALTHCHECK --interval=15s --timeout=5s --start-period=30m --retries=5 \
-    CMD curl --fail --silent --max-time 3 http://127.0.0.1:8765/health > /dev/null || exit 1
+# Only an active provisioning phase gets download grace; warm starts retain
+# the normal failure budget and must report model readiness, not just HTTP 200.
+HEALTHCHECK --interval=15s --timeout=5s --start-period=90s --retries=5 \
+    CMD ["/usr/local/bin/provision-daemon-models", "--healthcheck"]
 ENTRYPOINT ["/usr/local/bin/provision-daemon-models"]
 CMD ["pseudolife-daemon"]

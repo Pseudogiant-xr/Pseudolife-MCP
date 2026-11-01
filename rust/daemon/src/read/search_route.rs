@@ -74,7 +74,7 @@ pub(crate) fn normalize_tags(tags: &[String]) -> Vec<String> {
     out
 }
 
-/// The cross-encoder, loaded on first use from the provisioned model cache
+/// The cross-encoder, prepared at startup from the provisioned model cache
 /// or `PSEUDOLIFE_DAEMON_RERANK_DIR`
 /// (`reranker.py:_ensure_loaded`): a failed load disables it for the life of
 /// the process.
@@ -83,6 +83,13 @@ pub(crate) struct LazyReranker {
 }
 
 impl LazyReranker {
+    pub(crate) fn prepare() {
+        // Requests can enable reranking even when its config default is off.
+        // Optional loading never blocks readiness. Search reuses this same
+        // state, including a logged refusal, without hashing again.
+        tokio::task::spawn_blocking(|| Self::get().model());
+    }
+
     pub(crate) fn get() -> &'static LazyReranker {
         static SLOT: OnceLock<LazyReranker> = OnceLock::new();
         SLOT.get_or_init(|| LazyReranker {

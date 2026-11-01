@@ -318,6 +318,7 @@ fn main() {
             dsn,
             auth_configured,
         ));
+        read::search_route::LazyReranker::prepare();
         let background = background::Background::default();
         background.start_background_durability(service.clone(), autosave_every);
         background.start_session_reaper(service.clone(), reap_every, idle_seconds);
