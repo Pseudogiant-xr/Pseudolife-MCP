@@ -238,7 +238,7 @@ pub(crate) fn params_for(svc: &Service, req: &Request, k: usize) -> Params {
             skip_margin: cfg.reranker.skip_margin,
             model_name: cfg.reranker.model_name.clone(),
         },
-        count_access: req.count_access,
+        count_access: req.count_access && !svc.config.read_only,
         now: now(),
         filters_json: json!({
             "bands": req.bands,
@@ -272,8 +272,11 @@ pub async fn run(svc: &Service, ready: &Arc<Ready>, req: Request) -> anyhow::Res
     };
     let hide_superseded = cfg.hide_superseded;
     // A served reference hit's `access_count` (its entry is built per search).
-    let ref_accesses =
-        i64::from(req.count_access && !crate::mutants::active("search-no-access-bump"));
+    let ref_accesses = i64::from(
+        req.count_access
+            && !svc.config.read_only
+            && !crate::mutants::active("search-no-access-bump"),
+    );
     let floor = cfg.search_confidence_floor;
     let cache_size = svc.config.embedding.cache_size;
     let embedder = ready.embedder.clone();

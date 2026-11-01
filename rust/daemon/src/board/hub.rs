@@ -173,14 +173,18 @@ impl Board {
         headers: &HashMap<String, String>,
         principal: &str,
     ) -> Result<Value> {
+        let mut params = Map::new();
+        if self.service.config.read_only {
+            params.insert("read_only".into(), Value::Bool(true));
+        }
         if crate::mutants::active("mcp-binding-hub") {
-            return self.invoke("context", Map::new(), headers, principal).await;
+            return self.invoke("context", params, headers, principal).await;
         }
         let board = self.clone();
         let (headers, principal) = (headers.clone(), principal.to_string());
         tokio::spawn(async move {
             board
-                .dispatch("context", Map::new(), &headers, &principal)
+                .dispatch("context", params, &headers, &principal)
                 .await
         })
         .await

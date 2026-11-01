@@ -353,6 +353,9 @@ pub async fn payload(svc: &Service, principals: &crate::auth::PrincipalStore) ->
     p.insert("version".into(), json!(env!("CARGO_PKG_VERSION")));
     p.insert("schema".into(), json!(SCHEMA));
     p.insert("storage".into(), json!("postgres"));
+    if svc.config.read_only {
+        p.insert("read_only".into(), json!(true));
+    }
     p.insert("auth".into(), json!(svc.auth_configured));
     p.insert("bank".into(), Value::Null);
     p.insert(

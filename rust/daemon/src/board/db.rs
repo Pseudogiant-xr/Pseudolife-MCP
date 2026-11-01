@@ -56,12 +56,22 @@ mod tests;
 
 pub struct Conn {
     dsn: String,
+    read_only: bool,
     client: Option<Client>,
 }
 
 impl Conn {
     pub fn new(dsn: String) -> Conn {
-        Conn { dsn, client: None }
+        Conn {
+            dsn,
+            client: None,
+            read_only: false,
+        }
+    }
+
+    pub fn with_read_only(mut self, read_only: bool) -> Self {
+        self.read_only = read_only;
+        self
     }
 
     async fn connect(&self) -> Result<Client> {
@@ -78,6 +88,11 @@ impl Conn {
         client
             .batch_execute("SET lock_timeout = '5s'; SET search_path TO public")
             .await?;
+        if self.read_only {
+            client
+                .batch_execute("SET default_transaction_read_only = on")
+                .await?;
+        }
         Ok(client)
     }
 
