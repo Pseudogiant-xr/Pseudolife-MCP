@@ -81,6 +81,14 @@ image layer. First-start provisioning keeps downloads out of image builds and
 lets reinstall/update reuse the same verified cache. Native installers invoke
 the same command; installer and updater wiring belongs to B11.
 
+The disposable preparation Compose stack keeps `/data` on tmpfs but mounts a
+disk-backed named volume at `/models`. CI restores a model cache keyed on the
+compiled pin source and binds that cache to the same named volume. It runs
+`compose run --rm --no-deps rust-daemon pseudolife-daemon provision models`
+before `compose up --wait`, so download time is outside the service readiness
+deadline. Direct first start still provisions automatically; a health-timed
+launcher should likewise provision before starting its readiness timer.
+
 The explicit native provision command uses HTTPS directly, independent of
 the Python-library flags `HF_HUB_OFFLINE` and `TRANSFORMERS_OFFLINE`. Those
 flags can remain set in the image. Network isolation is tested with Docker

@@ -96,6 +96,19 @@ class ContainerTests(unittest.TestCase):
             self.assertFalse(target.exists())
             self.assertFalse(target.with_suffix(".onnx.partial").exists())
 
+    def test_preparation_cache_is_on_disk_and_provisioned_before_health_wait(self):
+        compose = (ROOT / "ops/docker-compose.rust.yml").read_text()
+        self.assertIn("PSEUDOLIFE_DAEMON_MODELS_DIR: /models", compose)
+        self.assertIn("- models:/models", compose)
+        self.assertIn("\nvolumes:\n  models: {}", compose)
+        job = (ROOT / ".github/workflows/rust.yml").read_text().split(
+            "\n  daemon-image:", 1)[1].split("\n  parity:", 1)[0]
+        self.assertIn("uses: actions/cache@v4", job)
+        self.assertIn("hashFiles('rust/daemon/src/model_provision.rs')", job)
+        self.assertIn("device: ${W3J_MODELS_CACHE}", job)
+        self.assertLess(job.index("run --rm --no-deps rust-daemon pseudolife-daemon provision models"),
+                        job.index("up --no-build --wait --wait-timeout 180"))
+
     def test_provisioned_layout_matches_the_default_loader(self):
         import tempfile
         from unittest.mock import patch
