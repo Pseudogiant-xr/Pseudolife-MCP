@@ -6,6 +6,44 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-11-01 — The Rust daemon completes the passkey-signed maintainer actions and runs dreams from the Console, keeps search counts and idle-session titles across restarts, `doctor` stops blaming the MCP SDK for a stray `mcp.py`, and five unused Console routes are deprecated
+
+### Fixed (2026-11-01 — Preserve search access counts across daemon restarts)
+- Rust autosave and clean-exit saves now synchronize resident entry access counts with PostgreSQL alongside the counters row. Search counter updates participate in write admission and shutdown draining, and saves cannot split a ranking update or overwrite a concurrent entry-access increment.
+
+### Fixed (2026-11-01 — Idle Rust sessions keep meaningful titles)
+- The Rust daemon now derives content titles when it closes idle, nonempty sessions that still have generic names, and persists the matching entry title stamps across restarts.
+
+### Added (2026-11-01 — complete passkey-signed maintainer actions in the Rust Console)
+
+- The Rust daemon now completes maintainer passkey enrolment, role changes, messages, cancellation, withdrawal and self-revocation from the Console. These six routes previously returned 501. They verify the signed challenge, credential and nonce before changing the board, keep refused actions from spending a challenge, and preserve the enrolment confirmation and quarantine rules.
+
+### Fixed (2026-11-01 — a stray `mcp.py` in the working directory no longer makes `doctor` blame the MCP SDK)
+- `pseudolife-mcp doctor` checks the shim by starting it as `python -m
+  pseudolife_memory.cli`, which puts the working directory first on
+  `sys.path`. Run from a directory holding a file named `mcp.py` (one turned
+  up in the temp directory), the shim it started imported that file instead
+  of the MCP SDK, so doctor failed with "this environment's MCP SDK predates
+  v2" and advised a pip install that could not help. The check now starts
+  the shim from a fresh, empty directory of its own, as the installed
+  launcher already does. A relative `PSEUDOLIFE_MCP_TOKEN_FILE` is resolved
+  first, and a doctor run from a source checkout still checks that
+  checkout's code.
+- When a file `mcp.py` or a package folder `mcp` (one holding
+  `__init__.py`) does hide the SDK (any `python -m` or `python -c` run from
+  its directory), the shim's SDK check names that path and says to move or
+  rename it, or start from another directory, instead of blaming the SDK
+  version; doctor's recovery advice says the same when the SDK check or an
+  import failed. A genuinely old or missing SDK still gets the pip command.
+
+### Added (2026-11-01 — Run dreams from the Rust Console)
+
+- The Rust daemon now serves `POST /api/dream/run` through the existing dream service, preserving Console limit coercion, extractor selection and the shared refusal while a dream is already running.
+
+### Deprecated (2026-11-01 — retire unused Console REST routes)
+- Under D9 / Proposal A / B2r (decided 2026-10-23), `POST /api/lessons/restore` and `POST /api/world/restore` are deprecated for removal in a later release; use `memory_graph_review(action="restore_slot")` with the matching store instead.
+- `GET /api/curation/retired`, `GET /api/graph/communities` and `GET /api/graph/proposal-evidence` are deprecated for removal in a later release (no replacement; no caller). Python handlers remain unchanged; Rust keeps its declared `501` responses for all five routes.
+
 ## [0.20.0] - 2026-11-01 — Ingested documents and the memory counters move into the bank (schema v57), the daemon records which machines last connected and which tokens it refused (schema v58), a dead token is named when a session starts, client-only installs offer a daily job that keeps their clients on the daemon's release, the Docker daemon stops running as root, client machines update without Docker access, and the Rust daemon serves the dream, graph, recall, document and Console routes
 
 ### Added (2026-10-31 — Console graph reads in the Rust daemon)
