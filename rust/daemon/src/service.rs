@@ -654,9 +654,9 @@ impl Service {
 
     /// `_persist_all`'s counters arm for `autosave_if_changed`: only when the
     /// bank or cortex changed since the last save, or the last counters
-    /// write failed. Entries, access
-    /// counts and the canonical stores write through here, so the counters
-    /// row is the one thing these saves add. A failed write is logged and
+    /// write failed. Entries and canonical stores write through; searches
+    /// accrue access counts in memory, so a save synchronizes those counts
+    /// along with the counters row. A failed counters write is logged and
     /// retried by the next autosave, as in Python.
     async fn save_counters(&self) -> Result<(), String> {
         let mut inner = self.inner.lock().await;
@@ -692,6 +692,7 @@ impl Service {
         {
             return Ok(());
         }
+        let ws = ready.write.lock().await;
         let fp = crate::counters::fingerprint(&ready);
         let pending = self
             .counters_pending
@@ -700,7 +701,6 @@ impl Service {
             return Ok(());
         }
         let row = {
-            let ws = ready.write.lock().await;
             let bands: Vec<String> = self
                 .config
                 .memory
@@ -727,7 +727,40 @@ impl Service {
                 eprintln!("counters save failed: {}", crate::storage::error_text(&e));
             }
         }
+        // Python's _persist_all also synchronizes lazy retrieval counts.
+        // Keep the write lock through both snapshots and writes so a get's
+        // durable increment cannot be overwritten by an older snapshot.
+        let (ids, counts): (Vec<i64>, Vec<i64>) = ready
+            .bank
+            .read()
+            .expect("bank lock")
+            .entries
+            .iter()
+            .map(|entry| {
+                (
+                    entry.id,
+                    entry
+                        .access_count
+                        .load(std::sync::atomic::Ordering::Relaxed),
+                )
+            })
+            .unzip();
+        if let Err(error) = crate::txn::run(ready.storage.client(), |db| async move {
+            db.execute(
+                "UPDATE entries e SET access_count = v.ac::integer \
+                 FROM (SELECT unnest($1::bigint[]) AS id, unnest($2::bigint[]) AS ac) v \
+                 WHERE e.id = v.id AND e.access_count <> v.ac",
+                &[&ids, &counts],
+            )
+            .await
+            .map(|_| ())
+        })
+        .await
+        {
+            eprintln!("access-count sync failed: {error}");
+        }
         *self.last_saved.lock().expect("last saved lock") = Some(fp);
+        drop(ws);
         drop(inner);
         Ok(())
     }
