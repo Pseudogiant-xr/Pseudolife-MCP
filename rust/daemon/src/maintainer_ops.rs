@@ -14,7 +14,7 @@ use axum::response::Response;
 use hmac::{Hmac, Mac};
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
-use tokio_postgres::Client;
+use tokio_postgres::GenericClient;
 
 use crate::board::error::BoardError;
 use crate::board::lease::{
@@ -26,7 +26,18 @@ use crate::http::{App, json_response};
 use crate::read::maintainer::{gate, refusal};
 
 /// The POST registrations this module answers.
-pub(crate) const PATHS: &[&str] = &["/api/maintainer/challenge"];
+pub(crate) const PATHS: &[&str] = &[
+    "/api/maintainer/challenge",
+    "/api/maintainer/enrol",
+    "/api/maintainer/role",
+    "/api/maintainer/send",
+    "/api/maintainer/cancel",
+    "/api/maintainer/repudiate",
+    "/api/maintainer/revoke",
+];
+mod actions;
+mod mail;
+mod roles;
 
 /// `CHALLENGE_TTL` (seconds).
 const CHALLENGE_TTL: i64 = 120;
@@ -105,7 +116,9 @@ pub(crate) async fn route(
     if let Err(refused) = gate(app, h) {
         return *refused;
     }
-    debug_assert_eq!(path, "/api/maintainer/challenge");
+    if path != "/api/maintainer/challenge" {
+        return action_route(app, path, h, body).await;
+    }
     let cfg = &app.board.config;
     let rp_id = cfg.maintainer_rp_id.clone();
     let answer = app
@@ -213,7 +226,7 @@ fn hold(value: Option<&Value>) -> Outcome<i64> {
 // ── store reads ────────────────────────────────────────────────────────────
 
 /// `live_keys`: pending or active passkeys.
-async fn live_keys(c: &Client) -> Outcome<i64> {
+async fn live_keys(c: &impl GenericClient) -> Outcome<i64> {
     let row = c
         .query_one(
             "SELECT count(*) FROM maintainer_passkeys WHERE state IN ('pending','active')",
@@ -224,7 +237,7 @@ async fn live_keys(c: &Client) -> Outcome<i64> {
 }
 
 /// `signing_keys`' credential ids: active and past their quarantine.
-async fn signing_keys(c: &Client, now: f64) -> Outcome<Vec<String>> {
+async fn signing_keys(c: &impl GenericClient, now: f64) -> Outcome<Vec<String>> {
     let rows = c
         .query(
             "SELECT credential_id, active_from FROM maintainer_passkeys WHERE state='active' \
@@ -240,7 +253,7 @@ async fn signing_keys(c: &Client, now: f64) -> Outcome<Vec<String>> {
 }
 
 /// Every passkey not revoked, for `excludeCredentials`.
-async fn unrevoked_keys(c: &Client) -> Outcome<Vec<String>> {
+async fn unrevoked_keys(c: &impl GenericClient) -> Outcome<Vec<String>> {
     let rows = c
         .query(
             "SELECT credential_id, state FROM maintainer_passkeys \
@@ -267,7 +280,10 @@ struct Recipient {
 
 /// `recipient_row`: a full agent id, registered and not revoked, and a
 /// session's own address (never a reserved row or a subagent's).
-async fn recipient_row(c: &Client, agent_id: Option<&Value>) -> Outcome<(String, Recipient)> {
+async fn recipient_row(
+    c: &impl GenericClient,
+    agent_id: Option<&Value>,
+) -> Outcome<(String, Recipient)> {
     let Some(Value::String(id)) = agent_id else {
         return Err(refuse("recipient_unknown", "agent_id"));
     };
@@ -302,7 +318,11 @@ async fn recipient_row(c: &Client, agent_id: Option<&Value>) -> Outcome<(String,
 }
 
 /// `recipient`: the preview a challenge carries.
-async fn recipient(c: &Client, agent_id: Option<&Value>, now: f64) -> Outcome<Map<String, Value>> {
+async fn recipient(
+    c: &impl GenericClient,
+    agent_id: Option<&Value>,
+    now: f64,
+) -> Outcome<Map<String, Value>> {
     let (id, row) = recipient_row(c, agent_id).await?;
     let duplicate = !row.label.is_empty()
         && c.query_opt(
@@ -339,7 +359,7 @@ async fn recipient(c: &Client, agent_id: Option<&Value>, now: f64) -> Outcome<Ma
 /// `role_holder`: the live holder of a role lease; for
 /// `conductor:<project>` a hold under the role's old name
 /// (`delegate:<project>`) counts too, the new name first.
-async fn role_holder(c: &Client, name: &str, now: f64) -> Outcome<Value> {
+async fn role_holder(c: &impl GenericClient, name: &str, now: f64) -> Outcome<Value> {
     let names: Vec<String> = match conductor_project(name) {
         Some(project) if name.starts_with(CONDUCTOR_PREFIX) => CONDUCTOR_PREFIXES
             .iter()
@@ -358,7 +378,7 @@ async fn role_holder(c: &Client, name: &str, now: f64) -> Outcome<Value> {
 }
 
 /// `is_sent`: a maintainer message still on the board.
-async fn is_sent(c: &Client, message_id: Option<&Value>) -> Outcome<bool> {
+async fn is_sent(c: &impl GenericClient, message_id: Option<&Value>) -> Outcome<bool> {
     let Some(Value::String(id)) = message_id else {
         return Ok(false);
     };
@@ -374,7 +394,7 @@ async fn is_sent(c: &Client, message_id: Option<&Value>) -> Outcome<bool> {
 // ── payloads ───────────────────────────────────────────────────────────────
 
 /// `_secret`: the MAC key, inserted the first time it is needed.
-async fn secret(c: &Client) -> Outcome<Vec<u8>> {
+async fn secret(c: &impl GenericClient) -> Outcome<Vec<u8>> {
     let mut fresh = [0u8; 32];
     getrandom::fill(&mut fresh).map_err(|_| refuse("coordination_unavailable", "randomness"))?;
     c.execute(
@@ -398,7 +418,7 @@ async fn secret(c: &Client) -> Outcome<Vec<u8>> {
 /// `issue`: the canonical payload for `purpose` carrying `fields`, and its
 /// MAC (`HMAC-SHA256` with the bank's secret, lower-case hex).
 async fn issue(
-    c: &Client,
+    c: &impl GenericClient,
     purpose: &str,
     mut fields: Map<String, Value>,
     now: f64,
@@ -469,7 +489,7 @@ fn create_options(rp_id: &str, payload: &str, unrevoked: &[String]) -> Value {
 
 /// `_role_preview`.
 async fn role_preview(
-    c: &Client,
+    c: &impl GenericClient,
     purpose: &str,
     fields: &Map<String, Value>,
     now: f64,
@@ -517,7 +537,12 @@ async fn role_preview(
 }
 
 /// `_challenge`.
-async fn challenge(c: &Client, rp_id: &str, body: &Map<String, Value>, now: f64) -> Outcome<Value> {
+async fn challenge(
+    c: &impl GenericClient,
+    rp_id: &str,
+    body: &Map<String, Value>,
+    now: f64,
+) -> Outcome<Value> {
     let legacy = match body.get("purpose") {
         Some(Value::String(p)) => LEGACY_ROLE_PURPOSES.iter().find(|(old, _)| old == p),
         _ => None,
@@ -644,3 +669,175 @@ async fn challenge(c: &Client, rp_id: &str, body: &Map<String, Value>, now: f64)
 #[cfg(test)]
 #[path = "maintainer_ops_tests.rs"]
 mod tests;
+
+async fn action_route(app: &App, path: &str, h: &HeaderMap, body: Map<String, Value>) -> Response {
+    let principal = match gate(app, h) {
+        Ok(p) => p,
+        Err(r) => return *r,
+    };
+    let board = app.board.clone();
+    let mail_action = matches!(path, "/api/maintainer/send" | "/api/maintainer/repudiate");
+    let ready = if mail_action {
+        match board.full_tier().await {
+            Ok(r) => Some(r),
+            Err(_) => return refusal("coordination_unavailable", None),
+        }
+    } else {
+        None
+    };
+    let path = path.to_string();
+    let owner = board.clone();
+    let answer = board
+        .with_store(move |store, client| {
+            Box::pin(async move {
+                let rp = &owner.config.maintainer_rp_id;
+                let origin = &owner.config.maintainer_origin;
+                let result: Outcome<Value> = async {
+                    match path.as_str() {
+                        "/api/maintainer/enrol" => {
+                            actions::enrol(store, client, rp, origin, &principal, &body).await
+                        }
+                        "/api/maintainer/cancel" => {
+                            actions::cancel(store, client, rp, origin, &principal, &body).await
+                        }
+                        "/api/maintainer/revoke" => {
+                            actions::revoke(store, client, rp, origin, &principal, &body).await
+                        }
+                        "/api/maintainer/role" => {
+                            actions::complete(
+                                store,
+                                client,
+                                rp,
+                                origin,
+                                &body,
+                                &[
+                                    "grant-conductor",
+                                    "revoke-conductor",
+                                    "assign-coordinator",
+                                    "revoke-coordinator",
+                                    "grant-delegate",
+                                    "revoke-delegate",
+                                ],
+                                |store, tx, fields, _key| {
+                                    Box::pin(async move { roles::role(store, tx, fields).await })
+                                },
+                            )
+                            .await
+                        }
+                        _ => {
+                            let purpose = if path.ends_with("/send") {
+                                "send"
+                            } else {
+                                "repudiate"
+                            };
+                            for attempt in 0..2 {
+                                let cached = owner
+                                    .maintainer_identity
+                                    .lock()
+                                    .expect("identity lock")
+                                    .clone();
+                                let identity = match cached {
+                                    Some(i) => i,
+                                    None => {
+                                        let params =
+                                            json!({"label":"maintainer","status":"maintainer"});
+                                        let row = store
+                                            .register(
+                                                client,
+                                                MAINTAINER_PRINCIPAL,
+                                                params.as_object().expect("object"),
+                                            )
+                                            .await?;
+                                        let i = (
+                                            row["agent_id"].as_str().expect("id").to_string(),
+                                            row["credential"]
+                                                .as_str()
+                                                .expect("credential")
+                                                .to_string(),
+                                        );
+                                        *owner.maintainer_identity.lock().expect("identity lock") =
+                                            Some(i.clone());
+                                        i
+                                    }
+                                };
+                                let stamp = crate::board::dispatch::stamp(
+                                    ready.as_ref().expect("mail full tier"),
+                                );
+                                let actor = principal.clone();
+                                let result = actions::complete(
+                                    store,
+                                    client,
+                                    rp,
+                                    origin,
+                                    &body,
+                                    &[purpose],
+                                    move |store, tx, fields, key| {
+                                        Box::pin(async move {
+                                            if purpose == "send" {
+                                                mail::send(
+                                                    store, tx, fields, &key.proof, &identity, stamp,
+                                                )
+                                                .await
+                                            } else {
+                                                mail::repudiate(
+                                                    store, tx, fields, &key.proof, &identity,
+                                                    stamp, &actor,
+                                                )
+                                                .await
+                                            }
+                                        })
+                                    },
+                                )
+                                .await;
+                                match result {
+                                    Err(Refusal::Code("_identity", _)) => {
+                                        *owner.maintainer_identity.lock().expect("identity lock") =
+                                            None;
+                                        if attempt == 1 {
+                                            return Err(refuse(
+                                                "coordination_unavailable",
+                                                "identity",
+                                            ));
+                                        }
+                                    }
+                                    other => return other,
+                                }
+                            }
+                            unreachable!()
+                        }
+                    }
+                }
+                .await;
+                match result {
+                    Ok(v) => Ok(v),
+                    Err(Refusal::Code(code, check)) => {
+                        eprintln!("maintainer route refused: {code} ({check})");
+                        Ok(json!({"_refused":code}))
+                    }
+                    Err(Refusal::Board(e)) => Err(e),
+                }
+            })
+        })
+        .await;
+    match answer {
+        Ok(mut v) => {
+            if let Some(code) = v.get("_refused").and_then(Value::as_str) {
+                return refusal(code, None);
+            }
+            if let Some(out) = v.as_object_mut() {
+                if let Some(Value::Array(ids)) = out.remove("_notify") {
+                    for id in ids {
+                        if let Some(id) = id.as_str() {
+                            board.hub.notify(id);
+                        }
+                    }
+                }
+                if let Some(Value::String(notice)) = out.remove("_notice") {
+                    board.daemon_notice(&format!("Maintainer passkey change in the Console: {notice}. A courtesy notice only; the Console's Settings, Your passkeys, is the record. Nothing for you to do.")).await;
+                }
+            }
+            json_response(200, &v)
+        }
+        Err(_) => refusal("coordination_unavailable", None),
+    }
+}

@@ -16,6 +16,43 @@ python -m board.boundary --shared-clock
 python -m board.boundary --json-keys
 ```
 
+The signed Console actions run with
+`--only maintainer-enrol maintainer-roles maintainer-mail maintainer-refusals`.
+These scenarios additionally compare `maintainer_passkeys`,
+`maintainer_bootstrap` and `maintainer_nonces` after each request. They cover
+bootstrap and approved enrolment, quarantine cancellation, self-revocation,
+conductor and coordinator changes (including legacy purposes), signed mail
+and both unread and acknowledged withdrawals. Refusals check signatures,
+MACs, purpose, expiry, nonce replay, caller admission and counter regression.
+A stale role preview is retried with the exact same assertion after restoring
+the signed holder, proving the refusal rolls back its nonce and sign count.
+The request checks require the expected status on each arm, so two identical
+refusals cannot pass as a successful action. Refused transactions also get an
+exact before/after state check, except for documented side effects (wrong
+bootstrap guesses, counter flags and the lazy maintainer address).
+
+The fixture uses deterministic software Ed25519 keys and a fixed secret in
+each disposable bank. Challenge MACs and WebAuthn challenge bytes are verified
+against their raw payloads, and stored mail proofs are cryptographically
+verified before their varying signatures and challenges are normalized;
+signed fields and authenticator counters remain compared. Maintainer clocks
+must match the captured request windows, including the 24-hour quarantine.
+Comparator checks are in `python -m pytest board/test_maintainer.py`.
+
+Additional boundary scenarios are selectable separately:
+`maintainer-bootstrap-refusals`, `maintainer-key-refusals`,
+`maintainer-recipient-refusals`, `maintainer-mail-refusals`,
+`maintainer-assertion-refusals` and `maintainer-zero-counter-replay`.
+They exercise exhausted and expired host codes, key and approver state
+changes, recipient deletion and role changes after preview, sender and
+mailbox capacity, malformed assertions, caller admission on all six actions,
+and authenticators without a signature counter. Capacity fixtures copy one
+genuine signed message into the disposable table; the queue fixture's old
+`created_at=1` and the expired code's `expires_at=1` are explicit inputs
+compared exactly. They do not wait for wall-clock expiry or send hundreds of
+HTTP requests. Retrying the exact refused queue assertion after freeing the
+mailbox proves its nonce and counter were rolled back.
+
 Per step it compares the status, the headers clients read (`content-type`,
 `cache-control`, `x-pl-board`) and the body by value. After every write it
 dumps the board's tables on both arms (agents, messages, events, leases,
