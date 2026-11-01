@@ -31,7 +31,9 @@ Declared rules, never applied by hand:
   one step apart, since the two daemons answer moments apart.
 
 Environment: ORT_DYLIB_PATH, PSEUDOLIFE_DAEMON_ONNX_DIR (Qwen3 export) and
-PSEUDOLIFE_DAEMON_RERANK_DIR (cross-encoder export) for the Rust side;
+PSEUDOLIFE_DAEMON_RERANK_DIR (the pinned ``reranker`` directory installed by
+``pseudolife-daemon provision models``) for the Rust side; arbitrary exports
+are refused. A requested rerank with a disabled Rust reranker fails this harness.
 PSEUDOLIFE_TEST_PG_HOST_PORT / the test login for the bank.
 """
 from __future__ import annotations
@@ -1008,6 +1010,37 @@ def common_env(dsn: str) -> dict[str, str]:
             "PSEUDOLIFE_MCP_DATABASE_URL": dsn}
 
 
+def require_requested_reranker(cases: list[dict], pairs: list, log: str,
+                               scenario: Scenario | None = None) -> None:
+    """A fallback is valid service behavior, but cannot prove rerank parity."""
+    disabled = next((line for line in log.splitlines()
+                     if "Cross-encoder reranker" in line and "disabling" in line), None)
+    if not disabled:
+        return
+    enabled = False
+    if scenario is not None:
+        import yaml
+        config = yaml.safe_load(config_for(scenario))
+        enabled = (config["memory"].get("reranker") or {}).get("enabled", False)
+    for c, pair in zip(cases, pairs):
+        if pair is None or pair[1]["status"] != 200:
+            continue
+        if "mcp" in c:
+            if c.get("tool", "memory_search") != "memory_search":
+                continue
+            requested = c["mcp"].get("rerank")
+        else:
+            path = urllib.parse.urlsplit(c["path"])
+            if path.path not in ("/api/search", "/api/trace"):
+                continue
+            value = urllib.parse.parse_qs(path.query, keep_blank_values=True).get("rerank", [None])[0]
+            requested = (None if value in (None, "", "null", "auto")
+                         else value.strip().lower() in ("true", "1", "yes", "on"))
+        requested = enabled if requested is None else requested
+        if requested:
+            raise RuntimeError(f"{c['name']}: requested reranking but Rust disabled it: {disabled}")
+
+
 def seed_template(name: str, paragraphs: int) -> None:
     dsn = pg.create(name)
     home = daemons.make_home(daemons.scratch_root(), "w2d-seed", None)
@@ -1330,6 +1363,7 @@ def run_scenario(scn: Scenario, binary: Path, template: str, mode: str, record: 
     finally:
         for d in procs.values():
             d.stop()
+    require_requested_reranker(scn.cases(), response_pairs, procs["rust"].log.read_text(errors="replace"), scn)
     states = {}
     declared = {}
     for side in sides:

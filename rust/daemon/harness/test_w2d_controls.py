@@ -12,6 +12,51 @@ import w2d_search as search
 import w2d_cortex_check as cortex
 
 
+class RerankerAvailabilityTests(unittest.TestCase):
+    def test_requested_reranking_cannot_silently_fall_back(self):
+        log = "Cross-encoder reranker failed to load (checksum mismatch) — disabling reranking."
+        for case in [search.case("REST explicit", "/api/search?q=x&rerank=true"),
+                     search.case("trace", "/api/trace?q=x&rerank=1"),
+                     search.mcp_case("MCP", {"query": "x", "rerank": True})]:
+            with self.subTest(case=case["name"]), self.assertRaisesRegex(RuntimeError, "requested reranking.*checksum mismatch"):
+                search.require_requested_reranker([case], [({}, {"status": 200})], log)
+
+    def test_default_search_does_not_request_reranking(self):
+        log = "Cross-encoder reranker cache unavailable (missing) — disabling."
+        cases = [search.case("default", "/api/search?q=x"),
+                 search.mcp_case("MCP default", {"query": "x"})]
+        search.require_requested_reranker(cases, [({}, {"status": 200})] * 2, log)
+
+    def test_inherited_and_explicit_reranking_follow_scenario_config(self):
+        log = "Cross-encoder reranker cache unavailable (missing) — disabling."
+        for enabled in (False, True):
+            scenario = search.Scenario()
+            scenario.config_yaml = f"memory:\n  reranker:\n    enabled: {str(enabled).lower()}\n"
+            inherited = [search.case("absent", "/api/search?q=x"),
+                         search.mcp_case("MCP absent", {"query": "x"}),
+                         search.mcp_case("MCP null", {"query": "x", "rerank": None})]
+            inherited += [search.case(value, f"/api/search?q=x&rerank={value}")
+                          for value in ("", "null", "auto")]
+            for case in inherited:
+                with self.subTest(enabled=enabled, case=case["name"]):
+                    if enabled:
+                        with self.assertRaisesRegex(RuntimeError, "requested reranking"):
+                            search.require_requested_reranker([case], [({}, {"status": 200})], log, scenario)
+                    else:
+                        search.require_requested_reranker([case], [({}, {"status": 200})], log, scenario)
+            off = [search.case("off", "/api/search?q=x&rerank=false"),
+                   search.mcp_case("MCP off", {"query": "x", "rerank": False})]
+            search.require_requested_reranker(off, [({}, {"status": 200})] * 2, log, scenario)
+
+    def test_explicitly_disabled_or_refused_requests_are_not_rerank_proof(self):
+        log = "Cross-encoder reranker cache unavailable (missing) — disabling."
+        cases = [search.case("off", "/api/search?q=x&rerank=false"),
+                 search.mcp_case("MCP off", {"query": "x", "rerank": False})]
+        search.require_requested_reranker(cases, [({}, {"status": 200})] * 2, log)
+        search.require_requested_reranker([search.case("unauth", "/api/search?q=x")],
+                                         [({}, {"status": 401})], log)
+
+
 class Scenario:
     require = {"with_entries": 1}
 

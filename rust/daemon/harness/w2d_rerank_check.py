@@ -5,9 +5,10 @@ sentence-transformers' ``CrossEncoder``).
 usage:
   python w2d_rerank_check.py --model-dir DIR [--keep DIR]
 
-``DIR`` (or ``W2D_RERANK_MODEL_DIR``) holds the optimum text-classification
-ONNX export of ``cross-encoder/ms-marco-MiniLM-L-6-v2`` (``model.onnx``,
-``tokenizer.json``). ``ORT_DYLIB_PATH`` must name the ONNX Runtime library
+``DIR`` (or ``W2D_RERANK_MODEL_DIR``) is the ``reranker`` directory installed
+by ``pseudolife-daemon provision models``. Its graph, tokenizer and metadata
+must match the compiled pins; arbitrary local exports are refused.
+``ORT_DYLIB_PATH`` must name the ONNX Runtime library
 for the Rust side. Python loads the model from the Hugging Face cache (set
 ``HF_HUB_OFFLINE=1``). ``CARGO_TARGET_DIR`` is passed through to cargo.
 

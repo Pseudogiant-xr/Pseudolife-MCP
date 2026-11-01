@@ -1,8 +1,10 @@
-"""Bake a pinned public fp32 Qwen export; downloads happen only at build time.
+"""Legacy public fp32 Qwen export utility, retained for historical tests.
 
 The onnx-community tensors and tokenizer match the historical CPU receipt.
 Module/model/tokenizer metadata comes from the separately pinned Qwen model.
-The public graph differs, so this image makes no embedding parity claim.
+The Rust image uses the native model provisioner instead. Tests assert these
+legacy pins agree with its compiled manifest. Current admission evidence:
+https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/1114
 Source: https://huggingface.co/onnx-community/ONNX_Qwen3-Embedding-0.6B
 """
 from __future__ import annotations

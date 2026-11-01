@@ -8,6 +8,7 @@ import subprocess
 EXACT_INPUTS = {
     ".dockerignore",
     "rust/Cargo.toml", "rust/Cargo.lock", "ops/Dockerfile.daemon-rust",
+    "ops/provision-daemon-models.sh",
     "ops/docker-compose.rust.yml", ".github/workflows/rust.yml",
 }
 
