@@ -1892,6 +1892,8 @@ def test_body_evidence_trigger_is_nightly_or_its_isolated_dispatch(event, mode, 
         def lookup(self, path):
             if path == ["inputs", "mode"]:
                 return mode
+            if path == ["vars", "PARITY_SELFHOSTED_RUNNERS"]:
+                return '["linux"]'
             return super().lookup(path)
 
     jobs = workflow()["jobs"]
@@ -1921,6 +1923,9 @@ def test_body_evidence_reuses_runner_guards_and_never_gates():
     assert lane["env"]["PARITY_MIN_FREE_GB"] == "8"
     assert lane["env"]["PARITY_YIELD_MINUTES"] == "60"
     assert lane["steps"][:2] == jobs["parity-checks"]["steps"][:2]
+    run_index = next(i for i, step in enumerate(lane["steps"])
+                     if step.get("name") == "Run every body differential")
+    assert lane["steps"][run_index - 1] == lane["steps"][1]
     for job in jobs.values():
         assert "body-evidence" not in job.get("needs", [])
     steps = {s.get("name"): s for s in lane["steps"]}
@@ -1930,3 +1935,22 @@ def test_body_evidence_reuses_runner_guards_and_never_gates():
     require_command(commands(steps["Run every body differential"]["run"]),
                     ("python", "rust/ci/body_evidence.py", "run"), ("--rust-bin", "--out"))
     assert not any(s.get("uses", "").startswith("Swatinem/rust-cache") for s in lane["steps"])
+
+
+@pytest.mark.parametrize("runners,enabled", [('', False), ('[]', False),
+    ('["windows"]', False), ('["linux"]', True), ('["linux", "windows"]', True)])
+def test_body_evidence_nightly_respects_registered_linux_runners(runners, enabled):
+    from ci_budget import Evaluator, condition_text
+
+    class Registry(Evaluator):
+        def lookup(self, path):
+            if path == ["vars", "PARITY_SELFHOSTED_RUNNERS"]:
+                return runners
+            if path == ["inputs", "mode"]:
+                return "body-evidence"
+            return super().lookup(path)
+
+    condition = condition_text(workflow()["jobs"]["body-evidence"]["if"])
+    assert Registry("schedule", [], set()).run(condition) is enabled
+    # An explicit trial remains available before registering nightly use.
+    assert Registry("workflow_dispatch", [], set()).run(condition) is True

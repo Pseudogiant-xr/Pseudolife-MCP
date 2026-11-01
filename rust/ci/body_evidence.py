@@ -88,17 +88,41 @@ def plan(out: Path) -> dict:
               "event": event, "ref": ref, "run_id": os.environ.get("GITHUB_RUN_ID"),
               "run_attempt": os.environ.get("GITHUB_RUN_ATTEMPT"),
               "scheduled_master": event == "schedule" and ref == "refs/heads/master",
-              "status": "incomplete", "suites": []}
+              "status": "incomplete", "suites": [],
+              "incomplete_reason": "Job did not reach the body differential run; see the preceding job steps."}
     save(out, report)
     print(f"Body evidence plan: {', '.join(SUITES)}; Rust {head}; Python {head}", flush=True)
     return report
+
+
+def lease_reason() -> str | None:
+    """Recheck the runner's suite lease at each differential boundary."""
+    if os.environ.get("RUNNER_ENVIRONMENT") != "self-hosted":
+        return None
+    lease = os.environ.get("PSEUDOLIFE_PARITY_LEASE", "")
+    lock_dir = os.environ.get("PSEUDOLIFE_PARITY_LOCK_DIR", "")
+    if not re.fullmatch(r"full-suite@[A-Za-z0-9._-]{1,40}", lease) or not lock_dir:
+        return "Full-suite lease configuration is missing or invalid."
+    env = dict(os.environ, PSEUDOLIFE_SUITE_LEASE=lease, PSEUDOLIFE_SUITE_LOCK_DIR=lock_dir)
+    try:
+        probe = subprocess.run(["pseudolife-mcp", "lease", "check", "--json", lease],
+                               env=env, capture_output=True, text=True, timeout=30)
+        state = json.loads(probe.stdout)["local"]["state"]
+    except (OSError, subprocess.TimeoutExpired, ValueError, KeyError, TypeError):
+        return "Full-suite lease could not be verified; no further differential started."
+    if probe.returncode not in (0, 1) or state not in ("free", "held"):
+        return "Full-suite lease could not be verified; no further differential started."
+    if probe.returncode == 1 or state == "held":
+        return "Full-suite lease is held; yielding the runner."
+    return None
 
 
 def run(binary: Path, out: Path, manifest: dict, *, smoke: bool = False) -> dict:
     with binary.open("rb") as stream:
         binary_digest = hashlib.file_digest(stream, "sha256").hexdigest()
     result = {**manifest, "status": "incomplete", "suites": [], "binary_sha256": binary_digest,
-              "oracle_cpu_dtype": "fp32", "scope": "smoke" if smoke else "full"}
+              "oracle_cpu_dtype": "fp32", "scope": "smoke" if smoke else "full",
+              "incomplete_reason": "Body differential run did not finish."}
     if smoke:
         result["scheduled_master"] = False
     save(out, result)
@@ -107,6 +131,14 @@ def run(binary: Path, out: Path, manifest: dict, *, smoke: bool = False) -> dict
     scratch = out.parent / "body-evidence-private"
     scratch.mkdir(parents=True, exist_ok=True)
     for family, script in SUITES.items():
+        reason = lease_reason()
+        if reason:
+            result["incomplete_reason"] = f"Before {family}: {reason}"
+            result["not_run"] = [name for name in SUITES
+                                 if name not in {row["name"] for row in result["suites"]}]
+            save(out, result)
+            print(result["incomplete_reason"], flush=True)
+            return result
         raw = scratch / f"{family}.json"
         raw.unlink(missing_ok=True)
         command = [sys.executable, str(HARNESS / script), "live", "--rust-bin", str(binary),
@@ -127,6 +159,7 @@ def run(binary: Path, out: Path, manifest: dict, *, smoke: bool = False) -> dict
         save(out, result)
         print(f"{family}: {row['status']}, exit {completed.returncode}, {row['counts']}", flush=True)
     result["status"] = "pass" if all(r["status"] == "pass" for r in result["suites"]) else "fail"
+    result.pop("incomplete_reason", None)
     save(out, result)
     return result
 
@@ -147,6 +180,8 @@ def summary(report: dict) -> str:
                          f"{counts['differences']} | {row['status']} (exit {row['exit_code']}) |")
         else:
             lines.append(f"| {name} | — | — | — | not run |")
+    if report.get("incomplete_reason"):
+        lines += ["", report["incomplete_reason"]]
     return "\n".join(lines) + "\n"
 
 

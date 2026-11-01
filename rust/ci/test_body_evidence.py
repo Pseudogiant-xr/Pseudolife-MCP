@@ -1,10 +1,71 @@
 """A published body comparison must distinguish missing evidence from parity."""
 import json
+import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 import body_evidence as evidence
+
+
+def test_runner_yields_between_suites_and_retains_completed_evidence(tmp_path, monkeypatch):
+    monkeypatch.setenv("RUNNER_ENVIRONMENT", "self-hosted")
+    monkeypatch.setenv("PSEUDOLIFE_PARITY_LEASE", "full-suite@fixture")
+    monkeypatch.setenv("PSEUDOLIFE_PARITY_LOCK_DIR", str(tmp_path / "locks"))
+    binary = tmp_path / "daemon"
+    binary.write_bytes(b"candidate")
+    probes, runs = [], []
+
+    def execute(command, **kwargs):
+        if command[0] == "pseudolife-mcp":
+            probes.append(command)
+            assert kwargs["env"]["PSEUDOLIFE_SUITE_LEASE"] == "full-suite@fixture"
+            assert kwargs["env"]["PSEUDOLIFE_SUITE_LOCK_DIR"] == str(tmp_path / "locks")
+            held = len(probes) > 1
+            return SimpleNamespace(returncode=int(held), stdout=json.dumps({
+                "local": {"state": "held" if held else "free"}}))
+        runs.append(command)
+        Path(command[command.index("--out") + 1]).write_text(json.dumps({
+            "complete": True, "planned_scenarios": ["one"],
+            "scenarios": [{"scenario": "one", "steps": [{"diffs": []}]}]}))
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(evidence.subprocess, "run", execute)
+    result = evidence.run(binary, tmp_path / "out", {
+        "rust_head": "a" * 40, "python_head": "a" * 40, "scheduled_master": True})
+    assert len(probes) == 2 and len(runs) == 1
+    assert result["status"] == "incomplete"
+    assert result["suites"][0]["status"] == "pass"
+    assert result["not_run"] == ["w2d_search", "board"]
+    assert "held" in result["incomplete_reason"]
+    assert "w2d_search" in result["incomplete_reason"]
+    assert result["incomplete_reason"] in evidence.summary(result)
+    assert json.loads((tmp_path / "out/evidence.json").read_text()) == result
+
+
+@pytest.mark.parametrize("failure", ["unreadable", "invalid-json", "exit", "timeout", "missing-command"])
+def test_unverifiable_selfhosted_lease_never_allows_work(tmp_path, monkeypatch, failure):
+    monkeypatch.setenv("RUNNER_ENVIRONMENT", "self-hosted")
+    monkeypatch.setenv("PSEUDOLIFE_PARITY_LEASE", "full-suite@fixture")
+    monkeypatch.setenv("PSEUDOLIFE_PARITY_LOCK_DIR", str(tmp_path))
+
+    def execute(*args, **kwargs):
+        if failure == "timeout":
+            raise subprocess.TimeoutExpired("lease check", 30)
+        if failure == "missing-command":
+            raise FileNotFoundError("fixture")
+        return SimpleNamespace(returncode=70 if failure == "exit" else 0,
+            stdout="not JSON" if failure == "invalid-json" else '{"local": {"state": null}}')
+
+    monkeypatch.setattr(evidence.subprocess, "run", execute)
+    assert evidence.lease_reason()
+
+
+def test_local_run_does_not_probe_selfhosted_lease(monkeypatch):
+    monkeypatch.delenv("RUNNER_ENVIRONMENT", raising=False)
+    monkeypatch.setattr(evidence.subprocess, "run", lambda *a, **kw: pytest.fail("unexpected lease probe"))
+    assert evidence.lease_reason() is None
 
 
 def test_write_counts_every_difference_and_preserves_scenario_names():

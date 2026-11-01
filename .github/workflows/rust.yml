@@ -1533,7 +1533,7 @@ jobs:
   body-evidence:
     # D6/D11: published bodies on master, separate from the required gates.
     # A branch dispatch proves this job without spending the hosted matrix.
-    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'body-evidence')
+    if: (github.event_name == 'schedule' && contains(vars.PARITY_SELFHOSTED_RUNNERS, '"linux"')) || (github.event_name == 'workflow_dispatch' && inputs.mode == 'body-evidence')
     name: Rust daemon / nightly body evidence (non-gating)
     runs-on: [self-hosted, pseudolife-parity-linux]
     continue-on-error: true
@@ -1587,6 +1587,7 @@ jobs:
           LC_ALL: C.UTF-8
         run: python rust/cli_harness/lease_ci.py
       - *selfhosted_disk
+      - *selfhosted_lease
       - name: Run every body differential
         run: python rust/ci/body_evidence.py run --rust-bin "$RUNNER_TEMP/body-daemon" --out "$RUNNER_TEMP/body-evidence"
       - name: Summarize body evidence
