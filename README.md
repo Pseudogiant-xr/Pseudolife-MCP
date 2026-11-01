@@ -1407,7 +1407,10 @@ pseudolife-mcp-daemon`).
   environment crashes the shim on start. The shim detects this and
   prints the interpreter path and the exact fix on stderr: `pip install -U
   "mcp>=2.2,<2.3"` in that interpreter, or re-run the installer (which
-  registers the project venv's shim).
+  registers the project venv's shim). When a file named `mcp.py` (or an
+  `mcp` package folder) in the directory the shim started from hides the
+  SDK, the shim names that path instead: move or rename it, or start
+  from another directory.
 - **Claude Desktop says "Couldn't start for Cowork and Code sessions. Error:
   unhandled errors in a TaskGroup (1 sub-exception)"**: the real exception
   is at the bottom of `mcp-server-pseudolife-desktop.log`
