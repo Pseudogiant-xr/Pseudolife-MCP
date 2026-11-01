@@ -567,8 +567,7 @@ class Update:
             if engine_checkout is not None:
                 self.report.mode = "checkout"
                 deploy_engine(self, engine_checkout)
-                return
-            if self.o.checkout is not None:
+            elif self.o.checkout is not None:
                 self.report.mode = "checkout"
                 self.deploy_checkout()
             else:
@@ -576,7 +575,7 @@ class Update:
                 self.deploy_release()
         # After the lock: the setup may wait minutes for the Console, and an
         # unattended run must not find the lock held all that time.
-        if not self.o.clients_only:
+        if not self.o.clients_only and not self.o.shadow:
             try:
                 self.maintainer_passkeys()
             except Exception as exc:  # noqa: BLE001 - the update itself succeeded
@@ -1085,6 +1084,11 @@ class Update:
         if code != 0:
             raise UpdateError("daemon rebuild failed" + (f" ({_last_line(out)})" if out.strip() else ""))
         health = self.wait_health()
+        self.checkout_post_deploy(repo, previous_digest, health)
+        self.prune_cache(repo)
+
+    def checkout_post_deploy(self, repo: Path, previous_digest: str | None, health: dict | None) -> None:
+        """Keep both daemon engines on the ordinary checkout completion path."""
         if self.o.all_clients:
             self.clients(repo, str(repo), health)
         else:
@@ -1095,7 +1099,6 @@ class Update:
             except Exception as exc:  # noqa: BLE001 - the deploy itself succeeded
                 self.warn(f"the test suite's login step failed ({type(exc).__name__}: {exc}); the deploy "
                           f"itself succeeded. Later: pseudolife-mcp test-login create")
-        self.prune_cache(repo)
 
     def ensure_test_login(self) -> None:
         """Checkout mode is a contributor's host: give its test suite the

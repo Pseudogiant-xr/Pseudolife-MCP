@@ -85,10 +85,15 @@ def engine_host(tmp_path, monkeypatch):
                 return 0, json.dumps(config)
             if "ps" in argv:
                 return 0, "fixture-daemon" if argv[-1] == up.DAEMON_SERVICE else "fixture-pg"
+            if "up" in argv and argv[-1] == up.DAEMON_SERVICE:
+                overlay = json.loads(Path(argv[argv.index("up") - 1]).read_text())
+                state["running"]["Config"]["Labels"] = overlay["services"][up.DAEMON_SERVICE]["labels"]
             if state["fail"] in ("build", "up") and state["fail"] in argv:
                 return 1, "fixture failure"
             return 0, ""
         if argv[1:2] == ["inspect"]:
+            if "-f" in argv:
+                return 0, json.dumps(state["running"]["Config"]["Labels"])
             return 0, json.dumps([state["running"]])
         if "psql" in argv and "-Atc" in argv:
             return 0, state["schema"]
@@ -118,6 +123,7 @@ def engine_host(tmp_path, monkeypatch):
     monkeypatch.setattr(up, "sleep", lambda s: None)
     monkeypatch.setattr(eng, "authenticated_read", lambda *a: state["read"])
     monkeypatch.setattr(up, "which", lambda name: name)
+    monkeypatch.setattr(up.Update, "ensure_test_login", lambda self: None)
     state["repo"] = repo
     state["update"] = lambda engine="rust", **kw: up.Update(up.Options(checkout=repo, engine=engine, health_retries=1,
                                                                        daemon_url="http://127.0.0.1:18765", **kw), log=lambda s: None)
@@ -162,9 +168,16 @@ def test_failure_never_commits_engine_selection(engine_host, failure, monkeypatc
     else:
         s["fail"] = failure
     update = s["update"]()
-    with pytest.raises(up.UpdateError):
+    with pytest.raises(up.UpdateError) as caught:
         eng.deploy_engine(update, s["repo"])
     assert not (s["repo"] / eng.SELECTION).exists()
+    retry = s["update"](None)
+    if failure in ("up", "read", "version", "schema"):
+        with pytest.raises(up.UpdateError, match="rollback"):
+            eng.selected_checkout(retry)
+    else:
+        assert eng.selected_checkout(retry) is None
+    assert str(caught.value).count("to roll back:") <= 1
     if failure == "backup":
         assert not any(a[1:2] == ["tag"] for a in s["calls"])
     else:
@@ -189,8 +202,10 @@ def test_switch_back_to_python_uses_running_rust_for_rollback(engine_host):
     s["running"]["Config"]["Labels"] = {eng.ENGINE_LABEL: "rust"}
     update = s["update"]("python")
     eng.deploy_engine(update, s["repo"])
-    assert eng._selection(s["repo"])["labels"][eng.ENGINE_LABEL] == "python"
+    assert eng._selection(s["repo"]) is None
     assert any(a[1:3] == ["tag", "sha256:validated-rust"] for a in s["calls"])
+    assert eng.selected_checkout(s["update"](None)) is None
+    assert eng.selected_checkout(up.Update(up.Options(tag="0.21.0", reinstall=True))) is None
 
 
 def test_shadow_missing_support_refuses_without_changes(engine_host):
@@ -280,6 +295,7 @@ def test_unattended_release_never_replaces_a_selected_rust_engine(engine_host, m
 def test_another_checkout_inherits_running_engine(engine_host, monkeypatch, tmp_path):
     from pseudolife_memory import update_engine as eng
     s = engine_host
+    eng.deploy_engine(s["update"](), s["repo"])
     other = tmp_path / "other-checkout"
     other.mkdir()
     labels = {eng.ENGINE_LABEL: "rust", eng.CHECKOUT_LABEL: str(s["repo"])}
@@ -309,3 +325,76 @@ def test_state_archive_failure_stops_before_tag_even_when_backup_script_exits_ze
     with pytest.raises(up.UpdateError, match="state backup"):
         eng.deploy_engine(s["update"](), s["repo"])
     assert not any(a[1:2] == ["tag"] or "build" in a or "up" in a for a in s["calls"])
+
+
+def test_colon_bearer_and_running_version_are_preserved(engine_host, monkeypatch):
+    from pseudolife_memory import update_engine as eng
+    s = engine_host
+    s["config"]["services"][up.DAEMON_SERVICE]["environment"] = {"PSEUDOLIFE_MCP_TOKENS": "fixture:colon:reader"}
+    seen = []
+    monkeypatch.setattr(eng, "authenticated_read", lambda url, token: seen.append(token) or True)
+    update = s["update"]()
+    monkeypatch.setattr(update, "daemon_health", lambda: {"status": "ok", "version": "0.20.7", "schema": 58})
+    eng.deploy_engine(update, s["repo"])
+    assert seen == ["fixture:colon", "fixture:colon"]
+    assert update.report.rollback["tag"].startswith("pseudolife-daemon-python:0.20.7-")
+
+
+def test_engine_runs_normal_post_deploy_steps(engine_host, monkeypatch):
+    s = engine_host
+    update = s["update"]()
+    completed = []
+    monkeypatch.setattr(up, "UpdateLock", __import__("contextlib").nullcontext)
+    monkeypatch.setattr(update, "hooks_changed_note", lambda *a: completed.append("hooks"))
+    monkeypatch.setattr(update, "ensure_test_login", lambda: completed.append("login"))
+    monkeypatch.setattr(update, "maintainer_passkeys", lambda: completed.append("passkeys"))
+    update._run()
+    assert completed == ["hooks", "login", "passkeys"]
+
+
+@pytest.mark.parametrize("docker_exit", [0, 7])
+def test_printed_python_rollback_clears_selection_only_after_recreate(engine_host, docker_exit):
+    import os
+    from tests.ops_harness import BASH, PWSH
+    from pseudolife_memory import update_engine as eng
+    s = engine_host
+    update = s["update"]()
+    eng.deploy_engine(update, s["repo"])
+    binary = PWSH if os.name == "nt" else BASH
+    if binary is None:
+        pytest.skip("native rollback shell unavailable")
+    commands = "\n".join(update.rollback_lines[:2])
+    if os.name == "nt":
+        script = s["repo"] / "rollback.ps1"
+        script.write_text(f"function docker {{ $global:LASTEXITCODE = {docker_exit} }}\n" + commands)
+        argv = [binary, "-NoProfile", "-File", str(script)]
+    else:
+        script = s["repo"] / "rollback.sh"
+        script.write_text(f"docker() {{ return {docker_exit}; }}\n" + commands)
+        argv = [binary, str(script)]
+    result = subprocess.run(argv, capture_output=True, text=True, timeout=30)
+    assert (s["repo"] / eng.SELECTION).exists() == (docker_exit != 0), result.stderr
+    if docker_exit == 0:
+        assert result.returncode == 0, result.stderr
+        s["running"]["Config"]["Labels"][eng.ENGINE_LABEL] = "python"
+        assert eng.selected_checkout(up.Update(up.Options(tag="0.21.0"))) is None
+
+
+@pytest.mark.parametrize("force", [False, True])
+def test_force_rollback_tag_uses_validated_running_image(engine_host, monkeypatch, force):
+    from pseudolife_memory import update_engine as eng
+    s = engine_host
+    run = up.run_cli
+    def collision(argv, **kw):
+        if list(argv)[1:3] == ["image", "inspect"]:
+            return 0, "sha256:another-rollback"
+        return run(argv, **kw)
+    monkeypatch.setattr(up, "run_cli", collision)
+    update = s["update"](force_rollback_tag=force)
+    if not force:
+        with pytest.raises(up.UpdateError, match="--force-rollback-tag"):
+            eng.deploy_engine(update, s["repo"])
+        assert not any(a[1:2] == ["tag"] for a in s["calls"])
+    else:
+        eng.deploy_engine(update, s["repo"])
+        assert any(a[1:3] == ["tag", "sha256:validated-python"] for a in s["calls"])

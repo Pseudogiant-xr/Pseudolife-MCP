@@ -51,7 +51,8 @@ def selected_checkout(update) -> Path | None:
     o = update.o
     if o.checkout is not None:
         repo = Path(o.checkout).resolve()
-        if o.engine or _selection(repo):
+        selected = _selection(repo)
+        if o.engine or (selected and selected["labels"][ENGINE_LABEL] == "rust"):
             return repo
         if not o.allow_dirty and up.tree_state(repo)["dirty"] != "false":
             # Keep the existing clean-tree refusal ahead of all Docker calls.
@@ -61,20 +62,24 @@ def selected_checkout(update) -> Path | None:
         labels = json.loads(out) if code == 0 else {}
     except ValueError:
         labels = {}
-    if labels.get(ENGINE_LABEL) not in ("rust", "python"):
+    if labels.get(ENGINE_LABEL) != "rust":
         if o.engine == "python":
             o.daemon_only = True
         return None
-    if o.checkout is not None:
-        update._selected_engine = labels[ENGINE_LABEL]
-        return repo
     if o.clients_only:
         return None
-    repo = Path(labels.get(CHECKOUT_LABEL, ""))
-    if o.tag or o.reinstall or o.allow_downgrade or o.env_file or not (repo / SELECTION).is_file():
+    origin = Path(labels.get(CHECKOUT_LABEL, ""))
+    selected = _selection(origin) if labels.get(CHECKOUT_LABEL) else None
+    if not selected or selected["labels"][ENGINE_LABEL] != "rust":
+        raise up.UpdateError("the running Rust container has no validated engine selection; use the previous "
+                             "update's rollback commands to restore Python before retrying; nothing was changed", 2)
+    if o.checkout is not None:
+        update._selected_engine = selected["labels"][ENGINE_LABEL]
+        return repo
+    if o.tag or o.reinstall or o.allow_downgrade or o.env_file:
         raise up.UpdateError("this host selected a checkout engine; use update --checkout <repo> "
                              "to keep it, or --engine python --checkout <repo> to switch back; nothing was changed", 2)
-    return repo.resolve()
+    return origin.resolve()
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -218,7 +223,8 @@ class EngineUpdate:
                 or endpoint.scheme != "http" or endpoint.port != int(published["published"])):
             port = published.get("published", 8765) if published else 8765
             raise up.UpdateError(f"engine verification must reach this project's loopback port; use --daemon-url http://127.0.0.1:{port}; nothing was changed", 2)
-        self.token = daemon_env.get("PSEUDOLIFE_MCP_TOKEN") or (daemon_env.get("PSEUDOLIFE_MCP_TOKENS") or "").split(":", 1)[0]
+        from pseudolife_memory.principals import parse_token_map
+        self.token = daemon_env.get("PSEUDOLIFE_MCP_TOKEN") or next(iter(parse_token_map(daemon_env.get("PSEUDOLIFE_MCP_TOKENS"))), "")
         if not self.token or any(c.isspace() for c in self.token):
             raise up.UpdateError("the engine health gate needs bearer auth; set PSEUDOLIFE_MCP_TOKEN in the host env file and retry; nothing was changed", 2)
         if self.o.shadow:
@@ -239,6 +245,10 @@ class EngineUpdate:
         if before.get("status") != "ok" or not authenticated_read(self.o.daemon_url, self.token):
             raise up.UpdateError("the running daemon did not pass an authenticated bank read; use the previous update's rollback commands before retrying; no rollback tag was moved", 2)
         self.u.schema_before = before.get("schema")
+        self.previous_digest = before.get("hooks_digest")
+        self.running_version = before.get("version") or "unknown"
+        if not re.fullmatch(r"[A-Za-z0-9_.-]+", self.running_version):
+            raise up.UpdateError("the running daemon reported an invalid version; restore its previous image before retrying", 2)
         self.version = re.search(r'^version\s*=\s*"([^"]+)"', (self.repo / "pyproject.toml").read_text(), re.M).group(1)
         self.schema = int(re.search(r"^SCHEMA_META_VERSION\s*=\s*(\d+)", (self.repo / "pseudolife_memory/storage/schema.py").read_text(), re.M).group(1))
 
@@ -271,7 +281,7 @@ class EngineUpdate:
                 return health
             if attempt + 1 < self.o.health_retries:
                 up.sleep(self.o.health_delay_ms / 1000)
-        raise up.UpdateError("the engine failed its version, schema or authenticated-read gate; to roll back:\n" + "\n".join(self.u.rollback_lines))
+        raise up.UpdateError("the engine failed its version, schema or authenticated-read gate")
 
     def run(self):
         self.preflight()
@@ -282,10 +292,13 @@ class EngineUpdate:
         suffix = self.o.rollback_suffix or f"pre-update-{up._stamp()}"
         if not re.fullmatch(r"[A-Za-z0-9_.-]+", suffix):
             raise up.UpdateError("--rollback-tag must contain only letters, digits, dots, underscores or hyphens; nothing was deployed", 2)
-        rollback = f"pseudolife-daemon-{old_engine}:{self.version}-{suffix}"
+        rollback = f"pseudolife-daemon-{old_engine}:{self.running_version}-{suffix}"
         exists, prior = self.command(["image", "inspect", "-f", "{{.Id}}", rollback], timeout=60)
         if exists == 0 and prior.strip() and prior.strip() != self.running["Image"]:
-            raise up.UpdateError("that rollback tag already names another image; choose a new --rollback-tag suffix; nothing was deployed", 2)
+            if not self.o.force_rollback_tag:
+                raise up.UpdateError("that rollback tag already names another image; choose a new --rollback-tag suffix "
+                                     "or use --force-rollback-tag to replace it with the validated running image; nothing was deployed", 2)
+            self.u.warn("--force-rollback-tag: replacing the existing rollback tag with the validated running image")
         code, _ = self.command(["tag", self.running["Image"], rollback], timeout=60)
         if code:
             raise up.UpdateError("could not tag the running image for rollback; nothing was deployed")
@@ -294,14 +307,17 @@ class EngineUpdate:
         rollback_file = self.repo / "data/update-engine" / f"docker-compose.rollback-{up._stamp()}.json"
         _write_overlay(rollback_file, old_service)
         selected_file = self.repo / SELECTION
-        rollback_args = [*self.base, "-f", str(selected_file)]
+        rollback_args = [*self.base, "-f", str(selected_file if old_engine == "rust" else rollback_file)]
         shown = " ".join('"' + str(a).replace('"', '\\"') + '"' for a in rollback_args)
         copy = (f'Copy-Item -LiteralPath "{rollback_file}" -Destination "{selected_file}"' if os.name == "nt"
                 else f'cp -- "{rollback_file}" "{selected_file}"')
         clear = ("Remove-Item Env:PSEUDOLIFE_MCP_TOKEN,Env:PSEUDOLIFE_MCP_TOKENS -ErrorAction SilentlyContinue" if os.name == "nt"
                  else "unset PSEUDOLIFE_MCP_TOKEN PSEUDOLIFE_MCP_TOKENS")
-        self.u.rollback_lines = [copy, clear, f"docker compose {shown} up -d --no-deps --no-build {up.DAEMON_SERVICE}",
-                                 *self.u._schema_rollback_note(None)]
+        restore = f"docker compose {shown} up -d --no-deps --no-build {up.DAEMON_SERVICE}"
+        if old_engine == "python":
+            restore += (f'; if ($LASTEXITCODE -eq 0) {{ Remove-Item -LiteralPath "{selected_file}" -ErrorAction SilentlyContinue }}'
+                        if os.name == "nt" else f' && rm -f -- "{selected_file}"')
+        self.u.rollback_lines = ([copy] if old_engine == "rust" else []) + [clear, restore, *self.u._schema_rollback_note(None)]
         self.u.report.rollback = {"tag": rollback, "state": "tagged", "overlay": str(rollback_file), **self.backup_paths}
         image = f"pseudolife-daemon-{self.engine}:checkout"
         service = {"image": image, "build": {"dockerfile": f"ops/Dockerfile.daemon{'-rust' if self.engine == 'rust' else ''}"},
@@ -324,16 +340,19 @@ class EngineUpdate:
             if code:
                 raise up.UpdateError("engine recreate failed")
             health = self.gate(self.o.daemon_url)
-            _write_overlay(selected_file, service)
+            if self.engine == "rust":
+                _write_overlay(selected_file, service)
+            else:
+                selected_file.unlink(missing_ok=True)
         except up.UpdateError as exc:
             raise up.UpdateError(str(exc) + "\nto roll back:\n" + "\n".join(self.u.rollback_lines)) from exc
         finally:
             candidate.unlink(missing_ok=True)
-        self.u.step(f"selected {self.engine}; future updates retain this engine; rollback commands:")
+        self.u.step("selected Rust; future updates retain this engine; rollback commands:" if self.engine == "rust"
+                    else "restored Python; future updates use the ordinary update path; rollback commands:")
         for line in self.u.rollback_lines:
             self.u.step(line)
-        if self.o.all_clients:
-            self.u.clients(self.repo, str(self.repo), health)
+        self.u.checkout_post_deploy(self.repo, self.previous_digest, health)
         for engine in ("python", "rust"):
             self.u.prune_rollbacks(self.repo, f"pseudolife-daemon-{engine}")
         self.u.prune_cache(self.repo)
@@ -382,5 +401,8 @@ class EngineUpdate:
                                  " ".join('"' + str(a) + '"' for a in compose) + " stop " + SHADOW_SERVICE]
         if code:
             raise up.UpdateError("shadow start failed; " + self.u.rollback_lines[0])
-        self.gate(url)
+        try:
+            self.gate(url)
+        except up.UpdateError as exc:
+            raise up.UpdateError(str(exc) + "\n" + self.u.rollback_lines[0]) from exc
         self.u.step(f"read-only Rust shadow answers at {url}; Python and the selected engine are unchanged")
