@@ -344,6 +344,11 @@ impl Service {
     /// The initialized service state, without initializing it (Python's
     /// `self._cms is None` check under the service lock).
     pub async fn ready_if_initialized(&self) -> Option<Arc<Ready>> {
+        // Awareness normally observes existing state without initializing.
+        // A shadow has no local writer to maintain that resident snapshot.
+        if self.config.read_only {
+            return self.ensure_init_inner().await.ok();
+        }
         self.inner.lock().await.ready.clone()
     }
 

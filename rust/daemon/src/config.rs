@@ -811,7 +811,8 @@ const RETIRED_WAKE_KEYS: [&str; 1] = ["nudge_interval_seconds"];
 const DEFAULT_PRINCIPAL: &str = "default";
 const DAEMON_PRINCIPAL: &str = "daemon";
 /// The sections `load_config` tests with `in raw`, in its order.
-const SECTIONS: [&str; 8] = [
+const SECTIONS: [&str; 9] = [
+    "read_only",
     "embedding",
     "memory",
     "context",
@@ -1869,10 +1870,11 @@ fn load_str(text: &str) -> Result<Config, ConfigError> {
 
     let mut config = Config::default();
 
-    if let Some(value) = leaves.get("read_only") {
-        config.read_only = value
-            .as_bool()
-            .ok_or_else(|| refuse("read_only must be true or false"))?;
+    if let Some(value) = lookup(entries, "read_only") {
+        config.read_only = match value {
+            Node::Bool(value) => *value,
+            _ => return Err(refuse("read_only must be true or false")),
+        };
     }
 
     // embedding: the overlay's `config.embedding.batch_size = 16` fails on
@@ -3014,6 +3016,12 @@ mod tests {
         assert!(!cfg("read_only: false").read_only);
         assert!(load_str("read_only: 1").is_err());
         assert!(load_str("read_only: 'yes'").is_err());
+        assert!(load_str("read_only: {enabled: true}").is_err());
+        assert!(load_str("read_only: {}").is_err());
+        assert!(load_str("read_only: [true]").is_err());
+        assert!(load_str("read_only: null").is_err());
+        assert!(load_str("'read_only: true'").is_err());
+        assert!(load_str("[read_only]").is_err());
         assert!(
             DaemonEnv::from_env(&env_of(&[("PSEUDOLIFE_READ_ONLY", "1")]))
                 .unwrap()

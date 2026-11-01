@@ -247,6 +247,17 @@ updates:
         status, fact = rust.read({"tool": "memory_fact_get", "args": {
             "entity": "shadow-refresh-probe", "attribute": "phase"}})
         assert status == 200 and fact.get("record") and fact["record"]["value"] == "committed-after-hydration", "shadow resident state is stale"
+        # Awareness has a non-initializing writer fast path. The shadow must
+        # refresh even when this GET is the only read after an episode change.
+        assert rust.request("GET", "/api/agents")[0] == 200
+        with psycopg.connect(dsn, autocommit=True) as conn:
+            conn.execute("INSERT INTO episodes(id,title,started_at,session_key) VALUES (%s,%s,%s,%s)",
+                         ("shadow-awareness-probe", "Fresh writer session", time.time(), "shadow-awareness-probe"))
+        status, agents = rust.request("GET", "/api/agents")
+        assert status == 200 and "shadow-awareness-probe" in json.dumps(agents), "shadow awareness is stale"
+        with psycopg.connect(dsn, autocommit=True) as conn:
+            conn.execute("UPDATE episodes SET ended_at=%s WHERE id='shadow-awareness-probe'", (time.time(),))
+        assert "shadow-awareness-probe" not in json.dumps(rust.request("GET", "/api/agents")[1])
         shadow.stop()
         writer.stop()
         # The gates must not leak into the default writer mode. This same
@@ -280,6 +291,7 @@ updates:
                             "future_table_select": True, "write_privileges_denied": True,
                             "writer_telemetry_and_dream_initialization": True,
                             "later_writer_commit_visible": True,
+                            "awareness_episode_changes_visible": True,
                             "reads": observations}
         out.write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
         out.with_suffix(".txt").write_text(compare.digest(summary), encoding="utf-8")
