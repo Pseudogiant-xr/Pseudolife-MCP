@@ -156,11 +156,11 @@
       }
     },
     "fingerprints": {
-      "scope": "1fb3a6e5a5dc0082",
+      "scope": "42b22137f81048ce",
       "rust": "59cc6066e4ac1f82",
       "fixtures": "defc5e07c5ac3f94",
-      "candidate": "77b0c5fa6b2afcbf",
-      "candidate-harness": "ab479a8fc85283e7",
+      "candidate": "d71c5590ce6f866a",
+      "candidate-harness": "43b859ee9d5fd738",
       "parity-checks": "06054831b8e7b5d2",
       "daemon-image": "cf93a3a209618bdc",
       "parity": "aa4ba434de948ea6"
@@ -210,6 +210,21 @@
         "job": "scope",
         "fingerprint": "1fb3a6e5a5dc0082",
         "reason": "2026-11-02: the docs rule also counts the port's three unread plan pages (parity_scope.RUST_PLAN_DOCS) as docs; the same single classify step runs, so its minutes are unchanged"
+      },
+      {
+        "job": "scope",
+        "fingerprint": "42b22137f81048ce",
+        "reason": "The body-evidence-only dispatch skips scope; its steps and cost for pull requests, batches and pushes are unchanged."
+      },
+      {
+        "job": "candidate",
+        "fingerprint": "d71c5590ce6f866a",
+        "reason": "Explicit ci/stress dispatch allowlist excludes the nightly body-evidence mode; build steps and budgeted-event cost are unchanged."
+      },
+      {
+        "job": "candidate-harness",
+        "fingerprint": "43b859ee9d5fd738",
+        "reason": "Explicit ci/stress dispatch allowlist excludes the nightly body-evidence mode; build steps and budgeted-event cost are unchanged."
       }
     ]
   },

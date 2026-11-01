@@ -1017,17 +1017,17 @@ def test_scope_gates_every_heavy_job_and_fails_safe():
                                 "batch_passed": "${{ steps.batch.outputs.passed }}"}
     checkout = next(s for s in scope["steps"] if s.get("uses") == "actions/checkout@v4")
     assert checkout["with"]["fetch-depth"] == 2
-    gated = ("${{ !cancelled() && (github.event_name != 'workflow_dispatch' || inputs.mode %s) "
+    gated = ("${{ !cancelled() && (github.event_name != 'workflow_dispatch' || %s) "
              "&& needs.scope.outputs.rust != 'false'%s }}")
     # The candidate build also serves a stress loop; the rest is ordinary CI.
     # Only the candidate build (and through it the parity matrix) leaves an
     # ordinary pull request; the Rust job and image check are its fast lanes.
     # The image check also leaves a master push whose merged batch passed it
     # on the same tree (ops/ci_batch_passed.py); a failed scope runs it.
-    for name, mode, full in (("rust", "== 'ci'", ""),
-                             ("candidate", "!= 'wait-mail'",
+    for name, mode, full in (("rust", "inputs.mode == 'ci'", ""),
+                             ("candidate", "(inputs.mode == 'ci' || inputs.mode == 'stress')",
                               " && needs.scope.outputs.full != 'false'"),
-                             ("daemon-image", "== 'ci'",
+                             ("daemon-image", "inputs.mode == 'ci'",
                               " && !contains(fromJSON(needs.scope.outputs.batch_passed || '[]'), "
                               "'Rust daemon / disposable image')")):
         assert jobs[name]["needs"] == "scope", name
@@ -1045,7 +1045,7 @@ def test_scope_gates_every_heavy_job_and_fails_safe():
     assert jobs["fixtures"]["needs"] == "scope"
     assert jobs["candidate-harness"]["needs"] == "scope"
     assert jobs["candidate-harness"]["if"] == jobs["candidate"]["if"]
-    assert jobs["fixtures"]["if"] == gated % ("== 'ci'", " && needs.scope.outputs.full != 'false'")
+    assert jobs["fixtures"]["if"] == gated % ("inputs.mode == 'ci'", " && needs.scope.outputs.full != 'false'")
     assert "rust" in jobs["parity"]["needs"]
     assert jobs["source-mutants"]["needs"] == ["candidate"]
     assert jobs["source-mutants"]["if"].startswith("${{ !cancelled() && ")
@@ -1877,3 +1877,49 @@ def test_runner_facts_name_cpus_and_image(tmp_path):
     assert result.returncode == 0, result.stderr
     assert f"image win25 20261012.1.0, {os.cpu_count()} logical CPUs" in result.stdout
     assert result.stdout.strip() in summary.read_text(encoding="utf-8-sig")
+
+
+@pytest.mark.parametrize("event,mode,expected", [
+    ("schedule", "", True), ("workflow_dispatch", "body-evidence", True),
+    ("workflow_dispatch", "ci", False), ("workflow_dispatch", "stress", False),
+    ("workflow_dispatch", "wait-mail", False), ("pull_request", "", False),
+    ("push", "", False), ("merge_group", "", False),
+])
+def test_body_evidence_trigger_is_nightly_or_its_isolated_dispatch(event, mode, expected):
+    from ci_budget import Evaluator, condition_text
+
+    class Dispatch(Evaluator):
+        def lookup(self, path):
+            if path == ["inputs", "mode"]:
+                return mode
+            return super().lookup(path)
+
+    jobs = workflow()["jobs"]
+    lane = jobs["body-evidence"]
+    assert Dispatch(event, [], set()).run(condition_text(lane["if"])) is expected
+    if mode == "body-evidence":
+        # None of the ordinary build, parity, image or stress roots may
+        # start. The one self-hosted job performs its own planning/build.
+        for name in ("scope", "rust", "candidate", "candidate-harness", "fixtures",
+                     "parity", "daemon-image", "stress-plan", "capture-windows"):
+            assert Dispatch(event, [], set()).run(condition_text(jobs[name]["if"])) is False, name
+
+
+def test_body_evidence_reuses_runner_guards_and_never_gates():
+    jobs = workflow()["jobs"]
+    lane = jobs["body-evidence"]
+    assert lane["runs-on"] == ["self-hosted", "pseudolife-parity-linux"]
+    assert lane["continue-on-error"] is True
+    assert "needs" not in lane
+    assert lane["env"]["PARITY_MIN_FREE_GB"] == "8"
+    assert lane["env"]["PARITY_YIELD_MINUTES"] == "60"
+    assert lane["steps"][:2] == jobs["parity-checks"]["steps"][:2]
+    for job in jobs.values():
+        assert "body-evidence" not in job.get("needs", [])
+    steps = {s.get("name"): s for s in lane["steps"]}
+    assert steps["Publish body evidence"]["if"] == "always()"
+    assert steps["Publish body evidence"]["with"]["path"] == "${{ runner.temp }}/body-evidence/evidence.json"
+    assert steps["Publish body evidence"]["with"]["if-no-files-found"] == "error"
+    require_command(commands(steps["Run every body differential"]["run"]),
+                    ("python", "rust/ci/body_evidence.py", "run"), ("--rust-bin", "--out"))
+    assert not any(s.get("uses", "").startswith("Swatinem/rust-cache") for s in lane["steps"])

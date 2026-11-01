@@ -12,9 +12,9 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: 'Ordinary CI, the bounded wait-mail capture, or a stress loop of one selection'
+        description: 'Ordinary CI, wait-mail capture, stress loop, or only the nightly body evidence job'
         type: choice
-        options: [ci, wait-mail, stress]
+        options: [ci, wait-mail, stress, body-evidence]
         default: ci
         required: true
       case_list:
@@ -117,7 +117,7 @@ jobs:
     # candidate and fixtures builds, the eval and judges suites (they compare
     # against the event-selected oracle, the merge base on a pull request
     # and the pushed head on a push) and every pair the batch did not pass.
-    if: github.event_name != 'workflow_dispatch' || inputs.mode != 'wait-mail'
+    if: github.event_name != 'workflow_dispatch' || (inputs.mode == 'ci' || inputs.mode == 'stress')
     name: Scope
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -514,7 +514,7 @@ jobs:
     needs: scope
     # The parity jobs need its release builds, so skipping it on an ordinary
     # pull request (scope's `full`) skips the parity matrix as well.
-    if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || inputs.mode != 'wait-mail') && needs.scope.outputs.rust != 'false' && needs.scope.outputs.full != 'false' }}
+    if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || (inputs.mode == 'ci' || inputs.mode == 'stress')) && needs.scope.outputs.rust != 'false' && needs.scope.outputs.full != 'false' }}
     name: Candidate / ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -585,7 +585,7 @@ jobs:
     # its own; the cli-daemon parity cache this workflow stopped using frees
     # about as much.
     needs: scope
-    if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || inputs.mode != 'wait-mail') && needs.scope.outputs.rust != 'false' && needs.scope.outputs.full != 'false' }}
+    if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || (inputs.mode == 'ci' || inputs.mode == 'stress')) && needs.scope.outputs.rust != 'false' && needs.scope.outputs.full != 'false' }}
     name: Candidate harness / ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -686,7 +686,8 @@ jobs:
       # with under 8 GB free. A step of its own, so a full disk is named as
       # one: every failure the 2026-10-27 nightly blamed on the yield step
       # was this check (6 GB free).
-      - name: Check the runner's free disk
+      - &selfhosted_disk
+        name: Check the runner's free disk
         if: runner.environment == 'self-hosted'
         shell: pwsh
         run: |
@@ -701,7 +702,8 @@ jobs:
       # the runner's own configuration names this machine's full-suite lease
       # and lock directory; the tree never names a machine. Runs before
       # checkout so a yielding shard loads nothing.
-      - name: Yield to this machine's full suite
+      - &selfhosted_lease
+        name: Yield to this machine's full suite
         if: runner.environment == 'self-hosted'
         shell: pwsh
         run: |
@@ -755,7 +757,8 @@ jobs:
           cache-dependency-path: pyproject.toml
       # A persistent runner shares one tool-cache Python between jobs; a venv
       # in the job's temporary directory starts each shard as clean as hosted.
-      - name: Give the shard its own Python environment
+      - &selfhosted_venv
+        name: Give the shard its own Python environment
         if: runner.environment == 'self-hosted'
         shell: pwsh
         run: |
@@ -1526,6 +1529,78 @@ jobs:
       PARITY_YIELD_MINUTES: '60'
       PARITY_MIN_FREE_GB: '8'
     steps: *parity_steps
+
+  body-evidence:
+    # D6/D11: published bodies on master, separate from the required gates.
+    # A branch dispatch proves this job without spending the hosted matrix.
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'body-evidence')
+    name: Rust daemon / nightly body evidence (non-gating)
+    runs-on: [self-hosted, pseudolife-parity-linux]
+    continue-on-error: true
+    timeout-minutes: 360
+    env:
+      PARITY_YIELD_MINUTES: '60'
+      PARITY_MIN_FREE_GB: '8'
+      CARGO_TARGET_DIR: ${{ runner.temp }}/body-target
+      HF_HOME: ${{ runner.temp }}/body-huggingface
+      PSEUDOLIFE_DAEMON_MODELS_DIR: ${{ runner.temp }}/body-models
+      PSEUDOLIFE_DAEMON_PDFIUM_DIR: ${{ runner.temp }}/body-pdfium
+      PSEUDOLIFE_DAEMON_ORT_THREADS: '1'
+      PYTHONUNBUFFERED: '1'
+    steps:
+      - *selfhosted_disk
+      - *selfhosted_lease
+      - uses: actions/checkout@v4
+      - name: Body evidence / plan
+        run: python3 rust/ci/body_evidence.py plan --out "$RUNNER_TEMP/body-evidence"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - *selfhosted_venv
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.94.0
+      - *selfhosted_disk
+      - name: Build the compared Rust daemon
+        working-directory: rust
+        run: |
+          cargo build --locked --release --bin pseudolife-daemon -j 3
+          cp "$CARGO_TARGET_DIR/release/pseudolife-daemon" "$RUNNER_TEMP/body-daemon"
+          # This job owns the whole target; no persistent runner cache grows.
+          cargo clean
+      - name: Install the Python oracle and harness dependencies
+        run: |
+          python -m pip install --no-compile --index-url https://download.pytorch.org/whl/cpu 'torch==2.13.0'
+          python -m pip install --no-compile -e '.[dev,lite,onnx]' 'sentence-transformers==5.3.0' 'transformers==4.57.6' 'onnxruntime==1.27.0' 'mcp==2.2.0' 'pydantic==2.14.0' 'pydantic-core==2.50.0'
+          python -m pip uninstall -y beautifulsoup4
+      - *selfhosted_disk
+      - name: Provision the compared models and native libraries
+        run: |
+          "$RUNNER_TEMP/body-daemon" provision models
+          "$RUNNER_TEMP/body-daemon" provision pdfium
+          python rust/ci/body_oracle.py --github-env "$GITHUB_ENV"
+      - name: Prepare disposable PostgreSQL for body differentials
+        env:
+          LANG: C.UTF-8
+          LC_ALL: C.UTF-8
+        run: python rust/cli_harness/lease_ci.py
+      - *selfhosted_disk
+      - name: Run every body differential
+        run: python rust/ci/body_evidence.py run --rust-bin "$RUNNER_TEMP/body-daemon" --out "$RUNNER_TEMP/body-evidence"
+      - name: Summarize body evidence
+        if: always()
+        run: python3 rust/ci/body_evidence.py summary --out "$RUNNER_TEMP/body-evidence"
+      - name: Publish body evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rust-body-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/body-evidence/evidence.json
+          if-no-files-found: error
+          retention-days: 30
+      # RUNNER_TEMP is cleared between jobs. The runner's tracking cleanup
+      # stops its PostgreSQL process; its next job hook removes only its own
+      # pl-cli-lease-postgres-* directories (self-hosted parity conventions).
 
   source-mutants:
     # Run 38145459384: 92m23s versus the 70m28s baseline; 68 source jobs

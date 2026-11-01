@@ -1413,6 +1413,9 @@ def main() -> int:
     args = ap.parse_args()
     # Live-only scenarios (a derived template) stay out of default replay.
     names = args.only or default_scenarios(args.mode)
+    if args.out and args.mode != "mutants":
+        args.out.write_text(json.dumps({"complete": False, "planned_scenarios": names,
+                                       "results": []}), encoding="utf-8")
     template = pg.name("pl_cf_w2d_template")
     if args.mode != "golden" and (not args.reuse_template or template not in pg.existing()):
         seed_template(template, args.paragraphs)
@@ -1450,7 +1453,12 @@ def main() -> int:
         survivors = [m for m, n in outcome.items() if n == 0]
         print(json.dumps({"mutants": outcome, "survivors": survivors}, indent=1))
         return 1 if survivors else 0
-    results = [run_scenario(SCENARIOS[n](), args.rust_bin, template, args.mode, args.record) for n in names]
+    results = []
+    for n in names:
+        results.append(run_scenario(SCENARIOS[n](), args.rust_bin, template, args.mode, args.record))
+        if args.out:
+            args.out.write_text(json.dumps({"complete": False, "planned_scenarios": names,
+                                           "results": results}), encoding="utf-8")
     n_cases = sum(len(r["cases"]) for r in results)
     n_diff = 0
     for r in results:
@@ -1468,7 +1476,8 @@ def main() -> int:
     summary = {"scenarios": len(results), "cases": n_cases, "case_diffs": n_diff, "db_diff_scenarios": db}
     print(json.dumps(summary))
     if args.out:
-        args.out.write_text(json.dumps({"summary": summary, "results": results}, indent=1), encoding="utf-8")
+        args.out.write_text(json.dumps({"complete": True, "planned_scenarios": names,
+                                       "summary": summary, "results": results}, indent=1), encoding="utf-8")
     return 1 if (n_diff or db) else 0
 
 
