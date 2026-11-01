@@ -196,9 +196,6 @@ fn main() {
     };
     let cwd = std::env::current_dir().unwrap_or_else(|e| fail(1, &format!("cwd: {e}")));
     let (data_dir, config_file) = config::config_path(&env_lookup, &cwd);
-    if let Err(e) = std::fs::create_dir_all(&data_dir) {
-        fail(1, &format!("data dir {}: {e}", data_dir.display()));
-    }
     let config = config::load(&config_file).unwrap_or_else(|e| fail(1, &e.to_string()));
     // Harness hook: print the parsed configuration and exit, so the config
     // differential can compare it with Python's AppConfig (harness/run.py).
@@ -207,6 +204,10 @@ fn main() {
         std::process::exit(0);
     }
     let env = config::DaemonEnv::from_env(&env_lookup).unwrap_or_else(|e| fail(1, &e.to_string()));
+    let read_only = config.read_only || env.read_only;
+    if !read_only && let Err(e) = std::fs::create_dir_all(&data_dir) {
+        fail(1, &format!("data dir {}: {e}", data_dir.display()));
+    }
 
     // A token that is not valid Unicode would read as unset and open the
     // bank; refuse instead (declared divergence: Python starts and answers
@@ -303,12 +304,13 @@ fn main() {
         ));
         // v58: the gate's activity record, written by the refresher; an
         // open daemon records nothing (daemon.py start_stored_principals).
-        let activity = auth_configured.then(|| Arc::new(principal_activity::Recorder::new()));
+        let activity = (auth_configured && !read_only).then(|| Arc::new(principal_activity::Recorder::new()));
         principals::spawn_refresher(
             dsn.clone(),
             store.clone(),
             env_principals,
             activity.clone(),
+            read_only,
         );
         let service_dsn = dsn.clone();
         let service = Arc::new(service::Service::new(
@@ -320,7 +322,9 @@ fn main() {
         ));
         let background = background::Background::default();
         background.start_background_durability(service.clone(), autosave_every);
-        background.start_session_reaper(service.clone(), reap_every, idle_seconds);
+        if !read_only {
+            background.start_session_reaper(service.clone(), reap_every, idle_seconds);
+        }
         background.start_dream_sweep(
             service.clone(),
             service.config.dream.enabled,

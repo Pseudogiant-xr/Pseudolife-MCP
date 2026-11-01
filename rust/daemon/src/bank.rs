@@ -145,6 +145,15 @@ async fn hydrate_locked(
     memory: Option<&MemoryConfig>,
     dim: usize,
 ) -> Result<(Bank, Vec<usize>)> {
+    // The shadow's session default is read-only, including after reconnect.
+    // Keep seating identical, but never attempt its cosmetic write-through.
+    let read_only: bool = client
+        .query_one(
+            "SELECT current_setting('transaction_read_only') = 'on'",
+            &[],
+        )
+        .await?
+        .get(0);
     let rows = client
         .query(
             "SELECT id, band, text, embedding::real[], surprise::text, ts, access_count, source, \
@@ -244,7 +253,7 @@ async fn hydrate_locked(
             entries[index]
                 .band
                 .clone_from(&memory.band_specs[depth].name);
-            if crate::mutants::active("startup-skip-stamp") {
+            if read_only || crate::mutants::active("startup-skip-stamp") {
                 continue;
             }
             if let Err(error) = client
@@ -270,7 +279,8 @@ async fn hydrate_locked(
                 // rebalance; a failed cosmetic hop is not silently retried.
                 if entry.band != memory.band_specs[depth].name {
                     entry.band.clone_from(&memory.band_specs[depth].name);
-                    if !crate::mutants::active("startup-skip-stamp")
+                    if !read_only
+                        && !crate::mutants::active("startup-skip-stamp")
                         && let Err(error) = client
                             .execute(
                                 "UPDATE entries SET band = $1 WHERE id = $2",
@@ -290,7 +300,7 @@ async fn hydrate_locked(
         }
     }
     for e in entries.iter().filter(|_| memory.is_none()) {
-        if e.stored_band != e.band {
+        if !read_only && e.stored_band != e.band {
             // Python wraps the one UPDATE in BEGIN/COMMIT; a single
             // autocommit statement is the same atomic write, and leaves no
             // transaction open on the shared session if this future is dropped.

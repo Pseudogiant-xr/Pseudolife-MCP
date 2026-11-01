@@ -16,6 +16,13 @@ use std::time::{Duration, Instant};
 const RETRY_BASE_S: f64 = 5.0;
 const RETRY_MAX_S: f64 = 60.0;
 
+// A disposable 100,000-row bank measured 45.6 ms/probe (median), 721.6 ms
+// for 16 probes. Reuse for one second to amortize bursts; the shadow proof
+// verifies that 16 concurrent readers share one probe after expiry.
+const SHADOW_PROBE_REUSE: Duration = Duration::from_secs(1);
+
+pub const READ_ONLY_MESSAGE: &str = "read-only shadow: this daemon cannot change the bank; send writes to the active writer daemon instead";
+
 /// What a request needs once init has completed.
 ///
 /// A reconnect that keeps the bank (no other writer in the gap) republishes
@@ -109,6 +116,8 @@ struct Inner {
     storage: Option<Arc<Storage>>,
     embedder: Option<Arc<Embedder>>,
     ready: Option<Arc<Ready>>,
+    shadow_marker: Option<Vec<(i64, String, String)>>,
+    shadow_probed_at: Option<Instant>,
     failures: u32,
     backoff_s: f64,
     retry_at: Option<Instant>,
@@ -164,12 +173,25 @@ pub struct Service {
 
 impl Service {
     pub fn new(
-        config: Config,
+        mut config: Config,
         env: DaemonEnv,
         data_dir: PathBuf,
         dsn: String,
         auth_configured: bool,
     ) -> Service {
+        config.read_only |= env.read_only;
+        if config.read_only {
+            config.memory.retrieval_log_enabled = false;
+            config.memory.cortex.read_tracking = false;
+            config.dream.enabled = false;
+            for key in [
+                "memory.retrieval_log.enabled",
+                "memory.cortex.read_tracking",
+                "memory.dream.enabled",
+            ] {
+                config.user_leaves.insert(key.into(), json!(false));
+            }
+        }
         let model_dir = std::env::var_os("PSEUDOLIFE_DAEMON_ONNX_DIR").map(PathBuf::from);
         let ort_threads = std::env::var("PSEUDOLIFE_DAEMON_ORT_THREADS")
             .ok()
@@ -230,6 +252,9 @@ impl Service {
     /// close here; the SessionEnd hook's close calls the same): one
     /// automatic dream in the background.
     pub fn fire_session_dream(&self) {
+        if self.config.read_only {
+            return;
+        }
         match self.handle() {
             Some(me) => {
                 eprintln!("session-end dream trigger: fired");
@@ -284,7 +309,12 @@ impl Service {
             return Ok(s.clone());
         }
         self.refuse_while_backing_off(inner)?;
-        let storage = match Storage::open(&self.dsn).await {
+        let opened = if self.config.read_only {
+            Storage::open_read_only(&self.dsn).await
+        } else {
+            Storage::open(&self.dsn).await
+        };
+        let storage = match opened {
             Ok(s) => Arc::new(s),
             Err(OpenError::LeaseHeld(msg)) => {
                 // Retryable: the holder may leave.
@@ -328,6 +358,11 @@ impl Service {
     /// The initialized service state, without initializing it (Python's
     /// `self._cms is None` check under the service lock).
     pub async fn ready_if_initialized(&self) -> Option<Arc<Ready>> {
+        // Awareness normally observes existing state without initializing.
+        // A shadow has no local writer to maintain that resident snapshot.
+        if self.config.read_only {
+            return self.ensure_init_inner().await.ok();
+        }
         self.inner.lock().await.ready.clone()
     }
 
@@ -376,6 +411,28 @@ impl Service {
             }
         }
         self.rehydrate_if_bank_changed_hands(&mut inner);
+        // Probe tuple versions, not embeddings. The service lock coalesces
+        // concurrent refreshes: waiters reuse the first published snapshot.
+        // Keep the pre-hydration marker so a commit during hydration causes
+        // the next request to refresh instead of blessing a mixed snapshot.
+        let shadow_marker = if self.config.read_only
+            && (reprobe
+                || inner.ready.is_none()
+                || inner
+                    .shadow_probed_at
+                    .is_none_or(|at| at.elapsed() >= SHADOW_PROBE_REUSE))
+        {
+            let storage = self.ensure_storage(&mut inner).await?;
+            let marker = storage.shadow_marker().await?;
+            inner.shadow_probed_at = Some(Instant::now());
+            eprintln!("read-only shadow: resident state probed");
+            if inner.shadow_marker.as_ref() != Some(&marker) {
+                inner.ready = None;
+            }
+            Some(marker)
+        } else {
+            inner.shadow_marker.clone()
+        };
         if let Some(r) = &inner.ready {
             if crate::mutants::active("startup-clock-reloads")
                 && r.startup.clock_state().hlc_reseed_pending
@@ -485,6 +542,10 @@ impl Service {
                     s.startup = Some(startup);
                     s.ready = Some(published);
                 });
+                inner.shadow_marker = shadow_marker;
+                if self.config.read_only {
+                    eprintln!("read-only shadow: resident state refreshed");
+                }
                 Ok(ready)
             }
             Err(e) => {
@@ -659,6 +720,9 @@ impl Service {
     /// along with the counters row. A failed counters write is logged and
     /// retried by the next autosave, as in Python.
     async fn save_counters(&self) -> Result<(), String> {
+        if self.config.read_only {
+            return Ok(());
+        }
         let mut inner = self.inner.lock().await;
         if inner.ready.is_none() {
             return Ok(());
@@ -833,6 +897,9 @@ impl Service {
 impl crate::background::Duties for Service {
     fn sweep(&self, stop: tokio::sync::watch::Receiver<bool>) -> crate::background::Duty<'_> {
         Box::pin(async move {
+            if self.config.read_only {
+                return Ok(());
+            }
             if self.config.memory.compaction_enabled {
                 let ready = self.ensure_init_inner().await?;
                 self.compact_superseded(&ready).await;
@@ -885,6 +952,9 @@ impl crate::background::Duties for Service {
 
     fn reap(&self, idle_seconds: f64) -> crate::background::Duty<'_> {
         Box::pin(async move {
+            if self.config.read_only {
+                return Ok(());
+            }
             self.ensure_init_inner().await?;
             // All session mutation is serialized with service operations.
             let _service_lock = self.inner.lock().await;
@@ -993,6 +1063,41 @@ impl crate::background::Duties for Service {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn shadow_duties_and_health_do_not_initialize_or_write() {
+        use crate::background::Duties;
+        let env =
+            DaemonEnv::from_env(&|k| (k == "PSEUDOLIFE_READ_ONLY").then(|| "1".into())).unwrap();
+        let mut config = Config::default();
+        for key in [
+            "memory.retrieval_log.enabled",
+            "memory.dream.enabled",
+            "memory.cortex.read_tracking",
+        ] {
+            config.user_leaves.insert(key.into(), json!(true));
+        }
+        let service = Service::new(config, env, PathBuf::from("unused"), String::new(), false);
+        assert!(!service.config.memory.retrieval_log_enabled);
+        assert!(!service.config.memory.cortex.read_tracking);
+        assert!(!service.config.dream.enabled);
+        for key in ["memory.retrieval_log.enabled", "memory.dream.enabled"] {
+            assert_eq!(
+                crate::config_io::running(&service.config, crate::config_io::knob(key).unwrap()),
+                json!(false)
+            );
+        }
+        service.autosave().await.unwrap();
+        service.reap(0.0).await.unwrap();
+        service
+            .sweep(tokio::sync::watch::channel(false).1)
+            .await
+            .unwrap();
+        service.fire_session_dream();
+        assert!(service.snapshot().storage.is_none());
+        let health = crate::health::payload(&service, &crate::auth::PrincipalStore::new()).await;
+        assert_eq!(health["read_only"], true);
+    }
     #[tokio::test]
     async fn shutdown_interrupts_warmup_retry_wait_without_another_init() {
         let service = Arc::new(Service::new(
