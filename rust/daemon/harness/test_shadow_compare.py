@@ -1,7 +1,11 @@
-"""Offline safety and verdict checks; no daemon, credentials or sockets."""
+"""Safety/verdict checks; synthetic credentials and loopback-only DB failures."""
 import json
+import os
 from pathlib import Path
+import socket
+import subprocess
 import sys
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -10,6 +14,38 @@ import shadow_compare as shadow
 
 
 class ShadowCompareTests(unittest.TestCase):
+    def assert_database_setup_failure(self, dsn):
+        env = {k: v for k, v in os.environ.items() if not k.startswith(("PSEUDOLIFE_", "PG"))}
+        env["SHADOW_TEST_DATABASE_URL"] = dsn
+        with tempfile.TemporaryDirectory() as folder:
+            output = Path(folder) / "summary.json"
+            result = subprocess.run(
+                [sys.executable, str(shadow.HERE / "shadow_compare.py"),
+                 "--python-url", "http://127.0.0.1:1", "--rust-url", "http://127.0.0.1:1",
+                 "--database-url-env", "SHADOW_TEST_DATABASE_URL", "--out", str(output)],
+                env=env, capture_output=True, text=True, timeout=10)
+            self.assertEqual(result.returncode, 2)
+            self.assertFalse(output.exists())
+        self.assertEqual(result.stdout, "")
+        self.assertIn("database setup failed", result.stderr)
+        self.assertIn("DSN redacted", result.stderr)
+        self.assertIn("SELECT credentials", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+        self.assertTrue(dsn not in result.stderr and "shadow-secret-marker" not in result.stderr,
+                        "database diagnostic leaked the synthetic DSN")
+
+    def test_malformed_database_dsn_is_sanitized_setup_failure(self):
+        self.assert_database_setup_failure("password=shadow-secret-marker invalid-shadow-option=value")
+
+    def test_refused_database_connection_is_sanitized_setup_failure(self):
+        # Reserve a loopback port without listening: libpq gets refusal from
+        # the OS, with no database, daemon or external endpoint involved.
+        with socket.socket() as reserved:
+            reserved.bind(("127.0.0.1", 0))
+            self.assert_database_setup_failure(
+                f"host=127.0.0.1 port={reserved.getsockname()[1]} dbname=shadow_fixture "
+                "user=shadow_fixture password=shadow-secret-marker connect_timeout=1")
+
     def test_generated_queries_supply_required_tool_arguments(self):
         tools = {t["name"]: t for t in map(json.loads, (shadow.HERE.parent / "src/mcp/tools.jsonl").read_text().splitlines())}
         for case in shadow.query_cases("fixture query"):

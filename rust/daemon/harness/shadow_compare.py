@@ -57,6 +57,10 @@ HERE = Path(__file__).resolve().parent
 REPLAY_SESSION_PREFIX = "shadow-compare:"
 
 
+class DatabaseSetupError(Exception):
+    """Database corpus setup failed; driver diagnostics may contain secrets."""
+
+
 def validate_case(case):
     if not isinstance(case, dict):
         raise ValueError("each case must be an object")
@@ -93,19 +97,22 @@ def corpus(query_file=None, dsn=None, limit=20):
             cases.extend(query_cases(item) if isinstance(item, str) else [validate_case(item)])
     if dsn:
         import psycopg
-        with psycopg.connect(dsn, options="-c default_transaction_read_only=on") as conn:
-            conn.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
-            rows = conn.execute("SELECT query_text FROM retrieval_events WHERE query_text <> '' "
-                                "AND coalesce(session_id, '') NOT LIKE 'shadow-compare:%%' "
-                                "GROUP BY query_text ORDER BY max(created_at) DESC, query_text LIMIT %s", (limit,))
-            for (query,) in rows:
-                cases.extend(query_cases(query))
-            for entity, attribute in conn.execute(
-                    "SELECT DISTINCT entity, attribute FROM facts WHERE status = 'current' "
-                    "ORDER BY entity, attribute LIMIT %s", (limit,)):
-                cases.append({"tool": "memory_fact_get", "args": {"entity": entity, "attribute": attribute}})
-                cases.append({"tool": "memory_graph", "args": {"entity": entity}})
-            cases.extend({"path": path} for path in sorted(READ_PATHS - {"/api/search", "/api/entry"}))
+        try:
+            with psycopg.connect(dsn, options="-c default_transaction_read_only=on") as conn:
+                conn.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
+                rows = conn.execute("SELECT query_text FROM retrieval_events WHERE query_text <> '' "
+                                    "AND coalesce(session_id, '') NOT LIKE 'shadow-compare:%%' "
+                                    "GROUP BY query_text ORDER BY max(created_at) DESC, query_text LIMIT %s", (limit,))
+                for (query,) in rows:
+                    cases.extend(query_cases(query))
+                for entity, attribute in conn.execute(
+                        "SELECT DISTINCT entity, attribute FROM facts WHERE status = 'current' "
+                        "ORDER BY entity, attribute LIMIT %s", (limit,)):
+                    cases.append({"tool": "memory_fact_get", "args": {"entity": entity, "attribute": attribute}})
+                    cases.append({"tool": "memory_graph", "args": {"entity": entity}})
+                cases.extend({"path": path} for path in sorted(READ_PATHS - {"/api/search", "/api/entry"}))
+        except psycopg.Error:
+            raise DatabaseSetupError from None
     if not cases:
         raise ValueError("empty corpus: supply a query file or a bank with retrieval log entries")
     for i, case in enumerate(cases):
@@ -321,6 +328,11 @@ def main(argv=None):
         args.out.with_suffix(".txt").write_text(digest(summary), encoding="utf-8")
         print(f"{summary['cases']} cases; {summary['classifications']}; JSON: {args.out}")
         return int(summary["classifications"].get("new_bug", 0) > 0)
+    except DatabaseSetupError:
+        print("shadow comparison database setup failed (DSN redacted); check the DSN in "
+              "--database-url-env, PostgreSQL reachability, and SELECT credentials for an initialized bank",
+              file=sys.stderr)
+        return 2
     except (ValueError, KeyError, OSError, http.client.HTTPException) as exc:
         # DSNs and tokens never appear in diagnostic exception text.
         print(f"shadow comparison failed ({type(exc).__name__}); check input and endpoint readiness", file=sys.stderr)

@@ -94,6 +94,10 @@ and bearer environment-variable names to `shadow_compare.py --help`.
 Use `--queries` for a JSON read corpus or `--database-url-env` for a
 SELECT-only retrieval-log snapshot. Replays still produce Python telemetry;
 the reserved session prefix described above keeps it out of later corpora.
+Database connection or corpus-query failures exit 2 (setup failure), with
+the DSN and driver diagnostics redacted. Check the named environment
+variable's DSN, PostgreSQL reachability and SELECT credentials against an
+initialized bank. Exit 1 denotes untriaged comparison differences.
 Keep the JSON and digest together: tolerated differences are reported, not
 discarded. `test_shadow_mode.py` is a Linux-only disposable-bank proof;
 the storage reconnect unit test runs natively on Windows as well.
