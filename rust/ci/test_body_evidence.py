@@ -104,6 +104,23 @@ def test_tokenless_woke_is_compared_as_a_served_body(monkeypatch):
     assert harness.compare_case(case, response, dict(response, status=501))["diffs"]
 
 
+def test_smoke_cells_cannot_be_published_as_full_nightly_evidence(tmp_path, monkeypatch):
+    binary = tmp_path / "daemon"
+    binary.write_bytes(b"candidate")
+    selected = []
+
+    def execute(command, **kwargs):
+        selected.append(command[command.index("--only") + 1])
+        return type("Result", (), {"returncode": 0})()
+
+    monkeypatch.setattr(evidence.subprocess, "run", execute)
+    result = evidence.run(binary, tmp_path / "out", {"scheduled_master": True}, smoke=True)
+    assert selected == list(evidence.SMOKE.values())
+    assert result["scope"] == "smoke"
+    assert result["scheduled_master"] is False
+    assert result["status"] == "fail"  # successful exits alone are never evidence
+
+
 def test_partial_report_names_the_scenarios_that_did_not_run():
     report = {"complete": False, "planned_scenarios": ["first", "second"],
               "scenarios": [{"scenario": "first", "steps": [{"diffs": []}]}]}

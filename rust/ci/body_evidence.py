@@ -20,6 +20,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[2]
 HARNESS = ROOT / "rust/daemon/harness"
 SUITES = {"w2e": "w2e.py", "w2d_search": "w2d_search.py", "board": "board/run.py"}
+SMOKE = {"w2e": "store-resume-disabled", "w2d_search": "default", "board": "identity"}
 
 
 def summarize(family: str, report: dict, exit_code: int) -> dict:
@@ -93,11 +94,13 @@ def plan(out: Path) -> dict:
     return report
 
 
-def run(binary: Path, out: Path, manifest: dict) -> dict:
+def run(binary: Path, out: Path, manifest: dict, *, smoke: bool = False) -> dict:
     with binary.open("rb") as stream:
         binary_digest = hashlib.file_digest(stream, "sha256").hexdigest()
     result = {**manifest, "status": "incomplete", "suites": [], "binary_sha256": binary_digest,
-              "oracle_cpu_dtype": "fp32"}
+              "oracle_cpu_dtype": "fp32", "scope": "smoke" if smoke else "full"}
+    if smoke:
+        result["scheduled_master"] = False
     save(out, result)
     # Scratch is outside the published directory. Never upload a whole
     # harness home: it contains disposable login material and raw responses.
@@ -108,9 +111,11 @@ def run(binary: Path, out: Path, manifest: dict) -> dict:
         raw.unlink(missing_ok=True)
         command = [sys.executable, str(HARNESS / script), "live", "--rust-bin", str(binary),
                    "--out", str(raw)]
+        if smoke:
+            command += ["--only", SMOKE[family]]
         env = dict(os.environ, PYTHONUNBUFFERED="1", PL_HARNESS_SCRATCH=str(scratch / family),
                    PSEUDOLIFE_EMBEDDING_CPU_DTYPE="fp32")
-        print(f"Starting full {family} live differential", flush=True)
+        print(f"Starting {result['scope']} {family} live differential", flush=True)
         with (scratch / f"{family}.log").open("w", encoding="utf-8") as log:
             completed = subprocess.run(command, cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT)
         try:
@@ -129,7 +134,8 @@ def run(binary: Path, out: Path, manifest: dict) -> dict:
 def summary(report: dict) -> str:
     lines = ["## Rust daemon body differentials", "",
              f"Rust: `{report['rust_head']}`; Python oracle: `{report['python_head']}`.",
-             f"Result: **{report['status']}**. Scheduled master: {report['scheduled_master']}.", "",
+             f"Result: **{report['status']}**. Scope: {report.get('scope', 'full')}. "
+             f"Scheduled master: {report['scheduled_master']}.", "",
              "| Harness | Scenarios | Cases | Differences | Result |",
              "|---|---:|---:|---:|---|"]
     rows = {row["name"]: row for row in report["suites"]}
@@ -149,6 +155,8 @@ def main() -> int:
     parser.add_argument("mode", choices=("plan", "run", "summary"))
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--rust-bin", type=Path)
+    parser.add_argument("--smoke", action="store_true",
+                        help="run one cell per harness; never qualifying nightly evidence")
     args = parser.parse_args()
     out = args.out.resolve()
     if args.mode == "plan":
@@ -158,7 +166,7 @@ def main() -> int:
     if args.mode == "run":
         if not args.rust_bin:
             parser.error("run requires --rust-bin")
-        report = run(args.rust_bin.resolve(), out, report)
+        report = run(args.rust_bin.resolve(), out, report, smoke=args.smoke)
         return 0 if report["status"] == "pass" else 1
     text = summary(report)
     print(text)
