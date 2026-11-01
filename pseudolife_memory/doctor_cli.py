@@ -120,11 +120,25 @@ def _bind_child_to_this_package(env: dict) -> dict:
     here = os.path.normcase(os.path.abspath(os.getcwd()))
     entries = [entry for entry in sys.path
                if entry and os.path.normcase(os.path.abspath(entry)) != here]
-    try:
-        spec = importlib.machinery.PathFinder.find_spec("pseudolife_memory", entries)
-        found = [Path(p).resolve() for p in (spec.submodule_search_locations or [])] if spec else []
-    except (ImportError, OSError, ValueError):
-        found = []
+    # Every meta-path finder, in import order, as the child will ask them: a
+    # PEP 660 editable install is served by a finder of its own, not by a
+    # sys.path entry, and its checkout root must not reach PYTHONPATH.
+    found = []
+    for finder in sys.meta_path:
+        find_spec = getattr(finder, "find_spec", None)
+        if find_spec is None:
+            continue
+        try:
+            if finder is importlib.machinery.PathFinder:
+                spec = find_spec("pseudolife_memory", entries)
+            else:
+                spec = find_spec("pseudolife_memory", None)
+            if spec is None:
+                continue
+            found = [Path(p).resolve() for p in (spec.submodule_search_locations or [])]
+        except (ImportError, OSError, ValueError):
+            continue
+        break
     if package in found:
         return env
     existing = env.get("PYTHONPATH")

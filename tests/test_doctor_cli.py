@@ -711,6 +711,52 @@ def test_the_doctor_handshake_leaves_pythonpath_alone_for_an_installed_package(t
     assert seen["pythonpath"] == "existing-entry"
 
 
+def test_the_doctor_handshake_leaves_pythonpath_alone_for_an_editable_install(tmp_path,
+                                                                              monkeypatch):
+    # A PEP 660 editable install serves the package from a sys.meta_path
+    # finder, not from a sys.path entry. The child finds it the same way, so
+    # its checkout root must not go on PYTHONPATH, where an unrelated mcp.py
+    # beside the package would replace the SDK in the child.
+    import importlib.util
+    import sys as _sys
+
+    import mcp.client.stdio as stdio
+    import pseudolife_memory
+    checkout = tmp_path / "checkout"
+    package = _stub_package(checkout, tmp_path / "unused")
+    (checkout / "mcp.py").write_text("# unrelated\n", encoding="utf-8")
+
+    class EditableFinder:
+        @staticmethod
+        def find_spec(name, path=None, target=None):
+            if name != "pseudolife_memory":
+                return None
+            return importlib.util.spec_from_file_location(
+                name, package / "__init__.py", submodule_search_locations=[str(package)])
+
+    import importlib.machinery
+    monkeypatch.setattr(pseudolife_memory, "__file__", str(package / "__init__.py"))
+    # As installed editable: no sys.path entry holds the package, and the
+    # editable finder follows PathFinder, as setuptools appends it.
+    monkeypatch.setattr(_sys, "path", [entry for entry in _sys.path
+                                       if not (Path(entry or ".") / "pseudolife_memory").is_dir()])
+    finders = list(_sys.meta_path)
+    finders.insert(finders.index(importlib.machinery.PathFinder) + 1, EditableFinder)
+    monkeypatch.setattr(_sys, "meta_path", finders)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("PYTHONPATH", raising=False)
+    seen = {}
+
+    def capture(params):
+        seen.update(pythonpath=params.env.get("PYTHONPATH"))
+        raise RuntimeError("captured")
+
+    monkeypatch.setattr(stdio, "stdio_client", capture)
+    with pytest.raises(RuntimeError, match="captured"):
+        asyncio.run(doctor_cli._handshake())
+    assert seen["pythonpath"] is None
+
+
 def test_the_doctor_handshake_hands_a_relative_token_file_over_resolved(tmp_path, monkeypatch):
     # The child runs from another directory, so a relative token file path
     # doctor's own checks read from the caller's directory is resolved first.
