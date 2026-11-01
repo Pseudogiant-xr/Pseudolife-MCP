@@ -57,8 +57,10 @@ pub struct Board {
     pub(crate) hub: hub::Hub,
     pub(crate) service: Arc<Service>,
     pub(crate) principals: Arc<PrincipalStore>,
-    /// The daemon's own board address, registered by its first notice.
+    /// The maintainer's board address, registered by the first
+    /// `/api/maintainer/send` or `/repudiate` request.
     pub(crate) maintainer_identity: Mutex<Option<(String, String)>>,
+    /// The daemon's own board address, registered by its first notice.
     pub(crate) daemon_identity: Mutex<Option<(String, String)>>,
     /// Test seam: a send's first attempt waits on this after it took its
     /// ready service and before it stamps (`clock_retry_tests`).
