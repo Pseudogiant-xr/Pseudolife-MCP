@@ -1,6 +1,6 @@
 """Deploy this checkout's daemon (and, with --all, the client side).
 
-    python ops/update.py [--all] [--rollback-tag pre-x] [--no-backup] [--allow-dirty] ...
+    python ops/update.py [--engine python|rust] [--shadow] [--all] [--rollback-tag pre-x] ...
 
 ``ops/update.ps1`` and ``ops/update.sh`` call this with their flags mapped;
 the logic is ``pseudolife_memory/update_cli.py``, the same code
