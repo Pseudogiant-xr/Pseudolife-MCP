@@ -2157,21 +2157,23 @@ def _mcp_shadow() -> tuple[str, str] | None:
         return None
     if spec is None:
         return None
-    try:
-        from importlib.metadata import distribution
-        sdk = Path(distribution("mcp").locate_file("mcp")).resolve()
-    except Exception:  # noqa: BLE001 - no installed SDK: nothing is shadowed
-        return None
-    if not sdk.is_dir():   # an unusual layout: claim nothing
-        return None
     found = spec.origin if spec.origin not in (None, "namespace") else None
     if found is None and spec.submodule_search_locations:
         found = next(iter(spec.submodule_search_locations), None)
     if not found:
         return None
-    loaded = Path(found).resolve()
+    try:
+        from importlib.metadata import distribution
+        sdk = Path(distribution("mcp").locate_file("mcp")).resolve()
+        if not sdk.is_dir():   # an unusual layout: claim nothing
+            return None
+        loaded = Path(found).resolve()
+    except Exception:  # noqa: BLE001 - no installed SDK, or an unreadable path: claim nothing
+        return None
     if loaded == sdk or sdk in loaded.parents:
         return None
+    if loaded.name == "__init__.py":   # a package: name its folder
+        loaded = loaded.parent
     return str(loaded), str(sdk)
 
 
@@ -2208,9 +2210,9 @@ def _require_mcp_sdk_v2() -> None:
         found, sdk = shadow
         print(
             f"[shim] `import mcp` loads {found}, not the installed MCP SDK "
-            f"(mcp {installed} at {sdk}): that file or folder comes first on "
-            f"the import path, usually because it sits in the directory this "
-            f"was started from.\n"
+            f"(mcp {installed} at {sdk}): that module or package comes first "
+            f"on the import path, usually because it sits in the directory "
+            f"this was started from.\n"
             f"  Fix:  move or rename {found}, or start from another directory.",
             file=sys.stderr,
         )

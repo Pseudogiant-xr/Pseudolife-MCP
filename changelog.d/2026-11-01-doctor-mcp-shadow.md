@@ -6,10 +6,12 @@
   of the MCP SDK, so doctor failed with "this environment's MCP SDK predates
   v2" and advised a pip install that could not help. The check now starts
   the shim from a fresh, empty directory of its own, as the installed
-  launcher already does, and a relative `PSEUDOLIFE_MCP_TOKEN_FILE` is
-  resolved before it moves.
-- When a file or folder named `mcp` does hide the SDK (any `python -m` or
-  `python -c` run from its directory), the shim's SDK check and doctor's
-  recovery advice now name that path and say to move or rename it, or start
-  from another directory, instead of blaming the SDK version. A genuinely
-  old or missing SDK still gets the pip command.
+  launcher already does. A relative `PSEUDOLIFE_MCP_TOKEN_FILE` is resolved
+  first, and a doctor run from a source checkout still checks that
+  checkout's code.
+- When a file `mcp.py` or a package folder `mcp` (one holding
+  `__init__.py`) does hide the SDK (any `python -m` or `python -c` run from
+  its directory), the shim's SDK check names that path and says to move or
+  rename it, or start from another directory, instead of blaming the SDK
+  version; doctor's recovery advice says the same when the SDK check or an
+  import failed. A genuinely old or missing SDK still gets the pip command.

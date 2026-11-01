@@ -102,6 +102,35 @@ def git_bash_report(env, *, defaults=GIT_BASH_DEFAULTS, which=shutil.which) -> d
     return report
 
 
+def _bind_child_to_this_package(env: dict) -> dict:
+    """``env`` for the handshake's child, which starts outside the working
+    directory, with this process's own ``pseudolife_memory`` importable.
+
+    Doctor started as ``python -m pseudolife_memory.cli doctor`` from a source
+    checkout with no editable install found the package through the working
+    directory; without it the child would test another installed copy, or
+    none. When the package is not where the rest of ``sys.path`` finds it,
+    its parent directory goes first on the child's ``PYTHONPATH``. An
+    installed runtime is found there, and its ``PYTHONPATH`` is left alone.
+    """
+    import importlib.machinery
+
+    import pseudolife_memory
+    package = Path(pseudolife_memory.__file__).resolve().parent
+    here = os.path.normcase(os.path.abspath(os.getcwd()))
+    entries = [entry for entry in sys.path
+               if entry and os.path.normcase(os.path.abspath(entry)) != here]
+    try:
+        spec = importlib.machinery.PathFinder.find_spec("pseudolife_memory", entries)
+        found = [Path(p).resolve() for p in (spec.submodule_search_locations or [])] if spec else []
+    except (ImportError, OSError, ValueError):
+        found = []
+    if package in found:
+        return env
+    existing = env.get("PYTHONPATH")
+    return {**env, "PYTHONPATH": str(package.parent) + (os.pathsep + existing if existing else "")}
+
+
 async def _handshake() -> dict:
     from mcp import ClientSession, StdioServerParameters
     from mcp.client.stdio import stdio_client
@@ -111,6 +140,7 @@ async def _handshake() -> dict:
         # Resolved here, as doctor's own checks resolved it: the child runs
         # from another directory.
         env[_TOKEN_FILE_KEY] = os.path.abspath(os.path.expanduser(env[_TOKEN_FILE_KEY]))
+    env = _bind_child_to_this_package(env)
     # From a fresh empty directory: `-m` puts the working directory first on
     # sys.path, so a stray `mcp.py` where doctor was run (one sat in the
     # shared temp directory, 2026-11-01) replaced the SDK in the child. The
@@ -723,9 +753,11 @@ def run_doctor() -> None:
         # or URL credentials. The exception type plus recovery is sufficient.
         report["error"] = type(exc).__name__
         report["recovery"] = "Check daemon health and the exact registered interpreter. Run that interpreter with -m pip check and -m pip show pseudolife-mcp mcp; reinstall there if stale, then retry."
-        shadow = _mcp_shadow()
+        # Only the failures a shadowing `mcp` causes, the SDK check's exit or
+        # an import, take its recovery; a refused bearer stays a refused bearer.
+        shadow = _mcp_shadow() if isinstance(exc, (SystemExit, ImportError)) else None
         if shadow is not None:
-            # No reinstall helps: a file or folder named mcp hides the SDK.
+            # No reinstall helps: an `mcp.py` or `mcp` package hides the SDK.
             report["recovery"] = (f"`import mcp` loads {shadow[0]}, not the installed MCP SDK at "
                                   f"{shadow[1]}; move or rename it, or run doctor from another "
                                   f"directory, then retry.")

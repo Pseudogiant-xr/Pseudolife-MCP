@@ -585,10 +585,9 @@ def test_the_doctor_handshake_ignores_an_mcp_module_in_the_working_directory(tmp
     assert not marker.exists(), "the handshake's shim imported the working directory's mcp.py"
 
 
-@pytest.mark.parametrize("shadow", [("/work/mcp.py", "/site-packages/mcp"), None])
-def test_doctor_recovery_names_a_shadowing_mcp_module(shadow, monkeypatch, capsys):
-    # Doctor started as `python -m` from that directory meets the shadow
-    # itself; its JSON recovery, which agents act on, must not say reinstall.
+def _doctor_failing(monkeypatch, capsys, *, failure, at_sdk_check, shadow):
+    """Run doctor to a reachable daemon whose SDK check or handshake raises
+    ``failure`` while ``_mcp_shadow`` reports ``shadow``; return the report."""
     monkeypatch.setattr(sys, "argv", ["pseudolife-mcp", "doctor"])
     monkeypatch.setattr(doctor_cli, "registration_credentials", lambda env: ({}, None))
     monkeypatch.setattr(doctor_cli, "_board_probe", lambda timeout: {"state": "on", "line": "on"})
@@ -598,21 +597,118 @@ def test_doctor_recovery_names_a_shadowing_mcp_module(shadow, monkeypatch, capsy
     monkeypatch.setattr(shim, "probe_health", lambda *args, **kwargs: {"status": "ok"})
     monkeypatch.setattr(shim, "_daemon_url", lambda: "http://127.0.0.1:8765")
 
-    def sdk_check():
-        raise SystemExit(1)
+    def fail(*_args, **_kwargs):
+        raise failure
 
-    monkeypatch.setattr(shim, "_require_mcp_sdk_v2", sdk_check)
+    monkeypatch.setattr(shim, "_require_mcp_sdk_v2", fail if at_sdk_check else (lambda: None))
+    if not at_sdk_check:
+        monkeypatch.setattr(doctor_cli, "_handshake", AsyncMock(side_effect=failure))
     monkeypatch.setattr(shim, "_mcp_shadow", lambda: shadow)
     with pytest.raises(SystemExit) as stop:
         doctor_cli.run_doctor()
     assert stop.value.code == 1
     report = json.loads(capsys.readouterr().out)
-    assert report["ok"] is False and report["error"] == "SystemExit"
-    if shadow is None:
-        assert "pip check" in report["recovery"]
-    else:
-        assert "/work/mcp.py" in report["recovery"] and "move or rename" in report["recovery"]
-        assert "pip" not in report["recovery"]
+    assert report["ok"] is False and report["error"] == type(failure).__name__
+    return report
+
+
+_SHADOW = ("/work/mcp.py", "/site-packages/mcp")
+
+
+@pytest.mark.parametrize("failure,at_sdk_check", [
+    (SystemExit(1), True),                                   # the SDK check's exit
+    (ModuleNotFoundError("No module named 'mcp.client'"), False),  # the handshake's import
+])
+def test_doctor_recovery_names_a_shadowing_mcp_module(failure, at_sdk_check, monkeypatch, capsys):
+    # Doctor started as `python -m` from that directory meets the shadow
+    # itself; its JSON recovery, which agents act on, must not say reinstall.
+    report = _doctor_failing(monkeypatch, capsys, failure=failure, at_sdk_check=at_sdk_check,
+                             shadow=_SHADOW)
+    assert "/work/mcp.py" in report["recovery"] and "move or rename" in report["recovery"]
+    assert "pip" not in report["recovery"]
+
+
+@pytest.mark.parametrize("failure,at_sdk_check,shadow", [
+    (SystemExit(1), True, None),                              # no shadow: an old SDK
+    (RuntimeError("the daemon refused this bearer"), False, _SHADOW),  # unrelated failure
+])
+def test_doctor_recovery_stays_generic_unless_the_shadow_caused_the_failure(
+        failure, at_sdk_check, shadow, monkeypatch, capsys):
+    report = _doctor_failing(monkeypatch, capsys, failure=failure, at_sdk_check=at_sdk_check,
+                             shadow=shadow)
+    assert "pip check" in report["recovery"]
+    assert "move or rename" not in report["recovery"]
+
+
+def test_the_shadow_check_never_raises_on_an_unreadable_path(monkeypatch):
+    # It runs inside doctor's error handler: a filesystem error there must
+    # read as "no shadow found", not crash the report.
+    import pathlib
+
+    def refuse(self):
+        raise PermissionError("access denied")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(pathlib.Path, "is_dir", refuse)
+        found = shim._mcp_shadow()
+    assert found is None
+
+
+def _stub_package(root: Path, marker: Path) -> Path:
+    """A minimal pseudolife_memory under ``root`` whose ``cli`` records which
+    copy ran, then exits."""
+    package = root / "pseudolife_memory"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    (package / "cli.py").write_text(
+        f"open({str(marker)!r}, 'w', encoding='utf-8').write(__file__)\nraise SystemExit(3)\n",
+        encoding="utf-8")
+    return package
+
+
+def test_the_doctor_handshake_runs_the_checkout_doctor_was_started_from(tmp_path, monkeypatch):
+    # `python -m pseudolife_memory.cli doctor` from a source checkout with no
+    # editable install: the package came from the working directory, which
+    # the child no longer starts in, so the child is pointed at it instead of
+    # testing some other installed copy.
+    import pseudolife_memory
+    marker = tmp_path / "child-ran"
+    checkout = tmp_path / "checkout"
+    package = _stub_package(checkout, marker)
+    monkeypatch.setattr(pseudolife_memory, "__file__", str(package / "__init__.py"))
+    monkeypatch.chdir(checkout)
+    monkeypatch.delenv("PYTHONPATH", raising=False)
+    monkeypatch.setenv("PSEUDOLIFE_MCP_DAEMON_URL", "http://127.0.0.1:9")
+    try:
+        asyncio.run(asyncio.wait_for(doctor_cli._handshake(), timeout=60))
+    except Exception:  # noqa: BLE001 - the stub exits: only which copy ran matters
+        pass
+    assert marker.exists(), "the handshake's child did not run the checkout's package"
+    assert Path(marker.read_text(encoding="utf-8")).resolve() == (package / "cli.py").resolve()
+
+
+def test_the_doctor_handshake_leaves_pythonpath_alone_for_an_installed_package(tmp_path,
+                                                                               monkeypatch):
+    # The near miss: the package is importable without the working directory
+    # (an installed runtime), so the child's PYTHONPATH is what doctor had.
+    import mcp.client.stdio as stdio
+    import pseudolife_memory
+    site = tmp_path / "site-packages"
+    package = _stub_package(site, tmp_path / "unused")
+    monkeypatch.setattr(pseudolife_memory, "__file__", str(package / "__init__.py"))
+    monkeypatch.syspath_prepend(str(site))
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("PYTHONPATH", "existing-entry")
+    seen = {}
+
+    def capture(params):
+        seen.update(pythonpath=params.env.get("PYTHONPATH"))
+        raise RuntimeError("captured")
+
+    monkeypatch.setattr(stdio, "stdio_client", capture)
+    with pytest.raises(RuntimeError, match="captured"):
+        asyncio.run(doctor_cli._handshake())
+    assert seen["pythonpath"] == "existing-entry"
 
 
 def test_the_doctor_handshake_hands_a_relative_token_file_over_resolved(tmp_path, monkeypatch):
