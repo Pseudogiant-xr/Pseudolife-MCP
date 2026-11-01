@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import shutil
 import sys
+import tempfile
 
 # Where Claude Code looks for bash.exe on Windows when CLAUDE_CODE_GIT_BASH_PATH
 # is not set, before the `git` on PATH (code.claude.com/docs/en/troubleshoot-install.md).
@@ -105,22 +106,30 @@ async def _handshake() -> dict:
     from mcp import ClientSession, StdioServerParameters
     from mcp.client.stdio import stdio_client
 
-    params = StdioServerParameters(
-        command=sys.executable, args=["-m", "pseudolife_memory.cli"],
-        env={**os.environ, "PSEUDOLIFE_MCP_NO_SPAWN": "1",
-             "PSEUDOLIFE_AGENT_COORDINATION": "0"},
-    )
-    async with stdio_client(params) as (read, write):
-        async with ClientSession(read, write) as client:
-            result = await client.initialize()
-            manifest = (await client.list_tools()).tools
-            return {
-                "instructions_present": bool(result.instructions),
-                "tool_count": len(manifest),
-                "tools_missing_annotations": [t.name for t in manifest if t.annotations is None],
-                "coordination_tools_present": all(name in {t.name for t in manifest}
-                                                  for name in ("memory_agents", "memory_message")),
-            }
+    env = {**os.environ, "PSEUDOLIFE_MCP_NO_SPAWN": "1", "PSEUDOLIFE_AGENT_COORDINATION": "0"}
+    if env.get(_TOKEN_FILE_KEY):
+        # Resolved here, as doctor's own checks resolved it: the child runs
+        # from another directory.
+        env[_TOKEN_FILE_KEY] = os.path.abspath(os.path.expanduser(env[_TOKEN_FILE_KEY]))
+    # From a fresh empty directory: `-m` puts the working directory first on
+    # sys.path, so a stray `mcp.py` where doctor was run (one sat in the
+    # shared temp directory, 2026-11-01) replaced the SDK in the child. The
+    # launcher's shim keeps its working directory off sys.path; so does this.
+    with tempfile.TemporaryDirectory(prefix="pseudolife-doctor-",
+                                     ignore_cleanup_errors=True) as neutral:
+        params = StdioServerParameters(command=sys.executable,
+                                       args=["-m", "pseudolife_memory.cli"], env=env, cwd=neutral)
+        async with stdio_client(params) as (read, write):
+            async with ClientSession(read, write) as client:
+                result = await client.initialize()
+                manifest = (await client.list_tools()).tools
+    return {
+        "instructions_present": bool(result.instructions),
+        "tool_count": len(manifest),
+        "tools_missing_annotations": [t.name for t in manifest if t.annotations is None],
+        "coordination_tools_present": all(name in {t.name for t in manifest}
+                                          for name in ("memory_agents", "memory_message")),
+    }
 
 
 _OFF = {"0", "false", "no", "off"}
@@ -137,7 +146,8 @@ def _read_toml(text: str) -> dict:
     return tomllib.loads(text)
 
 
-_TOKEN_KEYS = ("PSEUDOLIFE_MCP_TOKEN", "PSEUDOLIFE_MCP_TOKEN_FILE")
+_TOKEN_FILE_KEY = "PSEUDOLIFE_MCP_TOKEN_FILE"
+_TOKEN_KEYS = ("PSEUDOLIFE_MCP_TOKEN", _TOKEN_FILE_KEY)
 _URL_KEY = "PSEUDOLIFE_MCP_DAEMON_URL"
 
 
@@ -606,7 +616,7 @@ def coordination_snapshot(health, board, wake, host, registration, *, tools_pres
 
 
 def run_doctor() -> None:
-    from pseudolife_memory.shim import _daemon_url, _require_mcp_sdk_v2, probe_health
+    from pseudolife_memory.shim import _daemon_url, _mcp_shadow, _require_mcp_sdk_v2, probe_health
 
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--timeout", type=float, default=20,
@@ -713,6 +723,12 @@ def run_doctor() -> None:
         # or URL credentials. The exception type plus recovery is sufficient.
         report["error"] = type(exc).__name__
         report["recovery"] = "Check daemon health and the exact registered interpreter. Run that interpreter with -m pip check and -m pip show pseudolife-mcp mcp; reinstall there if stale, then retry."
+        shadow = _mcp_shadow()
+        if shadow is not None:
+            # No reinstall helps: a file or folder named mcp hides the SDK.
+            report["recovery"] = (f"`import mcp` loads {shadow[0]}, not the installed MCP SDK at "
+                                  f"{shadow[1]}; move or rename it, or run doctor from another "
+                                  f"directory, then retry.")
     report["wake"] = _wake_report(health if isinstance(health, dict) else None)
     registration = None
     if args.agent_state is not None and args.host != "claude-desktop" and board["state"] == "on":

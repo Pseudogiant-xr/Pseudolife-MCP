@@ -1,5 +1,8 @@
 """Doctor failure reports must retain safe, actionable recovery advice."""
+import asyncio
 import json
+import os
+import subprocess
 import sys
 from pathlib import Path
 from unittest.mock import AsyncMock
@@ -507,3 +510,125 @@ def test_doctor_says_a_remote_shim_without_its_host():
         **_SIGNED_OUT_HEALTH["stall"], "shim_remote": True}}
     line = doctor_cli.dream_health_line(health, "http://box.example:8765")
     assert "signed out on the machine running the CLI shim, not the daemon's" in line
+
+
+# --- a module named mcp in the working directory -----------------------------
+#
+# `python -m` and `python -c` put the working directory first on sys.path, so
+# a stray `mcp.py` there is imported in place of the MCP SDK. Seen 2026-11-01:
+# `pseudolife-mcp doctor` run from a temp directory holding one reported
+# "the SDK predates v2" and advised a pip install that could not help.
+
+_REPO_ROOT = Path(doctor_cli.__file__).resolve().parents[1]
+_SDK_CHECK = ("from pseudolife_memory.shim import _require_mcp_sdk_v2; "
+              "_require_mcp_sdk_v2(); print('sdk ok')")
+
+
+def _sdk_check_from(cwd: Path):
+    env = {**os.environ, "PYTHONPATH": str(_REPO_ROOT)}
+    return subprocess.run([sys.executable, "-c", _SDK_CHECK], cwd=cwd, env=env,
+                          capture_output=True, text=True, timeout=120)
+
+
+def test_the_sdk_check_names_a_shadowing_mcp_module_instead_of_blaming_the_sdk(tmp_path):
+    (tmp_path / "mcp.py").write_text("# a stray file, not the SDK\n", encoding="utf-8")
+    proc = _sdk_check_from(tmp_path)
+    assert proc.returncode == 1, proc.stdout + proc.stderr
+    assert str((tmp_path / "mcp.py").resolve()) in proc.stderr, proc.stderr
+    assert "move or rename" in proc.stderr
+    assert "predates" not in proc.stderr and "pip install" not in proc.stderr, proc.stderr
+
+
+def test_the_sdk_check_names_a_shadowing_mcp_package_too(tmp_path):
+    (tmp_path / "mcp").mkdir()
+    (tmp_path / "mcp" / "__init__.py").write_text("", encoding="utf-8")
+    proc = _sdk_check_from(tmp_path)
+    assert proc.returncode == 1, proc.stdout + proc.stderr
+    assert str((tmp_path / "mcp").resolve()) in proc.stderr, proc.stderr
+    assert "pip install" not in proc.stderr, proc.stderr
+
+
+def test_the_sdk_check_passes_with_no_shadow_in_the_working_directory(tmp_path):
+    # The near miss: the same run from a directory holding no `mcp`.
+    (tmp_path / "mcp_notes.py").write_text("# named like it, but not it\n", encoding="utf-8")
+    proc = _sdk_check_from(tmp_path)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "sdk ok" in proc.stdout and "[shim]" not in proc.stderr, proc.stderr
+
+
+def test_a_genuinely_missing_sdk_module_still_gets_the_pip_advice(monkeypatch, capsys):
+    monkeypatch.setattr(shim, "_SDK_V2_PROBE_MODULE", "mcp.server.no_such_module")
+    with pytest.raises(SystemExit) as stop:
+        shim._require_mcp_sdk_v2()
+    assert stop.value.code == 1
+    err = capsys.readouterr().err
+    assert "predates v2" in err and 'pip install -U "mcp>=2.2,<2.3"' in err
+    assert "move or rename" not in err
+
+
+def test_the_doctor_handshake_ignores_an_mcp_module_in_the_working_directory(tmp_path, monkeypatch):
+    # The handshake starts the shim as `python -m pseudolife_memory.cli`;
+    # from the caller's directory, a stray mcp.py there replaced the SDK in
+    # the child and doctor reported the false "SDK predates v2" line.
+    marker = tmp_path / "shadow-imported"
+    caller = tmp_path / "caller"
+    caller.mkdir()
+    (caller / "mcp.py").write_text(
+        f"open({str(marker)!r}, 'a').write('mcp\\n')\nraise SystemExit(42)\n", encoding="utf-8")
+    monkeypatch.chdir(caller)
+    monkeypatch.setenv("PYTHONPATH", str(_REPO_ROOT))
+    monkeypatch.setenv("PSEUDOLIFE_MCP_DAEMON_URL", "http://127.0.0.1:9")
+    try:
+        asyncio.run(asyncio.wait_for(doctor_cli._handshake(), timeout=60))
+    except Exception:  # noqa: BLE001 - no daemon here: only the import matters
+        pass
+    assert not marker.exists(), "the handshake's shim imported the working directory's mcp.py"
+
+
+@pytest.mark.parametrize("shadow", [("/work/mcp.py", "/site-packages/mcp"), None])
+def test_doctor_recovery_names_a_shadowing_mcp_module(shadow, monkeypatch, capsys):
+    # Doctor started as `python -m` from that directory meets the shadow
+    # itself; its JSON recovery, which agents act on, must not say reinstall.
+    monkeypatch.setattr(sys, "argv", ["pseudolife-mcp", "doctor"])
+    monkeypatch.setattr(doctor_cli, "registration_credentials", lambda env: ({}, None))
+    monkeypatch.setattr(doctor_cli, "_board_probe", lambda timeout: {"state": "on", "line": "on"})
+    monkeypatch.setattr(doctor_cli, "_windows", lambda: False)
+    monkeypatch.setattr(doctor_cli, "_wake_report", lambda health: {})
+    monkeypatch.setattr(doctor_cli, "_codex_hooks_line", lambda health: "current")
+    monkeypatch.setattr(shim, "probe_health", lambda *args, **kwargs: {"status": "ok"})
+    monkeypatch.setattr(shim, "_daemon_url", lambda: "http://127.0.0.1:8765")
+
+    def sdk_check():
+        raise SystemExit(1)
+
+    monkeypatch.setattr(shim, "_require_mcp_sdk_v2", sdk_check)
+    monkeypatch.setattr(shim, "_mcp_shadow", lambda: shadow)
+    with pytest.raises(SystemExit) as stop:
+        doctor_cli.run_doctor()
+    assert stop.value.code == 1
+    report = json.loads(capsys.readouterr().out)
+    assert report["ok"] is False and report["error"] == "SystemExit"
+    if shadow is None:
+        assert "pip check" in report["recovery"]
+    else:
+        assert "/work/mcp.py" in report["recovery"] and "move or rename" in report["recovery"]
+        assert "pip" not in report["recovery"]
+
+
+def test_the_doctor_handshake_hands_a_relative_token_file_over_resolved(tmp_path, monkeypatch):
+    # The child runs from another directory, so a relative token file path
+    # doctor's own checks read from the caller's directory is resolved first.
+    import mcp.client.stdio as stdio
+    seen = {}
+
+    def capture(params):
+        seen.update(cwd=params.cwd, token_file=params.env.get("PSEUDOLIFE_MCP_TOKEN_FILE"))
+        raise RuntimeError("captured")
+
+    monkeypatch.setattr(stdio, "stdio_client", capture)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("PSEUDOLIFE_MCP_TOKEN_FILE", "token.txt")
+    with pytest.raises(RuntimeError, match="captured"):
+        asyncio.run(doctor_cli._handshake())
+    assert seen["token_file"] == str(tmp_path / "token.txt")
+    assert seen["cwd"] and Path(seen["cwd"]).resolve() != tmp_path.resolve()
