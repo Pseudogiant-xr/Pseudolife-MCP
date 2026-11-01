@@ -54,6 +54,11 @@ def test_board_mixed_chain_is_counted_without_inventing_http_cases():
 
 
 def test_runner_attempts_all_three_and_keeps_failure_report(tmp_path, monkeypatch):
+    import importlib
+
+    monkeypatch.syspath_prepend(str(evidence.HARNESS))
+    daemons = importlib.import_module("daemons")
+    monkeypatch.setenv("PSEUDOLIFE_EMBEDDING_CPU_DTYPE", "bf16")
     binary = tmp_path / "daemon"
     binary.write_bytes(b"candidate")
     manifest = {"rust_head": "a" * 40, "python_head": "a" * 40,
@@ -62,6 +67,13 @@ def test_runner_attempts_all_three_and_keeps_failure_report(tmp_path, monkeypatc
 
     def execute(command, **kwargs):
         calls.append(command)
+        # Follow the override into the actual Python daemon environment,
+        # including the shared scrubber that originally dropped it.
+        with monkeypatch.context() as child:
+            child.setattr(daemons.os, "environ", kwargs["env"])
+            env = daemons.base_env(tmp_path / "python", {})
+            oracle = daemons.python_daemon(tmp_path / "python", 12345, env)
+            assert oracle.env["PSEUDOLIFE_EMBEDDING_CPU_DTYPE"] == "fp32"
         output = Path(command[command.index("--out") + 1])
         if len(calls) != 2:
             key = "scenarios" if len(calls) == 1 else "results"

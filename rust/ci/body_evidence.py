@@ -96,7 +96,8 @@ def plan(out: Path) -> dict:
 def run(binary: Path, out: Path, manifest: dict) -> dict:
     with binary.open("rb") as stream:
         binary_digest = hashlib.file_digest(stream, "sha256").hexdigest()
-    result = {**manifest, "status": "incomplete", "suites": [], "binary_sha256": binary_digest}
+    result = {**manifest, "status": "incomplete", "suites": [], "binary_sha256": binary_digest,
+              "oracle_cpu_dtype": "fp32"}
     save(out, result)
     # Scratch is outside the published directory. Never upload a whole
     # harness home: it contains disposable login material and raw responses.
@@ -107,7 +108,8 @@ def run(binary: Path, out: Path, manifest: dict) -> dict:
         raw.unlink(missing_ok=True)
         command = [sys.executable, str(HARNESS / script), "live", "--rust-bin", str(binary),
                    "--out", str(raw)]
-        env = dict(os.environ, PYTHONUNBUFFERED="1", PL_HARNESS_SCRATCH=str(scratch / family))
+        env = dict(os.environ, PYTHONUNBUFFERED="1", PL_HARNESS_SCRATCH=str(scratch / family),
+                   PSEUDOLIFE_EMBEDDING_CPU_DTYPE="fp32")
         print(f"Starting full {family} live differential", flush=True)
         with (scratch / f"{family}.log").open("w", encoding="utf-8") as log:
             completed = subprocess.run(command, cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT)
