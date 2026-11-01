@@ -247,11 +247,15 @@ pub(crate) async fn get_entry(
     // The read and its bump in one transaction, the row locked: Python
     // holds the service lock across both, so a concurrent get answers
     // the count after this one's bump, never the same count.
-    let bump = !crate::mutants::active("mcp-get-no-db-bump");
+    let bump = !svc.config.read_only && !crate::mutants::active("mcp-get-no-db-bump");
     let row = crate::txn::run(db, |db| async move {
         let r = db
             .query_opt(
-                "SELECT id, text, source, reinforcements, explicit_reinforcements,                  access_count, superseded_at, superseded_by_text FROM entries WHERE id = $1                  FOR UPDATE",
+                if svc.config.read_only {
+                    "SELECT id, text, source, reinforcements, explicit_reinforcements, access_count, superseded_at, superseded_by_text FROM entries WHERE id = $1"
+                } else {
+                    "SELECT id, text, source, reinforcements, explicit_reinforcements, access_count, superseded_at, superseded_by_text FROM entries WHERE id = $1 FOR UPDATE"
+                },
                 &[&id],
             )
             .await?;
@@ -278,7 +282,7 @@ pub(crate) async fn get_entry(
         return Ok(json!({"found": false, "faded": true}));
     };
     // The resident copy follows the database bump.
-    {
+    if !svc.config.read_only {
         let bank = ready.bank.read().expect("bank lock");
         if let Some(e) = bank.entries.iter().find(|e| e.id == id) {
             e.access_count
@@ -328,7 +332,7 @@ pub(crate) async fn get_entry(
     // +1 for the bump just applied.
     out.insert(
         "access_count".into(),
-        json!(i64::from(row.access_count) + 1),
+        json!(i64::from(row.access_count) + i64::from(!svc.config.read_only)),
     );
     out.insert("consolidated_into".into(), Value::Array(facts));
     if let Some(at) = row.superseded_at {

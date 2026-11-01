@@ -156,6 +156,43 @@ async fn db_second_writer_is_refused_and_epoch_counts() {
 }
 
 #[tokio::test]
+async fn db_shadow_never_takes_the_lease_even_after_reconnect() {
+    let Some(dsn) = test_dsn() else { return };
+    let _guard = DB.lock().await;
+    let writer = Storage::open(&dsn).await.unwrap();
+    let epoch = writer.lease_epoch();
+    let shadow = Storage::open_read_only(&dsn).await.unwrap();
+    assert!(shadow.read_only());
+    shadow.ping().await.unwrap();
+    assert_eq!(
+        read_lease_epoch(shadow.client()).await.unwrap(),
+        Some(epoch)
+    );
+    assert!(
+        shadow
+            .client()
+            .execute("INSERT INTO meta VALUES ('shadow_forbidden', 'true')", &[])
+            .await
+            .is_err()
+    );
+    let replacement = shadow.reopen().await.unwrap();
+    assert!(replacement.read_only());
+    assert_eq!(
+        read_lease_epoch(replacement.client()).await.unwrap(),
+        Some(epoch)
+    );
+    writer.close().await;
+    // Reconnecting after the real writer exits must not take its place.
+    let replacement2 = replacement.reopen().await.unwrap();
+    let next_writer = Storage::open(&dsn).await.unwrap();
+    assert_eq!(next_writer.lease_epoch(), epoch + 1);
+    replacement2.close().await;
+    replacement.close().await;
+    shadow.close().await;
+    next_writer.close().await;
+}
+
+#[tokio::test]
 async fn db_non_number_epoch_restarts_at_one() {
     let Some(dsn) = test_dsn() else { return };
     let _guard = DB.lock().await;

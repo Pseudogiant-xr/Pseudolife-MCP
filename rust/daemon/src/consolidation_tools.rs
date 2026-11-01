@@ -430,7 +430,7 @@ fn pool(
                 skip_margin: cfg.reranker.skip_margin,
                 model_name: cfg.reranker.model_name.clone(),
             },
-            count_access: true,
+            count_access: !ready.storage.read_only(),
             now: crate::episodes::now(),
             filters_json: Value::Null,
         };

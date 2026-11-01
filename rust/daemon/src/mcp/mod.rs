@@ -907,6 +907,11 @@ async fn call_tool(
     if catalogue::find(name).is_none() {
         return envelope::unknown_tool(name);
     }
+    if app.service.config.read_only && !shadow_read_tool(name, args) {
+        return envelope::error_result(&json!({
+            "error": "read_only_shadow", "message": crate::service::READ_ONLY_MESSAGE
+        }));
+    }
     // Binding precedes the body, so a refused argument answers the same
     // whether or not the body has landed (`binding.rs`).
     let bound = match binding::tool(name)
@@ -964,9 +969,90 @@ async fn guarded(name: &str, call: dispatch::ToolFuture<'_>) -> dispatch::ToolRe
     }
 }
 
+/// Explicit allowlist: new tools are refused until their state writes are
+/// audited. Board reads also settle leases/mail, so are not pure reads.
+fn shadow_read_tool(name: &str, args: &Map<String, Value>) -> bool {
+    match name {
+        "memory_search"
+        | "memory_recent"
+        | "memory_stats"
+        | "memory_get"
+        | "memory_fact_get"
+        | "memory_history"
+        | "memory_world_search"
+        | "memory_lesson_search"
+        | "memory_graph"
+        | "memory_recall"
+        | "memory_episode_summary"
+        | "memory_consolidation_candidates"
+        | "document_search" => true,
+        "memory_toolset" => {
+            args.get("action")
+                .and_then(Value::as_str)
+                .unwrap_or("status")
+                == "status"
+        }
+        _ => false,
+    }
+}
+
 #[cfg(test)]
 mod sessions {
     use super::*;
+
+    #[tokio::test]
+    async fn shadow_refuses_every_mutating_catalogue_tool_before_binding() {
+        let service = Arc::new(crate::service::Service::new(
+            crate::config::Config {
+                read_only: true,
+                ..Default::default()
+            },
+            crate::config::DaemonEnv::from_env(&|_| None).unwrap(),
+            std::path::PathBuf::from("unused"),
+            String::new(),
+            true,
+        ));
+        let store = Arc::new(crate::auth::PrincipalStore::new());
+        let board = Arc::new(crate::board::Board::new(
+            service.config.coordination.clone(),
+            String::new(),
+            service.clone(),
+            store.clone(),
+        ));
+        let app = Arc::new(crate::http::App::new(
+            service.clone(),
+            crate::auth::EnvTokens {
+                single: Some("fixture".into()),
+                map: vec![],
+            },
+            store,
+            None,
+            board,
+        ));
+        for tool in catalogue::tools() {
+            if shadow_read_tool(&tool.name, &Map::new()) {
+                continue;
+            }
+            let out = call_tool(
+                &app,
+                "default",
+                "fixture",
+                &HeaderMap::new(),
+                &tool.name,
+                &Map::new(),
+            )
+            .await;
+            assert!(
+                out.to_string().contains("read_only_shadow"),
+                "{}: {out}",
+                tool.name
+            );
+            assert!(out.to_string().contains("active writer"));
+        }
+        assert!(service.snapshot().storage.is_none());
+        assert!(shadow_read_tool("memory_graph", &Map::new()));
+        assert!(!shadow_read_tool("future_unreviewed_tool", &Map::new()));
+    }
 
     fn app() -> Arc<crate::http::App> {
         let service = Arc::new(crate::service::Service::new(

@@ -274,9 +274,14 @@ async fn overview(svc: &Arc<Service>, ready: &Ready) -> Value {
     let episodes = episode_list(ready, LESSONS_DUMP_LIMIT as i64).await;
     let sources = list_sources(ready);
     let tags = list_tags(ready).unwrap_or_else(|| json!({"tags": [], "total": 0}));
-    let dream = crate::dream::service::status(ready, &svc.config)
-        .await
-        .unwrap_or_else(|_| json!({}));
+    // Dream status initializes acknowledgement state, even on this GET.
+    let dream = if svc.config.read_only {
+        json!({"read_only": true, "enabled": false})
+    } else {
+        crate::dream::service::status(ready, &svc.config)
+            .await
+            .unwrap_or_else(|_| json!({}))
+    };
     let loop_health = loop_health(svc, ready, LOOP_WINDOW_DAYS)
         .await
         .unwrap_or_else(|_| json!({"available": false}));

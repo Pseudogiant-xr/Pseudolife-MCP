@@ -16,6 +16,8 @@ use std::time::{Duration, Instant};
 const RETRY_BASE_S: f64 = 5.0;
 const RETRY_MAX_S: f64 = 60.0;
 
+pub const READ_ONLY_MESSAGE: &str = "read-only shadow: this daemon cannot change the bank; send writes to the active writer daemon instead";
+
 /// What a request needs once init has completed.
 ///
 /// A reconnect that keeps the bank (no other writer in the gap) republishes
@@ -164,12 +166,18 @@ pub struct Service {
 
 impl Service {
     pub fn new(
-        config: Config,
+        mut config: Config,
         env: DaemonEnv,
         data_dir: PathBuf,
         dsn: String,
         auth_configured: bool,
     ) -> Service {
+        config.read_only |= env.read_only;
+        if config.read_only {
+            config.memory.retrieval_log_enabled = false;
+            config.memory.cortex.read_tracking = false;
+            config.dream.enabled = false;
+        }
         let model_dir = std::env::var_os("PSEUDOLIFE_DAEMON_ONNX_DIR").map(PathBuf::from);
         let ort_threads = std::env::var("PSEUDOLIFE_DAEMON_ORT_THREADS")
             .ok()
@@ -230,6 +238,9 @@ impl Service {
     /// close here; the SessionEnd hook's close calls the same): one
     /// automatic dream in the background.
     pub fn fire_session_dream(&self) {
+        if self.config.read_only {
+            return;
+        }
         match self.handle() {
             Some(me) => {
                 eprintln!("session-end dream trigger: fired");
@@ -284,7 +295,12 @@ impl Service {
             return Ok(s.clone());
         }
         self.refuse_while_backing_off(inner)?;
-        let storage = match Storage::open(&self.dsn).await {
+        let opened = if self.config.read_only {
+            Storage::open_read_only(&self.dsn).await
+        } else {
+            Storage::open(&self.dsn).await
+        };
+        let storage = match opened {
             Ok(s) => Arc::new(s),
             Err(OpenError::LeaseHeld(msg)) => {
                 // Retryable: the holder may leave.
@@ -376,6 +392,11 @@ impl Service {
             }
         }
         self.rehydrate_if_bank_changed_hands(&mut inner);
+        // Another daemon owns the bank and may have changed any resident
+        // store since the previous call. A shadow never serves that cache.
+        if self.config.read_only {
+            inner.ready = None;
+        }
         if let Some(r) = &inner.ready {
             if crate::mutants::active("startup-clock-reloads")
                 && r.startup.clock_state().hlc_reseed_pending
@@ -659,6 +680,9 @@ impl Service {
     /// along with the counters row. A failed counters write is logged and
     /// retried by the next autosave, as in Python.
     async fn save_counters(&self) -> Result<(), String> {
+        if self.config.read_only {
+            return Ok(());
+        }
         let mut inner = self.inner.lock().await;
         if inner.ready.is_none() {
             return Ok(());
@@ -833,6 +857,9 @@ impl Service {
 impl crate::background::Duties for Service {
     fn sweep(&self, stop: tokio::sync::watch::Receiver<bool>) -> crate::background::Duty<'_> {
         Box::pin(async move {
+            if self.config.read_only {
+                return Ok(());
+            }
             if self.config.memory.compaction_enabled {
                 let ready = self.ensure_init_inner().await?;
                 self.compact_superseded(&ready).await;
@@ -885,6 +912,9 @@ impl crate::background::Duties for Service {
 
     fn reap(&self, idle_seconds: f64) -> crate::background::Duty<'_> {
         Box::pin(async move {
+            if self.config.read_only {
+                return Ok(());
+            }
             self.ensure_init_inner().await?;
             // All session mutation is serialized with service operations.
             let _service_lock = self.inner.lock().await;
@@ -993,6 +1023,33 @@ impl crate::background::Duties for Service {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn shadow_duties_and_health_do_not_initialize_or_write() {
+        use crate::background::Duties;
+        let env =
+            DaemonEnv::from_env(&|k| (k == "PSEUDOLIFE_READ_ONLY").then(|| "1".into())).unwrap();
+        let service = Service::new(
+            Config::default(),
+            env,
+            PathBuf::from("unused"),
+            String::new(),
+            false,
+        );
+        assert!(!service.config.memory.retrieval_log_enabled);
+        assert!(!service.config.memory.cortex.read_tracking);
+        assert!(!service.config.dream.enabled);
+        service.autosave().await.unwrap();
+        service.reap(0.0).await.unwrap();
+        service
+            .sweep(tokio::sync::watch::channel(false).1)
+            .await
+            .unwrap();
+        service.fire_session_dream();
+        assert!(service.snapshot().storage.is_none());
+        let health = crate::health::payload(&service, &crate::auth::PrincipalStore::new()).await;
+        assert_eq!(health["read_only"], true);
+    }
     #[tokio::test]
     async fn shutdown_interrupts_warmup_retry_wait_without_another_init() {
         let service = Arc::new(Service::new(

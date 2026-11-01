@@ -258,7 +258,9 @@ pub(crate) fn browser_gate(app: &App, h: &HeaderMap) -> Result<Option<&'static s
 pub(crate) fn resolve(app: &App, h: &HeaderMap) -> Resolved {
     let header = authorization(h);
     let (resolved, source) = auth::resolve_detailed(header.as_deref(), &app.env_tokens, &app.store);
-    if let Some(activity) = &app.activity {
+    if !app.service.config.read_only
+        && let Some(activity) = &app.activity
+    {
         activity.note(header.as_deref(), &resolved, source);
     }
     resolved
@@ -533,6 +535,9 @@ async fn api(
     if method != "GET" && method != "POST" {
         return method_not_allowed();
     }
+    if app.service.config.read_only && method == "POST" {
+        return shadow_refusal();
+    }
     if method == "POST" && OPERATOR_POST_PATHS.contains(&path) && stored {
         return json_response(403, &json!({"error": "operator_principal_required"}));
     }
@@ -693,6 +698,15 @@ async fn dispatch(
     raw_query: Option<&str>,
     body: &mut RequestBody,
 ) -> Response {
+    if app.service.config.read_only
+        && (matches!(
+            path,
+            "/api/pair" | "/api/dream/status" | "/api/curation/duplicates"
+        ) || (path.starts_with("/api/hook/")
+            && !matches!(path, "/api/hook/memory-policy" | "/api/hook/memory-changes")))
+    {
+        return shadow_refusal();
+    }
     if path == "/health" {
         let payload = health::payload(&app.service, &app.store).await;
         let status = if payload["status"] == "ok" { 200 } else { 503 };
@@ -759,6 +773,13 @@ async fn dispatch(
         return api(app, path, method, h, raw_query, body).await;
     }
     crate::routes::mcp::route(app, path, method, h, raw_query, body).await
+}
+
+fn shadow_refusal() -> Response {
+    json_response(
+        403,
+        &json!({"error": "read_only_shadow", "message": crate::service::READ_ONLY_MESSAGE}),
+    )
 }
 
 // ---- GET /api/search (spec.md S1-S7) -------------------------------------
