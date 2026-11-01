@@ -24,6 +24,7 @@ from pseudolife_memory import update_cli as up
 SELECTION = "data/update-engine/docker-compose.engine.json"
 ENGINE_LABEL = "org.pseudolife.engine"
 CHECKOUT_LABEL = "org.pseudolife.checkout"
+ACTIVATION_LABEL = "org.pseudolife.activation"
 SHADOW_SERVICE = "pseudolife-rust-shadow"
 
 
@@ -45,6 +46,16 @@ def _selection(repo: Path) -> dict | None:
         return service
     except (OSError, ValueError, KeyError, TypeError) as exc:
         raise up.UpdateError(f"invalid engine selection at {path}; restore its rollback copy before updating", 2) from exc
+
+
+def _validated_rust_selection(labels: dict) -> dict:
+    origin = labels.get(CHECKOUT_LABEL)
+    selected = _selection(Path(origin)) if origin else None
+    if (not selected or selected["labels"][ENGINE_LABEL] != "rust"
+            or selected["labels"].get(ACTIVATION_LABEL) != labels.get(ACTIVATION_LABEL)):
+        raise up.UpdateError("the running Rust container has no valid engine selection; use the previous update's "
+                             "rollback commands (the Python rollback for a first activation) before retrying; nothing was changed", 2)
+    return selected
 
 
 def selected_checkout(update) -> Path | None:
@@ -84,10 +95,7 @@ def selected_checkout(update) -> Path | None:
     if o.clients_only:
         return None
     origin = Path(labels.get(CHECKOUT_LABEL, ""))
-    selected = _selection(origin) if labels.get(CHECKOUT_LABEL) else None
-    if not selected or selected["labels"][ENGINE_LABEL] != "rust":
-        raise up.UpdateError("the running Rust container has no validated engine selection; use the previous "
-                             "update's rollback commands to restore Python before retrying; nothing was changed", 2)
+    selected = _validated_rust_selection(labels)
     if o.checkout is not None:
         update._selected_engine = selected["labels"][ENGINE_LABEL]
         return repo
@@ -218,6 +226,11 @@ class EngineUpdate:
         self.pg_user, self.pg_db = pg_env["POSTGRES_USER"], pg_env["POSTGRES_DB"]
         self.daemon, self.pg = self.container(up.DAEMON_SERVICE), self.container("pseudolife-pg")
         self.running = self.inspect(self.daemon)
+        labels = self.running["Config"].get("Labels", {})
+        if labels.get(ENGINE_LABEL) == "rust":
+            # Explicit engine flags cannot promote a replacement that never
+            # passed its gate, including a failed Rust-to-Rust update.
+            _validated_rust_selection(labels)
         if not self.running.get("State", {}).get("Running"):
             raise up.UpdateError("the current daemon must be running for the backup and rollback tag; start it and retry", 2)
         daemon_env = config["services"][up.DAEMON_SERVICE].get("environment", {})
@@ -319,6 +332,9 @@ class EngineUpdate:
             raise up.UpdateError("could not tag the running image for rollback; nothing was deployed")
         old_service = {"image": rollback, "build": {"dockerfile": f"ops/Dockerfile.daemon{'-rust' if old_engine == 'rust' else ''}"},
                        "labels": {ENGINE_LABEL: old_engine, CHECKOUT_LABEL: str(self.repo)}}
+        activation = self.running["Config"].get("Labels", {}).get(ACTIVATION_LABEL)
+        if activation:
+            old_service["labels"][ACTIVATION_LABEL] = activation
         rollback_file = self.repo / "data/update-engine" / f"docker-compose.rollback-{up._stamp()}.json"
         _write_overlay(rollback_file, old_service)
         selected_file = self.repo / SELECTION
@@ -340,7 +356,7 @@ class EngineUpdate:
             self.u.prune_rollbacks(self.repo, f"pseudolife-daemon-{engine}")
         image = f"pseudolife-daemon-{self.engine}:checkout"
         service = {"image": image, "build": {"dockerfile": f"ops/Dockerfile.daemon{'-rust' if self.engine == 'rust' else ''}"},
-                   "labels": {ENGINE_LABEL: self.engine, CHECKOUT_LABEL: str(self.repo)}}
+                   "labels": {ENGINE_LABEL: self.engine, CHECKOUT_LABEL: str(self.repo), ACTIVATION_LABEL: secrets.token_hex(16)}}
         candidate = self.repo / "data/update-engine/docker-compose.engine-candidate.json"
         _write_overlay(candidate, service)
         compose = list(self.base)
@@ -363,10 +379,13 @@ class EngineUpdate:
                 _write_overlay(selected_file, service)
             else:
                 selected_file.unlink(missing_ok=True)
-        except up.UpdateError as exc:
+        except (up.UpdateError, OSError) as exc:
             raise up.UpdateError(str(exc) + "\nto roll back:\n" + "\n".join(self.u.rollback_lines)) from exc
         finally:
-            candidate.unlink(missing_ok=True)
+            try:
+                candidate.unlink(missing_ok=True)
+            except OSError:
+                self.u.warn("could not remove the temporary engine overlay; the rollback instructions remain usable")
         self.u.step("selected Rust; future updates retain this engine; rollback commands:" if self.engine == "rust"
                     else "restored Python; future updates use the ordinary update path; rollback commands:")
         for line in self.u.rollback_lines:
