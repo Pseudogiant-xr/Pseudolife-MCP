@@ -1,8 +1,6 @@
-//! The maintainer routes and `/api/config`, behind the operator gate. The
-//! three maintainer reads (`read/maintainer.rs`), `POST
-//! /api/maintainer/challenge` (`maintainer_ops.rs`) and `/api/config`
-//! (`config_io.rs`, after `http.rs`'s operator gate) are served; the other
-//! maintainer POSTs are not yet.
+//! Maintainer reads and signed actions, plus `/api/config`.
+//! The config editor runs after `http.rs`'s operator gate; maintainer
+//! actions use the passkey gate in `maintainer_ops.rs`.
 
 use super::console::Request;
 use crate::http::json_response;
@@ -15,6 +13,12 @@ pub(super) const SERVED: &[(&str, &str)] = &[
     ("GET", "/api/maintainer/sent"),
     ("GET", "/api/maintainer/inbox"),
     ("POST", "/api/maintainer/challenge"),
+    ("POST", "/api/maintainer/enrol"),
+    ("POST", "/api/maintainer/role"),
+    ("POST", "/api/maintainer/send"),
+    ("POST", "/api/maintainer/cancel"),
+    ("POST", "/api/maintainer/repudiate"),
+    ("POST", "/api/maintainer/revoke"),
     ("GET", "/api/config"),
     ("POST", "/api/config"),
 ];

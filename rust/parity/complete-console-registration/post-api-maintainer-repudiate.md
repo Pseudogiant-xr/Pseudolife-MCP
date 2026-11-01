@@ -1,3 +1,3 @@
 | Method | Path | Phase | Status | Rust | Evidence |
 |---|---|---:|---|---|---|
-| POST | /api/maintainer/repudiate | 4 | deferred | 501 | 501 (W2-F) |
+| POST | /api/maintainer/repudiate | 4 | deferred | served | `maintainer_ops` signed completion and board transaction; board differential harness maintainer scenarios compare HTTP responses, passkey and nonce rows, board state and audit chains; local validation cited in the PR pending nightly coverage |
