@@ -20,8 +20,10 @@ def native_paths(models: Path, runtime: Path) -> dict[str, str]:
         raise ValueError("expected exactly one provisioned model version in this job's model directory")
     roots = {"PSEUDOLIFE_DAEMON_ONNX_DIR": versions[0] / "embedding",
              "PSEUDOLIFE_DAEMON_RERANK_DIR": versions[0] / "reranker"}
-    for root in roots.values():
-        if not (root / "onnx/model.onnx").is_file() or not (root / "tokenizer.json").is_file():
+    graphs = {"PSEUDOLIFE_DAEMON_ONNX_DIR": "onnx/model.onnx",
+              "PSEUDOLIFE_DAEMON_RERANK_DIR": "model.onnx"}
+    for key, root in roots.items():
+        if not (root / graphs[key]).is_file() or not (root / "tokenizer.json").is_file():
             raise ValueError("provisioned model root lacks its graph or tokenizer")
     libraries = sorted(runtime.glob("libonnxruntime.so.*"))
     if len(libraries) != 1:

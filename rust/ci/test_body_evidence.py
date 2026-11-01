@@ -191,6 +191,11 @@ def test_native_model_paths_reject_ambiguous_or_incomplete_provisioning(tmp_path
         (first / name / "onnx").mkdir(parents=True)
         (first / name / "onnx/model.onnx").touch()
         (first / name / "tokenizer.json").touch()
+    # The reranker loader consumes a flat graph, unlike the embedding loader.
+    with pytest.raises(ValueError, match="graph or tokenizer"):
+        native_paths(models, runtime)
+    (first / "reranker/onnx/model.onnx").unlink()
+    (first / "reranker/model.onnx").touch()
     assert set(native_paths(models, runtime)) == {
         "PSEUDOLIFE_DAEMON_ONNX_DIR", "PSEUDOLIFE_DAEMON_RERANK_DIR", "ORT_DYLIB_PATH"}
     (models / "qwen3-msmarco-two").mkdir()
