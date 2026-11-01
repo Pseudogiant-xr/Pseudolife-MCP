@@ -55,6 +55,18 @@ pub fn container_inspect(docker: &std::ffi::OsStr) -> Vec<OsString> {
     ]
     .into()
 }
+pub fn container_engine_inspect(docker: &std::ffi::OsStr) -> Vec<OsString> {
+    [
+        docker.to_owned(),
+        "inspect".into(),
+        "-f".into(),
+        "{{index .Config.Labels \"org.pseudolife.engine\"}}".into(),
+        "pseudolife-mcp-daemon".into(),
+    ]
+    .into()
+}
+pub const RUST_OPERATOR_REFUSAL: &str = "the Rust daemon image has no Python operator runtime: run bank commands on a Python host with PSEUDOLIFE_MCP_DATABASE_URL set, or switch back with `pseudolife-mcp update --engine python --checkout <repo>`; nothing was changed";
+
 /// The daemon container's own Python CLI is the admitted deployment transport.
 pub fn container_exec(
     docker: &std::ffi::OsStr,

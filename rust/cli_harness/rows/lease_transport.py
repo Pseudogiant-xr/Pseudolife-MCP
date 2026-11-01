@@ -18,8 +18,11 @@ argv = sys.argv[1:]
 root = Path(os.environ['HOME'])
 with (root / 'docker.jsonl').open('a', encoding='utf-8') as log:
     log.write(json.dumps(argv) + '\\n')
-if argv[0] == 'inspect':
+if argv == ['inspect', '-f', '{{.State.Running}}', 'pseudolife-mcp-daemon']:
     print('true')
+    sys.exit(0)
+if argv == ['inspect', '-f', '{{index .Config.Labels "org.pseudolife.engine"}}', 'pseudolife-mcp-daemon']:
+    print(os.environ.get('FIXTURE_DOCKER_ENGINE', '<no value>'))
     sys.exit(0)
 (root / 'docker.stdin').write_bytes(sys.stdin.buffer.read())
 sys.stdout.buffer.write(b'container-out\\x00\\xff\\n')
@@ -56,11 +59,28 @@ def _docker_setup(arm):
         path.chmod(0o700)
 
 
-def _docker_after(action, tail):
+def _docker_after(action, tail, engine=None):
     def after(arm, obs):
         calls = [json.loads(line) for line in (arm.home / 'docker.jsonl').read_text().splitlines()]
         expected = [['inspect', '-f', '{{.State.Running}}', 'pseudolife-mcp-daemon'],
-                    ['exec', '-i', '-e', 'PSEUDOLIFE_DAEMON_EXEC=1',
+                    ['inspect', '-f', '{{index .Config.Labels "org.pseudolife.engine"}}', 'pseudolife-mcp-daemon']]
+        if engine == 'rust':
+            assert calls == expected, calls
+            assert obs['exit'] == 2, obs['exit']
+            assert core.decode(obs, 'stdout') == b''
+            refusal = (
+                b'pseudolife-mcp lease: the Rust daemon image has no Python operator runtime: '
+                b'run bank commands on a Python host with PSEUDOLIFE_MCP_DATABASE_URL set, '
+                b'or switch back with `pseudolife-mcp update --engine python --checkout <repo>`; '
+                b'nothing was changed\n')
+            if action in ('delegate', 'designate'):
+                refusal = (f'pseudolife-mcp lease {action} is deprecated: use '
+                           'pseudolife-mcp lease conductor\n').encode() + refusal
+            assert core.decode(obs, 'stderr') == (refusal.replace(b'\n', b'\r\n') if core.WINDOWS else refusal)
+            assert not (arm.home / 'docker.stdin').exists()
+            _remove_inputs(arm)
+            return
+        expected += [['exec', '-i', '-e', 'PSEUDOLIFE_DAEMON_EXEC=1',
                      'pseudolife-mcp-daemon', 'python', '-m', 'pseudolife_memory.cli',
                      'lease', 'conductor' if action in ('delegate', 'designate') else action, *tail]]
         assert calls == expected, calls
@@ -271,6 +291,14 @@ def cases():
         result.append(core.Case('operator-container-' + action, ['lease', action, *tail],
                                 env=env, stdin=b'container-input\x00\xff\n',
                                 setup=_docker_setup, after=_docker_after(action, tail)))
+        result.append(core.Case('operator-container-rust-' + action, ['lease', action, *tail],
+                                env={**env, 'FIXTURE_DOCKER_ENGINE': 'rust'},
+                                stdin=b'container-input\x00\xff\n', setup=_docker_setup,
+                                after=_docker_after(action, tail, 'rust')))
+    result.append(core.Case('operator-container-python-break', ['lease', 'break', 'fixture'],
+                            env={**env, 'FIXTURE_DOCKER_ENGINE': 'python'},
+                            stdin=b'container-input\x00\xff\n', setup=_docker_setup,
+                            after=_docker_after('break', ['fixture'], 'python')))
     result.append(core.Case('hold-shipped-windows-launcher',
                             ['lease', 'run', 'launcher', '--no-board', '--', 'pwsh',
                              '-NoProfile', '-NonInteractive', '-File', '{HOME}/caller.ps1'],
