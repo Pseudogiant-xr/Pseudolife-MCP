@@ -59,9 +59,10 @@ ENV PSEUDOLIFE_BUILD_GIT_SHA=$GIT_SHA \
     PSEUDOLIFE_BUILD_TIME=$BUILD_TIME \
     PSEUDOLIFE_BUILD_SOURCE=$BUILD_SOURCE
 EXPOSE 8765
-# Only an active provisioning phase gets download grace; warm starts retain
-# the normal failure budget and must report model readiness, not just HTTP 200.
-HEALTHCHECK --interval=15s --timeout=5s --start-period=90s --retries=5 \
+# The check waits for real readiness: up to 30m provisioning plus 90s init.
+# Warm init is bounded by the script's 90s marker; later checks take <=3s.
+# No successful check or service_healthy dependency precedes actual readiness.
+HEALTHCHECK --interval=15s --timeout=32m --start-period=0s --retries=5 \
     CMD ["/usr/local/bin/provision-daemon-models", "--healthcheck"]
 ENTRYPOINT ["/usr/local/bin/provision-daemon-models"]
 CMD ["pseudolife-daemon"]

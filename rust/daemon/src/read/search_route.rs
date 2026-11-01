@@ -141,9 +141,13 @@ impl LazyReranker {
     }
 
     fn disabled(&self) -> bool {
-        self.state
-            .lock()
-            .map_or(true, |st| matches!(*st, Some(None)))
+        // Ranking probes availability even when reranking is off. Loading
+        // is not a known failure, and this probe must never wait for it.
+        match self.state.try_lock() {
+            Ok(st) => matches!(*st, Some(None)),
+            Err(std::sync::TryLockError::WouldBlock) => false,
+            Err(std::sync::TryLockError::Poisoned(_)) => true,
+        }
     }
 }
 
@@ -714,6 +718,48 @@ pub async fn warmup_probe(svc: &Service, ready: &Arc<Ready>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn non_reranked_search_does_not_wait_for_reranker_preparation() {
+        let reranker = Arc::new(LazyReranker {
+            state: Mutex::new(None),
+        });
+        let (send, receive) = std::sync::mpsc::channel();
+        let (mut searched, mut worker) = (None, None);
+        reranker.model_with(|| {
+            // model_with holds the same mutex throughout startup loading.
+            // Keep it held until the real ranking call returns, or until the
+            // regression timeout lets us release it and join the worker.
+            let reranker = reranker.clone();
+            worker = Some(std::thread::spawn(move || {
+                let bank = crate::bank::Bank {
+                    dim: 2,
+                    entries: vec![crate::bank::Entry {
+                        id: 1,
+                        text: "needle".into(),
+                        band: "flat".into(),
+                        embedding: vec![1.0, 0.0],
+                        ..Default::default()
+                    }],
+                    matrix: vec![1.0, 0.0],
+                };
+                let params = search::fixture_params("needle", 1);
+                assert!(!params.rerank_enabled);
+                let ranked = search::rank(&bank, &[1.0, 0.0], &params, Some(&*reranker), &[], None);
+                send.send(ranked.hits.len()).unwrap();
+            }));
+            searched = Some(receive.recv_timeout(std::time::Duration::from_secs(10)));
+            None
+        });
+        worker.unwrap().join().unwrap();
+        assert_eq!(
+            searched
+                .unwrap()
+                .expect("rerank=false waited for model preparation"),
+            1
+        );
+        assert!(reranker.disabled());
+    }
 
     #[test]
     fn missing_or_tampered_reranker_is_disabled_without_loading() {

@@ -56,6 +56,11 @@ embedding readiness; architecture alone never selects that checkpoint's pins.
 The optional reranker independently verifies its inputs in a startup task,
 off the readiness path, in both normal and read-only shadow mode. Search reuses
 that task's cached result, including a refusal, without loading or logging twice.
+Preparation reads the approximately 91 MB reranker graph and retains its ONNX
+session and tokenizer even when the config default is off, because an individual
+request can enable reranking. Additional resident memory has not been measured.
+Availability checks do not wait for that loading task; a search with reranking
+off never waits on the reranker mutex.
 Missing or changed reranker files disable reranking with a prominent log naming
 the cause and repair, while store/search remain available. The existing health
 schema has no reranker field. Ordinary loading never downloads. Missing or
@@ -102,13 +107,17 @@ before `compose up --wait`, so download time is outside the service readiness
 deadline. Direct first start still provisions automatically; a health-timed
 launcher should likewise provision before starting its readiness timer. The
 entrypoint announces the provisioning phase and each artifact download. A
-timestamp marker grants only that active phase up to 30 minutes of health
-grace; completion, failure and restart clear it. Outside that phase, health
-requires the daemon's `ready: true`, with the normal 90-second start period
-and five 15-second retries. A warm failure therefore becomes unhealthy in
-about 2.5 minutes instead of waiting 30 minutes. During provisioning Docker
-reports healthy with `starting: model provisioning` in the healthcheck output;
-clients must still wait for the daemon's readiness response.
+timestamp marker bounds provisioning to 30 minutes, then starts a fresh
+90-second initialization budget when the daemon executes. The healthcheck
+waits inside those budgets and returns success only for the daemon's
+`ready: true`; only then is the marker removed. Docker therefore stays
+`starting` during downloads and initialization, and `compose up --wait` or
+`service_healthy` dependents cannot pass early. Its 32-minute command timeout
+covers both phases, with no Docker start period whose first success could
+discard the initialization grace. Expired markers fail immediately on later
+checks; five 15-second retries make warm startup failures unhealthy in about
+2.5 minutes. After readiness, checks are ordinary three-second HTTP probes.
+Provisioning failure and container restart clear stale markers.
 
 Downloads are capped at each artifact's pinned byte size before bytes reach
 the disk sink; short bodies are also refused. The shared HTTPS-only client
@@ -131,7 +140,8 @@ to an initialized disposable database named `s1_*` or `pl_cf_*`. Run
 the missing-reranker diagnostic before the first request, then successful
 store/search and readiness with no second diagnostic. The test runner owns
 database creation and cleanup. The W2-D search differential separately refuses
-to claim rerank agreement when a requested reranker was disabled.
+to claim rerank agreement when a requested reranker was disabled; an absent or
+automatic rerank parameter inherits the scenario's config (off by default).
 
 Run `harness/embedding.py --accepted-fp32 --qwen-position-ids-deferred` with
 the provisioned embedding directory and a Python checkpoint from the pinned
