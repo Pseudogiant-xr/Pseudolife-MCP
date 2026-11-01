@@ -218,7 +218,7 @@ def docker(env):
 def test_without_a_dsn_it_runs_inside_the_daemon_container(docker, capsys):
     code, out, _err = _run(capsys, "laptop", "--tier", "minimal", "--replace")
     assert code == 0 and out == "invited\n"
-    _inspect, check, run = docker.calls
+    _inspect, _engine, check, run = docker.calls
     assert check == ["docker", "exec", "pseudolife-mcp-daemon", "python", "-m",
                      "pseudolife_memory.cli", "invite", "--version-check"]
     assert run == ["docker", "exec", "-i", "pseudolife-mcp-daemon", "python", "-m",
@@ -230,7 +230,7 @@ def test_an_older_image_is_refused(docker, capsys):
     docker.version = None
     code, _out, err = _run(capsys, "laptop")
     assert code == 4 and "update the daemon first" in err
-    assert len(docker.calls) == 2
+    assert len(docker.calls) == 3
 
 
 def test_revoke_is_confirmed_here_and_forwarded_with_yes(docker, env, capsys):

@@ -30,6 +30,8 @@
 # and nothing here ever runs `down -v`. Run after `git pull`; local edits
 # must be committed first (or deployed with -AllowDirty).
 param(
+    [ValidateSet("python", "rust")][string]$Engine,
+    [switch]$Shadow,
     [string]$Tag = "",
     [switch]$NoBackup,
     [switch]$ForceRollbackTag,
@@ -72,6 +74,8 @@ if (-not $python) {
 $updateArgs = @("--checkout", $repo, "--keep-rollbacks", "$KeepRollbacks", "--keep-cache-hours", "$KeepCacheHours",
                 "--health-retries", "$HealthRetries", "--health-delay-ms", "$HealthDelayMs")
 if ($Tag) { $updateArgs += @("--rollback-tag", $Tag) }
+if ($Engine) { $updateArgs += @("--engine", $Engine) }
+if ($Shadow) { $updateArgs += "--shadow" }
 if ($NoBackup) { $updateArgs += "--no-backup" }
 if ($ForceRollbackTag) { $updateArgs += "--force-rollback-tag" }
 if ($NoCachePrune) { $updateArgs += "--no-cache-prune" }

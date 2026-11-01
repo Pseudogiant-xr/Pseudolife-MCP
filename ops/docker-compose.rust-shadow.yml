@@ -1,0 +1,42 @@
+# Opt-in read-only companion. Never changes the main daemon service.
+services:
+  pseudolife-rust-shadow:
+    image: ${PSEUDOLIFE_RUST_IMAGE:-pseudolife-daemon-rust:checkout}
+    build:
+      context: ..
+      dockerfile: ops/Dockerfile.daemon-rust
+      args:
+        GIT_SHA: ${PSEUDOLIFE_BUILD_GIT_SHA:-unknown}
+        GIT_DIRTY: ${PSEUDOLIFE_BUILD_DIRTY:-unknown}
+        BUILD_TIME: ${PSEUDOLIFE_BUILD_TIME:-unknown}
+        BUILD_SOURCE: checkout
+    restart: unless-stopped
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    mem_limit: ${PSEUDOLIFE_DAEMON_MEM_LIMIT:-6g}
+    memswap_limit: ${PSEUDOLIFE_DAEMON_MEM_LIMIT:-6g}
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
+    environment:
+      PSEUDOLIFE_READ_ONLY: "1"
+      PSEUDOLIFE_MCP_DATABASE_URL: postgresql://pseudolife_shadow:${PSEUDOLIFE_SHADOW_DB_PASSWORD:?Run update --engine rust --shadow}@pseudolife-pg:5432/pseudolife_memory
+      PSEUDOLIFE_MCP_HOST: 0.0.0.0
+      PSEUDOLIFE_MCP_PORT: "8765"
+      PSEUDOLIFE_MCP_DATA_DIR: /data
+      PSEUDOLIFE_DAEMON_MODELS_DIR: /models
+      PSEUDOLIFE_MCP_TRUST_BIND: "1"
+      PSEUDOLIFE_MCP_TOKEN: ${PSEUDOLIFE_MCP_TOKEN:-}
+      PSEUDOLIFE_MCP_TOKENS: ${PSEUDOLIFE_MCP_TOKENS:-}
+      CUDA_VISIBLE_DEVICES: "-1"
+    ports:
+      - "127.0.0.1:${PSEUDOLIFE_SHADOW_PORT:-8766}:8765"
+    volumes:
+      - pseudolife_data:/data:ro
+      - pseudolife_shadow_models:/models
+    depends_on:
+      pseudolife-pg:
+        condition: service_healthy
+
+volumes:
+  pseudolife_shadow_models: {}

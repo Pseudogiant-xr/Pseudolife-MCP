@@ -1,0 +1,10 @@
+# Opt-in persistent activation overlay; update supplies the checkout image tag.
+# The base project keeps its PostgreSQL, /data volume, port and resource limits.
+services:
+  pseudolife-daemon:
+    image: ${PSEUDOLIFE_RUST_IMAGE:-pseudolife-daemon-rust:checkout}
+    build:
+      context: ..
+      dockerfile: ops/Dockerfile.daemon-rust
+    labels:
+      org.pseudolife.engine: rust

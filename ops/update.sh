@@ -69,6 +69,8 @@ args=(--checkout "$repo" --health-retries "${HEALTH_RETRIES:-30}" --health-delay
 while [ $# -gt 0 ]; do
     case "$1" in
         --tag)            args+=(--rollback-tag "$2"); shift 2 ;;
+        --engine)         args+=(--engine "$2"); shift 2 ;;
+        --shadow)         args+=(--shadow); shift ;;
         --no-backup)      args+=(--no-backup); shift ;;
         --keep-rollbacks) args+=(--keep-rollbacks "$2"); shift 2 ;;
         --keep-cache-hours) args+=(--keep-cache-hours "$2"); shift 2 ;;
