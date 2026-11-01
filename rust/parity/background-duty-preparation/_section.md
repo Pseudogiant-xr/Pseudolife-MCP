@@ -9,13 +9,16 @@ and lesson-search rows even with dreams disabled. The native compaction
 selection and update-offer formatter use live Python policy goldens.
 
 `BACKGROUND-SESSIONS`, `BACKGROUND`, and `BACKGROUND-SWEEP` remain deferred.
-Writer durability and canonical-store slot synchronization require W2-E;
-session write/resume routes and generic close-time titles are not integrated;
-automatic dreams and the graph sweep ticks are served (`rust/daemon/spec.md`
+As audited on master `75a8015e` (2026-11-01), writer reconnect, counters
+autosave/exit flush and compaction slot synchronization are integrated in
+`service.rs`. Session close routes and explicit close-time titles are served;
+automatic titles in the idle reaper remain absent.
+
+Automatic dreams and the graph sweep ticks are served (`rust/daemon/spec.md`
 SW1-SW6), with the merge, link, junk, curation and candidate judges
 (LJ1-LJ6, JJ1-JJ5, CU1-CU6, CJ1-CJ5), and the reaper's
-session trigger fires the automatic dream. File-mode tensors and embedded bank lifecycle
-remain separately deferred. Source preparation and unit tests do not establish
+session trigger fires the automatic dream. File-mode retirement/import and installed lite acceptance
+remain separate obligations (the native lite lifecycle is implemented). Source preparation and unit tests do not establish
 those missing process-boundary contracts.
 
 The enabled release loop under `/health` remains unproved: the health normalizer

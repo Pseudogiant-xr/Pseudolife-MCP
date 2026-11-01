@@ -4,6 +4,21 @@ Manual, full-corpus graph consolidation. Writes touch the graph only
 (cortex/MIRAS untouched); the lesson and world stores are additionally
 *listed* for curation (cross-key duplicates), never written.
 
+## Deprecated REST routes (D9 / Proposal A / B2r)
+
+The 2026-10-23 [D9 decision](../../rust/CUTOVER.md) deprecates these routes
+for removal in a later release. Python handlers remain unchanged; Rust
+keeps its declared `501` responses. REST examples below describe the retained
+Python handlers only; use the replacement where one exists.
+
+| Deprecated route | Replacement |
+|---|---|
+| `POST /api/lessons/restore` | `memory_graph_review(action="restore_slot", store="lesson", src="entity\|attribute")` |
+| `POST /api/world/restore` | `memory_graph_review(action="restore_slot", store="world", src="entity\|attribute")` |
+| `GET /api/curation/retired` | no replacement; no caller |
+| `GET /api/graph/communities` | no replacement; no caller |
+| `GET /api/graph/proposal-evidence` | no replacement; no caller |
+
 ## 0. What runs by itself
 
 Since 2026-09-02 the sweep timer works every queue this runbook describes

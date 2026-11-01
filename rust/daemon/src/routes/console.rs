@@ -106,6 +106,7 @@ mod tests {
             }
         }
         assert_eq!(unserved + served.len(), 72);
+        assert!(served.contains(&("POST", "/api/dream/run")));
         // A declared route is answered by its family, not the fall-through.
         for &(method, path) in &served {
             let response = tokio::time::timeout(

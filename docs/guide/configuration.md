@@ -408,7 +408,9 @@ To verify an existing mailbox without attaching or modifying it, pass
 the context endpoint's `read_only` mode, checks a version-2 file's bank/principal
 binding and never transmits its instance credential. A missing or invalid file,
 rejected bearer, changed binding, unavailable bank or older daemon without this
-capability remains a separate diagnostic. Cold storage is not initialized by
+capability remains a separate diagnostic. A file registered under a principal the daemon no
+longer maps this login to reports `principal_changed`: it needs no repair, since
+the shim registers a new address at its next start. Cold storage is not initialized by
 this check. Saved state and client settings are preserved; default doctor never
 registers, receives, acknowledges or starts a daemon.
 
@@ -2063,10 +2065,14 @@ daemon explicitly confirms that the saved address no longer exists (pruned
 after seven idle days with no retained mail, or absent from a restored
 database, where `rebind` cannot restore it either). A bank-bound client first
 verifies that the daemon is still its saved bank and principal. It keeps
-the old state file beside it with a `.stale` suffix. A rejected bearer or instance
-credential, or a different bank or principal, preserves the saved address and
-requires corrected authentication or the deliberate restore/rebind procedure;
-an HTTP status alone never proves that an address should be replaced.
+the old state file beside it with a `.stale` suffix. When the daemon now maps
+the same login to a different principal on the same bank (the machine was
+paired again under another name, say), the next start also sets the file aside with a
+`.stale` suffix and registers a new address; mail sent to the old address is
+not carried over. A rejected bearer or instance credential, or a different
+bank, preserves the saved address and requires corrected authentication or
+the deliberate restore/rebind procedure; an HTTP status alone never proves
+that an address should be replaced.
 
 A subagent that a Claude Code session spawns with its Agent tool runs in the
 same shim process, so its board calls carry the parent's identity (probed
@@ -4289,6 +4295,12 @@ Separately from the schema meta version, Docker-tier installs created
 before 2026-08-14 also need the PostgreSQL 16 → 18 volume cutover —
 [the PostgreSQL 18 migration runbook](../runbooks/postgres-18-migration.md).
 The milestones:
+
+> `POST /api/lessons/restore` and `POST /api/world/restore` in the v37
+> history below are deprecated; use `memory_graph_review(action="restore_slot")`
+> with `store="lesson"` or `store="world"` instead. Removal is in a later
+> release under [D9 / Proposal A / B2r](../../rust/CUTOVER.md) (2026-10-23);
+> Python handlers remain unchanged and Rust keeps its declared `501` responses.
 
 | Version | What it added |
 |---|---|

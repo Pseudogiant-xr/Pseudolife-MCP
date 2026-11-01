@@ -8,16 +8,13 @@ independent batches run at the same time, and every decision that is the
 maintainer's to make is named. Nothing here authorizes a default switch, a
 release, an update, a deploy or any live-bank change.
 
-Plan audit: master `98c5d6bf`, 2026-10-19, updated for #832 (`2ce04a7d`);
-revised 2026-10-20 over master `2092e7b1` with what landed since, what sets
-the pace, and three proposals for the maintainer (proposals A to C, below);
-revised 2026-10-23 over master `bd8217a1` with the maintainer's decisions on
-D1 to D11 (the gates G1 to G4 stay open), the MCP count re-derived from the
-tool registry, a readiness view per surface, and the three linked proofs
-each closed slice needs. The other surface counts come from the refreshed
-checklists in the [parity register](parity/). The acceptance checklists after the
-plan are the 2026-10-10 draft's per-item evidence rules, plus the
-three-proofs row in "Acceptance boundary".
+Status audit: master `75a8015e`, rechecked unchanged after merging
+`23432a52` on 2026-11-01, derived from the registries,
+route dispatch, services and workflow commands, not release notes. Counts
+mean implemented bodies, not acceptance closure. The ordered plan and its
+2026-10-23 decisions remain the planning baseline; dated notes below identify
+landed work without changing that boundary. The PR contains reproducible
+count commands. Per-item evidence remains in the [parity register](parity/).
 
 ## Decisions this plan rests on
 
@@ -33,31 +30,32 @@ three-proofs row in "Acceptance boundary".
 
 ## Where the port stands
 
-| Surface | On master `2092e7b1` (2026-10-20); MCP row re-derived on `bd8217a1` (2026-10-23) | Left to do |
+| Surface | On master `75a8015e` (2026-11-01) | Left to do |
 |---|---|---|
-| MCP tools (38) | 32 served: the 31 bodies in the tool registry (`rust/daemon/src/mcp/dispatch.rs`, `registry()`) plus `memory_toolset`, which `mcp/mod.rs` answers before the registry. `mcp_compare.py`'s `UNSERVED` lists the other 6 and agrees. Since the first audit: `memory_consolidation_candidates` (#833, batch #850), the four graph write tools `memory_graph_relate`, `memory_graph_unrelate`, `memory_alias` and `memory_relation_define` (#842, task M, batch #866), and `memory_graph` (#847, task N1, batch #882). In flight: #836 `memory_consolidate` (task L), #864, #867, #873 and #881 `memory_dream` (task P1: the consolidation pass, outcome inference, lesson synthesis and digests, then the deep dream and its merge judge). | 6: `memory_consolidate`, `memory_recall` (graph expansion, task N2), `memory_graph_review` (task O), `memory_dream` (after task P1, the graph-insight refresh P2b under Option B), and `document_ingest` and `document_search`, blocked on the Python document table. `memory_search` still refuses `explain=true`. |
-| Console routes (72 `ConsoleRoutes`, plus `POST /api/pair`) | 2 served (`GET /api/search`, `POST /api/daemon-notice`), 1 partly (`GET /api/agents`: the coordination view). `/api/pair` serves its refusals; redemption is 501. | 69 routes answer 501: 32 GET and 37 POST ([Console checklist](parity/complete-console-registration/)). Under D9 (2026-10-23), 5 of them retire with a deprecation note, the 3 episode routes are one small batch (B2e), and 4 move to the CLI batches (B10), which leaves 57 for the Console batches B2a to B2d. |
-| Hook endpoints (8) | 4 served (coordination-start, park-gate, woke, subagent). memory-changes and session-end serve their gates and refusals. | 4: session-start and memory-policy (501 for every caller), the authorized memory-changes body and the session-end close. |
-| Coordination actions (15) | All served and compared by the board harness. | Three declared cutover blockers (below). |
-| CLI modes (29) | 9 native, 15 partly native, 5 defer by name ([CLI checklist](parity/cli-mode-acceptance-checklist/)). | The deferred sub-rows and modes in batch B10, plus the lite-tier rows (D1: lite is ported). Of the operator modes, D8 ports `coordination-recovery` before the switch and defers `delegate-watch`, `channel`'s remainder and `maintainer setup` by name until after it. |
-| Background duties | The scheduler, session reaper, dream-journal and log pruning, heap trim, release check and stored-principal refresh are implemented. | Autosave and the clean-exit flush are scheduled no-ops. The compaction policy is ported and golden-tested but never invoked. The reaper's automatic titles are absent. Automatic dreams, graph sweeps and the session-end dream trigger are absent or a declared no-op. |
-| Evidence | Every `ported` body rests on recorded Linux dev-lane differential runs (`w2d_search.py`, `w2e.py`, `board/run.py`). | Hosted CI compares no served MCP or REST body other than `memory_toolset`'s. It runs the MCP wire, binding and stub corpus, HTTP admission, security and body limits, static files, sweep pruning, dream cursors, the graph store and graph read model, and the CLI harness rows. No Windows runtime run of the daemon exists (batch B13). Since 2026-10-19 a local full suite runs in 9 to 12 minutes on four workers (#846, batch #850), and the CI reshape in batch #868 (merged 2026-10-20 as 72fbcc88) takes the Windows `cli-live` parity suite out of the required gate (still required on Linux; the other live suites stay gated on Windows) and runs only the parity shards a PR's diff reaches (#859), narrows the required Windows Python lane to the cases that reach Windows-specific product code (#862), and replaces sub-second clock waits in tests with event waits, with a guard against new ones (#863). Under D6 and D11 (2026-10-23) the body differentials will run nightly on a Linux dev box instead of in hosted CI (B13); no nightly runs yet. |
-| Declared divergences | About 150 rows in `daemon/divergences.md`, 9 in `daemon/spec.md` (W2-F) and a few dozen across the CLI harness rows and specs. | Under D7 (2026-10-23) the two sent-YAML presentation deferrals are accepted; every other row is bucketed as presentation, behaviour with no caller, or behaviour with a caller, and only the behaviour-with-a-caller bucket must close before G2. A row stays open until it is bucketed (B14a). |
+| MCP tools (38) | 38 served: `mcp/tools.jsonl` has 38 entries; `mcp/dispatch.rs::registry()` registers the body families, with `memory_toolset` handled in `mcp/mod.rs`; `harness/mcp_compare.py::UNSERVED = {}`. | No tool-level stubs. `read/mcp_search.rs` still refuses `explain=true`; other declared argument/behaviour differences and the three acceptance proofs remain. |
+| Console routes (72 `ConsoleRoutes`, plus `POST /api/pair`) | 59 served, from the union of the route families' `SERVED` constants intersected with `harness/goldens/routes.json`; pairing redemption is also served by `routes/pair.rs`. | 13 declared 501s: 6 maintainer actions, `POST /api/dream/run`, `GET /api/stats` (B10), and D9's 5 retirements. These are not counted as completed retirements. |
+| Hook endpoints (8) | All 8 dispatch to bodies in `routes/hook.rs`. | Behaviour details still matter: the memory-changes conductor reminder remains declared missing; registered-client execution proof remains. |
+| Coordination actions (15) | All 15 served in `board/dispatch.rs`; pairing, shared HLC and clock retry are implemented (blockers below). | Captured-epoch timing remains a declared difference, not an open W2F-CLOCK-RETRY blocker. |
+| CLI modes (29) | 9 native, 15 partly native, 5 defer by name ([CLI checklist](parity/cli-mode-acceptance-checklist/)); native mode coverage and sub-row deferrals are distinct from daemon route availability. | B10 remainder and installed-launcher proof; D8's named operator deferrals remain in force. |
+| Background duties | `service.rs::Duties` now saves counters on autosave and clean exit, invokes compaction with slot synchronization, and runs dream/graph sweeps; `fire_session_dream` reaches `dream/ticks.rs`. Writer reconnect/rehydration, pruning, release checking and heap trim are implemented. | Reaper automatic titles remain absent in `Service::reap`; explicit close titles exist in `session_close.rs`. Keep process/restart acceptance and health/release evidence separate from implementation. D2 import from an old `weights.pt` still requires Python before switching (B11). |
+| Evidence | `.github/workflows/rust.yml` invokes MCP wire/binding/toolset and tokenless comparisons (`mcp_ci.py`), HTTP admission/security/static comparisons, pruning, dream cursors, graph store/read, schema/startup/principals and CLI harnesses. These include hosted Windows runtime slices; the old claim of no Windows daemon runtime is false. | No workflow command invokes the full `w2e.py`, `w2d_search.py` or `board/run.py` body differential. Offline harness tests do not substitute for those comparisons. D6/D11's published nightly proof and installed execution must still be linked per surface; this audit does not claim a fresh differential or CI run. |
+| Declared divergences | 257 entry files under `daemon/divergences/` (exclude `_section.md`), plus 9 W2-F table rows in `daemon/spec.md`; CLI row/spec declarations remain separate. These are inventory counts, not 266 open blockers: entries include closed and historical obligations. | D7 triage/closure remains open; do not add overlapping declarations into a unique blocker total. Two sent-YAML presentation deferrals are accepted; other behaviour with a caller must close before G2 or receive its required disposition. |
 
 ### Named cutover blockers
 
-| # | Blocker | Where declared | Closes in |
+| # | Blocker | Status and code evidence | Remaining batch |
 |---|---|---|---|
-| 1 | Tokenless MCP Host/Origin rebinding: tokenless `/mcp` stays unmounted (501) until the rebinding gate is accepted | `daemon/divergences.md`, "Routes whose handlers belong to later slices" | B6, under D3's conditions (accepted 2026-10-23) |
-| 2 | Reference store: no document table, so no reference hits in search and no document tools | `daemon/divergences.md`, "W2-D: GET /api/search" | B7 |
-| 3 | W2F-PAIRING-HTTP: a valid `/api/pair` body on an authenticated install answers 501 | `daemon/divergences.md`, "Coordination board completion (W2-F)" | B5 |
-| 4 | W2F-CLOCK-RETRY: a send retry after an epoch change cannot heal the writer session | same | B5, after B4's writer-session refresh |
-| 5 | W2F-SHARED-HLC: the board keeps its own clock instead of the service clock | same | B5 |
-| 6 | Qwen artifact provisioning: no verified default embedding and reranker export is provisioned | `daemon/divergences.md`, "Startup and configuration" and `w2d-model-provisioning` | B8 (D4) |
-| 7 | Image ONNX graph agreement: the image's graph is not the verified export | OPS-CUTOVER below | B8 (D4) |
+| 1 | Tokenless MCP Host/Origin rebinding | **Closed**: `routes/mcp.rs` mounts tokenless MCP; `mcp/security` checks the allowlist, with legitimate near misses and refusals in route tests and `mcp_ci.py`'s tokenless corpus (#987). | B6 landed |
+| 2 | Reference store/document tools | **Closed**: schema v57 added `reference_chunks` and `cms_counters` (#903); current schema is v58. `documents.rs` serves ingest/search (#934), and `read/search.rs` and stats include references (#939); PDFium parity/provisioning followed in #965/#967. | B7 implementation landed; installed migration proof remains B11 |
+| 3 | W2F-PAIRING-HTTP | **Closed**: `routes/pair.rs` calls `principals::redeem`, publishes the principal, and owns redemption across disconnect, with saturation/refund tests (#1001). | B5 landed |
+| 4 | W2F-CLOCK-RETRY | **Closed**: `board/dispatch.rs` calls `Service::refresh_writer_session` before retry (#1015); `board/clock_retry_tests.rs` covers reconnect and fencing. The forced half-open reprobe outcome remains unproved, and captured-epoch timing remains declared. | B5 landed |
+| 5 | W2F-SHARED-HLC | **Closed**: `board/dispatch.rs::stamp` uses `Ready::tick_hlc`; `board/clock_tests.rs` interleaves board and memory stamps (#993). | B5 landed |
+| 6 | Qwen embedding and reranker artifact provisioning | **Open**: `onnx_artifacts.rs::resolve` requires local/cached artifacts; there is no verified default install/first-start provisioning and daemon checksum pin for both models. | B8 (D4) |
+| 7 | Image ONNX graph agreement | **Open**: `provision_container_model.py` pins download hashes but explicitly says the public graph differs from the verified export; `Dockerfile.daemon-rust` still bakes that graph. Download integrity is not embedding parity or D4's installed provisioning. | B8 (D4) |
 
-Blockers 6 and 7 are one problem and go in one batch; under D4 the daemon's
-checksum pin on the provisioned export closes both.
+Blockers 6 and 7 remain one B8 problem. Closing the other five does not
+close the acceptance gates or the remaining Console, CLI, install and
+recovery work.
 
 ### Readiness by surface
 
@@ -72,15 +70,15 @@ readable by the older side after a rollback) and **installed execution**
 restart, not a binary a harness starts by path). This table is the progress measure; the PR total in
 the ordered plan is a planning estimate.
 
-| Surface | Ready means | On `bd8217a1` (2026-10-23) |
+| Surface | Ready means | On `75a8015e` (2026-11-01) |
 |---|---|---|
-| MCP tools (38) | Every tool serves its body with every documented argument (no `not_implemented` stub, no refused documented argument), with the three proofs. | 32 of 38 bodies served, `memory_search`'s `explain=true` still refused; behaviour proofs are recorded Linux dev-lane runs; no tool has an installed-execution proof. |
-| Console routes (72 plus `/api/pair`) | Every route D9 keeps serves its body behind its gates, retired routes carry their deprecation note, and the Console's own views run against the Rust daemon. | 2 served and 1 partly; D9 retires 5, gives 3 to B2e and 4 to B10. No installed proof. |
-| Hook endpoints (8) | Every endpoint serves its body, and the plugin's hooks, run from a registered client, reach the Rust daemon and get the same answers. | 4 served, 2 partly; session-start and memory-policy answer 501. |
+| MCP tools (38) | Every tool serves its body with every documented argument (no `not_implemented` stub, no refused documented argument), with the three proofs. | 38 of 38 bodies served, `memory_search`'s `explain=true` still refused; behaviour proofs are recorded Linux dev-lane runs; no tool has an installed-execution proof. |
+| Console routes (72 plus `/api/pair`) | Every route D9 keeps serves its body behind its gates, retired routes carry their deprecation note, and the Console's own views run against the Rust daemon. | 59 of 72 served, plus pairing; 8 retained routes still 501 and 5 retirement dispositions outstanding. No linked installed proof. |
+| Hook endpoints (8) | Every endpoint serves its body, and the plugin's hooks, run from a registered client, reach the Rust daemon and get the same answers. | 8 bodies served; conductor reminder and registered-client proof remain. |
 | CLI modes (29) | Every mode is native, except D8's three named deferrals, and is invoked through the installed launcher. | 9 native, 15 partly, 5 defer. |
-| Background duties | Each duty runs on its schedule (no scheduled no-op) and its durable effect is checked: autosave writes D2's table, compaction mutates with slot sync, dream and graph-sweep ticks advance their cursors. | Autosave and the clean-exit flush are no-ops; compaction is never invoked; automatic dreams and graph sweeps are absent. |
-| Install and activation | The installers and release-mode `update` install the Rust daemon and clients with no manual step; the executable every registered client and hook invokes is the one installed; a restart keeps the bank. | No installed Rust path: nothing ships a Rust binary to users, and the only opt-in, `ops/docker-compose.rust.yml`, keeps its bank and `/data` on tmpfs, so it survives no restart. The Rust daemon reports its crate version, `0.0.0` (`rust/daemon/Cargo.toml`; `/health`'s `version` is `CARGO_PKG_VERSION`), while the shims are `0.19.0`: a call through a registered client still succeeds, but the shim warns of the mismatch and tells the user to install release `0.0.0`, which does not exist, until the daemon's version follows the release. |
-| Recovery | Backup and restore run through the Rust entry points on a disposable bank, and a rollback restores the previous executable selection and leaves the bank the newer side wrote readable by the older side. | Pending. The Python daemon's `ensure_schema` stamps `meta.schema_version` to its own build's version on every start and refuses no newer bank (`pseudolife_memory/storage/schema.py`, the `schema_version` upsert), so a rolled-back older daemon stamps a newer bank down without a warning; the Rust daemon refuses a newer bank. Every schema bump is crossable this way, to an older Python release as well as from Rust; the D10 bump (B7's and D2's tables) is the next one, and whether a rolled-back Python reads D2's table is not yet established. |
+| Background duties | Each duty runs on its schedule (no scheduled no-op) and its durable effect is checked: autosave writes D2's table, compaction mutates with slot sync, dream and graph-sweep ticks advance their cursors. | Autosave/exit flush persist `cms_counters`, compaction saves slots, and automatic dream/graph sweeps run; reaper titles and remaining process-boundary proof stay open. |
+| Install and activation | The installers and release-mode `update` install the Rust daemon and clients with no manual step; the executable every registered client and hook invokes is the one installed; a restart keeps the bank. | No installed Rust path: nothing ships a Rust binary to users, and the only opt-in, `ops/docker-compose.rust.yml`, keeps its bank and `/data` on tmpfs, so it survives no restart. The daemon crate now reports `0.19.0`, matching the shim release, so the former `0.0.0` mismatch is closed; this does not supply an installed activation proof. |
+| Recovery | Backup and restore run through the Rust entry points on a disposable bank, and a rollback restores the previous executable selection and leaves the bank the newer side wrote readable by the older side. | Pending end-to-end rollback proof. Current Python `schema.py::_refuse_on_future_or_malformed_version` refuses a newer bank before DDL, as Rust does; the old unconditional-downstamp claim is closed for current code. Older Python releases without that guard still need an explicit rollback target and readable-bank proof, including v57 counters/documents. |
 
 ## Maintainer decisions and gates
 
@@ -185,6 +183,24 @@ proposed, with the published JSON naming both compared heads, and D6's bar
 set to a published nightly run on a master that contains the PR's base;
 hosted body comparisons stay only for surfaces with Windows-specific code
 paths. D1 ports lite, so B13 keeps the Windows daemon runtime runs.
+
+### Dated reconciliation with the ordered plan (2026-11-01)
+
+B2-0 landed in #930; B5 in #993/#1001/#1015; B6 in #987; and B2e in #936.
+B7's implementation is present (#903/#934/#939, with PDF work #965/#967),
+but migration through installed update remains B11's obligation. B3's
+endpoint bodies landed (#992/#995/#1002), with the declared reminder gap
+still open. B4's autosave, shutdown and compaction work landed
+(#998/#999/#1000); it is not wholly complete. B1's tools and sweep ticks
+are implemented (including #931/#932/#937 and the queue judges), but this
+is not a declaration that all three acceptance proofs have landed.
+The plan's B2d label says seven maintainer POSTs: the challenge is now
+served, leaving six actions. B10f's briefing and episode routes landed
+(#1030/#1005); the CLI modes' other deferrals remain. B9's lite lifecycle
+exists (#946/#962/#963), so the historical DSN-only premise is stale;
+its CLI, retirement and installed-path obligations still apply.
+The following plan remains the dated baseline, including its old in-flight
+labels; use the audited status above for completion, not those labels.
 
 ## Ordered plan
 
@@ -291,31 +307,20 @@ feed B11 and B13, then B16.
 
 ### What sets the pace
 
-The PR count is not the constraint; writing the code is the cheap part. Each
-PR costs two reviews (an Opus reviewer and the Codex second review), their
-fixes and re-review, and then a hosted CI pass of about an hour, with the
-Windows parity shard the long pole; until 2026-10-19 every master move also
-sent every open PR back through CI. So the pace is sessions × review × CI
-queue: how many Rust sessions run at once without colliding on the hot-spot
-files above (three or four), how fast each PR's two reviews turn around
-(hours when a reviewer session is available), and how many CI passes a day
-the gate takes. Measured: between 2026-10-18 00:13Z and 2026-10-20 01:25Z (about 49
-hours) master took 27 merged PRs, plus the 10 members that batch #850
-landed, which GitHub shows as closed rather than merged; the two integration
-batches #850 and #866 landed 12 member PRs between them. 16 PRs were open at
-this revision.
+Measured with `gh pr list --state merged --search
+'merged:2026-10-24..2026-10-30' --limit 300 --json number,title,mergedAt,headRefName`:
+137 merged PR records over seven UTC calendar days, including 39 with
+`headRefName` beginning `integrate/` and 98 other PRs. This is repository-wide
+throughput, not 137 Rust port slices; member PRs and their integration
+wrappers must not be double-counted as delivered work. The observed average
+is 14 non-batch PRs and about 5.6 batches per day.
 
-Three changes since 2026-10-19 widen that queue: integration batches (#851)
-make one CI run land several PRs, the CI reshape in batch #868 (merged as
-72fbcc88) cuts the required hosted Windows lanes to what differs on Windows, and the
-4-worker
-local suite (#846) gates a batch head in about ten minutes before CI sees
-it. The calendar estimate that follows is an estimate, not a commitment, and
-moves with the session count: at one reviewed PR per session per day, three
-to four sessions and two batches a day, 65 to 95 PRs is about three to six
-weeks of calendar time to the end of stage 3, with the longest chain (B7,
-then B8 and B11, then the B16 soak) as the floor the count cannot beat.
-Stage 4 is maintainer-gated and adds the soak window.
+As an **estimate**, remaining work will be governed by review, integration
+and the unresolved install/model/recovery dependencies, not the old total
+of 65–95 planned PRs divided by that repository-wide rate. No defensible
+remaining PR count or completion date follows from these observations.
+Stage 4 still adds a maintainer-owned soak window. The older timing study
+below is retained as historical evidence, not a measurement of today's CI.
 
 Measured per batch, 2026-10-23, over every integration batch opened since
 2026-10-19 ([`evals/results/batch-lifecycle-20261023/`](../evals/results/batch-lifecycle-20261023/README.md),

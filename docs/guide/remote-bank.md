@@ -825,6 +825,18 @@ pipx install --force "pseudolife-mcp==<the daemon's version>"
 or, for a daemon on the 2.1 line, `pipx runpip pseudolife-mcp install
 "mcp<2.2"`.
 
+**A session starts with "the memory daemon refused this machine's token".**
+The daemon answered the token this machine holds with a 401 or 403, or as
+revoked: it was rotated or revoked on the daemon host, or never issued there.
+The session still starts, without memory: the SessionStart hook puts that
+line at the top of the instructions in place of the briefing, and the shim
+prints the same cause on stderr when it starts. The daemon cannot tell a
+revoked token from an unknown one, so the line says only "refused". Fix it by
+pairing again: on the daemon host run `pseudolife-mcp invite <name>`, then on
+this machine `pseudolife-mcp connect <daemon-url> --read-code`, which pairs
+and repoints this machine's clients (`pair` alone leaves them on the refused
+token). New sessions pick it up.
+
 **The shim exits at startup naming the credential file.** The line gives
 the path it read and the reason (missing, not owner-only, owned by another
 account, a link, or holding more than the token). Each reason's fix,

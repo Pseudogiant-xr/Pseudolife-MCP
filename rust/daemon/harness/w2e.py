@@ -1763,7 +1763,12 @@ def lineage_lesson(task, aspect, task_norm, aspect_norm, lesson, about, source_t
                    embedding_text) -> list[dict]:
     """Seed-only: a current lesson whose provenance and synthesis lineage
     audit name the entries with ``source_texts`` (by their ids), its
-    embedding copied from ``embedding_text``'s entry."""
+    embedding copied from ``embedding_text``'s entry.
+
+    Lessons one search can return together need distinct embedding texts:
+    on an exact score tie Rust keeps record order, while Python's torch
+    matmul scores identical rows a last bit apart, so the order would be
+    float noise (forget-slots, 2026-10-31)."""
     def q(v):
         return "NULL" if v is None else "'" + v.replace("'", "''") + "'"
     texts = ", ".join(q(t) for t in source_texts)
@@ -1847,6 +1852,10 @@ FORGET_SEED = [
         "AND e.text = 'The flaky test needs a warm cache.'", after_stop=True),
 ]
 
+# forget-slots' lessons, one entry each so no two share an embedding.
+FORGET_SLOT_LESSONS = ["Deploy through the pipeline.", "Tune the pool before the replica.",
+                       "Never deploy on Fridays."]
+
 SCENARIOS.update({
     "forget-memory": {
         "config": "memory:\n  delete_confirm_threshold: 2\n",
@@ -1897,6 +1906,8 @@ SCENARIOS.update({
         "config": None,
         "seed": [
             store("A note so the bank is not empty."),
+            # each lesson's embedding comes from its own text (lineage_lesson)
+            *[store(t) for t in FORGET_SLOT_LESSONS],
             fact("Payments DB", "host", "10.0.0.5", origin="user", confidence=0.9),
             fact("Payments DB", "host", "10.0.0.6", origin="user", confidence=0.9),
             fact("Payments DB", "port", "5432", origin="user", confidence=0.9),
@@ -1909,17 +1920,14 @@ SCENARIOS.update({
             world_set("Python", "latest version", "3.13.0", source_url="https://www.python.org/"),
             *lineage_lesson("deploy engine to host", "approach", "deploy-engine-to-host",
                             "approach", "Deploy through the pipeline.", "Payments DB",
-                            ["A note so the bank is not empty."],
-                            "A note so the bank is not empty."),
+                            ["A note so the bank is not empty."], "Deploy through the pipeline."),
             # a lesson whose task is a graph entity (fact_set minted it)
             *lineage_lesson("Payments DB", "tuning", "payments-db", "tuning",
                             "Tune the pool before the replica.", None,
-                            ["A note so the bank is not empty."],
-                            "A note so the bank is not empty."),
+                            ["A note so the bank is not empty."], "Tune the pool before the replica."),
             *lineage_lesson("deploy engine to host", "pitfall", "deploy-engine-to-host",
                             "pitfall", "Never deploy on Fridays.", None,
-                            ["A note so the bank is not empty."],
-                            "A note so the bank is not empty."),
+                            ["A note so the bank is not empty."], "Never deploy on Fridays."),
         ],
         "ops": [
             # the entity is required for these scopes
@@ -3645,32 +3653,39 @@ SCENARIOS.update({
             fact_get("Staging Database", "engine"),
         ],
     },
-    # The counters row (D2), written by autosave and read back at start: two
-    # stores and a search autosave the row; a restart reads it back; one more
-    # store autosaves the sum (interaction 3, not 1). The exits write nothing
-    # comparable: Python's exit save never runs on SIGTERM (uvicorn re-raises
-    # it; divergences.md), and Rust's, gated like autosave, finds nothing
-    # changed since the last autosave, so the row stands on both sides.
+    # Restore counters and lazy access counts through an observed clean exit.
+    # Keep periodic saves outside this phase: reads deliberately do not move
+    # the autosave fingerprint, so a timer firing between store and search
+    # on just one arm would make the expected query count nondeterministic.
+    # counters-autosave separately covers the periodic save and its gate.
     "counters-restore": {
-        "live_only": "autosave writes on each daemon's own clock; compared live",
+        "live_only": "clean-exit flush and restart are observed live",
+        "clean_stop": True,
         "config": COUNTERS_CONFIG,
-        "env": {"PSEUDOLIFE_MCP_AUTOSAVE_SECONDS": "1"},
+        "env": {"PSEUDOLIFE_MCP_AUTOSAVE_SECONDS": "3600"},
         "seed": [],
         "ops": [
             store("The counters note about the build cache.", source="pseudolife-mcp"),
             store("The counters note about the token rotation.", source="pseudolife-mcp"),
             search("build cache"),
-            {"op": "sleep", "s": 3},
-            counters(),
             {"op": "restart", "config": COUNTERS_CONFIG},
-            counters(),
+            dict(counters(), expect=[
+                "SELECT interaction_count = 2 AND tier_queries = 1 "
+                "AND (tier_hits->>'flat')::int = 1 FROM cms_counters WHERE id = 1",
+                "SELECT access_count = 1 FROM entries WHERE text = "
+                "'The counters note about the build cache.'",
+            ]),
             store("The counters note after the restart.", source="pseudolife-mcp"),
-            {"op": "sleep", "s": 3},
             counters(),
             # No search after the restart: its logged retrieval event carries
             # a hydrated entry's surprise that differs in the 7th digit
             # between the daemons, a read-path difference outside this row.
-            counters(stop=True),
+            dict(counters(stop=True), expect=[
+                "SELECT interaction_count = 3 AND tier_queries = 1 "
+                "AND (tier_hits->>'flat')::int = 1 FROM cms_counters WHERE id = 1",
+                "SELECT access_count = 1 FROM entries WHERE text = "
+                "'The counters note about the build cache.'",
+            ]),
         ],
     },
     # Autosave: a store changes the bank, so the next autosave writes the row;
@@ -5968,6 +5983,8 @@ def with_pull_token(op: dict, token: str | None) -> dict:
 
 
 def run_op(op: dict, port: int, mcp: Mcp, dsn: str) -> dict | None:
+    if op["op"] == "console_dream_gate":
+        return w2e_console_dream.gate(op, port, sys.modules[__name__])
     if op["op"] == "sleep":
         time.sleep(op["s"])
         return {"isError": False, "value": None}
@@ -6016,6 +6033,33 @@ MUTANTS += w2e_hooks.MUTANTS
 HOME_OPS += w2e_hooks.HOME_OPS
 
 
+def configure_clean_exit(procs: dict, scn: dict) -> None:
+    """Use the existing lifecycle harness's normal-return signal fixture.
+
+    Uvicorn rethrows the signal to the previous handler; a returning handler
+    lets Python return normally on both platforms, as in SessionReap.
+    Its lifespan shutdown performs the flush before atexit runs again.
+    Durable rows, not merely process exit, prove the flush took effect.
+    """
+    if not scn.get("clean_stop"):
+        return
+    procs["python"].argv = [sys.executable, "-c", """
+import signal
+for sig in (signal.SIGTERM, getattr(signal, "SIGBREAK", signal.SIGTERM)):
+    signal.signal(sig, lambda *_: None)
+from pseudolife_memory.daemon import run_daemon
+run_daemon()
+"""]
+
+
+def stop_for_scenario(daemon, scn: dict) -> None:
+    if scn.get("clean_stop"):
+        from background_sessions import graceful_stop
+        graceful_stop(daemon)
+    else:
+        daemon.stop()
+
+
 def restart_sides(op: dict, scn: dict, procs: dict, homes: dict, envs: dict,
                   stubs: dict, binary: Path) -> dict:
     """``restart``: stop both daemons once their background work has
@@ -6032,7 +6076,7 @@ def restart_sides(op: dict, scn: dict, procs: dict, homes: dict, envs: dict,
             return conn.execute(probes).fetchone()[0]
     booted = {side: count(side) + 1 for side in procs}
     for d in procs.values():
-        d.stop()
+        stop_for_scenario(d, scn)
     for side in ("python", "rust"):
         config = op["config"]
         if stubs.get(side) is not None:
@@ -6042,6 +6086,7 @@ def restart_sides(op: dict, scn: dict, procs: dict, homes: dict, envs: dict,
         homes["python"], daemons.free_port(), daemons.base_env(homes["python"], envs["python"]))
     procs["rust"] = daemons.rust_daemon(
         binary, homes["rust"], daemons.free_port(), daemons.base_env(homes["rust"], envs["rust"]))
+    configure_clean_exit(procs, scn)
     for d in procs.values():
         d.start(300)
     w1a.wait_settled([d.port for d in procs.values()], token=TOKEN)
@@ -6252,6 +6297,7 @@ def _run_live(name: str, scn: dict, tag: str, binary: Path, root: Path, record: 
         homes["rust"] = home
         procs["rust"] = daemons.rust_daemon(binary, home, daemons.free_port(), daemons.base_env(home, renv))
         envs = {"python": penv, "rust": renv}
+        configure_clean_exit(procs, scn)
         daemons.start_all(procs, 300)
         w1a.wait_settled([d.port for d in procs.values()], token=TOKEN)
         warmup_diffs = wait_warmups(dsns, before) if warmup_expected(scn) else []
@@ -6274,10 +6320,14 @@ def _run_live(name: str, scn: dict, tag: str, binary: Path, root: Path, record: 
                 elif op["op"] == "restart":
                     clients = restart_sides(op, scn, procs, homes, envs, stubs, binary)
                     py = rs = {"isError": False, "value": None}
+                elif op["op"] == "console_dream_concurrent":
+                    py, rs = [w2e_console_dream.concurrent(procs[side].port, dsns[side],
+                              clients[side], stubs[side], sys.modules[__name__])
+                              for side in ("python", "rust")]
                 elif op["op"] == "counters":
                     if op["stop"]:
                         for d in procs.values():
-                            d.stop()
+                            stop_for_scenario(d, scn)
                     py, rs = counters_rows(dsns)
                 else:
                     py = run_op(with_pull_token(op, tokens["python"]), procs["python"].port,
@@ -6317,7 +6367,7 @@ def _run_live(name: str, scn: dict, tag: str, binary: Path, root: Path, record: 
             sp, np_, ep = normalize_state(raw_py, before["python"], tsm_py)
             sr, nr, er = normalize_state(raw_rs, before["rust"], tsm_rs)
             if op["op"] != "init":
-                if op.get("name") == "memory_dream":
+                if op.get("name") == "memory_dream" or w2e_console_dream.is_dream(op):
                     row["diffs"] += idle_diffs(row["python"], row["rust"],
                                                max_wall + IDLE_SLACK_S)
                     row["diffs"] += orphan_age_diffs(row["python"], row["rust"])
@@ -6414,10 +6464,17 @@ def run_golden(name: str, binary: Path, root: Path, tol: dict, owned: list[str])
     tag = name.replace("-", "_")
     db = pg.name(f"pl_cf_w2e_{tag}_rs")
     owned.append(db)
-    dsn = pg.create(db)
+    console_dream = name.startswith("console-dream-")
+    # These recordings start from the Python constructor's empty template,
+    # including its declared migration metadata, just as the live run does.
+    stubs = start_stubs(scn, ("seed", "rust") if console_dream else ("rust",))
+    template = prepare_template(scn, tag, root, owned, stubs.get("seed")) if console_dream else None
+    dsn = pg.create(db, template=template)
+    if console_dream:
+        w2e_console_dream.seed_replay(dsn, golden)
     before = dbstate.dump(dsn)
-    home = daemons.make_home(root, f"{tag}-rs", scn.get("config"))
-    stubs = start_stubs(scn, ("rust",))
+    config = scenario_config(scn, stubs.get("rust")) if console_dream else scn.get("config")
+    home = daemons.make_home(root, f"{tag}-rs", config)
     renv = w1a.rust_env(side_env(scn, dsn, extractor_env(scn, stubs.get("rust"))))
     d = daemons.rust_daemon(binary, home, daemons.free_port(), daemons.base_env(home, renv))
     steps, stats, numeric = [], {}, {}
@@ -6426,15 +6483,24 @@ def run_golden(name: str, binary: Path, root: Path, tol: dict, owned: list[str])
         # so its writer-lease epoch is 2: boot the Rust bank twice as well.
         d.start(300)
         w1a.wait_settled([d.port], token=TOKEN)
-        d.stop()
-        d.start(300)
-        w1a.wait_settled([d.port], token=TOKEN)
+        if not console_dream:
+            d.stop()
+            d.start(300)
+            w1a.wait_settled([d.port], token=TOKEN)
+        elif warmup_expected(scn):
+            diffs = wait_warmups({"rust": dsn}, {"rust": before})
+            if diffs:
+                raise AssertionError(diffs)
         client = Mcp(d.port)
         client.init()
         for i, rec in enumerate(golden["steps"]):
             op = rec["op"]
             row = {"step": i, "op": op, "diffs": []}
-            rs = run_op(op, d.port, client, dsn) if op["op"] != "init" else None
+            if op["op"] == "console_dream_concurrent":
+                rs = w2e_console_dream.concurrent(d.port, dsn, client, stubs["rust"],
+                                                  sys.modules[__name__])
+            else:
+                rs = run_op(op, d.port, client, dsn) if op["op"] != "init" else None
             rs = w2e_documents.scrub(rs)
             if stubs:
                 if rs is not None:
@@ -6445,10 +6511,13 @@ def run_golden(name: str, binary: Path, root: Path, tol: dict, owned: list[str])
                 row["extractor"] = {"rust": extractor_summary(sent)}
                 row["diffs"] += extractor_unanswered("rust", sent)
             raw = dbstate.dump(dsn)
-            sr, nr, er = normalize_state(raw, before)
+            sr, nr, er = normalize_state(raw, before, ts_tokens(raw) if console_dream else None)
             if rs is not None and w2e_documents.is_search(op):
                 rs = w2e_documents.answer_tokens(rs, clock_ranks(raw))
             if rs is not None:
+                if console_dream and (w2e_console_dream.is_dream(op)
+                                      or op.get("name") == "memory_dream"):
+                    rs = dream_tokens(rs, ts_tokens(raw))
                 row["rust"] = rename_prefixes(rs, er)
                 row["diffs"] += compare_response(rec["python"], row["rust"], tol, stats)
             unpack_numeric(rec["numeric_new"], numeric)
@@ -6472,6 +6541,8 @@ def run_golden(name: str, binary: Path, root: Path, tol: dict, owned: list[str])
 RESTART_QUERY = "which port does the bench Postgres use"
 SCENARIOS.update({
     "search-after-restart": {
+        "clean_stop": True,
+        "env": {"PSEUDOLIFE_MCP_AUTOSAVE_SECONDS": "3600"},
         "config": None,
         "seed": [],
         "ops": [
@@ -6480,7 +6551,8 @@ SCENARIOS.update({
             dict(search(RESTART_QUERY, top_k=2), expect=[
                 f"SELECT count(*) = 1 FROM retrieval_events WHERE query_text = '{RESTART_QUERY}'"]),
             # A restart writes some config: the default board setting, unchanged.
-            {"op": "restart", "config": "coordination:\n  enabled: true\n"},
+            {"op": "restart", "config": "coordination:\n  enabled: true\n",
+             "expect": ["SELECT count(*) = 2 FROM entries WHERE access_count = 1"]},
             dict(search(RESTART_QUERY, top_k=2), expect=[
                 f"SELECT count(*) = 2 FROM retrieval_events WHERE query_text = '{RESTART_QUERY}'"]),
         ],
@@ -6497,6 +6569,11 @@ MUTANTS += w2e_episodes.MUTANTS
 
 import w2e_reads
 SCENARIOS.update(w2e_reads.register(sys.modules[__name__]))
+
+import w2e_console_dream  # noqa: E402
+
+SCENARIOS.update(w2e_console_dream.register(sys.modules[__name__]))
+
 
 def main() -> int:
     ap = argparse.ArgumentParser()

@@ -1170,7 +1170,10 @@ are `merge`, `link`, `junk`, `curation` and `candidate`, with a total limit of
 1–100. It queues work without changing automation modes or immediately calling
 a model.
 
-To review a large merge queue from outside the daemon, page through it with
+`GET /api/graph/proposal-evidence` is deprecated (no replacement; no caller).
+Deprecated under [D9 / Proposal A / B2r](../../rust/CUTOVER.md) (2026-10-23), for removal in a later release. Python handlers remain unchanged; Rust keeps its declared `501` responses.
+The following describes the retained Python handler, not a new integration path:
+page through a merge queue with
 `GET /api/graph/proposal-evidence?offset=0&limit=25` (limit 1–100). Each item
 is the evidence pack the merge judge itself reads: per-side display, degree,
 scopes and snippets at the judge's snippet cap, `low_differential`, the

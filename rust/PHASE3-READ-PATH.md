@@ -1,5 +1,11 @@
 # Phase 3 read-path source map
 
+> Archival note: [D9 / Proposal A / B2r](CUTOVER.md) (2026-10-23)
+> supersedes the route scope below: `GET /api/graph/communities`, `GET /api/graph/proposal-evidence` and
+> `GET /api/curation/retired`
+> deprecated for removal in a later release; no replacement; no caller.
+> Python handlers remain unchanged; Rust keeps its declared `501` responses.
+
 The daemon's read surface is backed mainly by resident Python stores hydrated from Postgres, rather than SQL vector queries. Several GET and MCP read operations also write observational or recovery state. Stored document vectors alone do not determine query rankings.
 
 Source checkout: `56dc806bcd0e8aaa6ada5f5c048bdf51e8b67933`; Python oracle: `f709abb54f7912ae9cd767998d0926ca33df4bcd`. `git diff --name-only <oracle> HEAD -- pseudolife_memory` was empty when inspected. Line references below are repository-relative at these pins. This is a source map for the authorized reading exercise; implementation, acceptance and unresolved scope remain deferred. No application imports, live bank reads, builds, tests, benchmarks, or model execution were used.

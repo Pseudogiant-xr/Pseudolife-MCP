@@ -2140,6 +2140,43 @@ async def _proxy(url: str, token: str | None, session_uid: str, *, provider=None
 _SDK_V2_PROBE_MODULE = "mcp.server.subscriptions"
 
 
+def _mcp_shadow() -> tuple[str, str] | None:
+    """``(what import mcp loads, where the installed SDK is)`` when the two
+    differ, else ``None``.
+
+    ``python -m`` and ``python -c`` put the working directory first on
+    ``sys.path``, so a stray ``mcp.py`` there (one turned up in the shared
+    temp directory, 2026-11-01) is imported in place of the SDK and every
+    ``mcp.*`` submodule then looks missing, which is not a version problem.
+    """
+    from pathlib import Path
+
+    try:
+        spec = importlib.util.find_spec("mcp")
+    except (ImportError, ValueError):
+        return None
+    if spec is None:
+        return None
+    found = spec.origin if spec.origin not in (None, "namespace") else None
+    if found is None and spec.submodule_search_locations:
+        found = next(iter(spec.submodule_search_locations), None)
+    if not found:
+        return None
+    try:
+        from importlib.metadata import distribution
+        sdk = Path(distribution("mcp").locate_file("mcp")).resolve()
+        if not sdk.is_dir():   # an unusual layout: claim nothing
+            return None
+        loaded = Path(found).resolve()
+    except Exception:  # noqa: BLE001 - no installed SDK, or an unreadable path: claim nothing
+        return None
+    if loaded == sdk or sdk in loaded.parents:
+        return None
+    if loaded.name == "__init__.py":   # a package: name its folder
+        loaded = loaded.parent
+    return str(loaded), str(sdk)
+
+
 def _require_mcp_sdk_v2() -> None:
     """Exit with the recovery command when this env's MCP SDK predates v2.
 
@@ -2168,6 +2205,18 @@ def _require_mcp_sdk_v2() -> None:
         installed = version("mcp")
     except Exception:  # noqa: BLE001 - absence reads the same as too-old
         installed = "not installed"
+    shadow = _mcp_shadow()
+    if shadow is not None:
+        found, sdk = shadow
+        print(
+            f"[shim] `import mcp` loads {found}, not the installed MCP SDK "
+            f"(mcp {installed} at {sdk}): that module or package comes first "
+            f"on the import path, usually because it sits in the directory "
+            f"this was started from.\n"
+            f"  Fix:  move or rename {found}, or start from another directory.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
     print(
         f"[shim] this environment's MCP SDK (mcp {installed}) predates v2 — "
         f"the shim needs mcp>=2.2 (no {_SDK_V2_PROBE_MODULE}).\n"
