@@ -1,3 +1,3 @@
-| Named divergence | Omitted surface | Reason / owner | D7 bucket | Code verification / B14b owner |
-|---|---|---|---|---|
+| Item | Python | Rust | Reason / owner | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
 | Maintainer passkey verifier (`maintainer_webauthn.rs`): an RS256 key above 8192 bits | `cryptography` (OpenSSL) verifies PKCS#1 v1.5 signatures up to 16384-bit moduli | aws-lc-rs caps PKCS#1 verification at 8192 bits, so such a key enrols but every signature it makes is refused (`signature`, answered `assertion_invalid`) | no platform authenticator makes RSA keys over 4096 bits; ES256 and EdDSA are unaffected | behaviour with no caller | `rust/daemon/src/maintainer_webauthn.rs::verify_signature` uses RSA_PKCS1_2048_8192_SHA256, unlike Python `pseudolife_memory/maintainer_webauthn.py`'s verifier backend. Bounded authenticator-producer search: `frontend/src/lib/webauthn.ts` obtains browser-created credentials via WebAuthn, with no arbitrary modulus-generation path; shipped platform authenticators supply ordinary <=4096-bit RSA or ES256/EdDSA keys, not >8192-bit RSA. B14b owner: B14b no-caller disposition. |

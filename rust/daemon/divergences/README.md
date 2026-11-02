@@ -25,8 +25,8 @@ runtime default and does not close B12, G1 or G2.
 | D7 bucket | Entries |
 |---|---:|
 | presentation | 17 |
-| behaviour with no caller | 71 |
-| behaviour with a caller | 127 |
+| behaviour with no caller | 68 |
+| behaviour with a caller | 130 |
 | closed | 45 |
 | **Total** | **260** |
 
@@ -34,7 +34,10 @@ runtime default and does not close B12, G1 or G2.
 
 Each link names the exact ledger row. Owners are the implementation streams
 R1–R6 where their briefs cover the work, otherwise the named cutover batch;
-the conductor assigns those batch obligations. Naming an owner does not
+the conductor assigns those batch obligations. B14b itself is a named
+cutover batch and is a valid owner for residual divergence dispositions.
+Explicit acceptance-harness callers keep open proof obligations in this
+list; they are not treated as no-caller dispositions. Naming an owner does not
 claim that its implementation or acceptance evidence has landed. A row
 whose remaining item is a proof keeps that boundary visible in its entry.
 
@@ -97,7 +100,7 @@ whose remaining item is a proof keeps that boundary visible in its entry.
 | [The cosine `_cosine` (`consolidation.py:81-92`)](write-path-w2-e/memory-consolidation-candidates/the-cosine-cosine-consolidation-py-81-92.md) | `rust/daemon/src/consolidation_tools.rs::mcp_memory_consolidation_candidates` | B14b W2-E consolidation numeric-boundary closure |
 | [The episode anchor's walk order](write-path-w2-e/memory-consolidation-candidates/the-episode-anchor-s-walk-order.md) | `rust/daemon/src/consolidation_tools.rs::mcp_memory_consolidation_candidates` with an episode anchor after multi-band stores | B14b W2-E multi-band promotion and consolidation closure |
 | [`memory.cortex.auto_promote: true`](write-path-w2-e/memory-cortex-auto-promote-true.md) | `rust/daemon/src/store.rs::mcp_memory_store` after enabling the Console auto-promote knob | B14b W2-E cortex auto-promotion closure |
-| [A non-finite float (REAL or double) in the pre-apply graph snapshot file](write-path-w2-e/memory-dream-deep-the-deep-dream/a-non-finite-float-real-or-double-in-the.md) | `pseudolife_memory/mcp_server.py` `memory_graph_review(action="propose")` / Rust `actions::propose`, followed by `memory_dream(action="deep", apply=true) | B1-P (dream engine), B14b |
+| [A non-finite float (REAL or double) in the pre-apply graph snapshot file](write-path-w2-e/memory-dream-deep-the-deep-dream/a-non-finite-float-real-or-double-in-the.md) | `pseudolife_memory/mcp_server.py` `memory_graph_review(action="propose")` / Rust `actions::propose`, followed by `memory_dream(action="deep", apply=true)` | B1-P (dream engine), B14b |
 | [An apply's lock windows (read snapshot, snapshot file, apply writes, stamp and re-read)](write-path-w2-e/memory-dream-deep-the-deep-dream/an-apply-s-lock-windows-read-snapshot.md) | `rust/daemon/src/dream/service.rs` `mcp_memory_dream(action="deep", apply=true)` and `rust/daemon/src/dream/ticks.rs` `deep_dream_tick`, concurrent with normal graph writes | B1-P (dream engine), B14b |
 | [float32 dot products (`np.dot`, `np.linalg.norm`) behind context vectors, candidate and curation cosines, off the build this port mirrors](write-path-w2-e/memory-dream-deep-the-deep-dream/float32-dot-products-np-dot-np-linalg.md) | `rust/daemon/src/dream/deep.rs` `plan` and curation candidate construction on manual / automatic deep dreams | B1-P (dream engine), B14b |
 | [`re.IGNORECASE` letter classes at the variant-token boundaries (`(?<![A-Za-z0-9])`)](write-path-w2-e/memory-dream-deep-the-deep-dream/re-ignorecase-letter-classes-at-the.md) | `rust/daemon/src/dream/deep.rs` `plan` invokes graph consolidation over entity names created by graph / fact tools | B1-P (dream engine), B14b |
@@ -164,6 +167,9 @@ whose remaining item is a proof keeps that boundary visible in its entry.
 | [Unicode newer than 14.0 in the label, meta-filter and slot regexes](write-path-w2-e/unicode-newer-than-14-0-in-the-label.md) | MCP `memory_store` and correction admission processing arbitrary caller text through labels, meta filtering and slots | B14b W2-E Unicode classification boundary |
 | [Autosave and clean-exit flush](write-path-w2-e/w2-e-first-increment-boundaries/autosave-and-clean-exit-flush.md) | Opt-in engine update on a pre-v57 bank through `pseudolife_memory/update_engine.py::require_imported_bank` | R4 / B11 installed legacy migration; D2 remains the documented Python exception |
 | [Exact-duplicate boundary](write-path-w2-e/w2-e-first-increment-boundaries/exact-duplicate-boundary.md) | MCP `memory_store` at the duplicate/surprise boundary | B14b W2-E exact admission/rejection-reason acceptance |
+| [Frozen store catalog snapshots](write-path-w2-e/w2-e-first-increment-boundaries/frozen-store-catalog-snapshots.md) | `rust/daemon/harness/w2e.py::run_golden` consumes the frozen store catalog for replay acceptance | B8 / B14b W2-E frozen-catalog acceptance |
+| [Hosted write-path execution](write-path-w2-e/w2-e-first-increment-boundaries/hosted-write-path-execution.md) | `.github/workflows/rust.yml` `body-evidence` invokes `rust/ci/body_evidence.py::run` for D6/D11 acceptance | B13 scheduled-master evidence and Windows-specific comparisons |
+| [New reaper recording's startup state](write-path-w2-e/w2-e-first-increment-boundaries/new-reaper-recording-s-startup-state.md) | `rust/daemon/harness/w2e.py::run_golden` consumes the reaper recording and `dbstate.py::dump` compares startup state | B4 / W3-H reaper-startup recording acceptance |
 | [Resident cortex refresh](write-path-w2-e/w2-e-first-increment-boundaries/resident-cortex-refresh.md) | MCP `memory_store` with the enabled Console `memory.cortex.auto_promote` option | B14b W2-E cortex auto-promotion closure (same obligation as the auto-promote entry) |
 | [Shutdown deadline](write-path-w2-e/w2-e-first-increment-boundaries/shutdown-deadline.md) | Operator `docker stop`/SIGTERM during requests or background writes; native `shutdown_signal` | B4 lifecycle shutdown-boundary closure; R3 image stop-grace acceptance |
 | [Unicode runtime](write-path-w2-e/w2-e-first-increment-boundaries/unicode-runtime.md) | MCP store/corrections through `rust/daemon/src/store.rs::admit` | B14b W2-E Unicode classification boundary (same obligation as the Unicode-table entry) |
@@ -177,4 +183,6 @@ caller and closing stream or batch. Preserve the one-entry-per-file format.
 
 Run `python rust/daemon/split_divergences.py --check` and
 `python -m pytest rust/ci/test_divergences_ledger.py` after ledger edits.
+The check rejects missing or unknown buckets, mismatched table widths,
+incorrect summary counts and incomplete or duplicate caller links.
 The renderer excludes this summary and retains the per-entry evidence.

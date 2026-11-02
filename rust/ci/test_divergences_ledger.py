@@ -251,3 +251,113 @@ def test_two_entries_one_name_would_hold_are_refused_with_the_fix():
     twice = BASE.replace("| BIND-A | a | b | c |\n", "| BIND-A | a | b | c |\n| bind a | d | e | f |\n")
     with pytest.raises(sd.LedgerError, match="two entries would be bind-a.md"):
         sd.parse_ledger(twice)
+
+
+TRIAGED = """\
+## Rows
+
+| Item | D7 bucket | Evidence |
+|---|---|---|
+| READ | behaviour with a caller | Caller: reader; B14b owner: B4. |
+| CLOSED | closed | Closed by implementation. |
+
+**DISPLAY:** Formatting only. D7 bucket: presentation.
+
+**UNUSED:** No shipped caller. D7 bucket: behaviour with no caller.
+"""
+
+INDEX = """\
+# Divergence triage
+
+| D7 bucket | Entries |
+|---|---:|
+| presentation | 1 |
+| behaviour with no caller | 1 |
+| behaviour with a caller | 1 |
+| closed | 1 |
+| **Total** | **4** |
+
+| Entry | Caller | Closing stream or batch |
+|---|---|---|
+| [READ](rows/read.md) | reader | B4 |
+"""
+
+
+def triaged(tmp_path):
+    root = converted(tmp_path, TRIAGED)
+    (root / "README.md").write_text(INDEX, encoding="utf-8", newline="\n")
+    pointer = tmp_path / "divergences.md"
+    pointer.write_text(sd.STUB, encoding="utf-8", newline="\n")
+    return root, pointer
+
+
+def test_check_accepts_all_four_buckets_in_tables_and_paragraphs(tmp_path):
+    root, pointer = triaged(tmp_path)
+    assert sd.check(root, pointer) == []
+
+
+@pytest.mark.parametrize("filename, before, after", [
+    ("read.md", "D7 bucket", "Disposition"),
+    ("read.md", "behaviour with a caller", "wontfix"),
+    ("read.md", "| Evidence |", "| D7 bucket |"),
+    ("unused.md", "D7 bucket:", "Disposition:"),
+    ("unused.md", "behaviour with no caller", "wontfix"),
+    ("unused.md", "D7 bucket: behaviour with no caller.",
+     "D7 bucket: behaviour with no caller. D7 bucket: closed."),
+])
+def test_check_rejects_missing_unknown_or_duplicate_buckets(tmp_path, filename, before, after):
+    root, pointer = triaged(tmp_path)
+    entry = root / "rows" / filename
+    entry.write_text(entry.read_text().replace(before, after), encoding="utf-8", newline="\n")
+    assert any("D7 bucket" in p for p in sd.check(root, pointer))
+
+
+@pytest.mark.parametrize("before, after", [
+    ("| closed | 1 |", "| closed | 2 |"),
+    ("| closed | 1 |\n", ""),
+    ("| closed | 1 |", "| closed | 1 |\n| closed | 1 |"),
+    ("| **Total** | **4** |", "| **Total** | **5** |"),
+    ("| closed | 1 |", "| wontfix | 1 |"),
+])
+def test_check_rejects_inaccurate_summary_counts(tmp_path, before, after):
+    root, pointer = triaged(tmp_path)
+    (root / "README.md").write_text(INDEX.replace(before, after), encoding="utf-8", newline="\n")
+    assert any("counts" in p for p in sd.check(root, pointer))
+
+
+@pytest.mark.parametrize("replacement", [
+    "",
+    "| [READ](rows/closed.md) | reader | B4 |\n",
+    "| [READ](rows/read.md) | reader | B4 |\n" * 2,
+    "| [READ](rows/read.md) | reader | |\n",
+])
+def test_check_rejects_missing_wrong_duplicate_or_unowned_caller_links(tmp_path, replacement):
+    root, pointer = triaged(tmp_path)
+    text = INDEX.replace("| [READ](rows/read.md) | reader | B4 |\n", replacement)
+    (root / "README.md").write_text(text, encoding="utf-8", newline="\n")
+    assert any("caller" in p for p in sd.check(root, pointer))
+
+
+def test_check_requires_the_summary_index(tmp_path):
+    root, pointer = triaged(tmp_path)
+    (root / "README.md").unlink()
+    assert any("README.md" in p for p in sd.check(root, pointer))
+
+
+@pytest.mark.parametrize("before, after", [
+    ("|---|---|---|", "|---|---|"),
+    ("Caller: reader; B14b owner: B4. |", "Caller: reader; | B14b owner: B4. |"),
+])
+def test_table_column_counts_must_match(tmp_path, before, after):
+    root, pointer = triaged(tmp_path)
+    entry = root / "rows/read.md"
+    entry.write_text(entry.read_text().replace(before, after), encoding="utf-8", newline="\n")
+    assert any("column count" in p for p in sd.check(root, pointer))
+
+
+def test_table_column_count_ignores_code_and_escaped_pipes(tmp_path):
+    root, pointer = triaged(tmp_path)
+    entry = root / "rows/read.md"
+    entry.write_text(entry.read_text().replace("Caller: reader;", r"`x|y` and x\|y; Caller: reader;"),
+                     encoding="utf-8", newline="\n")
+    assert sd.check(root, pointer) == []

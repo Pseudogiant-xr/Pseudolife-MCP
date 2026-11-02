@@ -1,3 +1,3 @@
-| Named divergence | Omitted surface | Reason / owner | D7 bucket | Code verification / B14b owner |
-|---|---|---|---|---|
+| Item | Python | Rust | Reason / owner | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
 | `GET /api/config` over a broken hand-edited config.yaml | a file that is not UTF-8, an impossible timestamp (`2026-13-45`) or a bad explicit tag (`!!int "1e5"`) makes the read fail (400, or 405 for `!!bool maybe`) | no `saved` is shown and the read answers 200 | only a restart knob's `saved` hint, on a file the next start refuses anyway | behaviour with no caller | `rust/daemon/src/config_io.rs::saved_file` suppresses unreadable/YAML failures; `pseudolife_memory/web/config_io.py::_saved_file` catches OSError/YAMLError but lets codec and constructor runtime errors escape. Bounded config-writer search: Python `write_config`, Rust `config_io.rs::write_config_with` and installer writers emit UTF-8 valid YAML; only external corruption/hand edits create these byte/tag/timestamp failures. B14b owner: B14b no-caller disposition. |
