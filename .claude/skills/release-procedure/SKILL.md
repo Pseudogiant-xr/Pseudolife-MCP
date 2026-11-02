@@ -159,6 +159,35 @@ them in this order (first done 2026-07-16, v0.8.0; GHCR images added
    packages to public in their GHCR package settings, or pulls fail with
    "denied". Verify:
    `docker manifest inspect ghcr.io/pseudogiant-xr/pseudolife-daemon:<version>`.
+
+   **Opt-in Rust artifacts.** Before the release, the maintainer chooses
+   whether to enable `PSEUDOLIFE_PUBLISH_RUST_DAEMON=true` (the separate
+   `pseudolife-daemon-rust:<version>` image) and
+   `PSEUDOLIFE_PUBLISH_RUST_ASSETS=true` (the five native CLI archives,
+   `SHA256SUMS`, and `pseudolife-compose-<version>.tar.gz`). Both are
+   repository variables, disabled when unset, and all publication remains
+   downstream of the human-approved `publish` job. The Rust image gets
+   only the explicit version tag, never `latest`, until the default switch
+   is separately approved. Neither variable switches a host's engine.
+
+   Run the build-only `release.yml` workflow dispatch on the candidate
+   first: all five target binaries must compile and execute their version
+   command after unpacking, and the complete compose/checksum artifact must
+   pass verification. Dispatch never invokes PyPI, GHCR, the registry or
+   GitHub asset publication. After an enabled release, inspect the Rust
+   image digest, download the six archives plus `SHA256SUMS`, and verify
+   every checksum and the archive-root layout in
+   [the asset contract](../../../docs/dev/release-assets.md). The Rust
+   GHCR package needs public visibility after its first approved push.
+   The build job checks native crate versions before PyPI publication.
+   If native asset attachment stops after a partial upload, rerun the
+   asset publication job with the same complete artifact. It requires the
+   exact file set and checksums, downloads and verifies already published
+   assets (including `SHA256SUMS`), and uploads only missing ones. It never
+   replaces existing bytes; investigate a mismatch before publication.
+   Missing opt-in assets are a failed native publication, not permission
+   to enable a fallback or change the default engine; keep installation
+   and update readiness as release prerequisites.
 6. **Deploy, then run the client step twice.** `pseudolife-mcp update
    --clients-only` runs the updater of the runtime it was launched from —
    the *previous* release's. That run installs the new runtime, but any

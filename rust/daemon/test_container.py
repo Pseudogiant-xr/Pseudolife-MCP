@@ -15,20 +15,37 @@ import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 ROOT = Path(__file__).resolve().parents[2]
-VERIFIED_GRAPH = "f5fdee679d0ffb98e1cb0bb178e8ee2b86739ab7ab035a3a9327761d5c6b1f0b"
 DEFAULT_PATHS = ("ops/Dockerfile.daemon", "ops/docker-compose.yml", "ops/docker-compose.ghcr.yml",
                  "pseudolife_memory/compose/docker-compose.yml", "pseudolife_memory/compose/docker-compose.ghcr.yml",
                  "pseudolife_memory/update_cli.py", ".github/workflows/release.yml",
                  "ops/install.sh", "ops/install.ps1")
 
 
+def native_manifest():
+    source = (ROOT / "rust/daemon/src/model_provision.rs").read_text(encoding="utf-8")
+    return re.findall(r'artifact!\(\s*"([^"]+)"\s*,\s*"([^"]+)"\s*,\s*"([^"]+)"'
+                      r'\s*,\s*"([^"]+)"\s*,\s*"([0-9a-f]{64})"\s*,\s*(\d+)\s*\)', source)
+
+
+def verified_graph():
+    # #1114 admitted the public export with measured parity. The compiled
+    # provisioner's manifest is the identity, not the historical export hash.
+    graphs = [row[4] for row in native_manifest() if row[0] == "embedding/onnx/model.onnx"]
+    assert len(graphs) == 1, "native manifest must pin exactly one embedding graph"
+    return graphs[0]
+
+
 def require_python_defaults(contents, graph):
     # This is one cutover prerequisite, not authorization to switch defaults.
-    if graph == VERIFIED_GRAPH:
-        return
     for path, text in contents.items():
+        if path == ".github/workflows/release.yml" and graph == verified_graph() and text:
+            # Only the opt-in job may refer to the admitted Rust image.
+            # Keep this clean-runner guard stdlib-only; parsed job conditions
+            # are checked under suite dependencies in test_rust_release_image.py.
+            text = re.sub(r"(?ms)^  rust-image:[ \t]*\n.*?(?=^  [A-Za-z0-9_-]+:|\Z)", "", text)
         assert not any(symbol in text for symbol in
-                       ("Dockerfile.daemon-rust", "docker-compose.rust.yml", "w3j-daemon-rust")), path
+                       ("Dockerfile.daemon-rust", "docker-compose.rust.yml", "w3j-daemon-rust",
+                        "pseudolife-daemon-rust")), path
     commands = [json.loads(line[4:]) for line in contents["ops/Dockerfile.daemon"].splitlines()
                 if line.startswith("CMD ")]
     assert commands[-1] == ["python", "-m", "pseudolife_memory.cli", "serve"]
@@ -42,28 +59,66 @@ def load(name):
 
 
 class ContainerTests(unittest.TestCase):
+    def test_guard_import_needs_only_the_standard_library(self):
+        subprocess.run([sys.executable, "-S", "-c",
+                        "import runpy, sys; runpy.run_path(sys.argv[1], run_name='container_guard_import')",
+                        str(Path(__file__).resolve())], check=True, capture_output=True, text=True, timeout=10)
+
     def test_build_context_excludes_cargo_outputs(self):
-        patterns = (ROOT / ".dockerignore").read_text().splitlines()
+        patterns = (ROOT / ".dockerignore").read_text(encoding="utf-8").splitlines()
         self.assertTrue({"rust/target", "**/target"}.intersection(patterns))
 
     def test_unverified_graph_cannot_enter_production_selection(self):
         graph = load("provision_container_model").FILES["model.onnx"]
-        contents = {path: (ROOT / path).read_text() for path in DEFAULT_PATHS}
+        contents = {path: (ROOT / path).read_text(encoding="utf-8") for path in DEFAULT_PATHS}
+        self.assertEqual(graph, verified_graph())
         require_python_defaults(contents, graph)
+        # Isolate each forbidden input: the real workflow now legitimately
+        # references the verified opt-in image, so it is not a negative fixture.
+        contents = {path: "" for path in DEFAULT_PATHS}
+        contents["ops/Dockerfile.daemon"] = 'CMD ["python", "-m", "pseudolife_memory.cli", "serve"]\n'
+        unverified = "0" * 64
+        require_python_defaults(contents, unverified)
         for path in DEFAULT_PATHS:
             counterfactual = dict(contents)
             counterfactual[path] += "\nimage: w3j-daemon-rust:prep\n"
             with self.subTest(path=path), self.assertRaises(AssertionError):
-                require_python_defaults(counterfactual, graph)
+                require_python_defaults(counterfactual, unverified)
         native_cmd = dict(contents)
         native_cmd["ops/Dockerfile.daemon"] = 'CMD ["pseudolife-daemon"]\n'
         with self.assertRaises(AssertionError):
-            require_python_defaults(native_cmd, graph)
-        require_python_defaults(counterfactual, VERIFIED_GRAPH)
+            require_python_defaults(native_cmd, unverified)
+        with self.assertRaises(AssertionError):
+            require_python_defaults(counterfactual, verified_graph())
+
+    def test_verified_graph_comes_from_the_native_manifest(self):
+        from unittest.mock import patch
+        replacement = [("embedding/onnx/model.onnx", "repo", "revision", "model.onnx", "a" * 64, "1")]
+        with patch.dict(verified_graph.__globals__, native_manifest=lambda: replacement):
+            self.assertEqual(verified_graph(), "a" * 64)
+
+    def test_verified_graph_does_not_allow_switching_real_python_defaults(self):
+        contents = {path: (ROOT / path).read_text(encoding="utf-8") for path in DEFAULT_PATHS}
+        require_python_defaults(contents, verified_graph())
+        for path, replacement in (
+            ("ops/docker-compose.yml", re.sub(r"(?m)^    image: pseudolife-daemon:.*$",
+                "    image: ghcr.io/pseudogiant-xr/pseudolife-daemon-rust:0.21.0", contents["ops/docker-compose.yml"])),
+            ("ops/Dockerfile.daemon", contents["ops/Dockerfile.daemon"].replace(
+                'CMD ["python", "-m", "pseudolife_memory.cli", "serve"]', 'CMD ["pseudolife-daemon"]')),
+            (".github/workflows/release.yml", contents[".github/workflows/release.yml"].replace(
+                "file: ops/Dockerfile.daemon\n", "file: ops/Dockerfile.daemon-rust\n")),
+        ):
+            with self.subTest(path=path), self.assertRaises(AssertionError):
+                require_python_defaults(dict(contents, **{path: replacement}), verified_graph())
+
+    def test_prompt_context_does_not_allow_the_whole_directory(self):
+        self.assertNotIn("!evals/prompts", (ROOT / ".dockerignore").read_text(encoding="utf-8").splitlines())
 
     def test_image_gate_matches_inputs_and_skips_unrelated_changes(self):
         gate = load("container_inputs")
         for path in (".dockerignore", "rust/daemon/src/embed.rs", "rust/Cargo.toml", "rust/Cargo.lock",
+                     "evals/prompts/assistant_facts_provenance.txt",
+                     "evals/prompts/sonnet_extractor_v5.md",
                      "rust/shim/src/main.rs", "rust/shim/Cargo.toml",
                      "rust/shared/pg_runtime.rs",
                      "ops/Dockerfile.daemon-rust", "ops/docker-compose.rust.yml",
@@ -75,30 +130,34 @@ class ContainerTests(unittest.TestCase):
                                           "pseudolife_memory/service.py"]))
 
     def test_image_ships_the_native_operator_cli(self):
-        dockerfile = (ROOT / "ops/Dockerfile.daemon-rust").read_text()
+        dockerfile = (ROOT / "ops/Dockerfile.daemon-rust").read_text(encoding="utf-8")
         self.assertIn("--bin pseudolife-stdio", dockerfile)
         self.assertIn("cp rust/target/release/pseudolife-stdio /pseudolife-mcp", dockerfile)
         self.assertIn("COPY --from=builder /pseudolife-mcp /usr/local/bin/pseudolife-mcp", dockerfile)
-        job = (ROOT / ".github/workflows/rust.yml").read_text().split(
+        self.assertIn("COPY evals/prompts/assistant_facts_provenance.txt /build/evals/prompts/assistant_facts_provenance.txt", dockerfile)
+        self.assertIn("!evals/prompts/assistant_facts_provenance.txt", (ROOT / ".dockerignore").read_text(encoding="utf-8"))
+        self.assertIn("COPY evals/prompts/sonnet_extractor_v5.md /build/evals/prompts/sonnet_extractor_v5.md", dockerfile)
+        self.assertIn("!evals/prompts/sonnet_extractor_v5.md", (ROOT / ".dockerignore").read_text(encoding="utf-8"))
+        job = (ROOT / ".github/workflows/rust.yml").read_text(encoding="utf-8").split(
             "\n  daemon-image:", 1)[1].split("\n  parity:", 1)[0]
         self.assertIn("docker run --rm --network none w3j-daemon-rust:prep pseudolife-mcp version", job)
 
     def test_release_overlay_requires_a_pull_and_an_explicit_version(self):
-        overlay = (ROOT / "ops/docker-compose.rust-ghcr.yml").read_text()
+        overlay = (ROOT / "ops/docker-compose.rust-ghcr.yml").read_text(encoding="utf-8")
         self.assertIn("\n    pull_policy: always\n", overlay)
         self.assertIn("\n    build: !reset null\n", overlay)
         self.assertIn("${PSEUDOLIFE_IMAGE_TAG:?", overlay)
         self.assertIn("\n      org.pseudolife.engine: rust\n", overlay)
 
     def test_runtime_contract_is_explicit_and_default_compose_is_not_used(self):
-        dockerfile = (ROOT / "ops/Dockerfile.daemon-rust").read_text()
+        dockerfile = (ROOT / "ops/Dockerfile.daemon-rust").read_text(encoding="utf-8")
         for item in ("USER root", 'EXPOSE 8765', 'VOLUME ["/data"]',
                      "HF_HUB_OFFLINE=1", "CUDA_VISIBLE_DEVICES=-1", "ORT_DYLIB_PATH=",
                      "PSEUDOLIFE_DAEMON_ONNX_DIR=", "HEALTHCHECK", "--locked", "-j 3",
                      "provision pdfium", "COPY --from=builder /opt/pdfium /opt/pdfium",
                      "PSEUDOLIFE_DAEMON_PDFIUM_DIR=/opt/pdfium"):
             self.assertIn(item, dockerfile)
-        compose = (ROOT / "ops/docker-compose.rust.yml").read_text()
+        compose = (ROOT / "ops/docker-compose.rust.yml").read_text(encoding="utf-8")
         self.assertIn("name: w3j-container-prep", compose)
         self.assertIn("-p w3j-container-prep", compose)
         self.assertNotIn("internal: true", compose)
@@ -121,11 +180,11 @@ class ContainerTests(unittest.TestCase):
             self.assertFalse(target.with_suffix(".onnx.partial").exists())
 
     def test_preparation_cache_is_on_disk_and_provisioned_before_health_wait(self):
-        compose = (ROOT / "ops/docker-compose.rust.yml").read_text()
+        compose = (ROOT / "ops/docker-compose.rust.yml").read_text(encoding="utf-8")
         self.assertIn("PSEUDOLIFE_DAEMON_MODELS_DIR: /models", compose)
         self.assertIn("- models:/models", compose)
         self.assertIn("\nvolumes:\n  models: {}", compose)
-        job = (ROOT / ".github/workflows/rust.yml").read_text().split(
+        job = (ROOT / ".github/workflows/rust.yml").read_text(encoding="utf-8").split(
             "\n  daemon-image:", 1)[1].split("\n  parity:", 1)[0]
         self.assertIn("uses: actions/cache@v4", job)
         self.assertIn("hashFiles('rust/daemon/src/model_provision.rs')", job)
@@ -162,7 +221,7 @@ class ContainerTests(unittest.TestCase):
                 if override:
                     env["PSEUDOLIFE_DAEMON_ONNX_DIR"] = override
                 subprocess.run(["sh", entrypoint, *args], env=env, check=True)
-                self.assertEqual(calls.read_text().splitlines(), expected)
+                self.assertEqual(calls.read_text(encoding="utf-8").splitlines(), expected)
             env["FAIL"] = "1"
             result = subprocess.run(["sh", entrypoint], env=env)
             self.assertEqual(result.returncode, 7)
@@ -206,7 +265,7 @@ class ContainerTests(unittest.TestCase):
             (root / "probes").unlink()
             marker.write_text("provision 100\n")
             self.assertEqual(check(), 0)
-            self.assertEqual((root / "probes").read_text().splitlines(), ["100", "1899", "1975", "1988"])
+            self.assertEqual((root / "probes").read_text(encoding="utf-8").splitlines(), ["100", "1899", "1975", "1988"])
             self.assertFalse(marker.exists())  # Only actual readiness clears startup.
             # Once ready, a new failure gets no startup grace.
             env["READY_AT"] = "9999"
@@ -215,11 +274,11 @@ class ContainerTests(unittest.TestCase):
             now.write_text("100\n")
             marker.write_text("init 100\n")
             self.assertNotEqual(check(), 0)
-            self.assertEqual(now.read_text().strip(), "190")  # 90s, not 30m.
+            self.assertEqual(now.read_text(encoding="utf-8").strip(), "190")  # 90s, not 30m.
             marker.write_text("provision 100\n")
             now.write_text("1900\n")
             self.assertNotEqual(check(), 0)  # A stuck download has a bound.
-            dockerfile = (ROOT / "ops/Dockerfile.daemon-rust").read_text()
+            dockerfile = (ROOT / "ops/Dockerfile.daemon-rust").read_text(encoding="utf-8")
             health = next(line for line in dockerfile.splitlines() if line.startswith("HEALTHCHECK "))
             options = dict(re.findall(r"--([a-z-]+)=(\S+)", health))
             self.assertEqual(options["start-period"], "0s")  # No early success is needed to end grace.
@@ -248,16 +307,16 @@ class ContainerTests(unittest.TestCase):
                 daemon.start(wait_s=180)
                 cause = "Cross-encoder reranker failed to load (model artifact is missing or unsafe:"
                 deadline = time.monotonic() + 10
-                while cause not in daemon.log.read_text() and time.monotonic() < deadline:
+                while cause not in daemon.log.read_text(encoding="utf-8") and time.monotonic() < deadline:
                     time.sleep(0.05)
-                self.assertEqual(daemon.log.read_text().count(cause), 1, daemon.log.read_text())  # Before any store/search.
+                self.assertEqual(daemon.log.read_text(encoding="utf-8").count(cause), 1, daemon.log.read_text(encoding="utf-8"))  # Before any store/search.
                 text = "Default pinned embedding works without the optional reranker."
                 stored = search.mcp_call(daemon.port, search.mcp_case("store", {"text": text}, tool="memory_store"), None)
                 self.assertEqual(stored["status"], 200, stored)
                 found = search.mcp_call(daemon.port, search.mcp_case("search", {"query": text, "rerank": True}), None)
                 self.assertEqual(found["status"], 200, found)
                 self.assertIn(text, json.dumps(found))
-                self.assertEqual(daemon.log.read_text().count(cause), 1)  # Reuses the disabled state.
+                self.assertEqual(daemon.log.read_text(encoding="utf-8").count(cause), 1)  # Reuses the disabled state.
                 health = search.call(daemon.port, "GET", "/health", [])
                 self.assertTrue(health["json"]["ready"])
                 self.assertEqual(health["json"]["embedder"]["backend"], "onnx")
@@ -287,20 +346,18 @@ class ContainerTests(unittest.TestCase):
             for name in ("onnx/model.onnx", "onnx/model.onnx_data", "tokenizer.json",
                          "config.json", "tokenizer_config.json", "modules.json", "1_Pooling/config.json"):
                 self.assertEqual((root / name).read_bytes(), b"verified fixture")
-            defaults = (ROOT / "rust/daemon/src/config.rs").read_text()
+            defaults = (ROOT / "rust/daemon/src/config.rs").read_text(encoding="utf-8")
             self.assertIn('onnx_file_name: "onnx/model.onnx".to_string()', defaults)
 
     def test_metadata_pins_match_the_recorded_qwen_model(self):
         provision = load("provision_container_model")
-        receipt = json.loads((ROOT / "rust/daemon/harness/results/embedding-20261010.json").read_text())
+        receipt = json.loads((ROOT / "rust/daemon/harness/results/embedding-20261010.json").read_text(encoding="utf-8"))
         recorded = next(row["identities"] for row in receipt["runs"] if row["model"] == "Qwen")
         for name in ("modules.json", "1_Pooling/config.json", "config.json", "tokenizer_config.json"):
             self.assertEqual(provision.FILES[name], recorded[name])
 
     def test_export_and_harness_pins_match_the_native_manifest(self):
-        source = (ROOT / "rust/daemon/src/model_provision.rs").read_text()
-        rows = re.findall(r'artifact!\(\s*"([^"]+)"\s*,\s*"([^"]+)"\s*,\s*"([^"]+)"'
-                          r'\s*,\s*"([^"]+)"\s*,\s*"([0-9a-f]{64})"\s*,\s*(\d+)\s*\)', source)
+        rows = native_manifest()
         self.assertEqual(len(rows), 12)
         pins = {path: digest for path, _, _, _, digest, _ in rows}
         self.assertTrue(all(int(size) > 0 for *_, size in rows))
