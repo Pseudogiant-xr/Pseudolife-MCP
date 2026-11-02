@@ -8,6 +8,7 @@ use std::{
 };
 
 const LIMIT: usize = 4 * 1024 * 1024;
+mod removal;
 
 /// Stable private advisory lock shared by native setup transactions. Refuse a
 /// concurrent installer rather than waiting while its user may be responding.
@@ -79,7 +80,7 @@ fn publish_exclusive(
     // SAFETY: both buffers are NUL-terminated paths that remain live for the
     // call. MoveFileW refuses an existing destination, preserving its inode.
     if unsafe { MoveFileW(source.as_ptr(), target.as_ptr()) } == 0 {
-        return Err("state_unavailable");
+        return Err(publish_error(std::io::Error::last_os_error()));
     }
     *published = true;
     Ok(())
@@ -92,12 +93,21 @@ fn publish_exclusive(
     published: &mut bool,
 ) -> Result<(), &'static str> {
     // link is exclusive at the destination even if another creator races us.
-    fs::hard_link(source, target).map_err(|_| "reservation_changed")?;
+    fs::hard_link(source, target).map_err(publish_error)?;
     *published = true;
     // The temporary second link must be removed before strict state validation
     // (which requires nlink == 1). The receipt uses the staged inode identity,
     // never a target reopen during this two-link interval.
-    fs::remove_file(source).map_err(|_| "state_unavailable")
+    fs::remove_file(source).map_err(|_| "publish_cleanup")
+}
+
+fn publish_error(error: std::io::Error) -> &'static str {
+    match error.kind() {
+        std::io::ErrorKind::AlreadyExists => "reservation_changed",
+        std::io::ErrorKind::PermissionDenied => "publish_denied",
+        std::io::ErrorKind::NotFound => "publish_missing",
+        _ => "publish_failed",
+    }
 }
 
 /// A receipt for the inode we created and filled before publishing its name.
@@ -200,7 +210,12 @@ fn file_error(path: &Path, reason: &str) -> SetupError {
     let detail = match reason {
         "invalid_state" => "is not a private regular file owned by this account",
         "path" => "has a redirected parent path",
-        "changed" | "reservation_changed" => "changed during setup",
+        "changed" => "changed during setup",
+        "reservation_changed" => "was created by another writer during setup",
+        "publish_denied" => "could not be published because filesystem access was denied",
+        "publish_missing" => "could not be published because a source or parent path is missing",
+        "publish_failed" => "could not be published because the filesystem operation failed",
+        "publish_cleanup" => "was published but its temporary link could not be removed",
         "parent" => "has an unavailable parent directory",
         "write" => "could not be written durably",
         "read" => "could not be read",
@@ -208,9 +223,15 @@ fn file_error(path: &Path, reason: &str) -> SetupError {
         "metadata" => "is not an accessible regular file within the size limit",
         _ => "could not be opened",
     };
-    SetupError::detail(format!(
-        "Setup file {path:?} {detail}; repair that file and retry."
-    ))
+    let fix = match reason {
+        "reservation_changed" => "review the existing file and retry setup",
+        "publish_denied" | "publish_failed" | "publish_cleanup" => {
+            "check the destination directory permissions and retry setup"
+        }
+        "publish_missing" => "restore the destination directory and retry setup",
+        _ => "repair that file and retry",
+    };
+    SetupError::detail(format!("Setup file {path:?} {detail}; {fix}."))
 }
 
 /// Contents are intentionally absent from Debug and all reports.
@@ -312,9 +333,7 @@ impl PrivateEdit {
         }
         let opened = state::open(&self.path).map_err(|cause| file_error(&self.path, cause))?;
         if Some(&opened.identity) != self.published_identity.as_ref() {
-            return Err(SetupError(
-                "Setup rollback refused a file replaced by another writer; restore the saved backup after reviewing it.",
-            ));
+            return Err(self.rollback_conflict("replaced by another writer"));
         }
         let mut bytes = Vec::new();
         (&opened.file)
@@ -322,9 +341,7 @@ impl PrivateEdit {
             .read_to_end(&mut bytes)
             .map_err(|_| file_error(&self.path, "read"))?;
         if bytes != self.after {
-            return Err(SetupError(
-                "Setup rollback refused a file changed by another writer; restore the saved backup after reviewing it.",
-            ));
+            return Err(self.rollback_conflict("changed by another writer"));
         }
         let identity = opened.identity;
         drop(opened.file);
@@ -340,11 +357,86 @@ impl PrivateEdit {
             }
             result?;
         } else {
-            fs::remove_file(&self.path).map_err(|_| file_error(&self.path, "remove"))?;
+            removal::remove_created(&self.path, &identity, &self.after)
+                .map_err(SetupError::detail)?;
             self.published_identity = None;
             self.committed = false;
         }
         sync_parent(&self.path)
+    }
+
+    fn rollback_conflict(&self, cause: &str) -> SetupError {
+        let fix = match &self.backup {
+            Some(backup) => format!(
+                "review the current file against backup {backup:?} before retrying recovery"
+            ),
+            None => {
+                "review the current file and resolve the competing change before retrying recovery"
+                    .into()
+            }
+        };
+        SetupError::detail(format!(
+            "Setup rollback refused file {:?}, {cause}; {fix}.",
+            self.path
+        ))
+    }
+}
+
+#[cfg(test)]
+mod recovery_tests {
+    use super::*;
+
+    struct Home(PathBuf);
+    impl Home {
+        fn new() -> Self {
+            let path =
+                std::env::temp_dir().join(format!("setup-file-recovery-{}", uuid::Uuid::new_v4()));
+            fs::create_dir(&path).unwrap();
+            Self(path)
+        }
+        fn file(&self) -> PathBuf {
+            self.0.join("credential")
+        }
+    }
+    impl Drop for Home {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn created_file_conflict_does_not_invent_a_backup() {
+        let home = Home::new();
+        let path = home.file();
+        let mut edit = PrivateEdit::prepare(&path, b"fixture-value".to_vec()).unwrap();
+        edit.commit().unwrap();
+        state::atomic_write(&path, b"fixture-value", None).unwrap();
+        let error = edit.rollback().unwrap_err().to_string();
+        assert!(!error.contains("backup"));
+        assert!(error.contains("review") && error.contains("retry"));
+    }
+
+    #[test]
+    fn first_creator_conflict_names_the_competing_writer() {
+        let home = Home::new();
+        let path = home.file();
+        let mut staged = StagedPrivate::new(&path, b"our value").unwrap();
+        state::atomic_create(&path, b"competing value").unwrap();
+        let error = staged.publish(&path, None).unwrap_err().to_string();
+        assert!(error.contains("another writer") && error.contains("retry"));
+        assert_eq!(state::read(&path, LIMIT).unwrap(), b"competing value");
+    }
+
+    #[test]
+    fn missing_staged_file_is_not_reported_as_a_competing_writer() {
+        let home = Home::new();
+        let path = home.file();
+        let mut staged = StagedPrivate::new(&path, b"our value").unwrap();
+        fs::remove_file(&staged.path).unwrap();
+        let error = staged.publish(&path, None).unwrap_err().to_string();
+        assert!(error.contains("could not be published"));
+        assert!(!error.contains("changed during setup"));
+        assert!(!path.exists());
     }
 }
 

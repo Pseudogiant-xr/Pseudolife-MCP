@@ -126,6 +126,10 @@ async fn same_bytes_connection_replacement_is_left_with_its_token_and_pending_re
         .unwrap_err();
     assert!(failure.recovery_pending);
     assert!(left(&failure.rollback, &home.connection()));
+    assert!(
+        left(&failure.rollback, &home.token()),
+        "retained owned token needs an event"
+    );
     assert!(failure.reason.to_string().contains("another writer"));
     assert_eq!(
         state::open(&home.connection()).unwrap().identity,

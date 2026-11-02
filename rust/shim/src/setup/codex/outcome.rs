@@ -69,6 +69,17 @@ fn compensate_file(edit: &mut PrivateEdit, events: &mut Vec<Value>) -> bool {
     rollback_file(edit, events).is_ok()
 }
 
+fn retained_file(edit: &PrivateEdit, events: &mut Vec<Value>, detail: &str) {
+    if edit.committed()
+        && !events
+            .iter()
+            .any(|event| event["file"] == json!(edit.path()))
+    {
+        events
+            .push(json!({"file":edit.path(),"state":"left","backup":edit.backup,"detail":detail}));
+    }
+}
+
 fn rollback_file(edit: &mut PrivateEdit, events: &mut Vec<Value>) -> Result<(), SetupError> {
     if !edit.committed() {
         return Ok(());
@@ -130,15 +141,22 @@ impl AppliedConnection {
         }.await;
         match result {
             Ok(()) => Ok(events),
-            Err(reason) => Err(SetupFailure {
-                reason,
-                report: report(Some(&self.write), self.token.as_ref(), &self.connection),
-                rollback: events,
-                recovery_pending: self.write.written_version.is_some()
-                    || self.connection.committed()
-                    || self.token.as_ref().is_some_and(PrivateEdit::committed),
-                recovery: None,
-            }),
+            Err(reason) => {
+                let detail = "Retained because recovery could not finish; review the current Codex connection settings before retrying recovery.";
+                retained_file(&self.connection, &mut events, detail);
+                if let Some(edit) = &self.token {
+                    retained_file(edit, &mut events, detail);
+                }
+                Err(SetupFailure {
+                    reason,
+                    report: report(Some(&self.write), self.token.as_ref(), &self.connection),
+                    rollback: events,
+                    recovery_pending: self.write.written_version.is_some()
+                        || self.connection.committed()
+                        || self.token.as_ref().is_some_and(PrivateEdit::committed),
+                    recovery: None,
+                })
+            }
         }
     }
 }
@@ -238,7 +256,7 @@ pub async fn apply_replace_detailed(
                 !compensate_file(edit, &mut events)
             } else {
                 events.push(json!({"file":edit.path(),"state":"left","backup":edit.backup,
-                    "detail":"Retained while configuration or connection ownership is unconfirmed."}));
+                    "detail":"Retained while configuration or connection ownership is unconfirmed; review the current Codex connection settings before retrying setup."}));
                 true
             };
             return Err(failed(
@@ -273,16 +291,26 @@ pub async fn apply_replace_detailed(
             let mut pending = disposition == WriteDisposition::Pending;
             if !pending && let Err(error) = write.rollback_locked(client, cwd).await {
                 pending = true;
-                events.push(json!({"file":write.plan.user.path,"state":"left","backup":write.backup,"detail":error.to_string()}));
+                if let Some(event) = events.iter_mut().find(|event| {
+                    event["file"] == json!(write.plan.user.path) && event["state"] == "restored"
+                }) {
+                    event["detail"] = json!(format!(
+                        "Restoration completed, but later verification failed: {error}"
+                    ));
+                } else {
+                    events.push(json!({"file":write.plan.user.path,"state":"left","backup":write.backup,"detail":error.to_string()}));
+                }
             }
             if !pending && connection.still_before() {
                 if let Some(edit) = &mut token {
                     pending = !compensate_file(edit, &mut events);
                 }
-            } else if let Some(edit) = &token {
+            } else if let Some(edit) = &token
+                && edit.committed()
+            {
                 pending = true;
                 events.push(json!({"file":edit.path(),"state":"left","backup":edit.backup,
-                    "detail":"Retained while configuration or connection ownership is unconfirmed."}));
+                    "detail":"Retained while configuration or connection ownership is unconfirmed; review the current Codex connection settings before retrying setup."}));
             }
             let configuration_owned_or_restored =
                 disposition != WriteDisposition::Pending || write.written_version.is_some();
@@ -317,7 +345,7 @@ pub async fn apply_replace_detailed(
             } else {
                 events.push(
                     json!({"file":connection.path(),"state":"left","backup":connection.backup,
-                    "detail":"Retained while configuration rollback is pending."}),
+                    "detail":"Retained while configuration rollback is pending; review the current Codex connection settings before retrying recovery."}),
                 );
             }
         } else if !connection.still_before() {
@@ -326,15 +354,17 @@ pub async fn apply_replace_detailed(
             }
             pending = true;
             events.push(json!({"file":connection.path(),"state":"left","backup":connection.backup,
-                "detail":"A connection file appeared or changed during setup; it was not removed."}));
+                "detail":"A connection file appeared or changed during setup; it was not removed. Review that file before retrying setup."}));
         }
-        if let Some(edit) = &mut token {
+        if let Some(edit) = &mut token
+            && edit.committed()
+        {
             if !pending {
                 pending = !compensate_file(edit, &mut events);
             } else {
                 events.push(
                     json!({"file":edit.path(),"state":"left","backup":edit.backup,
-                "detail":"Retained for the connection that remains on disk."}),
+                "detail":"Retained for the connection that remains on disk; review the current Codex connection settings before retrying recovery."}),
                 );
             }
         }

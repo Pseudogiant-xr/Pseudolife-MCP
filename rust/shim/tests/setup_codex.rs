@@ -1105,6 +1105,121 @@ async fn detailed_readback_failure_reports_only_completed_compensation() {
 }
 
 #[tokio::test]
+async fn review_unchanged_token_is_not_reported_as_retained_recovery() {
+    struct Refusal {
+        inner: Fake,
+        connection: std::path::PathBuf,
+    }
+    impl Rpc for Refusal {
+        async fn rpc(&mut self, method: &str, params: Value) -> Result<Value, SetupError> {
+            if method == "config/batchWrite" {
+                pseudolife_stdio::board::state::atomic_create(
+                    &self.connection,
+                    b"competing connection",
+                )
+                .unwrap();
+                return Err(SetupError::rejected("fixture definite rejection"));
+            }
+            self.inner.rpc(method, params).await
+        }
+    }
+    let home = Home::new();
+    let mut client = Refusal {
+        inner: Fake::new(&home.0),
+        connection: home.0.join("pseudolife").join("connection.json"),
+    };
+    let plan = plan_replace(
+        &client.inner.config,
+        &home.0,
+        "https://example.com",
+        None,
+        true,
+    )
+    .unwrap();
+    let token = Path::new(plan.env()["PSEUDOLIFE_MCP_TOKEN_FILE"].as_str().unwrap()).to_owned();
+    std::fs::create_dir_all(token.parent().unwrap()).unwrap();
+    pseudolife_stdio::board::state::atomic_create(&token, b"fixture-token").unwrap();
+    let identity = pseudolife_stdio::board::state::open(&token)
+        .unwrap()
+        .identity;
+    let failure =
+        pseudolife_stdio::setup::codex::apply_replace_detailed(&mut client, &home.0, plan)
+            .await
+            .err()
+            .unwrap();
+    assert!(
+        !failure.recovery_pending,
+        "no owned writes need recovery after a definite refusal"
+    );
+    assert!(
+        failure
+            .rollback
+            .iter()
+            .all(|event| event["file"] != json!(token))
+    );
+    assert_eq!(
+        pseudolife_stdio::board::state::open(&token)
+            .unwrap()
+            .identity,
+        identity
+    );
+}
+
+#[tokio::test]
+async fn review_restored_config_has_no_contradictory_left_event() {
+    struct LaterWriter {
+        inner: Fake,
+        writes: usize,
+        restored_reads: usize,
+    }
+    impl Rpc for LaterWriter {
+        async fn rpc(&mut self, method: &str, params: Value) -> Result<Value, SetupError> {
+            if method == "config/read" && self.writes == 2 {
+                self.restored_reads += 1;
+                if self.restored_reads == 2 {
+                    self.inner.config["layers"][0]["version"] = json!("later-writer");
+                }
+            }
+            let result = self.inner.rpc(method, params).await;
+            if method == "config/batchWrite" {
+                self.writes += 1;
+            }
+            result
+        }
+    }
+    let home = Home::new();
+    let mut client = LaterWriter {
+        inner: Fake::new(&home.0),
+        writes: 0,
+        restored_reads: 0,
+    };
+    client.inner.override_env = true;
+    let plan = plan_replace(
+        &client.inner.config,
+        &home.0,
+        "https://example.com",
+        None,
+        true,
+    )
+    .unwrap();
+    let path = user_config(&client.inner.config, &home.0).unwrap().path;
+    let failure =
+        pseudolife_stdio::setup::codex::apply_replace_detailed(&mut client, &home.0, plan)
+            .await
+            .err()
+            .unwrap();
+    assert!(failure.recovery_pending);
+    let events: Vec<_> = failure
+        .rollback
+        .iter()
+        .filter(|event| event["file"] == json!(path))
+        .collect();
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0]["state"], "restored");
+    assert!(events[0]["detail"].as_str().unwrap().contains("review"));
+}
+
+#[tokio::test]
 async fn detailed_rejected_write_does_not_claim_a_config_restore() {
     let home = Home::new();
     let mut client = Fake::new(&home.0);
@@ -1263,8 +1378,21 @@ async fn detailed_later_rollback_reports_conflict_without_fabricated_file_restor
         .unwrap_err();
     assert!(failure.recovery_pending);
     assert!(failure.recovery.is_none());
-    assert_eq!(failure.rollback.len(), 1);
-    assert_eq!(failure.rollback[0]["state"], "left");
+    assert_eq!(failure.rollback.len(), 3);
+    assert!(
+        failure
+            .rollback
+            .iter()
+            .all(|event| event["state"] == "left")
+    );
+    assert_eq!(
+        failure.rollback[1]["file"],
+        json!(home.0.join("pseudolife").join("connection.json"))
+    );
+    assert_eq!(
+        failure.rollback[2]["file"],
+        json!(home.0.join("pseudolife").join("token"))
+    );
     assert!(home.0.join("pseudolife/token").is_file());
     assert!(home.0.join("pseudolife/connection.json").is_file());
 }
@@ -1318,12 +1446,14 @@ async fn recovery_after_token_conflict(competing_config: bool) {
             .await
             .unwrap_err();
         assert!(failure.recovery_pending);
-        assert_eq!(failure.rollback.len(), 1);
+        assert_eq!(failure.rollback.len(), 2);
         assert_eq!(
             failure.rollback[0]["file"],
             json!(home.0.join("config.toml"))
         );
         assert_eq!(failure.rollback[0]["state"], "left");
+        assert_eq!(failure.rollback[1]["file"], json!(token));
+        assert_eq!(failure.rollback[1]["state"], "left");
         assert_eq!(client.config, before);
         assert!(token.is_file());
     } else {
