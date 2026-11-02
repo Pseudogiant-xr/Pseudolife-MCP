@@ -160,9 +160,7 @@ fn setting(cfg: &Config, path: &str) -> Option<Value> {
         "memory.dream.fallback_model" => opt(&d.fallback_model),
         "memory.dream.runs_keep" => json!(d.runs_keep),
         "memory.lessons.enabled" => json!(m.lessons_enabled),
-        // No reader in this daemon (the binder never reads it over MCP):
-        // `LessonsConfig.top_k`'s default.
-        "memory.lessons.top_k" => json!(5),
+        "memory.lessons.top_k" => json!(m.lessons_top_k),
         "memory.lessons.signal_retention_days" => json!(m.lessons_signal_retention_days),
         "memory.lessons.synthesize_in_dream" => json!(m.lessons_synthesize_in_dream),
         "memory.lessons.infer_outcomes" => json!(m.lessons_infer_outcomes),

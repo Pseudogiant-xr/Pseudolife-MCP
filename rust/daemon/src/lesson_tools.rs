@@ -139,11 +139,14 @@ pub(crate) async fn annotate_staleness(
 }
 
 // The binder admits any integer >= 1; past usize, everything.
-fn search_width(args: &Map<String, Value>) -> usize {
-    args.get("top_k").filter(|v| !v.is_null()).map_or(5, |v| {
-        v.as_u64()
-            .map_or(usize::MAX, |n| usize::try_from(n).unwrap_or(usize::MAX))
-    })
+fn search_width(args: &Map<String, Value>, config: &crate::config::MemoryConfig) -> usize {
+    let default = usize::try_from(config.lessons_top_k.max(0)).unwrap_or(usize::MAX);
+    args.get("top_k")
+        .filter(|v| !v.is_null())
+        .map_or(default, |v| {
+            v.as_u64()
+                .map_or(usize::MAX, |n| usize::try_from(n).unwrap_or(usize::MAX))
+        })
 }
 
 fn mcp_memory_lesson_search<'a>(app: &'a crate::http::App, call: ToolCall<'a>) -> ToolFuture<'a> {
@@ -155,7 +158,7 @@ fn mcp_memory_lesson_search<'a>(app: &'a crate::http::App, call: ToolCall<'a>) -
             .unwrap_or("")
             .to_string();
         let m = &app.service.config.memory;
-        let top_k = search_width(a);
+        let top_k = search_width(a, m);
         let verbose = a.get("verbose").and_then(Value::as_bool).unwrap_or(false);
         let floor = 0.0f64.max(m.lessons_min_confidence);
         let log = m.retrieval_log_enabled;
@@ -279,18 +282,41 @@ mod tests {
 
     #[test]
     fn omitted_lesson_width_keeps_the_default_after_binding() {
-        assert_eq!(search_width(json!({}).as_object().unwrap()), 5);
+        let config = crate::config::Config::default();
+        let width = |args: Value| search_width(args.as_object().unwrap(), &config.memory);
+        assert_eq!(width(json!({})), 5);
         // The binder fills this default for omission, but still rejects
         // an explicitly supplied null through the integer schema.
-        assert_eq!(search_width(json!({"top_k": null}).as_object().unwrap()), 5);
-        assert_eq!(search_width(json!({"top_k": 2}).as_object().unwrap()), 2);
+        assert_eq!(width(json!({"top_k": null})), 5);
+        assert_eq!(width(json!({"top_k": 2})), 2);
         assert_eq!(
-            search_width(
-                json!({"top_k": 18446744073709551616u128})
-                    .as_object()
-                    .unwrap()
-            ),
+            width(json!({"top_k": 18446744073709551616u128})),
             usize::MAX
         );
+    }
+
+    #[test]
+    fn omitted_lesson_width_uses_cold_configuration() {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "pl-lesson-width-{}-{nonce}.yaml",
+            std::process::id()
+        ));
+        for (configured, expected) in [(3, 3), (0, 0), (-2, 0)] {
+            std::fs::write(
+                &path,
+                format!("memory:\n  lessons:\n    top_k: {configured}\n"),
+            )
+            .unwrap();
+            let config = crate::config::load(&path).unwrap();
+            std::fs::remove_file(&path).unwrap();
+            let width = |args: Value| search_width(args.as_object().unwrap(), &config.memory);
+            assert_eq!(width(json!({})), expected);
+            assert_eq!(width(json!({"top_k": null})), expected);
+            assert_eq!(width(json!({"top_k": 7})), 7);
+        }
     }
 }
