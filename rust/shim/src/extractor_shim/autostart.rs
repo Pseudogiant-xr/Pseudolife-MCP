@@ -177,8 +177,8 @@ pub(super) fn install(args: &[OsString], remove: bool) -> Result<(), String> {
         serve_args.extend(["--repo".into(), repo.to_string_lossy().into_owned()]);
     }
     if let Some(receipt_dir) = config.as_ref().and_then(|c| c.receipt_dir.as_ref()) {
-        // Pin the installer's resolved directory: systemd and Task Scheduler
-        // need not inherit its XDG_CACHE_HOME / LOCALAPPDATA environment.
+        // Pin the installer's resolved directory. In particular, systemd
+        // need not inherit its XDG_CACHE_HOME override.
         serve_args.extend([
             "--receipt-dir".into(),
             receipt_dir.to_string_lossy().into_owned(),

@@ -129,16 +129,12 @@ pub(super) fn absolute_path(path: &Path) -> Result<PathBuf, String> {
         let mut head = absolute.as_path();
         let mut tail = vec![];
         loop {
-            if let Ok(resolved) = fs::canonicalize(head) {
-                let text = resolved.to_string_lossy();
-                let text = if let Some(unc) = text.strip_prefix(r"\\?\UNC\") {
-                    format!(r"\\{unc}")
-                } else {
-                    text.strip_prefix(r"\\?\").unwrap_or(&text).to_owned()
-                };
-                let mut resolved = PathBuf::from(text);
+            if let Ok(mut resolved) = fs::canonicalize(head) {
                 for part in tail.iter().rev() {
                     resolved.push(part);
+                }
+                if let Some(text) = resolved.to_str() {
+                    resolved = PathBuf::from(windows_path_without_verbatim_prefix(text));
                 }
                 return Ok(resolved);
             }
@@ -149,6 +145,128 @@ pub(super) fn absolute_path(path: &Path) -> Result<PathBuf, String> {
         }
     }
     Ok(absolute)
+}
+
+#[cfg(any(windows, test))]
+fn windows_path_without_verbatim_prefix(path: &str) -> String {
+    let Some(verbatim) = path.strip_prefix(r"\\?\") else {
+        return path.to_owned();
+    };
+    let bytes = verbatim.as_bytes();
+    let (plain, components) = if let Some(unc) = verbatim.strip_prefix(r"UNC\") {
+        if !unc
+            .split_once('\\')
+            .is_some_and(|(server, share)| !server.is_empty() && !share.is_empty())
+        {
+            return path.to_owned();
+        }
+        (format!(r"\\{unc}"), unc)
+    } else if bytes.len() >= 3 && bytes[0].is_ascii_alphabetic() && &bytes[1..3] == b":\\" {
+        (verbatim.to_owned(), &verbatim[3..])
+    } else {
+        // Volume GUIDs and other namespaces have no equivalent DOS spelling.
+        return path.to_owned();
+    };
+    // MAX_PATH includes the NUL terminator; check the complete path, not just
+    // the ancestor that canonicalize found. Windows counts UTF-16 code units.
+    let safe = components.is_empty()
+        || components
+            .strip_suffix('\\')
+            .unwrap_or(components)
+            .split('\\')
+            .all(|part| {
+                let stem = part.split('.').next().unwrap_or("").trim_end_matches(' ');
+                let stem = stem.to_ascii_uppercase();
+                !part.is_empty()
+                    && !part.ends_with(['.', ' '])
+                    && !part.chars().any(|c| c < ' ' || r#"<>:"/|?*"#.contains(c))
+                    && !matches!(
+                        stem.as_str(),
+                        "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$"
+                    )
+                    && !["COM", "LPT"].iter().any(|prefix| {
+                        stem.strip_prefix(*prefix)
+                            .is_some_and(|n| n.chars().count() == 1 && "123456789¹²³".contains(n))
+                    })
+            });
+    if plain.encode_utf16().count() < 260 && safe {
+        plain
+    } else {
+        path.to_owned()
+    }
+}
+
+#[cfg(test)]
+mod path_tests {
+    use super::windows_path_without_verbatim_prefix;
+
+    #[test]
+    fn windows_verbatim_short_drive_and_unc_paths() {
+        for (verbatim, plain) in [
+            (r"\\?\C:\", r"C:\"),
+            (
+                r"\\?\C:\cache\.config\COM0.txt",
+                r"C:\cache\.config\COM0.txt",
+            ),
+            (r"\\?\UNC\server\share", r"\\server\share"),
+            (r"\\?\UNC\server\share\cache\", r"\\server\share\cache\"),
+            (r"C:\cache\file", r"C:\cache\file"),
+        ] {
+            assert_eq!(windows_path_without_verbatim_prefix(verbatim), plain);
+        }
+    }
+
+    #[test]
+    fn windows_verbatim_max_path_boundary() {
+        for root in [r"C:\", r"\\server\share\"] {
+            let prefix = if root.starts_with(r"\\") {
+                format!(r"\\?\UNC\{}", &root[2..])
+            } else {
+                format!(r"\\?\{root}")
+            };
+            // The final component can take a short existing ancestor over
+            // MAX_PATH, so the decision must include every appended component.
+            let middle = format!("{}\\", "a".repeat(200));
+            let short_tail = "b".repeat(259 - root.encode_utf16().count() - middle.len());
+            let short = format!("{prefix}{middle}{short_tail}");
+            let plain = format!("{root}{middle}{short_tail}");
+            assert_eq!(plain.encode_utf16().count(), 259);
+            assert_eq!(windows_path_without_verbatim_prefix(&short), plain);
+            let long = format!("{short}b");
+            assert_eq!(windows_path_without_verbatim_prefix(&long), long);
+        }
+    }
+
+    #[test]
+    fn windows_verbatim_length_counts_utf16_units() {
+        let plain = format!("C:\\{}\\{}", "😀".repeat(100), "b".repeat(55));
+        let short = format!(r"\\?\{plain}");
+        assert_eq!(plain.encode_utf16().count(), 259);
+        assert_eq!(windows_path_without_verbatim_prefix(&short), plain);
+        let long = format!("{short}b");
+        assert!(long.chars().count() < 260);
+        assert_eq!(windows_path_without_verbatim_prefix(&long), long);
+    }
+
+    #[test]
+    fn windows_verbatim_namespaces_and_normalization_are_preserved() {
+        for path in [
+            r"\\?\Volume{00000000-0000-0000-0000-000000000000}\cache",
+            r"\\?\GLOBALROOT\Device\HarddiskVolume1\cache",
+            r"\\?\C:relative",
+            r"\\?\UNC\server",
+            r"\\?\C:\cache\name.",
+            r"\\?\C:\cache\name ",
+            r"\\?\C:\cache\..\file",
+            r"\\?\C:\cache/file",
+            r"\\?\C:\\",
+            r"\\?\C:\cache\\file",
+            r"\\?\C:\cache\NUL.txt",
+            r"\\?\C:\cache\com¹.txt",
+        ] {
+            assert_eq!(windows_path_without_verbatim_prefix(path), path);
+        }
+    }
 }
 
 fn receipt_path(config: &Config, pid: u32) -> Result<PathBuf, String> {

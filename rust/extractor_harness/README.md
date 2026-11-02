@@ -81,14 +81,15 @@ names support isolated installations and tests. When installing through a versio
 
 ## Stub-only verification
 
-Timeout checks observe descendant termination and pipe reaping through a socket
-witness, including a slow correct kill and a root-only mutation control. HTTP
-round-trip duration is not used as evidence that a descendant survived.
+Native timeout checks observe descendant termination and pipe reaping through a
+socket witness. Separate Python-only fixture controls cover a slow correct kill
+and a root-only mutation; those controls do not mutate the Rust implementation.
+HTTP round-trip duration is not used as evidence that a descendant survived.
 
 ```sh
 cargo test --manifest-path rust/Cargo.toml -p pseudolife-stdio --test extractor_shim
 python rust/extractor_harness/test_prompt.py
-PSEUDOLIFE_TEST_REAL_AUTOSTART=1 python rust/extractor_harness/autostart.py --binary /path/to/pseudolife-stdio
+PSEUDOLIFE_TEST_REAL_AUTOSTART=1 cargo test --manifest-path rust/Cargo.toml -p pseudolife-stdio --test extractor_shim extractor_shim_autostart
 ```
 
 The differential harness launches both implementations with disposable stub
@@ -98,10 +99,14 @@ diagnostics, and compares recorded argv (with instruction-file paths normalized)
 stdin bytes, instruction-file bytes and child environment. It covers routes,
 models, prompt overrides, tools, errors, timeout descendant cleanup, serialized
 calls, health refresh and managed configuration. Windows exercises native
-executables and batch launchers separately. Python and a small Rust trampoline
-are test fixtures only; no provider account is called.
+executables and batch launchers separately. A dev-only fixture crate compiles
+the stub and waiting launcher for Cargo's target triple and embeds their bytes
+in the integration test. Nextest archives therefore need no compiler or rustup
+toolchain at test time. Both differential arms receive the same stub bytes.
+Python and the Rust trampolines are test fixtures only; no provider account is called.
 
-The autostart proof registers unique disposable tasks or services, tests
+Separate Claude and Codex autostart tests report named step timings and register
+unique disposable tasks or services, testing
 launch, bind-conflict refusal, replacement, config reload and listener shutdown,
 including a stable launcher that waits for a runtime child on both platforms.
 Windows also tests removal of detached Python tasks and startup-timeout forwarding.
@@ -109,7 +114,7 @@ It removes its registrations. Run it
 only on a designated dev machine. Its Windows fixture uses S4U because an SSH
 session has no interactive logon token; it does not prove an interactive logon
 trigger fires. Never use it to replace an existing installation's task.
-Real registrations are gated by `PSEUDOLIFE_TEST_REAL_AUTOSTART=1`, or by both
+Real registrations are gated by `PSEUDOLIFE_TEST_REAL_AUTOSTART=1`, or on Windows by both
 `GITHUB_ACTIONS=true` and `RUNNER_ENVIRONMENT=github-hosted` on ephemeral hosted
 runners. Ordinary local and self-hosted Cargo runs skip this proof before any
 scheduler action. On PowerShell, set `$env:PSEUDOLIFE_TEST_REAL_AUTOSTART='1'`

@@ -406,6 +406,7 @@ def main():
     subprocess.run([sys.executable, str(Path(__file__).with_name("test_lifecycle.py"))], check=True)
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--binary", required=True, type=Path)
+    parser.add_argument("--stub-exe", required=True, type=Path)
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
     with tempfile.TemporaryDirectory(prefix="r6-extractor-") as scratch:
@@ -413,10 +414,7 @@ def main():
         if os.name == "nt":
             # Native executables and npm-style batch launchers are separate
             # fixtures; both must preserve the complete system prompt.
-            assert shutil.disk_usage(root).free >= 8 * 1024**3, "Rust fixture build needs 8 GB free"
-            STUB_EXE = root / "fixture.exe"
-            built = subprocess.run(["rustc", "--edition=2024", str(Path(__file__).with_name("stub.rs")), "-o", str(STUB_EXE)], capture_output=True)
-            assert built.returncode == 0, built.stderr.decode(errors="replace")
+            STUB_EXE = args.stub_exe.resolve(strict=True)
         count = differential(args.binary.resolve(), root)
         count += tools_differential(args.binary.resolve(), root)
         count += health_differential(args.binary.resolve(), root)

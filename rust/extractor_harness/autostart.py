@@ -20,8 +20,16 @@ import uuid
 import run
 
 
-def checked(argv, **kwargs):
+def invoke(argv, *, step, **kwargs):
+    started = time.monotonic()
+    print(f"START {step}", flush=True)
     p = subprocess.run(argv, capture_output=True, **kwargs)
+    print(f"END {step}: exit {p.returncode}, {time.monotonic() - started:.1f}s", flush=True)
+    return p
+
+
+def checked(argv, *, step="fixture helper", **kwargs):
+    p = invoke(argv, step=step, **kwargs)
     assert p.returncode == 0, (argv, p.returncode, p.stdout.decode(errors="replace"), p.stderr.decode(errors="replace"))
     return p
 
@@ -102,7 +110,7 @@ Register-ScheduledTask -TaskName $c.Name -Action $action -Principal $principal -
 Start-ScheduledTask -TaskName $c.Name
 ''', encoding="utf-8")
     try:
-        checked(["pwsh", "-NoProfile", "-File", str(helper), str(config)], env=env)
+        checked(["pwsh", "-NoProfile", "-File", str(helper), str(config)], env=env, step=f"{kind} legacy task start")
         deadline = time.monotonic() + 25
         while True:
             try:
@@ -113,11 +121,11 @@ Start-ScheduledTask -TaskName $c.Name
                 time.sleep(.1)
         # The last-start record must still identify the old listener after an edit.
         run.autostart_oracle.write_config(repo, kind, {"port": str(run.unused_port())})
-        checked([str(native), "extractor-shim", "uninstall-autostart", kind, "--name", name], env=env)
+        checked([str(native), "extractor-shim", "uninstall-autostart", kind, "--name", name], env=env, step=f"{kind} detached legacy uninstall")
         wait_closed(port)
         print(f"{kind}: detached Python task cleanup passed", flush=True)
     finally:
-        checked(["pwsh", "-NoProfile", "-File", str(helper), str(config), "-Cleanup"], env=env)
+        checked(["pwsh", "-NoProfile", "-File", str(helper), str(config), "-Cleanup"], env=env, step=f"{kind} legacy cleanup")
         run.autostart_oracle.pid_file(kind, repo).unlink(missing_ok=True)
 
 
@@ -130,19 +138,19 @@ def wrapper_forwarding(root):
                    "-NativeExe", str(stub), "-NativeTaskName", "r6-argv-only", "-LogFile", "logs/fixture.log"]
         if script == "install-shim-autostart.ps1":
             command += ["-StartupTimeoutSec", "321"]
-        args = json.loads(checked(command, cwd=root).stdout)
+        args = json.loads(checked(command, cwd=root, step=f"{script} argument forwarding").stdout)
         assert Path(args[args.index("--log") + 1]).resolve() == (root / "logs/fixture.log").resolve(), args
         if script == "install-shim-autostart.ps1":
             assert args[args.index("--startup-timeout") + 1] == "321", args
 
 
-def proof(binary, root):
+def proof(binary, root, fixture, launcher_exe, provider):
     windows = os.name == "nt"
     if windows:
         wrapper_forwarding(root)
         for case in ("PasswordRollback", "LegacyMigration"):
             checked(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(Path(__file__).with_name("scheduler_failures.ps1")),
-                     "-Source", str(run.ROOT / "rust/shim/src/extractor_shim/autostart.ps1"), "-Root", str(root), "-Case", case])
+                     "-Source", str(run.ROOT / "rust/shim/src/extractor_shim/autostart.ps1"), "-Root", str(root), "-Case", case], step=case)
     repo = root / "settings with spaces"
     repo.mkdir()
     bin_dir = root / "bin"
@@ -150,13 +158,13 @@ def proof(binary, root):
     native = bin_dir / ("pseudolife-mcp.exe" if windows else "pseudolife-mcp")
     shutil.copy2(binary, native)
     launcher = bin_dir / ("launcher.exe" if windows else "launcher")
-    assert shutil.disk_usage(root).free >= 8 * 1024**3
-    checked(["rustc", "--edition=2024", str(Path(__file__).with_name("launcher.rs")), "-o", str(launcher)])
+    shutil.copy2(launcher_exe, launcher)
     launcher.with_suffix(".target").write_text(str(native))
     env = os.environ.copy()
-    # The scheduler deliberately does not inherit this installer-only cache.
-    # The registration must pin its receipt directory for both processes.
-    env["LOCALAPPDATA" if windows else "XDG_CACHE_HOME"] = str(root / "installer cache")
+    # Linux proves the scheduler need not inherit the installer's cache override.
+    # Windows resolves a known folder; LOCALAPPDATA is not a cache override there.
+    if not windows:
+        env["XDG_CACHE_HOME"] = str(root / "installer cache")
     # Registration is real, but providers are always pinned to the fixture.
     env["PATH"] = str(bin_dir) + os.pathsep + env["PATH"]
     for k in list(env):
@@ -165,12 +173,7 @@ def proof(binary, root):
     if not windows:
         (bin_dir / "ip").write_text("#!/bin/sh\nprintf '    inet 127.0.0.1/8 scope host docker0\\n'\n")
         (bin_dir / "ip").chmod(0o700)
-    fixture = None
-    if windows:
-        assert shutil.disk_usage(root).free >= 8 * 1024**3
-        fixture = root / "fixture.exe"
-        checked(["rustc", "--edition=2024", str(Path(__file__).with_name("stub.rs")), "-o", str(fixture)])
-    for kind in ("claude", "codex"):
+    for kind in (provider,):
         token = "r6-" + uuid.uuid4().hex[:12] + "-" + kind
         plan, journal = root / f"{kind}-plan.json", root / f"{kind}-journal.jsonl"
         plan.write_text(json.dumps(run.canned(kind, "OK")))
@@ -204,7 +207,7 @@ def proof(binary, root):
             with run.server(None, kind, root / (kind + "-foreign"), run.canned(kind, "OK")) as (foreign_port, _, _, foreign, _):
                 foreign_args = list(args)
                 foreign_args[foreign_args.index("--port") + 1] = str(foreign_port)
-                refused = subprocess.run(foreign_args, env=env, capture_output=True)
+                refused = invoke(foreign_args, env=env, step=f"{kind} foreign checkout refusal")
                 assert refused.returncode != 0 and b"another process" in refused.stdout + refused.stderr, refused
                 if windows:
                     detail = refused.stdout + refused.stderr
@@ -213,7 +216,7 @@ def proof(binary, root):
             with socket.socket() as blocker:
                 blocker.bind(("127.0.0.1", port))
                 blocker.listen()
-                refused = subprocess.run(args, env=env, capture_output=True)
+                refused = invoke(args, env=env, step=f"{kind} occupied port refusal")
                 assert refused.returncode != 0 and b"another process" in refused.stdout + refused.stderr
                 assert not (repo / "stable config.env").exists() or kind == "codex"
             config_file = repo / "stable config.env"
@@ -221,7 +224,7 @@ def proof(binary, root):
                 config_file.write_bytes(b"")
             previous = config_file.read_bytes() if config_file.exists() else None
             plan.write_text(json.dumps({"rc": 1, "stderr": "fixture provider unavailable"}))
-            unhealthy = subprocess.run(args + ["--startup-timeout", "2"], env=env, capture_output=True)
+            unhealthy = invoke(args + ["--startup-timeout", "2"], env=env, step=f"{kind} failed install rollback")
             assert unhealthy.returncode != 0 and b"health check" in unhealthy.stdout + unhealthy.stderr, unhealthy
             wait_closed(port)
             assert (config_file.read_bytes() if config_file.exists() else None) == previous, "failed install did not restore config"
@@ -232,17 +235,17 @@ def proof(binary, root):
                 assert not (unit_dir / registration).exists(), "failed install left a registration"
             plan.write_text(json.dumps(run.canned(kind, "OK")))
             print(f"{kind}: registering owned fixture {token}", flush=True)
-            checked(args, env=env)
+            checked(args, env=env, step=f"{kind} initial install")
             status, body = run.call(port, "POST", "/chat/completions", {})
             assert status == 200, (status, body)
             assert Path(run.journal_rows(journal)[-1]["cwd"]).resolve() == repo.resolve()
             initial_calls = len(run.journal_rows(journal))
-            repeated = checked(args, env=env)
+            repeated = checked(args, env=env, step=f"{kind} unchanged reinstall")
             assert not repeated.stdout.strip(), repeated.stdout
             assert len(run.journal_rows(journal)) == initial_calls, "unchanged install restarted its provider"
             with config_file.open("a") as settings:
                 settings.write("\nUNRELATED_PASSWORD=synthetic-only\n")
-            assert not checked(args, env=env).stdout.strip(), "unrelated setting forced reinstall"
+            assert not checked(args, env=env, step=f"{kind} unrelated setting").stdout.strip(), "unrelated setting forced reinstall"
             assert len(run.journal_rows(journal)) == initial_calls, "unrelated settings restarted its provider"
             if not windows:
                 checked(["systemctl", "--user", "disable", registration])
@@ -253,7 +256,7 @@ def proof(binary, root):
             # itself would incorrectly keep the old running process.
             checked([str(native), "extractor-shim", "config", kind, "--env-file", str(config_file), "--model", model], env=env)
             assert json.loads(run.call(port, "GET", "/models")[1])["data"][0]["id"] != model
-            checked(args, env=env)
+            checked(args, env=env, step=f"{kind} config reload")
             assert json.loads(run.call(port, "GET", "/models")[1])["data"][0]["id"] == model
             assert len(run.journal_rows(journal)) > initial_calls, "edited config did not restart its provider"
             # A failed replacement must restore the previous registration and
@@ -269,7 +272,7 @@ def proof(binary, root):
                 broken_cli.write_text(f"#!{sys.executable}\nraise SystemExit(1)\n")
                 broken_cli.chmod(0o700)
             previous = config_file.read_bytes()
-            unhealthy = subprocess.run(args + ["--cli", str(broken_cli), "--startup-timeout", "2"], env=env, capture_output=True)
+            unhealthy = invoke(args + ["--cli", str(broken_cli), "--startup-timeout", "2"], env=env, step=f"{kind} failed replacement rollback")
             assert unhealthy.returncode != 0 and b"health check" in unhealthy.stdout + unhealthy.stderr, unhealthy
             assert config_file.read_bytes() == previous, "failed replacement did not restore config"
             deadline = time.monotonic() + 25
@@ -281,9 +284,9 @@ def proof(binary, root):
                     pass
                 assert time.monotonic() < deadline, "previous registration was not restarted"
                 time.sleep(.1)
-            assert not checked(args, env=env).stdout.strip(), "restored registration differs from the original"
+            assert not checked(args, env=env, step=f"{kind} restored registration").stdout.strip(), "restored registration differs from the original"
             model += "-next"
-            checked(args + [model_flag, model], env=env)
+            checked(args + [model_flag, model], env=env, step=f"{kind} final replacement")
             status, body = run.call(port, "GET", "/models")
             assert status == 200 and json.loads(body)["data"][0]["id"] == model
             assert len(run.journal_rows(journal)) > initial_calls, "replacement never warmed the new process"
@@ -299,7 +302,7 @@ def proof(binary, root):
             raise
         finally:
             try:
-                checked([str(native), "extractor-shim", "uninstall-autostart", kind, "--name", registration], env=env)
+                checked([str(native), "extractor-shim", "uninstall-autostart", kind, "--name", registration], env=env, step=f"{kind} uninstall")
                 wait_closed(port)
             finally:
                 if windows:
@@ -315,6 +318,9 @@ def proof(binary, root):
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--binary", required=True, type=Path)
+    p.add_argument("--stub-exe", required=True, type=Path)
+    p.add_argument("--launcher-exe", required=True, type=Path)
+    p.add_argument("--provider", required=True, choices=("claude", "codex"))
     args = p.parse_args()
     allowed = os.environ.get("PSEUDOLIFE_TEST_REAL_AUTOSTART") == "1" or (
         os.environ.get("GITHUB_ACTIONS") == "true" and os.environ.get("RUNNER_ENVIRONMENT") == "github-hosted")
@@ -335,7 +341,8 @@ def main():
             root = Path(short.value)
             assert root.samefile(directory)
             print(f"short-path alias available: {str(root).lower() != str(root.resolve()).lower()}", flush=True)
-        proof(args.binary.resolve(), root)
+        proof(args.binary.resolve(), root, args.stub_exe.resolve(strict=True),
+              args.launcher_exe.resolve(strict=True), args.provider)
 
 
 if __name__ == "__main__":
