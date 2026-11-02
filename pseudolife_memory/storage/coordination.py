@@ -2858,17 +2858,18 @@ class CoordinationStore:
             rows = [item for item in rows if item["decision"] == "attention"]
             if not rows:
                 return None
-        # Peer staggering cannot delay an authority offer. Expired
-        # non-Codex offers cannot mask a newer peer offer either.
+        # Peer staggering cannot delay a newer authority offer. An older
+        # unacknowledged authority offer must not mask a later peer bell.
+        newest = max(rows, key=lambda r: (r["created_at"], r["wake_id"]))
         privileged = [item for item in rows if item["reason"] in _PRIVILEGED_WAKE_REASONS
                       and (codex or item["queued"] or item["served_at"] > now - WAKE_SERVE_REPEAT)]
-        if privileged:
+        if privileged and newest["reason"] in _PRIVILEGED_WAKE_REASONS:
             rows = privileged
         newest = max(rows, key=lambda r: (r["created_at"], r["wake_id"]))
         if not codex and not any(row["queued"] for row in rows) and newest["served_at"] <= now - WAKE_SERVE_REPEAT:
             return None
         offer = {"decision": newest["decision"], "reason": newest["reason"],
-                 "ring_at": (min if privileged else max)(r["ring_at"] for r in rows)}
+                 "ring_at": max(r["ring_at"] for r in rows)}
         if codex:
             # Exact immutable message expiry, not a new lifetime on each heartbeat.
             offer["message_expires_at"] = newest["expires_at"]
@@ -3104,9 +3105,9 @@ class CoordinationStore:
             "SELECT count(*) FILTER (WHERE recipient_agent_id=%s AND created_at>%s) AS recipient,"
             "count(*) FILTER (WHERE created_at>%s) AS night,"
             "max(ring_at) FILTER (WHERE sender_agent_id=%s AND ring_at>%s) AS burst "
-            "FROM coordination_wakes",
+            "FROM coordination_wakes WHERE NOT (reason=ANY(%s))",
             (recipient["agent_id"], hour, day, sender["agent_id"],
-             now - policy.fan_out_stagger_seconds))
+             now - policy.fan_out_stagger_seconds, list(_PRIVILEGED_WAKE_REASONS)))
         if counts["recipient"] >= policy.per_recipient_per_hour:
             return {"decision": "capped", "reason": "recipient_hour", **need}
         if counts["night"] >= policy.nightly_total:

@@ -347,13 +347,14 @@ pub async fn wake_decision(
             "SELECT count(*) FILTER (WHERE recipient_agent_id=$1 AND created_at>$2) AS recipient,\
              count(*) FILTER (WHERE created_at>$3) AS night,\
              max(ring_at) FILTER (WHERE sender_agent_id=$4 AND ring_at>$5) AS burst \
-             FROM coordination_wakes",
+             FROM coordination_wakes WHERE NOT (reason=ANY($6))",
             &[
                 &recipient.agent_id,
                 &hour,
                 &day,
                 &sender.agent_id,
                 &stagger_floor,
+                &PRIVILEGED_WAKE_REASONS.to_vec(),
             ],
         )
         .await?;
@@ -671,8 +672,17 @@ pub async fn serve_wake(c: &impl GenericClient, agent_id: &str, now: f64) -> Res
             return Ok(Value::Null);
         }
     }
-    // Peer staggering cannot delay an authority offer; expired non-Codex
-    // authority offers must not mask a newer peer offer either.
+    // Peer staggering cannot delay a newer authority offer. An older
+    // unacknowledged authority offer must not mask a later peer bell.
+    let latest = rows
+        .iter()
+        .max_by(|a, b| {
+            a.created_at
+                .total_cmp(&b.created_at)
+                .then(a.wake_id.cmp(&b.wake_id))
+        })
+        .expect("eligible rows");
+    let latest_privileged = PRIVILEGED_WAKE_REASONS.contains(&latest.reason.as_str());
     let privileged: Vec<Offerable> = rows
         .iter()
         .filter(|item| {
@@ -685,7 +695,7 @@ pub async fn serve_wake(c: &impl GenericClient, agent_id: &str, now: f64) -> Res
         })
         .cloned()
         .collect();
-    let immediate = !privileged.is_empty();
+    let immediate = !privileged.is_empty() && latest_privileged;
     if immediate {
         rows = privileged;
     }
@@ -701,11 +711,7 @@ pub async fn serve_wake(c: &impl GenericClient, agent_id: &str, now: f64) -> Res
     {
         return Ok(Value::Null);
     }
-    let ring_at = if immediate {
-        rows.iter().map(|r| r.ring_at).fold(f64::MAX, f64::min)
-    } else {
-        max_ring(&rows)
-    };
+    let ring_at = max_ring(&rows);
     let mut offer = json!({"decision": newest.decision, "reason": newest.reason,
                            "ring_at": float_value(ring_at)});
     if codex {

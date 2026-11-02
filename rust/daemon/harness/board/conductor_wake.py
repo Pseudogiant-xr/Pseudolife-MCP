@@ -1,6 +1,7 @@
 """Conductor delivery and grant fencing, checked independently on both arms."""
 from board.scenarios import BASE_CONFIG, Scenario, act, msg, reg, seed
 from board.norm import Normalizer
+from board.maintainer import CONFIG, TABLES, SignedNormalizer, bootstrap, challenge, complete
 
 
 class ExpiredGrantNormalizer(Normalizer):
@@ -92,5 +93,63 @@ class ConductorWakeFences(Scenario):
         ]
 
 
-SCENARIOS = {s.name: s for s in (ConductorWake, ConductorWakeFences)}
+class ConductorWakeOffers(Scenario):
+    name = "conductor-wake-offers"
+    config_yaml = BASE_CONFIG.replace("nightly_total: 200", "nightly_total: 1").replace(
+        "per_recipient_per_hour: 6", "per_recipient_per_hour: 1")
+    reason = "conductor"
+    cap_reason = "recipient_hour"
+
+    def authority_mail(self, title):
+        return [expect(msg(title, "A", "B", title), "rung", self.reason)]
+
+    def offer(self, title, reason, later=False):
+        step = expect(act(title, "heartbeat", agent="B", body=lambda c: {
+            "attachment_id": "listener", "generation": c.vals["generation"],
+            "ring_armed_until": c.now + 60}), "rung", reason)
+        original = step.check
+
+        def check(dsn, ctx, response, before):
+            original(dsn, ctx, response, before)
+            at = response["json"]["wake"]["ring_at"]
+            if later:
+                assert at > ctx.vals["last_offer_at"], response
+            ctx.vals["last_offer_at"] = at
+        step.check = check
+        return step
+
+    def steps(self):
+        return setup() + [
+            *self.authority_mail("first authority bell"),
+            self.offer("first authority offer", self.reason),
+            *self.authority_mail("second authority bell"),
+            self.offer("second authority offer has new identity", self.reason, later=True),
+            # Both authority rows are still unacknowledged; neither spends
+            # the peer's single ring or hides its later offer.
+            expect(msg("peer retains budget", "C", "B", "result", urgent=True), "rung", "urgent"),
+            self.offer("later peer offer", "urgent", later=True),
+            expect(msg("peer own cap still binds", "C", "B", "second result", urgent=True),
+                   "capped", self.cap_reason),
+        ]
+
+
+class MaintainerWakeOffers(ConductorWakeOffers):
+    name = "maintainer-wake-offers"
+    config_yaml = CONFIG.replace("nightly_total: 200", "nightly_total: 1")
+    normalizer = SignedNormalizer
+    extra_tables = TABLES
+    reason = "maintainer_message"
+    cap_reason = "nightly"
+
+    def authority_mail(self, title):
+        return [challenge(title, "send", lambda c: {
+            "to": c.id("B"), "text": title, "urgent": False}),
+            expect(complete(title, "send"), "rung", self.reason)]
+
+    def steps(self):
+        return bootstrap() + super().steps()
+
+
+SCENARIOS = {s.name: s for s in (ConductorWake, ConductorWakeFences,
+                                ConductorWakeOffers, MaintainerWakeOffers)}
 
