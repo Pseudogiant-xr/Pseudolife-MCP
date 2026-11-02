@@ -754,7 +754,7 @@ fn encode64(bytes: &[u8]) -> String {
     out
 }
 fn decode64(text: &str) -> Option<String> {
-    if text.len() % 4 != 0 {
+    if !text.len().is_multiple_of(4) {
         return None;
     }
     let mut out = Vec::new();

@@ -216,15 +216,14 @@ impl Rpc for Client {
         let deadline = tokio::time::Instant::now() + self.timeout;
         self.send(&json!({"id":id,"method":method,"params":params}))
             .await?;
-        let result = tokio::time::timeout_at(deadline, async {
+        tokio::time::timeout_at(deadline, async {
             loop {
                 let message=self.receive(deadline.saturating_duration_since(tokio::time::Instant::now())).await?;
                 if message.get("id") != Some(&json!(id)) { continue; }
                 if message.get("error").is_some() { return Err(SetupError("Codex rejected the setup request; update Codex or review its configuration before retrying.")); }
                 return message.get("result").cloned().ok_or(EXITED);
             }
-        }).await.map_err(|_|TIMEOUT)?;
-        result
+        }).await.map_err(|_|TIMEOUT)?
     }
 }
 
