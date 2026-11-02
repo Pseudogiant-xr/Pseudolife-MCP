@@ -2,7 +2,7 @@
 //! `_project_search`, `_compact_entry`): the search and cortex-first block
 //! the REST route runs (`search_route::search_with_facts`), sized to the
 //! caller, then the MCP payload projection. Spec W2-D "memory_search over
-//! MCP"; `explain` is declared (`divergences.md`, MCP-SEARCH-EXPLAIN).
+//! MCP"; explain appends the independently retrieved trace, as Python does.
 
 use super::search_route::{Request, search_with_facts, unknown_bands};
 use crate::mcp::dispatch::{ToolCall, ToolError, ToolFn, ToolFuture};
@@ -34,12 +34,6 @@ fn mcp_memory_search<'a>(app: &'a crate::http::App, call: ToolCall<'a>) -> ToolF
         let a = call.args;
         let flag = |k: &str| a.get(k).and_then(Value::as_bool).unwrap_or(false);
         let (verbose, explain) = (flag("verbose"), flag("explain"));
-        if explain {
-            return Err(ToolError::refused(
-                "not_implemented",
-                Some("explain (the ranking trace) is not yet served by the Rust daemon"),
-            ));
-        }
         let ready = app
             .service
             .ensure_init()
@@ -63,7 +57,11 @@ fn mcp_memory_search<'a>(app: &'a crate::http::App, call: ToolCall<'a>) -> ToolF
             let Value::Object(blank) = blank else {
                 unreachable!()
             };
-            return project(blank, &[], compact, text_chars);
+            let mut result = project(blank, &[], compact, text_chars)?;
+            if explain {
+                result["trace"] = Value::Null;
+            }
+            return Ok(result);
         }
         // The binder took `ge=1`; a value past i64 asks for every hit.
         let top_k = a
@@ -91,10 +89,26 @@ fn mcp_memory_search<'a>(app: &'a crate::http::App, call: ToolCall<'a>) -> ToolF
             header_session: call.ident.header_session.clone(),
             transport_session: call.ident.transport_session.clone(),
         };
+        // Python searches first, then traces independently. Trace takes the
+        // original episode list (no subtree), the configured score floor and
+        // recency policy, even when search overrides those two settings.
+        let trace_req = explain.then(|| Request {
+            episodes: strings(a.get("episodes")),
+            min_score: None,
+            disable_recency_boost: false,
+            ..req.clone()
+        });
         let (searched, facts) = search_with_facts(&app.service, &ready, req, raw_q, fact_k)
             .await
             .map_err(ToolError::Internal)?;
-        project(searched.body, &facts, compact, text_chars)
+        let mut result = project(searched.body, &facts, compact, text_chars)?;
+        if let Some(req) = trace_req {
+            let traced = super::trace::trace(&app.service, &ready, req)
+                .await
+                .map_err(|e| ToolError::Internal(anyhow::anyhow!(e)))?;
+            result["trace"] = traced.get("trace").cloned().unwrap_or(Value::Null);
+        }
+        Ok(result)
     })
 }
 
