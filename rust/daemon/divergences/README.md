@@ -30,11 +30,11 @@ closed no-spawn planning difference; the counts below include these two rows.
 
 | D7 bucket | Entries |
 |---|---:|
-| presentation | 17 |
+| presentation | 18 |
 | behaviour with no caller | 69 |
 | behaviour with a caller | 126 |
 | closed | 50 |
-| **Total** | **262** |
+| **Total** | **263** |
 
 ## Behaviour with a caller: B14b routing
 
