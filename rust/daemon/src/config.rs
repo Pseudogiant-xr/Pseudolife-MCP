@@ -932,7 +932,7 @@ impl Default for WakeConfig {
             nightly_total: 200,
             fan_out_stagger_seconds: 30,
             active_seconds: 60,
-            authority_per_sender_per_hour: 12,
+            authority_per_sender_per_hour: 60,
         }
     }
 }
@@ -3457,7 +3457,7 @@ mod tests {
         let json = serde_json::to_string(&WakeConfig::default().to_json()).unwrap();
         assert_eq!(
             json,
-            r#"{"per_recipient_per_hour":20,"urgent_per_sender_per_hour":6,"nightly_total":200,"fan_out_stagger_seconds":30,"active_seconds":60,"authority_per_sender_per_hour":12}"#
+            r#"{"per_recipient_per_hour":20,"urgent_per_sender_per_hour":6,"nightly_total":200,"fan_out_stagger_seconds":30,"active_seconds":60,"authority_per_sender_per_hour":60}"#
         );
     }
 
