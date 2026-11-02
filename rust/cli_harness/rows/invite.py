@@ -79,6 +79,8 @@ def seed_states(conn, name: str) -> None:
     store.create_invite(conn, "delta", board=False, ttl_seconds=-60, replace=False)
     store.create_invite(conn, "a-rather-long-principal-name.x", tier="full", ttl_seconds=3600,
                         replace=False)
+    # v59: a machine invited as someone else's.
+    store.create_invite(conn, "echo", owned=False, ttl_seconds=900, replace=False)
 
 
 def seed_activity(conn, name: str) -> None:
@@ -497,6 +499,10 @@ LIVE_ONLY = frozenset({
     "reinvite-expired-board", "paired-replace", "revoked-reinvite-json",
     "invite-bank-match", "invite-health-int-at-limit", "invite-env-port", "revoke",
     "revoke-json", "revoke-again",
+    # v59 ownership writes, which show the seeded principals too.
+    "invite-someone-else", "invite-someone-else-json", "reinvite-keeps-someone-else",
+    "reinvite-keeps-someone-else-json", "reinvite-mine", "invite-mine-json",
+    "reinvite-pending-someone-else",
     # Its report is the daemon's auth value nested to the limit and
     # pretty-printed: 2.6 MB of indentation, compared live only.
     "health-nested-at-limit-json"})
@@ -634,6 +640,16 @@ def _cases() -> list[core.Case]:
     inviting("paired-needs-replace-json", "states", ["bravo", "--url", "u", "--json"])
     inviting("paired-replace", "states", ["bravo", "--replace", "--url", "u"])
     inviting("revoked-reinvite-json", "states", ["charlie", "--url", "u", "--json"])
+    # v59 ownership: a new machine that is someone else's, a re-invite that
+    # keeps it, --mine undoing it, and --mine on a new name (no flag note).
+    inviting("invite-someone-else", "states", ["laptop", "--someone-else", "--url", "u"])
+    inviting("invite-someone-else-json", "states", ["--someone-else", "laptop", "--url", "u",
+                                                    "--json"])
+    inviting("reinvite-keeps-someone-else", "states", ["echo", "--url", "u"])
+    inviting("reinvite-keeps-someone-else-json", "states", ["echo", "--url", "u", "--json"])
+    inviting("reinvite-mine", "states", ["echo", "--mine", "--url", "u"])
+    inviting("invite-mine-json", "states", ["laptop", "--mine", "--url", "u", "--json"])
+    inviting("reinvite-pending-someone-else", "states", ["alpha", "--someone-else", "--url", "u"])
     inviting("invite-bank-match", "states", ["laptop", "--bank", FINGERPRINT, "--url", "u"])
     inviting("invite-bank-other", "states", ["laptop", "--bank", OTHER_FINGERPRINT, "--url", "u"])
     inviting("invite-empty-bank", "empty", ["zulu.1", "--url", "u", "--json"])
@@ -673,6 +689,11 @@ def _cases() -> list[core.Case]:
     deferral("defer-config-yaml", ["laptop", "--url", "u"],
              extra_env={"PSEUDOLIFE_MCP_DATA_DIR": "{HOME}" + SEP + "data"},
              files={"data/config.yaml": b"coordination:\n  allowed_principals: [laptop]\n"})
+    # v59: --list reads coordination.not_owner_principals from the config.
+    deferral("defer-list-config-yaml", ["--list"],
+             extra_env={"PSEUDOLIFE_MCP_DATA_DIR": "{HOME}" + SEP + "data"},
+             files={"data/config.yaml": b"coordination:\n  not_owner_principals: [codex]\n"})
+    deferral("defer-mine-and-someone-else", ["laptop", "--mine", "--someone-else", "--url", "u"])
     deferral("defer-malformed-token-map", ["laptop", "--url", "u"],
              extra_env={"PSEUDOLIFE_MCP_TOKENS": "no-separator"})
     deferral("defer-help", ["--help"])
@@ -708,9 +729,17 @@ MUTANTS = [
            "single use, expires in {} min",
            "single-use, expires in {} min", cases=("invite-new",)),
     Mutant("invite-keep-tier-lost", "invite", "shim/src/cli/pairing/invite_db.rs",
-           "(Some(_), None) => \", tier = $4\",",
-           "(Some(_), None) => \", tier = $4, board = TRUE\",",
+           "given.push_str(&format!(\", tier = ${}\", params.len()));",
+           "given.push_str(&format!(\", tier = ${}, board = TRUE\", params.len()));",
            cases=("reinvite-expired-tier-json",)),
+    # v59: a re-invite without a flag must keep someone else's machine so.
+    Mutant("invite-keep-owned-lost", "invite", "shim/src/cli/pairing/invite_db.rs",
+           "\"UPDATE public.principals p SET code_hash = $1, ",
+           "\"UPDATE public.principals p SET owned = TRUE, code_hash = $1, ",
+           cases=("reinvite-keeps-someone-else",)),
+    Mutant("invite-list-owner-dropped", "invite", "shim/src/cli/pairing/invite.rs",
+           "if row.owner { \"yes\" } else { \"no\" },",
+           "\"yes\",", cases=("list",)),
     Mutant("invite-expired-is-pending", "invite", "shim/src/cli/pairing/invite_db.rs",
            "expires.is_some_and(|expires| expires > now)",
            "expires.is_some()", cases=("list",)),

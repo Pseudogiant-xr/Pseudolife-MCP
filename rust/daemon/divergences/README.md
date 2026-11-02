@@ -29,9 +29,9 @@ closed no-spawn planning difference; the counts below include these two rows.
 |---|---:|
 | presentation | 17 |
 | behaviour with no caller | 68 |
-| behaviour with a caller | 132 |
+| behaviour with a caller | 131 |
 | closed | 46 |
-| **Total** | **263** |
+| **Total** | **262** |
 
 ## Behaviour with a caller: B14b routing
 
@@ -47,7 +47,6 @@ whose remaining item is a proof keeps that boundary visible in its entry.
 | Entry | Caller | Closing stream or batch |
 |---|---|---|
 | [W2F-CLOCK-RETRY](coordination-board-completion-w2/w2f-clock-retry.md) | board sends and daemon notices through `rust/daemon/src/board/dispatch.rs` / `board/notice.rs` during a reconnect | B5 board; B4 writer-session refresh |
-| [W2F-CONSOLE-OWNER-SCOPE](coordination-board-completion-w2/w2f-console-owner-scope.md) | the Console's Board (`frontend/src/lib/api/client.ts` `api.board`) reading `GET /api/agents?view=coordination` with an owner principal's token | B5 board |
 | [W2F-MAIL-PACING](coordination-board-completion-w2/w2f-mail-pacing.md) | production board send/reply wake decisions in `rust/daemon/src/board/mail.rs::Store::send` at the active_seconds boundary | B5 board; B13 differential evidence |
 | [DOC-INGEST-LOCK](document-store-b7-document/doc-ingest-lock.md) | MCP `document_ingest` concurrent with `document_search`/`memory_search`, registered in `rust/daemon/src/mcp/dispatch.rs::registry` | B7 documents |
 | [DOC-PDF-ENGINE](document-store-b7-document/doc-pdf-engine.md) | `pseudolife_memory/mcp_server.py::document_ingest` / Rust `documents.rs::mcp_document_ingest` on a PDF after library loss or bad installation | B7 documents; B11 provisioning via R4/R5 |

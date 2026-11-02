@@ -293,6 +293,7 @@ mod tests {
             tier: Some("core".into()),
             board: true,
             revoked: false,
+            owned: true,
         }
     }
 

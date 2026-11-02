@@ -159,6 +159,9 @@ pub(super) struct Listed {
     pub paired_at: Option<f64>,
     pub revoked_at: Option<f64>,
     pub last_seen_at: Option<f64>,
+    /// v59: the bank owner's (`owner`); an environment row is, here, since
+    /// a list that could read `coordination.not_owner_principals` defers.
+    pub owner: bool,
 }
 
 impl Listed {
@@ -175,21 +178,29 @@ impl Listed {
             paired_at: None,
             revoked_at: None,
             last_seen_at,
+            owner: true,
         }
     }
 }
 
-/// `principal_store.LIST_SQL` (v58).
+/// `principal_store.OWNED_SQL` (v59): `owned` from the whole row, TRUE on a
+/// bank before v59.
+const OWNED_SQL: &str = "COALESCE((to_jsonb(p) ->> 'owned')::boolean, TRUE)";
+
+/// `principal_store.OWNED_NEEDS_V59`.
+const OWNED_NEEDS_V59: &str = "--someone-else and --mine need schema v59, and this bank is older: update the daemon to schema 59 (`pseudolife-mcp update`) and let it start, then re-run";
+
+/// `principal_store.LIST_SQL` (v58, with v59's `owned`).
 fn list_sql() -> String {
     format!(
         "SELECT p.principal, p.tier, p.board, p.token_hash IS NOT NULL, \
          p.code_hash IS NOT NULL, p.code_expires_at, p.created_at, p.paired_at, p.revoked_at, \
-         {NOW}, a.last_seen_at, TRUE \
+         {NOW}, a.last_seen_at, TRUE, {OWNED_SQL} \
          FROM public.principals p LEFT JOIN public.principal_activity a \
          ON a.principal = p.principal \
          UNION ALL \
          SELECT a.principal, NULL, NULL, FALSE, FALSE, NULL, NULL, NULL, NULL, {NOW}, \
-         a.last_seen_at, FALSE FROM public.principal_activity a \
+         a.last_seen_at, FALSE, NULL FROM public.principal_activity a \
          WHERE NOT EXISTS (SELECT 1 FROM public.principals p WHERE p.principal = a.principal) \
          ORDER BY 1"
     )
@@ -200,7 +211,7 @@ fn list_sql_v53() -> String {
     format!(
         "SELECT principal, tier, board, token_hash IS NOT NULL, code_hash IS NOT NULL, \
          code_expires_at, created_at, paired_at, revoked_at, {NOW}, NULL::double precision, \
-         TRUE FROM public.principals ORDER BY principal"
+         TRUE, {OWNED_SQL} FROM public.principals p ORDER BY principal"
     )
 }
 
@@ -258,6 +269,10 @@ pub(super) async fn list(client: &Client, environment: &[String]) -> Result<Vec<
             paired_at: get(7)?,
             revoked_at: revoked,
             last_seen_at: last_seen,
+            owner: row
+                .try_get::<_, Option<bool>>(12)
+                .map_err(|_| DbError::Defer)?
+                .unwrap_or(true),
         });
     }
     let mut names: Vec<&String> = environment.iter().collect();
@@ -342,6 +357,21 @@ pub(super) struct Created {
     pub state: &'static str,
     pub tier: Option<String>,
     pub board: bool,
+    pub owned: bool,
+}
+
+/// `has_owned_column`: whether `principals` has v59's `owned`.
+async fn has_owned_column(client: &Client) -> Result<bool, DbError> {
+    let row = client
+        .query_one(
+            "SELECT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = \
+             to_regclass('public.principals') AND attname = 'owned' AND attnum > 0 \
+             AND NOT attisdropped)",
+            &[],
+        )
+        .await
+        .map_err(|error| classify(&error))?;
+    row.try_get(0).map_err(|_| DbError::Defer)
 }
 
 /// `new_pairing_code`: twelve characters drawn uniformly from the 32.
@@ -357,20 +387,25 @@ enum Attempt {
     Collision,
 }
 
-/// `create_invite`: `tier` / `board` of `None` keep an existing row's value
-/// (a new row gets no tier and board access).
+/// `create_invite`: `tier` / `board` / `owned` of `None` keep an existing
+/// row's value (a new row gets no tier, board access and the owner's). A
+/// bank before v59 refuses an `owned` before anything is written.
 pub(super) async fn create_invite(
     client: &mut Client,
     name: &str,
     tier: Option<&str>,
     board: Option<bool>,
+    owned: Option<bool>,
     ttl: f64,
     replace: bool,
 ) -> Result<Created, DbError> {
+    if owned.is_some() && !has_owned_column(client).await? {
+        return Err(DbError::Refused(OWNED_NEEDS_V59.to_owned()));
+    }
     for _attempt in 0..5 {
         let code = new_code()?;
         let code_hash = super::sha256_hex(&code);
-        match attempt(client, name, tier, board, ttl, replace, code, &code_hash).await? {
+        match attempt(client, name, tier, board, owned, ttl, replace, code, &code_hash).await? {
             Attempt::Done(created) => return Ok(created),
             Attempt::Collision => continue,
         }
@@ -386,6 +421,7 @@ async fn attempt(
     name: &str,
     tier: Option<&str>,
     board: Option<bool>,
+    owned: Option<bool>,
     ttl: f64,
     replace: bool,
     code: String,
@@ -407,17 +443,35 @@ async fn attempt(
     let (state, written) = match existing {
         None => (
             "new",
-            transaction
-                .query_one(
-                    &format!(
-                        "INSERT INTO public.principals \
-                         (principal, tier, board, code_hash, code_expires_at, created_at) \
-                         VALUES ($1, $2, $3, $4, {NOW} + $5, {NOW}) \
-                         RETURNING code_expires_at, tier, board"
-                    ),
-                    &[&name, &tier, &board_value, &code_hash, &ttl],
-                )
-                .await,
+            match owned {
+                // Ownership left as it is takes the column's default.
+                None => {
+                    transaction
+                        .query_one(
+                            &format!(
+                                "INSERT INTO public.principals AS p \
+                                 (principal, tier, board, code_hash, code_expires_at, created_at) \
+                                 VALUES ($1, $2, $3, $4, {NOW} + $5, {NOW}) \
+                                 RETURNING code_expires_at, tier, board, {OWNED_SQL}"
+                            ),
+                            &[&name, &tier, &board_value, &code_hash, &ttl],
+                        )
+                        .await
+                }
+                Some(owned) => {
+                    transaction
+                        .query_one(
+                            &format!(
+                                "INSERT INTO public.principals AS p \
+                                 (principal, tier, board, owned, code_hash, code_expires_at, \
+                                 created_at) VALUES ($1, $2, $3, $6, $4, {NOW} + $5, {NOW}) \
+                                 RETURNING code_expires_at, tier, board, {OWNED_SQL}"
+                            ),
+                            &[&name, &tier, &board_value, &code_hash, &ttl, &owned],
+                        )
+                        .await
+                }
+            },
         ),
         Some(row) => {
             let paired: bool = row.try_get(0).map_err(|_| DbError::Defer)?;
@@ -442,40 +496,29 @@ async fn attempt(
                 ""
             };
             // Every bound parameter is referenced (an unreferenced one has
-            // no type for the server to infer).
-            let given = match (tier, board) {
-                (None, None) => "",
-                (Some(_), None) => ", tier = $4",
-                (None, Some(_)) => ", board = $4",
-                (Some(_), Some(_)) => ", tier = $4, board = $5",
-            };
+            // no type for the server to infer): each given value takes the
+            // next number after the three every statement binds.
+            let mut params: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> =
+                vec![&code_hash, &ttl, &name];
+            let mut given = String::new();
+            if let Some(tier) = &tier {
+                params.push(tier);
+                given.push_str(&format!(", tier = ${}", params.len()));
+            }
+            if let Some(board) = &board {
+                params.push(board);
+                given.push_str(&format!(", board = ${}", params.len()));
+            }
+            if let Some(owned) = &owned {
+                params.push(owned);
+                given.push_str(&format!(", owned = ${}", params.len()));
+            }
             let sql = format!(
-                "UPDATE public.principals SET code_hash = $1, code_expires_at = {NOW} + $2, \
+                "UPDATE public.principals p SET code_hash = $1, code_expires_at = {NOW} + $2, \
                  paired_code_hash = NULL{given}{reset} WHERE principal = $3 \
-                 RETURNING code_expires_at, tier, board"
+                 RETURNING code_expires_at, tier, board, {OWNED_SQL}"
             );
-            let result = match (tier, board) {
-                (None, None) => {
-                    transaction
-                        .query_one(&sql, &[&code_hash, &ttl, &name])
-                        .await
-                }
-                (Some(tier), None) => {
-                    transaction
-                        .query_one(&sql, &[&code_hash, &ttl, &name, &tier])
-                        .await
-                }
-                (None, Some(board)) => {
-                    transaction
-                        .query_one(&sql, &[&code_hash, &ttl, &name, &board])
-                        .await
-                }
-                (Some(tier), Some(board)) => {
-                    transaction
-                        .query_one(&sql, &[&code_hash, &ttl, &name, &tier, &board])
-                        .await
-                }
-            };
+            let result = transaction.query_one(&sql, &params).await;
             (state, result)
         }
     };
@@ -493,6 +536,7 @@ async fn attempt(
         state,
         tier: row.try_get(1).map_err(|_| DbError::Defer)?,
         board: row.try_get(2).map_err(|_| DbError::Defer)?,
+        owned: row.try_get(3).map_err(|_| DbError::Defer)?,
     };
     match transaction.commit().await {
         Ok(()) => Ok(Attempt::Done(created)),

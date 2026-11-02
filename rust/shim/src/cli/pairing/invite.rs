@@ -1,9 +1,10 @@
 //! `pseudolife-mcp invite` (invite_cli.py) over an explicit
 //! `PSEUDOLIFE_MCP_DATABASE_URL`:
 //!
-//! - `invite <name> [--tier T] [--board|--no-board] [--expires D] [--replace]
-//!   [--url U] [--port P] [--bank FP] [--json]`
-//! - `invite --list [--bank FP] [--json]` (with last seen and refused tokens, v58)
+//! - `invite <name> [--tier T] [--board|--no-board] [--expires D]
+//!   [--someone-else|--mine] [--replace] [--url U] [--port P] [--bank FP] [--json]`
+//! - `invite --list [--bank FP] [--json]` (with last seen and refused tokens,
+//!   v58, and whose each principal is, v59)
 //! - `invite --revoke <name> [--yes] [--bank FP] [--json]`
 //!
 //! Each option at most once, a value as the next argument; the name
@@ -11,8 +12,9 @@
 //! and help, no DSN (the lite bank, the daemon container, psql in the
 //! Postgres container), a DSN this crate's client does not take or cannot
 //! reach, a revocation's question on a terminal, environment token or tier
-//! maps that would log a warning, a `config.yaml` where `_listed_note` reads
-//! one, and (without `--url`) any `tailscale` CLI `expose status` could run.
+//! maps that would log a warning, a `config.yaml` where `_listed_note` (an
+//! invite) or `_not_owner_names` (a list) reads one, and (without `--url`)
+//! any `tailscale` CLI `expose status` could run.
 use super::invite_db::{self, DbError};
 use super::pyjson::{self, J};
 use super::{Defer, net};
@@ -33,6 +35,9 @@ struct Args {
     name: Option<String>,
     tier: Option<String>,
     board: Option<bool>,
+    /// v59: `--someone-else` (false) or `--mine` (true); both is
+    /// argparse's mutually-exclusive error, deferred.
+    owned: Option<bool>,
     expires: Option<u32>,
     replace: bool,
     url: Option<String>,
@@ -123,6 +128,8 @@ fn parse(arguments: &[String]) -> Result<Args, Defer> {
             }
             "--board" => once(&mut args.board, true)?,
             "--no-board" => once(&mut args.board, false)?,
+            "--someone-else" => once(&mut args.owned, false)?,
+            "--mine" => once(&mut args.owned, true)?,
             "--expires" => once(&mut args.expires, expires(&value()?)?)?,
             "--replace" => flag(&mut args.replace)?,
             "--url" => once(&mut args.url, value()?)?,
@@ -476,13 +483,13 @@ pub(super) async fn run(arguments: &[String]) -> Result<u8, Defer> {
     let dsn = crate::pg::Dsn::parse(&dsn).map_err(|_| Defer)?;
     let url = args.url.clone().filter(|url| !url.is_empty());
     let port = args.port.unwrap_or(default_port);
-    if name.is_some() {
-        if url.is_none() && tailscale_maybe_present()? {
-            return Err(Defer);
-        }
-        if config_maybe_present()? {
-            return Err(Defer);
-        }
+    if name.is_some() && url.is_none() && tailscale_maybe_present()? {
+        return Err(Defer);
+    }
+    // An invite's `_listed_note` and a list's `_not_owner_names` (v59)
+    // read the config; neither reading is ported.
+    if (name.is_some() || args.list) && config_maybe_present()? {
+        return Err(Defer);
     }
     // Everything that could still defer happens here, before an invite's
     // only request: the connection (Python opens it after `/health`; a
@@ -668,6 +675,7 @@ async fn local(
             &name,
             args.tier.as_deref(),
             args.board,
+            args.owned,
             f64::from(args.expires.unwrap_or(900)),
             args.replace,
         )
@@ -699,6 +707,7 @@ async fn local(
             &created,
             url,
             args.expires.unwrap_or(900),
+            args.owned,
         )),
         Ok(Err(refusal)) => Ok(report.fail_units(EXIT_REFUSED, refusal)),
         Err(DbError::UndefinedTable) => Ok(report.fail(EXIT_REFUSED, NO_TABLE)),
@@ -736,6 +745,7 @@ fn invite_report(
     created: &invite_db::Created,
     url: Option<String>,
     seconds: u32,
+    owned: Option<bool>,
 ) -> u8 {
     let code = format!(
         "{}-{}-{}",
@@ -751,6 +761,7 @@ fn invite_report(
     report.set("expires_at", J::Float(created.expires_at));
     report.set("tier", created.tier.clone().map_or(J::Null, J::Str));
     report.set("board", python_bool(created.board));
+    report.set("owned", python_bool(created.owned));
     report.set("url", J::Str(url.clone()));
     report.set("pair_command", J::Str(command.clone()));
     let what = match created.state {
@@ -765,8 +776,13 @@ fn invite_report(
         .filter(|tier| !tier.is_empty())
         .unwrap_or_else(|| "the daemon default".to_owned());
     report.say(&format!(
-        "{name}: {what}; tier {tier}, agent board {}",
-        if created.board { "on" } else { "off" }
+        "{name}: {what}; tier {tier}, agent board {}{}",
+        if created.board { "on" } else { "off" },
+        if created.owned {
+            ""
+        } else {
+            "; someone else's machine"
+        }
     ));
     // The expiry is the database clock plus at most a day: always finite.
     let expiry = when(Some(created.expires_at)).unwrap_or_default();
@@ -780,6 +796,9 @@ fn invite_report(
     );
     if url == URL_PLACEHOLDER {
         report.note("the daemon is not exposed on the tailnet here; put its URL in place of <daemon-url> (`pseudolife-mcp expose tailscale` exposes it), or pass --url");
+    }
+    if created.owned && owned.is_none() {
+        report.note("for a machine that is not yours, add --someone-else");
     }
     report.note("an invited machine can read and write the whole bank and use the agent board, but not change the daemon's configuration");
     report.finish(EXIT_OK)
@@ -828,12 +847,13 @@ fn list_report(
             Some(false) => "off",
         };
         lines.push(format!(
-            "  {:<24} {:<11} {:<21} {:<8} {:<6} {:<21} {:<21} {}",
+            "  {:<24} {:<11} {:<21} {:<8} {:<6} {:<6} {:<21} {:<21} {}",
             row.principal,
             state,
             when_or(row.last_seen_at, "never")?,
             tier,
             board,
+            if row.owner { "yes" } else { "no" },
             when(row.created_at)?,
             when(row.paired_at)?,
             when(row.revoked_at)?
@@ -856,6 +876,7 @@ fn list_report(
             ("paired_at".into(), float(row.paired_at)),
             ("revoked_at".into(), float(row.revoked_at)),
             ("last_seen_at".into(), float(row.last_seen_at)),
+            ("owner".into(), J::Bool(row.owner)),
         ]));
     }
     let mut refused_lines = Vec::new();
@@ -884,15 +905,16 @@ fn list_report(
         report.say("no stored principals");
     } else {
         report.say(&format!(
-            "  {:<24} {:<11} {:<21} {:<8} {:<6} {:<21} {:<21} revoked",
-            "name", "state", "last seen", "tier", "board", "created", "paired"
+            "  {:<24} {:<11} {:<21} {:<8} {:<6} {:<6} {:<21} {:<21} revoked",
+            "name", "state", "last seen", "tier", "board", "owner", "created", "paired"
         ));
     }
     for line in lines {
         report.say(&line);
     }
     if !rows.is_empty() {
-        report.say("  (environment: a token in the daemon's PSEUDOLIFE_MCP_TOKENS or PSEUDOLIFE_MCP_TOKEN; last seen: its last accepted request, written once a minute)");
+        report.say("  (environment: a token in the daemon's PSEUDOLIFE_MCP_TOKENS or PSEUDOLIFE_MCP_TOKEN; last seen: its last accepted request, written once a minute;");
+        report.say("   owner: the bank owner's machine, whose board mail the owner's Console shows; `invite --someone-else` and coordination.not_owner_principals say otherwise)");
     }
     report.say("");
     if rejected.is_empty() {
@@ -934,6 +956,8 @@ mod tests {
             ],
             &["--list", "--bank", "abc", "--json"],
             &["--revoke", "laptop", "--yes"],
+            &["laptop", "--someone-else"],
+            &["--mine", "laptop"],
             &["--version-check"],
             &[""],
         ] {
@@ -943,6 +967,8 @@ mod tests {
             &["a", "b"][..],
             &["--board", "--no-board", "x"],
             &["--json", "--json"],
+            &["x", "--mine", "--someone-else"],
+            &["x", "--someone-else", "--someone-else"],
             &["--tier", "writer", "x"],
             &["--tier"],
             &["--expires", "30s", "x"],
