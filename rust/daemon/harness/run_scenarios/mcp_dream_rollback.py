@@ -35,10 +35,12 @@ def register(harness):
                              "'scalar','retained','skipped',15)")
 
         def normalize_db(self, state, before, side):
+            state = super().normalize_db(state, before, side)
+            # Rollback writes this clock on the existing seeded run, whose
+            # rolled_back_at starts NULL. Preserve its null/non-null shape.
             return harness.dbstate.normalize(state, {
-                **harness.DB_NONDETERMINISTIC,
                 ("dream_runs", "rolled_back_at"): "clock: rollback audit timestamp",
-            }, before)
+            })
 
         def timeline(self, procs, holders):
             import psycopg
