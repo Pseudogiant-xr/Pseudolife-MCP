@@ -32,8 +32,8 @@ closed no-spawn planning difference; the counts below include these two rows.
 |---|---:|
 | presentation | 17 |
 | behaviour with no caller | 69 |
-| behaviour with a caller | 128 |
-| closed | 48 |
+| behaviour with a caller | 127 |
+| closed | 49 |
 | **Total** | **262** |
 
 ## Behaviour with a caller: B14b routing
@@ -75,7 +75,7 @@ whose remaining item is a proof keeps that boundary visible in its entry.
 | [Shadow telemetry and dream status](read-only-shadow/shadow-telemetry-and-dream-status.md) | shadow deployment `ops/docker-compose.rust-shadow.yml` and Console dream/duplicates readers (`frontend/src/lib/api/config.ts`, `frontend/src/lib/api/review.ts`) | B16 read-only shadow; B11 shadow activation via R4 |
 | [HTTP-BODY-LIMITS: cap enforced at frame granularity](request-parsing-edges-canonical/http-body-limits-cap-enforced-at-frame.md) | HTTP clients in `rust/shim/src/raw_http.rs` and `pseudolife_memory/shim.py` after an early/body-limit refusal | B6 MCP/HTTP transport |
 | [Console static dir](startup-and-configuration/console-static-dir.md) | Console requests from `frontend/src/main.ts` to `/ui` on a native or image launch | B8 models/image via R3; B11 installed layout via R4/R5 |
-| [CPU precision](startup-and-configuration/cpu-precision.md) | default `embedding.cpu_dtype: auto` in `pseudolife_memory/utils/config.py::EmbeddingConfig`, used by daemon search/store | B8 models/image via R3 |
+| [CPU precision](startup-and-configuration/cpu-precision.md) | default `embedding.cpu_dtype: auto` and existing explicit bf16 settings, used by daemon search/store | R10 actionable refusal under D4; B8 bf16 export follow-up |
 | [Embedding model](startup-and-configuration/embedding-model.md) | daemon `Service::init` and model configuration through `pseudolife_memory/utils/config.py::EmbeddingConfig` | B8 models/image via R3; B11 provisioning via R4/R5 |
 | [Plugin dir for `hooks_digest`](startup-and-configuration/plugin-dir-for-hooks-digest.md) | `pseudolife_memory/doctor_cli.py::_codex_hooks_line` and `rust/shim/src/cli/doctor/mod.rs` health digest checks on a native launch | B11 runtime/install layout via R4/R5 |
 | [R5-CODEX-BOOTSTRAP-AUTHORITY](startup-and-configuration/r5-codex-bootstrap-authority.md) | Native Codex credential bootstrap through `setup::codex::configure_credential_file` | R5 / B11 installers and client registration |
@@ -98,7 +98,6 @@ whose remaining item is a proof keeps that boundary visible in its entry.
 | [`custom` band `retention_policy` other than `balanced`](write-path-w2-e/custom-band-retention-policy-other-than.md) | `rust/daemon/src/store.rs::store_body` at capacity with a custom preset loaded by `config::load` | B14b W2-E custom-retention closure |
 | [`entries.embedding`, `entries.surprise`](write-path-w2-e/entries-embedding-entries-surprise.md) | `rust/daemon/src/store.rs::mcp_memory_store` through `cms_store`, then retrieval through `rust/daemon/src/read/mcp_search.rs` | B14b W2-E numerical admission and retrieval closure |
 | [Entry insert fails after eviction](write-path-w2-e/entry-insert-fails-after-eviction.md) | `rust/daemon/src/store.rs::mcp_memory_store` during insert failure after capacity eviction | B4 lifecycle / B14b W2-E failed-store recovery |
-| [The daemon version the session-start notices compare and print](write-path-w2-e/hooks-and-the-cli-s-episode/the-daemon-version-the-session-start.md) | `plugin/hooks/session-start.sh` and `plugin/hooks/lifecycle.ps1` send `plugin_version` to `/api/hook/session-start` | R3 release-version contract / B11 installed handshake |
 | [The hooks notice on session-start when `PSEUDOLIFE_PLUGIN_DIR` is unset](write-path-w2-e/hooks-and-the-cli-s-episode/the-hooks-notice-on-session-start-when.md) | `plugin/hooks/session-start.sh` and `plugin/hooks/lifecycle.ps1` on a checkout daemon without `PSEUDOLIFE_PLUGIN_DIR` | R4 installed hooks/runtime handshake / R3 image environment |
 | [The maintainer's conductor's reminder line on `memory-changes` (`?agent=`), after the cursor and any note](write-path-w2-e/hooks-and-the-cli-s-episode/the-maintainer-s-conductor-s-reminder.md) | `plugin/hooks/session-start.sh` memory-changes request and `plugin/hooks/lifecycle.ps1` send the board agent id | B5 coordination hook-reminder closure |
 | [The cosine `_cosine` (`consolidation.py:81-92`)](write-path-w2-e/memory-consolidation-candidates/the-cosine-cosine-consolidation-py-81-92.md) | `rust/daemon/src/consolidation_tools.rs::mcp_memory_consolidation_candidates` | B14b W2-E consolidation numeric-boundary closure |

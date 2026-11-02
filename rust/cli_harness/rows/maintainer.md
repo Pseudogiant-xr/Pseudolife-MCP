@@ -11,7 +11,7 @@ Harness row: `maintainer` (`rust/cli_harness/rows/maintainer.py`).
 
 ## Canonical shapes (implemented)
 
-- `maintainer enrol-code [--no-wait]`
+- `maintainer enrol-code [--no-wait] [--poll SECONDS]`
 - `maintainer confirm PREFIX`, `maintainer revoke PREFIX` (any single value but
   `-h`, `--help` and `--`, including a `-`-led id prefix, which `main` guards
   with an inserted `--`)
@@ -77,19 +77,10 @@ timeout and public search path (`_bank`, maintainer_cli.py:58-80).
 
 ## Deferred (the dispatcher's `mode 'maintainer' is deferred` line, exit 1, before any effect)
 
-- `setup` (guided and interactive: it probes the daemon's health over HTTP,
-  detects Docker and Tailscale, may run `tailscale serve`, writes the daemon's
-  config and restarts it, then drives enrol-code and confirm through the
-  daemon's environment; its `--check` form also needs the daemon's config and
-  the container transport, so no non-interactive shape is tractable here).
-- Help, `--poll`, `--opt=value`, abbreviations, repeated or extra arguments,
-  `confirm -- PREFIX`, non-Unicode argv.
-- The lite tier's embedded bank and the daemon-container re-run (no or empty
-  `PSEUDOLIFE_MCP_DATABASE_URL`), including Python's `no bank found` error;
-  DSNs or ambient PG controls the shared client refuses; a server that does
-  not answer (Python: `error: OperationalError; ...`, exit 2).
-- Any SQL failure before the change's COMMIT (Python: `error: <class>; ...`,
-  exit 2); the transaction rolls back, so nothing changed.
+- Guided setup is assessed separately by its implementation owner.
+- Noncanonical argv other than explicit polling and prefix delimiters;
+  non-Unicode argv and DSN spellings the shared client does not admit.
+- The lite tier's embedded bank.
 - `list` when stdout refuses it before any byte left (CPython: exit 120 with
   the trailer); whenever the encoded listing is 8192 bytes or longer,
   whatever stdout is, a healthy one included (unconditional: CPython would
@@ -146,3 +137,18 @@ make the listing host-independent:
   passed, Windows hosts defer every listing with a time, so the Windows
   listing cases check the deferral until the seed clock is re-pinned and
   the goldens re-recorded.
+
+## Operator transport extension (2026-11-02 candidate)
+
+Engine-labelled daemon reruns select `pseudolife-mcp` for `rust` and the
+Python module for Python or absent labels, retaining the nesting guard.
+Invite adds stopped-daemon psql list/revoke for v53 and v58; pair adds
+trusted/untrusted HTTPS and terminal code input; maintainer adds help and
+polling; test-login adds help while retaining its host-local login file.
+Linux native builds and the live differential rows passed, including the engine-selected transport and help cases. Native Windows contract tests passed; pairing interruption and backspace also passed both oracle and native console arms.
+The activated former deferral cases now compare the actual oracle outcome;
+their old case IDs remain stable. Linux goldens were re-recorded from the verified oracle tree at
+`7dcd738fa736c15c111fd67c5ffb83ea3f158b91` and replayed against the native candidate.
+The corresponding Windows goldens also replayed successfully. Hosted stress
+remains a separate qualification step. This extension makes
+no claim about guided setup or lite storage.

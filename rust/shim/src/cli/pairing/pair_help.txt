@@ -1,0 +1,23 @@
+usage: pseudolife-mcp pair [-h] [--read-code] [--token-file TOKEN_FILE]
+                           [--json]
+                           daemon-url [code]
+
+Join a bank with a pairing code from `pseudolife-mcp invite` on the daemon
+host: mint a bearer token here, write it to an owner-only file and register
+only its SHA-256 with the daemon. Exit codes: 0 paired and verified, 2 usage,
+4 refused (nothing kept), 5 outcome unknown or not verified (the token file is
+kept and named).
+
+positional arguments:
+  daemon-url            the daemon's origin, e.g. http://100.64.0.2:8765 (no
+                        path)
+  code                  the pairing code (XXXX-XXXX-XXXX); or use --read-code
+
+options:
+  -h, --help            show this help message and exit
+  --read-code           read the code from stdin (without echo on a terminal),
+                        keeping it out of the command line
+  --token-file TOKEN_FILE
+                        create this owner-only token file (it must not exist)
+                        instead of ~/.pseudolife-mcp/<principal>.token
+  --json                one JSON report on stdout

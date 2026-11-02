@@ -273,7 +273,8 @@ SEEDERS = {"rich": seed_rich, "pruned": seed_pruned, "legacy": seed_legacy,
            "fraction": seed_fraction_boundary, "payload": seed_payload_domain,
            "payload_send": seed_payload_send,
            "invalid_payload": seed_invalid_payload,
-           "surrogate_send": lambda conn: seed_payload_send(conn, surrogate=True)}
+           "surrogate_send": lambda conn: seed_payload_send(conn, surrogate=True),
+           "stats": lambda conn: seed_stats(conn)}
 _IDS: dict[str, dict] = {}
 _BASELINE: dict[str, dict] = {}
 _ARCHIVES: dict[str, bytes] = {}
@@ -332,6 +333,10 @@ def ensure(kind: str) -> str:
         _copy(ensure("rich"), name)
         with _bank.connect(name, autocommit=True) as conn:
             conn.execute("UPDATE coordination_events SET task='elsewhere' WHERE seq=2")
+    elif kind == "prev49":
+        _copy(ensure("rich"), name)
+        with _bank.connect(name, autocommit=True) as conn:
+            conn.execute("DROP TABLE coordination_wakes")
     elif kind == "prev46":
         # A restored v42-v45 bank read before any v46 daemon started, made
         # as test_board_audit_cli.test_a_bank_before_v46_... makes it.
@@ -600,6 +605,54 @@ def audit_stdout_closed_trailer(obs: dict) -> None:
         obs["stderr"] = base64.b64encode(_TRAILER.sub(b"", stderr)).decode()
 
 
+@normalize.rule("audit-stats-clock")
+def stats_clock(obs):
+    """Validate runtime fields before substituting only clock/version tokens.
+
+    Every metric, source, key order, numeric spelling and file byte remains
+    compared. Fixed time windows are never replaced.
+    """
+    import tomllib
+    native_version = tomllib.loads((Path(__file__).resolve().parents[2] / "shim" / "Cargo.toml").read_text())["package"]["version"]
+    defaults = obs.get("stats_defaults", (False, False))
+    if defaults is False:
+        defaults = (False, False)
+    def line(raw):
+        try:
+            report = json.loads(raw)
+        except (ValueError, UnicodeError):
+            return raw
+        if not isinstance(report, dict) or report.get("report") != "board-audit stats":
+            return raw
+        assert report["shape"] == 1
+        if obs["arm"] == "rust":
+            assert report["version"] == native_version
+        else:
+            # The isolated oracle can resolve a different installed wheel than
+            # the harness process (the same free field as transfer manifests).
+            assert re.fullmatch(r"[0-9]+(?:\.[0-9]+)+[a-zA-Z0-9.+!-]*", report["version"])
+        start, end = obs["window"]
+        assert start - 0.001 <= report["generated_at"] <= end + 0.001
+        window = report["window"]
+        if defaults[1]:
+            assert start <= window["until"] <= end
+        if defaults[0]:
+            assert window["since"] == window["until"] - 86400
+        raw = re.sub(rb'("generated_at":\s*)[-+0-9.eE]+', rb'\1"<generated_at>"', raw, count=1)
+        raw = re.sub(rb'("version":\s*)"[^"\r\n]*"', rb'\1"<version>"', raw, count=1)
+        if defaults[1]:
+            raw = re.sub(rb'("until":\s*)[-+0-9.eE]+', rb'\1"<until>"', raw, count=1)
+        if defaults[0] and defaults[1]:
+            raw = re.sub(rb'("since":\s*)[-+0-9.eE]+', rb'\1"<since>"', raw, count=1)
+        return raw
+    def content(raw):
+        return b"".join(line(part) for part in raw.splitlines(keepends=True))
+    obs["stdout"] = base64.b64encode(content(base64.b64decode(obs["stdout"]))).decode()
+    for name, value in list(obs.get("files", {}).items()):
+        if value.startswith("file:"):
+            obs["files"][name] = "file:" + base64.b64encode(content(base64.b64decode(value[5:]))).decode()
+
+
 # --- cases -----------------------------------------------------------------------
 
 SEP = "\\" if core.WINDOWS else "/"
@@ -674,7 +727,7 @@ def read_case(case_id, kind, argv, *, files=None, rules=(), stdout_closed=False,
     return case
 
 
-def file_case(case_id, argv, *, files=None, rules=(), stdout_closed=False,
+def file_case(case_id, argv, *, files=None, rules=(), stdout_closed=False, env=None,
               platforms=("windows", "linux"), note="", timeout=30.0):
     """A file-only action (no bank in the environment)."""
     original = ["board-audit", *argv]
@@ -684,7 +737,7 @@ def file_case(case_id, argv, *, files=None, rules=(), stdout_closed=False,
         _resolve_argv(case, original)
         _stash(arm)
 
-    case = core.Case(case_id, list(original), env=dict(GUARDS), setup=setup, after=_record,
+    case = core.Case(case_id, list(original), env={**GUARDS, **(env or {})}, setup=setup, after=_record,
                      rules=rules, stdout_closed=stdout_closed, platforms=platforms, note=note,
                      programs=PROGRAMS, timeout=timeout)
     return case
@@ -764,6 +817,241 @@ def _pruned(key):
     return _Lazy(lambda: ids("pruned")[key])
 
 
+def stats_events():
+    """Synthetic export rows for telemetry; deliberately not a verified chain."""
+    a, b = "a" * 32, "b" * 32
+    def event(seq, kind, when, agent=a, payload=None, **extra):
+        return dict(seq=seq, event=kind, actor="agent", principal="alice" if agent == a else "bob",
+                    agent_id=agent, recipient_agent_id=None, project="fixture", task="stats",
+                    message_id=None, payload=payload or {}, created_at=float(when), hlc="",
+                    prev_hash="0" * 64, hash="1" * 64, body=None, body_salt=None, **extra)
+    rows = []
+    def add(kind, when, agent=a, payload=None, **extra):
+        row = event(len(rows)+1, kind, when, agent, payload)
+        row.update(extra)
+        rows.append(row)
+    def park(reason, expiry, before=None):
+        return {"fields": {"park_reason": reason, "park_expires": expiry},
+                "before": {"park_reason": before, "park_expires": None}}
+    add("update", 900, b, park("before_window", 1200))
+    add("attach", 1000, payload={"renewed": False})
+    add("attach", 1100, b, {"renewed": False})
+    add("attach", 1150, b, {"renewed": True})
+    add("update", 1300, b, park("blocked", 2400, "before_window"))
+    add("update", 1310, b, {"fields": {"park_reason": "needs_resource"}, "before": {}})
+    for n, decision in enumerate(("rung", "nudged", "hinted", "withheld", "no_path", "capped", "not_needed", "future")):
+        add("send", 1400+n*10, message_id=f"m{n}", recipient_agent_id=b,
+            payload={"wake": decision, "private": "body/path must not reach the report"})
+        if n % 2 == 0:
+            add("read", 1400+n*10+(2.25 if n == 0 else n), b,
+                {"path": "pull"}, message_id=f"m{n}", recipient_agent_id=b)
+    add("update", 1500, b, {"fields": {"park_reason": None}, "before": {}})
+    add("update", 1600, payload=park("expires", 1650))
+    add("update", 1700, payload=park("revived", 1900, "expires"))
+    add("update", 1800, payload={"fields": {"park_reason": None}, "before": {}})
+    add("update", 2000, payload=park("open", 6000))
+    add("detach", 3000, b)
+    add("prune", 4000, payload={"agent_ids": [a]})
+    add("read", 5000, b, message_id="m1")  # exclusive boundary: still unread
+    return rows
+
+
+def seed_stats(conn):
+    """Oracle-chained events, plus a controlled historical wakes-table fixture."""
+    store = _store(conn)
+    events = stats_events()
+    b = "b" * 32
+    events.extend([
+        dict(events[0], seq=100, event="woke", created_at=1410.0, agent_id=b, payload={}),
+        dict(events[0], seq=101, event="read", created_at=1411.0, agent_id=b, payload={"path":"delivery"}),
+        dict(events[0], seq=102, event="update", created_at=1420.0, agent_id=b, actor="daemon", payload={}),
+    ])
+    for row in sorted(events,key=lambda r:(r["created_at"],r["seq"])):
+        event = store._event(row["event"],row["payload"],actor=row["actor"],principal=row["principal"],
+                             agent_id=row["agent_id"],recipient=row["recipient_agent_id"],project="fixture",
+                             task="stats",message_id=row["message_id"])
+        with store.storage._txn():
+            store._append([event],row["created_at"])
+    for n,(decision,created,served) in enumerate([
+        ("rung",1400.0,1405.0),("nudged",1410.0,None),("rung",1450.0,5000.0),
+        ("rung",900.0,1000.0),("hinted",1460.0,1470.0),
+    ]):
+        conn.execute("INSERT INTO coordination_wakes (recipient_agent_id,sender_agent_id,message_id,decision,ring_at,created_at,served_at) "
+                     "VALUES (%s,%s,%s,%s,%s,%s,%s)", (b,"a"*32,f"m{n}",decision,created,created,served))
+    return {}
+
+
+def stats_durations():
+    return b'not json\n[]\n' + b"".join(json.dumps(record).encode()+b"\n" for record in [
+        {"ended":"1970-01-01T01:06:40Z", "seconds":2.25,
+         "queued_at":"1970-01-01T01:00:00Z", "started_at":"1970-01-01T01:00:02.35Z"},
+        {"ended":"1970-01-01T01:06:40Z", "seconds":2.35},
+        {"ended":"1970-01-01T01:06:40Z", "seconds":True},
+        {"ended":"1970-01-01T01:23:20Z", "seconds":999},
+        {"ended":"bad", "seconds":5},
+    ])
+
+
+def stats_fixture():
+    """Generate deterministic unit-test goldens by executing the Python oracle."""
+    from pseudolife_memory.board_audit_stats import compute_stats
+    events = stats_events()
+    integer_events = [dict(e,created_at=int(e["created_at"])) for e in events]
+    durations = []
+    for line in stats_durations().splitlines():
+        try:
+            durations.append(json.loads(line))
+        except ValueError:
+            pass
+    b = "b"*32
+    wakes = [{"recipient_agent_id":b,"decision":d,"created_at":c,"served_at":s}
+             for d,c,s in [("rung",1400.0,1401.0),("nudged",1410.0,None),("rung",1450.0,5000.0)]]
+    result = []
+    for name, rows, rings, records in [("empty",[],[],[]),("telemetry",events,wakes,durations),
+                                       ("integer-times",integer_events,wakes,durations)]:
+        report = compute_stats(rows,rings,records,since=1000.0,until=5000.0,now=5000.5,
+                               version="fixture",sources={"events":"export","wakes":"fixture","durations":"file"})
+        result.append(dict(name=name,events=rows,wakes=rings,durations=records,report=report,
+                           line=json.dumps(report,ensure_ascii=True,separators=(",",":"))))
+    return result
+
+
+def stats_cases():
+    common = ["stats", "--since", "1000", "--until", "5000", "--input", _home("stats.jsonl"),
+              "--durations", _home("durations.jsonl")]
+    files = {"stats.jsonl": lambda: _lines(stats_events()), "durations.jsonl": stats_durations}
+    out = [
+        file_case("stats-export-metrics", common, files=files, rules=("audit-stats-clock",)),
+        file_case("stats-out-and-append", [*common,"--out",_home("out.jsonl"),"--append",_home("log.jsonl")],
+                  files={**files,"log.jsonl":b"existing\n"}, rules=("audit-stats-clock",)),
+        file_case("stats-out-exists", [*common,"--out",_home("out.jsonl")], files={"out.jsonl":b"keep"}),
+        file_case("stats-invalid-window", ["stats","--since","5000","--until","1000"]),
+        file_case("stats-stdout-closed", common, files=files, stdout_closed=True),
+        file_case("stats-out-missing-parent", [*common,"--out",_home("missing/out.jsonl")], files=files),
+        file_case("stats-append-missing-parent", [*common,"--append",_home("missing/log.jsonl")], files=files),
+        file_case("stats-input-malformed", [*common], files={"stats.jsonl":b"{}\n"}),
+        file_case("stats-input-duplicate", common, files={"stats.jsonl":b'{"seq":1,"seq":2}\n'}),
+        file_case("stats-input-utf8", common, files={"stats.jsonl":b"\xff\n"}),
+        file_case("stats-empty-default-window", ["stats","--input",_home("empty.jsonl")],
+                  files={"empty.jsonl":b""}, rules=("audit-stats-clock",)),
+        read_case("stats-bank-precision", "stats", ["stats","--since","1000","--until","5000"],
+                  rules=("audit-stats-clock",)),
+        read_case("stats-bank-rich", "rich", ["stats","--since",str(T0),"--until",str(T0+DAY*2)],
+                  rules=("audit-stats-clock",)),
+        read_case("stats-bank-no-wakes", "prev49", ["stats","--since",str(T0),"--until",str(T0+DAY*2)],
+                  rules=("audit-stats-clock",)),
+        read_case("stats-bank-nolog", "nolog", ["stats","--since","1000","--until","5000"]),
+    ]
+    # An empty export makes the parsed local epoch itself observable in window.since.
+    for label, zone, since, until in [
+        ("ny-fold","America/New_York","2026-11-01T01:30:00","2026-11-02T00:00:00Z"),
+        ("ny-gap","America/New_York","2026-03-08T02:30:00","2026-03-09T00:00:00Z"),
+        ("lord-howe-fold","Australia/Lord_Howe","2026-04-05T01:45:00","2026-04-06T00:00:00Z"),
+        ("lord-howe-gap","Australia/Lord_Howe","2026-10-04T02:15:00","2026-10-05T00:00:00Z"),
+        ("apia-gap","Pacific/Apia","2011-12-30T12:00:00","2012-01-01T00:00:00Z"),
+        ("date-only","UTC","2026-10-11","2026-10-12T00:00:00Z"),
+    ]:
+        out.append(file_case("stats-local-"+label,["stats","--input",_home("empty.jsonl"),"--since",since,"--until",until],
+                   files={"empty.jsonl":b""},env={"TZ":zone},platforms=("linux",),rules=("audit-stats-clock",)))
+        record = {"ended":since,"seconds":2.35,"queued_at":since,"started_at":until}
+        out.append(file_case("stats-durations-"+label,["stats","--input",_home("empty.jsonl"),"--since","0","--until","2000000000",
+                             "--durations",_home("durations.jsonl")],
+                   files={"empty.jsonl":b"","durations.jsonl":json.dumps(record).encode()},
+                   env={"TZ":zone},platforms=("linux",),rules=("audit-stats-clock",)))
+    out.append(file_case("stats-local-system-zone",["stats","--input",_home("empty.jsonl"),"--since","2026-10-11T12:00:00",
+                          "--until","2026-10-13T00:00:00Z"], files={"empty.jsonl":b""},rules=("audit-stats-clock",)))
+    for case in out:
+        case.golden = case.id == "stats-invalid-window"  # Fixed diagnostic; reports retain live clock validation.
+        original_after = case.after
+        defaults = ("--since" not in case.argv, "--until" not in case.argv)
+        successful = "audit-stats-clock" in case.rules
+        def after(arm,obs,original_after=original_after,defaults=defaults,successful=successful):
+            original_after(arm,obs)
+            assert obs["exit"] == (0 if successful else 2), "stats case did not reach its intended result"
+            obs["stats_defaults"] = defaults
+        case.after = after
+    return out
+
+
+_AUDIT_DOCKER = r"""import json, os, sys
+from pathlib import Path
+root = Path(os.environ['HOME'])
+argv = sys.argv[1:]
+with (root/'docker.jsonl').open('a',encoding='utf-8') as out:
+    out.write(json.dumps(argv)+'\n')
+if argv[0] == 'inspect':
+    print('true' if argv[2] == '{{.State.Running}}' else os.environ['FIXTURE_ENGINE'])
+    raise SystemExit(0)
+(root/'docker.stdin').write_bytes(sys.stdin.buffer.read())
+sys.stdout.buffer.write(b'{"container":"fixture"}\n')
+sys.stderr.buffer.write(b'fixture stderr\n')
+raise SystemExit(int(os.environ['FIXTURE_EXIT']))
+"""
+
+
+def transport_cases():
+    import shlex
+    import sys
+    out = []
+    for engine in ("python", "rust", "<no value>"):
+        for action in ("verify", "redact", "export", "stats"):
+            for exit_code in ((0, 23) if action in ("export", "stats") else (23,)):
+                suffix = "cmd" if core.WINDOWS else "sh"
+                tail = {"verify":["--expect-head","12:"+"a"*64],
+                        "redact":["--message-id","fixture-id","--reason","wrong paste"],
+                        "export":["--task","fixture task"],
+                        "stats":["--since","1000.0","--until","5000.0","--durations","/dev/stdin"]}[action]
+                argv = ["board-audit",action,*tail]
+                if action == "export":
+                    argv += ["--out",_home("out.jsonl")]
+                if action == "stats":
+                    argv = ["board-audit","stats","--since","1000.0","--until","5000.0",
+                            "--durations",_home("durations.jsonl"),"--out",_home("out.jsonl"),"--append",_home("log.jsonl")]
+                def setup(arm,suffix=suffix):
+                    script = arm.home/"docker_fixture.py"
+                    script.write_text(_AUDIT_DOCKER,encoding="utf-8")
+                    wrapper = (f'@echo off\r\n"{sys.executable}" "{script}" %*\r\nexit /b %errorlevel%\r\n' if core.WINDOWS else
+                               f'#!/bin/sh\nexec {shlex.quote(sys.executable)} {shlex.quote(str(script))} "$@"\n')
+                    path = arm.home/("docker_fixture."+suffix)
+                    path.write_text(wrapper,encoding="utf-8",newline="")
+                    if not core.WINDOWS:
+                        path.chmod(0o700)
+                    (arm.home/"durations.jsonl").write_bytes(b'{"seconds":2.25}\n')
+                    arm.state["inputs"] = {p.name:p.read_bytes() for p in (script,path,arm.home/"durations.jsonl")}
+                    _stash(arm)
+                def after(arm,obs,engine=engine,action=action,tail=tail,exit_code=exit_code):
+                    calls = [json.loads(line) for line in (arm.home/"docker.jsonl").read_text().splitlines()]
+                    expected = [["inspect","-f","{{.State.Running}}","pseudolife-mcp-daemon"],
+                                ["inspect","-f",'{{index .Config.Labels "org.pseudolife.engine"}}',"pseudolife-mcp-daemon"],
+                                ["exec","-i","-e","PSEUDOLIFE_DAEMON_EXEC=1","pseudolife-mcp-daemon",
+                                 *(["pseudolife-mcp"] if engine == "rust" else ["python","-m","pseudolife_memory.cli"]),
+                                 "board-audit",action,*tail]]
+                    assert calls == expected, calls
+                    assert obs["exit"] == exit_code
+                    assert (arm.home/"docker.stdin").read_bytes() == (b'{"seconds":2.25}\n' if action == "stats" else b"")
+                    if action in ("export","stats"):
+                        destination = arm.home/"out.jsonl"
+                        assert destination.exists() == (exit_code == 0)
+                        if exit_code == 0:
+                            assert destination.read_bytes() == b'{"container":"fixture"}\n'
+                            if action == "stats":
+                                assert (arm.home/"log.jsonl").read_bytes() == destination.read_bytes()
+                    # Wrapper paths include the interpreter, so remove only the
+                    # fixture files after asserting their original bytes.
+                    for name,data in arm.state["inputs"].items():
+                        assert (arm.home/name).read_bytes() == data
+                        (arm.home/name).unlink()
+                    obs["files"] = core.snapshot(arm.home)
+                    _record(arm,obs)
+                env = {**GUARDS,"PSEUDOLIFE_DAEMON_EXEC":None,
+                       "PSEUDOLIFE_DOCKER":"{HOME}/docker_fixture."+suffix,
+                       "FIXTURE_ENGINE":engine,"FIXTURE_EXIT":str(exit_code)}
+                case = core.Case(f"transport-{engine.replace('<no value>', 'unlabelled')}-{action}-{exit_code}",
+                                 argv,env=env,setup=setup,after=after,programs=PROGRAMS)
+                out.append(case)
+    return out
+
+
 def cases() -> list[core.Case]:
     rich_head = _Lazy(lambda: head("rich"))
     out = [
@@ -774,8 +1062,7 @@ def cases() -> list[core.Case]:
         file_case("input-wide-object", ["verify", "--input", _home("wide.jsonl")],
                   files={"wide.jsonl": lambda: json.dumps({f"key-{n}": None for n in range(100000)}).encode("utf-8")},
                   timeout=30.0 if os.name == "nt" else 5.0),
-        *[read_case(f"defer-export-iso-{name}", "rich", ["export", "--since", value],
-                    rules=("rust-deferral",)) for name, value in [
+        *[read_case(f"export-iso-{name}", "rich", ["export", "--since", value]) for name, value in [
             ("week-date", "2026-W41-1"),
             ("week-datetime", "2026-W41-6T12:00:00"),
             ("hour", "2026-10-11T12"),
@@ -804,8 +1091,7 @@ def cases() -> list[core.Case]:
                   platforms=("linux",), prepare=lambda arm: (arm.home / "loop").symlink_to("loop")),
         read_case("export-windows-long-name", "rich", ["export", "--out", _home("x" * 260)],
                   platforms=("windows",), note="Windows: pending CI"),
-        file_case("defer-export-local-minute", ["export", "--since", "2026-10-10T12:00"],
-                  rules=("rust-deferral",), note="Guard: already deferred on the original base"),
+        file_case("export-local-minute-no-bank", ["export", "--since", "2026-10-10T12:00"]),
         read_case("export-invalid-payload-prefix", "invalid_payload", ["export"]),
         # verify --input: every event family the seeded chain carries
         archive_case("input-rich", "rich"),
@@ -884,10 +1170,8 @@ def cases() -> list[core.Case]:
         file_case("export-bad-time", ["export", "--since", "NaN"]),
         *[file_case(f"export-bad-numeric-{name}", ["export", "--since=" + value])
           for name, value in [("inf", "inf"), ("negative-inf", "-Infinity"), ("overflow", "1e9999")]],
-        file_case("defer-export-invalid-nonnumeric", ["export", "--since", "not-a-time"],
-                  rules=("rust-deferral",)),
-        file_case("defer-export-iso-overwritten", ["export", "--since", "2026-W41-1", "--since", "0"],
-                  rules=("rust-deferral",)),
+        file_case("export-invalid-nonnumeric", ["export", "--since", "not-a-time"]),
+        file_case("export-iso-overwritten", ["export", "--since", "2026-W41-1", "--since", "0"]),
         file_case("audit-missing-action", []),
         file_case("audit-invalid-action", ["other"]),
         file_case("audit-root-unknown", ["--unknown", "verify"]),
@@ -981,7 +1265,8 @@ def cases() -> list[core.Case]:
         redact_case("redact-busy", "rich", _rich("to_redact"), "wrong paste", hold=True),
         redact_case("redact-nolog", "nolog", "0" * 32, "why"),
         # declared deferrals: the candidate defers and changes nothing
-        read_case("defer-stats", "rich", ["stats"], rules=("rust-deferral",)),
+        *stats_cases(),
+        *transport_cases(),
         file_case("verify-help", ["verify", "--help"]),
         read_case("export-joined-option", "rich", ["export", "--task=t1"]),
         read_case("export-float-spelling", "rich", ["export", "--since", "1.7e9"]),
@@ -992,7 +1277,7 @@ def cases() -> list[core.Case]:
                   ["export", "--out", _home("missing/out.jsonl")]),
         read_case("export-out-missing-dir-before-agent", "rich",
                   ["export", "--agent", "ffffffff0", "--out", _home("missing/out.jsonl")]),
-        file_case("defer-no-bank", ["verify"], rules=("rust-deferral",)),
+        file_case("no-bank", ["verify"]),
         file_case("input-not-utf8", ["verify", "--input", _home("archive.jsonl")],
                   files={"archive.jsonl": b'{"seq": 1}\n\xff\n'}),
         file_case("input-partial-utf8-after-cr", ["verify", "--input", _home("archive.jsonl")],
@@ -1042,7 +1327,7 @@ def cases() -> list[core.Case]:
 MUTANTS = [
     Mutant("audit-iso-conversion-admitted", "audit", "shim/src/cli/board_audit/args.rs",
            "None => iso(value),", "None => iso(value).or(Some(0.0)),",
-           ("defer-export-iso-week-date", "defer-export-iso-hour")),
+           ("export-iso-week-date", "export-iso-hour")),
     Mutant("audit-repeat-first-wins", "audit", "shim/src/cli/board_audit/args.rs",
            "slot.1 = value;", "let _ = value;", ("input-repeated", "export-repeated-abbreviated")),
     Mutant("audit-create-message", "audit", "shim/src/cli/board_audit/bank.rs",
