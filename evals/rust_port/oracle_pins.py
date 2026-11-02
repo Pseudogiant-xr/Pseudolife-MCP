@@ -22,6 +22,10 @@ ACCEPTED_BLOBS = {
         "3ea4594b958bcde244a147def1ae1abbe2f7e9ba",
         # lease conductor in --help (lease delegate deprecated), same PR.
         "5e2b3e25090d4fc6158552592088947aa21c18f9",
+        # `console` in --help and its dispatch (Console sign-in under D10's
+        # 2026-11-02 exception; the PR also pins the new usage hash and
+        # defers `console` in the native shim).
+        "bb5321f0d5344c10b802e67d79bfcf1f3fa6cce2",
     ),
     "pseudolife_memory/wait_mail_cli.py": ("236636957e2f5affbe2eec21d9e125c35ffae5f2",),
 }
