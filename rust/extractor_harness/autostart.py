@@ -150,7 +150,8 @@ def proof(binary, root, fixture, launcher_exe, provider, scenario="all"):
         wrapper_forwarding(root)
         for case in ("PasswordRollback", "LegacyMigration", "DelayedStop", "DelayedRemoval", "DeleteRetry", "DeleteFailure",
                      "StopTimeout", "RemovalTimeout", "ProcessExitRace", "ProcessStopFailure",
-                     "ProcessIdentityChanged"):
+                     "ProcessIdentityChanged", "QueryInitialRetry", "QueryRollbackRetry", "QueryRemovalRetry",
+                     "QueryFailure", "QueryAccessDenied", "QueryNamedAbsent"):
             checked(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(Path(__file__).with_name("scheduler_failures.ps1")),
                      "-Source", str(run.ROOT / "rust/shim/src/extractor_shim/autostart.ps1"), "-Root", str(root), "-Case", case], step=case)
     repo = root / "settings with spaces"

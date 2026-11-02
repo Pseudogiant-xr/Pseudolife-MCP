@@ -112,19 +112,33 @@ function Get-OwnedTaskProcesses($task) {
     } while ($added.Count)
     $captured
 }
+function Get-TaskRegistration([string]$taskName, [datetime]$deadline = (Get-Date).AddSeconds(15)) {
+    # The 2026-11-03 VM trace saw four intermittent provider file-not-found
+    # errors in 80 autostart proofs. They are not the named-task absence result.
+    # Retry that exact error within the scheduler's existing settlement budget;
+    # persistent failures and all other errors must remain visible to callers.
+    while ($true) {
+        try { return Get-ScheduledTask -TaskName $taskName -ErrorAction Stop }
+        catch {
+            if ($_.FullyQualifiedErrorId -eq 'CmdletizationQuery_NotFound_TaskName,Get-ScheduledTask') { return }
+            if ($_.FullyQualifiedErrorId -ne 'HRESULT 0x80070002,Get-ScheduledTask' -or (Get-Date) -ge $deadline) { throw }
+        }
+        Start-Sleep -Milliseconds 200
+    }
+}
 function Wait-TaskStopped([string]$taskName) {
     # Windows autostart stress (2026-11-02) left a terminated task visible;
     # reuse the existing 15-second port-release budget for scheduler settlement.
     $deadline = (Get-Date).AddSeconds(15)
     while ($true) {
-        $task = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+        $task = Get-TaskRegistration $taskName $deadline
         if (-not $task -or $task.State -notin @('Running', 'Queued')) { return }
         if ((Get-Date) -ge $deadline) { throw "task $taskName did not stop; inspect its scheduler state" }
         Start-Sleep -Milliseconds 200
     }
 }
 function Remove-OwnedTask([string]$taskName) {
-    $task = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+    $task = Get-TaskRegistration $taskName
     if (-not $task) { return }
     $script:removedRegistration = $true
     $captured = @(Get-OwnedTaskProcesses $task)
@@ -135,7 +149,7 @@ function Remove-OwnedTask([string]$taskName) {
     $deadline = (Get-Date).AddSeconds(15)
     $accepted = $false
     $lastDeleteError = 'registration is still present'
-    while (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue) {
+    while (Get-TaskRegistration $taskName $deadline) {
         if ((Get-Date) -ge $deadline) { throw "could not remove ${taskName}: $lastDeleteError" }
         if (-not $accepted) {
             try {
@@ -159,8 +173,8 @@ if ($c.Remove) {
     if ($script:removedRegistration) { Write-Host "Removed $name" }
     return
 }
-$registered = Get-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue
-$legacy = if ($name -eq 'Pseudolife Claude Shim') { Get-ScheduledTask -TaskName 'Pseudolife Sonnet Shim' -ErrorAction SilentlyContinue } else { $null }
+$registered = Get-TaskRegistration $name
+$legacy = if ($name -eq 'Pseudolife Claude Shim') { Get-TaskRegistration 'Pseudolife Sonnet Shim' } else { $null }
 $legacyProcesses = @(Get-OwnedTaskProcesses $legacy)
 $legacyWasActive = $legacy -and ($legacy.State -eq 'Running' -or $legacyProcesses.Count -gt 0)
 # Only the selected registration can establish ownership. A matching basename
@@ -243,7 +257,7 @@ try {
         while ((Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue) -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 200 }
         if (Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue) { throw "port $port did not become free; restoring the previous registration" }
         Register-ScheduledTask -TaskName $name -Action $action -Principal $principal -Trigger $trigger -Settings $settings -Description "Native $kind extractor CLI shim" -Force | Out-Null
-        if (-not (Get-ScheduledTask -TaskName $name)) { throw "task was not registered: $name" }
+        if (-not (Get-TaskRegistration $name)) { throw "task was not registered: $name" }
         Start-ScheduledTask -TaskName $name
         $deadline = (Get-Date).AddSeconds([int]$c.Timeout)
         while (-not (Test-HealthyListener)) {
@@ -274,7 +288,7 @@ try {
     }
     if ($rollbackErrors.Count) {
         $remaining = try {
-            $task = Get-ScheduledTask -TaskName $name -ErrorAction Stop
+            $task = Get-TaskRegistration $name
             if ($task) { "present (state $($task.State))" } else { 'absent' }
         } catch { 'absent or unreadable' }
         Write-Warning "Rollback incomplete: $($rollbackErrors -join '; '). Task '$name' is $remaining. Restore its previous registration manually if needed; password-logon tasks require credentials that task XML does not contain. Original failure: $($failure.Exception.Message)" -WarningAction Continue

@@ -1,4 +1,4 @@
-param([string]$Source, [string]$Root, [ValidateSet('PasswordRollback','LegacyMigration','DelayedStop','DelayedRemoval','DeleteRetry','DeleteFailure','StopTimeout','RemovalTimeout','ProcessExitRace','ProcessStopFailure','ProcessIdentityChanged')][string]$Case)
+param([string]$Source, [string]$Root, [ValidateSet('PasswordRollback','LegacyMigration','DelayedStop','DelayedRemoval','DeleteRetry','DeleteFailure','StopTimeout','RemovalTimeout','ProcessExitRace','ProcessStopFailure','ProcessIdentityChanged','QueryInitialRetry','QueryRollbackRetry','QueryRemovalRetry','QueryFailure','QueryAccessDenied','QueryNamedAbsent')][string]$Case)
 $ErrorActionPreference = 'Stop'
 # Every scheduler/process operation is mocked; these cases need no credentials,
 # real registrations, listeners or process termination.
@@ -25,6 +25,8 @@ $global:r6registered = $false
 $global:r6stoppedPids = @()
 $global:r6oldProcess = $null
 $global:r6newProcess = $null
+$global:r6queryFaults = 0
+$global:r6startupFailed = $false
 if ($Case -in @('ProcessExitRace','ProcessStopFailure','ProcessIdentityChanged')) {
     $ast = [Management.Automation.Language.Parser]::ParseFile($Source, [ref]$null, [ref]$null)
     $stopper = $ast.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Stop-CapturedProcess' }, $true)
@@ -71,17 +73,33 @@ if ($Case -eq 'PasswordRollback') {
     $global:r6legacyProcess = [PSCustomObject]@{ ProcessId=4242; ParentProcessId=1; CreationDate=[datetime]'2026-01-01'; ExecutablePath='legacy.exe'; CommandLine=('legacy.exe ' + $arguments) }
     $global:r6listening = $true
     $expectedFailure = 'original fixture registration failure'
-} elseif ($Case -in @('DelayedStop','StopTimeout')) {
+} elseif ($Case -in @('DelayedStop','StopTimeout','QueryInitialRetry','QueryFailure','QueryAccessDenied')) {
     $arguments = 'extractor-shim claude --env-file "' + $settings + '"'
     $global:r6fixtureTask = [PSCustomObject]@{ TaskName=$taskName; State='Running'; Principal=[PSCustomObject]@{LogonType='S4U'}; Actions=@([PSCustomObject]@{Execute=$writer;Arguments=$arguments}) }
     $global:r6oldProcess = [PSCustomObject]@{ ProcessId=4242; ParentProcessId=1; CreationDate=[datetime]'2026-01-01'; ExecutablePath=$writer; CommandLine=($writer + ' ' + $arguments) }
     $global:r6listening = $true
     $expectedFailure = "task $taskName did not stop; inspect its scheduler state"
+    if ($Case -in @('QueryFailure','QueryAccessDenied')) { $expectedFailure = 'fixture task query failed' }
 } else {
     $expectedFailure = 'original fixture startup failure'
 }
 function Get-ScheduledTask {
+    [CmdletBinding()]
     param($TaskName)
+    $fault = $Case -in @('QueryFailure','QueryAccessDenied','QueryNamedAbsent') -or (
+        $global:r6queryFaults -lt 2 -and (
+            $Case -eq 'QueryInitialRetry' -or
+            ($Case -eq 'QueryRollbackRetry' -and $global:r6startupFailed) -or
+            ($Case -eq 'QueryRemovalRetry' -and $global:r6deleteAttempts -gt 0)))
+    if ($fault) {
+        $global:r6queryFaults++
+        $id = if ($Case -eq 'QueryNamedAbsent') { 'CmdletizationQuery_NotFound_TaskName' }
+              elseif ($Case -eq 'QueryAccessDenied') { 'HRESULT 0x80070005' }
+              else { 'HRESULT 0x80070002' }
+        $record = [Management.Automation.ErrorRecord]::new([InvalidOperationException]::new('fixture task query failed'), $id, [Management.Automation.ErrorCategory]::NotSpecified, $TaskName)
+        $PSCmdlet.WriteError($record)
+        return
+    }
     if ($TaskName -eq 'Pseudolife Sonnet Shim') { return $global:r6legacyTask }
     if ($global:r6stopPending -gt 0) {
         $global:r6stopWaits++
@@ -131,7 +149,7 @@ function Unregister-ScheduledTask {
         return
     }
     if ($global:r6fixtureTask -and $global:r6fixtureTask.State -eq 'Running') { throw 'task unregistered before scheduler stopped' }
-    if ($Case -in @('DelayedRemoval','RemovalTimeout')) { $global:r6removePending=3 }
+    if ($Case -in @('DelayedRemoval','RemovalTimeout','QueryRemovalRetry')) { $global:r6removePending=3 }
     else { $global:r6fixtureTask=$null }
 }
 function Register-ScheduledTask {
@@ -145,24 +163,35 @@ function Register-ScheduledTask {
 function Start-ScheduledTask {
     param($TaskName)
     if ($TaskName -eq 'Pseudolife Sonnet Shim') { $global:r6restartedLegacy=$true; return }
-    if ($Case -eq 'DelayedStop') {
+    if ($Case -in @('DelayedStop','QueryInitialRetry')) {
         $global:r6newProcess = [PSCustomObject]@{ ProcessId=4343; ParentProcessId=1; CreationDate=[datetime]'2026-01-02'; ExecutablePath=$writer; CommandLine=($writer + ' extractor-shim claude --env-file "' + $global:r6settings + '"') }
         $global:r6listening=$true
         return
     }
     if ($Case -in @('DelayedRemoval','RemovalTimeout')) { $global:r6fixtureTask.State='Running' }
+    $global:r6startupFailed=$true
     throw $expectedFailure
 }
 function Invoke-WebRequest {
-    if ($Case -ne 'DelayedStop') { throw 'unexpected HTTP call in scheduler failure fixture' }
+    if ($Case -notin @('DelayedStop','QueryInitialRetry')) { throw 'unexpected HTTP call in scheduler failure fixture' }
 }
 function Write-Warning { param($Message) $global:r6warningText += $Message }
 $config = Join-Path $directory 'registration.json'
-@{ Native=$writer;OwnerExe=$writer;Kind='claude';Port=12345;Host='127.0.0.1';Name=$taskName;EnvFile=$settings;LogonType='S4U';Timeout=1;ConfigArgs=@();ServeArgs=@('extractor-shim','claude','--env-file',$settings) } |
+@{ Native=$writer;OwnerExe=$writer;Kind='claude';Port=12345;Host='127.0.0.1';Name=$taskName;EnvFile=$settings;LogonType='S4U';Timeout=1;Remove=($Case -eq 'QueryNamedAbsent');ConfigArgs=@();ServeArgs=@('extractor-shim','claude','--env-file',$settings) } |
     ConvertTo-Json | Set-Content -LiteralPath $config -Encoding UTF8
 $caught = ''
 try { & $Source -ConfigPath $config } catch { $caught = $_.Exception.Message }
-if ($Case -eq 'DelayedStop') {
+if ($Case -in @('QueryFailure','QueryAccessDenied','QueryNamedAbsent')) {
+    if ($Case -eq 'QueryNamedAbsent') {
+        if ($caught) { throw "confirmed missing task was not a quiet no-op: $caught" }
+    } elseif ($caught -ne $expectedFailure) { throw "task query failure was lost: $caught" }
+    if ($global:r6registered -or $global:r6deleteAttempts -or $global:r6stoppedPids.Count -or [IO.File]::ReadAllText($settings) -ne 'before') { throw 'unconfirmed registration caused a mutation' }
+    $elapsed=($global:r6clock - [datetime]'2026-01-01').TotalSeconds
+    if ($Case -eq 'QueryFailure' -and ($elapsed -ne 15 -or $global:r6queryFaults -lt 2)) { throw 'persistent query failure was not bounded by its deadline' }
+    if ($Case -ne 'QueryFailure' -and ($elapsed -ne 0 -or $global:r6queryFaults -ne 1)) { throw 'nonretryable query result was retried' }
+    Write-Output "$Case passed without real scheduler operations"
+    return
+} elseif ($Case -in @('DelayedStop','QueryInitialRetry')) {
     if ($caught) { throw "replacement failed: $caught" }
     if (-not $global:r6registered -or -not $global:r6listening -or $global:r6stopWaits -lt 3) { throw 'replacement did not wait for the delayed scheduler stop' }
     if (($global:r6stoppedPids -join ',') -ne '4242') { throw 'replacement did not stop precisely its captured process' }
@@ -189,6 +218,7 @@ if ($Case -eq 'DeleteRetry') {
 } elseif ($Case -eq 'LegacyMigration' -and (-not $global:r6stoppedLegacy -or -not $global:r6restartedLegacy)) {
     throw 'legacy registration was not recognized and restored'
 }
+if ($Case -in @('QueryInitialRetry','QueryRollbackRetry','QueryRemovalRetry') -and $global:r6queryFaults -ne 2) { throw 'transient query errors were not retried' }
 if (($global:r6clock - [datetime]'2026-01-01').TotalSeconds -gt 31) { throw 'scheduler waits exceeded their bounded deadlines' }
 Write-Output "$Case passed without real scheduler operations"
 $ast = [Management.Automation.Language.Parser]::ParseFile($Source, [ref]$null, [ref]$null)
