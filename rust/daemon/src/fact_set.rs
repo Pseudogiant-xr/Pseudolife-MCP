@@ -31,6 +31,24 @@ pub(crate) fn internal(e: impl std::fmt::Display) -> ToolError {
     ToolError::Internal(anyhow::anyhow!(e.to_string()))
 }
 
+/// Preserve a source error needed by partial journal replay.
+pub(crate) fn internal_cause(e: impl Into<anyhow::Error>) -> ToolError {
+    ToolError::Internal(e.into())
+}
+
+/// Python's save wrapper, retained as a type for partial rollback outcomes.
+/// Its display text remains the tool-boundary diagnostic.
+#[derive(Debug)]
+pub(crate) struct PersistenceError(pub(crate) String);
+
+impl std::fmt::Display for PersistenceError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "cortex save failed: {}", self.0)
+    }
+}
+
+impl std::error::Error for PersistenceError {}
+
 /// A label argument of `service.cortex_write` (`authority`,
 /// `distortion_tolerance`): Python's `INHERIT` sentinel, or a requested
 /// value for `resolve_authority` / `resolve_distortion` (`"auto"` infers
@@ -132,7 +150,7 @@ impl CortexWriteArgs {
 fn mcp_memory_fact_set<'a>(app: &'a crate::http::App, call: ToolCall<'a>) -> ToolFuture<'a> {
     Box::pin(async move {
         let svc = app.service.clone();
-        let ready = svc.ensure_init().await.map_err(internal)?;
+        let ready = svc.ensure_init().await.map_err(internal_cause)?;
         let caller = Caller {
             header_session: call.ident.header_session.clone(),
             transport_session: call.ident.transport_session.clone(),
@@ -146,7 +164,7 @@ fn mcp_memory_fact_set<'a>(app: &'a crate::http::App, call: ToolCall<'a>) -> Too
             .writes
             .spawn(async move { cortex_write(&svc, &r2, &caller, writer, args).await })
             .await
-            .map_err(internal)?
+            .map_err(internal_cause)?
     })
 }
 
@@ -162,7 +180,7 @@ async fn entity_kind(
             db.query("SELECT entity_norm, kind FROM entity_kinds", &[])
         })
         .await
-        .map_err(internal)?;
+        .map_err(internal_cause)?;
         let map: HashMap<String, String> = rows.iter().map(|r| (r.get(0), r.get(1))).collect();
         ws.entity_kinds = Some(map);
     }
@@ -176,8 +194,8 @@ pub(crate) async fn embed(ready: &Ready, text: String) -> Result<Arc<[f32]>, Too
     let embedder = ready.embedder.clone();
     let row = tokio::task::spawn_blocking(move || embedder.embed(&text))
         .await
-        .map_err(internal)?
-        .map_err(internal)?;
+        .map_err(internal_cause)?
+        .map_err(internal_cause)?;
     Ok(Arc::from(row))
 }
 
@@ -263,7 +281,7 @@ pub(crate) async fn cortex_write(
     if !crate::mutants::active("mcp-fact-set-no-entity-mint") {
         ensure_subject_entity(db, &a.entity)
             .await
-            .map_err(internal)?;
+            .map_err(internal_cause)?;
     }
     save_cortex(svc, ready).await?;
     let snap = ready.cortex.snapshot();
@@ -345,7 +363,7 @@ pub(crate) async fn save_cortex(svc: &Service, ready: &Ready) -> Result<(), Tool
                     })
             })
             .unwrap_or_else(|| format!("{e:#}"));
-        internal(format!("cortex save failed: {message}"))
+        internal_cause(PersistenceError(message))
     };
     let snap = ready.cortex.snapshot();
     let rows = crate::stores::cortex_sync::sync_slot_rows(db, &snap).await;

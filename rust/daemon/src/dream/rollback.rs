@@ -14,7 +14,7 @@ use tokio_postgres::Client;
 
 use crate::episodes::{self, Caller};
 use crate::fact_resolve::{ResolveArgs, cortex_resolve};
-use crate::fact_set::{CortexWriteArgs, LabelArg, cortex_write, save_cortex};
+use crate::fact_set::{CortexWriteArgs, LabelArg, PersistenceError, cortex_write, save_cortex};
 use crate::graph_review_tools::actions::{in_txn, reads};
 use crate::mcp::dispatch::ToolError;
 use crate::service::{Ready, Service};
@@ -36,9 +36,12 @@ fn tier_rank(t: &str) -> Option<i32> {
     }
 }
 
-fn internal(e: impl std::fmt::Display) -> ToolError {
-    ToolError::Internal(anyhow::anyhow!(e.to_string()))
+fn internal(e: impl Into<anyhow::Error>) -> ToolError {
+    ToolError::Internal(e.into())
 }
+
+#[path = "rollback_pg_errors.rs"]
+mod pg_errors;
 
 /// One `dream_runs` row as the rollback reads it.
 struct Run {
@@ -587,15 +590,13 @@ impl Replay<'_> {
                 .filter(|_| !crate::mutants::active("mcp-dream-rollback-event-kept"))
             {
                 let _ws = self.ready.write.lock().await;
-                deleted = in_txn(self.ready.storage.client(), |c| async move {
-                    Ok(
-                        c.execute("DELETE FROM chronicle_events WHERE id = $1", &[&id])
-                            .await
-                            .map_err(internal)?
-                            > 0,
-                    )
+                deleted = crate::txn::run(self.ready.storage.client(), |c| async move {
+                    c.execute("DELETE FROM chronicle_events WHERE id = $1", &[&id])
+                        .await
+                        .map(|count| count > 0)
                 })
-                .await?;
+                .await
+                .map_err(internal)?;
             }
             if deleted {
                 "reverted".into()
@@ -699,14 +700,43 @@ impl Replay<'_> {
 /// (`partial:error:<class>`).
 fn error_class(e: &ToolError) -> &'static str {
     match e {
-        ToolError::Invalid(_) => "ValueError",
-        // save_cortex preserves Python's PersistenceError as an internal
-        // error with this fixed prefix (fact_set.rs). Keep its class in
-        // per-row outcomes while later reversals and the final save proceed.
-        ToolError::Internal(cause) if cause.to_string().starts_with("cortex save failed: ") => {
-            "PersistenceError"
+        ToolError::Invalid(_) | ToolError::Refused { .. } => "ValueError",
+        ToolError::FileNotFound(_) => "FileNotFoundError",
+        ToolError::Internal(cause) => {
+            // The save wrapper takes precedence over its underlying DB error.
+            if cause.downcast_ref::<PersistenceError>().is_some() {
+                "PersistenceError"
+            } else if let Some(db) = cause.downcast_ref::<tokio_postgres::Error>() {
+                pg_errors::class(db.code().map(|code| code.code()))
+            } else {
+                "RuntimeError"
+            }
         }
-        _ => "RuntimeError",
+    }
+}
+
+#[cfg(test)]
+mod error_tests {
+    use super::*;
+
+    #[test]
+    fn typed_save_error_survives_context_without_parsing_its_message() {
+        let saved =
+            anyhow::Error::new(PersistenceError("fixture".into())).context("another diagnostic");
+        assert_eq!(error_class(&ToolError::Internal(saved)), "PersistenceError");
+        let misleading = internal(anyhow::anyhow!("cortex save failed: fixture"));
+        assert_eq!(error_class(&misleading), "RuntimeError");
+    }
+
+    #[test]
+    fn database_class_uses_sqlstate_and_transport_errors_stay_operational() {
+        assert_eq!(pg_errors::class(Some("22012")), "DivisionByZero");
+        assert_eq!(pg_errors::class(Some("P0001")), "RaiseException");
+        assert_eq!(pg_errors::class(Some("XX000")), "InternalError_");
+        assert_eq!(pg_errors::class(Some("22ZZZ")), "DataError");
+        assert_eq!(pg_errors::class(Some("P9999")), "ProgrammingError");
+        assert_eq!(pg_errors::class(Some("ZZZZZ")), "DatabaseError");
+        assert_eq!(pg_errors::class(None), "OperationalError");
     }
 }
 

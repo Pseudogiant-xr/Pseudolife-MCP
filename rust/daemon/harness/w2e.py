@@ -1476,7 +1476,7 @@ def supersede(new_text, headers=(), **kw) -> dict:
 # Scenarios whose operations may include ``external`` writes.
 EXTERNAL_WRITES = {"supersede-branches", "reinstate", "consolidation-candidates",
                    "review-list", "review-actions", "review-slots",
-                   "consolidate-branches"}
+                   "consolidate-branches", "dream-rollback-persistence"}
 
 
 def external(statement: str) -> dict:

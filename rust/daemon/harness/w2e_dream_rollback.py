@@ -30,8 +30,9 @@ row) and each answer's per-row outcomes:
   value, reversed by rewriting it;
 * ``dream-rollback-refused``: seeded run rows, a newer ``failed`` and
   ``running`` run refusing the rollback, and a stale ``run_id``;
-* ``dream-rollback-persistence``: a one-shot database failure reports
-  ``partial:error:PersistenceError`` while later reversals and the final
+* ``dream-rollback-persistence``: one-shot save and chronicle-delete failures report
+  ``partial:error:PersistenceError`` and the SQLSTATE-specific
+  ``partial:error:DivisionByZero`` while later reversals and the final
   save continue, retaining the rolled-back audit row.
 
 Normalizers: ``dream_runs.rolled_back_at`` is the rollback's clock
@@ -151,13 +152,22 @@ def scenarios(w) -> dict:
                 *first_pass,
                 # Sequences are not rolled back: only the first facts INSERT
                 # fails, so later reversals and the final save can succeed.
-                w.sql("CREATE SEQUENCE rollback_fail_once; "
+                # An independent delete failure exercises the raw DB class.
+                w.external("CREATE SEQUENCE rollback_fail_once; "
                       "CREATE FUNCTION rollback_fail_once() RETURNS trigger LANGUAGE plpgsql AS $$ "
                       "BEGIN IF NOT (SELECT is_called FROM rollback_fail_once) THEN "
                       "PERFORM nextval('rollback_fail_once'); "
                       "RAISE EXCEPTION 'fixture cortex save failure'; END IF; RETURN NEW; END $$; "
                       "CREATE TRIGGER rollback_fail_once BEFORE INSERT ON facts "
-                      "FOR EACH ROW EXECUTE FUNCTION rollback_fail_once()"),
+                      "FOR EACH ROW EXECUTE FUNCTION rollback_fail_once(); "
+                      "CREATE SEQUENCE rollback_event_fail_once; "
+                      "CREATE FUNCTION rollback_event_fail_once() RETURNS trigger LANGUAGE plpgsql AS $$ "
+                      "BEGIN IF NOT (SELECT is_called FROM rollback_event_fail_once) THEN "
+                      "PERFORM nextval('rollback_event_fail_once'); "
+                      "RAISE EXCEPTION 'fixture chronicle delete failure' USING ERRCODE = '22012'; "
+                      "END IF; RETURN OLD; END $$; "
+                      "CREATE TRIGGER rollback_event_fail_once BEFORE DELETE ON chronicle_events "
+                      "FOR EACH ROW EXECUTE FUNCTION rollback_event_fail_once()"),
                 w.dream("rollback"),
                 w.dream("runs"),
                 w.fact_get("Deploy Target", "region"),
