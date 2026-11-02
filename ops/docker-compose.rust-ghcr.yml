@@ -7,3 +7,8 @@ services:
     image: ghcr.io/pseudogiant-xr/pseudolife-daemon-rust:${PSEUDOLIFE_IMAGE_TAG:?Select an explicit Rust release version}
     labels:
       org.pseudolife.engine: rust
+  # The release bundle is self-contained; the checkout base uses ../ops.
+  pseudolife-extractor:
+    build:
+      context: .
+      dockerfile: Dockerfile.extractor
