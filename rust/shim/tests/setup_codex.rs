@@ -289,6 +289,68 @@ fn replace_refuses_project_forwarded_no_spawn() {
     assert!(plan_replace(&config, &home.0, "https://example.com", None, true).is_err());
 }
 
+#[tokio::test]
+async fn concurrent_connection_setups_preserve_the_winners_credential() {
+    struct Pausing {
+        inner: Fake,
+        reached: Option<tokio::sync::oneshot::Sender<()>>,
+        release: Option<tokio::sync::oneshot::Receiver<()>>,
+    }
+    impl Rpc for Pausing {
+        async fn rpc(&mut self, method: &str, params: Value) -> Result<Value, SetupError> {
+            if method == "config/batchWrite"
+                && let Some(reached) = self.reached.take()
+            {
+                reached.send(()).unwrap();
+                self.release.take().unwrap().await.unwrap();
+            }
+            self.inner.rpc(method, params).await
+        }
+    }
+    let home = Home::new();
+    let (reached, ready) = tokio::sync::oneshot::channel();
+    let (release, continue_write) = tokio::sync::oneshot::channel();
+    let mut first = Pausing {
+        inner: Fake::new(&home.0),
+        reached: Some(reached),
+        release: Some(continue_write),
+    };
+    let mut second = Fake::new(&home.0);
+    let first_plan = plan_replace(
+        &first.inner.config,
+        &home.0,
+        "https://example.com",
+        None,
+        true,
+    )
+    .unwrap();
+    let second_plan =
+        plan_replace(&second.config, &home.0, "https://example.com", None, true).unwrap();
+    let competing = async {
+        ready.await.unwrap();
+        let rejected = apply_replace(&mut second, &home.0, second_plan)
+            .await
+            .is_err();
+        release.send(()).unwrap();
+        assert!(rejected);
+        assert!(second.calls.is_empty());
+    };
+    let (winner, ()) = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        tokio::join!(apply_replace(&mut first, &home.0, first_plan), competing)
+    })
+    .await
+    .unwrap();
+    let mut winner = winner.unwrap();
+    assert!(home.0.join("pseudolife").join("token").exists());
+    assert!(
+        read_connection(&home.0.join("pseudolife").join("connection.json"))
+            .unwrap()
+            .is_some()
+    );
+    winner.rollback(&mut first, &home.0).await.unwrap();
+    assert!(!home.0.join("pseudolife").join("token").exists());
+}
+
 fn config(home: &Path) -> Value {
     let server = json!({"command":"pseudolife-mcp", "env": {
         "PSEUDOLIFE_MCP_DAEMON_URL":"http://localhost:8765",

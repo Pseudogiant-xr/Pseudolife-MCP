@@ -170,21 +170,3 @@ pub(crate) fn read_config(path: &Path) -> Result<Option<Vec<u8>>, SetupError> {
         _ => Err(file_error("metadata")),
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn setup_transaction_lock_refuses_a_competitor_and_releases_on_drop() {
-        let home =
-            std::env::temp_dir().join(format!("pseudolife-setup-lock-{}", uuid::Uuid::new_v4()));
-        fs::create_dir(&home).unwrap();
-        let config = home.join("config.toml");
-        let lock = TransactionLock::acquire(&config).unwrap();
-        assert!(TransactionLock::acquire(&config).is_err());
-        assert!(state::open(&home.join(".pseudolife-setup.lock")).is_ok());
-        drop(lock);
-        drop(TransactionLock::acquire(&config).unwrap());
-        fs::remove_dir_all(home).unwrap();
-    }
-}
