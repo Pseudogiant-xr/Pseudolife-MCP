@@ -3,3 +3,4 @@
 - Cleanup retains the database checkpoint allowance and owns the daemon process tree through interruption. Unsupported database TLS settings are refused before creating a bank, and model or runtime failures name their repair without exposing raw daemon diagnostics.
 - Disposable proofs connect directly despite ambient proxies, pass the same resolved PostgreSQL endpoint to the child, and tolerate optional reranker warnings. Interrupted cleanup reports its checkpoint wait and retries a lost DROP response on a separate owned connection.
 - Doctor explicitly opts into connection timeout and application-name options; ordinary CLI DSN admission retains its existing refusal behavior.
+- Relative ONNX Runtime overrides remain valid after child isolation. Unsupported fixture DSN forms name the native connection limits, and CREATE failures preserve PostgreSQL exception classes.

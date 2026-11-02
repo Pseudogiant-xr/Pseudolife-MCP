@@ -36,7 +36,8 @@ def test_equal_observations_have_no_diff():
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX umask inheritance")
 @pytest.mark.parametrize("inherited", [0o002, 0o077])
-def test_harness_process_pins_fixture_and_child_modes(tmp_path, inherited):
+@pytest.mark.parametrize("mode", [[], ["--record"], ["--golden"]])
+def test_harness_process_pins_only_recorded_fixture_and_child_modes(tmp_path, inherited, mode):
     import json
     import subprocess
 
@@ -48,9 +49,9 @@ entry, root = sys.argv[1], pathlib.Path(sys.argv[3])
 sys.path.insert(0, str(pathlib.Path(entry).parent.parent))
 from cli_harness import runner
 try:
-    runner.main(["--help"])
+    runner.main(["--row", "doctor", "--case", "absent-umask-case", *json.loads(sys.argv[4])])
 except SystemExit as error:
-    assert error.code == 0
+    assert error.code != 0
 (root / "fixture").mkdir()
 (root / "fixture/input").write_bytes(b"fixture")
 subprocess.run([sys.executable, "-c", "from pathlib import Path; Path('child').write_bytes(b'fixture')"], cwd=root, check=True)
@@ -58,9 +59,10 @@ print(json.dumps([stat.S_IMODE((root / path).stat().st_mode)
                   for path in ("fixture", "fixture/input", "child")]))
 '''
     result = subprocess.run([sys.executable, "-B", "-c", script, str(entry),
-                             str(inherited), str(tmp_path)], capture_output=True, text=True)
+                             str(inherited), str(tmp_path), json.dumps(mode)], capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
-    assert json.loads(result.stdout.splitlines()[-1]) == [0o755, 0o644, 0o644]
+    expected = 0o022 if mode else inherited
+    assert json.loads(result.stdout.splitlines()[-1]) == [0o777 & ~expected, 0o666 & ~expected, 0o666 & ~expected]
 
 
 @pytest.mark.parametrize("fault", [

@@ -21,7 +21,7 @@ starts the native daemon on loopback, and drives the actual native adapter.
 It requires a sibling or PATH-resolved `pseudolife-daemon` and the host's
 provisioned default models. Missing prerequisites produce a repair instruction
 before any database connection. It carries the resolved model directory and
-`ORT_DYLIB_PATH` into an otherwise isolated child environment; it never
+`ORT_DYLIB_PATH` (resolved against the invoking working directory) into an otherwise isolated child environment; it never
 provisions models or reads saved client registrations. The daemon verifies
 the model checksums before loading them.
 
@@ -76,6 +76,32 @@ stress runner. Hosted stress remains pending.
 Deferred before any effect: other argv shapes (abbreviations, `=` forms,
 repeats, help, bad values). A saved `--agent-state` with the proof is a usage
 error and does not read that file.
+
+## Disposable-proof differences from Python
+
+- The native proof admits one explicit TCP host and the `host`, `port`, `user`,
+  `password`, `dbname`, `sslmode`, `connect_timeout` and `application_name`
+  connection options. Hostless or socket connections and other options such as
+  `service`, `options` or `target_session_attrs` return
+  `NativeProofDsnUnsupported` before opening a connection, with the admitted
+  domain in the recovery text. Python's libpq accepts those forms. Malformed
+  DSN syntax remains `ProgrammingError`; required TLS and explicit certificate
+  settings retain their separate `NativeProofTlsUnsupported` refusal. Encoded
+  URI option keys are resolved before constructing the isolated child's DSN.
+- Native `TimeoutError` reports an operation-specific recovery instruction;
+  Python uses the generic fixture-server and CREATE/DROP-permission recovery.
+- A handled interrupt returns JSON `KeyboardInterrupt` with exit 1 after owned
+  cleanup. Python instead unwinds with a traceback or terminates by the signal.
+- Unsupported ambient `PG*` connection controls return
+  `PostgresEnvironmentUnsupported`. Psycopg honors those environment controls;
+  the native proof requires its admitted connection authority explicitly.
+  The supported password and password-file resolution remains unchanged.
+
+Server CREATE rejections preserve psycopg's SQLSTATE class names, including
+`InsufficientPrivilege` (42501) and `QueryCanceled` (57014), without returning
+raw server diagnostics. Loopback wire fixtures cover both rejections and assert
+that a rejected CREATE does not cause DROP. A relative-runtime child fixture
+checks the selected library remains readable after the daemon's cwd changes.
 
 ## Exact contract items
 

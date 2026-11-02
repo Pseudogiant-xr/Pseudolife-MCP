@@ -264,6 +264,10 @@ impl Dsn {
     ) -> Result<tokio_postgres::Config, Error> {
         super::password::configure(self, environment)
     }
+    /// Whether a caller must preserve an explicitly selected TLS root.
+    pub fn has_root_certificate(&self) -> bool {
+        self.rootcert.is_some()
+    }
     pub fn ssl_mode(&self) -> SslMode {
         self.mode
     }

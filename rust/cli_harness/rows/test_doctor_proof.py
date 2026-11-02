@@ -258,7 +258,8 @@ def test_corrupt_model_names_repair_and_removes_owned_bank(tmp_path, damage):
     assert banks() == before
 
 
-@pytest.mark.parametrize("fault", ["create-timeout", "drop-lost-reply", "drop-checkpoint-delay", pytest.param(
+@pytest.mark.parametrize("fault", ["create-denied", "create-query-canceled", pytest.param(
+    "relative-runtime", marks=pytest.mark.skipif(os.name == "nt", reason="POSIX executable fixture")), "create-timeout", "drop-lost-reply", "drop-checkpoint-delay", pytest.param(
     "create-interrupt", marks=pytest.mark.skipif(os.name == "nt", reason="POSIX SIGTERM contract")), pytest.param(
     "drop-interrupt", marks=pytest.mark.skipif(os.name == "nt", reason="POSIX SIGTERM contract"))])
 def test_lost_database_replies_are_bounded_and_cleanup_is_reported(tmp_path, fault):
@@ -303,6 +304,14 @@ def test_lost_database_replies_are_bounded_and_cleanup_is_reported(tmp_path, fau
                     queries.append(query)
                     if query.startswith("SET statement_timeout"):
                         statement_timeout = int(query.split("'")[1].removesuffix("s"))
+                    if query.startswith("CREATE DATABASE") and fault in ("create-denied", "create-query-canceled"):
+                        reached.set()
+                        code = b"42501" if fault == "create-denied" else b"57014"
+                        self.frame(b"E", b"SERROR\0C" + code + b"\0Msynthetic refusal\0\0")
+                        self.frame(b"Z", b"I")
+                        continue
+                    if query.startswith("CREATE DATABASE") and fault == "relative-runtime":
+                        reached.set()
                     dropping = query.startswith("DROP DATABASE")
                     if dropping and fault in ("drop-checkpoint-delay", "drop-interrupt"):
                         reached.set()
@@ -334,6 +343,17 @@ def test_lost_database_replies_are_bounded_and_cleanup_is_reported(tmp_path, fau
     shutil.copy2(source, candidate)
     daemon = tmp_path / ("pseudolife-daemon.exe" if os.name == "nt" else "pseudolife-daemon")
     daemon.write_bytes(b"intentionally not executable")
+    marker = tmp_path / "runtime-observation.json"
+    if fault == "relative-runtime":
+        import sys
+        runtime = tmp_path / "runtime" / "synthetic-library"
+        runtime.parent.mkdir()
+        runtime.write_bytes(b"synthetic runtime")
+        daemon.write_text(f"#!{sys.executable}\n"
+                          "import os,json\nfrom pathlib import Path\n"
+                          "p=Path(os.environ['ORT_DYLIB_PATH'])\n"
+                          f"Path({str(marker)!r}).write_text(json.dumps({{'absolute':p.is_absolute(), 'same_bytes':p.is_file() and p.read_bytes()==b'synthetic runtime'}}))\n")
+        daemon.chmod(0o700)
     models = _admission_models(tmp_path / "models")
     with Server(("127.0.0.1", 0), Handler) as server:
         thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True)
@@ -342,6 +362,8 @@ def test_lost_database_replies_are_bounded_and_cleanup_is_reported(tmp_path, fau
         env.update(HOME=str(tmp_path), USERPROFILE=str(tmp_path), PATH=str(tmp_path),
                    PSEUDOLIFE_DAEMON_ONNX_DIR=str(models),
                    PSEUDOLIFE_TEST_DATABASE_URL=f"host=127.0.0.1 port={server.server_address[1]} user=fixture password=synthetic dbname=r2_blackhole sslmode=disable")
+        if fault == "relative-runtime":
+            env["ORT_DYLIB_PATH"] = "./runtime/synthetic-library"
         child = subprocess.Popen([str(candidate), "doctor", "--disposable-proof"], env=env,
                                  cwd=tmp_path, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         try:
@@ -351,7 +373,8 @@ def test_lost_database_replies_are_bounded_and_cleanup_is_reported(tmp_path, fau
             stdout, stderr = child.communicate(timeout=45)
             assert child.returncode == 1
             report = json.loads(stdout)
-            expected = {"create-interrupt": "KeyboardInterrupt", "create-timeout": "TimeoutError",
+            expected = {"create-denied": "InsufficientPrivilege", "create-query-canceled": "QueryCanceled",
+                        "relative-runtime": "NativeDaemonStartupError", "create-interrupt": "KeyboardInterrupt", "create-timeout": "TimeoutError",
                         "drop-lost-reply": "FixtureCleanupError",
                         "drop-checkpoint-delay": "NativeDaemonSpawnError",
                         "drop-interrupt": "NativeDaemonSpawnError"}[fault]
@@ -360,7 +383,13 @@ def test_lost_database_replies_are_bounded_and_cleanup_is_reported(tmp_path, fau
                 assert stderr == "Finishing disposable-bank cleanup; PostgreSQL may take up to 11 minutes.\n"
             else:
                 assert not stderr
-            assert any(query.startswith('DROP DATABASE IF EXISTS "r2_blackhole_proof_') for query in queries)
+            drops = [query for query in queries if query.startswith('DROP DATABASE IF EXISTS "r2_blackhole_proof_')]
+            if fault in ("create-denied", "create-query-canceled"):
+                assert not drops, "server rejection proves CREATE did not succeed"
+            else:
+                assert drops
+            if fault == "relative-runtime":
+                assert json.loads(marker.read_text()) == {"absolute": True, "same_bytes": True}
             if fault == "drop-lost-reply":
                 assert sum(query.startswith("DROP DATABASE") for query in queries) == 2
                 assert report["fixture_removed"] is False
@@ -469,3 +498,21 @@ def test_signal_during_daemon_start_removes_owned_process_files_and_bank(tmp_pat
         if child.poll() is None:
             child.send_signal(signal.SIGTERM)
             child.communicate(timeout=30)
+
+
+@pytest.mark.parametrize("dsn", [
+    "dbname=r2_unsupported", "host=/var/run/postgresql dbname=r2_unsupported",
+    "host=localhost dbname=r2_unsupported options='-c statement_timeout=5000'",
+    "host=localhost dbname=r2_unsupported target_session_attrs=read-write",
+    "service=fixture dbname=r2_unsupported",
+])
+def test_native_proof_dsn_domain_refusal_names_the_actual_limit(tmp_path, dsn):
+    daemon = tmp_path / ("pseudolife-daemon.exe" if os.name == "nt" else "pseudolife-daemon")
+    daemon.write_bytes(b"must not execute")
+    models = _admission_models(tmp_path / "models")
+    result = _run(tmp_path, dsn=dsn, models=models)
+    assert result.returncode == 1 and result.stderr == ""
+    report = json.loads(result.stdout)
+    assert report["error"] == "NativeProofDsnUnsupported"
+    assert "TCP host" in report["recovery"] and "application_name" in report["recovery"]
+    assert "CREATE/DROP DATABASE permission" not in report["recovery"]

@@ -68,9 +68,9 @@ the rows already finished; `complete` is true only once every row ran.
 
 ## Isolation
 
-- On POSIX, the harness process pins umask `022` before live, recording or
-  replay dispatch. Fixture creation and both CLI children inherit this same
-  baseline; recorded file and directory modes are still compared exactly.
+- On POSIX, recording and golden replay pin umask `022` for fixture creation
+  and both CLI children. Live differentials inherit the caller's umask, including
+  `002` or `077`; file and directory modes remain compared exactly in all modes.
 - Each arm gets a fresh home under the default temporary directory (owner-only
   credential checks need its ACLs), the same path for both arms, reset between
   them. `HOME`, `USERPROFILE`, `APPDATA` and `LOCALAPPDATA` point into it, and

@@ -19,6 +19,8 @@ use unicode_casefold::UnicodeCaseFold;
 mod diagnostics;
 #[path = "proof_process.rs"]
 mod process;
+#[path = "../maintainer/sqlstate.rs"]
+mod sqlstate;
 
 const RECOVERY: &str = "Check the disposable fixture server and CREATE/DROP DATABASE permission; no host delivery has been verified.";
 const TOKEN: &str = "synthetic-proof-bearer";
@@ -119,6 +121,9 @@ fn failed(error: &'static str) -> Value {
         "NativeProofTlsUnsupported" => {
             "The installed native daemon cannot use this fixture's TLS options. Use an explicitly disposable plaintext fixture server with sslmode=disable and no sslrootcert; nothing was changed."
         }
+        "NativeProofDsnUnsupported" => {
+            "The native proof requires one explicit TCP host and supports host, port, user, password, dbname, sslmode (disable/prefer), connect_timeout and application_name options. Use this DSN domain for the disposable fixture; socket, hostless, service and other option forms are unsupported. Nothing was changed."
+        }
         "PostgresEnvironmentUnsupported" => {
             "A PG* environment override is unsupported by the native proof. Pass the fixture host, port, database and authentication explicitly in PSEUDOLIFE_TEST_DATABASE_URL and unset the other PG* connection controls; nothing was changed."
         }
@@ -152,8 +157,17 @@ fn fold(name: &str) -> String {
     name.trim_end_matches('/').case_fold().collect()
 }
 
+fn proof_dsn(dsn: &str) -> Result<Dsn, &'static str> {
+    Dsn::parse_with_connection_options(dsn).map_err(|error| match error {
+        crate::pg::Error::UnsupportedOption(_) | crate::pg::Error::InvalidOption("host") => {
+            "NativeProofDsnUnsupported"
+        }
+        _ => "ProgrammingError",
+    })
+}
+
 fn fixture_name(dsn: &str) -> Result<String, &'static str> {
-    let selected = Dsn::parse_with_connection_options(dsn).map_err(|_| "ProgrammingError")?;
+    let selected = proof_dsn(dsn)?;
     let name = selected
         .config()
         .get_dbname()
@@ -216,7 +230,7 @@ fn database(dsn: &str, name: &str) -> Result<String, &'static str> {
 /// Bind the selected fixture's authentication before changing database or HOME.
 /// No credential is placed in argv, output, or a persistent configuration file.
 fn authenticated(dsn: &str, environment: &PasswordEnvironment) -> Result<String, &'static str> {
-    let parsed = Dsn::parse_with_connection_options(dsn).map_err(|_| "ProgrammingError")?;
+    let parsed = proof_dsn(dsn)?;
     let config = parsed
         .resolved_config(environment)
         .map_err(|_| "OperationalError")?;
@@ -227,7 +241,7 @@ fn authenticated(dsn: &str, environment: &PasswordEnvironment) -> Result<String,
     // our admitted libpq domain uses the last value. Serialize the resolved
     // authority once so the child cannot try a different server first.
     let [tokio_postgres::config::Host::Tcp(host)] = config.get_hosts() else {
-        return Err("ProgrammingError");
+        return Err("NativeProofDsnUnsupported");
     };
     let [port] = config.get_ports() else {
         return Err("ProgrammingError");
@@ -255,7 +269,7 @@ fn authenticated(dsn: &str, environment: &PasswordEnvironment) -> Result<String,
 }
 
 async fn connect(dsn: &str) -> Result<Session, &'static str> {
-    let dsn = Dsn::parse_with_connection_options(dsn).map_err(|_| "ProgrammingError")?;
+    let dsn = proof_dsn(dsn)?;
     let mut environment = TlsEnvironment::from_environment();
     // Authentication was resolved against the original fixture database; an
     // empty result must not read a different pgpass entry for the admin bank.
@@ -270,11 +284,11 @@ async fn connect(dsn: &str) -> Result<Session, &'static str> {
 }
 
 fn daemon_connection_admission(dsn: &str) -> Result<(), &'static str> {
-    let parsed = Dsn::parse_with_connection_options(dsn).map_err(|_| "ProgrammingError")?;
+    let parsed = proof_dsn(dsn)?;
     if !matches!(
         parsed.ssl_mode(),
         crate::pg::SslMode::Disable | crate::pg::SslMode::Prefer
-    ) || dsn.parse::<tokio_postgres::Config>().is_err()
+    ) || parsed.has_root_certificate()
     {
         // The daemon's native pool uses NoTls and cannot read sslrootcert.
         // Refuse before CREATE rather than accepting TLS only in the parent.
@@ -393,11 +407,15 @@ async fn start(
         "TEMP",
         "TMP",
         "LD_LIBRARY_PATH",
-        "ORT_DYLIB_PATH",
     ] {
         if let Some(value) = std::env::var_os(key) {
             command.env(key, value);
         }
+    }
+    if let Some(value) = std::env::var_os("ORT_DYLIB_PATH") {
+        // Resolve against the invoking process, before the child changes cwd.
+        let library = std::path::absolute(value).map_err(|_| "OnnxRuntimeUnavailable")?;
+        command.env("ORT_DYLIB_PATH", library);
     }
     command
         .current_dir(&fixture.root)
@@ -690,7 +708,9 @@ pub(super) async fn run(dsn: &str, daemon: &Path, models: &Path, timeout: f64) -
                 if cancelled {
                     "KeyboardInterrupt"
                 } else {
-                    "OperationalError"
+                    error.as_db_error().map_or("OperationalError", |database| {
+                        sqlstate::class_name(database.code().code())
+                    })
                 },
                 error.as_db_error().is_none(),
             )),
@@ -890,6 +910,7 @@ mod tests {
         for dsn in [
             "host=localhost user=fixture dbname=r2_options connect_timeout=5 application_name='proof fixture'",
             "postgresql://fixture@localhost/r2_options?connect_timeout=5&application_name=proof%20fixture",
+            "postgresql://fixture@localhost/r2_options?connect_timeout=5&application%5fname=proof%20fixture",
         ] {
             let parsed = Dsn::parse_with_connection_options(dsn).unwrap();
             assert_eq!(
