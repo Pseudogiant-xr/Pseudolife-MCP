@@ -480,7 +480,7 @@ REPUDIATE_EVENT = "maintainer_repudiate"
 # hourly cap (``coordination.maintainer.maintainer_per_recipient_per_hour``)
 # counts these rows per recipient.
 MAINTAINER_WAKE_REASON = "maintainer_message"
-_SYSTEM_WAKE_REASONS = (MAINTAINER_WAKE_REASON, "lease_grant")
+_PRIVILEGED_WAKE_REASONS = (MAINTAINER_WAKE_REASON, "conductor", "lease_grant")
 # The audit log (schema v42): one append-only row per board mutation, written
 # in the mutation's own transaction and chained by sha256(prev_hash ||
 # canonical row), so an edited, inserted, reordered or removed row fails
@@ -534,7 +534,9 @@ class WakePolicy:
     nightly_total: int = 200
     fan_out_stagger_seconds: int = 30
     active_seconds: int = 60
-    authority_per_sender_per_hour: int = 12
+    # Starting budget, not a measurement: five broadcasts to eleven peers
+    # plus five individual follow-ups per hour (2026-11-03).
+    authority_per_sender_per_hour: int = 60
     # v54: rings maintainer messages may cause per recipient per hour. Set
     # from ``coordination.maintainer``, not WakeConfig; 30 is the spec's
     # starting value (2026-10-02), not a measurement.
@@ -2191,11 +2193,16 @@ class CoordinationStore:
             events.append(self._event("lease_dequeue", {"name": name, "reason": "reserved"},
                                       actor="daemon", agent_id=r["agent_id"]))
 
-    def pending_lease_grants(self):
+    def pending_lease_grants(self, after_name=""):
         """Committed grants are an outbox until their one daemon notice is
         committed. Only a still-current, live grant is useful to deliver."""
         return self._all(
             "SELECT l.name,l.fence FROM coordination_leases l WHERE l.expires_at>%s AND l.acquired_at>%s "
+            "AND l.name>%s AND NOT EXISTS (SELECT 1 FROM coordination_events a "
+            "WHERE a.event='lease_update' AND a.agent_id=l.holder_agent_id "
+            "AND a.created_at>=l.acquired_at AND a.created_at<=l.acquired_at+%s "
+            "AND a.payload::jsonb->>'name'=l.name AND a.payload::jsonb->>'fence'=l.fence::text "
+            "AND a.payload::jsonb->>'accepted'='true') "
             "AND EXISTS (SELECT 1 FROM coordination_events e WHERE e.event='lease_grant' "
             "AND e.actor='daemon' AND e.agent_id=l.holder_agent_id AND e.created_at>=l.acquired_at "
             "AND e.payload::jsonb->>'name'=l.name "
@@ -2205,7 +2212,8 @@ class CoordinationStore:
             "AND NOT EXISTS (SELECT 1 FROM coordination_events e WHERE e.event='send' "
             "AND e.principal='daemon' AND e.created_at>=l.acquired_at "
             "AND e.payload::jsonb->>'request_id'='lease-grant:'||l.fence::text) "
-            "ORDER BY l.name LIMIT 50", (self.clock(), self.clock() - LEASE_GRANT_WINDOW, DAEMON_PRINCIPAL))
+            "ORDER BY l.name LIMIT 50", (self.clock(), self.clock() - LEASE_GRANT_WINDOW,
+                                       after_name, LEASE_GRANT_WINDOW, DAEMON_PRINCIPAL))
 
     def send_lease_grant(self, agent_id, credential, *, name, fence, **stamp):
         """Drain one grant after settlement. The lease locks before mail's
@@ -2224,11 +2232,7 @@ class CoordinationStore:
                          "AND created_at>=%s AND payload::jsonb->>'request_id'=%s LIMIT 1",
                          (DAEMON_PRINCIPAL, row["acquired_at"], request_id)):
                 return None
-            if self._one(
-                    "SELECT 1 FROM coordination_events WHERE event='lease_grant' AND actor='daemon' "
-                    "AND agent_id=%s AND created_at>=%s AND payload::jsonb->>'name'=%s "
-                    "AND payload::jsonb->>'fence'=%s LIMIT 1",
-                    (row["holder_agent_id"], row["acquired_at"], name, str(fence))) is None:
+            if not self._unaccepted_grant(row, name):
                 return None
             return self.send(DAEMON_PRINCIPAL, agent_id, credential,
                              to=row["holder_agent_id"], request_id=request_id,
@@ -2910,7 +2914,7 @@ class CoordinationStore:
             (agent_id,)) if park else None
         park_seq = park_event["seq"] if park_event and park_event["park_set_at"] == park_since else None
         ring_allowed = park_seq is not None and self._listener_path(row, now) is None
-        # Maintainer and daemon lease-grant rings need no park: a live listener
+        # Maintainer, conductor and lease-grant rings need no park: a live listener
         # is enough, a done park included.
         listening = self._listener_path(row, now) is None
         if not codex and self._listener_path(row, now) is not None:
@@ -2930,14 +2934,14 @@ class CoordinationStore:
             "AND m.request_id='lease-grant:'||l.fence::text))",
             (park_seq or 0, agent_id, now, now))
         if reopen_only:
-            rows = [item for item in rows if item["reason"] in _SYSTEM_WAKE_REASONS or (
+            rows = [item for item in rows if item["reason"] in _PRIVILEGED_WAKE_REASONS or (
                 park_seq is not None and item["decision"] == "rung"
                 and item["reason"] in _REOPEN_ROW_REASONS and item["park_authorized"])]
         if not rows:
             return None
         if codex:
             eligible = [item for item in rows if item["decision"] == "attention"
-                        or (listening and item["reason"] in _SYSTEM_WAKE_REASONS)
+                        or (listening and item["reason"] in _PRIVILEGED_WAKE_REASONS)
                         or (ring_allowed and item["park_authorized"])]
             if not eligible:
                 # Historical ring authorization without its unchanged park is
@@ -2957,13 +2961,13 @@ class CoordinationStore:
         # Losing peer rows stay unstamped and may ring after the system mail
         # is acknowledged; they have not yet had a handoff.
         newest = max(rows, key=lambda r: (r["created_at"], r["wake_id"]))
-        privileged = [item for item in rows if item["reason"] in _SYSTEM_WAKE_REASONS
+        privileged = [item for item in rows if item["reason"] in _PRIVILEGED_WAKE_REASONS
                       and (codex or item["queued"] or item["served_at"] is None
                            or item["served_at"] > now - WAKE_SERVE_REPEAT)]
         unserved = [item for item in privileged if item["served_at"] is None]
         if unserved:
             rows = unserved
-        elif privileged and newest["reason"] in _SYSTEM_WAKE_REASONS:
+        elif privileged and newest["reason"] in _PRIVILEGED_WAKE_REASONS:
             rows = privileged
         newest = max(rows, key=lambda r: (r["created_at"], r["wake_id"]))
         if (not codex and not any(row["queued"] for row in rows)
@@ -3107,21 +3111,19 @@ class CoordinationStore:
         ``clears`` names the need, or the
         sender set ``urgent`` (each within its cap), else ``withheld`` with
         the need and ``retry`` so the sender knows what would wake it.
-        A done park rings only for ``urgent`` mail from the maintainer, the
-        maintainer's conductor for the project or the park's named clearer
-        (``reopened``; 2026-10-03), else ``not_needed`` with ``reopen_by``.
-        Urgent mail from the maintainer or the conductor is decided
-        ``maintainer`` or ``conductor`` wherever plain urgency would ring,
-        and spends the sender's ``authority_per_sender_per_hour`` instead of its urgent
-        allowance; the per-recipient, nightly and stagger caps bind every
-        ring alike. Unparked Codex
+        A verified conductor takes the maintainer delivery path first,
+        including plain mail, done parks and recent activity; its existing
+        sender authority allowance is independent of peer caps and stagger.
+        Legacy maintainer-principal urgency and named-clearer urgency may
+        also reopen a done park, under their existing peer caps.
+        Unparked Codex
         urgency is capped attention with explicit one-bell queue permission,
         unknown native state and no steer path. Other unparked clients retain their urgent ring contract,
         else ``not_needed`` with reason ``no_park``: the session is
         waiting on nobody, so the mail waits for its next turn. Regular
         mail never wakes (maintainer decision 2026-10-02, retiring the
         hourly ``nudged`` ring; rows decided ``nudged`` before then are
-        history, never served). Every ring is bounded per recipient per
+        history, never served). Every peer ring is bounded per recipient per
         hour and by the nightly total, and rings from one sender's burst
         are staggered by ``fan_out_stagger_seconds``. Chatter never rings.
 
@@ -3134,6 +3136,10 @@ class CoordinationStore:
         policy = self.wake
         if maintainer:
             return self._maintainer_wake(sender, recipient, now, message_id=message_id)
+        project = recipient.get("project") or ""
+        if project and self.conductor_projects(sender["agent_id"], now, project=project):
+            return self._maintainer_wake(sender, recipient, now, message_id=message_id,
+                                         conductor=True)
         park = self._live_park(recipient, now)
         done = park is not None and park["park_reason"] == "done"
         need = ({"park_needs": park["park_needs"], "park_clear_by": park["park_clear_by"]}
@@ -3207,9 +3213,9 @@ class CoordinationStore:
             "SELECT count(*) FILTER (WHERE recipient_agent_id=%s AND created_at>%s) AS recipient,"
             "count(*) FILTER (WHERE created_at>%s) AS night,"
             "max(ring_at) FILTER (WHERE sender_agent_id=%s AND ring_at>%s) AS burst "
-            "FROM coordination_wakes WHERE reason<>'lease_grant'",
+            "FROM coordination_wakes WHERE NOT (reason=ANY(%s))",
             (recipient["agent_id"], hour, day, sender["agent_id"],
-             now - policy.fan_out_stagger_seconds))
+             now - policy.fan_out_stagger_seconds, list(_PRIVILEGED_WAKE_REASONS)))
         if counts["recipient"] >= policy.per_recipient_per_hour:
             return {"decision": "capped", "reason": "recipient_hour", **need}
         if counts["night"] >= policy.nightly_total:
@@ -3264,19 +3270,34 @@ class CoordinationStore:
                     "fallback_paths": list(FALLBACK_PATHS_CODEX if codex else FALLBACK_PATHS_CLAUDE)}
         return {"decision": "rung", "reason": "lease_grant", "ring_at": now, "_ring": "lease_grant"}
 
-    def _maintainer_wake(self, sender, recipient, now, *, message_id):
-        """The maintainer branch of ``_wake_decision`` (v54)."""
+    def _maintainer_wake(self, sender, recipient, now, *, message_id, conductor=False):
+        """Maintainer delivery, also used by a conductor proven at send time.
+
+        Both bypass peer gates and caps. Conductors spend the existing
+        sender authority budget; signed maintainer mail has its recipient
+        budget. Legacy authority rows still spend the sender's allowance.
+        """
+        reason = "conductor" if conductor else MAINTAINER_WAKE_REASON
+        column = "sender_agent_id" if conductor else "recipient_agent_id"
+        identity = sender["agent_id"] if conductor else recipient["agent_id"]
+        reasons = list(_AUTHORITY_ROW_REASONS) if conductor else [MAINTAINER_WAKE_REASON]
         sent = self._one("SELECT count(*) AS n FROM coordination_wakes WHERE "
-                         "recipient_agent_id=%s AND reason=%s AND created_at>%s",
-                         (recipient["agent_id"], MAINTAINER_WAKE_REASON, now - 3600))["n"]
-        if sent >= self.wake.maintainer_per_recipient_per_hour:
-            return {"decision": "capped", "reason": "maintainer_hour"}
+                         f"{column}=%s AND reason=ANY(%s) AND created_at>%s",
+                         (identity, reasons, now - 3600))["n"]
+        cap = (self.wake.authority_per_sender_per_hour if conductor
+               else self.wake.maintainer_per_recipient_per_hour)
+        if sent >= cap:
+            return {"decision": "capped", "reason": (
+                "authority_sender_hour" if conductor else "maintainer_hour")}
         self.storage.conn.execute(
             "INSERT INTO coordination_wakes (recipient_agent_id,sender_agent_id,message_id,"
             "decision,reason,urgent,ring_at,created_at) VALUES (%s,%s,%s,'rung',%s,false,%s,%s)",
-            (recipient["agent_id"], sender["agent_id"], message_id, MAINTAINER_WAKE_REASON,
+            (recipient["agent_id"], sender["agent_id"], message_id, reason,
              now, now))
-        ring = {"_ring": MAINTAINER_WAKE_REASON}
+        ring = {"_ring": reason}
+        park = self._live_park(recipient, now) if conductor else None
+        if park and park["park_reason"] == "done":
+            ring["reopened"] = True
         missing = self._listener_path(recipient, now)
         if missing is not None:
             codex = "codex" in (recipient.get("capabilities") or {})
@@ -3285,7 +3306,7 @@ class CoordinationStore:
                     "fallback": FALLBACK_CODEX if codex else FALLBACK_CLAUDE,
                     "fallback_paths": list(FALLBACK_PATHS_CODEX if codex
                                            else FALLBACK_PATHS_CLAUDE), **ring}
-        return {"decision": "rung", "reason": MAINTAINER_WAKE_REASON, "ring_at": now, **ring}
+        return {"decision": "rung", "reason": reason, "ring_at": now, **ring}
 
     def park_gate(self, agent_id, principal, *, since=None):
         """What the Stop hook asks when a turn ends (v49): ``block`` when the

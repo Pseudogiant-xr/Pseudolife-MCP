@@ -1,6 +1,8 @@
 """Grant outbox recovery must not initialize a cold service."""
 from types import SimpleNamespace
 import threading
+import logging
+import pytest
 
 from pseudolife_memory import coordination
 from pseudolife_memory.memory.hlc import HybridLogicalClock
@@ -100,4 +102,78 @@ def test_ready_history_never_drains_pending_grant(store, monkeypatch):
     monkeypatch.setattr(coordination, "_ensure_tier", lambda *_a, **_kw: None)
     coordination.dispatch(svc, "history", {}, principal="alice", headers={
         "x-pl-agent": b["agent_id"], "x-pl-agent-key": b["credential"]})
+    assert store.receive(*creds(b))["messages"] == []
+
+
+def test_refused_first_page_does_not_starve_later_grants(store, monkeypatch):
+    a, b = [store.register("alice") for _ in range(2)]
+    for n in range(51):
+        name = f"resource-{n:02}"
+        for who in (a, b):
+            store.acquire_lease(*creds(who), name=name)
+        store.release_lease(*creds(a), name=name)
+    svc = service(store, [True])
+    monkeypatch.setattr(coordination, "_store", lambda _svc: store)
+    monkeypatch.setattr(coordination, "_ensure_tier", lambda *_a, **_kw: None)
+    original = store.send_lease_grant
+    attempted = []
+    def full(*args, **kwargs):
+        attempted.append(kwargs["name"])
+        if kwargs["name"] != "resource-50":
+            raise CoordinationError("queue_full")
+        return original(*args, **kwargs)
+    monkeypatch.setattr(store, "send_lease_grant", full)
+    coordination.drain_lease_grants(svc)
+    assert len(store.receive(*creds(b))["messages"]) == 1
+    assert len(attempted) == len(set(attempted)) == 51
+
+
+def test_refused_grant_logs_once_until_it_leaves_the_outbox(store, monkeypatch, caplog):
+    a, _b = queue(store, 2)
+    store.release_lease(*creds(a), name="resource")
+    svc = service(store, [True])
+    monkeypatch.setattr(coordination, "_store", lambda _svc: store)
+    monkeypatch.setattr(coordination, "_ensure_tier", lambda *_a, **_kw: None)
+    def full(*_args, **_kwargs):
+        raise CoordinationError("queue_full")
+    monkeypatch.setattr(store, "send_lease_grant", full)
+    with caplog.at_level(logging.INFO, logger=coordination.__name__):
+        coordination.drain_lease_grants(svc)
+        coordination.drain_lease_grants(svc)
+    assert sum("lease grant notice refused" in r.message for r in caplog.records) == 1
+
+
+@pytest.mark.parametrize("trigger", ["receive", "release", "leases"])
+def test_ready_dispatch_delivers_a_committed_grant(store, monkeypatch, trigger):
+    from tests.test_coordination_auth import service as auth_service
+    a, b = queue(store, 2)
+    if trigger == "receive":
+        store.release_lease(*creds(a), name="resource")
+    elif trigger == "leases":
+        store.test_time[0] += 121
+        store.update(*creds(b), status="ready")
+    svc = auth_service(allowed=["alice"])
+    svc._storage = store.storage
+    svc._coordination_ready = True
+    svc._coordination_lock = threading.RLock()
+    svc._hlc = HybridLogicalClock()
+    monkeypatch.setattr(coordination, "_store", lambda _: store)
+    monkeypatch.setattr(coordination, "_ensure_tier", lambda *_a, **_kw: None)
+    caller = a if trigger == "release" else b
+    body = {"name": "resource"} if trigger == "release" else {}
+    result = coordination.dispatch(svc, trigger, body, principal="alice", headers={
+        "x-pl-agent": caller["agent_id"], "x-pl-agent-key": caller["credential"]})
+    if trigger == "receive":
+        assert len(result["messages"]) == 1
+    assert len(store.receive(*creds(b))["messages"]) == 1
+
+
+def test_acceptance_between_outbox_read_and_send_suppresses_notice(store):
+    a, b = queue(store, 2)
+    store.release_lease(*creds(a), name="resource")
+    [grant] = store.pending_lease_grants()
+    store.acquire_lease(*creds(b), name="resource")
+    from tests.test_lease_grant_recovery import daemon
+    sender = daemon(store)
+    assert store.send_lease_grant(sender["agent_id"], sender["credential"], **grant) is None
     assert store.receive(*creds(b))["messages"] == []

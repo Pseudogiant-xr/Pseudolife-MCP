@@ -972,30 +972,42 @@ def _drain_lease_grants_locked(service, store):
     try:
         if not _tier_ready(service, full=True):
             return
-        for grant in store.pending_lease_grants():
-            for attempt in range(2):
-                identity = getattr(service, "_daemon_board_identity", None)
-                if identity is None:
-                    row = store.register(DAEMON_PRINCIPAL, label="daemon", status="daemon notices")
-                    identity = (row["agent_id"], row["credential"])
-                    service._daemon_board_identity = identity
-                epoch = {}
-                if hasattr(service, "_coordination_hlc_epoch"):
-                    epoch = {"enforce_writer_epoch": True,
-                             "expected_writer_epoch": service._coordination_hlc_epoch}
-                try:
-                    result = store.send_lease_grant(*identity, **grant,
-                        hlc=":".join(map(str, service._hlc.tick())), **epoch)
-                except CoordinationError as exc:
-                    if attempt == 0 and exc.code in {"instance_not_found", "invalid_credential"}:
-                        service._daemon_board_identity = None
-                        continue
-                    logger.info("lease grant notice refused (%s)", exc.code)
+        refused = getattr(service, "_lease_grant_refusals", set())
+        service._lease_grant_refusals = refused
+        pending_fences = set()
+        after_name = ""
+        while grants := store.pending_lease_grants(after_name):
+            # Advance past refusals too: a full first page cannot starve
+            # later grants. Each lease is attempted at most once per drain.
+            after_name = grants[-1]["name"]
+            for grant in grants:
+                pending_fences.add(grant["fence"])
+                for attempt in range(2):
+                    identity = getattr(service, "_daemon_board_identity", None)
+                    if identity is None:
+                        row = store.register(DAEMON_PRINCIPAL, label="daemon", status="daemon notices")
+                        identity = (row["agent_id"], row["credential"])
+                        service._daemon_board_identity = identity
+                    epoch = {}
+                    if hasattr(service, "_coordination_hlc_epoch"):
+                        epoch = {"enforce_writer_epoch": True,
+                                 "expected_writer_epoch": service._coordination_hlc_epoch}
+                    try:
+                        result = store.send_lease_grant(*identity, **grant,
+                            hlc=":".join(map(str, service._hlc.tick())), **epoch)
+                    except CoordinationError as exc:
+                        if attempt == 0 and exc.code in {"instance_not_found", "invalid_credential"}:
+                            service._daemon_board_identity = None
+                            continue
+                        if grant["fence"] not in refused:
+                            refused.add(grant["fence"])
+                            logger.info("lease grant notice refused (%s)", exc.code)
+                        break
+                    notify = getattr(service, "_coordination_notifier", None)
+                    if result is not None and notify is not None:
+                        notify(result["recipient_agent_id"])
                     break
-                notify = getattr(service, "_coordination_notifier", None)
-                if result is not None and notify is not None:
-                    notify(result["recipient_agent_id"])
-                break
+        refused.intersection_update(pending_fences)
     except Exception as exc:  # noqa: BLE001 — leave the outbox for the next drain
         logger.info("lease grant notice not sent (%s)", type(exc).__name__)
 

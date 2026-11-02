@@ -166,7 +166,7 @@ async fn drop_reserved_waiters(
 }
 
 /// `_settle`: the locked row after expiry and grant, or None.
-async fn unaccepted_grant(
+pub(crate) async fn unaccepted_grant(
     c: &impl GenericClient,
     row: &LeaseRow,
     name: &str,

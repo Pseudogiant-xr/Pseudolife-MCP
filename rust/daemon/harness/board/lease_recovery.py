@@ -1,5 +1,5 @@
 """Queue liveness, one missed-grant retry and durable grant notices."""
-from board.scenarios import Scenario, act, age, msg, reg, seed
+from board.scenarios import BASE_CONFIG, Scenario, act, age, msg, reg, seed
 
 
 def holder(step, who, queue):
@@ -87,6 +87,7 @@ class LeaseWaiterLiveness(Scenario):
             age(121),
             # Its own acquire proves D is alive before queue selection.
             act("D returns in own acquire", "lease", agent="D", body={"name": "resource"}),
+            notice(act("accepted own-acquire has no grant notice", "receive", agent="D"), 0),
             holder(act("returning D granted", "leases"), "D", ["B"]),
         ]
 
@@ -193,6 +194,66 @@ class LeaseExpiredGrant(LeaseObsoleteGrant):
     expired = True
 
 
+class LeaseNoticePages(Scenario):
+    name = "lease-notice-pages"
+    needs_bank = True
+
+    def steps(self):
+        def commit_grants(store, ctx):
+            from pseudolife_memory.storage.coordination import MAX_PENDING, SEND_RATE
+            for n in range(MAX_PENDING):
+                who = f"filler-{n // SEND_RATE}"
+                if who not in ctx.agents:
+                    ctx.agents[who] = store.register("default")
+                store.send("default", ctx.id(who), ctx.agents[who]["credential"],
+                           to=ctx.id("B"), text="pending", request_id=f"pending-{n}")
+            for n in range(51):
+                name = f"resource-{n:02}"
+                recipient = "B" if n < 50 else "C"
+                for who in ("A", recipient):
+                    store.acquire_lease("default", ctx.id(who), ctx.agents[who]["credential"],
+                                        name=name, ttl=600)
+                store.release_lease("default", ctx.id("A"), ctx.agents["A"]["credential"], name=name)
+        return [reg(f"register {who}", who) for who in "ABC"] + [
+            seed("full first page of grant recipients", commit_grants),
+            notice(act("later page still delivered", "receive", agent="C")),
+            notice(act("later page never duplicated", "receive", agent="C")),
+        ]
+
+
+class PrivilegedPeerBudgets(Scenario):
+    name = "privileged-peer-hour-budget"
+    config_yaml = BASE_CONFIG.replace("per_recipient_per_hour: 6", "per_recipient_per_hour: 1")
+    cap_reason = "recipient_hour"
+
+    def steps(self):
+        from board.conductor_wake import expect
+        steps = [reg("sender", "A"), reg("recipient", "B", capabilities={"ring": True}),
+                 act("recipient listening", "attach", agent="B", body=lambda c: {
+                     "attachment_id": "listener", "ring": True, "ring_armed_until": c.now + 60}),
+                 act("recipient needs peer result", "update", agent="B", body={
+                     "park_reason": "needs_info", "park_needs": "result", "park_clear_by": "anyone"})]
+        for reason in ("maintainer_message", "conductor", "lease_grant"):
+            def prior_wake(store, ctx, reason=reason):
+                store.storage.conn.execute("DELETE FROM coordination_wakes")
+                sent = store.send("default", ctx.id("A"), ctx.agents["A"]["credential"],
+                                  to=ctx.id("B"), text="prior", request_id=f"prior-{reason}")
+                store.storage.conn.execute("UPDATE coordination_wakes SET reason=%s WHERE message_id=%s",
+                                           (reason, sent["message_id"]))
+            steps += [seed(f"prior {reason} wake", prior_wake),
+                      expect(msg(f"{reason} leaves peer budget", "A", "B", "first"), "rung", "anyone"),
+                      expect(msg(f"{reason} peer cap still binds", "A", "B", "second"),
+                             "capped", self.cap_reason)]
+        return steps
+
+
+class PrivilegedPeerNightBudget(PrivilegedPeerBudgets):
+    name = "privileged-peer-night-budget"
+    config_yaml = BASE_CONFIG.replace("nightly_total: 200", "nightly_total: 1")
+    cap_reason = "nightly"
+
+
 SCENARIOS = {s.name: s for s in (LeaseGrantRecovery, LeaseWaiterLiveness, LeaseNoticeRecovery,
                               LeaseGrantOffer, LeaseGrantParkedOffer, LeaseGrantClaudeOffer,
-                              LeaseAcceptedGrant, LeaseObsoleteGrant, LeaseExpiredGrant)}
+                              LeaseAcceptedGrant, LeaseObsoleteGrant, LeaseExpiredGrant,
+                              LeaseNoticePages, PrivilegedPeerBudgets, PrivilegedPeerNightBudget)}

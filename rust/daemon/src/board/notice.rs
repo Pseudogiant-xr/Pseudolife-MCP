@@ -52,78 +52,101 @@ impl Board {
             return;
         }
         let result: super::error::Result<()> = async {
-            let pending = client
-                .query(
-                    "SELECT l.name,l.fence FROM coordination_leases l WHERE l.expires_at>$1 AND l.acquired_at>$3 \
-                 AND EXISTS (SELECT 1 FROM coordination_events e WHERE e.event='lease_grant' \
-                 AND e.actor='daemon' AND e.agent_id=l.holder_agent_id AND e.created_at>=l.acquired_at \
-                 AND e.payload::jsonb->>'name'=l.name \
-                 AND e.payload::jsonb->>'fence'=l.fence::text) \
-                 AND NOT EXISTS (SELECT 1 FROM coordination_messages m WHERE \
-                 m.sender_principal=$2 AND m.request_id='lease-grant:'||l.fence::text) \
-                 AND NOT EXISTS (SELECT 1 FROM coordination_events e WHERE e.event='send' \
-                 AND e.principal='daemon' AND e.created_at>=l.acquired_at \
-                 AND e.payload::jsonb->>'request_id'='lease-grant:'||l.fence::text) \
-                 ORDER BY l.name LIMIT 50",
-                    &[&now(), &DAEMON_PRINCIPAL, &(now() - super::lease::LEASE_GRANT_WINDOW as f64)],
-                )
-                .await?;
-            for grant in pending {
-                for attempt in 0..2 {
-                    let cached = self.daemon_identity.lock().expect("identity lock").clone();
-                    let identity = match cached {
-                        Some(identity) => identity,
-                        None => {
-                            let params = json!({"label": "daemon", "status": "daemon notices"});
-                            let row = self
-                                .store
-                                .register(
-                                    client,
-                                    DAEMON_PRINCIPAL,
-                                    params.as_object().expect("object"),
-                                )
-                                .await?;
-                            let identity = (
-                                row["agent_id"].as_str().expect("id").to_string(),
-                                row["credential"].as_str().expect("credential").to_string(),
-                            );
-                            *self.daemon_identity.lock().expect("identity lock") =
-                                Some(identity.clone());
-                            identity
-                        }
-                    };
-                    let sent = self
-                        .store
-                        .send_lease_grant(
-                            client,
-                            &identity,
-                            grant.get("name"),
-                            grant.get("fence"),
-                            super::dispatch::stamp(&ready),
-                        )
-                        .await;
-                    match sent {
-                        Ok(Some(recipient)) => self.hub.notify(&recipient),
-                        Ok(None) => {}
-                        Err(e)
-                            if attempt == 0
-                                && matches!(
-                                    e_code(&e),
-                                    Some("instance_not_found" | "invalid_credential")
-                                ) =>
-                        {
-                            *self.daemon_identity.lock().expect("identity lock") = None;
-                            continue;
-                        }
-                        Err(BoardError::Refused(_)) => {
-                            eprintln!("lease grant notice refused; retained for retry");
-                            break;
-                        }
-                        Err(e) => return Err(e),
-                    }
+            let mut after_name = String::new();
+            let mut pending_fences = std::collections::HashSet::new();
+            loop {
+                let pending = client
+                    .query(
+                        "SELECT l.name,l.fence FROM coordination_leases l WHERE l.expires_at>$1 AND l.acquired_at>$3 \
+                     AND l.name>$4 AND NOT EXISTS (SELECT 1 FROM coordination_events a \
+                     WHERE a.event='lease_update' AND a.agent_id=l.holder_agent_id \
+                     AND a.created_at>=l.acquired_at AND a.created_at<=l.acquired_at+$5 \
+                     AND a.payload::jsonb->>'name'=l.name AND a.payload::jsonb->>'fence'=l.fence::text \
+                     AND a.payload::jsonb->>'accepted'='true') \
+                     AND EXISTS (SELECT 1 FROM coordination_events e WHERE e.event='lease_grant' \
+                     AND e.actor='daemon' AND e.agent_id=l.holder_agent_id AND e.created_at>=l.acquired_at \
+                     AND e.payload::jsonb->>'name'=l.name \
+                     AND e.payload::jsonb->>'fence'=l.fence::text) \
+                     AND NOT EXISTS (SELECT 1 FROM coordination_messages m WHERE \
+                     m.sender_principal=$2 AND m.request_id='lease-grant:'||l.fence::text) \
+                     AND NOT EXISTS (SELECT 1 FROM coordination_events e WHERE e.event='send' \
+                     AND e.principal='daemon' AND e.created_at>=l.acquired_at \
+                     AND e.payload::jsonb->>'request_id'='lease-grant:'||l.fence::text) \
+                     ORDER BY l.name LIMIT 50",
+                        &[&now(), &DAEMON_PRINCIPAL, &(now() - super::lease::LEASE_GRANT_WINDOW as f64),
+                          &after_name, &(super::lease::LEASE_GRANT_WINDOW as f64)],
+                    )
+                    .await?;
+                let Some(last) = pending.last() else {
                     break;
+                };
+                // Refused entries must not pin the first page on every drain.
+                after_name = last.get("name");
+                for grant in pending {
+                    let fence: i64 = grant.get("fence");
+                    pending_fences.insert(fence);
+                    for attempt in 0..2 {
+                        let cached = self.daemon_identity.lock().expect("identity lock").clone();
+                        let identity = match cached {
+                            Some(identity) => identity,
+                            None => {
+                                let params = json!({"label": "daemon", "status": "daemon notices"});
+                                let row = self
+                                    .store
+                                    .register(
+                                        client,
+                                        DAEMON_PRINCIPAL,
+                                        params.as_object().expect("object"),
+                                    )
+                                    .await?;
+                                let identity = (
+                                    row["agent_id"].as_str().expect("id").to_string(),
+                                    row["credential"].as_str().expect("credential").to_string(),
+                                );
+                                *self.daemon_identity.lock().expect("identity lock") =
+                                    Some(identity.clone());
+                                identity
+                            }
+                        };
+                        let sent = self
+                            .store
+                            .send_lease_grant(
+                                client,
+                                &identity,
+                                grant.get("name"),
+                                grant.get("fence"),
+                                super::dispatch::stamp(&ready),
+                            )
+                            .await;
+                        match sent {
+                            Ok(Some(recipient)) => self.hub.notify(&recipient),
+                            Ok(None) => {}
+                            Err(e)
+                                if attempt == 0
+                                    && matches!(
+                                        e_code(&e),
+                                        Some("instance_not_found" | "invalid_credential")
+                                    ) =>
+                            {
+                                *self.daemon_identity.lock().expect("identity lock") = None;
+                                continue;
+                            }
+                            Err(BoardError::Refused(_)) => {
+                                if self.lease_grant_refusals.lock().expect("refusal lock").insert(fence) {
+                                    eprintln!("lease grant notice refused; retained for retry");
+                                }
+                                break;
+                            }
+                            Err(e) => return Err(e),
+                        }
+                        break;
+                    }
                 }
             }
+            self.lease_grant_refusals
+                .lock()
+                .expect("refusal lock")
+                .retain(|fence| pending_fences.contains(fence));
             Ok(())
         }
         .await;
@@ -260,7 +283,7 @@ impl Store {
         let tx = client.transaction().await?;
         let row = tx
             .query_opt(
-                "SELECT holder_agent_id,fence,expires_at,acquired_at FROM coordination_leases \
+                "SELECT * FROM coordination_leases \
                                 WHERE name=$1 FOR UPDATE",
                 &[&name],
             )
@@ -268,14 +291,15 @@ impl Store {
         let Some(row) = row else {
             return Ok(None);
         };
-        let holder: Option<String> = row.get("holder_agent_id");
+        let row = super::db::LeaseRow::from_row(&row);
+        let holder = row.holder_agent_id.clone();
         let Some(holder) = holder else {
             return Ok(None);
         };
-        if row.get::<_, i64>("fence") != fence || row.get::<_, f64>("expires_at") <= now() {
+        if row.fence != fence || row.expires_at.unwrap_or(0.0) <= now() {
             return Ok(None);
         }
-        let acquired: f64 = row.get("acquired_at");
+        let acquired = row.acquired_at.unwrap_or(0.0);
         let request_id = format!("lease-grant:{fence}");
         if tx
             .query_opt(
@@ -298,13 +322,7 @@ impl Store {
         {
             return Ok(None);
         }
-        if tx
-            .query_opt(
-                "SELECT 1 FROM coordination_events WHERE event='lease_grant' AND actor='daemon' \
-                         AND agent_id=$1 AND created_at>=$4 AND payload::jsonb->>'name'=$2 \
-                         AND payload::jsonb->>'fence'=$3 LIMIT 1",
-                &[&holder, &name, &fence.to_string(), &acquired],
-            )
+        if super::lease::unaccepted_grant(&tx, &row, name)
             .await?
             .is_none()
         {

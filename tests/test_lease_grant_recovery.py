@@ -56,6 +56,7 @@ def test_returning_waiter_is_alive_in_its_own_acquire(store):
     assert result["state"] == "held"
     assert result["queued"] == 1
     assert not store._one("SELECT 1 FROM coordination_lease_waiters WHERE agent_id=%s", (b["agent_id"],))
+    assert store.pending_lease_grants() == []
 
 
 def test_missed_grant_requeues_once_before_remaining_waiters(store):
