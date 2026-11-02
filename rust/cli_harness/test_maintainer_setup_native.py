@@ -91,13 +91,14 @@ def test_restart_failure_does_not_discard_the_saved_name(monkeypatch):
 
 @pytest.mark.parametrize("mode,code", [("active", 0), ("pending", 1), ("stopped", 4),
                                       ("fresh", 0), ("restart-fails", 5), ("restart-retry", 0)])
-def test_native_image_harness_seam_executes_the_real_oracle(tmp_path, mode, code):
+@pytest.mark.parametrize("engine", ["rust", "python", "unlabelled"])
+def test_native_image_harness_seam_executes_the_real_oracle(tmp_path, mode, code, engine):
     import sys
     from pathlib import Path
     from cli_harness import core
     from cli_harness.rows.maintainer_setup import cases
 
-    case = next(c for c in cases() if c.id == "setup-rust-image-" + mode)
+    case = next(c for c in cases() if c.id == "setup-" + engine + "-image-" + mode)
     source = Path(__file__).resolve().parents[2]
     result = core.run_arm(case, core.python_target(sys.executable, source), tmp_path / "home")
     assert result["exit"] == code

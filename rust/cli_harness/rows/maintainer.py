@@ -706,7 +706,7 @@ def cases() -> list[core.Case]:
         transport.append(core.Case('container-' + engine, ['maintainer', 'list'], env=env,
                                    stdin=b'container-input\x00\xff\n',
                                    setup=lease_transport._docker_setup,
-                                   after=lease_transport._docker_after('list', [], engine, 'maintainer'), golden=False))
+                                   after=lease_transport._docker_after('list', [], engine, 'maintainer')))
     return transport + [
         # list
         case("list-empty", "empty", ["list"]),

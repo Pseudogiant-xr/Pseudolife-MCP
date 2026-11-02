@@ -961,7 +961,7 @@ def stats_cases():
     out.append(file_case("stats-local-system-zone",["stats","--input",_home("empty.jsonl"),"--since","2026-10-11T12:00:00",
                           "--until","2026-10-13T00:00:00Z"], files={"empty.jsonl":b""},rules=("audit-stats-clock",)))
     for case in out:
-        case.golden = False  # Runtime clocks are qualified live, never fabricated as goldens.
+        case.golden = case.id == "stats-invalid-window"  # Fixed diagnostic; reports retain live clock validation.
         original_after = case.after
         defaults = ("--since" not in case.argv, "--until" not in case.argv)
         successful = "audit-stats-clock" in case.rules
@@ -1047,7 +1047,7 @@ def transport_cases():
                        "PSEUDOLIFE_DOCKER":"{HOME}/docker_fixture."+suffix,
                        "FIXTURE_ENGINE":engine,"FIXTURE_EXIT":str(exit_code)}
                 case = core.Case(f"transport-{engine.replace('<no value>', 'unlabelled')}-{action}-{exit_code}",
-                                 argv,env=env,setup=setup,after=after,programs=PROGRAMS,golden=False)
+                                 argv,env=env,setup=setup,after=after,programs=PROGRAMS)
                 out.append(case)
     return out
 

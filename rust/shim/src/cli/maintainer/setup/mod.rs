@@ -194,11 +194,13 @@ async fn entry(values: &[String], pending: Pending) -> Result<u8> {
         return Ok(0);
     }
     if values.iter().any(|v| matches!(v.as_str(), "-h" | "--help")) {
-        return Ok(if super::print(include_str!("help.txt")).is_ok() {
-            0
-        } else {
-            120
-        });
+        return Ok(
+            if super::print(&include_str!("help.txt").replace("\r\n", "\n")).is_ok() {
+                0
+            } else {
+                120
+            },
+        );
     }
     let args = parse(values)?;
     if args.check {

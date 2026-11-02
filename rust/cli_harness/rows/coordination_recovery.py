@@ -18,6 +18,13 @@ from urllib.parse import quote
 
 from .. import core, normalize
 from ..run_names import RunNames
+from ..mutants import Mutant
+
+MUTANTS = [
+    Mutant("recovery-stop-gate-dropped", "coordination_recovery",
+           "shim/src/cli/coordination_recovery/mod.rs",
+           "if !args.stopped {", "if false {", ("recovery-stop-required",)),
+]
 
 DISABLED = "coordination:\n  enabled: false\n  allowed_principals: [alice, daemon, maintainer]\n"
 ID_A = "aaaaaaaa000000000000000000000001"
@@ -92,7 +99,7 @@ def _bank_setup(kind):
         from pseudolife_memory.storage.schema import assert_disposable_database
         from ..pg_create import create_from_default_template
 
-        name = NAMES.name("r1_coordination_recovery_" + kind, max_length=63)
+        name = NAMES.name("r1_coordination_recovery_" + kind.replace("-", "_"), max_length=63)
         _drop(name)
         with _admin() as conn:
             create_from_default_template(conn, f'CREATE DATABASE "{name}"')
@@ -128,7 +135,7 @@ def _bank_setup(kind):
                 from pseudolife_memory import principal_store
                 from pseudolife_memory.storage.schema import PRINCIPALS_SCHEMA_SQL
                 conn.execute(PRINCIPALS_SCHEMA_SQL)
-                with mock.patch.object(principal_store.time, "time", return_value=1000.0), \
+                with mock.patch.object(principal_store, "_NOW", "1000.0"), \
                      mock.patch.object(principal_store, "new_pairing_code", return_value="0123456789AB"):
                     principal_store.create_invite(conn, "paired", tier=None, board=kind=="invited", ttl_seconds=60, replace=False)
             if kind == "owner-mismatch":
@@ -184,7 +191,8 @@ def _bank_after(kind):
             assert set(private) == {"bank_url", "agent_id", "credential"}
             row = next(v for v in dump["coordination_agents"] if v["agent_id"] == private["agent_id"])
             assert row["credential_hash"] == hashlib.sha256(private["credential"].encode()).hexdigest()
-            assert not row["wake_enabled"] and row["generation"] == 1
+            prior = next(v for v in before["coordination_agents"] if v["agent_id"] == row["agent_id"])
+            assert not row["wake_enabled"] and row["generation"] == prior["generation"]
             assert private["credential"].encode() not in core.decode(obs, "stdout") + core.decode(obs, "stderr")
             # Normalize only after checking the real private credential against
             # the actual durable hash. The file is still inspected for privacy.
@@ -280,7 +288,7 @@ def cases():
                        ("reservation-race", rebind),
                        ("repeat-recover", recover + ["--confirm-daemon-stopped", "--confirm-restore"]),
                        ("old", recover + ["--confirm-daemon-stopped", "--confirm-restore"])]:
-        name = NAMES.name("r1_coordination_recovery_" + kind, max_length=63)
+        name = NAMES.name("r1_coordination_recovery_" + kind.replace("-", "_"), max_length=63)
         # URL resolution is lazy: constructing --skip-bank rows must not read
         # a machine's database login. The bank case expands it in setup via a
         # disposable launch configuration below.

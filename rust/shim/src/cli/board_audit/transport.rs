@@ -80,8 +80,16 @@ pub(super) fn export(export: &Export) -> u8 {
     add(&mut args, "--project", export.project.as_deref());
     add(&mut args, "--task", export.task.as_deref());
     add(&mut args, "--agent", export.agent.as_deref());
-    add(&mut args, "--since", export.since);
-    add(&mut args, "--until", export.until);
+    add(
+        &mut args,
+        "--since",
+        export.since.map(crate::cli::pyjson::float_repr),
+    );
+    add(
+        &mut args,
+        "--until",
+        export.until.map(crate::cli::pyjson::float_repr),
+    );
     let Some(out) = &export.out else {
         return forward(args, None);
     };
@@ -117,7 +125,8 @@ pub(super) fn stats(stats: &Stats) -> u8 {
     runtime.block_on(async {
         let Some((docker,rust)) = resolution::daemon().await else { return no_bank(); };
         let mut args = vec!["stats".into()];
-        add(&mut args,"--since",stats.since); add(&mut args,"--until",stats.until);
+        add(&mut args,"--since",stats.since.map(crate::cli::pyjson::float_repr));
+        add(&mut args,"--until",stats.until.map(crate::cli::pyjson::float_repr));
         let durations = File::open(stats::durations_path(stats)).ok();
         if durations.is_some() { add(&mut args,"--durations",Some("/dev/stdin")); }
         let invocation = resolution::container_exec_for_engine(&docker,false,"board-audit",&args,rust);

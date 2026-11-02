@@ -5,7 +5,7 @@ mod archive;
 mod args;
 mod bank;
 mod chain;
-mod codec;
+pub(super) mod codec;
 mod help;
 mod metrics;
 mod redact;

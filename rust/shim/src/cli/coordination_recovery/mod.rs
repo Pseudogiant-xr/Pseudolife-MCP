@@ -1,6 +1,5 @@
 //! Offline recovery of restored mailbox credentials. Never starts or migrates a bank.
-#[path = "../board_audit/codec.rs"]
-mod codec;
+use super::board_audit::codec;
 
 use crate::{board::state, pg, sent_config};
 use serde_json::{Value, json};
@@ -98,7 +97,9 @@ pub fn run(values: Vec<OsString>) -> u8 {
             use std::io::Write;
             return if std::io::stdout()
                 .lock()
-                .write_all(&super::text_bytes(include_str!("help.txt")))
+                .write_all(&super::text_bytes(
+                    &include_str!("help.txt").replace("\r\n", "\n"),
+                ))
                 .is_ok()
             {
                 0

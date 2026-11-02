@@ -246,11 +246,28 @@ pub(super) async fn host(tier: &Tier, args: &[&str]) -> Result<Value> {
             )
         });
     }
-    let output = run(
-        &command(tier, &[&["maintainer", "setup"][..], args].concat())?,
-        120,
-    )
-    .await;
+    let Tier::Docker(docker) = tier else {
+        unreachable!()
+    };
+    let engine = run(&crate::pg::resolution::container_engine_inspect(docker), 60).await;
+    let invocation = if engine.code == 0 && engine.out.trim() == "rust" {
+        command(tier, &[&["maintainer", "setup"][..], args].concat())?
+    } else {
+        // Older and explicitly Python images expose the internal Python
+        // helper, whose subcommands predate the native --host-* flags.
+        let mut command = vec![
+            docker.clone(),
+            "exec".into(),
+            CONTAINER.into(),
+            "python".into(),
+            "-m".into(),
+            "pseudolife_memory.maintainer_setup".into(),
+            args[0].trim_start_matches("--host-").into(),
+        ];
+        command.extend(args[1..].iter().map(OsString::from));
+        command
+    };
+    let output = run(&invocation, 120).await;
     if output.code != 0 {
         let message = if args[0] == "--host-state" {
             "reading"

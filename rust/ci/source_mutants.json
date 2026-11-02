@@ -66,6 +66,9 @@
     "connect-user-agent-changed",
     "connect-verify-reverse-order"
   ],
+  "coordination_recovery": [
+    "recovery-stop-gate-dropped"
+  ],
   "doctor": [
     "doctor-agent-path-unnormalized",
     "doctor-agent-proof-inverted",
@@ -175,6 +178,9 @@
     "maint-secret-kept",
     "maint-unused-codes-kept",
     "maint-waiting-stdout-error-dropped"
+  ],
+  "maintainer_setup": [
+    "setup-consent-bypassed"
   ],
   "move": [
     "move-checkout-cr",

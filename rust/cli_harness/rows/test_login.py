@@ -744,8 +744,8 @@ def cases() -> list[Case]:
         _container_case("container-role-reserved", ["--role", "pg_test"], _cluster.BANK,
                         rules=("test-login-verifier-echo",)),
     ]
-    return [Case("help", ["test-login", "--help"], golden=False),
-            Case("create-help", ["test-login", "create", "--help"], golden=False),
+    return [Case("help", ["test-login", "--help"]),
+            Case("create-help", ["test-login", "create", "--help"]),
             *[_with_run_tokens(_guard(case)) for case in out]]
 
 

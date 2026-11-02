@@ -20,7 +20,14 @@ fn main() -> ExitCode {
             arguments.into_iter().skip(1).collect(),
         ));
     }
-    if arguments.first().is_some_and(|mode| mode == "coordination-recovery") { return ExitCode::from(pseudolife_stdio::cli::coordination_recovery::run(arguments.into_iter().skip(1).collect())); }
+    if arguments
+        .first()
+        .is_some_and(|mode| mode == "coordination-recovery")
+    {
+        return ExitCode::from(pseudolife_stdio::cli::coordination_recovery::run(
+            arguments.into_iter().skip(1).collect(),
+        ));
+    }
     if arguments.first().is_some_and(|mode| mode == "board-audit") {
         return ExitCode::from(pseudolife_stdio::cli::board_audit::run(
             arguments.into_iter().skip(1).collect(),

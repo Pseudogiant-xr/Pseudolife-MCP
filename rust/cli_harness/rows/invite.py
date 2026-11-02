@@ -582,7 +582,7 @@ def _transport_cases():
                'FIXTURE_DOCKER_ENGINE': engine, 'FIXTURE_DOCKER_RUNNING': 'true',
                'FIXTURE_DOCKER_EXIT': str(exit_code)}
         out.append(core.Case('container-' + engine, ['invite', *argv], env=env, setup=setup,
-                             after=after(engine, True, False, argv, exit_code, 't'), golden=False))
+                             after=after(engine, True, False, argv, exit_code, 't')))
     for name, argv, activity, nested in [
             ('stopped-list-v58', ['--list', '--json'], 't', False),
             ('stopped-list-v53', ['--list'], 'f', False),
@@ -593,7 +593,7 @@ def _transport_cases():
                'FIXTURE_DOCKER_ENGINE': 'rust', 'FIXTURE_DOCKER_RUNNING': 'false',
                'FIXTURE_ACTIVITY': activity}
         out.append(core.Case(name, ['invite', *argv], env=env, setup=setup,
-                             after=after('rust', False, nested, argv, 0, activity), golden=False))
+                             after=after('rust', False, nested, argv, 0, activity)))
     return out
 
 

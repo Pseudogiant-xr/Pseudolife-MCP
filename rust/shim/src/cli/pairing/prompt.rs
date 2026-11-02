@@ -3,12 +3,21 @@ use std::io::{self, Write};
 
 #[cfg(unix)]
 #[allow(unsafe_code)]
-pub(super) fn password() -> io::Result<String> {
-    use std::{io::BufRead, os::fd::AsRawFd};
+pub(super) async fn password() -> io::Result<String> {
+    use std::{
+        io::Read,
+        os::{fd::AsRawFd, unix::fs::OpenOptionsExt},
+    };
+    // Register before hiding echo: the default SIGINT action exits without
+    // dropping guards. Async terminal reads let the signal restore the modes
+    // without leaving a blocking reader behind.
+    let mut interrupt = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())?;
     let mut tty = std::fs::OpenOptions::new()
         .read(true)
         .write(true)
+        .custom_flags(libc::O_NONBLOCK)
         .open("/dev/tty")?;
+    let input = tokio::io::unix::AsyncFd::new(tty.try_clone()?)?;
     let fd = tty.as_raw_fd();
     let mut previous = std::mem::MaybeUninit::<libc::termios>::uninit();
     // SAFETY: fd is an open terminal and previous is writable termios storage.
@@ -33,17 +42,39 @@ pub(super) fn password() -> io::Result<String> {
     let restore = Restore(fd, previous);
     tty.write_all(b"pairing code: ")?;
     tty.flush()?;
-    let mut text = String::new();
-    let result = io::BufReader::new(tty.try_clone()?).read_line(&mut text);
+    let result = async {
+        let mut text = Vec::new();
+        loop {
+            tokio::select! {
+                biased;
+                _ = interrupt.recv() => return Err(io::ErrorKind::Interrupted.into()),
+                ready = input.readable() => {
+                    let mut ready = ready?;
+                    let mut buffer = [0u8; 1024];
+                    match ready.try_io(|inner| inner.get_ref().read(&mut buffer)) {
+                        Ok(Ok(count)) => {
+                            text.extend_from_slice(&buffer[..count]);
+                            if count == 0 || text.contains(&b'\n') {
+                                return String::from_utf8(text).map_err(|error|
+                                    io::Error::new(io::ErrorKind::InvalidData, error));
+                            }
+                        }
+                        Ok(Err(error)) => return Err(error),
+                        Err(_) => continue,
+                    }
+                }
+            }
+        }
+    }
+    .await;
     drop(restore);
     tty.write_all(b"\n")?;
-    result?;
-    Ok(text)
+    result
 }
 
 #[cfg(windows)]
 #[allow(unsafe_code)]
-pub(super) fn password() -> io::Result<String> {
+pub(super) async fn password() -> io::Result<String> {
     use std::os::windows::io::AsRawHandle;
     use windows_sys::Win32::System::Console::{
         ENABLE_ECHO_INPUT, GetConsoleMode, ReadConsoleW, SetConsoleMode,

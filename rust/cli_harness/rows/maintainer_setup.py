@@ -14,6 +14,13 @@ import sys
 
 from .. import core, normalize
 from ..fixture_daemon import FixtureDaemon, json_body
+from ..mutants import Mutant
+
+MUTANTS = [
+    Mutant("setup-consent-bypassed", "maintainer_setup",
+           "shim/src/cli/maintainer/setup/mod.rs",
+           "if args.yes {", "if true {", ("setup-noninteractive-consent",)),
+]
 
 ORIGINAL = ("memory:\n  preset: flat\n  nested: {flag: yes, octal: 017, label: 'on'}\n"
             "coordination:\n  enabled: false\n  maintainer:\n    maintainer_per_recipient_per_hour: 7\n")
@@ -51,7 +58,12 @@ def _config_after(changed):
             before = yaml.safe_load(original)
             before["coordination"]["maintainer"].update(
                 rp_id="localhost", origin="http://localhost:" + arm.daemon.url.rsplit(":", 1)[1])
-            assert yaml.safe_load(path.read_bytes()) == before
+            document = yaml.safe_load(path.read_bytes())
+            assert document == before
+            # Canonicalize only after checking the actual file, before the
+            # generic URL normalizer can turn an unquoted YAML scalar into
+            # a brace-delimited mapping.
+            obs["setup_config_document"] = document
             obs["setup_backup"] = backups[0].name
         obs["setup_config_projection"] = changed
     return after
@@ -66,9 +78,10 @@ def _config_values(obs):
     random basename change in comparison; output and exit codes stay exact.
     """
     if obs.get("setup_config_projection"):
-        import yaml
-        value = obs["files"]["config.yaml"]
-        document = yaml.safe_load(base64.b64decode(value[5:]))
+        document = obs.pop("setup_config_document")
+        # Generic normalization operates on file bytes, not this captured
+        # decoded value. Apply its validated fixture URL substitution here.
+        document["coordination"]["maintainer"]["origin"] = "{DAEMON}"
         obs["files"]["config.yaml"] = "file:" + base64.b64encode(
             json.dumps(document, sort_keys=True, ensure_ascii=True).encode()).decode()
     backup = obs.get("setup_backup")
@@ -87,12 +100,13 @@ from pathlib import Path
 root = Path(os.environ['HOME'])
 args = sys.argv[1:]
 mode = os.environ['R1_SETUP_FIXTURE']
+engine = os.environ.get('R1_SETUP_ENGINE', 'rust')
 if args[:3] == ['inspect', '-f', '{{.State.Running}}']:
     print('false' if mode == 'stopped' else 'true')
     raise SystemExit(0)
 if args[:2] == ['inspect', '-f']:
     assert args[2] == '{{index .Config.Labels "org.pseudolife.engine"}}'
-    print('rust')
+    print(engine if engine != 'unlabelled' else '<no value>')
     raise SystemExit(0)
 if args == ['restart', 'pseudolife-mcp-daemon']:
     with (root / 'effects.jsonl').open('a') as out: out.write(json.dumps(['restart']) + '\n')
@@ -104,8 +118,12 @@ if args == ['restart', 'pseudolife-mcp-daemon']:
 assert args[0] == 'exec'
 args = args[1:]
 if args[:2] == ['-e', 'PSEUDOLIFE_DAEMON_EXEC=1']: args = args[2:]
-assert args[:4] == ['pseudolife-mcp-daemon', 'pseudolife-mcp', 'maintainer', 'setup'], args
-args = args[4:]
+if engine == 'rust':
+    assert args[:4] == ['pseudolife-mcp-daemon', 'pseudolife-mcp', 'maintainer', 'setup'], args
+    args = args[4:]
+else:
+    assert args[:4] == ['pseudolife-mcp-daemon', 'python', '-m', 'pseudolife_memory.maintainer_setup'], args
+    args = ['--host-' + args[4], *args[5:]]
 with (root / 'effects.jsonl').open('a') as out: out.write(json.dumps(args) + '\n')
 configured = mode in ('active', 'pending', 'restart-retry') or (root / 'written').exists()
 if args == ['--host-state']:
@@ -141,7 +159,7 @@ def _docker_after(expected):
         calls = [json.loads(v) for v in effects.read_text().splitlines()] if effects.exists() else []
         assert [v[0] for v in calls] == expected, calls
         # Each actual invocation was asserted by the fake executable before it
-        # recorded a logical effect; malformed or Python fallbacks fail there.
+        # recorded a logical effect; the wrong engine's helper fails there.
         for name, data in arm.state["inputs"].items():
             path = arm.home / name
             assert path.read_bytes() == data
@@ -170,19 +188,19 @@ def cases():
         core.Case("setup-check-unreadable-keys", ["maintainer", "setup", "--check"], env=dict(env),
                   setup=_setup(CONFIGURED), after=_config_after(False), programs=("docker",)),
     ]
-    for mode, extra, expected in [
-        ("active", ["--check"], ["--host-state"]),
-        ("pending", ["--check"], ["--host-state"]),
-        ("stopped", ["--yes"], []),
-        ("fresh", ["--yes"], ["--host-state", "--host-write", "restart"]),
-        ("restart-fails", ["--yes"], ["--host-state", "--host-write", "restart"]),
-        ("restart-retry", ["--yes"], ["--host-state", "restart"]),
-    ]:
-        docker_env = dict(env, PSEUDOLIFE_DOCKER="{HOME}/fixture_docker." + ("cmd" if core.WINDOWS else "sh"),
-                          R1_SETUP_FIXTURE=mode)
-        if mode == "restart-retry":
-            docker_env["PSEUDOLIFE_MCP_TOKEN"] = "fixture-console-token"
-        result.append(core.Case("setup-rust-image-" + mode, base + extra, env=docker_env, daemon=_daemon(),
-                                setup=_docker_setup, after=_docker_after(expected), programs=("docker", "tailscale"),
-                                golden=False))
+    for engine in ("rust", "python", "unlabelled"):
+        for mode, extra, expected in [
+            ("active", ["--check"], ["--host-state"]),
+            ("pending", ["--check"], ["--host-state"]),
+            ("stopped", ["--yes"], []),
+            ("fresh", ["--yes"], ["--host-state", "--host-write", "restart"]),
+            ("restart-fails", ["--yes"], ["--host-state", "--host-write", "restart"]),
+            ("restart-retry", ["--yes"], ["--host-state", "restart"]),
+        ]:
+            docker_env = dict(env, PSEUDOLIFE_DOCKER="{HOME}/fixture_docker." + ("cmd" if core.WINDOWS else "sh"),
+                              R1_SETUP_FIXTURE=mode, R1_SETUP_ENGINE=engine)
+            if mode == "restart-retry":
+                docker_env["PSEUDOLIFE_MCP_TOKEN"] = "fixture-console-token"
+            result.append(core.Case("setup-" + engine + "-image-" + mode, base + extra, env=docker_env, daemon=_daemon(),
+                                    setup=_docker_setup, after=_docker_after(expected), programs=("docker", "tailscale")))
     return result
