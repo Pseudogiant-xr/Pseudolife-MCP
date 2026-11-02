@@ -9,10 +9,15 @@ import subprocess
 import pytest
 
 
-def _run(tmp_path: Path, *arguments: str, dsn: str | None = None, models: Path | None = None):
-    if "PSEUDOLIFE_PROOF_CANDIDATE" not in os.environ:
+def _candidate() -> Path:
+    value = os.environ.get("PSEUDOLIFE_PROOF_CANDIDATE") or os.environ.get("PSEUDOLIFE_RUST_BINARY")
+    if not value:
         pytest.skip("set PSEUDOLIFE_PROOF_CANDIDATE to the native CLI")
-    source = Path(os.environ["PSEUDOLIFE_PROOF_CANDIDATE"])
+    return Path(value).resolve()
+
+
+def _run(tmp_path: Path, *arguments: str, dsn: str | None = None, models: Path | None = None):
+    source = _candidate()
     candidate = tmp_path / source.name
     shutil.copy2(source, candidate)
     env = {key: value for key, value in os.environ.items()
@@ -181,8 +186,7 @@ def test_lost_database_replies_are_bounded_and_cleanup_is_reported(tmp_path, fau
     import struct
     import threading
 
-    if "PSEUDOLIFE_PROOF_CANDIDATE" not in os.environ:
-        pytest.skip("set PSEUDOLIFE_PROOF_CANDIDATE to the native CLI")
+    source = _candidate()
     reached = threading.Event()
     release = threading.Event()
     queries = []
@@ -229,7 +233,7 @@ def test_lost_database_replies_are_bounded_and_cleanup_is_reported(tmp_path, fau
         daemon_threads = True
 
     candidate = tmp_path / ("pseudolife-stdio.exe" if os.name == "nt" else "pseudolife-stdio")
-    shutil.copy2(os.environ["PSEUDOLIFE_PROOF_CANDIDATE"], candidate)
+    shutil.copy2(source, candidate)
     daemon = tmp_path / ("pseudolife-daemon.exe" if os.name == "nt" else "pseudolife-daemon")
     daemon.write_bytes(b"intentionally not executable")
     models = _admission_models(tmp_path / "models")

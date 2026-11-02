@@ -55,8 +55,12 @@ creation, sends SIGTERM to the owned CLI, and checks its child, files and bank
 are gone. Database-admission cases also compare the oracle's error bytes.
 Loopback PostgreSQL wire cases lose CREATE/DROP replies and check bounded
 exit and recovery; the live proof also covers environment and password-file
-authentication (password-file isolation is POSIX-only). These review-fix
-regressions await execution; earlier evidence is bound to `e8113388`.
+authentication (password-file isolation is POSIX-only). At `9a2a2ee2`, the
+production code passed 14 Linux proof cases and nine Windows admission/wire
+cases, with zero owned banks left on Linux. The seven private cleanup and
+authentication tests also compile into `cli_doctor_proof_contract` for hosted
+stress. The test helper accepts `PSEUDOLIFE_RUST_BINARY`, as supplied by the
+stress runner. Hosted stress remains pending.
 
 Deferred before any effect: other argv shapes (abbreviations, `=` forms,
 repeats, help, bad values). A saved `--agent-state` with the proof is a usage

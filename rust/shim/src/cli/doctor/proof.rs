@@ -720,11 +720,14 @@ mod tests {
             adapters: Vec::new(),
             digest_paths: vec![digest.clone()],
         };
-        let close = tokio::spawn(async move { fixture.close().await });
-        tokio::task::yield_now().await;
-        let closed_early = close.is_finished();
+        let mut close = tokio::spawn(async move { fixture.close().await });
+        let early = tokio::time::timeout(Duration::from_millis(100), &mut close).await;
+        let closed_early = early.is_ok();
         release.send(()).unwrap();
-        let result = close.await.unwrap();
+        let result = match early {
+            Ok(result) => result.unwrap(),
+            Err(_) => close.await.unwrap(),
+        };
         state::drain(&digest).await;
         let leftover = root.exists();
         if leftover {
