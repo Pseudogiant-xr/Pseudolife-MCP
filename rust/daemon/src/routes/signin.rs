@@ -356,15 +356,15 @@ pub(crate) async fn route(
         })
         .await
         {
-                Ok(revoked) => revoked,
-                Err(_) => {
-                    eprintln!("console sessions: revoke failed (store error)");
-                    return json_response(
-                        503,
-                        &json!({"error": "signin_unavailable", "hint": BANK_UNREACHABLE}),
-                    );
-                }
-            };
+            Ok(revoked) => revoked,
+            Err(_) => {
+                eprintln!("console sessions: revoke failed (store error)");
+                return json_response(
+                    503,
+                    &json!({"error": "signin_unavailable", "hint": BANK_UNREACHABLE}),
+                );
+            }
+        };
         return json_response(200, &json!({"revoked": revoked}));
     }
     // POST /api/console/link

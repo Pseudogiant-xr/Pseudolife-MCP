@@ -344,7 +344,10 @@ async fn revoke_sessions(
     name: &str,
 ) -> Result<(), DbError> {
     let present: bool = transaction
-        .query_one("SELECT to_regclass('public.console_sessions') IS NOT NULL", &[])
+        .query_one(
+            "SELECT to_regclass('public.console_sessions') IS NOT NULL",
+            &[],
+        )
         .await
         .map_err(|error| classify(&error))?
         .try_get(0)
