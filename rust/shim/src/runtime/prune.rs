@@ -82,7 +82,7 @@ fn verify_process_evidence(rows: &mut Vec<Process>) -> Result<()> {
 }
 #[cfg(windows)]
 #[allow(unsafe_code)]
-fn verify_process_evidence(rows: &mut Vec<Process>) -> Result<()> {
+fn verify_process_evidence(rows: &mut [Process]) -> Result<()> {
     use windows_sys::Win32::{
         Foundation::{CloseHandle, INVALID_HANDLE_VALUE},
         System::Diagnostics::ToolHelp::{
@@ -167,11 +167,18 @@ pub fn tunnel_runtimes(
     processes: &[Process],
 ) -> Result<BTreeSet<PathBuf>> {
     let mut pinned = BTreeSet::new();
-    if !crate::board::state::exists(root) {
-        return Ok(pinned);
-    }
     crate::credentials::reject_ancestor_redirects(root)
-        .map_err(|_| "tunnel directory is redirected; no runtime was removed")?;
+        .map_err(|_| "tunnel directory is redirected or unreadable; no runtime was removed")?;
+    match fs::symlink_metadata(root) {
+        Ok(meta) if meta.is_dir() && !redirect(&meta) => {}
+        Ok(_) => {
+            return Err(
+                "tunnel directory is redirected or not a directory; no runtime was removed".into(),
+            );
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(pinned),
+        Err(_) => return Err("tunnel directory is unreadable; no runtime was removed".into()),
+    }
     for entry in
         fs::read_dir(root).map_err(|_| "tunnel directory is unreadable; no runtime was removed")?
     {
@@ -211,10 +218,10 @@ pub fn tunnel_runtimes(
         // Native supervisors may pin a runtime directly. No profile credentials
         // or remote endpoints are read while determining local dependencies.
         for key in ["executable", "runtime_path", "interpreter"] {
-            if let Some(path) = record.get(key).and_then(Value::as_str) {
-                if let Some(runtime) = registrations::runtime_path(Path::new(path), layout) {
-                    pinned.insert(runtime);
-                }
+            if let Some(path) = record.get(key).and_then(Value::as_str)
+                && let Some(runtime) = registrations::runtime_path(Path::new(path), layout)
+            {
+                pinned.insert(runtime);
             }
         }
         let Some(snapshot) = record.get("snapshot").filter(|v| !v.is_null()) else {
@@ -224,10 +231,10 @@ pub fn tunnel_runtimes(
             return Err("invalid tunnel snapshot; no runtime was removed".into());
         }
         for key in ["executable", "runtime_path", "interpreter"] {
-            if let Some(path) = snapshot.get(key).and_then(Value::as_str) {
-                if let Some(runtime) = registrations::runtime_path(Path::new(path), layout) {
-                    pinned.insert(runtime);
-                }
+            if let Some(path) = snapshot.get(key).and_then(Value::as_str)
+                && let Some(runtime) = registrations::runtime_path(Path::new(path), layout)
+            {
+                pinned.insert(runtime);
             }
         }
         let digest = snapshot

@@ -96,8 +96,14 @@ directories and malformed markers are always retained for explicit recovery.
 
 Registration migration backs up each changed file privately, preserves unrelated
 entries and credentials, follows a dotfile symlink to its target, retains POSIX
-permission bits and validates Windows ownership. A concurrent change is
-preserved rather than overwritten by rollback. The only migrated arguments are
+permission bits and validates Windows ownership. A concurrent change detected
+before publication is left in place. Publication
+preserves the actual displaced file in an owner-only recovery directory, using
+atomic file exchange on POSIX and `ReplaceFileW` with a backup on Windows. If
+that displaced file differs from the observed input, the updater reports the
+conflict and recovery location; it never rolls back over another writer. An
+incomplete registration migration retains all runtimes. The only migrated
+arguments are
 the leading `-m pseudolife_memory[.cli]` pair; mode arguments remain. Native
 updates inspect legacy venv distribution metadata without running an
 interpreter. Editable, spawning and unverified installs remain in place.
@@ -137,7 +143,8 @@ The installer-facing command is:
 pseudolife-mcp runtime install --archive <archive> --sha256sums <SUMS-file> --version <version> [--json]
 ```
 
-`runtime::run` receives arguments after `runtime`; the CLI dispatches this mode directly. It takes the same update lock and calls `install_archive`. The
+`runtime::run` receives arguments after `runtime`; the CLI dispatches this mode
+directly. It takes the same update lock and calls `install_archive`. The
 archive and SUMS files are retained for installer retry/recovery. There is no
 `--binary` release bypass. A successful JSON report has `state: "installed"`,
 `runtime`, `version` and `launcher`; installation failures return a
@@ -147,16 +154,18 @@ before filesystem mutation. Setup owns the subsequent registration step.
 ## Recovery and validation
 
 A failed download or checksum leaves the old launcher and runtime active. A
-failed registration write retains its private backup and any newer concurrent
-content. If the stable executable is locked during activation, release the lock
+failed registration write retains its private recovery directory and any newer
+concurrent content, including the actual displaced file when publication raced
+a writer. Review the reported recovery location before retrying. If the stable
+executable is locked during activation, release the lock
 or retry after the scanner exits; running sessions need not be closed. If an
 OS error also blocks rollback, preserve the `*.old-native-*` file and rerun
 native setup from a separate CLI artifact; it reconstructs the stable path
 from the selected complete runtime. Never repair by deleting runtime markers,
 credentials, registrations or tunnel evidence.
 
-The source includes isolated unit tests under `runtime::tests`, plus the `native_runtime_installed` integration
-test. The integration test runs a production launcher in an empty PATH and
+The source includes isolated unit tests under `runtime::tests`, plus the
+`native_runtime_installed` integration test. The integration test runs a production launcher in an empty PATH and
 exercises two installed native sessions while updating side by side, Unicode
 stdio and exit propagation. Build/execution evidence must be recorded separately;
 formatting success does not prove these tests have run.

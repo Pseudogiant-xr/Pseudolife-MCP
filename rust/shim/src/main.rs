@@ -2,7 +2,9 @@
 mod argv;
 use std::process::ExitCode;
 fn main() -> ExitCode {
-    if let Some(code) = pseudolife_stdio::runtime::maybe_launch() { return ExitCode::from(code); }
+    if let Some(code) = pseudolife_stdio::runtime::maybe_launch() {
+        return ExitCode::from(code);
+    }
     // Episode hooks ignore every tail argument, including opaque OS strings.
     let first = std::env::args_os().nth(1);
     if let Some(code) = run_episode(first.as_deref().and_then(std::ffi::OsStr::to_str)) {

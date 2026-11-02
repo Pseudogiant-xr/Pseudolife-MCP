@@ -344,18 +344,19 @@ pub(crate) fn activate_launcher(layout: &Layout, binary: &Path) -> Result<Activa
                 fs::copy(&layout.launcher, backup).map_err(io_error)?;
             }
         }
-        let mut activation = Activation {
+        let activation = Activation {
             launcher: layout.launcher.clone(),
             backup: backup.clone(),
             committed: false,
             changed: true,
         };
+        #[cfg(windows)]
+        rename_retry(&temp, &layout.launcher)?;
+        #[cfg(not(windows))]
         if let Err(error) = rename_retry(&temp, &layout.launcher) {
             // On POSIX rename failure leaves the original in place.
-            #[cfg(not(windows))]
-            {
-                activation.changed = false;
-            }
+            let mut activation = activation;
+            activation.changed = false;
             return Err(error);
         }
         Ok(activation)

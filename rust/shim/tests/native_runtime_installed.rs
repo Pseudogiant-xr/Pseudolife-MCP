@@ -107,6 +107,17 @@ fn installed_production_launcher_ignores_incomplete_and_forged_runtime() {
     );
     assert_eq!(result.stdout, direct.stdout);
     assert_eq!(result.stderr, direct.stderr);
+    for missing in ["PSEUDOLIFE_SHIM_RUNTIMES", "PSEUDOLIFE_SHIM_LAUNCHER"] {
+        let result = home
+            .command(&layout.launcher)
+            .env_remove(missing)
+            .arg("--help")
+            .output()
+            .unwrap();
+        assert_eq!(result.status.code(), Some(1));
+        assert!(result.stdout.is_empty());
+        assert!(String::from_utf8_lossy(&result.stderr).contains("set both"));
+    }
 }
 
 #[cfg(windows)]

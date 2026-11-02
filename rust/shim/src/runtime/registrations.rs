@@ -1,6 +1,6 @@
 //! Conservative registration discovery and transactional, narrowly scoped edits.
 use super::*;
-use std::{collections::BTreeSet, io::Write};
+use std::collections::BTreeSet;
 
 pub const SERVER: &str = "pseudolife-memory";
 #[derive(Clone, Debug)]
@@ -221,10 +221,11 @@ fn owned_console(path: &Path) -> bool {
         text.lines()
             .any(|line| line.trim() == "from pseudolife_memory.cli import main")
     }
-    if let Ok(text) = std::str::from_utf8(&bytes) {
-        if text.starts_with("#!") && entry(text) {
-            return true;
-        }
+    if let Ok(text) = std::str::from_utf8(&bytes)
+        && text.starts_with("#!")
+        && entry(text)
+    {
+        return true;
     }
     // distlib appends a ZIP containing __main__.py to its Windows stub.
     let Ok(mut archive) = zip::ZipArchive::new(std::io::Cursor::new(bytes)) else {
@@ -477,77 +478,7 @@ pub fn migrated_args(args: &[String]) -> &[String] {
     }
 }
 
-/// Preserve dotfile symlinks, ownership and permission bits, back up privately,
-/// and refuse a concurrent change instead of overwriting its newer content.
-pub fn write_config(path: &Path, before: &[u8], after: &[u8]) -> Result<PathBuf> {
-    let target = if path.exists() {
-        fs::canonicalize(path).map_err(io_error)?
-    } else {
-        path.to_owned()
-    };
-    crate::credentials::reject_ancestor_redirects(&target)
-        .map_err(|_| "client config target is redirected")?;
-    let parent = target.parent().ok_or("client config has no parent")?;
-    if !parent.is_dir() {
-        crate::board::state::private_dir(parent).map_err(str::to_owned)?;
-    }
-    let id = uuid::Uuid::new_v4();
-    let backup = parent.join(format!(
-        "{}.bak-native-{id}",
-        target.file_name().unwrap().to_string_lossy()
-    ));
-    let temp = parent.join(format!(".client-native-{id}.tmp"));
-    let meta = fs::metadata(&target).ok();
-    #[cfg(unix)]
-    if let Some(meta) = &meta {
-        use std::os::unix::fs::MetadataExt;
-        if meta.uid() != rustix::process::getuid().as_raw() || meta.mode() & 0o022 != 0 {
-            return Err(
-                "client configuration is not owned by this user or is writable by others".into(),
-            );
-        }
-    }
-    #[cfg(windows)]
-    if meta.is_some() {
-        let opened = fs::File::open(&target).map_err(io_error)?;
-        crate::credentials::windows_security::validate(&opened)
-            .map_err(|_| "client configuration is not owner-only")?;
-    }
-    let result = (|| {
-        let mut saved = crate::board::state::create(&backup).map_err(str::to_owned)?;
-        saved
-            .file
-            .write_all(before)
-            .and_then(|_| saved.file.sync_all())
-            .map_err(io_error)?;
-        let mut pending = crate::board::state::create(&temp).map_err(str::to_owned)?;
-        pending
-            .file
-            .write_all(after)
-            .and_then(|_| pending.file.sync_all())
-            .map_err(io_error)?;
-        #[cfg(unix)]
-        if let Some(meta) = &meta {
-            pending
-                .file
-                .set_permissions(meta.permissions())
-                .map_err(io_error)?;
-        }
-        drop(pending);
-        if read_optional(&target)?.as_deref().unwrap_or_default() != before {
-            return Err(
-                "client configuration changed during the edit; newer content was preserved".into(),
-            );
-        }
-        fs::rename(&temp, &target).map_err(io_error)?;
-        if fs::read(&target).map_err(io_error)? != after {
-            return Err("client configuration changed after the edit; newer content was preserved; backup retained".into());
-        }
-        Ok(backup.clone())
-    })();
-    let _ = fs::remove_file(&temp);
-    result
-}
+pub use super::config_file::write_config;
 
 pub fn migrate(registration: &Registration, layout: &Layout) -> Value {
     let result = (|| -> Result<Value> {

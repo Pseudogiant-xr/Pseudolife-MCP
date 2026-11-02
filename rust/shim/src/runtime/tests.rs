@@ -1,5 +1,7 @@
 use super::*;
-use std::{collections::BTreeSet, io::Write};
+use std::collections::BTreeSet;
+#[cfg(not(windows))]
+use std::io::Write;
 
 struct Fixture {
     path: PathBuf,
@@ -321,10 +323,8 @@ fn changed_registration_fields_are_not_overwritten_by_a_stale_discovery() {
                 _ => json!("new"),
             };
             let bytes = if client == "codex" {
-                let data: toml::Value =
-                    serde_json::from_value(json!({"mcp_servers":{registrations::SERVER:new}}))
-                        .unwrap();
-                toml::to_string(&data).unwrap().into_bytes()
+                format!("[mcp_servers.pseudolife-memory]\ncommand = {}\nargs = {}\ncwd = {}\n[mcp_servers.pseudolife-memory.env]\nsetting = {}\n",
+                    new["command"], new["args"], new["cwd"], new["env"]["setting"]).into_bytes()
             } else {
                 serde_json::to_vec(&json!({"mcpServers":{registrations::SERVER:new}})).unwrap()
             };
@@ -427,4 +427,96 @@ fn locked_windows_launcher_keeps_old_runtime_and_allows_next_retry() {
     assert_eq!(fs::read(&f.layout.launcher).unwrap(), before);
     assert_eq!(current_runtime(&f.layout).unwrap().sequence, old.sequence);
     assert_eq!(f.install("1.0.1").version, "1.0.1");
+}
+
+#[test]
+fn another_first_launcher_can_create_the_usage_file_before_our_create() {
+    let f = Fixture::new();
+    let runtime = f.install("1.0.0");
+    let path = runtime.usage_lock_path();
+    let lock = launch::usage_file_with(&path, || {
+        drop(crate::board::state::create(&path).unwrap());
+        crate::board::state::create(&path)
+    })
+    .unwrap();
+    lock.lock_shared().unwrap();
+}
+
+#[test]
+fn selection_retries_when_an_update_prunes_before_the_usage_pin() {
+    let f = Fixture::new();
+    let old = f.install("1.0.0");
+    let mut calls = 0;
+    let (selected, _pin) = launch::select_pin_with(&f.layout, |runtime| {
+        calls += 1;
+        if calls == 1 {
+            f.install("1.0.1");
+            let _update = UpdateLock::acquire(&f.layout).unwrap();
+            remove_unused(&f.layout, Ok(evidence()));
+            assert!(!old.path.exists());
+        }
+        launch::pin(runtime)
+    })
+    .unwrap();
+    assert_eq!(selected.version, "1.0.1");
+    assert_eq!(calls, 2);
+}
+
+#[test]
+fn replacement_preserves_the_actual_file_changed_after_the_last_comparison() {
+    let f = Fixture::new();
+    let path = f.path.join("client.json");
+    crate::board::state::atomic_create(&path, b"old content").unwrap();
+    let error = config_file::write_config_with(&path, b"old content", b"replacement", || {
+        fs::write(&path, b"concurrent writer content").unwrap();
+    })
+    .unwrap_err();
+    assert!(
+        error.contains("actual displaced file was preserved"),
+        "{error}"
+    );
+    let recovery = fs::read_dir(&f.path)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .find(|e| {
+            e.file_name()
+                .to_string_lossy()
+                .starts_with(".client-native-backup-")
+        })
+        .unwrap()
+        .path();
+    assert_eq!(
+        fs::read(recovery.join("previous")).unwrap(),
+        b"concurrent writer content"
+    );
+    assert_eq!(fs::read(&path).unwrap(), b"replacement");
+}
+
+#[cfg(unix)]
+#[test]
+fn an_inaccessible_tunnel_parent_is_unknown_evidence() {
+    use std::os::unix::fs::PermissionsExt;
+    let f = Fixture::new();
+    let parent = f.path.join("inaccessible");
+    fs::create_dir(&parent).unwrap();
+    fs::set_permissions(&parent, fs::Permissions::from_mode(0o000)).unwrap();
+    let observed = prune::tunnel_runtimes(&f.layout, &parent.join("tunnel"), &[]);
+    fs::set_permissions(&parent, fs::Permissions::from_mode(0o700)).unwrap();
+    assert!(
+        observed.is_err(),
+        "unreadable tunnel root was treated as absent"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn redirected_tunnel_roots_and_missing_children_are_unknown_evidence() {
+    let f = Fixture::new();
+    let real = f.path.join("real");
+    fs::create_dir(&real).unwrap();
+    let redirected = f.path.join("redirected");
+    std::os::unix::fs::symlink(&real, &redirected).unwrap();
+    for root in [&redirected, &redirected.join("absent")] {
+        assert!(prune::tunnel_runtimes(&f.layout, root, &[]).is_err());
+    }
 }

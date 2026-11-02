@@ -6,20 +6,45 @@ use std::sync::OnceLock;
 static RUNNING_LOCK: OnceLock<fs::File> = OnceLock::new();
 
 pub(super) fn usage_file(path: &Path) -> Result<fs::File> {
-    let opened = match crate::board::state::open_with_write(path, true) {
-        Ok(opened) => opened,
-        Err(_) if !path.exists() => crate::board::state::create(path).map_err(str::to_owned)?,
-        Err(_) => return Err("native runtime usage lock is unavailable".into()),
-    };
+    usage_file_with(path, || crate::board::state::create(path))
+}
+
+pub(super) fn usage_file_with(
+    path: &Path,
+    create: impl FnOnce() -> std::result::Result<crate::board::state::PrivateFile, &'static str>,
+) -> Result<fs::File> {
+    let opened = crate::board::state::open_with_write(path, true)
+        .or_else(|_| create().or_else(|_| crate::board::state::open_with_write(path, true)))
+        .map_err(|_| "native runtime usage lock is unavailable".to_owned())?;
     Ok(opened.file)
 }
 
-fn pin(runtime: &Runtime) -> Result<fs::File> {
+pub(super) fn pin(runtime: &Runtime) -> Result<fs::File> {
     let file = usage_file(&runtime.usage_lock_path())?;
     file.lock_shared().map_err(io_error)?;
     // Selection can race with pruning while waiting for the shared lock.
     read_runtime(&runtime.path)?;
     Ok(file)
+}
+
+pub(super) fn select_pin_with(
+    layout: &Layout,
+    mut acquire: impl FnMut(&Runtime) -> Result<fs::File>,
+) -> Result<(Runtime, fs::File)> {
+    for _ in 0..4 {
+        let runtime = current_runtime(layout).ok_or_else(|| format!(
+            "no complete native runtime under {}; rerun native setup from a separate installed CLI", layout.root.display()))?;
+        match acquire(&runtime) {
+            Ok(lock) => return Ok((runtime, lock)),
+            Err(error) => {
+                if current_runtime(layout).is_some_and(|new| new.sequence != runtime.sequence) {
+                    continue;
+                }
+                return Err(error);
+            }
+        }
+    }
+    Err("runtime selection changed repeatedly; retry after the update finishes".into())
 }
 
 /// Call before dispatching *any* CLI mode. A runtime executable pins itself
@@ -30,8 +55,9 @@ pub fn maybe_launch() -> Option<u8> {
         Ok(layout) => layout,
         Err(error) => {
             // Half-configured overrides must not silently bypass selection.
-            if std::env::var_os("PSEUDOLIFE_SHIM_LAUNCHER")
-                .is_some_and(|p| same_path(&executable, Path::new(&p)))
+            if executable.file_name().is_some_and(|name| name == BINARY)
+                || std::env::var_os("PSEUDOLIFE_SHIM_LAUNCHER")
+                    .is_some_and(|p| same_path(&executable, Path::new(&p)))
             {
                 crate::stderrln!("pseudolife-mcp: {error}");
                 return Some(1);
@@ -40,10 +66,11 @@ pub fn maybe_launch() -> Option<u8> {
         }
     };
     if !same_path(&executable, &layout.launcher) {
-        if executable
-            .parent()
-            .and_then(|p| p.parent())
-            .is_some_and(|root| same_path(root, &layout.root))
+        if executable.file_name().is_some_and(|name| name == BINARY)
+            && executable
+                .parent()
+                .and_then(|p| p.parent())
+                .is_some_and(|root| same_path(root, &layout.root))
         {
             let runtime = match read_runtime(executable.parent()?) {
                 Ok(runtime) => runtime,
@@ -64,18 +91,8 @@ pub fn maybe_launch() -> Option<u8> {
         }
         return None;
     }
-    let runtime = match current_runtime(&layout) {
-        Some(runtime) => runtime,
-        None => {
-            crate::stderrln!(
-                "pseudolife-mcp: no complete native runtime under {}; rerun the native installer or pseudolife-mcp update --clients-only from a separate installed CLI",
-                layout.root.display()
-            );
-            return Some(1);
-        }
-    };
-    let lock = match pin(&runtime) {
-        Ok(lock) => lock,
+    let (runtime, lock) = match select_pin_with(&layout, pin) {
+        Ok(selected) => selected,
         Err(error) => {
             crate::stderrln!("pseudolife-mcp: {error}");
             return Some(1);

@@ -1,5 +1,6 @@
 //! Opt-in native, side-by-side client runtimes. No interpreter is used here.
 mod cli;
+mod config_file;
 mod install;
 mod launch;
 mod prune;
@@ -265,7 +266,7 @@ pub fn same_path(a: &Path, b: &Path) -> bool {
         let path = fs::canonicalize(path).unwrap_or_else(|_| path.to_owned());
         #[cfg(windows)]
         {
-            return PathBuf::from(path.to_string_lossy().to_lowercase());
+            PathBuf::from(path.to_string_lossy().to_lowercase())
         }
         #[cfg(not(windows))]
         {
@@ -359,7 +360,11 @@ pub fn update_shim(source: &str, repo: Option<&Path>, reinstall: bool) -> Value 
         }
         let failed = migrations.iter().any(|r| r["state"] == "failed");
         let exposed = registrations::expose_launcher(&layout);
-        let evidence = collect_evidence(&layout);
+        let evidence = if failed {
+            Err("client registration migration is incomplete; no runtime was removed".into())
+        } else {
+            collect_evidence(&layout)
+        };
         let pruned = remove_unused(&layout, evidence);
         Ok(
             json!({"state": if failed {"failed".into()} else {format!("{}:{}", if installed {"installed"} else {"current"}, runtime.version)},
