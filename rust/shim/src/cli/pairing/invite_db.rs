@@ -65,7 +65,7 @@ pub(super) async fn prepare(client: &Client) -> Result<(), DbError> {
         )
         .await
         .map_err(|_| DbError::Defer)?;
-    const EXPECTED: [(&str, &str, &str); 12] = [
+    const EXPECTED: [(&str, &str, &str); 13] = [
         ("meta", "key", "text"),
         ("meta", "value", "jsonb"),
         ("principals", "principal", "text"),
@@ -78,6 +78,7 @@ pub(super) async fn prepare(client: &Client) -> Result<(), DbError> {
         ("principals", "created_at", "double precision"),
         ("principals", "paired_at", "double precision"),
         ("principals", "revoked_at", "double precision"),
+        ("principals", "owned", "boolean"),
     ];
     for row in &rows {
         let (table, column, kind): (String, String, String) = (
