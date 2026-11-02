@@ -1116,8 +1116,8 @@ async fn recovery_after_token_conflict(competing_config: bool) {
     let plan = plan_replace(&client.config, &home.0, "https://example.com", None, true).unwrap();
     let expected = plan.env().clone();
     let mut applied = apply_replace(&mut client, &home.0, plan).await.unwrap();
-    let token = home.0.join("pseudolife/token");
-    let retained = home.0.join("pseudolife/retained-token");
+    let token = home.0.join("pseudolife").join("token");
+    let retained = home.0.join("pseudolife").join("retained-token");
     std::fs::rename(&token, &retained).unwrap();
     pseudolife_stdio::board::state::atomic_create(&token, b"fixture-token").unwrap();
     let failure = applied
@@ -1279,7 +1279,7 @@ async fn replace_updates_user_false_under_truthy_project_no_spawn() {
 async fn bootstrap_authority_error_identifies_project_file_and_key() {
     let home = Home::new();
     let mut client = Fake::new(&home.0);
-    let file = home.0.join("project/config.toml");
+    let file = home.0.join("project").join("config.toml");
     let settings =
         json!({"mcp_servers":{"pseudolife-memory":{"env_vars":["PSEUDOLIFE_MCP_TOKEN_FILE"]}}});
     client.config["layers"].as_array_mut().unwrap().insert(
