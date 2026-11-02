@@ -196,79 +196,6 @@ fn windows_path_without_verbatim_prefix(path: &str) -> String {
     }
 }
 
-#[cfg(test)]
-mod path_tests {
-    use super::windows_path_without_verbatim_prefix;
-
-    #[test]
-    fn windows_verbatim_short_drive_and_unc_paths() {
-        for (verbatim, plain) in [
-            (r"\\?\C:\", r"C:\"),
-            (
-                r"\\?\C:\cache\.config\COM0.txt",
-                r"C:\cache\.config\COM0.txt",
-            ),
-            (r"\\?\UNC\server\share", r"\\server\share"),
-            (r"\\?\UNC\server\share\cache\", r"\\server\share\cache\"),
-            (r"C:\cache\file", r"C:\cache\file"),
-        ] {
-            assert_eq!(windows_path_without_verbatim_prefix(verbatim), plain);
-        }
-    }
-
-    #[test]
-    fn windows_verbatim_max_path_boundary() {
-        for root in [r"C:\", r"\\server\share\"] {
-            let prefix = if root.starts_with(r"\\") {
-                format!(r"\\?\UNC\{}", &root[2..])
-            } else {
-                format!(r"\\?\{root}")
-            };
-            // The final component can take a short existing ancestor over
-            // MAX_PATH, so the decision must include every appended component.
-            let middle = format!("{}\\", "a".repeat(200));
-            let short_tail = "b".repeat(259 - root.encode_utf16().count() - middle.len());
-            let short = format!("{prefix}{middle}{short_tail}");
-            let plain = format!("{root}{middle}{short_tail}");
-            assert_eq!(plain.encode_utf16().count(), 259);
-            assert_eq!(windows_path_without_verbatim_prefix(&short), plain);
-            let long = format!("{short}b");
-            assert_eq!(windows_path_without_verbatim_prefix(&long), long);
-        }
-    }
-
-    #[test]
-    fn windows_verbatim_length_counts_utf16_units() {
-        let plain = format!("C:\\{}\\{}", "😀".repeat(100), "b".repeat(55));
-        let short = format!(r"\\?\{plain}");
-        assert_eq!(plain.encode_utf16().count(), 259);
-        assert_eq!(windows_path_without_verbatim_prefix(&short), plain);
-        let long = format!("{short}b");
-        assert!(long.chars().count() < 260);
-        assert_eq!(windows_path_without_verbatim_prefix(&long), long);
-    }
-
-    #[test]
-    fn windows_verbatim_namespaces_and_normalization_are_preserved() {
-        for path in [
-            r"\\?\Volume{00000000-0000-0000-0000-000000000000}\cache",
-            r"\\?\GLOBALROOT\Device\HarddiskVolume1\cache",
-            r"\\?\C:relative",
-            r"\\?\UNC\server",
-            r"\\?\C:\cache\name.",
-            r"\\?\C:\cache\name ",
-            r"\\?\C:\cache\..\file",
-            r"\\?\C:\cache/file",
-            r"\\?\C:\\",
-            r"\\?\C:\cache\\file",
-            r"\\?\C:\cache\NUL.txt",
-            r"\\?\C:\cache\com¹.txt",
-        ] {
-            assert_eq!(windows_path_without_verbatim_prefix(path), path);
-        }
-    }
-}
-
 fn receipt_path(config: &Config, pid: u32) -> Result<PathBuf, String> {
     Ok(config
         .receipt_dir
@@ -789,4 +716,77 @@ pub(super) fn parse(args: Vec<OsString>) -> Result<Option<Config>, String> {
         log,
         receipt_dir,
     }))
+}
+
+#[cfg(test)]
+mod path_tests {
+    use super::windows_path_without_verbatim_prefix;
+
+    #[test]
+    fn windows_verbatim_short_drive_and_unc_paths() {
+        for (verbatim, plain) in [
+            (r"\\?\C:\", r"C:\"),
+            (
+                r"\\?\C:\cache\.config\COM0.txt",
+                r"C:\cache\.config\COM0.txt",
+            ),
+            (r"\\?\UNC\server\share", r"\\server\share"),
+            (r"\\?\UNC\server\share\cache\", r"\\server\share\cache\"),
+            (r"C:\cache\file", r"C:\cache\file"),
+        ] {
+            assert_eq!(windows_path_without_verbatim_prefix(verbatim), plain);
+        }
+    }
+
+    #[test]
+    fn windows_verbatim_max_path_boundary() {
+        for root in [r"C:\", r"\\server\share\"] {
+            let prefix = if let Some(unc) = root.strip_prefix(r"\\") {
+                format!(r"\\?\UNC\{unc}")
+            } else {
+                format!(r"\\?\{root}")
+            };
+            // The final component can take a short existing ancestor over
+            // MAX_PATH, so the decision must include every appended component.
+            let middle = format!("{}\\", "a".repeat(200));
+            let short_tail = "b".repeat(259 - root.encode_utf16().count() - middle.len());
+            let short = format!("{prefix}{middle}{short_tail}");
+            let plain = format!("{root}{middle}{short_tail}");
+            assert_eq!(plain.encode_utf16().count(), 259);
+            assert_eq!(windows_path_without_verbatim_prefix(&short), plain);
+            let long = format!("{short}b");
+            assert_eq!(windows_path_without_verbatim_prefix(&long), long);
+        }
+    }
+
+    #[test]
+    fn windows_verbatim_length_counts_utf16_units() {
+        let plain = format!("C:\\{}\\{}", "😀".repeat(100), "b".repeat(55));
+        let short = format!(r"\\?\{plain}");
+        assert_eq!(plain.encode_utf16().count(), 259);
+        assert_eq!(windows_path_without_verbatim_prefix(&short), plain);
+        let long = format!("{short}b");
+        assert!(long.chars().count() < 260);
+        assert_eq!(windows_path_without_verbatim_prefix(&long), long);
+    }
+
+    #[test]
+    fn windows_verbatim_namespaces_and_normalization_are_preserved() {
+        for path in [
+            r"\\?\Volume{00000000-0000-0000-0000-000000000000}\cache",
+            r"\\?\GLOBALROOT\Device\HarddiskVolume1\cache",
+            r"\\?\C:relative",
+            r"\\?\UNC\server",
+            r"\\?\C:\cache\name.",
+            r"\\?\C:\cache\name ",
+            r"\\?\C:\cache\..\file",
+            r"\\?\C:\cache/file",
+            r"\\?\C:\\",
+            r"\\?\C:\cache\\file",
+            r"\\?\C:\cache\NUL.txt",
+            r"\\?\C:\cache\com¹.txt",
+        ] {
+            assert_eq!(windows_path_without_verbatim_prefix(path), path);
+        }
+    }
 }
