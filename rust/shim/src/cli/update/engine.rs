@@ -85,7 +85,7 @@ pub(super) fn selected_checkout(u: &mut Update) -> Result<Option<PathBuf>> {
                 repo.join("ops/docker-compose.yml"),
                 repo.join("ops/docker-compose.override.yml"),
             ],
-            &[env_file.clone()],
+            std::slice::from_ref(&env_file),
         );
         let env = compose_environment(&[env_file], &Environment::new());
         let mut args = vec!["compose".into()];
@@ -426,7 +426,7 @@ pub(super) fn deploy(u: &mut Update, repo: &Path) -> Result<()> {
             ops.join("docker-compose.yml"),
             ops.join("docker-compose.override.yml"),
         ],
-        &[env_file.clone()],
+        std::slice::from_ref(&env_file),
     );
     let choice =
         u.o.engine
@@ -439,7 +439,7 @@ pub(super) fn deploy(u: &mut Update, repo: &Path) -> Result<()> {
             })
             .unwrap_or_else(|| u.selected_engine.clone());
     let tree = tree_state(&repo);
-    let env = compose_environment(&[env_file.clone()], &build_environment(&tree));
+    let env = compose_environment(std::slice::from_ref(&env_file), &build_environment(&tree));
     if u.o.shadow && choice == "python" {
         return shadow::remove(u, &ops, &base, &env);
     }

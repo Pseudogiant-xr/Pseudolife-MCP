@@ -37,10 +37,10 @@ pub fn run_steps(
     if repo.is_some() {
         report["autostart"] = check_autostart(repo);
     }
-    if crate::board::state::exists(&runtime::home().join(".pseudolife-mcp/tunnel")) {
-        if let Some(tunnel) = update_tunnels(report.get("shim"), &NativeRunner) {
-            report["tunnel"] = tunnel;
-        }
+    if crate::board::state::exists(&runtime::home().join(".pseudolife-mcp/tunnel"))
+        && let Some(tunnel) = update_tunnels(report.get("shim"), &NativeRunner)
+    {
+        report["tunnel"] = tunnel;
     }
     report["ok"] = json!(
         report
@@ -125,15 +125,15 @@ fn registration_text(bytes: &[u8]) -> String {
     };
     let original = text.clone();
     for word in original.split_whitespace().collect::<Vec<_>>().windows(2) {
-        if word[0].eq_ignore_ascii_case("-EncodedCommand") {
-            if let Some(bytes) = base64_bytes(word[1].split('<').next().unwrap_or("")) {
-                text.push_str(&String::from_utf16_lossy(
-                    &bytes
-                        .chunks_exact(2)
-                        .map(|b| u16::from_le_bytes([b[0], b[1]]))
-                        .collect::<Vec<_>>(),
-                ));
-            }
+        if word[0].eq_ignore_ascii_case("-EncodedCommand")
+            && let Some(bytes) = base64_bytes(word[1].split('<').next().unwrap_or(""))
+        {
+            text.push_str(&String::from_utf16_lossy(
+                &bytes
+                    .chunks_exact(2)
+                    .map(|b| u16::from_le_bytes([b[0], b[1]]))
+                    .collect::<Vec<_>>(),
+            ));
         }
     }
     text
@@ -206,14 +206,13 @@ fn update_tunnels(shim: Option<&Value>, runner: &impl Runner) -> Option<Value> {
         );
         if let Some(mut report) = output.json().filter(|r| {
             matches!(r["state"].as_str(), Some("current" | "failed")) && r["detail"].is_string()
-        }) {
-            if (output.code == 0) == (report["state"] == "current") {
-                report["detail"] = json!(format!(
-                    "{}; run by the installed native launcher",
-                    report["detail"].as_str().unwrap()
-                ));
-                return Ok(Some(report));
-            }
+        }) && (output.code == 0) == (report["state"] == "current")
+        {
+            report["detail"] = json!(format!(
+                "{}; run by the installed native launcher",
+                report["detail"].as_str().unwrap()
+            ));
+            return Ok(Some(report));
         }
         Ok(Some(
             json!({"state":"failed","detail":format!("installed tunnel update ended with exit {}; run pseudolife-mcp tunnel status, then tunnel update and tunnel doctor",output.code)}),

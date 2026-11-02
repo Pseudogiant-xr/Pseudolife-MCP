@@ -82,12 +82,6 @@ pub(crate) struct Update {
     pub selected_engine: String,
 }
 
-fn whitespace(c: char) -> bool {
-    c.is_whitespace() || ('\u{1c}'..='\u{1f}').contains(&c)
-}
-fn repr(s: &str) -> String {
-    super::mode_repr(s)
-}
 fn output(text: &str, stderr: bool) -> std::io::Result<()> {
     let bytes = super::text_bytes(text);
     if stderr {
@@ -177,9 +171,6 @@ impl Update {
             schema_before: None,
             selected_engine: "python".into(),
         }
-    }
-    pub fn options(&self) -> &Options {
-        &self.o
     }
     pub fn step(&mut self, text: impl Into<String>) {
         let text = text.into();
@@ -303,9 +294,6 @@ impl Update {
         }
         Ok(())
     }
-    pub fn check_for_release(&mut self, tier: &str) -> Result<()> {
-        self.check(tier)
-    }
     pub fn run_locked(&mut self) -> Result<()> {
         let _lock = UpdateLock::acquire()?;
         self.update()
@@ -403,8 +391,8 @@ impl Update {
         if let Some(payload) = panic {
             std::panic::resume_unwind(payload);
         }
-        if self.o.as_json {
-            if output(
+        if self.o.as_json
+            && output(
                 &format!(
                     "{}\n",
                     serde_json::to_string_pretty(&self.report).expect("report")
@@ -412,9 +400,8 @@ impl Update {
                 false,
             )
             .is_err()
-            {
-                return 120;
-            }
+        {
+            return 120;
         }
         self.report.exit_code
     }

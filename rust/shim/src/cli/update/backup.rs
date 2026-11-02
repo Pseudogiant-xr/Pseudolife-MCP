@@ -3,7 +3,7 @@ use flate2::read::MultiGzDecoder;
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs::File,
-    io::{BufRead, BufReader, Read},
+    io::{BufRead, BufReader},
     time::{Duration, SystemTime},
 };
 
@@ -224,7 +224,7 @@ impl Update {
             ));
         }
         let (code, _) = self.command(
-            &vec![
+            &[
                 "cp".into(),
                 format!("{pg}:{remote}"),
                 part.to_string_lossy().into_owned(),

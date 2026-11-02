@@ -14,10 +14,10 @@ impl Output {
         for (offset, _) in text.match_indices('{') {
             let mut stream =
                 serde_json::Deserializer::from_str(&text[offset..]).into_iter::<Value>();
-            if let Some(Ok(value)) = stream.next() {
-                if value.is_object() {
-                    return Some(value);
-                }
+            if let Some(Ok(value)) = stream.next()
+                && value.is_object()
+            {
+                return Some(value);
             }
         }
         None
@@ -115,15 +115,14 @@ impl Runner for NativeRunner {
                 let out = tokio::spawn(read(stdout));
                 let err = tokio::spawn(async move {
                     let mut bytes = Vec::new();
-                    if let Some(pipe) = stderr {
-                        if pipe
+                    if let Some(pipe) = stderr
+                        && pipe
                             .take(8 * 1024 * 1024 + 1)
                             .read_to_end(&mut bytes)
                             .await
                             .is_err()
-                        {
-                            return None;
-                        }
+                    {
+                        return None;
                     }
                     Some(bytes)
                 });

@@ -271,7 +271,7 @@ pub(super) fn check_with(
             .map_err(|_| "Codex config is not UTF-8; hook approval is unknown")?;
         let config: toml::Value = toml::from_str(text)
             .map_err(|_| "Codex config is not valid TOML; hook approval is unknown")?;
-        if !config.get("plugins").and_then(|v| v.get(PLUGIN)).is_some()
+        if config.get("plugins").and_then(|v| v.get(PLUGIN)).is_none()
             && !text.contains(&format!("\"{PLUGIN}\""))
         {
             return Ok(result(

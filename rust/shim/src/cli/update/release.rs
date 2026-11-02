@@ -568,7 +568,7 @@ impl Update {
         }
         let compose = compose_args(
             &[file.clone(), repo.join("ops/docker-compose.override.yml")],
-            &[env_file.clone()],
+            std::slice::from_ref(&env_file),
         );
         let env = compose_environment(&[env_file], &engine::build_environment(&tree));
         let before = self.daemon_health();
