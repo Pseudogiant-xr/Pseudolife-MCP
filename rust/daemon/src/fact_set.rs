@@ -150,7 +150,7 @@ impl CortexWriteArgs {
 fn mcp_memory_fact_set<'a>(app: &'a crate::http::App, call: ToolCall<'a>) -> ToolFuture<'a> {
     Box::pin(async move {
         let svc = app.service.clone();
-        let ready = svc.ensure_init().await.map_err(internal_cause)?;
+        let ready = svc.ensure_init().await.map_err(internal)?;
         let caller = Caller {
             header_session: call.ident.header_session.clone(),
             transport_session: call.ident.transport_session.clone(),
