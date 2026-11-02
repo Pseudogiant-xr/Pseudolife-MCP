@@ -77,4 +77,4 @@ default-container commands and output. Updater acceptance additionally changes
 the container ID during recreation and verifies the subsequent check uses the
 new ID from that same Compose project. Linux `0fd31138` passed all 45 live and golden cases. Its new recording is
 Git-bound and used umask `022`; the 29 existing non-help cases match the prior
-recording under the unchanged comparison rules. Windows validation is pending.
+recording under the unchanged comparison rules. Windows recorded the same Git-bound oracle and passed all 45 live and golden cases; its 29 prior non-help cases also match under the existing rules.
