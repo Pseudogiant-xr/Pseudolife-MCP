@@ -26,15 +26,10 @@ Python remains the documented default until G2. This index changes no
 runtime default and does not close B12, G1 or G2.
 
 PR #1133 adds the native Codex bootstrap authority boundary and records the
-closed no-spawn planning difference; the counts below include these two rows.
+closed no-spawn planning difference.
 
-| D7 bucket | Entries |
-|---|---:|
-| presentation | 17 |
-| behaviour with no caller | 69 |
-| behaviour with a caller | 128 |
-| closed | 48 |
-| **Total** | **262** |
+The entry totals per D7 bucket are derived from the entry files, never
+committed here: `python rust/daemon/split_divergences.py --counts` prints them.
 
 ## Behaviour with a caller: B14b routing
 
@@ -181,12 +176,12 @@ whose remaining item is a proof keeps that boundary visible in its entry.
 ## Keeping the index current
 
 When a stream closes a row, update its D7 bucket and cite the closing PR or
-code, then update this count and remove its B14b routing row. New divergence
+code, then remove its B14b routing row. New divergence
 entries need a bucket, code evidence and, for behaviour with a caller, a
 caller and closing stream or batch. Preserve the one-entry-per-file format.
 
 Run `python rust/daemon/split_divergences.py --check` and
 `python -m pytest rust/ci/test_divergences_ledger.py` after ledger edits.
 The check rejects missing or unknown buckets, mismatched table widths,
-incorrect summary counts and incomplete or duplicate caller links.
+a committed count table and incomplete or duplicate caller links.
 The renderer excludes this summary and retains the per-entry evidence.
