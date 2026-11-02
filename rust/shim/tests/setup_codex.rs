@@ -27,6 +27,128 @@ struct Fake {
     override_env: bool,
     concurrent_env: bool,
     typed_extra: bool,
+    rejected_after_competitor: bool,
+}
+
+#[tokio::test]
+async fn isolated_credential_bootstrap_fixture() {
+    if std::env::var_os("PSEUDOLIFE_TEST_CREDENTIAL_HOME").is_none() {
+        return;
+    }
+    let home = std::path::PathBuf::from(std::env::var_os("CODEX_HOME").unwrap());
+    std::fs::create_dir_all(&home).unwrap();
+    std::fs::write(home.join("config.toml"), "# fixture\n").unwrap();
+    let token = home.parent().unwrap().join("credential");
+    pseudolife_stdio::board::state::atomic_create(&token, b"fixture-token").unwrap();
+    let mut client = Fake::new(&home);
+    for root in ["/config", "/layers/0/config"] {
+        let env =
+            client.config.pointer_mut(root).unwrap()["mcp_servers"]["pseudolife-memory"]["env"]
+                .as_object_mut()
+                .unwrap();
+        env.remove("PSEUDOLIFE_MCP_TOKEN");
+        env.insert("PSEUDOLIFE_MCP_TOKEN_FILE".into(), json!("~/credential"));
+    }
+    let report = pseudolife_stdio::setup::codex::configure_credential_file(
+        &mut client,
+        &home,
+        &home,
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+    assert_eq!(report["credential_file_path"], json!(token));
+}
+
+async fn isolated_fixture(name: &str, mode: &str) {
+    use process_wrap::tokio::{CommandWrap, KillOnDrop};
+    let home = Home::new();
+    let mut command = tokio::process::Command::new(std::env::current_exe().unwrap());
+    command
+        .args(["--exact", name, "--nocapture"])
+        .env_clear()
+        .env("HOME", &home.0)
+        .env("USERPROFILE", &home.0)
+        .env("CODEX_HOME", home.0.join(".codex"))
+        .env("LOCALAPPDATA", home.0.join("local"))
+        .env("APPDATA", home.0.join("roaming"))
+        .env("PSEUDOLIFE_TEST_CREDENTIAL_HOME", mode)
+        .env("PATH", &home.0)
+        .env("PATHEXT", ".CMD;.EXE")
+        .current_dir(&home.0)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    for key in ["SYSTEMROOT", "WINDIR"] {
+        if let Some(value) = std::env::var_os(key) {
+            command.env(key, value);
+        }
+    }
+    let mut command = CommandWrap::from(command);
+    command.wrap(KillOnDrop);
+    #[cfg(windows)]
+    command.wrap(process_wrap::tokio::JobObject);
+    #[cfg(unix)]
+    command.wrap(process_wrap::tokio::ProcessGroup::leader());
+    let child = command.spawn().unwrap();
+    let result = tokio::time::timeout(
+        std::time::Duration::from_secs(20),
+        Box::into_pin(child.wait_with_output()),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert!(
+        result.status.success(),
+        "isolated fixture failed: {}",
+        String::from_utf8_lossy(&result.stdout)
+    );
+}
+
+#[tokio::test]
+async fn credential_bootstrap_expands_home_relative_source() {
+    isolated_fixture("isolated_credential_bootstrap_fixture", "tilde").await;
+}
+
+#[cfg(windows)]
+#[tokio::test]
+async fn isolated_cmd_launcher_fixture() {
+    if std::env::var_os("PSEUDOLIFE_TEST_CREDENTIAL_HOME").is_none() {
+        return;
+    }
+    let home = std::path::PathBuf::from(std::env::var_os("HOME").unwrap());
+    let wrapper = home.join("codex.cmd");
+    std::fs::write(
+        &wrapper,
+        format!(
+            "@\"{}\" --exact rpc_fixture --nocapture\r\n",
+            std::env::current_exe().unwrap().display()
+        ),
+    )
+    .unwrap();
+    let executable = pseudolife_stdio::setup::codex::resolve_codex().unwrap();
+    assert_eq!(executable, wrapper);
+    let mut client = pseudolife_stdio::setup::codex::Client::open_with_environment(
+        &executable,
+        &home,
+        &home,
+        &json!({}),
+        &[("PSEUDOLIFE_TEST_CODEX_RPC".into(), Some("reply".into()))],
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        client.rpc("config/read", json!({})).await.unwrap(),
+        json!({"received":{}})
+    );
+    client.close().await;
+}
+
+#[cfg(windows)]
+#[tokio::test]
+async fn npm_cmd_launcher_is_discovered_and_started() {
+    isolated_fixture("isolated_cmd_launcher_fixture", "cmd").await;
 }
 impl Fake {
     fn new(home: &Path) -> Self {
@@ -37,6 +159,7 @@ impl Fake {
             override_env: false,
             concurrent_env: false,
             typed_extra: false,
+            rejected_after_competitor: false,
         }
     }
 }
@@ -69,6 +192,23 @@ impl Rpc for Fake {
                     edit["value"].clone();
             }
             self.config["layers"][0]["version"] = json!(format!("version-{}", self.calls.len()));
+            if self.rejected_after_competitor {
+                self.rejected_after_competitor = false;
+                let file = self.config["layers"][0]["name"]["file"].as_str().unwrap();
+                let connection = Path::new(file)
+                    .parent()
+                    .unwrap()
+                    .join("pseudolife")
+                    .join("connection.json");
+                pseudolife_stdio::board::state::atomic_create(
+                    &connection,
+                    b"winner connection refers to the shared token",
+                )
+                .unwrap();
+                return Err(SetupError(
+                    "fixture expectedVersion rejection after another writer won",
+                ));
+            }
             if self.override_env {
                 self.config["config"]["mcp_servers"]["pseudolife-memory"]["env"]["PSEUDOLIFE_MCP_DAEMON_URL"] =
                     json!("https://override.example.com");
@@ -80,11 +220,73 @@ impl Rpc for Fake {
             if self.typed_extra {
                 self.config["config"]["mcp_servers"]["pseudolife-memory"]["enabled"] = json!(true);
             }
-            return Ok(json!({}));
+            return Ok(json!({"version":self.config["layers"][0]["version"]}));
         }
         assert_eq!(method, "config/read");
         Ok(self.config.clone())
     }
+}
+
+#[tokio::test]
+async fn rejected_cas_never_undoes_a_competitor_or_deletes_its_adopted_token() {
+    let home = Home::new();
+    let mut client = Fake::new(&home.0);
+    let plan = plan_replace(&client.config, &home.0, "https://example.com", None, true).unwrap();
+    let expected = plan.env().clone();
+    client.rejected_after_competitor = true;
+    assert!(apply_replace(&mut client, &home.0, plan).await.is_err());
+    assert_eq!(
+        client.config["layers"][0]["config"]["mcp_servers"]["pseudolife-memory"]["env"],
+        json!(expected)
+    );
+    assert!(home.0.join("pseudolife").join("token").is_file());
+    assert_eq!(
+        std::fs::read(home.0.join("pseudolife").join("connection.json")).unwrap(),
+        b"winner connection refers to the shared token"
+    );
+    assert_eq!(
+        client
+            .calls
+            .iter()
+            .filter(|(method, _)| method == "config/batchWrite")
+            .count(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn bootstrap_refuses_project_forwarded_file_before_migrating_user_literal() {
+    let home = Home::new();
+    let mut client = Fake::new(&home.0);
+    client.config["config"]["mcp_servers"]["pseudolife-memory"]["env_vars"] =
+        json!(["PSEUDOLIFE_MCP_TOKEN_FILE"]);
+    assert!(
+        pseudolife_stdio::setup::codex::configure_credential_file(
+            &mut client,
+            &home.0,
+            &home.0,
+            None,
+            None
+        )
+        .await
+        .is_err()
+    );
+    assert!(!home.0.join("pseudolife").join("token").exists());
+    assert!(
+        !client
+            .calls
+            .iter()
+            .any(|(method, _)| method == "config/batchWrite")
+    );
+}
+
+#[test]
+fn replace_refuses_project_forwarded_no_spawn() {
+    let home = Home::new();
+    let mut config = config(&home.0);
+    config["config"]["mcp_servers"]["pseudolife-memory"]["env_vars"] =
+        json!(["PSEUDOLIFE_MCP_NO_SPAWN"]);
+    assert!(plan_replace(&config, &home.0, "https://example.com", None, true).is_err());
 }
 
 fn config(home: &Path) -> Value {
@@ -202,10 +404,21 @@ async fn apply_has_private_backup_token_connection_and_quiet_rerun() {
             .count(),
         5
     );
-    let before = client.calls.len();
+    let before = client
+        .calls
+        .iter()
+        .filter(|(method, _)| method == "config/batchWrite")
+        .count();
     let plan = plan_replace(&client.config, &home.0, "https://example.com", None, true).unwrap();
     let rerun = apply_replace(&mut client, &home.0, plan).await.unwrap();
-    assert_eq!(client.calls.len(), before);
+    assert_eq!(
+        client
+            .calls
+            .iter()
+            .filter(|(method, _)| method == "config/batchWrite")
+            .count(),
+        before
+    );
     assert!(rerun.report()["changed"].as_array().unwrap().is_empty());
     assert!(rerun.report()["connection_backup"].is_null());
 }

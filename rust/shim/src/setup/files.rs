@@ -9,6 +9,33 @@ use std::{
 
 const LIMIT: usize = 4 * 1024 * 1024;
 
+/// Stable private advisory lock shared by native setup transactions. Refuse a
+/// concurrent installer rather than waiting while its user may be responding.
+pub(crate) struct TransactionLock(std::fs::File);
+impl TransactionLock {
+    pub fn acquire(config: &Path) -> Result<Self, SetupError> {
+        let parent = config.parent().ok_or_else(|| file_error("parent"))?;
+        let path = parent.join(".pseudolife-setup.lock");
+        crate::credentials::reject_ancestor_redirects(&path).map_err(|_| file_error("path"))?;
+        fs::create_dir_all(parent).map_err(|_| file_error("parent"))?;
+        let opened = state::create(&path)
+            .or_else(|_| state::open_with_write(&path, true))
+            .map_err(file_error)?;
+        opened.file.try_lock().map_err(|_| {
+            SetupError("Another Codex setup is in progress; retry after it finishes.")
+        })?;
+        if state::open(&path).map_err(file_error)?.identity != opened.identity {
+            return Err(file_error("changed"));
+        }
+        Ok(Self(opened.file))
+    }
+}
+impl Drop for TransactionLock {
+    fn drop(&mut self) {
+        let _ = self.0.unlock();
+    }
+}
+
 pub(crate) fn backup(path: &Path, bytes: &[u8]) -> Result<PathBuf, SetupError> {
     let name = path
         .file_name()
@@ -75,6 +102,18 @@ impl PrivateEdit {
         &self.path
     }
 
+    pub fn still_before(&self) -> bool {
+        match &self.before {
+            None => fs::symlink_metadata(&self.path)
+                .is_err_and(|e| e.kind() == std::io::ErrorKind::NotFound),
+            Some(before) => {
+                state::read(&self.path, LIMIT).is_ok_and(|bytes| bytes == *before)
+                    && state::open(&self.path)
+                        .is_ok_and(|opened| Some(&opened.identity) == self.identity.as_ref())
+            }
+        }
+    }
+
     pub fn commit(&mut self) -> Result<(), SetupError> {
         if !self.changed() {
             return Ok(());
@@ -129,5 +168,23 @@ pub(crate) fn read_config(path: &Path) -> Result<Option<Vec<u8>>, SetupError> {
         }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
         _ => Err(file_error("metadata")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn setup_transaction_lock_refuses_a_competitor_and_releases_on_drop() {
+        let home =
+            std::env::temp_dir().join(format!("pseudolife-setup-lock-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&home).unwrap();
+        let config = home.join("config.toml");
+        let lock = TransactionLock::acquire(&config).unwrap();
+        assert!(TransactionLock::acquire(&config).is_err());
+        assert!(state::open(&home.join(".pseudolife-setup.lock")).is_ok());
+        drop(lock);
+        drop(TransactionLock::acquire(&config).unwrap());
+        fs::remove_dir_all(home).unwrap();
     }
 }

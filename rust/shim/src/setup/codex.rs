@@ -198,7 +198,11 @@ pub fn plan_replace(
         ));
     }
     // An effective false/forwarded no-spawn choice must not be silently overridden.
-    if no_spawn && effective_env.get(NO_SPAWN_KEY) != before.get(NO_SPAWN_KEY) {
+    if no_spawn
+        && (effective_env.get(NO_SPAWN_KEY) != before.get(NO_SPAWN_KEY)
+            || (forwarded.is_some_and(|f| f.iter().any(|v| v == NO_SPAWN_KEY))
+                && !before.contains_key(NO_SPAWN_KEY)))
+    {
         return Err(SetupError(
             "No-spawn settings come from another Codex configuration layer; replace mode did not change them.",
         ));
@@ -419,10 +423,19 @@ impl WritePlan {
         client: &mut impl Rpc,
         cwd: &Path,
     ) -> Result<AppliedWrite, SetupError> {
+        let _lock = files::TransactionLock::acquire(&self.user.path)?;
+        self.apply_locked(client, cwd).await
+    }
+
+    async fn apply_locked(
+        self,
+        client: &mut impl Rpc,
+        cwd: &Path,
+    ) -> Result<AppliedWrite, SetupError> {
         let mut applied = AppliedWrite {
             plan: self,
             backup: None,
-            attempted: false,
+            written_version: None,
         };
         if !applied.plan.changed() {
             return Ok(applied);
@@ -430,11 +443,46 @@ impl WritePlan {
         if let Some(bytes) = files::read_config(&applied.plan.user.path)? {
             applied.backup = Some(files::backup(&applied.plan.user.path, &bytes)?);
         }
-        applied.attempted = true;
+        let response = client
+            .rpc(
+                "config/batchWrite",
+                json!({"edits":applied.plan.edits.iter().map(Edit::request).collect::<Vec<_>>(),
+            "filePath":applied.plan.user.path,"expectedVersion":applied.plan.user.version}),
+            )
+            .await;
+        let response = match response {
+            Ok(response) => response,
+            Err(error) => {
+                // Matching desired values are not evidence of ownership: another
+                // writer may have won this CAS, or our response may have been lost.
+                let current = client
+                    .rpc("config/read", json!({"includeLayers":true,"cwd":cwd}))
+                    .await
+                    .map_err(|_| ROLLBACK_UNVERIFIED)?;
+                let user = user_config(
+                    &current,
+                    applied.plan.user.path.parent().ok_or(ROLLBACK_UNVERIFIED)?,
+                )
+                .map_err(|_| ROLLBACK_UNVERIFIED)?;
+                if user.version != applied.plan.user.version
+                    || user.config != applied.plan.user.config
+                {
+                    return Err(ROLLBACK_UNVERIFIED);
+                }
+                return Err(error);
+            }
+        };
+        applied.written_version = Some(
+            response["version"]
+                .as_str()
+                .filter(|v| !v.is_empty())
+                .ok_or(ROLLBACK_UNVERIFIED)?
+                .to_owned(),
+        );
         let result = async {
-            client.rpc("config/batchWrite", json!({"edits":applied.plan.edits.iter().map(Edit::request).collect::<Vec<_>>(),
-                "filePath":applied.plan.user.path,"expectedVersion":applied.plan.user.version})).await?;
             let current = client.rpc("config/read", json!({"includeLayers":true,"cwd":cwd})).await?;
+            let user=user_config(&current,applied.plan.user.path.parent().ok_or(ROLLBACK_UNVERIFIED)?)?;
+            if Some(&user.version)!=applied.written_version.as_ref() {return Err(ROLLBACK_UNVERIFIED);}
             if applied.plan.edits.iter().zip(&applied.plan.before).any(|(edit,before)| !matches_write(before,&edit.value,edit.value_at(&current["config"]))) {
                 return Err(SetupError("Codex saved settings but its effective configuration differs; check project or managed overrides before reconnecting."));
             }
@@ -442,7 +490,7 @@ impl WritePlan {
         }.await;
         if let Err(error) = result {
             applied
-                .rollback(client, cwd)
+                .rollback_locked(client, cwd)
                 .await
                 .map_err(|_| ROLLBACK_UNVERIFIED)?;
             return Err(error);
@@ -454,13 +502,21 @@ impl WritePlan {
 pub struct AppliedWrite {
     plan: WritePlan,
     pub backup: Option<PathBuf>,
-    attempted: bool,
+    written_version: Option<String>,
 }
 impl AppliedWrite {
     pub async fn rollback(&mut self, client: &mut impl Rpc, cwd: &Path) -> Result<(), SetupError> {
-        if !self.attempted {
+        let _lock = files::TransactionLock::acquire(&self.plan.user.path)?;
+        self.rollback_locked(client, cwd).await
+    }
+    async fn rollback_locked(
+        &mut self,
+        client: &mut impl Rpc,
+        cwd: &Path,
+    ) -> Result<(), SetupError> {
+        let Some(written_version) = self.written_version.as_ref() else {
             return Ok(());
-        }
+        };
         let current = client
             .rpc("config/read", json!({"includeLayers":true,"cwd":cwd}))
             .await?;
@@ -471,6 +527,11 @@ impl AppliedWrite {
             .parent()
             .ok_or(SetupError("Invalid Codex home."))?;
         let user = user_config(&current, home)?;
+        if &user.version != written_version {
+            return Err(SetupError(
+                "Codex rollback refused a newer configuration version; review the private config backup.",
+            ));
+        }
         let old = self
             .plan
             .edits
@@ -478,7 +539,7 @@ impl AppliedWrite {
             .zip(&self.plan.before)
             .all(|(edit, before)| edit.value_at(&user.config).unwrap_or(&Value::Null) == before);
         if old {
-            self.attempted = false;
+            self.written_version = None;
             return Ok(());
         }
         if self
@@ -525,7 +586,7 @@ impl AppliedWrite {
                 "Codex rollback could not be verified; review the private config backup.",
             ));
         }
-        self.attempted = false;
+        self.written_version = None;
         Ok(())
     }
 }
@@ -541,7 +602,8 @@ impl AppliedConnection {
         &self.report
     }
     pub async fn rollback(&mut self, client: &mut impl Rpc, cwd: &Path) -> Result<(), SetupError> {
-        self.write.rollback(client, cwd).await?;
+        let _lock = files::TransactionLock::acquire(&self.write.plan.user.path)?;
+        self.write.rollback_locked(client, cwd).await?;
         self.connection.rollback()?;
         if let Some(token) = &mut self.token {
             token.rollback()?;
@@ -586,13 +648,23 @@ pub async fn apply_replace(
     read_connection(&path)?;
     let data = connection_bytes(&plan.url, target.unwrap_or(""));
     let mut connection = PrivateEdit::prepare(&path, data)?;
+    let _lock = files::TransactionLock::acquire(&plan.write.user.path)?;
+    let current = client
+        .rpc("config/read", json!({"includeLayers":true,"cwd":cwd}))
+        .await?;
+    if user_config(&current, &plan.home)?.version != plan.write.user.version {
+        return Err(SetupError(
+            "Codex configuration changed during setup; no connection settings were written. Retry setup.",
+        ));
+    }
     if let Some(token) = &mut token {
         token.commit()?;
     }
-    let mut write = match plan.write.apply(client, cwd).await {
+    let mut write = match plan.write.apply_locked(client, cwd).await {
         Ok(write) => write,
         Err(error) => {
             if error != ROLLBACK_UNVERIFIED
+                && connection.still_before()
                 && let Some(token) = &mut token
             {
                 token.rollback()?;
@@ -601,7 +673,7 @@ pub async fn apply_replace(
         }
     };
     if let Err(error) = connection.commit() {
-        write.rollback(client, cwd).await?;
+        write.rollback_locked(client, cwd).await?;
         if let Some(token) = &mut token {
             token.rollback()?;
         }

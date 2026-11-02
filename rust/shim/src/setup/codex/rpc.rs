@@ -291,9 +291,23 @@ pub fn resolve_codex() -> Result<PathBuf, SetupError> {
     }
     if let Some(paths) = std::env::var_os("PATH") {
         for directory in std::env::split_paths(&paths) {
-            let file = directory.join(if cfg!(windows) { "codex.exe" } else { "codex" });
-            if file.is_file() {
-                return Ok(file);
+            #[cfg(windows)]
+            let names = std::env::var("PATHEXT")
+                .unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".into())
+                .split(';')
+                .map(|ext| ext.trim().to_ascii_lowercase())
+                .filter(|ext| matches!(ext.as_str(), ".com" | ".exe" | ".bat" | ".cmd"))
+                .map(|ext| format!("codex{ext}"))
+                .collect::<Vec<_>>();
+            #[cfg(not(windows))]
+            let names = vec!["codex".to_owned()];
+            for name in names {
+                let file = directory.join(name);
+                if file.is_file() {
+                    // std::process handles .cmd/.bat quoting; never construct a
+                    // shell command string from configuration or override values.
+                    return Ok(file);
+                }
             }
         }
     }

@@ -107,17 +107,26 @@ pub async fn configure_credential_file(
     }
     // Validate authority before staging a token copy. Foreign environment keys
     // remain untouched; only the connection fields must agree with the user.
-    if [FILE_KEY, TOKEN_KEY, URL_KEY]
-        .iter()
-        .any(|key| effective_env.get(*key) != before.get(*key))
-    {
+    if [FILE_KEY, TOKEN_KEY, URL_KEY].iter().any(|key| {
+        effective_env.get(*key) != before.get(*key)
+            || (!before.contains_key(*key)
+                && effective
+                    .get("env_vars")
+                    .and_then(Value::as_array)
+                    .is_some_and(|v| v.iter().any(|v| v == key))
+                && !server
+                    .get("env_vars")
+                    .and_then(Value::as_array)
+                    .is_some_and(|v| v.iter().any(|v| v == key)))
+    }) {
         return Err(SetupError(
             "Credential settings come from another Codex configuration layer; no settings were changed.",
         ));
     }
     let migrated = before.contains_key(TOKEN_KEY) || selected_url.is_some();
     if let Some(path) = &source {
-        let path = absolute(Path::new(path))?;
+        let path = crate::credentials::absolute_expanded(Path::new(path))
+            .map_err(|_| SetupError("The configured credential file path is invalid."))?;
         CredentialProvider::new(None,Some(path.clone())).and_then(|p|p.snapshot()).map_err(|_|SetupError("The configured credential file is missing, unsafe, or malformed; repair it before retrying."))?;
         source = Some(path.to_string_lossy().into_owned());
     } else if let Some(token) = &literal {
@@ -132,6 +141,15 @@ pub async fn configure_credential_file(
             let path = connection_path(&home);
             read_connection(&path)?;
             let mut write = PrivateEdit::prepare(&path, connection_bytes(url, ""))?;
+            let _lock = super::files::TransactionLock::acquire(&user.path)?;
+            let current = client
+                .rpc("config/read", json!({"includeLayers":true,"cwd":cwd}))
+                .await?;
+            if user_config(&current, &home)?.version != user.version {
+                return Err(SetupError(
+                    "Codex configuration changed during setup; retry credential setup.",
+                ));
+            }
             write.commit()?;
             backup = write.backup;
         }
