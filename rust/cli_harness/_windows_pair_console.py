@@ -96,6 +96,19 @@ def exercise(command, token, action):
             assert written.value == len(records)
 
         before = mode()
+        if action == "setup-refusal":
+            with token.open("wb") as errors:
+                child = subprocess.Popen(command, stdin=console_in, stdout=console_out,
+                                         stderr=errors)
+                try:
+                    code = child.wait(timeout=20)
+                    return {"exit_code": code, "stdout": screen(),
+                            "stderr": token.read_text(encoding="utf-8"),
+                            "isolated_console": True}
+                finally:
+                    if child.poll() is None:
+                        child.kill()
+                        child.wait(timeout=10)
         child = subprocess.Popen(command, stdin=console_in, stdout=console_out,
                                  stderr=console_out)
         try:

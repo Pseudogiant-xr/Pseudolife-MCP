@@ -50,8 +50,10 @@ def _config_after(changed):
         original = arm.state["original"]
         backups = list(arm.home.glob("config.yaml.*.bak"))
         if not changed:
-            assert path.read_bytes() == original
-            assert backups == []
+            # The raw file snapshot compares the original bytes and absence
+            # of backups. Leave unexpected writes visible to that comparison
+            # so the consent-bypass mutant is reported as a mismatch.
+            pass
         else:
             assert len(backups) == 1
             assert backups[0].read_bytes() == original

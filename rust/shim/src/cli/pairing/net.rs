@@ -8,7 +8,7 @@ use std::time::Duration;
 /// `pair_cli.MAX_RESPONSE_BYTES`.
 const MAX_RESPONSE_BYTES: usize = 65536;
 
-fn client(timeout: Duration, use_proxies: bool) -> Option<reqwest::Client> {
+fn client(url: &str, timeout: Duration, use_proxies: bool) -> Option<reqwest::Client> {
     let mut builder = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
         .timeout(timeout)
@@ -16,21 +16,29 @@ fn client(timeout: Duration, use_proxies: bool) -> Option<reqwest::Client> {
     if !use_proxies {
         builder = builder.no_proxy();
     }
-    // Python's default HTTPS context uses the system trust store, including
-    // SSL_CERT_FILE / SSL_CERT_DIR. The native loader honours those overrides.
-    let roots = rustls_native_certs::load_native_certs();
-    if !roots.certs.is_empty() {
-        let certs = roots
-            .certs
-            .iter()
-            .map(|cert| reqwest::Certificate::from_der(cert.as_ref()))
-            .collect::<Result<Vec<_>, _>>()
-            .ok()?;
-        builder = builder.tls_certs_only(certs);
-    } else if std::env::var_os("SSL_CERT_FILE").is_some()
-        || std::env::var_os("SSL_CERT_DIR").is_some()
-    {
-        return None;
+    // urllib creates its default HTTPS context only for HTTPS requests: a
+    // missing or empty trust override must not prevent a plain HTTP request.
+    if reqwest::Url::parse(url).ok()?.scheme() == "https" {
+        // The native loader honours SSL_CERT_FILE / SSL_CERT_DIR, like Python.
+        let roots = rustls_native_certs::load_native_certs();
+        if !roots.certs.is_empty() {
+            let certs = roots
+                .certs
+                .iter()
+                .map(|cert| reqwest::Certificate::from_der(cert.as_ref()))
+                .collect::<Result<Vec<_>, _>>()
+                .ok()?;
+            builder = builder.tls_certs_only(certs);
+        } else if std::env::var_os("SSL_CERT_FILE").is_some()
+            || std::env::var_os("SSL_CERT_DIR").is_some()
+        {
+            return None;
+        }
+    } else {
+        // The default platform verifier can itself fail while loading an
+        // empty overridden store on Linux, before any HTTP request is sent.
+        // No origin TLS handshake is possible on this no-redirect client.
+        builder = builder.tls_certs_only(Vec::<reqwest::Certificate>::new());
     }
     builder.build().ok()
 }
@@ -76,7 +84,7 @@ fn dict(body: &[u8], limit: usize) -> Result<Option<pyjson::Dict>, TooDeep> {
 /// `pair_cli.probe_health(url)`: the body of any HTTP answer (a redirect's
 /// too: `_NoRedirectHandler` turns it into an `HTTPError`) as a dict.
 pub(super) async fn pair_health(url: &str) -> Result<Option<pyjson::Dict>, TooDeep> {
-    let Some(client) = client(Duration::from_secs(5), false) else {
+    let Some(client) = client(url, Duration::from_secs(5), false) else {
         return Ok(None);
     };
     let Ok(mut response) = client.get(format!("{url}/health")).send().await else {
@@ -91,7 +99,7 @@ pub(super) async fn pair_health(url: &str) -> Result<Option<pyjson::Dict>, TooDe
 /// `expose_cli.probe_health(url, 3.0)`: a JSON object from any non-redirect
 /// answer, else `None`.
 pub(super) async fn invite_health(url: &str) -> Result<Option<pyjson::Dict>, TooDeep> {
-    let Some(client) = client(Duration::from_secs(3), false) else {
+    let Some(client) = client(url, Duration::from_secs(3), false) else {
         return Ok(None);
     };
     let Ok(mut response) = client.get(format!("{url}/health")).send().await else {
@@ -111,7 +119,7 @@ pub(super) async fn invite_health(url: &str) -> Result<Option<pyjson::Dict>, Too
 /// object. A 2xx body that cannot be read is no answer; a refusal's
 /// unreadable body is no payload.
 pub(super) async fn post_pair(url: &str, body: &str) -> Result<(u16, Option<pyjson::Dict>), ()> {
-    let client = client(Duration::from_secs(10), false).ok_or(())?;
+    let client = client(url, Duration::from_secs(10), false).ok_or(())?;
     let mut response = client
         .post(format!("{url}/api/pair"))
         .header(reqwest::header::CONTENT_TYPE, "application/json")
@@ -138,7 +146,7 @@ pub(super) async fn post_pair(url: &str, body: &str) -> Result<(u16, Option<pyjs
 /// `codex_connection.installer_credential_valid(url, token)`: a 200 to an
 /// authenticated `GET /api/episodes?limit=1`, without following redirects.
 pub(super) async fn credential_valid(url: &str, token: &str) -> bool {
-    let Some(client) = client(Duration::from_secs(3), true) else {
+    let Some(client) = client(url, Duration::from_secs(3), true) else {
         return false;
     };
     let Ok(header) = reqwest::header::HeaderValue::from_str(&format!("Bearer {token}")) else {

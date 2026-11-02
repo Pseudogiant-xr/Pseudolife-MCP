@@ -587,15 +587,26 @@ async fn enrol(tier: &Tier, origin: &str, pending: Pending) -> Result<u8> {
         "\nNext, in your browser: open {origin}/ui/. A browser keeps the Console's token per address: if this one says it did not accept the console's token, click \"Set a bearer token\" and paste the token your Console uses at its usual address: the daemon's PSEUDOLIFE_MCP_TOKEN, which a single-token install also keeps in your client's token file, ~/.pseudolife-mcp/<principal>.token. Then open Settings, Your passkeys, enter the code below with a label for this passkey, and create the passkey when the browser asks."
     );
     let command = system::command(tier, &["maintainer", "enrol-code"])?;
+    // Python's stream() uses stderr=STDOUT. Share one OS pipe so child
+    // diagnostics retain both their destination and their ordering.
+    let (reader, writer) =
+        io::pipe().map_err(|_| Error::refused("could not start passkey enrolment"))?;
+    let stderr = writer
+        .try_clone()
+        .map_err(|_| Error::refused("could not start passkey enrolment"))?;
     let mut child = tokio::process::Command::new(&command[0])
         .args(&command[1..])
         .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::inherit())
+        .stdout(writer)
+        .stderr(stderr)
         .kill_on_drop(true)
         .spawn()
         .map_err(|_| Error::refused("could not start passkey enrolment"))?;
-    let mut lines = tokio::io::BufReader::new(child.stdout.take().unwrap()).lines();
+    #[cfg(unix)]
+    let reader = std::fs::File::from(std::os::fd::OwnedFd::from(reader));
+    #[cfg(windows)]
+    let reader = std::fs::File::from(std::os::windows::io::OwnedHandle::from(reader));
+    let mut lines = tokio::io::BufReader::new(tokio::fs::File::from_std(reader)).lines();
     let mut enrolled = None;
     while let Some(line) = lines
         .next_line()

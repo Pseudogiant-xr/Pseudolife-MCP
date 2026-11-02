@@ -7,8 +7,9 @@ Python, starts a daemon or PostgreSQL instance, or migrates a restored bank.
 The bank-free cases cover help, default-enabled coordination, both required
 confirmations, incompatible recover/rebind options, existing private files,
 Git worktree rejection, and retention of the reservation after a failed
-connection. The Windows golden is recorded from the unchanged baseline oracle;
-it contains no candidate-generated expectations. Linux recording is pending.
+connection. Linux goldens were recorded from the verified oracle tree at `2c770c4d`
+and all nine replayed successfully. No expectations come from the candidate.
+The Windows recording is being refreshed from the same bound oracle.
 
 Live cases use only owned `r1_` databases through the disposable test login.
 The oracle's writers seed fixed addresses, credentials, pending mail, an active
@@ -42,6 +43,7 @@ python rust/cli_harness --row coordination_recovery --golden --candidate <native
 ```
 
 The Linux native build and all 20 live cases passed, including restored-bank
-rebind and reservation replacement. Native Windows and golden replay qualification
-remain pending.
+rebind and reservation replacement. Native Windows contract tests passed. A Python-free Rust image proof recovered
+and rebound a stopped bank while retaining pending mail; Windows live replay
+and hosted stress remain pending.
 Windows stress selection: `row:coordination_recovery` (20 hosted runs).

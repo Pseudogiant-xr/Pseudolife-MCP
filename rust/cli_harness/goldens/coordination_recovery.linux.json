@@ -1,0 +1,185 @@
+{
+ "row": "CLI-COORDINATION-RECOVERY",
+ "platform": "linux",
+ "oracle_commit": "2c770c4dab8dfaba058fc25d2f935bcdd10ffada",
+ "oracle_commit_source": "git",
+ "cases": {
+  "recovery-help": {
+   "home": null,
+   "utc_offset": 0,
+   "exit": 0,
+   "stdout": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIGNvb3JkaW5hdGlvbi1yZWNvdmVyeSBbLWhdIC0tY29uZmlnIENPTkZJRwogICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIFstLWNvbmZpcm0tZGFlbW9uLXN0b3BwZWRdCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgWy0tY29uZmlybS1yZXN0b3JlXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIFstLWFnZW50IEFHRU5UXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIFstLXByaW5jaXBhbCBQUklOQ0lQQUxdCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgWy0tYmFuay11cmwgQkFOS19VUkxdCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgWy0tc3RhdGUgU1RBVEVdCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAge3JlY292ZXIscmViaW5kfQoKT2ZmbGluZSwgb3BlcmF0b3Itb25seSBtYWlsYm94IHJlY292ZXJ5IGFmdGVyIGFuIGV4cGxpY2l0IGRhdGFiYXNlIHJlc3RvcmUuCk5ldmVyIHN0YXJ0cyBhIGRhZW1vbiwgb3BlbnMgYSBtb2RlbCBzZXNzaW9uLCBtaWdyYXRlcyBhIHNjaGVtYSwgb3IgcHJpbnRzCmtleXMuIFN0b3BwaW5nIHRoZSBkYWVtb24gaXMgYW4gb3BlcmF0b3IgcHJlY29uZGl0aW9uLCBub3QgaW5mZXJyZWQgZnJvbSBhCmNvbmZpZyBmaWxlLgoKcG9zaXRpb25hbCBhcmd1bWVudHM6CiAge3JlY292ZXIscmViaW5kfQoKb3B0aW9uczoKICAtaCwgLS1oZWxwICAgICAgICAgICAgc2hvdyB0aGlzIGhlbHAgbWVzc2FnZSBhbmQgZXhpdAogIC0tY29uZmlnIENPTkZJRyAgICAgICBSZXN0b3JlZCBkYWVtb24gY29uZmlndXJhdGlvbiBmaWxlCiAgLS1jb25maXJtLWRhZW1vbi1zdG9wcGVkCiAgLS1jb25maXJtLXJlc3RvcmUKICAtLWFnZW50IEFHRU5UICAgICAgICAgdGhlIG1haWxib3ggdG8gcmViaW5kOiBhIGZ1bGwgaWQsIG9yIGEgdW5pcXVlIHByZWZpeAogICAgICAgICAgICAgICAgICAgICAgICBvZiA4IG9yIG1vcmUgY2hhcmFjdGVycwogIC0tcHJpbmNpcGFsIFBSSU5DSVBBTAogIC0tYmFuay11cmwgQkFOS19VUkwKICAtLXN0YXRlIFNUQVRFICAgICAgICAgTmV3IHByaXZhdGUgYWRhcHRlciBzdGF0ZSBmaWxlIG91dHNpZGUgdGhlIHJlcG9zaXRvcnkK",
+   "stderr": "",
+   "window": [
+    1793591753.0681155,
+    1793591753.5399985
+   ],
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o775"
+   }
+  },
+  "recovery-default-on": {
+   "home": null,
+   "utc_offset": 0,
+   "exit": 1,
+   "stdout": "",
+   "stderr": "Y29vcmRpbmF0aW9uIHJlY292ZXJ5OiBjb29yZGluYXRpb24gbXVzdCBiZSBkaXNhYmxlZCBpbiB0aGUgZGFlbW9uIGNvbmZpZ3VyYXRpb246IHNldCBjb29yZGluYXRpb24uZW5hYmxlZDogZmFsc2UK",
+   "window": [
+    1793591753.540687,
+    1793591753.9957073
+   ],
+   "files": {
+    "config.yaml": "file:bWVtb3J5OiB7cHJlc2V0OiBmbGF0fQo=",
+    "cwd": "dir"
+   },
+   "modes": {
+    "config.yaml": "0o664",
+    "cwd": "0o775"
+   }
+  },
+  "recovery-stop-required": {
+   "home": null,
+   "utc_offset": 0,
+   "exit": 1,
+   "stdout": "",
+   "stderr": "Y29vcmRpbmF0aW9uIHJlY292ZXJ5OiBzdG9wIHRoZSBkYWVtb24gYW5kIGFkYXB0ZXJzLCB0aGVuIHBhc3MgLS1jb25maXJtLWRhZW1vbi1zdG9wcGVkCg==",
+   "window": [
+    1793591753.996581,
+    1793591754.450677
+   ],
+   "files": {
+    "config.yaml": "file:Y29vcmRpbmF0aW9uOgogIGVuYWJsZWQ6IGZhbHNlCiAgYWxsb3dlZF9wcmluY2lwYWxzOiBbYWxpY2UsIGRhZW1vbiwgbWFpbnRhaW5lcl0K",
+    "cwd": "dir"
+   },
+   "modes": {
+    "config.yaml": "0o664",
+    "cwd": "0o775"
+   }
+  },
+  "recovery-restore-required": {
+   "home": null,
+   "utc_offset": 0,
+   "exit": 1,
+   "stdout": "",
+   "stderr": "Y29vcmRpbmF0aW9uIHJlY292ZXJ5OiByZXN0b3JlIHJlY292ZXJ5IHJldm9rZXMgZXZlcnkgaW5zdGFuY2UgY3JlZGVudGlhbDsgLS1jb25maXJtLXJlc3RvcmUgaXMgcmVxdWlyZWQK",
+   "window": [
+    1793591754.4515023,
+    1793591754.9241188
+   ],
+   "files": {
+    "config.yaml": "file:Y29vcmRpbmF0aW9uOgogIGVuYWJsZWQ6IGZhbHNlCiAgYWxsb3dlZF9wcmluY2lwYWxzOiBbYWxpY2UsIGRhZW1vbiwgbWFpbnRhaW5lcl0K",
+    "cwd": "dir"
+   },
+   "modes": {
+    "config.yaml": "0o664",
+    "cwd": "0o775"
+   }
+  },
+  "recovery-no-automatic-database": {
+   "home": null,
+   "utc_offset": 0,
+   "exit": 1,
+   "stdout": "",
+   "stderr": "Y29vcmRpbmF0aW9uIHJlY292ZXJ5OiBQU0VVRE9MSUZFX01DUF9EQVRBQkFTRV9VUkwgaXMgcmVxdWlyZWQ7IG5vIGRhdGFiYXNlIGlzIHN0YXJ0ZWQgYXV0b21hdGljYWxseQo=",
+   "window": [
+    1793591754.9246988,
+    1793591755.4075823
+   ],
+   "files": {
+    "config.yaml": "file:Y29vcmRpbmF0aW9uOgogIGVuYWJsZWQ6IGZhbHNlCiAgYWxsb3dlZF9wcmluY2lwYWxzOiBbYWxpY2UsIGRhZW1vbiwgbWFpbnRhaW5lcl0K",
+    "cwd": "dir"
+   },
+   "modes": {
+    "config.yaml": "0o664",
+    "cwd": "0o775"
+   }
+  },
+  "recovery-rebind-flags-refused": {
+   "home": null,
+   "utc_offset": 0,
+   "exit": 1,
+   "stdout": "",
+   "stderr": "Y29vcmRpbmF0aW9uIHJlY292ZXJ5OiByZWJpbmQgcGFyYW1ldGVycyBjYW5ub3QgYmUgdXNlZCBmb3IgcmVjb3Zlcgo=",
+   "window": [
+    1793591755.408209,
+    1793591755.8567746
+   ],
+   "files": {
+    "config.yaml": "file:Y29vcmRpbmF0aW9uOgogIGVuYWJsZWQ6IGZhbHNlCiAgYWxsb3dlZF9wcmluY2lwYWxzOiBbYWxpY2UsIGRhZW1vbiwgbWFpbnRhaW5lcl0K",
+    "cwd": "dir"
+   },
+   "modes": {
+    "config.yaml": "0o664",
+    "cwd": "0o775"
+   }
+  },
+  "rebind-existing-file": {
+   "home": null,
+   "utc_offset": 0,
+   "exit": 1,
+   "stdout": "",
+   "stderr": "Y29vcmRpbmF0aW9uIHJlY292ZXJ5OiBzdGF0ZSBvdXRwdXQgbXVzdCBiZSBhIG5ldyBwcml2YXRlIGZpbGU7IGV4aXN0aW5nIGZpbGVzIGFyZSBuZXZlciByZXBsYWNlZAo=",
+   "window": [
+    1793591755.85764,
+    1793591757.2290256
+   ],
+   "files": {
+    "agent.json": "file:dW5jaGFuZ2Vk",
+    "config.yaml": "file:Y29vcmRpbmF0aW9uOgogIGVuYWJsZWQ6IGZhbHNlCiAgYWxsb3dlZF9wcmluY2lwYWxzOiBbYWxpY2UsIGRhZW1vbiwgbWFpbnRhaW5lcl0K",
+    "cwd": "dir"
+   },
+   "modes": {
+    "agent.json": "0o664",
+    "config.yaml": "0o664",
+    "cwd": "0o775"
+   }
+  },
+  "rebind-git-worktree-refused": {
+   "home": null,
+   "utc_offset": 0,
+   "exit": 1,
+   "stdout": "",
+   "stderr": "Y29vcmRpbmF0aW9uIHJlY292ZXJ5OiBwcml2YXRlIHN0YXRlIG11c3QgYmUgb3V0c2lkZSBhIEdpdCByZXBvc2l0b3J5Cg==",
+   "window": [
+    1793591757.2302456,
+    1793591757.6789317
+   ],
+   "files": {
+    "checkout": "dir",
+    "config.yaml": "file:Y29vcmRpbmF0aW9uOgogIGVuYWJsZWQ6IGZhbHNlCiAgYWxsb3dlZF9wcmluY2lwYWxzOiBbYWxpY2UsIGRhZW1vbiwgbWFpbnRhaW5lcl0K",
+    "cwd": "dir",
+    "checkout/.git": "file:Z2l0ZGlyOiBmaXh0dXJl"
+   },
+   "modes": {
+    "checkout": "0o775",
+    "checkout/.git": "0o664",
+    "config.yaml": "0o664",
+    "cwd": "0o775"
+   }
+  },
+  "rebind-no-database-keeps-reservation": {
+   "home": null,
+   "utc_offset": 0,
+   "exit": 1,
+   "stdout": "",
+   "stderr": "Y29vcmRpbmF0aW9uIHJlY292ZXJ5OiBQU0VVRE9MSUZFX01DUF9EQVRBQkFTRV9VUkwgaXMgcmVxdWlyZWQ7IG5vIGRhdGFiYXNlIGlzIHN0YXJ0ZWQgYXV0b21hdGljYWxseQo=",
+   "window": [
+    1793591757.67981,
+    1793591758.9919212
+   ],
+   "files": {
+    "agent.json": "file:",
+    "config.yaml": "file:Y29vcmRpbmF0aW9uOgogIGVuYWJsZWQ6IGZhbHNlCiAgYWxsb3dlZF9wcmluY2lwYWxzOiBbYWxpY2UsIGRhZW1vbiwgbWFpbnRhaW5lcl0K",
+    "cwd": "dir"
+   },
+   "modes": {
+    "agent.json": "0o600",
+    "config.yaml": "0o664",
+    "cwd": "0o775"
+   }
+  }
+ }
+}

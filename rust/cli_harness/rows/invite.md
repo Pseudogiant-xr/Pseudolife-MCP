@@ -124,8 +124,9 @@ Python module for Python or absent labels, retaining the nesting guard.
 Invite adds stopped-daemon psql list/revoke for v53 and v58; pair adds
 trusted/untrusted HTTPS and terminal code input; maintainer adds help and
 polling; test-login adds help while retaining its host-local login file.
-New native builds and differential comparisons are pending parent validation.
+Linux native builds and the live differential rows passed, including the engine-selected transport and help cases. Native Windows contract tests passed; pairing interruption and backspace also passed both oracle and native console arms.
 The activated former deferral cases now compare the actual oracle outcome;
-their old case IDs remain stable. Raw oracle goldens are unchanged, and new
-cases need a bound oracle recording after integration. This extension makes
+their old case IDs remain stable. Linux goldens were re-recorded from the verified oracle tree at
+`2c770c4dab8dfaba058fc25d2f935bcdd10ffada` and replayed against the native candidate.
+Windows refresh and hosted stress remain separate qualification steps. This extension makes
 no claim about guided setup or lite storage.

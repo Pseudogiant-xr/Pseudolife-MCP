@@ -6,8 +6,8 @@ ownership unchanged. The Python oracle and native candidate both execute
 
 Bank-free local cases exercise help, tokenless refusal, noninteractive consent,
 real configuration writes, exact original backups, invalid-name replacement,
-and read-only `--check`. The Windows golden is recorded from the unchanged
-baseline oracle. Refreshed recordings are pending. Eighteen transport cases
+and read-only `--check`. All 25 Linux goldens were recorded from the verified oracle at `2c770c4d`
+and replayed; the Windows recording is being refreshed. Eighteen transport cases
 exercise active and pending keys, stopped containers, fresh setup, restart
 failure and retry against Rust, Python and unlabelled images. The fixture checks
 the exact engine-specific helper command before recording any logical effect.
@@ -31,15 +31,15 @@ HTTP helpers. Docker selects the installed CLI for Rust images and the existing 
 Python helper for Python or unlabelled images. Local bank reads reuse an
 existing lite bank only; setup does not initialize a new bank or download a
 runtime. The host helper supports `--host-state` and
-`--host-write <rp_id> <origin>`; these are the Python oracle's Docker seam too.
+`--host-write <rp_id> <origin>`; the Python oracle selects these only for Rust images.
 
 Configuration output is JSON (valid YAML), preserving represented values.
 Shared collection aliases, YAML merge keys, timestamps/binary/non-finite values,
 non-string mapping keys and integers outside the loader domain refuse before
 backup or mutation instead of losing data. This bounded rewrite domain is an
 explicit remaining parity limitation; the ordinary valid-name rerun leaves
-the file untouched. Complete terminal enrollment and interrupt behavior need
-native Windows execution. All 25 Linux live cases passed, including checks,
+the file untouched. Real terminal regressions passed both arms on Linux and Windows: interruption
+restores the terminal, and enrolment diagnostics retain their merged stream. All 25 Linux live cases passed, including checks,
 fresh writes, restart failures and retries against all three engine labels.
 
 Validation after integration:

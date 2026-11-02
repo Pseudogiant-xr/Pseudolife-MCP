@@ -1,3 +1,3 @@
 | Mode | Phase | Status | Native | Evidence |
 |---|---|---|---|---|
-| pair | 2 | deferred | partly | HTTP(S) pairing, system/custom CA verification, proxy-aware token verification, terminal code input, Unicode normalization and help implemented. Owner-only files and uncertain-outcome handling retained. Trusted/untrusted HTTPS oracle fixtures and native differential cases added; native execution pending. |
+| pair | 2 | deferred | partly | HTTP(S) pairing, system/custom CA verification, proxy-aware token verification, terminal code input, Unicode normalization and help implemented. Owner-only files and uncertain-outcome handling retained. Trusted/untrusted HTTPS oracle fixtures and native differential cases added; Linux live cases and native Windows contracts passed; Ctrl-C restoration has watched RED/GREEN on Linux and Windows, and Windows backspace matches Python. Golden and hosted stress qualification remain pending. |

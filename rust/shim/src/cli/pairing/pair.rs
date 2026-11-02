@@ -253,6 +253,25 @@ pub(super) fn normalize_for_connect(text: &str) -> Option<String> {
 }
 
 pub(super) async fn run(arguments: &[String]) -> Result<u8, Defer> {
+    #[cfg(unix)]
+    {
+        // Tokio retains its process signal handler after a listener is dropped.
+        // Keep a listener through the requests following terminal code input;
+        // cancellation drops the prompt guard and retains any minted token.
+        let mut interrupt =
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())
+                .map_err(|_| Defer)?;
+        tokio::select! {
+            biased;
+            _ = interrupt.recv() => Ok(130),
+            result = run_inner(arguments) => result,
+        }
+    }
+    #[cfg(not(unix))]
+    run_inner(arguments).await
+}
+
+async fn run_inner(arguments: &[String]) -> Result<u8, Defer> {
     let args = parse(arguments)?;
     let usage = |line: &str, url: Option<&str>| {
         Report::new(url)

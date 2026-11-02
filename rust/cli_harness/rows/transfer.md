@@ -224,8 +224,10 @@ No Cargo or shared dispatcher integration is required. The shim includes the
 same generated schema artifacts directly; the existing schema-version pin now
 checks that source relationship instead of obsolete import deferral literals.
 
-The worker did not build or run Cargo, disposable-bank arms or Linux suites.
-Parent acceptance commands after the shared Linux build:
+Linux native compilation and all 69 differential cases passed. The NULL-stamp
+case initially differed because fixture construction used the wall clock;
+pinning the oracle writer's fixture timestamp made the full database snapshots
+match without discarding any stamp. Native Windows transfer contracts passed.
 
 ```sh
 cargo test --manifest-path rust/Cargo.toml -p pseudolife-stdio cli::transfer
@@ -233,11 +235,10 @@ python rust/cli_harness --row transfer --candidate "$CARGO_TARGET_DIR/debug/pseu
 python rust/daemon/harness/gen_schema_sql.py --check
 ```
 
-These are the intended RED/GREEN selections; native executions are not yet
-observed. Existing replay goldens select unrelated stable cases and remain
-unchanged. New bank cases stay live-only and must be run by the parent.
-The established shared harness allocates guarded `pl_cf_*` database names;
-its allocator does not accept the task's requested `r1_*` prefix, so the parent
-must resolve that naming boundary before launching it on the Linux dev box.
-Windows stress selection: `row:transfer` (20 hosted runs for existing and new
-connection/lock/commit paths).
+New bank cases remain live-only. Linux validation uses a private allocator
+adapter that prefixes disposable database names with `r1_` and retains the
+original labels for normalization. No shared or production bank is involved.
+Windows stress selection: `row:transfer` (20 hosted runs for connection,
+lock and commit paths). All six Linux goldens were refreshed from the verified oracle at `2c770c4d`
+and replayed. A Python-free Rust image proof initialized a blank bank through
+native import. Windows live qualification and hosted stress remain pending.

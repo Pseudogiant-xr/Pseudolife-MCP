@@ -453,6 +453,18 @@ def cases() -> list[core.Case]:
                  port=port, url=url, tls=True, golden=False,
                  env={"SSL_CERT_FILE": str(fixtures / ("ca.pem" if trusted else "other-ca.pem")),
                       "SSL_CERT_DIR": "{HOME}" + SEP + "no-certificates"}))
+    for store in ("empty", "missing"):
+        def seed_ca(home, store=store):
+            if store == "empty":
+                (home / "ca.pem").write_bytes(b"")
+
+        ca_env = {"SSL_CERT_FILE": "{HOME}" + SEP + "ca.pem",
+                  "SSL_CERT_DIR": "{HOME}" + SEP + "no-certificates"}
+        live(f"http-{store}-ca", [CODE, "--json"], seed=seed_ca, env=ca_env, golden=False)
+        port = free_port()
+        url = f"https://localhost:{port}"
+        add(case(f"https-{store}-ca", [url, CODE, "--json"], port=port, url=url,
+                 tls=True, seed=seed_ca, env=ca_env, golden=False))
     live("success", [CODE])
     live("success-json", [CODE, "--json"])
     live("verify-redirect-same-origin", [CODE, "--json"], verification_redirect="same")
@@ -572,8 +584,7 @@ def cases() -> list[core.Case]:
 
     # Declared deferrals: before any effect.
     deferred = ("pair-deferral",)
-    port = free_port()
-    add(case("defer-https", [f"https://127.0.0.1:{port}", CODE]))
+    add(case("defer-https", [core.DEAD_DAEMON_URL.replace("http:", "https:"), CODE]))
     live("defer-proxy-environment", [CODE],
          env={"HTTP_PROXY": "http://127.0.0.1:9"})
     live("defer-non-ascii-code", ["abcd-efgh-jkmñ"])

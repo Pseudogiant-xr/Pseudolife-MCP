@@ -7,22 +7,41 @@ import signal
 import subprocess
 import sys
 import time
+import threading
 
 import pytest
 
 
 @pytest.mark.skipif(os.name != "posix", reason="POSIX controlling-terminal regression")
 @pytest.mark.parametrize("arm", ["python", "rust"])
-def test_interrupt_restores_terminal_echo(tmp_path, arm):
+@pytest.mark.parametrize("phase", ["prompt", "health", "redemption"])
+def test_interrupt_restores_terminal_echo(tmp_path, arm, phase):
     import pty
     import termios
 
-    candidate = os.environ.get("R1_PAIR_CANDIDATE")
+    candidate = os.environ.get("R1_PAIR_CANDIDATE") or os.environ.get("PSEUDOLIFE_RUST_BINARY")
     if arm == "rust" and not candidate:
         pytest.skip("R1_PAIR_CANDIDATE is required for the native arm")
     command = ([sys.executable, "-m", "pseudolife_memory.cli"] if arm == "python"
                else [candidate])
-    command += ["pair", "http://localhost:1", "--read-code", "--token-file", str(tmp_path / "token")]
+    from .fixture_daemon import FixtureDaemon, json_body
+    received, release = threading.Event(), threading.Event()
+
+    def blocked(_request):
+        received.set()
+        release.wait(20)
+        return json_body({})
+
+    daemon = None
+    url = "http://localhost:1"
+    if phase != "prompt":
+        daemon = FixtureDaemon({
+            "/health": blocked if phase == "health" else json_body({"status": "ok", "auth": True}),
+            "/api/pair": blocked,
+        })
+        daemon.server.handle_error = lambda *_: None  # The interrupted client closes its socket.
+        url = daemon.url
+    command += ["pair", url, "--read-code", "--token-file", str(tmp_path / "token")]
     pid, master = pty.fork()
     if pid == 0:
         os.chdir(Path(__file__).resolve().parents[2])
@@ -39,6 +58,9 @@ def test_interrupt_restores_terminal_echo(tmp_path, arm):
                 output += os.read(master, 4096)
         assert b"pairing code: " in output, output
         assert not termios.tcgetattr(master)[3] & termios.ECHO
+        if phase != "prompt":
+            os.write(master, b"ABCD-EFGH-JKMN\n")
+            assert received.wait(5), "pairing never reached the blocked request"
         os.write(master, b"\x03")
         while time.monotonic() < deadline:
             waited, status_value = os.waitpid(pid, os.WNOHANG)
@@ -49,19 +71,22 @@ def test_interrupt_restores_terminal_echo(tmp_path, arm):
         assert status is not None, "interrupted prompt did not exit"
         assert termios.tcgetattr(master) == before, "terminal modes were not restored"
         assert os.waitstatus_to_exitcode(status) in (-signal.SIGINT, 130)
-        assert not (tmp_path / "token").exists()
+        assert (tmp_path / "token").exists() == (phase == "redemption")
     finally:
         if status is None:
             os.kill(pid, signal.SIGKILL)
             os.waitpid(pid, 0)
         os.close(master)
+        release.set()
+        if daemon:
+            daemon.close()
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows console regression")
 @pytest.mark.parametrize("arm", ["python", "rust"])
 @pytest.mark.parametrize("action", ["interrupt", "backspace"])
 def test_windows_prompt_restores_console_modes(tmp_path, arm, action):
-    candidate = os.environ.get("R1_PAIR_CANDIDATE")
+    candidate = os.environ.get("R1_PAIR_CANDIDATE") or os.environ.get("PSEUDOLIFE_RUST_BINARY")
     if arm == "rust" and not candidate:
         pytest.skip("R1_PAIR_CANDIDATE is required for the native arm")
     command = ([sys.executable, "-m", "pseudolife_memory.cli"] if arm == "python"
