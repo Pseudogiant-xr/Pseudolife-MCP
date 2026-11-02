@@ -198,6 +198,10 @@ class SessionSnapshot:
         self._seq = 0
         self._loaded_at: float | None = None
         self.active_passkeys: frozenset[str] = frozenset()
+        # Keys a passkey sign-in just proved active, and keys just revoked:
+        # held, like _added and _dropped, until a refresh that started after.
+        self._keys_added: dict[str, int] = {}
+        self._keys_dropped: dict[str, int] = {}
 
     def refresh(self, load: Callable[[], tuple[list[ConsoleSession], Iterable[str]]]) -> None:
         """Replace the view with ``load()``'s ``(sessions, active passkey
@@ -209,6 +213,9 @@ class SessionSnapshot:
         with self._lock:
             self._added = {k: v for k, v in self._added.items() if v[0] > started_seq}
             self._dropped = {k: v for k, v in self._dropped.items() if v > started_seq}
+            self._keys_added = {k: v for k, v in self._keys_added.items() if v > started_seq}
+            self._keys_dropped = {k: v for k, v in self._keys_dropped.items()
+                                  if v > started_seq}
             merged = {row.token_hash: row for row in rows
                       if row.session_id not in self._dropped}
             for _seq, row in self._added.values():
@@ -217,7 +224,8 @@ class SessionSnapshot:
             live = {row.session_id for row in merged.values()}
             # Uses of sessions that are gone have nothing left to extend.
             self._used = {sid: t for sid, t in self._used.items() if sid in live}
-            self.active_passkeys = frozenset(passkeys)
+            self.active_passkeys = (frozenset(passkeys) | frozenset(self._keys_added)) - frozenset(
+                self._keys_dropped)
             self._loaded_at = started_at
 
     def add(self, row: ConsoleSession) -> None:
@@ -225,6 +233,22 @@ class SessionSnapshot:
             self._seq += 1
             self._added[row.session_id] = (self._seq, row)
             self._by_hash[row.token_hash] = row
+            if row.method == METHOD_PASSKEY:
+                # complete() just verified the key active: a sign-in in the
+                # 10 s after its confirm must not bounce back to the dialog.
+                self._keys_added[row.issuer] = self._seq
+                self._keys_dropped.pop(row.issuer, None)
+                self.active_passkeys = self.active_passkeys | {row.issuer}
+
+    def drop_key(self, credential_id: str) -> None:
+        """A key just revoked: its passkey sessions and the key leave the
+        view at once."""
+        self.drop_issuer(credential_id)
+        with self._lock:
+            self._seq += 1
+            self._keys_dropped[credential_id] = self._seq
+            self._keys_added.pop(credential_id, None)
+            self.active_passkeys = self.active_passkeys - {credential_id}
 
     def drop(self, session_ids: Iterable[str]) -> None:
         """Revocations that just committed: gone at once."""

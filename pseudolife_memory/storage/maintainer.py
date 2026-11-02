@@ -187,7 +187,8 @@ def check_label(label) -> str:
 class MaintainerStore:
     """Runs on the board's mailbox connection, under the coordination lock."""
 
-    def __init__(self, storage, *, rp_id: str, origin: str, clock=time.time, principal=""):
+    def __init__(self, storage, *, rp_id: str, origin: str, clock=time.time, principal="",
+                 signs_in_as=None):
         self.storage = storage
         self.rp_id = rp_id
         self.origin = origin
@@ -195,6 +196,10 @@ class MaintainerStore:
         # The bearer principal of a Console request, for the audit record;
         # empty on the host.
         self.principal = principal
+        # v59: the Console sign-in a key enrolled through this request will
+        # give: the request's principal when it is the bank owner's, else
+        # none (the caller decides; spec 2026-11-02, section 5).
+        self.signs_in_as = signs_in_as
 
     # -- plumbing ----------------------------------------------------------
 
@@ -445,7 +450,7 @@ class MaintainerStore:
             "ON CONFLICT (credential_id) DO NOTHING",
             (credential_id, registration.public_key, registration.alg,
              registration.sign_count, label, enrolled_by, state, active_from,
-             self.clock(), self.principal or None)).rowcount
+             self.clock(), self.signs_in_as or None)).rowcount
         if inserted != 1:
             raise MaintainerError("assertion_invalid", check="credential_exists")
         return {"credential_id": credential_id, "label": label, "state": state,

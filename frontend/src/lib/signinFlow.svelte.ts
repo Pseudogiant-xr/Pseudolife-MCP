@@ -109,7 +109,9 @@ export async function signInWithPasskey(): Promise<void> {
   try {
     await settleOnStart();
     if (!ui.tokenOpen) return;
-    finish(await redeemPasskey({ ...deps(), sign }));
+    const r = await redeemPasskey({ ...deps(), sign, cancelled: () => !ui.tokenOpen });
+    if (r.kind === "cancelled" && !ui.tokenOpen) return;
+    finish(r);
   } finally {
     signinFlow.busy = false;
   }

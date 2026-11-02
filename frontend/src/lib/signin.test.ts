@@ -697,9 +697,16 @@ describe("Use this passkey to sign in", () => {
     );
   });
 
-  it("principal_not_allowed means this sign-in is not the owner's", () => {
-    const line = bindFailureLine(new ApiError(403, "principal_not_allowed", { error: "principal_not_allowed" }));
+  it("principal_not_allowed for ownership means this sign-in is not the owner's", () => {
+    const line = bindFailureLine(
+      new ApiError(403, "principal_not_allowed", { error: "principal_not_allowed", reason: "not_owner" } as never),
+    );
     expect(line).toMatch(/Only the bank owner's sign-in can do this: sign in with `pseudolife-mcp console` on the daemon's host, then try again\.$/);
+  });
+
+  it("principal_not_allowed from the board gate does not send the person round the same loop", () => {
+    const line = bindFailureLine(new ApiError(403, "principal_not_allowed", { error: "principal_not_allowed" }));
+    expect(line).not.toMatch(/Only the bank owner's sign-in/);
   });
 
   it("a 401 asks to sign in again", () => {
@@ -722,5 +729,46 @@ describe("Use this passkey to sign in", () => {
     expect(bindFailureLine(new CeremonyError("cancelled", "The passkey prompt was closed or timed out. Nothing was signed or sent."))).toMatch(
       /closed or timed out/,
     );
+  });
+});
+
+describe("a passkey sign-in whose dialog closed", () => {
+  const challenge = () =>
+    json(200, { payload: "{}", mac: "0".repeat(64), publicKey: { challenge: "AA", allowCredentials: [] } });
+
+  it("never opens the passkey prompt after the challenge arrives", async () => {
+    const sign = vi.fn(async () => ({}) as never);
+    const d = deps(vi.fn(async () => challenge()));
+    const r = await redeemPasskey({ ...d, sign, cancelled: () => true });
+    expect(r.kind).toBe("cancelled");
+    expect(sign).not.toHaveBeenCalled();
+    expect(d.store.read(PENDING_KEY)).toBe("");
+    expect(d.store.read(TOKEN_KEY)).toBe(OLD);
+  });
+
+  it("posts nothing when it closed while the prompt was open", async () => {
+    let open = true;
+    const sign = vi.fn(async () => {
+      open = false;
+      return { id: "x" } as never;
+    });
+    const fetch = vi.fn(async () => challenge());
+    const d = deps(fetch);
+    const r = await redeemPasskey({ ...d, sign, cancelled: () => !open });
+    expect(r.kind).toBe("cancelled");
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(d.store.read(PENDING_KEY)).toBe("");
+    expect(d.store.read(TOKEN_KEY)).toBe(OLD);
+  });
+});
+
+describe("the key-change record of a rebind", () => {
+  it("names the principal the key now signs in as", async () => {
+    const { keyChangeText } = await import("./maintainer");
+    const text = keyChangeText({
+      at: 1, change: "bind-sign-in", credential_id: "AAAAAAAAAAAAAAAA", label: "laptop", by: "AAAAAAAAAAAAAAAA",
+      path: "console", principal: "owner-pc", revoked: null,
+    } as never);
+    expect(text).toMatch(/now signs the Console in as owner-pc/);
   });
 });

@@ -25,6 +25,14 @@ from tests.test_maintainer_messages import bootstrap, bound, host, refused, sql,
 TOKEN = "fixture-passkey-browser-token"
 
 
+@pytest.fixture(autouse=True)
+def _principal_is_the_owners(monkeypatch, request):
+    """PRINCIPAL is an environment name here, so the owner's: an enrolment
+    records it as the key's sign-in principal."""
+    if "not_owner" not in request.node.name:
+        monkeypatch.setenv("PSEUDOLIFE_MCP_TOKENS", f"pk-fixture-token:{PRINCIPAL}")
+
+
 def _env(name):
     return "environment" if name == PRINCIPAL else None
 
@@ -48,7 +56,7 @@ def test_an_enrolment_records_the_principal_it_signs_in_as(svc):
 
 
 def test_no_challenge_before_a_key_can_sign_and_the_route_never_writes(svc):
-    assert _challenge(svc) is None
+    assert _challenge(svc) == {"error": "no_keys"}
     assert sql(svc, "SELECT count(*) FROM meta WHERE key='maintainer_secret_v1'") == [(0,)]
 
 
@@ -103,8 +111,11 @@ def test_a_payload_for_another_purpose_is_refused(svc):
 
 def test_a_key_with_no_sign_in_principal_names_the_recovery(svc):
     auth = bootstrap(svc)
+    challenge = _challenge(svc)
     sql(svc, "UPDATE maintainer_passkeys SET signs_in_as = NULL")
-    refused("passkey_signin_unavailable", _sign_in, svc, auth)
+    # No key can sign in now: the next challenge says so before any prompt.
+    assert _challenge(svc) == {"error": "unbound"}
+    refused("passkey_signin_unavailable", _sign_in, svc, auth, challenge=challenge)
     # Nothing was spent: the same key signs in once it is bound.
     sql(svc, "UPDATE maintainer_passkeys SET signs_in_as = %s", (PRINCIPAL,))
     assert _sign_in(svc, auth)[0].principal == PRINCIPAL
@@ -166,3 +177,45 @@ def test_only_an_owner_principal_may_bind(svc):
     with bound("visitor"):
         refused("principal_not_allowed", console_passkey.bind, svc, {}, "visitor",
                 is_owner=lambda name: False)
+
+
+def test_a_passkey_session_is_published_before_the_coordination_lock_is_released(svc):
+    auth = bootstrap(svc)
+    seen = []
+    challenge = _challenge(svc)
+    body = {"payload": challenge["payload"], "mac": challenge["mac"],
+            "assertion": auth.assertion(challenge_bytes(challenge["payload"]))}
+    session = console_passkey.complete_signin(
+        svc, body, principal_source=_env,
+        publish=lambda row: seen.append((row.session_id, svc._coordination_lock.locked())))
+    assert seen == [(session.session_id, True)]
+    assert not svc._coordination_lock.locked()
+
+
+def test_an_enrolment_by_a_principal_not_the_owners_records_no_sign_in_not_owner(svc):
+    # PRINCIPAL is admitted to the board but is neither an environment name
+    # nor a stored principal here, so it is not the bank owner's.
+    auth = bootstrap(svc)
+    assert sql(svc, "SELECT signs_in_as FROM maintainer_passkeys WHERE credential_id=%s",
+               (auth.id,)) == [(None,)]
+
+
+def test_completion_never_creates_the_challenge_secret(svc):
+    body = {"payload": '{"purpose":"sign-in"}', "mac": "0" * 64, "assertion": {}}
+    refused("assertion_invalid", console_passkey.complete_signin, svc, body,
+            principal_source=_env)
+    assert sql(svc, "SELECT count(*) FROM meta WHERE key='maintainer_secret_v1'") == [(0,)]
+
+
+def test_a_rebind_posts_a_notice_and_names_the_principal_in_the_record(svc):
+    auth = bootstrap(svc)
+    with bound(PRINCIPAL):
+        challenge = console_passkey.bind(svc, {}, PRINCIPAL, is_owner=lambda name: True)
+    body = {"payload": challenge["payload"], "mac": challenge["mac"],
+            "assertion": auth.assertion(challenge_bytes(challenge["payload"]))}
+    with bound(PRINCIPAL):
+        out = console_passkey.bind(svc, body, PRINCIPAL, is_owner=lambda name: True)
+    assert "_notice" not in out    # posted by _run, never returned
+    [(principal,)] = sql(svc, "SELECT principal FROM coordination_events "
+                              "WHERE event='maintainer_key' ORDER BY seq DESC LIMIT 1")
+    assert principal == PRINCIPAL

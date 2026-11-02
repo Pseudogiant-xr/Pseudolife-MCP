@@ -64,10 +64,13 @@ def test_no_challenge_without_passkeys_or_signing_keys(snapshot, sessions, issue
     app, _ = _app()
     status, out = _challenge(app, origin="http://127.0.0.1:8765")
     assert status == 409 and out["error"] == "passkey_signin_unavailable"
-    issued["result"] = None
+    issued["result"] = {"error": "no_keys"}
     app, _ = _app(service=_service())
     status, out = _challenge(app)
-    assert status == 409 and "maintainer setup" in out["hint"]
+    assert status == 409 and "maintainer setup" in out["hint"] and "confirm" in out["hint"]
+    issued["result"] = {"error": "unbound"}
+    status, out = _challenge(app)
+    assert status == 409 and "Use this passkey to sign in" in out["hint"]
 
 
 @pytest.mark.parametrize("body", [b"{}", b"[]", b"not json",
@@ -84,11 +87,13 @@ def test_a_malformed_challenge_request_is_refused(snapshot, sessions, issued, bo
 def completed(monkeypatch):
     state = {"calls": [], "result": "session"}
 
-    def fake(service, body, *, principal_source):
+    def fake(service, body, *, principal_source, publish=None):
         state["calls"].append((body, principal_source("default")))
         if isinstance(state["result"], Exception):
             raise state["result"]
-        return _session(method="passkey", issuer="credential-1", sid="pk1")
+        row = _session(method="passkey", issuer="credential-1", sid="pk1")
+        publish(row)
+        return row
 
     monkeypatch.setattr(console_passkey, "complete_signin", fake)
     return state
@@ -165,7 +170,25 @@ def test_binding_runs_as_the_callers_principal_and_signs_out_the_keys_other_sess
                        body=b"{}")
     assert status == 200 and seen == {"principal": "default", "owner": True,
                                       "maintainer": False}
+
+
+def test_a_completed_bind_drops_the_keys_other_sessions_inside_the_handler(sessions):
+    # _bind_complete runs under the coordination lock (maintainer._run), as
+    # a passkey sign-in's publication does, so neither can undo the other.
+    sessions.refresh(lambda: ([
+        _session("other-browser", principal="laptop", source="store", method="passkey",
+                 issuer="credential-1", sid="pk2"),
+        _session("same-browser", principal="default", method="passkey",
+                 issuer="credential-1", sid="pk3")], ["credential-1"]))
+
+    class Store:
+        def bind_sign_in(self, payload, mac, assertion, *, principal):
+            return {"credential_id": "credential-1", "signs_in_as": principal}
+
+    out = console_passkey._bind_complete(None, None, Store(), {}, "default")
+    assert out["signs_in_as"] == "default"
     assert sessions.lookup(secret_sha256("other-browser")) is None
+    assert sessions.lookup(secret_sha256("same-browser")) is not None
 
 
 def test_a_bind_refusal_keeps_its_maintainer_code(snapshot, sessions, monkeypatch):
@@ -188,3 +211,60 @@ def test_health_offers_the_passkey_where_passkeys_are_set_up(sessions):
                                                                       "passkey": True}
     service.config.coordination.maintainer.origin = ""
     assert _build_health_payload(service, True)["console_signin"]["passkey"] is False
+
+
+def test_issued_challenges_are_capped_per_minute(snapshot, sessions, issued):
+    app, _ = _app(service=_service())
+    for _ in range(30):
+        assert _challenge(app)[0] == 200
+    assert _challenge(app) == (429, {"error": "rate_limited"})
+
+
+def test_a_passkey_sign_in_counts_its_key_active_at_once(sessions):
+    # Signed in within 10 s of the host's confirm: the refresh has not seen
+    # the key yet, and one that started before the sign-in must not drop it.
+    from pseudolife_memory.console_sessions import resolve, environment_issuers
+    row = _session(method="passkey", issuer="new-key", sid="pk9")
+
+    def load():
+        sessions.add(row)            # the sign-in commits while this read runs
+        return [], []                # read before the key was confirmed
+
+    sessions.refresh(load)
+    hit = resolve(f"Bearer {SESSION_TOKEN}", sessions=sessions,
+                  env_issuers=environment_issuers({}, ENV_TOKEN), env_principals={"default"},
+                  store=None)
+    assert hit is not None and "new-key" in sessions.active_passkeys
+
+
+@pytest.mark.parametrize("handler", ["_revoke", "_cancel"])
+def test_a_key_revoked_in_the_console_signs_its_browsers_out_at_once(sessions, handler):
+    from pseudolife_memory import maintainer
+    row = _session(method="passkey", issuer="key-1", sid="pk1")
+    sessions.refresh(lambda: ([row], ["key-1"]))
+
+    class Store:
+        def revoke_self(self, payload, mac, assertion):
+            return {"credential_id": "key-1", "state": "revoked"}
+        cancel = revoke_self
+
+    def load():
+        # The revocation commits while a refresh that read the old rows runs.
+        getattr(maintainer, handler)(None, None, Store(), {})
+        assert sessions.lookup(secret_sha256(SESSION_TOKEN)) is None
+        return [row], ["key-1"]
+
+    sessions.refresh(load)
+    assert sessions.lookup(secret_sha256(SESSION_TOKEN)) is None
+    assert "key-1" not in sessions.active_passkeys
+
+
+def test_a_bind_refused_for_ownership_says_so(snapshot, sessions, monkeypatch):
+    def fake(service, body, principal, *, is_owner):
+        raise MaintainerError("principal_not_allowed", public={"reason": "not_owner"})
+    monkeypatch.setattr(console_passkey, "bind", fake)
+    app, _ = _app(service=_service())
+    status, out = call(app, "POST", "/api/console/passkey-bind", headers=_auth(ENV_TOKEN),
+                       body=b"{}")
+    assert (status, json.loads(out)) == (403, {"reason": "not_owner",
+                                               "error": "principal_not_allowed"})

@@ -39,8 +39,11 @@ UNAVAILABLE_HINT = (
     "this passkey has no Console sign-in, or the principal it signs in as no longer exists. "
     "On the daemon's host run `pseudolife-mcp console`, open Settings, Your passkeys, and choose "
     "\"Use this passkey to sign in\"; after that this passkey signs the Console in")
-NO_KEYS_HINT = ("no passkey can sign yet: set one up with `pseudolife-mcp maintainer setup` on "
-                "the daemon's host, or sign in with `pseudolife-mcp console`")
+NO_KEYS_HINT = (
+    "no passkey can sign yet: none is set up (`pseudolife-mcp maintainer setup` on the daemon's "
+    "host), the first one still waits for the host's `pseudolife-mcp maintainer confirm "
+    "<prefix>`, or a newly added one is still in its 24-hour wait. Meanwhile sign in with "
+    "`pseudolife-mcp console`")
 
 
 def _secret(conn) -> bytes | None:
@@ -56,11 +59,13 @@ def _secret(conn) -> bytes | None:
 
 
 def issue_signin_challenge(dsn: str, *, token_hash: str, label: str, rp_id: str,
-                           clock=time.time) -> dict | None:
+                           clock=time.time) -> dict:
     """A ``sign-in`` challenge for the browser's ``token_hash`` and its
-    WebAuthn request options, or ``None`` when no passkey can sign (no
-    secret yet, or no active key past its quarantine). Read-only, on its own
-    connection."""
+    WebAuthn request options, listing only the keys that can sign in (active,
+    past quarantine, with a sign-in principal); else ``{"error": "no_keys"}``
+    (no secret yet, or no key can sign) or ``{"error": "unbound"}`` (keys
+    can sign, but none has a sign-in principal), so the person is told before
+    the passkey prompt. Read-only, on its own connection."""
     from pseudolife_memory.console_sessions import _connect
     from pseudolife_memory.storage.maintainer import CHALLENGE_TTL, canonical, challenge_bytes
 
@@ -68,12 +73,15 @@ def issue_signin_challenge(dsn: str, *, token_hash: str, label: str, rp_id: str,
     with _connect(dsn, autocommit=True) as conn:
         conn.execute("SET statement_timeout = '5s'")
         secret = _secret(conn)
-        keys = [r[0] for r in conn.execute(
-            "SELECT credential_id FROM public.maintainer_passkeys WHERE state = 'active' "
-            "AND active_from IS NOT NULL AND active_from <= %s "
+        signing = [(r[0], r[1]) for r in conn.execute(
+            "SELECT credential_id, signs_in_as FROM public.maintainer_passkeys "
+            "WHERE state = 'active' AND active_from IS NOT NULL AND active_from <= %s "
             "ORDER BY created_at, credential_id", (now,))]
-    if secret is None or not keys:
-        return None
+    if secret is None or not signing:
+        return {"error": "no_keys"}
+    keys = [cid for cid, principal in signing if principal]
+    if not keys:
+        return {"error": "unbound"}
     payload = canonical({"token_sha256": token_hash, "label": label, "purpose": SIGN_IN,
                          "nonce": secrets.token_hex(16),
                          "expires_at": round(now + CHALLENGE_TTL, 3)})
@@ -84,14 +92,18 @@ def issue_signin_challenge(dsn: str, *, token_hash: str, label: str, rp_id: str,
     return {"payload": payload, "mac": mac, "publicKey": options}
 
 
-def complete_signin(service, body: dict, *, principal_source):
+def complete_signin(service, body: dict, *, principal_source, publish=None):
     """Verify a ``sign-in`` assertion and create its session, in one
     transaction under the coordination lock, as every maintainer completion
     does. ``principal_source(name)`` is ``environment``, ``store`` or
     ``None`` (no longer resolves). Raises ``MaintainerError``:
     ``assertion_invalid`` / ``challenge_*`` for any bad assertion,
     ``passkey_signin_unavailable`` for a key with no sign-in principal or
-    one that no longer resolves."""
+    one that no longer resolves. ``publish(session)`` (the daemon's
+    snapshot ``add``) runs before the coordination lock is released, so a
+    rebind of the same key, which drops its sessions under that lock,
+    cannot run between the commit and the publication and be undone by
+    it."""
     import psycopg
 
     from pseudolife_memory import coordination
@@ -126,10 +138,17 @@ def complete_signin(service, body: dict, *, principal_source):
 
     with service._coordination_lock:
         board = coordination._store(service)
+        # A pre-auth route never creates the challenge secret (the store's
+        # MAC check would): no secret, no challenge was ever issued.
+        if _secret(board.storage.conn) is None:
+            raise MaintainerError("assertion_invalid", check="no_secret")
         store = MaintainerStore(board.storage, rp_id=cfg.maintainer.rp_id,
                                 origin=cfg.maintainer.origin, clock=board.clock, principal="")
-        return store.complete(body.get("payload"), body.get("mac"), SIGN_IN,
-                              body.get("assertion"), action)
+        session = store.complete(body.get("payload"), body.get("mac"), SIGN_IN,
+                                 body.get("assertion"), action)
+        if publish is not None:
+            publish(session)
+        return session
 
 
 def _bind_challenge(service, board, store, principal):
@@ -139,8 +158,18 @@ def _bind_challenge(service, board, store, principal):
 
 
 def _bind_complete(service, board, store, body, principal):
-    return store.bind_sign_in(body.get("payload"), body.get("mac"), body.get("assertion"),
-                              principal=principal)
+    out = store.bind_sign_in(body.get("payload"), body.get("mac"), body.get("assertion"),
+                             principal=principal)
+    # Still under the coordination lock (maintainer._run), as a passkey
+    # sign-in's publication is: the key's other sessions leave the view
+    # at once and no sign-in committed before can put one back.
+    from pseudolife_memory.console_sessions import installed_sessions
+    sessions = installed_sessions()
+    if sessions is not None:
+        sessions.drop_issuer(out["credential_id"], keep_principal=out["signs_in_as"])
+    from pseudolife_memory.storage.maintainer import key_prefix
+    return {**out, "_notice": (f"key {key_prefix(out['credential_id'])} now signs the Console "
+                               f"in as {out['signs_in_as']}")}
 
 
 def bind(service, body: dict, principal: str, *, is_owner) -> dict:
@@ -152,7 +181,8 @@ def bind(service, body: dict, principal: str, *, is_owner) -> dict:
     from pseudolife_memory.storage.maintainer import MaintainerError
 
     if not is_owner(principal):
-        raise MaintainerError("principal_not_allowed", check="bind_not_owner")
+        raise MaintainerError("principal_not_allowed", check="bind_not_owner",
+                              public={"reason": "not_owner"})
     if not body:
         return maintainer._run(service, _bind_challenge, principal)
     if set(body) != {"payload", "mac", "assertion"}:

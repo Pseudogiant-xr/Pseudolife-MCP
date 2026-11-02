@@ -330,6 +330,10 @@ def build_console_app(
     signin_gate = RedemptionGate()
     passkey_failures = FailureLimiter()
     passkey_gate = RedemptionGate()
+    # Issued challenges are capped too, not only failures: each opens a
+    # database connection, and a well-formed request needs no secret. A
+    # design bound (a person signs in a few times a day), not a measurement.
+    passkey_issued = FailureLimiter(limit=30)
     env_issuers = console_sessions.environment_issuers(token_map, token)
     env_names = environment_principals(token_map, token)
 
@@ -707,7 +711,7 @@ def build_console_app(
             row = await asyncio.get_running_loop().run_in_executor(
                 signin_gate.executor, functools.partial(
                     console_passkey.complete_signin, service, body,
-                    principal_source=_principal_source))
+                    principal_source=_principal_source, publish=sessions.add))
         except PrincipalsUnavailable:
             signin_failures.refund(attempt)
             await _send_json(send, 503, {"error": "signin_unavailable"})
@@ -730,7 +734,7 @@ def build_console_app(
         finally:
             signin_gate.leave()
         signin_failures.refund(attempt)
-        sessions.add(row)
+        # Published by complete_signin under the coordination lock.
         await _send_json(send, 200, {"principal": row.principal, "session_id": row.session_id,
                                      "expires_at": row.expires_at})
 
@@ -751,7 +755,7 @@ def build_console_app(
             await _send_json(send, 415, {"error": "content_type_must_be_application_json"})
             return
         attempt = passkey_failures.reserve()
-        if attempt is None:
+        if attempt is None or passkey_issued.reserve() is None:
             await _send_json(send, 429, {"error": "rate_limited"})
             return
         try:
@@ -799,9 +803,11 @@ def build_console_app(
         finally:
             passkey_gate.leave()
         passkey_failures.refund(attempt)
-        if issued is None:
-            await _send_json(send, 409, {"error": "passkey_signin_unavailable",
-                                         "hint": console_passkey.NO_KEYS_HINT})
+        if "error" in issued:
+            await _send_json(send, 409, {
+                "error": "passkey_signin_unavailable",
+                "hint": (console_passkey.UNAVAILABLE_HINT if issued["error"] == "unbound"
+                         else console_passkey.NO_KEYS_HINT)})
             return
         await _send_json(send, 200, issued)
 
@@ -832,9 +838,8 @@ def build_console_app(
         except Exception as exc:  # noqa: BLE001 - mapped to a public code, never echoed
             await _send_json(send, *_maintainer_error(exc))
             return
-        sessions = console_sessions.installed_sessions()
-        if sessions is not None and "signs_in_as" in result:
-            sessions.drop_issuer(result["credential_id"], keep_principal=result["signs_in_as"])
+        # The key's other sessions left the view under the coordination
+        # lock (console_passkey._bind_complete).
         await _send_json(send, 200, result)
 
     async def _console_route(scope, send, method: str, path: str, body: dict,

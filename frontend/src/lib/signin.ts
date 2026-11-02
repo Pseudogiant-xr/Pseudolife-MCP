@@ -454,7 +454,12 @@ function passkeyRefusal(status: number, code: string, body: unknown, step: "chal
  * was. From just before the signed POST the token is the pending one, and
  * the answer is read exactly as a code's (postSession).
  */
-export async function redeemPasskey(deps: SigninDeps & { sign: SignAssertion }): Promise<RedeemResult> {
+export async function redeemPasskey(
+  deps: SigninDeps & { sign: SignAssertion; cancelled?: () => boolean },
+): Promise<RedeemResult> {
+  // The dialog closed meanwhile: stop before the passkey prompt opens and
+  // before anything is posted, with nothing changed.
+  const stopped = (): boolean => !!deps.cancelled?.();
   if (!canMint(deps.crypto)) return { kind: "unsupported", message: MESSAGES.unsupported };
   const token = mintToken(deps.crypto);
   const tokenSha = await sha256Hex(deps.crypto, token);
@@ -481,6 +486,8 @@ export async function redeemPasskey(deps: SigninDeps & { sign: SignAssertion }):
     return { kind: "refused", ...passkeyRefusal(res.status, code || "invalid_response", answer, "challenge") };
   }
 
+  if (stopped()) return { kind: "cancelled", message: MESSAGES.cancelled };
+
   // Step 2: the passkey signs. A closed prompt is the person's choice, said quietly.
   let assertion: AssertionJSON;
   try {
@@ -491,6 +498,8 @@ export async function redeemPasskey(deps: SigninDeps & { sign: SignAssertion }):
       e instanceof CeremonyError ? e.message : "The passkey prompt failed before anything was sent. Try again.";
     return { kind: "refused", reason: "ceremony", message };
   }
+
+  if (stopped()) return { kind: "cancelled", message: MESSAGES.cancelled };
 
   // Step 3: the signed session request, for the token now kept as pending.
   keepPending(deps.store, token, deps);
@@ -589,7 +598,8 @@ const BIND_FAILURE = "The passkey was not set to sign in";
  */
 export function bindFailureLine(e: unknown): string {
   if (e instanceof ApiError) {
-    if (e.code === "principal_not_allowed") {
+    const reason = (e.body as { reason?: unknown } | null)?.reason;
+    if (e.code === "principal_not_allowed" && reason === "not_owner") {
       return (
         `${BIND_FAILURE}. Only the bank owner's sign-in can do this: sign in with \`${SIGNIN_COMMAND}\` ` +
         "on the daemon's host, then try again."
