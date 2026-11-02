@@ -6,20 +6,14 @@ use super::{args::Args, out, say};
 use crate::pg::{self, resolution};
 use std::{
     ffi::OsString,
-    io::{IsTerminal, Write},
-    process::Stdio,
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::{SystemTime, UNIX_EPOCH},
 };
-use tokio::process::Command;
 
 fn no_bank() -> i32 {
     say(
         "no bank found: set PSEUDOLIFE_MCP_DATABASE_URL to the bank's database URL, or run where the lite tier's data dir holds one (Docker tier: start the daemon, or run `docker exec -it pseudolife-mcp-daemon pseudolife-mcp lease ...` on its host)",
     );
     1
-}
-fn configure(command: &mut Command) {
-    command.kill_on_drop(true);
 }
 fn diagnostic(error: &pg::Error) -> String {
     match error {
@@ -59,88 +53,10 @@ fn lite_directory() -> Result<std::path::PathBuf, pg::Error> {
     Ok(base.join("pseudolife-mcp"))
 }
 async fn container(arguments: &[String]) -> i32 {
-    if std::env::var_os("PSEUDOLIFE_DAEMON_EXEC").is_some_and(|v| !v.is_empty()) {
-        return no_bank();
-    }
-    let docker = std::env::var_os("PSEUDOLIFE_DOCKER")
-        .filter(|v| !v.is_empty())
-        .unwrap_or_else(|| "docker".into());
-    let inspect = resolution::container_inspect(&docker);
-    let mut command = Command::new(&inspect[0]);
-    command
-        .args(&inspect[1..])
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    configure(&mut command);
-    let Ok(child) = command.spawn() else {
-        return no_bank();
-    };
-    let Ok(Ok(output)) =
-        tokio::time::timeout(Duration::from_secs(30), child.wait_with_output()).await
-    else {
-        return no_bank();
-    };
-    if !output.status.success()
-        || String::from_utf8_lossy(&output.stdout).trim_matches(super::whitespace) != "true"
-    {
-        return no_bank();
-    }
-    let inspect = resolution::container_engine_inspect(&docker);
-    let mut command = Command::new(&inspect[0]);
-    command
-        .args(&inspect[1..])
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    configure(&mut command);
-    // Match daemon_exec.rust_operator_refusal: a missing label or failed
-    // label probe keeps the ordinary Python-container execution path.
-    let engine = match command.spawn() {
-        Ok(child) => tokio::time::timeout(Duration::from_secs(30), child.wait_with_output())
-            .await
-            .ok()
-            .and_then(Result::ok),
-        Err(_) => None,
-    };
-    if engine.is_some_and(|output| {
-        output.status.success()
-            && String::from_utf8_lossy(&output.stdout).trim_matches(super::whitespace) == "rust"
-    }) {
-        say(&format!(
-            "pseudolife-mcp lease: {}",
-            resolution::RUST_OPERATOR_REFUSAL
-        ));
-        return 2;
-    }
-    let terminal = std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
     let arguments: Vec<OsString> = arguments.iter().map(OsString::from).collect();
-    let invocation = resolution::container_exec(&docker, terminal, "lease", &arguments);
-    say(
-        "pseudolife-mcp lease: no bank in this shell; running it inside the pseudolife-mcp-daemon container",
-    );
-    let _ = std::io::stderr().flush();
-    let _ = std::io::stdout().flush();
-    let mut command = Command::new(&invocation[0]);
-    command.args(&invocation[1..]);
-    configure(&mut command);
-    match command.status().await {
-        Ok(status) => {
-            #[cfg(unix)]
-            {
-                use std::os::unix::process::ExitStatusExt;
-                // Python forwards subprocess.returncode through SystemExit.
-                status
-                    .code()
-                    .unwrap_or_else(|| (256 - status.signal().unwrap_or(1)) & 255)
-            }
-            #[cfg(windows)]
-            {
-                status.code().unwrap_or(1)
-            }
-        }
-        Err(_) => no_bank(),
-    }
+    resolution::run_in_daemon("lease", &arguments, None, None)
+        .await
+        .unwrap_or_else(no_bank)
 }
 fn resolution() -> Result<resolution::Target, pg::Error> {
     let dsn = match std::env::var("PSEUDOLIFE_MCP_DATABASE_URL") {

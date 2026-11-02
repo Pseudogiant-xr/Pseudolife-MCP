@@ -577,7 +577,7 @@ fn mcp_memory_store<'a>(
         memory_store(
             &app.service,
             &ready,
-            &app.service.config.memory,
+            &app.service.runtime_config().memory,
             &caller,
             &call.ident.writer,
             call.args,

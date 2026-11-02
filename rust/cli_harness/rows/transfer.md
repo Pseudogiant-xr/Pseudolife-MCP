@@ -4,8 +4,8 @@ Python oracle: `pseudolife_memory/transfer_cli.py` (line numbers below), plus
 `backup_cli._default_data_dir` (180-188), `storage/embedded_pg.py`
 `available` (65-71) and `default_lite_data_dir` (74-96), and
 `storage/schema.py` `ensure_schema` (1145), `_backfill_trace_invalidations`
-(1072-1088), `_EXPECTED_EMBEDDING_DIM` (1069), `SCHEMA_META_VERSION` (20, = 56).
-Native leaf: `rust/shim/src/cli/transfer.rs` and `transfer/{export,import,json,sql}.rs`.
+(1072-1088), `_EXPECTED_EMBEDDING_DIM` (1069), `SCHEMA_META_VERSION` (currently 58).
+Native leaf: `rust/shim/src/cli/transfer.rs` and `transfer/{export,import,json,sql,schema}.rs`.
 
 ## Exact contract
 
@@ -74,17 +74,15 @@ Export (`perform_export` 205-244, `_export_table` 247-276):
   jsonb columns); `<out>.part` must not already exist (the oracle would
   truncate and remove a file this run did not create).
 
-Import (`perform_import` 290-360). `ensure_schema` (316) is not run; it
-changes nothing only when all of these hold, and the leaf defers otherwise:
-`meta.schema_version` is 56 and every rostered table exists; `entries.embedding`
-is vector(1024) or undimensioned; the role owns (or has USAGE in the owner of)
-every public table and has CREATE on `public` (its ALTER/CREATE INDEX need
-ownership); and no `facts`/`world_facts`/`lessons`/`edges` row has a NULL
-`tx_time`, `valid_time` or `writer_id` (its v11 block backfills those and
-commits before the emptiness check; schema.py:361-376). A 5-second ACCESS
-EXCLUSIVE probe of every public table stands in for its DDL locks. The
-harness proves the no-op for fresh banks (the dump diff of catalog shape and
-rows) and the deferral for a non-empty bank holding daemon-written edges.
+Import (`perform_import`): connection guard first, then native ensure_schema.
+`transfer/schema.rs` interprets the daemon's generated `schema_plan.json`,
+`schema.sql` and `schema_meta.rs`; it maintains no separate DDL and changes no
+schema version. Statement order, simple versus typed protocol, version and
+embedding guards, one-time repairs and healing use that existing plan.
+Schema initialization commits before dimension/emptiness/archive checks, as
+Python does; a refused nonempty import can therefore leave schema repairs
+committed while importing no archive rows. PostgreSQL errors have native safe
+diagnostics; future/malformed-version refusals retain the oracle's guard text.
 
 - Manifest refusals before connecting (299-308): missing `manifest.json`;
   `format_version != 1` with its Python repr (None/False/ints/floats/strings).
@@ -140,23 +138,22 @@ rows) and the deferral for a non-empty bank holding daemon-written edges.
 
 - Import reads each member whole, twice (dry pass, then transaction); memory
   is bounded by the largest member, not streamed.
-- The lock probe takes ACCESS EXCLUSIVE on every public table for up to 5 s,
-  also under `--force` beside a running daemon; the oracle's ensure_schema
-  takes the same class of lock on the tables it alters.
+- Native ensure_schema takes the existing generated plan's DDL locks under
+  its five-second lock timeout, including when `--force` admits another connection.
 - The ownership check could not be exercised by the harness: the test login
   cannot create a second role.
 
 ## Deferrals and named substitutions
 
 - Roster guard: export defers before any effect when `meta.schema_version`
-  is not this build's (56), or when any public table is in neither
+  is not this build's (58), or when any public table is in neither
   `EXPORTED_TABLES` nor `EXCLUDED_TABLES`. Python exports whatever its own
   build's roster names, so a native build paired with a newer bank (one
   whose schema adds a table) would otherwise drop a table without a word.
   Cases `export-other-schema-defers`, `export-unknown-table-defers` (watched
   RED on the unguarded binary); mutants `transfer-schema-guard`,
   `transfer-roster-guard`.
-- Generic deferral (dispatcher line, exit 1, nothing changed): non-canonical
+- Generic deferral (dispatcher line, exit 1, no archive rows imported): non-canonical
   argv/paths; unreadable, encrypted or duplicate-member archives, or members
   neither stored nor deflated; manifest that is not a UTF-8 JSON object;
   archive values outside the export's own value domain or that would fail to
@@ -166,12 +163,9 @@ rows) and the deferral for a non-empty bank holding daemon-written edges.
   timestamptz strings the server refuses); export of a bank with a missing
   rostered table or an unported column type, a non-UTF8 server, an
   out-of-domain timestamptz or jsonb value, or an existing `<out>.part`;
-  import into a non-UTF8 server, a bank whose tables the role does not own,
-  or a bank with NULL v11 stamps; DSN not understood or connection failure; an
-  ensure_schema lock that the probe cannot take.
-- `import into a bank not at this build's schema (56) is deferred ... (needs
-  native ensure_schema)`: target without the rostered tables, or with
-  schema_version other than 56 (older or newer).
+  DSN not understood or connection failure. Import DDL permission/lock failures
+  now produce a native failure after rolling back schema initialization;
+  NULL stamps and missing tables are repaired by the shared generated plan.
 - `mode '<m>' on the embedded lite tier is deferred ... (needs native
   embedded_pg)`.
 - `import lost the answer to its COMMIT (native-pg-diagnostics); it may
@@ -207,3 +201,45 @@ lease step provisions (pg0, with the test login). The goldens
 full bank dump. The others are marked live-only (`Case.golden` False,
 `GOLDEN_CASES` in `transfer.py`), so `--record` and `--golden` leave them
 out.
+
+## Native schema acceptance (B10b)
+
+Cases now compare successful imports into blank databases, older stamped
+banks and banks missing a table. NULL v11 stamps are repaired before the
+nonempty-bank refusal. A blank database with another connection checks that
+the connection guard still precedes DDL. Future, string, null, boolean and zero
+schema stamps exercise refusal without mutation; a held table lock exercises
+DDL rollback. The existing complete catalog/row/sequence dumps compare both
+arms. The NULL-stamp fixture pins its oracle writer's assertion time before
+either arm, rather than discarding a database difference.
+
+`transfer-schema-refusal` substitutes only a checked Python RuntimeError for
+the native schema refusal line and requires the oracle bank to be unchanged.
+`transfer-schema-lock-failure` recognizes the specific LockNotAvailable
+traceback; full database dumps remain compared. The generic import failure
+line says archive rows were not committed, since schema initialization can
+already have committed separately. Lost COMMIT answers remain uncertain.
+
+No Cargo or shared dispatcher integration is required. The shim includes the
+same generated schema artifacts directly; the existing schema-version pin now
+checks that source relationship instead of obsolete import deferral literals.
+
+Linux native compilation and all 69 differential cases passed. The NULL-stamp
+case initially differed because fixture construction used the wall clock;
+pinning the oracle writer's fixture timestamp made the full database snapshots
+match without discarding any stamp. Native Windows transfer contracts passed.
+
+```sh
+cargo test --manifest-path rust/Cargo.toml -p pseudolife-stdio cli::transfer
+python rust/cli_harness --row transfer --candidate "$CARGO_TARGET_DIR/debug/pseudolife-stdio" --out /tmp/transfer.json
+python rust/daemon/harness/gen_schema_sql.py --check
+```
+
+New bank cases remain live-only. Linux validation uses a private allocator
+adapter that prefixes disposable database names with `r1_` and retains the
+original labels for normalization. No shared or production bank is involved.
+Windows stress selection: `row:transfer` (20 hosted runs for connection,
+lock and commit paths). All six Linux goldens were refreshed from the verified oracle at `7dcd738f`
+and replayed. A Python-free Rust image proof initialized a blank bank through
+native import. Five Windows live schema cases and all six goldens passed; hosted stress
+remains pending.

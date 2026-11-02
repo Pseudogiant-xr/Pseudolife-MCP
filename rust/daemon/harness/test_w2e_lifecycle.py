@@ -932,3 +932,33 @@ def test_a_template_probe_does_not_count_as_this_boots_probe(harness, monkeypatc
     (sql, params), = seen
     assert "query_text = 'warmup probe'" in sql and "origin = 'search'" in sql
     assert "NOT (id = ANY(%s::bigint[]))" in sql and params == (prior,)
+
+
+def live_config_answer(value, status=200):
+    return SimpleNamespace(AUTH=("Authorization", "Bearer fixture"),
+                           w1a=SimpleNamespace(call=lambda *args: {"status": status, "json": value}))
+
+
+def test_live_patch_keeps_applied_restart_and_value_differences_visible(harness):
+    original = {"applied": ["memory.surprise_threshold"], "restart_required": [],
+                "config_path": "/fixture/python/data/config.yaml", "backup": None}
+    result = harness.w2e_live_config.run(harness.w2e_live_config.patch(**{"memory.surprise_threshold": 0.9}), 1, live_config_answer(original))
+    assert result["value"] == {**original, "config_path": "<home>/data/config.yaml"}
+    restart = {**original, "applied": [], "restart_required": ["memory.surprise_threshold"]}
+    assert harness.w2e_live_config.run(harness.w2e_live_config.patch(**{"memory.surprise_threshold": 0.9}), 2, live_config_answer(restart)) != result
+
+
+@pytest.mark.parametrize("backup", ["/fixture/data/config.yaml.20261103-120000.abcdefgh.bak",
+                                    r"C:\fixture\data\config.yaml.20261103-120000.abcdefgh.bak"])
+def test_only_a_valid_backup_filename_is_normalized(harness, backup):
+    result = harness.w2e_live_config.run({"op": "live_config"}, 1, live_config_answer({
+        "config_path": "/fixture/data/config.yaml", "backup": backup}))
+    assert result["value"]["backup"] == "<backup>"
+    with pytest.raises(AssertionError):
+        harness.w2e_live_config.run({"op": "live_config"}, 1, live_config_answer({
+            "config_path": "/fixture/data/config.yaml", "backup": "wrong.bak"}))
+
+
+def test_live_config_refusal_keeps_the_status_and_error_body(harness):
+    assert harness.w2e_live_config.run(harness.w2e_live_config.patch(bad=1), 1, live_config_answer({"error": "unknown knob: bad"}, 400)) == {
+        "isError": True, "status": 400, "value": {"error": "unknown knob: bad"}}

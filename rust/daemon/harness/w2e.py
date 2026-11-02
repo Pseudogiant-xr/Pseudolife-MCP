@@ -6009,6 +6009,8 @@ def run_op(op: dict, port: int, mcp: Mcp, dsn: str) -> dict | None:
         hdrs = [AUTH] + ([("Content-Type", "application/json")] if body else [])
         r = w1a.call(port, op["method"], op["path"], hdrs, body)
         return {"isError": r["status"] != 200, "value": r.get("json", r.get("bytes"))}
+    if op["op"] in w2e_live_config.OPS:
+        return w2e_live_config.run(op, port, sys.modules[__name__])
     if op["op"] in w2e_hooks.OPS:
         return w2e_hooks.run(op, port, dsn, sys.modules[__name__])
     args = resolve_args(op["args"], dsn)
@@ -6034,6 +6036,9 @@ HOME_OPS += w2e_hooks.HOME_OPS
 
 import w2e_auto_promote  # noqa: E402
 SCENARIOS.update(w2e_auto_promote.register(sys.modules[__name__]))
+
+import w2e_live_config  # noqa: E402
+SCENARIOS.update(w2e_live_config.register(sys.modules[__name__]))
 
 
 def configure_clean_exit(procs: dict, scn: dict) -> None:

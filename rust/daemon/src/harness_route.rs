@@ -51,7 +51,8 @@ pub async fn call(app: &App, path: &str, h: &HeaderMap, body: &mut RequestBody) 
         Ok(r) => r,
         Err(e) => return json_response(500, &json!({"error": "internal_error", "message": e})),
     };
-    let cfg = &app.service.config.memory;
+    let config = app.service.runtime_config();
+    let cfg = &config.memory;
     let result = match name {
         "memory_store" => {
             let writer = last_header(h, "x-pl-writer")

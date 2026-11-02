@@ -1,3 +1,3 @@
 | Mode | Phase | Status | Native | Evidence |
 |---|---|---|---|---|
-| pair | 2 | deferred | partly | Canonical http pairing ported as CLI-PAIRING (harness row `pair`); https, proxied and terminal-prompt shapes (CLI-PAIRING-CONTAINER) defer; B HTTP pairing/owner-only token/retry (`pair_cli.py`); `test_pair_cli.py::test_read_code_takes_the_code_from_stdin`, `test_an_unknown_outcome_keeps_the_file_and_names_it` |
+| pair | 2 | ported-with-substitution | native | HTTP(S) pairing, system/custom CA verification, proxy-aware token verification, terminal code input, Unicode normalization and help implemented. Owner-only files and uncertain-outcome handling retained. Trusted/untrusted HTTPS oracle fixtures and native differential cases added; Linux live cases and native Windows contracts passed; Ctrl-C restoration has watched RED/GREEN on Linux and Windows, and Windows backspace matches Python. Both-platform goldens passed; hosted stress remains pending. |
