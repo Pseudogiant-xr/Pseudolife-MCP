@@ -508,13 +508,28 @@ mod tests {
     #[test]
     fn the_image_version_is_the_highest_exact_version_line() {
         for (stdout, version) in [
-            ("pseudolife-mcp invite 1\npseudolife-mcp invite 2\n", Some(2)),
-            ("pseudolife-mcp invite 1\r\npseudolife-mcp invite 2\r\n", Some(2)),
-            ("pseudolife-mcp invite 2\npseudolife-mcp invite 1\n", Some(2)),
+            (
+                "pseudolife-mcp invite 1\npseudolife-mcp invite 2\n",
+                Some(2),
+            ),
+            (
+                "pseudolife-mcp invite 1\r\npseudolife-mcp invite 2\r\n",
+                Some(2),
+            ),
+            (
+                "pseudolife-mcp invite 2\npseudolife-mcp invite 1\n",
+                Some(2),
+            ),
             ("a banner\npseudolife-mcp invite 3\n", Some(3)),
             ("pseudolife-mcp invite 1\n", Some(1)),
-            ("pseudolife-mcp invite 1\npseudolife-mcp invite 2x\n", Some(1)),
-            ("pseudolife-mcp invite 1\n pseudolife-mcp invite 2\n", Some(1)),
+            (
+                "pseudolife-mcp invite 1\npseudolife-mcp invite 2x\n",
+                Some(1),
+            ),
+            (
+                "pseudolife-mcp invite 1\n pseudolife-mcp invite 2\n",
+                Some(1),
+            ),
             ("pseudolife-mcp invite \n", None),
             ("pseudolife-mcp invite 2 extra\n", None),
             ("", None),
