@@ -268,13 +268,25 @@ pub(super) async fn run(args: &Args, report: &mut Report, port: u32) -> Result<u
     );
     check.remove(2); // A version probe has no stdin or TTY.
     let checked = capture(&check, None).await;
-    if checked.code != 0 || !checked.stdout.starts_with(VERSION_LINE) {
+    // `_VERSION.match`: `pseudolife-mcp invite <N>` at the start; 2 (v59)
+    // takes --someone-else and --mine.
+    let version = (checked.code == 0)
+        .then(|| checked.stdout.strip_prefix("pseudolife-mcp invite "))
+        .flatten()
+        .and_then(|rest| {
+            let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
+            digits.parse::<u64>().ok()
+        });
+    if version.is_none() {
         let message = if checked.code == 127 || checked.stderr.contains("No such container") {
             "no database here (PSEUDOLIFE_MCP_DATABASE_URL is unset and no lite bank was found) and no pseudolife-mcp-daemon container: run this on the daemon's host"
         } else {
             "the daemon's image predates `invite`: update the daemon first (pseudolife-mcp update), then re-run"
         };
         return Ok(report.fail(EXIT_REFUSED, message));
+    }
+    if args.owned.is_some() && version.is_some_and(|v| v < 2) {
+        return Ok(report.fail(EXIT_REFUSED, "the daemon's image predates --someone-else and --mine: update the daemon to schema 59 (pseudolife-mcp update), then re-run. Nothing was changed"));
     }
     let url = match args.url.clone().filter(|u| !u.is_empty()) {
         Some(url) => Some(url),
