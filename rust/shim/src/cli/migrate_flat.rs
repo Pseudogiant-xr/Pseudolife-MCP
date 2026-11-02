@@ -244,7 +244,7 @@ async fn locked(
             marker["status"] = "unchanged".into();
         } else {
             if let Err(reason) = finish(client, daemon, &path, &mut marker).await {
-                return Err(format!("{RETRY}{} ({reason})", restore(&marker["backup"])));
+                return Err(committed_error(&marker, &reason));
             }
             marker["status"] = "resumed".into();
         }
@@ -308,10 +308,15 @@ async fn locked(
     client.batch_execute("INSERT INTO public.meta (key,value) VALUES ('writer_lease_epoch','1'::jsonb) ON CONFLICT (key) DO UPDATE SET value=to_jsonb(COALESCE(CASE WHEN jsonb_typeof(meta.value)='number' THEN (meta.value #>> '{}')::numeric::bigint END,0)+1)").await.map_err(|_| "writer epoch could not be advanced; migration rolled back")?;
     client.batch_execute("COMMIT").await.map_err(|_| format!("migration COMMIT answer was lost; keep the daemon stopped and retry migrate-flat --apply to reconcile; restore bank and config together if needed: {}", restore(&marker["backup"])))?;
     if let Err(reason) = finish(client, daemon, &path, &mut marker).await {
-        return Err(format!("{RETRY}{} ({reason})", restore(&marker["backup"])));
+        return Err(committed_error(&marker, &reason));
     }
     marker["status"] = "migrated".into();
     Ok(marker)
+}
+
+fn committed_error(marker: &Value, reason: &str) -> String {
+    let reason = reason.replace("; nothing changed", "");
+    format!("{RETRY}{} ({reason})", restore(&marker["backup"]))
 }
 
 async fn migrate(
@@ -452,6 +457,17 @@ pub(super) fn run(arguments: Vec<OsString>) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn postcommit_read_failure_reports_committed_bank() {
+        let reason = read_config(&std::env::temp_dir()).unwrap_err();
+        assert!(reason.contains("nothing changed"));
+        let marker = json!({"backup": {"dump": "bank.sql.gz", "state": "state.tgz"}});
+        let message = committed_error(&marker, &reason);
+        assert!(message.starts_with(RETRY));
+        assert!(message.contains("config.yaml must be an existing regular file"));
+        assert!(!message.contains("nothing changed"));
+    }
 
     #[test]
     fn planner_does_not_inherit_database_url() {
