@@ -1505,7 +1505,7 @@ async fn deferred_privileged_bell_drops_on_empty_expired_or_delivered() {
             next.delivered = 2;
         }
         if end == "expired" {
-            tokio::time::sleep(Duration::from_secs_f64((expiry - now()).max(0.0) + 0.01)).await;
+            tokio::time::sleep(Duration::from_secs_f64((expiry - now()).max(1.0) + 0.01)).await;
         }
         if end == "park_expired" {
             next.wake = None;
