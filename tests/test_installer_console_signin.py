@@ -22,7 +22,8 @@ from tests.test_installer_client_only import BASH, ROOT, _Shell, _stub
 from tests.test_installer_client_only_ps import _PowerShell, _output
 
 COMMAND = "pseudolife-mcp console"
-OPENING = "Opening the Console in your browser, signed in (confirm the sign-in there)."
+# The installers print no lead line: `console` says what it did itself.
+OPENING = "Opening the Console in your browser"
 UNATTENDED = "Open the Console signed in: pseudolife-mcp console"
 
 
@@ -60,7 +61,7 @@ def test_it_runs_once_after_the_passkey_offer_on_a_daemon_host(script, offer, ca
 # -- install.sh ----------------------------------------------------------------
 
 def _sh(shell: _Shell, *, tty: bool = True, token: str = "minted",
-        console_exit: int = 0, shim: bool = True, board: bool = True, setup_done: bool = False):
+        console_exit: int = 0, shim: bool = True, board: bool = True):
     _stub(shell.bin / "fakeshim",
           "printf 'shim|%s|%s\\n' \"$*\" \"${PSEUDOLIFE_MCP_TOKEN_FILE:-}\" >>\"$CALL_LOG\"\n"
           "exit \"$FAKE_CONSOLE_EXIT\"\n")
@@ -71,7 +72,6 @@ def _sh(shell: _Shell, *, tty: bool = True, token: str = "minted",
         + ("SHIM_OK=1; SHIM_PATH=fakeshim; }\n" if shim else "SHIM_OK=; SHIM_PATH=; }\n")
         + f"TOKEN_STATE={token}\n"
         + ("board_file=/fixture/claude-code.token\n" if board else "")
-        + ("MAINTAINER_SETUP_DONE=1\n" if setup_done else "")
         + _block("console sign-in", "install.sh")
         + "\nopen_console_signin\necho \"BLOCK-EXIT $?\"\necho DONE\n",
         extra_env={"FAKE_CONSOLE_EXIT": str(console_exit)})
@@ -86,8 +86,8 @@ def test_sh_interactive_opens_the_console_with_the_board_token(bash, tmp_path):
     shell = _Shell(bash, tmp_path)
     proc = _sh(shell)
     assert proc.returncode == 0, proc.stderr
-    assert _shim_calls(shell) == ["shim|console|/fixture/claude-code.token"]
-    assert OPENING in proc.stdout and "BLOCK-EXIT 0" in proc.stdout
+    assert _shim_calls(shell) == ["shim|console --unless-signed-in|/fixture/claude-code.token"]
+    assert "BLOCK-EXIT 0" in proc.stdout
     # opening a browser is not a persistent change: nothing is asked
     assert "UNEXPECTED-QUESTION" not in proc.stdout and "[y/N]" not in proc.stdout
     assert proc.stderr == ""
@@ -98,7 +98,7 @@ def test_sh_without_a_board_token_file_it_uses_the_environment_token(bash, tmp_p
     shell = _Shell(bash, tmp_path)
     proc = _sh(shell, token="present", board=False)
     assert proc.returncode == 0, proc.stderr
-    assert _shim_calls(shell) == ["shim|console|"]
+    assert _shim_calls(shell) == ["shim|console --unless-signed-in|"]
 
 
 @BASH
@@ -146,7 +146,7 @@ def test_sh_without_the_shim_it_says_so_and_goes_on(bash, tmp_path):
 # -- install.ps1 ---------------------------------------------------------------
 
 def _ps(ps: _PowerShell, *, tty: bool = True, token: str = "minted",
-        console_exit: int = 0, shim: bool = True, board: bool = True, setup_done: bool = False):
+        console_exit: int = 0, shim: bool = True, board: bool = True):
     return ps.run(
         "function global:fakeshim {\n"
         f"    Add-Content -LiteralPath '{ps.calls}' -Value ('fakeshim|' + (@($args) -join ' '))\n"
@@ -159,7 +159,6 @@ def _ps(ps: _PowerShell, *, tty: bool = True, token: str = "minted",
            else "function Install-ShimOnce { $script:shimInstallPath = $null; $false }\n")
         + f"$tokenState = '{token}'\n"
         + ("$boardFile = '/fixture/claude-code.token'\n" if board else "$boardFile = $null\n")
-        + ("$script:maintainerSetupDone = $true\n" if setup_done else "")
         + _block("console sign-in", "install.ps1")
         + "\nInvoke-ConsoleSignin\n"
         + "Write-Output ('after|' + $env:PSEUDOLIFE_MCP_TOKEN_FILE)\nWrite-Output DONE\n")
@@ -169,8 +168,8 @@ def test_ps_interactive_opens_the_console_with_the_board_token(tmp_path):
     ps = _PowerShell(tmp_path)
     proc = _ps(ps)
     assert proc.returncode == 0, _output(proc)
-    assert ps.logged() == ["fakeshim|console", "token|/fixture/claude-code.token"]
-    assert OPENING in _output(proc) and "DONE" in proc.stdout
+    assert ps.logged() == ["fakeshim|console --unless-signed-in", "token|/fixture/claude-code.token"]
+    assert "DONE" in proc.stdout
     assert "UNEXPECTED-QUESTION" not in _output(proc) and "[y/N]" not in _output(proc)
     assert "WARNING" not in _output(proc)
     # the board token file is set for the one call only
@@ -181,7 +180,7 @@ def test_ps_without_a_board_token_file_it_uses_the_environment_token(tmp_path):
     ps = _PowerShell(tmp_path)
     proc = _ps(ps, token="present", board=False)
     assert proc.returncode == 0, _output(proc)
-    assert ps.logged() == ["fakeshim|console", "token|"]
+    assert ps.logged() == ["fakeshim|console --unless-signed-in", "token|"]
 
 
 def test_ps_without_a_terminal_one_line_names_the_command(tmp_path):
@@ -228,7 +227,7 @@ def test_ps_without_the_shim_it_says_so_and_goes_on(tmp_path):
 def test_the_client_only_notes_name_the_console_command(script):
     notes = " ".join(" ".join(_heredoc_payload(
         _marker_block(_text(script), "client-only notes"))).split())
-    assert "Open the Console signed in, on this machine: pseudolife-mcp console" in notes
+    assert "Open the Console signed in: pseudolife-mcp console" in notes
 
 
 @pytest.mark.parametrize("script,call", [
@@ -245,29 +244,13 @@ def test_a_client_only_install_shows_the_notes_and_runs_no_console(script, call)
     assert run.startswith(('if [ -z "$CLIENT_ONLY" ]', "if (-not $ClientOnly)"))
 
 
-@BASH
-@pytest.mark.parametrize("tty", [True, False])
-def test_sh_after_a_successful_passkey_setup_the_console_is_not_opened_twice(bash, tmp_path, tty):
-    shell = _Shell(bash, tmp_path)
-    proc = _sh(shell, tty=tty, setup_done=True)
-    assert proc.returncode == 0, proc.stderr
-    assert _shim_calls(shell) == []
-    assert "opened signed in by the passkey setup" in proc.stdout and "BLOCK-EXIT 0" in proc.stdout
 
-
-@pytest.mark.parametrize("tty", [True, False])
-def test_ps_after_a_successful_passkey_setup_the_console_is_not_opened_twice(tmp_path, tty):
-    ps = _PowerShell(tmp_path)
-    proc = _ps(ps, tty=tty, setup_done=True)
-    assert proc.returncode == 0, _output(proc)
-    assert ps.logged() == []
-    assert "opened signed in by the passkey setup" in _output(proc)
-
-
-@pytest.mark.parametrize("script,marker", [("install.sh", "MAINTAINER_SETUP_DONE=1"),
-                                           ("install.ps1", "$script:maintainerSetupDone = $true")])
-def test_only_a_successful_passkey_setup_sets_the_flag(script, marker):
-    offer = _block("maintainer setup offer", script)
-    assert offer.count(marker) == 1
-    # set in the success branch, after the failure warning
-    assert offer.index("maintainer setup exited") < offer.index(marker)
+@pytest.mark.parametrize("script", ["install.sh", "install.ps1"])
+def test_a_rerun_or_a_passkey_setup_opens_no_second_tab(script):
+    # `console --unless-signed-in` answers in one line when a browser is
+    # already signed in (an earlier install, or the passkey setup above);
+    # the installers keep no flag of their own that could claim otherwise.
+    block = _block("console sign-in", script)
+    assert "console --unless-signed-in" in block
+    assert "MAINTAINER_SETUP_DONE" not in _text(script)
+    assert "maintainerSetupDone" not in _text(script)

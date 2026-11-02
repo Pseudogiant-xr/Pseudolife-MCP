@@ -417,8 +417,9 @@ function Show-ClientOnlyNotes {
     below, on Linux and Windows) moves the shim to the daemon's
     release; without it, run the update command below with
     --clients-only here, so the shim matches the daemon.
-  - Open the Console signed in, on this machine: pseudolife-mcp console
-    (run as the update command below is).
+  - Open the Console signed in: pseudolife-mcp console (run as the update
+    command below is). From this machine it needs the Console's HTTPS
+    address (maintainer setup on the daemon host); until then, run it there.
 '@
 }
 # <<< client-only notes <<<
@@ -516,9 +517,6 @@ function Invoke-MaintainerSetupOffer {
     }
     if ($setupExit -ne 0) {
         Write-Warning "pseudolife-mcp maintainer setup exited $setupExit (see its message above). The install itself is complete: run it again once that is fixed."
-    } else {
-        # Its passkey step opened the Console signed in at the new address.
-        $script:maintainerSetupDone = $true
     }
 }
 # <<< maintainer setup offer <<<
@@ -533,10 +531,6 @@ function Invoke-MaintainerSetupOffer {
 # names the Console's HTTPS address. A tokenless daemon needs no sign-in.
 function Invoke-ConsoleSignin {
     if ($tokenState -notin "minted", "present") { return }
-    if ($script:maintainerSetupDone) {
-        Write-Host "Console: opened signed in by the passkey setup above (again later: pseudolife-mcp console)."
-        return
-    }
     $haveShim = (Install-ShimOnce) -and $script:shimInstallPath
     if (-not $interactive) {
         Write-Host "Open the Console signed in: pseudolife-mcp console"
@@ -546,12 +540,11 @@ function Invoke-ConsoleSignin {
         Write-Warning "The pseudolife-mcp shim is unavailable (see above), so the Console was not opened: run pseudolife-mcp console once it is installed."
         return
     }
-    Write-Host "Opening the Console in your browser, signed in (confirm the sign-in there)."
     $oldTokenFile = $env:PSEUDOLIFE_MCP_TOKEN_FILE
     try {
         if ($boardFile) { $env:PSEUDOLIFE_MCP_TOKEN_FILE = $boardFile }
         $global:LASTEXITCODE = 0
-        & $script:shimInstallPath console
+        & $script:shimInstallPath console --unless-signed-in
         $consoleExit = $LASTEXITCODE
     } catch {
         Write-Host "  $($_.Exception.Message)"

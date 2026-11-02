@@ -1611,7 +1611,8 @@ def _notes_update(monkeypatch, *, names_json=None, sessions=None, token="host-to
         calls.append(argv)
         if names_json is None:
             return 1, ""
-        return 0, json.dumps(names_json) + "\n"
+        # As invite --json prints it (indented), after a relayed line.
+        return 0, "relayed: docker exec\n" + json.dumps(names_json, indent=2) + "\n"
     monkeypatch.setattr(uc, "run_cli", fake_run)
     monkeypatch.setattr(console_cli, "credentials", lambda environ=None: (
         "http://127.0.0.1:8765", token, "environment"))

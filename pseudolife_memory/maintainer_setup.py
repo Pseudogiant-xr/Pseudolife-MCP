@@ -507,21 +507,23 @@ def _check_key(tier: str, prefix: str, label: str, *, fresh: bool) -> int:
     return EXIT_REFUSED
 
 
-def open_signed_in() -> bool:
-    """Open the Console at its new HTTPS address, signed in, with this
-    environment's bearer (``pseudolife-mcp console``: with passkeys set up,
-    its sign-in link is for that address). False, with nothing changed,
-    when there is no bearer here or the link could not be made."""
-    if bearer() is None:
-        return False
+def open_signed_in(port: int = 8765) -> bool:
+    """Open the Console at its new HTTPS address, signed in (``pseudolife-mcp
+    console``: with passkeys set up, its sign-in link is for that address),
+    asking the daemon this setup talks to (``--port``) with the bearer this
+    machine's clients use. False, with nothing changed, when there is none
+    or the link could not be made."""
     from pseudolife_memory import console_cli
+    environ = {**os.environ, "PSEUDOLIFE_MCP_DAEMON_URL": f"http://127.0.0.1:{port}"}
     try:
-        return console_cli.main([]) == 0
+        if console_cli.credentials(environ)[1] is None:
+            return False
+        return console_cli.main([], environ=environ) == 0
     except Exception:  # noqa: BLE001 - the manual way is printed instead
         return False
 
 
-def _enrol(tier: str, origin: str) -> int:
+def _enrol(tier: str, origin: str, port: int = 8765) -> int:
     # A browser keeps the Console's sign-in per address, so a first visit
     # to this origin has none (2026-10-05, the first live run): sign it in
     # with this environment's bearer (spec 2026-11-02), else name the ways
@@ -529,7 +531,7 @@ def _enrol(tier: str, origin: str) -> int:
     passkey_steps = ("Then open Settings, Your passkeys, enter the code below with a label for "
                      "this passkey, and create the passkey when the browser asks.")
     print(f"\nNext, the Console at its new address, {origin}/ui/.", flush=True)
-    if open_signed_in():
+    if open_signed_in(port):
         print(f"Confirm the sign-in in the browser (or open the link above). {passkey_steps}",
               flush=True)
     else:
@@ -660,7 +662,7 @@ def _setup(args) -> int:
         key = pending[0]
         print(f"A passkey is pending: {key['prefix']} ({key['label']}).")
         return _check_key(tier, key["prefix"], key["label"], fresh=False)
-    return _enrol(tier, origin)
+    return _enrol(tier, origin, args.port)
 
 
 def _port(value: str) -> int:

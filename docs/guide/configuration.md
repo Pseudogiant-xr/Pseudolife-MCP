@@ -1075,10 +1075,13 @@ bank bearer: see the [security posture](security-posture.md). Revoking a
 key signs out every browser it signed in.
 
 **Install and update do it for you.** A daemon-host install with a token
-ends by running `pseudolife-mcp console` (after the passkey offer, so the
-link is for the HTTPS address when you set one up); an unattended install
+ends by running `pseudolife-mcp console --unless-signed-in` (after the
+passkey offer, so the link is for the HTTPS address when you set one up):
+when a browser is signed in already, from the passkey setup or an earlier
+install, it says so in one line and opens nothing. An unattended install
 names the command instead, and a client-only install names it in its
-summary. `pseudolife-mcp update` names it when the daemon offers sign-in and
+summary. `console` never hands the link to a terminal browser (lynx, w3m):
+it prints it instead. `pseudolife-mcp update` names it when the daemon offers sign-in and
 no browser is signed in yet, and the update that moves the bank to schema
 v59 says, once, which principals are now treated as yours.
 

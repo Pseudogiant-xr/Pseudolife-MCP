@@ -1395,9 +1395,11 @@ pseudolife-mcp-daemon`).
   `ops/docker-compose.yml` if either collides.
 - **Console shows "offline" / asks you to sign in**: "offline" means the daemon
   isn't reachable (see above); a sign-in prompt means it runs with a token.
-  Run `pseudolife-mcp console` on any machine that uses Pseudolife: it opens
-  the Console signed in (or prints a link and a short code for a machine with
-  no browser). Pasting the daemon's token under "Advanced" still works.
+  Run `pseudolife-mcp console` on the daemon's machine, or on any machine that
+  uses Pseudolife once `pseudolife-mcp maintainer setup` gave the Console an
+  HTTPS address: it opens the Console signed in (or prints a link and a short
+  code where there is no browser). Pasting the daemon's token under
+  "Advanced" still works.
 - **The coding agent doesn't see the tools**: `claude mcp list` or
   `codex mcp list` should show
   `pseudolife-memory` ✓ connected. If not, re-check the URL

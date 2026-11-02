@@ -1300,9 +1300,14 @@ class Update:
                              "--json"], timeout=120, stdout_only=True)
         if code != 0:
             return []
+        # The report is indented JSON (invite's --json), after any relayed
+        # line a Docker exec may print first.
+        start = out.find("{")
+        if start < 0:
+            return []
         try:
-            rows = json.loads(out.strip().splitlines()[-1]).get("principals") or []
-        except (ValueError, IndexError, AttributeError):
+            rows = json.loads(out[start:]).get("principals") or []
+        except (ValueError, AttributeError):
             return []
         return sorted({row["principal"] for row in rows
                        if isinstance(row, dict) and isinstance(row.get("principal"), str)

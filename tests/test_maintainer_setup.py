@@ -606,22 +606,25 @@ def test_with_a_bearer_the_console_opens_signed_in_at_the_new_address(host, tail
                                                                       monkeypatch):
     opened = []
     monkeypatch.setattr(ms, "bearer", lambda: "never-printed-token-value")
-    monkeypatch.setattr(ms, "open_signed_in", lambda: opened.append(True) or True)
+    monkeypatch.setattr(ms, "open_signed_in", lambda port=8765: opened.append(port) or True)
     host.answers = ["y", "y"]
     assert ms.main([]) == 0
     out = capsys.readouterr().out
-    assert opened == [True]
+    assert opened == [8765]
     assert "Confirm the sign-in in the browser" in out and "Your passkeys" in out
     assert "paste a bearer token" not in out and "never-printed-token-value" not in out
 
 
-def test_open_signed_in_runs_the_console_link_with_this_bearer(monkeypatch):
+def test_open_signed_in_asks_the_daemon_this_setup_talks_to(monkeypatch):
     from pseudolife_memory import console_cli
     calls = []
-    monkeypatch.setattr(ms, "bearer", lambda: "a-token")
-    monkeypatch.setattr(console_cli, "main", lambda argv=None, environ=None: calls.append(argv) or 0)
-    assert ms.open_signed_in() is True and calls == [[]]
+    monkeypatch.setattr(console_cli, "credentials",
+                        lambda environ=None: ("http://127.0.0.1:9000", "a-token", "registration"))
+    monkeypatch.setattr(console_cli, "main", lambda argv=None, environ=None: calls.append(
+        (argv, environ["PSEUDOLIFE_MCP_DAEMON_URL"])) or 0)
+    assert ms.open_signed_in(9000) is True and calls == [([], "http://127.0.0.1:9000")]
     monkeypatch.setattr(console_cli, "main", lambda argv=None, environ=None: 4)
-    assert ms.open_signed_in() is False
-    monkeypatch.setattr(ms, "bearer", lambda: None)
-    assert ms.open_signed_in() is False
+    assert ms.open_signed_in(9000) is False
+    monkeypatch.setattr(console_cli, "credentials",
+                        lambda environ=None: ("http://127.0.0.1:9000", None, "none"))
+    assert ms.open_signed_in(9000) is False
