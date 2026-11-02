@@ -140,7 +140,7 @@ ROW_SUITES = {
     "transfer": "w1c-pairing", "invite": "w1c-pairing", "pair": "w1c-pairing",
     "test_login": "w1c-connection", "connect": "w1c-connect", "maintainer": "w1c-connect",
     "move": "w1c-connection", "tunnel": "w1c-connection",
-    "audit": "h5-audit", "backup": "h5-backup",
+    "audit": "h5-audit", "backup": "h5-backup", "migrate_flat": "h5-backup",
 }
 # The pseudolife-stdio binary: every CLI row, plus the differential judges,
 # which cover its whole argv, help and version surface.
@@ -155,7 +155,9 @@ DAEMON = ("cli", "cli-store", "cli-daemon", "cli-daemon-2", "cli-live", "eval", 
 # other commands import them. test_parity_scope.py scans the shim source and
 # fails if another command starts using a mapped entry.
 SHIM_COMMANDS = {
-    "backup": ("backup",), "backup_help.txt": ("backup",), "board_audit": ("audit",),
+    "backup": ("backup", "migrate_flat"), "backup_help.txt": ("backup", "migrate_flat"),
+    "board_audit": ("audit",),
+    "migrate_flat.rs": ("migrate_flat",),
     "connect": ("connect",), "doctor": ("doctor",), "maintainer": ("maintainer",),
     "move_cli.rs": ("move",), "test_login": ("test_login",),
     "transfer": ("transfer",), "transfer.rs": ("transfer",), "tunnel": ("tunnel",),

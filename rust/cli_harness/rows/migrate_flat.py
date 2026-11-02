@@ -15,11 +15,17 @@ import re
 
 from .. import normalize
 from ..core import Case
+from ..mutants import Mutant
 from . import _bank, backup
 
 DB = _bank.name("pl_cf_migrate_flat")
 CREATED = False
 MARKER = "flat_band_migration_v1"
+
+MUTANTS = [
+    Mutant("migrate-flat-apply-fence", "migrate_flat", "shim/src/cli/migrate_flat.rs",
+           "if !apply {", "if false && !apply {", ("no-apply",)),
+]
 
 
 @atexit.register
@@ -64,6 +70,26 @@ def after(arm, obs):
         if table not in ("entries", "meta"):
             assert current["tables"][table] == before["tables"][table], table
     assert current["sequences"] == before["sequences"]
+    old_meta = {row["key"]: row["value"] for text in before["tables"]["meta"] if (row := json.loads(text))}
+    new_meta = {row["key"]: row["value"] for text in current["tables"]["meta"] if (row := json.loads(text))}
+    for key, value in old_meta.items():
+        if key not in (MARKER, "writer_lease_epoch"):
+            assert new_meta[key] == value, key
+    if MARKER not in old_meta and MARKER in new_meta:
+        assert new_meta["writer_lease_epoch"] == old_meta.get("writer_lease_epoch", 0) + 1
+    else:
+        assert new_meta.get("writer_lease_epoch") == old_meta.get("writer_lease_epoch")
+    for index, text in enumerate(current["tables"]["meta"]):
+        row = json.loads(text)
+        if row["key"] != MARKER:
+            continue
+        for field in ("dump", "state"):
+            path = Path(row["value"]["backup"][field])
+            if path.is_absolute():
+                relative = path.relative_to(arm.home / "bank" / "backups")
+                assert path.is_file(), "committed recovery path must name its backup"
+                row["value"]["backup"][field] = "{HOME}/bank/backups/" + relative.as_posix()
+        current["tables"]["meta"][index] = json.dumps(row, sort_keys=True)
     obs["db"] = current
 
 
@@ -83,11 +109,11 @@ def held_writer(arm):
     arm.state["writer"] = writer
 
 
-def pending(replaced):
+def pending(replaced, prefix=""):
     def prepare(arm):
         import yaml
         from pseudolife_memory.migrate_flat_cli import flat_config
-        original = "memory: {miras: {preset: continuum}}\n"
+        original = prefix + "memory: {miras: {preset: continuum}}\n"
         target = yaml.safe_dump(flat_config(yaml.safe_load(original), 9)[0], sort_keys=False)
         setup(target if replaced else original)(arm)
         marker = {"version": 1, "complete": False, "entries": 9, "capacity": 5250,
@@ -97,6 +123,7 @@ def pending(replaced):
         with _bank.connect(DB) as conn:
             conn.execute("UPDATE entries SET band='flat'")
             conn.execute("INSERT INTO meta(key,value) VALUES (%s,%s::jsonb)", (MARKER, json.dumps(marker)))
+            conn.execute("INSERT INTO meta(key,value) VALUES ('writer_lease_epoch','1'::jsonb)")
             conn.commit()
         arm.state["before"] = _bank.dump(DB)
     return prepare
@@ -135,11 +162,13 @@ def cases():
         raise RuntimeError("migrate_flat parity needs PostgreSQL client tools")
     env = {"PSEUDOLIFE_MCP_DATABASE_URL": _bank.url(DB),
            "PATH": str(pg_dump.parent) + os.pathsep + os.environ.get("PATH", "")}
-    argv = ["migrate-flat", "--apply", "--data-dir", "{HOME}/bank"]
+    argv = ["migrate-flat", "--apply", "--data-dir", "{HOME}/bank", "--external-recovery-verified"]
     return [
         Case("help", ["migrate-flat", "--help"]),
         Case("no-apply", ["migrate-flat", "--data-dir", "{HOME}/bank"]),
         Case("missing-data-dir", ["migrate-flat", "--apply"]),
+        Case("recovery-unverified", argv[:-1], env=env,
+             setup=setup("memory: {miras: {preset: continuum}}\n"), after=refused),
         Case("writer-held", argv, env=env, setup=held_writer, after=refused),
         *[Case("refuse-" + name, argv, env=env, setup=setup(config), after=refused)
           for name, config in (
@@ -152,6 +181,8 @@ def cases():
           )],
         *[Case("resume-" + state, argv, env=env, setup=pending(replaced), after=after)
           for state, replaced in (("before-replace", False), ("after-replace", True))],
+        Case("resume-yaml11-strings", argv, env=env,
+             setup=pending(False, "model: 1e5\nother: 0o17\n"), after=after),
         *[Case("collapse-" + preset, argv, env=env,
                setup=setup("unrelated: yes\nmemory:\n  miras:\n    preset: " + preset + "\n"),
                after=after, rules=("flat-migration-files",), timeout=120,

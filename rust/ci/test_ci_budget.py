@@ -213,7 +213,7 @@ def test_one_matrix_job_saving_one_key_from_many_runs_is_refused():
         step = next(s for s in target["jobs"]["source-mutants"]["steps"]
                     if str(s.get("uses", "")).startswith("Swatinem/rust-cache"))
         step["with"].pop("save-if")
-    assert any("v0-rust-cli-source-mutants-source-mutants on Linux is saved by 37 runs" in problem
+    assert any("v0-rust-cli-source-mutants-source-mutants on Linux is saved by 38 runs" in problem
                for problem in check(workflow, raw))
 
 

@@ -109,7 +109,8 @@ SUITES = {
     'h5-audit': [dict(kind='cli', row='audit', mode=mode,
                       cases=AUDIT_GOLDEN_CASES if mode != 'live' else [])
                  for mode in ('live', 'record', 'golden')],
-    'h5-backup': [dict(kind='cli', row='backup', mode=mode, cases=[])
+    'h5-backup': [dict(kind='cli', row=row, mode=mode, cases=[])
+                  for row in ('backup', 'migrate_flat')
                   for mode in ('live', 'record', 'golden')],
     'h5-w1a': [dict(kind='daemon', scenario=name, mode=mode, record=mode == 'live')
                 for name in W1A if name not in EXCEPTIONS['w1a']

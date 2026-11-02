@@ -7528,18 +7528,43 @@ every variant.
   verdict measured as tying the 8-band continuum on every gate (ranking,
   forced-eviction retention quality, real recorded queries — see the
   [benchmarks page](benchmarks.md#band-structure)), so the simpler
-  structure ships. The **`continuum` preset is retained** as the one-line
-  rollback: the 8-tier `working … forever` layout with promotion
+  structure ships. The **`continuum` preset is retained** as an optional layout: the 8-tier `working … forever` layout with promotion
   thresholds, per-tier retention policies, and the 2026-07-25 demotion
   cascade (a full band demotes into the next; only overflow past
   `forever` drops).
-  **Changing the preset in either direction is safe**: hydration reseats
-  every row across the new band layout in one pass (rows whose old band
-  name is gone land in the first band) and **reconciles the stored band
-  stamps** to the new layout, idempotently. If the bank holds more rows
-  than the new preset seats, the deepest band is left over capacity and
-  the count logged rather than truncated at startup — normal eviction
-  drains it from there.
+  **Moving an existing bank to flat:** first rehearse restoring the exact
+  bank **and its config** with your own tooling. An automatic paired restore
+  for an explicit database URL is not available. Stop the daemon and use
+  `pseudolife-mcp migrate-flat --apply --data-dir PATH --external-recovery-verified` on the bank host,
+  with `PSEUDOLIFE_MCP_DATABASE_URL` set to that stopped bank. Native
+  execution needs both `pseudolife-mcp` and `pseudolife-daemon` installed,
+  plus PostgreSQL's `pg_dump`. Without the explicit recovery acknowledgement,
+  the command refuses before accessing the bank or config. With it, the
+  command prints a manual-recovery warning, then writes a physical
+  bank dump and a state archive containing the original `config.yaml`,
+  then changes every entry's band to `flat` without deduplication or
+  eviction. IDs, timestamps, supersession, episode links and other entry
+  fields stay unchanged, including rows in unrecognized bands. Capacity
+  is at least the old total, the complete row count and 5,250; larger banks
+  use the single-band custom layout below. Ordinary starts still accept
+  the existing presets; this command does not retire them.
+
+  The command commits its data migration before atomically replacing the
+  config. If interrupted, keep the daemon stopped and repeat the same
+  command to finish the committed plan. A migrated bank refuses startup
+  with a mismatched loaded layout. Both backup paths are printed: use your
+  rehearsed tooling to restore **both bank and config** to this same target
+  to undo the migration. The command never guesses a Docker restore target.
+  Keep that pair; it is outside ordinary backup rotation. This is a data
+  migration using the existing `meta` table, without a schema bump.
+
+  Both engines refuse a rewrite containing YAML timestamp or binary
+  values, integers outside signed 64-bit range, or shared mapping/list
+  aliases; the error names the unsupported shape and next step before
+  any bank rewrite. Comments are not retained by the YAML rewrite; the
+  state archive retains the exact original config. Do not switch a
+  populated continuum bank to flat by changing only the preset: startup
+  rebalancing is not the lossless migration path.
   **Before the first delete**: from 80% of the last band's capacity (the
   only band whose evictions are true drops) `memory_stats()` carries a
   `capacity_warning` and `/health` a `capacity_warning: true` flag. **To

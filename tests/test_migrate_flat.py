@@ -7,6 +7,26 @@ from pseudolife_memory import migrate_flat_cli as migration
 from tests.pg_fixtures import pg_conn, pg_url  # noqa: F401
 
 
+def test_explicit_target_requires_recovery_acknowledgement_before_effects(tmp_path, monkeypatch, capsys):
+    import psycopg
+    calls = []
+
+    def forbidden(*args, **kwargs):
+        calls.append(True)
+        raise AssertionError("preflight must not access the bank or config")
+
+    monkeypatch.setenv("PSEUDOLIFE_MCP_DATABASE_URL", "postgresql://unused.invalid/bank")
+    monkeypatch.setattr(psycopg, "connect", forbidden)
+    monkeypatch.setattr(migration, "_read_config", forbidden)
+    assert migration.main(["--apply", "--data-dir", str(tmp_path)]) == 1
+    assert calls == []
+    assert list(tmp_path.iterdir()) == []
+    output = capsys.readouterr()
+    assert not output.out
+    assert "a paired restore for an explicit DSN is not available yet" in output.err
+    assert "--external-recovery-verified" in output.err
+
+
 @pytest.mark.parametrize("preset", ["continuum", "titans", "moneta", "yaad", "memora"])
 def test_retired_preset_preserves_unrelated_config(preset):
     original = {"embedding": {"device": "cpu"}, "memory": {
@@ -92,8 +112,8 @@ def test_pending_migration_fences_only_mismatched_config(tmp_path):
     config.write_bytes(b"memory: {miras: {preset: continuum}}\n")
     marker = {"capacity": 5250, "complete": False, "target_sha256": migration._hash(b"memory: {miras: {preset: flat}}\n"),
               "backup": {"dump": "bank.sql.gz", "state": "state.tgz"}}
-    storage = SimpleNamespace(meta_get=lambda _: marker)
-    with pytest.raises(migration.MigrationError, match="migrate-flat --apply.*ops/restore.sh"):
+    storage = SimpleNamespace(get_meta=lambda _: marker)
+    with pytest.raises(migration.MigrationError, match="migrate-flat --apply.*external recovery tooling"):
         migration.require_config_finalized(storage, config, [("flat", 5250, "balanced")])
     config.write_bytes(b"memory: {miras: {preset: flat}}\n")
     migration.require_config_finalized(storage, config, [("flat", 5250, "balanced")])
@@ -102,7 +122,7 @@ def test_pending_migration_fences_only_mismatched_config(tmp_path):
         migration.require_config_finalized(storage, config, [("working", 200, "balanced")])
     config.write_bytes(b"memory: {miras: {preset: continuum}}\n")
     migration.require_config_finalized(storage, config, [("flat", 5250, "balanced")])
-    migration.require_config_finalized(SimpleNamespace(meta_get=lambda _: None), config, [])
+    migration.require_config_finalized(SimpleNamespace(get_meta=lambda _: None), config, [])
 
 
 def test_backup_failure_never_changes_config_or_rows(pg_conn, tmp_path):
@@ -117,6 +137,38 @@ def test_backup_failure_never_changes_config_or_rows(pg_conn, tmp_path):
         migration.migrate(pg_conn, tmp_path, backup=failed_backup)
     assert config.read_bytes() == original
     assert pg_conn.execute("SELECT value FROM meta WHERE key=%s", (migration.MARKER,)).fetchone() is None
+
+
+def test_backup_flush_failure_rolls_back_before_band_update(pg_conn, tmp_path, monkeypatch):
+    import gzip
+    import tarfile
+    from pseudolife_memory import backup_cli
+    config = tmp_path / "config.yaml"
+    original = b"memory: {miras: {preset: continuum}}\n"
+    config.write_bytes(original)
+    pg_conn.execute("INSERT INTO entries(band,text,embedding,ts) VALUES ('forever','kept',%s::vector,1)",
+                    ("[" + ",".join(["0.1"] * 1024) + "]",))
+    pg_conn.commit()
+
+    def backup(data_dir, out):
+        out.mkdir(parents=True)
+        dump, state = out / "bank.sql.gz", out / "state.tar.gz"
+        with gzip.open(dump, "wb") as stream:
+            stream.write(b"-- PostgreSQL database dump complete\n")
+        with tarfile.open(state, "w:gz") as archive:
+            archive.add(config, arcname="config.yaml")
+        return {"dump": dump, "state": state}
+
+    def failed_flush(_):
+        raise OSError("fixture flush failure")
+
+    monkeypatch.setattr(backup_cli, "perform_backup", backup)
+    monkeypatch.setattr(migration.os, "fsync", failed_flush)
+    with pytest.raises(migration.MigrationError, match="could not be flushed to disk"):
+        migration.migrate(pg_conn, tmp_path)
+    assert config.read_bytes() == original
+    assert pg_conn.execute("SELECT band FROM entries").fetchall() == [("forever",)]
+    assert pg_conn.execute("SELECT key FROM meta WHERE key IN (%s,'writer_lease_epoch')", (migration.MARKER,)).fetchall() == []
 
 
 def test_committed_migration_resumes_config_replace(pg_conn, tmp_path, monkeypatch):
@@ -150,7 +202,7 @@ def test_running_writer_refuses_before_backup(pg_conn, pg_url, tmp_path):
             migration.migrate(pg_conn, tmp_path, backup=lambda _: pytest.fail("backup before admission"))
 
 
-def test_over_capacity_bank_keeps_superseded_rows(pg_conn, tmp_path):
+def test_over_capacity_bank_keeps_superseded_rows(pg_conn, pg_url, tmp_path, monkeypatch):
     config = tmp_path / "config.yaml"
     config.write_text("memory: {miras: {preset: continuum}}\n", encoding="utf-8")
     pg_conn.execute("INSERT INTO entries (band,text,embedding,ts,superseded_at) "
@@ -167,6 +219,17 @@ def test_over_capacity_bank_keeps_superseded_rows(pg_conn, tmp_path):
     assert miras["bands"][0]["max_entries"] == 5251
     pg_conn.commit()
     assert migration.migrate(pg_conn, tmp_path, backup=lambda _: pytest.fail("repeat backup"))["status"] == "unchanged"
+    from pseudolife_memory.service import MemoryService
+    monkeypatch.setenv("PSEUDOLIFE_MCP_DATABASE_URL", pg_url)
+    service = MemoryService(data_dir=tmp_path)
+    try:
+        service._ensure_init()
+        assert len(service._cms.bands) == 1
+        assert len(service._cms.bands[0].entries) == 5251
+        assert pg_conn.execute(migration._FINGERPRINT).fetchall() == before
+    finally:
+        if service._storage is not None:
+            service._storage.close()
 
 
 def test_service_loaded_before_migration_cannot_hydrate_stale_bands(pg_conn, pg_url, tmp_path, monkeypatch):
@@ -182,3 +245,22 @@ def test_service_loaded_before_migration_cannot_hydrate_stale_bands(pg_conn, pg_
     finally:
         if service._storage is not None:
             service._storage.close()
+
+
+def test_reconnecting_resident_writer_observes_migration(pg_conn, pg_url, tmp_path, monkeypatch):
+    from pseudolife_memory.service import MemoryService
+    config = tmp_path / "config.yaml"
+    config.write_text("memory: {miras: {preset: continuum}}\n", encoding="utf-8")
+    monkeypatch.setenv("PSEUDOLIFE_MCP_DATABASE_URL", pg_url)
+    service = MemoryService(data_dir=tmp_path)
+    service._ensure_init()
+    epoch = service._storage._lease_epoch
+    service._storage._conn.close()
+    try:
+        migration.migrate(pg_conn, tmp_path, backup=lambda _: {"dump": "bank.sql.gz", "state": "state.tgz"})
+        assert pg_conn.execute("SELECT value FROM meta WHERE key='writer_lease_epoch'").fetchone()[0] == epoch + 1
+        pg_conn.commit()
+        with pytest.raises(RuntimeError, match="loaded config"):
+            service._ensure_init()
+    finally:
+        service._storage.close()

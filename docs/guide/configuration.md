@@ -2820,11 +2820,15 @@ every variant.
   thresholds, per-tier retention policies, and the 2026-07-25 demotion
   cascade (a full band demotes into the next; only overflow past
   `forever` drops).
-  **Moving an existing bank to flat:** stop the daemon and use
-  `pseudolife-mcp migrate-flat --apply --data-dir PATH` on the bank host,
+  **Moving an existing bank to flat:** first rehearse restoring the exact
+  bank **and its config** with your own tooling. An automatic paired restore
+  for an explicit database URL is not available. Stop the daemon and use
+  `pseudolife-mcp migrate-flat --apply --data-dir PATH --external-recovery-verified` on the bank host,
   with `PSEUDOLIFE_MCP_DATABASE_URL` set to that stopped bank. Native
   execution needs both `pseudolife-mcp` and `pseudolife-daemon` installed,
-  plus PostgreSQL's `pg_dump`. This opt-in command first writes a physical
+  plus PostgreSQL's `pg_dump`. Without the explicit recovery acknowledgement,
+  the command refuses before accessing the bank or config. With it, the
+  command prints a manual-recovery warning, then writes a physical
   bank dump and a state archive containing the original `config.yaml`,
   then changes every entry's band to `flat` without deduplication or
   eviction. IDs, timestamps, supersession, episode links and other entry
@@ -2836,9 +2840,9 @@ every variant.
   The command commits its data migration before atomically replacing the
   config. If interrupted, keep the daemon stopped and repeat the same
   command to finish the committed plan. A migrated bank refuses startup
-  with a mismatched loaded layout. Both backup paths and the paired
-  `ops/restore.sh --apply --backup-file ... --state-archive ...` command
-  are printed: restore **both bank and config** to undo the migration.
+  with a mismatched loaded layout. Both backup paths are printed: use your
+  rehearsed tooling to restore **both bank and config** to this same target
+  to undo the migration. The command never guesses a Docker restore target.
   Keep that pair; it is outside ordinary backup rotation. This is a data
   migration using the existing `meta` table, without a schema bump.
 

@@ -25,9 +25,16 @@ WRITER_LOCK = "pseudolife-bank-writer"
 _PRESETS = {"flat", "continuum", "titans", "moneta", "yaad", "memora", "custom"}
 _POLICIES = {"balanced", "recency_heavy", "surprise_heavy"}
 _FINGERPRINT = "SELECT id, md5((to_jsonb(e)-'band')::text) FROM public.entries e ORDER BY id"
-_HELP = ("usage: pseudolife-mcp migrate-flat --apply --data-dir PATH\n\n"
+_HELP = ("usage: pseudolife-mcp migrate-flat --apply --data-dir PATH --external-recovery-verified\n\n"
          "Back up and flatten a stopped bank. Set PSEUDOLIFE_MCP_DATABASE_URL.\n"
-         "Native execution also requires pseudolife-daemon on the bank host.\n")
+         "Native execution also requires pseudolife-daemon on the bank host.\n"
+         "--external-recovery-verified attests that you have rehearsed restoring\n"
+         "this exact bank AND config with your own tooling; no automatic restore exists.\n")
+_RECOVERY_REFUSAL = ("a paired restore for an explicit DSN is not available yet; nothing changed; "
+                     "rehearse restoring this exact bank AND config with your own tooling, "
+                     "then pass --external-recovery-verified")
+_RECOVERY_WARNING = ("WARNING: external recovery acknowledged for this bank AND config; "
+                     "use your rehearsed tooling to restore the backup pair; no automatic restore is available.")
 
 
 class MigrationError(RuntimeError):
@@ -93,21 +100,22 @@ def _hash(data):
     return hashlib.sha256(data).hexdigest()
 
 
-def restore_command(backup):
-    return ("ops/restore.sh --apply --backup-file " + shlex.quote(str(backup["dump"]))
-            + " --state-archive " + shlex.quote(str(backup["state"])))
+def recovery_instructions(backup):
+    return ("use your rehearsed external recovery tooling for this same bank AND config; bank dump "
+            + shlex.quote(str(backup["dump"])) + "; state archive "
+            + shlex.quote(str(backup["state"])) + "; no automatic restore is available")
 
 
 def require_config_finalized(storage, path, bands):
     """Fence only an explicitly started migration, before hydration can evict."""
-    marker = storage.meta_get(MARKER)
+    marker = storage.get_meta(MARKER)
     if marker is None:
         return
     capacity = marker.get("capacity") if isinstance(marker, dict) else None
     if type(capacity) is not int or capacity < 5250:
         raise MigrationError("flat migration marker is invalid; keep the daemon stopped and restore the bank and config from the migration backup pair")
     if not (len(bands) == 1 and bands[0][0] == "flat" and bands[0][1] >= capacity and bands[0][2] == "balanced"):
-        raise MigrationError("this bank was migrated but the loaded config is not the matching flat layout; restart with the migrated config or restore bank and config together: " + restore_command(marker["backup"]))
+        raise MigrationError("this bank was migrated but the loaded config is not the matching flat layout; restart with the migrated config or restore bank and config together: " + recovery_instructions(marker["backup"]))
     if marker.get("complete") is True:
         return
     try:
@@ -115,7 +123,7 @@ def require_config_finalized(storage, path, bands):
     except OSError:
         matches = False
     if not matches:
-        raise MigrationError("flat migration config finalization is pending; keep the daemon stopped and run migrate-flat --apply; restore bank and config together if needed: " + restore_command(marker["backup"]))
+        raise MigrationError("flat migration config finalization is pending; keep the daemon stopped and run migrate-flat --apply; restore bank and config together if needed: " + recovery_instructions(marker["backup"]))
 
 
 def _backup(data_dir):
@@ -135,6 +143,20 @@ def _backup(data_dir):
         with archive.extractfile(member) as source:
             if source.read() != config.read_bytes():
                 raise MigrationError("config.yaml changed during backup; nothing changed; retry migrate-flat --apply")
+    try:
+        for path in (result["dump"], result["state"]):
+            # A writable handle lets Windows flush file data and metadata.
+            with Path(path).open("r+b") as stream:
+                os.fsync(stream.fileno())
+        if os.name != "nt":
+            for path in (output, output.parent, data_dir):
+                descriptor = os.open(path, os.O_RDONLY)
+                try:
+                    os.fsync(descriptor)
+                finally:
+                    os.close(descriptor)
+    except OSError:
+        raise MigrationError("the bank backup could not be flushed to disk; nothing changed; repair the backup filesystem and retry migrate-flat --apply") from None
     return {"dump": str(result["dump"]), "state": str(result["state"])}
 
 
@@ -193,10 +215,10 @@ def _finish(conn, path, marker):
         target, capacity = flat_config(config, marker["capacity"])
         rendered = yaml.safe_dump(target, sort_keys=False).encode("utf-8")
         if capacity != marker["capacity"] or _hash(rendered) != marker["target_sha256"]:
-            raise MigrationError("migration config no longer matches its committed plan; restore bank and config together: " + restore_command(marker["backup"]))
+            raise MigrationError("migration config no longer matches its committed plan; restore bank and config together: " + recovery_instructions(marker["backup"]))
         _replace_config(path, rendered)
     elif _hash(raw) != marker["target_sha256"]:
-        raise MigrationError("config.yaml changed after the migration committed; restore bank and config together: " + restore_command(marker["backup"]))
+        raise MigrationError("config.yaml changed after the migration committed; restore bank and config together: " + recovery_instructions(marker["backup"]))
     marker = {**marker, "complete": True}
     with conn.transaction():
         conn.execute("UPDATE public.meta SET value=%s::jsonb WHERE key=%s", (json.dumps(marker), MARKER))
@@ -223,7 +245,7 @@ def migrate(conn, data_dir: Path, *, backup=None):
             marker = found[0]
             if marker.get("complete"):
                 if not _flat_layout(config, marker["capacity"]):
-                    raise MigrationError("this bank was migrated but its config is not the matching flat layout; restore bank and config together: " + restore_command(marker["backup"]))
+                    raise MigrationError("this bank was migrated but its config is not the matching flat layout; restore bank and config together: " + recovery_instructions(marker["backup"]))
                 return {"status": "unchanged", **marker}
             committed = True
             _finish(conn, path, marker)
@@ -246,8 +268,12 @@ def migrate(conn, data_dir: Path, *, backup=None):
                       "target_sha256": _hash(rendered), "backup": pair}
             conn.execute("UPDATE public.entries SET band='flat' WHERE band <> 'flat'")
             if conn.execute(_FINGERPRINT).fetchall() != rows:
-                raise MigrationError("entry verification failed; migration rolled back; restore backup if needed: " + restore_command(pair))
+                raise MigrationError("entry verification failed; migration rolled back; restore backup if needed: " + recovery_instructions(pair))
             conn.execute("INSERT INTO public.meta (key,value) VALUES (%s,%s::jsonb)", (MARKER, json.dumps(marker)))
+            conn.execute("INSERT INTO public.meta (key,value) VALUES ('writer_lease_epoch','1'::jsonb) "
+                         "ON CONFLICT (key) DO UPDATE SET value=to_jsonb(COALESCE("
+                         "CASE WHEN jsonb_typeof(meta.value)='number' "
+                         "THEN (meta.value #>> '{}')::numeric::bigint END,0)+1)")
         committed = True
         _finish(conn, path, marker)
         return {"status": "migrated", **marker, "complete": True}
@@ -255,9 +281,9 @@ def migrate(conn, data_dir: Path, *, backup=None):
         raise
     except Exception as error:
         if committed:
-            raise MigrationError("bank migration committed but config finalization failed; keep the daemon stopped and retry migrate-flat --apply; restore bank and config together if needed: " + restore_command(marker["backup"])) from error
+            raise MigrationError("bank migration committed but config finalization failed; keep the daemon stopped and retry migrate-flat --apply; restore bank and config together if needed: " + recovery_instructions(marker["backup"])) from error
         if marker is not None:
-            raise MigrationError("migration did not confirm completion; keep the daemon stopped and retry migrate-flat --apply to reconcile; restore bank and config together if needed: " + restore_command(marker["backup"])) from error
+            raise MigrationError("migration did not confirm completion; keep the daemon stopped and retry migrate-flat --apply to reconcile; restore bank and config together if needed: " + recovery_instructions(marker["backup"])) from error
         raise MigrationError("migration could not finish; keep the daemon stopped and retry migrate-flat --apply; inspect the backup before restoring") from error
     finally:
         try:
@@ -272,6 +298,7 @@ def migrate(conn, data_dir: Path, *, backup=None):
 
 def main(argv=None):
     apply = False
+    external_recovery = False
     data_dir = None
     args = iter(sys.argv[1:] if argv is None else argv)
     for argument in args:
@@ -280,6 +307,8 @@ def main(argv=None):
             return 0
         if argument == "--apply":
             apply = True
+        elif argument == "--external-recovery-verified":
+            external_recovery = True
         elif argument == "--data-dir":
             data_dir = next(args, None)
         else:
@@ -291,10 +320,14 @@ def main(argv=None):
     if data_dir is None:
         print("migrate-flat refused: --data-dir is required", file=sys.stderr)
         return 1
+    if not external_recovery:
+        print("migrate-flat refused: " + _RECOVERY_REFUSAL, file=sys.stderr)
+        return 1
     dsn = os.environ.get("PSEUDOLIFE_MCP_DATABASE_URL")
     if not dsn:
         print("migrate-flat refused: set PSEUDOLIFE_MCP_DATABASE_URL to the stopped bank and retry", file=sys.stderr)
         return 1
+    print(_RECOVERY_WARNING, file=sys.stderr)
     try:
         import psycopg
         with psycopg.connect(dsn, autocommit=True) as conn:
@@ -309,7 +342,7 @@ def main(argv=None):
     if "backup" in result:
         print(f"bank dump: {result['backup']['dump']}")
         print(f"state archive: {result['backup']['state']}")
-        print("restore bank and config together: " + restore_command(result["backup"]))
+        print("restore bank and config together: " + recovery_instructions(result["backup"]))
     return 0
 
 

@@ -255,7 +255,7 @@ def test_every_row_has_a_suite_and_w1c_rows_match_their_shards():
         if shard["suite"] in W1C_SUITES:
             assert {row for row, suite in ROW_SUITES.items() if suite == shard["suite"]} == \
                 set(re.findall(r"'([a-z_]+)'", shard["w1c_rows"]))
-    assert {row for row, suite in ROW_SUITES.items() if suite.startswith("h5-")} == {"audit", "backup"}
+    assert {row for row, suite in ROW_SUITES.items() if suite.startswith("h5-")} == {"audit", "backup", "migrate_flat"}
     assert set(ROW_SUITES.values()) <= set(SUITES)
 
 

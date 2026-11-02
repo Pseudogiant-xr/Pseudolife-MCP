@@ -32,7 +32,7 @@ pub(crate) fn pending_refusal(
         && bands[0].retention_policy == "balanced")
     {
         return Err(format!(
-            "this bank was migrated but the loaded config is not the matching flat layout; restart with the migrated config or restore bank and config together: ops/restore.sh --apply --backup-file {} --state-archive {}",
+            "this bank was migrated but the loaded config is not the matching flat layout; restart with the migrated config or restore bank and config together: use your rehearsed external recovery tooling for this same bank AND config; bank dump {}; state archive {}; no automatic restore is available",
             quote(marker["backup"]["dump"].as_str().unwrap_or("<dump>")),
             quote(marker["backup"]["state"].as_str().unwrap_or("<archive>"))
         ));
@@ -46,7 +46,7 @@ pub(crate) fn pending_refusal(
         return Ok(());
     }
     Err(format!(
-        "flat migration config finalization is pending; keep the daemon stopped and run migrate-flat --apply; restore bank and config together if needed: ops/restore.sh --apply --backup-file {} --state-archive {}",
+        "flat migration config finalization is pending; keep the daemon stopped and run migrate-flat --apply; restore bank and config together if needed: use your rehearsed external recovery tooling for this same bank AND config; bank dump {}; state archive {}; no automatic restore is available",
         quote(marker["backup"]["dump"].as_str().unwrap_or("<dump>")),
         quote(marker["backup"]["state"].as_str().unwrap_or("<archive>"))
     ))
@@ -196,7 +196,9 @@ pub(crate) fn plan(text: &str, entries: i64) -> Result<Value, String> {
     };
     put(&mut memory, "miras", target);
     put(&mut root, "memory", Node::Map(memory));
-    Ok(json!({"yaml": yaml_dump::safe_dump(&Node::Map(root)), "capacity": capacity, "flat": flat}))
+    Ok(
+        json!({"yaml": yaml_dump::safe_dump_pyyaml(&Node::Map(root)), "capacity": capacity, "flat": flat}),
+    )
 }
 
 pub(crate) fn command(args: &[std::ffi::OsString]) -> i32 {
@@ -242,8 +244,9 @@ mod tests {
             pending_refusal(&marker, Path::new("missing-fixture-config.yaml"), &bands).unwrap_err();
         assert!(error.contains("migrate-flat --apply"));
         assert!(error.contains(
-            "ops/restore.sh --apply --backup-file bank.sql.gz --state-archive state.tgz"
+            "external recovery tooling for this same bank AND config; bank dump bank.sql.gz; state archive state.tgz"
         ));
+        assert!(!error.contains("ops/restore"));
         let mut complete = marker;
         complete["complete"] = true.into();
         assert!(
@@ -277,5 +280,21 @@ mod tests {
         assert_eq!(plan(text, 0).unwrap()["capacity"], 16000);
         assert!(plan(&text.replace("surprise_heavy", "typo"), 0).is_err());
         assert!(plan(&text.replace("7000", "-1"), 0).is_err());
+    }
+
+    #[test]
+    fn migration_hash_bytes_use_yaml11_string_emission() {
+        let result = plan(
+            "model: 1e5\nother: 0o17\nmemory: {miras: {preset: continuum}}\n",
+            0,
+        )
+        .unwrap();
+        assert_eq!(
+            result["yaml"],
+            "model: 1e5\nother: 0o17\nmemory:\n  miras:\n    preset: flat\n"
+        );
+        let node = Node::Str("1e5".into());
+        assert_eq!(yaml_dump::safe_dump(&node), "'1e5'\n");
+        assert_eq!(yaml_dump::safe_dump_pyyaml(&node), "1e5\n...\n");
     }
 }

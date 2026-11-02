@@ -45,7 +45,7 @@ fn quoted(value: &str) -> String {
 }
 fn restore(pair: &Value) -> String {
     format!(
-        "ops/restore.sh --apply --backup-file {} --state-archive {}",
+        "use your rehearsed external recovery tooling for this same bank AND config; bank dump {}; state archive {}; no automatic restore is available",
         quoted(pair["dump"].as_str().unwrap_or("<dump>")),
         quoted(pair["state"].as_str().unwrap_or("<archive>"))
     )
@@ -290,6 +290,7 @@ async fn locked(
         )
         .await
         .map_err(|_| "migration marker could not be saved; migration rolled back")?;
+    client.batch_execute("INSERT INTO public.meta (key,value) VALUES ('writer_lease_epoch','1'::jsonb) ON CONFLICT (key) DO UPDATE SET value=to_jsonb(COALESCE(CASE WHEN jsonb_typeof(meta.value)='number' THEN (meta.value #>> '{}')::numeric::bigint END,0)+1)").await.map_err(|_| "writer epoch could not be advanced; migration rolled back")?;
     client.batch_execute("COMMIT").await.map_err(|_| format!("migration COMMIT answer was lost; keep the daemon stopped and retry migrate-flat --apply to reconcile; restore bank and config together if needed: {}", restore(&marker["backup"])))?;
     if let Err(reason) = finish(client, daemon, &path, &mut marker).await {
         return Err(format!("{RETRY}{} ({reason})", restore(&marker["backup"])));
@@ -326,16 +327,18 @@ async fn migrate(
 
 pub(super) fn run(arguments: Vec<OsString>) -> u8 {
     let mut apply = false;
+    let mut external_recovery = false;
     let mut data_dir = None;
     let mut args = arguments.iter();
     while let Some(arg) = args.next() {
         match arg.to_str() {
             Some("--apply") => apply = true,
+            Some("--external-recovery-verified") => external_recovery = true,
             Some("--data-dir") => data_dir = args.next().map(PathBuf::from),
             Some("--help" | "-h") => {
                 emit(
                     true,
-                    "usage: pseudolife-mcp migrate-flat --apply --data-dir PATH\n\nBack up and flatten a stopped bank. Set PSEUDOLIFE_MCP_DATABASE_URL.\nNative execution also requires pseudolife-daemon on the bank host.\n",
+                    "usage: pseudolife-mcp migrate-flat --apply --data-dir PATH --external-recovery-verified\n\nBack up and flatten a stopped bank. Set PSEUDOLIFE_MCP_DATABASE_URL.\nNative execution also requires pseudolife-daemon on the bank host.\n--external-recovery-verified attests that you have rehearsed restoring\nthis exact bank AND config with your own tooling; no automatic restore exists.\n",
                 );
                 return 0;
             }
@@ -350,6 +353,17 @@ pub(super) fn run(arguments: Vec<OsString>) -> u8 {
             return Err("no changes made; stop the daemon and pass --apply".into());
         }
         let data_dir = data_dir.ok_or("--data-dir is required")?;
+        if !external_recovery {
+            return Err("a paired restore for an explicit DSN is not available yet; nothing changed; rehearse restoring this exact bank AND config with your own tooling, then pass --external-recovery-verified".into());
+        }
+        let dsn = std::env::var("PSEUDOLIFE_MCP_DATABASE_URL")
+            .ok()
+            .filter(|s| !s.is_empty())
+            .ok_or("set PSEUDOLIFE_MCP_DATABASE_URL to the stopped bank and retry")?;
+        emit(
+            false,
+            "WARNING: external recovery acknowledged for this bank AND config; use your rehearsed tooling to restore the backup pair; no automatic restore is available.\n",
+        );
         let data_dir =
             fs::canonicalize(data_dir).map_err(|_| "--data-dir is unavailable; nothing changed")?;
         #[cfg(windows)]
@@ -360,10 +374,6 @@ pub(super) fn run(arguments: Vec<OsString>) -> u8 {
         let raw = read_config(&data_dir.join("config.yaml"))?;
         let daemon = daemon()?;
         plan(&daemon, &raw, 0)?;
-        let dsn = std::env::var("PSEUDOLIFE_MCP_DATABASE_URL")
-            .ok()
-            .filter(|s| !s.is_empty())
-            .ok_or("set PSEUDOLIFE_MCP_DATABASE_URL to the stopped bank and retry")?;
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()

@@ -70,6 +70,24 @@ pub(super) fn migration_backup(data_dir: &Path, dsn: &str) -> Result<serde_json:
     if !matched {
         return Err("state backup does not contain the unchanged config.yaml; nothing changed; retry migrate-flat --apply".into());
     }
+    let flush_failed = |_| {
+        "the bank backup could not be flushed to disk; nothing changed; repair the backup filesystem and retry migrate-flat --apply".to_owned()
+    };
+    for path in [&dump, &state] {
+        // Windows FlushFileBuffers requires a writable handle and includes metadata.
+        fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(path)
+            .and_then(|file| file.sync_all())
+            .map_err(flush_failed)?;
+    }
+    #[cfg(unix)]
+    for path in [bdir.as_path(), bdir.parent().unwrap(), data_dir] {
+        fs::File::open(path)
+            .and_then(|directory| directory.sync_all())
+            .map_err(flush_failed)?;
+    }
     Ok(serde_json::json!({"dump": dump, "state": state}))
 }
 

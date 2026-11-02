@@ -7,7 +7,7 @@ supplies an isolated server and selects this file explicitly.
 from pseudolife_memory import migrate_flat_cli as migration
 from tests.pg_fixtures import pg_conn, pg_url  # noqa: F401
 
-def test_real_backup_restores_bank_and_config(pg_conn, pg_url, tmp_path, monkeypatch):
+def test_real_backup_restores_bank_and_config(pg_conn, pg_url, tmp_path, monkeypatch, capsys):
     import gzip
     import os
     import subprocess
@@ -29,8 +29,13 @@ def test_real_backup_restores_bank_and_config(pg_conn, pg_url, tmp_path, monkeyp
     before = pg_conn.execute("SELECT to_jsonb(e) FROM entries e ORDER BY id").fetchall()
     pg_conn.commit()
     monkeypatch.setenv("PSEUDOLIFE_MCP_DATABASE_URL", pg_url)
-    result = migration.migrate(pg_conn, tmp_path)
-    assert result["status"] == "migrated"
+    assert migration.main(["--apply", "--data-dir", str(tmp_path), "--external-recovery-verified"]) == 0
+    output = capsys.readouterr()
+    assert "WARNING: external recovery acknowledged" in output.err
+    assert "ops/restore" not in output.out
+    result = pg_conn.execute("SELECT value FROM meta WHERE key=%s", (migration.MARKER,)).fetchone()[0]
+    pg_conn.commit()
+    assert result["complete"] is True
     with tarfile.open(result["backup"]["state"]) as archive:
         assert archive.extractfile("config.yaml").read() == original
     dump = _find_pg_dump()
