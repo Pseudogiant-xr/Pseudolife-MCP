@@ -558,3 +558,68 @@ impl Drop for SubscriptionGuard {
             .remove(&self.1);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn dropped_response_aborts_async_work() {
+        let (started, running) = tokio::sync::oneshot::channel();
+        let work = tokio::spawn(async move {
+            started.send(()).unwrap();
+            std::future::pending::<()>().await;
+        });
+        let guard = AbortAsync(Some(work.abort_handle()));
+        running.await.unwrap();
+        drop(guard);
+        assert!(work.await.unwrap_err().is_cancelled());
+    }
+
+    #[test]
+    fn overflow_releases_only_the_slow_subscription() {
+        let subscriptions = Arc::new(Subscriptions::default());
+        let (slow, mut slow_events) = mpsc::channel(1);
+        let (fast, mut fast_events) = mpsc::channel(2);
+        let (filtered, mut filtered_events) = mpsc::channel(1);
+        subscriptions.slots.lock().unwrap().1.extend([
+            (
+                1,
+                Listener {
+                    tools: true,
+                    tx: slow,
+                },
+            ),
+            (
+                2,
+                Listener {
+                    tools: true,
+                    tx: fast,
+                },
+            ),
+            (
+                3,
+                Listener {
+                    tools: false,
+                    tx: filtered,
+                },
+            ),
+        ]);
+        subscriptions.tools_changed();
+        subscriptions.tools_changed();
+        assert_eq!(subscriptions.slots.lock().unwrap().1.len(), 2);
+        assert_eq!(slow_events.try_recv(), Ok(()));
+        assert_eq!(
+            slow_events.try_recv(),
+            Err(mpsc::error::TryRecvError::Disconnected)
+        );
+        assert_eq!(fast_events.try_recv(), Ok(()));
+        assert_eq!(fast_events.try_recv(), Ok(()));
+        assert_eq!(
+            filtered_events.try_recv(),
+            Err(mpsc::error::TryRecvError::Empty)
+        );
+        drop(SubscriptionGuard(subscriptions.clone(), 2));
+        assert_eq!(subscriptions.slots.lock().unwrap().1.len(), 1);
+    }
+}
