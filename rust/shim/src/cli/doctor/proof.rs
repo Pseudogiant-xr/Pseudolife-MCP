@@ -153,7 +153,7 @@ fn fold(name: &str) -> String {
 }
 
 fn fixture_name(dsn: &str) -> Result<String, &'static str> {
-    let selected = Dsn::parse(dsn).map_err(|_| "ProgrammingError")?;
+    let selected = Dsn::parse_with_connection_options(dsn).map_err(|_| "ProgrammingError")?;
     let name = selected
         .config()
         .get_dbname()
@@ -170,7 +170,8 @@ fn fixture_name(dsn: &str) -> Result<String, &'static str> {
             if let Ok(live) = std::env::var("PSEUDOLIFE_MCP_DATABASE_URL")
                 && !live.is_empty()
             {
-                let live = Dsn::parse(&live).map_err(|_| "ProductionDatabaseError")?;
+                let live = Dsn::parse_with_connection_options(&live)
+                    .map_err(|_| "ProductionDatabaseError")?;
                 refused.push(
                     live.config()
                         .get_dbname()
@@ -215,7 +216,7 @@ fn database(dsn: &str, name: &str) -> Result<String, &'static str> {
 /// Bind the selected fixture's authentication before changing database or HOME.
 /// No credential is placed in argv, output, or a persistent configuration file.
 fn authenticated(dsn: &str, environment: &PasswordEnvironment) -> Result<String, &'static str> {
-    let parsed = Dsn::parse(dsn).map_err(|_| "ProgrammingError")?;
+    let parsed = Dsn::parse_with_connection_options(dsn).map_err(|_| "ProgrammingError")?;
     let config = parsed
         .resolved_config(environment)
         .map_err(|_| "OperationalError")?;
@@ -254,7 +255,7 @@ fn authenticated(dsn: &str, environment: &PasswordEnvironment) -> Result<String,
 }
 
 async fn connect(dsn: &str) -> Result<Session, &'static str> {
-    let dsn = Dsn::parse(dsn).map_err(|_| "ProgrammingError")?;
+    let dsn = Dsn::parse_with_connection_options(dsn).map_err(|_| "ProgrammingError")?;
     let mut environment = TlsEnvironment::from_environment();
     // Authentication was resolved against the original fixture database; an
     // empty result must not read a different pgpass entry for the admin bank.
@@ -269,7 +270,7 @@ async fn connect(dsn: &str) -> Result<Session, &'static str> {
 }
 
 fn daemon_connection_admission(dsn: &str) -> Result<(), &'static str> {
-    let parsed = Dsn::parse(dsn).map_err(|_| "ProgrammingError")?;
+    let parsed = Dsn::parse_with_connection_options(dsn).map_err(|_| "ProgrammingError")?;
     if !matches!(
         parsed.ssl_mode(),
         crate::pg::SslMode::Disable | crate::pg::SslMode::Prefer
@@ -850,7 +851,7 @@ mod tests {
             "host=127.0.0.1 port={} user=fixture password=synthetic dbname=postgres sslmode=disable",
             address.port()
         );
-        let dsn = Dsn::parse(&dsn).unwrap();
+        let dsn = Dsn::parse_with_connection_options(&dsn).unwrap();
         let environment = TlsEnvironment::default();
         let result = tokio::time::timeout(Duration::from_secs(10), async {
             // The fixture owns all connection settings. Runner PG* controls
@@ -876,7 +877,7 @@ mod tests {
     #[test]
     fn child_database_uses_only_the_parents_resolved_endpoint() {
         let source = "postgresql://fixture@localhost:5432/r2_fixture?host=127.0.0.1&port=5433";
-        let parent = Dsn::parse(source).unwrap();
+        let parent = Dsn::parse_with_connection_options(source).unwrap();
         let bound = authenticated(source, &PasswordEnvironment::default()).unwrap();
         let child: tokio_postgres::Config = database(&bound, "r2_child").unwrap().parse().unwrap();
         assert_eq!(child.get_hosts(), parent.config().get_hosts());
@@ -890,7 +891,7 @@ mod tests {
             "host=localhost user=fixture dbname=r2_options connect_timeout=5 application_name='proof fixture'",
             "postgresql://fixture@localhost/r2_options?connect_timeout=5&application_name=proof%20fixture",
         ] {
-            let parsed = Dsn::parse(dsn).unwrap();
+            let parsed = Dsn::parse_with_connection_options(dsn).unwrap();
             assert_eq!(
                 parsed.config().get_connect_timeout(),
                 Some(&Duration::from_secs(5))
@@ -1033,8 +1034,8 @@ mod tests {
     fn database_replacement_preserves_postgres_query_encoding() {
         let original = "postgresql://fixture@localhost/source?password=a%20b%2Bc&sslrootcert=cert%20dir/root.crt&db%6eame=old&dbname=last";
         let changed = database(original, "r2_fixture").unwrap();
-        let before = Dsn::parse(original).unwrap();
-        let after = Dsn::parse(&changed).unwrap();
+        let before = Dsn::parse_with_connection_options(original).unwrap();
+        let after = Dsn::parse_with_connection_options(&changed).unwrap();
         assert_eq!(after.config().get_dbname(), Some("r2_fixture"));
         assert_eq!(
             after.config().get_password(),
@@ -1052,7 +1053,7 @@ mod tests {
             "r2_fixture",
         )
         .unwrap();
-        let parsed = Dsn::parse(&changed).unwrap();
+        let parsed = Dsn::parse_with_connection_options(&changed).unwrap();
         assert_eq!(parsed.config().get_password(), Some(b"a+b".as_slice()));
     }
 
