@@ -228,16 +228,35 @@ fn bind_source(source: &str) -> String {
     // Preserve POSIX case and backslashes: they can name distinct files.
     source.to_owned()
 }
-fn ephemeral_mount(running: &Value, mount: &Value) -> bool {
+fn ephemeral_mount(config: &Value, running: &Value, mount: &Value) -> bool {
+    let name = mount["Name"].as_str();
+    let declared = config["volumes"].as_object();
+    let named = declared.is_some_and(|volumes| {
+        name.is_some_and(|name| volumes.values().any(|v| v["name"] == name))
+    });
+    // Compose inherits anonymous volumes when recreating a container and
+    // then records their generated name as Source. Do not mistake a declared
+    // named volume (even a hash-shaped one) or an arbitrary source for this.
+    let inherited = !named
+        && name.is_some_and(|name| {
+            name.len() == 64
+                && name
+                    .bytes()
+                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        })
+        && declared.is_some_and(|volumes| volumes.values().all(|v| v["name"].is_string()));
     mount["Type"] == "tmpfs"
         || (mount["Type"] == "volume"
+            && !named
             && running["HostConfig"]["Mounts"]
                 .as_array()
                 .is_some_and(|mounts| {
                     mounts.iter().any(|configured| {
                         configured["Target"] == mount["Destination"]
                             && configured["Type"] == "volume"
-                            && (configured["Source"].is_null() || configured["Source"] == "")
+                            && (configured["Source"].is_null()
+                                || configured["Source"] == ""
+                                || (inherited && configured["Source"].as_str() == name))
                     })
                 }))
 }
@@ -280,7 +299,7 @@ pub(super) fn verify_bank_identity(config: &Value, running: &Value) -> Result<()
         let target = volume["target"].as_str();
         let actual = mounts.iter().find(|m| m["Destination"].as_str() == target);
         if volume["type"] == "tmpfs" || volume["source"].as_str().is_none_or(str::is_empty) {
-            if actual.is_some_and(|mount| !ephemeral_mount(running, mount)) {
+            if actual.is_some_and(|mount| !ephemeral_mount(config, running, mount)) {
                 return Err(UpdateError::usage(format!(
                     "the Compose configuration replaces the persistent mount at {} with an ephemeral mount; restore its original mount type, source and access before updating; nothing was changed",
                     target.unwrap_or("an unreadable destination"),

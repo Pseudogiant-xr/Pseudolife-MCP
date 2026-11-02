@@ -744,6 +744,41 @@ def test_ephemeral_mount_remains_safe_to_recreate(tmp_path, previous, replacemen
         assert stages(json.loads(state_path.read_text()))[-1] == "up"
 
 
+@pytest.mark.parametrize("declared_named", [False, True], ids=["anonymous", "declared-named"])
+def test_inherited_anonymous_volume_survives_second_update(tmp_path, declared_named):
+    binary = _native_binary()
+    if not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path, mode="checkout") as (repo, env, state_path):
+        name = "a" * 64
+        state = json.loads(state_path.read_text())
+        state["config"]["services"][SERVICE]["volumes"].append({"type": "volume", "target": "/cache"})
+        state["running"]["Mounts"].append({"Type": "volume", "Name": name,
+            "Source": f"/var/lib/docker/volumes/{name}/_data", "Destination": "/cache", "RW": True})
+        state["running"]["HostConfig"] = {"Mounts": [{"Type": "volume", "Target": "/cache"}]}
+        state_path.write_text(json.dumps(state))
+        args = ["--checkout", str(repo), "--json", "--no-test-login", "--no-cache-prune", "--health-retries", "1"]
+        first = run_arm(repo, env, binary, args)
+        assert first.returncode == 0, first.stdout + first.stderr
+        state = json.loads(state_path.read_text())
+        assert stages(state)[-1] == "up"
+        # Docker's second-generation inspect names the inherited anonymous
+        # volume even though Compose still declares only its destination.
+        state["running"]["HostConfig"]["Mounts"][0]["Source"] = name
+        if declared_named:
+            state["config"]["volumes"]["cache"] = {"name": name}
+        state["calls"] = []
+        state_path.write_text(json.dumps(state))
+        second = run_arm(repo, env, binary, args)
+        assert second.returncode == (2 if declared_named else 0), second.stdout + second.stderr
+        calls = stages(json.loads(state_path.read_text()))
+        if declared_named:
+            assert "/cache" in second.stdout and "restore" in second.stdout
+            assert calls == []
+        else:
+            assert calls[-1] == "up"
+
+
 def test_nonexistent_release_does_not_recommend_another_updater(tmp_path):
     binary = _native_binary()
     if not binary:

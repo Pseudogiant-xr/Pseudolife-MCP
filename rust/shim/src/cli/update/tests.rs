@@ -296,6 +296,31 @@ fn native_update_ephemeral_mount_cannot_hide_persistent_contents() {
     }
 }
 #[test]
+fn native_update_anonymous_volume_survives_second_recreation() {
+    let name = "a".repeat(64);
+    let mut config = json!({"services":{DAEMON_SERVICE:{"environment":{"PSEUDOLIFE_MCP_DATABASE_URL":"fixture"},"volumes":[
+        {"type":"volume","source":"state","target":"/data"},
+        {"type":"volume","target":"/cache"}
+    ]}},"volumes":{"state":{"name":"fixture-state"}}});
+    let mut running = json!({"Config":{"Env":["PSEUDOLIFE_MCP_DATABASE_URL=fixture"]},"HostConfig":{"Mounts":[{"Type":"volume","Target":"/cache"}]},"Mounts":[
+        {"Type":"volume","Name":"fixture-state","Destination":"/data","RW":true},
+        {"Type":"volume","Name":name,"Source":format!("/var/lib/docker/volumes/{name}/_data"),"Destination":"/cache","RW":true}
+    ]});
+    assert!(engine::verify_bank_identity(&config, &running).is_ok());
+    // Compose inherits the anonymous volume on the first recreate. The next
+    // update sees its generated name in HostConfig, not an empty Source.
+    running["HostConfig"]["Mounts"][0]["Source"] = json!(name);
+    assert!(engine::verify_bank_identity(&config, &running).is_ok());
+    config["volumes"]["cache"] = json!({"name":name});
+    assert!(engine::verify_bank_identity(&config, &running).is_err());
+    config["volumes"].as_object_mut().unwrap().remove("cache");
+    running["HostConfig"]["Mounts"][0]["Source"] = json!("different-volume");
+    assert!(engine::verify_bank_identity(&config, &running).is_err());
+    running["HostConfig"] = Value::Null;
+    assert!(engine::verify_bank_identity(&config, &running).is_err());
+}
+
+#[test]
 fn native_update_rollback_records_commit_after_recreation() {
     let temp = Temp::new();
     let commands = engine::rollback_commands(
