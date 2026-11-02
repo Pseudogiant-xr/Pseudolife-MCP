@@ -86,7 +86,7 @@ pub fn run(arguments: Vec<OsString>) -> Option<u8> {
         return Some(setup::run(arguments.into_iter().skip(1).collect()));
     }
     if let Some(help) = help(&arguments) {
-        let _ = print(help);
+        let _ = print(&help.replace("\r\n", "\n"));
         return Some(0);
     }
     let action = parse(&arguments)?;

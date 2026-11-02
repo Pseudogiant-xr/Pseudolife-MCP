@@ -496,7 +496,7 @@ pub(super) fn run(values: Vec<OsString>) -> Option<ExitCode> {
         } else {
             include_str!("test_login_help.txt")
         };
-        let _ = std::io::stdout().write_all(&super::text_bytes(text));
+        let _ = std::io::stdout().write_all(&super::text_bytes(&text.replace("\r\n", "\n")));
         return Some(ExitCode::SUCCESS);
     }
     let args = parse(&values)?;

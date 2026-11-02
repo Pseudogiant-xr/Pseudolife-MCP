@@ -49,7 +49,7 @@ pub(super) fn run(mode: &str) -> Option<ExitCode> {
             "pair" => include_str!("pair_help.txt"),
             _ => return None,
         };
-        print(text.trim_end_matches('\n'));
+        print(text.replace("\r\n", "\n").trim_end_matches('\n'));
         return Some(ExitCode::SUCCESS);
     }
     let arguments = arguments
