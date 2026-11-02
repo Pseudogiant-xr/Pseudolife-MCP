@@ -32,8 +32,8 @@ closed no-spawn planning difference; the counts below include these two rows.
 |---|---:|
 | presentation | 17 |
 | behaviour with no caller | 69 |
-| behaviour with a caller | 128 |
-| closed | 48 |
+| behaviour with a caller | 127 |
+| closed | 49 |
 | **Total** | **262** |
 
 ## Behaviour with a caller: B14b routing
@@ -70,7 +70,6 @@ whose remaining item is a proof keeps that boundary visible in its entry.
 | [A bearer revoked between the gate and dispatch](mcp-surface-w2-g/a-bearer-revoked-between-the-gate-and.md) | stored-bearer `tools/call`/`tools/list` concurrent with principal revocation in `pseudolife_memory/invite_cli.py` | B6 MCP transport/auth boundary |
 | [MCP-REFUSAL-CLEANUP](mcp-surface-w2-g/mcp-refusal-cleanup.md) | HTTP clients in `rust/shim/src/raw_http.rs` or `pseudolife_memory/shim.py` after a body-limit/early refusal; direct clients may use Expect | B6 MCP/HTTP transport |
 | [MCP-REQUEST-CANCELLATION](mcp-surface-w2-g/mcp-request-cancellation.md) | stdio client cancellations forwarded through `rust/shim/src/wire_ids.rs` and `rust/shim/src/upstream.rs`; `memory_toolset` under GET backpressure exposes it | B6 MCP transport; R2 network/client CLI |
-| [MCP-SEARCH-EXPLAIN](mcp-surface-w2-g/mcp-search-explain.md) | agents calling the exposed `memory_search(explain=true)` parameter in `pseudolife_memory/mcp_server.py::memory_search` | B2a read projections / MCP search adapter |
 | [The 2026-07-28 stateless era (an `MCP-Protocol-Version` header outside the handshake versions, `_meta` envelopes, `subscriptions/listen`)](mcp-surface-w2-g/the-2026-07-28-stateless-era-an-mcp.md) | direct `claude mcp add --transport http` client documented in `README.md`, using the modern SDK protocol | B6 MCP transport; R2 direct-client compatibility |
 | [Shadow telemetry and dream status](read-only-shadow/shadow-telemetry-and-dream-status.md) | shadow deployment `ops/docker-compose.rust-shadow.yml` and Console dream/duplicates readers (`frontend/src/lib/api/config.ts`, `frontend/src/lib/api/review.ts`) | B16 read-only shadow; B11 shadow activation via R4 |
 | [HTTP-BODY-LIMITS: cap enforced at frame granularity](request-parsing-edges-canonical/http-body-limits-cap-enforced-at-frame.md) | HTTP clients in `rust/shim/src/raw_http.rs` and `pseudolife_memory/shim.py` after an early/body-limit refusal | B6 MCP/HTTP transport |

@@ -1,10 +1,23 @@
-**MCP-SEARCH-EXPLAIN:** `memory_search(explain=true)` answers the refusal
-envelope `{"error": "not_implemented", "message": "not_implemented: explain
-(the ranking trace) is not yet served by the Rust daemon"}` before any
-search runs, so no retrieval event or access count is written. Python runs
-the search, then `service.trace` (a second, instrumented retrieval) and
-serves verbose entries with `trace`. The instrumented retrieval itself is
-served since B2a's trace PR (`GET /api/trace`, `search::rank_traced`); the
-MCP adapter over it (search, then the traced retrieval, verbose entries
-with `trace`) is a follow-up. The search, store and board MCP adapters are now registered in
-`mcp/dispatch.rs`; that registration does not serve the explain option. Bound identity is enforced on the mount (M18). D7 bucket: behaviour with a caller. Code verification: `rust/daemon/src/read/mcp_search.rs::mcp_memory_search` still refuses explain before search; `pseudolife_memory/mcp_server.py::memory_search` runs search then trace; `rust/daemon/src/read/trace.rs::route` serves REST trace only. Other body adapters are registered in `rust/daemon/src/mcp/dispatch.rs::registry` and do not close this option. Caller: agents calling the exposed `memory_search(explain=true)` parameter in `pseudolife_memory/mcp_server.py::memory_search`; B14b owner: B2a read projections / MCP search adapter.
+**MCP-SEARCH-EXPLAIN:** closed. `memory_search(explain=true)` performs the
+ordinary search and cortex projection with verbose entries, then independently
+retrieves the ranking trace. It preserves Python's original episode filter,
+normalized tags, trace score-floor and recency defaults, access-count timing,
+and single retrieval event. A blank query returns `trace: null`; non-finite
+trace floats use the MCP serializer's null representation.
+
+D7 bucket: closed. Implementation: `read/mcp_search.rs::mcp_memory_search`
+and `read/trace.rs::trace`. The master `0f4f71ea` baseline refused all twelve
+live explain cases. The offline `run.py` scenario `mcp-search-explain` now
+matches Python in all nine cases and final bank state, and replays the
+committed `harness/goldens/mcp-search-explain.json` without Python. The
+`trace-no-trace` negative control changes five responses. The fixture also
+asserts that explain preserves the ordinary search's IDs, scores and order;
+`harness/mcp_search_baseline.py` compares four explain-false responses byte
+for byte against the unmodified daemon and compares final bank state.
+
+The live `w2d_search.py` explain scenario matches Python in all twelve
+cases and final bank state with the pinned oracle runtime. Real-model
+coverage remains in `w2d_search.py`'s `mcp-search-explain` and
+`mcp-search` scenarios, including reranking, cortex projection, original
+episode filters and subsequent access counts. This adapter does not change
+the embedding, retrieval, ranking or extraction algorithms.
