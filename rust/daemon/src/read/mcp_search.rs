@@ -106,10 +106,25 @@ fn mcp_memory_search<'a>(app: &'a crate::http::App, call: ToolCall<'a>) -> ToolF
             let traced = super::trace::trace(&app.service, &ready, req)
                 .await
                 .map_err(|e| ToolError::Internal(anyhow::anyhow!(e)))?;
-            result["trace"] = traced.get("trace").cloned().unwrap_or(Value::Null);
+            let mut trace = traced.get("trace").cloned().unwrap_or(Value::Null);
+            mcp_trace_numbers(&mut trace);
+            result["trace"] = trace;
         }
         Ok(result)
     })
+}
+
+/// Pydantic serializes the MCP trace's non-finite floats as null; the REST
+/// trace keeps Python JSON's Infinity/NaN spelling. Integer widths survive.
+fn mcp_trace_numbers(value: &mut Value) {
+    match value {
+        Value::Number(n) if matches!(n.to_string().as_str(), "Infinity" | "-Infinity" | "NaN") => {
+            *value = Value::Null;
+        }
+        Value::Array(items) => items.iter_mut().for_each(mcp_trace_numbers),
+        Value::Object(fields) => fields.values_mut().for_each(mcp_trace_numbers),
+        _ => {}
+    }
 }
 
 // The body-slice error type (`dispatch::ToolError`) is the large one.
@@ -440,6 +455,18 @@ fn restates_fact(entry_text: &str, value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mcp_trace_nulls_nonfinite_floats_without_narrowing_integers() {
+        let mut trace = json!({"top_k": serde_json::from_str::<Value>("999999999999999999999999999999").unwrap(),
+                               "tiers": [{"half_life_s": null}], "label": "Infinity"});
+        trace["tiers"][0]["half_life_s"] =
+            Value::Number(serde_json::Number::from_string_unchecked("Infinity".into()));
+        mcp_trace_numbers(&mut trace);
+        assert!(trace["tiers"][0]["half_life_s"].is_null());
+        assert_eq!(trace["top_k"].to_string(), "999999999999999999999999999999");
+        assert_eq!(trace["label"], "Infinity");
+    }
 
     #[test]
     fn truncation_counts_code_points() {
