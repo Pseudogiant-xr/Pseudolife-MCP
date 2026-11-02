@@ -1,5 +1,23 @@
 use super::*;
 use std::io::{Cursor, Read, Seek, SeekFrom, Write};
+
+#[cfg(windows)]
+#[test]
+fn native_update_external_paths_keep_drive_unc_and_unicode_without_verbatim_prefixes() {
+    for (input, expected) in [
+        (
+            r"\\?\C:\checkout λ\ops\backup.ps1",
+            r"C:\checkout λ\ops\backup.ps1",
+        ),
+        (
+            r"\\?\UNC\server\share\checkout λ",
+            r"\\server\share\checkout λ",
+        ),
+        (r"C:\checkout\ops", r"C:\checkout\ops"),
+    ] {
+        assert_eq!(seams::command_path(input.into()), PathBuf::from(expected));
+    }
+}
 struct Temp(PathBuf);
 impl Temp {
     fn new() -> Self {

@@ -70,7 +70,7 @@ pub(super) fn selected_checkout(u: &mut Update) -> Result<Option<PathBuf>> {
     let repo =
         u.o.checkout
             .as_ref()
-            .map(|p| fs::canonicalize(p).unwrap_or_else(|_| p.clone()));
+            .map(|p| seams::command_path(fs::canonicalize(p).unwrap_or_else(|_| p.clone())));
     if let Some(repo) = &repo {
         selected = selection(&repo.join(SELECTION))?;
         if u.o.engine.is_some() {
@@ -418,7 +418,7 @@ pub(super) fn rollback_commands(
 }
 
 pub(super) fn deploy(u: &mut Update, repo: &Path) -> Result<()> {
-    let repo = fs::canonicalize(repo)?;
+    let repo = seams::command_path(fs::canonicalize(repo)?);
     let ops = repo.join("ops");
     let env_file = ops.join(".env");
     let base = compose_args(

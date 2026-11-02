@@ -50,6 +50,12 @@ fn test_shim_runs_the_client_half_unattended_when_the_daemon_is_newer() {
         },
     );
     assert_eq!(calls, 1);
+    #[cfg(windows)]
+    assert!(
+        pseudolife_stdio::board::state::read(&home.path("state/update-clients.99.0.0.attempt"), 64)
+            .is_ok(),
+        "the native update attempt must have a readable owner-only ACL"
+    );
     assert!(note.contains("99.0.0") && note.contains("unattended"));
     assert_eq!(
         updates.version_note("http://127.0.0.1:18765", &health("99.0.0")),

@@ -104,8 +104,24 @@ def _program(path, script):
         # shell pipeline. Use pip's already-built console launcher, so argv
         # reaches the fixture byte for byte without compiling anything.
         import zipfile
-        from pip._vendor.distlib.scripts import ScriptMaker
-        launcher = ScriptMaker(None, None)._get_launcher("t")
+        try:
+            from pip._vendor.distlib.scripts import ScriptMaker
+        except ModuleNotFoundError:
+            # uv-created oracle environments can omit pip. CPython's bundled
+            # ensurepip wheel supplies the same launcher without installing it
+            # or mutating the shared interpreter environment.
+            import ensurepip
+            import struct
+            import sysconfig
+            wheels = sorted((Path(ensurepip.__file__).parent / "_bundled").glob("pip-*.whl"))
+            if not wheels:
+                raise RuntimeError("Windows Docker fixture needs pip or CPython's bundled ensurepip wheel") from None
+            bits = "64" if struct.calcsize("P") == 8 else "32"
+            suffix = "-arm" if sysconfig.get_platform() == "win-arm64" else ""
+            with zipfile.ZipFile(wheels[-1]) as bundle:
+                launcher = bundle.read(f"pip/_vendor/distlib/t{bits}{suffix}.exe")
+        else:
+            launcher = ScriptMaker(None, None)._get_launcher("t")
         payload = io.BytesIO()
         with zipfile.ZipFile(payload, "w") as archive:
             archive.writestr("__main__.py", f"import runpy\nrunpy.run_path({str(source)!r},run_name='__main__')\n")

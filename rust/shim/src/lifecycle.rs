@@ -1199,6 +1199,13 @@ impl ClientUpdates {
                     use std::os::unix::fs::OpenOptionsExt;
                     options.mode(0o600);
                 }
+                #[cfg(windows)]
+                {
+                    use std::os::windows::fs::OpenOptionsExt;
+                    // Match board::state's private creation access: file read/
+                    // write plus WRITE_DAC and WRITE_OWNER for make_private.
+                    options.access_mode(0x0012019f | 0x000c0000);
+                }
                 let mut file = open(&options, &marker)?;
                 owns_attempt = true;
                 #[cfg(windows)]

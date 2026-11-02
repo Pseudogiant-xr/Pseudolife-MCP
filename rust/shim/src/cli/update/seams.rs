@@ -12,6 +12,34 @@ use std::{
 
 pub(crate) type Environment = BTreeMap<String, String>;
 
+/// Canonical paths passed to PowerShell and Compose use ordinary Windows
+/// drive/UNC spelling; PowerShell's authorization check rejects verbatim paths.
+pub(crate) fn command_path(path: PathBuf) -> PathBuf {
+    #[cfg(windows)]
+    {
+        use std::path::{Component, Prefix};
+        let mut parts = path.components();
+        let Some(Component::Prefix(prefix)) = parts.next() else {
+            return path;
+        };
+        let mut plain = match prefix.kind() {
+            Prefix::VerbatimDisk(drive) => PathBuf::from(format!("{}:\\", char::from(drive))),
+            Prefix::VerbatimUNC(server, share) => PathBuf::from(r"\\").join(server).join(share),
+            _ => return path,
+        };
+        for part in parts {
+            if part != Component::RootDir {
+                plain.push(part.as_os_str());
+            }
+        }
+        plain
+    }
+    #[cfg(not(windows))]
+    {
+        path
+    }
+}
+
 pub(crate) fn home() -> PathBuf {
     std::env::var_os("USERPROFILE")
         .or_else(|| std::env::var_os("HOME"))
