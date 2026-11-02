@@ -437,7 +437,7 @@
     "rust/shim/src/credentials/unix_accounts.rs": "d30f56e73eb66cb4dad5989bab84e4ccb33692b0433262f50caca02dcf58a0be",
     "rust/shim/src/daemon_url.rs": "5aabc9e4811af93f9292d84e2abc7c182884ea201284b7bbc2f722ff94d3817e",
     "rust/shim/src/errors.rs": "dc2399e44394fae5bb48ad8a36ca5d9607a86b21cd252fd69388218f68e3bc28",
-    "rust/shim/src/lib.rs": "f8d35f4506a291b0acd8b5d79895f67c361d79e701dacbfd8e5e07be0ed9949d",
+    "rust/shim/src/lib.rs": "8709d74b05869f5ce776d9f1be942c6225100239008c6f16385cab260361c489",
     "rust/shim/src/lifecycle.rs": "666d564a93aedaa697dc1239a4aff6e27d98a1e38b3f7841664f1ddf320b418d",
     "rust/shim/src/lifecycle_executable.rs": "da0f66066d4e12bd383ce4b505c0882425a8897a2ca6c548a2b6e7b3246f6995",
     "rust/shim/src/main.rs": "ca972719f80883993ba4b933b1e1b48faa3c2370eb57c89a6f4a386487dfe2d4",
@@ -464,6 +464,11 @@
     "rust/shim/src/sent_json.rs": "6986f9f3fdabeb695c12a5b2e6d0e6e72a19288f4eaa284b8287f9d8709db5cc",
     "rust/shim/src/sent_jsonb.rs": "d9265b4adb2842160310fd5410bd8c9224933bf09acce6ff48143d21022cc46e",
     "rust/shim/src/sent_serve.rs": "335fd96af4c5eac802e5102f09154552e32705899bc81f990ae95ddba0dd0234",
+    "rust/shim/src/setup/codex.rs": "7d7a8c06e63ee60dea5b8ffaf662988b4137bb68da7fded3206c6923bb7a57d0",
+    "rust/shim/src/setup/codex/credentials.rs": "7e1fa0f5c83f0f2cd6028ea35657ac668837a8d7474eb2eef9e797be467de3a6",
+    "rust/shim/src/setup/codex/rpc.rs": "2806b8cbb5b73fbdc883c8a67a3d15d95bee325f462b4ee512e8fe4382d70438",
+    "rust/shim/src/setup/files.rs": "d68849e762391b5dd008e3ad176814873892494c3e364fb995d57ce32d6612d0",
+    "rust/shim/src/setup/mod.rs": "bae8e68ff423bf4e1ec2e2544363ce0ed7460958b79fee1fd858b5c4b9822dba",
     "rust/shim/src/subscriptions.rs": "bd3b8522e1266a15316598a2a2ccbb965dbe1e7fa9ed556140a22c877f0e97a9",
     "rust/shim/src/upstream.rs": "44c78d8044fde7fb8c4fe39f928063748f87271a1c4d6f50bbfa7622879db16d",
     "rust/shim/src/wire_compatibility.rs": "e51c066fded5c2f6e4a9f3d1412fd9725ac1d26aff51ad10009e4d7fc6f0a283",
@@ -5892,6 +5897,24 @@
           "dynamic": "unresolved",
           "evidence": "static",
           "location": "ops/setup-codex-coordination.py:166",
+          "shape": {
+            "argv": [
+              {
+                "literal": "shim"
+              }
+            ],
+            "channel": "argv",
+            "complete": false,
+            "executable_expression": "python -m pseudolife_memory.cli",
+            "expression": " \"shim\"",
+            "omitted_optional": null,
+            "parameters": {}
+          }
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "rust/shim/src/setup/codex.rs:437",
           "shape": {
             "argv": [
               {
@@ -30004,6 +30027,19 @@
           "usage": "reference"
         },
         {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "rust/shim/src/setup/codex.rs:17",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
           "evidence": "documented",
           "location": "docs/guide/configuration.md:3349",
           "shape": {
@@ -32267,6 +32303,19 @@
           "usage": "reference"
         },
         {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "rust/shim/src/setup/codex.rs:20",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
           "evidence": "documented",
           "location": "docs/guide/configuration.md:1202",
           "shape": {
@@ -33197,7 +33246,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/lib.rs:386",
+          "location": "rust/shim/src/lib.rs:387",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -35473,6 +35522,19 @@
           "usage": "reference"
         },
         {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "rust/shim/src/setup/codex.rs:19",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
           "evidence": "static",
           "location": "ops/install-autostart.ps1:32",
           "shape": {
@@ -37697,6 +37759,19 @@
           "dynamic": "unresolved",
           "evidence": "static",
           "location": "rust/shim/src/credentials.rs:125",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "rust/shim/src/setup/codex.rs:18",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -43667,6 +43742,22 @@
           "dynamic": "unresolved",
           "evidence": "static",
           "location": "rust/shim/src/cli/pairing/net.rs:136",
+          "shape": {
+            "channel": "query",
+            "complete": false,
+            "expression": "Request helper, URL suffix or body requires resolution at this location.",
+            "omitted_optional": null,
+            "parameters": {
+              "limit": {
+                "literal": "1"
+              }
+            }
+          }
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "rust/shim/src/setup/codex/credentials.rs:39",
           "shape": {
             "channel": "query",
             "complete": false,
@@ -88092,7 +88183,7 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/lib.rs:386",
+      "location": "rust/shim/src/lib.rs:387",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_PROXY_TIMEOUT_SECONDS"
     },
@@ -88590,6 +88681,47 @@
       "location": "rust/shim/src/sent_serve.rs:81",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_DATABASE_URL"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/setup/codex.rs:17",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_DAEMON_URL"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/setup/codex.rs:18",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/setup/codex.rs:19",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/setup/codex.rs:20",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_NO_SPAWN"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/setup/codex.rs:437",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "cli:shim"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/setup/codex/credentials.rs:39",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "route:GET /api/episodes"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/setup/codex/credentials.rs:39",
+      "reason": "built URL"
     },
     {
       "dynamic": "unresolved",
