@@ -2433,6 +2433,20 @@ RECALL_SEED = [
 ]
 
 SCENARIOS.update({
+    "recall-config-defaults": {
+        "config": ("memory:\n  dream:\n    enabled: false\n  recall:\n"
+                   "    default_hops: 1\n    default_top_k: 1\n"),
+        "seed": RECALL_SEED,
+        "ops": [
+            recall("What does the web app run on?", verbose=True),
+            {"op": "http", "method": "GET", "path": "/api/recall?q=web+app"},
+            recall("What does the web app run on?", hops=2, top_k=3, verbose=True),
+            {"op": "http", "method": "GET", "path": "/api/recall?q=web+app&hops=2&top_k=3"},
+            recall("web app", hops=None),
+            recall("web app", top_k=None),
+            {"op": "http", "method": "GET", "path": "/api/recall?q=web+app&hops=&top_k=invalid"},
+        ],
+    },
     "recall": {
         "config": None,
         "seed": RECALL_SEED,
