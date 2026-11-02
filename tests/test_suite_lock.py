@@ -1751,64 +1751,98 @@ def test_the_board_not_the_local_clock_decides_a_hold_has_lapsed(tmp_path, paced
 
 
 @pytest.fixture
-def short_answer_window(paced_board, monkeypatch):
-    # Production: REQUEST_TIMEOUT 10 s, TRANSIENT_RETRY 5 s.
-    monkeypatch.setattr(paced_board, "REQUEST_TIMEOUT", 0.3)
-    monkeypatch.setattr(paced_board, "TRANSIENT_RETRY", 0.2)
+def quick_retry(paced_board, monkeypatch):
+    # Production: TRANSIENT_RETRY 5 s, the pause before a failed call's retry.
+    monkeypatch.setattr(paced_board, "TRANSIENT_RETRY", 0.02)
     return paced_board
 
 
-def _times_out(lease_cli):
-    """A board call that takes the whole request timeout, then times out, as
-    a daemon slowed by a suite does."""
+def _never_closes(monkeypatch, mirror):
+    """Keep fail mode's answer window open: what ends the wait here is the
+    board's answer or the retry's failure, never how fast the machine runs.
+    Production bounds it at two timed-out calls and the retry pause."""
+    monkeypatch.setattr(mirror, "answer_window", lambda: float("inf"))
+    return mirror
+
+
+def _after(gate, outcome):
+    """A board call held until the test sets ``gate``, as a daemon slowed by
+    a suite is; then it raises ``outcome`` or returns it."""
     def reply(request):
-        time.sleep(lease_cli.REQUEST_TIMEOUT)
-        raise httpx.ReadTimeout("timed out")
+        assert gate.wait(START_TIMEOUT), "the test never released the board call"
+        if isinstance(outcome, BaseException):
+            raise outcome
+        return outcome
     return reply
 
 
-def _answers_late(answer, lease_cli):
-    """A board call that answers just inside the request timeout."""
-    def reply(request):
-        time.sleep(lease_cli.REQUEST_TIMEOUT * 0.8)
-        return answer
-    return reply
+def _acquire_in_thread(tmp_path, mirror, out):
+    """Run a fail-mode acquire on its own thread; the result dict gets
+    ``held`` or ``refused``."""
+    result: dict = {}
+
+    def run():
+        try:
+            result["held"] = suite_lock.acquire(tmp_path, "fail", worktree="w", poll=0.02,
+                                                out=out, mirror=mirror)
+        except suite_lock.SuiteLockBusy as exc:
+            result["refused"] = exc
+
+    thread = threading.Thread(target=run, daemon=True)
+    thread.start()
+    return thread, result
 
 
-def test_fail_mode_does_not_wait_for_a_board_that_does_not_answer(tmp_path,
-                                                                  short_answer_window):
+def test_fail_mode_does_not_wait_for_a_board_that_does_not_answer(tmp_path, quick_retry,
+                                                                  monkeypatch):
     # Opus review of #1174: fail mode sat out BOARD_GIVE_UP (120 s) when the
     # board stopped answering. Once its retry has failed too, it says so and
-    # the local lock admits the run.
-    lease_cli = short_answer_window
-    daemon = FakeDaemon(lease=[_times_out(lease_cli)])
+    # the local lock admits the run, without sitting out the answer window.
+    retry = threading.Event()
+    daemon = FakeDaemon(lease=[httpx.ReadTimeout("timed out"),
+                               _after(retry, httpx.ReadTimeout("timed out"))])
+    mirror = _never_closes(monkeypatch, _mirror(tmp_path, daemon))
     out = io.StringIO()
-    started = time.monotonic()
-    held_lock = suite_lock.acquire(tmp_path, "fail", worktree="w", poll=0.02, out=out,
-                                   mirror=_mirror(tmp_path, daemon))
+    thread, result = _acquire_in_thread(tmp_path, mirror, out)
     try:
-        # Two timed-out calls with the retry pause between them.
-        floor = 2 * lease_cli.REQUEST_TIMEOUT + lease_cli.TRANSIENT_RETRY
-        assert floor - 0.05 <= time.monotonic() - started < 30
-        assert daemon.actions().count("lease") >= 2
+        assert _wait_for(lambda: daemon.actions().count("lease") >= 2)
+        assert not result  # one failed call does not start the run
+        retry.set()
+        thread.join(START_TIMEOUT)
+        assert "held" in result, result
         assert "not answering" in out.getvalue() and "local lock" in out.getvalue()
     finally:
-        suite_lock.release(held_lock)
+        retry.set()
+        thread.join(START_TIMEOUT)
+        if "held" in result:
+            suite_lock.release(result["held"])
 
 
-def test_fail_mode_waits_for_the_retrys_answer_before_starting_alone(tmp_path,
-                                                                     short_answer_window):
+def test_fail_mode_waits_for_the_retrys_answer_before_starting_alone(tmp_path, quick_retry,
+                                                                     monkeypatch):
     # Opus review of #1174, rounds 2 and 3: a daemon slowed by the very
     # suite that holds the lease is the likeliest case, and its retry answers
-    # late. That answer shows the holder, so fail mode refuses.
-    lease_cli = short_answer_window
-    daemon = FakeDaemon(lease=[_times_out(lease_cli),
-                               _answers_late(_queued_behind(), lease_cli)])
-    with pytest.raises(suite_lock.SuiteLockBusy) as refused:
-        suite_lock.acquire(tmp_path, "fail", worktree="w", poll=0.02, out=io.StringIO(),
-                           mirror=_mirror(tmp_path, daemon))
-    assert "cargo build" in str(refused.value)
-    assert suite_lock_is_free(tmp_path)
+    # late. That answer shows the holder, so fail mode refuses. The retry is
+    # held on an event rather than a sleep: a loaded macOS runner overslept
+    # a 0.8 s window and started alone (batch #1190, run 41521120255).
+    answered = threading.Event()
+    daemon = FakeDaemon(lease=[httpx.ReadTimeout("timed out"),
+                               _after(answered, _queued_behind())])
+    mirror = _never_closes(monkeypatch, _mirror(tmp_path, daemon))
+    thread, result = _acquire_in_thread(tmp_path, mirror, io.StringIO())
+    try:
+        assert _wait_for(lambda: daemon.actions().count("lease") >= 2)
+        assert not result  # the retry is still out: no verdict yet
+        answered.set()
+        thread.join(START_TIMEOUT)
+        assert "refused" in result, result
+        assert "cargo build" in str(result["refused"])
+        assert suite_lock_is_free(tmp_path)
+    finally:
+        answered.set()
+        thread.join(START_TIMEOUT)
+        if "held" in result:
+            suite_lock.release(result["held"])
 
 
 def test_a_board_that_stops_answering_mid_wait_is_named_then_dropped(
