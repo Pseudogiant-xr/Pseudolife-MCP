@@ -1891,7 +1891,7 @@ def test_codex_repeated_valid_rung_keeps_offer_and_deduplicates_consumption(tmp_
     asyncio.run(drive())
 
 
-@pytest.mark.parametrize("reason", ["maintainer_message", "conductor", "lease_grant"])
+@pytest.mark.parametrize("reason", ["maintainer_message", "conductor"])
 def test_deferred_privileged_offer_survives_new_peer_attention(tmp_path, reason):
     ring = {"decision": "rung", "reason": reason, "ring_at": 0.0,
             "message_expires_at": time.time() + 3600}
@@ -1933,5 +1933,21 @@ def test_deferred_privileged_offer_is_bounded(tmp_path, end):
                     coordination._ring_context["message_expires_at"] = time.time() - 1
                 else:
                     (tmp_path / "digest.seen").write_text(str(coordination.digest_watermark))
+                assert coordination.ring_due() is None
+    asyncio.run(drive())
+
+
+def test_lease_grant_offer_still_obeys_daemon_withdrawal(tmp_path):
+    ring = {"decision": "rung", "reason": "lease_grant", "ring_at": 0.0,
+            "message_expires_at": time.time() + 3600}
+    daemon = _mailbox_daemon([(0, [], None), (1, _preview("m1"), ring), (1, _preview("m1"), None)])
+    async def drive():
+        client, coordination = adapter(daemon, delivery_transport="codex",
+                                       digest_path=tmp_path / "digest.txt")
+        async with client:
+            async with coordination:
+                await coordination._heartbeat()
+                coordination.restore_ring(coordination.ring_due())
+                await coordination._heartbeat()
                 assert coordination.ring_due() is None
     asyncio.run(drive())

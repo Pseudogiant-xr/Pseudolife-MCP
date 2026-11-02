@@ -381,7 +381,7 @@ class CoordinationAdapter:
         offer = self._ring_offer
         expiry = self._ring_context.get("message_expires_at")
         return (offer is not None and offer[0] == "rung"
-                and offer[1] in {"maintainer_message", "conductor", "lease_grant"}
+                and offer[1] in {"maintainer_message", "conductor"}
                 and type(expiry) in (int, float) and math.isfinite(expiry)
                 and expiry > time.time() and bool(self._pending_count)
                 and self._read_seen() < offer[3])
@@ -393,7 +393,7 @@ class CoordinationAdapter:
         offer = self._ring_offer
         if offer is None:
             return None
-        if (offer[1] in {"maintainer_message", "conductor", "lease_grant"}
+        if (offer[1] in {"maintainer_message", "conductor"}
                 and self._ring_context.get("message_expires_at") is not None
                 and not self._privileged_offer_live()):
             self._withdraw_ring()

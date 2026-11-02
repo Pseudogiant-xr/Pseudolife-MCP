@@ -1413,7 +1413,7 @@ fn resolver_pathext_preserves_supported_extensions_and_path_directory_order() {
 
 #[tokio::test]
 async fn deferred_privileged_bell_survives_peer_attention() {
-    for reason in ["maintainer_message", "conductor", "lease_grant"] {
+    for reason in ["maintainer_message", "conductor"] {
         let rig = Harness::new(true, Duration::ZERO).await;
         state::private_dir(rig.pending.path.parent().unwrap()).unwrap();
         let lock = state::create(&rig.pending.path.with_extension("bell-lock"))
@@ -1445,10 +1445,14 @@ async fn deferred_privileged_bell_survives_peer_attention() {
 
 #[tokio::test]
 async fn deferred_privileged_bell_drops_on_empty_expired_or_delivered() {
-    for end in ["empty", "expired", "delivered"] {
+    for end in ["empty", "expired", "delivered", "lease_grant"] {
         let rig = Harness::paused(true, Duration::from_secs(60)).await;
         let mut privileged = view(&[1, 2], 2, 2, 1.0);
-        privileged.wake.as_mut().unwrap()["reason"] = json!("conductor");
+        privileged.wake.as_mut().unwrap()["reason"] = json!(if end == "lease_grant" {
+            "lease_grant"
+        } else {
+            "conductor"
+        });
         privileged.wake.as_mut().unwrap()["message_expires_at"] = json!(if end == "expired" {
             now() + 0.2
         } else {

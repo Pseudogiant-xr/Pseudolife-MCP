@@ -315,7 +315,7 @@ impl Doorbell {
             && let Some(wake) = view.wake.as_ref()
             && wake["decision"] == "rung"
             && let Some(reason) = wake["reason"].as_str()
-            && matches!(reason, "maintainer_message" | "conductor" | "lease_grant")
+            && matches!(reason, "maintainer_message" | "conductor")
             && let Some(ring_at) = wake["ring_at"].as_f64().filter(|at| at.is_finite())
             && wake["message_expires_at"]
                 .as_f64()
