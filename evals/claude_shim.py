@@ -604,7 +604,7 @@ class ClaudeCli:
             n = self.calls
             t0 = time.monotonic()
             if file_system:
-                with tempfile.TemporaryDirectory(prefix="claude-shim-") as tmp:
+                with tempfile.TemporaryDirectory(prefix="claude-shim-", ignore_cleanup_errors=True) as tmp:
                     prompt = Path(tmp) / "system.txt"
                     prompt.write_text(system, encoding="utf-8", newline="")
                     rc, stdout, stderr = self._run(
