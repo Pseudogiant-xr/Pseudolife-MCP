@@ -148,7 +148,7 @@ def proof(binary, root, fixture, launcher_exe, provider):
     windows = os.name == "nt"
     if windows:
         wrapper_forwarding(root)
-        for case in ("PasswordRollback", "LegacyMigration", "DelayedStop", "DelayedRemoval",
+        for case in ("PasswordRollback", "LegacyMigration", "DelayedStop", "DelayedRemoval", "DeleteRetry", "DeleteFailure",
                      "StopTimeout", "RemovalTimeout", "ProcessExitRace", "ProcessStopFailure",
                      "ProcessIdentityChanged"):
             checked(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(Path(__file__).with_name("scheduler_failures.ps1")),

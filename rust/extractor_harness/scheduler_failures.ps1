@@ -1,4 +1,4 @@
-param([string]$Source, [string]$Root, [ValidateSet('PasswordRollback','LegacyMigration','DelayedStop','DelayedRemoval','StopTimeout','RemovalTimeout','ProcessExitRace','ProcessStopFailure','ProcessIdentityChanged')][string]$Case)
+param([string]$Source, [string]$Root, [ValidateSet('PasswordRollback','LegacyMigration','DelayedStop','DelayedRemoval','DeleteRetry','DeleteFailure','StopTimeout','RemovalTimeout','ProcessExitRace','ProcessStopFailure','ProcessIdentityChanged')][string]$Case)
 $ErrorActionPreference = 'Stop'
 # Every scheduler/process operation is mocked; these cases need no credentials,
 # real registrations, listeners or process termination.
@@ -20,6 +20,7 @@ $global:r6stopPending = 0
 $global:r6removePending = 0
 $global:r6stopWaits = 0
 $global:r6removeWaits = 0
+$global:r6deleteAttempts = 0
 $global:r6registered = $false
 $global:r6stoppedPids = @()
 $global:r6oldProcess = $null
@@ -122,6 +123,13 @@ function Stop-ScheduledTask {
     if ($global:r6fixtureTask -and $global:r6fixtureTask.State -eq 'Running') { $global:r6stopPending=3 }
 }
 function Unregister-ScheduledTask {
+    [CmdletBinding()]
+    param([string]$TaskName, [switch]$Confirm)
+    $global:r6deleteAttempts++
+    if ($Case -eq 'DeleteFailure' -or ($Case -eq 'DeleteRetry' -and $global:r6deleteAttempts -lt 3)) {
+        Write-Error 'fixture delete rejected'
+        return
+    }
     if ($global:r6fixtureTask -and $global:r6fixtureTask.State -eq 'Running') { throw 'task unregistered before scheduler stopped' }
     if ($Case -in @('DelayedRemoval','RemovalTimeout')) { $global:r6removePending=3 }
     else { $global:r6fixtureTask=$null }
@@ -161,9 +169,14 @@ if ($Case -eq 'DelayedStop') {
 } else {
     if ($caught -ne $expectedFailure) { throw "original failure was lost: $caught" }
     if ([IO.File]::ReadAllText($settings) -ne 'before') { throw 'settings were not restored' }
-    if ($Case -notin @('StopTimeout','RemovalTimeout') -and $global:r6fixtureTask) { throw 'replacement task survived failed installation' }
+    if ($Case -notin @('StopTimeout','RemovalTimeout','DeleteFailure') -and $global:r6fixtureTask) { throw 'replacement task survived failed installation' }
 }
-if ($Case -eq 'DelayedRemoval') {
+if ($Case -eq 'DeleteRetry') {
+    if ($global:r6deleteAttempts -ne 3 -or $global:r6warningText) { throw 'rejected deletion was not retried until accepted' }
+} elseif ($Case -eq 'DeleteFailure') {
+    if (-not $global:r6fixtureTask -or $global:r6warningText -notlike '*fixture delete rejected*' -or $global:r6warningText -notlike '*present*') { throw 'delete failure diagnostic or remaining state was lost' }
+    if (($global:r6clock - [datetime]'2026-01-01').TotalSeconds -lt 15) { throw 'rejected deletion did not await its deadline' }
+} elseif ($Case -eq 'DelayedRemoval') {
     if ($global:r6stopWaits -lt 3 -or $global:r6removeWaits -lt 3 -or $global:r6warningText) { throw 'rollback did not await delayed scheduler stop and removal' }
 } elseif ($Case -eq 'StopTimeout') {
     if ($global:r6registered -or -not $global:r6fixtureTask -or $global:r6warningText -notlike '*did not stop*') { throw 'stop timeout did not preserve the failure and remaining task' }

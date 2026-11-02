@@ -132,10 +132,20 @@ function Remove-OwnedTask([string]$taskName) {
     Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
     foreach ($process in @($captured | Sort-Object CreationDate -Descending)) { Stop-CapturedProcess $process }
     Wait-TaskStopped $taskName
-    Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
     $deadline = (Get-Date).AddSeconds(15)
+    $accepted = $false
+    $lastDeleteError = 'registration is still present'
     while (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue) {
-        if ((Get-Date) -ge $deadline) { throw "could not remove $taskName" }
+        if ((Get-Date) -ge $deadline) { throw "could not remove ${taskName}: $lastDeleteError" }
+        if (-not $accepted) {
+            try {
+                Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction Stop
+                $accepted = $true
+                $lastDeleteError = 'scheduler accepted deletion but registration is still present'
+            } catch { $lastDeleteError = $_.Exception.Message }
+        }
+        # A rejected delete needs another attempt; an accepted delete only
+        # needs its registration to disappear. Both share the same deadline.
         Start-Sleep -Milliseconds 200
     }
 }
