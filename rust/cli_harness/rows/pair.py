@@ -177,6 +177,7 @@ class Daemon:
         if tls:
             fixtures = Path(__file__).resolve().parents[2] / "shim/tests/fixtures/pg_tls"
             context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            context.minimum_version = ssl.TLSVersion.TLSv1_2
             context.load_cert_chain(fixtures / "server.pem", fixtures / "server-key.pem")
             for server in self.servers:
                 server.socket = context.wrap_socket(server.socket, server_side=True)
