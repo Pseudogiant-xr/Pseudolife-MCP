@@ -118,14 +118,30 @@ attached cross-origin) is unchanged.
 The table is credentials of this deployment. It stays out of logical exports
 and is listed in `BENCH_RESET_TABLES`, like v54's and v58's tables.
 
-**Resolution** (`principals.resolve_principal_detailed`, and
-`auth::resolve_detailed` in Rust):
-- **Where.** Only on `/api/*`, never on `/mcp` or the hook routes, so a
-  Console session is not an agent credential. The session snapshot is
-  installed globally like the stored-principal store, so
-  `authenticated_principal`, `current_principal` and the operator gate all
-  see it. It refreshes every 10 s, counts as available for 60 s, and gains a
-  new session immediately.
+**Resolution is an explicit opt-in, never global.** Hooks, `/mcp`,
+`writer_context` and the board's `/api/coordination/*` routes all resolve
+through `authenticated_principal` and `resolve_principal_detailed`. A
+session found there would become an agent credential that could register a
+mailbox and send mail.
+
+So sessions get their own resolver, `resolve_console_session`, and only
+these call sites use it:
+- the `/api` transport gate, for every `/api/*` path except
+  `/api/coordination/*`, `/api/hook/*`, `/api/console/link` and
+  `/api/daemon-notice`;
+- the `authenticated_principal` calls of the board snapshot and the
+  maintainer routes.
+
+Everything else, `/mcp` included, keeps today's resolver and answers 401 to
+a session bearer. The Console calls none of the excluded routes, so this
+costs it nothing.
+
+The session snapshot refreshes every 10 s, counts as available for 60 s, and
+gains a new session immediately. Rust mirrors the same split
+(`auth::resolve_detailed` unchanged, a separate session lookup at the same
+call sites).
+
+The resolver works as follows:
 - **What a hit gives.** The session's principal, with source `session`
   carrying the issuing source.
 - **When a session stops resolving.** Each of these alone ends it:
@@ -162,12 +178,16 @@ and is listed in `BENCH_RESET_TABLES`, like v54's and v58's tables.
   - That Console's Settings view says why, and names the way in: sign in
     from the daemon's host.
 - **Maintainer authority.** A session never carries it.
-  - `_authority` (`storage/coordination.py`) gives maintainer authority to a
-    sender whose principal is in `coordination.maintainer_principals`. A
-    session must not inherit that, since a passkey sign-in or a link would
-    otherwise buy 30 days of maintainer mail with no assertion. The check
-    excludes the `session` source.
+  - `_authority` (`storage/coordination.py`) gives maintainer authority to
+    mail from an agent registered under a principal in
+    `coordination.maintainer_principals`.
+  - A session can neither register an agent nor send board mail, because
+    `/api/coordination/*` refuses it. So no session mail exists for
+    `_authority` to judge, and that function needs no change.
   - Every `/api/maintainer/*` action still needs its own passkey assertion.
+- **Environment principals listed in `coordination.not_owner_principals`**
+  keep the operator rights they have today, and so do sessions they issue.
+  This is not a regression. The list changes board visibility only.
 
 **Revoking sessions.** The Console's Settings view lists signed-in browsers
 (label, method, principal, created, last used) and revokes them.
@@ -185,7 +205,12 @@ such a daemon anyway.
    (`PSEUDOLIFE_MCP_DAEMON_URL`, `PSEUDOLIFE_MCP_TOKEN_FILE`, else the client
    registrations `doctor` reads).
 2. **It asks for a code.** It calls `POST /api/console/link` with that bearer
-   and `{origin}`, the daemon origin it reached. The daemon creates a
+   and `{origin}`, the daemon origin it reached. The daemon validates and
+   normalises that origin before storing it. It must be `http` or `https`,
+   and either loopback or the configured passkey origin. The host is
+   lower-cased, the scheme's default port and any trailing slash are
+   dropped, and a path, query or credentials are refused. That way a stored
+   origin always equals what a browser sends. The daemon creates a
    one-time code in `console_signin_codes`. That table is v59, excluded from
    exports and holds:
    - `code_hash`;
@@ -261,8 +286,12 @@ your passkey".
    anyone holding a different token.
    - The route is pre-auth, with the same Origin and content-type rules.
    - It has its own failure budget and concurrency gate.
-   - It does not go through the maintainer `_run` path, so it never takes
-     the coordination lock.
+   - It does not go through the maintainer `_run` path. It reads the signing
+     keys and the secret on its own short-lived database connection, as
+     pairing does (`principal_store.redeem(dsn, …)`), never on the board's
+     mailbox connection, which only the coordination lock may use. The
+     `complete()` call on `/session` does take the lock, as every maintainer
+     completion does, bounded by the two-slot redemption gate.
    - It refuses when the challenge secret does not exist yet, rather than
      inserting it, so an unauthenticated caller can never write.
    - Passkeys are enrolled with `residentKey: "preferred"`, so the options
@@ -279,9 +308,9 @@ your passkey".
 - **How it is set.**
   - New enrolments record the bearer principal of the request that
     completed the enrolment.
-  - The migration backfills it only from the key's own enrolment event, the
-    `maintainer_key` audit event with change `enrol` for that
-    `credential_id`. It never uses a later `confirm`, `revoke` or `reset`
+  - The migration backfills it only from the key's own enrolment event: the
+    `maintainer_key` audit event for that `credential_id` whose change is
+    `enrol` (the bootstrap key) or `add` (a key approved by another key). It never uses a later `confirm`, `revoke` or `reset`
     event, which the host logs with an empty principal.
   - Where retention has pruned the enrolment event, the column stays empty.
   - No value is guessed from the daemon's environment, which neither a
@@ -291,6 +320,8 @@ your passkey".
   - It binds the key to the current Console session's principal, and only to
     an owner principal.
   - It is logged as a `maintainer_key` change.
+  - Rebinding ends every session the key issued under its old principal, in
+    the same transaction.
   - The recovery path runs through it. A key enrolled from a paired machine,
     or one whose enrolment event was pruned, is fixed by signing in once on
     the daemon's host with `pseudolife-mcp console` (an environment
@@ -341,9 +372,14 @@ the dialog keeps "Paste a bearer token" under "Advanced".
     - sign-in code;
     - "Advanced: paste a bearer token".
   - A new `#/signin` route.
-  - A 401 opens it with "Sign in again". A 404 or 501 from `/api/console/*`
-    says this daemon cannot sign in yet and keeps the paste option, so a
-    daemon without the routes never loops.
+  - A 401 from a bearer-gated route, `/api/console/*` list and revoke
+    included, opens it with "Sign in again". Only the two pre-auth routes,
+    `/session` and `/passkey-challenge`, read 401, 404 or 501 as "this daemon
+    cannot sign in yet", and keep the paste option. The Python daemon never
+    answers 401 on those two, and a daemon without them never loops.
+  - The bearer wording at `frontend/src/lib/board.ts` (the
+    `usesConsoleToken` comment and `pendingText`'s "Hidden: uses another
+    token") and the demo board in `web/fixtures.py` are updated with it.
   - Settings gains Signed-in browsers and "Use this passkey to sign in".
   - The empty-timeline text from #1141 points at sign-in.
 - **Docs:** the README, `docs/guide/configuration.md`,
@@ -390,8 +426,8 @@ Rust follows each Python step in its own PR (the oracle leads, per
 - **Unported routes don't answer 501 in Rust.** Routes outside `routes.json`
   answer 401 from the bearer gate, or 404 once authenticated. Each step
   therefore records `daemon/divergences/` entries and parity rows naming the
-  real answer. The Console treats 401, 404 and 501 from `/api/console/*` as
-  "this daemon cannot sign in yet".
+  real answer. The Console treats 401, 404 and 501 from the two pre-auth
+  routes as "this daemon cannot sign in yet".
 - **`/session` and `/passkey-challenge` are pre-auth routes**, dispatched
   beside `/api/pair` in `http.rs`, outside `ConsoleRoutes`.
 - **`/link`, list and revoke are bearer-gated routes.** If they join
@@ -400,9 +436,13 @@ Rust follows each Python step in its own PR (the oracle leads, per
 - **The shadow refuses every new POST.** No new GET joins `SHADOW_SAFE_GETS`
   without its audit.
 - **`rust/shim` gains `console` as a deferred mode.**
-- **G2 (the default switch) waits.** Session resolution, the operator
-  allowlist and both sign-in routes must be ported before it, or switching
-  daemons signs every browser out.
+- **G2 (the default switch) waits.** Before it, these must be ported:
+  - session resolution, with its opt-in call sites;
+  - the operator allowlist;
+  - both sign-in routes.
+
+  Otherwise switching daemons signs every browser out, or gives a session
+  more than Python does.
 
 ## Not in scope
 
@@ -441,3 +481,14 @@ above.
 - **Codex:**
   - the body cap rejecting RS256 assertions;
   - no path to operator rights for a passkey enrolled from a paired machine.
+
+The Opus reviewer's re-check of 920f7029 closed those findings except one,
+which it marked partly closed: excluding sessions inside `_authority` could
+not be built. It also found new defects, all folded in:
+- a global session lookup would have made sessions agent credentials on
+  hooks, `/mcp` and `/api/coordination/*`;
+- the backfill missed keys logged as `add`;
+- 401 meant two things;
+- the challenge route would have needed the coordination lock;
+- an unnormalised stored origin;
+- what a rebind does to existing sessions.
