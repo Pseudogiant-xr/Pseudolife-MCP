@@ -24,18 +24,30 @@ pub const NO_SPAWN_KEY: &str = "PSEUDOLIFE_MCP_NO_SPAWN";
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SetupError {
     message: std::borrow::Cow<'static, str>,
+    definite_rejection: bool,
 }
 /// Preserve the static constructor used by callers of the shared setup seam.
 #[allow(non_snake_case)]
 pub const fn SetupError(message: &'static str) -> SetupError {
     SetupError {
         message: std::borrow::Cow::Borrowed(message),
+        definite_rejection: false,
     }
 }
 impl SetupError {
     pub(crate) fn detail(message: String) -> Self {
         Self {
             message: std::borrow::Cow::Owned(message),
+            definite_rejection: false,
+        }
+    }
+
+    /// A correlated RPC error response confirms that the request finished.
+    /// Do not use for transport errors, timeouts, cancellation, or lost replies.
+    pub fn rejected(message: &'static str) -> Self {
+        Self {
+            message: message.into(),
+            definite_rejection: true,
         }
     }
 }
@@ -576,6 +588,11 @@ impl WritePlan {
                 {
                     return Err(CONFIG_CHANGED);
                 }
+                // An unchanged read is not a completion barrier: a timed-out
+                // request may still commit after the snapshot was returned.
+                if !error.definite_rejection {
+                    return Err(ROLLBACK_UNVERIFIED);
+                }
                 return Err(error);
             }
         };
@@ -681,22 +698,31 @@ impl AppliedWrite {
                 .request()
             })
             .collect::<Vec<_>>();
-        client
+        let restored = client
             .rpc(
                 "config/batchWrite",
                 json!({"edits":edits,"filePath":user.path,"expectedVersion":user.version}),
             )
             .await?;
+        let restored_version = restored["version"]
+            .as_str()
+            .filter(|v| !v.is_empty())
+            .ok_or(ROLLBACK_UNVERIFIED)?
+            .to_owned();
+        // Preserve the acknowledged restoration before a fallible/cancellable
+        // readback. A later retry can verify that same version without writing.
+        self.written_version = Some(restored_version.clone());
         let current = client
             .rpc("config/read", json!({"includeLayers":true,"cwd":cwd}))
             .await?;
         let user = user_config(&current, home)?;
-        if self
-            .plan
-            .edits
-            .iter()
-            .zip(&self.plan.before)
-            .any(|(edit, before)| edit.value_at(&user.config).unwrap_or(&Value::Null) != before)
+        if user.version != restored_version
+            || self
+                .plan
+                .edits
+                .iter()
+                .zip(&self.plan.before)
+                .any(|(edit, before)| edit.value_at(&user.config).unwrap_or(&Value::Null) != before)
         {
             return Err(SetupError(
                 "Codex rollback could not be verified; review the private config backup.",

@@ -232,7 +232,12 @@ impl Rpc for Client {
             loop {
                 let message=self.receive(deadline.saturating_duration_since(tokio::time::Instant::now())).await?;
                 if message.get("id") != Some(&json!(id)) { continue; }
-                if message.get("error").is_some() { return Err(SetupError("Codex rejected the setup request; update Codex or review its configuration before retrying.")); }
+                if let Some(error) = message.get("error") {
+                    if error.get("code").and_then(Value::as_i64).is_some() {
+                        return Err(SetupError::rejected("Codex rejected the setup request; update Codex or review its configuration before retrying."));
+                    }
+                    return Err(EXITED);
+                }
                 return message.get("result").cloned().ok_or(EXITED);
             }
         }).await.map_err(|_|TIMEOUT)?
