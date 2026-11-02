@@ -14,6 +14,7 @@ mod hook_http;
 mod hook_json;
 pub mod lease;
 pub mod maintainer;
+mod migrate_flat;
 mod move_cli;
 mod pairing;
 mod pyjson;
@@ -109,6 +110,11 @@ fn mode_repr(mode: &str) -> String {
 /// Handle leaves before daemon attachment; default/shim/channel keep the proxy path.
 pub fn dispatch(mode: Option<&str>) -> Option<ExitCode> {
     let mode = mode.unwrap_or("shim");
+    if mode == "migrate-flat" {
+        return Some(ExitCode::from(migrate_flat::run(
+            std::env::args_os().skip(2).collect(),
+        )));
+    }
     if mode == "runtime" {
         return Some(ExitCode::from(crate::runtime::run(
             std::env::args_os().skip(2).collect(),

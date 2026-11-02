@@ -59,6 +59,8 @@ modes:
                  `--tag X` pins one; pip installs upgrade the package)
   backup         back up the bank: pg_dump + state archive with rotation
                  (pip tiers; the Docker tier keeps ops/backup.ps1)
+  migrate-flat   back up and flatten a stopped bank without dropping entries
+                 (--apply --data-dir PATH; opt-in)
   export         write a portable logical export of the bank (ZIP of JSONL
                  tables + manifest; tier- and PG-version-independent)
   import         load a logical export into a fresh, empty bank

@@ -457,6 +457,12 @@ impl Service {
         }
         self.refuse_while_backing_off(&inner)?;
         let storage = self.ensure_storage(&mut inner).await?;
+        crate::migrate_flat_config::require_config_finalized(
+            storage.client(),
+            &self.data_dir,
+            &self.config.memory.band_specs,
+        )
+        .await?;
         let metadata = crate::startup::metadata(storage.client())
             .await
             .map_err(|e| format!("startup metadata failed: {e}"))?;

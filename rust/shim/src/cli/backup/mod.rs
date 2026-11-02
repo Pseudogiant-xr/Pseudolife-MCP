@@ -18,6 +18,61 @@ const HELP: &str = include_str!("../backup_help.txt");
 const DUMP_PREFIX: &str = "pseudolife_lite_memory-";
 const STATE_PREFIX: &str = "pseudolife_lite_state-";
 
+/// Reuse the physical backup format, retaining this pair outside rotation.
+pub(super) fn migration_backup(data_dir: &Path, dsn: &str) -> Result<serde_json::Value, String> {
+    use std::io::Read;
+    let bdir = data_dir
+        .join("backups")
+        .join(format!("migrate-flat-{}", uuid::Uuid::new_v4().simple()));
+    let fail = || {
+        "the bank backup could not finish; nothing changed; check pg_dump and the state directory, then retry migrate-flat --apply".to_owned()
+    };
+    let home = home().ok_or_else(fail)?;
+    let pg_dump = dump::find(&home).map_err(|_| fail())?.ok_or_else(fail)?;
+    archive::admit(data_dir, &bdir).ok_or_else(fail)?;
+    let stamp = timestamp().ok_or_else(fail)?;
+    fs::create_dir_all(&bdir).map_err(|_| fail())?;
+    let dump = dump::write(dsn, &pg_dump, &bdir, &stamp).map_err(|_| fail())?;
+    let state = archive::write(data_dir, &bdir, &stamp).map_err(|_| fail())?;
+    let mut source = flate2::read::GzDecoder::new(fs::File::open(&dump).map_err(|_| fail())?);
+    let mut tail = Vec::new();
+    let mut buffer = [0u8; 65536];
+    loop {
+        let n = source.read(&mut buffer).map_err(|_| fail())?;
+        if n == 0 {
+            break;
+        }
+        tail.extend_from_slice(&buffer[..n]);
+        if tail.len() > 65536 {
+            tail.drain(..tail.len() - 65536);
+        }
+    }
+    if !tail
+        .windows(b"-- PostgreSQL database dump complete".len())
+        .any(|w| w == b"-- PostgreSQL database dump complete")
+    {
+        return Err("the bank backup is incomplete; nothing changed; repair backup and retry migrate-flat --apply".into());
+    }
+    let original = fs::read(data_dir.join("config.yaml")).map_err(|_| fail())?;
+    let gzip = flate2::read::GzDecoder::new(fs::File::open(&state).map_err(|_| fail())?);
+    let mut archive = tar::Archive::new(gzip);
+    let mut matched = false;
+    for member in archive.entries().map_err(|_| fail())? {
+        let mut member = member.map_err(|_| fail())?;
+        if member.path().map_err(|_| fail())?.as_ref() == Path::new("config.yaml")
+            && member.header().entry_type().is_file()
+        {
+            let mut bytes = Vec::new();
+            member.read_to_end(&mut bytes).map_err(|_| fail())?;
+            matched = bytes == original;
+        }
+    }
+    if !matched {
+        return Err("state backup does not contain the unchanged config.yaml; nothing changed; retry migrate-flat --apply".into());
+    }
+    Ok(serde_json::json!({"dump": dump, "state": state}))
+}
+
 /// `Path.home()` as Python 3.11 resolves it; unusual environments defer.
 fn home() -> Option<PathBuf> {
     if cfg!(windows) {

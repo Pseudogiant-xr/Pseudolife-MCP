@@ -130,6 +130,7 @@ EXCLUDED_COLUMNS = {"outcome_signals": ("used_ids",)}
 # active-session pointer is transient session state.
 _META_SKIP_KEYS = {
     "schema_version", "active_session_pointer",
+    "flat_band_migration_v1",
     # Bank-local acknowledgement authority. Logical transfer creates or
     # retains the target generation; only physical restore preserves it.
     "dream_ack_secret_v1",
