@@ -413,11 +413,16 @@ def evidence(kind: str, names: list[str], scratch: Path) -> str:
 def write_row(out: str | Path, row: dict) -> None:
     """Write an iteration's row whole or not at all: a temporary file beside
     it, then a rename over it, so a job killed mid-write leaves the previous
-    row, never a torn one. The report's glob does not match the .tmp name."""
+    row, never a torn one. The report's glob does not match the .tmp name,
+    and a write or rename that fails removes it."""
     out = Path(out)
     temporary = out.with_name(out.name + ".tmp")
-    temporary.write_text(json.dumps(row, indent=2) + "\n", encoding="utf-8")
-    os.replace(temporary, out)
+    try:
+        temporary.write_text(json.dumps(row, indent=2) + "\n", encoding="utf-8")
+        os.replace(temporary, out)
+    except BaseException:
+        temporary.unlink(missing_ok=True)
+        raise
 
 
 def runner() -> dict:
@@ -542,7 +547,7 @@ def run(options) -> int:
     archive_file = Path(options.archive_file).resolve() if options.archive_file else None
     argv = command(kind, names, candidates, scratch, archive_file)
     env = dict(os.environ, **environment(kind, names, candidates, scratch))
-    started, code, note, tests = time.monotonic(), None, "", None
+    started, code, note, tests, judged = time.monotonic(), None, "", None, False
     try:
         if kind == "cargo":
             note = checkout_mismatch(archive_file)
@@ -564,13 +569,18 @@ def run(options) -> int:
                 if note:
                     code = 1
                     print(f"stress: {note}", flush=True)
+            judged = True
         except Exception as error:  # a run whose evidence cannot be judged is no evidence, whatever it exited
             note, code = f"{type(error).__name__}: {error}", code or 1
             print(f"stress: {note}", flush=True)
     finally:
+        # Only a judged run may pass: an interrupt (a job timeout or cancel)
+        # during the evidence check leaves code 0 with nothing judged.
+        if code == 0 and not judged:
+            note = note or "interrupted before evidence was judged"
         row = {"iteration": options.iteration, "attempt": int(os.environ.get("GITHUB_RUN_ATTEMPT") or 1),
                "selection": options.selection.strip(), "runner": runner(), "exit_code": code,
-               "outcome": "pass" if code == 0 else "fail",
+               "outcome": "pass" if code == 0 and judged else "fail",
                "seconds": round(time.monotonic() - started, 1),
                **({"note": note} if note else {}), **({"tests": tests} if tests is not None else {})}
         write_row(options.out, row)

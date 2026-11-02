@@ -1176,7 +1176,8 @@ def test_an_item_whose_summary_is_not_an_object_fails_and_the_rest_still_run(tmp
     assert hook["outcome"] == "pass" and "row:mail" in row["note"]
 
 
-@pytest.mark.parametrize("selection", ["row:hook", "row:mail row:hook"])
+# Ids without spaces: a stress dispatch names pytest nodes space-separated.
+@pytest.mark.parametrize("selection", ["row:hook", "row:mail row:hook"], ids=["single", "multi"])
 def test_the_row_is_replaced_atomically(tmp_path, monkeypatch, selection):
     # A kill mid-write must not leave a torn row: the row is written to a
     # temporary file beside it, then moved over it (review of 68e97311).
@@ -1251,6 +1252,49 @@ def test_a_single_item_whose_evidence_check_raises_fails(tmp_path, monkeypatch, 
     code, row = run_row(tmp_path, selection)
     assert code == 1 and row["outcome"] == "fail" and row["exit_code"] == 1
     assert row["note"] == "RuntimeError: summary unreadable"
+
+
+@pytest.mark.parametrize("selection", ["row:hook", "scenario:tokenless", "tests/test_a.py"])
+def test_an_interrupt_before_evidence_is_judged_leaves_a_failed_row(tmp_path, monkeypatch, selection):
+    # A job timeout or cancel (SIGINT) while evidence() runs: the harness
+    # exited 0, but nothing was judged, so the row the always() upload
+    # delivers must say fail, and the interrupt still ends the step
+    # (review of 3280332b).
+    monkeypatch.setattr(stress.subprocess, "run", lambda argv, env: SimpleNamespace(returncode=0))
+
+    def interrupted(kind, names, scratch):
+        raise KeyboardInterrupt
+    monkeypatch.setattr(stress, "evidence", interrupted)
+    out = tmp_path / "stress" / "stress-row-1.json"
+    with pytest.raises(KeyboardInterrupt):
+        stress.main(["run", "--selection", selection, "--iteration", "1",
+                     "--candidates", str(tmp_path / "bin"), "--out", str(out)])
+    row = json.loads(out.read_text(encoding="utf-8"))
+    assert row["outcome"] == "fail" and row["note"] == "interrupted before evidence was judged"
+
+
+@pytest.mark.parametrize("failing", ["write", "replace"])
+def test_a_failed_row_write_leaves_no_temporary_file_and_keeps_the_previous_row(tmp_path, monkeypatch, failing):
+    out = tmp_path / "stress-row-1.json"
+    stress.write_row(out, {"iteration": 1, "outcome": "fail"})
+    previous = out.read_text(encoding="utf-8")
+
+    def boom(*args, **kwargs):
+        raise PermissionError("denied")
+
+    def torn(self, text, *args, **kwargs):
+        # A disk-full write: part of the temporary file lands, then it fails.
+        with open(self, "w", encoding="utf-8") as handle:
+            handle.write(text[:5])
+        raise PermissionError("no space left")
+    if failing == "replace":
+        monkeypatch.setattr(stress.os, "replace", boom)
+    else:
+        monkeypatch.setattr(stress.Path, "write_text", torn)
+    with pytest.raises(PermissionError):
+        stress.write_row(out, {"iteration": 1, "outcome": "pass"})
+    assert out.read_text(encoding="utf-8") == previous
+    assert sorted(path.name for path in tmp_path.iterdir()) == ["stress-row-1.json"]
 
 
 def test_a_single_item_report_is_unchanged(tmp_path):
