@@ -343,12 +343,19 @@ pub(crate) async fn route(
             );
         };
         let sid = session_id.clone();
-        let revoked =
-            match detached(
-                async move { sessions::revoke_session(&dsn, &sid, scope.as_deref()).await },
-            )
-            .await
-            {
+        let task_view = view.clone();
+        // The view drops the session inside the detached task, as
+        // redemption publishes inside its own: a client that goes away
+        // after the revocation committed must not leave it resolving.
+        let revoked = match detached(async move {
+            let revoked = sessions::revoke_session(&dsn, &sid, scope.as_deref()).await?;
+            if revoked {
+                task_view.drop_ids(std::slice::from_ref(&sid));
+            }
+            Ok(revoked)
+        })
+        .await
+        {
                 Ok(revoked) => revoked,
                 Err(_) => {
                     eprintln!("console sessions: revoke failed (store error)");
@@ -358,9 +365,6 @@ pub(crate) async fn route(
                     );
                 }
             };
-        if revoked {
-            view.drop_ids(std::slice::from_ref(&session_id));
-        }
         return json_response(200, &json!({"revoked": revoked}));
     }
     // POST /api/console/link

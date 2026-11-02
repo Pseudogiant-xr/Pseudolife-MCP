@@ -336,6 +336,34 @@ pub(super) async fn list_rejected(client: &Client) -> Result<Vec<Rejected>, DbEr
 }
 
 /// `revoke`: whether a row was there.
+/// `console_sessions.revoke_principal_sessions` (v59): end `name`'s live
+/// Console sessions inside the caller's transaction, as revoking it, or
+/// re-inviting a revoked name, does in Python. A bank before v59 has none.
+async fn revoke_sessions(
+    transaction: &tokio_postgres::Transaction<'_>,
+    name: &str,
+) -> Result<(), DbError> {
+    let present: bool = transaction
+        .query_one("SELECT to_regclass('public.console_sessions') IS NOT NULL", &[])
+        .await
+        .map_err(|error| classify(&error))?
+        .try_get(0)
+        .map_err(|_| DbError::Defer)?;
+    if present {
+        transaction
+            .execute(
+                &format!(
+                    "UPDATE public.console_sessions SET revoked_at = {NOW} \
+                     WHERE principal = $1 AND revoked_at IS NULL"
+                ),
+                &[&name],
+            )
+            .await
+            .map_err(|error| classify(&error))?;
+    }
+    Ok(())
+}
+
 pub(super) async fn revoke(client: &mut Client, name: &str) -> Result<bool, DbError> {
     let transaction = client
         .transaction()
@@ -352,6 +380,9 @@ pub(super) async fn revoke(client: &mut Client, name: &str) -> Result<bool, DbEr
         )
         .await
         .map_err(|error| classify(&error))?;
+    if row.is_some() {
+        revoke_sessions(&transaction, name).await?;
+    }
     transaction
         .commit()
         .await
@@ -571,6 +602,11 @@ async fn attempt(
         }
         Err(error) => return Err(classify(&error)),
     };
+    if state == "revoked" {
+        // A revoked name starts with no Console sessions, even ones its
+        // revocation missed (the psql path revokes the row only).
+        revoke_sessions(&transaction, name).await?;
+    }
     let created = Created {
         code: Some(code),
         expires_at: Some(row.try_get(0).map_err(|_| DbError::Defer)?),

@@ -695,19 +695,23 @@ pub fn resolve(
 const SESSION_COLUMNS: &str = "session_id, token_hash, principal, source, issuer, method, label, \
      created_at, last_used_at, expires_at";
 
-fn session_row(r: &tokio_postgres::Row) -> ConsoleSession {
-    ConsoleSession {
-        session_id: r.get(0),
-        token_hash: r.get(1),
-        principal: r.get(2),
-        source: r.get(3),
-        issuer: r.get(4),
-        method: r.get(5),
-        label: r.get::<_, Option<String>>(6).unwrap_or_default(),
-        created_at: r.get(7),
-        last_used_at: r.get(8),
-        expires_at: r.get(9),
-    }
+/// One row of `console_sessions`. A column whose type is not the one the
+/// schema declares is an error, never a panic: it fails the refresh (the
+/// view ages towards stale, as Python's `_refresh_sessions` lets it) and
+/// must not take the principals refresher down with it.
+fn session_row(r: &tokio_postgres::Row) -> Result<ConsoleSession, tokio_postgres::Error> {
+    Ok(ConsoleSession {
+        session_id: r.try_get(0)?,
+        token_hash: r.try_get(1)?,
+        principal: r.try_get(2)?,
+        source: r.try_get(3)?,
+        issuer: r.try_get(4)?,
+        method: r.try_get(5)?,
+        label: r.try_get::<_, Option<String>>(6)?.unwrap_or_default(),
+        created_at: r.try_get(7)?,
+        last_used_at: r.try_get(8)?,
+        expires_at: r.try_get(9)?,
+    })
 }
 
 /// `load_sessions`: the live sessions and the active passkey credential
@@ -726,7 +730,10 @@ pub async fn load_sessions(
         )
         .await
     {
-        Ok(rows) => rows.iter().map(session_row).collect(),
+        Ok(rows) => rows
+            .iter()
+            .map(session_row)
+            .collect::<Result<Vec<_>, _>>()?,
         Err(e) if e.code() == Some(&SqlState::UNDEFINED_TABLE) => Vec::new(),
         Err(e) => return Err(e),
     };
@@ -737,7 +744,10 @@ pub async fn load_sessions(
         )
         .await
     {
-        Ok(rows) => rows.iter().map(|r| r.get::<_, String>(0)).collect(),
+        Ok(rows) => rows
+            .iter()
+            .map(|r| r.try_get::<_, String>(0))
+            .collect::<Result<Vec<_>, _>>()?,
         Err(e)
             if e.code() == Some(&SqlState::UNDEFINED_TABLE)
                 || e.code() == Some(&SqlState::UNDEFINED_COLUMN) =>
@@ -960,7 +970,7 @@ where
         .await;
     match inserted {
         Ok(row) => {
-            let session = session_row(&row);
+            let session = session_row(&row)?;
             tx.commit().await?;
             Ok(Redeemed::Session(session))
         }
@@ -1007,7 +1017,9 @@ pub async fn list_sessions(dsn: &str, principal: Option<&str>) -> Result<Vec<Val
                     .await?
             }
         };
-        Ok::<_, tokio_postgres::Error>(rows.iter().map(|r| describe(&session_row(r))).collect())
+        rows.iter()
+            .map(|r| session_row(r).map(|row| describe(&row)))
+            .collect::<Result<Vec<_>, tokio_postgres::Error>>()
     }
     .await;
     close(client, task).await;
