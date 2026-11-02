@@ -23,7 +23,8 @@ from collections.abc import Mapping
 from urllib.parse import quote, unquote
 
 from pseudolife_memory.principals import (
-    PrincipalsUnavailable, env_auth, installed_store, principal_admitted, resolve_principal)
+    PrincipalsUnavailable, env_auth, installed_store, owner_principals, principal_admitted,
+    resolve_principal)
 from pseudolife_memory.storage.coordination import (
     DAEMON_PRINCIPAL, MAINTAINER_ORIGIN, CoordinationClockChanged, CoordinationError,
 )
@@ -1014,6 +1015,12 @@ def console_snapshot(service, *, limit=50) -> dict:
 
     No adapter registration, mailbox read, pruning or lease settlement is
     performed. A cold/unavailable durable tier is reported explicitly.
+
+    v59 (spec 2026-11-02, section 2): a caller whose principal is the bank
+    owner's sees the mail metadata and unread counts of every owner
+    principal (``principals.owner_principals``); any other caller keeps its
+    own principal's alone. Bodies stay excluded, and mailbox access
+    (receive, ack, history) stays bound to the exact principal.
     """
     cfg = service.config.coordination
     if not cfg.enabled:
@@ -1032,8 +1039,10 @@ def console_snapshot(service, *, limit=50) -> dict:
                 if getattr(service, "_coordination_lock", None) is None:
                     from pseudolife_memory.utils.locks import MonitoredLock
                     service._coordination_lock = MonitoredLock("coordination")
+        owners = owner_principals(cfg)
+        scope = sorted(owners) if principal in owners else [principal]
         with service._coordination_lock:
-            return _store(service).console_snapshot(principal, limit=limit)
+            return _store(service).console_snapshot(principal, scope=scope, limit=limit)
     except Exception as exc:
         raise public_refusal(exc) from None
 

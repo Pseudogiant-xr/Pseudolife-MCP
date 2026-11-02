@@ -1274,6 +1274,68 @@ def audit_events(conn, *, project=None, task=None, agent_id=None, since=None, un
             yield from cur
 
 
+
+# The Console's board timeline (``console_snapshot``): the newest events a
+# scope of principals may see, 100 shown and one more to say the list was
+# cut. Every branch is bounded per principal or per agent, so the cost
+# follows the scope's size, not the retained log's (spec 2026-11-02,
+# section 2). A design bound, not a measurement.
+CONSOLE_EVENTS_CAP = 101
+# Rewritten for v59's owner scope, which may hold several principals:
+# * ``scope`` is the principal array; ``scope_agents`` every agent row
+#   registered under one of them.
+# * ``visible_mail``: per scope principal its newest ``cap`` sends
+#   (coordination_events_send_principal_idx), and per scope agent the
+#   newest ``cap`` sends addressed to it (send_recipient_idx). Bounded, so
+#   an owner scope never gathers every send in the retention window. For
+#   one principal it matches the unbounded pre-v59 set wherever a row can
+#   still reach the page: a send older than ``cap`` newer sends of the same
+#   sender or to the same recipient is below ``cap`` newer candidates. Only
+#   a later event of such an old message carrying someone else's principal
+#   (an outside recipient's read or ack, or the daemon's expiry) can drop
+#   out of the page.
+# * ``candidates``: (1) per scope principal its newest ``cap`` events
+#   through LATERAL on coordination_events_principal_idx, merged by seq
+#   (``principal = ANY(...) ORDER BY principal DESC, seq DESC`` would
+#   return the alphabetically last principal's events only); (2) the
+#   events of visible mail, by message (coordination_events_message_idx);
+#   (3) expiries naming visible mail. Each capped at ``cap`` by seq.
+# The detail and expired-count projection is unchanged from before v59.
+_CONSOLE_KINDS = "('send','read','ack','attempt','served','woke','lease_expire')"
+CONSOLE_TIMELINE_SQL = (
+    "WITH scope AS (SELECT DISTINCT unnest(%(scope)s::text[]) AS principal), "
+    "scope_agents AS (SELECT a.agent_id FROM coordination_agents a "
+    "WHERE a.principal=ANY(%(scope)s::text[])), "
+    "visible_mail AS MATERIALIZED ("
+    "SELECT e.message_id FROM scope s CROSS JOIN LATERAL "
+    "(SELECT message_id FROM coordination_events WHERE event='send' AND principal=s.principal "
+    "ORDER BY seq DESC LIMIT %(cap)s) e UNION "
+    "SELECT e.message_id FROM scope_agents a CROSS JOIN LATERAL "
+    "(SELECT message_id FROM coordination_events WHERE event='send' "
+    "AND recipient_agent_id=a.agent_id ORDER BY seq DESC LIMIT %(cap)s) e), "
+    "candidates AS ("
+    "(SELECT e.* FROM scope s CROSS JOIN LATERAL "
+    "(SELECT * FROM coordination_events WHERE principal=s.principal "
+    f"AND event IN {_CONSOLE_KINDS} ORDER BY seq DESC LIMIT %(cap)s) e "
+    "ORDER BY e.seq DESC LIMIT %(cap)s) UNION "
+    "(SELECT e.* FROM visible_mail v CROSS JOIN LATERAL "
+    "(SELECT * FROM coordination_events WHERE message_id>=v.message_id AND message_id<=v.message_id "
+    f"AND event IN {_CONSOLE_KINDS} "
+    "ORDER BY message_id,event,created_at OFFSET 0) e "
+    "ORDER BY e.seq DESC LIMIT %(cap)s) UNION "
+    "(SELECT e.* FROM coordination_events e WHERE e.event='expire' AND EXISTS "
+    "(SELECT 1 FROM jsonb_array_elements_text(e.payload::jsonb->'message_ids') AS ids(id) "
+    "JOIN visible_mail v ON v.message_id=ids.id) ORDER BY e.seq DESC LIMIT %(cap)s)), "
+    "timeline AS (SELECT e.seq,e.event,e.created_at,e.agent_id,e.recipient_agent_id,"
+    "e.message_id,e.project,e.task, "
+    "CASE e.event WHEN 'send' THEN e.payload::jsonb->>'wake' "
+    "WHEN 'read' THEN e.payload::jsonb->>'path' END AS detail, "
+    "CASE WHEN e.event='expire' THEN (SELECT count(*) FROM "
+    "jsonb_array_elements_text(e.payload::jsonb->'message_ids') AS ids(id) "
+    "JOIN visible_mail v ON v.message_id=ids.id) ELSE 0 END AS expired_count "
+    "FROM candidates e) SELECT * FROM timeline ORDER BY seq DESC LIMIT %(cap)s")
+
+
 class CoordinationStore:
     def __init__(self, storage, *, clock=time.time, wake=None, maintainer_principals=()):
         self.storage = storage
@@ -1919,74 +1981,49 @@ class CoordinationStore:
         return {"agents": agents, "truncated": len(rows) > limit, "idle_omitted": idle,
                 "leases": leases["leases"], "leases_truncated": leases["truncated"]}
 
-    def console_snapshot(self, principal, *, limit=50):
-        """One consistent read-only snapshot of board metadata."""
+    def console_snapshot(self, principal, *, scope=None, limit=50):
+        """One consistent read-only snapshot of board metadata. ``scope`` is
+        the principals whose mail and counts it covers (v59: the owner set
+        for an owner's principal); ``None`` is ``[principal]``."""
         with self.storage._txn():
             self.storage.conn.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
             self.storage.conn.execute("SET LOCAL statement_timeout = '5s'")
-            return self._console_snapshot(principal, limit=limit)
+            return self._console_snapshot(principal, scope=scope, limit=limit)
 
-    def _console_snapshot(self, principal, *, limit=50):
+    def _console_snapshot(self, principal, *, scope=None, limit=50):
         """Read board metadata without receiving mail or settling leases.
 
         Roster/lease visibility matches the board. Mail counts and retained
-        events are limited to the caller's principal or its visible mail.
-        Payloads (including pre-v46 text), bodies, salts and credentials never
-        leave this projection. This is a reading slice, not a chain export.
+        events are limited to the principals in ``scope`` (the caller's
+        alone unless it is the owner's) and the mail they can see: sent by
+        one of them or addressed to one of their agents. Payloads (including
+        pre-v46 text), bodies, salts and credentials never leave this
+        projection. This is a reading slice, not a chain export.
         """
+        scope = sorted(set([principal] if scope is None else scope))
         result = self._roster("", limit=limit, settle_leases=False)
         now = self.clock()
         counts = {r["recipient_agent_id"]: r["n"] for r in self._all(
             "SELECT m.recipient_agent_id,count(*) AS n FROM coordination_messages m "
             "JOIN coordination_agents a ON a.agent_id=m.recipient_agent_id "
-            "WHERE a.principal=%s AND m.acknowledged_at IS NULL AND m.expires_at>%s "
+            "WHERE a.principal=ANY(%s) AND m.acknowledged_at IS NULL AND m.expires_at>%s "
             "AND m.recipient_agent_id=ANY(%s) GROUP BY m.recipient_agent_id",
-            (principal, now, [a["agent_id"] for a in result["agents"]]))}
+            (scope, now, [a["agent_id"] for a in result["agents"]]))}
+        in_scope = set(scope)
         for agent in result["agents"]:
             agent["pending_count"] = (counts.get(agent["agent_id"], 0)
-                                      if agent["principal"] == principal else None)
+                                      if agent["principal"] in in_scope else None)
         for lease in result["leases"]:
             lease["expired"] = lease["expires_at"] is not None and lease["expires_at"] <= now
-        # Participant/message indexes avoid unrelated retained sends. Each
-        # branch caps returned rows; the transaction-local timeout also bounds
-        # large caller-owned histories and expiry payloads before releasing the
-        # shared board lock. No participant list or payload leaves this query.
-        rows = self._all(
-            "WITH visible_mail AS MATERIALIZED ("
-            "SELECT message_id FROM coordination_events WHERE event='send' "
-            "AND principal>=%s AND principal<=%s UNION "
-            "SELECT e.message_id FROM coordination_agents a CROSS JOIN LATERAL "
-            "(SELECT message_id FROM coordination_events WHERE event='send' "
-            "AND recipient_agent_id>=a.agent_id AND recipient_agent_id<=a.agent_id "
-            "ORDER BY recipient_agent_id,seq) e WHERE a.principal=%s), "
-            "candidates AS ("
-            "(SELECT e.* FROM coordination_events e WHERE principal>=%s AND principal<=%s "
-            "AND event IN ('send','read','ack','attempt','served','woke','lease_expire') "
-            "ORDER BY principal DESC,seq DESC LIMIT 101) UNION "
-            "(SELECT e.* FROM visible_mail v CROSS JOIN LATERAL "
-            "(SELECT * FROM coordination_events WHERE message_id>=v.message_id AND message_id<=v.message_id "
-            "AND event IN ('send','read','ack','attempt','served','woke','lease_expire') "
-            "ORDER BY message_id,event,created_at OFFSET 0) e "
-            "ORDER BY e.seq DESC LIMIT 101) UNION "
-            "(SELECT e.* FROM coordination_events e WHERE e.event='expire' AND EXISTS "
-            "(SELECT 1 FROM jsonb_array_elements_text(e.payload::jsonb->'message_ids') AS ids(id) "
-            "JOIN visible_mail v ON v.message_id=ids.id) ORDER BY e.seq DESC LIMIT 101)), "
-            "timeline AS (SELECT e.seq,e.event,e.created_at,e.agent_id,e.recipient_agent_id,"
-            "e.message_id,e.project,e.task, "
-            "CASE e.event WHEN 'send' THEN e.payload::jsonb->>'wake' "
-            "WHEN 'read' THEN e.payload::jsonb->>'path' END AS detail, "
-            "CASE WHEN e.event='expire' THEN (SELECT count(*) FROM "
-            "jsonb_array_elements_text(e.payload::jsonb->'message_ids') AS ids(id) "
-            "JOIN visible_mail v ON v.message_id=ids.id) ELSE 0 END AS expired_count "
-            "FROM candidates e) SELECT * FROM timeline ORDER BY seq DESC LIMIT 101",
-            (principal, principal, principal, principal, principal))
+        rows = self._all(CONSOLE_TIMELINE_SQL, {"scope": scope, "cap": CONSOLE_EVENTS_CAP})
         # ``nudged`` is no longer decided (2026-10-02) but stays displayable
         # for sends logged before then.
         details = {"hinted", "not_needed", "rung", "withheld", "nudged", "no_path", "capped",
                    "pull", "delivery"}
+        shown = CONSOLE_EVENTS_CAP - 1
         result["events"] = [{**dict(r), "detail": r["detail"] if r["detail"] in details else None}
-                            for r in rows[:100]]
-        result["events_truncated"] = len(rows) > 100
+                            for r in rows[:shown]]
+        result["events_truncated"] = len(rows) > shown
         return {"enabled": True, "available": True, "snapshot_at": now, **result}
 
     def _stamp_status_age(self, agents, now):

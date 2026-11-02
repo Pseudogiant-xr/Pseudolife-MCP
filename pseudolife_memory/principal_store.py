@@ -62,6 +62,11 @@ _TIERS = ("minimal", "core", "full")
 _KEEPALIVES = {"keepalives": 1, "keepalives_idle": 10, "keepalives_interval": 5,
                "keepalives_count": 3, "tcp_user_timeout": 30000}
 _NOW = "EXTRACT(EPOCH FROM clock_timestamp())::double precision"
+# v59's ``owned`` read from a whole-row value, so one statement serves a
+# bank before v59 too (no column: every row the owner's, as the migration
+# makes it). The refresher can run before the daemon's storage applied the
+# schema, and ``invite --list`` can meet an older bank.
+OWNED_SQL = "COALESCE((to_jsonb(p) ->> 'owned')::boolean, TRUE)"
 
 
 @dataclass(frozen=True)
@@ -71,6 +76,8 @@ class StoredPrincipal:
     tier: str | None
     board: bool
     revoked: bool
+    # v59: the bank owner's, unless invited with ``--someone-else``.
+    owned: bool = True
 
 
 def bank_fingerprint(bank_id) -> str | None:
@@ -187,6 +194,13 @@ class PrincipalSnapshot:
             row = self._rows.get(principal)
         return None if row is None or row.revoked else row.tier
 
+    def owned_principals(self) -> frozenset[str]:
+        """The stored principals that are the bank owner's (v59) and not
+        revoked; shadowed and reserved rows are not in the view at all."""
+        with self._lock:
+            return frozenset(name for name, row in self._rows.items()
+                             if row.owned and not row.revoked)
+
     @property
     def excluded_names(self) -> frozenset[str]:
         """Names a redemption must not pair: the environment's and the
@@ -218,7 +232,7 @@ def _normal(row: StoredPrincipal) -> StoredPrincipal | None:
     if not valid_principal_name(name):
         return None
     tier = row.tier if row.tier is None or row.tier in _TIERS else None
-    return StoredPrincipal(name, row.token_hash, tier, row.board, row.revoked)
+    return StoredPrincipal(name, row.token_hash, tier, row.board, row.revoked, bool(row.owned))
 
 
 # -- the database side ---------------------------------------------------------
@@ -239,8 +253,8 @@ def load_rows(conn) -> tuple[list[StoredPrincipal], str | None]:
 
     try:
         rows = conn.execute(
-            "SELECT principal, token_hash, tier, board, revoked_at IS NOT NULL "
-            "FROM public.principals").fetchall()
+            "SELECT principal, token_hash, tier, board, revoked_at IS NOT NULL, "
+            f"{OWNED_SQL} FROM public.principals p").fetchall()
     except psycopg.errors.UndefinedTable:
         rows = []
     try:
@@ -249,7 +263,7 @@ def load_rows(conn) -> tuple[list[StoredPrincipal], str | None]:
     except psycopg.errors.UndefinedTable:
         found = None
     return ([StoredPrincipal(principal=r[0], token_hash=r[1], tier=r[2], board=bool(r[3]),
-                             revoked=bool(r[4])) for r in rows],
+                             revoked=bool(r[4]), owned=bool(r[5])) for r in rows],
             bank_fingerprint(found[0] if found else None))
 
 
@@ -460,12 +474,12 @@ def redeem(dsn: str, code_hash: str, token_hash: str, *,
         try:
             row = conn.execute(
                 f"""
-                UPDATE public.principals
+                UPDATE public.principals p
                    SET token_hash = %(token)s, paired_at = {_NOW},
                        paired_code_hash = code_hash, code_hash = NULL, code_expires_at = NULL
                  WHERE code_hash = %(code)s AND code_expires_at > {_NOW} AND revoked_at IS NULL
                    AND NOT (principal = ANY(%(excluded)s))
-             RETURNING principal, tier, board
+             RETURNING principal, tier, board, {OWNED_SQL}
                 """, {"token": token_hash, "code": code_hash,
                       "excluded": sorted(excluded)}).fetchone()
         except psycopg.errors.UniqueViolation:
@@ -474,7 +488,7 @@ def redeem(dsn: str, code_hash: str, token_hash: str, *,
         if row is None:
             row = conn.execute(
                 f"""
-                SELECT principal, tier, board FROM public.principals
+                SELECT principal, tier, board, {OWNED_SQL} FROM public.principals p
                  WHERE paired_code_hash = %(code)s AND token_hash = %(token)s
                    AND revoked_at IS NULL AND paired_at > {_NOW} - %(window)s
                 """, {"token": token_hash, "code": code_hash, "window": RETRY_WINDOW_S}).fetchone()
@@ -487,7 +501,7 @@ def redeem(dsn: str, code_hash: str, token_hash: str, *,
     if row is None:
         return None
     return StoredPrincipal(principal=row[0], token_hash=token_hash, tier=row[1],
-                           board=bool(row[2]), revoked=False)
+                           board=bool(row[2]), revoked=False, owned=bool(row[3]))
 
 
 # -- invite's operations (out of process, on the daemon host) -------------------
@@ -496,8 +510,9 @@ class InviteRefused(Exception):
     """An invite the table's state refuses; the message is for the operator."""
 
 
-#: ``create_invite``'s default for ``tier`` and ``board``: an existing row
-#: keeps its value; a new row gets the daemon's tier and board access.
+#: ``create_invite``'s default for ``tier``, ``board`` and ``owned``: an
+#: existing row keeps its value; a new row gets the daemon's tier, board
+#: access and the owner's ownership.
 KEEP = object()
 
 
@@ -505,15 +520,17 @@ def new_pairing_code() -> str:
     return "".join(secrets.choice(PAIRING_CODE_ALPHABET) for _ in range(PAIRING_CODE_LENGTH))
 
 
-def create_invite(conn, name: str, *, tier=KEEP, board=KEEP, ttl_seconds: float,
+def create_invite(conn, name: str, *, tier=KEEP, board=KEEP, owned=KEEP, ttl_seconds: float,
                   replace: bool) -> dict:
     """Create or reset ``name``'s row with a new pending code and return
-    ``{"code", "expires_at", "state", "tier", "board"}`` (``state``: the
-    row before: ``new``, ``pending``, ``revoked`` or ``paired``). The code
-    is returned once, here, and only its hash is written. A paired name
-    needs ``replace``: its old token keeps working until the new code is
-    redeemed. A revoked name is reset (token and revocation cleared). An
-    existing row keeps its tier and board access unless they are given."""
+    ``{"code", "expires_at", "state", "tier", "board", "owned"}``
+    (``state``: the row before: ``new``, ``pending``, ``revoked`` or
+    ``paired``). The code is returned once, here, and only its hash is
+    written. A paired name needs ``replace``: its old token keeps working
+    until the new code is redeemed. A revoked name is reset (token and
+    revocation cleared). An existing row keeps its tier, board access and
+    ownership (v59: ``owned`` false is someone else's machine) unless they
+    are given."""
     import psycopg
 
     for _attempt in range(5):
@@ -526,15 +543,18 @@ def create_invite(conn, name: str, *, tier=KEEP, board=KEEP, ttl_seconds: float,
                     "FROM public.principals WHERE principal = %s FOR UPDATE", (name,)).fetchone()
                 params = {"name": name, "code": code_hash, "ttl": float(ttl_seconds),
                           "tier": None if tier is KEEP else tier,
-                          "board": True if board is KEEP else bool(board)}
+                          "board": True if board is KEEP else bool(board),
+                          "owned": True if owned is KEEP else bool(owned)}
                 if existing is None:
                     state = "new"
                     row = conn.execute(
                         f"""
                         INSERT INTO public.principals
-                            (principal, tier, board, code_hash, code_expires_at, created_at)
-                        VALUES (%(name)s, %(tier)s, %(board)s, %(code)s, {_NOW} + %(ttl)s, {_NOW})
-                        RETURNING code_expires_at, tier, board
+                            (principal, tier, board, owned, code_hash, code_expires_at,
+                             created_at)
+                        VALUES (%(name)s, %(tier)s, %(board)s, %(owned)s, %(code)s,
+                                {_NOW} + %(ttl)s, {_NOW})
+                        RETURNING code_expires_at, tier, board, owned
                         """, params).fetchone()
                 else:
                     paired, revoked = existing
@@ -548,31 +568,35 @@ def create_invite(conn, name: str, *, tier=KEEP, board=KEEP, ttl_seconds: float,
                     reset = (", token_hash = NULL, paired_at = NULL, revoked_at = NULL"
                              if state == "revoked" else "")
                     given = ("".join([", tier = %(tier)s" if tier is not KEEP else "",
-                                      ", board = %(board)s" if board is not KEEP else ""]))
+                                      ", board = %(board)s" if board is not KEEP else "",
+                                      ", owned = %(owned)s" if owned is not KEEP else ""]))
                     row = conn.execute(
                         f"""
                         UPDATE public.principals
                            SET code_hash = %(code)s, code_expires_at = {_NOW} + %(ttl)s,
                                paired_code_hash = NULL{given}{reset}
                          WHERE principal = %(name)s
-                     RETURNING code_expires_at, tier, board
+                     RETURNING code_expires_at, tier, board, owned
                         """, params).fetchone()
         except psycopg.errors.UniqueViolation:
             continue    # a code-hash collision: draw again
         return {"code": code, "expires_at": row[0], "state": state, "tier": row[1],
-                "board": bool(row[2])}
+                "board": bool(row[2]), "owned": bool(row[3])}
     raise InviteRefused("could not draw an unused pairing code; try again")
 
 
 # v58: the stored rows with their last success, then the names seen with no
 # stored row (environment principals: PSEUDOLIFE_MCP_TOKENS, and `default`
-# for PSEUDOLIFE_MCP_TOKEN). The last column says which half a row is from.
+# for PSEUDOLIFE_MCP_TOKEN). The twelfth column says which half a row is
+# from; the thirteenth (v59) whether a stored row is the owner's.
 LIST_SQL = f"""
 SELECT p.principal, p.tier, p.board, p.token_hash IS NOT NULL, p.code_hash IS NOT NULL,
-       p.code_expires_at, p.created_at, p.paired_at, p.revoked_at, {_NOW}, a.last_seen_at, TRUE
+       p.code_expires_at, p.created_at, p.paired_at, p.revoked_at, {_NOW}, a.last_seen_at, TRUE,
+       {OWNED_SQL}
   FROM public.principals p LEFT JOIN public.principal_activity a ON a.principal = p.principal
 UNION ALL
-SELECT a.principal, NULL, NULL, FALSE, FALSE, NULL, NULL, NULL, NULL, {_NOW}, a.last_seen_at, FALSE
+SELECT a.principal, NULL, NULL, FALSE, FALSE, NULL, NULL, NULL, NULL, {_NOW}, a.last_seen_at, FALSE,
+       NULL
   FROM public.principal_activity a
  WHERE NOT EXISTS (SELECT 1 FROM public.principals p WHERE p.principal = a.principal)
  ORDER BY 1
@@ -580,25 +604,28 @@ SELECT a.principal, NULL, NULL, FALSE, FALSE, NULL, NULL, NULL, NULL, {_NOW}, a.
 # Before v58 (a newer CLI on an older bank): the stored rows alone.
 LIST_SQL_V53 = f"""
 SELECT principal, tier, board, token_hash IS NOT NULL, code_hash IS NOT NULL,
-       code_expires_at, created_at, paired_at, revoked_at, {_NOW}, NULL::double precision, TRUE
-  FROM public.principals ORDER BY principal
+       code_expires_at, created_at, paired_at, revoked_at, {_NOW}, NULL::double precision, TRUE,
+       {OWNED_SQL}
+  FROM public.principals p ORDER BY principal
 """
 REJECTED_SQL = ("SELECT hash_prefix, rejections, first_seen_at, last_seen_at "
                 "FROM public.rejected_bearers ORDER BY last_seen_at DESC, hash_prefix")
 
 
-def list_principals(conn, *, environment=()) -> list[dict]:
+def list_principals(conn, *, environment=(), not_owner=()) -> list[dict]:
     """Every principal, for ``invite --list``: the stored ones (never a
     token or a code, only whether one is set and when the pending code
     expires), then environment ones, each with when it last authenticated
-    (``last_seen_at``, schema v58). ``environment`` names the daemon's
-    environment principals, so one never seen is listed too."""
+    (``last_seen_at``, schema v58) and whether it is the owner's (v59).
+    ``environment`` names the daemon's environment principals, so one never
+    seen is listed too; ``not_owner`` is the daemon's
+    ``coordination.not_owner_principals``."""
     import psycopg
     try:
         rows = conn.execute(LIST_SQL).fetchall()
     except psycopg.errors.UndefinedTable:
         rows = conn.execute(LIST_SQL_V53).fetchall()
-    return describe_rows(rows, environment=environment)
+    return describe_rows(rows, environment=environment, not_owner=not_owner)
 
 
 def list_rejected(conn) -> list[dict]:
@@ -617,17 +644,22 @@ def describe_rejected(rows) -> list[dict]:
              "last_seen_at": r[3]} for r in rows]
 
 
-def describe_rows(rows, *, environment=()) -> list[dict]:
+def describe_rows(rows, *, environment=(), not_owner=()) -> list[dict]:
     """``invite --list``'s view of ``(principal, tier, board, paired,
     pending, code_expires_at, created_at, paired_at, revoked_at, now,
-    last_seen_at, stored)`` tuples, from psycopg or from psql's JSON, plus
-    an ``environment`` row for each name in ``environment`` not listed,
-    sorted by name."""
+    last_seen_at, stored, owned)`` tuples, from psycopg or from psql's
+    JSON, plus an ``environment`` row for each name in ``environment`` not
+    listed, sorted by name. ``owned`` (v59) may be missing, as from an
+    older list: such a stored row is the owner's. An environment row is the
+    owner's unless ``not_owner`` names it."""
+    not_owner = frozenset(not_owner)
     out = []
-    for (name, tier, board, paired, pending, expires, created, paired_at, revoked, now,
-         last_seen, stored) in rows:
+    for row in rows:
+        (name, tier, board, paired, pending, expires, created, paired_at, revoked, now,
+         last_seen, stored) = row[:12]
+        owned = row[12] if len(row) > 12 and row[12] is not None else True
         if not stored:
-            out.append(_environment_row(name, last_seen))
+            out.append(_environment_row(name, last_seen, not_owner))
             continue
         if revoked is not None:
             state = "revoked"
@@ -643,18 +675,20 @@ def describe_rows(rows, *, environment=()) -> list[dict]:
                     "tier": tier, "board": bool(board),
                     "code_expires_at": expires if pending else None,
                     "created_at": created, "paired_at": paired_at, "revoked_at": revoked,
-                    "last_seen_at": last_seen})
+                    "last_seen_at": last_seen, "owner": bool(owned)})
     listed = {row["principal"] for row in out}
-    out.extend(_environment_row(name, None) for name in sorted(set(environment) - listed))
+    out.extend(_environment_row(name, None, not_owner)
+               for name in sorted(set(environment) - listed))
     return sorted(out, key=lambda row: row["principal"])
 
 
-def _environment_row(name: str, last_seen) -> dict:
+def _environment_row(name: str, last_seen, not_owner=frozenset()) -> dict:
     """A principal with no stored row: its token is in the daemon's
-    environment, so it has no tier, board or pairing of its own here."""
+    environment, so it has no tier, board or pairing of its own here. It is
+    the owner's unless ``coordination.not_owner_principals`` names it."""
     return {"principal": name, "state": "environment", "paired": False, "tier": None,
             "board": None, "code_expires_at": None, "created_at": None, "paired_at": None,
-            "revoked_at": None, "last_seen_at": last_seen}
+            "revoked_at": None, "last_seen_at": last_seen, "owner": name not in not_owner}
 
 
 def revoke(conn, name: str) -> bool:

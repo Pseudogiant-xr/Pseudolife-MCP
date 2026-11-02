@@ -1565,6 +1565,15 @@ class CoordinationConfig:
     # bearer only the maintainer holds; ``default``, every ordinary
     # session's principal, and the daemon's own sender are refused.
     maintainer_principals: list[str] = field(default_factory=list)
+    # v59 (spec 2026-11-02): environment principals (PSEUDOLIFE_MCP_TOKENS
+    # names, or ``default`` for PSEUDOLIFE_MCP_TOKEN) that are someone
+    # else's, not the bank owner's. Every other environment principal is the
+    # owner's, and an owner's Console shows the board metadata of all the
+    # owner's principals. Before ``invite`` existed the token map was the way
+    # to give someone a token; listing such a name keeps it someone else's.
+    # A stored principal is someone else's through ``invite --someone-else``
+    # instead. Set in config.yaml only: POST /api/config refuses it.
+    not_owner_principals: list[str] = field(default_factory=list)
     # Days the board's audit log (coordination_events, schema v42) keeps an
     # event; 0 keeps it forever. Separate from the live mailbox, whose bodies
     # still blank after 24 h. Measured 2026-09-24
@@ -1617,6 +1626,12 @@ class CoordinationConfig:
             raise ValueError("coordination.maintainer_principals must be a list of names")
         self.maintainer_principals = list(dict.fromkeys(
             p.strip().lower() for p in self.maintainer_principals))
+        if not isinstance(self.not_owner_principals, list) or any(
+            not isinstance(p, str) or not p.strip() for p in self.not_owner_principals
+        ):
+            raise ValueError("coordination.not_owner_principals must be a list of names")
+        self.not_owner_principals = list(dict.fromkeys(
+            p.strip().lower() for p in self.not_owner_principals))
         shared = {DEFAULT_PRINCIPAL, DAEMON_PRINCIPAL} & set(self.maintainer_principals)
         if shared:
             raise ValueError(

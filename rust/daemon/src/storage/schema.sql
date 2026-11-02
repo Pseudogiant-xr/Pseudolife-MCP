@@ -1,4 +1,4 @@
--- schema_version 58
+-- schema_version 59
 
 CREATE TABLE IF NOT EXISTS meta (
   key TEXT PRIMARY KEY,
@@ -775,8 +775,18 @@ CREATE TABLE IF NOT EXISTS principals (
     paired_code_hash TEXT,
     created_at       DOUBLE PRECISION NOT NULL,
     paired_at        DOUBLE PRECISION,
-    revoked_at       DOUBLE PRECISION
+    revoked_at       DOUBLE PRECISION,
+    owned            BOOLEAN NOT NULL DEFAULT TRUE
 );
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_attribute
+                   WHERE attrelid = 'principals'::regclass
+                     AND attname = 'owned' AND attnum > 0 AND NOT attisdropped) THEN
+        ALTER TABLE principals
+            ADD COLUMN IF NOT EXISTS owned BOOLEAN NOT NULL DEFAULT TRUE;
+    END IF;
+END $$;
 
 CREATE TABLE IF NOT EXISTS maintainer_passkeys (
     credential_id TEXT PRIMARY KEY,
@@ -791,7 +801,8 @@ CREATE TABLE IF NOT EXISTS maintainer_passkeys (
     last_used_at  DOUBLE PRECISION,
     revoked_at    DOUBLE PRECISION,
     revoked_by    TEXT,
-    flagged_at    DOUBLE PRECISION
+    flagged_at    DOUBLE PRECISION,
+    signs_in_as   TEXT
 );
 CREATE TABLE IF NOT EXISTS maintainer_bootstrap (
     code_hash       TEXT PRIMARY KEY,
@@ -814,6 +825,28 @@ BEGIN
                      AND attname = 'failed_attempts' AND attnum > 0 AND NOT attisdropped) THEN
         ALTER TABLE maintainer_bootstrap
             ADD COLUMN IF NOT EXISTS failed_attempts INTEGER NOT NULL DEFAULT 0;
+    END IF;
+END $$;
+-- v59: the principal each passkey signs in as, backfilled once from the
+-- key's own enrolment event. OFFSET 0 keeps the payload cast to
+-- maintainer_key rows.
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_attribute
+                   WHERE attrelid = 'maintainer_passkeys'::regclass
+                     AND attname = 'signs_in_as' AND attnum > 0 AND NOT attisdropped) THEN
+        ALTER TABLE maintainer_passkeys ADD COLUMN IF NOT EXISTS signs_in_as TEXT;
+        UPDATE maintainer_passkeys k SET signs_in_as = src.principal
+          FROM (SELECT DISTINCT ON (e.payload ->> 'credential_id')
+                       e.payload ->> 'credential_id' AS credential_id,
+                       NULLIF(e.principal, '') AS principal
+                  FROM (SELECT seq, principal, payload::jsonb AS payload
+                          FROM coordination_events
+                         WHERE event = 'maintainer_key' OFFSET 0) e
+                 WHERE e.payload ->> 'change' IN ('enrol', 'add')
+                   AND e.payload ->> 'credential_id' IS NOT NULL
+                 ORDER BY e.payload ->> 'credential_id', e.seq) src
+         WHERE src.credential_id = k.credential_id;
     END IF;
 END $$;
 
@@ -851,4 +884,28 @@ CREATE TABLE IF NOT EXISTS rejected_bearers (
     rejections    BIGINT NOT NULL,
     first_seen_at DOUBLE PRECISION NOT NULL,
     last_seen_at  DOUBLE PRECISION NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS console_sessions (
+    session_id   TEXT PRIMARY KEY,
+    token_hash   TEXT NOT NULL UNIQUE,
+    principal    TEXT NOT NULL,
+    source       TEXT NOT NULL,
+    issuer       TEXT NOT NULL,
+    method       TEXT NOT NULL,
+    label        TEXT NOT NULL DEFAULT '',
+    created_at   DOUBLE PRECISION NOT NULL,
+    last_used_at DOUBLE PRECISION,
+    expires_at   DOUBLE PRECISION NOT NULL,
+    revoked_at   DOUBLE PRECISION
+);
+CREATE TABLE IF NOT EXISTS console_signin_codes (
+    code_hash  TEXT PRIMARY KEY,
+    principal  TEXT NOT NULL,
+    source     TEXT NOT NULL,
+    issuer     TEXT NOT NULL,
+    origin     TEXT NOT NULL,
+    expires_at DOUBLE PRECISION NOT NULL,
+    used_at    DOUBLE PRECISION,
+    created_at DOUBLE PRECISION NOT NULL
 );

@@ -175,6 +175,27 @@ def test_the_config_route_cannot_set_the_maintainer_keys(tmp_path, monkeypatch, 
     assert not (tmp_path / "config.yaml").exists()
 
 
+@pytest.mark.parametrize("patch", [
+    {"coordination.not_owner_principals": ["fixture-guest"]},
+    {"Coordination.Not_Owner_Principals": []},
+    {"coordination": {"not_owner_principals": ["fixture-guest"]}},
+])
+def test_the_config_route_cannot_set_who_is_not_the_owner(tmp_path, monkeypatch, patch):
+    """v59: ``coordination.not_owner_principals`` widens or narrows whose
+    board metadata an owner's Console reads, and every environment
+    principal can call this route, so it is set in config.yaml only. It is
+    not a knob, so the route refuses it as one, writing nothing."""
+    monkeypatch.delenv("PSEUDOLIFE_MCP_CONFIG", raising=False)
+    service = FixtureService()
+    service.data_dir = tmp_path
+    with pytest.raises(ValueError, match="^unknown knob: "):
+        config_io.write_config(service, patch)
+    status, out = _hit(_app(service), "POST", "/api/config", {"patch": patch})
+    assert status == 400 and json.loads(out)["error"].startswith("unknown knob: ")
+    assert not (tmp_path / "config.yaml").exists()
+    assert service.config.coordination.not_owner_principals == []
+
+
 def test_the_config_file_carries_the_maintainer_keys():
     from pseudolife_memory.utils.config import CoordinationConfig
     cfg = CoordinationConfig(maintainer={"rp_id": "box.example", "origin": "https://box.example:8443",
