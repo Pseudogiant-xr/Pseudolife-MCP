@@ -16,7 +16,7 @@
 //! and show their `saved` value until the next start.
 
 mod yaml_dump;
-mod yaml_load;
+pub(crate) mod yaml_load;
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -642,6 +642,7 @@ fn node_type(node: &Node) -> &'static str {
         Node::Str(_) | Node::MergeKey => "str",
         Node::Seq(_) => "list",
         Node::Map(_) => "dict",
+        Node::Unsupported { .. } => unreachable!("startup-only YAML scalar"),
     }
 }
 
@@ -900,6 +901,7 @@ fn node_truthy(node: &Node) -> bool {
         Node::Seq(items) => !items.is_empty(),
         Node::Map(entries) => !entries.is_empty(),
         Node::MergeKey => true,
+        Node::Unsupported { .. } => unreachable!("startup-only YAML scalar"),
     }
 }
 
