@@ -1,3 +1,3 @@
-| Surface | Python behaviour | Owner |
-|---|---|---|
-| Stored callers' POST `/api/config` and `/api/daemon-notice` gate | HTTP already returns 403 `operator_principal_required` by stored-name inference; method-aware source policy is implemented for HTTP-SECURITY to consume with `resolve_detailed` | HTTP-SECURITY |
+| Surface | Python behaviour | Owner | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|
+| Stored callers' POST `/api/config` and `/api/daemon-notice` gate | HTTP already returns 403 `operator_principal_required` by stored-name inference; method-aware source policy is implemented for HTTP-SECURITY to consume with `resolve_detailed` | HTTP-SECURITY | closed | `rust/daemon/src/http.rs::api` enforces stored-principal operator refusal for POST config/daemon-notice after resolution; `pseudolife_memory/web/api.py::_resolve`/operator gate enforce the same method policy. Source inference is safe under the stored-principal name exclusion in the resolver; this is no longer an unconsumed policy body. B14b owner: none (closed). |

@@ -1,3 +1,3 @@
-| Item | Python | Rust | Owner / why |
-|---|---|---|---|
-| A stage cursor whose `retry` is a list of pairs with non-string keys, or whose lists hold non-strings where they are sorted | coerced by `dict()` / compared by `sorted()` (or raises) | refused (`internal_error`) | corrupt persisted data only; the stages write these cursors |
+| Item | Python | Rust | Owner / why | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| A stage cursor whose `retry` is a list of pairs with non-string keys, or whose lists hold non-strings where they are sorted | coerced by `dict()` / compared by `sorted()` (or raises) | refused (`internal_error`) | corrupt persisted data only; the stages write these cursors | behaviour with no caller | At `54063c1788f2`: `rust/daemon/src/dream/stages.rs` `Cursor::load` / `py_dict` require string keys; `pseudolife_memory/service_dream.py` `_load_infer_cursor` / `_load_digest_cursor` use dict/list coercions. Caller search: those Python loaders/savers plus Rust `Cursor::to_json`, `Cursor::save` and stage retry writers persist episode-id strings in retry/regenerate/context_deferred; they cannot generate non-string episode keys or mixed sorted lists. B14b owner: B14b disposition; B1-P (dream engine). |

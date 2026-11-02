@@ -1,3 +1,3 @@
-| Item | Python | Rust | Owner |
-|---|---|---|---|
-| MCP-HTTP1-ONLY | the current daemon listener serves HTTP/1 | the Rust listener enables Axum's `http1` feature only; SSE uses `Connection: keep-alive`, which must be removed before any HTTP/2 listener is enabled | HTTP/2 transport deferred |
+| Item | Python | Rust | Owner | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| MCP-HTTP1-ONLY | the current daemon listener serves HTTP/1 | the Rust listener enables Axum's `http1` feature only; SSE uses `Connection: keep-alive`, which must be removed before any HTTP/2 listener is enabled | HTTP/2 transport deferred | closed | `rust/daemon/Cargo.toml` enables Axum http1 only and `rust/daemon/src/mcp/mod.rs::sse_headers` supplies keep-alive; `pseudolife_memory/daemon.py::run_daemon` uses the current HTTP/1 uvicorn listener. Neither shipped listener serves HTTP/2; the future-listener condition is not an open parity gap. B14b owner: none (closed). |

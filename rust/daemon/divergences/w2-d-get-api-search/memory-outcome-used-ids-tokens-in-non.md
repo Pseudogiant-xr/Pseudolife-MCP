@@ -1,3 +1,3 @@
-| Item | Python | Rust | Why / owner |
-|---|---|---|---|
-| `memory_outcome` `used_ids` tokens in non-ASCII digits | `int()` takes any Unicode decimal digit (`"١٢"` is 12) | ASCII digits only (with sign, leading zeros, single underscores and the 4,300-digit limit, as `int()`); other digits count as ignored | the same ASCII-only rule as `memory_stats`' drop count; agents type ASCII ids |
+| Item | Python | Rust | Why / owner | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| `memory_outcome` `used_ids` tokens in non-ASCII digits | `int()` takes any Unicode decimal digit (`"١٢"` is 12) | ASCII digits only (with sign, leading zeros, single underscores and the 4,300-digit limit, as `int()`); other digits count as ignored | the same ASCII-only rule as `memory_stats`' drop count; agents type ASCII ids | behaviour with no caller | `rust/daemon/src/outcome_tools.rs::parse_used_ids` parses ASCII integer tokens; `pseudolife_memory/mcp_server.py::_parse_used_ids` uses Python int. Bounded producer search: served IDs from `memory_search` are JSON integers and `memory_outcome` instructions in `pseudolife_memory/mcp_server.py` ask callers to reuse them; both shims preserve integer/string payloads without localized digit rendering. No shipped producer translates IDs into non-ASCII digits. B14b owner: B14b no-caller disposition. |

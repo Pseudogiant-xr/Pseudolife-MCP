@@ -6,7 +6,5 @@ the search, then `service.trace` (a second, instrumented retrieval) and
 serves verbose entries with `trace`. The instrumented retrieval itself is
 served since B2a's trace PR (`GET /api/trace`, `search::rank_traced`); the
 MCP adapter over it (search, then the traced retrieval, verbose entries
-with `trace`) is a follow-up. W2-D supplies expanded REST search, W2-E supplies the
-harness-gated store body, and W2-F supplies the REST board. Their presence
-does not register MCP tool bodies: their projections remain the
-prerequisites listed above. Bound identity is enforced on the mount (M18).
+with `trace`) is a follow-up. The search, store and board MCP adapters are now registered in
+`mcp/dispatch.rs`; that registration does not serve the explain option. Bound identity is enforced on the mount (M18). D7 bucket: behaviour with a caller. Code verification: `rust/daemon/src/read/mcp_search.rs::mcp_memory_search` still refuses explain before search; `pseudolife_memory/mcp_server.py::memory_search` runs search then trace; `rust/daemon/src/read/trace.rs::route` serves REST trace only. Other body adapters are registered in `rust/daemon/src/mcp/dispatch.rs::registry` and do not close this option. Caller: agents calling the exposed `memory_search(explain=true)` parameter in `pseudolife_memory/mcp_server.py::memory_search`; B14b owner: B2a read projections / MCP search adapter.

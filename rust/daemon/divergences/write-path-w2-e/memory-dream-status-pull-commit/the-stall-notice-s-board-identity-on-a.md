@@ -1,3 +1,3 @@
-| Item | Python | Rust | Owner / why |
-|---|---|---|---|
-| The stall notice's board identity on a daemon whose board pruned it | registered again on the next notice | the same, through the board's daemon notice (W2-F) | |
+| Item | Python | Rust | Owner / why | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| The stall notice's board identity on a daemon whose board pruned it | registered again on the next notice | the same, through the board's daemon notice (W2-F) | | closed | At `54063c1788f2`: `rust/daemon/src/board/notice.rs` `Board::daemon_notice` clears cached identity on instance_not_found / invalid_credential and registers again on its second attempt; `pseudolife_memory/coordination.py` `daemon_notice` does the same. `rust/daemon/src/dream/ticks.rs` `stall_notify` uses that implementation. B14b owner: none (this obligation is closed). |

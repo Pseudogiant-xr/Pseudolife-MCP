@@ -1,3 +1,3 @@
-| Item | Python | Rust | Why |
-|---|---|---|---|
-| Console static dir | the package's `web/static` | `PSEUDOLIFE_DAEMON_STATIC_DIR` | packaging (W3-J) |
+| Item | Python | Rust | Why | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| Console static dir | the package's `web/static` | `PSEUDOLIFE_DAEMON_STATIC_DIR` | packaging (W3-J) | behaviour with a caller | `rust/daemon/src/main.rs::main` passes only `PSEUDOLIFE_DAEMON_STATIC_DIR` to `http::App`; `rust/daemon/src/http.rs::dispatch` serves `/ui` from it, unlike `pseudolife_memory/web/api.py`'s package-relative static directory. Packaging must supply the asset path; absence changes the served page, not just its location. Caller: Console requests from `frontend/src/main.ts` to `/ui` on a native or image launch; B14b owner: B8 models/image via R3; B11 installed layout via R4/R5. |

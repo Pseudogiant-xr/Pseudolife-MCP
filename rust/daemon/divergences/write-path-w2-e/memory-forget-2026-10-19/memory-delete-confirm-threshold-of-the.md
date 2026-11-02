@@ -1,3 +1,3 @@
-| Item | Python | Rust | Owner / why |
-|---|---|---|---|
-| `memory.delete_confirm_threshold` of the wrong type | `int(value or 0)` per call (a float truncates) | refused at config load, like every other typed key | the existing config-type substitution |
+| Item | Python | Rust | Owner / why | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| `memory.delete_confirm_threshold` of the wrong type | `int(value or 0)` per call (a float truncates) | refused at config load, like every other typed key | the existing config-type substitution | behaviour with no caller | Verified at `54063c17`: `rust/daemon/src/config.rs::load` reads this key through `want_int`; `pseudolife_memory/service.py::MemoryService.delete` applies `int(value or 0)`. Bounded search of `pseudolife_memory/utils/config.py` defaults, `pseudolife_memory/web/config_io.py` knob coercion, `ops`, `plugin` and `rust/shim/src` found no producer writing a float/string threshold; manually edited Python-accepted YAML remains different. B14b owner: B14b typed-configuration disposition / R7 configuration docs. |

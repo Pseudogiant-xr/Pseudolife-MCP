@@ -1,3 +1,3 @@
-| Item | Python | Rust | Why / owner |
-|---|---|---|---|
-| Duplicate current facts at hydration | demoted in memory, persisted on the next save | demoted in memory only | W2-E (save path); the bank's unique indexes prevent duplicates from every current producer |
+| Item | Python | Rust | Why / owner | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| Duplicate current facts at hydration | demoted in memory, persisted on the next save | demoted in memory and their slots marked dirty; a later canonical write or enabled compaction sweep saves them, rather than the counters-only autosave | W2-E (save path); the bank's unique indexes prevent duplicates from every current producer | behaviour with no caller | `rust/daemon/src/stores/cortex.rs::hydrate` now marks demoted slots dirty; `rust/daemon/src/service.rs::Service::compact_superseded` and `fact_set.rs::save_cortex` can persist them, rather than memory-only healing. Python `pseudolife_memory/memory/cortex.py::_reindex_current` persists on save. Bounded producer search: current writes in `pseudolife_memory/storage/postgres.py::replace_slot_facts`, Rust `stores/cortex_sync.rs`, and unique current-slot indexes in `storage/schema.py` prevent duplicate scalar currents; only a corrupted/legacy state can expose remaining cadence differences. B14b owner: B14b no-caller disposition. |

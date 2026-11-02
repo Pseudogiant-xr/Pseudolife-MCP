@@ -1,3 +1,3 @@
-| Item | Python | Rust | Owner / why |
-|---|---|---|---|
-| A digest's capacity victim with a deeper band configured | relocated to the next band | dropped (as `memory_store` drops it) | the store slice's band relocation, declared there; the default `flat` preset has one band |
+| Item | Python | Rust | Owner / why | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| A digest's capacity victim with a deeper band configured | relocated to the next band | dropped (as `memory_store` drops it) | the store slice's band relocation, declared there; the default `flat` preset has one band | behaviour with a caller | At `54063c1788f2`: `rust/daemon/src/dream/stages.rs` `store_digest` calls `store::evict_resident`; `pseudolife_memory/service_dream.py` `_store_digest` calls `band.store`, whose CMS capacity callback can relocate the victim. A multi-band bank loses a resident instead of relocating it. Caller: `rust/daemon/src/dream/stages.rs` `generate_digests_stage` / Python `generate_digests_stage`, when digest_enabled and a deeper band are configured; B14b owner: B1-P (digest) and B4 (resident store durability), B14b. |

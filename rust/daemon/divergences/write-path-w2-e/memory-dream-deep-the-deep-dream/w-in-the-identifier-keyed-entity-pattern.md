@@ -1,3 +1,3 @@
-| Item | Python | Rust | Owner / why |
-|---|---|---|---|
-| `\w` in the identifier-keyed entity pattern | `str.isalnum` or `_` | Unicode letters, numbers or `_` | rare characters only, as in `junk_names.rs` |
+| Item | Python | Rust | Owner / why | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| `\w` in the identifier-keyed entity pattern | `str.isalnum` or `_` | Unicode letters, numbers or `_` | rare characters only, as in `junk_names.rs` | behaviour with a caller | At `54063c1788f2`: `rust/daemon/src/graph_consolidation.rs` `ID_KEYED` uses Unicode L/N classes; `pseudolife_memory/memory/graph_consolidation.py` `_ID_KEYED_ENTITY` uses Python re \w. Different Unicode tables can change identifier-sibling exclusion and curation candidates. Caller: `rust/daemon/src/dream/deep.rs` `plan` calls `slot_duplicate_candidates` over lesson/world entity names; B14b owner: B1-P (dream engine), B14b. |

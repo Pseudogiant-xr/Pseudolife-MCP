@@ -1,3 +1,3 @@
-| Item | Python | Rust | Owner / why |
-|---|---|---|---|
-| A merge decision audit for an entity whose display is NULL | `entity_display` / `into_display` NULL (`disp.get(id, "?")` finds the NULL) | `?` | as the review actions write it; a display is NULL only for hand-written rows |
+| Item | Python | Rust | Owner / why | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| A merge decision audit for an entity whose display is NULL | `entity_display` / `into_display` NULL (`disp.get(id, "?")` finds the NULL) | `?` | as the review actions write it; the current entities.display NOT NULL constraint excludes NULL displays in a supported bank | behaviour with no caller | At `54063c1788f2`: `rust/daemon/src/dream/judge.rs` merge decision writing supplies fallback display strings; Python graph-accept audit uses disp.get(id, "?"). Caller search: `pseudolife_memory/storage/schema.py` entities.display is TEXT NOT NULL and both graph-store entity creation paths supply strings. A NULL display requires an out-of-schema/corrupt bank, not a supported production entity writer. B14b owner: B14b disposition; B1-O (graph review audit). |

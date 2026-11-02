@@ -1,3 +1,3 @@
-| Item | Python | Rust | Why |
-|---|---|---|---|
-| CPU precision | `auto` uses bf16 torch on bf16-native CPUs; explicit bf16 is honored by torch | `auto` selects the graph's fp32 policy; effective explicit bf16 refuses with `deferred: bf16 ONNX` | parity evidence pins fp32; automatic and explicit bf16 ONNX remain deferred |
+| Item | Python | Rust | Why | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| CPU precision | `auto` uses bf16 torch on bf16-native CPUs; explicit bf16 is honored by torch | `auto` selects the graph's fp32 policy; effective explicit bf16 refuses with `deferred: bf16 ONNX` | parity evidence pins fp32; automatic and explicit bf16 ONNX remain deferred | behaviour with a caller | `rust/daemon/src/embed.rs::Embedder::load_config` rejects effective bf16 and otherwise uses fp32 ONNX; `pseudolife_memory/memory/embedding.py::_resolve_cpu_dtype` selects bf16 on native-bf16 CPUs. This changes embedding/ranking arithmetic and valid explicit-bf16 support. Caller: default `embedding.cpu_dtype: auto` in `pseudolife_memory/utils/config.py::EmbeddingConfig`, used by daemon search/store; B14b owner: B8 models/image via R3. |

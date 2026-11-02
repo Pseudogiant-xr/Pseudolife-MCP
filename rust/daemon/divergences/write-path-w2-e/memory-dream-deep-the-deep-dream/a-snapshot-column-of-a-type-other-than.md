@@ -1,3 +1,3 @@
-| Item | Python | Rust | Owner / why |
-|---|---|---|---|
-| A snapshot column of a type other than integer, float, boolean, text or JSON | `str(value)` (`default=str`) | PostgreSQL's text form | the five graph tables have no such column |
+| Item | Python | Rust | Owner / why | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| A snapshot column of a type other than integer, float, boolean, text or JSON | `str(value)` (`default=str`) | attempts a String decode; unsupported column types can fail decoding | the five graph tables have no such column | behaviour with no caller | At `54063c1788f2`: `rust/daemon/src/dream/deep.rs` `dump_graph_tables` / `column_value` handle the five SNAPSHOT_TABLES; `pseudolife_memory/storage/postgres.py` `dump_graph_tables` and `pseudolife_memory/service_dream.py` `_write_graph_snapshot_locked` use default=str. Caller search: the five table definitions and migrations in `pseudolife_memory/storage/schema.py` contain only integer, float, boolean and text columns (plus supported JSON types if present); no current schema column reaches the unsupported-type branch. B14b owner: B14b disposition; B1-P (dream engine). |

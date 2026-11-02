@@ -1,3 +1,3 @@
-| Item | Python | Rust | Owner / why |
-|---|---|---|---|
-| A wrong-type `memory.recall` setting (`max_searches_per_hop: 2.5`, `hub_gate: "false"`, `driver: null`) | taken untyped (`int()` truncates, a non-empty string is truthy, `None` falls to mechanical) | refused at config load, like every other typed key | the existing config-type substitution |
+| Item | Python | Rust | Owner / why | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| A wrong-type `memory.recall` setting (`max_searches_per_hop: 2.5`, `hub_gate: "false"`, `driver: null`) | taken untyped (`int()` truncates, a non-empty string is truthy, `None` falls to mechanical) | refused at config load, like every other typed key | the existing config-type substitution | behaviour with no caller | Verified at `54063c17`: `rust/daemon/src/config.rs::load` uses `want_int`, `want_bool` and `want_str` for recall; Python `pseudolife_memory/utils/config.py::RecallConfig` receives YAML leaves used by `pseudolife_memory/memory/recall.py::run_recall` coercions. Bounded search of typed defaults, `pseudolife_memory/web/config_io.py::_write_config_locked`/`_coerce`, `ops`, `plugin` and `rust/shim/src` found no wrong-type recall producer. Manually edited Python-accepted YAML remains refused by Rust. B14b owner: B14b typed-configuration disposition / R7 recall configuration docs. |

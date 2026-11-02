@@ -1,3 +1,3 @@
-| Item | Python | Rust | Owner / why |
-|---|---|---|---|
-| `time_budget_seconds` (20 s) | wall clock (`time.monotonic`) | wall clock (`Instant`) | a walk near the budget can stop at a different step; the harness's walks finish in well under a second |
+| Item | Python | Rust | Owner / why | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| `time_budget_seconds` (20 s) | wall clock (`time.monotonic`) | wall clock (`Instant`) | a walk near the budget can stop at a different step; the harness's walks finish in well under a second | behaviour with a caller | Verified at `54063c17`: `rust/daemon/src/recall.rs::run_recall` checks elapsed Instant time; `pseudolife_memory/memory/recall.py::run_recall` checks `time.monotonic`. Different execution/network durations can stop different steps and change payload membership; fast fixture walks are not boundary acceptance evidence. Caller: MCP `memory_recall` and Console `/api/recall` near the configured time budget; B14b owner: B14b recall time-budget boundary acceptance. |

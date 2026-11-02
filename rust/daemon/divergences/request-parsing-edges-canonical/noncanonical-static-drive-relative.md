@@ -1,3 +1,3 @@
-| Item | Python | Rust |
-|---|---|---|
-| Noncanonical static drive-relative requests and lexical escapes through linked roots | captured oracle observations | `lexical-outside-root`: 403 before filesystem access, exact refusal headers/body; shipped Console asset paths are unchanged |
+| Item | Python | Rust | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|
+| Noncanonical static drive-relative requests and lexical escapes through linked roots | captured oracle observations | `lexical-outside-root`: 403 before filesystem access, exact refusal headers/body; shipped Console asset paths are unchanged | behaviour with no caller | `rust/daemon/src/static_files.rs::safe_relative_tail`/`serve_with_resolver` refuse lexical escapes before filesystem access; Python `pseudolife_memory/web/api.py::_inside_static_root` uses platform path resolution. Bounded URL-producer search: `pseudolife_memory/web/static/index.html`, its assets, and `frontend/src` imports use ordinary /ui asset paths without drive-relative or above-root components. B14b owner: B14b no-caller disposition. |

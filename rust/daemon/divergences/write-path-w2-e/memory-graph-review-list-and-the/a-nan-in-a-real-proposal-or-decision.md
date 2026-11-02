@@ -1,3 +1,3 @@
-| Item | Python | Rust | Owner / why |
-|---|---|---|---|
-| A NaN in a REAL proposal or decision column | serialized as `NaN` | `null` | NaN is not a stored score |
+| Item | Python | Rust | Owner / why | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| A NaN in a REAL proposal or decision column | serialized as `NaN` | `null` | NaN can be stored through an untyped proposal similarity; the list response then differs | behaviour with a caller | At `54063c1788f2`: `rust/daemon/src/graph_review.rs` `proposed_links` serializes a non-finite similarity with json! as null; Python graph review preserves float NaN. `rust/daemon/src/graph_review_actions.rs` `real_param` and Python `_graph_propose_links_locked` admit the string "NaN" similarity into an unconstrained REAL column. Caller: `pseudolife_memory/mcp_server.py` `memory_graph_review(action="propose", proposals=...)`, then `action="list"` / Console graph review; B14b owner: B1-O (graph review), B14b. |

@@ -1,3 +1,3 @@
-| Key | Python | Rust | Owner |
-|---|---|---|---|
-| `dream_tracking_error` before the first dream call | set at startup, when the dream's acknowledgement state is read | set at the first dream call, which is when Rust reads that state (the lazy tracking init above) | declared (B4): follows the tracking-init divergence (W3-H) |
+| Key | Python | Rust | Owner | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| `dream_tracking_error` before the first dream call | set at startup, when the dream's acknowledgement state is read | set at the first dream call, which is when Rust reads that state (the lazy tracking init above) | declared (B4): follows the tracking-init divergence (W3-H) | behaviour with a caller | `rust/daemon/src/dream/service.rs::ensure` initializes tracking at first dream operation; Python `pseudolife_memory/service.py::MemoryService._hydrate_resident_stores` calls `_initialize_dream_tracking` at startup. Caller: `/health` healthchecks before any dream call when tracking state cannot load; B14b owner: B4 lifecycle/storage. |

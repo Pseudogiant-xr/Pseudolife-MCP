@@ -1,3 +1,3 @@
-| Item | Python | Rust | Owner / why |
-|---|---|---|---|
-| File mode (`graph_requires_postgres`) | answered when no database is configured | not reachable: the daemon is PostgreSQL-only | the PostgreSQL-only rows above |
+| Item | Python | Rust | Owner / why | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| File mode (`graph_requires_postgres`) | answered when no database is configured | not reachable: the daemon is PostgreSQL-only | the PostgreSQL-only rows above | behaviour with a caller | Verified at `54063c17`: `pseudolife_memory/service.py::MemoryService.graph_relate` reaches the no-storage refusal on a Python file-mode daemon; `pseudolife_memory/daemon.py::run_daemon` still permits that fallback. Rust `rust/daemon/src/main.rs::main` refuses startup without a DSN. D1 retirement is not completed deprecation proof. Caller: Python CLI `serve` file-mode fallback followed by MCP graph write tools; B14b owner: B9 / D1 file-mode retirement, with R7 / B12 deprecation documentation. |

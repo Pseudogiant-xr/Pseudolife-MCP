@@ -1,3 +1,3 @@
-| Item | Python | Rust | Why |
-|---|---|---|---|
-| Nonpositive embedding limits / empty tokenization | backend-specific Python errors | batch_size and max_seq_length <= 0 refuse; a zero-token batch reports `empty tokenization` | unsupported input/limit shapes are explicitly refused before invalid inference |
+| Item | Python | Rust | Why | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| Nonpositive embedding limits / empty tokenization | backend-specific Python errors | batch_size and max_seq_length <= 0 refuse; a zero-token batch reports `empty tokenization` | unsupported input/limit shapes are explicitly refused before invalid inference | behaviour with no caller | `rust/daemon/src/embed.rs::Embedder::load_config` rejects nonpositive sizes and `Embedder::forward` rejects zero token width; Python `pseudolife_memory/memory/embedding.py::EmbeddingPipeline` delegates these cases to its backend. Bounded producer search: `pseudolife_memory/utils/config.py::EmbeddingConfig` uses positive defaults and shipped Qwen/MiniLM tokenizers add special tokens, so shipped calls do not create an empty-token batch; only changed config/custom artifacts reach this edge. B14b owner: B14b no-caller disposition. |

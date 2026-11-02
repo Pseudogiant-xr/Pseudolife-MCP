@@ -1,3 +1,3 @@
-| Item | Python | Rust | Why / owner |
-|---|---|---|---|
-| Lesson `provenance` items that are not strings | `set()` of whatever JSON the row holds, then `sorted` | strings only (others dropped), as the personal cortex's `support`/`provenance` load | the only producer (the dream) writes strings such as `signal:12` |
+| Item | Python | Rust | Why / owner | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| Lesson `provenance` items that are not strings | `set()` of whatever JSON the row holds, then `sorted` | strings only (others dropped), as the personal cortex's `support`/`provenance` load | the only producer (the dream) writes strings such as `signal:12` | behaviour with no caller | `rust/daemon/src/stores/lessons.rs::json_strings` drops non-string provenance, whereas `pseudolife_memory/memory/lessons.py` retains set members. Bounded writer search: lesson synthesis in `pseudolife_memory/service_dream.py` and `rust/daemon/src/dream/lessons.rs::lineage` generates string signal/episode markers; no public tool accepts arbitrary lesson-provenance JSON items. B14b owner: B14b no-caller disposition. |

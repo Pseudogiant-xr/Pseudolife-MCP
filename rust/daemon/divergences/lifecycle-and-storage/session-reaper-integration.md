@@ -1,3 +1,3 @@
-| Item | Python | Rust | Owner |
-|---|---|---|---|
-| Session reaper integration | closes idle sessions, derives generic titles and preserves resumable roots | reaping, cascade close, deferred-empty sweep, tombstone hydration and store/resume integration implemented; generic auto-titles and root entry stamps implemented through the explicit-close helper | closed (B4): live `session-restart` and `session-resume-refusal` compare durable titles and entry stamps |
+| Item | Python | Rust | Owner | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| Session reaper integration | closes idle sessions, derives generic titles and preserves resumable roots | reaping, cascade close, deferred-empty sweep, tombstone hydration and store/resume integration implemented; generic auto-titles and root entry stamps implemented through the explicit-close helper | closed (B4): live `session-restart` and `session-resume-refusal` compare durable titles and entry stamps | closed | `rust/daemon/src/service.rs::Duties::reap` calls `rust/daemon/src/background_sessions.rs::Sessions::reap_with_settings` and `rust/daemon/src/session_close.rs::auto_title`; Python: `pseudolife_memory/service.py` session reaper; existing differential: `rust/daemon/harness/w2e.py` session-restart/session-resume-refusal. B14b owner: none (closed). |

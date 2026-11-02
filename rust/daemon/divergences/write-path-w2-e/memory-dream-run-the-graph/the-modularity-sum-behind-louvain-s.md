@@ -1,3 +1,3 @@
-| Item | Python | Rust | Owner / why |
-|---|---|---|---|
-| The modularity sum behind Louvain's stopping test | `sum()` (CPython 3.12 compensates; 3.11 does not) | left to right | the value only meets the 1e-7 threshold between levels |
+| Item | Python | Rust | Owner / why | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| The modularity sum behind Louvain's stopping test | `sum()` (CPython 3.12 compensates; 3.11 does not) | left to right | the value only meets the 1e-7 threshold between levels | behaviour with a caller | At `54063c1788f2`: `rust/daemon/src/graph_insight.rs` `modularity` accumulates left-to-right; `pseudolife_memory/memory/graph_insight.py` `_partition` delegates Louvain's stopping test to NetworkX / Python sum. On Python 3.12+ compensated sums can change the threshold decision and final partition. Caller: `rust/daemon/src/dream/run.rs` `run_locked` / Python `_safe_refresh_graph_insight` run the refresh on production graphs; B14b owner: B1-P2b (graph insight / Option B disposition), B14b. |

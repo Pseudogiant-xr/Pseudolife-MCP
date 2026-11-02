@@ -1,3 +1,3 @@
-| Item | Python | Rust | Owner / why |
-|---|---|---|---|
-| A pending entry whose row is missing at a write failure | re-flushed (`cms.reflush_entries`) | detected, not re-inserted | the store slice's persistence follow-up; the answer (a write hold) is the same |
+| Item | Python | Rust | Owner / why | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| A pending entry whose row is missing at a write failure | re-flushed (`cms.reflush_entries`) | detected, not re-inserted | the store slice's persistence follow-up; the answer (a write hold) is the same | behaviour with a caller | At `54063c1788f2`: `rust/daemon/src/dream/run.rs` `reflush_stale` counts missing ids and returns zero; `pseudolife_memory/service_dream.py` `_dream_reflush_stale` calls `cms.reflush_entries`. The next retry can remain stalled in Rust. Caller: `rust/daemon/src/dream/run.rs` `run_locked` invokes stale-id recovery after a write failure; Python `_dream_run_locked` has the same recovery trigger; B14b owner: B1-P (dream recovery) and B4 (durability), B14b. |

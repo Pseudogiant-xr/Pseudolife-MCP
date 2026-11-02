@@ -1,3 +1,3 @@
-| Item | Python | Rust | Owner |
-|---|---|---|---|
-| Whole graph caps and fact projection | served graph and review behavior | not served (the graph store, `memory_graph`, `memory_recall`, `memory_graph_review` with its proposals, the deep dream, the merge, link, junk, curation and candidate judges and the communities a dream run refreshes are: see their sections below) | the Console REST rows (`GET /api/graph`), and later graph increments |
+| Item | Python | Rust | Owner | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| Whole graph caps and fact projection | served graph and review behavior | served by `read/graph.rs` and `graph_read_tools.rs`, including whole-graph scope/caps and fact projection; graph review/recall/dream bodies are registered | closed: Console REST graph projections and existing `w2e_reads.py` differential | closed | `rust/daemon/src/read/graph.rs::route` calls graph_neighborhood then filter_graph for whole-graph scope/caps; `rust/daemon/src/graph_read_tools.rs::graph_neighborhood` includes fact projection, matching `pseudolife_memory/web/routes.py` graph reads; existing differential: `rust/daemon/harness/w2e_reads.py`. The old not-served claim is obsolete. B14b owner: none (closed). |

@@ -1,3 +1,3 @@
-| Item | Python | Rust | Owner |
-|---|---|---|---|
-| Non-canonical startup metadata | Python coercions can accept arbitrary numeric spellings or non-string identities | supports shipped producer shapes; malformed durable HLC pairs refuse, and unbounded integers or Python-only identity/timestamp coercions remain deferred | W2-D/E for producer evolution |
+| Item | Python | Rust | Owner | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| Non-canonical startup metadata | Python coercions can accept arbitrary numeric spellings or non-string identities | supports shipped producer shapes; malformed durable HLC pairs refuse, and unbounded integers or Python-only identity/timestamp coercions remain deferred | W2-D/E for producer evolution | behaviour with no caller | `rust/daemon/src/startup.rs::identity_metadata`, `number_or_zero` and clock parsing are stricter than `pseudolife_memory/service.py::MemoryService._ensure_init` coercions. Bounded writer search: `pseudolife_memory/service.py` active-session/tombstone setters, `pseudolife_memory/memory/hlc.py` and `rust/daemon/src/episodes.rs` produce string identities, numeric timestamps and integer HLC pairs; no shipped writer produces these malformed shapes. B14b owner: B14b no-caller disposition. |

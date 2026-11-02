@@ -1,3 +1,3 @@
-| Item | Python | Rust | Owner / why |
-|---|---|---|---|
-| An environment integer past i64 (`PSEUDOLIFE_DREAM_MAX_TOKENS`) | kept | the configured default | no producer sets one |
+| Item | Python | Rust | Owner / why | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| An environment integer past i64 (`PSEUDOLIFE_DREAM_MAX_TOKENS`) | kept | the configured default | no producer sets one | behaviour with no caller | At `54063c1788f2`: `rust/daemon/src/dream/extractor.rs` `resolve_endpoints_with` narrows `py_int_str` to i64; `pseudolife_memory/memory/dream.py` `resolve_endpoints` uses `_env_num(..., int)`. Caller search: `PSEUDOLIFE_DREAM_MAX_TOKENS` across `pseudolife_memory/`, `plugin/`, `ops/`, `.github/`, and `pyproject.toml` finds Compose pass-through defaults of 2048 and the resolver, with no shipped generator of an out-of-i64 integer; a manually supplied oversized override is outside that producer set. B14b owner: B14b disposition; B1-P (dream engine). |

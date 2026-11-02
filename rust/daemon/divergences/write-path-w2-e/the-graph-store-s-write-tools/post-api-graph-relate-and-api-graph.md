@@ -1,3 +1,3 @@
-| Item | Python | Rust | Owner / why |
-|---|---|---|---|
-| `POST /api/graph/relate` and `/api/graph/unrelate` (the Console's graph editor) | served over the same service bodies | not served | the Console REST rows (PARITY.md); the bodies are shared when they are |
+| Item | Python | Rust | Owner / why | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| `POST /api/graph/relate` and `/api/graph/unrelate` (the Console's graph editor) | served over the same service bodies | Served by `routes/graph.rs::write` over `graph_write_tools::relate_console` and `unrelate` | Closed implementation gap; Console review action plans call both routes. | closed | Verified at `54063c17`: `rust/daemon/src/routes/graph.rs::SERVED` includes both POST routes; `rust/daemon/src/routes/graph.rs::write` calls `graph_write_tools::relate_console` and `unrelate`. Python `pseudolife_memory/web/routes.py` calls the corresponding service bodies. `frontend/src/lib/reviewActions.ts::planCalls` produces both requests. B14b owner: none (closed). |

@@ -1,3 +1,3 @@
-| Item | Python | Rust | Owner / why |
-|---|---|---|---|
-| `memory.cortex.auto_promote: true` | slot-shaped facts promoted into the cortex on every store | the client receives successful store admission with `cortex_promoted: 0`, but no cortex rows are written; the configuration is not refused | W2-E cortex PR (needs the cortex write path) |
+| Item | Python | Rust | Owner / why | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| `memory.cortex.auto_promote: true` | slot-shaped facts promoted into the cortex on every store | the client receives successful store admission with `cortex_promoted: 0`, but no cortex rows are written; the configuration is not refused | W2-E cortex PR (needs the cortex write path) | behaviour with a caller | Verified at `54063c17`: `rust/daemon/src/config.rs::load` accepts `memory.cortex.auto_promote`; `rust/daemon/src/store.rs::store_body` always returns zero promotions. `pseudolife_memory/service.py::MemoryService.store` calls `_promote_slots` when enabled. `pseudolife_memory/web/config_io.py::KNOBS` exposes the option. Caller: `rust/daemon/src/store.rs::mcp_memory_store` after enabling the Console auto-promote knob; B14b owner: B14b W2-E cortex auto-promotion closure. |

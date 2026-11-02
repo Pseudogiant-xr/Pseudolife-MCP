@@ -1,3 +1,3 @@
-| Item | Python | Rust | Owner |
-|---|---|---|---|
-| A reconnect that fails after winning the lease (reading or bumping the epoch) | `_reconnect_error` already cleared: `verify_writer_session` retries the reconnect once at once, then tolerates an operational failure | nothing cached; an operational failure is tolerated and the next call reconnects, any other propagates | declared (B4): one immediate retry fewer |
+| Item | Python | Rust | Owner | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| A reconnect that fails after winning the lease (reading or bumping the epoch) | `_reconnect_error` already cleared: `verify_writer_session` retries the reconnect once at once, then tolerates an operational failure | nothing cached; an operational failure is tolerated and the next call reconnects, any other propagates | declared (B4): one immediate retry fewer | behaviour with a caller | `rust/daemon/src/storage/mod.rs::Storage::heal` clears the cached error on `Reopen::AfterLease` without immediate retry; `pseudolife_memory/storage/postgres.py::PostgresStorage.verify_writer_session` retries `self.conn`. Caller: `rust/daemon/src/service.rs::Service::verify_writer_session` after a reconnect's epoch read/bump fails; B14b owner: B4 lifecycle/storage. |

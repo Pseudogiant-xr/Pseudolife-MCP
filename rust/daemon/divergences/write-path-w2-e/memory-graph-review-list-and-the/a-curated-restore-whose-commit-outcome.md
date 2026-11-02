@@ -1,3 +1,3 @@
-| Item | Python | Rust | Owner / why |
-|---|---|---|---|
-| A curated restore whose commit outcome is unknown and whose reload cannot be classified | raises, and every later call retries the recovery until it resolves | raises the same internal error; later calls are not gated | the daemon runs no per-call recovery passes (the `_ensure_init` row above) |
+| Item | Python | Rust | Owner / why | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| A curated restore whose commit outcome is unknown and whose reload cannot be classified | raises, and every later call retries the recovery until it resolves | raises the same internal error; later calls are not gated | the daemon runs no per-call recovery passes (the `_ensure_init` row above) | behaviour with a caller | At `54063c1788f2`: `rust/daemon/src/graph_review_slots.rs` `reconcile_restore` errors on unresolved reload / classification; `rust/daemon/src/service.rs` `Service::init` has no retained slot-curation recovery gate. `pseudolife_memory/curation_safety.py` `recover_slot_curation` and Python `_ensure_init` retain the barrier. Caller: `rust/daemon/src/graph_review_tools.rs` `mcp_memory_graph_review(action="restore_slot")`, then later reads after ambiguous COMMIT; B14b owner: B1-O (curation restore) and B4 (recovery read barriers), B14b. |

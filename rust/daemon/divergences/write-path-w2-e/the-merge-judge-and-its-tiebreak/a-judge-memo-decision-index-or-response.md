@@ -1,3 +1,3 @@
-| Item | Python | Rust | Owner / why |
-|---|---|---|---|
-| A judge memo, decision index or response identity meta value that is not an object, or a decision record missing a key | `.items()` / `.get()` / `int()` raise, and the tick answers `error` | read as empty, or the key as absent | corrupt persisted data only; the judge writes these values |
+| Item | Python | Rust | Owner / why | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| A judge memo, decision index or response identity meta value that is not an object, or a decision record missing a key | `.items()` / `.get()` / `int()` raise, and the tick answers `error` | read as empty, or the key as absent | corrupt persisted data only; the judge writes these values | behaviour with no caller | At `54063c1788f2`: `rust/daemon/src/dream/review_judgments.rs` `get_meta_map`, `DIndex::load`, `decision_record` and `last_response_identity` read malformed records leniently; `pseudolife_memory/memory/review_judgments.py` `ReviewJudgments` / `last_response_identity` and `review_decisions._index` use dict methods/coercions. Caller search: their paired memo, response-identity and automatic-decision writers store object records with required keys; no production writer emits the malformed persisted values. B14b owner: B14b disposition; B1-P (judge bookkeeping). |

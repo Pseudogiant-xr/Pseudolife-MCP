@@ -1,3 +1,3 @@
-| Item | Remaining behavior | Owner / reason |
-|---|---|---|
-| Autosave and clean-exit flush | Implemented for the `cms_counters` row (B4); a pre-v57 `weights.pt` is reported, not imported | the import is the Python daemon's (D2); B11's update runs it |
+| Item | Remaining behavior | Owner / reason | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|
+| Autosave and clean-exit flush | Implemented for `cms_counters` (B4); a pre-v57 `weights.pt` is reported, not imported | D2 retains the one-time Python import. R4/B11 owns installed migration: current activation refuses pending import and names a Python update; that proof remains open. | behaviour with a caller | Verified at `54063c17`: `rust/daemon/src/service.rs::Service::save_counters` and `rust/daemon/src/background.rs::Background::shutdown_until` implement saving; `rust/daemon/src/counters.rs::pending_import` still requires the Python import. `pseudolife_memory/update_engine.py::require_imported_bank` refuses and names that step. Implementation does not close the B11 installed legacy-upgrade proof. Caller: Opt-in engine update on a pre-v57 bank through `pseudolife_memory/update_engine.py::require_imported_bank`; B14b owner: R4 / B11 installed legacy migration; D2 remains the documented Python exception. |

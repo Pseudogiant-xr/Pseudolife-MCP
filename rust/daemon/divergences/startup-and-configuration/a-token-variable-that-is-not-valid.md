@@ -1,3 +1,3 @@
-| Item | Python | Rust | Why |
-|---|---|---|---|
-| A token variable that is not valid Unicode (Linux) | starts with auth on; every bearer answers 500 | refuses to start (exit 2) | fail closed: read as unset it would open the bank |
+| Item | Python | Rust | Why | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| A token variable that is not valid Unicode (Linux) | starts with auth on; every bearer answers 500 | refuses to start (exit 2) | fail closed: read as unset it would open the bank | behaviour with no caller | `rust/daemon/src/main.rs::main` refuses non-Unicode token environment values; Python `pseudolife_memory/principals.py::env_auth` reads the process environment. Bounded producer search: token generation/registration in `ops/install.sh`, `ops/install.ps1`, `pseudolife_memory/invite_cli.py` and `rust/shim/src/cli/pairing` writes ASCII tokens; none creates undecodable environment bytes. B14b owner: B14b no-caller disposition. |

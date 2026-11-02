@@ -1,3 +1,3 @@
-| Item | Python | Rust | Why / owner |
-|---|---|---|---|
-| `entries.access_count` persistence | resident counts written on the save cadence | resident counts bulk-synchronized on the same gated autosave and exit-save cadence | closed (B4): live `search-after-restart` and `counters-restore` |
+| Item | Python | Rust | Why / owner | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| `entries.access_count` persistence | resident counts written on the save cadence | resident counts bulk-synchronized on the same gated autosave and exit-save cadence | closed (B4): live `search-after-restart` and `counters-restore` | closed | `rust/daemon/src/service.rs::Service::save_counters` bulk-syncs entries.access_count with gated autosave/exit saves, matching `pseudolife_memory/service.py::MemoryService._persist_all`; existing differential: `rust/daemon/harness/w2e.py` search-after-restart/counters-restore. B14b owner: none (closed). |
