@@ -208,6 +208,52 @@ fn environment(server: &Map<String, Value>) -> Result<Map<String, Value>, SetupE
     }
 }
 
+fn same_env_value(key: &str, left: Option<&Value>, right: Option<&Value>) -> bool {
+    if left == right {
+        return true;
+    }
+    // Windows may report the same token through its long and 8.3 names.
+    // Open both spellings through the private-file boundary: canonicalizing
+    // alone would also accept redirected or otherwise unsafe credential files.
+    #[cfg(windows)]
+    if key == FILE_KEY
+        && let (Some(left), Some(right)) =
+            (left.and_then(Value::as_str), right.and_then(Value::as_str))
+        && Path::new(left).is_absolute()
+        && Path::new(right).is_absolute()
+        && let (Ok(left), Ok(right)) = (
+            crate::board::state::open(Path::new(left)),
+            crate::board::state::open(Path::new(right)),
+        )
+    {
+        return left.identity == right.identity;
+    }
+    // Planned files that do not exist yet still require the exact spelling.
+    let _ = key;
+    false
+}
+
+fn same_setting(path: &[String], left: &Value, right: &Value) -> bool {
+    if path
+        .iter()
+        .map(String::as_str)
+        .eq(["mcp_servers", SERVER, "env", FILE_KEY])
+    {
+        return same_env_value(FILE_KEY, Some(left), Some(right));
+    }
+    if let (Some(left), Some(right)) = (left.as_object(), right.as_object()) {
+        return left.len() == right.len()
+            && left.iter().all(|(key, value)| {
+                let mut child = path.to_vec();
+                child.push(key.clone());
+                right
+                    .get(key)
+                    .is_some_and(|other| same_setting(&child, value, other))
+            });
+    }
+    left == right
+}
+
 fn foreign_authority<'a>(config: &'a Value, key: &str) -> Option<&'a Value> {
     config["layers"].as_array().and_then(|layers| {
         let user = layers.iter().position(|layer| {
@@ -294,7 +340,7 @@ pub fn plan_replace(
     let effective_env = environment(effective)?;
     let forwarded = effective.get("env_vars").and_then(Value::as_array);
     if [URL_KEY, FILE_KEY, TOKEN_KEY].iter().any(|key| {
-        effective_env.get(*key) != before.get(*key)
+        !same_env_value(key, effective_env.get(*key), before.get(*key))
             || (forwarded.is_some_and(|f| f.iter().any(|v| v == key)) && !before.contains_key(*key))
     }) {
         return Err(SetupError(
@@ -403,7 +449,7 @@ pub fn plan_registration(
             let effective_env = environment(effective)?;
             if env
                 .keys()
-                .any(|key| current.get(key) != effective_env.get(key))
+                .any(|key| !same_env_value(key, current.get(key), effective_env.get(key)))
             {
                 return Err(SetupError(
                     "Registration settings come from another Codex configuration layer; setup did not change them.",
@@ -471,15 +517,16 @@ pub struct WritePlan {
     verify_no_spawn: bool,
 }
 
-fn matches_write(before: &Value, after: &Value, actual: Option<&Value>) -> bool {
+fn matches_write(path: &[String], before: &Value, after: &Value, actual: Option<&Value>) -> bool {
     if let Some(wanted) = after.as_object() {
         let Some(actual) = actual.and_then(Value::as_object) else {
             return false;
         };
-        if !wanted
-            .iter()
-            .all(|(key, value)| matches_write(&before[key], value, actual.get(key)))
-        {
+        if !wanted.iter().all(|(key, value)| {
+            let mut child = path.to_vec();
+            child.push(key.clone());
+            matches_write(&child, &before[key], value, actual.get(key))
+        }) {
             return false;
         }
         return before.as_object().is_none_or(|old| {
@@ -490,7 +537,7 @@ fn matches_write(before: &Value, after: &Value, actual: Option<&Value>) -> bool 
     if after.is_null() {
         return actual.is_none_or(Value::is_null);
     }
-    actual == Some(after)
+    actual.is_some_and(|actual| same_setting(path, after, actual))
 }
 impl WritePlan {
     pub fn new(config: &Value, home: &Path, edits: Vec<Edit>) -> Result<Self, SetupError> {
@@ -504,7 +551,7 @@ impl WritePlan {
             }
             let original = edit.value_at(&user.config).cloned().unwrap_or(Value::Null);
             verification.push(edit.clone());
-            if original != edit.value {
+            if !same_setting(&edit.path, &original, &edit.value) {
                 before.push(original);
                 changed.push(edit);
             }
@@ -545,7 +592,8 @@ impl WritePlan {
             .rpc("config/read", json!({"includeLayers":true,"cwd":cwd}))
             .await?;
         let user = user_config(&current, &self.home)?;
-        if user.version != self.user.version || user.config != self.user.config {
+        if user.version != self.user.version || !same_setting(&[], &user.config, &self.user.config)
+        {
             return Err(CONFIG_CHANGED);
         }
         if self.verify_no_spawn
@@ -557,7 +605,12 @@ impl WritePlan {
         {
             return Err(authority_error(&current, NO_SPAWN_KEY));
         }
-        if self.verification.is_empty() && server(&current["config"]) != self.server_before.as_ref()
+        if self.verification.is_empty()
+            && !same_setting(
+                &["mcp_servers".into(), SERVER.into()],
+                &json!(server(&current["config"])),
+                &json!(self.server_before),
+            )
         {
             return Err(SetupError(
                 "Codex's effective server changed during setup; review project or managed overrides and retry.",
@@ -598,6 +651,7 @@ impl WritePlan {
         }
         if self.verification.iter().any(|edit| {
             !matches_write(
+                &edit.path,
                 edit.value_at(&self.user.config).unwrap_or(&Value::Null),
                 &edit.value,
                 edit.value_at(&effective),
@@ -666,7 +720,7 @@ impl WritePlan {
                     let user = user_config(&current, &applied.plan.home)
                         .map_err(|_| ROLLBACK_UNVERIFIED)?;
                     if user.version != applied.plan.user.version
-                        || user.config != applied.plan.user.config
+                        || !same_setting(&[], &user.config, &applied.plan.user.config)
                     {
                         return Err(CONFIG_CHANGED);
                     }
@@ -754,7 +808,7 @@ impl AppliedWrite {
         let user = user_config(&current, home)?;
         let Some(written_version) = self.written_version.as_ref() else {
             if self.settled.as_ref().is_some_and(|settled| {
-                settled.version == user.version && settled.config == user.config
+                settled.version == user.version && same_setting(&[], &settled.config, &user.config)
             }) {
                 return Ok(());
             }
@@ -772,18 +826,23 @@ impl AppliedWrite {
             .edits
             .iter()
             .zip(&self.plan.before)
-            .all(|(edit, before)| edit.value_at(&user.config).unwrap_or(&Value::Null) == before);
+            .all(|(edit, before)| {
+                same_setting(
+                    &edit.path,
+                    edit.value_at(&user.config).unwrap_or(&Value::Null),
+                    before,
+                )
+            });
         if old {
             self.written_version = None;
             self.settled = Some(user);
             return Ok(());
         }
-        if self
-            .plan
-            .edits
-            .iter()
-            .any(|edit| edit.value_at(&user.config) != Some(&edit.value))
-        {
+        if self.plan.edits.iter().any(|edit| {
+            !edit
+                .value_at(&user.config)
+                .is_some_and(|actual| same_setting(&edit.path, actual, &edit.value))
+        }) {
             return Err(SetupError(
                 "Codex rollback refused settings changed by another writer; review the private config backup.",
             ));
@@ -825,7 +884,13 @@ impl AppliedWrite {
                 .edits
                 .iter()
                 .zip(&self.plan.before)
-                .any(|(edit, before)| edit.value_at(&user.config).unwrap_or(&Value::Null) != before)
+                .any(|(edit, before)| {
+                    !same_setting(
+                        &edit.path,
+                        edit.value_at(&user.config).unwrap_or(&Value::Null),
+                        before,
+                    )
+                })
         {
             return Err(SetupError(
                 "Codex rollback could not be verified; review the private config backup.",

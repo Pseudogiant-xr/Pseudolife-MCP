@@ -195,9 +195,9 @@ async fn write_ack_unknown_pending_write_keeps_token_after_baseline_reads() {
         token.is_file(),
         "the later committed write must retain its token"
     );
-    assert_eq!(
-        client.inner.config["config"]["mcp_servers"]["pseudolife-memory"]["env"]["PSEUDOLIFE_MCP_TOKEN_FILE"],
-        json!(token)
+    assert_same_file(
+        Path::new(client.inner.config["config"]["mcp_servers"]["pseudolife-memory"]["env"]["PSEUDOLIFE_MCP_TOKEN_FILE"].as_str().unwrap()),
+        &token,
     );
 }
 
@@ -548,6 +548,12 @@ fn concurrent_first_lock_publication_is_private_and_never_replaces_the_winner() 
 }
 
 struct Home(std::path::PathBuf);
+fn assert_same_file(left: &Path, right: &Path) {
+    assert_eq!(
+        std::fs::canonicalize(left).unwrap(),
+        std::fs::canonicalize(right).unwrap()
+    );
+}
 impl Home {
     fn new() -> Self {
         let path = std::env::temp_dir().join(format!("pseudolife-setup-{}", uuid::Uuid::new_v4()));
@@ -573,6 +579,165 @@ struct Fake {
     project_no_spawn: Option<String>,
     foreign_connection_after_write: bool,
     lost_write_reply: bool,
+}
+
+#[cfg(windows)]
+#[allow(unsafe_code)] // Both calls use live, bounded UTF-16 buffers.
+fn short_windows_path(path: &Path) -> std::path::PathBuf {
+    use std::os::windows::ffi::{OsStrExt, OsStringExt};
+    use windows_sys::Win32::Storage::FileSystem::GetShortPathNameW;
+    let path: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+    let needed = unsafe { GetShortPathNameW(path.as_ptr(), std::ptr::null_mut(), 0) };
+    assert_ne!(
+        needed, 0,
+        "GetShortPathNameW failed for the disposable fixture"
+    );
+    let mut output = vec![0; needed as usize];
+    let written = unsafe { GetShortPathNameW(path.as_ptr(), output.as_mut_ptr(), needed) };
+    assert!(
+        written > 0 && written < needed,
+        "GetShortPathNameW did not return a complete path"
+    );
+    std::ffi::OsString::from_wide(&output[..written as usize]).into()
+}
+
+#[cfg(windows)]
+#[tokio::test]
+async fn short_codex_home_accepts_safe_token_aliases_and_keeps_writes_scoped() {
+    struct ShortReadback {
+        inner: Fake,
+        token: std::path::PathBuf,
+    }
+    impl Rpc for ShortReadback {
+        async fn rpc(&mut self, method: &str, params: Value) -> Result<Value, SetupError> {
+            let mut response = self.inner.rpc(method, params).await?;
+            if method == "config/read" && self.token.exists() {
+                for root in ["/config", "/layers/0/config"] {
+                    let env = &mut response.pointer_mut(root).unwrap()["mcp_servers"]["pseudolife-memory"]
+                        ["env"];
+                    if env.get("PSEUDOLIFE_MCP_TOKEN_FILE").is_some() {
+                        env["PSEUDOLIFE_MCP_TOKEN_FILE"] = json!(self.token);
+                    }
+                }
+            }
+            Ok(response)
+        }
+    }
+    let home = Home::new();
+    // Home's final component deliberately exceeds the 8.3 length limit.
+    let short = short_windows_path(&home.0);
+    assert_ne!(
+        short.file_name(),
+        home.0.file_name(),
+        "the disposable test volume did not provide an 8.3 alias; this regression requires short-name creation enabled"
+    );
+    assert_same_file(&short, &home.0);
+    let mut client = ShortReadback {
+        inner: Fake::new(&short),
+        token: short.join("pseudolife/token"),
+    };
+    let plan = plan_replace(
+        &client.inner.config,
+        &short,
+        "https://example.com",
+        None,
+        true,
+    )
+    .unwrap();
+    let requested = plan.env()["PSEUDOLIFE_MCP_TOKEN_FILE"].clone();
+    assert_ne!(requested, json!(client.token));
+    let mut applied = apply_replace(&mut client, &short, plan).await.unwrap();
+    assert_same_file(Path::new(requested.as_str().unwrap()), &client.token);
+    let write = &client
+        .inner
+        .calls
+        .iter()
+        .find(|(method, _)| method == "config/batchWrite")
+        .unwrap()
+        .1;
+    assert_eq!(write["edits"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        write["edits"][0]["keyPath"],
+        "\"mcp_servers\".\"pseudolife-memory\".\"env\""
+    );
+    assert_eq!(
+        write["edits"][0]["value"]["PSEUDOLIFE_MCP_TOKEN_FILE"],
+        requested
+    );
+
+    // A different spelling in the effective layer has the same authority;
+    // another spelling returned after planning also leaves the no-op valid.
+    client.inner.config["config"]["mcp_servers"]["pseudolife-memory"]["env"]["PSEUDOLIFE_MCP_TOKEN_FILE"] =
+        json!(client.token);
+    let plan = plan_replace(
+        &client.inner.config,
+        &short,
+        "https://example.com",
+        None,
+        true,
+    )
+    .unwrap();
+    let writes = client
+        .inner
+        .calls
+        .iter()
+        .filter(|(method, _)| method == "config/batchWrite")
+        .count();
+    apply_replace(&mut client, &short, plan).await.unwrap();
+    let config = client.inner.config.clone();
+    pseudolife_stdio::setup::codex::configure_credential_file(
+        &mut client,
+        &short,
+        &short,
+        Some(config),
+        None,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        client
+            .inner
+            .calls
+            .iter()
+            .filter(|(method, _)| method == "config/batchWrite")
+            .count(),
+        writes
+    );
+    applied.rollback(&mut client, &short).await.unwrap();
+    assert!(!client.token.exists());
+}
+
+#[cfg(windows)]
+#[test]
+fn short_token_aliases_refuse_missing_unsafe_and_different_files() {
+    let home = Home::new();
+    let short = short_windows_path(&home.0);
+    assert_ne!(
+        short.file_name(),
+        home.0.file_name(),
+        "the disposable test volume did not provide an 8.3 alias; this regression requires short-name creation enabled"
+    );
+    let token = home.0.join("token");
+    let alias = short.join("token");
+    let mut config = config(&home.0);
+    for root in ["/config", "/layers/0/config"] {
+        let env = &mut config.pointer_mut(root).unwrap()["mcp_servers"]["pseudolife-memory"]["env"];
+        env.as_object_mut().unwrap().remove("PSEUDOLIFE_MCP_TOKEN");
+        env["PSEUDOLIFE_MCP_TOKEN_FILE"] = json!(token);
+    }
+    config["config"]["mcp_servers"]["pseudolife-memory"]["env"]["PSEUDOLIFE_MCP_TOKEN_FILE"] =
+        json!(alias);
+    assert!(plan_replace(&config, &short, "https://example.com", None, true).is_err());
+    // A hard link makes both spellings unsafe for the private-file boundary.
+    pseudolife_stdio::board::state::atomic_create(&token, b"fixture-token").unwrap();
+    let other = home.0.join("other-token");
+    std::fs::hard_link(&token, &other).unwrap();
+    assert!(plan_replace(&config, &short, "https://example.com", None, true).is_err());
+    std::fs::remove_file(&other).unwrap();
+    pseudolife_stdio::board::state::atomic_create(&other, b"fixture-token").unwrap();
+    config["config"]["mcp_servers"]["pseudolife-memory"]["env"]["PSEUDOLIFE_MCP_TOKEN_FILE"] =
+        json!(other);
+    assert!(plan_replace(&config, &short, "https://example.com", None, true).is_err());
 }
 
 #[cfg(windows)]
@@ -862,9 +1027,13 @@ impl Rpc for Fake {
             }
             if self.foreign_connection_after_write {
                 self.foreign_connection_after_write = false;
-                let home = Path::new(self.config["layers"][user]["name"]["file"].as_str().unwrap())
-                    .parent()
-                    .unwrap();
+                let home = Path::new(
+                    self.config["layers"][user]["name"]["file"]
+                        .as_str()
+                        .unwrap(),
+                )
+                .parent()
+                .unwrap();
                 pseudolife_stdio::board::state::atomic_create(
                     &home.join("pseudolife/connection.json"),
                     b"foreign malformed connection",
@@ -1445,7 +1614,15 @@ fn replace_preserves_foreign_env_and_migrates_literal() {
     assert!(plan.env().get("PSEUDOLIFE_MCP_TOKEN").is_none());
     assert_eq!(
         plan.env()["PSEUDOLIFE_MCP_TOKEN_FILE"],
-        home.join("pseudolife").join("token").to_str().unwrap()
+        user_config(&original, &home)
+            .unwrap()
+            .path
+            .parent()
+            .unwrap()
+            .join("pseudolife")
+            .join("token")
+            .to_str()
+            .unwrap()
     );
     assert_eq!(original, config(&home));
 }
@@ -1522,13 +1699,9 @@ async fn apply_has_private_backup_token_connection_and_quiet_rerun() {
             == Some("fixture-token")
     );
     let connection = home.0.join("pseudolife").join("connection.json");
-    assert_eq!(
-        read_connection(&connection).unwrap(),
-        Some((
-            "https://example.com".to_owned(),
-            token.to_str().unwrap().to_owned()
-        ))
-    );
+    let (url, saved_token) = read_connection(&connection).unwrap().unwrap();
+    assert_eq!(url, "https://example.com");
+    assert_same_file(Path::new(&saved_token), &token);
     assert_eq!(
         std::fs::read_to_string(&connection)
             .unwrap()

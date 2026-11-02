@@ -346,7 +346,7 @@ pub async fn apply_replace_detailed(
         .before
         .keys()
         .chain(plan.after.keys())
-        .filter(|key| plan.before.get(*key) != plan.after.get(*key))
+        .filter(|key| !same_env_value(key, plan.before.get(*key), plan.after.get(*key)))
         .cloned()
         .collect();
     changed.sort();
