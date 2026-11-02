@@ -2,7 +2,7 @@
 //! `_project_search`, `_compact_entry`): the search and cortex-first block
 //! the REST route runs (`search_route::search_with_facts`), sized to the
 //! caller, then the MCP payload projection. Spec W2-D "memory_search over
-//! MCP"; `explain` is declared (`divergences.md`, MCP-SEARCH-EXPLAIN).
+//! MCP"; explain appends the independently retrieved trace, as Python does.
 
 use super::search_route::{Request, search_with_facts, unknown_bands};
 use crate::mcp::dispatch::{ToolCall, ToolError, ToolFn, ToolFuture};
@@ -34,12 +34,6 @@ fn mcp_memory_search<'a>(app: &'a crate::http::App, call: ToolCall<'a>) -> ToolF
         let a = call.args;
         let flag = |k: &str| a.get(k).and_then(Value::as_bool).unwrap_or(false);
         let (verbose, explain) = (flag("verbose"), flag("explain"));
-        if explain {
-            return Err(ToolError::refused(
-                "not_implemented",
-                Some("explain (the ranking trace) is not yet served by the Rust daemon"),
-            ));
-        }
         let ready = app
             .service
             .ensure_init()
@@ -63,7 +57,11 @@ fn mcp_memory_search<'a>(app: &'a crate::http::App, call: ToolCall<'a>) -> ToolF
             let Value::Object(blank) = blank else {
                 unreachable!()
             };
-            return project(blank, &[], compact, text_chars);
+            let mut result = project(blank, &[], compact, text_chars)?;
+            if explain {
+                result["trace"] = Value::Null;
+            }
+            return Ok(result);
         }
         // The binder took `ge=1`; a value past i64 asks for every hit.
         let top_k = a
@@ -91,11 +89,50 @@ fn mcp_memory_search<'a>(app: &'a crate::http::App, call: ToolCall<'a>) -> ToolF
             header_session: call.ident.header_session.clone(),
             transport_session: call.ident.transport_session.clone(),
         };
+        // Python searches first, then traces independently. Trace takes the
+        // original episode list (no subtree), the configured score floor and
+        // recency policy, even when search overrides those two settings.
+        let trace_req = explain.then(|| Request {
+            episodes: strings(a.get("episodes")),
+            min_score: None,
+            disable_recency_boost: false,
+            ..req.clone()
+        });
         let (searched, facts) = search_with_facts(&app.service, &ready, req, raw_q, fact_k)
             .await
             .map_err(ToolError::Internal)?;
-        project(searched.body, &facts, compact, text_chars)
+        let mut result = project(searched.body, &facts, compact, text_chars)?;
+        if let Some(req) = trace_req {
+            let traced = super::trace::trace(&app.service, &ready, req)
+                .await
+                .map_err(|e| ToolError::Internal(anyhow::anyhow!(e)))?;
+            let mut trace = traced.get("trace").cloned().unwrap_or(Value::Null);
+            mcp_trace_numbers(&mut trace);
+            result["trace"] = trace;
+        }
+        Ok(result)
     })
+}
+
+/// Pydantic serializes the MCP trace's non-finite floats as null; the REST
+/// trace keeps Python JSON's Infinity/NaN spelling. Integer widths survive.
+fn mcp_trace_numbers(value: &mut Value) {
+    match value {
+        Value::Number(n)
+            if {
+                let text = n.to_string();
+                // Large integer top_k values remain arbitrary-precision ints.
+                let float = text.contains(['.', 'e', 'E'])
+                    || matches!(text.as_str(), "Infinity" | "-Infinity" | "NaN");
+                float && text.parse::<f64>().is_ok_and(|n| !n.is_finite())
+            } =>
+        {
+            *value = Value::Null;
+        }
+        Value::Array(items) => items.iter_mut().for_each(mcp_trace_numbers),
+        Value::Object(fields) => fields.values_mut().for_each(mcp_trace_numbers),
+        _ => {}
+    }
 }
 
 // The body-slice error type (`dispatch::ToolError`) is the large one.
@@ -426,6 +463,20 @@ fn restates_fact(entry_text: &str, value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mcp_trace_nulls_nonfinite_floats_without_narrowing_integers() {
+        let mut trace = json!({"top_k": serde_json::from_str::<Value>("999999999999999999999999999999").unwrap(),
+                               "tiers": [{"half_life_s": null}], "label": "Infinity"});
+        for token in ["Infinity", "-Infinity", "NaN", "1e400", "-1e400"] {
+            trace["tiers"][0]["half_life_s"] =
+                Value::Number(serde_json::Number::from_string_unchecked(token.into()));
+            mcp_trace_numbers(&mut trace);
+            assert!(trace["tiers"][0]["half_life_s"].is_null(), "{token}");
+        }
+        assert_eq!(trace["top_k"].to_string(), "999999999999999999999999999999");
+        assert_eq!(trace["label"], "Infinity");
+    }
 
     #[test]
     fn truncation_counts_code_points() {

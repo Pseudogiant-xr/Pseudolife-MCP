@@ -110,7 +110,7 @@ MUTANTS = ["del-unescaped", "auth-candidate-order", "serde-json-writer", "skip-r
            "health-omits-db", "route-405-as-404", "body-limit-off", "tokenless-maintainer-open",
            "no-backoff", "static-redirect", "static-no-csp", "static-traversal-open", "static-wrong-type",
            "static-json-whitespace", "static-string-prefix", "body-limit-inclusive", "text-limit-control", "agents-view-default",
-           "golden-float-token"]
+           "golden-float-token", "trace-no-trace"]
 
 import security_cases
 
