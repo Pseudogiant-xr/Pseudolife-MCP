@@ -25,14 +25,16 @@ pub(crate) fn load_startup(text: &str) -> Result<Option<Node>, String> {
 
 fn construct_startup(
     value: String,
-    style: TScalarStyle,
+    mut style: TScalarStyle,
     mut tag: Option<Tag>,
 ) -> Result<Node, String> {
-    // PyYAML resolves a non-specific tag using the scalar's own style.
+    // PyYAML applies implicit resolution to a non-specific tag even when
+    // its scalar is quoted.
     if tag.as_ref().is_some_and(|t| {
         (t.handle == "!" && t.suffix.is_empty()) || (t.handle.is_empty() && t.suffix == "!")
     }) {
         tag = None;
+        style = TScalarStyle::Plain;
     }
     let resolved = match &tag {
         Some(t) if t.handle == "tag:yaml.org,2002:" => match t.suffix.as_str() {

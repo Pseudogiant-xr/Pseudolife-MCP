@@ -3546,6 +3546,13 @@ mod tests {
                 assert_eq!(loaded.memory.hide_superseded, expected, "{spelling}");
                 assert_eq!(loaded.coordination.enabled, expected, "{spelling}");
                 assert_eq!(loaded.updates.check_releases, expected, "{spelling}");
+                assert_eq!(
+                    cfg(&format!("updates:\n  check_releases: ! '{spelling}'\n"))
+                        .updates
+                        .check_releases,
+                    expected,
+                    "non-specific tag: {spelling}"
+                );
                 assert!(refused(&format!(
                     "updates:\n  check_releases: '{spelling}'\n"
                 )));

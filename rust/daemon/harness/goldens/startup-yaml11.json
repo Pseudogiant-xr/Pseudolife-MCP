@@ -214,6 +214,18 @@
       "expected": true
     },
     {
+      "yaml": "! '010'",
+      "expected": 8
+    },
+    {
+      "yaml": "! 'NULL'",
+      "expected": null
+    },
+    {
+      "yaml": "! 'yEs'",
+      "expected": "yEs"
+    },
+    {
       "yaml": "!!str yes",
       "expected": "yes"
     },
