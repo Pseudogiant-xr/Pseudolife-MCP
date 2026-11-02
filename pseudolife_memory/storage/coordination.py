@@ -480,6 +480,7 @@ REPUDIATE_EVENT = "maintainer_repudiate"
 # hourly cap (``coordination.maintainer.maintainer_per_recipient_per_hour``)
 # counts these rows per recipient.
 MAINTAINER_WAKE_REASON = "maintainer_message"
+_PRIVILEGED_WAKE_REASONS = (MAINTAINER_WAKE_REASON, "conductor")
 # The audit log (schema v42): one append-only row per board mutation, written
 # in the mutation's own transaction and chained by sha256(prev_hash ||
 # canonical row), so an edited, inserted, reordered or removed row fails
@@ -533,7 +534,9 @@ class WakePolicy:
     nightly_total: int = 200
     fan_out_stagger_seconds: int = 30
     active_seconds: int = 60
-    authority_per_sender_per_hour: int = 12
+    # Starting budget, not a measurement: five broadcasts to eleven peers
+    # plus five individual follow-ups per hour (2026-11-03).
+    authority_per_sender_per_hour: int = 60
     # v54: rings maintainer messages may cause per recipient per hour. Set
     # from ``coordination.maintainer``, not WakeConfig; 30 is the spec's
     # starting value (2026-10-02), not a measurement.
@@ -2801,14 +2804,14 @@ class CoordinationStore:
             (agent_id,)) if park else None
         park_seq = park_event["seq"] if park_event and park_event["park_set_at"] == park_since else None
         ring_allowed = park_seq is not None and self._listener_path(row, now) is None
-        # A maintainer message's ring (v54) needs no park: a live listener
+        # Maintainer and verified conductor rings need no park: a live listener
         # is enough, a done park included.
         listening = self._listener_path(row, now) is None
-        serve_guard = (" AND (decision='attention' OR (%s AND reason=%s) OR (%s AND EXISTS "
+        serve_guard = (" AND (decision='attention' OR (%s AND reason=ANY(%s)) OR (%s AND EXISTS "
                        "(SELECT 1 FROM coordination_events s WHERE s.event='send' "
                        "AND s.message_id=coordination_wakes.message_id AND s.seq>%s)))"
                        ) if codex else ""
-        serve_values = (listening, MAINTAINER_WAKE_REASON, ring_allowed,
+        serve_values = (listening, list(_PRIVILEGED_WAKE_REASONS), ring_allowed,
                         park_seq or 0) if codex else ()
         if reopen_only:
             serve_guard += " AND decision='rung' AND reason=ANY(%s)"
@@ -2834,14 +2837,14 @@ class CoordinationStore:
             "AND (w.served_at IS NOT NULL OR %s) AND m.acknowledged_at IS NULL AND m.expires_at>%s",
             (park_seq or 0, agent_id, codex, now))
         if reopen_only:
-            rows = [item for item in rows if item["reason"] == MAINTAINER_WAKE_REASON or (
+            rows = [item for item in rows if item["reason"] in _PRIVILEGED_WAKE_REASONS or (
                 park_seq is not None and item["decision"] == "rung"
                 and item["reason"] in _REOPEN_ROW_REASONS and item["park_authorized"])]
         if not rows:
             return None
         if codex:
             eligible = [item for item in rows if item["decision"] == "attention"
-                        or (listening and item["reason"] == MAINTAINER_WAKE_REASON)
+                        or (listening and item["reason"] in _PRIVILEGED_WAKE_REASONS)
                         or (ring_allowed and item["park_authorized"])]
             if not eligible:
                 # Historical ring authorization without its unchanged park is
@@ -2993,21 +2996,19 @@ class CoordinationStore:
         ``clears`` names the need, or the
         sender set ``urgent`` (each within its cap), else ``withheld`` with
         the need and ``retry`` so the sender knows what would wake it.
-        A done park rings only for ``urgent`` mail from the maintainer, the
-        maintainer's conductor for the project or the park's named clearer
-        (``reopened``; 2026-10-03), else ``not_needed`` with ``reopen_by``.
-        Urgent mail from the maintainer or the conductor is decided
-        ``maintainer`` or ``conductor`` wherever plain urgency would ring,
-        and spends the sender's ``authority_per_sender_per_hour`` instead of its urgent
-        allowance; the per-recipient, nightly and stagger caps bind every
-        ring alike. Unparked Codex
+        A verified conductor takes the maintainer delivery path first,
+        including plain mail, done parks and recent activity; its existing
+        sender authority allowance is independent of peer caps and stagger.
+        Legacy maintainer-principal urgency and named-clearer urgency may
+        also reopen a done park, under their existing peer caps.
+        Unparked Codex
         urgency is capped attention with explicit one-bell queue permission,
         unknown native state and no steer path. Other unparked clients retain their urgent ring contract,
         else ``not_needed`` with reason ``no_park``: the session is
         waiting on nobody, so the mail waits for its next turn. Regular
         mail never wakes (maintainer decision 2026-10-02, retiring the
         hourly ``nudged`` ring; rows decided ``nudged`` before then are
-        history, never served). Every ring is bounded per recipient per
+        history, never served). Every peer ring is bounded per recipient per
         hour and by the nightly total, and rings from one sender's burst
         are staggered by ``fan_out_stagger_seconds``. Chatter never rings.
 
@@ -3020,6 +3021,10 @@ class CoordinationStore:
         policy = self.wake
         if maintainer:
             return self._maintainer_wake(sender, recipient, now, message_id=message_id)
+        project = recipient.get("project") or ""
+        if project and self.conductor_projects(sender["agent_id"], now, project=project):
+            return self._maintainer_wake(sender, recipient, now, message_id=message_id,
+                                         conductor=True)
         park = self._live_park(recipient, now)
         done = park is not None and park["park_reason"] == "done"
         need = ({"park_needs": park["park_needs"], "park_clear_by": park["park_clear_by"]}
@@ -3133,19 +3138,34 @@ class CoordinationStore:
                     **need, **reopened, **ring}
         return {"decision": decision, "reason": reason, "ring_at": ring_at, **reopened, **ring}
 
-    def _maintainer_wake(self, sender, recipient, now, *, message_id):
-        """The maintainer branch of ``_wake_decision`` (v54)."""
+    def _maintainer_wake(self, sender, recipient, now, *, message_id, conductor=False):
+        """Maintainer delivery, also used by a conductor proven at send time.
+
+        Both bypass peer gates and caps. Conductors spend the existing
+        sender authority budget; signed maintainer mail has its recipient
+        budget. Legacy authority rows still spend the sender's allowance.
+        """
+        reason = "conductor" if conductor else MAINTAINER_WAKE_REASON
+        column = "sender_agent_id" if conductor else "recipient_agent_id"
+        identity = sender["agent_id"] if conductor else recipient["agent_id"]
+        reasons = list(_AUTHORITY_ROW_REASONS) if conductor else [MAINTAINER_WAKE_REASON]
         sent = self._one("SELECT count(*) AS n FROM coordination_wakes WHERE "
-                         "recipient_agent_id=%s AND reason=%s AND created_at>%s",
-                         (recipient["agent_id"], MAINTAINER_WAKE_REASON, now - 3600))["n"]
-        if sent >= self.wake.maintainer_per_recipient_per_hour:
-            return {"decision": "capped", "reason": "maintainer_hour"}
+                         f"{column}=%s AND reason=ANY(%s) AND created_at>%s",
+                         (identity, reasons, now - 3600))["n"]
+        cap = (self.wake.authority_per_sender_per_hour if conductor
+               else self.wake.maintainer_per_recipient_per_hour)
+        if sent >= cap:
+            return {"decision": "capped", "reason": (
+                "authority_sender_hour" if conductor else "maintainer_hour")}
         self.storage.conn.execute(
             "INSERT INTO coordination_wakes (recipient_agent_id,sender_agent_id,message_id,"
             "decision,reason,urgent,ring_at,created_at) VALUES (%s,%s,%s,'rung',%s,false,%s,%s)",
-            (recipient["agent_id"], sender["agent_id"], message_id, MAINTAINER_WAKE_REASON,
+            (recipient["agent_id"], sender["agent_id"], message_id, reason,
              now, now))
-        ring = {"_ring": MAINTAINER_WAKE_REASON}
+        ring = {"_ring": reason}
+        park = self._live_park(recipient, now) if conductor else None
+        if park and park["park_reason"] == "done":
+            ring["reopened"] = True
         missing = self._listener_path(recipient, now)
         if missing is not None:
             codex = "codex" in (recipient.get("capabilities") or {})
@@ -3154,7 +3174,7 @@ class CoordinationStore:
                     "fallback": FALLBACK_CODEX if codex else FALLBACK_CLAUDE,
                     "fallback_paths": list(FALLBACK_PATHS_CODEX if codex
                                            else FALLBACK_PATHS_CLAUDE), **ring}
-        return {"decision": "rung", "reason": MAINTAINER_WAKE_REASON, "ring_at": now, **ring}
+        return {"decision": "rung", "reason": reason, "ring_at": now, **ring}
 
     def park_gate(self, agent_id, principal, *, since=None):
         """What the Stop hook asks when a turn ends (v49): ``block`` when the

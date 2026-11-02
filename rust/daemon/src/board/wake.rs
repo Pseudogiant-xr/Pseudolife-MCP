@@ -24,6 +24,7 @@ const REOPEN_ROW_REASONS: [&str; 5] = [
     "coordinator",
 ];
 pub const MAINTAINER_WAKE_REASON: &str = "maintainer_message";
+const PRIVILEGED_WAKE_REASONS: [&str; 2] = [MAINTAINER_WAKE_REASON, "conductor"];
 const ROLE_ACTORS: [&str; 2] = ["operator", "maintainer"];
 const WAKE_SERVE_REPEAT: f64 = 25.0;
 const LEASE_CLEAR_GRACE: f64 = 60.0;
@@ -138,6 +139,16 @@ async fn authority(
     if maintainer_principals.contains(&sender.principal) {
         return Ok(Some("maintainer"));
     }
+    conductor_authority(c, sender, recipient, now).await
+}
+
+/// Verify the live project hold and its operator/maintainer grant fence.
+async fn conductor_authority(
+    c: &impl GenericClient,
+    sender: &AgentRow,
+    recipient: &AgentRow,
+    now: f64,
+) -> Result<Option<&'static str>> {
     if recipient.project.is_empty() {
         return Ok(None);
     }
@@ -211,7 +222,13 @@ pub async fn wake_decision(
     maintainer: bool,
 ) -> Result<Map<String, Value>> {
     if maintainer {
-        return maintainer_wake(c, policy, sender, recipient, now, message_id).await;
+        return maintainer_wake(c, policy, sender, recipient, now, message_id, false).await;
+    }
+    if conductor_authority(c, sender, recipient, now)
+        .await?
+        .is_some()
+    {
+        return maintainer_wake(c, policy, sender, recipient, now, message_id, true).await;
     }
     let park = live_park(recipient, now);
     let done = park.as_ref().is_some_and(|p| p.park_reason == "done");
@@ -401,7 +418,7 @@ pub async fn wake_decision(
     Ok(m)
 }
 
-/// `_maintainer_wake`.
+/// `_maintainer_wake`: verified conductors share delivery but have a sender budget.
 async fn maintainer_wake(
     c: &impl GenericClient,
     policy: &WakePolicy,
@@ -409,22 +426,50 @@ async fn maintainer_wake(
     recipient: &AgentRow,
     now: f64,
     message_id: &str,
+    conductor: bool,
 ) -> Result<Map<String, Value>> {
+    let reason = if conductor {
+        "conductor"
+    } else {
+        MAINTAINER_WAKE_REASON
+    };
+    let column = if conductor {
+        "sender_agent_id"
+    } else {
+        "recipient_agent_id"
+    };
+    let identity = if conductor {
+        &sender.agent_id
+    } else {
+        &recipient.agent_id
+    };
+    let reasons: Vec<String> = if conductor {
+        AUTHORITY_ROW_REASONS
+            .iter()
+            .map(|s| s.to_string())
+            .collect()
+    } else {
+        vec![MAINTAINER_WAKE_REASON.to_string()]
+    };
     let sent = count(
         &c.query_one(
-            "SELECT count(*) AS n FROM coordination_wakes WHERE \
-             recipient_agent_id=$1 AND reason=$2 AND created_at>$3",
-            &[
-                &recipient.agent_id,
-                &MAINTAINER_WAKE_REASON,
-                &(now - 3600.0),
-            ],
+            &format!(
+                "SELECT count(*) AS n FROM coordination_wakes WHERE \
+                      {column}=$1 AND reason=ANY($2) AND created_at>$3"
+            ),
+            &[identity, &reasons, &(now - 3600.0)],
         )
         .await?,
     );
-    if sent >= policy.maintainer_per_recipient_per_hour {
+    let cap = if conductor {
+        policy.authority_per_sender_per_hour
+    } else {
+        policy.maintainer_per_recipient_per_hour
+    };
+    if sent >= cap {
         return Ok(obj_map(
-            json!({"decision": "capped", "reason": "maintainer_hour"}),
+            json!({"decision": "capped", "reason": if conductor {
+                "authority_sender_hour" } else { "maintainer_hour" }}),
         ));
     }
     c.execute(
@@ -434,20 +479,23 @@ async fn maintainer_wake(
             &recipient.agent_id,
             &sender.agent_id,
             &message_id,
-            &MAINTAINER_WAKE_REASON,
+            &reason,
             &now,
             &now,
         ],
     )
     .await?;
-    if let Some(missing) = listener_path(recipient, now) {
-        let mut m = no_path(recipient, missing);
-        m.insert("_ring".into(), json!(MAINTAINER_WAKE_REASON));
-        return Ok(m);
+    let mut m = if let Some(missing) = listener_path(recipient, now) {
+        no_path(recipient, missing)
+    } else {
+        let mut m = obj_map(json!({"decision": "rung", "reason": reason}));
+        m.insert("ring_at".into(), float_value(now));
+        m
+    };
+    m.insert("_ring".into(), json!(reason));
+    if conductor && live_park(recipient, now).is_some_and(|p| p.park_reason == "done") {
+        m.insert("reopened".into(), json!(true));
     }
-    let mut m = obj_map(json!({"decision": "rung", "reason": MAINTAINER_WAKE_REASON}));
-    m.insert("ring_at".into(), float_value(now));
-    m.insert("_ring".into(), json!(MAINTAINER_WAKE_REASON));
     Ok(m)
 }
 
@@ -508,6 +556,10 @@ pub async fn serve_wake(c: &impl GenericClient, agent_id: &str, now: f64) -> Res
     if !codex && !listening {
         return Ok(Value::Null);
     }
+    let privileged: Vec<String> = PRIVILEGED_WAKE_REASONS
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
     let seq_floor = park_seq.unwrap_or(0);
     let reopen: Vec<String> = REOPEN_ROW_REASONS
         .iter()
@@ -520,7 +572,7 @@ pub async fn serve_wake(c: &impl GenericClient, agent_id: &str, now: f64) -> Res
                 WHERE m.message_id=coordination_wakes.message_id AND m.recipient_agent_id=$2 \
                 AND m.acknowledged_at IS NULL AND m.expires_at>$1)";
     if codex {
-        let guard = " AND (decision='attention' OR ($3 AND reason=$4) OR ($5 AND EXISTS \
+        let guard = " AND (decision='attention' OR ($3 AND reason=ANY($4)) OR ($5 AND EXISTS \
                      (SELECT 1 FROM coordination_events s WHERE s.event='send' \
                      AND s.message_id=coordination_wakes.message_id AND s.seq>$6)))";
         if reopen_only {
@@ -531,7 +583,7 @@ pub async fn serve_wake(c: &impl GenericClient, agent_id: &str, now: f64) -> Res
                     &now,
                     &agent_id,
                     &listening,
-                    &MAINTAINER_WAKE_REASON,
+                    &privileged,
                     &ring_allowed,
                     &seq_floor,
                     &reopen,
@@ -546,7 +598,7 @@ pub async fn serve_wake(c: &impl GenericClient, agent_id: &str, now: f64) -> Res
                     &now,
                     &agent_id,
                     &listening,
-                    &MAINTAINER_WAKE_REASON,
+                    &privileged,
                     &ring_allowed,
                     &seq_floor,
                 ],
@@ -586,7 +638,7 @@ pub async fn serve_wake(c: &impl GenericClient, agent_id: &str, now: f64) -> Res
         .collect();
     if reopen_only {
         rows.retain(|item| {
-            item.reason == MAINTAINER_WAKE_REASON
+            PRIVILEGED_WAKE_REASONS.contains(&item.reason.as_str())
                 || (park_seq.is_some()
                     && item.decision == "rung"
                     && REOPEN_ROW_REASONS.contains(&item.reason.as_str())
@@ -602,7 +654,7 @@ pub async fn serve_wake(c: &impl GenericClient, agent_id: &str, now: f64) -> Res
             .iter()
             .filter(|item| {
                 item.decision == "attention"
-                    || (listening && item.reason == MAINTAINER_WAKE_REASON)
+                    || (listening && PRIVILEGED_WAKE_REASONS.contains(&item.reason.as_str()))
                     || (ring_allowed && item.park_authorized)
             })
             .cloned()
