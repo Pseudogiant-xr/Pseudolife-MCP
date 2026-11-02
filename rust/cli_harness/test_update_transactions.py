@@ -642,12 +642,12 @@ def test_discovered_checkout_backup_policy_uses_effective_engine(tmp_path, engin
         accepted = repo / "data/update-engine" / ("docker-compose.engine.json" if engine == "rust" else "docker-compose.python-accepted.json")
         accepted.parent.mkdir(parents=True)
         accepted.write_text(json.dumps({"services": {SERVICE: {"labels": labels}}}))
-        args = [] if engine == "rust" else ["--checkout", str(repo)]
-        result = run_arm(repo, env, binary, [*args, "--json", "--no-test-login", "--no-cache-prune", "--health-retries", "1"])
+        args = [] if engine == "rust" else ["--checkout", str(repo), "--no-test-login", "--no-cache-prune"]
+        result = run_arm(repo, env, binary, [*args, "--json", "--health-retries", "1"])
         if engine == "rust":
             assert result.returncode != 0, result.stdout + result.stderr
             assert "state" in result.stdout
-            assert "up" not in stages(json.loads(state_path.read_text()))
+            assert stages(json.loads(state_path.read_text())) == ["backup"]
         else:
             assert result.returncode == 0, result.stdout + result.stderr
             assert "continuing with the complete SQL dump" in result.stdout
