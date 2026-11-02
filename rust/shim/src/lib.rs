@@ -14,6 +14,7 @@ mod owned_transport;
 pub mod pg;
 mod raw_http;
 mod recovery;
+pub mod runtime;
 mod sent_config;
 pub mod sent_json;
 mod sent_jsonb;

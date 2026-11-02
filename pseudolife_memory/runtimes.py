@@ -197,9 +197,37 @@ def _runtime_name(sequence: int) -> str:
     return f"{sequence:0{_SEQUENCE_WIDTH}d}"
 
 
+def _runtime_evidence(path: Path) -> tuple[dict | None, bool]:
+    """Return a Python marker and whether foreign or unreadable evidence
+    requires retention. Native runtimes share the numbered root, but their
+    root executable and versioned marker never describe a virtualenv."""
+    foreign = False
+    for name in ("pseudolife-mcp", "pseudolife-mcp.exe"):
+        try:
+            (path / name).lstat()
+        except FileNotFoundError:
+            continue
+        except OSError:
+            foreign = True
+        else:
+            foreign = True
+    try:
+        marker = json.loads((path / MARKER).read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        # An empty reserved sequence may belong to a native install that
+        # has not published its executable yet. Only venv-shaped leftovers
+        # are ours to remove as abandoned Python installs.
+        return None, foreign or not any((path / name).is_dir() for name in ("Scripts", "bin"))
+    except (OSError, ValueError):
+        return None, True
+    if foreign or not isinstance(marker, dict) or "kind" in marker or "format" in marker:
+        return None, True
+    return marker, False
+
+
 def list_runtimes(layout: Layout) -> list[Runtime]:
-    """Every complete runtime under the root, lowest sequence first. A
-    directory whose marker is missing or unreadable is not a runtime."""
+    """Every complete Python runtime under the root, lowest sequence first.
+    Native, unknown and unreadable runtime evidence is never selected."""
     found: list[Runtime] = []
     try:
         names = os.listdir(layout.root)
@@ -210,11 +238,8 @@ def list_runtimes(layout: Layout) -> list[Runtime]:
         path = layout.root / name
         if sequence is None or not path.is_dir():
             continue
-        try:
-            marker = json.loads((path / MARKER).read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            continue
-        if not isinstance(marker, dict) or not _console(path, _windows(layout)).is_file():
+        marker, foreign = _runtime_evidence(path)
+        if foreign or marker is None or not _console(path, _windows(layout)).is_file():
             continue
         found.append(Runtime(path, sequence, str(marker.get("version") or "unknown"),
                              str(marker.get("installed_at") or ""), str(marker.get("source") or ""),
@@ -224,8 +249,8 @@ def list_runtimes(layout: Layout) -> list[Runtime]:
 
 
 def current_runtime(layout: Layout) -> Runtime | None:
-    """The runtime the launcher runs next: the highest sequence that is
-    complete."""
+    """The newest complete Python runtime. It remains inactive while the
+    stable launcher is native; only an explicit Python choice activates it."""
     runtimes = list_runtimes(layout)
     return runtimes[-1] if runtimes else None
 
@@ -397,7 +422,9 @@ def install(source: str, layout: Layout, *, python: str | None = None,
             run: Callable = run_cli, log: Callable[[str], None] = lambda _line: None) -> Runtime:
     """Install ``source`` (a checkout path or a pip requirement such as
     ``pseudolife-mcp==0.15.1``) as a new runtime beside the existing ones,
-    then make sure the launcher is in place. Returns the new runtime.
+    then ensure the launcher is in place. An active native launcher is kept
+    unless ``PSEUDOLIFE_SHIM_ENGINE=python`` explicitly selects Python.
+    Returns the new Python runtime, which may remain inactive.
 
     The runtime is built in its final directory and the marker is written
     only once every step passed, so the launcher never picks a half-built
@@ -640,20 +667,96 @@ def _marker_base(runtime: Runtime) -> str | None:
     return base if isinstance(base, str) and Path(base).is_file() else None
 
 
+def _launcher_kind(layout: Layout) -> str:
+    """Inspect launcher bytes without executing them. A Windows MZ header
+    alone cannot distinguish a native executable from a distlib launcher."""
+    import stat
+    try:
+        if not stat.S_ISREG(layout.launcher.lstat().st_mode):
+            return "unreadable"
+        with layout.launcher.open("rb") as opened:
+            prefix = opened.read(4096)
+            if not _windows(layout):
+                if prefix[:4] in (b"\x7fELF", b"\xfe\xed\xfa\xce", b"\xce\xfa\xed\xfe",
+                                  b"\xfe\xed\xfa\xcf", b"\xcf\xfa\xed\xfe", b"\xca\xfe\xba\xbe",
+                                  b"\xbe\xba\xfe\xca", b"\xca\xfe\xba\xbf", b"\xbf\xba\xfe\xca"):
+                    return "native"
+                body = prefix + opened.read(128 * 1024 + 1 - len(prefix))
+                if len(body) > 128 * 1024:
+                    return "unknown"
+                try:
+                    text = body.decode("utf-8").replace("\r\n", "\n")
+                except UnicodeDecodeError:
+                    return "unknown"
+                before, after = _POSIX_LAUNCHER.split("__ROOT__", 1)
+                return "python" if text.startswith(before) and text.endswith(after) else "unknown"
+            # distlib appends a stored zip with the selector as __main__.py.
+            # Bound archive inspection; native executables and malformed or
+            # unfamiliar launchers are preserved rather than guessed to be Python.
+            import zipfile
+            if not prefix.startswith(b"MZ") or os.fstat(opened.fileno()).st_size > 4 * 1024 * 1024:
+                return "unknown"
+            opened.seek(0)
+            try:
+                with zipfile.ZipFile(opened) as archive:
+                    members = archive.infolist()
+                    if len(members) != 1:
+                        return "unknown"
+                    script = members[0]
+                    if (script.filename != "__main__.py" or script.file_size > 128 * 1024
+                            or script.compress_type != zipfile.ZIP_STORED):
+                        return "unknown"
+                    body = archive.read(script).replace(b"\r\n", b"\n")
+                    ast.parse(body.decode("utf-8"))
+            except (zipfile.BadZipFile, OSError, RuntimeError, ValueError, NotImplementedError, SyntaxError):
+                return "unknown"
+            header = _WINDOWS_SELECTOR.split("import os", 1)[0].encode("utf-8")
+            return "python" if body.startswith(header) else "unknown"
+    except FileNotFoundError:
+        return "missing" if not os.path.lexists(layout.launcher) else "unreadable"
+    except OSError:
+        return "unreadable"
+
+
+def _keep_launcher(layout: Layout, kind: str | None = None) -> bool:
+    kind = _launcher_kind(layout) if kind is None else kind
+    if kind == "unreadable":
+        print(f"launcher kept because it could not be inspected: {layout.launcher}", file=sys.stderr)
+        return True
+    if kind in ("native", "unknown") and os.environ.get("PSEUDOLIFE_SHIM_ENGINE") != "python":
+        label = "native" if kind == "native" else "native or unverified"
+        print(f"{label} launcher kept: {layout.launcher}; set PSEUDOLIFE_SHIM_ENGINE=python to select Python", file=sys.stderr)
+        return True
+    return False
+
+
 def ensure_launcher(layout: Layout, runtime: Runtime | None = None, *, run: Callable = run_cli,
                     log: Callable[[str], None] = lambda _line: None) -> str:
     """Put the launcher in place, or leave it when its content is already
-    right. Returns ``"written"``, ``"replaced"`` or ``"current"``.
+    right. Returns ``"written"``, ``"replaced"``, ``"current"`` or ``"kept"``.
+
+    Native or unverified launchers remain active unless the caller explicitly
+    sets ``PSEUDOLIFE_SHIM_ENGINE=python``. An unreadable launcher is always
+    retained. The same rule applies to :func:`install` and client updates.
+    Keeping or explicitly replacing a native/unverified launcher emits one
+    notice to stderr, independently of the optional progress logger.
 
     On Windows a launcher a session is running cannot be overwritten, but
     it can be renamed: the old file is moved aside (``pseudolife-mcp.exe.
     old-<stamp>``) and cleaned up by :func:`remove_unused` once nothing runs
     it. The running sessions keep the file they opened."""
     layout.launcher_dir.mkdir(parents=True, exist_ok=True)
+    previous_kind = _launcher_kind(layout)
+    if _keep_launcher(layout, previous_kind):
+        return "kept"
     if not _windows(layout):
         wanted = launcher_content(layout)
         try:
             current = layout.launcher.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            # An explicit Python compatibility install may replace a native
+            # ELF/Mach-O launcher; its runtime directories remain separate.
+            current = ""
         except OSError:
             current = None
         if current == wanted:
@@ -661,7 +764,12 @@ def ensure_launcher(layout: Layout, runtime: Runtime | None = None, *, run: Call
         tmp = layout.launcher.with_name(layout.launcher.name + ".tmp")
         tmp.write_text(wanted, encoding="utf-8")
         os.chmod(tmp, 0o755)
+        if _keep_launcher(layout):
+            tmp.unlink()
+            return "kept"
         os.replace(tmp, layout.launcher)
+        if previous_kind in ("native", "unknown"):
+            print(f"native or unverified launcher replaced with Python: {layout.launcher}", file=sys.stderr)
         log(f"launcher {'written' if current is None else 'replaced'}: {layout.launcher}")
         return "written" if current is None else "replaced"
     runtime = runtime or current_runtime(layout)
@@ -674,11 +782,13 @@ def ensure_launcher(layout: Layout, runtime: Runtime | None = None, *, run: Call
     record = {"root": str(layout.root), "base_interpreter": base,
               "selector_sha256": _sha256(selector_content(layout).encode("utf-8"))}
     existing = _read_json(_launcher_record(layout))
-    if layout.launcher.is_file() and existing and all(existing.get(k) == v for k, v in record.items()):
+    if previous_kind == "python" and existing and all(existing.get(k) == v for k, v in record.items()):
         return "current"
     built = _build_windows_launcher(layout, runtime, run, base)
     aside = None
     try:
+        if _keep_launcher(layout):
+            return "kept"
         replaced = layout.launcher.is_file()
         if replaced:
             aside = layout.launcher.with_name(f"{_OLD_LAUNCHER_PREFIX}{time.strftime('%Y%m%d-%H%M%S')}-{os.getpid()}")
@@ -693,6 +803,8 @@ def ensure_launcher(layout: Layout, runtime: Runtime | None = None, *, run: Call
                 os.replace(aside, layout.launcher)
             raise
         _write_atomic(_launcher_record(layout), json.dumps(record, indent=2) + "\n")
+        if previous_kind in ("native", "unknown"):
+            print(f"native or unverified launcher replaced with Python: {layout.launcher}", file=sys.stderr)
         log(f"launcher {'replaced' if replaced else 'written'}: {layout.launcher}")
         return "replaced" if replaced else "written"
     finally:
@@ -1178,8 +1290,9 @@ def remove_unused(layout: Layout, *, pinned: Iterable[Path] = (),
     tunnel saved under ``tunnels``, is not the one this interpreter runs
     from and has no process running from it; likewise unfinished runtimes
     older than an hour (a younger one may still be installing) and
-    launchers moved aside. Where the process table or a tunnel record
-    cannot be read, nothing is removed and ``error`` says why; where the
+    launchers moved aside. Native and unknown runtime evidence is retained
+    for its own updater or explicit recovery. Where the process table or a
+    tunnel record cannot be read, nothing is removed and ``error`` says why; where the
     platform has no process table, only the newest is kept and everything
     else is left, named under ``unverified``."""
     result: dict = {"removed": [], "held": [], "kept": [], "unverified": [], "error": None}
@@ -1212,6 +1325,10 @@ def remove_unused(layout: Layout, *, pinned: Iterable[Path] = (),
             path = layout.root / name
             if _sequence_of(name) is None or not path.is_dir():
                 continue
+            _marker, foreign = _runtime_evidence(path)
+            if foreign:
+                result["kept"].append(str(path))
+                continue
             if os.path.normcase(str(path)) not in complete:
                 try:
                     young = time.time() - path.stat().st_mtime < _ABANDONED_AFTER_S
@@ -1225,7 +1342,8 @@ def remove_unused(layout: Layout, *, pinned: Iterable[Path] = (),
         pass
     try:
         for name in sorted(os.listdir(layout.launcher_dir)):
-            if name.startswith(_OLD_LAUNCHER_PREFIX):
+            if (name.startswith(_OLD_LAUNCHER_PREFIX)
+                    and not name.startswith(_OLD_LAUNCHER_PREFIX + "native-")):
                 candidates.append(layout.launcher_dir / name)
     except OSError:
         pass
@@ -1649,7 +1767,7 @@ def main(argv: list[str] | None = None) -> int:
     p_install.add_argument("--python", default=None, help="base interpreter for the runtime")
     p_install.add_argument("--no-prune", action="store_true", help="keep unused runtimes")
     sub.add_parser("list", help="the complete runtimes, oldest first")
-    sub.add_parser("current", help="the runtime the launcher runs next (exit 3 when none)")
+    sub.add_parser("current", help="the newest complete Python runtime (exit 3 when none)")
     p_launcher = sub.add_parser("launcher", help="the launcher path")
     p_launcher.add_argument("--if-installed", action="store_true",
                             help="exit 3 unless the launcher and a complete runtime exist")
