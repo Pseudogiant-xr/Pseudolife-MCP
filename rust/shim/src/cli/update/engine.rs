@@ -682,6 +682,7 @@ pub(super) fn deploy(u: &mut Update, repo: &Path) -> Result<()> {
         ));
     }
     verify_identity(u, &config, &running, &u.o.daemon_url)?;
+    u.maintainer_context = Some((base.clone(), env.clone()));
     let token = daemon_token(&config)?;
     let pg_env = &config["services"]["pseudolife-pg"]["environment"];
     let user = pg_env["POSTGRES_USER"]

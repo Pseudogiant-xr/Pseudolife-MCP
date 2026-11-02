@@ -598,3 +598,24 @@ fn native_update_compose_publication_is_atomic_immutable_and_keeps_prior_version
     assert!(first.is_dir());
     assert_eq!(fs::read_dir(root).unwrap().count(), 2);
 }
+
+#[test]
+fn maintainer_check_and_interactive_setup_keep_the_selected_target() {
+    let mut update = Update::new(Options::default());
+    update.o.daemon_url = "http://127.0.0.1:9876".into();
+    for (check, flag) in [(true, "--check"), (false, "--yes")] {
+        assert_eq!(
+            update.maintainer_command(Path::new("native-cli"), "second-project-new-daemon", check),
+            [
+                "native-cli",
+                "maintainer",
+                "setup",
+                flag,
+                "--container",
+                "second-project-new-daemon",
+                "--port",
+                "9876"
+            ]
+        );
+    }
+}

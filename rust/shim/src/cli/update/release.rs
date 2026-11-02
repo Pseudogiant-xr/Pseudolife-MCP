@@ -370,6 +370,7 @@ impl Update {
         let (code, out) = self.command(&config_args, Some(&env), 60, false);
         let config:Value=serde_json::from_str(&out).ok().filter(|_:&Value|code==0).ok_or_else(||UpdateError::usage("cannot resolve the Compose project; check its files and env file, then retry; nothing was changed"))?;
         engine::verify_bank_identity(self, &config, &context.running)?;
+        self.maintainer_context = Some((context.args.clone(), env.clone()));
         let token = if activating {
             engine::verify_identity(self, &config, &context.running, &self.o.daemon_url)?;
             engine::daemon_token(&config)?
@@ -687,6 +688,7 @@ impl Update {
         let daemon = engine::container(self, &compose, Some(&env), DAEMON_SERVICE)?;
         let running = engine::inspect(self, &daemon)?;
         engine::verify_checkout_identity(self, &config, &running, &daemon)?;
+        self.maintainer_context = Some((compose.clone(), env.clone()));
         if self.o.no_backup {
             self.backup(None)?;
         } else {

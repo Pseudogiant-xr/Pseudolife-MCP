@@ -64,6 +64,8 @@ import tempfile
 import time
 from urllib.parse import urlsplit
 
+from contextvars import ContextVar
+
 from pseudolife_memory import expose_cli
 from pseudolife_memory.daemon_exec import CONTAINER as DAEMON_CONTAINER, docker_cmd, operator_cli
 
@@ -279,36 +281,60 @@ class _Refused(Exception):
         self.code = code
 
 
+_CONTAINER_SCOPE: ContextVar[str | None] = ContextVar("maintainer_setup_container", default=None)
+
+
+def _container() -> str:
+    return _CONTAINER_SCOPE.get() or DAEMON_CONTAINER
+
+
+def _scoped_refusal() -> _Refused:
+    return _Refused(f"cannot read running container {_container()}; use docker ps to find the daemon, "
+                    "then run pseudolife-mcp maintainer setup --container <name>")
+
+
+def _operator_cli(docker: str) -> list[str]:
+    # operator_cli constructs exactly one engine-label inspect with its default
+    # container last. Preserve its engine policy while scoping that inspect too.
+    return operator_cli(docker, runner=lambda command: run([*command[:-1], _container()], timeout=60))
+
+
 def _tier() -> str:
     """``docker`` when the daemon container runs, ``local`` when there is
     none (or no Docker)."""
     docker = docker_cmd()
     if docker == "docker" and not which("docker"):
+        if _CONTAINER_SCOPE.get() is not None:
+            raise _scoped_refusal()
         return "local"
-    proc = run([docker, "inspect", "-f", "{{.State.Running}}", DAEMON_CONTAINER], timeout=60)
+    proc = run([docker, "inspect", "-f", "{{.State.Running}}", _container()], timeout=60)
     if proc.returncode == 0:
         if proc.stdout.strip() != "true":
-            raise _Refused(f"the {DAEMON_CONTAINER} container is not running: start it first")
+            if _CONTAINER_SCOPE.get() is not None:
+                raise _scoped_refusal()
+            raise _Refused(f"the {_container()} container is not running: start it first")
         return "docker"
+    if _CONTAINER_SCOPE.get() is not None:
+        raise _scoped_refusal()
     if "no such" in (proc.stderr + proc.stdout).lower():
         return "local"
     raise _Refused("docker did not answer ("
                    f"{expose_cli._first_line(proc.stderr) or f'exit {proc.returncode}'}), so "
-                   f"whether the daemon is the {DAEMON_CONTAINER} container cannot be told: start "
+                   f"whether the daemon is the {_container()} container cannot be told: start "
                    "Docker (or run this as a user who can use it) and run this again")
 
 
 def _python(tier: str) -> list[str]:
     if tier == "docker":
-        return [docker_cmd(), "exec", DAEMON_CONTAINER, "python"]
+        return [docker_cmd(), "exec", _container(), "python"]
     return [sys.executable]
 
 
 def _maintainer(tier: str, *args: str) -> list[str]:
     if tier == "docker":
         docker = docker_cmd()
-        cli = operator_cli(docker, runner=lambda command: run(command, timeout=60))
-        return [docker, "exec", DAEMON_CONTAINER, *cli, "maintainer", *args]
+        cli = _operator_cli(docker)
+        return [docker, "exec", _container(), *cli, "maintainer", *args]
     return [*_python(tier), "-m", "pseudolife_memory.cli", "maintainer", *args]
 
 
@@ -316,9 +342,9 @@ def _host(tier: str, *args: str) -> dict:
     command = [*_python(tier), "-m", MODULE, *args]
     if tier == "docker":
         docker = docker_cmd()
-        cli = operator_cli(docker, runner=lambda command: run(command, timeout=60))
+        cli = _operator_cli(docker)
         if cli == ["pseudolife-mcp"]:
-            command = [docker, "exec", DAEMON_CONTAINER, *cli, "maintainer", "setup",
+            command = [docker, "exec", _container(), *cli, "maintainer", "setup",
                        "--host-" + args[0], *args[1:]]
     proc = run(command, timeout=120)
     if proc.returncode != 0:
@@ -468,11 +494,11 @@ def _serve_off(binary: str, https_port: int) -> bool:
 
 
 def _restart(tier: str, port: int) -> None:
-    proc = run([docker_cmd(), "restart", DAEMON_CONTAINER], timeout=300)
+    proc = run([docker_cmd(), "restart", _container()], timeout=300)
     if proc.returncode != 0:
         raise _Refused("the daemon restart failed "
                        f"({expose_cli._first_line(proc.stderr) or f'exit {proc.returncode}'}); "
-                       f"the config is written: run `docker restart {DAEMON_CONTAINER}`, then "
+                       f"the config is written: run `docker restart {_container()}`, then "
                        f"`{SETUP}` again", EXIT_UNDONE)
     print("restarted the daemon; waiting for it to answer...", flush=True)
     deadline = time.monotonic() + RESTART_TIMEOUT_S
@@ -482,7 +508,7 @@ def _restart(tier: str, port: int) -> None:
             return
         if time.monotonic() >= deadline:
             raise _Refused(f"the daemon did not report healthy within {RESTART_TIMEOUT_S} s "
-                           f"of its restart: check `docker logs {DAEMON_CONTAINER}`, then run "
+                           f"of its restart: check `docker logs {_container()}`, then run "
                            f"`{SETUP}` again", EXIT_UNDONE)
         sleep(HEALTH_POLL_S)
 
@@ -607,7 +633,7 @@ def _setup(args) -> int:
     if configured and _running_name(args.port) not in (None, (rp_id, origin)):
         restart = True
     if restart and tier == "docker":
-        plan.append(f"restart  the daemon container ({DAEMON_CONTAINER}) so it reads them")
+        plan.append(f"restart  the daemon container ({_container()}) so it reads them")
 
     if origin.startswith("http://localhost"):
         print(f"Console name: {origin} (passkeys work in a browser on this machine only)")
@@ -662,6 +688,13 @@ def _port(value: str) -> int:
     return expose_cli._port(value)
 
 
+def _container_name(value: str) -> str:
+    if (not value or not value[0].isascii() or not value[0].isalnum()
+            or any(not c.isascii() or not (c.isalnum() or c in "_.-") for c in value)):
+        raise argparse.ArgumentTypeError("use docker ps to find the daemon, then pass --container <name>")
+    return value
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog=SETUP,
@@ -680,6 +713,8 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--check", action="store_true",
                         help="change nothing: exit 0 when passkeys are set up (a valid name and "
                              "an active key), 1 when not, 2 when that cannot be read")
+    parser.add_argument("--container", type=_container_name,
+                        help="scope Docker operations to this daemon container (default pseudolife-mcp-daemon)")
     return parser
 
 
@@ -688,8 +723,20 @@ def main(argv: list[str] | None = None) -> int:
         args = _parser().parse_args(argv)
     except SystemExit as exc:
         return exc.code if isinstance(exc.code, int) else EXIT_USAGE
+    token = _CONTAINER_SCOPE.set(args.container)
+    try:
+        return _main_scoped(args)
+    finally:
+        _CONTAINER_SCOPE.reset(token)
+
+
+def _main_scoped(args) -> int:
     if args.check:
-        state = passkeys_set_up()
+        try:
+            state = passkeys_set_up()
+        except _Refused as exc:
+            print(f"maintainer setup: {exc}", file=sys.stderr)
+            return EXIT_USAGE
         print({True: "maintainer passkeys: in place", False: "maintainer passkeys: not set up",
                None: "maintainer passkeys: could not read the daemon's state"}[state])
         return {True: 0, False: 1, None: 2}[state]
@@ -709,7 +756,13 @@ def passkeys_set_up() -> bool | None:
     ``None`` when that cannot be read (``pseudolife-mcp update`` then says
     nothing)."""
     try:
-        state = _host(_tier(), "state")
+        tier = _tier()
+    except _Refused:
+        if _CONTAINER_SCOPE.get() is not None:
+            raise
+        return None
+    try:
+        state = _host(tier, "state")
     except _Refused:
         return None
     if state.get("problem") is not None:

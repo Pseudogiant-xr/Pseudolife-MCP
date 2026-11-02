@@ -50,7 +50,11 @@ if a[:1]==["inspect"]:
  if "--format" in a: out=s["running"]["Image"]
  elif "-f" in a:
   f=a[a.index("-f")+1]
-  if "Labels" in f: out=json.dumps(s["running"]["Config"]["Labels"])
+  if "State.Running" in f:
+   if a[-1]=="missing-daemon":code=1;out="No such container"
+   else:out="true"
+  elif "index .Config.Labels" in f: out=s.get("setup_engine","python")
+  elif "Labels" in f: out=json.dumps(s["running"]["Config"]["Labels"])
   elif "|" in f: out=s["running"]["Image"]+"|"+s["running"]["Config"]["Image"]
   else: out=s["running"]["Id"]
  else: out=json.dumps([s["running"]])
@@ -74,7 +78,7 @@ elif a[:1]==["compose"]:
    config["services"]["pseudolife-daemon"]["volumes"].append({"type":"bind","source":str(directory/"config.yaml"),"target":"/data/config.yaml","read_only":True})
   out=json.dumps(config)
  elif "ps" in a:
-  out="fixture-pg" if a[-1]=="pseudolife-pg" else "fixture-daemon"
+  out="fixture-pg" if a[-1]=="pseudolife-pg" else s["running"]["Id"]
   if s["failure"]=="missing_project_daemon" and a[-1]=="pseudolife-daemon":out=""
   if s["failure"]=="ambiguous_project_daemon" and a[-1]=="pseudolife-daemon":out="first\nsecond"
  elif "build" in a and s["failure"]=="build":code=1
@@ -89,8 +93,11 @@ elif a[:1]==["compose"]:
      if "labels" in service:s["running"]["Config"]["Labels"]={**(s["running"]["Config"]["Labels"] or {}),**service["labels"]}
     except (OSError,ValueError,KeyError):pass
    s["running"]["Image"]="sha256:replacement"
+   s["running"]["Id"]=s.get("replacement_id",s["running"]["Id"])
 elif a[:1]==["exec"]:
- if "psql" in a:
+ if "--host-state" in a or "pseudolife_memory.maintainer_setup" in a:
+  out=s.get("setup_reply",json.dumps({"problem":None,"keys":[{"state":"active"}]}))
+ elif "psql" in a:
   if "cms_counters" in a[-1]:out="f" if s["failure"]=="pending_import" else "t"
   else:out="56" if s["failure"]=="old_schema" else "unreadable" if s["failure"]=="unreadable_schema" else "58"
  elif any("test ! -e /data/memory_state/weights.pt" in v for v in a):code=int(s["failure"] in ("pending_import","imported_weights"))
@@ -526,15 +533,52 @@ def test_plain_release_can_recover_an_unhealthy_daemon(tmp_path):
         assert stages(json.loads(state_path.read_text())) == ["pull", "backup", "tag", "up"]
 
 
-def test_deferred_maintainer_setup_does_not_claim_passkeys_are_missing(tmp_path):
+@pytest.mark.parametrize("setup_reply,missing", [
+    ('{"problem":null,"keys":[{"state":"active"}]}', False),
+    ('{"problem":null,"keys":[]}', True),
+    ('{"problem":null,"keys":null}', False),
+    ('unreadable', False),
+])
+def test_maintainer_setup_check_uses_recreated_checkout_container(tmp_path, setup_reply, missing):
     binary = _native_binary()
     if not binary:
         pytest.skip("set PSEUDOLIFE_RUST_BINARY")
-    with host(tmp_path) as (repo, env, _):
-        result = run_arm(repo, env, binary, ["--tag", "0.21.1", "--daemon-only", "--json", "--health-retries", "1"])
+    with host(tmp_path, mode="checkout") as (repo, env, state_path):
+        state = json.loads(state_path.read_text())
+        state.update(setup_reply=setup_reply, replacement_id="second-project-new-daemon")
+        state_path.write_text(json.dumps(state))
+        result = run_arm(repo, env, binary, ["--checkout", str(repo), "--no-test-login", "--no-cache-prune", "--json", "--health-retries", "1"])
         assert result.returncode == 0, result.stdout + result.stderr
-        assert "maintainer setup" in result.stdout
-        assert "passkeys are not set up" not in result.stdout
+        assert ("passkeys are not set up" in result.stdout) is missing
+        calls = json.loads(state_path.read_text())["calls"]
+        checks = [args for args in calls if "pseudolife_memory.maintainer_setup" in args or "--host-state" in args]
+        assert checks and all("second-project-new-daemon" in args for args in checks)
+        assert not any("pseudolife-mcp-daemon" in args for args in calls)
+
+
+@pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
+@pytest.mark.parametrize("container", [None, "second-project-daemon", "missing-daemon"])
+def test_maintainer_setup_explicit_container_scope(tmp_path, native, container):
+    binary = _native_binary() if native else None
+    if native and not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path) as (repo, env, state_path):
+        command = [binary] if native else [sys.executable, "-P", "-m", "pseudolife_memory.cli"]
+        command += ["maintainer", "setup", "--check"]
+        if container is not None:
+            command += ["--container", container]
+        result = subprocess.run(command, env=env, cwd=repo, capture_output=True, text=True, timeout=30)
+        if container == "missing-daemon":
+            assert result.returncode == 2
+            assert "--container" in result.stderr and "docker ps" in result.stderr
+        else:
+            assert result.returncode == 0, result.stdout + result.stderr
+            assert result.stdout == "maintainer passkeys: in place\n"
+            assert result.stderr == ""
+        calls = json.loads(state_path.read_text())["calls"]
+        assert calls and all((container or "pseudolife-mcp-daemon") in args for args in calls)
+        if container == "missing-daemon":
+            assert not any(args[0] == "exec" for args in calls)
 
 
 def test_native_unattended_rechecks_board_after_backup_before_tagging(tmp_path):

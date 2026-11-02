@@ -52,6 +52,7 @@ struct Args {
     https_port: u16,
     yes: bool,
     check: bool,
+    container: Option<String>,
 }
 fn parse(values: &[String]) -> Result<Args> {
     let mut args = Args {
@@ -68,6 +69,23 @@ fn parse(values: &[String]) -> Result<Args> {
             ("--local", None) => args.local = true,
             ("--yes", None) => args.yes = true,
             ("--check", None) => args.check = true,
+            ("--container", _) => {
+                let value = inline
+                    .or_else(|| values.next().map(String::as_str))
+                    .unwrap_or("");
+                if value.is_empty()
+                    || !value.as_bytes()[0].is_ascii_alphanumeric()
+                    || !value
+                        .bytes()
+                        .all(|b| b.is_ascii_alphanumeric() || b"_.-".contains(&b))
+                {
+                    return Err(Error::new(
+                        "argument --container: use docker ps to find the daemon, then pass --container <name>",
+                        2,
+                    ));
+                }
+                args.container = Some(value.into());
+            }
             ("--port" | "--https-port", _) => {
                 let value = inline
                     .or_else(|| values.next().map(String::as_str))
@@ -204,8 +222,9 @@ async fn entry(values: &[String], pending: Pending) -> Result<u8> {
     }
     let args = parse(values)?;
     if args.check {
-        let state = match system::tier().await {
+        let state = match system::tier(args.container.as_deref()).await {
             Ok(tier) => system::host(&tier, &["--host-state"]).await.ok(),
+            Err(error) if args.container.is_some() => return Err(Error::new(error.message, 2)),
             Err(_) => None,
         };
         let (code, text) = match state {
@@ -351,7 +370,7 @@ async fn setup(args: Args, pending: Pending) -> Result<u8> {
             "the daemon at {url} does not report \"auth\": true; maintainer passkeys need a daemon that requires a bearer token (an install without --no-token, or PSEUDOLIFE_MCP_TOKEN(S) in its environment)"
         )));
     }
-    let tier = system::tier().await?;
+    let tier = system::tier(args.container.as_deref()).await?;
     if matches!(tier, Tier::Local) {
         refuse_lite()?;
     }
@@ -429,10 +448,13 @@ async fn setup(args: Args, pending: Pending) -> Result<u8> {
         None
     };
     let restart = write || loaded.is_some_and(|v| v != (rp.clone(), origin.clone()));
-    if restart && matches!(tier, Tier::Docker(_)) {
+    if restart && matches!(tier, Tier::Docker(..)) {
         plan.push(format!(
             "restart  the daemon container ({}) so it reads them",
-            system::CONTAINER
+            match &tier {
+                Tier::Docker(_, container) => container.as_str(),
+                Tier::Local => unreachable!(),
+            }
         ));
     }
     if origin.starts_with("http://localhost") {
@@ -472,7 +494,7 @@ async fn setup(args: Args, pending: Pending) -> Result<u8> {
                     .unwrap_or_default()
             );
         }
-        if restart && matches!(tier, Tier::Docker(_)) {
+        if restart && matches!(tier, Tier::Docker(..)) {
             system::restart(&tier, args.port).await?;
         }
     }

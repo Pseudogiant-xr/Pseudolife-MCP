@@ -80,6 +80,7 @@ pub(crate) struct Update {
     pub rollback_lines: Vec<String>,
     pub schema_before: Option<i64>,
     pub selected_engine: String,
+    pub maintainer_context: Option<(Vec<String>, Environment)>,
 }
 
 fn output(text: &str, stderr: bool) -> std::io::Result<()> {
@@ -170,6 +171,7 @@ impl Update {
             rollback_lines: vec![],
             schema_before: None,
             selected_engine: "python".into(),
+            maintainer_context: None,
         }
     }
     pub fn step(&mut self, text: impl Into<String>) {
@@ -412,25 +414,27 @@ impl Update {
         let Ok(exe) = std::env::current_exe() else {
             return;
         };
-        let (code, detail) = run_cli(
-            &[
-                exe.to_string_lossy().into_owned(),
-                "maintainer".into(),
-                "setup".into(),
-                "--check".into(),
-            ],
-            None,
-            120,
-            false,
-        );
-        if detail.contains("mode 'maintainer' is deferred in this candidate") {
-            self.step("maintainer setup is not available in this native candidate; run pseudolife-mcp maintainer setup after installing a release that includes it");
+        // Recreation changes container IDs. Resolve the selected Compose
+        // project again; never fall back to another project's global daemon.
+        let container = if let Some((args, env)) = &self.maintainer_context {
+            match engine::container(self, args, Some(env), DAEMON_SERVICE) {
+                Ok(container) => container,
+                Err(_) => {
+                    self.warn("could not resolve the updated daemon for maintainer setup; use docker ps to find it, then run pseudolife-mcp maintainer setup --container <name>");
+                    return;
+                }
+            }
+        } else {
+            DAEMON_CONTAINER.into()
+        };
+        let args = self.maintainer_command(&exe, &container, true);
+        let (code, detail) = run_cli(&args, None, 120, false);
+        if code != 1 || detail.trim() != "maintainer passkeys: not set up" {
             return;
         }
-        if code != 1 {
-            return;
-        }
-        self.step("maintainer passkeys are not set up yet (they sign your Console messages and role changes): run pseudolife-mcp maintainer setup");
+        let mut remedy = self.maintainer_command(Path::new("pseudolife-mcp"), &container, false);
+        remedy.retain(|arg| arg != "--yes");
+        self.step(format!("maintainer passkeys are not set up yet (they sign your Console messages and role changes): run {}", display(&remedy)));
         if self.o.as_json
             || !ask(
                 "Set them up now? When Tailscale runs, this serves the daemon over HTTPS with tailscale serve (devices on your tailnet can reach it at https://<this machine>:8443), sets its config and restarts it [y/N] ",
@@ -438,18 +442,34 @@ impl Update {
         {
             return;
         }
-        let mut command = std::process::Command::new(exe);
-        command.args(["maintainer", "setup", "--yes"]);
+        let args = self.maintainer_command(&exe, &container, false);
+        let mut command = std::process::Command::new(&args[0]);
+        command.args(&args[1..]);
+        if !command.status().is_ok_and(|status| status.success()) {
+            self.warn("pseudolife-mcp maintainer setup failed; the update itself succeeded");
+        }
+    }
+    fn maintainer_command(&self, exe: &Path, container: &str, check: bool) -> Vec<String> {
+        let mut args = vec![
+            exe.to_string_lossy().into_owned(),
+            "maintainer".into(),
+            "setup".into(),
+            if check {
+                "--check".into()
+            } else {
+                "--yes".into()
+            },
+            "--container".into(),
+            container.into(),
+        ];
         if let Ok(url) = reqwest::Url::parse(&self.o.daemon_url)
             && matches!(url.host_str(), Some("localhost" | "127.0.0.1" | "::1"))
             && let Some(port) = url.port()
             && port != 8765
         {
-            command.args(["--port", &port.to_string()]);
+            args.extend(["--port".into(), port.to_string()]);
         }
-        if !command.status().is_ok_and(|status| status.success()) {
-            self.warn("pseudolife-mcp maintainer setup failed; the update itself succeeded");
-        }
+        args
     }
     pub fn clients(&mut self, repo: Option<&Path>, source: &str, health: Option<&Value>) {
         self.step("updating the client side (shim, plugin cache, Codex hooks)...");
