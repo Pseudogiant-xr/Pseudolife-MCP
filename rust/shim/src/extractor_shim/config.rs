@@ -1,3 +1,4 @@
+use sha2::{Digest, Sha256};
 use std::{
     collections::BTreeMap,
     ffi::OsString,
@@ -81,6 +82,7 @@ pub(super) struct Config {
     pub emulate: bool,
     pub managed: bool,
     pub log: Option<PathBuf>,
+    pub config_hash: Option<String>,
 }
 
 const BEGIN: &str = "# >>> pseudolife shim autostart (managed by ops/shim_autostart.py; edit values here, then: python ops/shim_autostart.py restart claude|codex) >>>";
@@ -119,11 +121,13 @@ fn env_line(line: &str) -> Option<(String, String)> {
     Some((key.into(), v))
 }
 
-fn env_file(path: &Path) -> BTreeMap<String, String> {
-    String::from_utf8_lossy(&fs::read(path).unwrap_or_default())
+fn env_file(path: &Path) -> (BTreeMap<String, String>, String) {
+    let raw = fs::read(path).unwrap_or_default();
+    let values = String::from_utf8_lossy(&raw)
         .lines()
         .filter_map(env_line)
-        .collect()
+        .collect();
+    (values, format!("{:x}", Sha256::digest(&raw)))
 }
 
 fn default_host(managed: bool) -> String {
@@ -403,8 +407,11 @@ pub(super) fn parse(args: Vec<OsString>) -> Result<Option<Config>, String> {
             "evals/prompts/sonnet_extractor_v5.md".into(),
         );
     }
+    let mut config_hash = None;
     if let Some(path) = &settings_path {
-        for (k, v) in env_file(path) {
+        let (values, hash) = env_file(path);
+        config_hash = Some(hash);
+        for (k, v) in values {
             if let Some(k) = k.strip_prefix(&kind.prefix())
                 && !v.is_empty()
             {
@@ -518,5 +525,6 @@ pub(super) fn parse(args: Vec<OsString>) -> Result<Option<Config>, String> {
         emulate,
         managed,
         log,
+        config_hash,
     }))
 }

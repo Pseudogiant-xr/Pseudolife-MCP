@@ -201,9 +201,6 @@ impl Shim {
             }
         };
         let model = c.kind.resolve_model(requested, &c.model);
-        if let Some(requested) = requested {
-            config::validate_cli_token("model", requested)?;
-        }
         let effort = req["reasoning_effort"]
             .as_str()
             .map(|s| s.trim_matches(' '))
@@ -278,6 +275,9 @@ impl Shim {
             .path_and_query()
             .map(|s| s.as_str())
             .unwrap_or("/");
+        let config_hash = (req.method() == hyper::Method::GET && path == "/health")
+            .then_some(self.config.config_hash.as_deref())
+            .flatten();
         let (status, body) = match (req.method().as_str(), path) {
             ("GET", "/health") => {
                 let (ok, body) = self.health().await;
@@ -328,10 +328,14 @@ impl Shim {
             _ => (404, json!({"error":"not found"})),
         };
         let body = json::dumps(&body, true);
-        Ok(Response::builder()
+        let mut response = Response::builder()
             .status(status)
             .header("content-type", "application/json")
-            .header("content-length", body.len())
+            .header("content-length", body.len());
+        if let Some(hash) = config_hash {
+            response = response.header("x-pseudolife-config-sha256", hash);
+        }
+        Ok(response
             .body(Full::new(Bytes::from(body)))
             .expect("HTTP response"))
     }
@@ -520,12 +524,19 @@ where
     F: FnMut() -> Fut,
     Fut: std::future::Future<Output = std::io::Result<T>>,
 {
+    let mut delay = std::time::Duration::from_millis(100);
+    let mut report_at = tokio::time::Instant::now();
     loop {
         match accept().await {
             Ok(value) => return value,
             Err(error) => {
-                report(&error);
-                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                let now = tokio::time::Instant::now();
+                if now >= report_at {
+                    report(&error);
+                    report_at = now + std::time::Duration::from_secs(30);
+                }
+                tokio::time::sleep(delay).await;
+                delay = (delay * 2).min(std::time::Duration::from_secs(5));
             }
         }
     }
@@ -533,7 +544,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn transient_accept_errors_do_not_stop_the_server() {
         let mut attempts = 0;
         let mut reports = 0;
@@ -549,6 +560,37 @@ mod tests {
             |_| reports += 1,
         )
         .await;
-        assert_eq!((answer, attempts, reports), (42, 3, 2));
+        assert_eq!((answer, attempts, reports), (42, 3, 1));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn persistent_accept_errors_back_off_and_limit_logs() {
+        let mut attempts = vec![];
+        let mut reports = vec![];
+        let answer = super::retry_accept(
+            || {
+                attempts.push(tokio::time::Instant::now());
+                std::future::ready(if attempts.len() <= 20 {
+                    Err(std::io::Error::other("persistent resource exhaustion"))
+                } else {
+                    Ok(42)
+                })
+            },
+            |_| reports.push(tokio::time::Instant::now()),
+        )
+        .await;
+        assert_eq!(answer, 42);
+        let delays: Vec<_> = attempts
+            .windows(2)
+            .map(|a| (a[1] - a[0]).as_millis())
+            .collect();
+        assert_eq!(&delays[..7], &[100, 200, 400, 800, 1600, 3200, 5000]);
+        assert!(delays[7..].iter().all(|&delay| delay == 5000));
+        assert_eq!(reports.len(), 3);
+        assert!(
+            reports
+                .windows(2)
+                .all(|a| a[1] - a[0] >= std::time::Duration::from_secs(30))
+        );
     }
 }

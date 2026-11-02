@@ -110,13 +110,20 @@ if ($c.Remove) {
 $marker = [regex]::Escape([string]$c.EnvFile)
 $nativePattern = "`"?extractor-shim`"?\s+`"?$kind`"?\s+`"?--env-file`"?\s+`"?$marker`"?(\s|$)"
 $registered = Get-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue
+$legacy = if ($name -eq 'Pseudolife Claude Shim') { Get-ScheduledTask -TaskName 'Pseudolife Sonnet Shim' -ErrorAction SilentlyContinue } else { $null }
+$legacyProcesses = @(Get-OwnedTaskProcesses $legacy)
+$legacyWasActive = $legacy -and ($legacy.State -eq 'Running' -or $legacyProcesses.Count -gt 0)
 # Only the selected registration can establish ownership. A matching basename
 # and port from another checkout is a foreign listener, never a replacement.
-$stale = @(Get-OwnedTaskProcesses $registered)
+$registeredProcesses = @(Get-OwnedTaskProcesses $registered)
+$stale = $registeredProcesses + $legacyProcesses
 $listeners = @(Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue)
 foreach ($listener in $listeners) {
     if ($listener.OwningProcess -notin @($stale | ForEach-Object ProcessId)) {
-        throw "port $port belongs to another process (pid $($listener.OwningProcess)); choose --port or stop its owner"
+        $conflict = Get-CimInstance Win32_Process -Filter "ProcessId = $($listener.OwningProcess)" -ErrorAction SilentlyContinue
+        $image = if ($conflict.ExecutablePath) { $conflict.ExecutablePath } elseif ($conflict.Name) { $conflict.Name } else { '<unavailable>' }
+        $command = if ($conflict.CommandLine) { $conflict.CommandLine } else { '<unavailable>' }
+        throw "port $port belongs to another process (pid $($listener.OwningProcess), image: $image, command: $command); choose --port or stop its owner"
     }
 }
 function Quote-Argument([string]$value) {
@@ -149,7 +156,11 @@ function Test-HealthyListener {
         $owner = Get-CimInstance Win32_Process -Filter "ProcessId = $($candidate.OwningProcess)" -ErrorAction SilentlyContinue
         if ($owner -and $owner.ExecutablePath -eq $ownerExe -and $owner.CommandLine -match $nativePattern) {
             try {
-                $null = Invoke-WebRequest -UseBasicParsing -Uri "http://$($c.Host):$port/health" -TimeoutSec 2
+                $health = Invoke-WebRequest -UseBasicParsing -Uri "http://$($c.Host):$port/health" -TimeoutSec 2
+                $sha = [Security.Cryptography.SHA256]::Create()
+                try { $expected = -join ($sha.ComputeHash([IO.File]::ReadAllBytes($c.EnvFile)) | ForEach-Object { $_.ToString('x2') }) }
+                finally { $sha.Dispose() }
+                if ($health.Headers['X-Pseudolife-Config-SHA256'] -ne $expected) { return $false }
                 $script:verifiedPid = $candidate.OwningProcess
                 return $true
             } catch { }
@@ -161,7 +172,7 @@ $configExisted = Test-Path -LiteralPath $c.EnvFile
 $configBefore = [byte[]]@()
 if ($configExisted) { $configBefore = [IO.File]::ReadAllBytes($c.EnvFile) }
 $previousXml = if ($registered) { Export-ScheduledTask -TaskName $name } else { $null }
-$wasActive = $registered -and ($registered.State -eq 'Running' -or $stale.Count -gt 0)
+$wasActive = $registered -and ($registered.State -eq 'Running' -or $registeredProcesses.Count -gt 0)
 $mutated = $false
 $unchanged = $false
 try {
@@ -176,6 +187,7 @@ try {
     if (-not $unchanged) {
         $mutated = $true
         Stop-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue
+        if ($legacy) { Stop-ScheduledTask -TaskName $legacy.TaskName -ErrorAction SilentlyContinue }
         foreach ($old in $stale) { Stop-CapturedProcess $old }
         $deadline = (Get-Date).AddSeconds(15)
         while ((Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue) -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 200 }
@@ -191,12 +203,31 @@ try {
     }
 } catch {
     $failure = $_
-    if ($mutated) { Remove-OwnedTask $name }
-    if ($configExisted) { [IO.File]::WriteAllBytes($c.EnvFile, [byte[]]$configBefore) }
-    elseif (Test-Path -LiteralPath $c.EnvFile) { Remove-Item -LiteralPath $c.EnvFile }
+    $rollbackErrors = @()
+    if ($mutated) {
+        try { Remove-OwnedTask $name }
+        catch { $rollbackErrors += "removing replacement task: $($_.Exception.Message)" }
+    }
+    try {
+        if ($configExisted) { [IO.File]::WriteAllBytes($c.EnvFile, [byte[]]$configBefore) }
+        elseif (Test-Path -LiteralPath $c.EnvFile) { Remove-Item -LiteralPath $c.EnvFile }
+    } catch { $rollbackErrors += "restoring settings: $($_.Exception.Message)" }
     if ($mutated -and $previousXml) {
-        Register-ScheduledTask -TaskName $name -Xml $previousXml -Force | Out-Null
-        if ($wasActive) { Start-ScheduledTask -TaskName $name }
+        try {
+            Register-ScheduledTask -TaskName $name -Xml $previousXml -Force | Out-Null
+            if ($wasActive) { Start-ScheduledTask -TaskName $name }
+        } catch { $rollbackErrors += "restoring previous task: $($_.Exception.Message)" }
+    }
+    if ($mutated -and $legacyWasActive) {
+        try { Start-ScheduledTask -TaskName $legacy.TaskName }
+        catch { $rollbackErrors += "restarting legacy task: $($_.Exception.Message)" }
+    }
+    if ($rollbackErrors.Count) {
+        $remaining = try {
+            $task = Get-ScheduledTask -TaskName $name -ErrorAction Stop
+            if ($task) { "present (state $($task.State))" } else { 'absent' }
+        } catch { 'absent or unreadable' }
+        Write-Warning "Rollback incomplete: $($rollbackErrors -join '; '). Task '$name' is $remaining. Restore its previous registration manually if needed; password-logon tasks require credentials that task XML does not contain. Original failure: $($failure.Exception.Message)" -WarningAction Continue
     }
     throw $failure
 }

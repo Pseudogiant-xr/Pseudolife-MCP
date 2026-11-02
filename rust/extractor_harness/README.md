@@ -16,11 +16,11 @@ background when stale. CLI failures become HTTP 500; an unhealthy health
 probe returns HTTP 503. As in the Python shims, `stream`, `temperature` and
 `response_format` do not change the completion protocol.
 
-Concrete provider model IDs pass through; aliases such as `extractor` keep
+Concrete provider model IDs pass through; aliases such as `extractor` or `Qwen/Qwen3` keep
 the launch model. Unlisted provider IDs get a one-line note. `--reasoning-effort`
 sets a launch default; a nonempty request value overrides it. Claude's optional
 `--emulate-tools` remains restricted to evaluation ports.
-Native model and effort values accept only ASCII letters, digits and `._:-`;
+Resolved native model and effort values accept only ASCII letters, digits and `._:-`;
 other characters are rejected before invoking a provider, including through
 Windows batch launchers. Each unlisted model is logged once per shim process.
 
@@ -60,6 +60,12 @@ elevated shell; its default principal is the current interactive user.
 Linux uses the Docker bridge address when available; `--host` overrides it.
 An unchanged, healthy registration is a quiet no-op. Installation verifies
 `/health`, and a failed replacement restores the prior registration and settings.
+Managed health responses include an `X-Pseudolife-Config-SHA256` header for the
+settings bytes loaded at startup; the JSON body is unchanged. Reinstallation
+compares that fingerprint with disk so prior configuration edits trigger a restart.
+A disabled but healthy Linux service is re-enabled without restarting it.
+If restoring a Windows password-logon task fails because its credentials are
+unavailable, the original failure is preserved alongside the remaining task state.
 Removing an absent Linux registration needs no service manager or Python.
 
 The existing `install-*shim-autostart.sh` scripts accept `--native PATH`;

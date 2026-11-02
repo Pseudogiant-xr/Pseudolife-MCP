@@ -139,6 +139,9 @@ def proof(binary, root):
     windows = os.name == "nt"
     if windows:
         wrapper_forwarding(root)
+        for case in ("PasswordRollback", "LegacyMigration"):
+            checked(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(Path(__file__).with_name("scheduler_failures.ps1")),
+                     "-Source", str(run.ROOT / "rust/shim/src/extractor_shim/autostart.ps1"), "-Root", str(root), "-Case", case])
     repo = root / "settings with spaces"
     repo.mkdir()
     bin_dir = root / "bin"
@@ -199,6 +202,9 @@ def proof(binary, root):
                 foreign_args[foreign_args.index("--port") + 1] = str(foreign_port)
                 refused = subprocess.run(foreign_args, env=env, capture_output=True)
                 assert refused.returncode != 0 and b"another process" in refused.stdout + refused.stderr, refused
+                if windows:
+                    detail = refused.stdout + refused.stderr
+                    assert b"image:" in detail and b"command:" in detail and f"{kind}_shim.py".encode() in detail, detail
                 assert foreign.poll() is None and run.call(foreign_port, "GET", "/health")[0] == 200, "foreign shim was stopped"
             with socket.socket() as blocker:
                 blocker.bind(("127.0.0.1", port))
@@ -230,6 +236,18 @@ def proof(binary, root):
             repeated = checked(args, env=env)
             assert not repeated.stdout.strip(), repeated.stdout
             assert len(run.journal_rows(journal)) == initial_calls, "unchanged install restarted its provider"
+            if not windows:
+                checked(["systemctl", "--user", "disable", registration])
+                checked(args, env=env)
+                checked(["systemctl", "--user", "is-enabled", "--quiet", registration])
+                assert len(run.journal_rows(journal)) == initial_calls, "re-enabling restarted its provider"
+            # Config was edited before the reinstall, so comparing disk with
+            # itself would incorrectly keep the old running process.
+            checked([str(native), "extractor-shim", "config", kind, "--env-file", str(config_file), "--model", model], env=env)
+            assert json.loads(run.call(port, "GET", "/models")[1])["data"][0]["id"] != model
+            checked(args, env=env)
+            assert json.loads(run.call(port, "GET", "/models")[1])["data"][0]["id"] == model
+            assert len(run.journal_rows(journal)) > initial_calls, "edited config did not restart its provider"
             # A failed replacement must restore the previous registration and
             # settings, then restart its still-working provider.
             broken_cli = bin_dir / (kind + ("-broken.exe" if windows else "-broken"))
@@ -256,6 +274,7 @@ def proof(binary, root):
                 assert time.monotonic() < deadline, "previous registration was not restarted"
                 time.sleep(.1)
             assert not checked(args, env=env).stdout.strip(), "restored registration differs from the original"
+            model += "-next"
             checked(args + [model_flag, model], env=env)
             status, body = run.call(port, "GET", "/models")
             assert status == 200 and json.loads(body)["data"][0]["id"] == model

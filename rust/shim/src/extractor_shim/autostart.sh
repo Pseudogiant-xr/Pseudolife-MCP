@@ -24,7 +24,7 @@ if [ "$action" = remove ]; then
     echo "Removed $name"
     exit 0
 fi
-for tool in systemctl ss curl cmp mktemp cp; do
+for tool in systemctl ss curl cmp mktemp cp sha256sum; do
     command -v "$tool" >/dev/null || { echo "native autostart requires $tool" >&2; exit 1; }
 done
 systemctl --user show-environment >/dev/null || { echo 'systemd user manager unavailable' >&2; exit 1; }
@@ -52,11 +52,15 @@ if [ -n "$listeners" ]; then
     fi
 fi
 healthy_listener() {
+    local expected headers
+    expected="$(sha256sum < "$env_file")"
+    expected="${expected%% *}"
     unit_group="$(systemctl --user show "$name" --property ControlGroup --value)"
     for pid in $(socket_pids "$(ss -H -ltnp "sport = :$port")"); do
         if owned_by_unit "$pid" && [ "$(readlink "/proc/$pid/exe" 2>/dev/null || true)" = "$owner_exe" ] &&
-            curl --silent --fail --max-time 2 "http://$host:$port/health" >/dev/null; then
-            return 0
+            headers="$(curl --silent --fail --max-time 2 --dump-header - --output /dev/null "http://$host:$port/health")"; then
+            headers="${headers//$'\r'/}"
+            if grep -qi "^x-pseudolife-config-sha256: $expected$" <<< "$headers"; then return 0; fi
         fi
     done
     return 1
@@ -100,6 +104,9 @@ unit_quote() {
 unchanged=0
 if [ "$had_config" = 1 ] && [ "$had_unit" = 1 ] && cmp -s "$config_backup" "$env_file" && cmp -s "$desired" "$unit" && healthy_listener; then
     unchanged=1
+    if ! systemctl --user is-enabled --quiet "$name"; then
+        systemctl --user enable "$name" >/dev/null
+    fi
 else
     mkdir -p "$unit_dir"
     mutated=1

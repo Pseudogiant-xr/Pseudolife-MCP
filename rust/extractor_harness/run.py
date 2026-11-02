@@ -193,7 +193,7 @@ def corpus(kind, prompt):
     yield "unsupported-method", "PUT", "/models", {}, canned(kind, "OK")
     messages = [{"role": "system", "content": "system é 😀"}, {"role": "user", "content": "hello"},
                 {"role": "assistant", "content": "prior"}, {"role": "user", "content": "again"}]
-    for model in (None, "extractor", "bench", "claude-future" if kind == "claude" else "gpt-future"):
+    for model in (None, "extractor", "bench", "Qwen/Qwen3", "claude-future" if kind == "claude" else "gpt-future"):
         yield f"model-{model}", "POST", "/v1/chat/completions", {"messages": messages, "model": model}, canned(kind, "```json\n{\"é\": \"😀\"}\n```")
     for effort in ("  high ", "", 17, None):
         yield f"effort-{effort}", "POST", "/chat/completions", {"messages": messages, "reasoning_effort": effort}, canned(kind, "[]")
