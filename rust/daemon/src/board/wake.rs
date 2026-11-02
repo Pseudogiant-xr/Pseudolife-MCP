@@ -544,7 +544,10 @@ pub async fn serve_wake(c: &impl GenericClient, agent_id: &str, now: f64) -> Res
              JOIN coordination_messages m ON m.message_id=w.message_id \
              AND m.recipient_agent_id=w.recipient_agent_id WHERE w.recipient_agent_id=$2 \
              AND w.decision IN ('rung','attention') \
-             AND m.acknowledged_at IS NULL AND m.expires_at>$3",
+             AND m.acknowledged_at IS NULL AND m.expires_at>$3 \
+             AND (w.reason<>'lease_grant' OR EXISTS (SELECT 1 FROM coordination_leases l \
+             WHERE l.holder_agent_id=m.recipient_agent_id AND l.expires_at>$3 \
+             AND m.request_id='lease-grant:'||l.fence::text))",
             &[&seq_floor, &agent_id, &now],
         )
         .await?

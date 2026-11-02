@@ -918,7 +918,8 @@ def _dispatch(service, action: str, parameters: dict, *, headers=None,
             if now - getattr(service, "_coordination_pruned_at", float("-inf")) >= 60:
                 store.prune(audit_retention_days=cfg.audit_retention_days)
                 service._coordination_pruned_at = now
-        _drain_lease_grants_locked(service, store)
+        if action != "history":
+            _drain_lease_grants_locked(service, store)
         if action == "register":
             return store.register(principal, **parameters)
         if action == "leases":
@@ -968,9 +969,9 @@ def _dispatch(service, action: str, parameters: dict, *, headers=None,
 def _drain_lease_grants_locked(service, store):
     """Best effort after settlement, never initialize the full service.
     The audit outbox retains work across cold startup, failures and restart."""
-    if not _tier_ready(service, full=True):
-        return
     try:
+        if not _tier_ready(service, full=True):
+            return
         for grant in store.pending_lease_grants():
             for attempt in range(2):
                 identity = getattr(service, "_daemon_board_identity", None)

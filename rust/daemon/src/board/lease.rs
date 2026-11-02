@@ -166,6 +166,39 @@ async fn drop_reserved_waiters(
 }
 
 /// `_settle`: the locked row after expiry and grant, or None.
+async fn unaccepted_grant(
+    c: &impl GenericClient,
+    row: &LeaseRow,
+    name: &str,
+) -> Result<Option<Value>> {
+    let start = row.acquired_at.unwrap_or(0.0);
+    let end = start + LEASE_GRANT_WINDOW as f64;
+    let event = c
+        .query_opt(
+            "SELECT payload FROM coordination_events e WHERE e.event='lease_grant' \
+         AND e.actor='daemon' AND e.agent_id=$1 AND e.created_at>=$2 AND e.created_at<=$3 \
+         AND e.payload::jsonb->>'name'=$4 AND e.payload::jsonb->>'fence'=$5 \
+         AND NOT EXISTS (SELECT 1 FROM coordination_events a WHERE a.event='lease_update' \
+         AND a.created_at>=$2 AND a.created_at<=$3 AND a.agent_id=e.agent_id \
+         AND a.payload::jsonb->>'name'=$4 AND a.payload::jsonb->>'fence'=$5 \
+         AND a.payload::jsonb->>'accepted'='true') ORDER BY e.seq DESC LIMIT 1",
+            &[
+                &row.holder_agent_id,
+                &start,
+                &end,
+                &name,
+                &row.fence.to_string(),
+            ],
+        )
+        .await?;
+    event
+        .map(|event| {
+            serde_json::from_str(event.get::<_, &str>(0))
+                .map_err(|e| BoardError::Internal(e.to_string()))
+        })
+        .transpose()
+}
+
 pub async fn settle(
     c: &impl GenericClient,
     name: &str,
@@ -189,18 +222,7 @@ pub async fn settle(
     {
         // Match the exact queue-grant generation. Direct holds, renewed
         // windows and a retry that was already missed expire normally.
-        if let Some(event) = c
-            .query_opt(
-                "SELECT payload FROM coordination_events WHERE event='lease_grant' \
-             AND actor='daemon' AND agent_id=$1 AND created_at>=$2 \
-             AND payload::jsonb->>'name'=$3 AND payload::jsonb->>'fence'=$4 \
-             ORDER BY seq DESC LIMIT 1",
-                &[holder, &row.acquired_at, &name, &row.fence.to_string()],
-            )
-            .await?
-        {
-            let payload: Value = serde_json::from_str(event.get::<_, &str>(0))
-                .map_err(|e| BoardError::Internal(e.to_string()))?;
+        if let Some(payload) = unaccepted_grant(c, &row, name).await? {
             if let Some(window) = payload["window"].as_i64()
                 && payload["retry"] != true
                 && row.expires_at.unwrap_or(f64::INFINITY)
@@ -556,6 +578,13 @@ impl Store {
         let purpose_or_empty = purpose.clone().unwrap_or_default();
         if row.holder_agent_id.as_deref() == Some(agent_id) {
             let mut changed = serde_json::Map::new();
+            if events
+                .iter()
+                .any(|e| e.event == "lease_grant" && e.agent_id == agent_id)
+                || unaccepted_grant(&tx, &row, &name).await?.is_some()
+            {
+                changed.insert("accepted".into(), json!(true));
+            }
             let new_expect = expect32.filter(|e| Some(*e) != row.expect);
             let new_purpose = purpose.clone().filter(|p| *p != row.purpose);
             tx.execute(

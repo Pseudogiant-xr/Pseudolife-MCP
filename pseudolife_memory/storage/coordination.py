@@ -2074,6 +2074,19 @@ class CoordinationStore:
             "purpose='',acquired_at=NULL,expires_at=NULL,expect=NULL,expected_end=NULL,"
             "freed_at=%s WHERE name=%s RETURNING *", (now, name))
 
+    def _unaccepted_grant(self, row, name):
+        return self._one(
+            "SELECT payload FROM coordination_events e WHERE e.event='lease_grant' "
+            "AND e.actor='daemon' AND e.agent_id=%s AND e.created_at>=%s AND e.created_at<=%s "
+            "AND e.payload::jsonb->>'name'=%s AND e.payload::jsonb->>'fence'=%s "
+            "AND NOT EXISTS (SELECT 1 FROM coordination_events a WHERE a.event='lease_update' "
+            "AND a.created_at>=%s AND a.created_at<=%s AND a.agent_id=e.agent_id "
+            "AND a.payload::jsonb->>'name'=%s AND a.payload::jsonb->>'fence'=%s "
+            "AND a.payload::jsonb->>'accepted'='true') ORDER BY e.seq DESC LIMIT 1",
+            (row["holder_agent_id"], row["acquired_at"], row["acquired_at"] + LEASE_GRANT_WINDOW,
+             name, str(row["fence"]), row["acquired_at"], row["acquired_at"] + LEASE_GRANT_WINDOW,
+             name, str(row["fence"])))
+
     def _settle(self, name, now, events):
         """Expire a lapsed hold on ``name`` and grant a free lease to the head
         of its queue, inside the caller's transaction. Returns the locked row,
@@ -2088,12 +2101,7 @@ class CoordinationStore:
             # Only an unaccepted queue grant gets one retry. A direct hold,
             # a renewal beyond the grant window, or an already retried grant
             # expires normally. Match the generation, never just the agent.
-            grant = self._one(
-                "SELECT payload FROM coordination_events WHERE event='lease_grant' "
-                "AND actor='daemon' AND agent_id=%s AND created_at>=%s "
-                "AND payload::jsonb->>'name'=%s AND payload::jsonb->>'fence'=%s "
-                "ORDER BY seq DESC LIMIT 1",
-                (row["holder_agent_id"], row["acquired_at"], name, str(row["fence"])))
+            grant = self._unaccepted_grant(row, name)
             if grant is not None:
                 grant = json.loads(grant["payload"])
                 if (not grant.get("retry") and row["expires_at"] <=
@@ -2187,16 +2195,17 @@ class CoordinationStore:
         """Committed grants are an outbox until their one daemon notice is
         committed. Only a still-current, live grant is useful to deliver."""
         return self._all(
-            "SELECT l.name,l.fence FROM coordination_leases l WHERE l.expires_at>%s "
+            "SELECT l.name,l.fence FROM coordination_leases l WHERE l.expires_at>%s AND l.acquired_at>%s "
             "AND EXISTS (SELECT 1 FROM coordination_events e WHERE e.event='lease_grant' "
-            "AND e.actor='daemon' AND e.agent_id=l.holder_agent_id "
+            "AND e.actor='daemon' AND e.agent_id=l.holder_agent_id AND e.created_at>=l.acquired_at "
             "AND e.payload::jsonb->>'name'=l.name "
             "AND e.payload::jsonb->>'fence'=l.fence::text) "
             "AND NOT EXISTS (SELECT 1 FROM coordination_messages m WHERE "
             "m.sender_principal=%s AND m.request_id='lease-grant:'||l.fence::text) "
             "AND NOT EXISTS (SELECT 1 FROM coordination_events e WHERE e.event='send' "
-            "AND e.principal='daemon' AND e.payload::jsonb->>'request_id'='lease-grant:'||l.fence::text) "
-            "ORDER BY l.name LIMIT 50", (self.clock(), DAEMON_PRINCIPAL))
+            "AND e.principal='daemon' AND e.created_at>=l.acquired_at "
+            "AND e.payload::jsonb->>'request_id'='lease-grant:'||l.fence::text) "
+            "ORDER BY l.name LIMIT 50", (self.clock(), self.clock() - LEASE_GRANT_WINDOW, DAEMON_PRINCIPAL))
 
     def send_lease_grant(self, agent_id, credential, *, name, fence, **stamp):
         """Drain one grant after settlement. The lease locks before mail's
@@ -2212,13 +2221,14 @@ class CoordinationStore:
                          "AND request_id=%s", (DAEMON_PRINCIPAL, request_id)):
                 return None
             if self._one("SELECT 1 FROM coordination_events WHERE event='send' AND principal=%s "
-                         "AND payload::jsonb->>'request_id'=%s LIMIT 1", (DAEMON_PRINCIPAL, request_id)):
+                         "AND created_at>=%s AND payload::jsonb->>'request_id'=%s LIMIT 1",
+                         (DAEMON_PRINCIPAL, row["acquired_at"], request_id)):
                 return None
             if self._one(
                     "SELECT 1 FROM coordination_events WHERE event='lease_grant' AND actor='daemon' "
-                    "AND agent_id=%s AND payload::jsonb->>'name'=%s "
+                    "AND agent_id=%s AND created_at>=%s AND payload::jsonb->>'name'=%s "
                     "AND payload::jsonb->>'fence'=%s LIMIT 1",
-                    (row["holder_agent_id"], name, str(fence))) is None:
+                    (row["holder_agent_id"], row["acquired_at"], name, str(fence))) is None:
                 return None
             return self.send(DAEMON_PRINCIPAL, agent_id, credential,
                              to=row["holder_agent_id"], request_id=request_id,
@@ -2321,11 +2331,14 @@ class CoordinationStore:
             scope = {"principal": principal, "agent_id": agent_id,
                      "project": agent["project"], "task": agent["task"]}
             if row["holder_agent_id"] == agent_id:
-                # A renewal only extends the hold. Repeating the estimate
+                # A renewal accepts the grant and sets its expiry. Repeating the estimate
                 # the hold already carries leaves its expected end alone,
                 # so a stalled holder that keeps renewing still reads
                 # stale; a new estimate or purpose is a logged change.
                 sets, values, changed = ["expires_at=%s"], [now + ttl], {}
+                if (any(e["event"] == "lease_grant" and e["agent_id"] == agent_id for e in events)
+                        or self._unaccepted_grant(row, name) is not None):
+                    changed["accepted"] = True
                 if expect is not None and expect != row["expect"]:
                     sets += ["expect=%s", "expected_end=%s"]
                     values += [expect, now + expect]
@@ -2911,8 +2924,11 @@ class CoordinationStore:
             "JOIN coordination_messages m ON m.message_id=w.message_id "
             "AND m.recipient_agent_id=w.recipient_agent_id WHERE w.recipient_agent_id=%s "
             "AND w.decision IN ('rung','attention') "
-            "AND m.acknowledged_at IS NULL AND m.expires_at>%s",
-            (park_seq or 0, agent_id, now))
+            "AND m.acknowledged_at IS NULL AND m.expires_at>%s "
+            "AND (w.reason<>'lease_grant' OR EXISTS (SELECT 1 FROM coordination_leases l "
+            "WHERE l.holder_agent_id=m.recipient_agent_id AND l.expires_at>%s "
+            "AND m.request_id='lease-grant:'||l.fence::text))",
+            (park_seq or 0, agent_id, now, now))
         if reopen_only:
             rows = [item for item in rows if item["reason"] in _SYSTEM_WAKE_REASONS or (
                 park_seq is not None and item["decision"] == "rung"
@@ -3798,7 +3814,10 @@ class CoordinationStore:
                 raise CoordinationError("invalid_cursor", "cursor_ahead")
         attempt_clause = (" AND attempts<%s AND (sender_principal<>%s OR "
                           "EXISTS (SELECT 1 FROM coordination_wakes g WHERE "
-                          "g.message_id=coordination_messages.message_id AND g.reason='lease_grant')) "
+                          "g.message_id=coordination_messages.message_id AND g.reason='lease_grant' "
+                          "AND EXISTS (SELECT 1 FROM coordination_leases l WHERE "
+                          "l.holder_agent_id=coordination_messages.recipient_agent_id AND l.expires_at>%s "
+                          "AND coordination_messages.request_id='lease-grant:'||l.fence::text))) "
                           "AND (wake IS NULL OR "
                           "wake->>'decision' IN ('rung','hinted') OR "
                           "(wake->>'queued'='true' AND NOT EXISTS (SELECT 1 FROM "
@@ -3808,7 +3827,7 @@ class CoordinationStore:
                           "w.decision='nudged'))) AND repudiated_at IS NULL"
                           if for_delivery else "")
         now = self.clock()
-        params = ([agent_id, seq, now] + ([MAX_ATTEMPTS, DAEMON_PRINCIPAL] if for_delivery else [])
+        params = ([agent_id, seq, now] + ([MAX_ATTEMPTS, DAEMON_PRINCIPAL, now] if for_delivery else [])
                   + [limit])
         rows = self._all("SELECT * FROM coordination_messages WHERE recipient_agent_id=%s "
                          "AND recipient_sequence>%s AND acknowledged_at IS NULL AND expires_at>%s"

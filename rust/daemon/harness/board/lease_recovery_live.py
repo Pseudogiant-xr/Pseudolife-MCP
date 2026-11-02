@@ -8,6 +8,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 def test_live_lease_recovery(tmp_path, monkeypatch):
     import yaml
+    import json
     from board import run
     from board.boundary import runtime_library
     from board.lease_recovery import SCENARIOS
@@ -36,7 +37,7 @@ def test_live_lease_recovery(tmp_path, monkeypatch):
     _startup_recovery(run, scenario, binary, tmp_path)
     steps, differences, state_differences, problems = run.summarize(results)
     assert steps > 0
-    assert differences == state_differences == problems == 0, results
+    assert differences == state_differences == problems == 0, json.dumps(results, indent=2)
 
 
 def _startup_recovery(run, scenario, binary, root):

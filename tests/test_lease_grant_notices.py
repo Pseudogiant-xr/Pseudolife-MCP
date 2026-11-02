@@ -85,3 +85,19 @@ def test_unavailable_board_does_not_fail_warmup(store, monkeypatch):
         raise RuntimeError("board connection unavailable")
     monkeypatch.setattr(coordination, "_ensure_tier", unavailable)
     coordination.drain_lease_grants(svc)
+
+
+def test_ready_history_never_drains_pending_grant(store, monkeypatch):
+    from tests.test_coordination_auth import service as auth_service
+    a, b = queue(store, 2)
+    store.release_lease(*creds(a), name="resource")
+    svc = auth_service(allowed=["alice"])
+    svc._storage = store.storage
+    svc._coordination_ready = True
+    svc._coordination_lock = threading.RLock()
+    svc._hlc = HybridLogicalClock()
+    monkeypatch.setattr(coordination, "_store", lambda _: store)
+    monkeypatch.setattr(coordination, "_ensure_tier", lambda *_a, **_kw: None)
+    coordination.dispatch(svc, "history", {}, principal="alice", headers={
+        "x-pl-agent": b["agent_id"], "x-pl-agent-key": b["credential"]})
+    assert store.receive(*creds(b))["messages"] == []

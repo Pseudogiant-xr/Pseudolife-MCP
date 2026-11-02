@@ -16,14 +16,11 @@ python -m board.boundary --shared-clock
 python -m board.boundary --json-keys
 ```
 
-`lease-grant-recovery`, `lease-waiter-liveness` and `lease-notice-recovery`, `lease-grant-offer`, `lease-grant-parked-offer`
-exercise one missed-grant retry, live versus stale waiters, and recovery of
-committed grants that have not yet sent a notice. Both arms must satisfy
-holder, queue and delivery assertions, in addition to matching each other.
-They are registered in the complete body-evidence corpus. The explicit
-hosted stress selection is
-`rust/daemon/harness/board/lease_recovery_live.py::test_live_lease_recovery`;
-it uses the offline embedding fixture and the existing candidate binary.
+The `lease_recovery` scenarios cover missed-grant retry, live and stale waiters,
+notice recovery, accepted short renewals, obsolete grants and interleaved peer
+bells for Codex and non-Codex listeners. They are registered in the complete
+board corpus; the explicit offline adapter is
+`lease_recovery_live.py::test_live_lease_recovery`.
 
 The signed Console actions run with
 `--only maintainer-enrol maintainer-roles maintainer-mail maintainer-refusals`.

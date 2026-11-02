@@ -54,17 +54,18 @@ impl Board {
         let result: super::error::Result<()> = async {
             let pending = client
                 .query(
-                    "SELECT l.name,l.fence FROM coordination_leases l WHERE l.expires_at>$1 \
+                    "SELECT l.name,l.fence FROM coordination_leases l WHERE l.expires_at>$1 AND l.acquired_at>$3 \
                  AND EXISTS (SELECT 1 FROM coordination_events e WHERE e.event='lease_grant' \
-                 AND e.actor='daemon' AND e.agent_id=l.holder_agent_id \
+                 AND e.actor='daemon' AND e.agent_id=l.holder_agent_id AND e.created_at>=l.acquired_at \
                  AND e.payload::jsonb->>'name'=l.name \
                  AND e.payload::jsonb->>'fence'=l.fence::text) \
                  AND NOT EXISTS (SELECT 1 FROM coordination_messages m WHERE \
                  m.sender_principal=$2 AND m.request_id='lease-grant:'||l.fence::text) \
                  AND NOT EXISTS (SELECT 1 FROM coordination_events e WHERE e.event='send' \
-                 AND e.principal='daemon' AND e.payload::jsonb->>'request_id'='lease-grant:'||l.fence::text) \
+                 AND e.principal='daemon' AND e.created_at>=l.acquired_at \
+                 AND e.payload::jsonb->>'request_id'='lease-grant:'||l.fence::text) \
                  ORDER BY l.name LIMIT 50",
-                    &[&now(), &DAEMON_PRINCIPAL],
+                    &[&now(), &DAEMON_PRINCIPAL, &(now() - super::lease::LEASE_GRANT_WINDOW as f64)],
                 )
                 .await?;
             for grant in pending {
@@ -259,7 +260,7 @@ impl Store {
         let tx = client.transaction().await?;
         let row = tx
             .query_opt(
-                "SELECT holder_agent_id,fence,expires_at FROM coordination_leases \
+                "SELECT holder_agent_id,fence,expires_at,acquired_at FROM coordination_leases \
                                 WHERE name=$1 FOR UPDATE",
                 &[&name],
             )
@@ -274,6 +275,7 @@ impl Store {
         if row.get::<_, i64>("fence") != fence || row.get::<_, f64>("expires_at") <= now() {
             return Ok(None);
         }
+        let acquired: f64 = row.get("acquired_at");
         let request_id = format!("lease-grant:{fence}");
         if tx
             .query_opt(
@@ -288,8 +290,8 @@ impl Store {
         if tx
             .query_opt(
                 "SELECT 1 FROM coordination_events WHERE event='send' AND principal=$1 \
-             AND payload::jsonb->>'request_id'=$2 LIMIT 1",
-                &[&DAEMON_PRINCIPAL, &request_id],
+             AND created_at>=$3 AND payload::jsonb->>'request_id'=$2 LIMIT 1",
+                &[&DAEMON_PRINCIPAL, &request_id, &acquired],
             )
             .await?
             .is_some()
@@ -299,9 +301,9 @@ impl Store {
         if tx
             .query_opt(
                 "SELECT 1 FROM coordination_events WHERE event='lease_grant' AND actor='daemon' \
-                         AND agent_id=$1 AND payload::jsonb->>'name'=$2 \
+                         AND agent_id=$1 AND created_at>=$4 AND payload::jsonb->>'name'=$2 \
                          AND payload::jsonb->>'fence'=$3 LIMIT 1",
-                &[&holder, &name, &fence.to_string()],
+                &[&holder, &name, &fence.to_string(), &acquired],
             )
             .await?
             .is_none()

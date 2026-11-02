@@ -1033,7 +1033,9 @@ impl Store {
                      AND recipient_sequence>$2 AND acknowledged_at IS NULL AND expires_at>$3 \
                      AND attempts<$4 AND (sender_principal<>$5 OR EXISTS \
                      (SELECT 1 FROM coordination_wakes g WHERE g.message_id=coordination_messages.message_id \
-                     AND g.reason='lease_grant')) AND (wake IS NULL OR \
+                     AND g.reason='lease_grant' AND EXISTS (SELECT 1 FROM coordination_leases l WHERE \
+                     l.holder_agent_id=coordination_messages.recipient_agent_id AND l.expires_at>$3 \
+                     AND coordination_messages.request_id='lease-grant:'||l.fence::text))) AND (wake IS NULL OR \
                      wake->>'decision' IN ('rung','hinted') OR \
                      (wake->>'queued'='true' AND NOT EXISTS (SELECT 1 FROM \
                      coordination_wakes w WHERE w.recipient_agent_id=\

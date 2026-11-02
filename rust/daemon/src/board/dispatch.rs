@@ -463,7 +463,9 @@ impl Board {
                 *self.pruned_at.lock().expect("prune clock") = Some(std::time::Instant::now());
             }
         }
-        self.drain_lease_grants_locked(client).await;
+        if action != "history" {
+            self.drain_lease_grants_locked(client).await;
+        }
         if action == "register" {
             return self.store.register(client, principal, &params).await;
         }

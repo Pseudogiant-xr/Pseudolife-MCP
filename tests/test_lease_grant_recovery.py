@@ -211,3 +211,33 @@ def test_notice_dedupe_survives_live_message_pruning(store):
     assert store.pending_lease_grants() == []
     replacement = daemon(store)
     assert store.send_lease_grant(replacement["agent_id"], replacement["credential"], **pending) is None
+
+
+def test_short_renewal_accepts_grant_without_priority_retry(store):
+    a, b, c = queue(store, 3, ttl=600)
+    store.release_lease(*creds(a), name="resource")
+    store.test_time[0] += 10
+    store.acquire_lease(*creds(b), name="resource", ttl=120)
+    store.test_time[0] += 121
+    touch(store, c)
+    result = view(store)
+    assert result["holder"]["agent_id"] == c["agent_id"]
+    assert result["queued"] == 0
+
+
+@pytest.mark.parametrize("end", ["expired", "released"])
+def test_obsolete_grant_never_rings_or_delivers_live(store, end):
+    a, b, c = queue(store, 3)
+    store.storage.conn.execute("UPDATE coordination_agents SET capabilities=%s WHERE agent_id=%s",
+                               (Jsonb({"ring": True, "codex": False}), b["agent_id"]))
+    store.release_lease(*creds(a), name="resource")
+    sender = daemon(store)
+    store.send_lease_grant(sender["agent_id"], sender["credential"], **store.pending_lease_grants()[0])
+    if end == "expired":
+        store.test_time[0] += 121
+    else:
+        store.release_lease(*creds(b), name="resource")
+    attached = store.attach(*creds(b), attachment_id="listener", ring=True,
+                            ring_armed_until=store.test_time[0] + 60)
+    assert attached["wake"] is None
+    assert store.receive(*creds(b), for_delivery=True)["messages"] == []

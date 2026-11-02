@@ -101,6 +101,7 @@ class LeaseNoticeRecovery(Scenario):
             store.release_lease("default", ctx.id("A"), ctx.agents["A"]["credential"], name="resource")
         return setup() + [
             seed("committed grant without drain", commit_grant),
+            notice(act("history leaves grant outbox alone", "history", agent="B"), 0),
             notice(act("ordinary receive recovers grant", "receive", agent="B")),
             notice(act("repeat receive does not duplicate", "receive", agent="B")),
             seed("pruned live notice", lambda store, _ctx:
@@ -147,5 +148,50 @@ class LeaseGrantClaudeOffer(LeaseGrantParkedOffer):
     codex = False
 
 
+class LeaseAcceptedGrant(Scenario):
+    name = "lease-accepted-grant"
+    needs_bank = True
+
+    def steps(self):
+        initial = setup()
+        for step in initial[4:]:
+            step.body["ttl"] = 600
+        return initial + [
+            act("release grants B", "release", agent="A", body={"name": "resource"}),
+            act("B accepts shorter hold", "lease", agent="B", body={"name": "resource", "ttl": 120}),
+            age(121),
+            act("C returns", "update", agent="C", body={"status": "ready"}),
+            holder(act("accepted B gets no priority retry", "leases"), "C", ["D"]),
+        ]
+
+
+class LeaseObsoleteGrant(Scenario):
+    name = "lease-obsolete-grant"
+    needs_bank = True
+    expired = False
+
+    def steps(self):
+        def no_offer(_dsn, _ctx, response, _before):
+            assert response["status"] == 200, response
+            assert response["json"]["wake"] is None, response
+        attached = act("B reconnects after grant ended", "attach", agent="B", body=lambda c: {
+            "attachment_id": "listener", "ring": True, "ring_armed_until": c.now + 60},
+            save=lambda c, r: c.vals.update(generation=r["generation"]))
+        attached.check = no_offer
+        return setup() + [
+            act("release grants B", "release", agent="A", body={"name": "resource"}),
+            age(121) if self.expired else act("B releases", "release", agent="B", body={"name": "resource"}),
+            attached,
+            notice(act("obsolete grant excluded from live delivery", "receive", agent="B", body=lambda c: {
+                "attachment_id": "listener", "generation": c.vals["generation"]}), 0),
+        ]
+
+
+class LeaseExpiredGrant(LeaseObsoleteGrant):
+    name = "lease-expired-grant"
+    expired = True
+
+
 SCENARIOS = {s.name: s for s in (LeaseGrantRecovery, LeaseWaiterLiveness, LeaseNoticeRecovery,
-                              LeaseGrantOffer, LeaseGrantParkedOffer, LeaseGrantClaudeOffer)}
+                              LeaseGrantOffer, LeaseGrantParkedOffer, LeaseGrantClaudeOffer,
+                              LeaseAcceptedGrant, LeaseObsoleteGrant, LeaseExpiredGrant)}
