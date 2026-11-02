@@ -140,13 +140,12 @@ impl Pending {
         } else {
             Some(work.await)
         };
-        if self.finish() || result.is_none() {
+        match (self.finish(), result) {
             // The legacy HTTP transport settles an unanswered request with
             // this error; the cancelled handler's result is never delivered.
-            json!({"jsonrpc":"2.0", "id":id, "error":{"code":-32800,"message":"Request cancelled"}})
-                .to_string()
-        } else {
-            result.unwrap()
+            (true, _) | (_, None) => json!({"jsonrpc":"2.0", "id":id, "error":{"code":-32800,"message":"Request cancelled"}})
+                .to_string(),
+            (false, Some(result)) => result,
         }
     }
 }

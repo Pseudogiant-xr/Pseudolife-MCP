@@ -709,10 +709,10 @@ async fn post(
     let (id, method, params) = match message {
         Message::Request { id, method, params } => (id, method, params),
         Message::Notification { method, params } => {
-            if method == "notifications/cancelled" {
-                if let Some(id) = params.get("requestId") {
-                    app.mcp.requests.cancel(sid, id);
-                }
+            if method == "notifications/cancelled"
+                && let Some(id) = params.get("requestId")
+            {
+                app.mcp.requests.cancel(sid, id);
             }
             if validation::notification(&method, &Value::Object(params))
                 && method == "notifications/initialized"

@@ -78,6 +78,14 @@ def register(harness):
                 add(label, change=lambda body, value=value: body.update(id=value))
             for label, body in (("parse error", b"{"), ("batch", b"[]"), ("posted result", b'{"jsonrpc":"2.0","id":1,"result":{}}')):
                 rows.append(harness.case(label, "POST", "/mcp", base, body))
+            encoded = json.dumps({"jsonrpc": "2.0", "id": "東京", "method": "server/discover",
+                                  "params": {"_meta": {VERSION_KEY: VERSION, CAPABILITIES_KEY: {}}}}, ensure_ascii=False)
+            discover_headers = base + [("Mcp-Method", "server/discover")]
+            for encoding in ("utf-8-sig", "utf-16", "utf-16-be", "utf-32", "utf-32-be"):
+                rows.append(harness.case(f"JSON bytes {encoding}", "POST", "/mcp", discover_headers, encoded.encode(encoding)))
+            for label, value in (("oversized integer", "1" * 4301), ("nonfinite float", "Infinity")):
+                body = encoded.replace('"東京"', value).encode()
+                rows.append(harness.case(label, "POST", "/mcp", discover_headers, body))
             return rows
 
     class McpModernSubscriptions(McpModern):

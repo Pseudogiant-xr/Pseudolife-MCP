@@ -4,6 +4,7 @@
 use super::*;
 use base64::{Engine, engine::general_purpose::STANDARD};
 use std::collections::BTreeMap;
+use std::fmt::Write;
 use std::sync::OnceLock;
 
 const VERSION: &str = "2026-07-28";
@@ -47,7 +48,99 @@ fn response(value: Value) -> Response {
         Some(METHOD_NOT_FOUND) => 404,
         _ => 200,
     };
-    json_bytes(status, value.to_string().into_bytes(), None)
+    json_bytes(status, wire(&value).into_bytes(), None)
+}
+
+/// Modern HTTP uses json.dumps(ensure_ascii=True), including SSE messages.
+fn wire(value: &Value) -> String {
+    let mut out = String::new();
+    for c in value.to_string().chars() {
+        if c < '\u{7f}' {
+            out.push(c);
+        } else {
+            for unit in c.encode_utf16(&mut [0; 2]) {
+                write!(out, "\\u{unit:04x}").unwrap();
+            }
+        }
+    }
+    out
+}
+
+/// Legacy schema models move their named fields first. Restore the generated
+/// schema's order for modern InputSchema (`$schema`, `type`, then extras)
+/// and OutputSchema (`$schema`, then extras).
+fn tool_schema_order(result: &mut Value) {
+    for tool in result["tools"].as_array_mut().expect("tool catalogue") {
+        for name in ["inputSchema", "outputSchema"] {
+            let Some(schema) = tool.get_mut(name).and_then(Value::as_object_mut) else {
+                continue;
+            };
+            let mut fields: BTreeMap<_, _> = std::mem::take(schema).into_iter().collect();
+            for key in ["$schema", "type"]
+                .into_iter()
+                .take(if name == "inputSchema" { 2 } else { 1 })
+            {
+                if let Some(value) = fields.remove(key) {
+                    schema.insert(key.into(), value);
+                }
+            }
+            schema.extend(fields);
+        }
+    }
+}
+
+/// json.loads(bytes) detects UTF-8/16/32, with or without a byte-order mark.
+fn decode_body(body: &[u8]) -> Option<String> {
+    let (body, width, little) = if let Some(body) = body.strip_prefix(b"\xff\xfe\0\0") {
+        (body, 4, true)
+    } else if let Some(body) = body.strip_prefix(b"\0\0\xfe\xff") {
+        (body, 4, false)
+    } else if let Some(body) = body.strip_prefix(b"\xff\xfe") {
+        (body, 2, true)
+    } else if let Some(body) = body.strip_prefix(b"\xfe\xff") {
+        (body, 2, false)
+    } else if let Some(body) = body.strip_prefix(b"\xef\xbb\xbf") {
+        (body, 1, false)
+    } else if body.len() >= 4 && body[0] == 0 && body[1] == 0 {
+        (body, 4, false)
+    } else if body.len() >= 4 && body[1..4] == [0, 0, 0] {
+        (body, 4, true)
+    } else if body.len() >= 2 && body[0] == 0 {
+        (body, 2, false)
+    } else if body.len() >= 2 && body[1] == 0 {
+        (body, 2, true)
+    } else {
+        (body, 1, false)
+    };
+    if body.len() % width != 0 {
+        return None;
+    }
+    match width {
+        2 => String::from_utf16(
+            &body
+                .chunks_exact(2)
+                .map(|v| {
+                    if little {
+                        u16::from_le_bytes([v[0], v[1]])
+                    } else {
+                        u16::from_be_bytes([v[0], v[1]])
+                    }
+                })
+                .collect::<Vec<_>>(),
+        )
+        .ok(),
+        4 => body
+            .chunks_exact(4)
+            .map(|v| {
+                char::from_u32(if little {
+                    u32::from_le_bytes(v.try_into().unwrap())
+                } else {
+                    u32::from_be_bytes(v.try_into().unwrap())
+                })
+            })
+            .collect(),
+        _ => String::from_utf8(body.to_vec()).ok(),
+    }
 }
 
 fn unsupported(id: &Value, requested: &str) -> Value {
@@ -242,11 +335,17 @@ async fn dispatch(
         json!({"jsonrpc":"2.0", "id":id, "result": {
             "capabilities": {"prompts":{"listChanged":true}, "resources":{"listChanged":true,"subscribe":true}, "tools":{"listChanged":true}},
             "instructions":INSTRUCTIONS, "supportedVersions":[VERSION]}})
+    } else if method == "prompts/get" {
+        // Python's handler raises ValueError; modern runner sanitizes it.
+        error(&id, -32603, "Internal server error", None)
     } else {
         let data = method_response(&app, &principal, "", &headers, &id, &method, &params).await;
         serde_json::from_str(&data).expect("handler JSON-RPC response")
     };
     if let Some(result) = out.get_mut("result") {
+        if method == "tools/list" {
+            tool_schema_order(result);
+        }
         *result = stamp(&method, result.take());
     }
     out
@@ -268,10 +367,7 @@ pub(super) async fn handle(
     if accepts(&headers) != (true, true) {
         return plain(406, "");
     }
-    let raw = match std::str::from_utf8(&body)
-        .ok()
-        .and_then(|s| crate::http::parse_body_json(s).ok())
-    {
+    let raw = match decode_body(&body).and_then(|s| py_loads::loads(&s)) {
         Some(value) => value,
         None => return response(error(&Value::Null, PARSE_ERROR, "Parse error", None)),
     };
@@ -317,7 +413,7 @@ pub(super) async fn handle(
                 loop {
                     tokio::select! {
                         done = &mut work => {
-                            if let Ok(value) = done { let _ = tx.send(Ok(sse_event(&value.to_string()))).await; }
+                            if let Ok(value) = done { let _ = tx.send(Ok(sse_event(&wire(&value)))).await; }
                             break;
                         },
                         _ = tx.closed() => break,
@@ -407,7 +503,7 @@ impl Subscriptions {
                          "params":{"_meta":meta, "notifications":honored}});
         let stream = async_stream(move |tx| async move {
             let _guard = guard;
-            if tx.send(Ok(sse_event(&ack.to_string()))).await.is_err() {
+            if tx.send(Ok(sse_event(&wire(&ack)))).await.is_err() {
                 return;
             }
             loop {
@@ -416,12 +512,12 @@ impl Subscriptions {
                         if event.is_none() {
                             let result = stamp("subscriptions/listen", json!({"_meta":meta}));
                             let value = json!({"jsonrpc":"2.0", "id":id, "result":result});
-                            let _ = tx.send(Ok(sse_event(&value.to_string()))).await;
+                            let _ = tx.send(Ok(sse_event(&wire(&value)))).await;
                             break;
                         }
                         if tools {
                             let message = json!({"jsonrpc":"2.0", "method":"notifications/tools/list_changed", "params":{"_meta":meta}});
-                            if tx.send(Ok(sse_event(&message.to_string()))).await.is_err() { break; }
+                            if tx.send(Ok(sse_event(&wire(&message)))).await.is_err() { break; }
                         }
                     },
                     _ = tx.closed() => break,
