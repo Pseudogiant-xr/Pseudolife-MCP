@@ -1026,6 +1026,18 @@
     ]
    },
    "status": 200
+  },
+  {
+   "headers": {},
+   "json": {
+    "error": {
+     "code": -32600,
+     "message": "Body must be a single JSON-RPC request or notification object"
+    },
+    "id": null,
+    "jsonrpc": "2.0"
+   },
+   "status": 400
   }
  ]
 }
