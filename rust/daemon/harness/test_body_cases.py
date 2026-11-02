@@ -101,6 +101,32 @@ def test_health_memory_golden_replay_validates_only_the_raw_candidate(reading):
     assert run.compare_case(c, golden, golden, golden=True)["diffs"]
 
 
+@pytest.mark.parametrize("reading", MEMORY_READINGS + [{"source": "unavailable"}])
+def test_recorded_health_memory_uses_replay_host_oracle_shape(reading, monkeypatch):
+    from pseudolife_memory.utils import memory_headroom
+    monkeypatch.setattr(memory_headroom, "read_memory_headroom", lambda: reading)
+    golden = run.load_golden("tokens")
+    case = next(c for c in run.Tokens().cases() if c["name"] == "health GET")
+    recorded = golden["responses"][0]
+    raw = copy.deepcopy(recorded)
+    raw["json"]["memory"] = reading
+    assert not run.compare_case(case, recorded, raw, golden=True)["diffs"]
+    broken = copy.deepcopy(raw)
+    broken["json"]["memory"] = {"source": "invalid"}
+    assert run.compare_case(case, recorded, broken, golden=True)["diffs"]
+    del broken["json"]["memory"]
+    assert run.compare_case(case, recorded, broken, golden=True)["diffs"]
+
+
+def test_gate_css_case_targets_a_current_asset_and_rejects_spa_fallback():
+    case = next(c for c in run.gate_cases(None) if c["name"] == "ui asset css")
+    asset = run.REPO / "pseudolife_memory/web/static" / case["path"].removeprefix("/ui/")
+    assert asset.is_file()
+    fallback = {"status": 200, "headers": {"content-type": "text/html; charset=utf-8"},
+                "bytes": "<!doctype html>"}
+    assert run.compare_case(case, fallback, fallback)["diffs"]
+
+
 def test_daemon_mutant_observer_failure(tmp_path, monkeypatch):
     report = tmp_path / "report.json"
     monkeypatch.setattr("sys.argv", ["run.py", "mutants", "--rust-bin", "not-executed",
