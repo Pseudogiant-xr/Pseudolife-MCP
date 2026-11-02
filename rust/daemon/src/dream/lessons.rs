@@ -371,7 +371,8 @@ pub async fn synthesize_lessons(
     writer: &str,
     extractor: &Extractor,
 ) -> Result<Value, ToolError> {
-    let m = &svc.config.memory;
+    let config = svc.runtime_config();
+    let m = &config.memory;
     if !(m.lessons_enabled && m.lessons_synthesize_in_dream) {
         return Ok(json!({"signals": 0, "lessons": 0, "skipped": "disabled"}));
     }

@@ -220,9 +220,9 @@ def test_without_a_dsn_it_runs_inside_the_daemon_container(docker, capsys):
     code, out, _err = _run(capsys, "laptop", "--tier", "minimal", "--replace")
     assert code == 0 and out == "invited\n"
     _inspect, _engine, check, run = docker.calls
-    assert check == ["docker", "exec", "pseudolife-mcp-daemon", "python", "-m",
+    assert check == ["docker", "exec", "-e", "PSEUDOLIFE_DAEMON_EXEC=1", "pseudolife-mcp-daemon", "python", "-m",
                      "pseudolife_memory.cli", "invite", "--version-check"]
-    assert run == ["docker", "exec", "-i", "pseudolife-mcp-daemon", "python", "-m",
+    assert run == ["docker", "exec", "-i", "-e", "PSEUDOLIFE_DAEMON_EXEC=1", "pseudolife-mcp-daemon", "python", "-m",
                    "pseudolife_memory.cli", "invite", "laptop", "--tier", "minimal", "--expires",
                    "900s", "--replace", "--url", "http://100.64.0.2:8765"]
 
