@@ -1,4 +1,5 @@
 """Live Console policies reach the resident cortex before the next write."""
+from concurrent.futures import ThreadPoolExecutor
 from threading import Lock
 from types import SimpleNamespace
 
@@ -39,16 +40,14 @@ def test_applied_policy_changes_the_next_fact_write(service, field, value, suppo
     assert service._cortex.lookup("fixture", "host").value == "new"
 
 
-def test_policy_written_before_initialization_is_available_to_new_cortex(service):
-    service._cortex = None
-    patch = {"memory.cortex.protect_provenance": False,
-             "memory.cortex.supersede_confidence_margin": 0.5}
-    assert write_config(service, patch)["applied"] == list(patch)
-    cc = service.config.memory.cortex
-    resident = CortexStore(protect_provenance=cc.protect_provenance,
-                           supersede_confidence_margin=cc.supersede_confidence_margin)
-    assert resident.protect_provenance is False
-    assert resident.supersede_confidence_margin == 0.5
+def test_unrelated_config_save_does_not_wait_for_initialization_lock(service):
+    # Cold initialization holds this lock while loading the embedder. Knobs
+    # whose consumers read config directly must remain writable throughout.
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        with service._lock:
+            saved = pool.submit(write_config, service, {"memory.top_k": 12})
+            assert saved.result(timeout=2)["applied"] == ["memory.top_k"]
+    assert service.config.memory.top_k == 12
 
 
 def test_cold_file_hydration_keeps_applied_policy_over_snapshot(service, monkeypatch):

@@ -960,16 +960,20 @@ def _write_config_locked(service: Any, patch: dict[str, Any]) -> dict[str, Any]:
     applied, restart = [], []
     # Initialization and cortex writes hold the service lock. Publish the
     # config and the two policies copied into the resident store together,
-    # after persistence succeeds. Lightweight Console fixtures have no lock.
-    with getattr(service, "_lock", nullcontext()):
+    # after persistence succeeds. Other knobs read config directly and must
+    # not wait for a cold embedder load. Lightweight fixtures have no lock.
+    cortex_paths = ("memory.cortex.protect_provenance",
+                    "memory.cortex.supersede_confidence_margin")
+    lock = (getattr(service, "_lock", nullcontext())
+            if any(path in cortex_paths for path in coerced) else nullcontext())
+    with lock:
         for path, value in coerced.items():
             knob = _KNOB_BY_PATH[path]
             # Restart knobs are persisted only; their running values stay put.
             if not knob.get("restart"):
                 try:
                     _set_by_path(service.config, path, value)
-                    if path in ("memory.cortex.protect_provenance",
-                                "memory.cortex.supersede_confidence_margin"):
+                    if path in cortex_paths:
                         cortex = getattr(service, "_cortex", None)
                         if cortex is not None:
                             setattr(cortex, path.rsplit(".", 1)[1], value)
