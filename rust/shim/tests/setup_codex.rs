@@ -559,7 +559,9 @@ impl Home {
         let path = std::env::temp_dir().join(format!("pseudolife-setup-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&path).unwrap();
         std::fs::write(path.join("config.toml"), "# foreign configuration\n").unwrap();
-        Self(path)
+        // Match the canonical, non-verbatim spelling used in recovery events.
+        let user = user_config(&Fake::new(&path).config, &path).unwrap();
+        Self(user.path.parent().unwrap().to_owned())
     }
 }
 impl Drop for Home {
