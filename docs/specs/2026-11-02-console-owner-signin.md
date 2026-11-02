@@ -237,8 +237,13 @@ such a daemon anyway.
    - If the browser already holds a working token, it asks before replacing
      it, so a link cannot silently sign the owner's browser into someone
      else's principal.
-   - It mints a random token, stores it, and posts
-     `{code, token_sha256, label}` to `POST /api/console/session`.
+   - It mints a random token and keeps it as a pending token, separate
+     from `pl_token`.
+   - It posts `{code, token_sha256, label}` to `POST /api/console/session`.
+   - Only a success moves the pending token into `pl_token`. After an
+     ambiguous answer (a network drop), it first tests the pending token on a
+     bearer-gated read. A refusal or an expired code leaves the working
+     token untouched.
 6. **The daemon creates the session.** The Console reloads, signed in.
 
 **`POST /api/console/session` is a browser-called pre-auth route**, the
@@ -372,11 +377,15 @@ the dialog keeps "Paste a bearer token" under "Advanced".
     - sign-in code;
     - "Advanced: paste a bearer token".
   - A new `#/signin` route.
-  - A 401 from a bearer-gated route, `/api/console/*` list and revoke
-    included, opens it with "Sign in again". Only the two pre-auth routes,
-    `/session` and `/passkey-challenge`, read 401, 404 or 501 as "this daemon
-    cannot sign in yet", and keep the paste option. The Python daemon never
-    answers 401 on those two, and a daemon without them never loops.
+  - **Whether the daemon offers sign-in is a capability, not a guess from
+    errors.** `/health`, which is unauthenticated, gains
+    `console_signin: {link: bool, passkey: bool}`.
+    - When it is absent (an older daemon, or the Rust daemon before the
+      port), the dialog offers only "paste a bearer token" and says this
+      daemon cannot sign in yet.
+    - Every 401 from a bearer-gated route, `/api/console/*` list and revoke
+      included, means "Sign in again".
+    - The dialog never infers capability from 401, 404 or 501.
   - The bearer wording at `frontend/src/lib/board.ts` (the
     `usesConsoleToken` comment and `pendingText`'s "Hidden: uses another
     token") and the demo board in `web/fixtures.py` are updated with it.
@@ -426,8 +435,9 @@ Rust follows each Python step in its own PR (the oracle leads, per
 - **Unported routes don't answer 501 in Rust.** Routes outside `routes.json`
   answer 401 from the bearer gate, or 404 once authenticated. Each step
   therefore records `daemon/divergences/` entries and parity rows naming the
-  real answer. The Console treats 401, 404 and 501 from the two pre-auth
-  routes as "this daemon cannot sign in yet".
+  real answer. The Rust `/health` omits `console_signin` until both routes
+  are ported, so the Console never offers sign-in there. The `/health`
+  field is itself a parity row.
 - **`/session` and `/passkey-challenge` are pre-auth routes**, dispatched
   beside `/api/pair` in `http.rs`, outside `ConsoleRoutes`.
 - **`/link`, list and revoke are bearer-gated routes.** If they join
@@ -488,7 +498,11 @@ not be built. It also found new defects, all folded in:
 - a global session lookup would have made sessions agent credentials on
   hooks, `/mcp` and `/api/coordination/*`;
 - the backfill missed keys logged as `add`;
-- 401 meant two things;
+- 401 meant two things. Codex raised it too, and suggested the `/health`
+  capability adopted here;
 - the challenge route would have needed the coordination lock;
 - an unnormalised stored origin;
 - what a rebind does to existing sessions.
+
+Codex's re-check also found the Console replacing a working token before a
+redemption succeeded; the pending token fixes it.
