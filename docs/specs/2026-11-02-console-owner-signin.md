@@ -5,9 +5,11 @@ principal belongs to the bank owner unless it was invited as someone else's.
 The Console signs in both with a one-time link from the CLI and with the
 maintainer passkey.
 
-This work adds new Python routes, a new CLI mode and a schema bump (v59).
-D10 in `rust/CUTOVER.md` freezes all three, so the maintainer grants or
-refuses an exception on this spec's PR before any implementation PR opens.
+This work adds new Python routes, a new CLI mode and a schema bump (v59),
+which D10 in `rust/CUTOVER.md` freezes. The maintainer granted the D10
+exception for this work on 2026-11-02 (PR #1144). The exception covers the
+`/api/console/` routes, the `pseudolife-mcp console` mode and the v59 bump
+described here, nothing wider.
 
 ## What a user should experience
 
