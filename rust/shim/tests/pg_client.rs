@@ -65,9 +65,7 @@ fn unsupported_dsn_controls_are_named_and_never_ignored() {
         "sslpassword",
         "sslnegotiation",
         "sslsni",
-        "connect_timeout",
         "options",
-        "application_name",
         "hostaddr",
         "service",
         "passfile",
@@ -94,6 +92,12 @@ fn unsupported_dsn_controls_are_named_and_never_ignored() {
         assert_eq!(
             Dsn::parse(&format!("host=localhost sslmode='{mode}'")).unwrap_err(),
             Error::UnsupportedOption("sslmode".into())
+        );
+    }
+    for value in ["fixture-value", "1.5", "18446744073709551616"] {
+        assert_eq!(
+            Dsn::parse(&format!("host=localhost connect_timeout='{value}'")).unwrap_err(),
+            Error::InvalidOption("connect_timeout")
         );
     }
     for dsn in [

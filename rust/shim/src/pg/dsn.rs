@@ -60,7 +60,8 @@ fn option(key: &str) -> Result<(), Error> {
         return Err(Error::InvalidDsn);
     }
     match key {
-        "host" | "port" | "user" | "password" | "dbname" | "sslmode" | "sslrootcert" => Ok(()),
+        "host" | "port" | "user" | "password" | "dbname" | "sslmode" | "sslrootcert"
+        | "connect_timeout" | "application_name" => Ok(()),
         _ => Err(Error::UnsupportedOption(key.into())),
     }
 }
@@ -199,6 +200,7 @@ impl Dsn {
             return Err(Error::InvalidOption("port"));
         }
         config.port(port);
+        let connect_timeout = fields.remove("connect_timeout");
         for (key, value) in fields {
             match key.as_str() {
                 "user" => {
@@ -206,6 +208,9 @@ impl Dsn {
                 }
                 "dbname" => {
                     config.dbname(value);
+                }
+                "application_name" => {
+                    config.application_name(value);
                 }
                 _ => unreachable!("admitted DSN option"),
             }
@@ -224,7 +229,16 @@ impl Dsn {
             config.ssl_mode(tokio_postgres::config::SslMode::Require);
             config.ssl_negotiation(tokio_postgres::config::SslNegotiation::Direct);
         }
-        config.connect_timeout(Duration::from_secs(10));
+        let seconds = connect_timeout
+            .as_deref()
+            .map(str::trim)
+            .map(str::parse::<u64>)
+            .transpose()
+            .map_err(|_| Error::InvalidOption("connect_timeout"))?
+            .unwrap_or(10);
+        if seconds != 0 {
+            config.connect_timeout(Duration::from_secs(seconds));
+        }
         Ok(Self {
             config,
             mode,

@@ -1,4 +1,4 @@
-#![forbid(unsafe_code)]
+#![deny(unsafe_code)]
 // Compile the same private proof leaf into a selectable integration target so
 // hosted lifecycle stress can exercise its cancellation and cleanup regressions.
 use pseudolife_stdio::{board, credentials, lifecycle, pg};

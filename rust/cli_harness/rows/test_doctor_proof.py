@@ -16,7 +16,8 @@ def _candidate() -> Path:
     return Path(value).resolve()
 
 
-def _run(tmp_path: Path, *arguments: str, dsn: str | None = None, models: Path | None = None):
+def _run(tmp_path: Path, *arguments: str, dsn: str | None = None, models: Path | None = None,
+         extra_env: dict | None = None):
     source = _candidate()
     candidate = tmp_path / source.name
     shutil.copy2(source, candidate)
@@ -28,6 +29,7 @@ def _run(tmp_path: Path, *arguments: str, dsn: str | None = None, models: Path |
         env["PSEUDOLIFE_TEST_DATABASE_URL"] = dsn
     if models is not None:
         env["PSEUDOLIFE_DAEMON_ONNX_DIR"] = str(models)
+    env.update(extra_env or {})
     return subprocess.run([str(candidate), "doctor", "--disposable-proof", *arguments],
                           env=env, cwd=tmp_path, capture_output=True, text=True, timeout=15)
 
@@ -177,7 +179,65 @@ def _admission_models(root):
     return root
 
 
-@pytest.mark.parametrize("fault", ["create-timeout", "drop-timeout", pytest.param(
+@pytest.mark.parametrize("option", ["sslmode=require", "sslmode=verify-full", "sslrootcert=relative.pem"])
+def test_unsupported_daemon_tls_refuses_before_create(tmp_path, option):
+    (tmp_path / ("pseudolife-daemon.exe" if os.name == "nt" else "pseudolife-daemon")).write_bytes(b"must not execute")
+    result = _run(tmp_path, dsn=f"host=127.0.0.1 port=1 user=fixture dbname=r2_admission {option}",
+                  models=_admission_models(tmp_path / "models"))
+    assert result.returncode == 1
+    report = json.loads(result.stdout)
+    assert report["error"] == "NativeProofTlsUnsupported"
+    assert "sslmode=disable" in report["recovery"]
+    assert "nothing was changed" in report["recovery"]
+
+
+def test_empty_configured_database_refuses_before_create(tmp_path):
+    (tmp_path / ("pseudolife-daemon.exe" if os.name == "nt" else "pseudolife-daemon")).write_bytes(b"must not execute")
+    result = _run(tmp_path, dsn="host=127.0.0.1 port=1 user=fixture dbname=r2_admission",
+                  models=_admission_models(tmp_path / "models"),
+                  extra_env={"PSEUDOLIFE_MCP_DATABASE_URL": "host=127.0.0.1 dbname=''"})
+    assert result.returncode == 1
+    assert json.loads(result.stdout)["error"] == "ProductionDatabaseError"
+
+
+@pytest.mark.skipif(os.environ.get("PSEUDOLIFE_DOCTOR_LIVE_PROOF") != "1",
+                   reason="explicit disposable server and installed native daemon required")
+@pytest.mark.parametrize("damage", ["metadata", "checksum"])
+def test_corrupt_model_names_repair_and_removes_owned_bank(tmp_path, damage):
+    import psycopg
+    from psycopg.conninfo import conninfo_to_dict, make_conninfo
+    dsn = os.environ["PSEUDOLIFE_TEST_DATABASE_URL"]
+    assert conninfo_to_dict(dsn)["dbname"].startswith("r2_")
+    admin = make_conninfo(dsn, dbname="postgres", connect_timeout=5)
+    def banks():
+        with psycopg.connect(admin, autocommit=True) as connection:
+            return {row[0] for row in connection.execute(
+                "SELECT datname FROM pg_database WHERE starts_with(datname, 'r2_')")}
+    before = banks()
+    candidate = _candidate()
+    env = {key: value for key, value in os.environ.items()
+           if key in ("SYSTEMROOT", "WINDIR", "PATH", "LD_LIBRARY_PATH", "ORT_DYLIB_PATH")}
+    models = _admission_models(tmp_path / "corrupt-model")
+    if damage == "checksum":
+        (models / "modules.json").write_text(json.dumps([
+            {"path": "", "type": "sentence_transformers.models.Transformer"},
+            {"path": "1_Pooling", "type": "sentence_transformers.models.Pooling"},
+        ]))
+    env.update(HOME=str(tmp_path), USERPROFILE=str(tmp_path),
+               TMPDIR=str(tmp_path), TEMP=str(tmp_path), TMP=str(tmp_path),
+               PSEUDOLIFE_TEST_DATABASE_URL=make_conninfo(dsn, connect_timeout=5, application_name="proof fixture"),
+               PSEUDOLIFE_DAEMON_ONNX_DIR=str(models))
+    result = subprocess.run([str(candidate), "doctor", "--disposable-proof"],
+                            env=env, cwd=tmp_path, capture_output=True, text=True, timeout=90)
+    assert result.returncode == 1
+    report = json.loads(result.stdout)
+    assert report["error"] == "ProvisionedModelIntegrityError"
+    assert "pseudolife-daemon provision models" in report["recovery"]
+    assert not result.stderr
+    assert banks() == before
+
+
+@pytest.mark.parametrize("fault", ["create-timeout", "drop-lost-reply", "drop-checkpoint-delay", pytest.param(
     "create-interrupt", marks=pytest.mark.skipif(os.name == "nt", reason="POSIX SIGTERM contract"))])
 def test_lost_database_replies_are_bounded_and_cleanup_is_reported(tmp_path, fault):
     """A loopback PostgreSQL wire fixture loses replies after accepting SQL."""
@@ -206,6 +266,7 @@ def test_lost_database_replies_are_bounded_and_cleanup_is_reported(tmp_path, fau
 
         def handle(self):
             try:
+                statement_timeout = None
                 size = struct.unpack("!I", self.exact(4))[0]
                 self.exact(size - 4)
                 self.frame(b"R", struct.pack("!I", 0))
@@ -218,11 +279,26 @@ def test_lost_database_replies_are_bounded_and_cleanup_is_reported(tmp_path, fau
                         return
                     query = body[:-1].decode()
                     queries.append(query)
+                    if query.startswith("SET statement_timeout"):
+                        statement_timeout = int(query.split("'")[1].removesuffix("s"))
+                    dropping = query.startswith("DROP DATABASE")
+                    if dropping and fault == "drop-checkpoint-delay":
+                        reached.set()
+                        # A real DROP may wait 150–172 s for a checkpoint. This
+                        # shorter witness still exceeds the old 5/10 s limits.
+                        if release.wait(min(12, statement_timeout)):
+                            return
+                        if statement_timeout < 12:
+                            self.frame(b"E", b"SERROR\0C57014\0Mstatement timeout\0\0")
+                        else:
+                            self.frame(b"C", b"DROP DATABASE\0")
+                        self.frame(b"Z", b"I")
+                        continue
                     stalled = (query.startswith("CREATE DATABASE") and fault.startswith("create")) or (
-                        query.startswith("DROP DATABASE") and fault == "drop-timeout")
+                        dropping and fault == "drop-lost-reply")
                     if stalled:
                         reached.set()
-                        release.wait(90)
+                        release.wait(0.1 if dropping else 90)
                         return
                     self.frame(b"C", b"SET\0")
                     self.frame(b"Z", b"I")
@@ -254,14 +330,17 @@ def test_lost_database_replies_are_bounded_and_cleanup_is_reported(tmp_path, fau
             assert child.returncode == 1
             report = json.loads(stdout)
             expected = {"create-interrupt": "KeyboardInterrupt", "create-timeout": "TimeoutError",
-                        "drop-timeout": "FixtureCleanupError"}[fault]
+                        "drop-lost-reply": "FixtureCleanupError",
+                        "drop-checkpoint-delay": "NativeDaemonSpawnError"}[fault]
             assert report["error"] == expected
             assert not stderr
             assert any(query.startswith('DROP DATABASE IF EXISTS "r2_blackhole_proof_') for query in queries)
-            if fault == "drop-timeout":
+            if fault == "drop-lost-reply":
                 assert report["fixture_removed"] is False
                 assert report["fixture_bank"].startswith("r2_blackhole_proof_")
                 assert "DROP DATABASE" in report["recovery"]
+            if fault.startswith("drop-"):
+                assert "SET statement_timeout = '300s'" in queries
         finally:
             release.set()
             if child.poll() is None:
@@ -295,7 +374,8 @@ def test_invalid_or_production_database_report_matches_python(tmp_path, monkeypa
 
 @pytest.mark.skipif(os.name == "nt" or os.environ.get("PSEUDOLIFE_DOCTOR_LIVE_PROOF") != "1",
                     reason="POSIX signal and an explicit disposable server required")
-def test_signal_during_daemon_start_removes_owned_process_files_and_bank(tmp_path):
+@pytest.mark.parametrize("mode", ["signal", "exited-descendant"])
+def test_signal_during_daemon_start_removes_owned_process_files_and_bank(tmp_path, mode):
     import signal
     import sys
     import time
@@ -318,8 +398,13 @@ def test_signal_during_daemon_start_removes_owned_process_files_and_bank(tmp_pat
     shutil.copy2(os.environ["PSEUDOLIFE_PROOF_CANDIDATE"], candidate)
     marker = tmp_path / "daemon-started"
     daemon = tmp_path / "pseudolife-daemon"
-    daemon.write_text(f"#!{sys.executable}\nimport os,time\nfrom pathlib import Path\n"
-                      f"Path({str(marker)!r}).write_text(str(os.getpid()))\ntime.sleep(120)\n")
+    script = f"#!{sys.executable}\nimport os,time\nfrom pathlib import Path\n"
+    if mode == "exited-descendant":
+        script += ("if os.fork():\n"
+                   f" while not Path({str(marker)!r}).exists(): time.sleep(0.01)\n"
+                   " os._exit(0)\n")
+    script += f"Path({str(marker)!r}).write_text(str(os.getpid()))\ntime.sleep(120)\n"
+    daemon.write_text(script)
     daemon.chmod(0o700)
     models = _admission_models(tmp_path / "models")
     temp = tmp_path / "temp"
@@ -337,13 +422,20 @@ def test_signal_during_daemon_start_removes_owned_process_files_and_bank(tmp_pat
             assert time.monotonic() < deadline, "fixture daemon did not start"
             time.sleep(0.02)
         daemon_pid = int(marker.read_text())
-        child.send_signal(signal.SIGTERM)
+        if mode == "signal":
+            child.send_signal(signal.SIGTERM)
         stdout, stderr = child.communicate(timeout=30)
         assert child.returncode == 1
-        assert json.loads(stdout)["error"] == "KeyboardInterrupt"
+        expected = "KeyboardInterrupt" if mode == "signal" else "NativeDaemonStartupError"
+        assert json.loads(stdout)["error"] == expected
         assert not stderr
-        with pytest.raises(ProcessLookupError):
-            os.kill(daemon_pid, 0)
+        import psutil
+        # An orphan can briefly remain as a zombie awaiting its reaper; it must
+        # never keep executing or retain the fixture's stderr or database socket.
+        try:
+            assert psutil.Process(daemon_pid).status() == psutil.STATUS_ZOMBIE
+        except psutil.NoSuchProcess:
+            pass
         assert banks() == before
         assert not list(temp.iterdir())
     finally:

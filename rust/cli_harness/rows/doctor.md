@@ -29,8 +29,19 @@ The fixture DSN's resolved user and password are bound before changing its
 database name or the child environment. URI query escaping is preserved.
 CREATE and DROP have client deadlines as well as server statement limits,
 so a lost reply reaches owned-bank cleanup or an explicit recovery report.
+DROP retains Python's 300-second checkpoint allowance, with a 315-second
+client deadline and a second connection attempt. `connect_timeout` and
+`application_name` are preserved. TLS modes requiring encryption and explicit
+certificate options are refused before CREATE because the sibling daemon's
+database transport cannot honor them end to end.
 Queued adapter file writes are drained before removing the fixture directory;
 if both bank and directory cleanup fail, the report names both resources.
+Signal receivers remain installed through cleanup. A Windows job owns the
+daemon tree; POSIX cleanup kills its process group before releasing the
+leader's PID. Linux parent-death signaling also kills the direct daemon if
+the CLI is forcibly terminated. Raw child diagnostics remain private: only
+bounded classification into model, runtime or listener repair messages is
+returned.
 
 The proof checks enqueue, hint and ring signal, receive, explicit ack and an
 empty mailbox after ack. It stops its owned child and removes its fixture

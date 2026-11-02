@@ -520,6 +520,10 @@ def healthy(**fields):
 
 def setup(*steps):
     def run(arm):
+        if os.name != "nt":
+            # The owned fixture cwd is not an observed host permission. Keep
+            # golden inputs independent of the recording machine's umask.
+            arm.cwd.chmod(0o755)
         if arm.daemon is not None:
             arm.daemon.version = own_version(arm)
             arm.daemon.home = arm.home

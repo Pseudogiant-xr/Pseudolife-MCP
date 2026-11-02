@@ -13,12 +13,20 @@ use std::{
     sync::Arc,
     time::Duration,
 };
-use tokio::process::Child;
 use unicode_casefold::UnicodeCaseFold;
+
+#[path = "proof_diagnostics.rs"]
+mod diagnostics;
+#[path = "proof_process.rs"]
+mod process;
 
 const RECOVERY: &str = "Check the disposable fixture server and CREATE/DROP DATABASE permission; no host delivery has been verified.";
 const TOKEN: &str = "synthetic-proof-bearer";
 const DATABASE_IO_TIMEOUT: Duration = Duration::from_secs(10);
+// Python measured DROP checkpoint waits of 150–172 s on large fixture servers
+// (coordination_proof.py, 2026-10-01). Leave a client margin beyond its 300 s
+// statement timeout so a lost response is bounded without defeating that fix.
+const DROP_IO_TIMEOUT: Duration = Duration::from_secs(315);
 
 pub(super) fn daemon() -> Option<PathBuf> {
     let name = if cfg!(windows) {
@@ -40,7 +48,7 @@ pub(super) fn missing_daemon() -> Value {
 
 pub(super) fn missing_models() -> Value {
     json!({"ok": false, "error": "ProvisionedModelsRequired", "recovery":
-        "The native disposable proof needs the daemon's provisioned embedding model. Run `pseudolife-daemon provision models` or run inside the daemon container; keep the same PSEUDOLIFE_DAEMON_MODELS_DIR (or PSEUDOLIFE_DAEMON_ONNX_DIR) setting. Nothing was changed."})
+        "The native disposable proof needs the daemon's provisioned embedding model. Run `pseudolife-daemon provision models` or run inside the daemon container. If several cached generations exist, set PSEUDOLIFE_DAEMON_ONNX_DIR to one complete embedding directory. Nothing was changed."})
 }
 
 /// Resolve the host's read-only model inputs before replacing HOME and data dir.
@@ -101,7 +109,43 @@ pub(super) fn models() -> Option<PathBuf> {
 }
 
 fn failed(error: &'static str) -> Value {
-    json!({"ok": false, "error": error, "recovery": RECOVERY})
+    let recovery = match error {
+        "ProvisionedModelIntegrityError" => {
+            "The native daemon rejected the embedding model's integrity or metadata. Move the damaged model directory aside and run `pseudolife-daemon provision models`, then set PSEUDOLIFE_DAEMON_ONNX_DIR to the repaired embedding directory."
+        }
+        "OnnxRuntimeUnavailable" => {
+            "The native daemon could not load ONNX Runtime. Install the matching native runtime library and set ORT_DYLIB_PATH to it before retrying."
+        }
+        "NativeProofTlsUnsupported" => {
+            "The installed native daemon cannot use this fixture's TLS options. Use an explicitly disposable plaintext fixture server with sslmode=disable and no sslrootcert; nothing was changed."
+        }
+        "PostgresEnvironmentUnsupported" => {
+            "A PG* environment override is unsupported by the native proof. Pass the fixture host, port, database and authentication explicitly in PSEUDOLIFE_TEST_DATABASE_URL and unset the other PG* connection controls; nothing was changed."
+        }
+        "FixtureListenerUnavailable" => {
+            "The loopback fixture port could not be bound. Retry the proof after releasing local listener resources."
+        }
+        "FixtureDirectoryPermissionError" => {
+            "The private fixture directory could not be created or written. Check permissions and free space in the configured temporary directory, then retry."
+        }
+        "NativeDaemonSpawnError" => {
+            "The installed native daemon could not be started. Check its executable permissions and required runtime libraries, then retry."
+        }
+        "NativeDaemonStartupError" => {
+            "The installed native daemon exited before readiness. Check its installation and native runtime libraries, then retry with the provisioned model directory."
+        }
+        "NativeDaemonStartupTimeout" => {
+            "The native fixture daemon did not become ready within 60 seconds. Check the disposable server's availability and the provisioned model/runtime installation before retrying."
+        }
+        "KeyboardInterrupt" => {
+            "The disposable proof was interrupted; owned fixture cleanup was attempted. No host delivery has been verified."
+        }
+        "TimeoutError" => {
+            "The disposable proof exceeded its operation timeout; owned fixture cleanup was attempted. Check fixture responsiveness or increase --timeout before retrying."
+        }
+        _ => RECOVERY,
+    };
+    json!({"ok": false, "error": error, "recovery": recovery})
 }
 
 fn fold(name: &str) -> String {
@@ -130,6 +174,7 @@ fn fixture_name(dsn: &str) -> Result<String, &'static str> {
                 refused.push(
                     live.config()
                         .get_dbname()
+                        .filter(|name| !name.is_empty())
                         .ok_or("ProductionDatabaseError")?
                         .to_owned(),
                 );
@@ -207,16 +252,33 @@ async fn connect(dsn: &str) -> Result<Session, &'static str> {
     tokio::time::timeout(Duration::from_secs(5), Session::open_in(&dsn, &environment))
         .await
         .map_err(|_| "OperationalError")?
-        .map_err(|_| "OperationalError")
+        .map_err(|error| match error {
+            crate::pg::Error::AmbientControl(_) => "PostgresEnvironmentUnsupported",
+            _ => "OperationalError",
+        })
+}
+
+fn daemon_connection_admission(dsn: &str) -> Result<(), &'static str> {
+    let parsed = Dsn::parse(dsn).map_err(|_| "ProgrammingError")?;
+    if !matches!(
+        parsed.ssl_mode(),
+        crate::pg::SslMode::Disable | crate::pg::SslMode::Prefer
+    ) || dsn.parse::<tokio_postgres::Config>().is_err()
+    {
+        // The daemon's native pool uses NoTls and cannot read sslrootcert.
+        // Refuse before CREATE rather than accepting TLS only in the parent.
+        return Err("NativeProofTlsUnsupported");
+    }
+    Ok(())
 }
 
 async fn drop_bank(admin: &str, name: &str) -> bool {
     for _ in 0..2 {
         if let Ok(session) = connect(admin).await {
-            let result = tokio::time::timeout(DATABASE_IO_TIMEOUT, async {
+            let result = tokio::time::timeout(DROP_IO_TIMEOUT, async {
                 session
                     .client()
-                    .batch_execute("SET statement_timeout = '5s'")
+                    .batch_execute("SET statement_timeout = '300s'")
                     .await?;
                 session
                     .client()
@@ -234,34 +296,12 @@ async fn drop_bank(admin: &str, name: &str) -> bool {
     false
 }
 
-/// Install handlers before CREATE so a signal during fixture creation is
-/// remembered and handled after ownership has been established.
-fn interrupted() -> std::io::Result<std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>>
-{
-    #[cfg(unix)]
-    {
-        use tokio::signal::unix::{SignalKind, signal};
-        let mut interrupt = signal(SignalKind::interrupt())?;
-        let mut terminate = signal(SignalKind::terminate())?;
-        Ok(Box::pin(async move {
-            tokio::select! { _ = interrupt.recv() => {}, _ = terminate.recv() => {} }
-        }))
-    }
-    #[cfg(windows)]
-    {
-        let mut interrupt = tokio::signal::windows::ctrl_c()?;
-        let mut terminate = tokio::signal::windows::ctrl_break()?;
-        Ok(Box::pin(async move {
-            tokio::select! { _ = interrupt.recv() => {}, _ = terminate.recv() => {} }
-        }))
-    }
-}
-
 struct Fixture {
     root: PathBuf,
-    child: Option<Child>,
+    child: Option<Box<dyn process_wrap::tokio::ChildWrapper>>,
     adapters: Vec<Arc<Adapter>>,
     digest_paths: Vec<PathBuf>,
+    diagnostics: diagnostics::Diagnostics,
 }
 
 impl Fixture {
@@ -276,9 +316,10 @@ impl Fixture {
         }
         if let Some(mut child) = self.child.take() {
             // A Child handle owns the unreaped process; no name or shared PID search.
-            let _ = child.kill().await;
+            let _ = child.start_kill();
             let _ = child.wait().await;
         }
+        self.diagnostics.close().await;
         match std::fs::remove_dir_all(&self.root) {
             Ok(()) => Ok(()),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
@@ -293,11 +334,15 @@ async fn start(
     dsn: &str,
     fixture: &mut Fixture,
 ) -> Result<String, &'static str> {
-    state::private_dir(&fixture.root).map_err(|_| "PermissionError")?;
+    state::private_dir(&fixture.root).map_err(|_| "FixtureDirectoryPermissionError")?;
     let config = fixture.root.join("config.yaml");
-    state::atomic_create(&config, b"coordination:\n  enabled: true\n  allowed_principals: [default]\ndream:\n  enabled: false\nmemory:\n  retrieval_log_enabled: false\nupdates:\n  check_enabled: false\n").map_err(|_| "PermissionError")?;
-    let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).map_err(|_| "OSError")?;
-    let port = listener.local_addr().map_err(|_| "OSError")?.port();
+    state::atomic_create(&config, b"coordination:\n  enabled: true\n  allowed_principals: [default]\ndream:\n  enabled: false\nmemory:\n  retrieval_log_enabled: false\nupdates:\n  check_enabled: false\n").map_err(|_| "FixtureDirectoryPermissionError")?;
+    let listener =
+        std::net::TcpListener::bind(("127.0.0.1", 0)).map_err(|_| "FixtureListenerUnavailable")?;
+    let port = listener
+        .local_addr()
+        .map_err(|_| "FixtureListenerUnavailable")?
+        .port();
     drop(listener);
     let mut command = tokio::process::Command::new(daemon);
     command.env_clear();
@@ -327,6 +372,8 @@ async fn start(
             models.parent().unwrap_or(models).join("reranker"),
         )
         .env("PSEUDOLIFE_DAEMON_ORT_THREADS", "2")
+        // Only this owned child's bounded, private classifier reads debug text.
+        .env("PSEUDOLIFE_DAEMON_DEBUG_BOARD", "1")
         .env("PSEUDOLIFE_MCP_HOST", "127.0.0.1")
         .env("PSEUDOLIFE_MCP_PORT", port.to_string())
         .env("PSEUDOLIFE_MCP_TOKEN", TOKEN)
@@ -336,11 +383,12 @@ async fn start(
         .env("CUDA_VISIBLE_DEVICES", "-1")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .kill_on_drop(true);
-    #[cfg(windows)]
-    command.creation_flags(0x08000000);
-    fixture.child = Some(command.spawn().map_err(|_| "OSError")?);
+        .stderr(Stdio::piped());
+    let mut child = process::spawn(command).map_err(|_| "NativeDaemonSpawnError")?;
+    fixture
+        .diagnostics
+        .watch(child.stderr().take().ok_or("NativeDaemonSpawnError")?);
+    fixture.child = Some(child);
     let url = format!("http://127.0.0.1:{port}");
     let client = reqwest::Client::builder()
         .no_proxy()
@@ -358,7 +406,20 @@ async fn start(
             .map_err(|_| "OSError")?
             .is_some()
         {
-            return Err("NativeDaemonStartupError");
+            // A descendant can still hold stderr after the leader exits.
+            // Stop the owned tree before waiting for the diagnostic reader.
+            if let Some(mut child) = fixture.child.take() {
+                let _ = child.start_kill();
+                let _ = child.wait().await;
+            }
+            fixture.diagnostics.close().await;
+            return Err(fixture
+                .diagnostics
+                .error()
+                .unwrap_or("NativeDaemonStartupError"));
+        }
+        if let Some(error) = fixture.diagnostics.error() {
+            return Err(error);
         }
         // An authenticated request loads the principal view; public /health
         // deliberately cannot do that initialization itself.
@@ -376,7 +437,7 @@ async fn start(
             return Ok(url);
         }
         if tokio::time::Instant::now() >= deadline {
-            return Err("TimeoutError");
+            return Err("NativeDaemonStartupTimeout");
         }
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
@@ -532,11 +593,14 @@ pub(super) async fn run(dsn: &str, daemon: &Path, models: &Path, timeout: f64) -
         Ok(name) => name,
         Err(e) => return failed(e),
     };
+    if let Err(error) = daemon_connection_admission(dsn) {
+        return failed(error);
+    }
     let dsn = match authenticated(dsn, &PasswordEnvironment::from_environment()) {
         Ok(dsn) => dsn,
         Err(e) => return failed(e),
     };
-    let mut interrupted = match interrupted() {
+    let mut signals = match process::Signals::new() {
         Ok(signal) => signal,
         Err(_) => return failed("OSError"),
     };
@@ -575,7 +639,7 @@ pub(super) async fn run(dsn: &str, daemon: &Path, models: &Path, timeout: f64) -
             result = &mut create => (result, false),
             // Let the bounded CREATE settle before DROP, so a pending CREATE
             // cannot finish after cleanup has already observed an absent bank.
-            _ = &mut interrupted => (create.await, true),
+            _ = signals.wait() => (create.await, true),
         };
         match create {
             Ok(Ok(())) if cancelled => Err(("KeyboardInterrupt", true)),
@@ -618,6 +682,7 @@ pub(super) async fn run(dsn: &str, daemon: &Path, models: &Path, timeout: f64) -
         child: None,
         adapters: Vec::new(),
         digest_paths: Vec::new(),
+        diagnostics: diagnostics::Diagnostics::default(),
     };
     let proof = async {
         match start(daemon, models, &fixture_dsn, &mut fixture).await {
@@ -636,10 +701,13 @@ pub(super) async fn run(dsn: &str, daemon: &Path, models: &Path, timeout: f64) -
     };
     let mut result = tokio::select! {
         result = proof => result,
-        _ = interrupted => failed("KeyboardInterrupt"),
+        _ = signals.wait() => failed("KeyboardInterrupt"),
     };
     let files_removed = fixture.close().await;
     let bank_removed = drop_bank(&admin, &name).await;
+    // Windows defaults resume when the last receiver drops. Retain every
+    // receiver through owned process, file and database cleanup.
+    drop(signals);
     if let Some(error) = cleanup_failure(&name, &fixture.root, bank_removed, files_removed) {
         return error;
     }
@@ -682,6 +750,53 @@ mod tests {
     use super::*;
 
     #[test]
+    fn fixture_connection_options_reach_the_native_driver() {
+        for dsn in [
+            "host=localhost user=fixture dbname=r2_options connect_timeout=5 application_name='proof fixture'",
+            "postgresql://fixture@localhost/r2_options?connect_timeout=5&application_name=proof%20fixture",
+        ] {
+            let parsed = Dsn::parse(dsn).unwrap();
+            assert_eq!(
+                parsed.config().get_connect_timeout(),
+                Some(&Duration::from_secs(5))
+            );
+            assert_eq!(
+                parsed.config().get_application_name(),
+                Some("proof fixture")
+            );
+            assert_eq!(daemon_connection_admission(dsn), Ok(()));
+            assert_eq!(fixture_name(dsn), Ok("r2_options".into()));
+            let child = database(
+                &authenticated(dsn, &PasswordEnvironment::default()).unwrap(),
+                "r2_child",
+            )
+            .unwrap();
+            let config: tokio_postgres::Config = child.parse().unwrap();
+            assert_eq!(config.get_dbname(), Some("r2_child"));
+            assert_eq!(config.get_application_name(), Some("proof fixture"));
+        }
+    }
+
+    #[test]
+    fn daemon_tls_admission_refuses_before_any_database_work() {
+        for option in [
+            "sslmode=require",
+            "sslmode=verify-full",
+            "sslrootcert=relative.pem",
+        ] {
+            let dsn = format!("postgresql://fixture@localhost/r2_options?{option}");
+            assert_eq!(
+                daemon_connection_admission(&dsn),
+                Err("NativeProofTlsUnsupported")
+            );
+        }
+        assert_eq!(
+            daemon_connection_admission("host=localhost dbname=r2_options sslmode=disable"),
+            Ok(())
+        );
+    }
+
+    #[test]
     fn simultaneous_cleanup_failures_report_both_owned_resources() {
         let report = cleanup_failure(
             "r2_owned",
@@ -719,6 +834,7 @@ mod tests {
             child: None,
             adapters: Vec::new(),
             digest_paths: vec![digest.clone()],
+            diagnostics: diagnostics::Diagnostics::default(),
         };
         let mut close = tokio::spawn(async move { fixture.close().await });
         let early = tokio::time::timeout(Duration::from_millis(100), &mut close).await;
@@ -816,6 +932,7 @@ mod tests {
             child: None,
             adapters: Vec::new(),
             digest_paths: Vec::new(),
+            diagnostics: diagnostics::Diagnostics::default(),
         };
         assert_eq!(fixture.close().await, Err("FixtureDirectoryCleanupError"));
         assert_eq!(std::fs::read(&path).unwrap(), b"fixture replacement");
