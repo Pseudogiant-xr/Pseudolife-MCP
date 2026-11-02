@@ -77,8 +77,8 @@ impl Store {
         // No JIT for this read, as Python's `console_snapshot`: measured
         // 2026-11-02 on a live-size board (470 agents, 77,767 events,
         // PostgreSQL 18.6; evals/results/console-snapshot-bench-20261102.json),
-        // about 390 ms of each run was JIT compilation; off, the owner-scope
-        // median went from 488 to 120 ms, one principal from 446 to 57 ms.
+        // turning JIT off took the owner-scope timeline's median from 627 to
+        // 130 ms and one principal's from 532 to 54 ms.
         tx.batch_execute(
             "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY; \
              SET LOCAL statement_timeout = '5s'; SET LOCAL jit = off",

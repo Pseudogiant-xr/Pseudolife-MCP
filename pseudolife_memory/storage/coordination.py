@@ -2002,9 +2002,10 @@ class CoordinationStore:
             # what it reads, so PostgreSQL compiled it on every call. Measured
             # 2026-11-02 on a live-size board (470 agents, 77,767 events,
             # PostgreSQL 18.6; evals/results/console-snapshot-bench-20261102.json):
-            # about 390 ms of each run was JIT, and turning it off took the
-            # owner-scope median from 488 to 120 ms, one principal from 446 to
-            # 57 ms. The Rust daemon sets the same (board/console.rs).
+            # turning JIT off took the owner-scope timeline's median from 627
+            # to 130 ms and one principal's from 532 to 54 ms (8 vCPUs; JIT
+            # was 420-560 ms of each run). The Rust daemon sets the same
+            # (board/console.rs).
             self.storage.conn.execute("SET LOCAL jit = off")
             return self._console_snapshot(principal, scope=scope, limit=limit)
 
