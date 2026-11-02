@@ -78,6 +78,13 @@ pub(super) fn verify(
     directory: &Path,
     before: &BTreeMap<String, (SystemTime, u64)>,
 ) -> Result<Value> {
+    verify_with_state(directory, before, true)
+}
+fn verify_with_state(
+    directory: &Path,
+    before: &BTreeMap<String, (SystemTime, u64)>,
+    require_state: bool,
+) -> Result<Value> {
     let after = snapshot(directory);
     let dumps: Vec<_> = after
         .iter()
@@ -86,7 +93,7 @@ pub(super) fn verify(
         .collect();
     if dumps.len() != 1 {
         return Err(UpdateError::new(
-            "cannot identify this run's bank and state backup; check the backup directory and retry; nothing was deployed",
+            "cannot identify this run's bank backup; check the backup directory and retry, or use --no-backup for a plain update; nothing was deployed",
         ));
     }
     let dump = directory.join(dumps[0]);
@@ -94,15 +101,13 @@ pub(super) fn verify(
         .replace("pseudolife_memory-", "pseudolife_state-")
         .replace(".sql.gz", ".tgz");
     let state = directory.join(&state_name);
-    if after.get(&state_name) == before.get(&state_name)
-        || !dump_complete(&dump)
-        || !state_complete(&state)
-    {
+    let state_ok = after.get(&state_name) != before.get(&state_name) && state_complete(&state);
+    if !dump_complete(&dump) || (require_state && !state_ok) {
         return Err(UpdateError::new(
-            "the bank or state backup is missing or incomplete; fix the backup error and retry; nothing was deployed",
+            "the bank or required state backup is missing or incomplete; fix the backup error and retry, or use --no-backup for a plain update; nothing was deployed",
         ));
     }
-    Ok(json!({"dump":dump,"state_archive":state}))
+    Ok(json!({"dump":dump,"state_archive":if state_ok {Some(state)} else {None}}))
 }
 pub(super) fn rotate(directory: &Path, keep: &BTreeSet<String>) -> Vec<PathBuf> {
     let mut removed = vec![];
@@ -142,6 +147,24 @@ pub(super) fn rotate(directory: &Path, keep: &BTreeSet<String>) -> Vec<PathBuf> 
     removed
 }
 impl Update {
+    fn requires_state_backup(&self) -> bool {
+        self.o.engine.is_some() || self.selected_engine == "rust"
+    }
+    fn verify_backup(
+        &mut self,
+        directory: &Path,
+        before: &BTreeMap<String, (SystemTime, u64)>,
+    ) -> Result<Value> {
+        let backup = if self.requires_state_backup() {
+            verify(directory, before)?
+        } else {
+            verify_with_state(directory, before, false)?
+        };
+        if backup["state_archive"].is_null() {
+            self.warn("state archive could not be made; continuing with the complete SQL dump (the daemon may be stopped)");
+        }
+        Ok(backup)
+    }
     pub fn backup(&mut self, repo: Option<&Path>) -> Result<Value> {
         if self.o.no_backup {
             self.warn("skipping backup (--no-backup)");
@@ -167,9 +190,11 @@ impl Update {
                 directory.to_string_lossy().into_owned(),
             ]);
             if run_cli(&args, None, 3600, !self.o.as_json).0 != 0 {
-                return Err(UpdateError::new("the backup failed; nothing was deployed"));
+                return Err(UpdateError::new(
+                    "the backup failed; fix the backup error or use --no-backup for a plain update; nothing was deployed",
+                ));
             }
-            return verify(&directory, &before);
+            return self.verify_backup(&directory, &before);
         }
         self.builtin_backup(
             PG_CONTAINER,
@@ -220,7 +245,7 @@ impl Update {
         if code != 0 {
             self.docker_call(&["exec", pg, "rm", "-f", &remote]);
             return Err(UpdateError::new(
-                "pg_dump failed inside the PostgreSQL container; nothing was deployed",
+                "pg_dump failed inside the PostgreSQL container; fix the backup error or use --no-backup for a plain update; nothing was deployed",
             ));
         }
         let (code, _) = self.command(
@@ -236,7 +261,7 @@ impl Update {
         self.docker_call(&["exec", pg, "rm", "-f", &remote]);
         if code != 0 || !dump_complete(&part) {
             return Err(UpdateError::new(
-                "the backup is INCOMPLETE ('PostgreSQL database dump complete' missing or gzip damaged); nothing was deployed",
+                "the backup is INCOMPLETE ('PostgreSQL database dump complete' missing or gzip damaged); fix the dump or use --no-backup for a plain update; nothing was deployed",
             ));
         }
         fs::rename(&part, &dump)?;
@@ -268,15 +293,23 @@ impl Update {
                 .0
                 == 0;
         self.docker_call(&["exec", daemon, "rm", "-f", &remote]);
-        if !copied || !state_complete(&state) {
-            return Err(UpdateError::new(
-                "the state volume backup is missing or incomplete; the bank dump is retained; fix the backup error and retry; nothing was deployed",
-            ));
+        let state_ok = copied && state_complete(&state);
+        if !state_ok {
+            if self.requires_state_backup() {
+                return Err(UpdateError::new(
+                    "the state volume backup is missing or incomplete; the bank dump is retained; fix the backup error and retry; engine changes cannot use --no-backup; nothing was deployed",
+                ));
+            }
+            self.warn("state archive could not be made; continuing with the complete SQL dump (the daemon may be stopped)");
         }
         self.step(format!(
-            "backup: {} + {}; restore with ops/restore.* -BackupFile / --backup-file {}",
+            "backup: {}{}; restore with ops/restore.* -BackupFile / --backup-file {}",
             dump.display(),
-            state.file_name().unwrap().to_string_lossy(),
+            if state_ok {
+                format!(" + {}", state.file_name().unwrap().to_string_lossy())
+            } else {
+                String::new()
+            },
             dump.display()
         ));
         let keep = [
@@ -292,7 +325,9 @@ impl Update {
                 removed.len()
             ));
         }
-        Ok(json!({"dump":dump,"state_archive":state,"rotated":removed}))
+        Ok(
+            json!({"dump":dump,"state_archive":if state_ok {Some(state)} else {None},"rotated":removed}),
+        )
     }
     pub fn project_backup(
         &mut self,
@@ -330,11 +365,13 @@ impl Update {
         ]) {
             args.extend([flag.into(), value]);
         }
-        self.step("backing up the bank and /data before switching engines...");
+        self.step("backing up the bank and /data before deploying...");
         if run_cli(&args, None, 3600, !self.o.as_json).0 != 0 {
-            return Err(UpdateError::new("the backup failed; nothing was deployed"));
+            return Err(UpdateError::new(
+                "the backup failed; fix the backup error or use --no-backup for a plain update; nothing was deployed",
+            ));
         }
-        verify(&directory, &before)
+        self.verify_backup(&directory, &before)
     }
     pub fn checkout_script(&self, repo: &Path, stem: &str) -> Option<PathBuf> {
         let suffix = if cfg!(windows) { "ps1" } else { "sh" };

@@ -286,11 +286,22 @@ def test_wrapper_refusals_precede_crlf_normalization(tmp_path, shell, refusal):
         args = ["--tag" if shell == "bash" else "-Tag"]
     else:
         args = ["--bogus" if shell == "bash" else "-Bogus"]
+        if shell == "pwsh":
+            wrapper.env["PSEUDOLIFE_NATIVE_UPDATE"] = "1"
     result = wrapper.run(*args)
     assert result.returncode != 0, result.stderr
     assert not wrapper.native_args.exists() and not wrapper.python_args.exists()
     assert not wrapper.python_probes.exists() and not wrapper.native_probes.exists()
     wrapper.unchanged(path, mtime)
+
+
+def test_powershell_python_path_keeps_legacy_extra_argument_behavior(tmp_path):
+    wrapper = Wrapper(tmp_path, "pwsh")
+    wrapper.python()
+    result = wrapper.run("-Bogus")
+    assert result.returncode == 5, result.stderr
+    assert wrapper.python_args.exists()
+    assert not wrapper.native_args.exists()
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX executable permission contract")

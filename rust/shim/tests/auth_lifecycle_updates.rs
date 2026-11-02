@@ -435,17 +435,12 @@ fn native_binary_selection_uses_stable_native_launcher_and_never_python_script()
         std::path::absolute(&launcher).unwrap()
     );
     fs::write(&launcher, b"#!/usr/bin/env python\n").unwrap();
-    assert_eq!(
-        native_update_binary_at(Some(&launcher), &invoking).unwrap(),
-        fs::canonicalize(&invoking).unwrap()
-    );
+    assert!(native_update_binary_at(Some(&launcher), &invoking).is_err());
     fs::write(
         &launcher,
         b"MZ\0\0legacy console launcher with a Python selector",
     )
     .unwrap();
-    assert_eq!(
-        native_update_binary_at(Some(&launcher), &invoking).unwrap(),
-        fs::canonicalize(invoking).unwrap()
-    );
+    assert!(native_update_binary_at(Some(&launcher), &invoking).is_err());
+    assert!(native_update_binary_at(None, &invoking).is_err());
 }

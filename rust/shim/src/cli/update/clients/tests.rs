@@ -275,6 +275,82 @@ fn refused_marketplace_migration_restores_only_its_entry() {
     assert_eq!(after["extraKnownMarketplaces"]["pseudolife-mcp"], original);
     assert!(after["extraKnownMarketplaces"].get("other").is_some());
 }
+
+#[test]
+fn migration_failure_preserves_absent_settings_and_reports_its_cause() {
+    let f = Fixture::new();
+    let (root, clone, _) = f.plugin();
+    let settings = f.path.join("settings.json");
+    f.write(
+        &root.join("known_marketplaces.json"),
+        &json!({"pseudolife-mcp":{
+            "source":{"source":"github","repo":"Pseudogiant-xr/Pseudolife-MCP"},
+            "installLocation":clone.parent().unwrap()
+        }}),
+    );
+    let runner = Fake::new(|args: &[&str], _: Option<&Path>| {
+        output(if args.contains(&"add") { 23 } else { 0 }, "fixture")
+    });
+    let report = plugin::update_with(
+        None,
+        &root,
+        &settings,
+        &f.path.join("fixture-claude"),
+        &runner,
+    );
+    assert_eq!(report["state"], "failed");
+    assert!(
+        report["detail"]
+            .as_str()
+            .unwrap()
+            .contains("marketplace add did not verify (exit 23)")
+    );
+    assert!(
+        !settings.exists(),
+        "rollback must not create settings that never existed"
+    );
+}
+
+#[test]
+fn ordinary_client_children_keep_the_callers_ssh_configuration() {
+    let expected = std::env::var("GIT_SSH_COMMAND").unwrap_or_default();
+    let output = command::NativeRunner.run(
+        &std::env::current_exe().unwrap(),
+        &[
+            "--exact",
+            "cli::update::clients::tests::ssh_configuration_child",
+            "--ignored",
+        ],
+        None,
+        Duration::from_secs(30),
+        &[("PSEUDOLIFE_FIXTURE_EXPECTED_SSH", &expected)],
+    );
+    assert_eq!(output.code, 0, "{}", output.text());
+}
+
+#[test]
+fn refused_migration_does_not_create_previously_absent_settings() {
+    let f = Fixture::new();
+    let (root, _, _) = f.plugin();
+    let settings = f.path.join("settings.json");
+    f.write(
+        &root.join("known_marketplaces.json"),
+        &json!({"pseudolife-mcp":{
+            "source":{"source":"github","repo":"Pseudogiant-xr/Pseudolife-MCP"}
+        }}),
+    );
+    let runner = Fake::new(|_: &[&str], _: Option<&Path>| output(23, "refused"));
+    let report = plugin::migrate_with(&root, &settings, &f.path.join("fixture-claude"), &runner);
+    assert_eq!(report["state"], "failed");
+    assert!(!settings.exists());
+}
+
+#[test]
+#[ignore = "subprocess fixture"]
+fn ssh_configuration_child() {
+    let expected = std::env::var("PSEUDOLIFE_FIXTURE_EXPECTED_SSH").unwrap();
+    assert!(std::env::var("GIT_SSH_COMMAND").unwrap_or_default() == expected);
+}
 #[test]
 fn add_failure_after_record_moves_keeps_settings_consistent_and_fails() {
     let f = Fixture::new();

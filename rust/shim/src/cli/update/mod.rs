@@ -412,7 +412,7 @@ impl Update {
         let Ok(exe) = std::env::current_exe() else {
             return;
         };
-        let (code, _) = run_cli(
+        let (code, detail) = run_cli(
             &[
                 exe.to_string_lossy().into_owned(),
                 "maintainer".into(),
@@ -423,6 +423,10 @@ impl Update {
             120,
             false,
         );
+        if detail.contains("mode 'maintainer' is deferred in this candidate") {
+            self.step("maintainer setup is not available in this native candidate; run pseudolife-mcp maintainer setup after installing a release that includes it");
+            return;
+        }
         if code != 1 {
             return;
         }
@@ -665,12 +669,11 @@ pub(crate) fn run(arguments: Vec<OsString>) -> u8 {
     // Image metadata probe: no daemon, configuration, network or bank access.
     // R3 ships this same CLI beside the daemon in its runtime image.
     if arguments == [OsString::from("--schema-version")] {
-        let source = include_str!("../../../../../pseudolife_memory/storage/schema.py");
-        if let Some(version) = source
-            .lines()
-            .find_map(|line| line.strip_prefix("SCHEMA_META_VERSION = "))
-            .and_then(|s| s.parse::<u64>().ok())
-        {
+        let plan: Value = serde_json::from_str(include_str!(
+            "../../../../daemon/src/storage/schema_plan.json"
+        ))
+        .expect("embedded daemon schema plan");
+        if let Some(version) = plan["schema_version"].as_u64() {
             return if output(&format!("{version}\n"), false).is_ok() {
                 0
             } else {

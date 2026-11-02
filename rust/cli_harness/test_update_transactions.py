@@ -22,7 +22,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 SERVICE = "pseudolife-daemon"
 FILES = ("docker-compose.yml", "docker-compose.ghcr.yml", "docker-compose.rust-daemon.yml",
-         "docker-compose.rust-shadow.yml", "docker-compose.rust-ghcr.yml")
+         "docker-compose.rust-shadow.yml", "docker-compose.rust-ghcr.yml", "Dockerfile.extractor")
 
 # Runs only inside the disposable home. Its sole authority is the explicit
 # fixture-state path passed by the harness, never the caller's environment.
@@ -50,7 +50,12 @@ elif a[:1]==["pull"]: code=int(s["failure"]=="pull")
 elif a[:1]==["run"]: out="58" if "--schema-version" in a else "SCHEMA_META_VERSION = 58\n"
 elif a[:1]==["tag"]: s["images"][a[-1]]=a[-2]
 elif a[:1]==["compose"]:
- if "config" in a: out=json.dumps(s["config"])
+ if "config" in a:
+  config=json.loads(json.dumps(s["config"]))
+  if s.get("relative_mount"):
+   directory=pathlib.Path(a[a.index("--project-directory")+1]) if "--project-directory" in a else pathlib.Path(a[a.index("-f")+1]).parent
+   config["services"]["pseudolife-daemon"]["volumes"].append({"type":"bind","source":str(directory/"config.yaml"),"target":"/data/config.yaml","read_only":True})
+  out=json.dumps(config)
  elif "ps" in a:
   out="fixture-pg" if a[-1]=="pseudolife-pg" else "fixture-daemon"
   if s["failure"]=="missing_project_daemon" and a[-1]=="pseudolife-daemon":out=""
@@ -64,7 +69,7 @@ elif a[:1]==["compose"]:
    for path in overlays:
     try:
      service=json.loads(pathlib.Path(path).read_text())["services"]["pseudolife-daemon"]
-     if "labels" in service:s["running"]["Config"]["Labels"]=service["labels"]
+     if "labels" in service:s["running"]["Config"]["Labels"]={**(s["running"]["Config"]["Labels"] or {}),**service["labels"]}
     except (OSError,ValueError,KeyError):pass
    s["running"]["Image"]="sha256:replacement"
 elif a[:1]==["exec"]:
@@ -73,6 +78,7 @@ elif a[:1]==["exec"]:
   else:out="56" if s["failure"]=="old_schema" else "unreadable" if s["failure"]=="unreadable_schema" else "58"
  elif any("test ! -e /data/memory_state/weights.pt" in v for v in a):code=int(s["failure"] in ("pending_import","imported_weights"))
  elif any("pg_dump" in v for v in a):code=int(s["failure"]=="backup")
+ elif any("tar czf" in v for v in a):code=int(s["failure"]=="missing_state")
 elif a[:1]==["cp"]:
  target=pathlib.Path(a[-1]);target.parent.mkdir(parents=True,exist_ok=True)
  if ".sql.gz" in a[-2]:target.write_bytes(gzip.compress(b"COPY x FROM stdin;\n\\.\n"+(b"" if s["failure"]=="incomplete" else b"-- PostgreSQL database dump complete\n")))
@@ -93,7 +99,7 @@ a=sys.argv[1:];flag="-OutDir" if "-OutDir" in a else "--out-dir"
 directory=pathlib.Path(a[a.index(flag)+1]) if flag in a else pathlib.Path(os.environ["UPDATE_FIXTURE_BACKUPS"])
 directory.mkdir(parents=True,exist_ok=True)
 (directory/"pseudolife_memory-20260101-000001.sql.gz").write_bytes(gzip.compress(b"-- PostgreSQL database dump complete\n"))
-if s["failure"]!="incomplete":
+if s["failure"] not in ("incomplete", "missing_state"):
  with tarfile.open(directory/"pseudolife_state-20260101-000001.tgz","w:gz") as tar:
   member=tarfile.TarInfo("config.yaml");member.size=2;tar.addfile(member,io.BytesIO(b"{}"))
 '''
@@ -163,7 +169,7 @@ def host(tmp_path, failure="", mode="release"):
     state_path = home / "fixture-state.json"
     state = {"calls": [], "deployed": False, "failure": failure, "images": {"pseudolife-daemon:0.21.0": "sha256:validated"},
              "running": {"Id": "fixture-daemon", "Image": "sha256:validated", "State": {"Running": True},
-                         "Mounts": [{"Destination": "/data", "Name": "fixture-state"}],
+                         "Mounts": [{"Destination": "/data", "Name": "fixture-state", "Type": "volume", "RW": True}],
                          "Config": {"Image": "pseudolife-daemon:0.21.0", "Labels": None,
                                     "Env": ["PSEUDOLIFE_MCP_DATABASE_URL=postgresql://fixture:fixture@pseudolife-pg:5432/fixture"]}}}
 
@@ -179,10 +185,11 @@ def host(tmp_path, failure="", mode="release"):
                 body = asset
             elif self.path == "/health":
                 deployed = current["deployed"]
-                body = json.dumps({"status": "error" if deployed and failure == "health" else "ok",
+                body = json.dumps({"status": "error" if deployed and failure == "health" or not deployed and failure == "stopped" else "ok",
                                    "version": "wrong" if deployed and failure == "version" else "0.21.1" if deployed else "0.21.0",
                                    "schema": 59 if deployed and failure == "schema" else 58,
-                                   "auth": True, "persist_errors": 0}).encode()
+                                   "auth": True, "persist_errors": 0,
+                                   "updates": {"unattended_daemon": True}}).encode()
             else:
                 valid = self.headers.get("Authorization") == "Bearer fixture-bearer"
                 if not valid or current["deployed"] and failure == "read":
@@ -190,6 +197,24 @@ def host(tmp_path, failure="", mode="release"):
                     self.end_headers()
                     return
                 body = b'{"entries":[]}'
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_POST(self):
+            self.rfile.read(int(self.headers.get("Content-Length", "0")))
+            current = json.loads(state_path.read_text())
+            if self.path == "/api/coordination/register":
+                payload = {"agent_id": "fixture-address", "credential": "fixture-key"}
+            elif self.path == "/api/coordination/agents":
+                # Backup completion brings a peer onto the board. Only the
+                # callback inside deploy_release can observe this transition.
+                active = any(a[:1] == ["fixture-backup"] for a in current["calls"])
+                payload = {"agents": [{"agent_id": "fixture-peer", "task": "working"}] if active else []}
+            else:
+                payload = {"recipients": 1}
+            body = json.dumps(payload).encode()
             self.send_response(200)
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
@@ -209,14 +234,16 @@ def host(tmp_path, failure="", mode="release"):
         state["running"]["Config"]["Labels"] = {"com.docker.compose.project.config_files": str(ops / "docker-compose.yml"),
                     "com.docker.compose.project.working_dir": str(ops), "com.docker.compose.project.environment_file": str(ops / ".env")}
     state_path.write_text(json.dumps(state))
-    payload = io.BytesIO()
-    with tarfile.open(fileobj=payload, mode="w:gz") as tar:
-        for name in FILES:
-            body = (ops / name).read_bytes()
-            member = tarfile.TarInfo(name)
-            member.size = len(body)
-            tar.addfile(member, io.BytesIO(body))
-    asset = payload.getvalue()
+    # Consume exactly the producer's bundle, including Dockerfile.extractor.
+    # A hand-built five-file tar missed the sixth release asset in review.
+    from rust.ci import release_assets
+    assets = home / "release-assets"
+    stub = home / "asset-binary"
+    stub.write_bytes(b"fixture native asset")
+    for target in release_assets.TARGETS:
+        release_assets.package(stub, "0.21.1", target, assets)
+    release_assets.assemble(repo, "0.21.1", assets)
+    asset = (assets / "pseudolife-compose-0.21.1.tar.gz").read_bytes()
     env = {k: os.environ[k] for k in ("SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT", "TEMP", "TMP") if k in os.environ}
     shell_dir = str(Path(shutil.which("pwsh") or sys.executable).parent)
     env.update(HOME=str(home), USERPROFILE=str(home), LOCALAPPDATA=str(home / "local"),
@@ -277,13 +304,9 @@ def test_ordinary_checkout_transaction_phase_parity(tmp_path, native, failure):
 
 
 @pytest.mark.parametrize("script_backup", [True, False], ids=["checkout-script", "native-backup"])
-@pytest.mark.parametrize("failure", ["", "incomplete", "version", "schema", "read"])
+@pytest.mark.parametrize("failure", ["", "version", "schema", "read", "missing_state"])
 def test_native_checkout_scopes_backup_and_rollback_to_its_compose_project(tmp_path, script_backup, failure):
-    """Native safety repair: Python's ordinary checkout still uses global names.
-
-    Exercise the brief's version/schema/authenticated-read gate separately from
-    the legacy oracle's weaker ordinary-checkout health check.
-    """
+    """Plain checkout retains project scoping and Python's health-only gate."""
     binary = os.environ.get("PSEUDOLIFE_UPDATE_TEST_BINARY")
     if not binary:
         pytest.skip("set PSEUDOLIFE_UPDATE_TEST_BINARY to the built native CLI")
@@ -293,7 +316,7 @@ def test_native_checkout_scopes_backup_and_rollback_to_its_compose_project(tmp_p
         result = run_arm(repo, env, binary, ["--checkout", str(repo), "--no-test-login", "--no-cache-prune",
                                            "--json", "--health-retries", "1", "--health-delay-ms", "0",
                                            "--rollback-tag", "pre-fixture"])
-        assert result.returncode == (1 if failure else 0), result.stdout + result.stderr
+        assert result.returncode == 0, result.stdout + result.stderr
         state = json.loads(state_path.read_text())
         calls = state["calls"]
         assert not any("pseudolife-mcp-daemon" in args or "pseudolife-mcp-postgres" in args for args in calls)
@@ -305,7 +328,7 @@ def test_native_checkout_scopes_backup_and_rollback_to_its_compose_project(tmp_p
         else:
             backup = next(args for args in calls if args[:1] == ["exec"] and any("pg_dump" in part for part in args))
             assert backup[1] == "fixture-pg" and backup[-2:] == ["fixture", "fixture"]
-        assert stages(state) == (["backup"] if failure == "incomplete" else ["backup", "tag", "up"])
+        assert stages(state) == ["backup", "tag", "up"]
         report = json.loads(result.stdout)
         assert report["clients"] is None
         if failure != "incomplete":
@@ -395,34 +418,26 @@ def test_checkout_d2_guard_is_reached_before_backup_and_accepts_imported_row(tmp
             assert "import" in result.stdout.lower()
 
 
-@pytest.mark.parametrize("failure", ["old_schema", "pending_import", "unreadable_schema", "imported_weights"])
-def test_native_release_d2_guard_is_reached_before_pull_and_accepts_imported_row(tmp_path, failure):
+@pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
+def test_release_rust_refuses_unpublished_image_before_any_effect(tmp_path, native):
     binary = os.environ.get("PSEUDOLIFE_UPDATE_TEST_BINARY")
-    if not binary:
-        pytest.skip("native release engine selection extends the unpublished-image Python oracle; build owned by parent")
-    with host(tmp_path, failure) as (repo, env, state_path):
-        result = run_arm(repo, env, binary, ["--engine", "rust", "--tag", "0.21.1", "--json", "--health-retries", "1", "--rollback-tag", "pre-fixture"])
-        assert result.returncode == (0 if failure == "imported_weights" else 2), result.stdout + result.stderr
-        state = json.loads(state_path.read_text())
-        sql = [a[-1] for a in state["calls"] if "psql" in a and "-Atc" in a]
-        assert sql and "schema_version" in sql[0]
-        assert stages(state) == (["pull", "backup", "tag", "up"] if failure == "imported_weights" else [])
-        report = json.loads(result.stdout)
-        assert report["clients"] is None
-        if failure == "imported_weights":
-            assert any("cms_counters" in query for query in sql)
-            assert Path(report["rollback"]["overlay"]).is_file()
-        else:
-            assert report["rollback"] == {}
+    if native and not binary:
+        pytest.skip("set PSEUDOLIFE_UPDATE_TEST_BINARY")
+    with host(tmp_path) as (repo, env, state_path):
+        result = run_arm(repo, env, binary if native else None, ["--engine", "rust", "--tag", "0.21.1", "--json"])
+        assert result.returncode == 2, result.stdout + result.stderr
+        assert "not published" in result.stdout + result.stderr
+        assert "--checkout" in result.stdout + result.stderr
+        assert json.loads(state_path.read_text())["calls"] == []
 
 
-def test_native_rust_release_rollback_supplies_required_compose_image_tag(tmp_path):
+def test_native_release_rollback_supplies_required_compose_image_tag(tmp_path):
     binary = os.environ.get("PSEUDOLIFE_UPDATE_TEST_BINARY")
     if not binary:
         pytest.skip("set PSEUDOLIFE_UPDATE_TEST_BINARY to the built native CLI")
     with host(tmp_path, "health") as (repo, env, state_path):
         env.pop("PSEUDOLIFE_IMAGE_TAG", None)
-        result = run_arm(repo, env, binary, ["--engine", "rust", "--tag", "0.21.1", "--daemon-only", "--json",
+        result = run_arm(repo, env, binary, ["--tag", "0.21.1", "--daemon-only", "--json",
                                            "--health-retries", "1", "--health-delay-ms", "0", "--rollback-tag", "pre-fixture"])
         assert result.returncode == 1, result.stdout + result.stderr
         assert stages(json.loads(state_path.read_text())) == ["pull", "backup", "tag", "up"]
@@ -430,3 +445,160 @@ def test_native_rust_release_rollback_supplies_required_compose_image_tag(tmp_pa
         assert report["rollback"]["state"] == "tagged"
         assert "PSEUDOLIFE_IMAGE_TAG=" in result.stdout
         assert "--pull never" in result.stdout
+
+
+@pytest.mark.parametrize("native_first", [True, False])
+@pytest.mark.parametrize("explicit_python", [False, True])
+def test_release_updaters_can_follow_each_other(tmp_path, native_first, explicit_python):
+    binary = os.environ.get("PSEUDOLIFE_UPDATE_TEST_BINARY")
+    if not binary:
+        pytest.skip("set PSEUDOLIFE_UPDATE_TEST_BINARY")
+    with host(tmp_path) as (repo, env, state_path):
+        for index, native in enumerate([native_first, not native_first]):
+            args = ["--tag", "0.21.1", "--daemon-only", "--reinstall", "--json",
+                    "--health-retries", "1", "--rollback-tag", f"pre-round-{index}"]
+            if native and explicit_python:
+                args += ["--engine", "python"]
+            result = run_arm(repo, env, binary if native else None, args)
+            assert result.returncode == 0, result.stdout + result.stderr
+            labels = json.loads(state_path.read_text())["running"]["Config"]["Labels"]
+            if not explicit_python:
+                assert not labels.get("org.pseudolife.activation")
+            for backup in (repo / "data/backups").glob("pseudolife_*"):
+                backup.unlink()
+
+
+@pytest.mark.parametrize("mode", ["release", "checkout"])
+def test_plain_update_accepts_tokenless_host_and_scaffolded_env(tmp_path, mode):
+    binary = os.environ.get("PSEUDOLIFE_UPDATE_TEST_BINARY")
+    if not binary:
+        pytest.skip("set PSEUDOLIFE_UPDATE_TEST_BINARY")
+    with host(tmp_path, mode=mode) as (repo, env, state_path):
+        state = json.loads(state_path.read_text())
+        state["config"]["services"][SERVICE]["environment"].pop("PSEUDOLIFE_MCP_TOKEN")
+        state_path.write_text(json.dumps(state))
+        if mode == "checkout":
+            (repo / "ops/.env").unlink()
+            (repo / "ops/.env.example").write_text("# PSEUDOLIFE_MCP_TOKEN=\n")
+        args = ["--tag", "0.21.1", "--daemon-only"] if mode == "release" else [
+            "--checkout", str(repo), "--no-test-login", "--no-cache-prune"]
+        result = run_arm(repo, env, binary, [*args, "--json", "--health-retries", "1"])
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert stages(json.loads(state_path.read_text()))[-2:] == ["tag", "up"]
+
+
+def test_plain_release_can_recover_an_unhealthy_daemon(tmp_path):
+    binary = os.environ.get("PSEUDOLIFE_UPDATE_TEST_BINARY")
+    if not binary:
+        pytest.skip("set PSEUDOLIFE_UPDATE_TEST_BINARY")
+    with host(tmp_path, "stopped") as (repo, env, state_path):
+        result = run_arm(repo, env, binary, ["--tag", "0.21.1", "--daemon-only", "--json", "--health-retries", "1"])
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert stages(json.loads(state_path.read_text())) == ["pull", "backup", "tag", "up"]
+
+
+def test_deferred_maintainer_setup_does_not_claim_passkeys_are_missing(tmp_path):
+    binary = os.environ.get("PSEUDOLIFE_UPDATE_TEST_BINARY")
+    if not binary:
+        pytest.skip("set PSEUDOLIFE_UPDATE_TEST_BINARY")
+    with host(tmp_path) as (repo, env, _):
+        result = run_arm(repo, env, binary, ["--tag", "0.21.1", "--daemon-only", "--json", "--health-retries", "1"])
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "maintainer setup" in result.stdout
+        assert "passkeys are not set up" not in result.stdout
+
+
+def test_native_unattended_rechecks_board_after_backup_before_tagging(tmp_path):
+    binary = os.environ.get("PSEUDOLIFE_UPDATE_TEST_BINARY")
+    if not binary:
+        pytest.skip("set PSEUDOLIFE_UPDATE_TEST_BINARY")
+    with host(tmp_path) as (repo, env, state_path):
+        env["PSEUDOLIFE_MCP_TOKEN"] = "fixture-bearer"
+        result = run_arm(repo, env, binary, ["--unattended", "--tag", "0.21.1", "--json"])
+        assert result.returncode == 4, result.stdout + result.stderr
+        assert "active" in result.stdout
+        assert stages(json.loads(state_path.read_text())) == ["pull", "backup"]
+
+
+def test_release_retains_original_project_directory_for_relative_mounts(tmp_path):
+    binary = os.environ.get("PSEUDOLIFE_UPDATE_TEST_BINARY")
+    if not binary:
+        pytest.skip("set PSEUDOLIFE_UPDATE_TEST_BINARY")
+    with host(tmp_path) as (repo, env, state_path):
+        override = repo / "ops/docker-compose.override.yml"
+        override.write_text("services:\n  pseudolife-daemon:\n    volumes:\n      - ./config.yaml:/data/config.yaml:ro\n")
+        (repo / "ops/config.yaml").write_text("fixture: true\n")
+        state = json.loads(state_path.read_text())
+        state["relative_mount"] = True
+        state["running"]["Config"]["Labels"]["com.docker.compose.project.config_files"] += "," + str(override)
+        state["running"]["Mounts"].append({"Type": "bind", "Source": str(repo / "ops/config.yaml"),
+                                            "Destination": "/data/config.yaml", "RW": False})
+        state_path.write_text(json.dumps(state))
+        result = run_arm(repo, env, binary, ["--tag", "0.21.1", "--daemon-only", "--json", "--health-retries", "1"])
+        assert result.returncode == 0, result.stdout + result.stderr
+        calls = json.loads(state_path.read_text())["calls"]
+        for args in calls:
+            if args[:1] == ["compose"] and ("config" in args or "up" in args):
+                assert args[args.index("--project-directory") + 1] == str(repo / "ops")
+
+
+@pytest.mark.parametrize("mode", ["release", "checkout"])
+def test_changed_mount_or_wrong_checkout_endpoint_refuses_before_backup(tmp_path, mode):
+    binary = os.environ.get("PSEUDOLIFE_UPDATE_TEST_BINARY")
+    if not binary:
+        pytest.skip("set PSEUDOLIFE_UPDATE_TEST_BINARY")
+    with host(tmp_path, mode=mode) as (repo, env, state_path):
+        state = json.loads(state_path.read_text())
+        state["config"]["services"][SERVICE]["volumes"].append({
+            "type": "bind", "source": str(repo / "bundle/config.yaml"), "target": "/data/config.yaml", "read_only": True})
+        state["running"]["Mounts"].append({"Type": "bind", "Source": str(repo / "ops/config.yaml"),
+                                            "Destination": "/data/config.yaml", "RW": False})
+        state_path.write_text(json.dumps(state))
+        args = ["--tag", "0.21.1"] if mode == "release" else ["--checkout", str(repo)]
+        result = run_arm(repo, env, binary, [*args, "--json"])
+        assert result.returncode == 2, result.stdout + result.stderr
+        assert "mount" in result.stdout
+        assert stages(json.loads(state_path.read_text())) == []
+
+
+@pytest.mark.parametrize("rollback_state", ["kept", "none"])
+def test_plain_checkout_unavailable_rollback_prints_recovery(tmp_path, rollback_state):
+    binary = os.environ.get("PSEUDOLIFE_UPDATE_TEST_BINARY")
+    if not binary:
+        pytest.skip("set PSEUDOLIFE_UPDATE_TEST_BINARY")
+    with host(tmp_path, "health", "checkout") as (repo, env, state_path):
+        state = json.loads(state_path.read_text())
+        state["images"] = {} if rollback_state == "none" else {"pseudolife-daemon:0.21.0": "sha256:unvalidated"}
+        state_path.write_text(json.dumps(state))
+        result = run_arm(repo, env, binary, ["--checkout", str(repo), "--json", "--no-backup", "--no-test-login",
+                                            "--no-cache-prune", "--health-retries", "1"])
+        assert result.returncode == 1, result.stdout + result.stderr
+        report = json.loads(result.stdout)
+        assert report["rollback"]["state"] == rollback_state
+        assert "docker compose" in result.stdout
+        assert ("surviving rollback tag" if rollback_state == "kept" else "Restore the previous checkout") in result.stdout
+
+
+def test_plain_checkout_wrong_health_endpoint_refuses_before_backup(tmp_path):
+    binary = os.environ.get("PSEUDOLIFE_UPDATE_TEST_BINARY")
+    if not binary:
+        pytest.skip("set PSEUDOLIFE_UPDATE_TEST_BINARY")
+    with host(tmp_path, mode="checkout") as (repo, env, state_path):
+        state = json.loads(state_path.read_text())
+        state["config"]["services"][SERVICE]["ports"][0]["published"] = "1"
+        state_path.write_text(json.dumps(state))
+        result = run_arm(repo, env, binary, ["--checkout", str(repo), "--json"])
+        assert result.returncode == 2, result.stdout + result.stderr
+        assert "--daemon-url http://127.0.0.1:1" in result.stdout
+        assert stages(json.loads(state_path.read_text())) == []
+
+
+def test_release_without_native_bundle_names_python_or_new_release(tmp_path):
+    binary = os.environ.get("PSEUDOLIFE_UPDATE_TEST_BINARY")
+    if not binary:
+        pytest.skip("set PSEUDOLIFE_UPDATE_TEST_BINARY")
+    with host(tmp_path) as (repo, env, state_path):
+        result = run_arm(repo, env, binary, ["--tag", "0.21.0", "--reinstall", "--json"])
+        assert result.returncode == 2, result.stdout + result.stderr
+        assert "Python updater" in result.stdout and "--tag" in result.stdout
+        assert stages(json.loads(state_path.read_text())) == []

@@ -50,10 +50,6 @@ param(
 
 $ErrorActionPreference = "Stop"
 $repo = Split-Path -Parent $PSScriptRoot
-if ($args.Count -gt 0) {
-    [Console]::Error.WriteLine('unknown update argument; use the documented update parameters; nothing was changed')
-    exit 2
-}
 
 # A release-mode option of `pseudolife-mcp update`; this script deploys the checkout.
 if ($ClientsOnly) {
@@ -80,6 +76,10 @@ if (-not $nativeCli) {
     $nativeCli = Join-Path $localData 'pseudolife-mcp/bin/pseudolife-mcp.exe'
 }
 if ($Native -or $env:PSEUDOLIFE_NATIVE_UPDATE -eq "1") {
+    if ($args.Count -gt 0) {
+        [Console]::Error.WriteLine('unknown update argument; use the documented update parameters; nothing was changed')
+        exit 2
+    }
     if (-not (Test-Path -LiteralPath $nativeCli -PathType Leaf)) {
         [Console]::Error.WriteLine('native update CLI is missing; install the native runtime or set PSEUDOLIFE_NATIVE_CLI to its binary; nothing was changed')
         exit 2
@@ -105,6 +105,10 @@ foreach ($candidate in @("python", "python3", "py")) {
     } catch { continue }
 }
 if (-not $python) {
+    if ($args.Count -gt 0) {
+        [Console]::Error.WriteLine('unknown update argument; use the documented update parameters; nothing was changed')
+        exit 2
+    }
     # The read-only runtime capability rejects legacy Python selectors and
     # unrelated executables even when they successfully print generic help.
     $nativeHelp = 'usage: pseudolife-mcp runtime install --archive <archive> --sha256sums <SUMS-file> --version <version> [--json]'

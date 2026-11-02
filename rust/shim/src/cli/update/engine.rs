@@ -46,6 +46,8 @@ pub(super) fn validated(labels: &Value) -> Result<Value> {
         && selected["labels"][ENGINE_LABEL] == engine
         && selected["labels"][ACTIVATION_LABEL].as_str().is_some()
         && selected["labels"][ACTIVATION_LABEL] == labels[ACTIVATION_LABEL]
+        && (labels[RELEASE_LABEL].is_null()
+            || selected["labels"][RELEASE_LABEL] == labels[RELEASE_LABEL])
     {
         return Ok(selected);
     }
@@ -185,6 +187,10 @@ pub(super) fn daemon_token(config: &Value) -> Result<String> {
     token.filter(|s|!s.contains(['\r','\n'])).ok_or_else(||UpdateError::usage("the engine health gate needs bearer auth; set PSEUDOLIFE_MCP_TOKEN in the host env file and retry; nothing was changed"))
 }
 pub(super) fn verify_identity(config: &Value, running: &Value, url: &str) -> Result<()> {
+    verify_bank_identity(config, running)?;
+    verify_endpoint(config, url)
+}
+pub(super) fn verify_bank_identity(config: &Value, running: &Value) -> Result<()> {
     let service = &config["services"][DAEMON_SERVICE];
     let env = &service["environment"];
     let expected = env["PSEUDOLIFE_MCP_DATABASE_URL"].as_str();
@@ -214,6 +220,52 @@ pub(super) fn verify_identity(config: &Value, running: &Value, url: &str) -> Res
             "the host Compose configuration must keep the running daemon's named /data volume; restore its volume setting and retry; nothing was changed",
         ));
     }
+    // Retained overrides may include relative bind mounts. Compare the
+    // resolved sources, destinations and write access, not just /data.
+    let mounts = running["Mounts"].as_array().ok_or_else(|| UpdateError::usage(
+        "cannot read the daemon's mounts; restore its Compose project and retry; nothing was changed"
+    ))?;
+    for volume in service["volumes"].as_array().into_iter().flatten() {
+        let target = volume["target"].as_str();
+        let actual = mounts.iter().find(|m| m["Destination"].as_str() == target);
+        let expected_source = if volume["type"] == "volume" {
+            volume["source"]
+                .as_str()
+                .and_then(|s| config["volumes"][s]["name"].as_str())
+        } else {
+            volume["source"].as_str()
+        };
+        let same = actual.is_some_and(|m| {
+            let source = if volume["type"] == "volume" {
+                m["Name"].as_str()
+            } else {
+                m["Source"].as_str()
+            };
+            expected_source.is_some()
+                && source == expected_source
+                && m["Type"] == volume["type"]
+                && m["RW"].as_bool() == Some(volume["read_only"] != true)
+        });
+        if !same {
+            return Err(UpdateError::usage(
+                "the Compose configuration changes a daemon mount; restore its original project directory, mount source and access before updating; nothing was changed",
+            ));
+        }
+    }
+    for mount in mounts {
+        if !service["volumes"]
+            .as_array()
+            .is_some_and(|volumes| volumes.iter().any(|v| v["target"] == mount["Destination"]))
+        {
+            return Err(UpdateError::usage(
+                "the Compose configuration drops a daemon mount; restore its original mounts before updating; nothing was changed",
+            ));
+        }
+    }
+    Ok(())
+}
+fn verify_endpoint(config: &Value, url: &str) -> Result<()> {
+    let service = &config["services"][DAEMON_SERVICE];
     let port = service["ports"]
         .as_array()
         .and_then(|a| a.iter().find(|p| p["target"] == 8765));

@@ -198,7 +198,17 @@ pub(super) fn migrate_with(
         if output.code != 0 || source_kind(now.as_ref()) != "https" {
             // Re-read after the CLI: undo only this entry, keeping concurrent
             // writes to unrelated settings. Never remove the marketplace.
-            let after_bytes = registrations::read_optional(settings)?.unwrap_or_default();
+            let after_bytes = registrations::read_optional(settings)?;
+            if after_bytes.is_none() && original.is_none() {
+                return Ok(result(
+                    "failed",
+                    format!(
+                        "marketplace add did not verify (exit {}); no settings entry existed to restore; installed plugin retained",
+                        output.code
+                    ),
+                ));
+            }
+            let after_bytes = after_bytes.unwrap_or_default();
             let mut after = if after_bytes.is_empty() {
                 json!({})
             } else {
@@ -314,8 +324,9 @@ pub(super) fn update_with(
         if failure || migrated["state"] == "failed" {
             report["state"] = json!("failed");
             report["detail"] = json!(format!(
-                "marketplace refresh did not verify (exit {}); the cache may match an older clone; installed plugin was retained; fix the marketplace source, then run pseudolife-mcp update --clients-only; {}",
+                "marketplace refresh did not verify (exit {}); {}; the cache may match an older clone; installed plugin was retained; fix the marketplace source, then run pseudolife-mcp update --clients-only; {}",
                 refreshed.code,
+                migrated["detail"].as_str().unwrap_or(""),
                 report["detail"].as_str().unwrap_or("")
             ));
         }

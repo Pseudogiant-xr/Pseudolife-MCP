@@ -413,8 +413,13 @@ fn offered_manifest(home: &Path, runner: &impl Runner) -> Result<Value, String> 
             args.extend(["--branch", reference]);
         }
         args.extend(["--", source, clone_text]);
+        let ssh_default = if std::env::var_os("GIT_SSH_COMMAND").is_none() {
+            vec![("GIT_SSH_COMMAND", "ssh -o BatchMode=yes")]
+        } else {
+            vec![]
+        };
         if runner
-            .run(&git, &args, None, Duration::from_secs(120), &[])
+            .run(&git, &args, None, Duration::from_secs(120), &ssh_default)
             .code
             != 0
         {

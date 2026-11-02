@@ -4,12 +4,13 @@ use std::{collections::BTreeMap, io::Read};
 
 pub(super) const PYTHON_IMAGE: &str = "ghcr.io/pseudogiant-xr/pseudolife-daemon";
 pub(super) const RUST_IMAGE: &str = "ghcr.io/pseudogiant-xr/pseudolife-daemon-rust";
-const COMPOSE_FILES: [&str; 5] = [
+const COMPOSE_FILES: [&str; 6] = [
     "docker-compose.yml",
     "docker-compose.ghcr.yml",
     "docker-compose.rust-daemon.yml",
     "docker-compose.rust-shadow.yml",
     "docker-compose.rust-ghcr.yml",
+    "Dockerfile.extractor",
 ];
 
 pub(super) fn verified_compose(
@@ -148,6 +149,11 @@ pub(super) fn publish_compose(
 
 impl Update {
     fn release_compose(&self, target: &str) -> Result<PathBuf> {
+        if version_key(target) <= version_key("0.21.0") {
+            return Err(UpdateError::usage(
+                "this release predates the native Compose bundle; use the Python updater, or --tag a release that ships pseudolife-compose-<version>.tar.gz; nothing was deployed",
+            ));
+        }
         let base = std::env::var("PSEUDOLIFE_RELEASE_BASE_URL").unwrap_or_else(|_| {
             "https://github.com/Pseudogiant-xr/Pseudolife-MCP/releases/download".into()
         });
@@ -202,6 +208,11 @@ impl Update {
             ));
         }
         let existing = list("com.docker.compose.project.config_files");
+        let project_dir = working.or_else(|| {
+            existing.first().and_then(|p| p.parent()).map(Path::to_owned)
+        }).ok_or_else(|| UpdateError::usage(
+            "cannot resolve the original Compose project directory; restore its project labels before updating; nothing was changed"
+        ))?;
         if existing.iter().any(|p| !p.is_file()) && env_files.is_empty() {
             return Err(UpdateError::usage(
                 "the daemon's compose files are gone and no env file was found; name the original file with --env-file. Nothing was changed",
@@ -232,12 +243,17 @@ impl Update {
                 .unwrap_or("pseudolife-mcp")
                 .into(),
         ];
+        args.extend([
+            "--project-directory".into(),
+            project_dir.to_string_lossy().into_owned(),
+        ]);
         args.extend(compose_args(&files, &env_files));
-        let checkout = working.as_ref().and_then(|p| {
-            [p.clone(), p.parent().unwrap_or(p).to_owned()]
-                .into_iter()
-                .find(|p| p.join("pyproject.toml").is_file() && p.join("ops").is_dir())
-        });
+        let checkout = [
+            project_dir.clone(),
+            project_dir.parent().unwrap_or(&project_dir).to_owned(),
+        ]
+        .into_iter()
+        .find(|p| p.join("pyproject.toml").is_file() && p.join("ops").is_dir());
         Ok(Context {
             args,
             env_files,
@@ -292,6 +308,12 @@ impl Update {
         let labels = engine::host_labels(self, DAEMON_CONTAINER);
         let selected = labels[engine::ENGINE_LABEL].as_str().unwrap_or("python");
         let choice = self.o.engine.clone().unwrap_or_else(|| selected.to_owned());
+        if choice == "rust" {
+            return Err(UpdateError::usage(
+                "Rust images are not published; use --engine rust --checkout <repo> (checkout mode); nothing was changed",
+            ));
+        }
+        let activating = self.o.engine.is_some() || truthy(&labels[engine::ACTIVATION_LABEL]);
         if current.as_deref() == Some(&target) && !self.o.reinstall && choice == selected {
             self.step(format!("the daemon already runs {target}; nothing to do (--reinstall to recreate it anyway, --clients-only for the shim and plugin)"));
             return Ok(());
@@ -309,10 +331,16 @@ impl Update {
         config_args.extend(["config".into(), "--format".into(), "json".into()]);
         let (code, out) = self.command(&config_args, Some(&env), 60, false);
         let config:Value=serde_json::from_str(&out).ok().filter(|_:&Value|code==0).ok_or_else(||UpdateError::usage("cannot resolve the Compose project; check its files and env file, then retry; nothing was changed"))?;
-        engine::verify_identity(&config, &context.running, &self.o.daemon_url)?;
-        let token = engine::daemon_token(&config)?;
-        if before.as_ref().is_none_or(|v| v["status"] != "ok")
-            || !seams::authenticated_read(&self.o.daemon_url, &token)
+        engine::verify_bank_identity(&config, &context.running)?;
+        let token = if activating {
+            engine::verify_identity(&config, &context.running, &self.o.daemon_url)?;
+            engine::daemon_token(&config)?
+        } else {
+            String::new()
+        };
+        if activating
+            && (before.as_ref().is_none_or(|v| v["status"] != "ok")
+                || !seams::authenticated_read(&self.o.daemon_url, &token))
         {
             return Err(UpdateError::usage(
                 "the running daemon did not pass an authenticated bank read; use the previous update's rollback commands before retrying; no rollback tag was moved",
@@ -376,9 +404,13 @@ impl Update {
                 "cat /app/pseudolife_memory/storage/schema.py".into(),
             ]
         };
-        let (code, metadata) = self.command(&probe, None, 60, false);
-        let schema=if choice=="rust"{metadata.trim().parse::<i64>().ok()}else{regex::Regex::new(r"(?m)^SCHEMA_META_VERSION\s*=\s*([0-9]+)").expect("schema").captures(&metadata).and_then(|c|c[1].parse::<i64>().ok())}.filter(|_|code==0)
-            .ok_or_else(||UpdateError::usage("cannot read the pulled image's schema version; verify its published CLI/image contract and retry; nothing was deployed"))?;
+        let schema = if activating {
+            let (code, metadata) = self.command(&probe, None, 60, false);
+            Some(if choice=="rust"{metadata.trim().parse::<i64>().ok()}else{regex::Regex::new(r"(?m)^SCHEMA_META_VERSION\s*=\s*([0-9]+)").expect("schema").captures(&metadata).and_then(|c|c[1].parse::<i64>().ok())}.filter(|_|code==0)
+                .ok_or_else(||UpdateError::usage("cannot read the pulled image's schema version; verify its published CLI/image contract and retry; nothing was deployed"))?)
+        } else {
+            None
+        };
         let pg = engine::container(self, &context.args, Some(&env), "pseudolife-pg")?;
         let pg_env = &config["services"]["pseudolife-pg"]["environment"];
         let user = pg_env["POSTGRES_USER"]
@@ -453,7 +485,10 @@ impl Update {
         self.prune_rollbacks(None, PYTHON_IMAGE);
         self.prune_rollbacks(None, RUST_IMAGE);
         let activation = uuid::Uuid::new_v4().simple().to_string();
-        let service = json!({"image":image,"labels":{(engine::ENGINE_LABEL):choice,(engine::ACTIVATION_LABEL):activation,(engine::RELEASE_LABEL):target}});
+        let mut service = json!({"image":image});
+        if activating {
+            service["labels"] = json!({(engine::ENGINE_LABEL):choice,(engine::ACTIVATION_LABEL):activation,(engine::RELEASE_LABEL):target});
+        }
         let candidate = data_dir()
             .join("update-engine")
             .join(format!("docker-compose.engine-candidate-{activation}.json"));
@@ -476,8 +511,14 @@ impl Update {
             if self.command(&args, Some(&env), 3600, true).0 != 0 {
                 return Err(UpdateError::new("daemon recreate failed"));
             }
-            let health = self.wait_health(Some(&target), Some(schema), &token, false)?;
-            engine::write_overlay(&engine::release_accepted(), &service)?;
+            let health = if activating {
+                self.wait_health(Some(&target), schema, &token, false)?
+            } else {
+                self.wait_plain_health(Some(&target))?
+            };
+            if activating {
+                engine::write_overlay(&engine::release_accepted(), &service)?;
+            }
             if !self.o.daemon_only {
                 self.clients(None, &format!("pseudolife-mcp=={target}"), Some(&health));
             } else {
@@ -497,6 +538,18 @@ impl Update {
         token: &str,
         shadow: bool,
     ) -> Result<Value> {
+        self.wait_health_with(version, schema, Some(token), shadow)
+    }
+    fn wait_plain_health(&mut self, version: Option<&str>) -> Result<Value> {
+        self.wait_health_with(version, None, None, false)
+    }
+    fn wait_health_with(
+        &mut self,
+        version: Option<&str>,
+        schema: Option<i64>,
+        token: Option<&str>,
+        shadow: bool,
+    ) -> Result<Value> {
         self.step("waiting for the daemon to report healthy...");
         for attempt in 0..self.o.health_retries {
             let health = fetch_json(
@@ -507,12 +560,12 @@ impl Update {
                 && health["status"] == "ok"
                 && version.is_none_or(|v| health["version"] == v)
                 && schema.is_none_or(|v| health["schema"] == v)
-                && !truthy(&health["counters_import_required"])
+                && (token.is_none() || !truthy(&health["counters_import_required"]))
                 && (!shadow
                     || (health["read_only"] == true
                         && health["ready"] == true
                         && health["db"] == "ok"))
-                && seams::authenticated_read(&self.o.daemon_url, token)
+                && token.is_none_or(|token| seams::authenticated_read(&self.o.daemon_url, token))
             {
                 if self
                     .schema_before
@@ -540,9 +593,11 @@ impl Update {
                 std::thread::sleep(std::time::Duration::from_millis(self.o.health_delay_ms));
             }
         }
-        Err(UpdateError::new(
-            "the daemon failed its expected version, schema or authenticated-read health gate; the client side was not moved",
-        ))
+        Err(UpdateError::new(if token.is_some() {
+            "the daemon failed its expected version, schema or authenticated-read health gate; the client side was not moved"
+        } else {
+            "the daemon did not report healthy at the expected version; inspect docker logs and use the rollback commands below; the client side was not moved"
+        }))
     }
     pub fn deploy_checkout(&mut self, repo: &Path) -> Result<()> {
         let repo = fs::canonicalize(repo)
@@ -575,8 +630,7 @@ impl Update {
         let env = compose_environment(&[env_file], &engine::build_environment(&tree));
         let before = self.daemon_health();
         self.schema_before = before.as_ref().and_then(|v| v["schema"].as_i64());
-        // Resolve effective credentials and the target schema before backup or
-        // recreation; malformed inputs must leave the running daemon alone.
+        // Resolve this project's bank and health endpoint before backup.
         let mut discovery = vec!["compose".into()];
         discovery.extend(compose.clone());
         discovery.extend(["config".into(), "--format".into(), "json".into()]);
@@ -586,14 +640,14 @@ impl Update {
             .filter(|_: &Value| code == 0)
             .ok_or_else(|| {
                 UpdateError::usage(
-                    "cannot resolve the project's health credentials; nothing was deployed",
+                    "cannot resolve the project's Compose configuration; restore its files and retry; nothing was deployed",
                 )
             })?;
-        let token = engine::daemon_token(&config)?;
-        let (version, schema) = engine::checkout_version_schema(&repo)?;
         // A checkout can name a different Compose project. Never read a global
         // daemon or back up a different bank while recreating this project.
         let daemon = engine::container(self, &compose, Some(&env), DAEMON_SERVICE)?;
+        let running = engine::inspect(self, &daemon)?;
+        engine::verify_identity(&config, &running, &self.o.daemon_url)?;
         if self.o.no_backup {
             self.backup(None)?;
         } else {
@@ -647,6 +701,22 @@ impl Update {
             {
                 self.warn("REFUSING to move the rollback tag: the version tag is NOT the image the running daemon deployed; existing rollback tags are untouched");
                 self.report.rollback = json!({"tag":rollback,"state":"kept","image_tag":image});
+                self.rollback_lines = vec![
+                    "(the rollback tag was NOT moved this run - see the warning above)".into(),
+                    "Pick the newest surviving rollback tag and redeploy it:".into(),
+                    format!(
+                        "docker image ls {}",
+                        seams::quote(image.split(':').next().unwrap_or("pseudolife-daemon"))
+                    ),
+                    format!(
+                        "docker tag <surviving-rollback-tag> {}",
+                        seams::quote(&image)
+                    ),
+                    format!(
+                        "docker compose {} up -d --no-deps --no-build {DAEMON_SERVICE}",
+                        display(&compose)
+                    ),
+                ];
             } else {
                 engine::tag_validated(self, source, &rollback)?;
                 self.report.rollback = json!({"tag":rollback,"state":"tagged","image_tag":image});
@@ -665,6 +735,14 @@ impl Update {
         } else {
             self.warn("this deploy has NO rollback image. Rolling back means rebuilding the previous code");
             self.report.rollback = json!({"tag":rollback,"state":"none","image_tag":image});
+            self.rollback_lines = vec![
+                "(no rollback image exists for this deploy - nothing was tagged)".into(),
+                "Restore the previous checkout and rebuild the daemon to roll back.".into(),
+                format!(
+                    "docker compose {} up -d --no-deps --build {DAEMON_SERVICE}",
+                    display(&compose)
+                ),
+            ];
         }
         if !self.rollback_lines.is_empty() {
             self.rollback_lines.extend(self.schema_rollback_note());
@@ -696,7 +774,7 @@ impl Update {
             return Err(self.rollback_error("daemon rebuild failed"));
         }
         let health = self
-            .wait_health(Some(&version), Some(schema), &token, false)
+            .wait_plain_health(None)
             .map_err(|e| self.rollback_error(e.message))?;
         self.checkout_post_deploy(
             &repo,

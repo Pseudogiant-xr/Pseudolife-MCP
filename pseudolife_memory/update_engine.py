@@ -26,6 +26,8 @@ PYTHON_ACCEPTED = "data/update-engine/docker-compose.python-accepted.json"
 ENGINE_LABEL = "org.pseudolife.engine"
 CHECKOUT_LABEL = "org.pseudolife.checkout"
 ACTIVATION_LABEL = "org.pseudolife.activation"
+RELEASE_LABEL = "org.pseudolife.release"
+RELEASE_ACCEPTED = "update-engine/docker-compose.release-accepted.json"
 SHADOW_SERVICE = "pseudolife-rust-shadow"
 
 
@@ -52,9 +54,13 @@ def _selection(repo: Path, filename: str = SELECTION) -> dict | None:
 def _validated_engine_selection(labels: dict) -> dict:
     engine = labels.get(ENGINE_LABEL, "python")
     origin = labels.get(CHECKOUT_LABEL)
-    selected = _selection(Path(origin), SELECTION if engine == "rust" else PYTHON_ACCEPTED) if origin else None
+    release = labels.get(RELEASE_LABEL)
+    selected = (_selection(up.data_dir(), RELEASE_ACCEPTED) if release else
+                _selection(Path(origin), SELECTION if engine == "rust" else PYTHON_ACCEPTED) if origin else None)
     if (not selected or selected["labels"][ENGINE_LABEL] != engine
-            or selected["labels"].get(ACTIVATION_LABEL) != labels.get(ACTIVATION_LABEL)):
+            or not labels.get(ACTIVATION_LABEL)
+            or selected["labels"].get(ACTIVATION_LABEL) != labels.get(ACTIVATION_LABEL)
+            or release and selected["labels"].get(RELEASE_LABEL) != release):
         raise up.UpdateError(f"the running {engine} container has no valid accepted activation; use the previous update's "
                              "rollback commands (the Python rollback for a first activation) before retrying; nothing was changed", 2)
     return selected

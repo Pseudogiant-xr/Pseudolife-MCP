@@ -153,6 +153,11 @@ impl Options {
                 "--shadow requires --engine rust --checkout <repo> to start, or --engine python --checkout <repo> to remove; nothing was changed",
             ));
         }
+        if self.engine.as_deref() == Some("rust") && self.checkout.is_none() {
+            return Err(UpdateError::usage(
+                "Rust images are not published; use --engine rust --checkout <repo> (checkout mode); nothing was changed",
+            ));
+        }
         if (self.engine.is_some() || self.shadow)
             && (self.clients_only || self.all_clients || self.unattended || self.schedule.is_some())
         {

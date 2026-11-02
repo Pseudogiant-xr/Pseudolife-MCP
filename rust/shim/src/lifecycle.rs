@@ -980,7 +980,10 @@ pub fn native_update_binary_at(launcher: Option<&Path>, invoking: &Path) -> io::
     if let Some(launcher) = launcher.filter(|path| native_launcher_verified(path, invoking)) {
         return std::path::absolute(launcher);
     }
-    fs::canonicalize(invoking)
+    Err(io::Error::new(
+        io::ErrorKind::NotFound,
+        "no verified stable native launcher; install the native runtime or set PSEUDOLIFE_SHIM_LAUNCHER to its stable launcher before updating clients",
+    ))
 }
 
 fn native_launcher_verified(path: &Path, invoking: &Path) -> bool {

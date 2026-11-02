@@ -74,8 +74,7 @@ impl Runner for NativeRunner {
                         c.current_dir(cwd);
                     }
                     c.env("GIT_TERMINAL_PROMPT", "0")
-                        .env("GCM_INTERACTIVE", "never")
-                        .env("GIT_SSH_COMMAND", "ssh -o BatchMode=yes");
+                        .env("GCM_INTERACTIVE", "never");
                     for (key, _) in std::env::vars_os() {
                         if key
                             .to_string_lossy()

@@ -79,6 +79,7 @@ fn native_update_option_refusals_precede_effects() {
         vec!["--tag", "1.2;bad"],
         vec!["--rollback-tag", "bad/tag"],
         vec!["--no-test-login"],
+        vec!["--engine", "rust"],
     ] {
         assert_eq!(
             Options::parse(args.into_iter().map(OsString::from).collect())
@@ -153,13 +154,14 @@ fn native_update_compose_requires_checksum_and_closed_archive() {
         ("docker-compose.rust-daemon.yml", b"services: {}".as_slice()),
         ("docker-compose.rust-shadow.yml", b"services: {}".as_slice()),
         ("docker-compose.rust-ghcr.yml", b"services: {}".as_slice()),
+        ("Dockerfile.extractor", b"FROM scratch".as_slice()),
     ];
     let bytes = archive(&files);
     assert_eq!(
         release::verified_compose("0.21.0", &sums(&bytes), &bytes)
             .unwrap()
             .len(),
-        5
+        6
     );
     let mut corrupt = bytes.clone();
     corrupt[8] ^= 1;
@@ -204,6 +206,29 @@ fn native_update_null_labels_and_failed_activation_are_distinct() {
 fn native_update_mapped_bearer_preserves_colons() {
     let config = json!({"services":{DAEMON_SERVICE:{"environment":{"PSEUDOLIFE_MCP_TOKENS":" malformed, :reader, reserved:default, fixture:colon : Reader , next:other "}}}});
     assert!(engine::daemon_token(&config).is_ok_and(|v| v == "fixture:colon"));
+}
+
+#[test]
+fn native_update_identity_checks_every_effective_mount() {
+    let mut config = json!({"services":{DAEMON_SERVICE:{"environment":{"PSEUDOLIFE_MCP_DATABASE_URL":"fixture"},"volumes":[
+        {"type":"volume","source":"state","target":"/data"},
+        {"type":"bind","source":"/original/config.yaml","target":"/data/config.yaml","read_only":true}
+    ]}},"volumes":{"state":{"name":"fixture-state"}}});
+    let running = json!({"Config":{"Env":["PSEUDOLIFE_MCP_DATABASE_URL=fixture"]},"Mounts":[
+        {"Type":"volume","Name":"fixture-state","Destination":"/data","RW":true},
+        {"Type":"bind","Source":"/original/config.yaml","Destination":"/data/config.yaml","RW":false}
+    ]});
+    assert!(engine::verify_bank_identity(&config, &running).is_ok());
+    config["services"][DAEMON_SERVICE]["volumes"][1]["source"] = json!("/bundle/config.yaml");
+    assert!(engine::verify_bank_identity(&config, &running).is_err());
+    config["services"][DAEMON_SERVICE]["volumes"][1]["source"] = json!("/original/config.yaml");
+    config["services"][DAEMON_SERVICE]["volumes"][1]["read_only"] = json!(false);
+    assert!(engine::verify_bank_identity(&config, &running).is_err());
+    config["services"][DAEMON_SERVICE]["volumes"]
+        .as_array_mut()
+        .unwrap()
+        .pop();
+    assert!(engine::verify_bank_identity(&config, &running).is_err());
 }
 #[test]
 fn native_update_rollback_records_commit_after_recreation() {
