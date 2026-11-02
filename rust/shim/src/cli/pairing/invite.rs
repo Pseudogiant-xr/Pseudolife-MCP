@@ -353,24 +353,44 @@ fn config_yaml() -> Option<yaml_rust2::Yaml> {
         .next()
 }
 
-/// A `coordination` list of names; `None` when any entry is not a string
-/// (the oracle's config validation then refuses the whole file).
+/// A `coordination` list of names as `CoordinationConfig.__post_init__`
+/// keeps it: each stripped and lower-cased, duplicates dropped in order.
+/// `None` when any entry is not a string or is blank (the oracle's
+/// validation then refuses the whole file).
 fn coordination_names(config: &yaml_rust2::Yaml, key: &str) -> Option<Vec<String>> {
-    match &config["coordination"][key] {
-        yaml_rust2::Yaml::BadValue | yaml_rust2::Yaml::Null => Some(Vec::new()),
-        yaml_rust2::Yaml::Array(items) => items
-            .iter()
-            .map(|value| value.as_str().map(str::to_owned))
-            .collect(),
-        _ => None,
+    let items = match &config["coordination"][key] {
+        yaml_rust2::Yaml::BadValue | yaml_rust2::Yaml::Null => return Some(Vec::new()),
+        yaml_rust2::Yaml::Array(items) => items,
+        _ => return None,
+    };
+    let mut names: Vec<String> = Vec::new();
+    for value in items {
+        let name = value.as_str()?.trim().to_lowercase();
+        if name.is_empty() {
+            return None;
+        }
+        if !names.contains(&name) {
+            names.push(name);
+        }
     }
+    Some(names)
+}
+
+/// The config is the oracle's only when both lists it reads are valid: a
+/// malformed one makes `load_config` refuse the whole file, and then
+/// neither the listed note nor the not-owner names apply.
+fn coordination_lists(config: &yaml_rust2::Yaml) -> Option<(Vec<String>, Vec<String>)> {
+    Some((
+        coordination_names(config, "allowed_principals")?,
+        coordination_names(config, "not_owner_principals")?,
+    ))
 }
 
 /// The optional courtesy note never blocks an invite on malformed configuration.
 fn listed_in_config(name: &str) -> bool {
     config_yaml()
-        .and_then(|config| coordination_names(&config, "allowed_principals"))
-        .is_some_and(|names| names.iter().any(|value| value == name))
+        .and_then(|config| coordination_lists(&config))
+        .is_some_and(|(allowed, _)| allowed.iter().any(|value| value == name))
 }
 
 /// `_not_owner_names` (v59): `coordination.not_owner_principals`, the
@@ -378,7 +398,8 @@ fn listed_in_config(name: &str) -> bool {
 /// cannot be read.
 fn not_owner_in_config() -> Vec<String> {
     config_yaml()
-        .and_then(|config| coordination_names(&config, "not_owner_principals"))
+        .and_then(|config| coordination_lists(&config))
+        .map(|(_, not_owner)| not_owner)
         .unwrap_or_default()
 }
 
@@ -930,6 +951,35 @@ fn list_report(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn config_names_are_normalised_as_the_oracle_keeps_them() {
+        let doc = |text: &str| {
+            yaml_rust2::YamlLoader::load_from_str(text)
+                .unwrap()
+                .remove(0)
+        };
+        let config = doc("coordination:\n  not_owner_principals: [' Friend ', friend, CODEX]\n");
+        assert_eq!(
+            coordination_names(&config, "not_owner_principals"),
+            Some(vec!["friend".to_owned(), "codex".to_owned()])
+        );
+        assert_eq!(
+            coordination_names(&config, "allowed_principals"),
+            Some(vec![])
+        );
+        for bad in ["[' ']", "[1]", "[friend, '']", "friend"] {
+            let config = doc(&format!("coordination:\n  not_owner_principals: {bad}\n"));
+            assert_eq!(
+                coordination_names(&config, "not_owner_principals"),
+                None,
+                "{bad}"
+            );
+        }
+        let other_bad =
+            doc("coordination:\n  allowed_principals: ['']\n  not_owner_principals: [friend]\n");
+        assert!(coordination_lists(&other_bad).is_none());
+    }
+
     use super::*;
 
     fn strings(values: &[&str]) -> Vec<String> {

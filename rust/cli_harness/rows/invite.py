@@ -526,7 +526,8 @@ LIVE_ONLY = frozenset({
     # Its report is the daemon's auth value nested to the limit and
     # pretty-printed: 2.6 MB of indentation, compared live only.
     "health-nested-at-limit-json", "defer-tailscale-present", "defer-config-yaml",
-    "defer-list-config-yaml", "defer-list-config-env", "defer-invite-config-env"})
+    "defer-list-config-yaml", "defer-list-config-env", "defer-invite-config-env",
+    "list-config-names-normalised"})
 
 
 _TRANSPORT_DOCKER = r'''import json, os, sys
@@ -803,7 +804,8 @@ def _cases() -> list[core.Case]:
     def deferral(case_id, argv, kind="states", **options):
         native = case_id in {"defer-no-dsn", "defer-list-no-dsn", "defer-tailscale-present", "defer-config-yaml", "defer-help",
                              # v59: the list and the invite read the config natively.
-                             "defer-list-config-yaml", "defer-list-config-env", "defer-invite-config-env"}
+                             "defer-list-config-yaml", "defer-list-config-env", "defer-invite-config-env",
+                             "list-config-names-normalised"}
         port = free_port()
         add(write_case(case_id, kind, [*argv, "--port", str(port)], rules=("invite-written",) if native else deferred,
                        daemon=_daemon(port, health()), **options))
@@ -826,6 +828,10 @@ def _cases() -> list[core.Case]:
     deferral("defer-list-config-yaml", ["--list"],
              extra_env={"PSEUDOLIFE_MCP_DATA_DIR": "{HOME}" + SEP + "data"},
              files={"data/config.yaml": b"coordination:\n  not_owner_principals: [codex]\n"})
+    # The config's names as load_config keeps them: stripped, lower-cased.
+    deferral("list-config-names-normalised", ["--list"],
+             extra_env={"PSEUDOLIFE_MCP_DATA_DIR": "{HOME}" + SEP + "data"},
+             files={"data/config.yaml": b"coordination:\n  not_owner_principals: [' Codex ']\n"})
     deferral("defer-mine-and-someone-else", ["laptop", "--mine", "--someone-else", "--url", "u"])
     # PSEUDOLIFE_MCP_CONFIG comes first for the daemon, so the oracle reads it.
     deferral("defer-list-config-env", ["--list"],
