@@ -2,6 +2,9 @@
 mod argv;
 use std::process::ExitCode;
 fn main() -> ExitCode {
+    if let Some(code) = pseudolife_stdio::runtime::maybe_launch() {
+        return ExitCode::from(code);
+    }
     // Episode hooks ignore every tail argument, including opaque OS strings.
     let first = std::env::args_os().nth(1);
     if let Some(code) = run_episode(first.as_deref().and_then(std::ffi::OsStr::to_str)) {
@@ -21,6 +24,14 @@ fn main() -> ExitCode {
             arguments.into_iter().skip(1).collect(),
         ));
     }
+    if arguments
+        .first()
+        .is_some_and(|mode| mode == "coordination-recovery")
+    {
+        return ExitCode::from(pseudolife_stdio::cli::coordination_recovery::run(
+            arguments.into_iter().skip(1).collect(),
+        ));
+    }
     if arguments.first().is_some_and(|mode| mode == "board-audit") {
         return ExitCode::from(pseudolife_stdio::cli::board_audit::run(
             arguments.into_iter().skip(1).collect(),
@@ -29,7 +40,7 @@ fn main() -> ExitCode {
     if arguments.first().is_some_and(|mode| mode == "maintainer")
         && let Some(code) = pseudolife_stdio::cli::maintainer::run(arguments[1..].to_vec())
     {
-        return ExitCode::from(code);
+        std::process::exit(code);
     }
     if arguments.first().and_then(|mode| mode.to_str()) == Some("lease") {
         let Some(lease_arguments) = arguments

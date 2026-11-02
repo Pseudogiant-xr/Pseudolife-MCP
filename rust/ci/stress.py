@@ -8,9 +8,11 @@ calls on the VM, then failed 3 of 5 hosted runs. Each iteration is its own
 job on a fresh runner, so first-hit cold-start stalls count.
 
 A selection is one of:
-  row:<row>[/<case>]     one live arm of a CLI harness row against this
-                         checkout's Python, run as its required lane runs it
-  scenario:<name>        one live daemon comparison (run.py live --only), on
+  row:<row>[/<case>] [row:...]
+                         live arms of CLI harness rows against this
+                         checkout's Python, each run as its required lane runs it
+  scenario:<name> [scenario:...]
+                         live daemon comparisons (run.py live --only), each on
                          the binary and settings the scenario's lane uses
   cargo:<package>/<test binary>[::<test>] [cargo:...]
                          Rust integration test binaries, lib for library unit
@@ -31,10 +33,26 @@ A selection is one of:
                          the parity shards' candidate binaries in the env
 
 An iteration passes only with evidence: a pytest or cargo run where every
-selected test ran and passed (a skip is not evidence, so a binary holding
-#[ignore] tests is selected test by test; a Rust test that returns early
+selected test ran and passed (a runtime skip is not evidence; nextest's
+default-excluded #[ignore] tests are not selected; a Rust test that returns early
 still counts as run, so a cargo row lists each test's seconds), or a row or scenario that
-compared at least one case. Subcommands: ``plan`` checks the inputs and
+compared at least one case.
+
+Several rows, or several scenarios, share one loop: every iteration runs
+each item in turn as its own harness process, with the argv, env and
+scratch directory it would get alone, so items never share a setup and N
+items cost one set of runner jobs instead of N. The iteration passes only
+if every item passed and compared a case; its row lists each item's
+result (an item that raises is that item's failure, and the rest still
+run) and is rewritten before each item, so a timed-out job names the item
+it was running. One iteration provides every row and every scenario (the
+job downloads the stdio, default static and mutants daemon builds and
+prepares PostgreSQL for both kinds) except REMOTE_BIND's, so ``plan``
+refuses a selection naming one of those, a mix of kinds, overlapping
+items (a row twice, or a whole row beside one of its cases), or more than
+MAX_ITEMS items, which would not fit one job's time budget.
+
+Subcommands: ``plan`` checks the inputs and
 lists the iterations, ``archive`` builds a cargo selection's archive,
 ``run`` runs one iteration and writes its row, ``report`` joins the rows
 into stress-report.json and fails unless every iteration passed in the same
@@ -70,6 +88,14 @@ STATIC_PREFIXES = ("body-", "security-", "static-")
 # These need the debug build's loopback-bind override, which only the rust
 # job builds, and a stress loop runs no rust job.
 REMOTE_BIND = {"trust-bind", "security-remote-open", "security-remote-auth"}
+# The kinds whose items each run as their own harness process.
+ITEM_KINDS = ("row", "scenario")
+# The items of one row or scenario selection run one after another inside one
+# stress job (rust.yml's timeout-minutes, ITERATION_MINUTES). Review of the
+# multi-item change (2026-11-02): a row job spends about 4-5 minutes on setup,
+# then 2-3 minutes per row, so 6 items leave room inside the budget.
+MAX_ITEMS = 6
+ITERATION_MINUTES = 45
 # A cargo item: package and test binary, optionally one test by its libtest
 # path (module::test). lib selects library unit tests; test/lib escapes the
 # reserved name for an integration target. bin/<name> selects binary unit
@@ -81,23 +107,58 @@ CARGO_FORM = "cargo:<package>/[bin/]<test binary>[::<test>]"
 WORKSPACE = Path("rust")
 
 
+def token_kind(token: str) -> str:
+    """The kind one space-separated selection item names."""
+    prefix, colon, _ = token.partition(":")
+    return prefix if colon and prefix in ("row", "scenario", "cargo") else "pytest"
+
+
 def parse(selection: str) -> tuple[str, list[str]]:
-    """The selection's kind and its names, or ValueError naming the fix."""
+    """The selection's kind and its names, or ValueError naming the fix.
+    Rows and scenarios are named per item ("hook/<case>", "tokenless");
+    item_names splits one into the harness's names."""
     selection = selection.strip()
-    if selection.startswith("row:"):
-        row, slash, case = selection[4:].partition("/")
-        if not NAME.fullmatch(row) or (slash and not NAME.fullmatch(case)):
-            raise ValueError(f"row selection {selection!r}: expected row:<row> or row:<row>/<case>")
-        return "row", [row] + ([case] if case else [])
-    if selection.startswith("scenario:"):
-        name = selection[9:]
-        if not NAME.fullmatch(name):
-            raise ValueError(f"scenario selection {selection!r}: expected scenario:<run.py scenario>")
-        if name in REMOTE_BIND:
-            raise ValueError(f"scenario:{name} needs the debug loopback-bind build, which a stress loop "
-                             "does not build; dispatch manual CI (mode=ci) for it, or pick another scenario:")
-        return "scenario", [name]
-    nodes = selection.split()
+    tokens = selection.split()
+    if any(token_kind(token) in ITEM_KINDS for token in tokens):
+        kind = token_kind(tokens[0])
+        stray = next((token for token in tokens if token_kind(token) != kind), None)
+        if stray is not None:
+            first = kind if kind in ITEM_KINDS else token_kind(stray)
+            raise ValueError(f"{first} selection {selection!r}: item {stray!r} is a {token_kind(stray)} item; "
+                             f"a selection holds one kind, so dispatch the {token_kind(stray)} item separately")
+        seen = {}
+        for token in tokens:
+            where = "" if len(tokens) == 1 else f": item {token!r}"
+            name = token[len(kind) + 1:]
+            if kind == "row":
+                row, slash, case = name.partition("/")
+                if not NAME.fullmatch(row) or (slash and not NAME.fullmatch(case)):
+                    raise ValueError(f"row selection {selection!r}{where}: expected row:<row> or row:<row>/<case>"
+                                     + (", separated by spaces" if where else ""))
+            else:
+                if not NAME.fullmatch(name):
+                    raise ValueError(f"scenario selection {selection!r}{where}: expected scenario:<run.py scenario>"
+                                     + (", separated by spaces" if where else ""))
+                if name in REMOTE_BIND:
+                    raise ValueError(f"scenario:{name} needs the debug loopback-bind build, which a stress loop "
+                                     "does not build; dispatch manual CI (mode=ci) for it, or pick another scenario:")
+            # Identity is (row, case) or (scenario,): a whole row already runs
+            # every case of it, so a row and one of its cases overlap.
+            identity = tuple(item_names(kind, name))
+            for other, earlier in seen.items():
+                if other == identity:
+                    raise ValueError(f"{kind} selection {selection!r}: {token!r} is named twice; "
+                                     f"name each {kind} once")
+                if other[0] == identity[0] and len(other) != len(identity):
+                    raise ValueError(f"{kind} selection {selection!r}: item {token!r} overlaps {earlier!r}, "
+                                     "since a whole row runs every case of it; name the row or its cases, not both")
+            seen[identity] = token
+        if len(tokens) > MAX_ITEMS:
+            raise ValueError(f"{kind} selection {selection!r} names {len(tokens)} items; a loop runs at most "
+                             f"{MAX_ITEMS}, one after another in one {ITERATION_MINUTES}-minute job, so split "
+                             "the dispatch into several of at most that many")
+        return kind, [token[len(kind) + 1:] for token in tokens]
+    nodes = tokens
     if any(node.startswith("cargo:") for node in nodes):
         if not all(CARGO.fullmatch(node) for node in nodes):
             raise ValueError(f"cargo selection {selection!r}: expected {CARGO_FORM} items, "
@@ -111,6 +172,14 @@ def parse(selection: str) -> tuple[str, list[str]]:
         raise ValueError(f"selection {selection!r}: expected row:<row>[/<case>], scenario:<name>, "
                          f"{CARGO_FORM}, or pytest node ids such as tests/test_x.py::test_y")
     return "pytest", nodes
+
+
+def item_names(kind: str, item: str) -> list[str]:
+    """One row or scenario item's harness names: [row] or [row, case], or [scenario]."""
+    if kind == "row":
+        row, _, case = item.partition("/")
+        return [row] + ([case] if case else [])
+    return [item]
 
 
 def cargo_item(name: str) -> tuple[str, str, str | None]:
@@ -263,7 +332,8 @@ def junit_counts(report: Path) -> tuple[int, int]:
 def selected_cases(names: list[str], report: Path) -> list | None:
     """The (suite, testcase, matching items) a nextest JUnit report holds for
     a cargo selection, or None without a readable report. Tests outside the
-    selection (the rest of a binary when one test is named) are left out."""
+    selection (the rest of a binary when one test is named, or tests excluded
+    by nextest's default run-ignored policy) are left out."""
     try:
         root = ElementTree.parse(report).getroot()
     except (OSError, ElementTree.ParseError):
@@ -272,6 +342,11 @@ def selected_cases(names: list[str], report: Path) -> list | None:
     selected = []
     for suite in root.iter("testsuite"):
         for case in suite.iter("testcase"):
+            # Only nextest's canonical default-exclusion record is not selected.
+            # Unknown skips or records carrying additional failure evidence fail closed.
+            if (len(case) == 1 and case[0].tag == "skipped"
+                    and case[0].get("message") == "Skipped: test does not match the run-ignored option"):
+                continue
             matched = [name for name, (package, binary, test) in zip(names, items)
                        if suite.get("name") == cargo_binary_id(package, binary) and test in (None, case.get("name"))]
             if matched:
@@ -335,6 +410,21 @@ def evidence(kind: str, names: list[str], scratch: Path) -> str:
     return ""
 
 
+def write_row(out: str | Path, row: dict) -> None:
+    """Write an iteration's row whole or not at all: a temporary file beside
+    it, then a rename over it, so a job killed mid-write leaves the previous
+    row, never a torn one. The report's glob does not match the .tmp name,
+    and a write or rename that fails removes it."""
+    out = Path(out)
+    temporary = out.with_name(out.name + ".tmp")
+    try:
+        temporary.write_text(json.dumps(row, indent=2) + "\n", encoding="utf-8")
+        os.replace(temporary, out)
+    except BaseException:
+        temporary.unlink(missing_ok=True)
+        raise
+
+
 def runner() -> dict:
     return {"os": os.environ.get("RUNNER_OS", ""), "image": " ".join(
         filter(None, (os.environ.get("ImageOS"), os.environ.get("ImageVersion")))) or "unknown",
@@ -343,7 +433,7 @@ def runner() -> dict:
 
 def plan(options) -> int:
     try:
-        kind, _ = parse(options.selection)
+        kind, names = parse(options.selection)
         count = iterations(options.iterations)
     except ValueError as error:
         print(f"stress: {error}; nothing was started", file=sys.stderr)
@@ -351,7 +441,8 @@ def plan(options) -> int:
     with open(options.github_output, "a", encoding="utf-8") as output:
         output.write(f"iterations={json.dumps(list(range(1, count + 1)))}\n")
         output.write(f"kind={kind}\n")
-    print(f"stress: {count} iterations of {options.selection.strip()}")
+    each = f" ({len(names)} items each)" if kind in ITEM_KINDS and len(names) > 1 else ""
+    print(f"stress: {count} iterations of {options.selection.strip()}{each}")
     return 0
 
 
@@ -383,15 +474,80 @@ def checkout_mismatch(archive_file: Path) -> str:
     return ""
 
 
+def run_items(options, kind: str, items: list[str]) -> int:
+    """Several rows or scenarios, one after another: each runs as its own
+    harness process with the binary, flags, env and summary a one-item
+    selection would give it, in its own scratch directory, and is judged
+    by the same evidence rule. Every item runs even after one fails or
+    raises, so the row names each item's own result. The row is written
+    before each item starts and once at the end, so a job that times out
+    keeps the finished items' results and names the item still running."""
+    scratch = Path(options.out).parent
+    scratch.mkdir(parents=True, exist_ok=True)
+    candidates = Path(options.candidates)
+    started, results = time.monotonic(), []
+
+    def record(running: dict | None = None) -> int:
+        """Write the row as it stands and return its exit code."""
+        failed = [result for result in results if result["outcome"] != "pass" and result is not running]
+        if running is None and len(results) == len(items) and not failed:
+            code = 0
+        else:
+            code = next((result["exit_code"] for result in failed if result["exit_code"]), 1)
+        unrun = [f"{kind}:{item}" for item in items[len(results):]]
+        note = "; ".join(filter(None, (
+            f"{len(failed)} of {len(items)} items failed: " + ", ".join(result["item"] for result in failed)
+            if failed else "", f"not finished: {running['item']}" if running else "",
+            "not run: " + ", ".join(unrun) if unrun else "")))
+        row = {"iteration": options.iteration, "attempt": int(os.environ.get("GITHUB_RUN_ATTEMPT") or 1),
+               "selection": options.selection.strip(), "runner": runner(), "exit_code": code,
+               "outcome": "pass" if code == 0 else "fail",
+               "seconds": round(time.monotonic() - started, 1),
+               **({"note": note} if note else {}), "items": results}
+        write_row(options.out, row)
+        return code
+
+    for index, item in enumerate(items, 1):
+        label = f"{kind}:{item}"
+        result = {"item": label, "exit_code": None, "outcome": "fail", "note": "not finished"}
+        results.append(result)
+        record(running=result)
+        begun, exit_code = time.monotonic(), None
+        try:
+            names, here = item_names(kind, item), scratch / f"item-{index}"
+            here.mkdir(parents=True, exist_ok=True)
+            argv = command(kind, names, candidates, here)
+            env = dict(os.environ, **environment(kind, names, candidates, here))
+            print("stress: " + " ".join(argv), flush=True)
+            exit_code = subprocess.run(argv, env=env).returncode
+            note = f"exit code {exit_code}" if exit_code else evidence(kind, names, here)
+            # Built whole before it replaces the placeholder, so a raise
+            # anywhere above leaves a complete failed result, never an empty one.
+            done = {"item": label, "exit_code": exit_code, "outcome": "fail" if note else "pass",
+                    "compared": compared(kind, names, here), **({"note": note} if note else {})}
+        except Exception as error:  # one item that cannot run is that item's failure, not the loop's
+            done = {"item": label, "exit_code": exit_code, "outcome": "fail",
+                    "note": f"{type(error).__name__}: {error}"}
+        result.clear()
+        result.update(done, seconds=round(time.monotonic() - begun, 1))
+        print(f"stress: {label} {result['outcome']}" + (f": {result['note']}" if "note" in result else ""),
+              flush=True)
+    return record()
+
+
 def run(options) -> int:
     kind, names = parse(options.selection)
+    if kind in ITEM_KINDS:
+        if len(names) > 1:
+            return run_items(options, kind, names)
+        names = item_names(kind, names[0])
     scratch = Path(options.out).parent
     scratch.mkdir(parents=True, exist_ok=True)
     candidates = Path(options.candidates)
     archive_file = Path(options.archive_file).resolve() if options.archive_file else None
     argv = command(kind, names, candidates, scratch, archive_file)
     env = dict(os.environ, **environment(kind, names, candidates, scratch))
-    started, code, note, tests = time.monotonic(), None, "", None
+    started, code, note, tests, judged = time.monotonic(), None, "", None, False
     try:
         if kind == "cargo":
             note = checkout_mismatch(archive_file)
@@ -403,31 +559,71 @@ def run(options) -> int:
             cargo_junit(WORKSPACE).unlink(missing_ok=True)
         print("stress: " + " ".join(argv), flush=True)
         code = subprocess.run(argv, env=env).returncode
-        if kind == "cargo" and cargo_junit(WORKSPACE).is_file():
-            # The row's artifact keeps the report; evidence reads this copy.
-            (scratch / "junit.xml").write_bytes(cargo_junit(WORKSPACE).read_bytes())
-            tests = cargo_times(names, scratch / "junit.xml")
-        if code == 0:
-            note = evidence(kind, names, scratch)
-            if note:
-                code = 1
-                print(f"stress: {note}", flush=True)
+        try:
+            if kind == "cargo" and cargo_junit(WORKSPACE).is_file():
+                # The row's artifact keeps the report; evidence reads this copy.
+                (scratch / "junit.xml").write_bytes(cargo_junit(WORKSPACE).read_bytes())
+                tests = cargo_times(names, scratch / "junit.xml")
+            if code == 0:
+                note = evidence(kind, names, scratch)
+                if note:
+                    code = 1
+                    print(f"stress: {note}", flush=True)
+            judged = True
+        except Exception as error:  # a run whose evidence cannot be judged is no evidence, whatever it exited
+            note, code = f"{type(error).__name__}: {error}", code or 1
+            print(f"stress: {note}", flush=True)
     finally:
+        # Only a judged run may pass: an interrupt (a job timeout or cancel)
+        # during the evidence check leaves code 0 with nothing judged.
+        if code == 0 and not judged:
+            note = note or "interrupted before evidence was judged"
         row = {"iteration": options.iteration, "attempt": int(os.environ.get("GITHUB_RUN_ATTEMPT") or 1),
                "selection": options.selection.strip(), "runner": runner(), "exit_code": code,
-               "outcome": "pass" if code == 0 else "fail",
+               "outcome": "pass" if code == 0 and judged else "fail",
                "seconds": round(time.monotonic() - started, 1),
                **({"note": note} if note else {}), **({"tests": tests} if tests is not None else {})}
-        Path(options.out).write_text(json.dumps(row, indent=2) + "\n", encoding="utf-8")
+        write_row(options.out, row)
     return code
+
+
+def complete_row(row) -> bool:
+    """Whether a row holds every field the report reads."""
+    def whole(item):
+        return isinstance(item, dict) and isinstance(item.get("item"), str) and isinstance(item.get("outcome"), str)
+    return (isinstance(row, dict) and type(row.get("iteration")) is int and row.get("outcome") in ("pass", "fail")
+            and "seconds" in row and isinstance(row.get("runner"), dict)
+            and type(row.get("attempt", 1)) is int
+            and isinstance(row.get("items", []), list) and all(whole(item) for item in row.get("items", [])))
+
+
+def read_row(path: Path) -> tuple[int | None, dict]:
+    """An iteration's number and row. A row that cannot be read whole (a
+    kill mid-write, a partial upload) is that iteration's failure, numbered
+    by its file name, so one bad file never costs the other iterations'
+    report; a file whose name carries no number is not an iteration's row."""
+    numbered = re.fullmatch(r"stress-row-(\d+)\.json", path.name)
+    number = int(numbered[1]) if numbered else None
+    try:
+        row = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        note = f"unreadable row {path.name}: {type(error).__name__}: {error}"
+    else:
+        if complete_row(row):
+            return row["iteration"], row
+        note = f"incomplete row {path.name}: a field the report needs is missing or malformed"
+    print(f"stress: {note}", file=sys.stderr)
+    return number, {"iteration": number, "outcome": "fail", "exit_code": None, "seconds": None,
+                    "runner": {}, "note": note}
 
 
 def report(options) -> int:
     count = iterations(options.iterations)
     rows = {}
     for path in sorted(Path(options.rows).glob("**/stress-row-*.json")):
-        row = json.loads(path.read_text(encoding="utf-8"))
-        rows[int(row["iteration"])] = row
+        iteration, row = read_row(path)
+        if iteration is not None:
+            rows[iteration] = row
     table = [rows.get(i, {"iteration": i, "outcome": "no result", "exit_code": None, "seconds": None,
                           "runner": {}}) for i in range(1, count + 1)]
     passed = sum(row["outcome"] == "pass" for row in table)
@@ -439,17 +635,35 @@ def report(options) -> int:
                "passed": passed, "failed": sum(row["outcome"] == "fail" for row in table),
                "no_result": sum(row["outcome"] == "no result" for row in table),
                "attempts": attempts, "clean": passed == count and not mixed, "rows": table}
+    # Several rows or scenarios: each item's own tally, so a failing one is named.
+    kind, names = parse(options.selection)
+    labels = [f"{kind}:{name}" for name in names] if kind in ITEM_KINDS and len(names) > 1 else []
+    results = [{item["item"]: item["outcome"] for item in row.get("items", [])} for row in table]
+    items = {label: {"passed": sum(result.get(label) == "pass" for result in results),
+                     "failed": sum(result.get(label) == "fail" for result in results),
+                     "no_result": sum(label not in result for result in results)} for label in labels}
+    if items:
+        summary = {**{key: value for key, value in summary.items() if key != "rows"}, "items": items, "rows": table}
     Path(options.out).write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
     lines = [f"### Stress: {summary['selection']} on {options.os}",
              f"{passed} of {count} iterations passed."]
+    lines += [f"- {label}: {tally['passed']} of {count} iterations passed" for label, tally in items.items()]
     if mixed:
         lines.append(f"Not clean: rows come from run attempts {attempts}; a re-run of failed jobs "
                      "replaced at least one failure. Dispatch a new loop.")
+
+    def note(row: dict) -> str:
+        if not labels or "items" not in row:
+            return row.get("note", "")
+        found = {item["item"]: item for item in row["items"]}
+        return "; ".join(f"{label} {found[label]['outcome']}" + (f": {found[label]['note']}"
+                                                                 if found[label].get("note") else "")
+                         if label in found else f"{label} no result" for label in labels)
     lines += ["", "| Iteration | Attempt | Outcome | Seconds | Image | CPUs | Note |",
               "| --- | --- | --- | --- | --- | --- | --- |"]
     lines += [f"| {row['iteration']} | {row.get('attempt', '')} | {row['outcome']} "
               f"| {row['seconds'] if row['seconds'] is not None else ''} "
-              f"| {row['runner'].get('image', '')} | {row['runner'].get('cpus', '')} | {row.get('note', '')} |"
+              f"| {row['runner'].get('image', '')} | {row['runner'].get('cpus', '')} | {note(row)} |"
               for row in table]
     text = "\n".join(lines) + "\n"
     print(text)

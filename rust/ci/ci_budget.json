@@ -157,11 +157,11 @@
     },
     "fingerprints": {
       "scope": "42b22137f81048ce",
-      "rust": "59cc6066e4ac1f82",
+      "rust": "7e5f6fc858dd1367",
       "fixtures": "defc5e07c5ac3f94",
       "candidate": "d71c5590ce6f866a",
       "candidate-harness": "43b859ee9d5fd738",
-      "parity-checks": "06054831b8e7b5d2",
+      "parity-checks": "fc8882ae92b7f9bb",
       "daemon-image": "5c93764cb0f0bab7",
       "parity": "aa4ba434de948ea6"
     },
@@ -240,6 +240,16 @@
         "job": "daemon-image",
         "fingerprint": "5c93764cb0f0bab7",
         "reason": "Adds one network-disabled CLI version invocation to the existing image job; no new job or dependency setup. The shim shares the daemon dependency build; retain current budget pending batch measurement."
+      },
+      {
+        "job": "rust",
+        "fingerprint": "7e5f6fc858dd1367",
+        "reason": "The existing Rust job runs setup planning parity after Nextest; the harness reuses the same workspace all-targets feature-unified artifacts, with no new job, matrix row, dependency installation or limit increase. The additional 22 disposable planning cases complete in seconds. Existing R1 workflow changes and their accepted costs are retained."
+      },
+      {
+        "job": "parity-checks",
+        "fingerprint": "fc8882ae92b7f9bb",
+        "reason": "Integrate the bounded R1 recovery, setup, transport, config and stats checks into the existing W1-C shards after the installer workflow merge; no new jobs, shards, dependency installation or setup steps, and budget limits remain unchanged. Re-measure the combined steps from the next integration batch."
       }
     ]
   },
