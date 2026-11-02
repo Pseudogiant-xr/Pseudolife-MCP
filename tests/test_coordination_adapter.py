@@ -1916,24 +1916,42 @@ def test_deferred_privileged_offer_survives_new_peer_attention(tmp_path, reason)
     asyncio.run(drive())
 
 
-@pytest.mark.parametrize("end", ["empty", "expired", "seen"])
+@pytest.mark.parametrize("end", ["empty", "expired", "seen", "receive"])
 def test_deferred_privileged_offer_is_bounded(tmp_path, end):
     ring = {"decision": "rung", "reason": "conductor", "ring_at": 0.0,
             "message_expires_at": time.time() + 3600}
-    daemon = _mailbox_daemon([(0, [], None), (1, _preview("m1"), ring), (0, [], None)])
+    peer = {"decision": "attention", "reason": "urgent", "ring_at": 2.0,
+            "queue_allowed": True, "recipient_state": "unknown"}
+    responses = [(0, [], None), (1, _preview("m1"), ring)]
+    if end == "empty":
+        responses.append((0, [], ring))
+    responses.append((2, _preview("m1", "m2"), peer))
+    daemon = _mailbox_daemon(responses)
     async def drive():
         client, coordination = adapter(daemon, delivery_transport="codex",
                                        digest_path=tmp_path / "digest.txt")
         async with client:
             async with coordination:
                 await coordination._heartbeat()
+                coordination.restore_ring(coordination.ring_due())
                 if end == "empty":
                     await coordination._heartbeat()
                 elif end == "expired":
                     coordination._ring_context["message_expires_at"] = time.time() - 1
-                else:
+                elif end == "seen":
                     (tmp_path / "digest.seen").write_text(str(coordination.digest_watermark))
-                assert coordination.ring_due() is None
+                else:
+                    from pseudolife_memory.codex_doorbell import CodexDoorbell
+                    bell = CodexDoorbell([])
+                    thread = "aaaaaaaa-1111-4111-8111-111111111111"
+                    bell.watch(thread, coordination)
+                    bell.note_call(thread, "memory_message", {"action": "receive"}, succeeded=True)
+                    # Delivery can happen while a child turn is running; no
+                    # prompt hook has written a seen marker in this case.
+                    assert not (tmp_path / "digest.seen").exists()
+                    coordination.mailbox_observer = None
+                await coordination._heartbeat()
+                assert coordination.ring_due() == ("attention", "urgent")
     asyncio.run(drive())
 
 
@@ -1950,4 +1968,55 @@ def test_lease_grant_offer_still_obeys_daemon_withdrawal(tmp_path):
                 coordination.restore_ring(coordination.ring_due())
                 await coordination._heartbeat()
                 assert coordination.ring_due() is None
+    asyncio.run(drive())
+
+
+@pytest.mark.parametrize("withdrawal", [None, {
+    "decision": "attention", "reason": "no_steer_path", "ring_at": 2.0,
+    "recipient_state": "unknown",
+}])
+def test_deferred_conductor_obeys_park_expiry_or_refinement(tmp_path, withdrawal):
+    ring = {"decision": "rung", "reason": "conductor", "ring_at": 0.0,
+            "message_expires_at": time.time() + 3600}
+    peer = {"decision": "attention", "reason": "urgent", "ring_at": 3.0,
+            "queue_allowed": True, "recipient_state": "unknown"}
+    daemon = _mailbox_daemon([(0, [], None), (1, _preview("m1"), ring),
+                              (1, _preview("m1"), withdrawal),
+                              (2, _preview("m1", "m2"), peer)])
+    async def drive():
+        client, coordination = adapter(daemon, delivery_transport="codex",
+                                       digest_path=tmp_path / "digest.txt")
+        async with client:
+            async with coordination:
+                await coordination._heartbeat()
+                coordination.restore_ring(coordination.ring_due())
+                await coordination._heartbeat()
+                assert coordination.ring_due() is None
+                await coordination._heartbeat()
+                assert coordination.ring_due() == ("attention", "urgent")
+    asyncio.run(drive())
+
+
+def test_already_rung_privileged_offer_is_not_retained_again(tmp_path):
+    ring = {"decision": "rung", "reason": "maintainer_message", "ring_at": 0.0,
+            "message_expires_at": time.time() + 3600}
+    peer = {"decision": "rung", "reason": "urgent", "ring_at": 1.0}
+    attention = {"decision": "attention", "reason": "urgent", "ring_at": 3.0,
+                 "queue_allowed": True, "recipient_state": "unknown"}
+    daemon = _mailbox_daemon([(0, [], None), (1, _preview("m1"), ring),
+                              (2, _preview("m1", "m2"), peer),
+                              (1, _preview("m1"), ring),
+                              (2, _preview("m1", "m3"), attention)])
+    async def drive():
+        client, coordination = adapter(daemon, delivery_transport="codex",
+                                       digest_path=tmp_path / "digest.txt")
+        async with client:
+            async with coordination:
+                for expected in [("rung", "maintainer_message"), ("rung", "urgent")]:
+                    await coordination._heartbeat()
+                    assert coordination.ring_due() == expected
+                    (tmp_path / "digest.seen").write_text(str(coordination.digest_watermark))
+                await coordination._heartbeat()  # old mail after peer acknowledgment
+                await coordination._heartbeat()  # a new arrival must use its own permission
+                assert coordination.ring_due() == ("attention", "urgent")
     asyncio.run(drive())

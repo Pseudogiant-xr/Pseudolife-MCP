@@ -293,15 +293,22 @@ impl Doorbell {
             return;
         }
         let Some(count) = view.count else { return };
-        // The wire offer cannot identify an individual acknowledgment amid
-        // other pending mail. Retain a deferred privileged bell until handoff,
-        // delivery, an empty mailbox or its origin expiry; a stale ack can
-        // therefore keep it pending only until one of those bounds.
+        // A failed reservation can survive newer peer permission, but never
+        // explicit daemon withdrawal (including an invalidated park).
+        let permitted = view.wake.as_ref().is_some_and(|wake| {
+            wake["reason"].is_string()
+                && wake["ring_at"].as_f64().is_some_and(|at| at.is_finite())
+                && (wake["decision"] == "rung"
+                    || (wake["decision"] == "attention"
+                        && wake["queue_allowed"] == true
+                        && wake["recipient_state"] == "unknown"))
+        });
         if bell
             .deferred_privileged
             .as_ref()
             .is_some_and(|(wake, watermark)| {
-                count == 0
+                !permitted
+                    || count == 0
                     || view.delivered >= *watermark
                     || wake["message_expires_at"]
                         .as_f64()
@@ -309,21 +316,6 @@ impl Doorbell {
             })
         {
             bell.deferred_privileged = None;
-        }
-        if bell.deferred_privileged.is_none()
-            && count > 0
-            && let Some(wake) = view.wake.as_ref()
-            && wake["decision"] == "rung"
-            && let Some(reason) = wake["reason"].as_str()
-            && matches!(reason, "maintainer_message" | "conductor")
-            && let Some(ring_at) = wake["ring_at"].as_f64().filter(|at| at.is_finite())
-            && wake["message_expires_at"]
-                .as_f64()
-                .is_some_and(|at| at.is_finite() && at > now())
-            && let Some(watermark) = view.wake_watermark.filter(|mark| view.delivered < *mark)
-            && bell.last_ring.as_ref() != Some(&("rung".into(), reason.into(), ring_at))
-        {
-            bell.deferred_privileged = Some((wake.clone(), watermark));
         }
         let unknown = view
             .preview
@@ -410,6 +402,10 @@ impl Doorbell {
             .filter(|value| !value.is_null())
             .map(|value| value.as_f64().unwrap_or(f64::NAN));
         let unknown = decision == "attention";
+        let deferred = (decision == "rung"
+            && matches!(reason, "maintainer_message" | "conductor")
+            && expiry.is_some_and(|at| at.is_finite() && at > now()))
+        .then(|| (wake.clone(), watermark.unwrap()));
         let (previous_expiry, notice, current_expiry) = offload(&bell.pending, move |pending| {
             let expired = pending.path.with_extension("bell-unresolved-expired");
             let previous = state::read(&expired, 8192).ok();
@@ -424,6 +420,7 @@ impl Doorbell {
             self.note_expiry(&bell.adapter, thread, &basis).await;
         }
         let Some(notice) = notice else {
+            bell.deferred_privileged = deferred;
             bell.outstanding = state::exists(&bell.pending.path);
             self.note_delivery(
                 &bell.adapter,

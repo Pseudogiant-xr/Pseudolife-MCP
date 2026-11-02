@@ -265,6 +265,7 @@ class CoordinationAdapter:
         self._last_attention = None
         self.ring_context = {}
         self._taken_ring = None
+        self._ring_deferred = False
         self._ring_context = {}
         self._last_ring = None
         self._ring_unwritten = None
@@ -406,6 +407,7 @@ class CoordinationAdapter:
         if time.time() < offer[2]:
             return None
         self._ring_offer = None
+        self._ring_deferred = False
         self._taken_ring = offer
         self.ring_context = self._ring_context.copy()
         return offer[0], offer[1]
@@ -416,11 +418,19 @@ class CoordinationAdapter:
         if (offer is not None and offer[:2] == decision and self._ring_offer is None
                 and offer[:3] == self._last_ring):
             self._ring_offer = offer
+            self._ring_deferred = (offer[0] == "rung"
+                                   and offer[1] in {"maintainer_message", "conductor"})
+
+    def clear_deferred_ring(self) -> None:
+        """A successful receive covers a reservation that never queued."""
+        if self._ring_deferred:
+            self._withdraw_ring()
 
     def _withdraw_ring(self) -> None:
         """Withdraw local authorization, never an outstanding native notice."""
         self._ring_offer = None
         self._taken_ring = None
+        self._ring_deferred = False
         self._ring_context = {}
         self._ring_unwritten = None
         if self._ring_timer is not None:
@@ -437,18 +447,21 @@ class CoordinationAdapter:
         old non-Codex daemons retain their offer-lapsed retry contract.
         Nothing here may ring on a guess."""
         codex = "codex" in self._registration["capabilities"]
-        # A deferred privileged bell survives newer peer attention until
-        # handoff, empty mailbox, delivery or origin expiry. The protocol
-        # cannot prove an individual ack amid other pending mail, so it may
-        # retain an already-acked bell until one of those bounds is reached.
-        if codex and self._privileged_offer_live():
-            return
         wake = result.get("wake")
         if not isinstance(wake, dict):
             if codex:
                 self._withdraw_ring()
             return
         decision, reason, ring_at = wake.get("decision"), wake.get("reason"), wake.get("ring_at")
+        # Retain only a failed reservation, never an old offer seen again
+        # after another bell. Explicit daemon withdrawal still takes effect.
+        permitted = (decision == "rung" or (
+            decision == "attention" and wake.get("queue_allowed") is True
+            and wake.get("recipient_state") == "unknown"))
+        if (codex and self._ring_deferred and self._privileged_offer_live()
+                and permitted and isinstance(reason, str)
+                and type(ring_at) in (int, float) and math.isfinite(ring_at)):
+            return
         if (decision == "attention" and codex
                 and isinstance(reason, str) and type(ring_at) in (int, float)
                 and math.isfinite(ring_at)):
@@ -485,6 +498,7 @@ class CoordinationAdapter:
         self._ring_unwritten = None   # superseded by the newer ring
         # The offer names the digest watermark it rings for.
         self._ring_offer = (*ring, self._digest_watermark)
+        self._ring_deferred = False
         if self._ring_timer is not None:
             self._ring_timer.cancel()
         # A far-off ring_at (a stepped clock) still rings within minutes.
