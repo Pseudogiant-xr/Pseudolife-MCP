@@ -1,4 +1,12 @@
 use super::*;
+
+fn verify_bank_identity(config: &Value, running: &Value) -> Result<()> {
+    engine::verify_bank_identity_with(config, running, |name| {
+        Some(json!([
+            {"Name":name,"Labels":{"com.docker.volume.anonymous":""}}
+        ]))
+    })
+}
 use std::io::{Cursor, Read, Seek, SeekFrom, Write};
 
 #[cfg(windows)]
@@ -218,17 +226,17 @@ fn native_update_identity_checks_every_effective_mount() {
         {"Type":"volume","Name":"fixture-state","Destination":"/data","RW":true},
         {"Type":"bind","Source":"/original/config.yaml","Destination":"/data/config.yaml","RW":false}
     ]});
-    assert!(engine::verify_bank_identity(&config, &running).is_ok());
+    assert!(verify_bank_identity(&config, &running).is_ok());
     config["services"][DAEMON_SERVICE]["volumes"][1]["source"] = json!("/bundle/config.yaml");
-    assert!(engine::verify_bank_identity(&config, &running).is_err());
+    assert!(verify_bank_identity(&config, &running).is_err());
     config["services"][DAEMON_SERVICE]["volumes"][1]["source"] = json!("/original/config.yaml");
     config["services"][DAEMON_SERVICE]["volumes"][1]["read_only"] = json!(false);
-    assert!(engine::verify_bank_identity(&config, &running).is_err());
+    assert!(verify_bank_identity(&config, &running).is_err());
     config["services"][DAEMON_SERVICE]["volumes"]
         .as_array_mut()
         .unwrap()
         .pop();
-    assert!(engine::verify_bank_identity(&config, &running).is_err());
+    assert!(verify_bank_identity(&config, &running).is_err());
 }
 
 #[test]
@@ -248,12 +256,9 @@ fn native_update_mount_identity_normalizes_windows_docker_desktop_sources() {
             {"Type":"volume","Name":"fixture-state","Destination":"/data","RW":true},
             {"Type":"bind","Source":actual,"Destination":"/config","RW":false}
         ]});
-        assert!(
-            engine::verify_bank_identity(&config, &running).is_ok(),
-            "{actual}"
-        );
+        assert!(verify_bank_identity(&config, &running).is_ok(), "{actual}");
         running["Mounts"][1]["Source"] = json!("/run/desktop/mnt/host/d/fixture/config.yaml");
-        assert!(engine::verify_bank_identity(&config, &running).is_err());
+        assert!(verify_bank_identity(&config, &running).is_err());
     }
 }
 
@@ -271,7 +276,7 @@ fn native_update_mount_identity_ignores_tmpfs_and_sourceless_mounts() {
         {"Type":"tmpfs","Destination":"/other-tmp","RW":true},
         {"Type":"bind","Destination":"/sourceless","RW":true}
     ]});
-    assert!(engine::verify_bank_identity(&config, &running).is_ok());
+    assert!(verify_bank_identity(&config, &running).is_ok());
 }
 
 #[test]
@@ -286,12 +291,12 @@ fn native_update_ephemeral_mount_cannot_hide_persistent_contents() {
                 {"Type":"volume","Name":"fixture-state","Destination":"/data","RW":true},
                 {"Type":previous,"Name":"persistent-cache","Source":"/persistent/cache","Destination":"/cache","RW":false}
             ]});
-            let refusal = engine::verify_bank_identity(&config, &running).unwrap_err();
+            let refusal = verify_bank_identity(&config, &running).unwrap_err();
             assert!(refusal.message.contains("/cache") && refusal.message.contains("restore"));
             running["Mounts"][1] = json!({"Type":"tmpfs","Destination":"/cache"});
-            assert!(engine::verify_bank_identity(&config, &running).is_ok());
+            assert!(verify_bank_identity(&config, &running).is_ok());
             running["Mounts"].as_array_mut().unwrap().pop();
-            assert!(engine::verify_bank_identity(&config, &running).is_ok());
+            assert!(verify_bank_identity(&config, &running).is_ok());
         }
     }
 }
@@ -306,18 +311,71 @@ fn native_update_anonymous_volume_survives_second_recreation() {
         {"Type":"volume","Name":"fixture-state","Destination":"/data","RW":true},
         {"Type":"volume","Name":name,"Source":format!("/var/lib/docker/volumes/{name}/_data"),"Destination":"/cache","RW":true}
     ]});
-    assert!(engine::verify_bank_identity(&config, &running).is_ok());
+    assert!(verify_bank_identity(&config, &running).is_ok());
     // Compose inherits the anonymous volume on the first recreate. The next
     // update sees its generated name in HostConfig, not an empty Source.
     running["HostConfig"]["Mounts"][0]["Source"] = json!(name);
-    assert!(engine::verify_bank_identity(&config, &running).is_ok());
+    for _generation in [2, 3] {
+        assert!(verify_bank_identity(&config, &running).is_ok());
+    }
     config["volumes"]["cache"] = json!({"name":name});
-    assert!(engine::verify_bank_identity(&config, &running).is_err());
+    assert!(verify_bank_identity(&config, &running).is_err());
     config["volumes"].as_object_mut().unwrap().remove("cache");
     running["HostConfig"]["Mounts"][0]["Source"] = json!("different-volume");
-    assert!(engine::verify_bank_identity(&config, &running).is_err());
+    assert!(verify_bank_identity(&config, &running).is_err());
     running["HostConfig"] = Value::Null;
-    assert!(engine::verify_bank_identity(&config, &running).is_err());
+    assert!(verify_bank_identity(&config, &running).is_err());
+}
+
+#[test]
+fn native_update_external_hash_volume_requires_anonymous_provenance() {
+    let name = "a".repeat(64);
+    let config = json!({"services":{DAEMON_SERVICE:{"environment":{"PSEUDOLIFE_MCP_DATABASE_URL":"fixture"},"volumes":[
+        {"type":"volume","source":"state","target":"/data"}, {"type":"tmpfs","target":"/cache"}
+    ]}},"volumes":{"state":{"name":"fixture-state"}}});
+    let running = json!({"Config":{"Env":["PSEUDOLIFE_MCP_DATABASE_URL=fixture"]},"HostConfig":{"Mounts":[{"Type":"volume","Target":"/cache","Source":name}]},"Mounts":[
+        {"Type":"volume","Name":"fixture-state","Destination":"/data","RW":true},
+        {"Type":"volume","Name":name,"Source":format!("/var/lib/docker/volumes/{name}/_data"),"Destination":"/cache","RW":true}
+    ]});
+    for metadata in [
+        None,
+        Some(json!([])),
+        Some(json!({})),
+        Some(json!([{"Name":"other-volume","Labels":{"com.docker.volume.anonymous":""}}])),
+        Some(json!([{"Name":name,"Labels":{}}])),
+        Some(json!([{"Name":name,"Labels":null}])),
+        Some(json!([{"Name":name,"Labels":{"com.docker.volume.anonymous":true}}])),
+    ] {
+        let error =
+            engine::verify_bank_identity_with(&config, &running, |_| metadata.clone()).unwrap_err();
+        assert!(
+            error.message.contains("/cache")
+                && error.message.contains("declare")
+                && error.message.contains("recreate")
+        );
+    }
+}
+
+#[test]
+fn native_update_anonymous_volume_requires_name_and_resolved_named_set() {
+    for missing_name in [true, false] {
+        let mut config = json!({"services":{DAEMON_SERVICE:{"environment":{"PSEUDOLIFE_MCP_DATABASE_URL":"fixture"},"volumes":[
+            {"type":"volume","source":"state","target":"/data"}, {"type":"volume","target":"/cache"}
+        ]}},"volumes":{"state":{"name":"fixture-state"}}});
+        let mut running = json!({"Config":{"Env":["PSEUDOLIFE_MCP_DATABASE_URL=fixture"]},"HostConfig":{"Mounts":[{"Type":"volume","Target":"/cache"}]},"Mounts":[
+            {"Type":"volume","Name":"fixture-state","Destination":"/data","RW":true},
+            {"Type":"volume","Name":"a".repeat(64),"Destination":"/cache","RW":true}
+        ]});
+        if missing_name {
+            running["Mounts"][1].as_object_mut().unwrap().remove("Name");
+        } else {
+            config["volumes"]["unresolved"] = json!({});
+        }
+        assert!(
+            verify_bank_identity(&config, &running).is_err(),
+            "missing_name={missing_name}"
+        );
+    }
 }
 
 #[test]

@@ -369,9 +369,9 @@ impl Update {
         config_args.extend(["config".into(), "--format".into(), "json".into()]);
         let (code, out) = self.command(&config_args, Some(&env), 60, false);
         let config:Value=serde_json::from_str(&out).ok().filter(|_:&Value|code==0).ok_or_else(||UpdateError::usage("cannot resolve the Compose project; check its files and env file, then retry; nothing was changed"))?;
-        engine::verify_bank_identity(&config, &context.running)?;
+        engine::verify_bank_identity(self, &config, &context.running)?;
         let token = if activating {
-            engine::verify_identity(&config, &context.running, &self.o.daemon_url)?;
+            engine::verify_identity(self, &config, &context.running, &self.o.daemon_url)?;
             engine::daemon_token(&config)?
         } else {
             String::new()
@@ -686,7 +686,7 @@ impl Update {
         // daemon or back up a different bank while recreating this project.
         let daemon = engine::container(self, &compose, Some(&env), DAEMON_SERVICE)?;
         let running = engine::inspect(self, &daemon)?;
-        engine::verify_checkout_identity(&config, &running, &daemon)?;
+        engine::verify_checkout_identity(self, &config, &running, &daemon)?;
         if self.o.no_backup {
             self.backup(None)?;
         } else {

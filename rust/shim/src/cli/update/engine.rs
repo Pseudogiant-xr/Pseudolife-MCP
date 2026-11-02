@@ -186,11 +186,17 @@ pub(super) fn daemon_token(config: &Value) -> Result<String> {
         });
     token.filter(|s|!s.contains(['\r','\n'])).ok_or_else(||UpdateError::usage("the engine health gate needs bearer auth; set PSEUDOLIFE_MCP_TOKEN in the host env file and retry; nothing was changed"))
 }
-pub(super) fn verify_identity(config: &Value, running: &Value, url: &str) -> Result<()> {
-    verify_bank_identity(config, running)?;
+pub(super) fn verify_identity(
+    u: &Update,
+    config: &Value,
+    running: &Value,
+    url: &str,
+) -> Result<()> {
+    verify_bank_identity(u, config, running)?;
     verify_endpoint(config, url)
 }
 pub(super) fn verify_checkout_identity(
+    u: &Update,
     config: &Value,
     running: &Value,
     daemon: &str,
@@ -206,7 +212,7 @@ pub(super) fn verify_checkout_identity(
             "the daemon does not belong to this checkout's Compose project; restore its project files and container before updating; nothing was deployed",
         ));
     }
-    verify_bank_identity(config, running)
+    verify_bank_identity(u, config, running)
 }
 fn bind_source(source: &str) -> String {
     let slashes = source.replace('\\', "/");
@@ -228,39 +234,88 @@ fn bind_source(source: &str) -> String {
     // Preserve POSIX case and backslashes: they can name distinct files.
     source.to_owned()
 }
-fn ephemeral_mount(config: &Value, running: &Value, mount: &Value) -> bool {
-    let name = mount["Name"].as_str();
-    let declared = config["volumes"].as_object();
-    let named = declared.is_some_and(|volumes| {
-        name.is_some_and(|name| volumes.values().any(|v| v["name"] == name))
-    });
-    // Compose inherits anonymous volumes when recreating a container and
-    // then records their generated name as Source. Do not mistake a declared
-    // named volume (even a hash-shaped one) or an arbitrary source for this.
-    let inherited = !named
-        && name.is_some_and(|name| {
-            name.len() == 64
-                && name
-                    .bytes()
-                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+fn ephemeral_mount(
+    config: &Value,
+    running: &Value,
+    mount: &Value,
+    volume_inspect: &mut impl FnMut(&str) -> Option<Value>,
+) -> Result<bool> {
+    if mount["Type"] == "tmpfs" {
+        return Ok(true);
+    }
+    if mount["Type"] != "volume" {
+        return Ok(false);
+    }
+    let refusal = |cause: &str| {
+        UpdateError::usage(format!(
+            "cannot verify anonymous volume provenance at {}: {cause}; declare the volume as a named Compose volume to restore its persistent mount, or recreate the anonymous mount with a current Docker engine; nothing was changed",
+            mount["Destination"]
+                .as_str()
+                .unwrap_or("an unreadable destination"),
+        ))
+    };
+    let name = mount["Name"]
+        .as_str()
+        .filter(|name| !name.is_empty())
+        .ok_or_else(|| refusal("the running mount has no volume Name"))?;
+    let declared = config["volumes"]
+        .as_object()
+        .filter(|volumes| {
+            volumes
+                .values()
+                .all(|v| v["name"].as_str().is_some_and(|name| !name.is_empty()))
         })
-        && declared.is_some_and(|volumes| volumes.values().all(|v| v["name"].is_string()));
-    mount["Type"] == "tmpfs"
-        || (mount["Type"] == "volume"
-            && !named
-            && running["HostConfig"]["Mounts"]
-                .as_array()
-                .is_some_and(|mounts| {
-                    mounts.iter().any(|configured| {
-                        configured["Target"] == mount["Destination"]
-                            && configured["Type"] == "volume"
-                            && (configured["Source"].is_null()
-                                || configured["Source"] == ""
-                                || (inherited && configured["Source"].as_str() == name))
-                    })
-                }))
+        .ok_or_else(|| refusal("the project's named volumes could not be resolved"))?;
+    if declared.values().any(|v| v["name"] == name) {
+        return Ok(false);
+    }
+    let configured = running["HostConfig"]["Mounts"]
+        .as_array()
+        .is_some_and(|mounts| {
+            mounts.iter().any(|m| {
+                m["Target"] == mount["Destination"]
+                    && m["Type"] == "volume"
+                    && (m["Source"].is_null() || m["Source"] == "" || m["Source"] == name)
+            })
+        });
+    if !configured {
+        return Err(refusal(
+            "the running mount configuration is missing or disagrees with its volume Name",
+        ));
+    }
+    // Generated names and absence from the new Compose configuration cannot
+    // distinguish an anonymous volume from an external persistent volume.
+    let inspected = volume_inspect(name)
+        .ok_or_else(|| refusal("docker volume inspect failed or returned unreadable metadata"))?;
+    let record = inspected
+        .as_array()
+        .filter(|a| a.len() == 1)
+        .and_then(|a| a.first())
+        .filter(|v| v["Name"] == name)
+        .ok_or_else(|| refusal("docker volume inspect did not return the matching volume"))?;
+    if !record["Labels"]["com.docker.volume.anonymous"].is_string() {
+        return Err(refusal(
+            "docker volume inspect did not report the com.docker.volume.anonymous label",
+        ));
+    }
+    Ok(true)
 }
-pub(super) fn verify_bank_identity(config: &Value, running: &Value) -> Result<()> {
+
+pub(super) fn verify_bank_identity(u: &Update, config: &Value, running: &Value) -> Result<()> {
+    verify_bank_identity_with(config, running, |name| {
+        let (code, out) = u.docker_call(&["volume", "inspect", name]);
+        if code != 0 {
+            return None;
+        }
+        serde_json::from_str(&out).ok()
+    })
+}
+
+pub(super) fn verify_bank_identity_with(
+    config: &Value,
+    running: &Value,
+    mut volume_inspect: impl FnMut(&str) -> Option<Value>,
+) -> Result<()> {
     let service = &config["services"][DAEMON_SERVICE];
     let env = &service["environment"];
     let expected = env["PSEUDOLIFE_MCP_DATABASE_URL"].as_str();
@@ -299,7 +354,9 @@ pub(super) fn verify_bank_identity(config: &Value, running: &Value) -> Result<()
         let target = volume["target"].as_str();
         let actual = mounts.iter().find(|m| m["Destination"].as_str() == target);
         if volume["type"] == "tmpfs" || volume["source"].as_str().is_none_or(str::is_empty) {
-            if actual.is_some_and(|mount| !ephemeral_mount(config, running, mount)) {
+            if let Some(mount) = actual
+                && !ephemeral_mount(config, running, mount, &mut volume_inspect)?
+            {
                 return Err(UpdateError::usage(format!(
                     "the Compose configuration replaces the persistent mount at {} with an ephemeral mount; restore its original mount type, source and access before updating; nothing was changed",
                     target.unwrap_or("an unreadable destination"),
@@ -624,7 +681,7 @@ pub(super) fn deploy(u: &mut Update, repo: &Path) -> Result<()> {
             "the current daemon must be running for the backup and rollback tag; start it and retry",
         ));
     }
-    verify_identity(&config, &running, &u.o.daemon_url)?;
+    verify_identity(u, &config, &running, &u.o.daemon_url)?;
     let token = daemon_token(&config)?;
     let pg_env = &config["services"]["pseudolife-pg"]["environment"];
     let user = pg_env["POSTGRES_USER"]

@@ -59,6 +59,9 @@ elif a[:2]==["image","inspect"]:
  elif a[-1] in s["images"]: out=s["images"][a[-1]]
  else: code=1
 elif a[:2]==["image","ls"]: out=""
+elif a[:2]==["volume","inspect"]:
+ if s.get("volume_inspect_failure"):code=1
+ else:out=json.dumps(s.get("volume_inspections",{}).get(a[-1],[]))
 elif a[:1]==["ps"]: out=s["running"]["Id"]
 elif a[:1]==["pull"]: code=int(s["failure"]=="pull")
 elif a[:1]==["run"]: out="58" if "--schema-version" in a else "SCHEMA_META_VERSION = 58\n"
@@ -738,6 +741,7 @@ def test_ephemeral_mount_remains_safe_to_recreate(tmp_path, previous, replacemen
                                                 "Name": "generated", "Source": "/docker/generated", "Destination": "/cache", "RW": True})
         if previous == "anonymous":
             state["running"]["HostConfig"] = {"Mounts": [{"Type": "volume", "Target": "/cache"}]}
+            state["volume_inspections"] = {"generated": [{"Name": "generated", "Labels": {"com.docker.volume.anonymous": ""}}]}
         state_path.write_text(json.dumps(state))
         result = run_arm(repo, env, binary, ["--checkout", str(repo), "--json", "--no-test-login", "--no-cache-prune", "--health-retries", "1"])
         assert result.returncode == 0, result.stdout + result.stderr
@@ -756,6 +760,7 @@ def test_inherited_anonymous_volume_survives_second_update(tmp_path, declared_na
         state["running"]["Mounts"].append({"Type": "volume", "Name": name,
             "Source": f"/var/lib/docker/volumes/{name}/_data", "Destination": "/cache", "RW": True})
         state["running"]["HostConfig"] = {"Mounts": [{"Type": "volume", "Target": "/cache"}]}
+        state["volume_inspections"] = {name: [{"Name": name, "Labels": {"com.docker.volume.anonymous": ""}}]}
         state_path.write_text(json.dumps(state))
         args = ["--checkout", str(repo), "--json", "--no-test-login", "--no-cache-prune", "--health-retries", "1"]
         first = run_arm(repo, env, binary, args)
@@ -777,6 +782,9 @@ def test_inherited_anonymous_volume_survives_second_update(tmp_path, declared_na
             assert calls == []
         else:
             assert calls[-1] == "up"
+            third = run_arm(repo, env, binary, args)
+            assert third.returncode == 0, third.stdout + third.stderr
+            assert stages(json.loads(state_path.read_text())).count("up") == 2
 
 
 def test_nonexistent_release_does_not_recommend_another_updater(tmp_path):
@@ -791,4 +799,46 @@ def test_nonexistent_release_does_not_recommend_another_updater(tmp_path):
         assert result.returncode == 2, result.stdout + result.stderr
         assert "9.9.9" in result.stdout and "published" in result.stdout
         assert "Python updater" not in result.stdout
+        assert stages(json.loads(state_path.read_text())) == []
+
+
+@pytest.mark.parametrize("mode", ["checkout", "release", "engine"])
+@pytest.mark.parametrize("evidence", ["external", "inspect-failed", "malformed", "wrong-name", "missing-name", "unresolved-named-set"])
+def test_anonymous_mount_requires_docker_volume_provenance(tmp_path, mode, evidence):
+    binary = _native_binary()
+    if not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path, mode=mode) as (repo, env, state_path):
+        name = "a" * 64
+        state = json.loads(state_path.read_text())
+        state["config"]["services"][SERVICE]["volumes"].append({"type": "tmpfs", "target": "/cache"})
+        state["running"]["Mounts"].append({"Type": "volume", "Name": name,
+            "Source": f"/var/lib/docker/volumes/{name}/_data", "Destination": "/cache", "RW": True})
+        configured = {"Type": "volume", "Target": "/cache", "Source": name}
+        state["running"]["HostConfig"] = {"Mounts": [configured]}
+        record = {"Name": name, "Labels": {"com.docker.volume.anonymous": ""}}
+        if evidence == "external":
+            record["Labels"] = {}
+        elif evidence == "inspect-failed":
+            state["volume_inspect_failure"] = True
+        elif evidence == "wrong-name":
+            record["Name"] = "another-volume"
+        elif evidence == "missing-name":
+            state["running"]["Mounts"][-1].pop("Name")
+            configured.pop("Source")
+        elif evidence == "unresolved-named-set":
+            state["config"]["volumes"]["unresolved"] = {}
+            configured.pop("Source")
+        state["volume_inspections"] = {name: {} if evidence == "malformed" else [record]}
+        state_path.write_text(json.dumps(state))
+        args = ["--json", "--daemon-only", "--health-retries", "1"]
+        if mode == "release":
+            args += ["--tag", "0.21.1"]
+        else:
+            args += ["--checkout", str(repo), "--no-test-login", "--no-cache-prune"]
+            if mode == "engine":
+                args += ["--engine", "rust"]
+        result = run_arm(repo, env, binary, args)
+        assert result.returncode == 2, result.stdout + result.stderr
+        assert "/cache" in result.stdout and "declare" in result.stdout and "recreate" in result.stdout
         assert stages(json.loads(state_path.read_text())) == []
