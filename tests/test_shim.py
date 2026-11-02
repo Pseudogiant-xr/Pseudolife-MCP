@@ -808,6 +808,26 @@ def test_spawn_daemon_never_allocates_a_console_window(monkeypatch):
     assert flags & subprocess.CREATE_NEW_PROCESS_GROUP
 
 
+def test_spawn_daemon_runs_the_installed_package_from_inside_another_checkout(monkeypatch, tmp_path):
+    """Started from a directory that is not the package's own (an older
+    checkout, say), the daemon child leaves that directory off its import
+    path instead of running whatever ``pseudolife_memory`` sits there."""
+    from pseudolife_memory import shim
+
+    seen: dict = {}
+
+    def fake_popen(argv, **kwargs):
+        seen["argv"] = argv
+        return object()
+
+    monkeypatch.setattr(shim.subprocess, "Popen", fake_popen)
+    monkeypatch.chdir(tmp_path)
+    shim.spawn_daemon()
+    argv = seen["argv"]
+    assert argv[0] == sys.executable and argv[-3:] == ["-m", "pseudolife_memory.cli", "serve"]
+    assert ("-P" in argv) == (sys.version_info >= (3, 11))
+
+
 def test_shipped_package_never_spawns_with_detached_process():
     """Guard the class, not just today's one site.
 

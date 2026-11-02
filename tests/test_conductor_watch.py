@@ -10,12 +10,13 @@ runs, as it does across a restart.
 """
 import json
 import os
+import sys
 from pathlib import Path
 
 import httpx
 import pytest
 
-from pseudolife_memory import conductor_watch_cli as watch
+from pseudolife_memory import child_python, conductor_watch_cli as watch
 from pseudolife_memory.coordination_identity import resolve_digest_path
 from pseudolife_memory.lease_cli import _Board, _Refused, _Transient
 
@@ -1066,7 +1067,10 @@ def test_detach_reports_one_already_running(tmp_path, capsys):
     assert "already running" in out and "a" * 32 in out
 
 
-def test_detach_starts_the_watcher_and_prints_its_address(tmp_path, capsys):
+def test_detach_starts_the_watcher_and_prints_its_address(tmp_path, capsys, monkeypatch):
+    # Started from a directory that is not the package's own (an older
+    # checkout, say), the child must not import what sits there.
+    monkeypatch.chdir(tmp_path)
     state = tmp_path / "w.json"
     # A pid file whose process start does not match is stale, not running.
     state.with_suffix(".pid").write_text(json.dumps(
@@ -1091,7 +1095,9 @@ def test_detach_starts_the_watcher_and_prints_its_address(tmp_path, capsys):
     assert "--detach" not in argv and argv[argv.index("--interval") + 1] == "30"
     assert len(argv[argv.index("--nonce") + 1]) == 32
     assert argv[argv.index("--owner") + 1] == OWNER and argv[argv.index("--state") + 1] == str(state)
-    assert argv[1:4] == ["-m", "pseudolife_memory.cli", "conductor-watch"]
+    expected = child_python.cli_argv("conductor-watch")
+    assert argv[:len(expected)] == expected
+    assert ("-P" in argv) == (sys.version_info >= (3, 11))
     assert started["log"] == state.with_suffix(".log")
     out = capsys.readouterr().out.strip()
     assert out == (f"conductor-watch {'c' * 32} watching for {OWNER}; park with "
