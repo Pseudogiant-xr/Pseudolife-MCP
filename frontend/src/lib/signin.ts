@@ -213,7 +213,7 @@ export type RedeemResult =
 
 export const MESSAGES = {
   badCode: "A sign-in code has 12 letters and digits, like ABCD-EFGH-JKMN. Check it and try again.",
-  refused: `That code has expired, was already used or was mistyped. Run \`${SIGNIN_COMMAND}\` again for a new one.`,
+  refused: `That code has expired, was already used, was mistyped, or was made for another address of this Console. Run \`${SIGNIN_COMMAND}\` again for a new one, from where you use this Console.`,
   forbiddenOrigin:
     "This code was made for another address of this Console. Open the link at the address it names, or run " +
     `\`${SIGNIN_COMMAND}\` again from where you want to use the Console.`,

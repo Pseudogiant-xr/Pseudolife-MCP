@@ -228,7 +228,7 @@ describe("redeem", () => {
   });
 
   it.each([
-    [400, "signin_refused", "refused", /expired, was already used or was mistyped.*pseudolife-mcp console/],
+    [400, "signin_refused", "refused", /expired, was already used, was mistyped, or was made for another address.*pseudolife-mcp console/],
     [403, "forbidden_origin", "forbidden_origin", /another address of this Console/],
     [429, "rate_limited", "rate_limited", /in a minute/],
     [413, "http_413", "http", /HTTP 413/],
