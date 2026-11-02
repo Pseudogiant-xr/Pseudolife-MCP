@@ -715,6 +715,30 @@ impl Config {
             "memory_policy.ab_arms": self.memory_policy.ab_arms,
         });
         let map = dump.as_object_mut().expect("config dump object");
+        for (key, value) in [
+            (
+                "memory.dream.literal_gate_effective",
+                serde_json::json!(d.literal_gate),
+            ),
+            (
+                "memory.dream.span_gate_effective",
+                serde_json::json!(d.span_gate),
+            ),
+            (
+                "memory.deep_dream.judge_mode",
+                m.deep_dream.as_dict["judge_mode"].clone(),
+            ),
+            (
+                "time.relative_age_effective",
+                serde_json::json!(self.time.relative_age),
+            ),
+            (
+                "memory.reference.max_results_effective",
+                serde_json::json!(m.reference.max_results),
+            ),
+        ] {
+            map.insert(key.into(), value);
+        }
         map.insert(
             "memory.retrieval_log.retention_days".into(),
             serde_json::json!(m.retrieval_retention_days),
@@ -1245,6 +1269,7 @@ pub(crate) enum Node {
     Unsupported {
         value: String,
         reason: String,
+        truthy: bool,
     },
 }
 
@@ -1259,7 +1284,8 @@ impl Node {
             Node::Str(s) => !s.is_empty(),
             Node::Seq(items) => !items.is_empty(),
             Node::Map(entries) => !entries.is_empty(),
-            Node::MergeKey | Node::Unsupported { .. } => true,
+            Node::MergeKey => true,
+            Node::Unsupported { truthy, .. } => *truthy,
         }
     }
 
@@ -1488,6 +1514,29 @@ fn finish_mapping(raw: Vec<(Node, Node)>) -> Result<Node, String> {
 }
 
 impl Loader {
+    fn scalar_detail(&self, value: &str, reason: &str, mark: Marker) -> String {
+        let path = self
+            .stack
+            .iter()
+            .filter_map(|frame| match frame {
+                Frame::Map(_, Some(Node::Str(key)), _) => Some(key.clone()),
+                Frame::Seq(items, _) => Some(format!("[{}]", items.len())),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join(".");
+        let path = if path.is_empty() {
+            "config.yaml"
+        } else {
+            &path
+        };
+        format!(
+            "{path} at line {}, column {}: {value:?}: {reason}",
+            mark.line(),
+            mark.col() + 1
+        )
+    }
+
     fn complete(&mut self, node: Node, anchor: usize) {
         if anchor > 0 {
             self.anchors.insert(anchor, node.clone());
@@ -1555,29 +1604,18 @@ impl Loader {
                 let mut node = if value_key {
                     Node::Str(value)
                 } else {
-                    self.resolve.unwrap_or(resolve_scalar)(value, style, tag)?
+                    self.resolve.unwrap_or(resolve_scalar)(value.clone(), style, tag).map_err(
+                        |reason| {
+                            if self.startup {
+                                self.scalar_detail(&value, &reason, mark)
+                            } else {
+                                reason
+                            }
+                        },
+                    )?
                 };
-                if let Node::Unsupported { value, reason } = &mut node {
-                    let path = self
-                        .stack
-                        .iter()
-                        .filter_map(|frame| match frame {
-                            Frame::Map(_, Some(Node::Str(key)), _) => Some(key.clone()),
-                            Frame::Seq(items, _) => Some(format!("[{}]", items.len())),
-                            _ => None,
-                        })
-                        .collect::<Vec<_>>()
-                        .join(".");
-                    let path = if path.is_empty() {
-                        "config.yaml"
-                    } else {
-                        &path
-                    };
-                    *reason = format!(
-                        "{path} at line {}, column {}: {value:?}: {reason}",
-                        mark.line(),
-                        mark.col() + 1
-                    );
+                if let Node::Unsupported { value, reason, .. } = &mut node {
+                    *reason = self.scalar_detail(value, reason, mark);
                 }
                 self.complete(node, anchor);
             }
@@ -1774,7 +1812,7 @@ fn py_lenient_limit(
     key: &str,
     default: Option<i64>,
 ) -> Result<Option<i64>, ConfigError> {
-    Ok(match lookup(entries, key)? {
+    Ok(match raw_lookup(entries, key) {
         None => default,
         Some(Node::Int(i)) => Some(*i),
         Some(Node::Bool(b)) => Some(i64::from(*b)),
@@ -1816,8 +1854,11 @@ fn want_str(
         None => Ok(default.to_string()),
         Some(Node::Str(s)) => Ok(s.clone()),
         // PyYAML reads an unquoted off as False. These Python readers use
-        // named-mode comparisons, so False disables the corresponding gate.
-        Some(Node::Bool(false)) if off_mode(path, key) => Ok("off".into()),
+        // named-mode comparisons. Literal/span gates run for False != "off",
+        // but neither enforce nor contend: their effective behavior is log.
+        Some(Node::Bool(false)) if off_mode(path, key) => {
+            Ok(if path == "memory.dream" { "log" } else { "off" }.into())
+        }
         Some(Node::Bool(_)) => Err(refuse(format!(
             "{path}.{key} must be a string; quote YAML boolean words, for example 'off'"
         ))),
@@ -2486,7 +2527,7 @@ fn load_str(text: &str) -> Result<Config, ConfigError> {
     // `_dict_to_dataclass(TimeConfig, raw["time"])`: no type check, so the
     // value counts by Python truthiness where it is read.
     if let Some(t) = section(entries, "time", "")?
-        && let Some(v) = lookup(t, "relative_age")?
+        && let Some(v) = raw_lookup(t, "relative_age")
     {
         config.time.relative_age = v.truthy();
     }
@@ -3797,8 +3838,6 @@ mod tests {
                 "memory:\n  dream:\n    literal_gate: {word}\n    span_gate: {word}\n  deep_dream:\n    judge_mode: {word}\n    link_judge_mode: {word}\n    junk_judge_mode: {word}\n    curation_judge_mode: {word}\n    candidate_judge_mode: {word}\n"
             ));
             for mode in [
-                &config.dream.literal_gate,
-                &config.dream.span_gate,
                 &config.memory.deep_dream.judge_mode,
                 &config.memory.deep_dream.link_judge_mode,
                 &config.memory.deep_dream.junk_judge_mode,
@@ -3807,6 +3846,8 @@ mod tests {
             ] {
                 assert_eq!(mode, "off", "{word}");
             }
+            assert_eq!(config.dream.literal_gate, "log", "{word}");
+            assert_eq!(config.dream.span_gate, "log", "{word}");
             assert_eq!(
                 config.memory.deep_dream.as_dict["judge_mode"],
                 Value::Bool(false)
@@ -3818,6 +3859,31 @@ mod tests {
             cfg("embedding: {model_name: 'off'}\n").embedding.model_name,
             "off"
         );
+    }
+
+    #[test]
+    fn yaml_1_1_lenient_reads_and_malformed_integer_details() {
+        let mut failures = Vec::new();
+        match load_str(
+            "memory: {reference: {max_results: 2024-01-01}}\ntime: {relative_age: 2024-01-01}\n",
+        ) {
+            Ok(config) => {
+                assert_eq!(config.memory.reference.max_results, None);
+                assert!(config.time.relative_age);
+            }
+            Err(_) => failures.push("lenient timestamp readers"),
+        }
+        let error = load_str("unused:\n  integer: !!int '08'\n")
+            .unwrap_err()
+            .to_string();
+        if !["unused.integer", "line 2", "08", "quote"]
+            .iter()
+            .all(|part| error.contains(part))
+        {
+            failures.push("malformed integer location");
+        }
+        assert!(failures.is_empty(), "{failures:?}");
+        assert!(!cfg("time: {relative_age: !!binary ''}\n").time.relative_age);
     }
 
     #[test]

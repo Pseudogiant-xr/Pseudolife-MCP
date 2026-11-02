@@ -42,6 +42,7 @@ fn construct_startup(
             "int" => TAG_INT,
             "timestamp" => TAG_TIMESTAMP,
             "binary" => return Ok(Node::Unsupported {
+                truthy: value.chars().any(|c| !c.is_whitespace()),
                 value,
                 reason: "YAML binary values cannot be used at startup; replace !!binary with a plain string".into(),
             }),
@@ -52,6 +53,7 @@ fn construct_startup(
     };
     match resolved {
         TAG_TIMESTAMP => Ok(Node::Unsupported {
+            truthy: true,
             value,
             reason: "YAML timestamps cannot be used at startup; quote the date or timestamp to use it as a string".into(),
         }),
@@ -65,6 +67,7 @@ fn construct_startup(
             Ok(match construct_int_with(&value, startup_integer) {
             Ok(value) => Node::Int(value),
             Err(_) => Node::Unsupported {
+                truthy: true,
                 value,
                 reason: "YAML integer is invalid or outside the signed 64-bit range; use a value from -9223372036854775808 to 9223372036854775807, or quote it for a string setting".into(),
             },
