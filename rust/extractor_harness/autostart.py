@@ -124,10 +124,15 @@ def wrapper_forwarding(root):
     stub = root / "argv.ps1"
     stub.write_text('param([Parameter(ValueFromRemainingArguments=$true)][string[]]$Rest)\n'
                     'ConvertTo-Json -Compress -InputObject @($Rest)\n$global:LASTEXITCODE=0\n')
-    output = checked(["pwsh", "-NoProfile", "-File", str(run.ROOT / "ops/install-shim-autostart.ps1"),
-                      "-NativeExe", str(stub), "-NativeTaskName", "r6-argv-only", "-StartupTimeoutSec", "321"])
-    args = json.loads(output.stdout)
-    assert args[args.index("--startup-timeout") + 1] == "321", args
+    for script in ("install-shim-autostart.ps1", "install-codex-shim-autostart.ps1"):
+        command = ["pwsh", "-NoProfile", "-File", str(run.ROOT / "ops" / script),
+                   "-NativeExe", str(stub), "-NativeTaskName", "r6-argv-only", "-LogFile", "logs/fixture.log"]
+        if script == "install-shim-autostart.ps1":
+            command += ["-StartupTimeoutSec", "321"]
+        args = json.loads(checked(command, cwd=root).stdout)
+        assert Path(args[args.index("--log") + 1]) == root / "logs/fixture.log", args
+        if script == "install-shim-autostart.ps1":
+            assert args[args.index("--startup-timeout") + 1] == "321", args
 
 
 def proof(binary, root):
@@ -187,25 +192,77 @@ def proof(binary, root):
             args += ["--task-logon-type", "S4U"]
         model_flag = "--model"
         try:
+            # A Python shim from another checkout on this port is not ours to
+            # replace, even though its basename and provider match.
+            with run.server(None, kind, root / (kind + "-foreign"), run.canned(kind, "OK")) as (foreign_port, _, _, foreign, _):
+                foreign_args = list(args)
+                foreign_args[foreign_args.index("--port") + 1] = str(foreign_port)
+                refused = subprocess.run(foreign_args, env=env, capture_output=True)
+                assert refused.returncode != 0 and b"another process" in refused.stdout + refused.stderr, refused
+                assert foreign.poll() is None and run.call(foreign_port, "GET", "/health")[0] == 200, "foreign shim was stopped"
             with socket.socket() as blocker:
                 blocker.bind(("127.0.0.1", port))
                 blocker.listen()
                 refused = subprocess.run(args, env=env, capture_output=True)
                 assert refused.returncode != 0 and b"another process" in refused.stdout + refused.stderr
                 assert not (repo / "stable config.env").exists() or kind == "codex"
+            config_file = repo / "stable config.env"
+            if kind == "claude":
+                config_file.write_bytes(b"")
+            previous = config_file.read_bytes() if config_file.exists() else None
+            plan.write_text(json.dumps({"rc": 1, "stderr": "fixture provider unavailable"}))
+            unhealthy = subprocess.run(args + ["--startup-timeout", "2"], env=env, capture_output=True)
+            assert unhealthy.returncode != 0 and b"health check" in unhealthy.stdout + unhealthy.stderr, unhealthy
+            wait_closed(port)
+            assert (config_file.read_bytes() if config_file.exists() else None) == previous, "failed install did not restore config"
+            if windows:
+                exists = checked(["pwsh", "-NoProfile", "-Command", f"if (Get-ScheduledTask -TaskName '{token}' -ErrorAction SilentlyContinue) {{ exit 1 }}"])
+            else:
+                unit_dir = Path(os.environ.get("XDG_CONFIG_HOME", str(Path.home() / ".config"))) / "systemd/user"
+                assert not (unit_dir / registration).exists(), "failed install left a registration"
+            plan.write_text(json.dumps(run.canned(kind, "OK")))
             print(f"{kind}: registering owned fixture {token}", flush=True)
             checked(args, env=env)
             status, body = run.call(port, "POST", "/chat/completions", {})
             assert status == 200, (status, body)
             assert Path(run.journal_rows(journal)[-1]["cwd"]).resolve() == repo.resolve()
             initial_calls = len(run.journal_rows(journal))
+            repeated = checked(args, env=env)
+            assert not repeated.stdout.strip(), repeated.stdout
+            assert len(run.journal_rows(journal)) == initial_calls, "unchanged install restarted its provider"
+            # A failed replacement must restore the previous registration and
+            # settings, then restart its still-working provider.
+            broken_cli = bin_dir / (kind + ("-broken.exe" if windows else "-broken"))
+            if windows:
+                shutil.copyfile(fixture, broken_cli)
+                broken_script = bin_dir / f"{kind}-broken.py"
+                broken_script.write_text("raise SystemExit(1)\n")
+                broken_cli.with_suffix(".python").write_text(sys.executable)
+                broken_cli.with_suffix(".script").write_text(str(broken_script))
+            else:
+                broken_cli.write_text(f"#!{sys.executable}\nraise SystemExit(1)\n")
+                broken_cli.chmod(0o700)
+            previous = config_file.read_bytes()
+            unhealthy = subprocess.run(args + ["--cli", str(broken_cli), "--startup-timeout", "2"], env=env, capture_output=True)
+            assert unhealthy.returncode != 0 and b"health check" in unhealthy.stdout + unhealthy.stderr, unhealthy
+            assert config_file.read_bytes() == previous, "failed replacement did not restore config"
+            deadline = time.monotonic() + 25
+            while True:
+                try:
+                    if run.call(port, "GET", "/health")[0] == 200:
+                        break
+                except OSError:
+                    pass
+                assert time.monotonic() < deadline, "previous registration was not restarted"
+                time.sleep(.1)
+            assert not checked(args, env=env).stdout.strip(), "restored registration differs from the original"
             checked(args + [model_flag, model], env=env)
             status, body = run.call(port, "GET", "/models")
             assert status == 200 and json.loads(body)["data"][0]["id"] == model
             assert len(run.journal_rows(journal)) > initial_calls, "replacement never warmed the new process"
             status, body = run.call(port, "POST", "/chat/completions", {"messages": [{"role": "user", "content": "proof"}]})
             assert status == 200 and json.loads(body)["model"] == model
-            print(f"{kind}: installed launch, replacement, config reload and completion passed", flush=True)
+            print(f"{kind}: foreign refusal, health rollback, quiet rerun, replacement and completion passed", flush=True)
         except Exception:
             if windows:
                 diagnostic = subprocess.run(["pwsh", "-NoProfile", "-Command", f"(Get-ScheduledTaskInfo -TaskName '{token}').LastTaskResult"], capture_output=True)
@@ -232,6 +289,10 @@ def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--binary", required=True, type=Path)
     args = p.parse_args()
+    allowed = os.environ.get("PSEUDOLIFE_TEST_REAL_AUTOSTART") == "1" or (
+        os.environ.get("GITHUB_ACTIONS") == "true" and os.environ.get("RUNNER_ENVIRONMENT") == "github-hosted")
+    if not allowed:
+        p.error("real autostart proof requires PSEUDOLIFE_TEST_REAL_AUTOSTART=1 on a designated dev machine")
     with tempfile.TemporaryDirectory(prefix="r6-autostart-") as directory:
         proof(args.binary.resolve(), Path(directory))
 

@@ -84,6 +84,13 @@ pub(super) fn install(args: &[OsString], remove: bool) -> Result<(), String> {
             .join(format!(".pseudolife-mcp/{kind}-shim.log"));
         settings.extend(["--log".into(), path.into_os_string()]);
     }
+    for at in 0..settings.len().saturating_sub(1) {
+        if settings[at] == "--log" && !settings[at + 1].to_string_lossy().starts_with("~/") {
+            settings[at + 1] = std::path::absolute(PathBuf::from(&settings[at + 1]))
+                .map_err(|e| e.to_string())?
+                .into_os_string();
+        }
+    }
     // Resolve and validate everything without invoking a provider or modifying registration.
     let config = if remove {
         None
@@ -129,6 +136,28 @@ pub(super) fn install(args: &[OsString], remove: bool) -> Result<(), String> {
                 .all(|c| c.is_ascii_alphanumeric() || "_.@-".contains(c)))
     {
         return Err("invalid systemd unit name".into());
+    }
+    if remove && cfg!(target_os = "linux") {
+        let config_dir = std::env::var_os("XDG_CONFIG_HOME")
+            .map(PathBuf::from)
+            .unwrap_or(
+                dirs::home_dir()
+                    .ok_or("home directory unavailable")?
+                    .join(".config"),
+            );
+        // Endpoint installs clean up optional extractors even on hosts without
+        // a service manager. An absent registration needs no external command.
+        match fs::symlink_metadata(config_dir.join("systemd/user").join(&name)) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(e) => return Err(e.to_string()),
+            Ok(_) => {}
+        }
+        if !std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
+            .any(|p| p.join("systemctl").is_file())
+        {
+            println!("systemctl unavailable; skipping removal of {name}");
+            return Ok(());
+        }
     }
     let owner_exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let native = std::path::absolute(launcher.unwrap_or_else(|| owner_exe.clone()))

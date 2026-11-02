@@ -29,6 +29,7 @@ struct Shim {
     calls: tokio::sync::Mutex<Option<cli::Instructions>>,
     health: Mutex<Option<Health>>,
     override_misses: Mutex<std::collections::HashSet<String>>,
+    unlisted_models: Mutex<std::collections::HashSet<String>>,
 }
 
 impl Shim {
@@ -39,6 +40,25 @@ impl Shim {
         model: &str,
         effort: Option<&str>,
     ) -> Result<String, cli::Failure> {
+        config::validate_cli_token("model", model)?;
+        if let Some(effort) = effort.or(self.config.effort.as_deref()) {
+            config::validate_cli_token("reasoning-effort", effort)?;
+        }
+        if !self.config.kind.models().contains(&model)
+            && self
+                .unlisted_models
+                .lock()
+                .expect("model warnings")
+                .insert(model.to_owned())
+        {
+            cli::log(
+                &self.config,
+                &format!(
+                    "{} shim: unlisted model {model}; passing it through to the CLI",
+                    self.config.kind.name()
+                ),
+            );
+        }
         if self.config.kind == Kind::Claude
             && self.config.system.as_ref().is_some_and(|s| !s.is_empty())
             && !system.is_empty()
@@ -181,9 +201,12 @@ impl Shim {
             }
         };
         let model = c.kind.resolve_model(requested, &c.model);
+        if let Some(requested) = requested {
+            config::validate_cli_token("model", requested)?;
+        }
         let effort = req["reasoning_effort"]
             .as_str()
-            .map(str::trim)
+            .map(|s| s.trim_matches(' '))
             .filter(|s| !s.is_empty());
         let reply = self
             .chat(&system, &user, &model, effort)
@@ -435,6 +458,7 @@ async fn serve(config: Config) -> Result<(), Box<dyn std::error::Error>> {
         calls: tokio::sync::Mutex::new(None),
         health: Mutex::new(None),
         override_misses: Mutex::new(std::collections::HashSet::new()),
+        unlisted_models: Mutex::new(std::collections::HashSet::new()),
     });
     let (ok, body) = shim.refresh().await;
     cli::log(
@@ -464,7 +488,16 @@ async fn serve(config: Config) -> Result<(), Box<dyn std::error::Error>> {
         ),
     );
     loop {
-        let (stream, _) = listener.accept().await?;
+        let (stream, _) = retry_accept(
+            || listener.accept(),
+            |e| {
+                cli::log(
+                    &shim.config,
+                    &format!("extractor-shim: accept failed: {e}; retrying"),
+                )
+            },
+        )
+        .await;
         let shim = shim.clone();
         tokio::spawn(async move {
             let service = service_fn(move |req| {
@@ -479,5 +512,43 @@ async fn serve(config: Config) -> Result<(), Box<dyn std::error::Error>> {
                 .serve_connection(TokioIo::new(stream), service)
                 .await;
         });
+    }
+}
+
+async fn retry_accept<T, F, Fut>(mut accept: F, mut report: impl FnMut(&std::io::Error)) -> T
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = std::io::Result<T>>,
+{
+    loop {
+        match accept().await {
+            Ok(value) => return value,
+            Err(error) => {
+                report(&error);
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[tokio::test]
+    async fn transient_accept_errors_do_not_stop_the_server() {
+        let mut attempts = 0;
+        let mut reports = 0;
+        let answer = super::retry_accept(
+            || {
+                attempts += 1;
+                std::future::ready(if attempts < 3 {
+                    Err(std::io::Error::other("temporary resource exhaustion"))
+                } else {
+                    Ok(42)
+                })
+            },
+            |_| reports += 1,
+        )
+        .await;
+        assert_eq!((answer, attempts, reports), (42, 3, 2));
     }
 }

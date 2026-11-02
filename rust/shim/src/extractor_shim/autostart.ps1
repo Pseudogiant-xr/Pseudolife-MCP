@@ -52,8 +52,7 @@ function Stop-CapturedProcess($old) {
         Stop-Process -Id $old.ProcessId -Force
     }
 }
-function Remove-OwnedTask([string]$taskName) {
-    $task = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+function Get-OwnedTaskProcesses($task) {
     if (-not $task) { return }
     $captured = @()
     $snapshot = @(Get-CimInstance Win32_Process)
@@ -85,6 +84,13 @@ function Remove-OwnedTask([string]$taskName) {
         })
         $captured += $added
     } while ($added.Count)
+    $captured
+}
+function Remove-OwnedTask([string]$taskName) {
+    $task = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+    if (-not $task) { return }
+    $script:removedRegistration = $true
+    $captured = @(Get-OwnedTaskProcesses $task)
     # Capture children before stopping the wrapper: its exit can orphan them.
     Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
     foreach ($process in @($captured | Sort-Object CreationDate -Descending)) { Stop-CapturedProcess $process }
@@ -92,51 +98,27 @@ function Remove-OwnedTask([string]$taskName) {
     if (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue) { throw "could not remove $taskName" }
 }
 if ($c.Remove) {
+    $script:removedRegistration = $false
     $names = @($name)
     if ($name -eq 'Pseudolife Claude Shim') { $names += 'Pseudolife Sonnet Shim' }
     foreach ($task in $names) {
         Remove-OwnedTask $task
     }
-    Write-Host "Removed $name"
+    if ($script:removedRegistration) { Write-Host "Removed $name" }
     return
 }
 $marker = [regex]::Escape([string]$c.EnvFile)
 $nativePattern = "`"?extractor-shim`"?\s+`"?$kind`"?\s+`"?--env-file`"?\s+`"?$marker`"?(\s|$)"
-$pythonPattern = "${kind}_shim\.py.*--port\s+$port(\s|$)"
 $registered = Get-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue
-$executables = @($native, $ownerExe) + @($registered.Actions | ForEach-Object Execute)
-foreach ($oldAction in $registered.Actions) {
-    # Read a previous registration's literal target without executing its code.
-    if ($oldAction.Arguments -match '-EncodedCommand ([A-Za-z0-9+/=]+)') {
-        try {
-            $previous = [Text.Encoding]::Unicode.GetString([Convert]::FromBase64String($Matches[1]))
-            if ($previous -match '(?m)^\$psi\.FileName = ''((?:[^'']|'''')*)''\r?$') {
-                $executables += $Matches[1].Replace("''", "'")
-            }
-        } catch { }
-    }
-}
-function Test-OwnedProcess($process) {
-    if ($process.ExecutablePath -in $executables) { return $true }
-    # A stable launcher may wait for a versioned runtime child. Follow only
-    # that child's recorded parent, not another process with the same name.
-    $parent = Get-CimInstance Win32_Process -Filter "ProcessId = $($process.ParentProcessId)" -ErrorAction SilentlyContinue
-    return ($parent -and $parent.ExecutablePath -in $executables -and
-        $parent.CreationDate -le $process.CreationDate -and $parent.CommandLine -match $nativePattern)
-}
-$stale = @(Get-CimInstance Win32_Process | Where-Object {
-    $_.CommandLine -and (($_.CommandLine -match $nativePattern -and (Test-OwnedProcess $_)) -or
-        $_.CommandLine -match $pythonPattern)
-})
+# Only the selected registration can establish ownership. A matching basename
+# and port from another checkout is a foreign listener, never a replacement.
+$stale = @(Get-OwnedTaskProcesses $registered)
 $listeners = @(Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue)
 foreach ($listener in $listeners) {
     if ($listener.OwningProcess -notin @($stale | ForEach-Object ProcessId)) {
         throw "port $port belongs to another process (pid $($listener.OwningProcess)); choose --port or stop its owner"
     }
 }
-$configArgs = @($c.ConfigArgs)
-& $native @configArgs
-if ($LASTEXITCODE -ne 0) { throw 'could not write native shim settings' }
 function Quote-Argument([string]$value) {
     # Windows CommandLineToArgvW quoting, including a trailing backslash.
     '"' + [regex]::Replace([regex]::Replace($value, '(\\*)"', '$1$1\"'), '(\\+)$', '$1$1') + '"'
@@ -161,34 +143,62 @@ $user = [Security.Principal.WindowsIdentity]::GetCurrent().Name
 $principal = New-ScheduledTaskPrincipal -UserId $user -LogonType ([string]$c.LogonType)
 $trigger = New-ScheduledTaskTrigger -AtLogOn -User $user
 $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -ExecutionTimeLimit ([TimeSpan]::Zero) -Hidden
-Register-ScheduledTask -TaskName $name -Action $action -Principal $principal -Trigger $trigger -Settings $settings -Description "Native $kind extractor CLI shim" -Force | Out-Null
-if (-not (Get-ScheduledTask -TaskName $name)) { throw "task was not registered: $name" }
-Stop-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue
-foreach ($old in $stale) {
-    Stop-CapturedProcess $old
-}
-$deadline = (Get-Date).AddSeconds(15)
-while ((Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue) -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 200 }
-if (Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue) { throw "port $port did not become free; task registered but not started" }
-Start-ScheduledTask -TaskName $name
-$deadline = (Get-Date).AddSeconds([int]$c.Timeout)
-$verified = $false
-while ((Get-Date) -lt $deadline) {
+function Test-HealthyListener {
     $candidate = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($candidate) {
         $owner = Get-CimInstance Win32_Process -Filter "ProcessId = $($candidate.OwningProcess)" -ErrorAction SilentlyContinue
         if ($owner -and $owner.ExecutablePath -eq $ownerExe -and $owner.CommandLine -match $nativePattern) {
             try {
-                $null = Invoke-WebRequest -UseBasicParsing -Uri "http://$($c.Host):$port/models" -TimeoutSec 2
-                $verified = $true; break
+                $null = Invoke-WebRequest -UseBasicParsing -Uri "http://$($c.Host):$port/health" -TimeoutSec 2
+                $script:verifiedPid = $candidate.OwningProcess
+                return $true
             } catch { }
         }
     }
-    Start-Sleep -Milliseconds 500
+    return $false
 }
-if (-not $verified) {
-    $info = Get-ScheduledTaskInfo -TaskName $name
-    throw "native $kind shim did not bind port $port (task result $($info.LastTaskResult), last run $($info.LastRunTime)); inspect its configured log"
+$configExisted = Test-Path -LiteralPath $c.EnvFile
+$configBefore = [byte[]]@()
+if ($configExisted) { $configBefore = [IO.File]::ReadAllBytes($c.EnvFile) }
+$previousXml = if ($registered) { Export-ScheduledTask -TaskName $name } else { $null }
+$wasActive = $registered -and ($registered.State -eq 'Running' -or $stale.Count -gt 0)
+$mutated = $false
+$unchanged = $false
+try {
+    $configArgs = @($c.ConfigArgs)
+    & $native @configArgs | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'could not write native shim settings' }
+    $sameConfig = $configExisted -and [Convert]::ToBase64String([byte[]]$configBefore) -eq [Convert]::ToBase64String([IO.File]::ReadAllBytes($c.EnvFile))
+    $sameTask = $registered -and @($registered.Actions).Count -eq 1 -and
+        $registered.Actions[0].Execute -eq $action.Execute -and $registered.Actions[0].Arguments -eq $action.Arguments -and
+        [string]$registered.Principal.LogonType -eq [string]$c.LogonType
+    $unchanged = $sameConfig -and $sameTask -and (Test-HealthyListener)
+    if (-not $unchanged) {
+        $mutated = $true
+        Stop-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue
+        foreach ($old in $stale) { Stop-CapturedProcess $old }
+        $deadline = (Get-Date).AddSeconds(15)
+        while ((Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue) -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 200 }
+        if (Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue) { throw "port $port did not become free; restoring the previous registration" }
+        Register-ScheduledTask -TaskName $name -Action $action -Principal $principal -Trigger $trigger -Settings $settings -Description "Native $kind extractor CLI shim" -Force | Out-Null
+        if (-not (Get-ScheduledTask -TaskName $name)) { throw "task was not registered: $name" }
+        Start-ScheduledTask -TaskName $name
+        $deadline = (Get-Date).AddSeconds([int]$c.Timeout)
+        while (-not (Test-HealthyListener)) {
+            if ((Get-Date) -ge $deadline) { throw "native $kind shim failed its health check on port $port; inspect its configured log" }
+            Start-Sleep -Milliseconds 500
+        }
+    }
+} catch {
+    $failure = $_
+    if ($mutated) { Remove-OwnedTask $name }
+    if ($configExisted) { [IO.File]::WriteAllBytes($c.EnvFile, [byte[]]$configBefore) }
+    elseif (Test-Path -LiteralPath $c.EnvFile) { Remove-Item -LiteralPath $c.EnvFile }
+    if ($mutated -and $previousXml) {
+        Register-ScheduledTask -TaskName $name -Xml $previousXml -Force | Out-Null
+        if ($wasActive) { Start-ScheduledTask -TaskName $name }
+    }
+    throw $failure
 }
 if ($name -eq 'Pseudolife Claude Shim') {
     Remove-OwnedTask 'Pseudolife Sonnet Shim'
@@ -201,5 +211,7 @@ if ($c.ReplaceSibling) {
         }
     }
 }
-Write-Host "Registered + started native $kind shim (port $port, pid $($candidate.OwningProcess))."
-Write-Host "To reload $($c.EnvFile): stop and start scheduled task $name."
+if (-not $unchanged) {
+    Write-Host "Registered + started native $kind shim (port $port, pid $script:verifiedPid)."
+    Write-Host "To reload $($c.EnvFile): stop and start scheduled task $name."
+}

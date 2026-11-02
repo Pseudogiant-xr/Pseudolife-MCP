@@ -53,6 +53,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 $repo = Split-Path -Parent $PSScriptRoot
+$LogFile = [IO.Path]::GetFullPath($LogFile, (Get-Location).ProviderPath)
 
 # Native registration is shipped in the executable.
 if ($NativeExe) {

@@ -20,6 +20,9 @@ Concrete provider model IDs pass through; aliases such as `extractor` keep
 the launch model. Unlisted provider IDs get a one-line note. `--reasoning-effort`
 sets a launch default; a nonempty request value overrides it. Claude's optional
 `--emulate-tools` remains restricted to evaluation ports.
+Native model and effort values accept only ASCII letters, digits and `._:-`;
+other characters are rejected before invoking a provider, including through
+Windows batch launchers. Each unlisted model is logged once per shim process.
 
 Both shims read the existing shared production prompt artifact,
 `evals/prompts/assistant_facts_provenance.txt`; Rust embeds it at compile time.
@@ -48,13 +51,16 @@ Without `--repo` or `--env-file`, settings live in
 existing v5 prompt, embedded from `evals/prompts/sonnet_extractor_v5.md`.
 No checkout or prompt file is required for a release installation.
 
-Rerunning installation restarts the shim and verifies that its process owns
+Replacing a changed installation restarts the shim and verifies that its process owns
 the requested listening socket. `--replace-sibling` removes the opposite
 provider's known autostart registration only after the new endpoint binds.
 An unrelated listener causes a refusal. Windows registration needs an
 elevated shell; its default principal is the current interactive user.
 `--task-logon-type S4U` explicitly selects a local-only unattended principal.
 Linux uses the Docker bridge address when available; `--host` overrides it.
+An unchanged, healthy registration is a quiet no-op. Installation verifies
+`/health`, and a failed replacement restores the prior registration and settings.
+Removing an absent Linux registration needs no service manager or Python.
 
 The existing `install-*shim-autostart.sh` scripts accept `--native PATH`;
 their PowerShell equivalents accept `-NativeExe PATH`. Their existing
@@ -66,7 +72,7 @@ names support isolated installations and tests. When installing through a versio
 ```sh
 cargo test --manifest-path rust/Cargo.toml -p pseudolife-stdio --test extractor_shim
 python rust/extractor_harness/test_prompt.py
-python rust/extractor_harness/autostart.py --binary /path/to/pseudolife-stdio
+PSEUDOLIFE_TEST_REAL_AUTOSTART=1 python rust/extractor_harness/autostart.py --binary /path/to/pseudolife-stdio
 ```
 
 The differential harness launches both implementations with disposable stub
@@ -87,3 +93,8 @@ It removes its registrations. Run it
 only on a designated dev machine. Its Windows fixture uses S4U because an SSH
 session has no interactive logon token; it does not prove an interactive logon
 trigger fires. Never use it to replace an existing installation's task.
+Real registrations are gated by `PSEUDOLIFE_TEST_REAL_AUTOSTART=1`, or by both
+`GITHUB_ACTIONS=true` and `RUNNER_ENVIRONMENT=github-hosted` on ephemeral hosted
+runners. Ordinary local and self-hosted Cargo runs skip this proof before any
+scheduler action. On PowerShell, set `$env:PSEUDOLIFE_TEST_REAL_AUTOSTART='1'`
+explicitly on the dev VM before the installed proof.

@@ -73,6 +73,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 $repo = Split-Path -Parent $PSScriptRoot
+$LogFile = [IO.Path]::GetFullPath($LogFile, (Get-Location).ProviderPath)
 
 # Native registration is shipped in the executable.
 if ($NativeExe) {
@@ -123,7 +124,6 @@ $PythonExe = "$picked".Trim()
 # Absolute up front: the runner would otherwise resolve a relative -LogFile
 # against its WorkingDirectory ($repo) while the verification below resolves
 # it against this shell's location.
-$LogFile = [IO.Path]::GetFullPath($LogFile, (Get-Location).ProviderPath)
 New-Item -ItemType Directory -Force (Split-Path -Parent $LogFile) | Out-Null
 
 # Every process whose command line names claude_shim.py AND this --port. The

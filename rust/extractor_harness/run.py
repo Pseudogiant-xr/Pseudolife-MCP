@@ -97,7 +97,7 @@ def unused_port():
 
 
 @contextlib.contextmanager
-def server(binary, kind, root, plan, *, emulate=False, override=None, ttl=None, timeout=None, managed=False):
+def server(binary, kind, root, plan, *, emulate=False, override=None, ttl=None, timeout=None, managed=False, discover=False, logging=False):
     root.mkdir(parents=True)
     script = root / "stub.py"
     script.write_text(STUB, encoding="utf-8")
@@ -121,10 +121,20 @@ def server(binary, kind, root, plan, *, emulate=False, override=None, ttl=None, 
                R6_STUB_PYTHON=sys.executable, R6_STUB_SCRIPT=str(script),
                R6_ROOT=str(root),
                CLAUDECODE="fixture-session", CLAUDE_CODE_SESSION_ID="fixture-id", CLAUDE_EFFORT="low")
+    cli_argument = str(cli)
+    if discover:
+        assert os.name == "nt"
+        (root / kind).write_text("#!/bin/sh\nexit 93\n")
+        (root / (kind + ".cmd")).write_text(f'@"{sys.executable}" "{script}" %*\r\n', encoding="utf-8")
+        env["PATH"] = str(root) + os.pathsep + env["PATH"]
+        env["PATHEXT"] = ".COM;.EXE;.BAT;.CMD"
+        cli_argument = kind
     port = unused_port()
     argv = ([str(binary), "extractor-shim", kind] if binary else
             [sys.executable, str(ROOT / "evals" / f"{kind}_shim.py")])
-    argv += ["--cli", str(cli), "--port", str(port)]
+    argv += ["--cli", cli_argument, "--port", str(port)]
+    if logging:
+        argv += ["--log", str(root / "native.log")]
     if emulate:
         argv += ["--emulate-tools"]
     if override:
@@ -227,7 +237,10 @@ def differential(binary, root):
             with server(exe, kind, root / f"{kind}-{arm}", canned(kind, "OK"), override=override) as (port, plan, journal, _, _):
                 for label, method, path, body, output in corpus(kind, prompt):
                     plan.write_text(json.dumps(output))
-                    status, response = call(port, method, path, body)
+                    try:
+                        status, response = call(port, method, path, body)
+                    except OSError as error:
+                        raise AssertionError(f"{root.name}/{kind}/{arm}/{label}: {error}") from error
                     arm_results.append((label, status, normalize(response)))
                 records.append(journal_rows(journal))
             results.append(arm_results)
@@ -248,10 +261,11 @@ def configuration(binary, root):
         for directory in (pyroot, native):
             (directory / "ops").mkdir(parents=True)
             (directory / "ops/.env").write_text(seed)
-        for model in ("fixture-model", 'fixture\'s "model" \\ path', ""):
-            autostart_oracle.write_config(pyroot, kind, {"model": model, "host": "127.0.0.1"})
+        for model in ("fixture-model", "fixture:revision", ""):
+            log = 'fixture\'s "log" \\ path'
+            autostart_oracle.write_config(pyroot, kind, {"model": model, "host": "127.0.0.1", "log": log})
             result = subprocess.run([str(binary), "extractor-shim", "config", kind, "--repo", str(native),
-                                     "--model", model, "--host", "127.0.0.1"], capture_output=True)
+                                     "--model", model, "--host", "127.0.0.1", "--log", log], capture_output=True)
             assert result.returncode == 0, result.stderr
             assert (pyroot / "ops/.env").read_text() == (native / "ops/.env").read_text(), kind
             count += 1
@@ -371,6 +385,7 @@ def main():
         count += health_differential(args.binary.resolve(), root)
         count += lifecycle(args.binary.resolve(), root)
         count += configuration(args.binary.resolve(), root)
+        count += native_regressions(args.binary.resolve(), root)
         if os.name == "nt":
             STUB_EXE = None
             count += differential(args.binary.resolve(), root / "batch")
@@ -379,6 +394,68 @@ def main():
     if args.output:
         args.output.write_text(json.dumps(result, indent=2) + "\n")
     print(json.dumps(result))
+
+
+def native_regressions(binary, root):
+    count = 0
+    for kind in ("claude", "codex"):
+        for field in ("model", "reasoning-effort"):
+            target = root / f"{kind}-{field}-rejected.env"
+            rejected = subprocess.run([str(binary), "extractor-shim", "config", kind,
+                "--env-file", str(target), "--" + field, "unsafe&value"], capture_output=True)
+            assert rejected.returncode != 0 and not target.exists(), rejected
+            count += 1
+        with server(binary, kind, root / (kind + "-validation"), canned(kind, "OK"), logging=True) as (port, _, journal, _, _):
+            before = len(journal_rows(journal))
+            for suffix in ("%", '"', "\n", "&"):
+                for field in ("model", "reasoning_effort"):
+                    value = ("claude-future" if kind == "claude" else "gpt-future") + suffix
+                    status, body = call(port, "POST", "/chat/completions", {field: value})
+                    assert status == 500 and b"must contain only ASCII" in body, (field, value, status, body)
+                    count += 1
+            assert len(journal_rows(journal)) == before, "invalid token reached the provider"
+            model = "claude-future" if kind == "claude" else "gpt-future"
+            for _ in range(2):
+                assert call(port, "POST", "/chat/completions", {"model": model})[0] == 200
+            logged = (journal.parent / "native.log").read_text()
+            assert logged.count(f"unlisted model {model}; passing it through to the CLI") == 1, logged
+            count += 1
+        if os.name == "nt":
+            with server(binary, kind, root / (kind + "-npm"), canned(kind, "OK"), discover=True) as (port, _, journal, _, _):
+                assert call(port, "GET", "/health") == (200, b'{"status": "ok"}')
+                assert len(journal_rows(journal)) == 1, "npm-style executable was not called"
+                count += 1
+    if sys.platform == "linux":
+        home = root / "no-service-manager"
+        home.mkdir()
+        env = dict(os.environ, HOME=str(home), XDG_CONFIG_HOME=str(home / ".config"), PATH="")
+        for kind in ("claude", "codex"):
+            result = subprocess.run([str(binary), "extractor-shim", "uninstall-autostart", kind], env=env, capture_output=True)
+            assert (result.returncode, result.stdout, result.stderr) == (0, b"", b""), result
+            count += 1
+        unit = home / ".config/systemd/user/r6-absent-manager.service"
+        unit.parent.mkdir(parents=True)
+        unit.write_text("[Service]\nExecStart=/fixture\n")
+        result = subprocess.run([str(binary), "extractor-shim", "uninstall-autostart", "claude", "--name", unit.name], env=env, capture_output=True)
+        assert result.returncode == 0 and b"systemctl unavailable" in result.stdout and unit.exists(), result
+        count += 1
+        commands = home / "commands"
+        commands.mkdir()
+        (commands / "bash").symlink_to(shutil.which("bash"))
+        env["PATH"] = str(commands)
+        target = home / "settings.env"
+        result = subprocess.run([str(binary), "extractor-shim", "install-autostart", "claude",
+            "--env-file", str(target), "--cli", str(root / "claude-validation/stub"),
+            "--name", "r6-missing-manager.service"], env=env, capture_output=True)
+        assert result.returncode != 0 and b"requires systemctl" in result.stderr and not target.exists(), result
+        count += 1
+        manager = commands / "systemctl"
+        manager.write_text("#!/bin/sh\nexit 1\n")
+        manager.chmod(0o700)
+        result = subprocess.run([str(binary), "extractor-shim", "uninstall-autostart", "claude", "--name", unit.name], env=env, capture_output=True)
+        assert result.returncode == 0 and b"manager unavailable" in result.stdout and unit.exists(), result
+        count += 1
+    return count
 
 
 if __name__ == "__main__":

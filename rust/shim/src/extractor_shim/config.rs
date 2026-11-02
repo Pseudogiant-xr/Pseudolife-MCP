@@ -50,14 +50,21 @@ impl Kind {
                 Self::Codex => s.starts_with("gpt-") || s.starts_with("codex-"),
             })
             .unwrap_or(default);
-        if !self.models().contains(&model) {
-            eprintln!(
-                "{} shim: unlisted model {model}; passing it through to the CLI",
-                self.name()
-            );
-        }
         model.into()
     }
+}
+
+pub(super) fn validate_cli_token(label: &str, value: &str) -> Result<(), String> {
+    if value.is_empty()
+        || !value
+            .bytes()
+            .all(|c| c.is_ascii_alphanumeric() || b"._:-".contains(&c))
+    {
+        return Err(format!(
+            "{label} must contain only ASCII letters, digits, '.', '_', ':', or '-'"
+        ));
+    }
+    Ok(())
 }
 
 pub(super) struct Config {
@@ -205,7 +212,10 @@ fn write_config(
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
-    fs::write(path, kept.join("\n") + "\n").map_err(|e| e.to_string())?;
+    let rendered = kept.join("\n") + "\n";
+    if rendered != raw {
+        fs::write(path, rendered).map_err(|e| e.to_string())?;
+    }
     println!(
         "wrote settings for the {} shim into {}",
         kind.name(),
@@ -216,20 +226,42 @@ fn write_config(
 
 pub(super) fn resolve_cli(name: &str, kind: Kind) -> Option<PathBuf> {
     let direct = PathBuf::from(name);
-    if direct.is_file() {
-        return Some(direct);
+    let runnable = |path: PathBuf| -> Option<PathBuf> {
+        #[cfg(windows)]
+        {
+            let extensions =
+                std::env::var("PATHEXT").unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".into());
+            let extensions: Vec<_> = extensions
+                .split(';')
+                .filter(|s| s.starts_with('.') && s.len() > 1)
+                .collect();
+            if path.extension().is_some_and(|e| {
+                extensions
+                    .iter()
+                    .any(|x| e.to_string_lossy().eq_ignore_ascii_case(&x[1..]))
+            }) && path.is_file()
+            {
+                return Some(path);
+            }
+            for ext in extensions {
+                let candidate = PathBuf::from(format!("{}{ext}", path.display()));
+                if candidate.is_file() {
+                    return Some(candidate);
+                }
+            }
+            None
+        }
+        #[cfg(not(windows))]
+        {
+            path.is_file().then_some(path)
+        }
+    };
+    if let Some(path) = runnable(direct) {
+        return Some(path);
     }
     for dir in std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()) {
-        let p = dir.join(name);
-        if p.is_file() {
-            return Some(p);
-        }
-        #[cfg(windows)]
-        for ext in ["exe", "cmd", "bat"] {
-            let p = dir.join(format!("{name}.{ext}"));
-            if p.is_file() {
-                return Some(p);
-            }
+        if let Some(path) = runnable(dir.join(name)) {
+            return Some(path);
         }
     }
     if cfg!(windows) && kind == Kind::Codex && matches!(name, "codex" | "codex.exe") {
@@ -317,6 +349,11 @@ pub(super) fn parse(args: Vec<OsString>) -> Result<Option<Config>, String> {
         .map(PathBuf::from)
         .or_else(|| repo.as_ref().map(|r| r.join("ops/.env")));
     if writing {
+        for key in ["model", "reasoning-effort"] {
+            if let Some(value) = opts.get(key).filter(|s| !s.is_empty()) {
+                validate_cli_token(key, value)?;
+            }
+        }
         write_config(
             repo.as_deref().unwrap_or(Path::new(".")),
             settings_path
@@ -412,10 +449,14 @@ pub(super) fn parse(args: Vec<OsString>) -> Result<Option<Config>, String> {
             .as_ref()
             .and_then(|p| p.parent().map(Path::to_path_buf))
     });
+    validate_cli_token("model", &vals["model"])?;
+    if let Some(effort) = vals.get("reasoning-effort").filter(|s| !s.is_empty()) {
+        validate_cli_token("reasoning-effort", effort)?;
+    }
     let local_cli = cwd
         .as_ref()
         .map(|p| p.join(&cli_name))
-        .filter(|p| p.is_file());
+        .and_then(|p| resolve_cli(&p.to_string_lossy(), kind));
     let cli = local_cli
         .or_else(|| resolve_cli(&cli_name, kind))
         .ok_or_else(|| format!("{} CLI not found at {cli_name}", kind.name()))?;
