@@ -16,6 +16,20 @@ python -m board.boundary --shared-clock
 python -m board.boundary --json-keys
 ```
 
+`conductor-wake` and `conductor-wake-fences` cover ordinary conductor mail,
+need and done parks, nightly-cap exemption, the sender's own cap, and
+expired, replaced or mismatched grant fences. Each arm must also satisfy
+explicit receipt expectations, so equal refusals do not pass as delivery.
+`conductor-wake-offers` and `maintainer-wake-offers` check that successive
+authority and peer messages produce new offers and keep separate budgets.
+The four `unserved-*` scenarios interleave a conductor or signed maintainer
+message between peer messages, with parked and unparked Codex recipients.
+They are included in the complete `board.run` corpus used by body-evidence CI.
+For the hosted stress lane, select
+`rust/daemon/harness/board/conductor_wake_live.py::test_live_conductor_wake`.
+It runs all eight scenarios against both engines with the offline embedding
+fixture and requires the lane's `PL_SECURITY_RELEASE_MUTANTS_BIN` candidate.
+
 The signed Console actions run with
 `--only maintainer-enrol maintainer-roles maintainer-mail maintainer-refusals`.
 These scenarios additionally compare `maintainer_passkeys`,
