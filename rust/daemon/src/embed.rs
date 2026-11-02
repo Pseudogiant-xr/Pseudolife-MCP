@@ -97,6 +97,25 @@ fn cache_root_from(lookup: impl Fn(&str) -> Option<std::ffi::OsString>) -> PathB
         })
 }
 
+fn validate_cpu_dtype(configured: &str, override_value: &str) -> Result<()> {
+    let requested = override_value.trim().to_lowercase();
+    let dtype = if requested.is_empty() {
+        configured.trim().to_lowercase()
+    } else {
+        requested
+    };
+    if !matches!(dtype.as_str(), "auto" | "fp32" | "bf16") {
+        bail!("embedding cpu_dtype must be 'auto', 'fp32' or 'bf16'");
+    }
+    // An explicit bf16 request must not silently become the measured fp32 policy.
+    if dtype == "bf16" {
+        bail!(
+            "the native daemon does not support bf16 ONNX inference; set embedding.cpu_dtype: fp32 or auto in config.yaml, and unset PSEUDOLIFE_EMBEDDING_CPU_DTYPE or set it to fp32 or auto; keep the Python engine if explicit bf16 is required"
+        );
+    }
+    Ok(())
+}
+
 impl Embedder {
     /// An override is a complete local model root. The configured graph name
     /// is relative to its Transformer module; loading never guesses files.
@@ -108,23 +127,10 @@ impl Embedder {
         if !matches!(config.backend.as_str(), "torch" | "onnx") {
             bail!("embedding backend must be 'torch' or 'onnx'");
         }
-        let requested = std::env::var("PSEUDOLIFE_EMBEDDING_CPU_DTYPE")
-            .unwrap_or_default()
-            .trim()
-            .to_lowercase();
-        let dtype = if requested.is_empty() {
-            config.cpu_dtype.trim().to_lowercase()
-        } else {
-            requested
-        };
-        if !matches!(dtype.as_str(), "auto" | "fp32" | "bf16") {
-            bail!("embedding cpu_dtype must be 'auto', 'fp32' or 'bf16'");
-        }
-        // The port currently admits float32 hidden states only. An explicit
-        // bf16 request must not silently become the measured fp32 policy.
-        if dtype == "bf16" {
-            bail!("deferred: bf16 ONNX");
-        }
+        validate_cpu_dtype(
+            &config.cpu_dtype,
+            &std::env::var("PSEUDOLIFE_EMBEDDING_CPU_DTYPE").unwrap_or_default(),
+        )?;
         if config.batch_size <= 0 || config.max_seq_length <= 0 {
             bail!("embedding batch_size and max_seq_length must be positive");
         }
@@ -621,6 +627,33 @@ pub fn probe() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn compatibility_bf16_refusal_names_configuration_and_environment_fix() {
+        for (configured, override_value) in [("bf16", ""), ("auto", " BF16 ")] {
+            let error = super::validate_cpu_dtype(configured, override_value)
+                .unwrap_err()
+                .to_string();
+            for fix in [
+                "embedding.cpu_dtype",
+                "fp32",
+                "auto",
+                "PSEUDOLIFE_EMBEDDING_CPU_DTYPE",
+            ] {
+                assert!(error.contains(fix), "{error}");
+            }
+        }
+        for (configured, override_value) in [
+            ("auto", ""),
+            ("fp32", ""),
+            ("bf16", "fp32"),
+            ("bf16", "auto"),
+            (" fp32 ", "  "),
+        ] {
+            assert!(super::validate_cpu_dtype(configured, override_value).is_ok());
+        }
+        assert!(super::validate_cpu_dtype("bfloat16", "").is_err());
+    }
+
     use super::*;
 
     #[test]

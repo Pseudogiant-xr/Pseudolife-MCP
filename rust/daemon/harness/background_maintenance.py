@@ -80,7 +80,11 @@ s.close()
             for row in state["rows"][relation_table]["rows"]:
                 if row[0] in prior and row[clock] != prior[row[0]][clock]:
                     raise RuntimeError("sweep changed a seeded relation clock")
-            normalized = dbstate.normalize(state, harness.DB_NONDETERMINISTIC)
+            normalized = dbstate.normalize(state, harness.DB_NONDETERMINISTIC, before)
+            # Only relation seeds have deliberately portable clocks, checked
+            # against this run's baseline above. Retrieval seeds stay exact.
+            normalized = dbstate.normalize(normalized, {
+                ("relations", "created_at"): harness.DB_NONDETERMINISTIC[("relations", "created_at")]})
             # Catalog version/owner metadata varies between the bench and
             # hosted disposable PostgreSQL. Prove it stayed byte-equal to
             # this arm's seeded baseline before emitting a portable marker.

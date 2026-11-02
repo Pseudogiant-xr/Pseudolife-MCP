@@ -1,0 +1,25 @@
+usage: pseudolife-mcp test-login create [-h] [--role ROLE] [--file FILE]
+                                        [--rotate] [--bank DB]
+                                        [--admin-url ADMIN_URL]
+                                        [--container CONTAINER] [--json]
+
+Create or reset the test login, close the bank to it (REVOKE CONNECT FROM
+PUBLIC), install vector in template1, and write the login to a test-only file.
+Run on the daemon host, once; again any time.
+
+options:
+  -h, --help            show this help message and exit
+  --role ROLE           role name (default pseudolife_test)
+  --file FILE           where to write the login (default
+                        $PSEUDOLIFE_TEST_PG_LOGIN_FILE, else ~/.pseudolife-
+                        mcp/test-pg.env)
+  --rotate              draw a new password instead of re-applying the file's
+  --bank DB             another production database to close (repeatable)
+  --admin-url ADMIN_URL
+                        a superuser URL, best without its password (libpq
+                        reads PGPASSWORD or ~/.pgpass); without it, psql in
+                        the Postgres container
+  --container CONTAINER
+                        the Postgres container (default pseudolife-mcp-
+                        postgres)
+  --json                print one JSON report

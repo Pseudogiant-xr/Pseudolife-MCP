@@ -1,0 +1,922 @@
+{
+ "row": "CLI-AUDIT",
+ "platform": "windows",
+ "oracle_commit": "2c770c4dab8dfaba058fc25d2f935bcdd10ffada",
+ "oracle_commit_source": "git",
+ "cases": {
+  "audit-reserved-number-key-duplicates": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "Ym9hcmQtYXVkaXQ6IHtIT01FfVxhcmNoaXZlLmpzb25sIGxpbmUgMSBoYXMgYSBkdXBsaWNhdGUga2V5LCBzbyBhIHJlYWRlciBhbmQgdmVyaWZ5IGNvdWxkIHNlZSBkaWZmZXJlbnQgdmFsdWVzOyBpdCBjYW5ub3QgYmUgY2hlY2tlZA0K",
+   "window": [
+    1793593928.7961435,
+    1793593929.425818
+   ],
+   "arm": "python",
+   "before": {
+    "archive.jsonl": "file:eyJwYXlsb2FkIjp7IiRzZXJkZV9qc29uOjpwcml2YXRlOjpOdW1iZXIiOiIxIiwiJHNlcmRlX2pzb246OnByaXZhdGU6Ok51bWJlciI6IjEifX0K",
+    "cwd": "dir"
+   },
+   "files": {
+    "archive.jsonl": "file:eyJwYXlsb2FkIjp7IiRzZXJkZV9qc29uOjpwcml2YXRlOjpOdW1iZXIiOiIxIiwiJHNlcmRlX2pzb246OnByaXZhdGU6Ok51bWJlciI6IjEifX0K",
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "input-empty": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "eyJvayI6IHRydWUsICJldmVudHMiOiAwLCAiZmlyc3Rfc2VxIjogbnVsbCwgImhlYWRfc2VxIjogbnVsbCwgImhlYWRfaGFzaCI6IG51bGwsICJoZWFkX2NyZWF0ZWRfYXQiOiBudWxsLCAic3RhcnRfY3V0IjogbnVsbH0NCg==",
+   "stderr": "",
+   "window": [
+    1793593929.4298291,
+    1793593930.073305
+   ],
+   "arm": "python",
+   "before": {
+    "archive.jsonl": "file:",
+    "cwd": "dir"
+   },
+   "files": {
+    "archive.jsonl": "file:",
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "input-missing": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "Ym9hcmQtYXVkaXQ6IGNhbm5vdCByZWFkIHtIT01FfVxtaXNzaW5nLmpzb25sDQo=",
+   "window": [
+    1793593930.077316,
+    1793593930.7305408
+   ],
+   "arm": "python",
+   "before": {
+    "cwd": "dir"
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "bank-verify-head-mismatch": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 1,
+   "stdout": "eyJvayI6IGZhbHNlLCAic2VxIjogNDUsICJyZWFzb24iOiAiaGVhZF9taXNtYXRjaCJ9DQo=",
+   "stderr": "",
+   "window": [
+    1793593941.8577862,
+    1793593942.5564423
+   ],
+   "arm": "python",
+   "before": {
+    "cwd": "dir"
+   },
+   "db": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "bank-verify-head-missing": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 1,
+   "stdout": "eyJvayI6IGZhbHNlLCAic2VxIjogOTk5OSwgInJlYXNvbiI6ICJoZWFkX21pc3NpbmcifQ0K",
+   "stderr": "",
+   "window": [
+    1793593942.6733973,
+    1793593943.348838
+   ],
+   "arm": "python",
+   "before": {
+    "cwd": "dir"
+   },
+   "db": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "bank-verify-head-pruned": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 1,
+   "stdout": "eyJvayI6IGZhbHNlLCAic2VxIjogMiwgInJlYXNvbiI6ICJoZWFkX3BydW5lZCIsICJzdGFydF9jdXQiOiB7InNlcSI6IDYsICJjcmVhdGVkX2F0IjogMTcwMDI1OTIwMC4wLCAiY3V0b2ZmIjogMTcwMDA5MjgwMCwgInJldGVudGlvbl9kYXlzIjogMSwgInRocm91Z2hfc2VxIjogM319DQo=",
+   "stderr": "",
+   "window": [
+    1793593944.1603165,
+    1793593944.8498442
+   ],
+   "arm": "python",
+   "before": {
+    "cwd": "dir"
+   },
+   "db": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "bank-verify-empty": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "eyJvayI6IHRydWUsICJldmVudHMiOiAwLCAiZmlyc3Rfc2VxIjogbnVsbCwgImhlYWRfc2VxIjogbnVsbCwgImhlYWRfaGFzaCI6IG51bGwsICJoZWFkX2NyZWF0ZWRfYXQiOiBudWxsLCAic3RhcnRfY3V0IjogbnVsbH0NCg==",
+   "stderr": "",
+   "window": [
+    1793593945.6986978,
+    1793593946.3997374
+   ],
+   "arm": "python",
+   "before": {
+    "cwd": "dir"
+   },
+   "db": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "bank-verify-nolog": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "Ym9hcmQtYXVkaXQ6IHRoaXMgYmFuayBoYXMgbm8gYXVkaXQgbG9nIHlldCAoc2NoZW1hIG9sZGVyIHRoYW4gdjQyKTsgc3RhcnQgYSB2NDIgZGFlbW9uIG9uY2UgdG8gY3JlYXRlIGl0DQo=",
+   "window": [
+    1793593946.8590536,
+    1793593947.5421138
+   ],
+   "arm": "python",
+   "before": {
+    "cwd": "dir"
+   },
+   "db": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "bank-verify-tampered": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 1,
+   "stdout": "eyJvayI6IGZhbHNlLCAic2VxIjogMiwgInJlYXNvbiI6ICJoYXNoX21pc21hdGNoIn0NCg==",
+   "stderr": "",
+   "window": [
+    1793593948.478395,
+    1793593949.1683712
+   ],
+   "arm": "python",
+   "before": {
+    "cwd": "dir"
+   },
+   "db": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "export-agent-literal": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "",
+   "stderr": "",
+   "window": [
+    1793593949.2852812,
+    1793593949.972173
+   ],
+   "arm": "python",
+   "before": {
+    "cwd": "dir"
+   },
+   "db": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "export-agent-unknown": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "Ym9hcmQtYXVkaXQ6IG5vIGFnZW50IGlkIHN0YXJ0cyB3aXRoIGZmZmZmZmZmMA0K",
+   "window": [
+    1793593950.0888362,
+    1793593950.7900817
+   ],
+   "arm": "python",
+   "before": {
+    "cwd": "dir"
+   },
+   "db": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "export-agent-unknown-out": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "Ym9hcmQtYXVkaXQ6IG5vIGFnZW50IGlkIHN0YXJ0cyB3aXRoIGZmZmZmZmZmMA0K",
+   "window": [
+    1793593950.9108188,
+    1793593951.5977848
+   ],
+   "arm": "python",
+   "before": {
+    "cwd": "dir"
+   },
+   "db": "unchanged",
+   "files": {
+    "cwd": "dir",
+    "out.jsonl": "file:"
+   },
+   "modes": {}
+  },
+  "export-out-exists": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "Ym9hcmQtYXVkaXQ6IHtIT01FfVxvdXQuanNvbmwgZXhpc3RzOyBleHBvcnQgbmV2ZXIgcmVwbGFjZXMgYSBmaWxlDQo=",
+   "window": [
+    1793593951.7162898,
+    1793593952.3459868
+   ],
+   "arm": "python",
+   "before": {
+    "cwd": "dir",
+    "out.jsonl": "file:a2VlcA=="
+   },
+   "db": "unchanged",
+   "files": {
+    "cwd": "dir",
+    "out.jsonl": "file:a2VlcA=="
+   },
+   "modes": {}
+  },
+  "export-empty": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "",
+   "stderr": "",
+   "window": [
+    1793593952.46666,
+    1793593953.1892395
+   ],
+   "arm": "python",
+   "before": {
+    "cwd": "dir"
+   },
+   "db": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "export-nolog": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "Ym9hcmQtYXVkaXQ6IHRoaXMgYmFuayBoYXMgbm8gYXVkaXQgbG9nIHlldCAoc2NoZW1hIG9sZGVyIHRoYW4gdjQyKTsgc3RhcnQgYSB2NDIgZGFlbW9uIG9uY2UgdG8gY3JlYXRlIGl0DQo=",
+   "window": [
+    1793593953.3021314,
+    1793593953.9894528
+   ],
+   "arm": "python",
+   "before": {
+    "cwd": "dir"
+   },
+   "db": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "export-stdout-closed": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "Ym9hcmQtYXVkaXQ6IHRoZSBvdXRwdXQgd2FzIGNsb3NlZCBiZWZvcmUgdGhlIGV4cG9ydCBmaW5pc2hlZA0K",
+   "window": [
+    1793593954.1479247,
+    1793593954.940031
+   ],
+   "arm": "python",
+   "before": {
+    "cwd": "dir"
+   },
+   "db": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "redact-nolog": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "Ym9hcmQtYXVkaXQ6IHRoaXMgYmFuayBoYXMgbm8gYXVkaXQgbG9nIHlldCAoc2NoZW1hIG9sZGVyIHRoYW4gdjQyKTsgc3RhcnQgYSB2NDIgZGFlbW9uIG9uY2UgdG8gY3JlYXRlIGl0DQo=",
+   "window": [
+    1793593955.367656,
+    1793593956.0824153
+   ],
+   "arm": "python",
+   "before": {
+    "cwd": "dir"
+   },
+   "db": {
+    "tables": {},
+    "sequences": {},
+    "columns": [],
+    "indexes": [],
+    "constraints": []
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "stats-invalid-window": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "Ym9hcmQtYXVkaXQ6IC0tc2luY2UgbXVzdCBiZSBiZWZvcmUgLS11bnRpbA0K",
+   "window": [
+    1793593956.1357362,
+    1793593956.7873647
+   ],
+   "arm": "python",
+   "before": {
+    "cwd": "dir"
+   },
+   "stats_defaults": [
+    false,
+    false
+   ],
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "transport-python-verify-23": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 23,
+   "stdout": "eyJjb250YWluZXIiOiJmaXh0dXJlIn0K",
+   "stderr": "cHNldWRvbGlmZS1tY3AgYm9hcmQtYXVkaXQ6IG5vIGJhbmsgaW4gdGhpcyBzaGVsbDsgcnVubmluZyBpdCBpbnNpZGUgdGhlIHBzZXVkb2xpZmUtbWNwLWRhZW1vbiBjb250YWluZXINCmZpeHR1cmUgc3RkZXJyCg==",
+   "window": [
+    1793593956.8823895,
+    1793593957.953701
+   ],
+   "files": {
+    "cwd": "dir",
+    "docker.jsonl": "file:WyJpbnNwZWN0IiwgIi1mIiwgInt7LlN0YXRlLlJ1bm5pbmd9fSIsICJwc2V1ZG9saWZlLW1jcC1kYWVtb24iXQ0KWyJpbnNwZWN0IiwgIi1mIiwgInt7aW5kZXggLkNvbmZpZy5MYWJlbHMgXCJvcmcucHNldWRvbGlmZS5lbmdpbmVcIn19IiwgInBzZXVkb2xpZmUtbWNwLWRhZW1vbiJdDQpbImV4ZWMiLCAiLWkiLCAiLWUiLCAiUFNFVURPTElGRV9EQUVNT05fRVhFQz0xIiwgInBzZXVkb2xpZmUtbWNwLWRhZW1vbiIsICJweXRob24iLCAiLW0iLCAicHNldWRvbGlmZV9tZW1vcnkuY2xpIiwgImJvYXJkLWF1ZGl0IiwgInZlcmlmeSIsICItLWV4cGVjdC1oZWFkIiwgIjEyOmFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWEiXQ0K",
+    "docker.stdin": "file:"
+   },
+   "arm": "python",
+   "before": {
+    "cwd": "dir",
+    "docker_fixture.cmd": "file:QGVjaG8gb2ZmDQoiQzpcZGV2XFBzZXVkb2xpZmUtTUNQXC52ZW52XFNjcmlwdHNccHl0aG9uLmV4ZSIgIkM6XFVzZXJzXGRldlxBcHBEYXRhXExvY2FsXFRlbXBccGwtY2xpLWRpZmYtNDU1NlxoXGRvY2tlcl9maXh0dXJlLnB5IiAlKg0KZXhpdCAvYiAlZXJyb3JsZXZlbCUNCg==",
+    "docker_fixture.py": "file:aW1wb3J0IGpzb24sIG9zLCBzeXMNCmZyb20gcGF0aGxpYiBpbXBvcnQgUGF0aA0Kcm9vdCA9IFBhdGgob3MuZW52aXJvblsnSE9NRSddKQ0KYXJndiA9IHN5cy5hcmd2WzE6XQ0Kd2l0aCAocm9vdC8nZG9ja2VyLmpzb25sJykub3BlbignYScsZW5jb2Rpbmc9J3V0Zi04JykgYXMgb3V0Og0KICAgIG91dC53cml0ZShqc29uLmR1bXBzKGFyZ3YpKydcbicpDQppZiBhcmd2WzBdID09ICdpbnNwZWN0JzoNCiAgICBwcmludCgndHJ1ZScgaWYgYXJndlsyXSA9PSAne3suU3RhdGUuUnVubmluZ319JyBlbHNlIG9zLmVudmlyb25bJ0ZJWFRVUkVfRU5HSU5FJ10pDQogICAgcmFpc2UgU3lzdGVtRXhpdCgwKQ0KKHJvb3QvJ2RvY2tlci5zdGRpbicpLndyaXRlX2J5dGVzKHN5cy5zdGRpbi5idWZmZXIucmVhZCgpKQ0Kc3lzLnN0ZG91dC5idWZmZXIud3JpdGUoYid7ImNvbnRhaW5lciI6ImZpeHR1cmUifVxuJykNCnN5cy5zdGRlcnIuYnVmZmVyLndyaXRlKGInZml4dHVyZSBzdGRlcnJcbicpDQpyYWlzZSBTeXN0ZW1FeGl0KGludChvcy5lbnZpcm9uWydGSVhUVVJFX0VYSVQnXSkpDQo=",
+    "durations.jsonl": "file:eyJzZWNvbmRzIjoyLjI1fQo="
+   },
+   "modes": {}
+  },
+  "transport-python-redact-23": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 23,
+   "stdout": "eyJjb250YWluZXIiOiJmaXh0dXJlIn0K",
+   "stderr": "cHNldWRvbGlmZS1tY3AgYm9hcmQtYXVkaXQ6IG5vIGJhbmsgaW4gdGhpcyBzaGVsbDsgcnVubmluZyBpdCBpbnNpZGUgdGhlIHBzZXVkb2xpZmUtbWNwLWRhZW1vbiBjb250YWluZXINCmZpeHR1cmUgc3RkZXJyCg==",
+   "window": [
+    1793593957.9695535,
+    1793593959.025781
+   ],
+   "files": {
+    "cwd": "dir",
+    "docker.jsonl": "file:WyJpbnNwZWN0IiwgIi1mIiwgInt7LlN0YXRlLlJ1bm5pbmd9fSIsICJwc2V1ZG9saWZlLW1jcC1kYWVtb24iXQ0KWyJpbnNwZWN0IiwgIi1mIiwgInt7aW5kZXggLkNvbmZpZy5MYWJlbHMgXCJvcmcucHNldWRvbGlmZS5lbmdpbmVcIn19IiwgInBzZXVkb2xpZmUtbWNwLWRhZW1vbiJdDQpbImV4ZWMiLCAiLWkiLCAiLWUiLCAiUFNFVURPTElGRV9EQUVNT05fRVhFQz0xIiwgInBzZXVkb2xpZmUtbWNwLWRhZW1vbiIsICJweXRob24iLCAiLW0iLCAicHNldWRvbGlmZV9tZW1vcnkuY2xpIiwgImJvYXJkLWF1ZGl0IiwgInJlZGFjdCIsICItLW1lc3NhZ2UtaWQiLCAiZml4dHVyZS1pZCIsICItLXJlYXNvbiIsICJ3cm9uZyBwYXN0ZSJdDQo=",
+    "docker.stdin": "file:"
+   },
+   "arm": "python",
+   "before": {
+    "cwd": "dir",
+    "docker_fixture.cmd": "file:QGVjaG8gb2ZmDQoiQzpcZGV2XFBzZXVkb2xpZmUtTUNQXC52ZW52XFNjcmlwdHNccHl0aG9uLmV4ZSIgIkM6XFVzZXJzXGRldlxBcHBEYXRhXExvY2FsXFRlbXBccGwtY2xpLWRpZmYtNDU1NlxoXGRvY2tlcl9maXh0dXJlLnB5IiAlKg0KZXhpdCAvYiAlZXJyb3JsZXZlbCUNCg==",
+    "docker_fixture.py": "file:aW1wb3J0IGpzb24sIG9zLCBzeXMNCmZyb20gcGF0aGxpYiBpbXBvcnQgUGF0aA0Kcm9vdCA9IFBhdGgob3MuZW52aXJvblsnSE9NRSddKQ0KYXJndiA9IHN5cy5hcmd2WzE6XQ0Kd2l0aCAocm9vdC8nZG9ja2VyLmpzb25sJykub3BlbignYScsZW5jb2Rpbmc9J3V0Zi04JykgYXMgb3V0Og0KICAgIG91dC53cml0ZShqc29uLmR1bXBzKGFyZ3YpKydcbicpDQppZiBhcmd2WzBdID09ICdpbnNwZWN0JzoNCiAgICBwcmludCgndHJ1ZScgaWYgYXJndlsyXSA9PSAne3suU3RhdGUuUnVubmluZ319JyBlbHNlIG9zLmVudmlyb25bJ0ZJWFRVUkVfRU5HSU5FJ10pDQogICAgcmFpc2UgU3lzdGVtRXhpdCgwKQ0KKHJvb3QvJ2RvY2tlci5zdGRpbicpLndyaXRlX2J5dGVzKHN5cy5zdGRpbi5idWZmZXIucmVhZCgpKQ0Kc3lzLnN0ZG91dC5idWZmZXIud3JpdGUoYid7ImNvbnRhaW5lciI6ImZpeHR1cmUifVxuJykNCnN5cy5zdGRlcnIuYnVmZmVyLndyaXRlKGInZml4dHVyZSBzdGRlcnJcbicpDQpyYWlzZSBTeXN0ZW1FeGl0KGludChvcy5lbnZpcm9uWydGSVhUVVJFX0VYSVQnXSkpDQo=",
+    "durations.jsonl": "file:eyJzZWNvbmRzIjoyLjI1fQo="
+   },
+   "modes": {}
+  },
+  "transport-python-export-0": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "",
+   "stderr": "cHNldWRvbGlmZS1tY3AgYm9hcmQtYXVkaXQ6IG5vIGJhbmsgaW4gdGhpcyBzaGVsbDsgcnVubmluZyBpdCBpbnNpZGUgdGhlIHBzZXVkb2xpZmUtbWNwLWRhZW1vbiBjb250YWluZXINCmZpeHR1cmUgc3RkZXJyCg==",
+   "window": [
+    1793593959.110979,
+    1793593960.163917
+   ],
+   "files": {
+    "cwd": "dir",
+    "docker.jsonl": "file:WyJpbnNwZWN0IiwgIi1mIiwgInt7LlN0YXRlLlJ1bm5pbmd9fSIsICJwc2V1ZG9saWZlLW1jcC1kYWVtb24iXQ0KWyJpbnNwZWN0IiwgIi1mIiwgInt7aW5kZXggLkNvbmZpZy5MYWJlbHMgXCJvcmcucHNldWRvbGlmZS5lbmdpbmVcIn19IiwgInBzZXVkb2xpZmUtbWNwLWRhZW1vbiJdDQpbImV4ZWMiLCAiLWkiLCAiLWUiLCAiUFNFVURPTElGRV9EQUVNT05fRVhFQz0xIiwgInBzZXVkb2xpZmUtbWNwLWRhZW1vbiIsICJweXRob24iLCAiLW0iLCAicHNldWRvbGlmZV9tZW1vcnkuY2xpIiwgImJvYXJkLWF1ZGl0IiwgImV4cG9ydCIsICItLXRhc2siLCAiZml4dHVyZSB0YXNrIl0NCg==",
+    "docker.stdin": "file:",
+    "out.jsonl": "file:eyJjb250YWluZXIiOiJmaXh0dXJlIn0K"
+   },
+   "arm": "python",
+   "before": {
+    "cwd": "dir",
+    "docker_fixture.cmd": "file:QGVjaG8gb2ZmDQoiQzpcZGV2XFBzZXVkb2xpZmUtTUNQXC52ZW52XFNjcmlwdHNccHl0aG9uLmV4ZSIgIkM6XFVzZXJzXGRldlxBcHBEYXRhXExvY2FsXFRlbXBccGwtY2xpLWRpZmYtNDU1NlxoXGRvY2tlcl9maXh0dXJlLnB5IiAlKg0KZXhpdCAvYiAlZXJyb3JsZXZlbCUNCg==",
+    "docker_fixture.py": "file:aW1wb3J0IGpzb24sIG9zLCBzeXMNCmZyb20gcGF0aGxpYiBpbXBvcnQgUGF0aA0Kcm9vdCA9IFBhdGgob3MuZW52aXJvblsnSE9NRSddKQ0KYXJndiA9IHN5cy5hcmd2WzE6XQ0Kd2l0aCAocm9vdC8nZG9ja2VyLmpzb25sJykub3BlbignYScsZW5jb2Rpbmc9J3V0Zi04JykgYXMgb3V0Og0KICAgIG91dC53cml0ZShqc29uLmR1bXBzKGFyZ3YpKydcbicpDQppZiBhcmd2WzBdID09ICdpbnNwZWN0JzoNCiAgICBwcmludCgndHJ1ZScgaWYgYXJndlsyXSA9PSAne3suU3RhdGUuUnVubmluZ319JyBlbHNlIG9zLmVudmlyb25bJ0ZJWFRVUkVfRU5HSU5FJ10pDQogICAgcmFpc2UgU3lzdGVtRXhpdCgwKQ0KKHJvb3QvJ2RvY2tlci5zdGRpbicpLndyaXRlX2J5dGVzKHN5cy5zdGRpbi5idWZmZXIucmVhZCgpKQ0Kc3lzLnN0ZG91dC5idWZmZXIud3JpdGUoYid7ImNvbnRhaW5lciI6ImZpeHR1cmUifVxuJykNCnN5cy5zdGRlcnIuYnVmZmVyLndyaXRlKGInZml4dHVyZSBzdGRlcnJcbicpDQpyYWlzZSBTeXN0ZW1FeGl0KGludChvcy5lbnZpcm9uWydGSVhUVVJFX0VYSVQnXSkpDQo=",
+    "durations.jsonl": "file:eyJzZWNvbmRzIjoyLjI1fQo="
+   },
+   "modes": {}
+  },
+  "transport-python-export-23": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 23,
+   "stdout": "",
+   "stderr": "cHNldWRvbGlmZS1tY3AgYm9hcmQtYXVkaXQ6IG5vIGJhbmsgaW4gdGhpcyBzaGVsbDsgcnVubmluZyBpdCBpbnNpZGUgdGhlIHBzZXVkb2xpZmUtbWNwLWRhZW1vbiBjb250YWluZXINCmZpeHR1cmUgc3RkZXJyCg==",
+   "window": [
+    1793593960.1857743,
+    1793593961.2581725
+   ],
+   "files": {
+    "cwd": "dir",
+    "docker.jsonl": "file:WyJpbnNwZWN0IiwgIi1mIiwgInt7LlN0YXRlLlJ1bm5pbmd9fSIsICJwc2V1ZG9saWZlLW1jcC1kYWVtb24iXQ0KWyJpbnNwZWN0IiwgIi1mIiwgInt7aW5kZXggLkNvbmZpZy5MYWJlbHMgXCJvcmcucHNldWRvbGlmZS5lbmdpbmVcIn19IiwgInBzZXVkb2xpZmUtbWNwLWRhZW1vbiJdDQpbImV4ZWMiLCAiLWkiLCAiLWUiLCAiUFNFVURPTElGRV9EQUVNT05fRVhFQz0xIiwgInBzZXVkb2xpZmUtbWNwLWRhZW1vbiIsICJweXRob24iLCAiLW0iLCAicHNldWRvbGlmZV9tZW1vcnkuY2xpIiwgImJvYXJkLWF1ZGl0IiwgImV4cG9ydCIsICItLXRhc2siLCAiZml4dHVyZSB0YXNrIl0NCg==",
+    "docker.stdin": "file:"
+   },
+   "arm": "python",
+   "before": {
+    "cwd": "dir",
+    "docker_fixture.cmd": "file:QGVjaG8gb2ZmDQoiQzpcZGV2XFBzZXVkb2xpZmUtTUNQXC52ZW52XFNjcmlwdHNccHl0aG9uLmV4ZSIgIkM6XFVzZXJzXGRldlxBcHBEYXRhXExvY2FsXFRlbXBccGwtY2xpLWRpZmYtNDU1NlxoXGRvY2tlcl9maXh0dXJlLnB5IiAlKg0KZXhpdCAvYiAlZXJyb3JsZXZlbCUNCg==",
+    "docker_fixture.py": "file:aW1wb3J0IGpzb24sIG9zLCBzeXMNCmZyb20gcGF0aGxpYiBpbXBvcnQgUGF0aA0Kcm9vdCA9IFBhdGgob3MuZW52aXJvblsnSE9NRSddKQ0KYXJndiA9IHN5cy5hcmd2WzE6XQ0Kd2l0aCAocm9vdC8nZG9ja2VyLmpzb25sJykub3BlbignYScsZW5jb2Rpbmc9J3V0Zi04JykgYXMgb3V0Og0KICAgIG91dC53cml0ZShqc29uLmR1bXBzKGFyZ3YpKydcbicpDQppZiBhcmd2WzBdID09ICdpbnNwZWN0JzoNCiAgICBwcmludCgndHJ1ZScgaWYgYXJndlsyXSA9PSAne3suU3RhdGUuUnVubmluZ319JyBlbHNlIG9zLmVudmlyb25bJ0ZJWFRVUkVfRU5HSU5FJ10pDQogICAgcmFpc2UgU3lzdGVtRXhpdCgwKQ0KKHJvb3QvJ2RvY2tlci5zdGRpbicpLndyaXRlX2J5dGVzKHN5cy5zdGRpbi5idWZmZXIucmVhZCgpKQ0Kc3lzLnN0ZG91dC5idWZmZXIud3JpdGUoYid7ImNvbnRhaW5lciI6ImZpeHR1cmUifVxuJykNCnN5cy5zdGRlcnIuYnVmZmVyLndyaXRlKGInZml4dHVyZSBzdGRlcnJcbicpDQpyYWlzZSBTeXN0ZW1FeGl0KGludChvcy5lbnZpcm9uWydGSVhUVVJFX0VYSVQnXSkpDQo=",
+    "durations.jsonl": "file:eyJzZWNvbmRzIjoyLjI1fQo="
+   },
+   "modes": {}
+  },
+  "transport-python-stats-0": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "",
+   "stderr": "cHNldWRvbGlmZS1tY3AgYm9hcmQtYXVkaXQ6IG5vIGJhbmsgaW4gdGhpcyBzaGVsbDsgcnVubmluZyBpdCBpbnNpZGUgdGhlIHBzZXVkb2xpZmUtbWNwLWRhZW1vbiBjb250YWluZXINCmZpeHR1cmUgc3RkZXJyCg==",
+   "window": [
+    1793593961.2699835,
+    1793593962.3641033
+   ],
+   "files": {
+    "cwd": "dir",
+    "docker.jsonl": "file:WyJpbnNwZWN0IiwgIi1mIiwgInt7LlN0YXRlLlJ1bm5pbmd9fSIsICJwc2V1ZG9saWZlLW1jcC1kYWVtb24iXQ0KWyJpbnNwZWN0IiwgIi1mIiwgInt7aW5kZXggLkNvbmZpZy5MYWJlbHMgXCJvcmcucHNldWRvbGlmZS5lbmdpbmVcIn19IiwgInBzZXVkb2xpZmUtbWNwLWRhZW1vbiJdDQpbImV4ZWMiLCAiLWkiLCAiLWUiLCAiUFNFVURPTElGRV9EQUVNT05fRVhFQz0xIiwgInBzZXVkb2xpZmUtbWNwLWRhZW1vbiIsICJweXRob24iLCAiLW0iLCAicHNldWRvbGlmZV9tZW1vcnkuY2xpIiwgImJvYXJkLWF1ZGl0IiwgInN0YXRzIiwgIi0tc2luY2UiLCAiMTAwMC4wIiwgIi0tdW50aWwiLCAiNTAwMC4wIiwgIi0tZHVyYXRpb25zIiwgIi9kZXYvc3RkaW4iXQ0K",
+    "docker.stdin": "file:eyJzZWNvbmRzIjoyLjI1fQo=",
+    "log.jsonl": "file:eyJjb250YWluZXIiOiJmaXh0dXJlIn0K",
+    "out.jsonl": "file:eyJjb250YWluZXIiOiJmaXh0dXJlIn0K"
+   },
+   "arm": "python",
+   "before": {
+    "cwd": "dir",
+    "docker_fixture.cmd": "file:QGVjaG8gb2ZmDQoiQzpcZGV2XFBzZXVkb2xpZmUtTUNQXC52ZW52XFNjcmlwdHNccHl0aG9uLmV4ZSIgIkM6XFVzZXJzXGRldlxBcHBEYXRhXExvY2FsXFRlbXBccGwtY2xpLWRpZmYtNDU1NlxoXGRvY2tlcl9maXh0dXJlLnB5IiAlKg0KZXhpdCAvYiAlZXJyb3JsZXZlbCUNCg==",
+    "docker_fixture.py": "file:aW1wb3J0IGpzb24sIG9zLCBzeXMNCmZyb20gcGF0aGxpYiBpbXBvcnQgUGF0aA0Kcm9vdCA9IFBhdGgob3MuZW52aXJvblsnSE9NRSddKQ0KYXJndiA9IHN5cy5hcmd2WzE6XQ0Kd2l0aCAocm9vdC8nZG9ja2VyLmpzb25sJykub3BlbignYScsZW5jb2Rpbmc9J3V0Zi04JykgYXMgb3V0Og0KICAgIG91dC53cml0ZShqc29uLmR1bXBzKGFyZ3YpKydcbicpDQppZiBhcmd2WzBdID09ICdpbnNwZWN0JzoNCiAgICBwcmludCgndHJ1ZScgaWYgYXJndlsyXSA9PSAne3suU3RhdGUuUnVubmluZ319JyBlbHNlIG9zLmVudmlyb25bJ0ZJWFRVUkVfRU5HSU5FJ10pDQogICAgcmFpc2UgU3lzdGVtRXhpdCgwKQ0KKHJvb3QvJ2RvY2tlci5zdGRpbicpLndyaXRlX2J5dGVzKHN5cy5zdGRpbi5idWZmZXIucmVhZCgpKQ0Kc3lzLnN0ZG91dC5idWZmZXIud3JpdGUoYid7ImNvbnRhaW5lciI6ImZpeHR1cmUifVxuJykNCnN5cy5zdGRlcnIuYnVmZmVyLndyaXRlKGInZml4dHVyZSBzdGRlcnJcbicpDQpyYWlzZSBTeXN0ZW1FeGl0KGludChvcy5lbnZpcm9uWydGSVhUVVJFX0VYSVQnXSkpDQo=",
+    "durations.jsonl": "file:eyJzZWNvbmRzIjoyLjI1fQo="
+   },
+   "modes": {}
+  },
+  "transport-python-stats-23": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 23,
+   "stdout": "",
+   "stderr": "cHNldWRvbGlmZS1tY3AgYm9hcmQtYXVkaXQ6IG5vIGJhbmsgaW4gdGhpcyBzaGVsbDsgcnVubmluZyBpdCBpbnNpZGUgdGhlIHBzZXVkb2xpZmUtbWNwLWRhZW1vbiBjb250YWluZXINCmZpeHR1cmUgc3RkZXJyCg==",
+   "window": [
+    1793593962.381938,
+    1793593963.449896
+   ],
+   "files": {
+    "cwd": "dir",
+    "docker.jsonl": "file:WyJpbnNwZWN0IiwgIi1mIiwgInt7LlN0YXRlLlJ1bm5pbmd9fSIsICJwc2V1ZG9saWZlLW1jcC1kYWVtb24iXQ0KWyJpbnNwZWN0IiwgIi1mIiwgInt7aW5kZXggLkNvbmZpZy5MYWJlbHMgXCJvcmcucHNldWRvbGlmZS5lbmdpbmVcIn19IiwgInBzZXVkb2xpZmUtbWNwLWRhZW1vbiJdDQpbImV4ZWMiLCAiLWkiLCAiLWUiLCAiUFNFVURPTElGRV9EQUVNT05fRVhFQz0xIiwgInBzZXVkb2xpZmUtbWNwLWRhZW1vbiIsICJweXRob24iLCAiLW0iLCAicHNldWRvbGlmZV9tZW1vcnkuY2xpIiwgImJvYXJkLWF1ZGl0IiwgInN0YXRzIiwgIi0tc2luY2UiLCAiMTAwMC4wIiwgIi0tdW50aWwiLCAiNTAwMC4wIiwgIi0tZHVyYXRpb25zIiwgIi9kZXYvc3RkaW4iXQ0K",
+    "docker.stdin": "file:eyJzZWNvbmRzIjoyLjI1fQo="
+   },
+   "arm": "python",
+   "before": {
+    "cwd": "dir",
+    "docker_fixture.cmd": "file:QGVjaG8gb2ZmDQoiQzpcZGV2XFBzZXVkb2xpZmUtTUNQXC52ZW52XFNjcmlwdHNccHl0aG9uLmV4ZSIgIkM6XFVzZXJzXGRldlxBcHBEYXRhXExvY2FsXFRlbXBccGwtY2xpLWRpZmYtNDU1NlxoXGRvY2tlcl9maXh0dXJlLnB5IiAlKg0KZXhpdCAvYiAlZXJyb3JsZXZlbCUNCg==",
+    "docker_fixture.py": "file:aW1wb3J0IGpzb24sIG9zLCBzeXMNCmZyb20gcGF0aGxpYiBpbXBvcnQgUGF0aA0Kcm9vdCA9IFBhdGgob3MuZW52aXJvblsnSE9NRSddKQ0KYXJndiA9IHN5cy5hcmd2WzE6XQ0Kd2l0aCAocm9vdC8nZG9ja2VyLmpzb25sJykub3BlbignYScsZW5jb2Rpbmc9J3V0Zi04JykgYXMgb3V0Og0KICAgIG91dC53cml0ZShqc29uLmR1bXBzKGFyZ3YpKydcbicpDQppZiBhcmd2WzBdID09ICdpbnNwZWN0JzoNCiAgICBwcmludCgndHJ1ZScgaWYgYXJndlsyXSA9PSAne3suU3RhdGUuUnVubmluZ319JyBlbHNlIG9zLmVudmlyb25bJ0ZJWFRVUkVfRU5HSU5FJ10pDQogICAgcmFpc2UgU3lzdGVtRXhpdCgwKQ0KKHJvb3QvJ2RvY2tlci5zdGRpbicpLndyaXRlX2J5dGVzKHN5cy5zdGRpbi5idWZmZXIucmVhZCgpKQ0Kc3lzLnN0ZG91dC5idWZmZXIud3JpdGUoYid7ImNvbnRhaW5lciI6ImZpeHR1cmUifVxuJykNCnN5cy5zdGRlcnIuYnVmZmVyLndyaXRlKGInZml4dHVyZSBzdGRlcnJcbicpDQpyYWlzZSBTeXN0ZW1FeGl0KGludChvcy5lbnZpcm9uWydGSVhUVVJFX0VYSVQnXSkpDQo=",
+    "durations.jsonl": "file:eyJzZWNvbmRzIjoyLjI1fQo="
+   },
+   "modes": {}
+  },
+  "transport-rust-verify-23": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 23,
+   "stdout": "eyJjb250YWluZXIiOiJmaXh0dXJlIn0K",
+   "stderr": "cHNldWRvbGlmZS1tY3AgYm9hcmQtYXVkaXQ6IG5vIGJhbmsgaW4gdGhpcyBzaGVsbDsgcnVubmluZyBpdCBpbnNpZGUgdGhlIHBzZXVkb2xpZmUtbWNwLWRhZW1vbiBjb250YWluZXINCmZpeHR1cmUgc3RkZXJyCg==",
+   "window": [
+    1793593963.5330184,
+    1793593964.6254797
+   ],
+   "files": {
+    "cwd": "dir",
+    "docker.jsonl": "file:WyJpbnNwZWN0IiwgIi1mIiwgInt7LlN0YXRlLlJ1bm5pbmd9fSIsICJwc2V1ZG9saWZlLW1jcC1kYWVtb24iXQ0KWyJpbnNwZWN0IiwgIi1mIiwgInt7aW5kZXggLkNvbmZpZy5MYWJlbHMgXCJvcmcucHNldWRvbGlmZS5lbmdpbmVcIn19IiwgInBzZXVkb2xpZmUtbWNwLWRhZW1vbiJdDQpbImV4ZWMiLCAiLWkiLCAiLWUiLCAiUFNFVURPTElGRV9EQUVNT05fRVhFQz0xIiwgInBzZXVkb2xpZmUtbWNwLWRhZW1vbiIsICJwc2V1ZG9saWZlLW1jcCIsICJib2FyZC1hdWRpdCIsICJ2ZXJpZnkiLCAiLS1leHBlY3QtaGVhZCIsICIxMjphYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhIl0NCg==",
+    "docker.stdin": "file:"
+   },
+   "arm": "python",
+   "before": {
+    "cwd": "dir",
+    "docker_fixture.cmd": "file:QGVjaG8gb2ZmDQoiQzpcZGV2XFBzZXVkb2xpZmUtTUNQXC52ZW52XFNjcmlwdHNccHl0aG9uLmV4ZSIgIkM6XFVzZXJzXGRldlxBcHBEYXRhXExvY2FsXFRlbXBccGwtY2xpLWRpZmYtNDU1NlxoXGRvY2tlcl9maXh0dXJlLnB5IiAlKg0KZXhpdCAvYiAlZXJyb3JsZXZlbCUNCg==",
+    "docker_fixture.py": "file:aW1wb3J0IGpzb24sIG9zLCBzeXMNCmZyb20gcGF0aGxpYiBpbXBvcnQgUGF0aA0Kcm9vdCA9IFBhdGgob3MuZW52aXJvblsnSE9NRSddKQ0KYXJndiA9IHN5cy5hcmd2WzE6XQ0Kd2l0aCAocm9vdC8nZG9ja2VyLmpzb25sJykub3BlbignYScsZW5jb2Rpbmc9J3V0Zi04JykgYXMgb3V0Og0KICAgIG91dC53cml0ZShqc29uLmR1bXBzKGFyZ3YpKydcbicpDQppZiBhcmd2WzBdID09ICdpbnNwZWN0JzoNCiAgICBwcmludCgndHJ1ZScgaWYgYXJndlsyXSA9PSAne3suU3RhdGUuUnVubmluZ319JyBlbHNlIG9zLmVudmlyb25bJ0ZJWFRVUkVfRU5HSU5FJ10pDQogICAgcmFpc2UgU3lzdGVtRXhpdCgwKQ0KKHJvb3QvJ2RvY2tlci5zdGRpbicpLndyaXRlX2J5dGVzKHN5cy5zdGRpbi5idWZmZXIucmVhZCgpKQ0Kc3lzLnN0ZG91dC5idWZmZXIud3JpdGUoYid7ImNvbnRhaW5lciI6ImZpeHR1cmUifVxuJykNCnN5cy5zdGRlcnIuYnVmZmVyLndyaXRlKGInZml4dHVyZSBzdGRlcnJcbicpDQpyYWlzZSBTeXN0ZW1FeGl0KGludChvcy5lbnZpcm9uWydGSVhUVVJFX0VYSVQnXSkpDQo=",
+    "durations.jsonl": "file:eyJzZWNvbmRzIjoyLjI1fQo="
+   },
+   "modes": {}
+  },
+  "transport-rust-redact-23": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 23,
+   "stdout": "eyJjb250YWluZXIiOiJmaXh0dXJlIn0K",
+   "stderr": "cHNldWRvbGlmZS1tY3AgYm9hcmQtYXVkaXQ6IG5vIGJhbmsgaW4gdGhpcyBzaGVsbDsgcnVubmluZyBpdCBpbnNpZGUgdGhlIHBzZXVkb2xpZmUtbWNwLWRhZW1vbiBjb250YWluZXINCmZpeHR1cmUgc3RkZXJyCg==",
+   "window": [
+    1793593964.6392896,
+    1793593965.6979795
+   ],
+   "files": {
+    "cwd": "dir",
+    "docker.jsonl": "file:WyJpbnNwZWN0IiwgIi1mIiwgInt7LlN0YXRlLlJ1bm5pbmd9fSIsICJwc2V1ZG9saWZlLW1jcC1kYWVtb24iXQ0KWyJpbnNwZWN0IiwgIi1mIiwgInt7aW5kZXggLkNvbmZpZy5MYWJlbHMgXCJvcmcucHNldWRvbGlmZS5lbmdpbmVcIn19IiwgInBzZXVkb2xpZmUtbWNwLWRhZW1vbiJdDQpbImV4ZWMiLCAiLWkiLCAiLWUiLCAiUFNFVURPTElGRV9EQUVNT05fRVhFQz0xIiwgInBzZXVkb2xpZmUtbWNwLWRhZW1vbiIsICJwc2V1ZG9saWZlLW1jcCIsICJib2FyZC1hdWRpdCIsICJyZWRhY3QiLCAiLS1tZXNzYWdlLWlkIiwgImZpeHR1cmUtaWQiLCAiLS1yZWFzb24iLCAid3JvbmcgcGFzdGUiXQ0K",
+    "docker.stdin": "file:"
+   },
+   "arm": "python",
+   "before": {
+    "cwd": "dir",
+    "docker_fixture.cmd": "file:QGVjaG8gb2ZmDQoiQzpcZGV2XFBzZXVkb2xpZmUtTUNQXC52ZW52XFNjcmlwdHNccHl0aG9uLmV4ZSIgIkM6XFVzZXJzXGRldlxBcHBEYXRhXExvY2FsXFRlbXBccGwtY2xpLWRpZmYtNDU1NlxoXGRvY2tlcl9maXh0dXJlLnB5IiAlKg0KZXhpdCAvYiAlZXJyb3JsZXZlbCUNCg==",
+    "docker_fixture.py": "file:aW1wb3J0IGpzb24sIG9zLCBzeXMNCmZyb20gcGF0aGxpYiBpbXBvcnQgUGF0aA0Kcm9vdCA9IFBhdGgob3MuZW52aXJvblsnSE9NRSddKQ0KYXJndiA9IHN5cy5hcmd2WzE6XQ0Kd2l0aCAocm9vdC8nZG9ja2VyLmpzb25sJykub3BlbignYScsZW5jb2Rpbmc9J3V0Zi04JykgYXMgb3V0Og0KICAgIG91dC53cml0ZShqc29uLmR1bXBzKGFyZ3YpKydcbicpDQppZiBhcmd2WzBdID09ICdpbnNwZWN0JzoNCiAgICBwcmludCgndHJ1ZScgaWYgYXJndlsyXSA9PSAne3suU3RhdGUuUnVubmluZ319JyBlbHNlIG9zLmVudmlyb25bJ0ZJWFRVUkVfRU5HSU5FJ10pDQogICAgcmFpc2UgU3lzdGVtRXhpdCgwKQ0KKHJvb3QvJ2RvY2tlci5zdGRpbicpLndyaXRlX2J5dGVzKHN5cy5zdGRpbi5idWZmZXIucmVhZCgpKQ0Kc3lzLnN0ZG91dC5idWZmZXIud3JpdGUoYid7ImNvbnRhaW5lciI6ImZpeHR1cmUifVxuJykNCnN5cy5zdGRlcnIuYnVmZmVyLndyaXRlKGInZml4dHVyZSBzdGRlcnJcbicpDQpyYWlzZSBTeXN0ZW1FeGl0KGludChvcy5lbnZpcm9uWydGSVhUVVJFX0VYSVQnXSkpDQo=",
+    "durations.jsonl": "file:eyJzZWNvbmRzIjoyLjI1fQo="
+   },
+   "modes": {}
+  },
+  "transport-rust-export-0": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "",
+   "stderr": "cHNldWRvbGlmZS1tY3AgYm9hcmQtYXVkaXQ6IG5vIGJhbmsgaW4gdGhpcyBzaGVsbDsgcnVubmluZyBpdCBpbnNpZGUgdGhlIHBzZXVkb2xpZmUtbWNwLWRhZW1vbiBjb250YWluZXINCmZpeHR1cmUgc3RkZXJyCg==",
+   "window": [
+    1793593965.7832248,
+    1793593966.8499277
+   ],
+   "files": {
+    "cwd": "dir",
+    "docker.jsonl": "file:WyJpbnNwZWN0IiwgIi1mIiwgInt7LlN0YXRlLlJ1bm5pbmd9fSIsICJwc2V1ZG9saWZlLW1jcC1kYWVtb24iXQ0KWyJpbnNwZWN0IiwgIi1mIiwgInt7aW5kZXggLkNvbmZpZy5MYWJlbHMgXCJvcmcucHNldWRvbGlmZS5lbmdpbmVcIn19IiwgInBzZXVkb2xpZmUtbWNwLWRhZW1vbiJdDQpbImV4ZWMiLCAiLWkiLCAiLWUiLCAiUFNFVURPTElGRV9EQUVNT05fRVhFQz0xIiwgInBzZXVkb2xpZmUtbWNwLWRhZW1vbiIsICJwc2V1ZG9saWZlLW1jcCIsICJib2FyZC1hdWRpdCIsICJleHBvcnQiLCAiLS10YXNrIiwgImZpeHR1cmUgdGFzayJdDQo=",
+    "docker.stdin": "file:",
+    "out.jsonl": "file:eyJjb250YWluZXIiOiJmaXh0dXJlIn0K"
+   },
+   "arm": "python",
+   "before": {
+    "cwd": "dir",
+    "docker_fixture.cmd": "file:QGVjaG8gb2ZmDQoiQzpcZGV2XFBzZXVkb2xpZmUtTUNQXC52ZW52XFNjcmlwdHNccHl0aG9uLmV4ZSIgIkM6XFVzZXJzXGRldlxBcHBEYXRhXExvY2FsXFRlbXBccGwtY2xpLWRpZmYtNDU1NlxoXGRvY2tlcl9maXh0dXJlLnB5IiAlKg0KZXhpdCAvYiAlZXJyb3JsZXZlbCUNCg==",
+    "docker_fixture.py": "file:aW1wb3J0IGpzb24sIG9zLCBzeXMNCmZyb20gcGF0aGxpYiBpbXBvcnQgUGF0aA0Kcm9vdCA9IFBhdGgob3MuZW52aXJvblsnSE9NRSddKQ0KYXJndiA9IHN5cy5hcmd2WzE6XQ0Kd2l0aCAocm9vdC8nZG9ja2VyLmpzb25sJykub3BlbignYScsZW5jb2Rpbmc9J3V0Zi04JykgYXMgb3V0Og0KICAgIG91dC53cml0ZShqc29uLmR1bXBzKGFyZ3YpKydcbicpDQppZiBhcmd2WzBdID09ICdpbnNwZWN0JzoNCiAgICBwcmludCgndHJ1ZScgaWYgYXJndlsyXSA9PSAne3suU3RhdGUuUnVubmluZ319JyBlbHNlIG9zLmVudmlyb25bJ0ZJWFRVUkVfRU5HSU5FJ10pDQogICAgcmFpc2UgU3lzdGVtRXhpdCgwKQ0KKHJvb3QvJ2RvY2tlci5zdGRpbicpLndyaXRlX2J5dGVzKHN5cy5zdGRpbi5idWZmZXIucmVhZCgpKQ0Kc3lzLnN0ZG91dC5idWZmZXIud3JpdGUoYid7ImNvbnRhaW5lciI6ImZpeHR1cmUifVxuJykNCnN5cy5zdGRlcnIuYnVmZmVyLndyaXRlKGInZml4dHVyZSBzdGRlcnJcbicpDQpyYWlzZSBTeXN0ZW1FeGl0KGludChvcy5lbnZpcm9uWydGSVhUVVJFX0VYSVQnXSkpDQo=",
+    "durations.jsonl": "file:eyJzZWNvbmRzIjoyLjI1fQo="
+   },
+   "modes": {}
+  },
+  "transport-rust-export-23": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 23,
+   "stdout": "",
+   "stderr": "cHNldWRvbGlmZS1tY3AgYm9hcmQtYXVkaXQ6IG5vIGJhbmsgaW4gdGhpcyBzaGVsbDsgcnVubmluZyBpdCBpbnNpZGUgdGhlIHBzZXVkb2xpZmUtbWNwLWRhZW1vbiBjb250YWluZXINCmZpeHR1cmUgc3RkZXJyCg==",
+   "window": [
+    1793593966.8657844,
+    1793593967.9203596
+   ],
+   "files": {
+    "cwd": "dir",
+    "docker.jsonl": "file:WyJpbnNwZWN0IiwgIi1mIiwgInt7LlN0YXRlLlJ1bm5pbmd9fSIsICJwc2V1ZG9saWZlLW1jcC1kYWVtb24iXQ0KWyJpbnNwZWN0IiwgIi1mIiwgInt7aW5kZXggLkNvbmZpZy5MYWJlbHMgXCJvcmcucHNldWRvbGlmZS5lbmdpbmVcIn19IiwgInBzZXVkb2xpZmUtbWNwLWRhZW1vbiJdDQpbImV4ZWMiLCAiLWkiLCAiLWUiLCAiUFNFVURPTElGRV9EQUVNT05fRVhFQz0xIiwgInBzZXVkb2xpZmUtbWNwLWRhZW1vbiIsICJwc2V1ZG9saWZlLW1jcCIsICJib2FyZC1hdWRpdCIsICJleHBvcnQiLCAiLS10YXNrIiwgImZpeHR1cmUgdGFzayJdDQo=",
+    "docker.stdin": "file:"
+   },
+   "arm": "python",
+   "before": {
+    "cwd": "dir",
+    "docker_fixture.cmd": "file:QGVjaG8gb2ZmDQoiQzpcZGV2XFBzZXVkb2xpZmUtTUNQXC52ZW52XFNjcmlwdHNccHl0aG9uLmV4ZSIgIkM6XFVzZXJzXGRldlxBcHBEYXRhXExvY2FsXFRlbXBccGwtY2xpLWRpZmYtNDU1NlxoXGRvY2tlcl9maXh0dXJlLnB5IiAlKg0KZXhpdCAvYiAlZXJyb3JsZXZlbCUNCg==",
+    "docker_fixture.py": "file:aW1wb3J0IGpzb24sIG9zLCBzeXMNCmZyb20gcGF0aGxpYiBpbXBvcnQgUGF0aA0Kcm9vdCA9IFBhdGgob3MuZW52aXJvblsnSE9NRSddKQ0KYXJndiA9IHN5cy5hcmd2WzE6XQ0Kd2l0aCAocm9vdC8nZG9ja2VyLmpzb25sJykub3BlbignYScsZW5jb2Rpbmc9J3V0Zi04JykgYXMgb3V0Og0KICAgIG91dC53cml0ZShqc29uLmR1bXBzKGFyZ3YpKydcbicpDQppZiBhcmd2WzBdID09ICdpbnNwZWN0JzoNCiAgICBwcmludCgndHJ1ZScgaWYgYXJndlsyXSA9PSAne3suU3RhdGUuUnVubmluZ319JyBlbHNlIG9zLmVudmlyb25bJ0ZJWFRVUkVfRU5HSU5FJ10pDQogICAgcmFpc2UgU3lzdGVtRXhpdCgwKQ0KKHJvb3QvJ2RvY2tlci5zdGRpbicpLndyaXRlX2J5dGVzKHN5cy5zdGRpbi5idWZmZXIucmVhZCgpKQ0Kc3lzLnN0ZG91dC5idWZmZXIud3JpdGUoYid7ImNvbnRhaW5lciI6ImZpeHR1cmUifVxuJykNCnN5cy5zdGRlcnIuYnVmZmVyLndyaXRlKGInZml4dHVyZSBzdGRlcnJcbicpDQpyYWlzZSBTeXN0ZW1FeGl0KGludChvcy5lbnZpcm9uWydGSVhUVVJFX0VYSVQnXSkpDQo=",
+    "durations.jsonl": "file:eyJzZWNvbmRzIjoyLjI1fQo="
+   },
+   "modes": {}
+  },
+  "transport-rust-stats-0": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "",
+   "stderr": "cHNldWRvbGlmZS1tY3AgYm9hcmQtYXVkaXQ6IG5vIGJhbmsgaW4gdGhpcyBzaGVsbDsgcnVubmluZyBpdCBpbnNpZGUgdGhlIHBzZXVkb2xpZmUtbWNwLWRhZW1vbiBjb250YWluZXINCmZpeHR1cmUgc3RkZXJyCg==",
+   "window": [
+    1793593967.9321692,
+    1793593969.0308444
+   ],
+   "files": {
+    "cwd": "dir",
+    "docker.jsonl": "file:WyJpbnNwZWN0IiwgIi1mIiwgInt7LlN0YXRlLlJ1bm5pbmd9fSIsICJwc2V1ZG9saWZlLW1jcC1kYWVtb24iXQ0KWyJpbnNwZWN0IiwgIi1mIiwgInt7aW5kZXggLkNvbmZpZy5MYWJlbHMgXCJvcmcucHNldWRvbGlmZS5lbmdpbmVcIn19IiwgInBzZXVkb2xpZmUtbWNwLWRhZW1vbiJdDQpbImV4ZWMiLCAiLWkiLCAiLWUiLCAiUFNFVURPTElGRV9EQUVNT05fRVhFQz0xIiwgInBzZXVkb2xpZmUtbWNwLWRhZW1vbiIsICJwc2V1ZG9saWZlLW1jcCIsICJib2FyZC1hdWRpdCIsICJzdGF0cyIsICItLXNpbmNlIiwgIjEwMDAuMCIsICItLXVudGlsIiwgIjUwMDAuMCIsICItLWR1cmF0aW9ucyIsICIvZGV2L3N0ZGluIl0NCg==",
+    "docker.stdin": "file:eyJzZWNvbmRzIjoyLjI1fQo=",
+    "log.jsonl": "file:eyJjb250YWluZXIiOiJmaXh0dXJlIn0K",
+    "out.jsonl": "file:eyJjb250YWluZXIiOiJmaXh0dXJlIn0K"
+   },
+   "arm": "python",
+   "before": {
+    "cwd": "dir",
+    "docker_fixture.cmd": "file:QGVjaG8gb2ZmDQoiQzpcZGV2XFBzZXVkb2xpZmUtTUNQXC52ZW52XFNjcmlwdHNccHl0aG9uLmV4ZSIgIkM6XFVzZXJzXGRldlxBcHBEYXRhXExvY2FsXFRlbXBccGwtY2xpLWRpZmYtNDU1NlxoXGRvY2tlcl9maXh0dXJlLnB5IiAlKg0KZXhpdCAvYiAlZXJyb3JsZXZlbCUNCg==",
+    "docker_fixture.py": "file:aW1wb3J0IGpzb24sIG9zLCBzeXMNCmZyb20gcGF0aGxpYiBpbXBvcnQgUGF0aA0Kcm9vdCA9IFBhdGgob3MuZW52aXJvblsnSE9NRSddKQ0KYXJndiA9IHN5cy5hcmd2WzE6XQ0Kd2l0aCAocm9vdC8nZG9ja2VyLmpzb25sJykub3BlbignYScsZW5jb2Rpbmc9J3V0Zi04JykgYXMgb3V0Og0KICAgIG91dC53cml0ZShqc29uLmR1bXBzKGFyZ3YpKydcbicpDQppZiBhcmd2WzBdID09ICdpbnNwZWN0JzoNCiAgICBwcmludCgndHJ1ZScgaWYgYXJndlsyXSA9PSAne3suU3RhdGUuUnVubmluZ319JyBlbHNlIG9zLmVudmlyb25bJ0ZJWFRVUkVfRU5HSU5FJ10pDQogICAgcmFpc2UgU3lzdGVtRXhpdCgwKQ0KKHJvb3QvJ2RvY2tlci5zdGRpbicpLndyaXRlX2J5dGVzKHN5cy5zdGRpbi5idWZmZXIucmVhZCgpKQ0Kc3lzLnN0ZG91dC5idWZmZXIud3JpdGUoYid7ImNvbnRhaW5lciI6ImZpeHR1cmUifVxuJykNCnN5cy5zdGRlcnIuYnVmZmVyLndyaXRlKGInZml4dHVyZSBzdGRlcnJcbicpDQpyYWlzZSBTeXN0ZW1FeGl0KGludChvcy5lbnZpcm9uWydGSVhUVVJFX0VYSVQnXSkpDQo=",
+    "durations.jsonl": "file:eyJzZWNvbmRzIjoyLjI1fQo="
+   },
+   "modes": {}
+  },
+  "transport-rust-stats-23": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 23,
+   "stdout": "",
+   "stderr": "cHNldWRvbGlmZS1tY3AgYm9hcmQtYXVkaXQ6IG5vIGJhbmsgaW4gdGhpcyBzaGVsbDsgcnVubmluZyBpdCBpbnNpZGUgdGhlIHBzZXVkb2xpZmUtbWNwLWRhZW1vbiBjb250YWluZXINCmZpeHR1cmUgc3RkZXJyCg==",
+   "window": [
+    1793593969.0486734,
+    1793593970.1135824
+   ],
+   "files": {
+    "cwd": "dir",
+    "docker.jsonl": "file:WyJpbnNwZWN0IiwgIi1mIiwgInt7LlN0YXRlLlJ1bm5pbmd9fSIsICJwc2V1ZG9saWZlLW1jcC1kYWVtb24iXQ0KWyJpbnNwZWN0IiwgIi1mIiwgInt7aW5kZXggLkNvbmZpZy5MYWJlbHMgXCJvcmcucHNldWRvbGlmZS5lbmdpbmVcIn19IiwgInBzZXVkb2xpZmUtbWNwLWRhZW1vbiJdDQpbImV4ZWMiLCAiLWkiLCAiLWUiLCAiUFNFVURPTElGRV9EQUVNT05fRVhFQz0xIiwgInBzZXVkb2xpZmUtbWNwLWRhZW1vbiIsICJwc2V1ZG9saWZlLW1jcCIsICJib2FyZC1hdWRpdCIsICJzdGF0cyIsICItLXNpbmNlIiwgIjEwMDAuMCIsICItLXVudGlsIiwgIjUwMDAuMCIsICItLWR1cmF0aW9ucyIsICIvZGV2L3N0ZGluIl0NCg==",
+    "docker.stdin": "file:eyJzZWNvbmRzIjoyLjI1fQo="
+   },
+   "arm": "python",
+   "before": {
+    "cwd": "dir",
+    "docker_fixture.cmd": "file:QGVjaG8gb2ZmDQoiQzpcZGV2XFBzZXVkb2xpZmUtTUNQXC52ZW52XFNjcmlwdHNccHl0aG9uLmV4ZSIgIkM6XFVzZXJzXGRldlxBcHBEYXRhXExvY2FsXFRlbXBccGwtY2xpLWRpZmYtNDU1NlxoXGRvY2tlcl9maXh0dXJlLnB5IiAlKg0KZXhpdCAvYiAlZXJyb3JsZXZlbCUNCg==",
+    "docker_fixture.py": "file:aW1wb3J0IGpzb24sIG9zLCBzeXMNCmZyb20gcGF0aGxpYiBpbXBvcnQgUGF0aA0Kcm9vdCA9IFBhdGgob3MuZW52aXJvblsnSE9NRSddKQ0KYXJndiA9IHN5cy5hcmd2WzE6XQ0Kd2l0aCAocm9vdC8nZG9ja2VyLmpzb25sJykub3BlbignYScsZW5jb2Rpbmc9J3V0Zi04JykgYXMgb3V0Og0KICAgIG91dC53cml0ZShqc29uLmR1bXBzKGFyZ3YpKydcbicpDQppZiBhcmd2WzBdID09ICdpbnNwZWN0JzoNCiAgICBwcmludCgndHJ1ZScgaWYgYXJndlsyXSA9PSAne3suU3RhdGUuUnVubmluZ319JyBlbHNlIG9zLmVudmlyb25bJ0ZJWFRVUkVfRU5HSU5FJ10pDQogICAgcmFpc2UgU3lzdGVtRXhpdCgwKQ0KKHJvb3QvJ2RvY2tlci5zdGRpbicpLndyaXRlX2J5dGVzKHN5cy5zdGRpbi5idWZmZXIucmVhZCgpKQ0Kc3lzLnN0ZG91dC5idWZmZXIud3JpdGUoYid7ImNvbnRhaW5lciI6ImZpeHR1cmUifVxuJykNCnN5cy5zdGRlcnIuYnVmZmVyLndyaXRlKGInZml4dHVyZSBzdGRlcnJcbicpDQpyYWlzZSBTeXN0ZW1FeGl0KGludChvcy5lbnZpcm9uWydGSVhUVVJFX0VYSVQnXSkpDQo=",
+    "durations.jsonl": "file:eyJzZWNvbmRzIjoyLjI1fQo="
+   },
+   "modes": {}
+  },
+  "transport-unlabelled-verify-23": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 23,
+   "stdout": "eyJjb250YWluZXIiOiJmaXh0dXJlIn0K",
+   "stderr": "cHNldWRvbGlmZS1tY3AgYm9hcmQtYXVkaXQ6IG5vIGJhbmsgaW4gdGhpcyBzaGVsbDsgcnVubmluZyBpdCBpbnNpZGUgdGhlIHBzZXVkb2xpZmUtbWNwLWRhZW1vbiBjb250YWluZXINCmZpeHR1cmUgc3RkZXJyCg==",
+   "window": [
+    1793593970.1944828,
+    1793593971.2649696
+   ],
+   "files": {
+    "cwd": "dir",
+    "docker.jsonl": "file:WyJpbnNwZWN0IiwgIi1mIiwgInt7LlN0YXRlLlJ1bm5pbmd9fSIsICJwc2V1ZG9saWZlLW1jcC1kYWVtb24iXQ0KWyJpbnNwZWN0IiwgIi1mIiwgInt7aW5kZXggLkNvbmZpZy5MYWJlbHMgXCJvcmcucHNldWRvbGlmZS5lbmdpbmVcIn19IiwgInBzZXVkb2xpZmUtbWNwLWRhZW1vbiJdDQpbImV4ZWMiLCAiLWkiLCAiLWUiLCAiUFNFVURPTElGRV9EQUVNT05fRVhFQz0xIiwgInBzZXVkb2xpZmUtbWNwLWRhZW1vbiIsICJweXRob24iLCAiLW0iLCAicHNldWRvbGlmZV9tZW1vcnkuY2xpIiwgImJvYXJkLWF1ZGl0IiwgInZlcmlmeSIsICItLWV4cGVjdC1oZWFkIiwgIjEyOmFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWEiXQ0K",
+    "docker.stdin": "file:"
+   },
+   "arm": "python",
+   "before": {
+    "cwd": "dir",
+    "docker_fixture.cmd": "file:QGVjaG8gb2ZmDQoiQzpcZGV2XFBzZXVkb2xpZmUtTUNQXC52ZW52XFNjcmlwdHNccHl0aG9uLmV4ZSIgIkM6XFVzZXJzXGRldlxBcHBEYXRhXExvY2FsXFRlbXBccGwtY2xpLWRpZmYtNDU1NlxoXGRvY2tlcl9maXh0dXJlLnB5IiAlKg0KZXhpdCAvYiAlZXJyb3JsZXZlbCUNCg==",
+    "docker_fixture.py": "file:aW1wb3J0IGpzb24sIG9zLCBzeXMNCmZyb20gcGF0aGxpYiBpbXBvcnQgUGF0aA0Kcm9vdCA9IFBhdGgob3MuZW52aXJvblsnSE9NRSddKQ0KYXJndiA9IHN5cy5hcmd2WzE6XQ0Kd2l0aCAocm9vdC8nZG9ja2VyLmpzb25sJykub3BlbignYScsZW5jb2Rpbmc9J3V0Zi04JykgYXMgb3V0Og0KICAgIG91dC53cml0ZShqc29uLmR1bXBzKGFyZ3YpKydcbicpDQppZiBhcmd2WzBdID09ICdpbnNwZWN0JzoNCiAgICBwcmludCgndHJ1ZScgaWYgYXJndlsyXSA9PSAne3suU3RhdGUuUnVubmluZ319JyBlbHNlIG9zLmVudmlyb25bJ0ZJWFRVUkVfRU5HSU5FJ10pDQogICAgcmFpc2UgU3lzdGVtRXhpdCgwKQ0KKHJvb3QvJ2RvY2tlci5zdGRpbicpLndyaXRlX2J5dGVzKHN5cy5zdGRpbi5idWZmZXIucmVhZCgpKQ0Kc3lzLnN0ZG91dC5idWZmZXIud3JpdGUoYid7ImNvbnRhaW5lciI6ImZpeHR1cmUifVxuJykNCnN5cy5zdGRlcnIuYnVmZmVyLndyaXRlKGInZml4dHVyZSBzdGRlcnJcbicpDQpyYWlzZSBTeXN0ZW1FeGl0KGludChvcy5lbnZpcm9uWydGSVhUVVJFX0VYSVQnXSkpDQo=",
+    "durations.jsonl": "file:eyJzZWNvbmRzIjoyLjI1fQo="
+   },
+   "modes": {}
+  },
+  "transport-unlabelled-redact-23": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 23,
+   "stdout": "eyJjb250YWluZXIiOiJmaXh0dXJlIn0K",
+   "stderr": "cHNldWRvbGlmZS1tY3AgYm9hcmQtYXVkaXQ6IG5vIGJhbmsgaW4gdGhpcyBzaGVsbDsgcnVubmluZyBpdCBpbnNpZGUgdGhlIHBzZXVkb2xpZmUtbWNwLWRhZW1vbiBjb250YWluZXINCmZpeHR1cmUgc3RkZXJyCg==",
+   "window": [
+    1793593971.2747674,
+    1793593972.3360698
+   ],
+   "files": {
+    "cwd": "dir",
+    "docker.jsonl": "file:WyJpbnNwZWN0IiwgIi1mIiwgInt7LlN0YXRlLlJ1bm5pbmd9fSIsICJwc2V1ZG9saWZlLW1jcC1kYWVtb24iXQ0KWyJpbnNwZWN0IiwgIi1mIiwgInt7aW5kZXggLkNvbmZpZy5MYWJlbHMgXCJvcmcucHNldWRvbGlmZS5lbmdpbmVcIn19IiwgInBzZXVkb2xpZmUtbWNwLWRhZW1vbiJdDQpbImV4ZWMiLCAiLWkiLCAiLWUiLCAiUFNFVURPTElGRV9EQUVNT05fRVhFQz0xIiwgInBzZXVkb2xpZmUtbWNwLWRhZW1vbiIsICJweXRob24iLCAiLW0iLCAicHNldWRvbGlmZV9tZW1vcnkuY2xpIiwgImJvYXJkLWF1ZGl0IiwgInJlZGFjdCIsICItLW1lc3NhZ2UtaWQiLCAiZml4dHVyZS1pZCIsICItLXJlYXNvbiIsICJ3cm9uZyBwYXN0ZSJdDQo=",
+    "docker.stdin": "file:"
+   },
+   "arm": "python",
+   "before": {
+    "cwd": "dir",
+    "docker_fixture.cmd": "file:QGVjaG8gb2ZmDQoiQzpcZGV2XFBzZXVkb2xpZmUtTUNQXC52ZW52XFNjcmlwdHNccHl0aG9uLmV4ZSIgIkM6XFVzZXJzXGRldlxBcHBEYXRhXExvY2FsXFRlbXBccGwtY2xpLWRpZmYtNDU1NlxoXGRvY2tlcl9maXh0dXJlLnB5IiAlKg0KZXhpdCAvYiAlZXJyb3JsZXZlbCUNCg==",
+    "docker_fixture.py": "file:aW1wb3J0IGpzb24sIG9zLCBzeXMNCmZyb20gcGF0aGxpYiBpbXBvcnQgUGF0aA0Kcm9vdCA9IFBhdGgob3MuZW52aXJvblsnSE9NRSddKQ0KYXJndiA9IHN5cy5hcmd2WzE6XQ0Kd2l0aCAocm9vdC8nZG9ja2VyLmpzb25sJykub3BlbignYScsZW5jb2Rpbmc9J3V0Zi04JykgYXMgb3V0Og0KICAgIG91dC53cml0ZShqc29uLmR1bXBzKGFyZ3YpKydcbicpDQppZiBhcmd2WzBdID09ICdpbnNwZWN0JzoNCiAgICBwcmludCgndHJ1ZScgaWYgYXJndlsyXSA9PSAne3suU3RhdGUuUnVubmluZ319JyBlbHNlIG9zLmVudmlyb25bJ0ZJWFRVUkVfRU5HSU5FJ10pDQogICAgcmFpc2UgU3lzdGVtRXhpdCgwKQ0KKHJvb3QvJ2RvY2tlci5zdGRpbicpLndyaXRlX2J5dGVzKHN5cy5zdGRpbi5idWZmZXIucmVhZCgpKQ0Kc3lzLnN0ZG91dC5idWZmZXIud3JpdGUoYid7ImNvbnRhaW5lciI6ImZpeHR1cmUifVxuJykNCnN5cy5zdGRlcnIuYnVmZmVyLndyaXRlKGInZml4dHVyZSBzdGRlcnJcbicpDQpyYWlzZSBTeXN0ZW1FeGl0KGludChvcy5lbnZpcm9uWydGSVhUVVJFX0VYSVQnXSkpDQo=",
+    "durations.jsonl": "file:eyJzZWNvbmRzIjoyLjI1fQo="
+   },
+   "modes": {}
+  },
+  "transport-unlabelled-export-0": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "",
+   "stderr": "cHNldWRvbGlmZS1tY3AgYm9hcmQtYXVkaXQ6IG5vIGJhbmsgaW4gdGhpcyBzaGVsbDsgcnVubmluZyBpdCBpbnNpZGUgdGhlIHBzZXVkb2xpZmUtbWNwLWRhZW1vbiBjb250YWluZXINCmZpeHR1cmUgc3RkZXJyCg==",
+   "window": [
+    1793593972.4172208,
+    1793593973.4788482
+   ],
+   "files": {
+    "cwd": "dir",
+    "docker.jsonl": "file:WyJpbnNwZWN0IiwgIi1mIiwgInt7LlN0YXRlLlJ1bm5pbmd9fSIsICJwc2V1ZG9saWZlLW1jcC1kYWVtb24iXQ0KWyJpbnNwZWN0IiwgIi1mIiwgInt7aW5kZXggLkNvbmZpZy5MYWJlbHMgXCJvcmcucHNldWRvbGlmZS5lbmdpbmVcIn19IiwgInBzZXVkb2xpZmUtbWNwLWRhZW1vbiJdDQpbImV4ZWMiLCAiLWkiLCAiLWUiLCAiUFNFVURPTElGRV9EQUVNT05fRVhFQz0xIiwgInBzZXVkb2xpZmUtbWNwLWRhZW1vbiIsICJweXRob24iLCAiLW0iLCAicHNldWRvbGlmZV9tZW1vcnkuY2xpIiwgImJvYXJkLWF1ZGl0IiwgImV4cG9ydCIsICItLXRhc2siLCAiZml4dHVyZSB0YXNrIl0NCg==",
+    "docker.stdin": "file:",
+    "out.jsonl": "file:eyJjb250YWluZXIiOiJmaXh0dXJlIn0K"
+   },
+   "arm": "python",
+   "before": {
+    "cwd": "dir",
+    "docker_fixture.cmd": "file:QGVjaG8gb2ZmDQoiQzpcZGV2XFBzZXVkb2xpZmUtTUNQXC52ZW52XFNjcmlwdHNccHl0aG9uLmV4ZSIgIkM6XFVzZXJzXGRldlxBcHBEYXRhXExvY2FsXFRlbXBccGwtY2xpLWRpZmYtNDU1NlxoXGRvY2tlcl9maXh0dXJlLnB5IiAlKg0KZXhpdCAvYiAlZXJyb3JsZXZlbCUNCg==",
+    "docker_fixture.py": "file:aW1wb3J0IGpzb24sIG9zLCBzeXMNCmZyb20gcGF0aGxpYiBpbXBvcnQgUGF0aA0Kcm9vdCA9IFBhdGgob3MuZW52aXJvblsnSE9NRSddKQ0KYXJndiA9IHN5cy5hcmd2WzE6XQ0Kd2l0aCAocm9vdC8nZG9ja2VyLmpzb25sJykub3BlbignYScsZW5jb2Rpbmc9J3V0Zi04JykgYXMgb3V0Og0KICAgIG91dC53cml0ZShqc29uLmR1bXBzKGFyZ3YpKydcbicpDQppZiBhcmd2WzBdID09ICdpbnNwZWN0JzoNCiAgICBwcmludCgndHJ1ZScgaWYgYXJndlsyXSA9PSAne3suU3RhdGUuUnVubmluZ319JyBlbHNlIG9zLmVudmlyb25bJ0ZJWFRVUkVfRU5HSU5FJ10pDQogICAgcmFpc2UgU3lzdGVtRXhpdCgwKQ0KKHJvb3QvJ2RvY2tlci5zdGRpbicpLndyaXRlX2J5dGVzKHN5cy5zdGRpbi5idWZmZXIucmVhZCgpKQ0Kc3lzLnN0ZG91dC5idWZmZXIud3JpdGUoYid7ImNvbnRhaW5lciI6ImZpeHR1cmUifVxuJykNCnN5cy5zdGRlcnIuYnVmZmVyLndyaXRlKGInZml4dHVyZSBzdGRlcnJcbicpDQpyYWlzZSBTeXN0ZW1FeGl0KGludChvcy5lbnZpcm9uWydGSVhUVVJFX0VYSVQnXSkpDQo=",
+    "durations.jsonl": "file:eyJzZWNvbmRzIjoyLjI1fQo="
+   },
+   "modes": {}
+  },
+  "transport-unlabelled-export-23": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 23,
+   "stdout": "",
+   "stderr": "cHNldWRvbGlmZS1tY3AgYm9hcmQtYXVkaXQ6IG5vIGJhbmsgaW4gdGhpcyBzaGVsbDsgcnVubmluZyBpdCBpbnNpZGUgdGhlIHBzZXVkb2xpZmUtbWNwLWRhZW1vbiBjb250YWluZXINCmZpeHR1cmUgc3RkZXJyCg==",
+   "window": [
+    1793593973.4886367,
+    1793593974.5463388
+   ],
+   "files": {
+    "cwd": "dir",
+    "docker.jsonl": "file:WyJpbnNwZWN0IiwgIi1mIiwgInt7LlN0YXRlLlJ1bm5pbmd9fSIsICJwc2V1ZG9saWZlLW1jcC1kYWVtb24iXQ0KWyJpbnNwZWN0IiwgIi1mIiwgInt7aW5kZXggLkNvbmZpZy5MYWJlbHMgXCJvcmcucHNldWRvbGlmZS5lbmdpbmVcIn19IiwgInBzZXVkb2xpZmUtbWNwLWRhZW1vbiJdDQpbImV4ZWMiLCAiLWkiLCAiLWUiLCAiUFNFVURPTElGRV9EQUVNT05fRVhFQz0xIiwgInBzZXVkb2xpZmUtbWNwLWRhZW1vbiIsICJweXRob24iLCAiLW0iLCAicHNldWRvbGlmZV9tZW1vcnkuY2xpIiwgImJvYXJkLWF1ZGl0IiwgImV4cG9ydCIsICItLXRhc2siLCAiZml4dHVyZSB0YXNrIl0NCg==",
+    "docker.stdin": "file:"
+   },
+   "arm": "python",
+   "before": {
+    "cwd": "dir",
+    "docker_fixture.cmd": "file:QGVjaG8gb2ZmDQoiQzpcZGV2XFBzZXVkb2xpZmUtTUNQXC52ZW52XFNjcmlwdHNccHl0aG9uLmV4ZSIgIkM6XFVzZXJzXGRldlxBcHBEYXRhXExvY2FsXFRlbXBccGwtY2xpLWRpZmYtNDU1NlxoXGRvY2tlcl9maXh0dXJlLnB5IiAlKg0KZXhpdCAvYiAlZXJyb3JsZXZlbCUNCg==",
+    "docker_fixture.py": "file:aW1wb3J0IGpzb24sIG9zLCBzeXMNCmZyb20gcGF0aGxpYiBpbXBvcnQgUGF0aA0Kcm9vdCA9IFBhdGgob3MuZW52aXJvblsnSE9NRSddKQ0KYXJndiA9IHN5cy5hcmd2WzE6XQ0Kd2l0aCAocm9vdC8nZG9ja2VyLmpzb25sJykub3BlbignYScsZW5jb2Rpbmc9J3V0Zi04JykgYXMgb3V0Og0KICAgIG91dC53cml0ZShqc29uLmR1bXBzKGFyZ3YpKydcbicpDQppZiBhcmd2WzBdID09ICdpbnNwZWN0JzoNCiAgICBwcmludCgndHJ1ZScgaWYgYXJndlsyXSA9PSAne3suU3RhdGUuUnVubmluZ319JyBlbHNlIG9zLmVudmlyb25bJ0ZJWFRVUkVfRU5HSU5FJ10pDQogICAgcmFpc2UgU3lzdGVtRXhpdCgwKQ0KKHJvb3QvJ2RvY2tlci5zdGRpbicpLndyaXRlX2J5dGVzKHN5cy5zdGRpbi5idWZmZXIucmVhZCgpKQ0Kc3lzLnN0ZG91dC5idWZmZXIud3JpdGUoYid7ImNvbnRhaW5lciI6ImZpeHR1cmUifVxuJykNCnN5cy5zdGRlcnIuYnVmZmVyLndyaXRlKGInZml4dHVyZSBzdGRlcnJcbicpDQpyYWlzZSBTeXN0ZW1FeGl0KGludChvcy5lbnZpcm9uWydGSVhUVVJFX0VYSVQnXSkpDQo=",
+    "durations.jsonl": "file:eyJzZWNvbmRzIjoyLjI1fQo="
+   },
+   "modes": {}
+  },
+  "transport-unlabelled-stats-0": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "",
+   "stderr": "cHNldWRvbGlmZS1tY3AgYm9hcmQtYXVkaXQ6IG5vIGJhbmsgaW4gdGhpcyBzaGVsbDsgcnVubmluZyBpdCBpbnNpZGUgdGhlIHBzZXVkb2xpZmUtbWNwLWRhZW1vbiBjb250YWluZXINCmZpeHR1cmUgc3RkZXJyCg==",
+   "window": [
+    1793593974.5563958,
+    1793593975.6319094
+   ],
+   "files": {
+    "cwd": "dir",
+    "docker.jsonl": "file:WyJpbnNwZWN0IiwgIi1mIiwgInt7LlN0YXRlLlJ1bm5pbmd9fSIsICJwc2V1ZG9saWZlLW1jcC1kYWVtb24iXQ0KWyJpbnNwZWN0IiwgIi1mIiwgInt7aW5kZXggLkNvbmZpZy5MYWJlbHMgXCJvcmcucHNldWRvbGlmZS5lbmdpbmVcIn19IiwgInBzZXVkb2xpZmUtbWNwLWRhZW1vbiJdDQpbImV4ZWMiLCAiLWkiLCAiLWUiLCAiUFNFVURPTElGRV9EQUVNT05fRVhFQz0xIiwgInBzZXVkb2xpZmUtbWNwLWRhZW1vbiIsICJweXRob24iLCAiLW0iLCAicHNldWRvbGlmZV9tZW1vcnkuY2xpIiwgImJvYXJkLWF1ZGl0IiwgInN0YXRzIiwgIi0tc2luY2UiLCAiMTAwMC4wIiwgIi0tdW50aWwiLCAiNTAwMC4wIiwgIi0tZHVyYXRpb25zIiwgIi9kZXYvc3RkaW4iXQ0K",
+    "docker.stdin": "file:eyJzZWNvbmRzIjoyLjI1fQo=",
+    "log.jsonl": "file:eyJjb250YWluZXIiOiJmaXh0dXJlIn0K",
+    "out.jsonl": "file:eyJjb250YWluZXIiOiJmaXh0dXJlIn0K"
+   },
+   "arm": "python",
+   "before": {
+    "cwd": "dir",
+    "docker_fixture.cmd": "file:QGVjaG8gb2ZmDQoiQzpcZGV2XFBzZXVkb2xpZmUtTUNQXC52ZW52XFNjcmlwdHNccHl0aG9uLmV4ZSIgIkM6XFVzZXJzXGRldlxBcHBEYXRhXExvY2FsXFRlbXBccGwtY2xpLWRpZmYtNDU1NlxoXGRvY2tlcl9maXh0dXJlLnB5IiAlKg0KZXhpdCAvYiAlZXJyb3JsZXZlbCUNCg==",
+    "docker_fixture.py": "file:aW1wb3J0IGpzb24sIG9zLCBzeXMNCmZyb20gcGF0aGxpYiBpbXBvcnQgUGF0aA0Kcm9vdCA9IFBhdGgob3MuZW52aXJvblsnSE9NRSddKQ0KYXJndiA9IHN5cy5hcmd2WzE6XQ0Kd2l0aCAocm9vdC8nZG9ja2VyLmpzb25sJykub3BlbignYScsZW5jb2Rpbmc9J3V0Zi04JykgYXMgb3V0Og0KICAgIG91dC53cml0ZShqc29uLmR1bXBzKGFyZ3YpKydcbicpDQppZiBhcmd2WzBdID09ICdpbnNwZWN0JzoNCiAgICBwcmludCgndHJ1ZScgaWYgYXJndlsyXSA9PSAne3suU3RhdGUuUnVubmluZ319JyBlbHNlIG9zLmVudmlyb25bJ0ZJWFRVUkVfRU5HSU5FJ10pDQogICAgcmFpc2UgU3lzdGVtRXhpdCgwKQ0KKHJvb3QvJ2RvY2tlci5zdGRpbicpLndyaXRlX2J5dGVzKHN5cy5zdGRpbi5idWZmZXIucmVhZCgpKQ0Kc3lzLnN0ZG91dC5idWZmZXIud3JpdGUoYid7ImNvbnRhaW5lciI6ImZpeHR1cmUifVxuJykNCnN5cy5zdGRlcnIuYnVmZmVyLndyaXRlKGInZml4dHVyZSBzdGRlcnJcbicpDQpyYWlzZSBTeXN0ZW1FeGl0KGludChvcy5lbnZpcm9uWydGSVhUVVJFX0VYSVQnXSkpDQo=",
+    "durations.jsonl": "file:eyJzZWNvbmRzIjoyLjI1fQo="
+   },
+   "modes": {}
+  },
+  "transport-unlabelled-stats-23": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 23,
+   "stdout": "",
+   "stderr": "cHNldWRvbGlmZS1tY3AgYm9hcmQtYXVkaXQ6IG5vIGJhbmsgaW4gdGhpcyBzaGVsbDsgcnVubmluZyBpdCBpbnNpZGUgdGhlIHBzZXVkb2xpZmUtbWNwLWRhZW1vbiBjb250YWluZXINCmZpeHR1cmUgc3RkZXJyCg==",
+   "window": [
+    1793593975.643712,
+    1793593976.6960912
+   ],
+   "files": {
+    "cwd": "dir",
+    "docker.jsonl": "file:WyJpbnNwZWN0IiwgIi1mIiwgInt7LlN0YXRlLlJ1bm5pbmd9fSIsICJwc2V1ZG9saWZlLW1jcC1kYWVtb24iXQ0KWyJpbnNwZWN0IiwgIi1mIiwgInt7aW5kZXggLkNvbmZpZy5MYWJlbHMgXCJvcmcucHNldWRvbGlmZS5lbmdpbmVcIn19IiwgInBzZXVkb2xpZmUtbWNwLWRhZW1vbiJdDQpbImV4ZWMiLCAiLWkiLCAiLWUiLCAiUFNFVURPTElGRV9EQUVNT05fRVhFQz0xIiwgInBzZXVkb2xpZmUtbWNwLWRhZW1vbiIsICJweXRob24iLCAiLW0iLCAicHNldWRvbGlmZV9tZW1vcnkuY2xpIiwgImJvYXJkLWF1ZGl0IiwgInN0YXRzIiwgIi0tc2luY2UiLCAiMTAwMC4wIiwgIi0tdW50aWwiLCAiNTAwMC4wIiwgIi0tZHVyYXRpb25zIiwgIi9kZXYvc3RkaW4iXQ0K",
+    "docker.stdin": "file:eyJzZWNvbmRzIjoyLjI1fQo="
+   },
+   "arm": "python",
+   "before": {
+    "cwd": "dir",
+    "docker_fixture.cmd": "file:QGVjaG8gb2ZmDQoiQzpcZGV2XFBzZXVkb2xpZmUtTUNQXC52ZW52XFNjcmlwdHNccHl0aG9uLmV4ZSIgIkM6XFVzZXJzXGRldlxBcHBEYXRhXExvY2FsXFRlbXBccGwtY2xpLWRpZmYtNDU1NlxoXGRvY2tlcl9maXh0dXJlLnB5IiAlKg0KZXhpdCAvYiAlZXJyb3JsZXZlbCUNCg==",
+    "docker_fixture.py": "file:aW1wb3J0IGpzb24sIG9zLCBzeXMNCmZyb20gcGF0aGxpYiBpbXBvcnQgUGF0aA0Kcm9vdCA9IFBhdGgob3MuZW52aXJvblsnSE9NRSddKQ0KYXJndiA9IHN5cy5hcmd2WzE6XQ0Kd2l0aCAocm9vdC8nZG9ja2VyLmpzb25sJykub3BlbignYScsZW5jb2Rpbmc9J3V0Zi04JykgYXMgb3V0Og0KICAgIG91dC53cml0ZShqc29uLmR1bXBzKGFyZ3YpKydcbicpDQppZiBhcmd2WzBdID09ICdpbnNwZWN0JzoNCiAgICBwcmludCgndHJ1ZScgaWYgYXJndlsyXSA9PSAne3suU3RhdGUuUnVubmluZ319JyBlbHNlIG9zLmVudmlyb25bJ0ZJWFRVUkVfRU5HSU5FJ10pDQogICAgcmFpc2UgU3lzdGVtRXhpdCgwKQ0KKHJvb3QvJ2RvY2tlci5zdGRpbicpLndyaXRlX2J5dGVzKHN5cy5zdGRpbi5idWZmZXIucmVhZCgpKQ0Kc3lzLnN0ZG91dC5idWZmZXIud3JpdGUoYid7ImNvbnRhaW5lciI6ImZpeHR1cmUifVxuJykNCnN5cy5zdGRlcnIuYnVmZmVyLndyaXRlKGInZml4dHVyZSBzdGRlcnJcbicpDQpyYWlzZSBTeXN0ZW1FeGl0KGludChvcy5lbnZpcm9uWydGSVhUVVJFX0VYSVQnXSkpDQo=",
+    "durations.jsonl": "file:eyJzZWNvbmRzIjoyLjI1fQo="
+   },
+   "modes": {}
+  },
+  "defer-dsn-option": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "eyJvayI6IHRydWUsICJldmVudHMiOiA0NSwgImZpcnN0X3NlcSI6IDEsICJoZWFkX3NlcSI6IDQ1LCAiaGVhZF9oYXNoIjogImViZWFjM2NjY2FlY2ExN2UwMGY3ZWRhMjAwN2FlZTVmM2U3NzYzNjRmYWE3ZGFmYWVjMjI4MTY2ZTNkZjkzYzYiLCAiaGVhZF9jcmVhdGVkX2F0IjogMTc5MzU5Mzk1Ni4xNTU2ODMzLCAic3RhcnRfY3V0IjogbnVsbH0NCg==",
+   "stderr": "",
+   "window": [
+    1793593976.7751691,
+    1793593977.463125
+   ],
+   "arm": "python",
+   "before": {
+    "cwd": "dir"
+   },
+   "db": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "no-bank": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "Ym9hcmQtYXVkaXQ6IG5vIGJhbmsgZm91bmQ6IHNldCBQU0VVRE9MSUZFX01DUF9EQVRBQkFTRV9VUkwgdG8gdGhlIGJhbmsncyBkYXRhYmFzZSBVUkwsIG9yIHJ1biB3aGVyZSB0aGUgbGl0ZSB0aWVyJ3MgZGF0YSBkaXIgaG9sZHMgb25lIChEb2NrZXIgdGllcjogc3RhcnQgdGhlIGRhZW1vbiwgb3IgcnVuIGBkb2NrZXIgZXhlYyAtaXQgcHNldWRvbGlmZS1tY3AtZGFlbW9uIHBzZXVkb2xpZmUtbWNwIGJvYXJkLWF1ZGl0IC4uLmAgb24gaXRzIGhvc3QpDQo=",
+   "window": [
+    1793593977.575903,
+    1793593978.2222145
+   ],
+   "arm": "python",
+   "before": {
+    "cwd": "dir"
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "defer-bank-verify-stdout-closed": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 120,
+   "stdout": "",
+   "stderr": "RXhjZXB0aW9uIGlnbm9yZWQgaW46IDxfaW8uVGV4dElPV3JhcHBlciBuYW1lPSc8c3Rkb3V0PicgbW9kZT0ndycgZW5jb2Rpbmc9J3V0Zi04Jz4NCk9TRXJyb3I6IFtFcnJubyAyMl0gSW52YWxpZCBhcmd1bWVudA0K",
+   "window": [
+    1793593978.2242234,
+    1793593978.891261
+   ],
+   "arm": "python",
+   "before": {
+    "cwd": "dir"
+   },
+   "db": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "export-agent-ambiguous": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "Ym9hcmQtYXVkaXQ6IC0tYWdlbnQgYWIxMmNkMzQgbWF0Y2hlcyBzZXZlcmFsIGlkczogYWIxMmNkMzRlZjU2LCBhYjEyY2QzNGVmNTc7IGdpdmUgYSBsb25nZXIgcHJlZml4DQo=",
+   "window": [
+    1793593979.0020237,
+    1793593979.6967509
+   ],
+   "arm": "python",
+   "before": {
+    "cwd": "dir"
+   },
+   "db": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "export-agent-ambiguous-out": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "Ym9hcmQtYXVkaXQ6IC0tYWdlbnQgYWIxMmNkMzRlZjUgbWF0Y2hlcyBzZXZlcmFsIGlkczogYWIxMmNkMzRlZjU2LCBhYjEyY2QzNGVmNTc7IGdpdmUgYSBsb25nZXIgcHJlZml4DQo=",
+   "window": [
+    1793593979.8155227,
+    1793593980.5059142
+   ],
+   "arm": "python",
+   "before": {
+    "cwd": "dir"
+   },
+   "db": "unchanged",
+   "files": {
+    "cwd": "dir",
+    "out.jsonl": "file:"
+   },
+   "modes": {}
+  }
+ }
+}

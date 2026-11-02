@@ -1432,6 +1432,140 @@ def test_oracle_arm_never_runs_in_tree_bytecode(tmp_path):
     assert run(oracle_env) == "source"
 
 
+_ISOLATION_PROBE = '''
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+sys.path.insert(0, RUST_PATH)
+from cli_harness import runner
+
+depth = int(os.environ.get("CLI_HARNESS_TEST_DEPTH", "0"))
+trace = Path(sys.argv[1])
+with trace.open("a", encoding="utf-8") as stream:
+    stream.write(json.dumps({"depth": depth, "prefix": sys.pycache_prefix}) + "\\n")
+original_run = subprocess.run
+
+
+def bounded_run(command, **kwargs):
+    # This test must stay bounded even against the pre-fix implementation.
+    if depth >= 1:
+        raise SystemExit("test prevented a second relaunch")
+    kwargs["env"]["CLI_HARNESS_TEST_DEPTH"] = str(depth + 1)
+    return original_run(command, timeout=10, **kwargs)
+
+
+runner.subprocess.run = bounded_run
+if depth and sys.argv[3] == "corrupt":
+    sys.dont_write_bytecode = False
+code = runner.isolated_relaunch()
+if code is None:
+    print(json.dumps({"argv": sys.argv[1:], "depth": depth,
+                      "prefix": sys.pycache_prefix,
+                      "dont_write_bytecode": sys.dont_write_bytecode,
+                      "cache_files": list(Path(sys.pycache_prefix).rglob("*"))}))
+    code = int(sys.argv[2])
+raise SystemExit(code)
+'''
+
+
+def _isolation_probe(tmp_path, flags=(), entry="script", exit_code=0, corrupt=False):
+    import json
+    import subprocess
+
+    driver = tmp_path / "isolation_probe.py"
+    driver.write_text(_ISOLATION_PROBE.replace(
+        "RUST_PATH", repr(str(Path(__file__).resolve().parent.parent))), encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    args = [str(trace), str(exit_code), "corrupt" if corrupt else "keep",
+            "--row", "case with spaces", "-I"]
+    if entry == "module":
+        invocation = ["-m", "isolation_probe"]
+    elif entry == "command":
+        invocation = ["-Ic", f"exec(compile(open({str(driver)!r}).read(), {str(driver)!r}, 'exec'))"]
+    else:
+        invocation = [str(driver)]
+    env = {k: v for k, v in os.environ.items()
+           if k not in ("PYTHONPYCACHEPREFIX", "PYTHONDONTWRITEBYTECODE", "PYTHONPATH",
+                        "CLI_HARNESS_PYCACHE_PREFIX", "CLI_HARNESS_RELAUNCH_DEPTH",
+                        "CLI_HARNESS_TEST_DEPTH")}
+    done = subprocess.run([sys.executable, *flags, *invocation, *args], env=env,
+                          cwd=tmp_path, capture_output=True, text=True, timeout=20)
+    launches = [json.loads(line) for line in trace.read_text(encoding="utf-8").splitlines()]
+    return done, launches, args
+
+
+@pytest.mark.parametrize("flags, entry", [
+    ([], "script"), (["-I"], "script"), (["-E"], "script"),
+    ([], "module"), (["-E"], "module"), ([], "command"),
+    (["-I", "-X", "pycache_prefix=ignored-cache"], "script"),
+])
+@pytest.mark.parametrize("exit_code", [0, 23])
+def test_isolated_relaunch_preserves_invocation_and_cleans_cache(tmp_path, flags, entry, exit_code):
+    import json
+
+    done, launches, args = _isolation_probe(tmp_path, flags, entry, exit_code)
+    assert done.returncode == exit_code, done.stdout + done.stderr
+    assert [launch["depth"] for launch in launches] == [0, 1]
+    isolated = json.loads(done.stdout)
+    assert isolated["argv"] == args
+    assert isolated["depth"] == 1
+    assert isolated["dont_write_bytecode"] is True
+    assert isolated["cache_files"] == []
+    assert isolated["prefix"] == launches[1]["prefix"]
+    assert not Path(isolated["prefix"]).exists()
+
+
+def test_isolated_relaunch_refuses_a_second_attempt_when_flags_do_not_take_effect(tmp_path):
+    done, launches, _ = _isolation_probe(tmp_path, ["-I"], corrupt=True)
+    assert done.returncode != 0
+    assert "isolation failed after one relaunch" in done.stderr
+    assert "test prevented" not in done.stderr
+    assert [launch["depth"] for launch in launches] == [0, 1]
+    assert not Path(launches[1]["prefix"]).exists()
+
+
+@pytest.mark.parametrize("original, before, after", [
+    (["-I", "-W", "ignore", "-X", "dev", "-m", "pkg", "--flag"],
+     ["-I", "-W", "ignore", "-X", "dev"], ["-m", "pkg", "--flag"]),
+    (["-Wignore", "-Xdev", "--check-hash-based-pycs", "always", "--", "script.py", "-B"],
+     ["-Wignore", "-Xdev", "--check-hash-based-pycs", "always"], ["--", "script.py", "-B"]),
+    (["-Impkg", "value"], ["-I"], ["-mpkg", "value"]),
+    (["-IXpycache_prefix=old", "script.py", "-X", "argument"],
+     ["-IXpycache_prefix=fresh"], ["script.py", "-X", "argument"]),
+    (["-X", "pycache_prefix", "script.py"], ["-X", "pycache_prefix=fresh"], ["script.py"]),
+    (["-Xpycache_prefix=old", "-cpass", "-Xpycache_prefix=argument"],
+     ["-Xpycache_prefix=fresh"], ["-cpass", "-Xpycache_prefix=argument"]),
+    (["-E", "-"], ["-E"], ["-"]),
+])
+def test_isolated_relaunch_flags_precede_entrypoint_and_preserve_its_arguments(
+        monkeypatch, original, before, after):
+    from cli_harness import runner
+
+    argv = [sys.executable, *original]
+    monkeypatch.setattr(sys, "orig_argv", argv)
+    assert runner._isolated_argv("fresh") == [sys.executable, *before, "-B", "-X",
+                                               "pycache_prefix=fresh", *after]
+    assert sys.orig_argv == [sys.executable, *original]
+
+
+@pytest.mark.parametrize("depth", ["1", "2", "invalid"])
+def test_isolated_relaunch_depth_guard_never_spawns_again(monkeypatch, depth):
+    from cli_harness import runner
+
+    monkeypatch.setenv(runner.ISOLATION_DEPTH_ENV, depth)
+    monkeypatch.setattr(sys, "pycache_prefix", None)
+
+    def unexpected_spawn(*args, **kwargs):
+        raise AssertionError("the depth guard must refuse before spawning")
+
+    monkeypatch.setattr(runner.subprocess, "run", unexpected_spawn)
+    message = "isolation failed after one relaunch" if depth == "1" else "invalid relaunch depth"
+    with pytest.raises(SystemExit, match=message):
+        runner.isolated_relaunch()
+
+
 _PARENT_DRIVER = '''
 import sys
 from pathlib import Path
@@ -1485,7 +1619,8 @@ def test_parent_process_records_the_source_not_a_stale_seeder_cache(tmp_path):
     driver.write_text(_PARENT_DRIVER.format(rust=str(Path(__file__).resolve().parent.parent)))
     goldens = tmp_path / "goldens"
     env = {k: v for k, v in os.environ.items()
-           if k not in ("PYTHONPYCACHEPREFIX", "PYTHONDONTWRITEBYTECODE", "CLI_HARNESS_PYCACHE_PREFIX")}
+           if k not in ("PYTHONPYCACHEPREFIX", "PYTHONDONTWRITEBYTECODE",
+                        "CLI_HARNESS_PYCACHE_PREFIX", "CLI_HARNESS_RELAUNCH_DEPTH")}
     done = subprocess.run([sys.executable, str(driver), str(goldens), str(repo)], env=env,
                           cwd=tmp_path, capture_output=True, text=True, timeout=120)
     assert done.returncode == 0, done.stdout + done.stderr

@@ -485,6 +485,20 @@ fn docker_on_path() -> Option<bool> {
 pub(super) fn run(values: Vec<OsString>) -> Option<ExitCode> {
     // The oracle resolves the home at import, before parsing.
     let home = file::home()?;
+    if values
+        .iter()
+        .take_while(|arg| *arg != "--")
+        .any(|arg| arg == "--help" || arg == "-h")
+    {
+        use std::io::Write;
+        let text = if values.first().is_some_and(|arg| arg == "create") {
+            include_str!("create_help.txt")
+        } else {
+            include_str!("test_login_help.txt")
+        };
+        let _ = std::io::stdout().write_all(&super::text_bytes(&text.replace("\r\n", "\n")));
+        return Some(ExitCode::SUCCESS);
+    }
     let args = parse(&values)?;
     let mut report = Report {
         json: args.json,

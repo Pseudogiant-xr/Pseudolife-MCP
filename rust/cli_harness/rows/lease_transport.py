@@ -59,30 +59,15 @@ def _docker_setup(arm):
         path.chmod(0o700)
 
 
-def _docker_after(action, tail, engine=None):
+def _docker_after(action, tail, engine=None, mode='lease'):
     def after(arm, obs):
         calls = [json.loads(line) for line in (arm.home / 'docker.jsonl').read_text().splitlines()]
         expected = [['inspect', '-f', '{{.State.Running}}', 'pseudolife-mcp-daemon'],
                     ['inspect', '-f', '{{index .Config.Labels "org.pseudolife.engine"}}', 'pseudolife-mcp-daemon']]
-        if engine == 'rust':
-            assert calls == expected, calls
-            assert obs['exit'] == 2, obs['exit']
-            assert core.decode(obs, 'stdout') == b''
-            refusal = (
-                b'pseudolife-mcp lease: the Rust daemon image has no Python operator runtime: '
-                b'run bank commands on a Python host with PSEUDOLIFE_MCP_DATABASE_URL set, '
-                b'or switch back with `pseudolife-mcp update --engine python --checkout <repo>`; '
-                b'nothing was changed\n')
-            if action in ('delegate', 'designate'):
-                refusal = (f'pseudolife-mcp lease {action} is deprecated: use '
-                           'pseudolife-mcp lease conductor\n').encode() + refusal
-            assert core.decode(obs, 'stderr') == (refusal.replace(b'\n', b'\r\n') if core.WINDOWS else refusal)
-            assert not (arm.home / 'docker.stdin').exists()
-            _remove_inputs(arm)
-            return
         expected += [['exec', '-i', '-e', 'PSEUDOLIFE_DAEMON_EXEC=1',
-                     'pseudolife-mcp-daemon', 'python', '-m', 'pseudolife_memory.cli',
-                     'lease', 'conductor' if action in ('delegate', 'designate') else action, *tail]]
+                     'pseudolife-mcp-daemon', *(['pseudolife-mcp'] if engine == 'rust' else
+                                                ['python', '-m', 'pseudolife_memory.cli']),
+                     mode, 'conductor' if action in ('delegate', 'designate') else action, *tail]]
         assert calls == expected, calls
         assert obs['exit'] == 23, obs['exit']
         assert (arm.home / 'docker.stdin').read_bytes() == b'container-input\x00\xff\n'

@@ -7,6 +7,8 @@ import subprocess
 
 EXACT_INPUTS = {
     ".dockerignore",
+    "evals/prompts/assistant_facts_provenance.txt",
+    "evals/prompts/sonnet_extractor_v5.md",
     "rust/Cargo.toml", "rust/Cargo.lock", "ops/Dockerfile.daemon-rust",
     "ops/provision-daemon-models.sh",
     "ops/docker-compose.rust.yml", ".github/workflows/rust.yml",

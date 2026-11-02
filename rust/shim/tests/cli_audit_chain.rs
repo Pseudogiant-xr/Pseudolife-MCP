@@ -374,7 +374,7 @@ fn an_existing_export_target_is_refused_before_any_bank() {
 }
 
 #[test]
-fn bank_actions_without_an_explicit_database_url_defer() {
+fn bank_actions_distinguish_a_missing_bank_from_an_unsupported_dsn() {
     let home = Home::new();
     let deferral = cli::native_text(
         "board-audit: this path is deferred; native board-audit covers canonical verify, export and redact\n",
@@ -405,9 +405,24 @@ fn bank_actions_without_an_explicit_database_url_defer() {
                 command.env("PSEUDOLIFE_MCP_DATABASE_URL", url);
             }
             let output = command.output().unwrap();
-            assert_eq!(output.status.code(), Some(1), "{args:?}");
+            let unsupported = url.is_some_and(|value| !value.is_empty());
+            assert_eq!(
+                output.status.code(),
+                Some(if unsupported { 1 } else { 2 }),
+                "{args:?}"
+            );
             assert!(output.stdout.is_empty());
-            assert_eq!(output.stderr, deferral, "{args:?}");
+            if unsupported {
+                assert_eq!(output.stderr, deferral, "{args:?}");
+            } else {
+                assert_eq!(
+                    output.stderr,
+                    cli::native_text(
+                        "board-audit: no bank found: set PSEUDOLIFE_MCP_DATABASE_URL to the bank's database URL, or run where the lite tier's data dir holds one (Docker tier: start the daemon, or run `docker exec -it pseudolife-mcp-daemon pseudolife-mcp board-audit ...` on its host)\n"
+                    ),
+                    "{args:?}"
+                );
+            }
         }
     }
     assert_eq!(fs::read_dir(&home.0).unwrap().count(), 0);

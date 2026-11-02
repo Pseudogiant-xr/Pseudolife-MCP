@@ -32,6 +32,38 @@ pub(crate) fn version_shape(value: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || b".+-".contains(&b))
 }
 
+/// Package metadata uses PEP 440 (`0.20.0rc1`), while Cargo uses a
+/// semver prerelease (`0.20.0-rc1`). Only known prerelease spellings are
+/// interchangeable; unknown suffixes and different release tuples stay distinct.
+pub(crate) fn same_version(a: &str, b: &str) -> bool {
+    if a == b {
+        return true;
+    }
+    static PRERELEASE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(r"(?i)^([0-9]+(?:\.[0-9]+)*)-?(alpha|beta|preview|pre|rc|a|b|c)(?:[.-]?([0-9]+))?(\+[a-z0-9.-]+)?$")
+            .expect("prerelease version pattern")
+    });
+    let key = |value: &str| {
+        let parts = PRERELEASE.captures(value)?;
+        let kind = match parts[2].to_ascii_lowercase().as_str() {
+            "a" | "alpha" => "a",
+            "b" | "beta" => "b",
+            _ => "rc",
+        };
+        let number = parts
+            .get(3)
+            .map_or("0", |n| n.as_str())
+            .trim_start_matches('0');
+        Some((
+            parts[1].to_owned(),
+            kind,
+            if number.is_empty() { "0" } else { number }.to_owned(),
+            parts.get(4).map(|v| v.as_str().to_owned()),
+        ))
+    };
+    matches!((key(a), key(b)), (Some(a), Some(b)) if a == b)
+}
+
 /// Numeric tuple comparison without narrowing Python's integer components.
 pub(crate) fn version_key(value: &str) -> Option<Vec<&str>> {
     let mut end = 0;
@@ -93,7 +125,7 @@ pub fn update_notice(
         return String::new();
     }
     let mut location = format!("daemon {daemon}");
-    if let Some(plugin) = plugin.filter(|p| version_shape(p) && *p != daemon) {
+    if let Some(plugin) = plugin.filter(|p| version_shape(p) && !same_version(p, daemon)) {
         location.push_str(&format!(", plugin {plugin}"));
     }
     format!(
@@ -208,6 +240,38 @@ mod tests {
         assert!(snapshot.latest_release.is_none());
         assert_eq!(snapshot.checked_at, 0.0);
     }
+    #[test]
+    fn compatibility_prerelease_spelling_is_not_a_plugin_mismatch() {
+        assert_eq!(
+            update_notice("0.20.0-rc1", Some("0.21.0"), Some("0.20.0rc1"), "pl"),
+            "Pseudolife-MCP: release 0.21.0 is available (daemon 0.20.0-rc1) — run pl update, then start a new session."
+        );
+    }
+
+    #[test]
+    fn compatibility_python_prerelease_spelling_equivalence() {
+        let cases: Value =
+            serde_json::from_str(include_str!("../harness/goldens/version-spelling.json")).unwrap();
+        for case in cases.as_array().unwrap() {
+            let python = case["python"].as_str().unwrap();
+            let native = case["native"].as_str().unwrap();
+            let equal = case["equal"].as_bool().unwrap();
+            assert_eq!(same_version(python, native), equal, "{case}");
+            assert_eq!(same_version(native, python), equal, "{case}");
+        }
+        for (a, b) in [
+            ("0.20.0-custom1", "0.20.0custom1"),
+            ("0.20.0-rc1.extra", "0.20.0rc1"),
+            ("0.20.0-rc.", "0.20.0rc0"),
+            ("0.20.0-alpha-", "0.20.0a0"),
+            ("0.20.0.dev1", "0.20.0"),
+            ("0.20.0", "0.20"),
+            ("not-a-version", "another-version"),
+        ] {
+            assert!(!same_version(a, b), "{a} / {b}");
+        }
+    }
+
     #[test]
     fn live_python_notice_goldens() {
         let golden: Value =
