@@ -357,7 +357,7 @@ async fn through_postgres(args: &Args, report: &mut Report) -> Result<u8, Defer>
             .trim()
             .lines()
             .last()
-            .and_then(|s| decode_list(s, &super::invite::not_owner_in_config()).ok());
+            .and_then(|s| decode_list(s, &super::not_owner_in_config()).ok());
         let Some((rows, rejected)) = listed else {
             return Ok(by_hand(
                 report,
