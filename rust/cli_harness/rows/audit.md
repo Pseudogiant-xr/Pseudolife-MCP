@@ -1,4 +1,4 @@
-# CLI-AUDIT contract (board-audit verify / export / redact)
+# CLI-AUDIT contract (board-audit verify / export / redact / stats)
 
 Oracle: `pseudolife_memory/board_audit_cli.py`, `pseudolife_memory/storage/coordination.py`
 at `rust-cf/w1c-base` (c10d2ce9). Candidate: `rust/shim/src/cli/board_audit/`.
@@ -15,8 +15,10 @@ Harness row: `audit` (`rust/cli_harness/rows/audit.py`).
   Paths use pathlib's lexical display spelling.
 - `board-audit redact --message-id ID --reason TEXT` (either order)
 
-The bank is reached only through a non-empty `PSEUDOLIFE_MCP_DATABASE_URL`
-that the shared native client's DSN grammar admits (`rust/shim/src/pg/`).
+The direct bank path uses a non-empty `PSEUDOLIFE_MCP_DATABASE_URL` admitted
+by the shared native client. Without a local bank, container forwarding
+selects the installed operator CLI from the daemon engine label. The lite
+instance lifecycle remains separately deferred.
 
 ## Exact contract items
 
@@ -24,7 +26,7 @@ that the shared native client's DSN grammar admits (`rust/shim/src/pg/`).
 |---|---|
 | Exit 0 ok, 1 broken chain / unconfirmed head / refused redaction, 2 could not check | `board_audit_cli.py:23-27`, `main` 555-626 |
 | `--expect-head` is `SEQ:HASH`, seq >= 1, 64 lowercase hex | `_head` 92-97 |
-| `--since`/`--until`: epoch seconds or ISO 8601 (finite float epochs and ISO with explicit `+HH:MM`/`-HH:MM` offsets are admitted) | `_time` 78-89 |
+| `--since`/`--until`: epoch seconds or ISO 8601 (finite epochs, aware ISO timestamps and local naive dates/times are admitted) | `_time` 78-89 |
 | Bank: DSN, read-only repeatable-read snapshot, `to_regclass('public.coordination_events')` check and its "no audit log yet" text (exit 2); redact also needs the v46 `body` column (its text, exit 2) | `_bank` 105-146 |
 | Export: an existing `--out` refused before any bank (`{path} exists; export never replaces a file`, exit 2); file created before `--agent` resolves, so a refused agent leaves it empty; JSON lines `json.dumps(row, ensure_ascii=True, separators=(",", ":"))`, payload `json.loads`ed, columns in `AUDIT_COLUMNS` order then `body`, `body_salt`; stdout lines CRLF on Windows, `--out` LF; closed stdout prints `the output was closed before the export finished`, exit 2 | `_export` 173-217, `main` 612-620 |
 | `--agent`: full id or unique 8-31 hex prefix among agents, log actors and recipients (`ORDER BY agent_id LIMIT 9`), refusals `no agent id starts with A` / `--agent A matches several ids: P1, P2; give a longer prefix` | `_export` 184-192, `resolve_agent_id` coordination.py:721, `distinguishing_prefixes` 667 |
@@ -53,13 +55,11 @@ that the shared native client's DSN grammar admits (`rust/shim/src/pg/`).
 
 ## Deferred (the leaf's own deferral line, exit 1, before any effect)
 
-- `stats` execution (its option errors and help are native).
-- The lite tier's embedded bank and the daemon-container transport (no or empty
-  `PSEUDOLIFE_MCP_DATABASE_URL`); DSNs or ambient PG controls the shared client
-  refuses; any connection or SQL failure on a read.
-- Every non-numeric time conversion the native ISO reader cannot reproduce,
-  including local time, additional ISO forms and the documented date-only
-  `--since 2026-09-23`; non-Unicode OS arguments.
+- The lite tier's embedded bank; DSNs or ambient PG controls the shared client
+  refuses. Existing verify/export connection failures retain their deferrals;
+  stats uses the oracle's safe generic database diagnostic.
+- Non-Unicode OS arguments and the existing archive scalar-domain limits.
+  Historical surrogate-bearing stats metadata is not qualified by this slice.
 - Archive sequence values beyond i64 and metadata outside the native scalar
   domain. Stored payloads use Python's JSON domain, including non-finite
   numbers, large integers and lone surrogates. Parsed surrogates that Python
@@ -103,7 +103,7 @@ that the shared native client's DSN grammar admits (`rust/shim/src/pg/`).
   Linux (see the declared divergence).
 - Review regression cases cover links before surrogate encoding, root `--`,
   short help clusters, Python's head-conversion errors and integer digit limit,
-  minute-precision local ISO deferral, output symlink loops, and the stdout
+  minute-precision local ISO parsing, output symlink loops, and the stdout
   prefix before a later invalid stored payload. Leading-dot Windows paths and
   long output names remain Windows: pending CI.
 
@@ -111,12 +111,12 @@ that the shared native client's DSN grammar admits (`rust/shim/src/pg/`).
 
 - **CLI-AUDIT-VERIFY-EXPORT-REDACT: ported** for the option grammar above over
   an explicit DSN (harness row `audit`).
-- **CLI-AUDIT-STATS: deferred.** Blockers: the report's `version` is the
-  installed Python distribution's version; `generated_at` and the default
-  window come from the wall clock; the suite durations file carries local-time
-  ISO stamps; Python `round` and nearest-rank percentiles need a qualified match.
-- **CLI-AUDIT-TRANSPORT: deferred.** The embedded and container transports and
-  local-time ISO arguments (including the documented date-only `--since`).
+- **CLI-AUDIT-STATS: implemented; Linux differential validated.** The report
+  follows `board_audit_stats.py`, including nearest-rank percentiles, decimal
+  half-even rounding, as-of-until reads, park lookback and session clipping.
+- **CLI-AUDIT-TRANSPORT: partly implemented; Linux differential validated.**
+  Container forwarding and local time parsing are native; lite lifecycle stays
+  in its existing separate boundary.
 
 The live option, archive-error and historical-payload parity evidence for this
 change is Linux-only until #726 selects the h5-audit suite. Windows live cases
@@ -138,8 +138,7 @@ failures preserve the Python diagnostic and exit rather than admitting a
 partial interpretation. Golden replay remains limited to the stable subset.
 
 The 100,000-key object case exceeded five seconds with the previous linear
-scan and checks the indexed reader against Python. The local-minute ISO case
-is a guard: it already passed on the original base. The driver-side row decode
+scan and checks the indexed reader against Python. The local-minute ISO case now requires native parsing before the no-bank diagnostic. The driver-side row decode
 case is also an original-base guard; it failed against the rejected PR head's
 new generic-error mapping. A PostgreSQL-wire regression
 blocks an export query, renames its created destination and installs a replacement
@@ -156,3 +155,51 @@ line semantics. ISO deferral cases use an explicit fixture DSN; an admitted-ISO
 source control catches a converter that incorrectly returns an epoch. Failed
 export coverage also asserts that an unreplaced, owned destination disappears;
 disabling its cleanup makes that case fail.
+
+## B10b acceptance and integration
+
+`stats` reads events and wakes in one read-only repeatable-read snapshot.
+An export input has no wake rows. Host durations cross container stdin;
+`--out` and `--append` stay on the host, with exclusive output creation and
+append behavior preserved. Failed container exports remove their own output.
+The shared `pg::resolution` engine selector supplies `pseudolife-mcp` in a
+Rust-labelled image and the Python CLI for Python or unlabelled images.
+No Cargo or dispatcher change is needed.
+
+Naive arguments use the machine's local zone with Python's default fold=0:
+the earlier instant of a fold and the later implied instant of a gap.
+Naive duration stamps follow `astimezone().timestamp()`, including its distinct
+gap interpretation. Linux cases pin New York, Lord Howe and Apia; Windows
+uses the CRT local zone and inherits its range limits. Historical dates near
+the Windows CRT bounds remain unqualified.
+
+Live `audit-stats-clock` replaces only a validated generation clock and the
+package/crate version; default window endpoints are checked against the launch
+window before substitution. Metrics, source labels, key order, float spelling,
+output files and fixed window endpoints remain exact. The isolated oracle may
+resolve a different installed wheel than the harness process; its version must
+still have a release-version spelling. Runtime stats/transport cases are live
+only. `board_audit/testdata/stats.json` contains three deterministic full-report
+fixtures generated by executing `stats_fixture()` against the Python oracle;
+Rust tests compare both the structured report and its exact compact JSON line.
+
+Linux native compilation and all 221 differential cases passed, including the
+local fold/gap cases and all three engine-labelled transports. Six stats
+transport failures exposed discarded child stderr; forwarding stderr repaired
+them and all six reran successfully. Native Windows audit contracts passed.
+The transport fixture proves argv and file ownership. A Python-free Rust image
+proof passed at `2c770c4d`, including both host transport arms and a validated
+audit chain. All 41 qualified goldens replayed on Linux and Windows. Four Windows live
+stats/time cases also passed; hosted stress remains a separate check.
+
+Validation commands:
+
+```sh
+cargo test --manifest-path rust/Cargo.toml -p pseudolife-stdio cli::board_audit
+python rust/cli_harness --row audit --candidate "$CARGO_TARGET_DIR/debug/pseudolife-stdio" --out /tmp/audit.json
+```
+
+The CI golden roster now selects `stats-invalid-window` and `no-bank` for the
+formerly deferred paths. New deterministic transport cases are golden-eligible;
+clock-qualified reports remain live-only. Windows stress selection: `row:audit`
+(20 hosted runs), including subprocess/file handling and local CRT time conversion.

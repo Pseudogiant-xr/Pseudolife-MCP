@@ -20,8 +20,6 @@ const NO_TABLES: &str = "this bank has no maintainer tables yet (schema older th
 /// `BOOTSTRAP_TTL`: the one-time code's life, and how long the host waits.
 const BOOTSTRAP_TTL: u64 = 600;
 const BOOTSTRAP_MAX_FAILURES: i32 = 5;
-/// `--poll`'s default; other intervals are deferred argv.
-const POLL: Duration = Duration::from_secs(2);
 const BASE32: &[u8; 32] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 const SECRET_META_KEY: &str = "maintainer_secret_v1";
 const LIVE_KEYS: &str =
@@ -45,8 +43,8 @@ enum Stop {
 }
 
 impl From<tokio_postgres::Error> for Stop {
-    fn from(_: tokio_postgres::Error) -> Self {
-        Self::Deferred
+    fn from(error: tokio_postgres::Error) -> Self {
+        Self::Failed(sqlstate_of(&error))
     }
 }
 
@@ -76,29 +74,37 @@ async fn commit(tx: Transaction<'_>) -> Result<(), Stop> {
 /// The exit code, or `None` to defer. Nothing is printed before an outcome
 /// is known, except the waiting form's progress after its code committed.
 pub(super) async fn run(dsn: &pg::Dsn, action: Action) -> Option<u8> {
-    let mut session = pg::Session::open(dsn).await.ok()?;
+    let mut session = match pg::Session::open(dsn).await {
+        Ok(session) => session,
+        Err(_) => {
+            crate::stderrln!("error: OperationalError; check PSEUDOLIFE_MCP_DATABASE_URL");
+            return Some(2);
+        }
+    };
     let ending = act(&mut session, action).await;
     let _ = session.close().await;
     ending
 }
 
 async fn act(session: &mut pg::Session, action: Action) -> Option<u8> {
-    let present: bool = session
+    let row = match session
         .client()
         .query_one(
             "SELECT to_regclass('public.maintainer_passkeys') IS NOT NULL",
             &[],
         )
         .await
-        .ok()?
-        .try_get(0)
-        .ok()?;
+    {
+        Ok(row) => row,
+        Err(error) => return Some(failed(session, sqlstate_of(&error))),
+    };
+    let present: bool = row.try_get(0).ok()?;
     if !present {
         crate::stderrln!("error: {NO_TABLES}");
         return Some(2);
     }
     let outcome = match action {
-        Action::EnrolCode { wait } => return enrol_code(session, wait).await,
+        Action::EnrolCode { wait, poll } => return enrol_code(session, wait, poll).await,
         Action::Confirm(prefix) => confirm(session, &prefix).await.map(|(id, label)| {
             format!("Active: {}  label: {label}\n", display::key_prefix(&id))
         }),
@@ -172,7 +178,7 @@ async fn rollback(tx: Transaction<'_>, stop: Stop) -> Stop {
     stop
 }
 
-async fn enrol_code(session: &mut pg::Session, wait: bool) -> Option<u8> {
+async fn enrol_code(session: &mut pg::Session, wait: bool, poll: f64) -> Option<u8> {
     let code = bootstrap_code()?;
     let hash = code_hash(&code);
     match store_code(session, &hash).await {
@@ -255,7 +261,19 @@ async fn enrol_code(session: &mut pg::Session, wait: bool) -> Option<u8> {
                 );
             }
         }
-        tokio::time::sleep(POLL).await;
+        let duration = match Duration::try_from_secs_f64(poll) {
+            Ok(duration) => duration,
+            Err(_) => {
+                let class = if poll.is_infinite() {
+                    "OverflowError"
+                } else {
+                    "ValueError"
+                };
+                crate::stderrln!("error: {class}; check PSEUDOLIFE_MCP_DATABASE_URL");
+                return Some(2);
+            }
+        };
+        tokio::time::sleep(duration).await;
     };
     Some(if print(&report).is_ok() {
         code
