@@ -159,13 +159,13 @@ pub(super) struct Listed {
     pub paired_at: Option<f64>,
     pub revoked_at: Option<f64>,
     pub last_seen_at: Option<f64>,
-    /// v59: the bank owner's (`owner`); an environment row is, here, since
-    /// a list that could read `coordination.not_owner_principals` defers.
+    /// v59: the bank owner's (`owner`); an environment row is unless
+    /// `coordination.not_owner_principals` names it.
     pub owner: bool,
 }
 
 impl Listed {
-    fn environment(principal: String, last_seen_at: Option<f64>) -> Self {
+    fn environment(principal: String, last_seen_at: Option<f64>, owner: bool) -> Self {
         Listed {
             principal,
             state: "environment",
@@ -178,7 +178,7 @@ impl Listed {
             paired_at: None,
             revoked_at: None,
             last_seen_at,
-            owner: true,
+            owner,
         }
     }
 }
@@ -218,7 +218,11 @@ fn list_sql_v53() -> String {
 /// `list_principals(conn, environment=...)`: the stored rows, the names
 /// seen with no stored row, and each `environment` name not listed, sorted
 /// by name.
-pub(super) async fn list(client: &Client, environment: &[String]) -> Result<Vec<Listed>, DbError> {
+pub(super) async fn list(
+    client: &Client,
+    environment: &[String],
+    not_owner: &[String],
+) -> Result<Vec<Listed>, DbError> {
     let rows = match client.query(&list_sql(), &[]).await {
         Ok(rows) => rows,
         Err(error) => match classify(&error) {
@@ -238,7 +242,8 @@ pub(super) async fn list(client: &Client, environment: &[String]) -> Result<Vec<
         let last_seen = get(10)?;
         let stored: bool = row.try_get(11).map_err(|_| DbError::Defer)?;
         if !stored {
-            out.push(Listed::environment(principal, last_seen));
+            let owner = !not_owner.contains(&principal);
+            out.push(Listed::environment(principal, last_seen, owner));
             continue;
         }
         let paired: bool = row.try_get(3).map_err(|_| DbError::Defer)?;
@@ -280,7 +285,7 @@ pub(super) async fn list(client: &Client, environment: &[String]) -> Result<Vec<
     names.dedup();
     for name in names {
         if !out.iter().any(|row| &row.principal == name) {
-            out.push(Listed::environment(name.clone(), None));
+            out.push(Listed::environment(name.clone(), None, !not_owner.contains(name)));
         }
     }
     // Python's sorted(key=principal): code point order, stable.

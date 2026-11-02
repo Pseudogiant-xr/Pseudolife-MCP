@@ -184,7 +184,9 @@ fn hooks_notice(
     command: &str,
     checkout_built: bool,
 ) -> String {
-    let Some(version) = plugin_version.filter(|v| !v.is_empty() && *v == DAEMON_VERSION) else {
+    let Some(version) = plugin_version
+        .filter(|v| !v.is_empty() && crate::release_check::same_version(v, DAEMON_VERSION))
+    else {
         return String::new();
     };
     let (Some(plugin), Some(daemon)) = (plugin_digest, daemon_digest) else {
@@ -209,7 +211,7 @@ fn version_notice(plugin_version: Option<&str>, command: &str) -> String {
     let Some(plugin) = plugin_version.filter(|v| !v.is_empty() && version_shape(v)) else {
         return String::new();
     };
-    if plugin == DAEMON_VERSION {
+    if crate::release_check::same_version(plugin, DAEMON_VERSION) {
         return String::new();
     }
     let head = format!("Pseudolife-MCP: plugin {plugin} and daemon {DAEMON_VERSION} differ");

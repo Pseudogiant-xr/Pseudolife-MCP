@@ -9,7 +9,10 @@ The audit covers master `ac275ac984178570cae449a92be7192989247995`
 #1126 added the reranker tie entry and clarified the model-provisioning row.
 Those two rows were reconciled against `ac275ac9`; the daemon implementation
 did not change between these two heads. This is source verification, not a
-new differential, installed-execution or recovery proof.
+new differential, installed-execution or recovery proof. R2 subsequently closed
+the two stats projection entries with the shared REST handler and authenticated
+REST/MCP/REST and token-gate coverage; the residual route family contains only
+the five D9-retired routes with no frontend caller.
 
 Under D7, behaviour with a caller must close before G2. Presentation and
 no-caller rows remain explicit dispositions for the maintainer; the two
@@ -28,9 +31,9 @@ closed no-spawn planning difference; the counts below include these two rows.
 | D7 bucket | Entries |
 |---|---:|
 | presentation | 17 |
-| behaviour with no caller | 68 |
-| behaviour with a caller | 131 |
-| closed | 46 |
+| behaviour with no caller | 69 |
+| behaviour with a caller | 127 |
+| closed | 49 |
 | **Total** | **262** |
 
 ## Behaviour with a caller: B14b routing
@@ -71,9 +74,8 @@ whose remaining item is a proof keeps that boundary visible in its entry.
 | [The 2026-07-28 stateless era (an `MCP-Protocol-Version` header outside the handshake versions, `_meta` envelopes, `subscriptions/listen`)](mcp-surface-w2-g/the-2026-07-28-stateless-era-an-mcp.md) | direct `claude mcp add --transport http` client documented in `README.md`, using the modern SDK protocol | B6 MCP transport; R2 direct-client compatibility |
 | [Shadow telemetry and dream status](read-only-shadow/shadow-telemetry-and-dream-status.md) | shadow deployment `ops/docker-compose.rust-shadow.yml` and Console dream/duplicates readers (`frontend/src/lib/api/config.ts`, `frontend/src/lib/api/review.ts`) | B16 read-only shadow; B11 shadow activation via R4 |
 | [HTTP-BODY-LIMITS: cap enforced at frame granularity](request-parsing-edges-canonical/http-body-limits-cap-enforced-at-frame.md) | HTTP clients in `rust/shim/src/raw_http.rs` and `pseudolife_memory/shim.py` after an early/body-limit refusal | B6 MCP/HTTP transport |
-| [Every Console route in `harness/goldens/routes.json` other than `GET /api/search`, the coordination view of `GET /api/agents`, `POST /api/daemon-notice`, `POST /api/episodes/rename`, `/merge` and `/prune`, `GET /api/briefing`, `POST /api/episode/start` and `/end`, the reads `read/console.rs` serves (the `w2d-console-projections` row below), the graph/recall/dream reads `read/graph.rs` serves, `/api/agents`' default view, the maintainer reads, all seven `POST /api/maintainer/*` actions and `/api/config`, `POST /api/dream/run`, after all gates](routes-whose-handlers-belong-to/every-console-route-in-harness-goldens.md) | `pseudolife_memory/move_cli.py` target-readiness probe GET /api/stats (also `rust/shim/src/cli/move_cli.rs`) | B10d via R2 (stats); B2r (retired route disposition) |
 | [Console static dir](startup-and-configuration/console-static-dir.md) | Console requests from `frontend/src/main.ts` to `/ui` on a native or image launch | B8 models/image via R3; B11 installed layout via R4/R5 |
-| [CPU precision](startup-and-configuration/cpu-precision.md) | default `embedding.cpu_dtype: auto` in `pseudolife_memory/utils/config.py::EmbeddingConfig`, used by daemon search/store | B8 models/image via R3 |
+| [CPU precision](startup-and-configuration/cpu-precision.md) | default `embedding.cpu_dtype: auto` and existing explicit bf16 settings, used by daemon search/store | R10 actionable refusal under D4; B8 bf16 export follow-up |
 | [Embedding model](startup-and-configuration/embedding-model.md) | daemon `Service::init` and model configuration through `pseudolife_memory/utils/config.py::EmbeddingConfig` | B8 models/image via R3; B11 provisioning via R4/R5 |
 | [Plugin dir for `hooks_digest`](startup-and-configuration/plugin-dir-for-hooks-digest.md) | `pseudolife_memory/doctor_cli.py::_codex_hooks_line` and `rust/shim/src/cli/doctor/mod.rs` health digest checks on a native launch | B11 runtime/install layout via R4/R5 |
 | [R5-CODEX-BOOTSTRAP-AUTHORITY](startup-and-configuration/r5-codex-bootstrap-authority.md) | Native Codex credential bootstrap through `setup::codex::configure_credential_file` | R5 / B11 installers and client registration |
@@ -82,11 +84,9 @@ whose remaining item is a proof keeps that boundary visible in its entry.
 | [YAML dialect](startup-and-configuration/yaml-dialect.md) | existing Python config.yaml files read by `rust/daemon/src/config.rs::load` on engine cutover | B15 configuration/environment; B11 existing-config cutover via R4/R5 |
 | [`config-write-restart-only`: `POST /api/config` on a live knob](w2-d-completion-boundary-2026-10/config-write-restart-only-post-api.md) | `frontend/src/lib/api/config.ts::configApi.write`, used by `frontend/src/views/Settings.svelte` | B4 runtime configuration; B2d config API |
 | [`POST /api/config` over a config.yaml this daemon cannot rewrite exactly: a YAML timestamp or `!!binary` value, a mapping or list shared through an anchor and alias (a merge of a mapping of scalars is fine), an integer past 64 bits](w2-d-completion-boundary-2026-10/post-api-config-over-a-config-yaml-this.md) | `frontend/src/lib/api/config.ts::configApi.write` against an existing Python-authored config.yaml during engine cutover | B15 configuration/environment; B2d config API |
-| [`w2d-console-projections`](w2-d-completion-boundary-2026-10/w2d-console-projections.md) | `pseudolife_memory/move_cli.py` GET /api/stats target probe, with native move in `rust/shim/src/cli/move_cli.rs` | B10d via R2 (D9 moved stats from B2a) |
 | [`w2d-model-provisioning`](w2-d-completion-boundary-2026-10/w2d-model-provisioning.md) | `rust/daemon/src/read/search_route.rs::params_for` forwards `cfg.reranker.model_name`; `LazyReranker::model` loads the fixed bundle. `ops/provision-daemon-models.sh` invokes default provisioning on Rust image startup. | B8/B15 configured model support or disposition; R3/R4/R5 / B11 installed provisioning |
 | [Casefold in slot keys and pin scope](w2-d-get-api-search/casefold-in-slot-keys-and-pin-scope.md) | `pseudolife_memory/mcp_server.py::memory_fact_set` entity/attribute inputs and cortex search via `rust/daemon/src/read/cortex_search.rs` | B1 canonical identity; B2a search |
 | [Cross-encoder model](w2-d-get-api-search/cross-encoder-model.md) | reranked `memory_search`/GET search configured through `pseudolife_memory/utils/config.py::RerankerConfig` | B8 models/image via R3; B11 provisioning via R4/R5 |
-| [`memory_stats` `GET /api/stats`](w2-d-get-api-search/memory-stats-get-api-stats.md) | `pseudolife_memory/move_cli.py` target probe GET /api/stats; native counterpart `rust/shim/src/cli/move_cli.rs` | B10d via R2 |
 | [`memory_stats` `slot_index_shadow_divergences` and `weights_reset`](w2-d-get-api-search/memory-stats-slot-index-shadow.md) | MCP `memory_stats` after CMS retrieval shadow checks or startup with unreadable legacy weights | B2a search diagnostics; B11 legacy disposition via R4/R5 |
 | [`memory_stats` `true_drops` under a multi-band preset](w2-d-get-api-search/memory-stats-true-drops-under-a-multi.md) | opt-in multi-band presets in `pseudolife_memory/utils/config.py` used by `memory_store` and `memory_stats` | B4 multi-band storage |
 | [Pin-scope word characters, non-ASCII](w2-d-get-api-search/pin-scope-word-characters-non-ascii.md) | `pseudolife_memory/mcp_server.py::memory_search` cortex block and `frontend/src/lib/api/stream.ts::streamApi.search` | B2a cortex search |
@@ -98,7 +98,6 @@ whose remaining item is a proof keeps that boundary visible in its entry.
 | [`custom` band `retention_policy` other than `balanced`](write-path-w2-e/custom-band-retention-policy-other-than.md) | `rust/daemon/src/store.rs::store_body` at capacity with a custom preset loaded by `config::load` | B14b W2-E custom-retention closure |
 | [`entries.embedding`, `entries.surprise`](write-path-w2-e/entries-embedding-entries-surprise.md) | `rust/daemon/src/store.rs::mcp_memory_store` through `cms_store`, then retrieval through `rust/daemon/src/read/mcp_search.rs` | B14b W2-E numerical admission and retrieval closure |
 | [Entry insert fails after eviction](write-path-w2-e/entry-insert-fails-after-eviction.md) | `rust/daemon/src/store.rs::mcp_memory_store` during insert failure after capacity eviction | B4 lifecycle / B14b W2-E failed-store recovery |
-| [The daemon version the session-start notices compare and print](write-path-w2-e/hooks-and-the-cli-s-episode/the-daemon-version-the-session-start.md) | `plugin/hooks/session-start.sh` and `plugin/hooks/lifecycle.ps1` send `plugin_version` to `/api/hook/session-start` | R3 release-version contract / B11 installed handshake |
 | [The hooks notice on session-start when `PSEUDOLIFE_PLUGIN_DIR` is unset](write-path-w2-e/hooks-and-the-cli-s-episode/the-hooks-notice-on-session-start-when.md) | `plugin/hooks/session-start.sh` and `plugin/hooks/lifecycle.ps1` on a checkout daemon without `PSEUDOLIFE_PLUGIN_DIR` | R4 installed hooks/runtime handshake / R3 image environment |
 | [The maintainer's conductor's reminder line on `memory-changes` (`?agent=`), after the cursor and any note](write-path-w2-e/hooks-and-the-cli-s-episode/the-maintainer-s-conductor-s-reminder.md) | `plugin/hooks/session-start.sh` memory-changes request and `plugin/hooks/lifecycle.ps1` send the board agent id | B5 coordination hook-reminder closure |
 | [The cosine `_cosine` (`consolidation.py:81-92`)](write-path-w2-e/memory-consolidation-candidates/the-cosine-cosine-consolidation-py-81-92.md) | `rust/daemon/src/consolidation_tools.rs::mcp_memory_consolidation_candidates` | B14b W2-E consolidation numeric-boundary closure |
