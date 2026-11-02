@@ -11,10 +11,9 @@
 //!
 //! A write validates and persists the patch as Python does (backup, atomic
 //! replace, PyYAML's `safe_dump` bytes: `yaml_dump.rs`, over the file as
-//! PyYAML reads it: `yaml_load.rs`) but applies nothing to the running
-//! daemon: every patched knob answers `restart_required` and shows its
-//! `saved` value until the next start (declared divergence
-//! `config-write-restart-only`).
+//! PyYAML reads it: `yaml_load.rs`). Implemented live knobs publish a new
+//! runtime snapshot after persistence. Other knobs answer `restart_required`
+//! and show their `saved` value until the next start.
 
 mod yaml_dump;
 mod yaml_load;
@@ -726,18 +725,32 @@ fn io_text(e: &std::io::Error) -> String {
 
 /// `write_config`: validate the `{dotted.path: value}` patch, merge it into
 /// config.yaml (a timestamped backup first, then an atomic replace), and
-/// answer `{applied, restart_required, config_path, backup}`. Nothing is
-/// applied to the running daemon (`config-write-restart-only`).
-pub(crate) fn write_config(env: Env, data_dir: &Path, patch: &Value) -> Result<Value, WriteError> {
-    write_config_with(env, data_dir, patch, pending())
+/// answer `{applied, restart_required, config_path, backup}`.
+pub(crate) fn write_config(
+    service: &crate::service::Service,
+    env: Env,
+    patch: &Value,
+) -> Result<Value, WriteError> {
+    write_config_inner(env, &service.data_dir, patch, pending(), Some(service))
 }
 
-/// [`write_config`], recording the saved knobs in `pending`.
+/// File-only oracle cases exercise persistence without a running service.
+#[cfg(test)]
 fn write_config_with(
     env: Env,
     data_dir: &Path,
     patch: &Value,
     pending: &Mutex<HashSet<String>>,
+) -> Result<Value, WriteError> {
+    write_config_inner(env, data_dir, patch, pending, None)
+}
+
+fn write_config_inner(
+    env: Env,
+    data_dir: &Path,
+    patch: &Value,
+    pending: &Mutex<HashSet<String>>,
+    service: Option<&crate::service::Service>,
 ) -> Result<Value, WriteError> {
     static WRITE_LOCK: Mutex<()> = Mutex::new(());
     let _held = WRITE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
@@ -827,17 +840,59 @@ fn write_config_with(
     let _ = std::fs::remove_file(&tmp);
     replaced.map_err(|e| WriteError::Failed(io_text(&e)))?;
 
-    let paths: Vec<&str> = coerced.iter().map(|(p, _)| *p).collect();
-    pending
-        .lock()
-        .expect("pending knobs")
-        .extend(paths.iter().map(|p| (*p).to_string()));
+    let applied = service.map_or_else(Vec::new, |service| {
+        service.update_runtime_config(|config| apply_live(config, &coerced))
+    });
+    let restart: Vec<&str> = coerced
+        .iter()
+        .map(|(path, _)| *path)
+        .filter(|path| !applied.iter().any(|p| p == path))
+        .collect();
+    let mut pending = pending.lock().expect("pending knobs");
+    for path in &applied {
+        pending.remove(path);
+    }
+    pending.extend(restart.iter().map(|path| (*path).to_string()));
     Ok(json!({
-        "applied": [],
-        "restart_required": paths,
+        "applied": applied,
+        "restart_required": restart,
         "config_path": shown,
         "backup": backup,
     }))
+}
+
+/// Only knobs whose actual consumers read the runtime snapshot belong here.
+/// Values have already passed the shared coercion and persistence checks.
+fn apply_live(config: &mut Config, changes: &[(&str, Node)]) -> Vec<String> {
+    let mut applied = Vec::new();
+    for (path, node) in changes {
+        let value = node_value(node);
+        match *path {
+            "memory.surprise_threshold" => {
+                config.memory.surprise_threshold = value.as_f64().unwrap()
+            }
+            "memory.compaction.enabled" => {
+                config.memory.compaction_enabled = value.as_bool().unwrap()
+            }
+            "memory.compaction.keep_per_slot" => {
+                config.memory.compaction_keep_per_slot = value.as_i64().unwrap()
+            }
+            "memory.compaction.min_age_days" => {
+                config.memory.compaction_min_age_days = value.as_f64().unwrap()
+            }
+            "memory.retrieval_log.retention_days" => {
+                config.memory.retrieval_retention_days = value.as_f64().unwrap()
+            }
+            "memory.lessons.signal_retention_days" => {
+                config.memory.lessons_signal_retention_days = value.as_i64().unwrap()
+            }
+            "memory.dream.runs_keep" => config.dream.runs_keep = value.as_i64().unwrap(),
+            _ => continue,
+        }
+        config.user_leaves.insert((*path).into(), value);
+        applied.push((*path).to_string());
+    }
+    applied
 }
 
 /// Python truthiness of a loaded document.

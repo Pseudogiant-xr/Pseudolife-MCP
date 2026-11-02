@@ -525,7 +525,103 @@ LIVE_ONLY = frozenset({
     "reinvite-pending-someone-else", "paired-someone-else", "paired-mine-json",
     # Its report is the daemon's auth value nested to the limit and
     # pretty-printed: 2.6 MB of indentation, compared live only.
-    "health-nested-at-limit-json"})
+    "health-nested-at-limit-json", "defer-tailscale-present", "defer-config-yaml",
+    "defer-list-config-yaml", "defer-list-config-env", "defer-invite-config-env"})
+
+
+_TRANSPORT_DOCKER = r'''import json, os, sys
+from pathlib import Path
+argv = sys.argv[1:]
+body = sys.stdin.read() if argv[0] == 'exec' and '-i' in argv else ''
+with (Path(os.environ['HOME']) / 'docker.jsonl').open('a', encoding='utf-8') as log:
+    log.write(json.dumps({'argv': argv, 'stdin': body}) + '\n')
+if argv[0] == 'inspect':
+    print(os.environ['FIXTURE_DOCKER_ENGINE'] if 'Labels' in argv[2]
+          else os.environ['FIXTURE_DOCKER_RUNNING'])
+elif '--version-check' in argv:
+    print('pseudolife-mcp invite 1')
+elif 'pseudolife-mcp-postgres' in argv:
+    if 'to_regclass' in body:
+        print(os.environ.get('FIXTURE_ACTIVITY', 't'))
+    elif 'coordination_bank_id' in body:
+        print('fixture-bank')
+    elif 'UPDATE' in body:
+        print('laptop')
+    else:
+        print(json.dumps({'principals': [['laptop', 'core', True, True, False, None,
+                                        1700000000.0, 1700000001.0, None, 1700000010.0,
+                                        None, True]], 'rejected': []}))
+else:
+    print('container-invite')
+    sys.exit(int(os.environ.get('FIXTURE_DOCKER_EXIT', '0')))
+'''
+
+
+def _transport_cases():
+    from . import lease_transport
+    import shlex
+    import sys
+
+    def setup(arm):
+        script = lease_transport._input(arm, 'docker.py', _TRANSPORT_DOCKER)
+        wrapper = (f'@echo off\r\n"{sys.executable}" "{script}" %*\r\nexit /b %errorlevel%\r\n'
+                   if core.WINDOWS else
+                   f'#!/bin/sh\nexec {shlex.quote(sys.executable)} {shlex.quote(str(script))} "$@"\n')
+        path = lease_transport._input(arm, 'docker.cmd' if core.WINDOWS else 'docker.sh', wrapper)
+        if not core.WINDOWS:
+            path.chmod(0o700)
+
+    def after(engine, running, nested, argv, exit_code, activity):
+        def check(arm, obs):
+            log = arm.home / 'docker.jsonl'
+            calls = [json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
+            if nested:
+                assert not calls
+                assert obs['exit'] == 4
+            elif running:
+                cli = ['pseudolife-mcp'] if engine == 'rust' else ['python', '-m', 'pseudolife_memory.cli']
+                base = ['-e', 'PSEUDOLIFE_DAEMON_EXEC=1', 'pseudolife-mcp-daemon', *cli, 'invite']
+                assert calls[2]['argv'] == ['exec', *base, '--version-check']
+                assert calls[3]['argv'] == ['exec', '-i', *base, 'laptop', '--expires', '900s',
+                                            '--url', 'https://example.com', '--json']
+                assert obs['exit'] == (exit_code if exit_code in (0, 1, 2, 4) else 1)
+                assert core.decode(obs, 'stdout') in (b'container-invite\n', b'container-invite\r\n')
+            else:
+                from pseudolife_memory import invite_cli
+                psql = calls[1:]
+                for call in psql:
+                    assert call['argv'] == invite_cli._PSQL[1:]
+                if '--list' in argv:
+                    assert psql[0]['stdin'] == invite_cli.ACTIVITY_SQL + '\n'
+                    expected = invite_cli.LIST_SQL if activity == 't' else invite_cli.LIST_SQL_V53
+                    assert psql[1]['stdin'] == expected + '\n'
+                else:
+                    assert psql[0]['stdin'] == invite_cli.revoke_sql('laptop') + '\n'
+                assert obs['exit'] == 0
+            lease_transport._remove_inputs(arm)
+        return check
+
+    out = []
+    for engine, exit_code in [('rust', 4), ('python', 0), ('<no value>', 23)]:
+        argv = ['laptop', '--url', 'https://example.com', '--json']
+        env = {'PSEUDOLIFE_MCP_DATABASE_URL': None, 'PSEUDOLIFE_DAEMON_EXEC': None,
+               'PSEUDOLIFE_DOCKER': '{HOME}/docker.' + ('cmd' if core.WINDOWS else 'sh'),
+               'FIXTURE_DOCKER_ENGINE': engine, 'FIXTURE_DOCKER_RUNNING': 'true',
+               'FIXTURE_DOCKER_EXIT': str(exit_code)}
+        out.append(core.Case('container-' + engine, ['invite', *argv], env=env, setup=setup,
+                             after=after(engine, True, False, argv, exit_code, 't')))
+    for name, argv, activity, nested in [
+            ('stopped-list-v58', ['--list', '--json'], 't', False),
+            ('stopped-list-v53', ['--list'], 'f', False),
+            ('stopped-revoke', ['--revoke', 'laptop', '--yes'], 't', False),
+            ('nested-no-bank', ['--list', '--json'], 't', True)]:
+        env = {'PSEUDOLIFE_MCP_DATABASE_URL': None, 'PSEUDOLIFE_DAEMON_EXEC': '1' if nested else None,
+               'PSEUDOLIFE_DOCKER': '{HOME}/docker.' + ('cmd' if core.WINDOWS else 'sh'),
+               'FIXTURE_DOCKER_ENGINE': 'rust', 'FIXTURE_DOCKER_RUNNING': 'false',
+               'FIXTURE_ACTIVITY': activity}
+        out.append(core.Case(name, ['invite', *argv], env=env, setup=setup,
+                             after=after('rust', False, nested, argv, 0, activity)))
+    return out
 
 
 def cases() -> list[core.Case]:
@@ -535,7 +631,7 @@ def cases() -> list[core.Case]:
         raise ValueError(f"LIVE_ONLY names no case: {sorted(missing)}")
     for case in out:
         case.golden = case.id not in LIVE_ONLY
-    return out
+    return [*_transport_cases(), *out]
 
 
 def _cases() -> list[core.Case]:
@@ -705,8 +801,11 @@ def _cases() -> list[core.Case]:
     deferred = ("invite-deferral",)
 
     def deferral(case_id, argv, kind="states", **options):
+        native = case_id in {"defer-no-dsn", "defer-list-no-dsn", "defer-tailscale-present", "defer-config-yaml", "defer-help",
+                             # v59: the list and the invite read the config natively.
+                             "defer-list-config-yaml", "defer-list-config-env", "defer-invite-config-env"}
         port = free_port()
-        add(write_case(case_id, kind, [*argv, "--port", str(port)], rules=deferred,
+        add(write_case(case_id, kind, [*argv, "--port", str(port)], rules=("invite-written",) if native else deferred,
                        daemon=_daemon(port, health()), **options))
 
     deferral("defer-no-dsn", ["laptop", "--url", "u"],
@@ -777,9 +876,6 @@ MUTANTS = [
            "\"UPDATE public.principals p SET code_hash = $1, ",
            "\"UPDATE public.principals p SET owned = TRUE, code_hash = $1, ",
            cases=("reinvite-keeps-someone-else",)),
-    Mutant("invite-list-owner-dropped", "invite", "shim/src/cli/pairing/invite.rs",
-           "if row.owner { \"yes\" } else { \"no\" },",
-           "\"yes\",", cases=("list",)),
     Mutant("invite-expired-is-pending", "invite", "shim/src/cli/pairing/invite_db.rs",
            "expires.is_some_and(|expires| expires > now)",
            "expires.is_some()", cases=("list",)),

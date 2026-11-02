@@ -474,7 +474,9 @@ def fixture(args):
                         capture_output=True, timeout=120)
                     refused = proc.returncode != 0 and not proc.stdout
                     if case == "bf16 ONNX":
-                        refused = refused and b"deferred: bf16 ONNX" in proc.stderr
+                        refused = refused and all(part in proc.stderr for part in (
+                            b"embedding.cpu_dtype", b"PSEUDOLIFE_EMBEDDING_CPU_DTYPE",
+                            b"fp32", b"auto", b"Python engine"))
                     report["refusals"].append({"case": case, "refused": bool(refused)})
                 saved_prompt_file = root / "model/config_sentence_transformers.json"
                 saved_prompt_file.write_text(json.dumps({"prompts": {"query": "query "}, "default_prompt_name": "query"}), encoding="utf-8")

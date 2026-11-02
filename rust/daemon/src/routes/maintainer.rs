@@ -37,7 +37,7 @@ pub(super) async fn route(req: &mut Request<'_>) -> Option<Response> {
             let svc = &req.app.service;
             Some(
                 match crate::config_io::read_config(
-                    &svc.config,
+                    &svc.runtime_config(),
                     &crate::config_io::process_env,
                     &svc.data_dir,
                 ) {
@@ -57,8 +57,8 @@ pub(super) async fn route(req: &mut Request<'_>) -> Option<Response> {
             };
             Some(
                 match crate::config_io::write_config(
+                    &req.app.service,
                     &crate::config_io::process_env,
-                    &req.app.service.data_dir,
                     &patch,
                 ) {
                     Ok(answer) => json_response(200, &answer),

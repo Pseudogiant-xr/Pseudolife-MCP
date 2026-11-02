@@ -249,7 +249,10 @@ mod owner_tests {
 
     fn env(map: &[(&str, &str)], single: bool) -> EnvTokens {
         EnvTokens {
-            map: map.iter().map(|(t, p)| (t.to_string(), p.to_string())).collect(),
+            map: map
+                .iter()
+                .map(|(t, p)| (t.to_string(), p.to_string()))
+                .collect(),
             single: single.then(|| "t0".to_string()),
         }
     }
