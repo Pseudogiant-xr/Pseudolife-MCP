@@ -178,10 +178,7 @@ fn invite_version_check_still_answers_an_older_host_cli() {
     let output = run(check, b"");
     assert!(output.status.success());
     let stdout = String::from_utf8(output.stdout).unwrap();
-    assert!(
-        stdout.starts_with("pseudolife-mcp invite 1"),
-        "{stdout:?}"
-    );
+    assert!(stdout.starts_with("pseudolife-mcp invite 1"), "{stdout:?}");
     assert!(stdout.lines().any(|line| line == "pseudolife-mcp invite 2"));
 }
 

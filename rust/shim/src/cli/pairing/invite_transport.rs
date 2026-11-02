@@ -553,18 +553,27 @@ mod tests {
     #[test]
     fn the_image_version_reads_as_the_oracle_does() {
         let zeros = format!("pseudolife-mcp invite {}2\n", "0".repeat(5000));
-        let huge = format!("pseudolife-mcp invite 1\npseudolife-mcp invite {}\n", "1".repeat(25));
+        let huge = format!(
+            "pseudolife-mcp invite 1\npseudolife-mcp invite {}\n",
+            "1".repeat(25)
+        );
         for (stdout, version) in [
             // A lone \r is no line break: one line, not an exact match.
             ("pseudolife-mcp invite 1\rpseudolife-mcp invite 2\n", None),
-            ("pseudolife-mcp invite 1\n\rpseudolife-mcp invite 2\n", Some(1)),
+            (
+                "pseudolife-mcp invite 1\n\rpseudolife-mcp invite 2\n",
+                Some(1),
+            ),
             // A \r ends a line only before \n.
             ("pseudolife-mcp invite 2\r", None),
             ("pseudolife-mcp invite 2\r\r\n", None),
             ("pseudolife-mcp invite 2", Some(2)),
             // A number past u64 is ignored; leading zeros are not.
             (huge.as_str(), Some(1)),
-            ("pseudolife-mcp invite 18446744073709551615\n", Some(u64::MAX)),
+            (
+                "pseudolife-mcp invite 18446744073709551615\n",
+                Some(u64::MAX),
+            ),
             ("pseudolife-mcp invite 18446744073709551616\n", None),
             (zeros.as_str(), Some(2)),
             ("pseudolife-mcp invite 0\n", Some(0)),
@@ -572,9 +581,15 @@ mod tests {
             ("\n", None),
             // Decimal digits other than ASCII are not a version.
             ("pseudolife-mcp invite \u{0662}\n", None),
-            ("pseudolife-mcp invite 1\npseudolife-mcp invite \u{ff12}\n", Some(1)),
+            (
+                "pseudolife-mcp invite 1\npseudolife-mcp invite \u{ff12}\n",
+                Some(1),
+            ),
             // Other Unicode line breaks split nothing.
-            ("pseudolife-mcp invite 1\u{2028}pseudolife-mcp invite 2\n", None),
+            (
+                "pseudolife-mcp invite 1\u{2028}pseudolife-mcp invite 2\n",
+                None,
+            ),
         ] {
             assert_eq!(image_version(stdout), version, "{stdout:?}");
         }

@@ -743,9 +743,10 @@ async fn local(
             &created,
             url,
             args.expires.unwrap_or(900),
-            args.owned,
-            ownership,
-            ownership_note(forwarded(), args.caller_takes_ownership),
+            // The note is offered only where the flag can work: a bank with
+            // the column, and neither flag given.
+            (ownership && args.owned.is_none())
+                .then(|| ownership_note(forwarded(), args.caller_takes_ownership)),
         )),
         Ok(Err(refusal)) => Ok(report.fail_units(EXIT_REFUSED, refusal)),
         Err(DbError::UndefinedTable) => Ok(report.fail(EXIT_REFUSED, NO_TABLE)),
@@ -777,16 +778,15 @@ fn minutes(seconds: u32) -> u32 {
     }
 }
 
-/// `_invite`'s report, after the row was written.
+/// `_invite`'s report, after the row was written. `ownership_note`: the
+/// `--someone-else` note, printed when the row is the owner's.
 fn invite_report(
     report: &mut Report,
     name: &str,
     created: &invite_db::Created,
     url: Option<String>,
     seconds: u32,
-    owned: Option<bool>,
-    ownership: bool,
-    ownership_note: &str,
+    ownership_note: Option<&str>,
 ) -> u8 {
     let (Some(raw), Some(expires_at)) = (created.code.as_deref(), created.expires_at) else {
         // A paired machine's ownership alone: no code, nothing to re-pair.
@@ -853,8 +853,8 @@ fn invite_report(
     if listed_in_config(name) {
         report.note(&format!("note: {name} is already listed in coordination.allowed_principals; the invite gives it a token"));
     }
-    if ownership && created.owned && owned.is_none() {
-        report.note(ownership_note);
+    if let Some(note) = ownership_note.filter(|_| created.owned) {
+        report.note(note);
     }
     report.note("an invited machine can read and write the whole bank and use the agent board, but not change the daemon's configuration");
     report.finish(EXIT_OK)
