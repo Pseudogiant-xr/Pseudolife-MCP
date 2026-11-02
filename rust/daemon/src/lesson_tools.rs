@@ -138,6 +138,14 @@ pub(crate) async fn annotate_staleness(
     Ok(())
 }
 
+// The binder admits any integer >= 1; past usize, everything.
+fn search_width(args: &Map<String, Value>) -> usize {
+    args.get("top_k").filter(|v| !v.is_null()).map_or(5, |v| {
+        v.as_u64()
+            .map_or(usize::MAX, |n| usize::try_from(n).unwrap_or(usize::MAX))
+    })
+}
+
 fn mcp_memory_lesson_search<'a>(app: &'a crate::http::App, call: ToolCall<'a>) -> ToolFuture<'a> {
     Box::pin(async move {
         let a = call.args;
@@ -147,11 +155,7 @@ fn mcp_memory_lesson_search<'a>(app: &'a crate::http::App, call: ToolCall<'a>) -
             .unwrap_or("")
             .to_string();
         let m = &app.service.config.memory;
-        // The binder admits any integer >= 1; past usize, everything.
-        let top_k = a.get("top_k").map_or(5, |v| {
-            v.as_u64()
-                .map_or(usize::MAX, |n| usize::try_from(n).unwrap_or(usize::MAX))
-        });
+        let top_k = search_width(a);
         let verbose = a.get("verbose").and_then(Value::as_bool).unwrap_or(false);
         let floor = 0.0f64.max(m.lessons_min_confidence);
         let log = m.retrieval_log_enabled;
@@ -267,4 +271,26 @@ async fn lesson_search(
         Value::Array(rows.into_iter().map(Value::Object).collect()),
     );
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn omitted_lesson_width_keeps_the_default_after_binding() {
+        assert_eq!(search_width(json!({}).as_object().unwrap()), 5);
+        // The binder fills this default for omission, but still rejects
+        // an explicitly supplied null through the integer schema.
+        assert_eq!(search_width(json!({"top_k": null}).as_object().unwrap()), 5);
+        assert_eq!(search_width(json!({"top_k": 2}).as_object().unwrap()), 2);
+        assert_eq!(
+            search_width(
+                json!({"top_k": 18446744073709551616u128})
+                    .as_object()
+                    .unwrap()
+            ),
+            usize::MAX
+        );
+    }
 }
