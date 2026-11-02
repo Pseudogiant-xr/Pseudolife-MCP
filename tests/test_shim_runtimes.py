@@ -380,6 +380,57 @@ def test_abandoned_installs_and_moved_aside_launchers_are_cleaned(tmp_path, shap
     assert not leftover.exists() and not aside.exists()
 
 
+@pytest.mark.parametrize("evidence", ["complete", "incomplete", "unmarked", "reserved", "malformed", "unreadable", "unknown"])
+def test_python_pruning_retains_native_and_unknown_runtime_evidence(tmp_path, shape, tools, monkeypatch, evidence):
+    layout = _layout(tmp_path, shape)
+    python = _install(layout, tools, "0.15.0")
+    native = layout.root / "000009"
+    native.mkdir()
+    marker = native / rt.MARKER
+    if evidence not in ("unmarked", "reserved"):
+        marker.write_text(json.dumps({"format": 1, "kind": "native", "version": "0.16.0"}), encoding="utf-8")
+    if evidence in ("complete", "unmarked"):
+        (native / _console_name(shape)).write_bytes(b"native executable")
+    if evidence == "malformed":
+        marker.write_text("{not json", encoding="utf-8")
+    if evidence == "unknown":
+        marker.write_text(json.dumps({"format": 2, "kind": "future"}), encoding="utf-8")
+    if evidence == "unreadable":
+        read_text = Path.read_text
+
+        def denied(path, *args, **kwargs):
+            if path == marker:
+                raise PermissionError("runtime marker is unreadable")
+            return read_text(path, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "read_text", denied)
+    two_hours_ago = time.time() - 7200
+    os.utime(native, (two_hours_ago, two_hours_ago))
+    result = rt.remove_unused(layout, processes=lambda: [])
+    assert result["removed"] == [] and str(native) in result["kept"]
+    assert native.is_dir()
+    assert rt.current_runtime(layout).path == python.path
+    # Allocation must continue past foreign sequences, including incomplete ones.
+    assert _install(layout, tools, "0.15.1").name == "000010"
+
+
+def test_native_markers_are_never_used_to_build_a_python_launcher(tmp_path, shape, tools):
+    layout = _layout(tmp_path, shape)
+    python = _install(layout, tools, "0.15.0")
+    native = layout.root / "000009"
+    # A native marker must remain foreign even if venv-shaped files exist.
+    _scripts(native, shape).mkdir(parents=True)
+    (_scripts(native, shape) / _console_name(shape)).write_bytes(b"not a Python runtime")
+    (native / rt.MARKER).write_text(json.dumps({"format": 1, "kind": "native"}), encoding="utf-8")
+    assert [r.path for r in rt.list_runtimes(layout)] == [python.path]
+    assert rt.running_runtime(layout, prefix=str(native)) is None
+    if shape == "windows":
+        layout.launcher.unlink()
+        tools.calls.clear()
+        assert rt.ensure_launcher(layout, run=tools) == "written"
+        assert Path(tools.calls[0][0]) == _scripts(python.path, shape) / _python_name(shape)
+
+
 def test_the_helper_itself_never_counts_as_holding_a_runtime(tmp_path, shape, tools):
     layout = _layout(tmp_path, shape)
     old = _install(layout, tools, "0.15.0")

@@ -39,7 +39,8 @@ retained after pruning. The marker has these fields:
 Markers are owner-only files, read using the existing credential/state security
 boundary. A native selector rejects redirected paths, malformed markers,
 unexpected fields, wrong targets, missing executables, checksum mismatches and
-non-executable POSIX files. It chooses the highest verified native sequence.
+non-executable POSIX files. It verifies candidates newest first and chooses the
+first valid native sequence, without hashing older retained binaries on launch.
 Legacy Python markers and incomplete or forged records never enter that set.
 Verification checks consistency and ownership; it is not a release signature
 or protection against a malicious process already acting as the installing user.
@@ -60,9 +61,13 @@ dispatch; selection uses executable paths, not an environment flag that could
 cause recursive launches or bypass verification.
 
 POSIX uses `exec`, retaining signal delivery, exit status and terminal ownership.
-Windows starts the child suspended through the existing `process-wrap` job
-wrapper, assigns its job before execution, and uses kill-on-close ownership.
-The launcher waits for the child and preserves its Windows process exit code;
+The usage-lock descriptor survives this one exec; the runtime acquires its own
+pin and marks the verified inherited descriptor close-on-exec before dispatch,
+so detached children cannot retain an old session's pin.
+Windows starts the child suspended, assigns its job before execution, and uses
+kill-on-close ownership.
+Explicitly detached daemon and updater launches can break away from that job;
+ordinary child processes remain owned by it. The launcher waits for the child and preserves its Windows process exit code;
 console cancellation reaches the child rather than abandoning it. Per-runtime
 shared usage locks remain held for the native child's lifetime.
 
@@ -78,30 +83,39 @@ Installation holds `.native-update.lock`, reserves a fresh sequence, writes and
 syncs the executable, activates the stable launcher, then atomically publishes
 the marker. Windows renames the old stable executable aside rather than
 overwriting a running image. If activation fails, its rollback guard restores
-the previous launcher and the new sequence is removed. Retained
-`*.old-native-*` launcher copies are recovery artifacts; the native updater
-does not automatically delete them, because they can include a running legacy
-Python launcher.
+the previous launcher by atomic rename and the new sequence is removed. A
+successful activation deletes its displaced launcher copy when the OS permits
+it; a locked legacy image or failed rollback retains `*.old-native-*` for
+recovery. Activation also invalidates the sibling Python launcher `.json` cache
+record, restoring it only if the original launcher is restored on rollback.
+Python's compatibility updater retains native and unreadable runtime directories
+and allocates subsequent venv sequences beside them; it never selects native
+markers as Python environments.
 
 ## Pruning and client state
 
 Pruning considers only verified native directories. It retains the newest,
 the updater's own runtime, process-held runtimes, registered paths and saved
 tunnel snapshot dependencies. It also checks the native usage lock before
-quarantining an old directory. Unknown process, registration or tunnel evidence
-removes nothing. On Windows, an inaccessible process image is conservatively
-unknown even if it probably belongs to another account, so pruning can retain
-all old runtimes on a restricted host. Legacy Python runtimes, incomplete
+quarantining an old directory. Unknown registration or tunnel evidence and
+ambiguous readable process evidence remove nothing. On Windows, inaccessible
+system processes do not veto pruning when the exclusive runtime usage lock can
+be acquired: a live native launcher holds the shared side of that lock. A
+readable process referencing a runtime still retains it. Legacy Python runtimes, incomplete
 directories and malformed markers are always retained for explicit recovery.
 
 Registration migration backs up each changed file privately, preserves unrelated
 entries and credentials, follows a dotfile symlink to its target, retains POSIX
-permission bits and validates Windows ownership. A concurrent change detected
+permission bits and validates Windows ownership, accepting normal inherited
+SYSTEM/Administrators access while rejecting other users' write access. A concurrent change detected
 before publication is left in place. Publication
 preserves the actual displaced file in an owner-only recovery directory, using
 atomic file exchange on POSIX and `ReplaceFileW` with a backup on Windows. If
 that displaced file differs from the observed input, the updater reports the
-conflict and recovery location; it never rolls back over another writer. An
+conflict and recovery location; it never rolls back over another writer. Cleanup
+retains the three newest verified successful backups for each exact target.
+Conflicted, unreadable, changed and unrecognized recovery evidence is retained;
+failed cleanup may leave a `.client-native-pruning-*` quarantine directory. An
 incomplete registration migration retains all runtimes. The only migrated
 arguments are
 the leading `-m pseudolife_memory[.cli]` pair; mode arguments remain. Native

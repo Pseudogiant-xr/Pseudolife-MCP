@@ -1,6 +1,8 @@
 use super::*;
 use std::collections::BTreeSet;
 
+/// `(pid, parent pid, image)`. An empty image records a Windows PID whose
+/// image could not be opened; it supplies tunnel liveness, never a path pin.
 pub type Process = (u32, u32, PathBuf);
 #[derive(Clone, Debug)]
 pub struct Evidence {
@@ -77,18 +79,16 @@ fn verify_process_evidence(rows: &mut Vec<Process>) -> Result<()> {
 }
 #[cfg(windows)]
 #[allow(unsafe_code)]
-fn verify_process_evidence(rows: &mut [Process]) -> Result<()> {
+fn verify_process_evidence(rows: &mut Vec<Process>) -> Result<()> {
     use windows_sys::Win32::{
-        Foundation::{CloseHandle, INVALID_HANDLE_VALUE},
+        Foundation::{CloseHandle, ERROR_NO_MORE_FILES, GetLastError, INVALID_HANDLE_VALUE},
         System::Diagnostics::ToolHelp::{
             CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW,
             TH32CS_SNAPPROCESS,
         },
     };
-    // The shared inspector skips processes it cannot query. For deletion that
-    // absence is unknown evidence, even if the process probably belongs to
-    // another account. Keep every runtime rather than infer its ownership.
-    unsafe {
+    let mut pids = Vec::new();
+    let completed = unsafe {
         let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
         if snapshot.is_null() || snapshot == INVALID_HANDLE_VALUE {
             return Err("process snapshot is unreadable; no runtime was removed".into());
@@ -96,18 +96,36 @@ fn verify_process_evidence(rows: &mut [Process]) -> Result<()> {
         let mut entry: PROCESSENTRY32W = std::mem::zeroed();
         entry.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
         let mut more = Process32FirstW(snapshot, &mut entry);
-        let mut unknown = more == 0;
         while more != 0 {
-            if entry.th32ProcessID > 4 && !rows.iter().any(|r| r.0 == entry.th32ProcessID) {
-                unknown = true;
-            }
+            pids.push((entry.th32ProcessID, entry.th32ParentProcessID));
             more = Process32NextW(snapshot, &mut entry);
         }
+        let completed = GetLastError() == ERROR_NO_MORE_FILES;
         CloseHandle(snapshot);
-        if unknown {
-            return Err(
-                "one or more process images could not be inspected; no runtime was removed".into(),
-            );
+        completed
+    };
+    windows_snapshot_evidence(rows, &pids, completed)
+}
+
+#[cfg(any(windows, test))]
+fn windows_snapshot_evidence(
+    rows: &mut Vec<Process>,
+    pids: &[(u32, u32)],
+    completed: bool,
+) -> Result<()> {
+    if !completed || pids.is_empty() {
+        return Err("process snapshot is unreadable; no runtime was removed".into());
+    }
+    if rows.iter().any(|(_, _, image)| !image.is_absolute()) {
+        return Err("a readable process image is ambiguous; no runtime was removed".into());
+    }
+    // Opening system or other-account processes is routinely denied. The
+    // exclusive lifetime usage lock, acquired before removal, is authoritative
+    // for native launches; an omitted image is not a readable path reference.
+    // Retain these PIDs so a live tunnel cannot disappear from the evidence.
+    for &(pid, ppid) in pids {
+        if !rows.iter().any(|row| row.0 == pid) {
+            rows.push((pid, ppid, PathBuf::new()));
         }
     }
     Ok(())
@@ -122,7 +140,12 @@ fn verify_process_evidence(rows: &mut Vec<Process>) -> Result<()> {
     if !output.status.success() {
         return Err("process image table is unreadable; no runtime was removed".into());
     }
-    for line in std::str::from_utf8(&output.stdout)
+    append_macos_process_images(rows, &output.stdout)
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn append_macos_process_images(rows: &mut Vec<Process>, bytes: &[u8]) -> Result<()> {
+    for line in std::str::from_utf8(bytes)
         .map_err(|_| "process image table is not UTF-8")?
         .lines()
     {
@@ -144,13 +167,19 @@ fn verify_process_evidence(rows: &mut Vec<Process>) -> Result<()> {
             .next()
             .ok_or("process image is unreadable; no runtime was removed")?
             .trim_start();
-        if !image.starts_with('/') {
+        // ps reports login shells by their conventional argv[0], such as
+        // "-zsh", rather than an absolute image path. Recognize exact standard
+        // shell markers; arbitrary relative or truncated paths remain unknown.
+        if !image.starts_with('/')
+            && !["-sh", "-bash", "-zsh", "-ksh", "-csh", "-tcsh", "-fish"].contains(&image)
+        {
             return Err("process image is unknown; no runtime was removed".into());
         }
         rows.push((pid, ppid, PathBuf::from(image)));
     }
     Ok(())
 }
+
 #[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
 fn verify_process_evidence(_: &mut Vec<Process>) -> Result<()> {
     Err("process image inspection is unavailable; no runtime was removed".into())
@@ -345,8 +374,8 @@ fn literal_paths(text: &str) -> Result<Vec<String>> {
     Ok(paths)
 }
 
-/// Call under `UpdateLock`. Unknown evidence is a result, never permission to
-/// delete. Only directories with a verified native marker are candidates:
+/// Call under `UpdateLock`. Evidence collection errors never permit deletion.
+/// Only directories with a verified native marker are candidates:
 /// legacy Python runtimes and malformed/incomplete directories remain intact.
 pub fn remove_unused(layout: &Layout, evidence: Result<Evidence>) -> Value {
     let mut removed = Vec::new();
@@ -430,3 +459,7 @@ pub fn remove_unused(layout: &Layout, evidence: Result<Evidence>) -> Value {
     // part of the native migration. Reruns can safely leave these tiny files.
     json!({"removed":removed,"held":held,"kept":kept,"unverified":[],"error":null})
 }
+
+#[cfg(test)]
+#[path = "prune_tests.rs"]
+mod tests;

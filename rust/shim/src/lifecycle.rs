@@ -539,10 +539,42 @@ fn detached(command: &mut Command) {
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
-        command.creation_flags(WINDOWS_DETACHED_FLAGS);
+        // The native launcher's job owns ordinary descendants; daemon and
+        // unattended updater lifetimes explicitly leave that job.
+        command.creation_flags(WINDOWS_DETACHED_FLAGS | windows_breakaway_flag());
     }
     #[cfg(unix)]
     posix_session::detached(command);
+}
+#[cfg(windows)]
+#[allow(unsafe_code)]
+fn windows_breakaway_flag() -> u32 {
+    use windows_sys::Win32::System::{
+        JobObjects::{
+            JOB_OBJECT_LIMIT_BREAKAWAY_OK, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+            JobObjectExtendedLimitInformation, QueryInformationJobObject,
+        },
+        Threading::CREATE_BREAKAWAY_FROM_JOB,
+    };
+    let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+    // SAFETY: null selects this process's immediate job; the initialized,
+    // correctly sized output buffer remains valid. A foreign job that forbids
+    // breakaway keeps its policy rather than making an ordinary spawn fail.
+    let queried = unsafe {
+        QueryInformationJobObject(
+            std::ptr::null_mut(),
+            JobObjectExtendedLimitInformation,
+            (&mut limits as *mut JOBOBJECT_EXTENDED_LIMIT_INFORMATION).cast(),
+            std::mem::size_of_val(&limits) as u32,
+            std::ptr::null_mut(),
+        )
+    };
+    if queried != 0 && limits.BasicLimitInformation.LimitFlags & JOB_OBJECT_LIMIT_BREAKAWAY_OK != 0
+    {
+        CREATE_BREAKAWAY_FROM_JOB
+    } else {
+        0
+    }
 }
 #[cfg(unix)]
 #[allow(unsafe_code)]

@@ -197,9 +197,37 @@ def _runtime_name(sequence: int) -> str:
     return f"{sequence:0{_SEQUENCE_WIDTH}d}"
 
 
+def _runtime_evidence(path: Path) -> tuple[dict | None, bool]:
+    """Return a Python marker and whether foreign or unreadable evidence
+    requires retention. Native runtimes share the numbered root, but their
+    root executable and versioned marker never describe a virtualenv."""
+    foreign = False
+    for name in ("pseudolife-mcp", "pseudolife-mcp.exe"):
+        try:
+            (path / name).lstat()
+        except FileNotFoundError:
+            continue
+        except OSError:
+            foreign = True
+        else:
+            foreign = True
+    try:
+        marker = json.loads((path / MARKER).read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        # An empty reserved sequence may belong to a native install that
+        # has not published its executable yet. Only venv-shaped leftovers
+        # are ours to remove as abandoned Python installs.
+        return None, foreign or not any((path / name).is_dir() for name in ("Scripts", "bin"))
+    except (OSError, ValueError):
+        return None, True
+    if foreign or not isinstance(marker, dict) or "kind" in marker or "format" in marker:
+        return None, True
+    return marker, False
+
+
 def list_runtimes(layout: Layout) -> list[Runtime]:
-    """Every complete runtime under the root, lowest sequence first. A
-    directory whose marker is missing or unreadable is not a runtime."""
+    """Every complete Python runtime under the root, lowest sequence first.
+    Native, unknown and unreadable runtime evidence is never selected."""
     found: list[Runtime] = []
     try:
         names = os.listdir(layout.root)
@@ -210,11 +238,8 @@ def list_runtimes(layout: Layout) -> list[Runtime]:
         path = layout.root / name
         if sequence is None or not path.is_dir():
             continue
-        try:
-            marker = json.loads((path / MARKER).read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            continue
-        if not isinstance(marker, dict) or not _console(path, _windows(layout)).is_file():
+        marker, foreign = _runtime_evidence(path)
+        if foreign or marker is None or not _console(path, _windows(layout)).is_file():
             continue
         found.append(Runtime(path, sequence, str(marker.get("version") or "unknown"),
                              str(marker.get("installed_at") or ""), str(marker.get("source") or ""),
@@ -1178,8 +1203,9 @@ def remove_unused(layout: Layout, *, pinned: Iterable[Path] = (),
     tunnel saved under ``tunnels``, is not the one this interpreter runs
     from and has no process running from it; likewise unfinished runtimes
     older than an hour (a younger one may still be installing) and
-    launchers moved aside. Where the process table or a tunnel record
-    cannot be read, nothing is removed and ``error`` says why; where the
+    launchers moved aside. Native and unknown runtime evidence is retained
+    for its own updater or explicit recovery. Where the process table or a
+    tunnel record cannot be read, nothing is removed and ``error`` says why; where the
     platform has no process table, only the newest is kept and everything
     else is left, named under ``unverified``."""
     result: dict = {"removed": [], "held": [], "kept": [], "unverified": [], "error": None}
@@ -1211,6 +1237,10 @@ def remove_unused(layout: Layout, *, pinned: Iterable[Path] = (),
         for name in sorted(os.listdir(layout.root)):
             path = layout.root / name
             if _sequence_of(name) is None or not path.is_dir():
+                continue
+            _marker, foreign = _runtime_evidence(path)
+            if foreign:
+                result["kept"].append(str(path))
                 continue
             if os.path.normcase(str(path)) not in complete:
                 try:

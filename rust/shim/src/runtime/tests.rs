@@ -158,6 +158,49 @@ fn dropped_activation_restores_old_launcher() {
     assert_eq!(current_runtime(&f.layout).unwrap().version, "1.0.0");
 }
 #[test]
+fn activation_invalidates_python_launcher_record_and_restores_it_on_rollback() {
+    let f = Fixture::new();
+    f.install("1.0.0");
+    let mut record = f.layout.launcher.as_os_str().to_os_string();
+    record.push(".json");
+    let record = PathBuf::from(record);
+    let cached = br#"{"root":"legacy","base_interpreter":"python","selector_sha256":"old"}"#;
+    fs::write(&record, cached).unwrap();
+    {
+        let _activation = install::activate_launcher(&f.layout, &f.binary("1.0.1")).unwrap();
+        assert!(
+            !record.exists(),
+            "Python must not mistake a native launcher for its cached stub"
+        );
+    }
+    assert_eq!(fs::read(&record).unwrap(), cached);
+    f.install("1.0.1");
+    assert!(!record.exists());
+    assert!(
+        fs::read_dir(f.layout.launcher.parent().unwrap())
+            .unwrap()
+            .all(|e| {
+                !e.unwrap()
+                    .file_name()
+                    .to_string_lossy()
+                    .contains(".old-native-")
+            })
+    );
+}
+
+#[test]
+fn committed_activation_removes_displaced_launcher_copy() {
+    let f = Fixture::new();
+    f.install("1.0.0");
+    f.install("1.0.1");
+    assert_eq!(
+        fs::read_dir(f.layout.launcher.parent().unwrap())
+            .unwrap()
+            .count(),
+        1
+    );
+}
+#[test]
 fn failed_activation_publishes_no_completion_marker() {
     let f = Fixture::new();
     let old = f.install("1.0.0");

@@ -253,13 +253,29 @@ pub fn list_runtimes(layout: &Layout) -> Vec<Runtime> {
     found
 }
 pub fn current_runtime(layout: &Layout) -> Option<Runtime> {
-    list_runtimes(layout).pop()
+    // Verify candidates newest first. Old sessions can retain many large
+    // binaries; starting a new session only needs the first valid candidate.
+    let mut paths: Vec<_> = fs::read_dir(&layout.root)
+        .ok()?
+        .filter_map(|e| e.ok())
+        .filter_map(|e| {
+            let number = e.file_name().to_str().and_then(sequence)?;
+            Some((number, e.path()))
+        })
+        .collect();
+    paths.sort_by_key(|(number, _)| std::cmp::Reverse(*number));
+    paths
+        .into_iter()
+        .find_map(|(_, path)| read_runtime(&path).ok())
 }
 pub fn running_runtime(layout: &Layout) -> Option<Runtime> {
     let executable = std::env::current_exe().ok()?;
-    list_runtimes(layout)
-        .into_iter()
-        .find(|r| same_path(&executable, &r.executable()))
+    let path = executable.parent()?;
+    if !same_path(path.parent()?, &layout.root) {
+        return None;
+    }
+    let runtime = read_runtime(path).ok()?;
+    same_path(&executable, &runtime.executable()).then_some(runtime)
 }
 pub fn same_path(a: &Path, b: &Path) -> bool {
     fn norm(path: &Path) -> PathBuf {

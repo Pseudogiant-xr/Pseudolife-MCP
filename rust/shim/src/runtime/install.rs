@@ -266,25 +266,38 @@ fn install_bytes(
 pub(crate) struct Activation {
     launcher: PathBuf,
     backup: Option<PathBuf>,
+    python_record: PathBuf,
+    record_backup: Option<PathBuf>,
     committed: bool,
     changed: bool,
 }
 impl Activation {
     pub fn commit(mut self) {
         self.committed = true;
+        // Windows can retain an open legacy image. Deletion then fails safely;
+        // never stop a running session merely to remove its displaced launcher.
+        for backup in [&self.backup, &self.record_backup].into_iter().flatten() {
+            let _ = fs::remove_file(backup);
+        }
     }
 }
 impl Drop for Activation {
     fn drop(&mut self) {
-        if self.committed || !self.changed {
+        if self.committed {
             return;
         }
-        if let Some(backup) = &self.backup {
-            // Keep the backup when rollback is blocked, so recovery is possible.
-            let _ = fs::remove_file(&self.launcher);
-            let _ = rename_retry(backup, &self.launcher);
+        let restored = if !self.changed {
+            true
+        } else if let Some(backup) = &self.backup {
+            // Replace atomically: a failed restore leaves the current launcher
+            // and recovery copy intact, without an unlink-then-rename gap.
+            rename_retry(backup, &self.launcher).is_ok()
         } else {
-            let _ = fs::remove_file(&self.launcher);
+            fs::remove_file(&self.launcher).is_ok()
+        };
+        if restored && let Some(backup) = &self.record_backup {
+            // Restore the Python cache only alongside its original launcher.
+            let _ = rename_retry(backup, &self.python_record);
         }
     }
 }
@@ -312,15 +325,31 @@ pub(crate) fn activate_launcher(layout: &Layout, binary: &Path) -> Result<Activa
     if exists && !plain_file(&layout.launcher) {
         return Err("stable launcher is not a regular file; nothing replaced".into());
     }
-    if exists && hash_file(&layout.launcher)? == hash_file(binary)? {
-        return Ok(Activation {
-            launcher: layout.launcher.clone(),
-            backup: None,
-            committed: false,
-            changed: false,
-        });
-    }
+    let unchanged = exists && hash_file(&layout.launcher)? == hash_file(binary)?;
     let id = uuid::Uuid::new_v4();
+    let mut record_name = layout.launcher.as_os_str().to_os_string();
+    record_name.push(".json");
+    let python_record = PathBuf::from(record_name);
+    let record_backup = match fs::symlink_metadata(&python_record) {
+        Ok(meta) if meta.is_file() && !redirect(&meta) => {
+            let backup = parent.join(format!(".python-launcher-record.old-native-{id}"));
+            rename_retry(&python_record, &backup)?;
+            Some(backup)
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => None,
+        _ => return Err("Python launcher record is unavailable or redirected; repair the sibling launcher .json file before retrying".into()),
+    };
+    let mut activation = Activation {
+        launcher: layout.launcher.clone(),
+        backup: None,
+        python_record,
+        record_backup,
+        committed: false,
+        changed: false,
+    };
+    if unchanged {
+        return Ok(activation);
+    }
     let temp = parent.join(format!(".native-launcher-{id}"));
     let backup = exists.then(|| {
         parent.join(format!(
@@ -344,19 +373,17 @@ pub(crate) fn activate_launcher(layout: &Layout, binary: &Path) -> Result<Activa
                 fs::copy(&layout.launcher, backup).map_err(io_error)?;
             }
         }
-        let activation = Activation {
-            launcher: layout.launcher.clone(),
-            backup: backup.clone(),
-            committed: false,
-            changed: true,
-        };
+        activation.backup = backup.clone();
+        activation.changed = true;
         #[cfg(windows)]
         rename_retry(&temp, &layout.launcher)?;
         #[cfg(not(windows))]
         if let Err(error) = rename_retry(&temp, &layout.launcher) {
             // On POSIX rename failure leaves the original in place.
-            let mut activation = activation;
             activation.changed = false;
+            if let Some(backup) = &activation.backup {
+                let _ = fs::remove_file(backup);
+            }
             return Err(error);
         }
         Ok(activation)
