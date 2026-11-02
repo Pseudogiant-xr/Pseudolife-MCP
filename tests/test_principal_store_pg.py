@@ -484,3 +484,15 @@ def test_a_pre_v59_bank_takes_an_invite_that_leaves_ownership_alone(db):
     for owned in (False, True):
         with pytest.raises(store.InviteRefused, match="need schema v59"):
             _invite(db, "laptop", owned=owned)
+
+
+def test_a_paired_rows_ownership_changes_without_a_code(db, pg_url):
+    invite = _invite(db, "laptop")
+    store.redeem(pg_url, secret_sha256(invite["code"]), secret_sha256(TOKEN_A))
+    changed = store.create_invite(db, "laptop", owned=False, ttl_seconds=900, replace=False)
+    assert (changed["code"], changed["expires_at"], changed["state"], changed["owned"]) == (
+        None, None, "paired", False)
+    assert db.execute("SELECT token_hash, code_hash, owned FROM principals").fetchone() == (
+        secret_sha256(TOKEN_A), None, False)
+    with pytest.raises(store.InviteRefused, match="--mine or --someone-else alone"):
+        store.create_invite(db, "laptop", owned=True, tier="core", ttl_seconds=900, replace=False)

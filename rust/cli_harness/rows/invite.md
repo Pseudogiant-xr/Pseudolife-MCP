@@ -7,8 +7,8 @@ Oracle: `pseudolife_memory/invite_cli.py`, `principal_store.py`, `principals.py`
 
 ## Canonical shapes (implemented)
 
-- `invite <name> [--tier T] [--board|--no-board] [--expires D] [--someone-else|--mine] [--replace] [--url U] [--port P] [--bank FP] [--json]` (v59: `--someone-else` / `--mine` set `owned`, refused before any write on a bank before v59; a re-invite without either keeps it; the report's `owned` member and the `for a machine that is not yours, add --someone-else` note when neither is given and the row is the owner's)
-- `invite --list [--bank FP] [--json]` (v59: the owner column and footer line, JSON `owner`; deferred where a `config.yaml` could hold `coordination.not_owner_principals`)
+- `invite <name> [--tier T] [--board|--no-board] [--expires D] [--someone-else|--mine] [--replace] [--url U] [--port P] [--bank FP] [--json]` (v59: `--someone-else` / `--mine` set `owned`, refused before any write on a bank before v59 (`prev59` seed); a re-invite without either keeps it; on a paired row either alone changes ownership with no code; the report's `owned` member and the `for a machine that is not yours, add --someone-else` note when neither is given, the row is the owner's and the bank has the column)
+- `invite --list [--bank FP] [--json]` (v59: the owner column and footer line, JSON `owner`; deferred where a `config.yaml` could hold `coordination.not_owner_principals`, `PSEUDOLIFE_MCP_CONFIG` included)
 - `invite --revoke <name> [--yes] [--bank FP] [--json]`
 - `invite --version-check` (the Docker path's image probe)
 

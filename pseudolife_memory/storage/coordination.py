@@ -1998,6 +1998,14 @@ class CoordinationStore:
         with self.storage._txn():
             self.storage.conn.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
             self.storage.conn.execute("SET LOCAL statement_timeout = '5s'")
+            # No JIT for this read: the timeline's row estimates are far above
+            # what it reads, so PostgreSQL compiled it on every call. Measured
+            # 2026-11-02 on a live-size board (470 agents, 77,767 events,
+            # PostgreSQL 18.6; evals/results/console-snapshot-bench-20261102.json):
+            # about 390 ms of each run was JIT, and turning it off took the
+            # owner-scope median from 488 to 120 ms, one principal from 446 to
+            # 57 ms. The Rust daemon sets the same (board/console.rs).
+            self.storage.conn.execute("SET LOCAL jit = off")
             return self._console_snapshot(principal, scope=scope, limit=limit)
 
     def _console_snapshot(self, principal, *, scope=None, limit=50):

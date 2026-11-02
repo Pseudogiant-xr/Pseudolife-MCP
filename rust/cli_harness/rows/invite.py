@@ -96,8 +96,26 @@ def seed_activity(conn, name: str) -> None:
                  "('ffffffff', 12345678, 1791000000.0, 1793000000.0)")
 
 
+def seed_prev59(conn, name: str) -> None:
+    """A bank before v59 (as tests/test_invite_cli.py drops the column):
+    rows at fixed times, so the cases replay as goldens, then no ``owned``."""
+    _meta(conn)
+    _guarded(conn)
+    conn.execute(
+        "INSERT INTO principals (principal, token_hash, tier, board, created_at, paired_at) "
+        "VALUES ('alpha', %s, NULL, TRUE, 1793000000.0, 1793000060.0)",
+        (hashlib.sha256(b"prev59-seed-token-alpha").hexdigest(),))
+    conn.execute(
+        "INSERT INTO principals (principal, tier, board, code_hash, code_expires_at, created_at) "
+        "VALUES ('bravo', 'core', FALSE, %s, 1793000400.0, 1793000100.0)",
+        (hashlib.sha256(b"prev59-seed-code-bravo").hexdigest(),))
+    _guarded(conn)
+    conn.execute("ALTER TABLE principals DROP COLUMN owned")
+
+
 SEEDERS = {
     "states": seed_states,
+    "prev59": seed_prev59,
     "activity": seed_activity,
     "empty": lambda conn, name: _meta(conn),
     "nometa": lambda conn, name: None,
@@ -166,6 +184,8 @@ def fresh_copy(kind: str) -> None:
     from psycopg.types.json import Jsonb  # noqa: PLC0415
     with _bank.connect(ARM_DB, autocommit=True) as target:
         _guarded(target)
+        if kind == "prev59":
+            target.execute("ALTER TABLE principals DROP COLUMN owned")
         for key, value in meta:
             target.execute("INSERT INTO meta (key, value) VALUES (%s, %s)", (key, Jsonb(value)))
         marks = ", ".join(["%s"] * len(columns))
@@ -502,7 +522,7 @@ LIVE_ONLY = frozenset({
     # v59 ownership writes, which show the seeded principals too.
     "invite-someone-else", "invite-someone-else-json", "reinvite-keeps-someone-else",
     "reinvite-keeps-someone-else-json", "reinvite-mine", "invite-mine-json",
-    "reinvite-pending-someone-else",
+    "reinvite-pending-someone-else", "paired-someone-else", "paired-mine-json",
     # Its report is the daemon's auth value nested to the limit and
     # pretty-printed: 2.6 MB of indentation, compared live only.
     "health-nested-at-limit-json"})
@@ -650,6 +670,20 @@ def _cases() -> list[core.Case]:
     inviting("reinvite-mine", "states", ["echo", "--mine", "--url", "u"])
     inviting("invite-mine-json", "states", ["laptop", "--mine", "--url", "u", "--json"])
     inviting("reinvite-pending-someone-else", "states", ["alpha", "--someone-else", "--url", "u"])
+    # A paired machine's ownership alone: no --replace, no new code.
+    inviting("paired-someone-else", "states", ["bravo", "--someone-else", "--url", "u"])
+    inviting("paired-mine-json", "states", ["bravo", "--mine", "--url", "u", "--json"])
+    inviting("paired-mine-tier-refused", "states", ["bravo", "--mine", "--tier", "core",
+                                                    "--url", "u"])
+    # A bank before v59: invites and lists work; the ownership flags are
+    # refused before any write, naming the update.
+    add(read_case("prev59-list", "prev59", ["--list"]))
+    add(read_case("prev59-list-json", "prev59", ["--list", "--json"]))
+    inviting("prev59-invite", "prev59", ["zulu.1", "--url", "u"])
+    inviting("prev59-invite-json", "prev59", ["zulu.1", "--url", "u", "--json"])
+    inviting("prev59-reinvite", "prev59", ["bravo", "--url", "u"])
+    inviting("prev59-someone-else-refused", "prev59", ["zulu.1", "--someone-else", "--url", "u"])
+    inviting("prev59-mine-refused-json", "prev59", ["alpha", "--mine", "--url", "u", "--json"])
     inviting("invite-bank-match", "states", ["laptop", "--bank", FINGERPRINT, "--url", "u"])
     inviting("invite-bank-other", "states", ["laptop", "--bank", OTHER_FINGERPRINT, "--url", "u"])
     inviting("invite-empty-bank", "empty", ["zulu.1", "--url", "u", "--json"])
@@ -694,6 +728,12 @@ def _cases() -> list[core.Case]:
              extra_env={"PSEUDOLIFE_MCP_DATA_DIR": "{HOME}" + SEP + "data"},
              files={"data/config.yaml": b"coordination:\n  not_owner_principals: [codex]\n"})
     deferral("defer-mine-and-someone-else", ["laptop", "--mine", "--someone-else", "--url", "u"])
+    # PSEUDOLIFE_MCP_CONFIG comes first for the daemon, so the oracle reads it.
+    deferral("defer-list-config-env", ["--list"],
+             extra_env={"PSEUDOLIFE_MCP_CONFIG": "{HOME}" + SEP + "elsewhere.yaml"},
+             files={"elsewhere.yaml": b"coordination:\n  not_owner_principals: [codex]\n"})
+    deferral("defer-invite-config-env", ["laptop", "--url", "u"],
+             extra_env={"PSEUDOLIFE_MCP_CONFIG": "{HOME}" + SEP + "absent.yaml"})
     deferral("defer-malformed-token-map", ["laptop", "--url", "u"],
              extra_env={"PSEUDOLIFE_MCP_TOKENS": "no-separator"})
     deferral("defer-help", ["--help"])

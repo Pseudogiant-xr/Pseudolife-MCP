@@ -543,7 +543,9 @@ def create_invite(conn, name: str, *, tier=KEEP, board=KEEP, owned=KEEP, ttl_sec
     until the new code is redeemed. A revoked name is reset (token and
     revocation cleared). An existing row keeps its tier, board access and
     ownership (v59: ``owned`` false is someone else's machine) unless they
-    are given. A bank before v59 takes an invite that leaves ownership as
+    are given. A paired name given ownership alone, without ``replace``,
+    only has its ownership changed: ``code`` and ``expires_at`` are
+    ``None``. A bank before v59 takes an invite that leaves ownership as
     it is (every row there is the owner's); one that sets it is refused
     before anything is written."""
     import psycopg
@@ -581,10 +583,22 @@ def create_invite(conn, name: str, *, tier=KEEP, board=KEEP, owned=KEEP, ttl_sec
                     paired, revoked = existing
                     state = "revoked" if revoked else "paired" if paired else "pending"
                     if state == "paired" and not replace:
+                        if owned is not KEEP and tier is KEEP and board is KEEP:
+                            # Ownership alone touches no credential: the
+                            # token, the pairing and any code stay as they are.
+                            row = conn.execute(
+                                f"""
+                                UPDATE public.principals p SET owned = %(owned)s
+                                 WHERE principal = %(name)s
+                             RETURNING tier, board, {OWNED_SQL}
+                                """, params).fetchone()
+                            return {"code": None, "expires_at": None, "state": state,
+                                    "tier": row[0], "board": bool(row[1]), "owned": bool(row[2])}
                         raise InviteRefused(
                             f"{name} is already paired; pass --replace to give it a new code (its "
-                            "current token keeps working until the new code is redeemed), or "
-                            f"--revoke {name} first")
+                            "current token keeps working until the new code is redeemed, so it "
+                            f"need not pair again), or --revoke {name} first. --mine or "
+                            "--someone-else alone changes whose machine it is, with no new code")
                     # A revoked name starts again: token and revocation cleared.
                     reset = (", token_hash = NULL, paired_at = NULL, revoked_at = NULL"
                              if state == "revoked" else "")

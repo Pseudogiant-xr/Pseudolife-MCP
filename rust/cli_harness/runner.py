@@ -457,6 +457,7 @@ def _write_summary(out: Path | None, summary: dict) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     global GOLDENS
+    core.pin_umask()
     parser = argparse.ArgumentParser(prog="cli_harness",
                                      description="Python CLI vs Rust CLI differential harness")
     parser.add_argument("--row", action="append", choices=sorted(rows.ROWS), required=True)

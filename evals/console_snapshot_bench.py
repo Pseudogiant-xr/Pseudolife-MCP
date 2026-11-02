@@ -14,7 +14,8 @@ at least the live board's size"):
 Each arm runs on a fresh connection right after ``ANALYZE`` (the cold-ish
 run: empty plan cache, shared buffers and the OS cache not dropped), then
 ten more times; each run is a read-only REPEATABLE READ transaction under
-the snapshot's own ``statement_timeout = '5s'``. Then ``EXPLAIN (ANALYZE,
+the snapshot's own ``statement_timeout = '5s'``, the v59 arms with its
+``jit = off``, and once more with JIT the other way as a diagnostic. Then ``EXPLAIN (ANALYZE,
 BUFFERS)``. The full ``console_snapshot`` call (roster, counts, timeline) is
 timed too for the two v59 arms. No model, GPU or live-bank access; every body
 is synthetic filler.
@@ -208,8 +209,7 @@ def _nodes(node):
 
 def time_query(dsn: str, query: str, params, repeats: int, *, jit_off: bool = False) -> dict:
     """First run on a fresh connection right after ANALYZE, then ``repeats``.
-    ``jit_off`` is a diagnostic arm only (``SET LOCAL jit = off``): the
-    snapshot itself runs with the server's setting."""
+    ``jit_off`` adds ``SET LOCAL jit = off``, as the v59 snapshot does."""
     local = "SET LOCAL statement_timeout = '5s'" + ("; SET LOCAL jit = off" if jit_off else "")
     with psycopg.connect(dsn, autocommit=True) as conn:
         conn.execute("ANALYZE coordination_events, coordination_agents, coordination_messages")
@@ -308,21 +308,20 @@ def main(argv=None) -> int:
                 "SELECT relname, pg_total_relation_size(oid) FROM pg_class WHERE relname IN "
                 "('coordination_events','coordination_messages','coordination_agents')").fetchall())
         principal = busiest[0]
-        arms = {
-            "old": time_query(dsn, _REFERENCE_TIMELINE, (principal,) * 5, args.repeats),
-            "new-one": time_query(dsn, CONSOLE_TIMELINE_SQL,
-                                  {"scope": [principal], "cap": CONSOLE_EVENTS_CAP}, args.repeats),
-            "new-owner": time_query(dsn, CONSOLE_TIMELINE_SQL,
-                                    {"scope": owners, "cap": CONSOLE_EVENTS_CAP}, args.repeats),
+        queries = {
+            "old": (_REFERENCE_TIMELINE, (principal,) * 5),
+            "new-one": (CONSOLE_TIMELINE_SQL, {"scope": [principal], "cap": CONSOLE_EVENTS_CAP}),
+            "new-owner": (CONSOLE_TIMELINE_SQL, {"scope": owners, "cap": CONSOLE_EVENTS_CAP}),
         }
+        # Each arm as it ships: the pre-v59 query ran with the server's JIT,
+        # the v59 snapshot turns JIT off. The diagnostic arms flip that.
+        shipped_jit_off = {"old": False, "new-one": True, "new-owner": True}
+        arms = {name: time_query(dsn, *query, args.repeats, jit_off=shipped_jit_off[name])
+                for name, query in queries.items()}
         diagnostics = {
-            name + "-jit-off": time_query(dsn, *query, args.repeats, jit_off=True)
-            for name, query in (
-                ("old", (_REFERENCE_TIMELINE, (principal,) * 5)),
-                ("new-one", (CONSOLE_TIMELINE_SQL, {"scope": [principal],
-                                                    "cap": CONSOLE_EVENTS_CAP})),
-                ("new-owner", (CONSOLE_TIMELINE_SQL, {"scope": owners,
-                                                      "cap": CONSOLE_EVENTS_CAP})))}
+            name + ("-jit-on" if shipped_jit_off[name] else "-jit-off"):
+                time_query(dsn, *query, args.repeats, jit_off=not shipped_jit_off[name])
+            for name, query in queries.items()}
         for arm in diagnostics.values():
             arm.pop("_rows")
         old_rows, one_rows = arms["old"].pop("_rows"), arms["new-one"].pop("_rows")
@@ -349,14 +348,15 @@ def main(argv=None) -> int:
         "timeline_query": arms,
         "old_vs_new_one_same_rows": old_rows == one_rows,
         "old_vs_new_one_page_diff": {"only_old": only_old, "only_new": only_new},
-        "jit_off_diagnostic": diagnostics,
+        "jit_diagnostic": diagnostics,
         "console_snapshot_call": snapshots,
         "notes": ["cold-ish = the first execution on a fresh connection right after ANALYZE; "
                   "shared buffers and the OS page cache were not dropped",
                   "timeline times are execute + fetch inside the snapshot's read-only "
                   "REPEATABLE READ transaction with statement_timeout 5s",
-                  "jit_off_diagnostic repeats each arm with SET LOCAL jit = off, to show how "
-                  "much of the time is JIT compilation; the shipped snapshot does not set it"],
+                  "timeline_query arms run as they ship: old with the server's JIT (on), the "
+                  "v59 arms with SET LOCAL jit = off as console_snapshot sets it; "
+                  "jit_diagnostic runs each arm the other way"],
     }
     out.write_text(json.dumps(result, indent=1, sort_keys=True) + "\n", encoding="utf-8")
     print(json.dumps({arm: {"cold_ish_ms": a["cold_ish_ms"], **a["repeats"],

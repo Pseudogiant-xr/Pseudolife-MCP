@@ -62,6 +62,9 @@ def test_console_timeline_indexes_sparse_principal_and_caps_execution(store, mon
     print(text)
     assert "coordination_events_principal_idx" in text
     assert "coordination_events_message_idx" in text
+    # v59: visible mail seeks each scope agent's sends both ways.
+    assert "coordination_events_send_sender_idx" in text
+    assert "coordination_events_send_recipient_idx" in text
     def removed(node):
         if isinstance(node, dict):
             return [node.get("Rows Removed by Filter", 0),
@@ -464,3 +467,18 @@ def test_the_cap_is_per_agent_so_a_principal_with_two_busy_agents_matches_pre_v5
     reference, truncated, _pending = _reference(store, "alice", result["agents"])
     assert ("ack", "one-0") in {(e["event"], e["message_id"]) for e in result["events"]}
     assert result["events"] == reference and result["events_truncated"] == truncated
+
+
+def test_the_snapshot_runs_without_jit(store, monkeypatch):
+    """2026-11-02: JIT compilation was most of the snapshot's time on a
+    live-size board (evals/results/console-snapshot-bench-20261102.json)."""
+    store.register("alice")
+    seen = []
+    original = store._console_snapshot
+
+    def spy(*args, **kwargs):
+        seen.append(store.storage.conn.execute("SHOW jit").fetchone()[0])
+        return original(*args, **kwargs)
+    monkeypatch.setattr(store, "_console_snapshot", spy)
+    store.console_snapshot("alice")
+    assert seen == ["off"]

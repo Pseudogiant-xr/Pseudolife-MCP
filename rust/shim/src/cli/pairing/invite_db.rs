@@ -352,8 +352,9 @@ pub(super) async fn revoke(client: &mut Client, name: &str) -> Result<bool, DbEr
 
 /// What `create_invite` returns.
 pub(super) struct Created {
-    pub code: String,
-    pub expires_at: f64,
+    /// `None` (with `expires_at`) for a paired row given ownership alone.
+    pub code: Option<String>,
+    pub expires_at: Option<f64>,
     pub state: &'static str,
     pub tier: Option<String>,
     pub board: bool,
@@ -361,7 +362,7 @@ pub(super) struct Created {
 }
 
 /// `has_owned_column`: whether `principals` has v59's `owned`.
-async fn has_owned_column(client: &Client) -> Result<bool, DbError> {
+pub(super) async fn has_owned_column(client: &Client) -> Result<bool, DbError> {
     let row = client
         .query_one(
             "SELECT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = \
@@ -484,10 +485,37 @@ async fn attempt(
                 "pending"
             };
             if state == "paired" && !replace {
+                if let (Some(owned), None, None) = (owned, tier, board) {
+                    // Ownership alone touches no credential: the token, the
+                    // pairing and any code stay as they are.
+                    let row = transaction
+                        .query_one(
+                            &format!(
+                                "UPDATE public.principals p SET owned = $1 WHERE principal = $2 \
+                                 RETURNING tier, board, {OWNED_SQL}"
+                            ),
+                            &[&owned, &name],
+                        )
+                        .await
+                        .map_err(|error| classify(&error))?;
+                    let created = Created {
+                        code: None,
+                        expires_at: None,
+                        state,
+                        tier: row.try_get(0).map_err(|_| DbError::Defer)?,
+                        board: row.try_get(1).map_err(|_| DbError::Defer)?,
+                        owned: row.try_get(2).map_err(|_| DbError::Defer)?,
+                    };
+                    transaction
+                        .commit()
+                        .await
+                        .map_err(|error| classify(&error))?;
+                    return Ok(Attempt::Done(created));
+                }
                 // Leaving the transaction rolls it back, as the raise does.
                 drop(transaction);
                 return Err(DbError::Refused(format!(
-                    "{name} is already paired; pass --replace to give it a new code (its current token keeps working until the new code is redeemed), or --revoke {name} first"
+                    "{name} is already paired; pass --replace to give it a new code (its current token keeps working until the new code is redeemed, so it need not pair again), or --revoke {name} first. --mine or --someone-else alone changes whose machine it is, with no new code"
                 )));
             }
             let reset = if state == "revoked" {
@@ -531,8 +559,8 @@ async fn attempt(
         Err(error) => return Err(classify(&error)),
     };
     let created = Created {
-        code,
-        expires_at: row.try_get(0).map_err(|_| DbError::Defer)?,
+        code: Some(code),
+        expires_at: Some(row.try_get(0).map_err(|_| DbError::Defer)?),
         state,
         tier: row.try_get(1).map_err(|_| DbError::Defer)?,
         board: row.try_get(2).map_err(|_| DbError::Defer)?,

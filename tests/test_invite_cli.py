@@ -184,7 +184,7 @@ def test_the_reserved_name_check_is_load_bearing_for_the_database(bank, pg_url, 
 # -- the Docker path -----------------------------------------------------------
 
 class _Docker:
-    def __init__(self, version="pseudolife-mcp invite 1\n", code=0, stdout="invited\n"):
+    def __init__(self, version="pseudolife-mcp invite 2\n", code=0, stdout="invited\n"):
         self.calls = []
         self.inputs = []
         self.version, self.code, self.stdout = version, code, stdout
@@ -533,6 +533,8 @@ def test_a_pre_v59_bank_invites_but_refuses_to_record_ownership(bank, pg_url, ca
     code, out, err = _run(capsys, *argv)
     if flag is None:
         assert code == 0 and "re-invited" in out
+        # The flag cannot work on this bank, so the invite does not offer it.
+        assert "--someone-else" not in out
         assert _run(capsys, "phone")[0] == 0
         assert [r[0] for r in _rows(pg_url)] == ["laptop", "phone"]
         return
@@ -542,3 +544,55 @@ def test_a_pre_v59_bank_invites_but_refuses_to_record_ownership(bank, pg_url, ca
                    "then re-run. Nothing was changed\n")
     with psycopg.connect(pg_url, autocommit=True) as conn:
         assert conn.execute("SELECT code_hash FROM principals").fetchall() == before
+
+
+def test_the_list_reads_the_config_the_daemon_reads(bank, env, pg_url, capsys, tmp_path):
+    """PSEUDOLIFE_MCP_CONFIG comes first, as the daemon reads it
+    (mcp_server.py, maintainer_setup._config_path)."""
+    env.setenv("PSEUDOLIFE_MCP_TOKENS", "fixture-env-token:codex,fixture-env-token-2:friend")
+    (tmp_path / "config.yaml").write_text("coordination:\n  not_owner_principals: [codex]\n",
+                                          encoding="utf-8")
+    elsewhere = tmp_path / "elsewhere.yaml"
+    elsewhere.write_text("coordination:\n  not_owner_principals: [friend]\n", encoding="utf-8")
+    env.setenv("PSEUDOLIFE_MCP_CONFIG", str(elsewhere))
+    report = json.loads(_run(capsys, "--list", "--json")[1])
+    assert {r["principal"]: r["owner"] for r in report["principals"]} == {
+        "codex": True, "friend": False}
+
+
+def test_an_older_image_refuses_the_ownership_flags_plainly(docker, capsys):
+    """A v59 host CLI and a daemon image from before --someone-else: the
+    image's argparse would refuse the flag as unrecognized."""
+    docker.version = "pseudolife-mcp invite 1\n"
+    for flag in ("--someone-else", "--mine"):
+        code, _out, err = _run(capsys, "laptop", flag)
+        assert code == 4 and "update the daemon to schema 59" in err, err
+        assert not any(call[:4] == ["docker", "exec", "-i", "pseudolife-mcp-daemon"]
+                       for call in docker.calls)
+    assert _run(capsys, "laptop")[0] == 0           # a plain invite still goes through
+
+
+def test_the_version_check_names_the_ownership_flags(capsys):
+    assert invite_cli.main(["--version-check"]) == 0
+    assert capsys.readouterr().out == "pseudolife-mcp invite 2\n"
+
+
+def test_a_paired_machine_changes_owner_without_a_new_code(bank, pg_url, capsys):
+    """Ownership touches no credential: a paired machine's --mine or
+    --someone-else needs no --replace and leaves its token and pairing."""
+    import psycopg
+    _run(capsys, "laptop")
+    token = secret_sha256("fixture-token")
+    with psycopg.connect(pg_url, autocommit=True) as conn:
+        conn.execute("UPDATE principals SET token_hash = %s, code_hash = NULL, "
+                     "code_expires_at = NULL, paired_at = 1", (token,))
+    code, out, _err = _run(capsys, "laptop", "--someone-else")
+    assert code == 0 and "no new code" in out and "someone else's machine" in out
+    with psycopg.connect(pg_url) as conn:
+        assert conn.execute("SELECT token_hash, code_hash, owned FROM principals").fetchone() == (
+            token, None, False)
+    report = json.loads(_run(capsys, "laptop", "--mine", "--json")[1])
+    assert report["owned"] is True and report["state"] == "paired" and "code" not in report
+    code, _out, err = _run(capsys, "laptop", "--mine", "--tier", "core")
+    assert code == 4 and "--mine or --someone-else alone changes whose machine it is" in err
+    assert "need not pair again" in err

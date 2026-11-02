@@ -74,9 +74,14 @@ impl Store {
         limit: i64,
     ) -> Result<Value> {
         let tx = client.transaction().await?;
+        // No JIT for this read, as Python's `console_snapshot`: measured
+        // 2026-11-02 on a live-size board (470 agents, 77,767 events,
+        // PostgreSQL 18.6; evals/results/console-snapshot-bench-20261102.json),
+        // about 390 ms of each run was JIT compilation; off, the owner-scope
+        // median went from 488 to 120 ms, one principal from 446 to 57 ms.
         tx.batch_execute(
             "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY; \
-             SET LOCAL statement_timeout = '5s'",
+             SET LOCAL statement_timeout = '5s'; SET LOCAL jit = off",
         )
         .await?;
         let limit = check_limit(&json!(limit))?;

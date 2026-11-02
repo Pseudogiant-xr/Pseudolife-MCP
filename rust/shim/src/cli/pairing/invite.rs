@@ -28,7 +28,7 @@ const DEFAULT_PORT: u32 = 8765;
 const MIN_SCHEMA: i64 = 53;
 const TIERS: [&str; 3] = ["minimal", "core", "full"];
 const URL_PLACEHOLDER: &str = "<daemon-url>";
-const VERSION_LINE: &str = "pseudolife-mcp invite 1";
+const VERSION_LINE: &str = "pseudolife-mcp invite 2";
 
 #[derive(Default)]
 struct Args {
@@ -346,6 +346,11 @@ fn python_home() -> Result<PathBuf, Defer> {
 /// checked). Its reading (the whole AppConfig, any failure a silent "no
 /// note") is not ported; such an invite defers.
 fn config_maybe_present() -> Result<bool, Defer> {
+    // The daemon's own order: PSEUDOLIFE_MCP_CONFIG first (any value Python
+    // finds truthy), which the oracle then reads.
+    if std::env::var_os("PSEUDOLIFE_MCP_CONFIG").is_some_and(|value| !value.is_empty()) {
+        return Ok(true);
+    }
     let mut candidates = Vec::new();
     if let Some(dir) = env_nonempty("PSEUDOLIFE_MCP_DATA_DIR") {
         candidates.push(dir);
@@ -670,6 +675,7 @@ async fn local(
             return Ok(Ok(Outcome::Revoked(found)));
         }
         let name = name.clone().ok_or(DbError::Defer)?;
+        let ownership = invite_db::has_owned_column(session.client()).await?;
         let created = invite_db::create_invite(
             session.client_mut(),
             &name,
@@ -680,7 +686,7 @@ async fn local(
             args.replace,
         )
         .await?;
-        Ok(Ok(Outcome::Created(created)))
+        Ok(Ok(Outcome::Created(created, ownership)))
     }
     .await;
     match result {
@@ -701,13 +707,14 @@ async fn local(
             ));
             Ok(report.finish(EXIT_OK))
         }
-        Ok(Ok(Outcome::Created(created))) => Ok(invite_report(
+        Ok(Ok(Outcome::Created(created, ownership))) => Ok(invite_report(
             report,
             &name.unwrap_or_default(),
             &created,
             url,
             args.expires.unwrap_or(900),
             args.owned,
+            ownership,
         )),
         Ok(Err(refusal)) => Ok(report.fail_units(EXIT_REFUSED, refusal)),
         Err(DbError::UndefinedTable) => Ok(report.fail(EXIT_REFUSED, NO_TABLE)),
@@ -725,7 +732,8 @@ async fn local(
 enum Outcome {
     List(Vec<invite_db::Listed>, Vec<invite_db::Rejected>),
     Revoked(bool),
-    Created(invite_db::Created),
+    /// The row, and whether the bank records ownership (v59).
+    Created(invite_db::Created, bool),
 }
 
 /// `round(seconds / 60)`: half to even.
@@ -746,19 +754,32 @@ fn invite_report(
     url: Option<String>,
     seconds: u32,
     owned: Option<bool>,
+    ownership: bool,
 ) -> u8 {
-    let code = format!(
-        "{}-{}-{}",
-        &created.code[..4],
-        &created.code[4..8],
-        &created.code[8..]
-    );
+    let (Some(raw), Some(expires_at)) = (created.code.as_deref(), created.expires_at) else {
+        // A paired machine's ownership alone: no code, nothing to re-pair.
+        report.set("principal", J::Str(name.to_owned()));
+        report.set("state", J::Str(created.state.into()));
+        report.set("tier", created.tier.clone().map_or(J::Null, J::Str));
+        report.set("board", python_bool(created.board));
+        report.set("owned", python_bool(created.owned));
+        let whose = if created.owned {
+            "the owner's"
+        } else {
+            "someone else's"
+        };
+        report.say(&format!(
+            "{name}: paired; now {whose} machine. Its token and pairing are unchanged: no new code, nothing to re-pair"
+        ));
+        return report.finish(EXIT_OK);
+    };
+    let code = format!("{}-{}-{}", &raw[..4], &raw[4..8], &raw[8..]);
     let url = url.unwrap_or_else(|| URL_PLACEHOLDER.to_owned());
     let command = format!("pseudolife-mcp pair {url} {code}");
     report.set("principal", J::Str(name.to_owned()));
     report.set("state", J::Str(created.state.into()));
     report.set("code", J::Str(code.clone()));
-    report.set("expires_at", J::Float(created.expires_at));
+    report.set("expires_at", J::Float(expires_at));
     report.set("tier", created.tier.clone().map_or(J::Null, J::Str));
     report.set("board", python_bool(created.board));
     report.set("owned", python_bool(created.owned));
@@ -785,7 +806,7 @@ fn invite_report(
         }
     ));
     // The expiry is the database clock plus at most a day: always finite.
-    let expiry = when(Some(created.expires_at)).unwrap_or_default();
+    let expiry = when(Some(expires_at)).unwrap_or_default();
     report.say(&format!(
         "  code     {code}   single use, expires in {} min ({expiry})",
         minutes(seconds)
@@ -797,7 +818,7 @@ fn invite_report(
     if url == URL_PLACEHOLDER {
         report.note("the daemon is not exposed on the tailnet here; put its URL in place of <daemon-url> (`pseudolife-mcp expose tailscale` exposes it), or pass --url");
     }
-    if created.owned && owned.is_none() {
+    if ownership && created.owned && owned.is_none() {
         report.note("for a machine that is not yours, add --someone-else");
     }
     report.note("an invited machine can read and write the whole bank and use the agent board, but not change the daemon's configuration");

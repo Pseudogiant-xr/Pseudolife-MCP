@@ -117,8 +117,13 @@ MIN_SCHEMA = 53
 TIERS = ("minimal", "core", "full")
 URL_PLACEHOLDER = "<daemon-url>"
 # The first line `invite --version-check` prints: an image that answers it
-# carries this command.
-VERSION_LINE = "pseudolife-mcp invite 1"
+# carries this command. 2 (schema v59): it takes --someone-else and --mine.
+VERSION_LINE = "pseudolife-mcp invite 2"
+_VERSION = re.compile(r"pseudolife-mcp invite (\d+)")
+# The refusal of --someone-else / --mine through an image that predates them.
+OWNERSHIP_NEEDS_NEWER_IMAGE = (
+    "the daemon's image predates --someone-else and --mine: update the daemon to schema 59 "
+    "(pseudolife-mcp update), then re-run. Nothing was changed")
 _EXPIRES = re.compile(r"(\d+)\s*([smhd]?)")
 _UNIT = {"": 60, "s": 1, "m": 60, "h": 3600, "d": 86400}
 DOCKER_TIMEOUT_S = 60
@@ -304,7 +309,11 @@ def _coordination_config():
     try:
         from pseudolife_memory.backup_cli import _default_data_dir
         from pseudolife_memory.utils.config import load_config
-        return load_config(_default_data_dir(os.environ) / "config.yaml").coordination
+        # The daemon's own order (mcp_server.py, maintainer_setup._config_path):
+        # PSEUDOLIFE_MCP_CONFIG, else the data dir's config.yaml.
+        override = os.environ.get("PSEUDOLIFE_MCP_CONFIG")
+        path = Path(override) if override else _default_data_dir(os.environ) / "config.yaml"
+        return load_config(path).coordination
     except Exception:  # noqa: BLE001 - a courtesy, never a failure
         return None
 
@@ -384,11 +393,23 @@ def _local(args, report: _Report, dsn: str) -> int:
 
 def _invite(args, report: _Report, store, conn) -> int:
     note = _listed_note(args.name)
+    # Whether this bank records ownership (v59): the --someone-else note is
+    # offered only where the flag can work.
+    ownership = store.has_owned_column(conn)
     created = store.create_invite(conn, args.name,
                                   tier=store.KEEP if args.tier is None else args.tier,
                                   board=store.KEEP if args.board is None else args.board,
                                   owned=store.KEEP if args.owned is None else args.owned,
                                   ttl_seconds=args.expires, replace=args.replace)
+    if created["code"] is None:
+        # A paired machine's ownership alone (--mine / --someone-else without
+        # --replace): no code, its token and pairing untouched.
+        report.data.update(principal=args.name, state=created["state"], tier=created["tier"],
+                           board=created["board"], owned=created["owned"])
+        whose = "the owner's" if created["owned"] else "someone else's"
+        report.say(f"{args.name}: paired; now {whose} machine. Its token and pairing are "
+                   "unchanged: no new code, nothing to re-pair")
+        return report.finish(EXIT_OK)
     code = format_pairing_code(created["code"])
     url = args.url or exposed_url(args.port) or URL_PLACEHOLDER
     command = f"pseudolife-mcp pair {url} {code}"
@@ -411,7 +432,7 @@ def _invite(args, report: _Report, store, conn) -> int:
                     "<daemon-url> (`pseudolife-mcp expose tailscale` exposes it), or pass --url")
     if note:
         report.note(note)
-    if created["owned"] and args.owned is None:
+    if ownership and created["owned"] and args.owned is None:
         report.note("for a machine that is not yours, add --someone-else")
     report.note("an invited machine can read and write the whole bank and use the agent board, "
                 "but not change the daemon's configuration")
@@ -556,13 +577,16 @@ def _in_container(args, report: _Report) -> int:
         return report.fail(EXIT_REFUSED, refusal)
     base = ["docker", "exec", CONTAINER, "python", "-m", "pseudolife_memory.cli", "invite"]
     check = run([*base, "--version-check"])
-    if check.returncode != 0 or not (check.stdout or "").startswith(VERSION_LINE):
+    version = _VERSION.match(check.stdout or "") if check.returncode == 0 else None
+    if version is None:
         if check.returncode == 127 or "No such container" in (check.stderr or ""):
             return report.fail(EXIT_REFUSED, (
                 f"no database here (PSEUDOLIFE_MCP_DATABASE_URL is unset and no lite bank was found) and "
                 f"no {CONTAINER} container: run this on the daemon's host"))
         return report.fail(EXIT_REFUSED, ("the daemon's image predates `invite`: update the daemon "
                                           "first (pseudolife-mcp update), then re-run"))
+    if args.owned is not None and int(version.group(1)) < 2:
+        return report.fail(EXIT_REFUSED, OWNERSHIP_NEEDS_NEWER_IMAGE)
     proc = run(["docker", "exec", "-i", CONTAINER, "python", "-m", "pseudolife_memory.cli", "invite",
                 *_forward(args)])
     # The container's own report: relayed as it is (it carries the code).
