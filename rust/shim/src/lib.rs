@@ -18,6 +18,7 @@ mod sent_config;
 pub mod sent_json;
 mod sent_jsonb;
 pub mod sent_serve;
+pub mod setup;
 mod subscriptions;
 mod upstream;
 mod wire_compatibility;
