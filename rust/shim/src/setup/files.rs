@@ -347,7 +347,14 @@ impl PrivateEdit {
         drop(opened.file);
         if let Some(bytes) = &self.before {
             let mut staged = StagedPrivate::new(&self.path, bytes)?;
-            let result = staged.publish(&self.path, Some(&identity));
+            let result = removal::restore_existing(
+                &staged.path,
+                &self.path,
+                &identity,
+                &self.after,
+                &mut staged.published,
+            )
+            .map_err(SetupError::detail);
             if staged.published {
                 // This restoration is another inode we own, not the original
                 // inode from prepare. A legitimate rerun may replace it again.

@@ -309,3 +309,44 @@ async fn first_creation_does_not_replace_a_competing_connection() {
     );
     assert!(home.token().exists());
 }
+
+#[tokio::test]
+async fn review_locked_recovery_reports_the_retained_configuration() {
+    let home = Home::new();
+    let mut client = Fake::new(&home.0);
+    let mut applied = apply(&home, &mut client).await;
+    let lock = state::open_with_write(&home.0.join(".pseudolife-setup.lock"), true).unwrap();
+    lock.file.try_lock().unwrap();
+    let failure = applied
+        .rollback_detailed(&mut client, &home.0)
+        .await
+        .unwrap_err();
+    assert!(failure.recovery_pending);
+    assert!(
+        left(&failure.rollback, &home.0.join("config.toml")),
+        "retained config needs an event"
+    );
+    assert!(left(&failure.rollback, &home.connection()));
+    assert!(left(&failure.rollback, &home.token()));
+}
+
+#[tokio::test]
+async fn review_connection_refusal_reports_the_retained_configuration() {
+    let home = Home::new();
+    let mut first = Fake::new(&home.0);
+    let _installed = apply(&home, &mut first).await;
+    // Recreate the user-config migration with already matching private files.
+    let mut client = Fake::new(&home.0);
+    let mut applied = apply(&home, &mut client).await;
+    replace_with_same_bytes(&home.connection());
+    let failure = applied
+        .rollback_detailed(&mut client, &home.0)
+        .await
+        .unwrap_err();
+    assert!(failure.recovery_pending);
+    assert!(
+        left(&failure.rollback, &home.0.join("config.toml")),
+        "retained config needs an event"
+    );
+    assert!(left(&failure.rollback, &home.connection()));
+}

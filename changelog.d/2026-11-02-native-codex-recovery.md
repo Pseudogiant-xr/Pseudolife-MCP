@@ -8,3 +8,6 @@
 - Created-file cleanup rechecks identity after moving the file away from its
   public name. Recovery reports every retained owned file without contradictory
   restoration events or instructions referring to nonexistent backups.
+- Restoration also preserves replacements made by a concurrent writer, and
+  uses an exclusive rename without a partial hard-link state. Filesystem errors
+  retain their actual cause; early recovery refusals report retained configuration.

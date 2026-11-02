@@ -143,6 +143,14 @@ impl AppliedConnection {
             Ok(()) => Ok(events),
             Err(reason) => {
                 let detail = "Retained because recovery could not finish; review the current Codex connection settings before retrying recovery.";
+                if self.write.written_version.is_some()
+                    && !events
+                        .iter()
+                        .any(|event| event["file"] == json!(self.write.plan.user.path))
+                {
+                    events.push(json!({"file":self.write.plan.user.path,"state":"left",
+                        "backup":self.write.backup,"detail":format!("{detail} Cause: {reason}")}));
+                }
                 retained_file(&self.connection, &mut events, detail);
                 if let Some(edit) = &self.token {
                     retained_file(edit, &mut events, detail);
