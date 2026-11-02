@@ -1,0 +1,19 @@
+usage: pseudolife-mcp maintainer setup [-h] [--local] [--port PORT]
+                                       [--https-port HTTPS_PORT] [--yes]
+                                       [--check]
+
+Set up maintainer passkeys on this daemon host: the Console's HTTPS name, the
+daemon's config, and your first passkey.
+
+options:
+  -h, --help            show this help message and exit
+  --local               name the Console http://localhost:<port> (this machine
+                        only), even on a tailnet
+  --port PORT           the daemon's port (default 8765)
+  --https-port HTTPS_PORT
+                        the tailnet HTTPS port for the Console (default 8443)
+  --yes                 make the host changes without asking (the passkey
+                        check is always asked)
+  --check               change nothing: exit 0 when passkeys are set up (a
+                        valid name and an active key), 1 when not, 2 when that
+                        cannot be read

@@ -1,10 +1,10 @@
-//! `perform_import` into a bank already at this build's schema, where the
-//! oracle's `ensure_schema` changes nothing. A dry pass over the archive runs
+//! `perform_import` with the daemon's native schema initialization.
+//! A dry pass over the archive runs
 //! before the transaction and defers every unported value; the transaction
 //! pass then issues the oracle's statements in its order, so a refusal lands
 //! at the same row with the same rolled-back work.
 use super::json::{self, Value};
-use super::{EXCLUDED_TABLES, EXPORTED_TABLES, Outcome, skip_meta_key, sql};
+use super::{EXPORTED_TABLES, Outcome, skip_meta_key, sql};
 use crate::pg::{Client, Dsn, Session};
 use std::{
     collections::HashSet,
@@ -15,10 +15,6 @@ use std::{
 };
 use zip::{CompressionMethod, ZipArchive};
 
-/// `SCHEMA_META_VERSION` at the pinned oracle, as meta's jsonb text.
-const CURRENT_SCHEMA: &str = "58";
-/// `schema._EXPECTED_EMBEDDING_DIM`: ensure_schema refuses any other live dim.
-const EXPECTED_DIM: i64 = 1024;
 /// `transfer_cli._BATCH_ROWS`: rows grouped per executemany flush.
 const BATCH_ROWS: usize = 500;
 /// Statements sent per simple-protocol message; one transaction either way.
@@ -41,6 +37,7 @@ const ENTRY_HIGHWATER: &str = "SELECT GREATEST(\
 enum Stop {
     Defer,
     Refuse(String),
+    SchemaRefuse(String),
     Fail,
     /// The COMMIT's answer was FATAL or lost: the import may be durable.
     CommitUnknown,
@@ -61,10 +58,6 @@ enum Pass<'a> {
     Dry(&'a Client),
     Real(&'a Client),
 }
-
-/// The tables ensure_schema's v11 block backfills on every call (tx_time,
-/// valid_time from asserted_at, writer_id 'legacy'; schema.py:361-376).
-const STAMPED_TABLES: [&str; 4] = ["facts", "world_facts", "lessons", "edges"];
 
 struct Archive {
     zip: ZipArchive<BufReader<File>>,
@@ -598,16 +591,15 @@ async fn transaction(
     Ok(counts)
 }
 
-/// Everything before the transaction: guard, schema scope, the lock probe
-/// standing in for ensure_schema's DDL locks, the dimension check and the
-/// dry pass. `Ok(None)` is the named schema deferral.
+/// Guard connections first, initialize and commit the native schema, then
+/// check dimensions and dry-read the archive before its import transaction.
 async fn admit(
     client: &Client,
     archive: &mut Archive,
     manifest: &Value,
     force: bool,
     legacy: bool,
-) -> Result<Option<Vec<Vec<Column>>>, Stop> {
+) -> Result<Vec<Vec<Column>>, Stop> {
     let defer = |_| Stop::Defer;
     sql::execute(client, "RESET lock_timeout")
         .await
@@ -621,66 +613,13 @@ async fn admit(
             "{others} other connection(s) hold this database — a running daemon? Stop it first (Docker tier: `docker compose -f ops/docker-compose.yml stop pseudolife-daemon`; pip tiers: stop the serve process), then retry. Pass --force only if you know the connections are inert."
         )));
     }
-    for table in EXPORTED_TABLES.iter().chain(EXCLUDED_TABLES.iter()) {
-        let exists = sql::scalar(
-            client,
-            &format!("SELECT to_regclass('public.{table}') IS NOT NULL"),
-        )
+    super::schema::ensure(client)
         .await
-        .map_err(defer)?;
-        if exists.as_deref() != Some("t") {
-            return Ok(None);
-        }
-    }
-    let version = sql::scalar(
-        client,
-        "SELECT value::text FROM meta WHERE key = 'schema_version'",
-    )
-    .await
-    .map_err(defer)?;
-    if version.as_deref() != Some(CURRENT_SCHEMA) {
-        return Ok(None);
-    }
-    // psycopg decodes in the server's encoding; the native client is UTF-8.
-    let encoding = sql::scalar(client, "SHOW server_encoding")
-        .await
-        .map_err(defer)?;
-    if encoding.as_deref() != Some("UTF8") {
-        return Err(Stop::Defer);
-    }
-    // ensure_schema's ALTER/CREATE INDEX need table ownership and its CREATE
-    // TABLE IF NOT EXISTS needs CREATE on public; without them the oracle
-    // fails before importing.
-    let owner = sql::scalar(
-        client,
-        "SELECT coalesce(bool_and(pg_has_role(c.relowner, 'USAGE')), true) \
-         AND has_schema_privilege('public', 'CREATE') \
-         FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace \
-         WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p')",
-    )
-    .await
-    .map_err(defer)?;
-    if owner.as_deref() != Some("t") {
-        return Err(Stop::Defer);
-    }
-    // ensure_schema commits its stamp backfill before the dimension and
-    // emptiness checks, so a bank holding NULL stamps would change.
-    let stamps = STAMPED_TABLES
-        .iter()
-        .map(|table| {
-            format!(
-                "EXISTS (SELECT 1 FROM {table} WHERE tx_time IS NULL \
-                 OR valid_time IS NULL OR writer_id IS NULL)"
-            )
-        })
-        .collect::<Vec<_>>()
-        .join(" OR ");
-    let unstamped = sql::scalar(client, &format!("SELECT {stamps}"))
-        .await
-        .map_err(defer)?;
-    if unstamped.as_deref() != Some("f") {
-        return Err(Stop::Defer);
-    }
+        .map_err(|error| match error {
+            super::schema::Error::Refused(message) => Stop::SchemaRefuse(message),
+            super::schema::Error::Db => Stop::Fail,
+            super::schema::Error::CommitUnknown => Stop::CommitUnknown,
+        })?;
     let live = sql::scalar(
         client,
         "SELECT atttypmod FROM pg_attribute \
@@ -692,25 +631,6 @@ async fn admit(
     .map(|text| text.parse::<i64>())
     .transpose()
     .map_err(|_| Stop::Defer)?;
-    if live.is_some_and(|live| live > 0 && live != EXPECTED_DIM) {
-        return Err(Stop::Defer);
-    }
-    // ensure_schema's DDL waits up to 5 s for every table it alters; a holder
-    // that would make it fail makes this probe fail first.
-    let tables = sql::scalar(
-        client,
-        "SELECT string_agg(quote_ident(tablename), ', ' ORDER BY tablename) \
-         FROM pg_tables WHERE schemaname = 'public'",
-    )
-    .await
-    .map_err(defer)?
-    .ok_or(Stop::Defer)?;
-    let probe = format!(
-        "BEGIN; SET LOCAL lock_timeout = '5s'; LOCK TABLE {tables} IN ACCESS EXCLUSIVE MODE"
-    );
-    let locked = sql::execute(client, &probe).await;
-    sql::execute(client, "ROLLBACK").await.map_err(defer)?;
-    locked.map_err(defer)?;
     if let Some(message) =
         dim_refusal(manifest.get("embedding_dim"), live.filter(|live| *live > 0))?
     {
@@ -749,7 +669,7 @@ async fn admit(
     )
     .await
     {
-        Ok(()) | Err(Stop::Refuse(_)) => Ok(Some(columns)),
+        Ok(()) | Err(Stop::Refuse(_)) => Ok(columns),
         Err(other) => Err(other),
     }
 }
@@ -783,15 +703,14 @@ pub(super) async fn run(dsn: &Dsn, path: &Path, display: &str, force: bool) -> O
         return Outcome::Deferred;
     };
     let result = match admit(session.client(), &mut archive, &manifest, force, legacy).await {
-        Ok(None) => Err(None),
-        Ok(Some(columns)) => {
+        Ok(columns) => {
             let result = transaction(session.client(), &mut archive, &columns, legacy).await;
             if result.is_err() {
                 let _ = sql::execute(session.client(), "ROLLBACK").await;
             }
-            result.map_err(Some)
+            result
         }
-        Err(stop) => Err(Some(stop)),
+        Err(stop) => Err(stop),
     };
     let _ = session.close().await;
     match result {
@@ -804,8 +723,7 @@ pub(super) async fn run(dsn: &Dsn, path: &Path, display: &str, force: bool) -> O
             }
             Outcome::Done(text)
         }
-        Err(None) => Outcome::SchemaDeferred,
-        Err(Some(stop)) => outcome(stop),
+        Err(stop) => outcome(stop),
     }
 }
 
@@ -813,6 +731,7 @@ fn outcome(stop: Stop) -> Outcome {
     match stop {
         Stop::Defer => Outcome::Deferred,
         Stop::Refuse(message) => Outcome::Refused(message),
+        Stop::SchemaRefuse(message) => Outcome::SchemaRefused(message),
         Stop::Fail => Outcome::Failed,
         Stop::CommitUnknown => Outcome::CommitUnknown,
     }

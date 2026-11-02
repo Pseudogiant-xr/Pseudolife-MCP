@@ -1,3 +1,3 @@
 | Mode | Phase | Status | Native | Evidence |
 |---|---|---|---|---|
-| maintainer | 4/5 | deferred | partly | enrol-code, confirm, revoke, reset and list over an explicit DSN ported as CLI-MAINTAINER (harness row `maintainer`); `setup`, help, `--poll` and the embedded/container transports (CLI-MAINTAINER-TRANSPORT) defer; added upstream at the schema-54 close-out pin; `test_maintainer_cli.py`, `test_maintainer_setup.py` |
+| maintainer | 4/5 | deferred | partly | Enrol-code, confirm, revoke, reset and list retain direct-DSN semantics; engine-labelled container rerun, help, explicit --poll and -- prefix delimiters implemented. Guided setup has a separate CLI-MAINTAINER-SETUP sub-row covering consent, backups, restart and passkey verification. Bounded YAML rewrites, lite and existing timestamp/list-buffer substitutions remain documented. Native differential and terminal validation pending. |

@@ -1,3 +1,3 @@
 | Row | Phase | Behavior to preserve and Python source | Existing test pool and boundary | Status |
 |---|---:|---|---|---|
-| CLI-TRANSFER-SCHEMA | 4 | Import into a bank that needs `ensure_schema` work (another schema version, missing tables, NULL v11 stamps, another owner). `transfer_cli.py`, `storage/schema.py` | Native defers by name before any effect. Blocker: needs native ensure_schema (W1-A) | deferred |
+| CLI-TRANSFER-SCHEMA | 4 | Import schema initialization and repair, with connection guard before DDL and committed schema work before later import checks. `transfer_cli.py`, `storage/schema.py` | `transfer/schema.rs` reuses the daemon's generated plan, SQL and metadata without new DDL or a schema bump. Differential cases cover blank/older/missing-table targets, NULL stamps, guard ordering, future/malformed stamps and DDL lock rollback. Schema artifact pin passed; Cargo, disposable-bank arms and permission-role coverage not yet run. | deferred |

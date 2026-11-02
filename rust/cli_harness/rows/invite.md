@@ -57,10 +57,7 @@ the `principals` / `meta` column types and the database clock, so nothing
 after the request can meet a value this client cannot decode or a date it
 cannot print. List and revoke make no request.
 
-- No `PSEUDOLIFE_MCP_DATABASE_URL` (empty counts as none): the lite tier's
-  embedded bank, the Docker re-exec (`docker exec ... invite`), and the
-  psql-in-container fallback (`_through_postgres`). Proposed row
-  CLI-PAIRING-CONTAINER.
+- The lite tier's embedded bank remains outside this transport slice.
 - A DSN the shared client does not admit, or a connection it cannot open or
   set up. The oracle asks `/health` first and then prints `could not connect
   to the bank's database (<Class>)`, exit 1 (or the health refusal, when
@@ -68,20 +65,12 @@ cannot print. List and revoke make no request.
   `defer-refused-login`: no request).
 - A `principals` / `meta` column of another type than the v53 DDL's, or a
   database clock outside 1970..9999 less two days (an invite only).
-- Argparse's errors and `--help` (help and usage text depend on `COLUMNS`),
+- Argparse's errors (help is a canonical 80-column snapshot),
   repeated options, `--opt=value`, abbreviations, values that start with `-`,
   `PSEUDOLIFE_MCP_PORT` / `--port` / `--expires` spellings other than ASCII
   digits (and the unit), a port outside 1..65535.
-- `--revoke` without `--yes` on a terminal (the question).
 - Token or tier maps that would log a warning (malformed, duplicate, reserved
   principal) or hold non-ASCII text.
-- An invite where `_listed_note` could read a `config.yaml` (the data dir's,
-  or with no `PSEUDOLIFE_MCP_DATA_DIR` either the lite default's or
-  `./data`'s): its reading is the whole AppConfig loader, any failure silent.
-- An invite without `--url` when any `tailscale` CLI candidate exists (on
-  `PATH`, Windows' cwd, `%ProgramW6432%`/`%ProgramFiles%\Tailscale`, the macOS
-  app): `expose status` would run it. With none, the URL is `<daemon-url>`,
-  as the oracle answers.
 - A list time outside 1970-01-01..9999-12-31 (glibc prints a year before
   1000 unpadded, Windows' `gmtime` refuses negative times: the oracle's own
   answer depends on the host), or a non-finite one.
@@ -127,3 +116,16 @@ process, so the cases run live only (`Case.golden` False).
 `health-nested-at-limit-json` is live-only too: its report pretty-prints
 the daemon's auth value nested to the limit, 2.6 MB of indentation. The
 goldens hold the other 61.
+
+## Operator transport extension (2026-11-02 candidate)
+
+Engine-labelled daemon reruns select `pseudolife-mcp` for `rust` and the
+Python module for Python or absent labels, retaining the nesting guard.
+Invite adds stopped-daemon psql list/revoke for v53 and v58; pair adds
+trusted/untrusted HTTPS and terminal code input; maintainer adds help and
+polling; test-login adds help while retaining its host-local login file.
+New native builds and differential comparisons are pending parent validation.
+The activated former deferral cases now compare the actual oracle outcome;
+their old case IDs remain stable. Raw oracle goldens are unchanged, and new
+cases need a bound oracle recording after integration. This extension makes
+no claim about guided setup or lite storage.

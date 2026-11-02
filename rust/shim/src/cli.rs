@@ -7,6 +7,7 @@ mod backup;
 pub mod board_audit;
 mod briefing_hook;
 mod connect;
+pub mod coordination_recovery;
 mod doctor;
 mod doorbell_seen;
 mod episode;
@@ -27,7 +28,6 @@ const HELP: &str = include_str!("cli_help.txt");
 const DEFERRED_MODES: &[&str] = &[
     "serve",
     "embedded",
-    "coordination-recovery",
     "board-audit",
     "doctor",
     "connect",

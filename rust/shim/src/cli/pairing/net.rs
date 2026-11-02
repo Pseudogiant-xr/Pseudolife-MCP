@@ -1,26 +1,38 @@
 //! The pairing commands' daemon traffic, as urllib makes it: no proxy and
 //! no redirect followed for `/health` and `POST /api/pair`; the token check
-//! (`codex_connection.installer_credential_valid`) through `urlopen`, which
-//! follows redirects. Environment proxies defer before any request (see
-//! `proxies_configured`).
+//! (`codex_connection.installer_credential_valid`) uses a no-redirect opener
+//! that honours environment proxies. HTTPS uses system trust.
 use super::pyjson::{self, J};
 use std::time::Duration;
 
 /// `pair_cli.MAX_RESPONSE_BYTES`.
 const MAX_RESPONSE_BYTES: usize = 65536;
 
-fn client(timeout: Duration, follow: bool) -> Option<reqwest::Client> {
-    reqwest::Client::builder()
-        .no_proxy()
-        .redirect(if follow {
-            reqwest::redirect::Policy::limited(10)
-        } else {
-            reqwest::redirect::Policy::none()
-        })
+fn client(timeout: Duration, use_proxies: bool) -> Option<reqwest::Client> {
+    let mut builder = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
         .timeout(timeout)
-        .pool_max_idle_per_host(0)
-        .build()
-        .ok()
+        .pool_max_idle_per_host(0);
+    if !use_proxies {
+        builder = builder.no_proxy();
+    }
+    // Python's default HTTPS context uses the system trust store, including
+    // SSL_CERT_FILE / SSL_CERT_DIR. The native loader honours those overrides.
+    let roots = rustls_native_certs::load_native_certs();
+    if !roots.certs.is_empty() {
+        let certs = roots
+            .certs
+            .iter()
+            .map(|cert| reqwest::Certificate::from_der(cert.as_ref()))
+            .collect::<Result<Vec<_>, _>>()
+            .ok()?;
+        builder = builder.tls_certs_only(certs);
+    } else if std::env::var_os("SSL_CERT_FILE").is_some()
+        || std::env::var_os("SSL_CERT_DIR").is_some()
+    {
+        return None;
+    }
+    builder.build().ok()
 }
 
 /// `response.read(limit)` (or `read()` with no limit): `Err` when the body
@@ -124,7 +136,7 @@ pub(super) async fn post_pair(url: &str, body: &str) -> Result<(u16, Option<pyjs
 }
 
 /// `codex_connection.installer_credential_valid(url, token)`: a 200 to an
-/// authenticated `GET /api/episodes?limit=1`, redirects followed.
+/// authenticated `GET /api/episodes?limit=1`, without following redirects.
 pub(super) async fn credential_valid(url: &str, token: &str) -> bool {
     let Some(client) = client(Duration::from_secs(3), true) else {
         return false;
@@ -146,12 +158,42 @@ pub(super) async fn credential_valid(url: &str, token: &str) -> bool {
     response.chunk().await.is_ok()
 }
 
-/// Whether urllib's `getproxies()` would read a proxy from the environment
-/// (any non-empty `*_proxy` variable but `no_proxy`, in either case). The
-/// token check honours them in Python; this candidate defers instead.
-pub(super) fn proxies_configured() -> bool {
-    std::env::vars_os().any(|(name, value)| {
-        let name = name.to_string_lossy().to_ascii_lowercase();
-        name.ends_with("_proxy") && name != "no_proxy" && !value.is_empty()
-    })
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    #[tokio::test]
+    async fn credential_verification_does_not_follow_redirects() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let (finished, mut finish) = tokio::sync::oneshot::channel();
+        let server = tokio::spawn(async move {
+            let mut requests = 0;
+            loop {
+                let (mut stream, _) = tokio::select! {
+                    accepted = listener.accept() => accepted.unwrap(),
+                    _ = &mut finish => break,
+                };
+                let mut request = [0; 4096];
+                stream.read(&mut request).await.unwrap();
+                requests += 1;
+                let response = if requests == 1 {
+                    "HTTP/1.1 302 Found\r\nLocation: /accepted\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                } else {
+                    "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}"
+                };
+                stream.write_all(response.as_bytes()).await.unwrap();
+            }
+            requests
+        });
+        let valid = credential_valid(&format!("http://{address}"), "fixture-token").await;
+        finished.send(()).unwrap();
+        let requests = server.await.unwrap();
+        assert!(!valid, "a redirect must not validate a credential");
+        assert_eq!(
+            requests, 1,
+            "credential verification must not request the redirect target"
+        );
+    }
 }

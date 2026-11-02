@@ -45,24 +45,42 @@ fn assert_deferred(arguments: &[&str], dsn: Option<&str>) {
 const UNREACHABLE: &str = "postgresql://user:secret@127.0.0.1:9/pl_cf_none?sslmode=disable";
 
 #[test]
+fn help_does_not_open_the_bank_or_enter_the_container() {
+    let home = std::env::temp_dir().join(format!("maintainer-help-{}", uuid::Uuid::new_v4()));
+    fs::create_dir(&home).unwrap();
+    for args in [
+        &["--help"][..],
+        &["list", "--help"],
+        &["enrol-code", "--help"],
+    ] {
+        let output = command(&home)
+            .args(args)
+            .env("PSEUDOLIFE_MCP_DATABASE_URL", UNREACHABLE)
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(0));
+        assert!(
+            output
+                .stdout
+                .starts_with(b"usage: pseudolife-mcp maintainer")
+        );
+        assert!(output.stderr.is_empty());
+    }
+    assert_eq!(fs::read_dir(&home).unwrap().count(), 0);
+    fs::remove_dir_all(home).unwrap();
+}
+
+#[test]
 fn non_canonical_argv_defers_before_the_bank() {
     for arguments in [
         &[][..],
         &["setup"],
         &["setup", "--check"],
         &["setup", "--local", "--yes"],
-        &["--help"],
-        &["-h"],
-        &["list", "--help"],
         &["list", "extra"],
-        &["enrol-code", "--poll", "0.01"],
-        &["enrol-code", "--poll=0.01", "--no-wait"],
-        &["enrol-code", "--no-wait", "--no-wait"],
         &["enrol-code", "--no-w"],
         &["confirm"],
-        &["confirm", "-h"],
         &["confirm", "--"],
-        &["confirm", "--", "-abcdef"],
         &["revoke", "abcdef", "ghijkl"],
         &["reset", "--yes", "--yes"],
         &["reset", "-y"],
@@ -74,7 +92,7 @@ fn non_canonical_argv_defers_before_the_bank() {
 }
 
 #[test]
-fn canonical_argv_without_a_native_bank_defers() {
+fn canonical_argv_without_a_bank_reports_the_native_error() {
     for arguments in [
         &["list"][..],
         &["enrol-code"],
@@ -84,15 +102,26 @@ fn canonical_argv_without_a_native_bank_defers() {
         &["reset"],
         &["reset", "--yes"],
     ] {
-        // No DSN (the lite bank and the daemon container are deferred), an
-        // empty one, a DSN option the native client does not admit, and a
-        // server that does not answer.
-        assert_deferred(arguments, None);
-        assert_deferred(arguments, Some(""));
         assert_deferred(
             arguments,
             Some("postgresql://user:secret@127.0.0.1:9/db?application_name=x"),
         );
-        assert_deferred(arguments, Some(UNREACHABLE));
+        for dsn in [None, Some(""), Some(UNREACHABLE)] {
+            let home =
+                std::env::temp_dir().join(format!("maintainer-no-bank-{}", uuid::Uuid::new_v4()));
+            fs::create_dir(&home).unwrap();
+            let mut command = command(&home);
+            if let Some(dsn) = dsn {
+                command.env("PSEUDOLIFE_MCP_DATABASE_URL", dsn);
+            }
+            let output = command.args(arguments).output().unwrap();
+            assert_eq!(output.status.code(), Some(2));
+            assert!(output.stdout.is_empty());
+            let error = String::from_utf8_lossy(&output.stderr);
+            assert!(error.starts_with("error: ") && error.contains("PSEUDOLIFE_MCP_DATABASE_URL"));
+            assert!(!error.contains("secret"));
+            assert_eq!(fs::read_dir(&home).unwrap().count(), 0);
+            fs::remove_dir_all(home).unwrap();
+        }
     }
 }

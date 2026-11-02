@@ -33,6 +33,7 @@ import json
 import os
 import re
 import socket
+import ssl
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -61,7 +62,7 @@ class Daemon:
 
     def __init__(self, port: int, *, url: str, answers=(), default="pair", principal="laptop",
                  tier="writer", bank="7f8402238397365c", health=None, accept_bearers=True,
-                 result=None, hold_on_post=False):
+                 result=None, hold_on_post=False, tls=False, verification_redirect=None):
         self.url = url
         self.health = health if health is not None else {
             "status": "ok", "auth": True, "version": "0.0.0-fixture"}
@@ -98,7 +99,7 @@ class Daemon:
                         "headers": {k: v for k, v in headers.items() if v is not None},
                         "body": body.decode("utf-8", "backslashreplace")})
 
-            def _send(self, status: int, payload) -> None:
+            def _send(self, status: int, payload, location=None) -> None:
                 body = (payload if isinstance(payload, bytes)
                         else json.dumps(payload, default=str).encode("utf-8"))
                 self.send_response(status)
@@ -106,6 +107,8 @@ class Daemon:
                 self.send_header("content-length", str(len(body)))
                 self.send_header("cache-control", "no-store")
                 self.send_header("x-content-type-options", "nosniff")
+                if location is not None:
+                    self.send_header("location", location)
                 self.end_headers()
                 self.wfile.write(body)
 
@@ -114,6 +117,11 @@ class Daemon:
                 if self.path == "/health":
                     return self._send(200, daemon.health)
                 if self.path.startswith("/api/episodes"):
+                    if verification_redirect and self.path == "/api/episodes?limit=1":
+                        location = "/api/episodes?redirected=1"
+                        if verification_redirect == "cross":
+                            location = daemon.url.replace("127.0.0.1", "localhost") + location
+                        return self._send(302, {}, location)
                     bearer = (self.headers.get("Authorization") or "").removeprefix("Bearer ")
                     digest = hashlib.sha256(bearer.encode()).hexdigest()
                     ok = daemon.accept_bearers and bearer and digest == daemon.paired_hash
@@ -166,6 +174,12 @@ class Daemon:
         except OSError:
             pass
         self.threads = []
+        if tls:
+            fixtures = Path(__file__).resolve().parents[2] / "shim/tests/fixtures/pg_tls"
+            context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            context.load_cert_chain(fixtures / "server.pem", fixtures / "server-key.pem")
+            for server in self.servers:
+                server.socket = context.wrap_socket(server.socket, server_side=True)
         for server in self.servers:
             thread = threading.Thread(target=server.serve_forever, daemon=True)
             thread.start()
@@ -384,7 +398,7 @@ def _env(**extra) -> dict:
 
 def case(case_id: str, argv: list[str], *, port: int | None = None, url: str | None = None,
          stdin: bytes = b"", seed=None, rules=("pair-token",), env=None, timeout=60,
-         platforms=("windows", "linux"), **daemon) -> core.Case:
+         platforms=("windows", "linux"), golden=True, **daemon) -> core.Case:
     def setup(arm):
         if arm.daemon is not None:
             arm.daemon.home = arm.home
@@ -408,7 +422,7 @@ def case(case_id: str, argv: list[str], *, port: int | None = None, url: str | N
             return Daemon(port, url=url, **daemon)
     return core.Case(case_id, ["pair", *argv], env=_env(**(env or {})), stdin=stdin,
                      setup=setup, after=after, rules=rules, daemon=factory, timeout=timeout,
-                     platforms=platforms)
+                     platforms=platforms, golden=golden)
 
 
 def target(remote: bool = False) -> tuple[int, str]:
@@ -431,8 +445,18 @@ def cases() -> list[core.Case]:
         add(case(case_id, [url, *argv_tail], port=port, url=url, **options))
 
     # Success.
+    fixtures = Path(__file__).resolve().parents[2] / "shim/tests/fixtures/pg_tls"
+    for trusted in (True, False):
+        port = free_port()
+        url = f"https://localhost:{port}"
+        add(case("https-verified" if trusted else "https-untrusted", [url, CODE, "--json"],
+                 port=port, url=url, tls=True, golden=False,
+                 env={"SSL_CERT_FILE": str(fixtures / ("ca.pem" if trusted else "other-ca.pem")),
+                      "SSL_CERT_DIR": "{HOME}" + SEP + "no-certificates"}))
     live("success", [CODE])
     live("success-json", [CODE, "--json"])
+    live("verify-redirect-same-origin", [CODE, "--json"], verification_redirect="same")
+    live("verify-redirect-cross-origin", [CODE, "--json"], verification_redirect="cross")
     live("success-canonical-code", ["ABCDEFGHJKMN"])
     live("success-lookalikes", ["oil0-1234-5678"])
     live("installer-read-code", ["--read-code", "--token-file", "{HOME}" + SEP + "chosen" + SEP
@@ -549,13 +573,12 @@ def cases() -> list[core.Case]:
     # Declared deferrals: before any effect.
     deferred = ("pair-deferral",)
     port = free_port()
-    add(case("defer-https", [f"https://127.0.0.1:{port}", CODE], rules=deferred))
-    live("defer-proxy-environment", [CODE], rules=deferred,
+    add(case("defer-https", [f"https://127.0.0.1:{port}", CODE]))
+    live("defer-proxy-environment", [CODE],
          env={"HTTP_PROXY": "http://127.0.0.1:9"})
-    live("defer-non-ascii-code", ["abcd-efgh-jkmñ"], rules=deferred)
-    live("defer-non-ascii-stdin", ["--read-code"], stdin="abcd-efgh-jkmñ\n".encode(),
-         rules=deferred)
-    live("defer-help", ["--help"], rules=deferred)
+    live("defer-non-ascii-code", ["abcd-efgh-jkmñ"])
+    live("defer-non-ascii-stdin", ["--read-code"], stdin="abcd-efgh-jkmñ\n".encode())
+    live("defer-help", ["--help"])
     live("defer-code-after-option", ["--json", CODE], rules=deferred)
     live("defer-repeated-option", [CODE, "--json", "--json"], rules=deferred)
     live("defer-equals-spelling", [CODE, "--token-file=x.token"], rules=deferred)

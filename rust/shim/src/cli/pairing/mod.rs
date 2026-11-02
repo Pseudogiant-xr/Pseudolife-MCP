@@ -1,21 +1,30 @@
-//! `pseudolife-mcp invite` (invite_cli.py) and `pseudolife-mcp pair`
-//! (pair_cli.py) for their canonical argv.
-//!
-//! `invite` writes the bank's `principals` table over an explicit
-//! `PSEUDOLIFE_MCP_DATABASE_URL`; the lite tier's embedded instance, the
-//! Docker re-exec into the daemon container and the psql-in-container
-//! fallback defer before any effect. `pair` mints an owner-only token here,
-//! sends only its SHA-256 to `POST /api/pair` and verifies it. Every shape
-//! outside the canonical ones defers before any effect: the dispatcher then
-//! prints its candidate deferral line.
+//! Native invite and pair operators, including Docker transport, stopped-daemon
+//! SQL, HTTPS pairing and owner-only local tokens. The lite bank remains outside
+//! this operator transport slice.
 mod invite;
 mod invite_db;
 mod net;
 mod pair;
+mod prompt;
 use super::pyjson;
 mod sqlstate;
 mod token_file;
 mod url;
+
+/// Shared pairing operations used by the native connect workflow.
+#[allow(dead_code)] // The connect consumer lands independently of this transport seam.
+pub(in crate::cli) async fn redeem_for_connect(
+    url: &str,
+    code: &str,
+    token_file: Option<&str>,
+) -> Result<serde_json::Value, ()> {
+    pair::redeem_for_connect(url, code, token_file).await
+}
+
+#[allow(dead_code)]
+pub(in crate::cli) fn normalize_for_connect(text: &str) -> Option<String> {
+    pair::normalize_for_connect(text)
+}
 
 use sha2::{Digest, Sha256};
 use std::ffi::OsString;
@@ -30,6 +39,19 @@ pub(super) struct Defer;
 /// Run `invite` or `pair`; `None` defers to the dispatcher's deferral line.
 pub(super) fn run(mode: &str) -> Option<ExitCode> {
     let arguments: Vec<OsString> = std::env::args_os().skip(2).collect();
+    if arguments
+        .iter()
+        .take_while(|arg| *arg != "--")
+        .any(|arg| arg == "--help" || arg == "-h")
+    {
+        let text = match mode {
+            "invite" => include_str!("invite_help.txt"),
+            "pair" => include_str!("pair_help.txt"),
+            _ => return None,
+        };
+        print(text.trim_end_matches('\n'));
+        return Some(ExitCode::SUCCESS);
+    }
     let arguments = arguments
         .into_iter()
         .map(|argument| argument.into_string().ok())

@@ -1,14 +1,17 @@
 //! `pseudolife-mcp board-audit`: argparse options and help, archive or bank
 //! verification, export and redaction over an explicit database URL.
-//! Stats execution, embedded/container transports and local-time ISO values
-//! retain their separate deferrals.
+//! Stats and container transport retain host-local input and output files.
 mod archive;
 mod args;
 mod bank;
 mod chain;
 mod codec;
 mod help;
+mod metrics;
 mod redact;
+mod stats;
+mod time;
+mod transport;
 use crate::sent_json::{self, Json};
 use std::{
     ffi::OsString,
@@ -50,6 +53,9 @@ fn run_inner(arguments: Vec<OsString>) -> u8 {
         }
         args::Action::VerifyInput { input, expect } => verify_input(&input, expect),
         args::Action::VerifyBank { expect } => {
+            if bank::dsn().is_none() {
+                return transport::verify(expect.as_ref());
+            }
             with_bank(|dsn| async move { bank::verify(&dsn, expect).await })
         }
         args::Action::Export(export) => {
@@ -72,9 +78,16 @@ fn run_inner(arguments: Vec<OsString>) -> u8 {
                     Err(_) => return failed(),
                 }
             }
+            if bank::dsn().is_none() {
+                return transport::export(&export);
+            }
             with_bank(|dsn| async move { bank::export(&dsn, &export).await })
         }
+        args::Action::Stats(stats) => stats::run(stats),
         args::Action::Redact { message_id, reason } => {
+            if bank::dsn().is_none() {
+                return transport::redact(&message_id, &reason);
+            }
             with_bank(|dsn| async move { redact::run(&dsn, &message_id, &reason).await })
         }
     }

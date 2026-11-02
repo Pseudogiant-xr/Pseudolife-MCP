@@ -1,0 +1,181 @@
+{
+ "row": "CLI-MAINTAINER-SETUP",
+ "platform": "windows",
+ "oracle_commit": "54063c1788f2a263a40c8dcddd7efac2b3f3e52b",
+ "oracle_commit_source": "verified-tree",
+ "cases": {
+  "setup-help": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIG1haW50YWluZXIgc2V0dXAgWy1oXSBbLS1sb2NhbF0gWy0tcG9ydCBQT1JUXQ0KICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgWy0taHR0cHMtcG9ydCBIVFRQU19QT1JUXSBbLS15ZXNdDQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1jaGVja10NCg0KU2V0IHVwIG1haW50YWluZXIgcGFzc2tleXMgb24gdGhpcyBkYWVtb24gaG9zdDogdGhlIENvbnNvbGUncyBIVFRQUyBuYW1lLCB0aGUNCmRhZW1vbidzIGNvbmZpZywgYW5kIHlvdXIgZmlyc3QgcGFzc2tleS4NCg0Kb3B0aW9uczoNCiAgLWgsIC0taGVscCAgICAgICAgICAgIHNob3cgdGhpcyBoZWxwIG1lc3NhZ2UgYW5kIGV4aXQNCiAgLS1sb2NhbCAgICAgICAgICAgICAgIG5hbWUgdGhlIENvbnNvbGUgaHR0cDovL2xvY2FsaG9zdDo8cG9ydD4gKHRoaXMgbWFjaGluZQ0KICAgICAgICAgICAgICAgICAgICAgICAgb25seSksIGV2ZW4gb24gYSB0YWlsbmV0DQogIC0tcG9ydCBQT1JUICAgICAgICAgICB0aGUgZGFlbW9uJ3MgcG9ydCAoZGVmYXVsdCA4NzY1KQ0KICAtLWh0dHBzLXBvcnQgSFRUUFNfUE9SVA0KICAgICAgICAgICAgICAgICAgICAgICAgdGhlIHRhaWxuZXQgSFRUUFMgcG9ydCBmb3IgdGhlIENvbnNvbGUgKGRlZmF1bHQgODQ0MykNCiAgLS15ZXMgICAgICAgICAgICAgICAgIG1ha2UgdGhlIGhvc3QgY2hhbmdlcyB3aXRob3V0IGFza2luZyAodGhlIHBhc3NrZXkNCiAgICAgICAgICAgICAgICAgICAgICAgIGNoZWNrIGlzIGFsd2F5cyBhc2tlZCkNCiAgLS1jaGVjayAgICAgICAgICAgICAgIGNoYW5nZSBub3RoaW5nOiBleGl0IDAgd2hlbiBwYXNza2V5cyBhcmUgc2V0IHVwIChhDQogICAgICAgICAgICAgICAgICAgICAgICB2YWxpZCBuYW1lIGFuZCBhbiBhY3RpdmUga2V5KSwgMSB3aGVuIG5vdCwgMiB3aGVuIHRoYXQNCiAgICAgICAgICAgICAgICAgICAgICAgIGNhbm5vdCBiZSByZWFkDQo=",
+   "stderr": "",
+   "window": [
+    1793585718.808147,
+    1793585719.0540547
+   ],
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "setup-tokenless-refuses": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 4,
+   "stdout": "",
+   "stderr": "bWFpbnRhaW5lciBzZXR1cDogdGhlIGRhZW1vbiBhdCB7REFFTU9OfSBkb2VzIG5vdCByZXBvcnQgImF1dGgiOiB0cnVlOyBtYWludGFpbmVyIHBhc3NrZXlzIG5lZWQgYSBkYWVtb24gdGhhdCByZXF1aXJlcyBhIGJlYXJlciB0b2tlbiAoYW4gaW5zdGFsbCB3aXRob3V0IC0tbm8tdG9rZW4sIG9yIFBTRVVET0xJRkVfTUNQX1RPS0VOKFMpIGluIGl0cyBlbnZpcm9ubWVudCkNCg==",
+   "window": [
+    1793585719.132035,
+    1793585719.3766382
+   ],
+   "requests": [
+    {
+     "method": "GET",
+     "target": "/health",
+     "headers": {
+      "accept-encoding": "identity",
+      "connection": "close",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": ""
+    }
+   ],
+   "setup_config_projection": false,
+   "files": {
+    "config.yaml": "file:bWVtb3J5OgogIHByZXNldDogZmxhdAogIG5lc3RlZDoge2ZsYWc6IHllcywgb2N0YWw6IDAxNywgbGFiZWw6ICdvbid9CmNvb3JkaW5hdGlvbjoKICBlbmFibGVkOiBmYWxzZQogIG1haW50YWluZXI6CiAgICBtYWludGFpbmVyX3Blcl9yZWNpcGllbnRfcGVyX2hvdXI6IDcK",
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "setup-noninteractive-consent": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "Q29uc29sZSBuYW1lOiB7REFFTU9OfSAocGFzc2tleXMgd29yayBpbiBhIGJyb3dzZXIgb24gdGhpcyBtYWNoaW5lIG9ubHkpDQpwbGFuOg0KICB3cml0ZSAgICBjb29yZGluYXRpb24ubWFpbnRhaW5lciBycF9pZCBsb2NhbGhvc3QsIG9yaWdpbiB7REFFTU9OfSBpbnRvIHtIT01FfVxjb25maWcueWFtbCAoYSBiYWNrdXAgYmVzaWRlIGl0KQ0K",
+   "stderr": "bWFpbnRhaW5lciBzZXR1cDogbm8gdGVybWluYWwgdG8gY29uZmlybSBvbjogcnVuIHRoaXMgaW4gYSB0ZXJtaW5hbCwgb3IgcmVydW4gd2l0aCAtLXllcw0K",
+   "window": [
+    1793585719.9251354,
+    1793585720.6911612
+   ],
+   "requests": [
+    {
+     "method": "GET",
+     "target": "/health",
+     "headers": {
+      "accept-encoding": "identity",
+      "connection": "close",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": ""
+    }
+   ],
+   "setup_config_projection": false,
+   "files": {
+    "config.yaml": "file:bWVtb3J5OgogIHByZXNldDogZmxhdAogIG5lc3RlZDoge2ZsYWc6IHllcywgb2N0YWw6IDAxNywgbGFiZWw6ICdvbid9CmNvb3JkaW5hdGlvbjoKICBlbmFibGVkOiBmYWxzZQogIG1haW50YWluZXI6CiAgICBtYWludGFpbmVyX3Blcl9yZWNpcGllbnRfcGVyX2hvdXI6IDcK",
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "setup-local-write-and-restart-instruction": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "Q29uc29sZSBuYW1lOiB7REFFTU9OfSAocGFzc2tleXMgd29yayBpbiBhIGJyb3dzZXIgb24gdGhpcyBtYWNoaW5lIG9ubHkpDQpwbGFuOg0KICB3cml0ZSAgICBjb29yZGluYXRpb24ubWFpbnRhaW5lciBycF9pZCBsb2NhbGhvc3QsIG9yaWdpbiB7REFFTU9OfSBpbnRvIHtIT01FfVxjb25maWcueWFtbCAoYSBiYWNrdXAgYmVzaWRlIGl0KQ0Kd3JvdGUge0hPTUV9XGNvbmZpZy55YW1sIChwcmV2aW91czoge0hPTUV9XGNvbmZpZy55YW1sLjIwMjYxMTAyLTEzMTUyMi5fN2JyZW03Ny5iYWspDQpSZXN0YXJ0IHRoZSBkYWVtb24gc28gaXQgcmVhZHMgdGhlIG5hbWUgKHN0b3AgdGhlIGBwc2V1ZG9saWZlLW1jcCBzZXJ2ZWAgcHJvY2VzczsgeW91ciBuZXh0IHNlc3Npb24gc3RhcnRzIGl0IGFnYWluKSwgdGhlbiBydW4gYHBzZXVkb2xpZmUtbWNwIG1haW50YWluZXIgc2V0dXBgIGFnYWluIHRvIGVucm9sIHlvdXIgcGFzc2tleS4NCg==",
+   "stderr": "",
+   "window": [
+    1793585721.2152898,
+    1793585722.688204
+   ],
+   "requests": [
+    {
+     "method": "GET",
+     "target": "/health",
+     "headers": {
+      "accept-encoding": "identity",
+      "connection": "close",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": ""
+    }
+   ],
+   "setup_backup": "config.yaml.20261102-131522._7brem77.bak",
+   "setup_config_projection": true,
+   "files": {
+    "config.yaml": "file:bWVtb3J5Og0KICBwcmVzZXQ6IGZsYXQNCiAgbmVzdGVkOg0KICAgIGZsYWc6IHRydWUNCiAgICBvY3RhbDogMTUNCiAgICBsYWJlbDogJ29uJw0KY29vcmRpbmF0aW9uOg0KICBlbmFibGVkOiBmYWxzZQ0KICBtYWludGFpbmVyOg0KICAgIG1haW50YWluZXJfcGVyX3JlY2lwaWVudF9wZXJfaG91cjogNw0KICAgIHJwX2lkOiBsb2NhbGhvc3QNCiAgICBvcmlnaW46IHtEQUVNT059DQo=",
+    "config.yaml.20261102-131522._7brem77.bak": "file:bWVtb3J5OgogIHByZXNldDogZmxhdAogIG5lc3RlZDoge2ZsYWc6IHllcywgb2N0YWw6IDAxNywgbGFiZWw6ICdvbid9CmNvb3JkaW5hdGlvbjoKICBlbmFibGVkOiBmYWxzZQogIG1haW50YWluZXI6CiAgICBtYWludGFpbmVyX3Blcl9yZWNpcGllbnRfcGVyX2hvdXI6IDcK",
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "setup-replaces-invalid-name-keeps-cap": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "Q29uc29sZSBuYW1lOiB7REFFTU9OfSAocGFzc2tleXMgd29yayBpbiBhIGJyb3dzZXIgb24gdGhpcyBtYWNoaW5lIG9ubHkpDQpwbGFuOg0KICByZXBsYWNlICB0aGUgZGFlbW9uJ3MgY29vcmRpbmF0aW9uLm1haW50YWluZXIgKHJwX2lkIG11c3QgYmUgYSBsb3dlci1jYXNlIGhvc3RuYW1lKQ0KICB3cml0ZSAgICBjb29yZGluYXRpb24ubWFpbnRhaW5lciBycF9pZCBsb2NhbGhvc3QsIG9yaWdpbiB7REFFTU9OfSBpbnRvIHtIT01FfVxjb25maWcueWFtbCAoYSBiYWNrdXAgYmVzaWRlIGl0KQ0Kd3JvdGUge0hPTUV9XGNvbmZpZy55YW1sIChwcmV2aW91czoge0hPTUV9XGNvbmZpZy55YW1sLjIwMjYxMTAyLTEzMTUyNC41bjhqOHN2ay5iYWspDQpSZXN0YXJ0IHRoZSBkYWVtb24gc28gaXQgcmVhZHMgdGhlIG5hbWUgKHN0b3AgdGhlIGBwc2V1ZG9saWZlLW1jcCBzZXJ2ZWAgcHJvY2VzczsgeW91ciBuZXh0IHNlc3Npb24gc3RhcnRzIGl0IGFnYWluKSwgdGhlbiBydW4gYHBzZXVkb2xpZmUtbWNwIG1haW50YWluZXIgc2V0dXBgIGFnYWluIHRvIGVucm9sIHlvdXIgcGFzc2tleS4NCg==",
+   "stderr": "",
+   "window": [
+    1793585723.0886707,
+    1793585724.386836
+   ],
+   "requests": [
+    {
+     "method": "GET",
+     "target": "/health",
+     "headers": {
+      "accept-encoding": "identity",
+      "connection": "close",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": ""
+    }
+   ],
+   "setup_backup": "config.yaml.20261102-131524.5n8j8svk.bak",
+   "setup_config_projection": true,
+   "files": {
+    "config.yaml": "file:bWVtb3J5Og0KICBwcmVzZXQ6IGZsYXQNCiAgbmVzdGVkOg0KICAgIGZsYWc6IHRydWUNCiAgICBvY3RhbDogMTUNCiAgICBsYWJlbDogJ29uJw0KY29vcmRpbmF0aW9uOg0KICBlbmFibGVkOiBmYWxzZQ0KICBtYWludGFpbmVyOg0KICAgIG1haW50YWluZXJfcGVyX3JlY2lwaWVudF9wZXJfaG91cjogNw0KICAgIHJwX2lkOiBsb2NhbGhvc3QNCiAgICBvcmlnaW46IHtEQUVNT059DQo=",
+    "config.yaml.20261102-131524.5n8j8svk.bak": "file:bWVtb3J5OgogIHByZXNldDogZmxhdAogIG5lc3RlZDoge2ZsYWc6IHllcywgb2N0YWw6IDAxNywgbGFiZWw6ICdvbid9CmNvb3JkaW5hdGlvbjoKICBlbmFibGVkOiBmYWxzZQogIG1haW50YWluZXI6CiAgICBtYWludGFpbmVyX3Blcl9yZWNpcGllbnRfcGVyX2hvdXI6IDcKICAgIHJwX2lkOiBVUFBFUi5pbnZhbGlkCiAgICBvcmlnaW46IGh0dHBzOi8vVVBQRVIuaW52YWxpZAo=",
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "setup-check-unset": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 1,
+   "stdout": "bWFpbnRhaW5lciBwYXNza2V5czogbm90IHNldCB1cA0K",
+   "stderr": "",
+   "window": [
+    1793585724.9434657,
+    1793585725.7447467
+   ],
+   "setup_config_projection": false,
+   "files": {
+    "config.yaml": "file:bWVtb3J5OgogIHByZXNldDogZmxhdAogIG5lc3RlZDoge2ZsYWc6IHllcywgb2N0YWw6IDAxNywgbGFiZWw6ICdvbid9CmNvb3JkaW5hdGlvbjoKICBlbmFibGVkOiBmYWxzZQogIG1haW50YWluZXI6CiAgICBtYWludGFpbmVyX3Blcl9yZWNpcGllbnRfcGVyX2hvdXI6IDcK",
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "setup-check-unreadable-keys": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "bWFpbnRhaW5lciBwYXNza2V5czogY291bGQgbm90IHJlYWQgdGhlIGRhZW1vbidzIHN0YXRlDQo=",
+   "stderr": "",
+   "window": [
+    1793585725.7477458,
+    1793585726.5591466
+   ],
+   "setup_config_projection": false,
+   "files": {
+    "config.yaml": "file:bWVtb3J5OgogIHByZXNldDogZmxhdAogIG5lc3RlZDoge2ZsYWc6IHllcywgb2N0YWw6IDAxNywgbGFiZWw6ICdvbid9CmNvb3JkaW5hdGlvbjoKICBlbmFibGVkOiBmYWxzZQogIG1haW50YWluZXI6CiAgICBtYWludGFpbmVyX3Blcl9yZWNpcGllbnRfcGVyX2hvdXI6IDcKICAgIHJwX2lkOiBsb2NhbGhvc3QKICAgIG9yaWdpbjogaHR0cDovL2xvY2FsaG9zdDo4NzY1Cg==",
+    "cwd": "dir"
+   },
+   "modes": {}
+  }
+ }
+}
