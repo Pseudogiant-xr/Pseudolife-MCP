@@ -185,6 +185,22 @@
        null,
        "NEVER",
        null
+      ],
+      [
+       "public",
+       "principals",
+       11,
+       "owned",
+       "boolean",
+       "bool",
+       null,
+       null,
+       "NO",
+       "true",
+       "NO",
+       null,
+       "NEVER",
+       null
       ]
      ],
      "constraints": [
@@ -208,6 +224,13 @@
        "principals_created_at_not_null",
        "n",
        "NOT NULL created_at"
+      ],
+      [
+       "public",
+       "principals",
+       "principals_owned_not_null",
+       "n",
+       "NOT NULL owned"
       ],
       [
        "public",
@@ -345,6 +368,15 @@
        "double precision",
        false,
        ""
+      ],
+      [
+       "public",
+       "principals",
+       11,
+       "owned",
+       "boolean",
+       true,
+       ""
       ]
      ],
      "sequence_bounds": [],
@@ -391,7 +423,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": []
      }
@@ -419,6 +452,7 @@
      "desk",
      "maintainer"
     ],
+    "owned": [],
     "names": [],
     "resolved": [
      {
@@ -814,6 +848,9 @@
      "desk",
      "maintainer"
     ],
+    "owned": [
+     "early"
+    ],
     "names": [
      {
       "principal": "early",
@@ -948,7 +985,7 @@
    "case": "normalization-exclusion-board-tier",
    "output": {
     "available": true,
-    "len": 7,
+    "len": 8,
     "bank": "0123456789abcdef",
     "shadowed": [
      "daemon",
@@ -965,6 +1002,14 @@
      "default",
      "desk",
      "maintainer"
+    ],
+    "owned": [
+     "encoded",
+     "env-conflict",
+     "laptop",
+     "nbsp",
+     "pending",
+     "quiet"
     ],
     "names": [
      {
@@ -1204,7 +1249,7 @@
    "case": "environment-precedes-stored-same-secret",
    "output": {
     "available": true,
-    "len": 7,
+    "len": 8,
     "bank": "0123456789abcdef",
     "shadowed": [
      "daemon",
@@ -1221,6 +1266,14 @@
      "default",
      "desk",
      "maintainer"
+    ],
+    "owned": [
+     "encoded",
+     "env-conflict",
+     "laptop",
+     "nbsp",
+     "pending",
+     "quiet"
     ],
     "names": [
      {
@@ -1277,7 +1330,7 @@
    "case": "nonascii-and-latin1-header-candidates-http-whitespace",
    "output": {
     "available": true,
-    "len": 7,
+    "len": 8,
     "bank": "0123456789abcdef",
     "shadowed": [
      "daemon",
@@ -1294,6 +1347,14 @@
      "default",
      "desk",
      "maintainer"
+    ],
+    "owned": [
+     "encoded",
+     "env-conflict",
+     "laptop",
+     "nbsp",
+     "pending",
+     "quiet"
     ],
     "names": [],
     "resolved": [
@@ -1490,7 +1551,7 @@
    "case": "allowlist-before-stored-board-reserved-refused",
    "output": {
     "available": true,
-    "len": 7,
+    "len": 8,
     "bank": "0123456789abcdef",
     "shadowed": [
      "daemon",
@@ -1507,6 +1568,14 @@
      "default",
      "desk",
      "maintainer"
+    ],
+    "owned": [
+     "encoded",
+     "env-conflict",
+     "laptop",
+     "nbsp",
+     "pending",
+     "quiet"
     ],
     "names": [
      {
@@ -1560,7 +1629,7 @@
    "case": "stale-fail-closed-env-survives",
    "output": {
     "available": false,
-    "len": 7,
+    "len": 8,
     "bank": null,
     "shadowed": [
      "daemon",
@@ -1577,6 +1646,14 @@
      "default",
      "desk",
      "maintainer"
+    ],
+    "owned": [
+     "encoded",
+     "env-conflict",
+     "laptop",
+     "nbsp",
+     "pending",
+     "quiet"
     ],
     "names": [],
     "resolved": [
@@ -1706,7 +1783,7 @@
    "case": "fresh-recovery",
    "output": {
     "available": true,
-    "len": 7,
+    "len": 8,
     "bank": null,
     "shadowed": [
      "daemon",
@@ -1723,6 +1800,14 @@
      "default",
      "desk",
      "maintainer"
+    ],
+    "owned": [
+     "encoded",
+     "env-conflict",
+     "laptop",
+     "nbsp",
+     "pending",
+     "quiet"
     ],
     "names": [],
     "resolved": [
@@ -1802,6 +1887,9 @@
      "desk",
      "maintainer"
     ],
+    "owned": [
+     "race"
+    ],
     "names": [
      {
       "principal": "race",
@@ -1873,6 +1961,9 @@
      "default",
      "desk",
      "maintainer"
+    ],
+    "owned": [
+     "race"
     ],
     "names": [],
     "resolved": [
@@ -1975,6 +2066,7 @@
      "desk",
      "maintainer"
     ],
+    "owned": [],
     "names": [
      {
       "principal": "race",
@@ -2052,6 +2144,9 @@
      "daemon",
      "default",
      "maintainer"
+    ],
+    "owned": [
+     "laptop"
     ],
     "names": [],
     "resolved": [
@@ -2198,6 +2293,7 @@
      "desk",
      "maintainer"
     ],
+    "owned": [],
     "names": [],
     "resolved": [
      {
@@ -2457,6 +2553,22 @@
        null,
        "NEVER",
        null
+      ],
+      [
+       "public",
+       "principals",
+       11,
+       "owned",
+       "boolean",
+       "bool",
+       null,
+       null,
+       "NO",
+       "true",
+       "NO",
+       null,
+       "NEVER",
+       null
       ]
      ],
      "constraints": [
@@ -2501,6 +2613,13 @@
        "principals_created_at_not_null",
        "n",
        "NOT NULL created_at"
+      ],
+      [
+       "public",
+       "principals",
+       "principals_owned_not_null",
+       "n",
+       "NOT NULL owned"
       ],
       [
        "public",
@@ -2662,6 +2781,15 @@
        "double precision",
        false,
        ""
+      ],
+      [
+       "public",
+       "principals",
+       11,
+       "owned",
+       "boolean",
+       true,
+       ""
       ]
      ],
      "sequence_bounds": [],
@@ -2729,7 +2857,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": []
      }
@@ -2952,6 +3081,22 @@
        null,
        "NEVER",
        null
+      ],
+      [
+       "public",
+       "principals",
+       11,
+       "owned",
+       "boolean",
+       "bool",
+       null,
+       null,
+       "NO",
+       "true",
+       "NO",
+       null,
+       "NEVER",
+       null
       ]
      ],
      "constraints": [
@@ -2996,6 +3141,13 @@
        "principals_created_at_not_null",
        "n",
        "NOT NULL created_at"
+      ],
+      [
+       "public",
+       "principals",
+       "principals_owned_not_null",
+       "n",
+       "NOT NULL owned"
       ],
       [
        "public",
@@ -3157,6 +3309,15 @@
        "double precision",
        false,
        ""
+      ],
+      [
+       "public",
+       "principals",
+       11,
+       "owned",
+       "boolean",
+       true,
+       ""
       ]
      ],
      "sequence_bounds": [],
@@ -3229,7 +3390,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": []
      }
@@ -3257,6 +3419,7 @@
      "desk",
      "maintainer"
     ],
+    "owned": [],
     "names": [],
     "resolved": []
    },
@@ -3478,6 +3641,22 @@
        null,
        "NEVER",
        null
+      ],
+      [
+       "public",
+       "principals",
+       11,
+       "owned",
+       "boolean",
+       "bool",
+       null,
+       null,
+       "NO",
+       "true",
+       "NO",
+       null,
+       "NEVER",
+       null
       ]
      ],
      "constraints": [
@@ -3522,6 +3701,13 @@
        "principals_created_at_not_null",
        "n",
        "NOT NULL created_at"
+      ],
+      [
+       "public",
+       "principals",
+       "principals_owned_not_null",
+       "n",
+       "NOT NULL owned"
       ],
       [
        "public",
@@ -3683,6 +3869,15 @@
        "double precision",
        false,
        ""
+      ],
+      [
+       "public",
+       "principals",
+       11,
+       "owned",
+       "boolean",
+       true,
+       ""
       ]
      ],
      "sequence_bounds": [],
@@ -3755,7 +3950,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": []
      }
@@ -3783,6 +3979,7 @@
      "desk",
      "maintainer"
     ],
+    "owned": [],
     "names": [],
     "resolved": []
    },
@@ -4004,6 +4201,22 @@
        null,
        "NEVER",
        null
+      ],
+      [
+       "public",
+       "principals",
+       11,
+       "owned",
+       "boolean",
+       "bool",
+       null,
+       null,
+       "NO",
+       "true",
+       "NO",
+       null,
+       "NEVER",
+       null
       ]
      ],
      "constraints": [
@@ -4048,6 +4261,13 @@
        "principals_created_at_not_null",
        "n",
        "NOT NULL created_at"
+      ],
+      [
+       "public",
+       "principals",
+       "principals_owned_not_null",
+       "n",
+       "NOT NULL owned"
       ],
       [
        "public",
@@ -4209,6 +4429,15 @@
        "double precision",
        false,
        ""
+      ],
+      [
+       "public",
+       "principals",
+       11,
+       "owned",
+       "boolean",
+       true,
+       ""
       ]
      ],
      "sequence_bounds": [],
@@ -4281,7 +4510,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": []
      }
@@ -4309,6 +4539,7 @@
      "desk",
      "maintainer"
     ],
+    "owned": [],
     "names": [],
     "resolved": []
    },
@@ -4319,7 +4550,8 @@
    "output": {
     "state": "new",
     "tier": "core",
-    "board": true
+    "board": true,
+    "owned": true
    },
    "state": {
     "catalog": {
@@ -4532,6 +4764,22 @@
        null,
        "NEVER",
        null
+      ],
+      [
+       "public",
+       "principals",
+       11,
+       "owned",
+       "boolean",
+       "bool",
+       null,
+       null,
+       "NO",
+       "true",
+       "NO",
+       null,
+       "NEVER",
+       null
       ]
      ],
      "constraints": [
@@ -4576,6 +4824,13 @@
        "principals_created_at_not_null",
        "n",
        "NOT NULL created_at"
+      ],
+      [
+       "public",
+       "principals",
+       "principals_owned_not_null",
+       "n",
+       "NOT NULL owned"
       ],
       [
        "public",
@@ -4737,6 +4992,15 @@
        "double precision",
        false,
        ""
+      ],
+      [
+       "public",
+       "principals",
+       11,
+       "owned",
+       "boolean",
+       true,
+       ""
       ]
      ],
      "sequence_bounds": [],
@@ -4809,7 +5073,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": [
        [
@@ -4822,7 +5087,8 @@
         null,
         "<invite-laptop:created_at+0>",
         null,
-        null
+        null,
+        true
        ]
       ]
      }
@@ -4834,7 +5100,8 @@
    "output": {
     "state": "new",
     "tier": "full",
-    "board": false
+    "board": false,
+    "owned": true
    },
    "state": {
     "catalog": {
@@ -5047,6 +5314,22 @@
        null,
        "NEVER",
        null
+      ],
+      [
+       "public",
+       "principals",
+       11,
+       "owned",
+       "boolean",
+       "bool",
+       null,
+       null,
+       "NO",
+       "true",
+       "NO",
+       null,
+       "NEVER",
+       null
       ]
      ],
      "constraints": [
@@ -5091,6 +5374,13 @@
        "principals_created_at_not_null",
        "n",
        "NOT NULL created_at"
+      ],
+      [
+       "public",
+       "principals",
+       "principals_owned_not_null",
+       "n",
+       "NOT NULL owned"
       ],
       [
        "public",
@@ -5252,6 +5542,15 @@
        "double precision",
        false,
        ""
+      ],
+      [
+       "public",
+       "principals",
+       11,
+       "owned",
+       "boolean",
+       true,
+       ""
       ]
      ],
      "sequence_bounds": [],
@@ -5324,7 +5623,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": [
        [
@@ -5337,7 +5637,8 @@
         null,
         "<invite-laptop:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "quiet",
@@ -5349,7 +5650,8 @@
         null,
         "<invite-quiet:created_at+0>",
         null,
-        null
+        null,
+        true
        ]
       ]
      }
@@ -5361,7 +5663,8 @@
    "output": {
     "state": "new",
     "tier": null,
-    "board": true
+    "board": true,
+    "owned": true
    },
    "state": {
     "catalog": {
@@ -5574,6 +5877,22 @@
        null,
        "NEVER",
        null
+      ],
+      [
+       "public",
+       "principals",
+       11,
+       "owned",
+       "boolean",
+       "bool",
+       null,
+       null,
+       "NO",
+       "true",
+       "NO",
+       null,
+       "NEVER",
+       null
       ]
      ],
      "constraints": [
@@ -5618,6 +5937,13 @@
        "principals_created_at_not_null",
        "n",
        "NOT NULL created_at"
+      ],
+      [
+       "public",
+       "principals",
+       "principals_owned_not_null",
+       "n",
+       "NOT NULL owned"
       ],
       [
        "public",
@@ -5779,6 +6105,15 @@
        "double precision",
        false,
        ""
+      ],
+      [
+       "public",
+       "principals",
+       11,
+       "owned",
+       "boolean",
+       true,
+       ""
       ]
      ],
      "sequence_bounds": [],
@@ -5851,7 +6186,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": [
        [
@@ -5864,7 +6200,8 @@
         null,
         "<invite-expired:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "laptop",
@@ -5876,7 +6213,8 @@
         null,
         "<invite-laptop:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "quiet",
@@ -5888,7 +6226,8 @@
         null,
         "<invite-quiet:created_at+0>",
         null,
-        null
+        null,
+        true
        ]
       ]
      }
@@ -5900,7 +6239,8 @@
    "output": {
     "state": "new",
     "tier": null,
-    "board": true
+    "board": true,
+    "owned": true
    },
    "state": {
     "catalog": {
@@ -6113,6 +6453,22 @@
        null,
        "NEVER",
        null
+      ],
+      [
+       "public",
+       "principals",
+       11,
+       "owned",
+       "boolean",
+       "bool",
+       null,
+       null,
+       "NO",
+       "true",
+       "NO",
+       null,
+       "NEVER",
+       null
       ]
      ],
      "constraints": [
@@ -6157,6 +6513,13 @@
        "principals_created_at_not_null",
        "n",
        "NOT NULL created_at"
+      ],
+      [
+       "public",
+       "principals",
+       "principals_owned_not_null",
+       "n",
+       "NOT NULL owned"
       ],
       [
        "public",
@@ -6318,6 +6681,15 @@
        "double precision",
        false,
        ""
+      ],
+      [
+       "public",
+       "principals",
+       11,
+       "owned",
+       "boolean",
+       true,
+       ""
       ]
      ],
      "sequence_bounds": [],
@@ -6390,7 +6762,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": [
        [
@@ -6403,7 +6776,8 @@
         null,
         "<invite-desk:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "expired",
@@ -6415,7 +6789,8 @@
         null,
         "<invite-expired:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "laptop",
@@ -6427,7 +6802,8 @@
         null,
         "<invite-laptop:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "quiet",
@@ -6439,7 +6815,8 @@
         null,
         "<invite-quiet:created_at+0>",
         null,
-        null
+        null,
+        true
        ]
       ]
      }
@@ -6451,7 +6828,8 @@
    "output": {
     "state": "new",
     "tier": "minimal",
-    "board": true
+    "board": true,
+    "owned": true
    },
    "state": {
     "catalog": {
@@ -6664,6 +7042,22 @@
        null,
        "NEVER",
        null
+      ],
+      [
+       "public",
+       "principals",
+       11,
+       "owned",
+       "boolean",
+       "bool",
+       null,
+       null,
+       "NO",
+       "true",
+       "NO",
+       null,
+       "NEVER",
+       null
       ]
      ],
      "constraints": [
@@ -6708,6 +7102,13 @@
        "principals_created_at_not_null",
        "n",
        "NOT NULL created_at"
+      ],
+      [
+       "public",
+       "principals",
+       "principals_owned_not_null",
+       "n",
+       "NOT NULL owned"
       ],
       [
        "public",
@@ -6869,6 +7270,15 @@
        "double precision",
        false,
        ""
+      ],
+      [
+       "public",
+       "principals",
+       11,
+       "owned",
+       "boolean",
+       true,
+       ""
       ]
      ],
      "sequence_bounds": [],
@@ -6941,7 +7351,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": [
        [
@@ -6954,7 +7365,8 @@
         null,
         "<invite-desk:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "expired",
@@ -6966,7 +7378,8 @@
         null,
         "<invite-expired:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "laptop",
@@ -6978,7 +7391,8 @@
         null,
         "<invite-laptop:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "pending",
@@ -6990,7 +7404,8 @@
         null,
         "<invite-pending:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "quiet",
@@ -7002,7 +7417,8 @@
         null,
         "<invite-quiet:created_at+0>",
         null,
-        null
+        null,
+        true
        ]
       ]
      }
@@ -7014,7 +7430,8 @@
    "output": {
     "state": "new",
     "tier": null,
-    "board": true
+    "board": true,
+    "owned": true
    },
    "state": {
     "catalog": {
@@ -7227,6 +7644,22 @@
        null,
        "NEVER",
        null
+      ],
+      [
+       "public",
+       "principals",
+       11,
+       "owned",
+       "boolean",
+       "bool",
+       null,
+       null,
+       "NO",
+       "true",
+       "NO",
+       null,
+       "NEVER",
+       null
       ]
      ],
      "constraints": [
@@ -7271,6 +7704,13 @@
        "principals_created_at_not_null",
        "n",
        "NOT NULL created_at"
+      ],
+      [
+       "public",
+       "principals",
+       "principals_owned_not_null",
+       "n",
+       "NOT NULL owned"
       ],
       [
        "public",
@@ -7432,6 +7872,15 @@
        "double precision",
        false,
        ""
+      ],
+      [
+       "public",
+       "principals",
+       11,
+       "owned",
+       "boolean",
+       true,
+       ""
       ]
      ],
      "sequence_bounds": [],
@@ -7504,7 +7953,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": [
        [
@@ -7517,7 +7967,8 @@
         null,
         "<invite-desk:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "expired",
@@ -7529,7 +7980,8 @@
         null,
         "<invite-expired:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "gone",
@@ -7541,7 +7993,8 @@
         null,
         "<invite-gone:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "laptop",
@@ -7553,7 +8006,8 @@
         null,
         "<invite-laptop:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "pending",
@@ -7565,7 +8019,8 @@
         null,
         "<invite-pending:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "quiet",
@@ -7577,7 +8032,1264 @@
         null,
         "<invite-quiet:created_at+0>",
         null,
-        null
+        null,
+        true
+       ]
+      ]
+     }
+    }
+   }
+  },
+  {
+   "case": "invite-guest",
+   "output": {
+    "state": "new",
+    "tier": null,
+    "board": true,
+    "owned": false
+   },
+   "state": {
+    "catalog": {
+     "extensions": [
+      [
+       "plpgsql",
+       "1.0",
+       "pg_catalog"
+      ],
+      [
+       "vector",
+       "<fixture-vector-version>",
+       "public"
+      ]
+     ],
+     "schemas": [
+      [
+       "public"
+      ]
+     ],
+     "columns": [
+      [
+       "public",
+       "meta",
+       1,
+       "key",
+       "text",
+       "text",
+       null,
+       null,
+       "NO",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "meta",
+       2,
+       "value",
+       "jsonb",
+       "jsonb",
+       null,
+       null,
+       "NO",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "principals",
+       1,
+       "principal",
+       "text",
+       "text",
+       null,
+       null,
+       "NO",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "principals",
+       2,
+       "token_hash",
+       "text",
+       "text",
+       null,
+       null,
+       "YES",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "principals",
+       3,
+       "tier",
+       "text",
+       "text",
+       null,
+       null,
+       "YES",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "principals",
+       4,
+       "board",
+       "boolean",
+       "bool",
+       null,
+       null,
+       "NO",
+       "true",
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "principals",
+       5,
+       "code_hash",
+       "text",
+       "text",
+       null,
+       null,
+       "YES",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "principals",
+       6,
+       "code_expires_at",
+       "double precision",
+       "float8",
+       null,
+       53,
+       "YES",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "principals",
+       7,
+       "paired_code_hash",
+       "text",
+       "text",
+       null,
+       null,
+       "YES",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "principals",
+       8,
+       "created_at",
+       "double precision",
+       "float8",
+       null,
+       53,
+       "NO",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "principals",
+       9,
+       "paired_at",
+       "double precision",
+       "float8",
+       null,
+       53,
+       "YES",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "principals",
+       10,
+       "revoked_at",
+       "double precision",
+       "float8",
+       null,
+       53,
+       "YES",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "principals",
+       11,
+       "owned",
+       "boolean",
+       "bool",
+       null,
+       null,
+       "NO",
+       "true",
+       "NO",
+       null,
+       "NEVER",
+       null
+      ]
+     ],
+     "constraints": [
+      [
+       "public",
+       "meta",
+       "meta_key_not_null",
+       "n",
+       "NOT NULL key"
+      ],
+      [
+       "public",
+       "meta",
+       "meta_pkey",
+       "p",
+       "PRIMARY KEY (key)"
+      ],
+      [
+       "public",
+       "meta",
+       "meta_value_not_null",
+       "n",
+       "NOT NULL value"
+      ],
+      [
+       "public",
+       "principals",
+       "principals_board_not_null",
+       "n",
+       "NOT NULL board"
+      ],
+      [
+       "public",
+       "principals",
+       "principals_code_hash_key",
+       "u",
+       "UNIQUE (code_hash)"
+      ],
+      [
+       "public",
+       "principals",
+       "principals_created_at_not_null",
+       "n",
+       "NOT NULL created_at"
+      ],
+      [
+       "public",
+       "principals",
+       "principals_owned_not_null",
+       "n",
+       "NOT NULL owned"
+      ],
+      [
+       "public",
+       "principals",
+       "principals_pkey",
+       "p",
+       "PRIMARY KEY (principal)"
+      ],
+      [
+       "public",
+       "principals",
+       "principals_principal_not_null",
+       "n",
+       "NOT NULL principal"
+      ],
+      [
+       "public",
+       "principals",
+       "principals_token_hash_key",
+       "u",
+       "UNIQUE (token_hash)"
+      ]
+     ],
+     "indexes": [
+      [
+       "public",
+       "meta",
+       "meta_pkey",
+       "CREATE UNIQUE INDEX meta_pkey ON public.meta USING btree (key)"
+      ],
+      [
+       "public",
+       "principals",
+       "principals_code_hash_key",
+       "CREATE UNIQUE INDEX principals_code_hash_key ON public.principals USING btree (code_hash)"
+      ],
+      [
+       "public",
+       "principals",
+       "principals_pkey",
+       "CREATE UNIQUE INDEX principals_pkey ON public.principals USING btree (principal)"
+      ],
+      [
+       "public",
+       "principals",
+       "principals_token_hash_key",
+       "CREATE UNIQUE INDEX principals_token_hash_key ON public.principals USING btree (token_hash)"
+      ]
+     ],
+     "sequences": [],
+     "functions": [],
+     "triggers": [],
+     "views": [],
+     "column_types": [
+      [
+       "public",
+       "meta",
+       1,
+       "key",
+       "text",
+       true,
+       ""
+      ],
+      [
+       "public",
+       "meta",
+       2,
+       "value",
+       "jsonb",
+       true,
+       ""
+      ],
+      [
+       "public",
+       "principals",
+       1,
+       "principal",
+       "text",
+       true,
+       ""
+      ],
+      [
+       "public",
+       "principals",
+       2,
+       "token_hash",
+       "text",
+       false,
+       ""
+      ],
+      [
+       "public",
+       "principals",
+       3,
+       "tier",
+       "text",
+       false,
+       ""
+      ],
+      [
+       "public",
+       "principals",
+       4,
+       "board",
+       "boolean",
+       true,
+       ""
+      ],
+      [
+       "public",
+       "principals",
+       5,
+       "code_hash",
+       "text",
+       false,
+       ""
+      ],
+      [
+       "public",
+       "principals",
+       6,
+       "code_expires_at",
+       "double precision",
+       false,
+       ""
+      ],
+      [
+       "public",
+       "principals",
+       7,
+       "paired_code_hash",
+       "text",
+       false,
+       ""
+      ],
+      [
+       "public",
+       "principals",
+       8,
+       "created_at",
+       "double precision",
+       true,
+       ""
+      ],
+      [
+       "public",
+       "principals",
+       9,
+       "paired_at",
+       "double precision",
+       false,
+       ""
+      ],
+      [
+       "public",
+       "principals",
+       10,
+       "revoked_at",
+       "double precision",
+       false,
+       ""
+      ],
+      [
+       "public",
+       "principals",
+       11,
+       "owned",
+       "boolean",
+       true,
+       ""
+      ]
+     ],
+     "sequence_bounds": [],
+     "owners_and_comments": [
+      [
+       "public",
+       "meta",
+       "r",
+       "<test-role>",
+       null
+      ],
+      [
+       "public",
+       "meta_pkey",
+       "i",
+       "<test-role>",
+       null
+      ],
+      [
+       "public",
+       "principals",
+       "r",
+       "<test-role>",
+       null
+      ],
+      [
+       "public",
+       "principals_code_hash_key",
+       "i",
+       "<test-role>",
+       null
+      ],
+      [
+       "public",
+       "principals_pkey",
+       "i",
+       "<test-role>",
+       null
+      ],
+      [
+       "public",
+       "principals_token_hash_key",
+       "i",
+       "<test-role>",
+       null
+      ]
+     ]
+    },
+    "rows": {
+     "public.meta": {
+      "columns": [
+       "key",
+       "value"
+      ],
+      "rows": [
+       [
+        "coordination_bank_id",
+        ""
+       ]
+      ]
+     },
+     "public.principals": {
+      "columns": [
+       "principal",
+       "token_hash",
+       "tier",
+       "board",
+       "code_hash",
+       "code_expires_at",
+       "paired_code_hash",
+       "created_at",
+       "paired_at",
+       "revoked_at",
+       "owned"
+      ],
+      "rows": [
+       [
+        "desk",
+        null,
+        null,
+        true,
+        "6a7e7d07d17711e0aecb2855a89b2a3fac1f50533d35af54fa835d2ed1996675",
+        "<invite-desk:code_expires_at+900>",
+        null,
+        "<invite-desk:created_at+0>",
+        null,
+        null,
+        true
+       ],
+       [
+        "expired",
+        null,
+        null,
+        true,
+        "b66b98cc7e921e146a28f512870c1c2d05b0febe3d89c43f01d2b6f02d421f44",
+        "<invite-expired:code_expires_at+900>",
+        null,
+        "<invite-expired:created_at+0>",
+        null,
+        null,
+        true
+       ],
+       [
+        "gone",
+        null,
+        null,
+        true,
+        "44fb61a65fba7e3e4d581da7548ea52d583381475b6057cce178c76d39556346",
+        "<invite-gone:code_expires_at+900>",
+        null,
+        "<invite-gone:created_at+0>",
+        null,
+        null,
+        true
+       ],
+       [
+        "guest",
+        null,
+        null,
+        true,
+        "9b2b22951354e1791788d131cbda13e17bca5d419342754f8d52a430eb412718",
+        "<invite-guest:code_expires_at+900>",
+        null,
+        "<invite-guest:created_at+0>",
+        null,
+        null,
+        false
+       ],
+       [
+        "laptop",
+        null,
+        "core",
+        true,
+        "6d0d469eb943381c992442c239d3b7eaf595f93e7a8b1a2848e094b36c8a351e",
+        "<invite-laptop:code_expires_at+900>",
+        null,
+        "<invite-laptop:created_at+0>",
+        null,
+        null,
+        true
+       ],
+       [
+        "pending",
+        null,
+        "minimal",
+        true,
+        "6294b5f6171cbfafe68a6340db974723cae6bb40ff4d3749001e4f083f545725",
+        "<invite-pending:code_expires_at+900>",
+        null,
+        "<invite-pending:created_at+0>",
+        null,
+        null,
+        true
+       ],
+       [
+        "quiet",
+        null,
+        "full",
+        false,
+        "d688ae5b56a2edf43467fc811e428efc3fe43a04e0dffbf206fe1e12cde9a2d6",
+        "<invite-quiet:code_expires_at+900>",
+        null,
+        "<invite-quiet:created_at+0>",
+        null,
+        null,
+        true
+       ]
+      ]
+     }
+    }
+   }
+  },
+  {
+   "case": "invite-guest",
+   "output": {
+    "state": "pending",
+    "tier": null,
+    "board": true,
+    "owned": false
+   },
+   "state": {
+    "catalog": {
+     "extensions": [
+      [
+       "plpgsql",
+       "1.0",
+       "pg_catalog"
+      ],
+      [
+       "vector",
+       "<fixture-vector-version>",
+       "public"
+      ]
+     ],
+     "schemas": [
+      [
+       "public"
+      ]
+     ],
+     "columns": [
+      [
+       "public",
+       "meta",
+       1,
+       "key",
+       "text",
+       "text",
+       null,
+       null,
+       "NO",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "meta",
+       2,
+       "value",
+       "jsonb",
+       "jsonb",
+       null,
+       null,
+       "NO",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "principals",
+       1,
+       "principal",
+       "text",
+       "text",
+       null,
+       null,
+       "NO",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "principals",
+       2,
+       "token_hash",
+       "text",
+       "text",
+       null,
+       null,
+       "YES",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "principals",
+       3,
+       "tier",
+       "text",
+       "text",
+       null,
+       null,
+       "YES",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "principals",
+       4,
+       "board",
+       "boolean",
+       "bool",
+       null,
+       null,
+       "NO",
+       "true",
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "principals",
+       5,
+       "code_hash",
+       "text",
+       "text",
+       null,
+       null,
+       "YES",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "principals",
+       6,
+       "code_expires_at",
+       "double precision",
+       "float8",
+       null,
+       53,
+       "YES",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "principals",
+       7,
+       "paired_code_hash",
+       "text",
+       "text",
+       null,
+       null,
+       "YES",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "principals",
+       8,
+       "created_at",
+       "double precision",
+       "float8",
+       null,
+       53,
+       "NO",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "principals",
+       9,
+       "paired_at",
+       "double precision",
+       "float8",
+       null,
+       53,
+       "YES",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "principals",
+       10,
+       "revoked_at",
+       "double precision",
+       "float8",
+       null,
+       53,
+       "YES",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "principals",
+       11,
+       "owned",
+       "boolean",
+       "bool",
+       null,
+       null,
+       "NO",
+       "true",
+       "NO",
+       null,
+       "NEVER",
+       null
+      ]
+     ],
+     "constraints": [
+      [
+       "public",
+       "meta",
+       "meta_key_not_null",
+       "n",
+       "NOT NULL key"
+      ],
+      [
+       "public",
+       "meta",
+       "meta_pkey",
+       "p",
+       "PRIMARY KEY (key)"
+      ],
+      [
+       "public",
+       "meta",
+       "meta_value_not_null",
+       "n",
+       "NOT NULL value"
+      ],
+      [
+       "public",
+       "principals",
+       "principals_board_not_null",
+       "n",
+       "NOT NULL board"
+      ],
+      [
+       "public",
+       "principals",
+       "principals_code_hash_key",
+       "u",
+       "UNIQUE (code_hash)"
+      ],
+      [
+       "public",
+       "principals",
+       "principals_created_at_not_null",
+       "n",
+       "NOT NULL created_at"
+      ],
+      [
+       "public",
+       "principals",
+       "principals_owned_not_null",
+       "n",
+       "NOT NULL owned"
+      ],
+      [
+       "public",
+       "principals",
+       "principals_pkey",
+       "p",
+       "PRIMARY KEY (principal)"
+      ],
+      [
+       "public",
+       "principals",
+       "principals_principal_not_null",
+       "n",
+       "NOT NULL principal"
+      ],
+      [
+       "public",
+       "principals",
+       "principals_token_hash_key",
+       "u",
+       "UNIQUE (token_hash)"
+      ]
+     ],
+     "indexes": [
+      [
+       "public",
+       "meta",
+       "meta_pkey",
+       "CREATE UNIQUE INDEX meta_pkey ON public.meta USING btree (key)"
+      ],
+      [
+       "public",
+       "principals",
+       "principals_code_hash_key",
+       "CREATE UNIQUE INDEX principals_code_hash_key ON public.principals USING btree (code_hash)"
+      ],
+      [
+       "public",
+       "principals",
+       "principals_pkey",
+       "CREATE UNIQUE INDEX principals_pkey ON public.principals USING btree (principal)"
+      ],
+      [
+       "public",
+       "principals",
+       "principals_token_hash_key",
+       "CREATE UNIQUE INDEX principals_token_hash_key ON public.principals USING btree (token_hash)"
+      ]
+     ],
+     "sequences": [],
+     "functions": [],
+     "triggers": [],
+     "views": [],
+     "column_types": [
+      [
+       "public",
+       "meta",
+       1,
+       "key",
+       "text",
+       true,
+       ""
+      ],
+      [
+       "public",
+       "meta",
+       2,
+       "value",
+       "jsonb",
+       true,
+       ""
+      ],
+      [
+       "public",
+       "principals",
+       1,
+       "principal",
+       "text",
+       true,
+       ""
+      ],
+      [
+       "public",
+       "principals",
+       2,
+       "token_hash",
+       "text",
+       false,
+       ""
+      ],
+      [
+       "public",
+       "principals",
+       3,
+       "tier",
+       "text",
+       false,
+       ""
+      ],
+      [
+       "public",
+       "principals",
+       4,
+       "board",
+       "boolean",
+       true,
+       ""
+      ],
+      [
+       "public",
+       "principals",
+       5,
+       "code_hash",
+       "text",
+       false,
+       ""
+      ],
+      [
+       "public",
+       "principals",
+       6,
+       "code_expires_at",
+       "double precision",
+       false,
+       ""
+      ],
+      [
+       "public",
+       "principals",
+       7,
+       "paired_code_hash",
+       "text",
+       false,
+       ""
+      ],
+      [
+       "public",
+       "principals",
+       8,
+       "created_at",
+       "double precision",
+       true,
+       ""
+      ],
+      [
+       "public",
+       "principals",
+       9,
+       "paired_at",
+       "double precision",
+       false,
+       ""
+      ],
+      [
+       "public",
+       "principals",
+       10,
+       "revoked_at",
+       "double precision",
+       false,
+       ""
+      ],
+      [
+       "public",
+       "principals",
+       11,
+       "owned",
+       "boolean",
+       true,
+       ""
+      ]
+     ],
+     "sequence_bounds": [],
+     "owners_and_comments": [
+      [
+       "public",
+       "meta",
+       "r",
+       "<test-role>",
+       null
+      ],
+      [
+       "public",
+       "meta_pkey",
+       "i",
+       "<test-role>",
+       null
+      ],
+      [
+       "public",
+       "principals",
+       "r",
+       "<test-role>",
+       null
+      ],
+      [
+       "public",
+       "principals_code_hash_key",
+       "i",
+       "<test-role>",
+       null
+      ],
+      [
+       "public",
+       "principals_pkey",
+       "i",
+       "<test-role>",
+       null
+      ],
+      [
+       "public",
+       "principals_token_hash_key",
+       "i",
+       "<test-role>",
+       null
+      ]
+     ]
+    },
+    "rows": {
+     "public.meta": {
+      "columns": [
+       "key",
+       "value"
+      ],
+      "rows": [
+       [
+        "coordination_bank_id",
+        ""
+       ]
+      ]
+     },
+     "public.principals": {
+      "columns": [
+       "principal",
+       "token_hash",
+       "tier",
+       "board",
+       "code_hash",
+       "code_expires_at",
+       "paired_code_hash",
+       "created_at",
+       "paired_at",
+       "revoked_at",
+       "owned"
+      ],
+      "rows": [
+       [
+        "desk",
+        null,
+        null,
+        true,
+        "6a7e7d07d17711e0aecb2855a89b2a3fac1f50533d35af54fa835d2ed1996675",
+        "<invite-desk:code_expires_at+900>",
+        null,
+        "<invite-desk:created_at+0>",
+        null,
+        null,
+        true
+       ],
+       [
+        "expired",
+        null,
+        null,
+        true,
+        "b66b98cc7e921e146a28f512870c1c2d05b0febe3d89c43f01d2b6f02d421f44",
+        "<invite-expired:code_expires_at+900>",
+        null,
+        "<invite-expired:created_at+0>",
+        null,
+        null,
+        true
+       ],
+       [
+        "gone",
+        null,
+        null,
+        true,
+        "44fb61a65fba7e3e4d581da7548ea52d583381475b6057cce178c76d39556346",
+        "<invite-gone:code_expires_at+900>",
+        null,
+        "<invite-gone:created_at+0>",
+        null,
+        null,
+        true
+       ],
+       [
+        "guest",
+        null,
+        null,
+        true,
+        "7d1545ece43106c2f0b3aeb51b7bcecc8bcac0f121a55fa93bc2dc1391b5c681",
+        "<invite-guest:code_expires_at+900>",
+        null,
+        "<invite-guest:created_at+0>",
+        null,
+        null,
+        false
+       ],
+       [
+        "laptop",
+        null,
+        "core",
+        true,
+        "6d0d469eb943381c992442c239d3b7eaf595f93e7a8b1a2848e094b36c8a351e",
+        "<invite-laptop:code_expires_at+900>",
+        null,
+        "<invite-laptop:created_at+0>",
+        null,
+        null,
+        true
+       ],
+       [
+        "pending",
+        null,
+        "minimal",
+        true,
+        "6294b5f6171cbfafe68a6340db974723cae6bb40ff4d3749001e4f083f545725",
+        "<invite-pending:code_expires_at+900>",
+        null,
+        "<invite-pending:created_at+0>",
+        null,
+        null,
+        true
+       ],
+       [
+        "quiet",
+        null,
+        "full",
+        false,
+        "d688ae5b56a2edf43467fc811e428efc3fe43a04e0dffbf206fe1e12cde9a2d6",
+        "<invite-quiet:code_expires_at+900>",
+        null,
+        "<invite-quiet:created_at+0>",
+        null,
+        null,
+        true
        ]
       ]
      }
@@ -7589,7 +9301,8 @@
    "output": {
     "state": "new",
     "tier": null,
-    "board": true
+    "board": true,
+    "owned": true
    },
    "state": {
     "catalog": {
@@ -7802,6 +9515,22 @@
        null,
        "NEVER",
        null
+      ],
+      [
+       "public",
+       "principals",
+       11,
+       "owned",
+       "boolean",
+       "bool",
+       null,
+       null,
+       "NO",
+       "true",
+       "NO",
+       null,
+       "NEVER",
+       null
       ]
      ],
      "constraints": [
@@ -7846,6 +9575,13 @@
        "principals_created_at_not_null",
        "n",
        "NOT NULL created_at"
+      ],
+      [
+       "public",
+       "principals",
+       "principals_owned_not_null",
+       "n",
+       "NOT NULL owned"
       ],
       [
        "public",
@@ -8007,6 +9743,15 @@
        "double precision",
        false,
        ""
+      ],
+      [
+       "public",
+       "principals",
+       11,
+       "owned",
+       "boolean",
+       true,
+       ""
       ]
      ],
      "sequence_bounds": [],
@@ -8079,7 +9824,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": [
        [
@@ -8087,12 +9833,13 @@
         null,
         null,
         true,
-        "9b2b22951354e1791788d131cbda13e17bca5d419342754f8d52a430eb412718",
+        "1be573bd4fd741a17ead23102a77d1ea623e447d5b2b7d47ef30c40aa986ea16",
         "<adversarial-invite-default:code_expires_at+900>",
         null,
         "<adversarial-invite-default:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "desk",
@@ -8104,7 +9851,8 @@
         null,
         "<invite-desk:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "expired",
@@ -8116,7 +9864,8 @@
         null,
         "<invite-expired:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "gone",
@@ -8128,7 +9877,21 @@
         null,
         "<invite-gone:created_at+0>",
         null,
-        null
+        null,
+        true
+       ],
+       [
+        "guest",
+        null,
+        null,
+        true,
+        "7d1545ece43106c2f0b3aeb51b7bcecc8bcac0f121a55fa93bc2dc1391b5c681",
+        "<invite-guest:code_expires_at+900>",
+        null,
+        "<invite-guest:created_at+0>",
+        null,
+        null,
+        false
        ],
        [
         "laptop",
@@ -8140,7 +9903,8 @@
         null,
         "<invite-laptop:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "pending",
@@ -8152,7 +9916,8 @@
         null,
         "<invite-pending:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "quiet",
@@ -8164,7 +9929,8 @@
         null,
         "<invite-quiet:created_at+0>",
         null,
-        null
+        null,
+        true
        ]
       ]
      }
@@ -8176,7 +9942,8 @@
    "output": {
     "state": "new",
     "tier": null,
-    "board": true
+    "board": true,
+    "owned": true
    },
    "state": {
     "catalog": {
@@ -8389,6 +10156,22 @@
        null,
        "NEVER",
        null
+      ],
+      [
+       "public",
+       "principals",
+       11,
+       "owned",
+       "boolean",
+       "bool",
+       null,
+       null,
+       "NO",
+       "true",
+       "NO",
+       null,
+       "NEVER",
+       null
       ]
      ],
      "constraints": [
@@ -8433,6 +10216,13 @@
        "principals_created_at_not_null",
        "n",
        "NOT NULL created_at"
+      ],
+      [
+       "public",
+       "principals",
+       "principals_owned_not_null",
+       "n",
+       "NOT NULL owned"
       ],
       [
        "public",
@@ -8594,6 +10384,15 @@
        "double precision",
        false,
        ""
+      ],
+      [
+       "public",
+       "principals",
+       11,
+       "owned",
+       "boolean",
+       true,
+       ""
       ]
      ],
      "sequence_bounds": [],
@@ -8666,7 +10465,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": [
        [
@@ -8674,24 +10474,26 @@
         null,
         null,
         true,
-        "7d1545ece43106c2f0b3aeb51b7bcecc8bcac0f121a55fa93bc2dc1391b5c681",
+        "bce6af934964561513d9730badfa3a4ae950147aa9a5335a70d08c00deefec21",
         "<adversarial-invite-daemon:code_expires_at+900>",
         null,
         "<adversarial-invite-daemon:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "default",
         null,
         null,
         true,
-        "9b2b22951354e1791788d131cbda13e17bca5d419342754f8d52a430eb412718",
+        "1be573bd4fd741a17ead23102a77d1ea623e447d5b2b7d47ef30c40aa986ea16",
         "<adversarial-invite-default:code_expires_at+900>",
         null,
         "<adversarial-invite-default:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "desk",
@@ -8703,7 +10505,8 @@
         null,
         "<invite-desk:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "expired",
@@ -8715,7 +10518,8 @@
         null,
         "<invite-expired:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "gone",
@@ -8727,7 +10531,21 @@
         null,
         "<invite-gone:created_at+0>",
         null,
-        null
+        null,
+        true
+       ],
+       [
+        "guest",
+        null,
+        null,
+        true,
+        "7d1545ece43106c2f0b3aeb51b7bcecc8bcac0f121a55fa93bc2dc1391b5c681",
+        "<invite-guest:code_expires_at+900>",
+        null,
+        "<invite-guest:created_at+0>",
+        null,
+        null,
+        false
        ],
        [
         "laptop",
@@ -8739,7 +10557,8 @@
         null,
         "<invite-laptop:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "pending",
@@ -8751,7 +10570,8 @@
         null,
         "<invite-pending:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "quiet",
@@ -8763,7 +10583,8 @@
         null,
         "<invite-quiet:created_at+0>",
         null,
-        null
+        null,
+        true
        ]
       ]
      }
@@ -8775,7 +10596,8 @@
    "output": {
     "state": "new",
     "tier": null,
-    "board": true
+    "board": true,
+    "owned": true
    },
    "state": {
     "catalog": {
@@ -8988,6 +10810,22 @@
        null,
        "NEVER",
        null
+      ],
+      [
+       "public",
+       "principals",
+       11,
+       "owned",
+       "boolean",
+       "bool",
+       null,
+       null,
+       "NO",
+       "true",
+       "NO",
+       null,
+       "NEVER",
+       null
       ]
      ],
      "constraints": [
@@ -9032,6 +10870,13 @@
        "principals_created_at_not_null",
        "n",
        "NOT NULL created_at"
+      ],
+      [
+       "public",
+       "principals",
+       "principals_owned_not_null",
+       "n",
+       "NOT NULL owned"
       ],
       [
        "public",
@@ -9193,6 +11038,15 @@
        "double precision",
        false,
        ""
+      ],
+      [
+       "public",
+       "principals",
+       11,
+       "owned",
+       "boolean",
+       true,
+       ""
       ]
      ],
      "sequence_bounds": [],
@@ -9265,7 +11119,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": [
        [
@@ -9273,24 +11128,26 @@
         null,
         null,
         true,
-        "7d1545ece43106c2f0b3aeb51b7bcecc8bcac0f121a55fa93bc2dc1391b5c681",
+        "bce6af934964561513d9730badfa3a4ae950147aa9a5335a70d08c00deefec21",
         "<adversarial-invite-daemon:code_expires_at+900>",
         null,
         "<adversarial-invite-daemon:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "default",
         null,
         null,
         true,
-        "9b2b22951354e1791788d131cbda13e17bca5d419342754f8d52a430eb412718",
+        "1be573bd4fd741a17ead23102a77d1ea623e447d5b2b7d47ef30c40aa986ea16",
         "<adversarial-invite-default:code_expires_at+900>",
         null,
         "<adversarial-invite-default:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "desk",
@@ -9302,7 +11159,8 @@
         null,
         "<invite-desk:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "expired",
@@ -9314,7 +11172,8 @@
         null,
         "<invite-expired:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "gone",
@@ -9326,7 +11185,21 @@
         null,
         "<invite-gone:created_at+0>",
         null,
-        null
+        null,
+        true
+       ],
+       [
+        "guest",
+        null,
+        null,
+        true,
+        "7d1545ece43106c2f0b3aeb51b7bcecc8bcac0f121a55fa93bc2dc1391b5c681",
+        "<invite-guest:code_expires_at+900>",
+        null,
+        "<invite-guest:created_at+0>",
+        null,
+        null,
+        false
        ],
        [
         "laptop",
@@ -9338,19 +11211,21 @@
         null,
         "<invite-laptop:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "maintainer",
         null,
         null,
         true,
-        "1be573bd4fd741a17ead23102a77d1ea623e447d5b2b7d47ef30c40aa986ea16",
+        "ade8403fdc71011e85b57df06f82644494d0e70dadd0babddf2692f7ede87d52",
         "<adversarial-invite-maintainer:code_expires_at+900>",
         null,
         "<adversarial-invite-maintainer:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "pending",
@@ -9362,7 +11237,8 @@
         null,
         "<invite-pending:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "quiet",
@@ -9374,7 +11250,8 @@
         null,
         "<invite-quiet:created_at+0>",
         null,
-        null
+        null,
+        true
        ]
       ]
      }
@@ -9597,6 +11474,22 @@
        null,
        "NEVER",
        null
+      ],
+      [
+       "public",
+       "principals",
+       11,
+       "owned",
+       "boolean",
+       "bool",
+       null,
+       null,
+       "NO",
+       "true",
+       "NO",
+       null,
+       "NEVER",
+       null
       ]
      ],
      "constraints": [
@@ -9641,6 +11534,13 @@
        "principals_created_at_not_null",
        "n",
        "NOT NULL created_at"
+      ],
+      [
+       "public",
+       "principals",
+       "principals_owned_not_null",
+       "n",
+       "NOT NULL owned"
       ],
       [
        "public",
@@ -9802,6 +11702,15 @@
        "double precision",
        false,
        ""
+      ],
+      [
+       "public",
+       "principals",
+       11,
+       "owned",
+       "boolean",
+       true,
+       ""
       ]
      ],
      "sequence_bounds": [],
@@ -9874,7 +11783,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": [
        [
@@ -9882,24 +11792,26 @@
         null,
         null,
         true,
-        "7d1545ece43106c2f0b3aeb51b7bcecc8bcac0f121a55fa93bc2dc1391b5c681",
+        "bce6af934964561513d9730badfa3a4ae950147aa9a5335a70d08c00deefec21",
         "<adversarial-invite-daemon:code_expires_at+900>",
         null,
         "<adversarial-invite-daemon:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "default",
         null,
         null,
         true,
-        "9b2b22951354e1791788d131cbda13e17bca5d419342754f8d52a430eb412718",
+        "1be573bd4fd741a17ead23102a77d1ea623e447d5b2b7d47ef30c40aa986ea16",
         "<adversarial-invite-default:code_expires_at+900>",
         null,
         "<adversarial-invite-default:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "desk",
@@ -9911,7 +11823,8 @@
         null,
         "<invite-desk:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "expired",
@@ -9923,7 +11836,8 @@
         null,
         "<invite-expired:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "gone",
@@ -9935,7 +11849,21 @@
         null,
         "<invite-gone:created_at+0>",
         null,
-        null
+        null,
+        true
+       ],
+       [
+        "guest",
+        null,
+        null,
+        true,
+        "7d1545ece43106c2f0b3aeb51b7bcecc8bcac0f121a55fa93bc2dc1391b5c681",
+        "<invite-guest:code_expires_at+900>",
+        null,
+        "<invite-guest:created_at+0>",
+        null,
+        null,
+        false
        ],
        [
         "laptop",
@@ -9947,19 +11875,21 @@
         null,
         "<invite-laptop:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "maintainer",
         null,
         null,
         true,
-        "1be573bd4fd741a17ead23102a77d1ea623e447d5b2b7d47ef30c40aa986ea16",
+        "ade8403fdc71011e85b57df06f82644494d0e70dadd0babddf2692f7ede87d52",
         "<adversarial-invite-maintainer:code_expires_at+900>",
         null,
         "<adversarial-invite-maintainer:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "pending",
@@ -9971,7 +11901,8 @@
         null,
         "<invite-pending:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "quiet",
@@ -9983,7 +11914,8 @@
         null,
         "<invite-quiet:created_at+0>",
         null,
-        null
+        null,
+        true
        ]
       ]
      }
@@ -10206,6 +12138,22 @@
        null,
        "NEVER",
        null
+      ],
+      [
+       "public",
+       "principals",
+       11,
+       "owned",
+       "boolean",
+       "bool",
+       null,
+       null,
+       "NO",
+       "true",
+       "NO",
+       null,
+       "NEVER",
+       null
       ]
      ],
      "constraints": [
@@ -10250,6 +12198,13 @@
        "principals_created_at_not_null",
        "n",
        "NOT NULL created_at"
+      ],
+      [
+       "public",
+       "principals",
+       "principals_owned_not_null",
+       "n",
+       "NOT NULL owned"
       ],
       [
        "public",
@@ -10411,6 +12366,15 @@
        "double precision",
        false,
        ""
+      ],
+      [
+       "public",
+       "principals",
+       11,
+       "owned",
+       "boolean",
+       true,
+       ""
       ]
      ],
      "sequence_bounds": [],
@@ -10483,7 +12447,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": [
        [
@@ -10491,24 +12456,26 @@
         null,
         null,
         true,
-        "7d1545ece43106c2f0b3aeb51b7bcecc8bcac0f121a55fa93bc2dc1391b5c681",
+        "bce6af934964561513d9730badfa3a4ae950147aa9a5335a70d08c00deefec21",
         "<adversarial-invite-daemon:code_expires_at+900>",
         null,
         "<adversarial-invite-daemon:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "default",
         null,
         null,
         true,
-        "9b2b22951354e1791788d131cbda13e17bca5d419342754f8d52a430eb412718",
+        "1be573bd4fd741a17ead23102a77d1ea623e447d5b2b7d47ef30c40aa986ea16",
         "<adversarial-invite-default:code_expires_at+900>",
         null,
         "<adversarial-invite-default:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "desk",
@@ -10520,7 +12487,8 @@
         null,
         "<invite-desk:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "expired",
@@ -10532,7 +12500,8 @@
         null,
         "<invite-expired:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "gone",
@@ -10544,7 +12513,21 @@
         null,
         "<invite-gone:created_at+0>",
         null,
-        null
+        null,
+        true
+       ],
+       [
+        "guest",
+        null,
+        null,
+        true,
+        "7d1545ece43106c2f0b3aeb51b7bcecc8bcac0f121a55fa93bc2dc1391b5c681",
+        "<invite-guest:code_expires_at+900>",
+        null,
+        "<invite-guest:created_at+0>",
+        null,
+        null,
+        false
        ],
        [
         "laptop",
@@ -10556,19 +12539,21 @@
         null,
         "<invite-laptop:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "maintainer",
         null,
         null,
         true,
-        "1be573bd4fd741a17ead23102a77d1ea623e447d5b2b7d47ef30c40aa986ea16",
+        "ade8403fdc71011e85b57df06f82644494d0e70dadd0babddf2692f7ede87d52",
         "<adversarial-invite-maintainer:code_expires_at+900>",
         null,
         "<adversarial-invite-maintainer:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "pending",
@@ -10580,7 +12565,8 @@
         null,
         "<invite-pending:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "quiet",
@@ -10592,7 +12578,8 @@
         null,
         "<invite-quiet:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "unpaired",
@@ -10604,7 +12591,8 @@
         null,
         1000.0,
         null,
-        null
+        null,
+        true
        ]
       ]
      }
@@ -10827,6 +12815,22 @@
        null,
        "NEVER",
        null
+      ],
+      [
+       "public",
+       "principals",
+       11,
+       "owned",
+       "boolean",
+       "bool",
+       null,
+       null,
+       "NO",
+       "true",
+       "NO",
+       null,
+       "NEVER",
+       null
       ]
      ],
      "constraints": [
@@ -10871,6 +12875,13 @@
        "principals_created_at_not_null",
        "n",
        "NOT NULL created_at"
+      ],
+      [
+       "public",
+       "principals",
+       "principals_owned_not_null",
+       "n",
+       "NOT NULL owned"
       ],
       [
        "public",
@@ -11032,6 +13043,15 @@
        "double precision",
        false,
        ""
+      ],
+      [
+       "public",
+       "principals",
+       11,
+       "owned",
+       "boolean",
+       true,
+       ""
       ]
      ],
      "sequence_bounds": [],
@@ -11104,7 +13124,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": [
        [
@@ -11112,24 +13133,26 @@
         null,
         null,
         true,
-        "7d1545ece43106c2f0b3aeb51b7bcecc8bcac0f121a55fa93bc2dc1391b5c681",
+        "bce6af934964561513d9730badfa3a4ae950147aa9a5335a70d08c00deefec21",
         "<adversarial-invite-daemon:code_expires_at+900>",
         null,
         "<adversarial-invite-daemon:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "default",
         null,
         null,
         true,
-        "9b2b22951354e1791788d131cbda13e17bca5d419342754f8d52a430eb412718",
+        "1be573bd4fd741a17ead23102a77d1ea623e447d5b2b7d47ef30c40aa986ea16",
         "<adversarial-invite-default:code_expires_at+900>",
         null,
         "<adversarial-invite-default:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "desk",
@@ -11141,7 +13164,8 @@
         null,
         "<invite-desk:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "expired",
@@ -11153,7 +13177,8 @@
         null,
         "<invite-expired:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "gone",
@@ -11165,7 +13190,21 @@
         null,
         "<invite-gone:created_at+0>",
         null,
-        "<revoke-pending:revoked_at+0>"
+        "<revoke-pending:revoked_at+0>",
+        true
+       ],
+       [
+        "guest",
+        null,
+        null,
+        true,
+        "7d1545ece43106c2f0b3aeb51b7bcecc8bcac0f121a55fa93bc2dc1391b5c681",
+        "<invite-guest:code_expires_at+900>",
+        null,
+        "<invite-guest:created_at+0>",
+        null,
+        null,
+        false
        ],
        [
         "laptop",
@@ -11177,19 +13216,21 @@
         null,
         "<invite-laptop:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "maintainer",
         null,
         null,
         true,
-        "1be573bd4fd741a17ead23102a77d1ea623e447d5b2b7d47ef30c40aa986ea16",
+        "ade8403fdc71011e85b57df06f82644494d0e70dadd0babddf2692f7ede87d52",
         "<adversarial-invite-maintainer:code_expires_at+900>",
         null,
         "<adversarial-invite-maintainer:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "pending",
@@ -11201,7 +13242,8 @@
         null,
         "<invite-pending:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "quiet",
@@ -11213,7 +13255,8 @@
         null,
         "<invite-quiet:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "unpaired",
@@ -11225,7 +13268,8 @@
         null,
         1000.0,
         null,
-        null
+        null,
+        true
        ]
       ]
      }
@@ -11448,6 +13492,22 @@
        null,
        "NEVER",
        null
+      ],
+      [
+       "public",
+       "principals",
+       11,
+       "owned",
+       "boolean",
+       "bool",
+       null,
+       null,
+       "NO",
+       "true",
+       "NO",
+       null,
+       "NEVER",
+       null
       ]
      ],
      "constraints": [
@@ -11492,6 +13552,13 @@
        "principals_created_at_not_null",
        "n",
        "NOT NULL created_at"
+      ],
+      [
+       "public",
+       "principals",
+       "principals_owned_not_null",
+       "n",
+       "NOT NULL owned"
       ],
       [
        "public",
@@ -11653,6 +13720,15 @@
        "double precision",
        false,
        ""
+      ],
+      [
+       "public",
+       "principals",
+       11,
+       "owned",
+       "boolean",
+       true,
+       ""
       ]
      ],
      "sequence_bounds": [],
@@ -11725,7 +13801,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": [
        [
@@ -11733,24 +13810,26 @@
         null,
         null,
         true,
-        "7d1545ece43106c2f0b3aeb51b7bcecc8bcac0f121a55fa93bc2dc1391b5c681",
+        "bce6af934964561513d9730badfa3a4ae950147aa9a5335a70d08c00deefec21",
         "<adversarial-invite-daemon:code_expires_at+900>",
         null,
         "<adversarial-invite-daemon:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "default",
         null,
         null,
         true,
-        "9b2b22951354e1791788d131cbda13e17bca5d419342754f8d52a430eb412718",
+        "1be573bd4fd741a17ead23102a77d1ea623e447d5b2b7d47ef30c40aa986ea16",
         "<adversarial-invite-default:code_expires_at+900>",
         null,
         "<adversarial-invite-default:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "desk",
@@ -11762,7 +13841,8 @@
         null,
         "<invite-desk:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "expired",
@@ -11774,7 +13854,8 @@
         null,
         "<invite-expired:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "gone",
@@ -11786,7 +13867,21 @@
         "44fb61a65fba7e3e4d581da7548ea52d583381475b6057cce178c76d39556346",
         "<invite-gone:created_at+0>",
         "<adversarial-revoked-with-live-codes:paired_at+0>",
-        "<revoke-pending:revoked_at+0>"
+        "<revoke-pending:revoked_at+0>",
+        true
+       ],
+       [
+        "guest",
+        null,
+        null,
+        true,
+        "7d1545ece43106c2f0b3aeb51b7bcecc8bcac0f121a55fa93bc2dc1391b5c681",
+        "<invite-guest:code_expires_at+900>",
+        null,
+        "<invite-guest:created_at+0>",
+        null,
+        null,
+        false
        ],
        [
         "laptop",
@@ -11798,19 +13893,21 @@
         null,
         "<invite-laptop:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "maintainer",
         null,
         null,
         true,
-        "1be573bd4fd741a17ead23102a77d1ea623e447d5b2b7d47ef30c40aa986ea16",
+        "ade8403fdc71011e85b57df06f82644494d0e70dadd0babddf2692f7ede87d52",
         "<adversarial-invite-maintainer:code_expires_at+900>",
         null,
         "<adversarial-invite-maintainer:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "pending",
@@ -11822,7 +13919,8 @@
         null,
         "<invite-pending:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "quiet",
@@ -11834,7 +13932,8 @@
         null,
         "<invite-quiet:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "unpaired",
@@ -11846,7 +13945,8 @@
         null,
         1000.0,
         null,
-        null
+        null,
+        true
        ]
       ]
      }
@@ -11867,7 +13967,8 @@
       "created_at": "<adversarial-invite-daemon:created_at+0>",
       "paired_at": null,
       "revoked_at": null,
-      "last_seen_at": null
+      "last_seen_at": null,
+      "owner": true
      },
      {
       "principal": "default",
@@ -11879,7 +13980,8 @@
       "created_at": "<adversarial-invite-default:created_at+0>",
       "paired_at": null,
       "revoked_at": null,
-      "last_seen_at": null
+      "last_seen_at": null,
+      "owner": true
      },
      {
       "principal": "desk",
@@ -11891,7 +13993,8 @@
       "created_at": "<invite-desk:created_at+0>",
       "paired_at": null,
       "revoked_at": null,
-      "last_seen_at": null
+      "last_seen_at": null,
+      "owner": true
      },
      {
       "principal": "expired",
@@ -11903,7 +14006,8 @@
       "created_at": "<invite-expired:created_at+0>",
       "paired_at": null,
       "revoked_at": null,
-      "last_seen_at": null
+      "last_seen_at": null,
+      "owner": true
      },
      {
       "principal": "gone",
@@ -11915,7 +14019,21 @@
       "created_at": "<invite-gone:created_at+0>",
       "paired_at": "<adversarial-revoked-with-live-codes:paired_at+0>",
       "revoked_at": "<revoke-pending:revoked_at+0>",
-      "last_seen_at": null
+      "last_seen_at": null,
+      "owner": true
+     },
+     {
+      "principal": "guest",
+      "state": "pending",
+      "paired": false,
+      "tier": null,
+      "board": true,
+      "code_expires_at": "<invite-guest:code_expires_at+900>",
+      "created_at": "<invite-guest:created_at+0>",
+      "paired_at": null,
+      "revoked_at": null,
+      "last_seen_at": null,
+      "owner": false
      },
      {
       "principal": "laptop",
@@ -11927,7 +14045,8 @@
       "created_at": "<invite-laptop:created_at+0>",
       "paired_at": null,
       "revoked_at": null,
-      "last_seen_at": null
+      "last_seen_at": null,
+      "owner": true
      },
      {
       "principal": "maintainer",
@@ -11939,7 +14058,8 @@
       "created_at": "<adversarial-invite-maintainer:created_at+0>",
       "paired_at": null,
       "revoked_at": null,
-      "last_seen_at": null
+      "last_seen_at": null,
+      "owner": true
      },
      {
       "principal": "pending",
@@ -11951,7 +14071,8 @@
       "created_at": "<invite-pending:created_at+0>",
       "paired_at": null,
       "revoked_at": null,
-      "last_seen_at": null
+      "last_seen_at": null,
+      "owner": true
      },
      {
       "principal": "quiet",
@@ -11963,7 +14084,8 @@
       "created_at": "<invite-quiet:created_at+0>",
       "paired_at": null,
       "revoked_at": null,
-      "last_seen_at": null
+      "last_seen_at": null,
+      "owner": true
      },
      {
       "principal": "unpaired",
@@ -11975,7 +14097,8 @@
       "created_at": 1000.0,
       "paired_at": null,
       "revoked_at": null,
-      "last_seen_at": null
+      "last_seen_at": null,
+      "owner": true
      }
     ]
    },
@@ -12204,6 +14327,22 @@
        null,
        "NEVER",
        null
+      ],
+      [
+       "public",
+       "principals",
+       11,
+       "owned",
+       "boolean",
+       "bool",
+       null,
+       null,
+       "NO",
+       "true",
+       "NO",
+       null,
+       "NEVER",
+       null
       ]
      ],
      "constraints": [
@@ -12248,6 +14387,13 @@
        "principals_created_at_not_null",
        "n",
        "NOT NULL created_at"
+      ],
+      [
+       "public",
+       "principals",
+       "principals_owned_not_null",
+       "n",
+       "NOT NULL owned"
       ],
       [
        "public",
@@ -12409,6 +14555,15 @@
        "double precision",
        false,
        ""
+      ],
+      [
+       "public",
+       "principals",
+       11,
+       "owned",
+       "boolean",
+       true,
+       ""
       ]
      ],
      "sequence_bounds": [],
@@ -12481,7 +14636,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": [
        [
@@ -12489,24 +14645,26 @@
         null,
         null,
         true,
-        "7d1545ece43106c2f0b3aeb51b7bcecc8bcac0f121a55fa93bc2dc1391b5c681",
+        "bce6af934964561513d9730badfa3a4ae950147aa9a5335a70d08c00deefec21",
         "<adversarial-invite-daemon:code_expires_at+900>",
         null,
         "<adversarial-invite-daemon:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "default",
         null,
         null,
         true,
-        "9b2b22951354e1791788d131cbda13e17bca5d419342754f8d52a430eb412718",
+        "1be573bd4fd741a17ead23102a77d1ea623e447d5b2b7d47ef30c40aa986ea16",
         "<adversarial-invite-default:code_expires_at+900>",
         null,
         "<adversarial-invite-default:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "desk",
@@ -12518,7 +14676,8 @@
         null,
         "<invite-desk:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "expired",
@@ -12530,7 +14689,8 @@
         null,
         "<invite-expired:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "gone",
@@ -12542,7 +14702,21 @@
         "44fb61a65fba7e3e4d581da7548ea52d583381475b6057cce178c76d39556346",
         "<invite-gone:created_at+0>",
         "<adversarial-revoked-with-live-codes:paired_at+0>",
-        "<revoke-pending:revoked_at+0>"
+        "<revoke-pending:revoked_at+0>",
+        true
+       ],
+       [
+        "guest",
+        null,
+        null,
+        true,
+        "7d1545ece43106c2f0b3aeb51b7bcecc8bcac0f121a55fa93bc2dc1391b5c681",
+        "<invite-guest:code_expires_at+900>",
+        null,
+        "<invite-guest:created_at+0>",
+        null,
+        null,
+        false
        ],
        [
         "laptop",
@@ -12554,19 +14728,21 @@
         null,
         "<invite-laptop:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "maintainer",
         null,
         null,
         true,
-        "1be573bd4fd741a17ead23102a77d1ea623e447d5b2b7d47ef30c40aa986ea16",
+        "ade8403fdc71011e85b57df06f82644494d0e70dadd0babddf2692f7ede87d52",
         "<adversarial-invite-maintainer:code_expires_at+900>",
         null,
         "<adversarial-invite-maintainer:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "pending",
@@ -12578,7 +14754,8 @@
         null,
         "<invite-pending:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "quiet",
@@ -12590,7 +14767,8 @@
         null,
         "<invite-quiet:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "unpaired",
@@ -12602,7 +14780,8 @@
         null,
         1000.0,
         null,
-        null
+        null,
+        true
        ]
       ]
      }
@@ -12825,6 +15004,22 @@
        null,
        "NEVER",
        null
+      ],
+      [
+       "public",
+       "principals",
+       11,
+       "owned",
+       "boolean",
+       "bool",
+       null,
+       null,
+       "NO",
+       "true",
+       "NO",
+       null,
+       "NEVER",
+       null
       ]
      ],
      "constraints": [
@@ -12869,6 +15064,13 @@
        "principals_created_at_not_null",
        "n",
        "NOT NULL created_at"
+      ],
+      [
+       "public",
+       "principals",
+       "principals_owned_not_null",
+       "n",
+       "NOT NULL owned"
       ],
       [
        "public",
@@ -13030,6 +15232,15 @@
        "double precision",
        false,
        ""
+      ],
+      [
+       "public",
+       "principals",
+       11,
+       "owned",
+       "boolean",
+       true,
+       ""
       ]
      ],
      "sequence_bounds": [],
@@ -13102,7 +15313,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": [
        [
@@ -13110,24 +15322,26 @@
         null,
         null,
         true,
-        "7d1545ece43106c2f0b3aeb51b7bcecc8bcac0f121a55fa93bc2dc1391b5c681",
+        "bce6af934964561513d9730badfa3a4ae950147aa9a5335a70d08c00deefec21",
         "<adversarial-invite-daemon:code_expires_at+900>",
         null,
         "<adversarial-invite-daemon:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "default",
         null,
         null,
         true,
-        "9b2b22951354e1791788d131cbda13e17bca5d419342754f8d52a430eb412718",
+        "1be573bd4fd741a17ead23102a77d1ea623e447d5b2b7d47ef30c40aa986ea16",
         "<adversarial-invite-default:code_expires_at+900>",
         null,
         "<adversarial-invite-default:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "desk",
@@ -13139,7 +15353,8 @@
         null,
         "<invite-desk:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "expired",
@@ -13151,7 +15366,8 @@
         null,
         "<invite-expired:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "gone",
@@ -13163,7 +15379,21 @@
         "44fb61a65fba7e3e4d581da7548ea52d583381475b6057cce178c76d39556346",
         "<invite-gone:created_at+0>",
         "<adversarial-revoked-with-live-codes:paired_at+0>",
-        "<revoke-pending:revoked_at+0>"
+        "<revoke-pending:revoked_at+0>",
+        true
+       ],
+       [
+        "guest",
+        null,
+        null,
+        true,
+        "7d1545ece43106c2f0b3aeb51b7bcecc8bcac0f121a55fa93bc2dc1391b5c681",
+        "<invite-guest:code_expires_at+900>",
+        null,
+        "<invite-guest:created_at+0>",
+        null,
+        null,
+        false
        ],
        [
         "laptop",
@@ -13175,19 +15405,21 @@
         null,
         "<invite-laptop:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "maintainer",
         null,
         null,
         true,
-        "1be573bd4fd741a17ead23102a77d1ea623e447d5b2b7d47ef30c40aa986ea16",
+        "ade8403fdc71011e85b57df06f82644494d0e70dadd0babddf2692f7ede87d52",
         "<adversarial-invite-maintainer:code_expires_at+900>",
         null,
         "<adversarial-invite-maintainer:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "pending",
@@ -13199,7 +15431,8 @@
         null,
         "<invite-pending:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "quiet",
@@ -13211,7 +15444,8 @@
         null,
         "<invite-quiet:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "unpaired",
@@ -13223,7 +15457,8 @@
         null,
         1000.0,
         null,
-        null
+        null,
+        true
        ]
       ]
      }
@@ -13446,6 +15681,22 @@
        null,
        "NEVER",
        null
+      ],
+      [
+       "public",
+       "principals",
+       11,
+       "owned",
+       "boolean",
+       "bool",
+       null,
+       null,
+       "NO",
+       "true",
+       "NO",
+       null,
+       "NEVER",
+       null
       ]
      ],
      "constraints": [
@@ -13490,6 +15741,13 @@
        "principals_created_at_not_null",
        "n",
        "NOT NULL created_at"
+      ],
+      [
+       "public",
+       "principals",
+       "principals_owned_not_null",
+       "n",
+       "NOT NULL owned"
       ],
       [
        "public",
@@ -13651,6 +15909,15 @@
        "double precision",
        false,
        ""
+      ],
+      [
+       "public",
+       "principals",
+       11,
+       "owned",
+       "boolean",
+       true,
+       ""
       ]
      ],
      "sequence_bounds": [],
@@ -13723,7 +15990,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": [
        [
@@ -13731,24 +15999,26 @@
         null,
         null,
         true,
-        "7d1545ece43106c2f0b3aeb51b7bcecc8bcac0f121a55fa93bc2dc1391b5c681",
+        "bce6af934964561513d9730badfa3a4ae950147aa9a5335a70d08c00deefec21",
         "<adversarial-invite-daemon:code_expires_at+900>",
         null,
         "<adversarial-invite-daemon:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "default",
         null,
         null,
         true,
-        "9b2b22951354e1791788d131cbda13e17bca5d419342754f8d52a430eb412718",
+        "1be573bd4fd741a17ead23102a77d1ea623e447d5b2b7d47ef30c40aa986ea16",
         "<adversarial-invite-default:code_expires_at+900>",
         null,
         "<adversarial-invite-default:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "desk",
@@ -13760,7 +16030,8 @@
         null,
         "<invite-desk:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "expired",
@@ -13772,7 +16043,8 @@
         null,
         "<invite-expired:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "gone",
@@ -13784,7 +16056,21 @@
         "44fb61a65fba7e3e4d581da7548ea52d583381475b6057cce178c76d39556346",
         "<invite-gone:created_at+0>",
         "<adversarial-revoked-with-live-codes:paired_at+0>",
-        "<revoke-pending:revoked_at+0>"
+        "<revoke-pending:revoked_at+0>",
+        true
+       ],
+       [
+        "guest",
+        null,
+        null,
+        true,
+        "7d1545ece43106c2f0b3aeb51b7bcecc8bcac0f121a55fa93bc2dc1391b5c681",
+        "<invite-guest:code_expires_at+900>",
+        null,
+        "<invite-guest:created_at+0>",
+        null,
+        null,
+        false
        ],
        [
         "laptop",
@@ -13796,19 +16082,21 @@
         null,
         "<invite-laptop:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "maintainer",
         null,
         null,
         true,
-        "1be573bd4fd741a17ead23102a77d1ea623e447d5b2b7d47ef30c40aa986ea16",
+        "ade8403fdc71011e85b57df06f82644494d0e70dadd0babddf2692f7ede87d52",
         "<adversarial-invite-maintainer:code_expires_at+900>",
         null,
         "<adversarial-invite-maintainer:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "pending",
@@ -13820,7 +16108,8 @@
         null,
         "<invite-pending:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "quiet",
@@ -13832,7 +16121,8 @@
         null,
         "<invite-quiet:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "unpaired",
@@ -13844,7 +16134,8 @@
         null,
         1000.0,
         null,
-        null
+        null,
+        true
        ]
       ]
      }
@@ -14067,6 +16358,22 @@
        null,
        "NEVER",
        null
+      ],
+      [
+       "public",
+       "principals",
+       11,
+       "owned",
+       "boolean",
+       "bool",
+       null,
+       null,
+       "NO",
+       "true",
+       "NO",
+       null,
+       "NEVER",
+       null
       ]
      ],
      "constraints": [
@@ -14111,6 +16418,13 @@
        "principals_created_at_not_null",
        "n",
        "NOT NULL created_at"
+      ],
+      [
+       "public",
+       "principals",
+       "principals_owned_not_null",
+       "n",
+       "NOT NULL owned"
       ],
       [
        "public",
@@ -14272,6 +16586,15 @@
        "double precision",
        false,
        ""
+      ],
+      [
+       "public",
+       "principals",
+       11,
+       "owned",
+       "boolean",
+       true,
+       ""
       ]
      ],
      "sequence_bounds": [],
@@ -14344,7 +16667,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": [
        [
@@ -14352,24 +16676,26 @@
         null,
         null,
         true,
-        "7d1545ece43106c2f0b3aeb51b7bcecc8bcac0f121a55fa93bc2dc1391b5c681",
+        "bce6af934964561513d9730badfa3a4ae950147aa9a5335a70d08c00deefec21",
         "<adversarial-invite-daemon:code_expires_at+900>",
         null,
         "<adversarial-invite-daemon:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "default",
         null,
         null,
         true,
-        "9b2b22951354e1791788d131cbda13e17bca5d419342754f8d52a430eb412718",
+        "1be573bd4fd741a17ead23102a77d1ea623e447d5b2b7d47ef30c40aa986ea16",
         "<adversarial-invite-default:code_expires_at+900>",
         null,
         "<adversarial-invite-default:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "desk",
@@ -14381,7 +16707,8 @@
         null,
         "<invite-desk:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "expired",
@@ -14393,7 +16720,8 @@
         null,
         "<invite-expired:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "gone",
@@ -14405,7 +16733,21 @@
         "44fb61a65fba7e3e4d581da7548ea52d583381475b6057cce178c76d39556346",
         "<invite-gone:created_at+0>",
         "<adversarial-revoked-with-live-codes:paired_at+0>",
-        "<revoke-pending:revoked_at+0>"
+        "<revoke-pending:revoked_at+0>",
+        true
+       ],
+       [
+        "guest",
+        null,
+        null,
+        true,
+        "7d1545ece43106c2f0b3aeb51b7bcecc8bcac0f121a55fa93bc2dc1391b5c681",
+        "<invite-guest:code_expires_at+900>",
+        null,
+        "<invite-guest:created_at+0>",
+        null,
+        null,
+        false
        ],
        [
         "laptop",
@@ -14417,19 +16759,21 @@
         null,
         "<invite-laptop:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "maintainer",
         null,
         null,
         true,
-        "1be573bd4fd741a17ead23102a77d1ea623e447d5b2b7d47ef30c40aa986ea16",
+        "ade8403fdc71011e85b57df06f82644494d0e70dadd0babddf2692f7ede87d52",
         "<adversarial-invite-maintainer:code_expires_at+900>",
         null,
         "<adversarial-invite-maintainer:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "pending",
@@ -14441,7 +16785,8 @@
         null,
         "<invite-pending:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "quiet",
@@ -14453,7 +16798,8 @@
         null,
         "<invite-quiet:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "unpaired",
@@ -14465,7 +16811,8 @@
         null,
         1000.0,
         null,
-        null
+        null,
+        true
        ]
       ]
      }
@@ -14688,6 +17035,22 @@
        null,
        "NEVER",
        null
+      ],
+      [
+       "public",
+       "principals",
+       11,
+       "owned",
+       "boolean",
+       "bool",
+       null,
+       null,
+       "NO",
+       "true",
+       "NO",
+       null,
+       "NEVER",
+       null
       ]
      ],
      "constraints": [
@@ -14732,6 +17095,13 @@
        "principals_created_at_not_null",
        "n",
        "NOT NULL created_at"
+      ],
+      [
+       "public",
+       "principals",
+       "principals_owned_not_null",
+       "n",
+       "NOT NULL owned"
       ],
       [
        "public",
@@ -14893,6 +17263,15 @@
        "double precision",
        false,
        ""
+      ],
+      [
+       "public",
+       "principals",
+       11,
+       "owned",
+       "boolean",
+       true,
+       ""
       ]
      ],
      "sequence_bounds": [],
@@ -14965,7 +17344,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": [
        [
@@ -14973,24 +17353,26 @@
         null,
         null,
         true,
-        "7d1545ece43106c2f0b3aeb51b7bcecc8bcac0f121a55fa93bc2dc1391b5c681",
+        "bce6af934964561513d9730badfa3a4ae950147aa9a5335a70d08c00deefec21",
         "<adversarial-invite-daemon:code_expires_at+900>",
         null,
         "<adversarial-invite-daemon:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "default",
         null,
         null,
         true,
-        "9b2b22951354e1791788d131cbda13e17bca5d419342754f8d52a430eb412718",
+        "1be573bd4fd741a17ead23102a77d1ea623e447d5b2b7d47ef30c40aa986ea16",
         "<adversarial-invite-default:code_expires_at+900>",
         null,
         "<adversarial-invite-default:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "desk",
@@ -15002,7 +17384,8 @@
         null,
         "<invite-desk:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "expired",
@@ -15014,7 +17397,8 @@
         null,
         "<invite-expired:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "gone",
@@ -15026,7 +17410,21 @@
         "44fb61a65fba7e3e4d581da7548ea52d583381475b6057cce178c76d39556346",
         "<invite-gone:created_at+0>",
         "<adversarial-revoked-with-live-codes:paired_at+0>",
-        "<revoke-pending:revoked_at+0>"
+        "<revoke-pending:revoked_at+0>",
+        true
+       ],
+       [
+        "guest",
+        null,
+        null,
+        true,
+        "7d1545ece43106c2f0b3aeb51b7bcecc8bcac0f121a55fa93bc2dc1391b5c681",
+        "<invite-guest:code_expires_at+900>",
+        null,
+        "<invite-guest:created_at+0>",
+        null,
+        null,
+        false
        ],
        [
         "laptop",
@@ -15038,19 +17436,21 @@
         null,
         "<invite-laptop:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "maintainer",
         null,
         null,
         true,
-        "1be573bd4fd741a17ead23102a77d1ea623e447d5b2b7d47ef30c40aa986ea16",
+        "ade8403fdc71011e85b57df06f82644494d0e70dadd0babddf2692f7ede87d52",
         "<adversarial-invite-maintainer:code_expires_at+900>",
         null,
         "<adversarial-invite-maintainer:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "pending",
@@ -15062,7 +17462,8 @@
         null,
         "<invite-pending:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "quiet",
@@ -15074,7 +17475,8 @@
         null,
         "<invite-quiet:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "unpaired",
@@ -15086,7 +17488,8 @@
         null,
         1000.0,
         null,
-        null
+        null,
+        true
        ]
       ]
      }
@@ -15309,6 +17712,22 @@
        null,
        "NEVER",
        null
+      ],
+      [
+       "public",
+       "principals",
+       11,
+       "owned",
+       "boolean",
+       "bool",
+       null,
+       null,
+       "NO",
+       "true",
+       "NO",
+       null,
+       "NEVER",
+       null
       ]
      ],
      "constraints": [
@@ -15353,6 +17772,13 @@
        "principals_created_at_not_null",
        "n",
        "NOT NULL created_at"
+      ],
+      [
+       "public",
+       "principals",
+       "principals_owned_not_null",
+       "n",
+       "NOT NULL owned"
       ],
       [
        "public",
@@ -15514,6 +17940,15 @@
        "double precision",
        false,
        ""
+      ],
+      [
+       "public",
+       "principals",
+       11,
+       "owned",
+       "boolean",
+       true,
+       ""
       ]
      ],
      "sequence_bounds": [],
@@ -15586,7 +18021,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": [
        [
@@ -15594,24 +18030,26 @@
         null,
         null,
         true,
-        "7d1545ece43106c2f0b3aeb51b7bcecc8bcac0f121a55fa93bc2dc1391b5c681",
+        "bce6af934964561513d9730badfa3a4ae950147aa9a5335a70d08c00deefec21",
         "<adversarial-invite-daemon:code_expires_at+900>",
         null,
         "<adversarial-invite-daemon:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "default",
         null,
         null,
         true,
-        "9b2b22951354e1791788d131cbda13e17bca5d419342754f8d52a430eb412718",
+        "1be573bd4fd741a17ead23102a77d1ea623e447d5b2b7d47ef30c40aa986ea16",
         "<adversarial-invite-default:code_expires_at+900>",
         null,
         "<adversarial-invite-default:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "desk",
@@ -15623,7 +18061,8 @@
         null,
         "<invite-desk:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "expired",
@@ -15635,7 +18074,8 @@
         null,
         "<invite-expired:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "gone",
@@ -15647,7 +18087,21 @@
         "44fb61a65fba7e3e4d581da7548ea52d583381475b6057cce178c76d39556346",
         "<invite-gone:created_at+0>",
         "<adversarial-revoked-with-live-codes:paired_at+0>",
-        "<revoke-pending:revoked_at+0>"
+        "<revoke-pending:revoked_at+0>",
+        true
+       ],
+       [
+        "guest",
+        null,
+        null,
+        true,
+        "7d1545ece43106c2f0b3aeb51b7bcecc8bcac0f121a55fa93bc2dc1391b5c681",
+        "<invite-guest:code_expires_at+900>",
+        null,
+        "<invite-guest:created_at+0>",
+        null,
+        null,
+        false
        ],
        [
         "laptop",
@@ -15659,19 +18113,21 @@
         null,
         "<invite-laptop:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "maintainer",
         null,
         null,
         true,
-        "1be573bd4fd741a17ead23102a77d1ea623e447d5b2b7d47ef30c40aa986ea16",
+        "ade8403fdc71011e85b57df06f82644494d0e70dadd0babddf2692f7ede87d52",
         "<adversarial-invite-maintainer:code_expires_at+900>",
         null,
         "<adversarial-invite-maintainer:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "pending",
@@ -15683,7 +18139,8 @@
         null,
         "<invite-pending:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "quiet",
@@ -15695,7 +18152,8 @@
         null,
         "<invite-quiet:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "unpaired",
@@ -15707,7 +18165,8 @@
         null,
         1000.0,
         null,
-        null
+        null,
+        true
        ]
       ]
      }
@@ -15930,6 +18389,22 @@
        null,
        "NEVER",
        null
+      ],
+      [
+       "public",
+       "principals",
+       11,
+       "owned",
+       "boolean",
+       "bool",
+       null,
+       null,
+       "NO",
+       "true",
+       "NO",
+       null,
+       "NEVER",
+       null
       ]
      ],
      "constraints": [
@@ -15974,6 +18449,13 @@
        "principals_created_at_not_null",
        "n",
        "NOT NULL created_at"
+      ],
+      [
+       "public",
+       "principals",
+       "principals_owned_not_null",
+       "n",
+       "NOT NULL owned"
       ],
       [
        "public",
@@ -16135,6 +18617,15 @@
        "double precision",
        false,
        ""
+      ],
+      [
+       "public",
+       "principals",
+       11,
+       "owned",
+       "boolean",
+       true,
+       ""
       ]
      ],
      "sequence_bounds": [],
@@ -16207,7 +18698,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": [
        [
@@ -16215,24 +18707,26 @@
         null,
         null,
         true,
-        "7d1545ece43106c2f0b3aeb51b7bcecc8bcac0f121a55fa93bc2dc1391b5c681",
+        "bce6af934964561513d9730badfa3a4ae950147aa9a5335a70d08c00deefec21",
         "<adversarial-invite-daemon:code_expires_at+900>",
         null,
         "<adversarial-invite-daemon:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "default",
         null,
         null,
         true,
-        "9b2b22951354e1791788d131cbda13e17bca5d419342754f8d52a430eb412718",
+        "1be573bd4fd741a17ead23102a77d1ea623e447d5b2b7d47ef30c40aa986ea16",
         "<adversarial-invite-default:code_expires_at+900>",
         null,
         "<adversarial-invite-default:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "desk",
@@ -16244,7 +18738,8 @@
         null,
         "<invite-desk:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "expired",
@@ -16256,7 +18751,8 @@
         null,
         "<invite-expired:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "gone",
@@ -16268,7 +18764,21 @@
         "44fb61a65fba7e3e4d581da7548ea52d583381475b6057cce178c76d39556346",
         "<invite-gone:created_at+0>",
         "<adversarial-revoked-with-live-codes:paired_at+0>",
-        "<revoke-pending:revoked_at+0>"
+        "<revoke-pending:revoked_at+0>",
+        true
+       ],
+       [
+        "guest",
+        null,
+        null,
+        true,
+        "7d1545ece43106c2f0b3aeb51b7bcecc8bcac0f121a55fa93bc2dc1391b5c681",
+        "<invite-guest:code_expires_at+900>",
+        null,
+        "<invite-guest:created_at+0>",
+        null,
+        null,
+        false
        ],
        [
         "laptop",
@@ -16280,19 +18790,21 @@
         null,
         "<invite-laptop:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "maintainer",
         null,
         null,
         true,
-        "1be573bd4fd741a17ead23102a77d1ea623e447d5b2b7d47ef30c40aa986ea16",
+        "ade8403fdc71011e85b57df06f82644494d0e70dadd0babddf2692f7ede87d52",
         "<adversarial-invite-maintainer:code_expires_at+900>",
         null,
         "<adversarial-invite-maintainer:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "pending",
@@ -16304,7 +18816,8 @@
         null,
         "<invite-pending:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "quiet",
@@ -16316,7 +18829,8 @@
         null,
         "<invite-quiet:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "unpaired",
@@ -16328,7 +18842,8 @@
         null,
         1000.0,
         null,
-        null
+        null,
+        true
        ]
       ]
      }
@@ -16551,6 +19066,22 @@
        null,
        "NEVER",
        null
+      ],
+      [
+       "public",
+       "principals",
+       11,
+       "owned",
+       "boolean",
+       "bool",
+       null,
+       null,
+       "NO",
+       "true",
+       "NO",
+       null,
+       "NEVER",
+       null
       ]
      ],
      "constraints": [
@@ -16595,6 +19126,13 @@
        "principals_created_at_not_null",
        "n",
        "NOT NULL created_at"
+      ],
+      [
+       "public",
+       "principals",
+       "principals_owned_not_null",
+       "n",
+       "NOT NULL owned"
       ],
       [
        "public",
@@ -16756,6 +19294,15 @@
        "double precision",
        false,
        ""
+      ],
+      [
+       "public",
+       "principals",
+       11,
+       "owned",
+       "boolean",
+       true,
+       ""
       ]
      ],
      "sequence_bounds": [],
@@ -16828,7 +19375,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": [
        [
@@ -16836,24 +19384,26 @@
         null,
         null,
         true,
-        "7d1545ece43106c2f0b3aeb51b7bcecc8bcac0f121a55fa93bc2dc1391b5c681",
+        "bce6af934964561513d9730badfa3a4ae950147aa9a5335a70d08c00deefec21",
         "<adversarial-invite-daemon:code_expires_at+900>",
         null,
         "<adversarial-invite-daemon:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "default",
         null,
         null,
         true,
-        "9b2b22951354e1791788d131cbda13e17bca5d419342754f8d52a430eb412718",
+        "1be573bd4fd741a17ead23102a77d1ea623e447d5b2b7d47ef30c40aa986ea16",
         "<adversarial-invite-default:code_expires_at+900>",
         null,
         "<adversarial-invite-default:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "desk",
@@ -16865,7 +19415,8 @@
         null,
         "<invite-desk:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "expired",
@@ -16877,7 +19428,8 @@
         null,
         "<invite-expired:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "gone",
@@ -16889,7 +19441,21 @@
         "44fb61a65fba7e3e4d581da7548ea52d583381475b6057cce178c76d39556346",
         "<invite-gone:created_at+0>",
         "<adversarial-revoked-with-live-codes:paired_at+0>",
-        "<revoke-pending:revoked_at+0>"
+        "<revoke-pending:revoked_at+0>",
+        true
+       ],
+       [
+        "guest",
+        null,
+        null,
+        true,
+        "7d1545ece43106c2f0b3aeb51b7bcecc8bcac0f121a55fa93bc2dc1391b5c681",
+        "<invite-guest:code_expires_at+900>",
+        null,
+        "<invite-guest:created_at+0>",
+        null,
+        null,
+        false
        ],
        [
         "laptop",
@@ -16901,19 +19467,21 @@
         null,
         "<invite-laptop:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "maintainer",
         null,
         null,
         true,
-        "1be573bd4fd741a17ead23102a77d1ea623e447d5b2b7d47ef30c40aa986ea16",
+        "ade8403fdc71011e85b57df06f82644494d0e70dadd0babddf2692f7ede87d52",
         "<adversarial-invite-maintainer:code_expires_at+900>",
         null,
         "<adversarial-invite-maintainer:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "pending",
@@ -16925,7 +19493,8 @@
         null,
         "<invite-pending:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "quiet",
@@ -16937,7 +19506,8 @@
         null,
         "<invite-quiet:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "unpaired",
@@ -16949,7 +19519,8 @@
         null,
         1000.0,
         null,
-        null
+        null,
+        true
        ]
       ]
      }
@@ -16964,7 +19535,8 @@
      "token_hash": "8f386f2f89d18fc672ff2417036bd7b5e9382a84b08aaaba044f6af9fd52ebc4",
      "tier": "core",
      "board": true,
-     "revoked": false
+     "revoked": false,
+     "owned": true
     }
    },
    "state": {
@@ -17178,6 +19750,22 @@
        null,
        "NEVER",
        null
+      ],
+      [
+       "public",
+       "principals",
+       11,
+       "owned",
+       "boolean",
+       "bool",
+       null,
+       null,
+       "NO",
+       "true",
+       "NO",
+       null,
+       "NEVER",
+       null
       ]
      ],
      "constraints": [
@@ -17222,6 +19810,13 @@
        "principals_created_at_not_null",
        "n",
        "NOT NULL created_at"
+      ],
+      [
+       "public",
+       "principals",
+       "principals_owned_not_null",
+       "n",
+       "NOT NULL owned"
       ],
       [
        "public",
@@ -17383,6 +19978,15 @@
        "double precision",
        false,
        ""
+      ],
+      [
+       "public",
+       "principals",
+       11,
+       "owned",
+       "boolean",
+       true,
+       ""
       ]
      ],
      "sequence_bounds": [],
@@ -17455,7 +20059,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": [
        [
@@ -17463,24 +20068,26 @@
         null,
         null,
         true,
-        "7d1545ece43106c2f0b3aeb51b7bcecc8bcac0f121a55fa93bc2dc1391b5c681",
+        "bce6af934964561513d9730badfa3a4ae950147aa9a5335a70d08c00deefec21",
         "<adversarial-invite-daemon:code_expires_at+900>",
         null,
         "<adversarial-invite-daemon:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "default",
         null,
         null,
         true,
-        "9b2b22951354e1791788d131cbda13e17bca5d419342754f8d52a430eb412718",
+        "1be573bd4fd741a17ead23102a77d1ea623e447d5b2b7d47ef30c40aa986ea16",
         "<adversarial-invite-default:code_expires_at+900>",
         null,
         "<adversarial-invite-default:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "desk",
@@ -17492,7 +20099,8 @@
         null,
         "<invite-desk:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "expired",
@@ -17504,7 +20112,8 @@
         null,
         "<invite-expired:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "gone",
@@ -17516,7 +20125,21 @@
         "44fb61a65fba7e3e4d581da7548ea52d583381475b6057cce178c76d39556346",
         "<invite-gone:created_at+0>",
         "<adversarial-revoked-with-live-codes:paired_at+0>",
-        "<revoke-pending:revoked_at+0>"
+        "<revoke-pending:revoked_at+0>",
+        true
+       ],
+       [
+        "guest",
+        null,
+        null,
+        true,
+        "7d1545ece43106c2f0b3aeb51b7bcecc8bcac0f121a55fa93bc2dc1391b5c681",
+        "<invite-guest:code_expires_at+900>",
+        null,
+        "<invite-guest:created_at+0>",
+        null,
+        null,
+        false
        ],
        [
         "laptop",
@@ -17528,19 +20151,21 @@
         "6d0d469eb943381c992442c239d3b7eaf595f93e7a8b1a2848e094b36c8a351e",
         "<invite-laptop:created_at+0>",
         "<redeem-immediate-add:paired_at+0>",
-        null
+        null,
+        true
        ],
        [
         "maintainer",
         null,
         null,
         true,
-        "1be573bd4fd741a17ead23102a77d1ea623e447d5b2b7d47ef30c40aa986ea16",
+        "ade8403fdc71011e85b57df06f82644494d0e70dadd0babddf2692f7ede87d52",
         "<adversarial-invite-maintainer:code_expires_at+900>",
         null,
         "<adversarial-invite-maintainer:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "pending",
@@ -17552,7 +20177,8 @@
         null,
         "<invite-pending:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "quiet",
@@ -17564,7 +20190,8 @@
         null,
         "<invite-quiet:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "unpaired",
@@ -17576,7 +20203,8 @@
         null,
         1000.0,
         null,
-        null
+        null,
+        true
        ]
       ]
      }
@@ -17587,7 +20215,7 @@
    "case": "immediately-visible-operator-refusal",
    "output": {
     "available": true,
-    "len": 6,
+    "len": 7,
     "bank": null,
     "shadowed": [
      "daemon",
@@ -17601,6 +20229,13 @@
      "default",
      "desk",
      "maintainer"
+    ],
+    "owned": [
+     "expired",
+     "laptop",
+     "pending",
+     "quiet",
+     "unpaired"
     ],
     "names": [
      {
@@ -17735,7 +20370,8 @@
      "token_hash": "8f386f2f89d18fc672ff2417036bd7b5e9382a84b08aaaba044f6af9fd52ebc4",
      "tier": "core",
      "board": true,
-     "revoked": false
+     "revoked": false,
+     "owned": true
     }
    },
    "state": {
@@ -17949,6 +20585,22 @@
        null,
        "NEVER",
        null
+      ],
+      [
+       "public",
+       "principals",
+       11,
+       "owned",
+       "boolean",
+       "bool",
+       null,
+       null,
+       "NO",
+       "true",
+       "NO",
+       null,
+       "NEVER",
+       null
       ]
      ],
      "constraints": [
@@ -17993,6 +20645,13 @@
        "principals_created_at_not_null",
        "n",
        "NOT NULL created_at"
+      ],
+      [
+       "public",
+       "principals",
+       "principals_owned_not_null",
+       "n",
+       "NOT NULL owned"
       ],
       [
        "public",
@@ -18154,6 +20813,15 @@
        "double precision",
        false,
        ""
+      ],
+      [
+       "public",
+       "principals",
+       11,
+       "owned",
+       "boolean",
+       true,
+       ""
       ]
      ],
      "sequence_bounds": [],
@@ -18226,7 +20894,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": [
        [
@@ -18234,24 +20903,26 @@
         null,
         null,
         true,
-        "7d1545ece43106c2f0b3aeb51b7bcecc8bcac0f121a55fa93bc2dc1391b5c681",
+        "bce6af934964561513d9730badfa3a4ae950147aa9a5335a70d08c00deefec21",
         "<adversarial-invite-daemon:code_expires_at+900>",
         null,
         "<adversarial-invite-daemon:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "default",
         null,
         null,
         true,
-        "9b2b22951354e1791788d131cbda13e17bca5d419342754f8d52a430eb412718",
+        "1be573bd4fd741a17ead23102a77d1ea623e447d5b2b7d47ef30c40aa986ea16",
         "<adversarial-invite-default:code_expires_at+900>",
         null,
         "<adversarial-invite-default:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "desk",
@@ -18263,7 +20934,8 @@
         null,
         "<invite-desk:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "expired",
@@ -18275,7 +20947,8 @@
         null,
         "<invite-expired:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "gone",
@@ -18287,7 +20960,21 @@
         "44fb61a65fba7e3e4d581da7548ea52d583381475b6057cce178c76d39556346",
         "<invite-gone:created_at+0>",
         "<adversarial-revoked-with-live-codes:paired_at+0>",
-        "<revoke-pending:revoked_at+0>"
+        "<revoke-pending:revoked_at+0>",
+        true
+       ],
+       [
+        "guest",
+        null,
+        null,
+        true,
+        "7d1545ece43106c2f0b3aeb51b7bcecc8bcac0f121a55fa93bc2dc1391b5c681",
+        "<invite-guest:code_expires_at+900>",
+        null,
+        "<invite-guest:created_at+0>",
+        null,
+        null,
+        false
        ],
        [
         "laptop",
@@ -18299,19 +20986,21 @@
         "6d0d469eb943381c992442c239d3b7eaf595f93e7a8b1a2848e094b36c8a351e",
         "<invite-laptop:created_at+0>",
         "<redeem-immediate-add:paired_at+0>",
-        null
+        null,
+        true
        ],
        [
         "maintainer",
         null,
         null,
         true,
-        "1be573bd4fd741a17ead23102a77d1ea623e447d5b2b7d47ef30c40aa986ea16",
+        "ade8403fdc71011e85b57df06f82644494d0e70dadd0babddf2692f7ede87d52",
         "<adversarial-invite-maintainer:code_expires_at+900>",
         null,
         "<adversarial-invite-maintainer:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "pending",
@@ -18323,7 +21012,8 @@
         null,
         "<invite-pending:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "quiet",
@@ -18335,7 +21025,8 @@
         null,
         "<invite-quiet:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "unpaired",
@@ -18347,7 +21038,8 @@
         null,
         1000.0,
         null,
-        null
+        null,
+        true
        ]
       ]
      }
@@ -18362,7 +21054,8 @@
      "token_hash": "8f386f2f89d18fc672ff2417036bd7b5e9382a84b08aaaba044f6af9fd52ebc4",
      "tier": "core",
      "board": true,
-     "revoked": false
+     "revoked": false,
+     "owned": true
     }
    },
    "state": {
@@ -18576,6 +21269,22 @@
        null,
        "NEVER",
        null
+      ],
+      [
+       "public",
+       "principals",
+       11,
+       "owned",
+       "boolean",
+       "bool",
+       null,
+       null,
+       "NO",
+       "true",
+       "NO",
+       null,
+       "NEVER",
+       null
       ]
      ],
      "constraints": [
@@ -18620,6 +21329,13 @@
        "principals_created_at_not_null",
        "n",
        "NOT NULL created_at"
+      ],
+      [
+       "public",
+       "principals",
+       "principals_owned_not_null",
+       "n",
+       "NOT NULL owned"
       ],
       [
        "public",
@@ -18781,6 +21497,15 @@
        "double precision",
        false,
        ""
+      ],
+      [
+       "public",
+       "principals",
+       11,
+       "owned",
+       "boolean",
+       true,
+       ""
       ]
      ],
      "sequence_bounds": [],
@@ -18853,7 +21578,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": [
        [
@@ -18861,24 +21587,26 @@
         null,
         null,
         true,
-        "7d1545ece43106c2f0b3aeb51b7bcecc8bcac0f121a55fa93bc2dc1391b5c681",
+        "bce6af934964561513d9730badfa3a4ae950147aa9a5335a70d08c00deefec21",
         "<adversarial-invite-daemon:code_expires_at+900>",
         null,
         "<adversarial-invite-daemon:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "default",
         null,
         null,
         true,
-        "9b2b22951354e1791788d131cbda13e17bca5d419342754f8d52a430eb412718",
+        "1be573bd4fd741a17ead23102a77d1ea623e447d5b2b7d47ef30c40aa986ea16",
         "<adversarial-invite-default:code_expires_at+900>",
         null,
         "<adversarial-invite-default:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "desk",
@@ -18890,7 +21618,8 @@
         null,
         "<invite-desk:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "expired",
@@ -18902,7 +21631,8 @@
         null,
         "<invite-expired:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "gone",
@@ -18914,7 +21644,21 @@
         "44fb61a65fba7e3e4d581da7548ea52d583381475b6057cce178c76d39556346",
         "<invite-gone:created_at+0>",
         "<adversarial-revoked-with-live-codes:paired_at+0>",
-        "<revoke-pending:revoked_at+0>"
+        "<revoke-pending:revoked_at+0>",
+        true
+       ],
+       [
+        "guest",
+        null,
+        null,
+        true,
+        "7d1545ece43106c2f0b3aeb51b7bcecc8bcac0f121a55fa93bc2dc1391b5c681",
+        "<invite-guest:code_expires_at+900>",
+        null,
+        "<invite-guest:created_at+0>",
+        null,
+        null,
+        false
        ],
        [
         "laptop",
@@ -18926,19 +21670,21 @@
         "6d0d469eb943381c992442c239d3b7eaf595f93e7a8b1a2848e094b36c8a351e",
         "<invite-laptop:created_at+0>",
         "<redeem-immediate-add:paired_at+0>",
-        null
+        null,
+        true
        ],
        [
         "maintainer",
         null,
         null,
         true,
-        "1be573bd4fd741a17ead23102a77d1ea623e447d5b2b7d47ef30c40aa986ea16",
+        "ade8403fdc71011e85b57df06f82644494d0e70dadd0babddf2692f7ede87d52",
         "<adversarial-invite-maintainer:code_expires_at+900>",
         null,
         "<adversarial-invite-maintainer:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "pending",
@@ -18950,7 +21696,8 @@
         null,
         "<invite-pending:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "quiet",
@@ -18962,7 +21709,8 @@
         null,
         "<invite-quiet:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "unpaired",
@@ -18974,7 +21722,8 @@
         null,
         1000.0,
         null,
-        null
+        null,
+        true
        ]
       ]
      }
@@ -19197,6 +21946,22 @@
        null,
        "NEVER",
        null
+      ],
+      [
+       "public",
+       "principals",
+       11,
+       "owned",
+       "boolean",
+       "bool",
+       null,
+       null,
+       "NO",
+       "true",
+       "NO",
+       null,
+       "NEVER",
+       null
       ]
      ],
      "constraints": [
@@ -19241,6 +22006,13 @@
        "principals_created_at_not_null",
        "n",
        "NOT NULL created_at"
+      ],
+      [
+       "public",
+       "principals",
+       "principals_owned_not_null",
+       "n",
+       "NOT NULL owned"
       ],
       [
        "public",
@@ -19402,6 +22174,15 @@
        "double precision",
        false,
        ""
+      ],
+      [
+       "public",
+       "principals",
+       11,
+       "owned",
+       "boolean",
+       true,
+       ""
       ]
      ],
      "sequence_bounds": [],
@@ -19474,7 +22255,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": [
        [
@@ -19482,24 +22264,26 @@
         null,
         null,
         true,
-        "7d1545ece43106c2f0b3aeb51b7bcecc8bcac0f121a55fa93bc2dc1391b5c681",
+        "bce6af934964561513d9730badfa3a4ae950147aa9a5335a70d08c00deefec21",
         "<adversarial-invite-daemon:code_expires_at+900>",
         null,
         "<adversarial-invite-daemon:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "default",
         null,
         null,
         true,
-        "9b2b22951354e1791788d131cbda13e17bca5d419342754f8d52a430eb412718",
+        "1be573bd4fd741a17ead23102a77d1ea623e447d5b2b7d47ef30c40aa986ea16",
         "<adversarial-invite-default:code_expires_at+900>",
         null,
         "<adversarial-invite-default:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "desk",
@@ -19511,7 +22295,8 @@
         null,
         "<invite-desk:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "expired",
@@ -19523,7 +22308,8 @@
         null,
         "<invite-expired:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "gone",
@@ -19535,7 +22321,21 @@
         "44fb61a65fba7e3e4d581da7548ea52d583381475b6057cce178c76d39556346",
         "<invite-gone:created_at+0>",
         "<adversarial-revoked-with-live-codes:paired_at+0>",
-        "<revoke-pending:revoked_at+0>"
+        "<revoke-pending:revoked_at+0>",
+        true
+       ],
+       [
+        "guest",
+        null,
+        null,
+        true,
+        "7d1545ece43106c2f0b3aeb51b7bcecc8bcac0f121a55fa93bc2dc1391b5c681",
+        "<invite-guest:code_expires_at+900>",
+        null,
+        "<invite-guest:created_at+0>",
+        null,
+        null,
+        false
        ],
        [
         "laptop",
@@ -19547,19 +22347,21 @@
         "6d0d469eb943381c992442c239d3b7eaf595f93e7a8b1a2848e094b36c8a351e",
         "<invite-laptop:created_at+0>",
         "<redeem-immediate-add:paired_at+0>",
-        null
+        null,
+        true
        ],
        [
         "maintainer",
         null,
         null,
         true,
-        "1be573bd4fd741a17ead23102a77d1ea623e447d5b2b7d47ef30c40aa986ea16",
+        "ade8403fdc71011e85b57df06f82644494d0e70dadd0babddf2692f7ede87d52",
         "<adversarial-invite-maintainer:code_expires_at+900>",
         null,
         "<adversarial-invite-maintainer:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "pending",
@@ -19571,7 +22373,8 @@
         null,
         "<invite-pending:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "quiet",
@@ -19583,7 +22386,8 @@
         null,
         "<invite-quiet:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "unpaired",
@@ -19595,7 +22399,8 @@
         null,
         1000.0,
         null,
-        null
+        null,
+        true
        ]
       ]
      }
@@ -19818,6 +22623,22 @@
        null,
        "NEVER",
        null
+      ],
+      [
+       "public",
+       "principals",
+       11,
+       "owned",
+       "boolean",
+       "bool",
+       null,
+       null,
+       "NO",
+       "true",
+       "NO",
+       null,
+       "NEVER",
+       null
       ]
      ],
      "constraints": [
@@ -19862,6 +22683,13 @@
        "principals_created_at_not_null",
        "n",
        "NOT NULL created_at"
+      ],
+      [
+       "public",
+       "principals",
+       "principals_owned_not_null",
+       "n",
+       "NOT NULL owned"
       ],
       [
        "public",
@@ -20023,6 +22851,15 @@
        "double precision",
        false,
        ""
+      ],
+      [
+       "public",
+       "principals",
+       11,
+       "owned",
+       "boolean",
+       true,
+       ""
       ]
      ],
      "sequence_bounds": [],
@@ -20095,7 +22932,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": [
        [
@@ -20103,24 +22941,26 @@
         null,
         null,
         true,
-        "7d1545ece43106c2f0b3aeb51b7bcecc8bcac0f121a55fa93bc2dc1391b5c681",
+        "bce6af934964561513d9730badfa3a4ae950147aa9a5335a70d08c00deefec21",
         "<adversarial-invite-daemon:code_expires_at+900>",
         null,
         "<adversarial-invite-daemon:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "default",
         null,
         null,
         true,
-        "9b2b22951354e1791788d131cbda13e17bca5d419342754f8d52a430eb412718",
+        "1be573bd4fd741a17ead23102a77d1ea623e447d5b2b7d47ef30c40aa986ea16",
         "<adversarial-invite-default:code_expires_at+900>",
         null,
         "<adversarial-invite-default:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "desk",
@@ -20132,7 +22972,8 @@
         null,
         "<invite-desk:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "expired",
@@ -20144,7 +22985,8 @@
         null,
         "<invite-expired:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "gone",
@@ -20156,7 +22998,21 @@
         "44fb61a65fba7e3e4d581da7548ea52d583381475b6057cce178c76d39556346",
         "<invite-gone:created_at+0>",
         "<adversarial-revoked-with-live-codes:paired_at+0>",
-        "<revoke-pending:revoked_at+0>"
+        "<revoke-pending:revoked_at+0>",
+        true
+       ],
+       [
+        "guest",
+        null,
+        null,
+        true,
+        "7d1545ece43106c2f0b3aeb51b7bcecc8bcac0f121a55fa93bc2dc1391b5c681",
+        "<invite-guest:code_expires_at+900>",
+        null,
+        "<invite-guest:created_at+0>",
+        null,
+        null,
+        false
        ],
        [
         "laptop",
@@ -20168,19 +23024,21 @@
         "6d0d469eb943381c992442c239d3b7eaf595f93e7a8b1a2848e094b36c8a351e",
         "<invite-laptop:created_at+0>",
         "<redeem-immediate-add:paired_at+0>",
-        null
+        null,
+        true
        ],
        [
         "maintainer",
         null,
         null,
         true,
-        "1be573bd4fd741a17ead23102a77d1ea623e447d5b2b7d47ef30c40aa986ea16",
+        "ade8403fdc71011e85b57df06f82644494d0e70dadd0babddf2692f7ede87d52",
         "<adversarial-invite-maintainer:code_expires_at+900>",
         null,
         "<adversarial-invite-maintainer:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "pending",
@@ -20192,7 +23050,8 @@
         null,
         "<invite-pending:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "quiet",
@@ -20204,7 +23063,8 @@
         null,
         "<invite-quiet:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "unpaired",
@@ -20216,7 +23076,8 @@
         null,
         1000.0,
         null,
-        null
+        null,
+        true
        ]
       ]
      }
@@ -20231,7 +23092,8 @@
      "token_hash": "af772503241fa3e7efa7ce42cfd138b7468311a5d083612bc54376a07f0b0412",
      "tier": "full",
      "board": false,
-     "revoked": false
+     "revoked": false,
+     "owned": true
     }
    },
    "state": {
@@ -20445,6 +23307,22 @@
        null,
        "NEVER",
        null
+      ],
+      [
+       "public",
+       "principals",
+       11,
+       "owned",
+       "boolean",
+       "bool",
+       null,
+       null,
+       "NO",
+       "true",
+       "NO",
+       null,
+       "NEVER",
+       null
       ]
      ],
      "constraints": [
@@ -20489,6 +23367,13 @@
        "principals_created_at_not_null",
        "n",
        "NOT NULL created_at"
+      ],
+      [
+       "public",
+       "principals",
+       "principals_owned_not_null",
+       "n",
+       "NOT NULL owned"
       ],
       [
        "public",
@@ -20650,6 +23535,15 @@
        "double precision",
        false,
        ""
+      ],
+      [
+       "public",
+       "principals",
+       11,
+       "owned",
+       "boolean",
+       true,
+       ""
       ]
      ],
      "sequence_bounds": [],
@@ -20722,7 +23616,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": [
        [
@@ -20730,24 +23625,26 @@
         null,
         null,
         true,
-        "7d1545ece43106c2f0b3aeb51b7bcecc8bcac0f121a55fa93bc2dc1391b5c681",
+        "bce6af934964561513d9730badfa3a4ae950147aa9a5335a70d08c00deefec21",
         "<adversarial-invite-daemon:code_expires_at+900>",
         null,
         "<adversarial-invite-daemon:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "default",
         null,
         null,
         true,
-        "9b2b22951354e1791788d131cbda13e17bca5d419342754f8d52a430eb412718",
+        "1be573bd4fd741a17ead23102a77d1ea623e447d5b2b7d47ef30c40aa986ea16",
         "<adversarial-invite-default:code_expires_at+900>",
         null,
         "<adversarial-invite-default:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "desk",
@@ -20759,7 +23656,8 @@
         null,
         "<invite-desk:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "expired",
@@ -20771,7 +23669,8 @@
         null,
         "<invite-expired:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "gone",
@@ -20783,7 +23682,21 @@
         "44fb61a65fba7e3e4d581da7548ea52d583381475b6057cce178c76d39556346",
         "<invite-gone:created_at+0>",
         "<adversarial-revoked-with-live-codes:paired_at+0>",
-        "<revoke-pending:revoked_at+0>"
+        "<revoke-pending:revoked_at+0>",
+        true
+       ],
+       [
+        "guest",
+        null,
+        null,
+        true,
+        "7d1545ece43106c2f0b3aeb51b7bcecc8bcac0f121a55fa93bc2dc1391b5c681",
+        "<invite-guest:code_expires_at+900>",
+        null,
+        "<invite-guest:created_at+0>",
+        null,
+        null,
+        false
        ],
        [
         "laptop",
@@ -20795,19 +23708,21 @@
         "6d0d469eb943381c992442c239d3b7eaf595f93e7a8b1a2848e094b36c8a351e",
         "<invite-laptop:created_at+0>",
         "<redeem-immediate-add:paired_at+0>",
-        null
+        null,
+        true
        ],
        [
         "maintainer",
         null,
         null,
         true,
-        "1be573bd4fd741a17ead23102a77d1ea623e447d5b2b7d47ef30c40aa986ea16",
+        "ade8403fdc71011e85b57df06f82644494d0e70dadd0babddf2692f7ede87d52",
         "<adversarial-invite-maintainer:code_expires_at+900>",
         null,
         "<adversarial-invite-maintainer:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "pending",
@@ -20819,7 +23734,8 @@
         null,
         "<invite-pending:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "quiet",
@@ -20831,7 +23747,8 @@
         "d688ae5b56a2edf43467fc811e428efc3fe43a04e0dffbf206fe1e12cde9a2d6",
         "<invite-quiet:created_at+0>",
         "<unique-refusal-rollback-proven:paired_at+0>",
-        null
+        null,
+        true
        ],
        [
         "unpaired",
@@ -20843,7 +23760,8 @@
         null,
         1000.0,
         null,
-        null
+        null,
+        true
        ]
       ]
      }
@@ -20864,7 +23782,8 @@
       "created_at": "<adversarial-invite-daemon:created_at+0>",
       "paired_at": null,
       "revoked_at": null,
-      "last_seen_at": null
+      "last_seen_at": null,
+      "owner": true
      },
      {
       "principal": "default",
@@ -20876,7 +23795,8 @@
       "created_at": "<adversarial-invite-default:created_at+0>",
       "paired_at": null,
       "revoked_at": null,
-      "last_seen_at": null
+      "last_seen_at": null,
+      "owner": true
      },
      {
       "principal": "desk",
@@ -20888,7 +23808,8 @@
       "created_at": "<invite-desk:created_at+0>",
       "paired_at": null,
       "revoked_at": null,
-      "last_seen_at": null
+      "last_seen_at": null,
+      "owner": true
      },
      {
       "principal": "expired",
@@ -20900,7 +23821,8 @@
       "created_at": "<invite-expired:created_at+0>",
       "paired_at": null,
       "revoked_at": null,
-      "last_seen_at": null
+      "last_seen_at": null,
+      "owner": true
      },
      {
       "principal": "gone",
@@ -20912,7 +23834,21 @@
       "created_at": "<invite-gone:created_at+0>",
       "paired_at": "<adversarial-revoked-with-live-codes:paired_at+0>",
       "revoked_at": "<revoke-pending:revoked_at+0>",
-      "last_seen_at": null
+      "last_seen_at": null,
+      "owner": true
+     },
+     {
+      "principal": "guest",
+      "state": "pending",
+      "paired": false,
+      "tier": null,
+      "board": true,
+      "code_expires_at": "<invite-guest:code_expires_at+900>",
+      "created_at": "<invite-guest:created_at+0>",
+      "paired_at": null,
+      "revoked_at": null,
+      "last_seen_at": null,
+      "owner": false
      },
      {
       "principal": "laptop",
@@ -20924,7 +23860,8 @@
       "created_at": "<invite-laptop:created_at+0>",
       "paired_at": "<redeem-immediate-add:paired_at+0>",
       "revoked_at": null,
-      "last_seen_at": null
+      "last_seen_at": null,
+      "owner": true
      },
      {
       "principal": "maintainer",
@@ -20936,7 +23873,8 @@
       "created_at": "<adversarial-invite-maintainer:created_at+0>",
       "paired_at": null,
       "revoked_at": null,
-      "last_seen_at": null
+      "last_seen_at": null,
+      "owner": true
      },
      {
       "principal": "pending",
@@ -20948,7 +23886,8 @@
       "created_at": "<invite-pending:created_at+0>",
       "paired_at": null,
       "revoked_at": null,
-      "last_seen_at": null
+      "last_seen_at": null,
+      "owner": true
      },
      {
       "principal": "quiet",
@@ -20960,7 +23899,8 @@
       "created_at": "<invite-quiet:created_at+0>",
       "paired_at": "<unique-refusal-rollback-proven:paired_at+0>",
       "revoked_at": null,
-      "last_seen_at": null
+      "last_seen_at": null,
+      "owner": true
      },
      {
       "principal": "unpaired",
@@ -20972,7 +23912,8 @@
       "created_at": 1000.0,
       "paired_at": null,
       "revoked_at": null,
-      "last_seen_at": null
+      "last_seen_at": null,
+      "owner": true
      }
     ]
    },
@@ -20983,7 +23924,8 @@
    "output": {
     "state": "paired",
     "tier": "minimal",
-    "board": false
+    "board": false,
+    "owned": true
    },
    "state": {
     "catalog": {
@@ -21196,6 +24138,22 @@
        null,
        "NEVER",
        null
+      ],
+      [
+       "public",
+       "principals",
+       11,
+       "owned",
+       "boolean",
+       "bool",
+       null,
+       null,
+       "NO",
+       "true",
+       "NO",
+       null,
+       "NEVER",
+       null
       ]
      ],
      "constraints": [
@@ -21240,6 +24198,13 @@
        "principals_created_at_not_null",
        "n",
        "NOT NULL created_at"
+      ],
+      [
+       "public",
+       "principals",
+       "principals_owned_not_null",
+       "n",
+       "NOT NULL owned"
       ],
       [
        "public",
@@ -21401,6 +24366,15 @@
        "double precision",
        false,
        ""
+      ],
+      [
+       "public",
+       "principals",
+       11,
+       "owned",
+       "boolean",
+       true,
+       ""
       ]
      ],
      "sequence_bounds": [],
@@ -21473,7 +24447,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": [
        [
@@ -21481,24 +24456,26 @@
         null,
         null,
         true,
-        "7d1545ece43106c2f0b3aeb51b7bcecc8bcac0f121a55fa93bc2dc1391b5c681",
+        "bce6af934964561513d9730badfa3a4ae950147aa9a5335a70d08c00deefec21",
         "<adversarial-invite-daemon:code_expires_at+900>",
         null,
         "<adversarial-invite-daemon:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "default",
         null,
         null,
         true,
-        "9b2b22951354e1791788d131cbda13e17bca5d419342754f8d52a430eb412718",
+        "1be573bd4fd741a17ead23102a77d1ea623e447d5b2b7d47ef30c40aa986ea16",
         "<adversarial-invite-default:code_expires_at+900>",
         null,
         "<adversarial-invite-default:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "desk",
@@ -21510,7 +24487,8 @@
         null,
         "<invite-desk:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "expired",
@@ -21522,7 +24500,8 @@
         null,
         "<invite-expired:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "gone",
@@ -21534,31 +24513,47 @@
         "44fb61a65fba7e3e4d581da7548ea52d583381475b6057cce178c76d39556346",
         "<invite-gone:created_at+0>",
         "<adversarial-revoked-with-live-codes:paired_at+0>",
-        "<revoke-pending:revoked_at+0>"
+        "<revoke-pending:revoked_at+0>",
+        true
+       ],
+       [
+        "guest",
+        null,
+        null,
+        true,
+        "7d1545ece43106c2f0b3aeb51b7bcecc8bcac0f121a55fa93bc2dc1391b5c681",
+        "<invite-guest:code_expires_at+900>",
+        null,
+        "<invite-guest:created_at+0>",
+        null,
+        null,
+        false
        ],
        [
         "laptop",
         "8f386f2f89d18fc672ff2417036bd7b5e9382a84b08aaaba044f6af9fd52ebc4",
         "minimal",
         false,
-        "bce6af934964561513d9730badfa3a4ae950147aa9a5335a70d08c00deefec21",
+        "bab91296ba60f887486dd69e49d6effd1c6d8e9b8033472867c080e39e9e6c42",
         "<invite-laptop-replace:code_expires_at+900>",
         null,
         "<invite-laptop:created_at+0>",
         "<redeem-immediate-add:paired_at+0>",
-        null
+        null,
+        true
        ],
        [
         "maintainer",
         null,
         null,
         true,
-        "1be573bd4fd741a17ead23102a77d1ea623e447d5b2b7d47ef30c40aa986ea16",
+        "ade8403fdc71011e85b57df06f82644494d0e70dadd0babddf2692f7ede87d52",
         "<adversarial-invite-maintainer:code_expires_at+900>",
         null,
         "<adversarial-invite-maintainer:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "pending",
@@ -21570,7 +24565,8 @@
         null,
         "<invite-pending:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "quiet",
@@ -21582,7 +24578,8 @@
         "d688ae5b56a2edf43467fc811e428efc3fe43a04e0dffbf206fe1e12cde9a2d6",
         "<invite-quiet:created_at+0>",
         "<unique-refusal-rollback-proven:paired_at+0>",
-        null
+        null,
+        true
        ],
        [
         "unpaired",
@@ -21594,7 +24591,8 @@
         null,
         1000.0,
         null,
-        null
+        null,
+        true
        ]
       ]
      }
@@ -21612,7 +24610,7 @@
    "case": "old-token-lives-until-new-redemption",
    "output": {
     "available": true,
-    "len": 6,
+    "len": 7,
     "bank": null,
     "shadowed": [
      "daemon",
@@ -21626,6 +24624,13 @@
      "default",
      "desk",
      "maintainer"
+    ],
+    "owned": [
+     "expired",
+     "laptop",
+     "pending",
+     "quiet",
+     "unpaired"
     ],
     "names": [],
     "resolved": [
@@ -21678,7 +24683,8 @@
      "token_hash": "5155fed7b858d7bd2e15d85358fb9bc6ecb2f0a7d07ced26157df5e13b734447",
      "tier": "minimal",
      "board": false,
-     "revoked": false
+     "revoked": false,
+     "owned": true
     }
    },
    "state": {
@@ -21892,6 +24898,22 @@
        null,
        "NEVER",
        null
+      ],
+      [
+       "public",
+       "principals",
+       11,
+       "owned",
+       "boolean",
+       "bool",
+       null,
+       null,
+       "NO",
+       "true",
+       "NO",
+       null,
+       "NEVER",
+       null
       ]
      ],
      "constraints": [
@@ -21936,6 +24958,13 @@
        "principals_created_at_not_null",
        "n",
        "NOT NULL created_at"
+      ],
+      [
+       "public",
+       "principals",
+       "principals_owned_not_null",
+       "n",
+       "NOT NULL owned"
       ],
       [
        "public",
@@ -22097,6 +25126,15 @@
        "double precision",
        false,
        ""
+      ],
+      [
+       "public",
+       "principals",
+       11,
+       "owned",
+       "boolean",
+       true,
+       ""
       ]
      ],
      "sequence_bounds": [],
@@ -22169,7 +25207,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": [
        [
@@ -22177,24 +25216,26 @@
         null,
         null,
         true,
-        "7d1545ece43106c2f0b3aeb51b7bcecc8bcac0f121a55fa93bc2dc1391b5c681",
+        "bce6af934964561513d9730badfa3a4ae950147aa9a5335a70d08c00deefec21",
         "<adversarial-invite-daemon:code_expires_at+900>",
         null,
         "<adversarial-invite-daemon:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "default",
         null,
         null,
         true,
-        "9b2b22951354e1791788d131cbda13e17bca5d419342754f8d52a430eb412718",
+        "1be573bd4fd741a17ead23102a77d1ea623e447d5b2b7d47ef30c40aa986ea16",
         "<adversarial-invite-default:code_expires_at+900>",
         null,
         "<adversarial-invite-default:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "desk",
@@ -22206,7 +25247,8 @@
         null,
         "<invite-desk:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "expired",
@@ -22218,7 +25260,8 @@
         null,
         "<invite-expired:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "gone",
@@ -22230,7 +25273,21 @@
         "44fb61a65fba7e3e4d581da7548ea52d583381475b6057cce178c76d39556346",
         "<invite-gone:created_at+0>",
         "<adversarial-revoked-with-live-codes:paired_at+0>",
-        "<revoke-pending:revoked_at+0>"
+        "<revoke-pending:revoked_at+0>",
+        true
+       ],
+       [
+        "guest",
+        null,
+        null,
+        true,
+        "7d1545ece43106c2f0b3aeb51b7bcecc8bcac0f121a55fa93bc2dc1391b5c681",
+        "<invite-guest:code_expires_at+900>",
+        null,
+        "<invite-guest:created_at+0>",
+        null,
+        null,
+        false
        ],
        [
         "laptop",
@@ -22239,22 +25296,24 @@
         false,
         null,
         null,
-        "bce6af934964561513d9730badfa3a4ae950147aa9a5335a70d08c00deefec21",
+        "bab91296ba60f887486dd69e49d6effd1c6d8e9b8033472867c080e39e9e6c42",
         "<invite-laptop:created_at+0>",
         "<replacement-redemption:paired_at+0>",
-        null
+        null,
+        true
        ],
        [
         "maintainer",
         null,
         null,
         true,
-        "1be573bd4fd741a17ead23102a77d1ea623e447d5b2b7d47ef30c40aa986ea16",
+        "ade8403fdc71011e85b57df06f82644494d0e70dadd0babddf2692f7ede87d52",
         "<adversarial-invite-maintainer:code_expires_at+900>",
         null,
         "<adversarial-invite-maintainer:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "pending",
@@ -22266,7 +25325,8 @@
         null,
         "<invite-pending:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "quiet",
@@ -22278,7 +25338,8 @@
         "d688ae5b56a2edf43467fc811e428efc3fe43a04e0dffbf206fe1e12cde9a2d6",
         "<invite-quiet:created_at+0>",
         "<unique-refusal-rollback-proven:paired_at+0>",
-        null
+        null,
+        true
        ],
        [
         "unpaired",
@@ -22290,7 +25351,8 @@
         null,
         1000.0,
         null,
-        null
+        null,
+        true
        ]
       ]
      }
@@ -22301,7 +25363,7 @@
    "case": "replacement-drops-old-token",
    "output": {
     "available": true,
-    "len": 6,
+    "len": 7,
     "bank": null,
     "shadowed": [
      "daemon",
@@ -22315,6 +25377,13 @@
      "default",
      "desk",
      "maintainer"
+    ],
+    "owned": [
+     "expired",
+     "laptop",
+     "pending",
+     "quiet",
+     "unpaired"
     ],
     "names": [
      {
@@ -22620,6 +25689,22 @@
        null,
        "NEVER",
        null
+      ],
+      [
+       "public",
+       "principals",
+       11,
+       "owned",
+       "boolean",
+       "bool",
+       null,
+       null,
+       "NO",
+       "true",
+       "NO",
+       null,
+       "NEVER",
+       null
       ]
      ],
      "constraints": [
@@ -22664,6 +25749,13 @@
        "principals_created_at_not_null",
        "n",
        "NOT NULL created_at"
+      ],
+      [
+       "public",
+       "principals",
+       "principals_owned_not_null",
+       "n",
+       "NOT NULL owned"
       ],
       [
        "public",
@@ -22825,6 +25917,15 @@
        "double precision",
        false,
        ""
+      ],
+      [
+       "public",
+       "principals",
+       11,
+       "owned",
+       "boolean",
+       true,
+       ""
       ]
      ],
      "sequence_bounds": [],
@@ -22897,7 +25998,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": [
        [
@@ -22905,24 +26007,26 @@
         null,
         null,
         true,
-        "7d1545ece43106c2f0b3aeb51b7bcecc8bcac0f121a55fa93bc2dc1391b5c681",
+        "bce6af934964561513d9730badfa3a4ae950147aa9a5335a70d08c00deefec21",
         "<adversarial-invite-daemon:code_expires_at+900>",
         null,
         "<adversarial-invite-daemon:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "default",
         null,
         null,
         true,
-        "9b2b22951354e1791788d131cbda13e17bca5d419342754f8d52a430eb412718",
+        "1be573bd4fd741a17ead23102a77d1ea623e447d5b2b7d47ef30c40aa986ea16",
         "<adversarial-invite-default:code_expires_at+900>",
         null,
         "<adversarial-invite-default:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "desk",
@@ -22934,7 +26038,8 @@
         null,
         "<invite-desk:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "expired",
@@ -22946,7 +26051,8 @@
         null,
         "<invite-expired:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "gone",
@@ -22958,7 +26064,21 @@
         "44fb61a65fba7e3e4d581da7548ea52d583381475b6057cce178c76d39556346",
         "<invite-gone:created_at+0>",
         "<adversarial-revoked-with-live-codes:paired_at+0>",
-        "<revoke-pending:revoked_at+0>"
+        "<revoke-pending:revoked_at+0>",
+        true
+       ],
+       [
+        "guest",
+        null,
+        null,
+        true,
+        "7d1545ece43106c2f0b3aeb51b7bcecc8bcac0f121a55fa93bc2dc1391b5c681",
+        "<invite-guest:code_expires_at+900>",
+        null,
+        "<invite-guest:created_at+0>",
+        null,
+        null,
+        false
        ],
        [
         "laptop",
@@ -22967,22 +26087,24 @@
         false,
         null,
         null,
-        "bce6af934964561513d9730badfa3a4ae950147aa9a5335a70d08c00deefec21",
+        "bab91296ba60f887486dd69e49d6effd1c6d8e9b8033472867c080e39e9e6c42",
         "<invite-laptop:created_at+0>",
         1000.0,
-        null
+        null,
+        true
        ],
        [
         "maintainer",
         null,
         null,
         true,
-        "1be573bd4fd741a17ead23102a77d1ea623e447d5b2b7d47ef30c40aa986ea16",
+        "ade8403fdc71011e85b57df06f82644494d0e70dadd0babddf2692f7ede87d52",
         "<adversarial-invite-maintainer:code_expires_at+900>",
         null,
         "<adversarial-invite-maintainer:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "pending",
@@ -22994,7 +26116,8 @@
         null,
         "<invite-pending:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "quiet",
@@ -23006,7 +26129,8 @@
         "d688ae5b56a2edf43467fc811e428efc3fe43a04e0dffbf206fe1e12cde9a2d6",
         "<invite-quiet:created_at+0>",
         "<unique-refusal-rollback-proven:paired_at+0>",
-        null
+        null,
+        true
        ],
        [
         "unpaired",
@@ -23018,7 +26142,8 @@
         null,
         1000.0,
         null,
-        null
+        null,
+        true
        ]
       ]
      }
@@ -23241,6 +26366,22 @@
        null,
        "NEVER",
        null
+      ],
+      [
+       "public",
+       "principals",
+       11,
+       "owned",
+       "boolean",
+       "bool",
+       null,
+       null,
+       "NO",
+       "true",
+       "NO",
+       null,
+       "NEVER",
+       null
       ]
      ],
      "constraints": [
@@ -23285,6 +26426,13 @@
        "principals_created_at_not_null",
        "n",
        "NOT NULL created_at"
+      ],
+      [
+       "public",
+       "principals",
+       "principals_owned_not_null",
+       "n",
+       "NOT NULL owned"
       ],
       [
        "public",
@@ -23446,6 +26594,15 @@
        "double precision",
        false,
        ""
+      ],
+      [
+       "public",
+       "principals",
+       11,
+       "owned",
+       "boolean",
+       true,
+       ""
       ]
      ],
      "sequence_bounds": [],
@@ -23518,7 +26675,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": [
        [
@@ -23526,24 +26684,26 @@
         null,
         null,
         true,
-        "7d1545ece43106c2f0b3aeb51b7bcecc8bcac0f121a55fa93bc2dc1391b5c681",
+        "bce6af934964561513d9730badfa3a4ae950147aa9a5335a70d08c00deefec21",
         "<adversarial-invite-daemon:code_expires_at+900>",
         null,
         "<adversarial-invite-daemon:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "default",
         null,
         null,
         true,
-        "9b2b22951354e1791788d131cbda13e17bca5d419342754f8d52a430eb412718",
+        "1be573bd4fd741a17ead23102a77d1ea623e447d5b2b7d47ef30c40aa986ea16",
         "<adversarial-invite-default:code_expires_at+900>",
         null,
         "<adversarial-invite-default:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "desk",
@@ -23555,7 +26715,8 @@
         null,
         "<invite-desk:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "expired",
@@ -23567,7 +26728,8 @@
         null,
         "<invite-expired:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "gone",
@@ -23579,7 +26741,21 @@
         "44fb61a65fba7e3e4d581da7548ea52d583381475b6057cce178c76d39556346",
         "<invite-gone:created_at+0>",
         "<adversarial-revoked-with-live-codes:paired_at+0>",
-        "<revoke-pending:revoked_at+0>"
+        "<revoke-pending:revoked_at+0>",
+        true
+       ],
+       [
+        "guest",
+        null,
+        null,
+        true,
+        "7d1545ece43106c2f0b3aeb51b7bcecc8bcac0f121a55fa93bc2dc1391b5c681",
+        "<invite-guest:code_expires_at+900>",
+        null,
+        "<invite-guest:created_at+0>",
+        null,
+        null,
+        false
        ],
        [
         "laptop",
@@ -23591,19 +26767,21 @@
         null,
         "<invite-laptop:created_at+0>",
         1000.0,
-        null
+        null,
+        true
        ],
        [
         "maintainer",
         null,
         null,
         true,
-        "1be573bd4fd741a17ead23102a77d1ea623e447d5b2b7d47ef30c40aa986ea16",
+        "ade8403fdc71011e85b57df06f82644494d0e70dadd0babddf2692f7ede87d52",
         "<adversarial-invite-maintainer:code_expires_at+900>",
         null,
         "<adversarial-invite-maintainer:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "pending",
@@ -23615,7 +26793,8 @@
         null,
         "<invite-pending:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "quiet",
@@ -23627,7 +26806,8 @@
         "d688ae5b56a2edf43467fc811e428efc3fe43a04e0dffbf206fe1e12cde9a2d6",
         "<invite-quiet:created_at+0>",
         "<unique-refusal-rollback-proven:paired_at+0>",
-        null
+        null,
+        true
        ],
        [
         "unpaired",
@@ -23639,7 +26819,8 @@
         null,
         1000.0,
         null,
-        null
+        null,
+        true
        ]
       ]
      }
@@ -23862,6 +27043,22 @@
        null,
        "NEVER",
        null
+      ],
+      [
+       "public",
+       "principals",
+       11,
+       "owned",
+       "boolean",
+       "bool",
+       null,
+       null,
+       "NO",
+       "true",
+       "NO",
+       null,
+       "NEVER",
+       null
       ]
      ],
      "constraints": [
@@ -23906,6 +27103,13 @@
        "principals_created_at_not_null",
        "n",
        "NOT NULL created_at"
+      ],
+      [
+       "public",
+       "principals",
+       "principals_owned_not_null",
+       "n",
+       "NOT NULL owned"
       ],
       [
        "public",
@@ -24067,6 +27271,15 @@
        "double precision",
        false,
        ""
+      ],
+      [
+       "public",
+       "principals",
+       11,
+       "owned",
+       "boolean",
+       true,
+       ""
       ]
      ],
      "sequence_bounds": [],
@@ -24139,7 +27352,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": [
        [
@@ -24147,24 +27361,26 @@
         null,
         null,
         true,
-        "7d1545ece43106c2f0b3aeb51b7bcecc8bcac0f121a55fa93bc2dc1391b5c681",
+        "bce6af934964561513d9730badfa3a4ae950147aa9a5335a70d08c00deefec21",
         "<adversarial-invite-daemon:code_expires_at+900>",
         null,
         "<adversarial-invite-daemon:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "default",
         null,
         null,
         true,
-        "9b2b22951354e1791788d131cbda13e17bca5d419342754f8d52a430eb412718",
+        "1be573bd4fd741a17ead23102a77d1ea623e447d5b2b7d47ef30c40aa986ea16",
         "<adversarial-invite-default:code_expires_at+900>",
         null,
         "<adversarial-invite-default:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "desk",
@@ -24176,7 +27392,8 @@
         null,
         "<invite-desk:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "expired",
@@ -24188,7 +27405,8 @@
         null,
         "<invite-expired:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "gone",
@@ -24200,7 +27418,21 @@
         "44fb61a65fba7e3e4d581da7548ea52d583381475b6057cce178c76d39556346",
         "<invite-gone:created_at+0>",
         "<adversarial-revoked-with-live-codes:paired_at+0>",
-        "<revoke-pending:revoked_at+0>"
+        "<revoke-pending:revoked_at+0>",
+        true
+       ],
+       [
+        "guest",
+        null,
+        null,
+        true,
+        "7d1545ece43106c2f0b3aeb51b7bcecc8bcac0f121a55fa93bc2dc1391b5c681",
+        "<invite-guest:code_expires_at+900>",
+        null,
+        "<invite-guest:created_at+0>",
+        null,
+        null,
+        false
        ],
        [
         "laptop",
@@ -24212,19 +27444,21 @@
         null,
         "<invite-laptop:created_at+0>",
         1000.0,
-        null
+        null,
+        true
        ],
        [
         "maintainer",
         null,
         null,
         true,
-        "1be573bd4fd741a17ead23102a77d1ea623e447d5b2b7d47ef30c40aa986ea16",
+        "ade8403fdc71011e85b57df06f82644494d0e70dadd0babddf2692f7ede87d52",
         "<adversarial-invite-maintainer:code_expires_at+900>",
         null,
         "<adversarial-invite-maintainer:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "pending",
@@ -24236,7 +27470,8 @@
         null,
         "<invite-pending:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "quiet",
@@ -24248,7 +27483,8 @@
         null,
         "<invite-quiet:created_at+0>",
         "<unique-refusal-rollback-proven:paired_at+0>",
-        "<revoke-paired:revoked_at+0>"
+        "<revoke-paired:revoked_at+0>",
+        true
        ],
        [
         "unpaired",
@@ -24260,7 +27496,8 @@
         null,
         1000.0,
         null,
-        null
+        null,
+        true
        ]
       ]
      }
@@ -24483,6 +27720,22 @@
        null,
        "NEVER",
        null
+      ],
+      [
+       "public",
+       "principals",
+       11,
+       "owned",
+       "boolean",
+       "bool",
+       null,
+       null,
+       "NO",
+       "true",
+       "NO",
+       null,
+       "NEVER",
+       null
       ]
      ],
      "constraints": [
@@ -24527,6 +27780,13 @@
        "principals_created_at_not_null",
        "n",
        "NOT NULL created_at"
+      ],
+      [
+       "public",
+       "principals",
+       "principals_owned_not_null",
+       "n",
+       "NOT NULL owned"
       ],
       [
        "public",
@@ -24688,6 +27948,15 @@
        "double precision",
        false,
        ""
+      ],
+      [
+       "public",
+       "principals",
+       11,
+       "owned",
+       "boolean",
+       true,
+       ""
       ]
      ],
      "sequence_bounds": [],
@@ -24760,7 +28029,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": [
        [
@@ -24768,24 +28038,26 @@
         null,
         null,
         true,
-        "7d1545ece43106c2f0b3aeb51b7bcecc8bcac0f121a55fa93bc2dc1391b5c681",
+        "bce6af934964561513d9730badfa3a4ae950147aa9a5335a70d08c00deefec21",
         "<adversarial-invite-daemon:code_expires_at+900>",
         null,
         "<adversarial-invite-daemon:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "default",
         null,
         null,
         true,
-        "9b2b22951354e1791788d131cbda13e17bca5d419342754f8d52a430eb412718",
+        "1be573bd4fd741a17ead23102a77d1ea623e447d5b2b7d47ef30c40aa986ea16",
         "<adversarial-invite-default:code_expires_at+900>",
         null,
         "<adversarial-invite-default:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "desk",
@@ -24797,7 +28069,8 @@
         null,
         "<invite-desk:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "expired",
@@ -24809,7 +28082,8 @@
         null,
         "<invite-expired:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "gone",
@@ -24821,7 +28095,21 @@
         "44fb61a65fba7e3e4d581da7548ea52d583381475b6057cce178c76d39556346",
         "<invite-gone:created_at+0>",
         "<adversarial-revoked-with-live-codes:paired_at+0>",
-        "<revoke-pending:revoked_at+0>"
+        "<revoke-pending:revoked_at+0>",
+        true
+       ],
+       [
+        "guest",
+        null,
+        null,
+        true,
+        "7d1545ece43106c2f0b3aeb51b7bcecc8bcac0f121a55fa93bc2dc1391b5c681",
+        "<invite-guest:code_expires_at+900>",
+        null,
+        "<invite-guest:created_at+0>",
+        null,
+        null,
+        false
        ],
        [
         "laptop",
@@ -24833,19 +28121,21 @@
         null,
         "<invite-laptop:created_at+0>",
         1000.0,
-        null
+        null,
+        true
        ],
        [
         "maintainer",
         null,
         null,
         true,
-        "1be573bd4fd741a17ead23102a77d1ea623e447d5b2b7d47ef30c40aa986ea16",
+        "ade8403fdc71011e85b57df06f82644494d0e70dadd0babddf2692f7ede87d52",
         "<adversarial-invite-maintainer:code_expires_at+900>",
         null,
         "<adversarial-invite-maintainer:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "pending",
@@ -24857,7 +28147,8 @@
         null,
         "<invite-pending:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "quiet",
@@ -24869,7 +28160,8 @@
         null,
         "<invite-quiet:created_at+0>",
         "<unique-refusal-rollback-proven:paired_at+0>",
-        "<revoke-paired:revoked_at+0>"
+        "<revoke-paired:revoked_at+0>",
+        true
        ],
        [
         "unpaired",
@@ -24881,7 +28173,8 @@
         null,
         1000.0,
         null,
-        null
+        null,
+        true
        ]
       ]
      }
@@ -25104,6 +28397,22 @@
        null,
        "NEVER",
        null
+      ],
+      [
+       "public",
+       "principals",
+       11,
+       "owned",
+       "boolean",
+       "bool",
+       null,
+       null,
+       "NO",
+       "true",
+       "NO",
+       null,
+       "NEVER",
+       null
       ]
      ],
      "constraints": [
@@ -25148,6 +28457,13 @@
        "principals_created_at_not_null",
        "n",
        "NOT NULL created_at"
+      ],
+      [
+       "public",
+       "principals",
+       "principals_owned_not_null",
+       "n",
+       "NOT NULL owned"
       ],
       [
        "public",
@@ -25309,6 +28625,15 @@
        "double precision",
        false,
        ""
+      ],
+      [
+       "public",
+       "principals",
+       11,
+       "owned",
+       "boolean",
+       true,
+       ""
       ]
      ],
      "sequence_bounds": [],
@@ -25381,7 +28706,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": [
        [
@@ -25389,24 +28715,26 @@
         null,
         null,
         true,
-        "7d1545ece43106c2f0b3aeb51b7bcecc8bcac0f121a55fa93bc2dc1391b5c681",
+        "bce6af934964561513d9730badfa3a4ae950147aa9a5335a70d08c00deefec21",
         "<adversarial-invite-daemon:code_expires_at+900>",
         null,
         "<adversarial-invite-daemon:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "default",
         null,
         null,
         true,
-        "9b2b22951354e1791788d131cbda13e17bca5d419342754f8d52a430eb412718",
+        "1be573bd4fd741a17ead23102a77d1ea623e447d5b2b7d47ef30c40aa986ea16",
         "<adversarial-invite-default:code_expires_at+900>",
         null,
         "<adversarial-invite-default:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "desk",
@@ -25418,7 +28746,8 @@
         null,
         "<invite-desk:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "expired",
@@ -25430,7 +28759,8 @@
         null,
         "<invite-expired:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "gone",
@@ -25442,7 +28772,21 @@
         "44fb61a65fba7e3e4d581da7548ea52d583381475b6057cce178c76d39556346",
         "<invite-gone:created_at+0>",
         "<adversarial-revoked-with-live-codes:paired_at+0>",
-        "<revoke-pending:revoked_at+0>"
+        "<revoke-pending:revoked_at+0>",
+        true
+       ],
+       [
+        "guest",
+        null,
+        null,
+        true,
+        "7d1545ece43106c2f0b3aeb51b7bcecc8bcac0f121a55fa93bc2dc1391b5c681",
+        "<invite-guest:code_expires_at+900>",
+        null,
+        "<invite-guest:created_at+0>",
+        null,
+        null,
+        false
        ],
        [
         "laptop",
@@ -25454,19 +28798,21 @@
         null,
         "<invite-laptop:created_at+0>",
         1000.0,
-        null
+        null,
+        true
        ],
        [
         "maintainer",
         null,
         null,
         true,
-        "1be573bd4fd741a17ead23102a77d1ea623e447d5b2b7d47ef30c40aa986ea16",
+        "ade8403fdc71011e85b57df06f82644494d0e70dadd0babddf2692f7ede87d52",
         "<adversarial-invite-maintainer:code_expires_at+900>",
         null,
         "<adversarial-invite-maintainer:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "pending",
@@ -25478,7 +28824,8 @@
         null,
         "<invite-pending:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "quiet",
@@ -25490,7 +28837,8 @@
         null,
         "<invite-quiet:created_at+0>",
         "<unique-refusal-rollback-proven:paired_at+0>",
-        "<revoke-paired:revoked_at+0>"
+        "<revoke-paired:revoked_at+0>",
+        true
        ],
        [
         "unpaired",
@@ -25502,7 +28850,8 @@
         null,
         1000.0,
         null,
-        null
+        null,
+        true
        ]
       ]
      }
@@ -25513,7 +28862,7 @@
    "case": "revocation-visible-after-refresh-only",
    "output": {
     "available": true,
-    "len": 6,
+    "len": 7,
     "bank": null,
     "shadowed": [
      "daemon",
@@ -25527,6 +28876,13 @@
      "default",
      "desk",
      "maintainer"
+    ],
+    "owned": [
+     "expired",
+     "laptop",
+     "pending",
+     "quiet",
+     "unpaired"
     ],
     "names": [],
     "resolved": [
@@ -25582,7 +28938,7 @@
    "case": "revoked-identity-refused",
    "output": {
     "available": true,
-    "len": 6,
+    "len": 7,
     "bank": null,
     "shadowed": [
      "daemon",
@@ -25596,6 +28952,12 @@
      "default",
      "desk",
      "maintainer"
+    ],
+    "owned": [
+     "expired",
+     "laptop",
+     "pending",
+     "unpaired"
     ],
     "names": [
      {
@@ -25662,7 +29024,8 @@
       "created_at": "<adversarial-invite-daemon:created_at+0>",
       "paired_at": null,
       "revoked_at": null,
-      "last_seen_at": null
+      "last_seen_at": null,
+      "owner": true
      },
      {
       "principal": "default",
@@ -25674,7 +29037,8 @@
       "created_at": "<adversarial-invite-default:created_at+0>",
       "paired_at": null,
       "revoked_at": null,
-      "last_seen_at": null
+      "last_seen_at": null,
+      "owner": true
      },
      {
       "principal": "desk",
@@ -25686,7 +29050,8 @@
       "created_at": "<invite-desk:created_at+0>",
       "paired_at": null,
       "revoked_at": null,
-      "last_seen_at": null
+      "last_seen_at": null,
+      "owner": true
      },
      {
       "principal": "expired",
@@ -25698,7 +29063,8 @@
       "created_at": "<invite-expired:created_at+0>",
       "paired_at": null,
       "revoked_at": null,
-      "last_seen_at": null
+      "last_seen_at": null,
+      "owner": true
      },
      {
       "principal": "gone",
@@ -25710,7 +29076,21 @@
       "created_at": "<invite-gone:created_at+0>",
       "paired_at": "<adversarial-revoked-with-live-codes:paired_at+0>",
       "revoked_at": "<revoke-pending:revoked_at+0>",
-      "last_seen_at": null
+      "last_seen_at": null,
+      "owner": true
+     },
+     {
+      "principal": "guest",
+      "state": "pending",
+      "paired": false,
+      "tier": null,
+      "board": true,
+      "code_expires_at": "<invite-guest:code_expires_at+900>",
+      "created_at": "<invite-guest:created_at+0>",
+      "paired_at": null,
+      "revoked_at": null,
+      "last_seen_at": null,
+      "owner": false
      },
      {
       "principal": "laptop",
@@ -25722,7 +29102,8 @@
       "created_at": "<invite-laptop:created_at+0>",
       "paired_at": 1000.0,
       "revoked_at": null,
-      "last_seen_at": null
+      "last_seen_at": null,
+      "owner": true
      },
      {
       "principal": "maintainer",
@@ -25734,7 +29115,8 @@
       "created_at": "<adversarial-invite-maintainer:created_at+0>",
       "paired_at": null,
       "revoked_at": null,
-      "last_seen_at": null
+      "last_seen_at": null,
+      "owner": true
      },
      {
       "principal": "pending",
@@ -25746,7 +29128,8 @@
       "created_at": "<invite-pending:created_at+0>",
       "paired_at": null,
       "revoked_at": null,
-      "last_seen_at": null
+      "last_seen_at": null,
+      "owner": true
      },
      {
       "principal": "quiet",
@@ -25758,7 +29141,8 @@
       "created_at": "<invite-quiet:created_at+0>",
       "paired_at": "<unique-refusal-rollback-proven:paired_at+0>",
       "revoked_at": "<revoke-paired:revoked_at+0>",
-      "last_seen_at": null
+      "last_seen_at": null,
+      "owner": true
      },
      {
       "principal": "unpaired",
@@ -25770,7 +29154,8 @@
       "created_at": 1000.0,
       "paired_at": null,
       "revoked_at": null,
-      "last_seen_at": null
+      "last_seen_at": null,
+      "owner": true
      }
     ]
    },
@@ -25781,7 +29166,8 @@
    "output": {
     "state": "new",
     "tier": null,
-    "board": true
+    "board": true,
+    "owned": true
    },
    "state": {
     "catalog": {
@@ -25994,6 +29380,22 @@
        null,
        "NEVER",
        null
+      ],
+      [
+       "public",
+       "principals",
+       11,
+       "owned",
+       "boolean",
+       "bool",
+       null,
+       null,
+       "NO",
+       "true",
+       "NO",
+       null,
+       "NEVER",
+       null
       ]
      ],
      "constraints": [
@@ -26038,6 +29440,13 @@
        "principals_created_at_not_null",
        "n",
        "NOT NULL created_at"
+      ],
+      [
+       "public",
+       "principals",
+       "principals_owned_not_null",
+       "n",
+       "NOT NULL owned"
       ],
       [
        "public",
@@ -26199,6 +29608,15 @@
        "double precision",
        false,
        ""
+      ],
+      [
+       "public",
+       "principals",
+       11,
+       "owned",
+       "boolean",
+       true,
+       ""
       ]
      ],
      "sequence_bounds": [],
@@ -26271,7 +29689,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": [
        [
@@ -26279,24 +29698,26 @@
         null,
         null,
         true,
-        "7d1545ece43106c2f0b3aeb51b7bcecc8bcac0f121a55fa93bc2dc1391b5c681",
+        "bce6af934964561513d9730badfa3a4ae950147aa9a5335a70d08c00deefec21",
         "<adversarial-invite-daemon:code_expires_at+900>",
         null,
         "<adversarial-invite-daemon:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "default",
         null,
         null,
         true,
-        "9b2b22951354e1791788d131cbda13e17bca5d419342754f8d52a430eb412718",
+        "1be573bd4fd741a17ead23102a77d1ea623e447d5b2b7d47ef30c40aa986ea16",
         "<adversarial-invite-default:code_expires_at+900>",
         null,
         "<adversarial-invite-default:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "desk",
@@ -26308,7 +29729,8 @@
         null,
         "<invite-desk:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "expired",
@@ -26320,7 +29742,8 @@
         null,
         "<invite-expired:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "gone",
@@ -26332,7 +29755,21 @@
         "44fb61a65fba7e3e4d581da7548ea52d583381475b6057cce178c76d39556346",
         "<invite-gone:created_at+0>",
         "<adversarial-revoked-with-live-codes:paired_at+0>",
-        "<revoke-pending:revoked_at+0>"
+        "<revoke-pending:revoked_at+0>",
+        true
+       ],
+       [
+        "guest",
+        null,
+        null,
+        true,
+        "7d1545ece43106c2f0b3aeb51b7bcecc8bcac0f121a55fa93bc2dc1391b5c681",
+        "<invite-guest:code_expires_at+900>",
+        null,
+        "<invite-guest:created_at+0>",
+        null,
+        null,
+        false
        ],
        [
         "laptop",
@@ -26344,19 +29781,21 @@
         null,
         "<invite-laptop:created_at+0>",
         1000.0,
-        null
+        null,
+        true
        ],
        [
         "maintainer",
         null,
         null,
         true,
-        "1be573bd4fd741a17ead23102a77d1ea623e447d5b2b7d47ef30c40aa986ea16",
+        "ade8403fdc71011e85b57df06f82644494d0e70dadd0babddf2692f7ede87d52",
         "<adversarial-invite-maintainer:code_expires_at+900>",
         null,
         "<adversarial-invite-maintainer:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "pending",
@@ -26368,7 +29807,8 @@
         null,
         "<invite-pending:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "quiet",
@@ -26380,19 +29820,21 @@
         null,
         "<invite-quiet:created_at+0>",
         "<unique-refusal-rollback-proven:paired_at+0>",
-        "<revoke-paired:revoked_at+0>"
+        "<revoke-paired:revoked_at+0>",
+        true
        ],
        [
         "raced",
         null,
         null,
         true,
-        "ade8403fdc71011e85b57df06f82644494d0e70dadd0babddf2692f7ede87d52",
+        "c8c4d8dc6ada429e3b9c4bb60959cd8e47309c22add178b66626545dafe39946",
         "<invite-raced:code_expires_at+900>",
         null,
         "<invite-raced:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "unpaired",
@@ -26404,7 +29846,8 @@
         null,
         1000.0,
         null,
-        null
+        null,
+        true
        ]
       ]
      }
@@ -26629,6 +30072,22 @@
        null,
        "NEVER",
        null
+      ],
+      [
+       "public",
+       "principals",
+       11,
+       "owned",
+       "boolean",
+       "bool",
+       null,
+       null,
+       "NO",
+       "true",
+       "NO",
+       null,
+       "NEVER",
+       null
       ]
      ],
      "constraints": [
@@ -26673,6 +30132,13 @@
        "principals_created_at_not_null",
        "n",
        "NOT NULL created_at"
+      ],
+      [
+       "public",
+       "principals",
+       "principals_owned_not_null",
+       "n",
+       "NOT NULL owned"
       ],
       [
        "public",
@@ -26834,6 +30300,15 @@
        "double precision",
        false,
        ""
+      ],
+      [
+       "public",
+       "principals",
+       11,
+       "owned",
+       "boolean",
+       true,
+       ""
       ]
      ],
      "sequence_bounds": [],
@@ -26906,7 +30381,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": [
        [
@@ -26914,24 +30390,26 @@
         null,
         null,
         true,
-        "7d1545ece43106c2f0b3aeb51b7bcecc8bcac0f121a55fa93bc2dc1391b5c681",
+        "bce6af934964561513d9730badfa3a4ae950147aa9a5335a70d08c00deefec21",
         "<adversarial-invite-daemon:code_expires_at+900>",
         null,
         "<adversarial-invite-daemon:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "default",
         null,
         null,
         true,
-        "9b2b22951354e1791788d131cbda13e17bca5d419342754f8d52a430eb412718",
+        "1be573bd4fd741a17ead23102a77d1ea623e447d5b2b7d47ef30c40aa986ea16",
         "<adversarial-invite-default:code_expires_at+900>",
         null,
         "<adversarial-invite-default:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "desk",
@@ -26943,7 +30421,8 @@
         null,
         "<invite-desk:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "expired",
@@ -26955,7 +30434,8 @@
         null,
         "<invite-expired:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "gone",
@@ -26967,7 +30447,21 @@
         "44fb61a65fba7e3e4d581da7548ea52d583381475b6057cce178c76d39556346",
         "<invite-gone:created_at+0>",
         "<adversarial-revoked-with-live-codes:paired_at+0>",
-        "<revoke-pending:revoked_at+0>"
+        "<revoke-pending:revoked_at+0>",
+        true
+       ],
+       [
+        "guest",
+        null,
+        null,
+        true,
+        "7d1545ece43106c2f0b3aeb51b7bcecc8bcac0f121a55fa93bc2dc1391b5c681",
+        "<invite-guest:code_expires_at+900>",
+        null,
+        "<invite-guest:created_at+0>",
+        null,
+        null,
+        false
        ],
        [
         "laptop",
@@ -26979,19 +30473,21 @@
         null,
         "<invite-laptop:created_at+0>",
         1000.0,
-        null
+        null,
+        true
        ],
        [
         "maintainer",
         null,
         null,
         true,
-        "1be573bd4fd741a17ead23102a77d1ea623e447d5b2b7d47ef30c40aa986ea16",
+        "ade8403fdc71011e85b57df06f82644494d0e70dadd0babddf2692f7ede87d52",
         "<adversarial-invite-maintainer:code_expires_at+900>",
         null,
         "<adversarial-invite-maintainer:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "pending",
@@ -27003,7 +30499,8 @@
         null,
         "<invite-pending:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "quiet",
@@ -27015,7 +30512,8 @@
         null,
         "<invite-quiet:created_at+0>",
         "<unique-refusal-rollback-proven:paired_at+0>",
-        "<revoke-paired:revoked_at+0>"
+        "<revoke-paired:revoked_at+0>",
+        true
        ],
        [
         "raced",
@@ -27024,10 +30522,11 @@
         true,
         null,
         null,
-        "ade8403fdc71011e85b57df06f82644494d0e70dadd0babddf2692f7ede87d52",
+        "c8c4d8dc6ada429e3b9c4bb60959cd8e47309c22add178b66626545dafe39946",
         "<invite-raced:created_at+0>",
         "<two-redeemers-one-conditional-winner:paired_at+0>",
-        null
+        null,
+        true
        ],
        [
         "unpaired",
@@ -27039,7 +30538,8 @@
         null,
         1000.0,
         null,
-        null
+        null,
+        true
        ]
       ]
      }
@@ -27262,6 +30762,22 @@
        null,
        "NEVER",
        null
+      ],
+      [
+       "public",
+       "principals",
+       11,
+       "owned",
+       "boolean",
+       "bool",
+       null,
+       null,
+       "NO",
+       "true",
+       "NO",
+       null,
+       "NEVER",
+       null
       ]
      ],
      "constraints": [
@@ -27306,6 +30822,13 @@
        "principals_created_at_not_null",
        "n",
        "NOT NULL created_at"
+      ],
+      [
+       "public",
+       "principals",
+       "principals_owned_not_null",
+       "n",
+       "NOT NULL owned"
       ],
       [
        "public",
@@ -27467,6 +30990,15 @@
        "double precision",
        false,
        ""
+      ],
+      [
+       "public",
+       "principals",
+       11,
+       "owned",
+       "boolean",
+       true,
+       ""
       ]
      ],
      "sequence_bounds": [],
@@ -27539,7 +31071,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": [
        [
@@ -27547,24 +31080,26 @@
         null,
         null,
         true,
-        "7d1545ece43106c2f0b3aeb51b7bcecc8bcac0f121a55fa93bc2dc1391b5c681",
+        "bce6af934964561513d9730badfa3a4ae950147aa9a5335a70d08c00deefec21",
         "<adversarial-invite-daemon:code_expires_at+900>",
         null,
         "<adversarial-invite-daemon:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "default",
         null,
         null,
         true,
-        "9b2b22951354e1791788d131cbda13e17bca5d419342754f8d52a430eb412718",
+        "1be573bd4fd741a17ead23102a77d1ea623e447d5b2b7d47ef30c40aa986ea16",
         "<adversarial-invite-default:code_expires_at+900>",
         null,
         "<adversarial-invite-default:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "desk",
@@ -27576,7 +31111,8 @@
         null,
         "<invite-desk:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "expired",
@@ -27588,7 +31124,8 @@
         null,
         "<invite-expired:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "gone",
@@ -27600,7 +31137,21 @@
         "44fb61a65fba7e3e4d581da7548ea52d583381475b6057cce178c76d39556346",
         "<invite-gone:created_at+0>",
         "<adversarial-revoked-with-live-codes:paired_at+0>",
-        "<revoke-pending:revoked_at+0>"
+        "<revoke-pending:revoked_at+0>",
+        true
+       ],
+       [
+        "guest",
+        null,
+        null,
+        true,
+        "7d1545ece43106c2f0b3aeb51b7bcecc8bcac0f121a55fa93bc2dc1391b5c681",
+        "<invite-guest:code_expires_at+900>",
+        null,
+        "<invite-guest:created_at+0>",
+        null,
+        null,
+        false
        ],
        [
         "laptop",
@@ -27612,19 +31163,21 @@
         null,
         "<invite-laptop:created_at+0>",
         1000.0,
-        null
+        null,
+        true
        ],
        [
         "maintainer",
         null,
         null,
         true,
-        "1be573bd4fd741a17ead23102a77d1ea623e447d5b2b7d47ef30c40aa986ea16",
+        "ade8403fdc71011e85b57df06f82644494d0e70dadd0babddf2692f7ede87d52",
         "<adversarial-invite-maintainer:code_expires_at+900>",
         null,
         "<adversarial-invite-maintainer:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "pending",
@@ -27636,7 +31189,8 @@
         null,
         "<invite-pending:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "quiet",
@@ -27648,7 +31202,8 @@
         null,
         "<invite-quiet:created_at+0>",
         "<unique-refusal-rollback-proven:paired_at+0>",
-        "<revoke-paired:revoked_at+0>"
+        "<revoke-paired:revoked_at+0>",
+        true
        ],
        [
         "raced",
@@ -27657,10 +31212,11 @@
         true,
         null,
         null,
-        "ade8403fdc71011e85b57df06f82644494d0e70dadd0babddf2692f7ede87d52",
+        "c8c4d8dc6ada429e3b9c4bb60959cd8e47309c22add178b66626545dafe39946",
         "<invite-raced:created_at+0>",
         "<two-redeemers-one-conditional-winner:paired_at+0>",
-        null
+        null,
+        true
        ],
        [
         "unpaired",
@@ -27672,7 +31228,8 @@
         null,
         1000.0,
         null,
-        null
+        null,
+        true
        ]
       ]
      }
@@ -27691,7 +31248,7 @@
    "case": "failed-load-preserves-state",
    "output": {
     "available": true,
-    "len": 6,
+    "len": 7,
     "bank": null,
     "shadowed": [
      "daemon",
@@ -27705,6 +31262,12 @@
      "default",
      "desk",
      "maintainer"
+    ],
+    "owned": [
+     "expired",
+     "laptop",
+     "pending",
+     "unpaired"
     ],
     "names": [
      {
@@ -28017,6 +31580,22 @@
        null,
        "NEVER",
        null
+      ],
+      [
+       "public",
+       "principals",
+       11,
+       "owned",
+       "boolean",
+       "bool",
+       null,
+       null,
+       "NO",
+       "true",
+       "NO",
+       null,
+       "NEVER",
+       null
       ]
      ],
      "constraints": [
@@ -28061,6 +31640,13 @@
        "principals_created_at_not_null",
        "n",
        "NOT NULL created_at"
+      ],
+      [
+       "public",
+       "principals",
+       "principals_owned_not_null",
+       "n",
+       "NOT NULL owned"
       ],
       [
        "public",
@@ -28222,6 +31808,15 @@
        "double precision",
        false,
        ""
+      ],
+      [
+       "public",
+       "principals",
+       11,
+       "owned",
+       "boolean",
+       true,
+       ""
       ]
      ],
      "sequence_bounds": [],
@@ -28294,7 +31889,8 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
       ],
       "rows": [
        [
@@ -28302,24 +31898,26 @@
         null,
         null,
         true,
-        "7d1545ece43106c2f0b3aeb51b7bcecc8bcac0f121a55fa93bc2dc1391b5c681",
+        "bce6af934964561513d9730badfa3a4ae950147aa9a5335a70d08c00deefec21",
         "<adversarial-invite-daemon:code_expires_at+900>",
         null,
         "<adversarial-invite-daemon:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "default",
         null,
         null,
         true,
-        "9b2b22951354e1791788d131cbda13e17bca5d419342754f8d52a430eb412718",
+        "1be573bd4fd741a17ead23102a77d1ea623e447d5b2b7d47ef30c40aa986ea16",
         "<adversarial-invite-default:code_expires_at+900>",
         null,
         "<adversarial-invite-default:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "desk",
@@ -28331,7 +31929,8 @@
         null,
         "<invite-desk:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "expired",
@@ -28343,7 +31942,8 @@
         null,
         "<invite-expired:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "gone",
@@ -28355,7 +31955,21 @@
         "44fb61a65fba7e3e4d581da7548ea52d583381475b6057cce178c76d39556346",
         "<invite-gone:created_at+0>",
         "<adversarial-revoked-with-live-codes:paired_at+0>",
-        "<revoke-pending:revoked_at+0>"
+        "<revoke-pending:revoked_at+0>",
+        true
+       ],
+       [
+        "guest",
+        null,
+        null,
+        true,
+        "7d1545ece43106c2f0b3aeb51b7bcecc8bcac0f121a55fa93bc2dc1391b5c681",
+        "<invite-guest:code_expires_at+900>",
+        null,
+        "<invite-guest:created_at+0>",
+        null,
+        null,
+        false
        ],
        [
         "laptop",
@@ -28367,19 +31981,21 @@
         null,
         "<invite-laptop:created_at+0>",
         1000.0,
-        null
+        null,
+        true
        ],
        [
         "maintainer",
         null,
         null,
         true,
-        "1be573bd4fd741a17ead23102a77d1ea623e447d5b2b7d47ef30c40aa986ea16",
+        "ade8403fdc71011e85b57df06f82644494d0e70dadd0babddf2692f7ede87d52",
         "<adversarial-invite-maintainer:code_expires_at+900>",
         null,
         "<adversarial-invite-maintainer:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "pending",
@@ -28391,7 +32007,8 @@
         null,
         "<invite-pending:created_at+0>",
         null,
-        null
+        null,
+        true
        ],
        [
         "quiet",
@@ -28403,7 +32020,8 @@
         null,
         "<invite-quiet:created_at+0>",
         "<unique-refusal-rollback-proven:paired_at+0>",
-        "<revoke-paired:revoked_at+0>"
+        "<revoke-paired:revoked_at+0>",
+        true
        ],
        [
         "raced",
@@ -28412,10 +32030,11 @@
         true,
         null,
         null,
-        "ade8403fdc71011e85b57df06f82644494d0e70dadd0babddf2692f7ede87d52",
+        "c8c4d8dc6ada429e3b9c4bb60959cd8e47309c22add178b66626545dafe39946",
         "<invite-raced:created_at+0>",
         "<two-redeemers-one-conditional-winner:paired_at+0>",
-        null
+        null,
+        true
        ],
        [
         "unpaired",
@@ -28427,7 +32046,8 @@
         null,
         1000.0,
         null,
-        null
+        null,
+        true
        ]
       ]
      }
@@ -28609,6 +32229,7 @@
      "desk",
      "maintainer"
     ],
+    "owned": [],
     "names": [
      {
       "principal": "laptop",
