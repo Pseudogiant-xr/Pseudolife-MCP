@@ -222,25 +222,35 @@ fn authenticated(dsn: &str, environment: &PasswordEnvironment) -> Result<String,
     let user = config.get_user().ok_or("OperationalError")?;
     let password = std::str::from_utf8(config.get_password().unwrap_or_default())
         .map_err(|_| "ProgrammingError")?;
-    if dsn.starts_with("postgres://") || dsn.starts_with("postgresql://") {
-        let encode = |value: &str| {
-            percent_encoding::utf8_percent_encode(value, percent_encoding::NON_ALPHANUMERIC)
-                .to_string()
-        };
-        let separator = if dsn.contains('?') { '&' } else { '?' };
-        Ok(format!(
-            "{dsn}{separator}user={}&password={}",
-            encode(user),
-            encode(password)
-        ))
-    } else {
-        let quote = |value: &str| value.replace('\\', "\\\\").replace('\'', "\\'");
-        Ok(format!(
-            "{dsn} user='{}' password='{}'",
-            quote(user),
-            quote(password)
-        ))
+    // URI authority and query host selectors append in tokio-postgres, while
+    // our admitted libpq domain uses the last value. Serialize the resolved
+    // authority once so the child cannot try a different server first.
+    let [tokio_postgres::config::Host::Tcp(host)] = config.get_hosts() else {
+        return Err("ProgrammingError");
+    };
+    let [port] = config.get_ports() else {
+        return Err("ProgrammingError");
+    };
+    let quote = |value: &str| value.replace('\\', "\\\\").replace('\'', "\\'");
+    let mode = match parsed.ssl_mode() {
+        crate::pg::SslMode::Disable => "disable",
+        crate::pg::SslMode::Prefer => "prefer",
+        _ => return Err("NativeProofTlsUnsupported"),
+    };
+    let mut serialized = format!(
+        "host='{}' port={} user='{}' password='{}' dbname='{}' sslmode={} connect_timeout={}",
+        quote(host),
+        port,
+        quote(user),
+        quote(password),
+        quote(config.get_dbname().ok_or("ProgrammingError")?),
+        mode,
+        config.get_connect_timeout().map_or(0, Duration::as_secs),
+    );
+    if let Some(application) = config.get_application_name() {
+        serialized.push_str(&format!(" application_name='{}'", quote(application)));
     }
+    Ok(serialized)
 }
 
 async fn connect(dsn: &str) -> Result<Session, &'static str> {
@@ -273,9 +283,13 @@ fn daemon_connection_admission(dsn: &str) -> Result<(), &'static str> {
 }
 
 async fn drop_bank(admin: &str, name: &str) -> bool {
+    drop_bank_with_timeout(admin, name, DROP_IO_TIMEOUT).await
+}
+
+async fn drop_bank_with_timeout(admin: &str, name: &str, deadline: Duration) -> bool {
     for _ in 0..2 {
         if let Ok(session) = connect(admin).await {
-            let result = tokio::time::timeout(DROP_IO_TIMEOUT, async {
+            let result = tokio::time::timeout(deadline, async {
                 session
                     .client()
                     .batch_execute("SET statement_timeout = '300s'")
@@ -294,6 +308,23 @@ async fn drop_bank(admin: &str, name: &str) -> bool {
         }
     }
     false
+}
+
+async fn finishing_drop(admin: &str, name: &str, signals: &mut process::Signals) -> bool {
+    let cleanup = drop_bank(admin, name);
+    tokio::pin!(cleanup);
+    let mut reported = false;
+    loop {
+        tokio::select! {
+            result = &mut cleanup => return result,
+            _ = signals.wait() => {
+                if !reported {
+                    crate::stderrln!("Finishing disposable-bank cleanup; PostgreSQL may take up to 11 minutes.");
+                    reported = true;
+                }
+            }
+        }
+    }
 }
 
 struct Fixture {
@@ -418,9 +449,6 @@ async fn start(
                 .error()
                 .unwrap_or("NativeDaemonStartupError"));
         }
-        if let Some(error) = fixture.diagnostics.error() {
-            return Err(error);
-        }
         // An authenticated request loads the principal view; public /health
         // deliberately cannot do that initialization itself.
         let _ = client
@@ -437,7 +465,12 @@ async fn start(
             return Ok(url);
         }
         if tokio::time::Instant::now() >= deadline {
-            return Err("NativeDaemonStartupTimeout");
+            // A running daemon can log nonfatal optional-reranker failures.
+            // Diagnose only after readiness fails, never instead of checking it.
+            return Err(fixture
+                .diagnostics
+                .error()
+                .unwrap_or("NativeDaemonStartupTimeout"));
         }
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
@@ -455,7 +488,7 @@ async fn adapter(
     if let Some(path) = &digest {
         fixture.digest_paths.push(path.clone());
     }
-    let adapter = Adapter::enter(Config {
+    let adapter = Adapter::enter_direct(Config {
         url: url.into(),
         provider,
         state: None,
@@ -667,7 +700,7 @@ pub(super) async fn run(dsn: &str, daemon: &Path, models: &Path, timeout: f64) -
         // A server rejection proves CREATE did not take effect. A lost
         // connection can hide a successful CREATE, so resolve that uncertainty
         // by removing only this invocation's randomly named fixture.
-        if uncertain && !drop_bank(&admin, &name).await {
+        if uncertain && !finishing_drop(&admin, &name, &mut signals).await {
             return json!({"ok":false,"error":"FixtureCleanupError","fixture_removed":false,
                 "fixture_bank":name,"recovery":format!("On the explicitly selected fixture server, run DROP DATABASE \"{name}\" WITH (FORCE); no host delivery has been verified.")});
         }
@@ -704,7 +737,7 @@ pub(super) async fn run(dsn: &str, daemon: &Path, models: &Path, timeout: f64) -
         _ = signals.wait() => failed("KeyboardInterrupt"),
     };
     let files_removed = fixture.close().await;
-    let bank_removed = drop_bank(&admin, &name).await;
+    let bank_removed = finishing_drop(&admin, &name, &mut signals).await;
     // Windows defaults resume when the last receiver drops. Retain every
     // receiver through owned process, file and database cleanup.
     drop(signals);
@@ -748,6 +781,78 @@ fn cleanup_failure(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn held_drop_replies_expire_and_retry_on_two_owned_connections() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let mut attempts = Vec::new();
+            for _ in 0..2 {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let size = socket.read_u32().await.unwrap();
+                let mut startup = vec![0; size as usize - 4];
+                socket.read_exact(&mut startup).await.unwrap();
+                socket
+                    .write_all(b"R\0\0\0\x08\0\0\0\0Z\0\0\0\x05I")
+                    .await
+                    .unwrap();
+                loop {
+                    assert_eq!(socket.read_u8().await.unwrap(), b'Q');
+                    let size = socket.read_u32().await.unwrap();
+                    let mut query = vec![0; size as usize - 4];
+                    socket.read_exact(&mut query).await.unwrap();
+                    let query = String::from_utf8(query).unwrap();
+                    if query.starts_with("DROP DATABASE") {
+                        attempts.push(query);
+                        // Retain the accepted connection without a reply. Only
+                        // the client's deadline/owned socket close can release it.
+                        let mut end = [0];
+                        let count = socket.read(&mut end).await.unwrap_or(0);
+                        assert!(count == 0 || end[0] == b'X');
+                        break;
+                    }
+                    assert!(
+                        query == "SET statement_timeout = '300s'\0"
+                            || query == "SET lock_timeout = '5s'; SET search_path TO public\0"
+                    );
+                    socket
+                        .write_all(b"C\0\0\0\x08SET\0Z\0\0\0\x05I")
+                        .await
+                        .unwrap();
+                }
+            }
+            attempts
+        });
+        let dsn = format!(
+            "host=127.0.0.1 port={} user=fixture password=synthetic dbname=postgres sslmode=disable",
+            address.port()
+        );
+        let result = tokio::time::timeout(Duration::from_secs(10), async {
+            let removed =
+                drop_bank_with_timeout(&dsn, "r2_held_reply", Duration::from_secs(1)).await;
+            (removed, server.await.unwrap())
+        })
+        .await
+        .unwrap();
+        assert!(!result.0);
+        assert_eq!(
+            result.1,
+            vec!["DROP DATABASE IF EXISTS \"r2_held_reply\" WITH (FORCE)\0"; 2]
+        );
+    }
+
+    #[test]
+    fn child_database_uses_only_the_parents_resolved_endpoint() {
+        let source = "postgresql://fixture@localhost:5432/r2_fixture?host=127.0.0.1&port=5433";
+        let parent = Dsn::parse(source).unwrap();
+        let bound = authenticated(source, &PasswordEnvironment::default()).unwrap();
+        let child: tokio_postgres::Config = database(&bound, "r2_child").unwrap().parse().unwrap();
+        assert_eq!(child.get_hosts(), parent.config().get_hosts());
+        assert_eq!(child.get_ports(), parent.config().get_ports());
+        assert_eq!(child.get_dbname(), Some("r2_child"));
+    }
 
     #[test]
     fn fixture_connection_options_reach_the_native_driver() {

@@ -382,12 +382,24 @@ impl Adapter {
     pub async fn enter(config: Config) -> Result<Arc<Self>, Failure> {
         Self::enter_with(config, RETIRE_ATTEMPTS).await
     }
+    /// Enter an explicitly local transport, such as the disposable proof,
+    /// without consulting ambient HTTP proxy configuration.
+    pub async fn enter_direct(config: Config) -> Result<Arc<Self>, Failure> {
+        Self::enter_transport(config, RETIRE_ATTEMPTS, true).await
+    }
     /// `enter` with `retires_left` retires of a saved record still allowed;
     /// public only so a test can exhaust the budget deterministically.
     #[doc(hidden)]
     pub async fn enter_with(config: Config, retires_left: u8) -> Result<Arc<Self>, Failure> {
-        let client = Client::builder()
-            .redirect(reqwest::redirect::Policy::none())
+        Self::enter_transport(config, retires_left, false).await
+    }
+    async fn enter_transport(
+        config: Config,
+        retires_left: u8,
+        direct: bool,
+    ) -> Result<Arc<Self>, Failure> {
+        let client = Client::builder().redirect(reqwest::redirect::Policy::none());
+        let client = if direct { client.no_proxy() } else { client }
             .build()
             .map_err(|_| Failure::local("transport_unavailable"))?;
         let snapshot = config
@@ -522,7 +534,8 @@ impl Adapter {
                         // under the previous principal too.
                         let mut config = config;
                         config.legacy_state = None;
-                        return Box::pin(Self::enter_with(config, retires_left - 1)).await;
+                        return Box::pin(Self::enter_transport(config, retires_left - 1, direct))
+                            .await;
                     }
                     context
                         .check_binding(&saved)
@@ -651,7 +664,7 @@ impl Adapter {
             // whose address the bank pruned would otherwise be read again.
             let mut config = config;
             config.legacy_state = None;
-            return Box::pin(Self::enter_with(config, retires_left - 1)).await;
+            return Box::pin(Self::enter_transport(config, retires_left - 1, direct)).await;
         }
         let attached = attached?;
         let generation = attached

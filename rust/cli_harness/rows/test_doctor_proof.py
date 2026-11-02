@@ -52,7 +52,7 @@ def test_client_only_install_refuses_before_connecting(tmp_path):
 
 @pytest.mark.skipif(os.environ.get("PSEUDOLIFE_DOCTOR_LIVE_PROOF") != "1",
                     reason="explicit disposable server and provisioned native models required")
-@pytest.mark.parametrize("authentication", ["inline", "environment", pytest.param(
+@pytest.mark.parametrize("authentication", ["inline", "environment", "embedding-only", "dead-proxy", pytest.param(
     "password-file", marks=pytest.mark.skipif(os.name == "nt", reason="Windows password files use the real Shell32 profile; isolated resolver coverage is native"))])
 def test_actual_adapter_proof_matches_python(tmp_path, monkeypatch, capsys, authentication):
     """Compare actual adapter proofs; only bank namespace and transport differ.
@@ -114,7 +114,28 @@ def test_actual_adapter_proof_matches_python(tmp_path, monkeypatch, capsys, auth
     temp.mkdir()
     env.update(HOME=str(tmp_path), USERPROFILE=str(tmp_path), TMPDIR=str(temp),
                TEMP=str(temp), TMP=str(temp), PSEUDOLIFE_TEST_DATABASE_URL=dsn)
-    if authentication != "inline":
+    if authentication == "dead-proxy":
+        env.update({key: "http://127.0.0.1:1" for key in (
+            "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy")})
+        env.update(NO_PROXY="", no_proxy="")
+    if authentication == "embedding-only":
+        configured = env.get("PSEUDOLIFE_DAEMON_ONNX_DIR")
+        if configured:
+            original = Path(configured)
+        else:
+            candidates = list(Path(env["PSEUDOLIFE_DAEMON_MODELS_DIR"]).glob("qwen3-msmarco-fp32-v1-*/embedding"))
+            assert len(candidates) == 1
+            original = candidates[0]
+        embedding = tmp_path / "models" / "embedding"
+        def link_or_copy(source, destination):
+            try:
+                os.link(source, destination)
+            except OSError:
+                shutil.copy2(source, destination)
+        shutil.copytree(original, embedding, copy_function=link_or_copy)
+        assert not embedding.with_name("reranker").exists()
+        env["PSEUDOLIFE_DAEMON_ONNX_DIR"] = str(embedding)
+    if authentication in ("environment", "password-file"):
         fields = conninfo_to_dict(dsn)
         password = fields.pop("password")
         env["PSEUDOLIFE_TEST_DATABASE_URL"] = make_conninfo(**fields)
@@ -238,7 +259,8 @@ def test_corrupt_model_names_repair_and_removes_owned_bank(tmp_path, damage):
 
 
 @pytest.mark.parametrize("fault", ["create-timeout", "drop-lost-reply", "drop-checkpoint-delay", pytest.param(
-    "create-interrupt", marks=pytest.mark.skipif(os.name == "nt", reason="POSIX SIGTERM contract"))])
+    "create-interrupt", marks=pytest.mark.skipif(os.name == "nt", reason="POSIX SIGTERM contract")), pytest.param(
+    "drop-interrupt", marks=pytest.mark.skipif(os.name == "nt", reason="POSIX SIGTERM contract"))])
 def test_lost_database_replies_are_bounded_and_cleanup_is_reported(tmp_path, fault):
     """A loopback PostgreSQL wire fixture loses replies after accepting SQL."""
     import signal
@@ -282,7 +304,7 @@ def test_lost_database_replies_are_bounded_and_cleanup_is_reported(tmp_path, fau
                     if query.startswith("SET statement_timeout"):
                         statement_timeout = int(query.split("'")[1].removesuffix("s"))
                     dropping = query.startswith("DROP DATABASE")
-                    if dropping and fault == "drop-checkpoint-delay":
+                    if dropping and fault in ("drop-checkpoint-delay", "drop-interrupt"):
                         reached.set()
                         # A real DROP may wait 150–172 s for a checkpoint. This
                         # shorter witness still exceeds the old 5/10 s limits.
@@ -324,18 +346,23 @@ def test_lost_database_replies_are_bounded_and_cleanup_is_reported(tmp_path, fau
                                  cwd=tmp_path, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         try:
             assert reached.wait(30), "proof never reached the accepted database statement"
-            if fault == "create-interrupt":
+            if fault in ("create-interrupt", "drop-interrupt"):
                 child.send_signal(signal.SIGTERM)
             stdout, stderr = child.communicate(timeout=45)
             assert child.returncode == 1
             report = json.loads(stdout)
             expected = {"create-interrupt": "KeyboardInterrupt", "create-timeout": "TimeoutError",
                         "drop-lost-reply": "FixtureCleanupError",
-                        "drop-checkpoint-delay": "NativeDaemonSpawnError"}[fault]
+                        "drop-checkpoint-delay": "NativeDaemonSpawnError",
+                        "drop-interrupt": "NativeDaemonSpawnError"}[fault]
             assert report["error"] == expected
-            assert not stderr
+            if fault == "drop-interrupt":
+                assert stderr == "Finishing disposable-bank cleanup; PostgreSQL may take up to 11 minutes.\n"
+            else:
+                assert not stderr
             assert any(query.startswith('DROP DATABASE IF EXISTS "r2_blackhole_proof_') for query in queries)
             if fault == "drop-lost-reply":
+                assert sum(query.startswith("DROP DATABASE") for query in queries) == 2
                 assert report["fixture_removed"] is False
                 assert report["fixture_bank"].startswith("r2_blackhole_proof_")
                 assert "DROP DATABASE" in report["recovery"]
