@@ -1,6 +1,7 @@
 """Differential HTTP/CLI proof; the CLIs are disposable stubs, never accounts.
 
-python rust/extractor_harness/run.py --binary /path/to/pseudolife-stdio
+Invoke through the extractor_shim Cargo integration test, which supplies the
+target-native --stub-exe fixture alongside --binary.
 
 Only generated completion/tool IDs, per-process instruction-file paths and
 the fixture CLI path in timeout diagnostics are normalized. HTTP status and response bodies are then compared as bytes;
