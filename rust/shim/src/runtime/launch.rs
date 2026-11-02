@@ -22,7 +22,9 @@ pub(super) fn usage_file_with(
 pub(super) fn pin(runtime: &Runtime) -> Result<fs::File> {
     let file = usage_file(&runtime.usage_lock_path())?;
     file.lock_shared().map_err(io_error)?;
-    // Selection can race with pruning while waiting for the shared lock.
+    // Hash only after pinning: selection can race with pruning while waiting
+    // for this lock. Both launcher and child need this verification because
+    // runtime binaries can also be invoked directly, without a launcher pin.
     read_runtime(&runtime.path)?;
     Ok(file)
 }
@@ -31,13 +33,17 @@ pub(super) fn select_pin_with(
     layout: &Layout,
     mut acquire: impl FnMut(&Runtime) -> Result<fs::File>,
 ) -> Result<(Runtime, fs::File)> {
+    let mut retry = None;
     for _ in 0..4 {
-        let runtime = current_runtime(layout).ok_or_else(|| format!(
+        let runtime = retry.take().or_else(|| newest_runtime(layout, false)).ok_or_else(|| format!(
             "no complete native runtime under {}; rerun native setup from a separate installed CLI", layout.root.display()))?;
         match acquire(&runtime) {
             Ok(lock) => return Ok((runtime, lock)),
             Err(error) => {
-                if current_runtime(layout).is_some_and(|new| new.sequence != runtime.sequence) {
+                if let Some(new) = current_runtime(layout)
+                    && new.sequence != runtime.sequence
+                {
+                    retry = Some(new);
                     continue;
                 }
                 return Err(error);
@@ -72,7 +78,7 @@ pub fn maybe_launch() -> Option<u8> {
                 .and_then(|p| p.parent())
                 .is_some_and(|root| same_path(root, &layout.root))
         {
-            let runtime = match read_runtime(executable.parent()?) {
+            let runtime = match read_runtime_with_digest(executable.parent()?, false) {
                 Ok(runtime) => runtime,
                 Err(error) => {
                     crate::stderrln!("pseudolife-mcp: {error}; rerun native setup");

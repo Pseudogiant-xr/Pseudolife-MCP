@@ -191,6 +191,10 @@ pub fn redirect(meta: &fs::Metadata) -> bool {
     false
 }
 pub fn read_runtime(path: &Path) -> Result<Runtime> {
+    read_runtime_with_digest(path, true)
+}
+
+fn read_runtime_with_digest(path: &Path, verify_digest: bool) -> Result<Runtime> {
     let sequence = path
         .file_name()
         .and_then(|n| n.to_str())
@@ -216,7 +220,7 @@ pub fn read_runtime(path: &Path) -> Result<Runtime> {
             .as_ref()
             .is_some_and(|s| s.len() != 40 || !s.bytes().all(|b| b.is_ascii_hexdigit()))
         || !plain_file(&path.join(BINARY))
-        || hash_file(&path.join(BINARY))? != marker.binary_sha256
+        || (verify_digest && hash_file(&path.join(BINARY))? != marker.binary_sha256)
     {
         return Err("runtime marker or executable verification failed".into());
     }
@@ -253,6 +257,10 @@ pub fn list_runtimes(layout: &Layout) -> Vec<Runtime> {
     found
 }
 pub fn current_runtime(layout: &Layout) -> Option<Runtime> {
+    newest_runtime(layout, true)
+}
+
+fn newest_runtime(layout: &Layout, verify_digest: bool) -> Option<Runtime> {
     // Verify candidates newest first. Old sessions can retain many large
     // binaries; starting a new session only needs the first valid candidate.
     let mut paths: Vec<_> = fs::read_dir(&layout.root)
@@ -266,7 +274,7 @@ pub fn current_runtime(layout: &Layout) -> Option<Runtime> {
     paths.sort_by_key(|(number, _)| std::cmp::Reverse(*number));
     paths
         .into_iter()
-        .find_map(|(_, path)| read_runtime(&path).ok())
+        .find_map(|(_, path)| read_runtime_with_digest(&path, verify_digest).ok())
 }
 pub fn running_runtime(layout: &Layout) -> Option<Runtime> {
     let executable = std::env::current_exe().ok()?;

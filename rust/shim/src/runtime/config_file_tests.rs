@@ -257,6 +257,33 @@ mod windows {
     }
 
     #[test]
+    fn locked_pending_refuses_before_publication_and_retry_has_one_link() {
+        let f = Fixture::new();
+        let target = f.0.join("client.json");
+        let pending = f.0.join("pending.json");
+        let previous = f.0.join("previous.json");
+        crate::board::state::atomic_create(&target, b"before").unwrap();
+        crate::board::state::atomic_create(&pending, b"after").unwrap();
+        let held = fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .open(&pending)
+            .unwrap();
+        assert!(replace_preserving(&target, &pending, &previous).is_err());
+        assert_eq!(fs::read(&target).unwrap(), b"before");
+        assert!(!previous.exists());
+        assert_eq!(fs::read_dir(&f.0).unwrap().count(), 2);
+        drop(held);
+        assert_eq!(fs::read(&pending).unwrap(), b"after");
+        replace_preserving(&target, &pending, &previous).unwrap();
+        assert!(!pending.exists());
+        assert_eq!(read_optional(&target).unwrap().unwrap(), b"after");
+        windows_config_security::validate(&fs::File::open(&target).unwrap()).unwrap();
+        assert_eq!(fs::read(&previous).unwrap(), b"before");
+        assert_eq!(fs::read_dir(&f.0).unwrap().count(), 2);
+    }
+
+    #[test]
     fn ordinary_client_created_file_keeps_its_default_owner() {
         // Isolate from host-specific Temp ACLs that may grant other accounts
         // write access; the client file itself still uses fs::write defaults.

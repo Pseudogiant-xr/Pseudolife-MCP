@@ -539,20 +539,34 @@ fn replace_preserving(target: &Path, pending: &Path, previous: &Path) -> io::Res
     // ReplaceFileW resolves inherited target ACEs against the replacement's
     // parent. Replacing directly from the private recovery directory can
     // produce an empty DACL for an ordinary, non-elevated client. A private
-    // hard link beside the target keeps the correct inheritance context;
-    // the recovery copy remains available until publication is verified.
+    // move beside the target keeps the correct inheritance context. Move the
+    // sole pending name before publication: an AV deletion refusal must not
+    // leave a changed, hard-linked target that subsequent retries reject.
     let staged = target
         .parent()
         .ok_or_else(|| io::Error::other("configuration target has no parent"))?
         .join(format!(".client-native-pending-{}", uuid::Uuid::new_v4()));
-    let pending_w = wide(&staged)?;
-    fs::hard_link(pending, &staged)?;
+    let staged_w = wide(&staged)?;
+    let pending_w = wide(pending)?;
+    let move_absent = |from: &[u16], to: &[u16]| -> io::Result<()> {
+        // Flags zero prohibit replacing an existing destination and copying
+        // across volumes. All names and buffers remain live during the call.
+        if unsafe {
+            windows_sys::Win32::Storage::FileSystem::MoveFileExW(from.as_ptr(), to.as_ptr(), 0)
+        } == 0
+        {
+            Err(io::Error::last_os_error())
+        } else {
+            Ok(())
+        }
+    };
+    move_absent(&pending_w, &staged_w)?;
     // ReplaceFileW retains the actual displaced file and its attributes. All
     // buffers live for the call; no ACL-merge errors are ignored.
     let replaced = unsafe {
         windows_sys::Win32::Storage::FileSystem::ReplaceFileW(
             target_w.as_ptr(),
-            pending_w.as_ptr(),
+            staged_w.as_ptr(),
             previous_w.as_ptr(),
             0,
             std::ptr::null_mut(),
@@ -560,18 +574,15 @@ fn replace_preserving(target: &Path, pending: &Path, previous: &Path) -> io::Res
         )
     };
     if replaced != 0 {
-        // Publication consumed the sibling link. Drop the redundant recovery
-        // link before validation so a conflict cannot leave the live target
-        // looking like an externally hard-linked configuration on retry.
-        return fs::remove_file(pending);
+        return Ok(());
     }
     let error = io::Error::last_os_error();
     // ERROR_UNABLE_TO_MOVE_REPLACEMENT_2 can leave the original at the backup
     // path. Restore only into an absent target; never overwrite another writer.
     if error.raw_os_error() == Some(1177) {
-        let _ = fs::hard_link(previous, target);
+        let _ = move_absent(&previous_w, &target_w);
     }
-    if let Err(cleanup) = fs::remove_file(&staged)
+    if let Err(cleanup) = move_absent(&staged_w, &pending_w)
         && cleanup.kind() != io::ErrorKind::NotFound
     {
         return Err(io::Error::new(

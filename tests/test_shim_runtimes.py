@@ -19,6 +19,7 @@ import stat
 import subprocess
 import sys
 import time
+import zipfile
 from pathlib import Path, PurePosixPath
 
 import pytest
@@ -91,8 +92,10 @@ class FakeTools:
         if argv[1] == "-c" and "ScriptMaker" in argv[2]:
             if self.build[0] == 0:
                 target, executable, body = argv[3], argv[4], argv[5]
-                (Path(target) / "pseudolife-mcp.exe").write_bytes(
-                    b"MZ-fake-launcher\n#!" + executable.encode() + b"\n" + Path(body).read_bytes())
+                launcher = Path(target) / "pseudolife-mcp.exe"
+                launcher.write_bytes(b"MZ-fake-launcher\n#!" + executable.encode() + b"\n")
+                with zipfile.ZipFile(launcher, "a") as archive:
+                    archive.writestr("__main__.py", Path(body).read_bytes())
             return self.build
         return 91, f"unexpected call {argv}"
 
@@ -134,6 +137,125 @@ def test_install_creates_a_complete_runtime_and_the_launcher(tmp_path, shape, to
     else:
         assert layout.launcher.read_bytes().startswith(b"MZ")
         assert repr(str(layout.root)).encode() in layout.launcher.read_bytes()
+
+
+@pytest.mark.parametrize("native_bytes", [b"\x7fELF\xff\x00", b"\xcf\xfa\xed\xfe\x00"])
+def test_python_update_after_native_posix_launcher_retains_both_runtime_types(tmp_path, native_bytes, monkeypatch):
+    layout = _layout(tmp_path, "posix")
+    tools = FakeTools("posix")
+    original = _install(layout, tools)
+    native = layout.root / "000002"
+    native.mkdir()
+    (native / "pseudolife-mcp").write_bytes(native_bytes)
+    marker = {"format": 1, "kind": "native", "version": "0.15.1"}
+    (native / rt.MARKER).write_text(json.dumps(marker), encoding="utf-8")
+    layout.launcher.write_bytes(native_bytes)
+
+    monkeypatch.setenv("PSEUDOLIFE_SHIM_ENGINE", "python")
+    updated = _install(layout, tools, version="0.15.2")
+
+    assert updated.path == layout.root / "000003"
+    assert original.path.is_dir() and native.is_dir()
+    assert (native / "pseudolife-mcp").read_bytes() == native_bytes
+    assert json.loads((native / rt.MARKER).read_text(encoding="utf-8")) == marker
+    assert rt.current_runtime(layout).path == updated.path
+    assert layout.launcher.read_text(encoding="utf-8") == rt.launcher_content(layout)
+    assert rt.ensure_launcher(layout, run=tools) == "current"
+
+
+@pytest.mark.parametrize("explicit", [False, True])
+def test_a_python_install_preserves_native_activation_unless_explicitly_selected(tmp_path, shape, tools, monkeypatch, explicit, capsys):
+    monkeypatch.delenv("PSEUDOLIFE_SHIM_ENGINE", raising=False)
+    layout = _layout(tmp_path, shape)
+    original = _install(layout, tools)
+    native = layout.root / "000002"
+    native.mkdir()
+    native_bytes = b"MZ-native executable" if shape == "windows" else b"\x7fELF\xff\x00"
+    (native / _console_name(shape)).write_bytes(native_bytes)
+    (native / rt.MARKER).write_text(json.dumps({"format": 1, "kind": "native"}), encoding="utf-8")
+    # Deliberately retain the prior Python cache on Windows: a stale record
+    # alone must never identify a newly activated MZ binary as Python.
+    layout.launcher.write_bytes(native_bytes)
+    if explicit:
+        monkeypatch.setenv("PSEUDOLIFE_SHIM_ENGINE", "python")
+    tools.calls.clear()
+    tools.version = "0.15.2"
+    lines = []
+    updated = rt.install("pseudolife-mcp==0.15.2", layout, python=sys.executable, run=tools, log=lines.append)
+    notice = capsys.readouterr().err.splitlines()
+    assert len(notice) == 1
+    assert updated.name == "000003" and original.path.is_dir() and native.is_dir()
+    assert (native / _console_name(shape)).read_bytes() == native_bytes
+    if explicit:
+        assert "launcher replaced with Python:" in notice[0]
+        assert rt._launcher_kind(layout) == "python"
+        assert layout.launcher.read_bytes() != native_bytes
+    else:
+        assert layout.launcher.read_bytes() == native_bytes
+        assert "launcher kept:" in notice[0]
+        assert not any("ScriptMaker" in str(call) for call in tools.calls)
+        assert rt.ensure_launcher(layout, run=tools) == "kept"
+    assert str(native) not in rt.remove_unused(layout, processes=lambda: [])["removed"]
+
+
+@pytest.mark.parametrize("explicit", [False, True])
+def test_unreadable_launcher_evidence_is_retained_even_with_an_explicit_python_choice(tmp_path, shape, tools, monkeypatch, explicit, capsys):
+    layout = _layout(tmp_path, shape)
+    _install(layout, tools)
+    before = layout.launcher.read_bytes()
+    if explicit:
+        monkeypatch.setenv("PSEUDOLIFE_SHIM_ENGINE", "python")
+    else:
+        monkeypatch.delenv("PSEUDOLIFE_SHIM_ENGINE", raising=False)
+    original_open = Path.open
+
+    def denied(path, *args, **kwargs):
+        if path == layout.launcher:
+            raise PermissionError("launcher cannot be inspected")
+        return original_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", denied)
+    tools.calls.clear()
+    lines = []
+    assert rt.ensure_launcher(layout, run=tools, log=lines.append) == "kept"
+    notice = capsys.readouterr().err.splitlines()
+    assert tools.calls == [] and len(notice) == 1 and "could not be inspected" in notice[0]
+    with original_open(layout.launcher, "rb") as opened:
+        assert opened.read() == before
+
+
+def test_malformed_or_unrecognized_launcher_evidence_does_not_authorize_replacement(tmp_path, shape, tools, monkeypatch):
+    monkeypatch.delenv("PSEUDOLIFE_SHIM_ENGINE", raising=False)
+    layout = _layout(tmp_path, shape)
+    _install(layout, tools)
+    before = b"MZ\x00not a distlib archive" if shape == "windows" else b"\xff\x00unrecognized launcher"
+    layout.launcher.write_bytes(before)
+    (layout.root / "000001" / rt.MARKER).write_text("{unreadable marker", encoding="utf-8")
+    assert rt.ensure_launcher(layout, run=tools) == "kept"
+    assert layout.launcher.read_bytes() == before
+
+
+def test_client_updates_preserve_an_active_native_launcher_by_default(tmp_path, shape, tools, monkeypatch):
+    from pseudolife_memory import client_updates as updates
+
+    monkeypatch.delenv("PSEUDOLIFE_SHIM_ENGINE", raising=False)
+    layout = _layout(tmp_path, shape)
+    original = _install(layout, tools)
+    native_bytes = b"MZ-native executable" if shape == "windows" else b"\x7fELF\xff\x00"
+    layout.launcher.write_bytes(native_bytes)
+    registration = rt.Registration("claude-code", tmp_path / "config.json", rt.SERVER,
+                                   str(layout.launcher), ["shim"])
+    monkeypatch.setattr(updates, "runtimes_module", lambda: rt)
+    monkeypatch.setattr(updates, "client_env", lambda: {"HOME": str(tmp_path / "home"), "USERPROFILE": str(tmp_path / "home")})
+    monkeypatch.setattr(updates, "which", lambda _name: None)
+    monkeypatch.setattr(updates, "_installed_release", lambda *_args: original)
+    monkeypatch.setattr(updates, "run_cli", tools)
+    monkeypatch.setattr(updates, "list_processes", lambda: [])
+    monkeypatch.setattr(rt, "default_layout", lambda _env: layout)
+    monkeypatch.setattr(rt, "find_registrations", lambda _env: [registration])
+    result = updates.update_shim("pseudolife-mcp==0.15.0")
+    assert result["state"] == "current:0.15.0", result
+    assert layout.launcher.read_bytes() == native_bytes
 
 
 def test_notices_name_the_launcher_by_its_path_unless_path_finds_it(tmp_path, shape, tools):
@@ -193,15 +315,18 @@ def test_a_changed_launcher_is_moved_aside_never_overwritten(tmp_path, shape, to
     renamed; the same rename keeps the POSIX replacement atomic."""
     layout = _layout(tmp_path, shape)
     _install(layout, tools, "0.15.0")
-    layout.launcher.write_bytes(b"an older launcher")
+    before = layout.launcher.read_bytes()
     if shape == "windows":
         record = layout.launcher.with_name("pseudolife-mcp.exe.json")
         record.write_text(json.dumps({"root": "elsewhere"}), encoding="utf-8")
+    else:
+        layout.launcher.write_text(rt.launcher_content(rt.Layout(tmp_path / "old-root", layout.launcher)), encoding="utf-8")
+        before = layout.launcher.read_bytes()
     assert rt.ensure_launcher(layout, run=tools) == "replaced"
-    assert layout.launcher.read_bytes() != b"an older launcher"
+    assert shape == "windows" or layout.launcher.read_bytes() != before
     if shape == "windows":
         aside = list(layout.launcher_dir.glob("pseudolife-mcp.exe.old-*"))
-        assert len(aside) == 1 and aside[0].read_bytes() == b"an older launcher"
+        assert len(aside) == 1 and aside[0].read_bytes() == before
 
 
 def test_a_failed_install_leaves_no_staging_and_keeps_the_current_runtime(tmp_path, shape, tools):
@@ -378,6 +503,18 @@ def test_abandoned_installs_and_moved_aside_launchers_are_cleaned(tmp_path, shap
     result = rt.remove_unused(layout, processes=lambda: [])
     assert sorted(result["removed"]) == sorted([str(leftover), str(aside)])
     assert not leftover.exists() and not aside.exists()
+
+
+def test_python_pruning_never_removes_native_launcher_recovery_copies(tmp_path, shape, tools):
+    layout = _layout(tmp_path, shape)
+    _install(layout, tools)
+    native = layout.launcher_dir / "pseudolife-mcp.exe.old-native-recovery"
+    native.write_bytes(b"retained native recovery executable")
+    python = layout.launcher_dir / "pseudolife-mcp.exe.old-python-recovery"
+    python.write_bytes(b"unused Python launcher")
+    result = rt.remove_unused(layout, processes=lambda: [])
+    assert native.is_file() and str(native) not in result["removed"]
+    assert result["removed"] == [str(python)] and not python.exists()
 
 
 @pytest.mark.parametrize("evidence", ["complete", "incomplete", "unmarked", "reserved", "malformed", "unreadable", "unknown"])

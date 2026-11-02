@@ -92,6 +92,37 @@ Python's compatibility updater retains native and unreadable runtime directories
 and allocates subsequent venv sequences beside them; it never selects native
 markers as Python environments.
 
+Python `ensure_launcher`, runtime installation and `client_updates.update_shim`
+preserve an active native launcher by default, including unattended calls. A
+compatibility update can install a newer Python venv without activating it.
+To select the Python client runtime explicitly, set
+`PSEUDOLIFE_SHIM_ENGINE=python` for that install or update invocation, for example:
+
+```sh
+PSEUDOLIFE_SHIM_ENGINE=python python ops/shim_runtime.py install --source <checkout>
+```
+
+This variable selects the client launcher; the update command's existing
+`--engine` option selects the Docker daemon. `ensure_launcher` returns `kept`
+when preserving the launcher, alongside its existing `written`, `replaced` and
+`current` results. It emits one stderr notice when keeping or explicitly
+replacing a native or unverified launcher. Its `current_runtime` helper and
+`current` subcommand report the newest complete Python candidate, which can
+remain inactive while the stable launcher is native.
+
+Detection reads executable bytes without starting either runtime. POSIX ELF
+and Mach-O signatures identify native launchers. On Windows, MZ alone is
+ambiguous: Python recognizes its stored distlib `__main__.py` selector rather
+than trusting a stale adjacent cache record. Unknown or malformed launchers
+are retained unless Python is explicitly selected; unreadable launchers are
+retained even with that selection. Native runtime directories and
+`*.old-native-*` recovery copies are preserved during Python pruning.
+
+An empty numbered directory is also retained: the native installer reserves
+its sequence before writing an executable or marker, so age alone cannot
+identify it as an abandoned Python install. Only unfinished directories with
+Python venv structure are eligible for Python's age-based cleanup.
+
 ## Pruning and client state
 
 Pruning considers only verified native directories. It retains the newest,

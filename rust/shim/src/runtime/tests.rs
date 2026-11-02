@@ -89,6 +89,8 @@ fn marker_cannot_select_a_modified_binary() {
     let new = f.install("1.0.1");
     fs::write(new.executable(), b"changed after install").unwrap();
     assert_eq!(current_runtime(&f.layout).unwrap().sequence, old.sequence);
+    let (selected, _pin) = launch::select_pin_with(&f.layout, launch::pin).unwrap();
+    assert_eq!(selected.sequence, old.sequence);
 }
 #[test]
 fn legacy_python_runtime_is_never_selected_or_deleted() {
