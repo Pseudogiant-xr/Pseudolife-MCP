@@ -23,6 +23,7 @@ import shutil
 import tempfile
 import threading
 import time
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Any
 
@@ -957,19 +958,30 @@ def _write_config_locked(service: Any, patch: dict[str, Any]) -> dict[str, Any]:
         tmp.unlink(missing_ok=True)
 
     applied, restart = [], []
-    for path, value in coerced.items():
-        knob = _KNOB_BY_PATH[path]
-        # Live-mutate in-process for knobs whose read path is live. Restart knobs
-        # are persisted only (next boot reads them); mutating in place would lie
-        # about the running behaviour.
-        if not knob.get("restart"):
-            try:
-                _set_by_path(service.config, path, value)
-                applied.append(path)
-            except AttributeError:
+    # Initialization and cortex writes hold the service lock. Publish the
+    # config and the two policies copied into the resident store together,
+    # after persistence succeeds. Other knobs read config directly and must
+    # not wait for a cold embedder load. Lightweight fixtures have no lock.
+    cortex_paths = ("memory.cortex.protect_provenance",
+                    "memory.cortex.supersede_confidence_margin")
+    lock = (getattr(service, "_lock", nullcontext())
+            if any(path in cortex_paths for path in coerced) else nullcontext())
+    with lock:
+        for path, value in coerced.items():
+            knob = _KNOB_BY_PATH[path]
+            # Restart knobs are persisted only; their running values stay put.
+            if not knob.get("restart"):
+                try:
+                    _set_by_path(service.config, path, value)
+                    if path in cortex_paths:
+                        cortex = getattr(service, "_cortex", None)
+                        if cortex is not None:
+                            setattr(cortex, path.rsplit(".", 1)[1], value)
+                    applied.append(path)
+                except AttributeError:
+                    restart.append(path)
+            else:
                 restart.append(path)
-        else:
-            restart.append(path)
 
     return {
         "applied": applied,

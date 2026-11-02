@@ -1,8 +1,8 @@
 //! `export` / `import`: the logical bank transfer (`transfer_cli.py`) on an
 //! explicit `PSEUDOLIFE_MCP_DATABASE_URL`.
 //!
-//! The embedded lite tier and imports into a bank below this build's schema
-//! defer by name before any effect; every non-canonical argv or input shape
+//! The embedded lite tier defers by name before any effect;
+//! every non-canonical argv or input shape
 //! defers through the dispatcher's generic line.
 use std::{
     ffi::OsString,
@@ -14,6 +14,7 @@ use std::{
 mod export;
 mod import;
 mod json;
+mod schema;
 mod sql;
 
 const EXPORT_HELP: &str = include_str!("transfer/export_help.txt");
@@ -95,8 +96,8 @@ pub(super) enum Outcome {
     Refused(String),
     /// A shape outside this candidate: the dispatcher's generic deferral.
     Deferred,
-    /// The named deferral for a bank not at this build's schema.
-    SchemaDeferred,
+    /// The native schema guard refused before making changes.
+    SchemaRefused(String),
     /// A PostgreSQL failure after the work began (`native-pg-diagnostics`).
     Failed,
     /// Import only: the COMMIT's answer was FATAL or lost, so the import may
@@ -270,10 +271,10 @@ fn finish(mode: &str, outcome: Outcome) -> Option<ExitCode> {
             ),
             1,
         ),
-        Outcome::SchemaDeferred => (
+        Outcome::SchemaRefused(message) => (
             emit(
                 &mut io::stderr().lock(),
-                "pseudolife-stdio: import into a bank not at this build's schema (58) is deferred in this candidate (needs native ensure_schema)\n",
+                &format!("pseudolife-stdio: import schema initialization refused: {message}\n"),
             ),
             1,
         ),
@@ -281,7 +282,12 @@ fn finish(mode: &str, outcome: Outcome) -> Option<ExitCode> {
             emit(
                 &mut io::stderr().lock(),
                 &format!(
-                    "pseudolife-stdio: {mode} failed (native-pg-diagnostics); nothing was committed\n"
+                    "pseudolife-stdio: {mode} failed (native-pg-diagnostics); {}\n",
+                    if mode == "import" {
+                        "archive rows were not committed"
+                    } else {
+                        "nothing was committed"
+                    }
                 ),
             ),
             1,

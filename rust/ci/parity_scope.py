@@ -80,7 +80,7 @@ SHARDS = [
     # 9.8 min. test_login stays here with its container image and record.
     {"suite": "w1c-connection", "w1c_rows": "'test_login', 'move', 'tunnel'",
      "w1c_timeout": 26, "job_timeout": 50},
-    {"suite": "w1c-connect", "w1c_rows": "'connect', 'maintainer'", "w1c_timeout": 25,
+    {"suite": "w1c-connect", "w1c_rows": "'connect', 'maintainer', 'coordination_recovery', 'maintainer_setup'", "w1c_timeout": 25,
      "job_timeout": 29},
     # Hosted step timings for rust.yml runs 2026-10-11 to 10-20, about 300
     # successful steps per suite and OS (h5_linux_measurements.json
@@ -139,6 +139,7 @@ ROW_SUITES = {
     "doctor": "w1c-doctor",
     "transfer": "w1c-pairing", "invite": "w1c-pairing", "pair": "w1c-pairing",
     "test_login": "w1c-connection", "connect": "w1c-connect", "maintainer": "w1c-connect",
+    "coordination_recovery": "w1c-connect", "maintainer_setup": "w1c-connect",
     "move": "w1c-connection", "tunnel": "w1c-connection",
     "audit": "h5-audit", "backup": "h5-backup", "migrate_flat": "h5-backup",
 }
@@ -156,9 +157,10 @@ DAEMON = ("cli", "cli-store", "cli-daemon", "cli-daemon-2", "cli-live", "eval", 
 # fails if another command starts using a mapped entry.
 SHIM_COMMANDS = {
     "backup": ("backup", "migrate_flat"), "backup_help.txt": ("backup", "migrate_flat"),
-    "board_audit": ("audit",),
+    "board_audit": ("audit", "coordination_recovery"),
     "migrate_flat.rs": ("migrate_flat",),
-    "connect": ("connect",), "doctor": ("doctor",), "maintainer": ("maintainer",),
+    "connect": ("connect",), "doctor": ("doctor",), "maintainer": ("maintainer", "maintainer_setup"),
+    "coordination_recovery": ("coordination_recovery",),
     "move_cli.rs": ("move",), "test_login": ("test_login",),
     "transfer": ("transfer",), "transfer.rs": ("transfer",), "tunnel": ("tunnel",),
     "episode.rs": ("episode",), "episode_input.rs": ("episode",),

@@ -69,6 +69,9 @@
     "connect-user-agent-changed",
     "connect-verify-reverse-order"
   ],
+  "coordination_recovery": [
+    "recovery-stop-gate-dropped"
+  ],
   "doctor": [
     "doctor-agent-path-unnormalized",
     "doctor-agent-proof-inverted",
@@ -179,6 +182,9 @@
     "maint-unused-codes-kept",
     "maint-waiting-stdout-error-dropped"
   ],
+  "maintainer_setup": [
+    "setup-consent-bypassed"
+  ],
   "move": [
     "move-checkout-cr",
     "move-dash-value-admitted",
@@ -245,10 +251,11 @@
     "transfer-numeric-strings",
     "transfer-order-flip",
     "transfer-part-guard",
-    "transfer-probe-share",
     "transfer-refusal-exit",
     "transfer-roster-guard",
     "transfer-schema-guard",
+    "transfer-schema-lock-deferred",
+    "transfer-server-encoding",
     "transfer-stdout-refusal-ignored",
     "transfer-timestamp-range",
     "transfer-utc-precheck"

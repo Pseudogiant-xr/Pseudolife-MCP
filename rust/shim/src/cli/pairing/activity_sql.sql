@@ -1,0 +1,1 @@
+SELECT to_regclass('public.principal_activity') IS NOT NULL;

@@ -161,7 +161,7 @@
       "fixtures": "defc5e07c5ac3f94",
       "candidate": "d71c5590ce6f866a",
       "candidate-harness": "43b859ee9d5fd738",
-      "parity-checks": "703c66ccfa3c2ea5",
+      "parity-checks": "fc8882ae92b7f9bb",
       "daemon-image": "5c93764cb0f0bab7",
       "parity": "aa4ba434de948ea6"
     },
@@ -248,8 +248,8 @@
       },
       {
         "job": "parity-checks",
-        "fingerprint": "703c66ccfa3c2ea5",
-        "reason": "The added artifact-presence check does no build or download. Flat migration adds 22 cases inside the existing H5 backup shard: the 20-case Windows live run measured about 50 seconds, so live/record/golden adds about 2.5 minutes within the existing 10-minute Windows step and 40-minute Linux composite limits. No PR job or timeout is added; remeasure the shard on hosted batch runs."
+        "fingerprint": "fc8882ae92b7f9bb",
+        "reason": "Integrate the bounded R1 recovery, setup, transport, config and stats checks into the existing W1-C shards after the installer workflow merge; no new jobs, shards, dependency installation or setup steps, and budget limits remain unchanged. Re-measure the combined steps from the next integration batch."
       }
     ]
   },
