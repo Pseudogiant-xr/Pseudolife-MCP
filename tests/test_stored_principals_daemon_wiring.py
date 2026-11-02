@@ -14,11 +14,14 @@ from pseudolife_memory.principals import installed_store, install_store
 
 @pytest.fixture(autouse=True)
 def _restore_store():
+    from pseudolife_memory.console_sessions import install_sessions, installed_sessions
     previous = installed_store()
     recorder = principal_activity.installed_recorder()
+    sessions = installed_sessions()
     yield
     install_store(previous)
     principal_activity.install_recorder(recorder)
+    install_sessions(sessions)
 
 
 @pytest.fixture
@@ -67,3 +70,19 @@ def test_an_open_daemon_records_no_activity(started):
     daemon.start_stored_principals(svc, {}, auth_configured=False)
     assert principal_activity.installed_recorder() is None
     assert started[0]._recorder is None
+
+
+def test_an_authenticated_daemon_installs_console_sessions_its_refresher_loads(started):
+    from pseudolife_memory.console_sessions import SessionSnapshot, installed_sessions
+    svc = SimpleNamespace(_db_url="postgresql://fixture@127.0.0.1:5433/fixture")
+    daemon.start_stored_principals(svc, {"tok": "desk"}, auth_configured=True)
+    sessions = installed_sessions()
+    assert isinstance(sessions, SessionSnapshot) and started[0]._sessions is sessions
+
+
+def test_an_open_daemon_has_no_console_sessions(started):
+    from pseudolife_memory.console_sessions import install_sessions, installed_sessions
+    install_sessions(None)
+    svc = SimpleNamespace(_db_url="postgresql://fixture@127.0.0.1:5433/fixture")
+    daemon.start_stored_principals(svc, {}, auth_configured=False)
+    assert installed_sessions() is None and started[0]._sessions is None

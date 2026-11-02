@@ -189,6 +189,13 @@ class PrincipalSnapshot:
             row = self._rows.get(principal)
         return row is not None and row.board and not row.revoked
 
+    def resolves(self, principal: str) -> bool:
+        """Whether ``principal`` still authenticates on its own: a row with
+        a token, not revoked (a Console session it issued needs that)."""
+        with self._lock:
+            row = self._rows.get(principal)
+        return row is not None and bool(row.token_hash) and not row.revoked
+
     def tier_of(self, principal: str) -> str | None:
         with self._lock:
             row = self._rows.get(principal)
@@ -283,9 +290,14 @@ class PrincipalRefresher:
 
     def __init__(self, dsn: str, snapshot: PrincipalSnapshot, *,
                  auth_configured: bool, interval: float = REFRESH_INTERVAL_S,
-                 recorder=None):
+                 recorder=None, sessions=None):
         self._dsn = dsn
         self._snapshot = snapshot
+        # v59: the Console sessions' view (console_sessions.SessionSnapshot),
+        # reloaded on the same connection right after the principals.
+        self._sessions = sessions
+        self._sessions_failing = False
+        self._uses_flushed_at = 0.0
         self._auth_configured = auth_configured
         self._interval = interval
         self._recorder = recorder
@@ -322,6 +334,7 @@ class PrincipalRefresher:
         if self._failing:
             logger.info("stored principals: refresh recovered")
         self._failing = False
+        self._refresh_sessions()
         if not self._warned:
             self._warned = True
             self._startup_warnings()
@@ -330,6 +343,45 @@ class PrincipalRefresher:
                 self._warned_invalid.add(name)
                 logger.warning("stored principal %r is not a principal name "
                                "([a-z0-9][a-z0-9._-]{0,63}): skipped", name)
+        return True
+
+    def _refresh_sessions(self) -> None:
+        """Reload the Console sessions on the refresher's connection. A
+        failure leaves that view to age towards stale (its bearers then get
+        503, never 401) and is logged once, by type."""
+        if self._sessions is None or self._conn is None:
+            return
+        from pseudolife_memory.console_sessions import load_sessions
+        try:
+            self._sessions.refresh(lambda: load_sessions(self._conn))
+        except Exception as exc:  # noqa: BLE001 - the view ages to stale; the type only
+            if not self._sessions_failing:
+                logger.warning("console sessions: refresh failed (%s)", type(exc).__name__)
+            self._sessions_failing = True
+            return
+        if self._sessions_failing:
+            logger.info("console sessions: refresh recovered")
+        self._sessions_failing = False
+
+    def flush_session_uses(self, *, now: float | None = None) -> bool:
+        """Write the Console sessions' last use, at most once a minute, on
+        the live connection only; a failed write keeps them for the next."""
+        if self._sessions is None or self._conn is None or self._conn.closed:
+            return False
+        from pseudolife_memory.console_sessions import USE_FLUSH_S, flush_uses
+        now = time.monotonic() if now is None else now
+        if now - self._uses_flushed_at < USE_FLUSH_S:
+            return False
+        uses = self._sessions.take_uses()
+        if not uses:
+            return False
+        try:
+            flush_uses(self._conn, uses)
+        except Exception as exc:  # noqa: BLE001 - kept for the next try; the type only
+            self._sessions.give_back_uses(uses)
+            logger.warning("console sessions: last-use write failed (%s)", type(exc).__name__)
+            return False
+        self._uses_flushed_at = now
         return True
 
     def _startup_warnings(self) -> None:
@@ -372,6 +424,7 @@ class PrincipalRefresher:
         while not self._stop.is_set():
             if self.refresh_once():
                 self.flush_activity()
+                self.flush_session_uses()
             self._stop.wait(self._interval)
 
     def start(self) -> threading.Thread:
@@ -492,6 +545,12 @@ def redeem(dsn: str, code_hash: str, token_hash: str, *,
                  WHERE paired_code_hash = %(code)s AND token_hash = %(token)s
                    AND revoked_at IS NULL AND paired_at > {_NOW} - %(window)s
                 """, {"token": token_hash, "code": code_hash, "window": RETRY_WINDOW_S}).fetchone()
+        if row is not None:
+            # v59: a re-pair ends the Console sessions the principal's older
+            # token issued, in this transaction (spec 2026-11-02, section 3).
+            from pseudolife_memory.console_sessions import (
+                METHOD_LINK, revoke_principal_sessions)
+            revoke_principal_sessions(conn, row[0], method=METHOD_LINK, keep_issuer=token_hash)
         # A spent code answers retries for the window only.
         conn.execute(
             f"UPDATE public.principals SET paired_code_hash = NULL "
@@ -738,4 +797,9 @@ def revoke(conn, name: str) -> bool:
              WHERE principal = %s
          RETURNING principal
             """, (name,)).fetchone()
+        if row is not None:
+            # v59: its Console sessions end with it (spec 2026-11-02,
+            # section 3), so re-inviting the name never brings them back.
+            from pseudolife_memory.console_sessions import revoke_principal_sessions
+            revoke_principal_sessions(conn, name)
     return row is not None

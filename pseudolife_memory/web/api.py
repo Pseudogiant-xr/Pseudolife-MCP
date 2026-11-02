@@ -46,6 +46,17 @@ _TEXT_BODY_LIMIT = 4 * 1024 * 1024
 _SESSION_END_BODY_LIMIT = 16 * 1024
 # A pairing body is {"code": 14 chars, "token_sha256": 64 hex}: ~100 bytes.
 _PAIR_BODY_LIMIT = 1024
+# A sign-in body is {"code", "token_sha256", "label" (64 chars)}: under
+# 300 bytes (spec 2026-11-02, section 4).
+_SIGNIN_BODY_LIMIT = 1024
+# Console sessions (schema v59) resolve on /api/* except these: the board's
+# mailbox routes (a session must never become an agent credential), the
+# sign-in link (a session cannot issue a session: it is resolved there only
+# to be refused by name) and the daemon notice
+# (spec 2026-11-02, section 3). /api/hook/* and /mcp never reach the
+# session resolver at all.
+_SESSIONLESS_API_PATHS = frozenset({"/api/console/link", "/api/daemon-notice"})
+_CONSOLE_PREFIX = "/api/console/"
 _TEXT_BODY_PATHS = {"/api/facts/set", "/api/consolidate", "/api/supersede"}
 # Routes that reconfigure the daemon or speak as it: an invited (stored)
 # principal is refused them (spec 2026-10-02, "What an invited principal
@@ -293,11 +304,12 @@ def build_console_app(
     paths; ``health_payload`` powers ``/health``; ``service`` backs ``/api``.
     ``token`` is the singular bearer (default principal); ``token_map`` maps
     per-principal tokens (spec 2026-08-10) — either alone closes the gate."""
-    from pseudolife_memory import principal_activity
+    from pseudolife_memory import console_sessions, principal_activity
     from pseudolife_memory.principal_store import FailureLimiter, RedemptionGate
     from pseudolife_memory.principals import (
-        DEFAULT_PRINCIPAL, SOURCE_STORE, PrincipalsUnavailable, bearer_presented,
-        installed_store, resolve_principal_detailed)
+        DEFAULT_PRINCIPAL, SOURCE_ENVIRONMENT, SOURCE_OPEN, SOURCE_SESSION, SOURCE_STORE,
+        PrincipalsUnavailable, bearer_presented, environment_principals, installed_store,
+        resolve_principal_detailed)
 
     token = token or None
     token_map = dict(token_map or {})
@@ -307,19 +319,53 @@ def build_console_app(
     coordination = CoordinationHub(service)
     pairing_failures = FailureLimiter()
     pairing_gate = RedemptionGate()
+    # Sign-in has its own budget and slots, so a burst of bad pairing codes
+    # cannot lock the Console's sign-in out, nor the reverse.
+    signin_failures = FailureLimiter()
+    signin_gate = RedemptionGate()
+    env_issuers = console_sessions.environment_issuers(token_map, token)
+    env_names = environment_principals(token_map, token)
 
-    def _resolve_detailed(scope) -> tuple[str | None, str | None]:
-        """``(principal, source)``: ``(None, None)`` when unauthorized;
-        raises ``PrincipalsUnavailable`` when the bearer may be a stored one
-        the daemon cannot check right now (principals.resolve_principal).
-        The transport gate's one resolution per request, so it is also
-        where the outcome is noted for ``invite --list`` (v58)."""
+    def _resolve_detailed(scope, *, sessions: bool = False
+                          ) -> tuple[str | None, str | None, str | None]:
+        """``(principal, source, issued_by)``: ``(None, None, None)`` when
+        unauthorized; raises ``PrincipalsUnavailable`` when the bearer may
+        be a stored one, or a Console session, the daemon cannot check
+        right now. ``sessions`` opts this call site into Console sessions
+        (schema v59): a hit is ``source`` ``session`` with ``issued_by`` the
+        issuing credential's source. The transport gate's one resolution per
+        request, so it is also where the outcome is noted for ``invite
+        --list`` (v58), a session's under its principal."""
         if not auth_configured:
-            return DEFAULT_PRINCIPAL, None
+            return DEFAULT_PRINCIPAL, None, None
         auth = _authorization(scope)
-        principal, source = resolve_principal_detailed(auth, token_map, token, installed_store())
-        principal_activity.note(principal_activity.installed_recorder(), auth, principal, source)
-        return principal, source
+        unavailable = False
+        try:
+            principal, source = resolve_principal_detailed(auth, token_map, token,
+                                                           installed_store())
+        except PrincipalsUnavailable:
+            principal, source, unavailable = None, None, True
+        issued_by = None
+        if principal is None and sessions:
+            hit = console_sessions.resolve(
+                auth, sessions=console_sessions.installed_sessions(), env_issuers=env_issuers,
+                env_principals=env_names, store=installed_store())
+            if hit is not None:
+                principal, source, issued_by = hit.principal, SOURCE_SESSION, hit.issued_by
+        if principal is None and unavailable:
+            raise PrincipalsUnavailable()
+        principal_activity.note(principal_activity.installed_recorder(), auth, principal,
+                                issued_by if source == SOURCE_SESSION else source)
+        return principal, source, issued_by
+
+    def _operator(source: str | None, issued_by: str | None) -> bool:
+        """The operator routes' allowlist (spec 2026-11-02, section 3): an
+        environment principal, an open daemon, or a Console session an
+        environment principal issued. A paired machine, and any session it
+        issued, is refused: a pairing code never grants operator rights."""
+        if source in (None, SOURCE_OPEN, SOURCE_ENVIRONMENT):
+            return True
+        return source == SOURCE_SESSION and issued_by == SOURCE_ENVIRONMENT
 
     def _authorization(scope) -> str | None:
         """The ``Authorization`` value the resolver judges: the last one
@@ -475,6 +521,237 @@ def build_console_app(
         store.add(paired)
         await _send_json(send, 200, {"principal": paired.principal, "tier": paired.tier,
                                      "bank": store.bank})
+
+    def _issuing_hash(scope, principal: str, source: str | None) -> str | None:
+        """The SHA-256 of the bearer that resolved to ``principal`` from
+        ``source``: a link session's issuer, which must keep naming the
+        same principal for the session to resolve."""
+        for token_hash in console_sessions.bearer_hashes(_authorization(scope)):
+            if source == SOURCE_ENVIRONMENT and env_issuers.get(token_hash) == principal:
+                return token_hash
+            if source == SOURCE_STORE:
+                store = installed_store()
+                row = store.lookup(token_hash) if store is not None else None
+                if row is not None and row.principal == principal:
+                    return token_hash
+        return None
+
+    def _issuer_still_valid(principal: str, source: str, issuer: str) -> bool:
+        """At redemption: the credential that asked for the code still
+        resolves to the same principal (a stale stored view refuses)."""
+        if source == SOURCE_ENVIRONMENT:
+            return env_issuers.get(issuer) == principal
+        if source == SOURCE_STORE:
+            store = installed_store()
+            if store is None or not store.available():
+                return False
+            row = store.lookup(issuer)
+            return row is not None and row.principal == principal
+        return False
+
+    async def _signin(scope, receive, send, method: str) -> None:
+        """``POST /api/console/session``: redeem a sign-in code for the
+        SHA-256 of a token the browser minted (spec 2026-11-02, section 4).
+        Browser-called, so the request's ``Origin`` must equal the origin
+        the code was issued for; a JSON body only (a preflight, and no CORS
+        headers are served); exactly ``{code, token_sha256, label}`` in 1
+        KiB. Every bad code is the same ``400 signin_refused`` and counts
+        against sign-in's own failure budget; nothing from the body or an
+        exception is logged or returned."""
+        if method != "POST":
+            await _send_json(send, 405, {"error": "method_not_allowed"})
+            return
+        origin = console_sessions.normalize_origin(_hdr(scope, b"origin"))
+        if origin is None:
+            await _send_json(send, 403, {"error": "forbidden_origin"})
+            return
+        ctype = (_hdr(scope, b"content-type") or "").split(";")[0].strip().lower()
+        if ctype != "application/json":
+            await _send_json(send, 415, {"error": "content_type_must_be_application_json"})
+            return
+        attempt = signin_failures.reserve()
+        if attempt is None:
+            await _send_json(send, 429, {"error": "rate_limited"})
+            return
+
+        async def refused() -> None:
+            await _send_json(send, 400, {"error": "signin_refused"})
+
+        try:
+            raw = await _read_body(receive, max_bytes=_SIGNIN_BODY_LIMIT)
+        except ValueError:
+            await _send_json(send, 413, {"error": "request_too_large"})
+            return
+        from pseudolife_memory.principals import (
+            is_sha256_hex, normalize_pairing_code, secret_sha256)
+        try:
+            body = json.loads(raw.decode("utf-8"))
+            if not (isinstance(body, dict) and set(body) == {"code", "token_sha256", "label"}):
+                raise ValueError
+            code = normalize_pairing_code(body["code"])
+            token_hash = body["token_sha256"]
+            label = console_sessions.clean_label(body["label"])
+            if code is None or not is_sha256_hex(token_hash) or label is None:
+                raise ValueError
+        except Exception:  # noqa: BLE001 - never echoed, never logged
+            await refused()
+            return
+        sessions = console_sessions.installed_sessions()
+        dsn = getattr(service, "_db_url", None)
+        if not auth_configured or sessions is None or not dsn:
+            await refused()
+            return
+        if not signin_gate.try_enter():
+            signin_failures.refund(attempt)
+            await _send_json(send, 429, {"error": "rate_limited"})
+            return
+        try:
+            row = await asyncio.get_running_loop().run_in_executor(
+                signin_gate.executor,
+                functools.partial(console_sessions.redeem_code, dsn, secret_sha256(code),
+                                  token_hash, origin=origin, label=label,
+                                  still_valid=_issuer_still_valid))
+        except Exception as exc:  # noqa: BLE001 - the outcome is unknown; the type only
+            logger.error("console sign-in failed (%s)", type(exc).__name__)
+            await _send_json(send, 503, {"error": "signin_unavailable"})
+            return
+        finally:
+            signin_gate.leave()
+        if row is None:
+            await refused()
+            return
+        signin_failures.refund(attempt)
+        sessions.add(row)
+        await _send_json(send, 200, {"principal": row.principal, "session_id": row.session_id,
+                                     "expires_at": row.expires_at})
+
+    async def _console_route(scope, send, method: str, path: str, body: dict,
+                             principal: str, source: str | None,
+                             issued_by: str | None) -> None:
+        """The bearer-gated Console sign-in routes (spec 2026-11-02):
+        ``POST /api/console/link`` asks for a sign-in code, ``GET
+        /api/console/sessions`` lists signed-in browsers and ``POST
+        /api/console/sessions/revoke`` ends one. An operator (see
+        :func:`_operator`) sees and revokes every session; anyone else only
+        their own principal's."""
+        loop = asyncio.get_running_loop()
+        dsn = getattr(service, "_db_url", None)
+        sessions = console_sessions.installed_sessions()
+        operator = _operator(source, issued_by)
+        routes_here = {"/api/console/link": "POST", "/api/console/sessions": "GET",
+                       "/api/console/sessions/revoke": "POST"}
+        if path not in routes_here:
+            await _send_json(send, 404, {"error": "not_found", "path": path})
+            return
+        if method != routes_here[path]:
+            await _send_json(send, 405, {"error": "method_not_allowed", "path": path})
+            return
+        unavailable = None
+        if not auth_configured:
+            unavailable = ("this daemon has no token configured, so the Console needs no "
+                           "sign-in: open it on this machine")
+        elif sessions is None or not dsn:
+            unavailable = "Console sign-in needs the daemon's Postgres bank"
+        if path == "/api/console/sessions":
+            if unavailable:
+                await _send_json(send, 200, {"sessions": [], "operator": operator,
+                                             "available": False})
+                return
+            current = None
+            if source == SOURCE_SESSION:
+                for token_hash in console_sessions.bearer_hashes(_authorization(scope)):
+                    hit = sessions.lookup(token_hash)
+                    if hit is not None:
+                        current = hit.session_id
+                        break
+            try:
+                rows = await loop.run_in_executor(None, functools.partial(
+                    console_sessions.list_sessions, dsn,
+                    principal=None if operator else principal))
+            except Exception as exc:  # noqa: BLE001 - the type only
+                logger.error("console sessions: list failed (%s)", type(exc).__name__)
+                await _send_json(send, 503, {"error": "signin_unavailable"})
+                return
+            rows = console_sessions.with_last_use(rows, sessions)
+            await _send_json(send, 200, {
+                "sessions": [{**r, "current": r["session_id"] == current} for r in rows],
+                "operator": operator, "available": True})
+            return
+        if unavailable:
+            await _send_json(send, 409, {"error": "signin_unavailable", "hint": unavailable})
+            return
+        if path == "/api/console/sessions/revoke":
+            session_id = body.get("session_id")
+            if set(body) != {"session_id"} or not isinstance(session_id, str) or not (
+                    0 < len(session_id) <= 64):
+                await _send_json(send, 400, {"error": "invalid_request",
+                                             "hint": "send {\"session_id\": \"<id>\"}"})
+                return
+            try:
+                revoked = await loop.run_in_executor(None, functools.partial(
+                    console_sessions.revoke_session, dsn, session_id,
+                    principal=None if operator else principal))
+            except Exception as exc:  # noqa: BLE001 - the type only
+                logger.error("console sessions: revoke failed (%s)", type(exc).__name__)
+                await _send_json(send, 503, {"error": "signin_unavailable"})
+                return
+            if revoked:
+                sessions.drop([session_id])
+            await _send_json(send, 200, {"revoked": bool(revoked)})
+            return
+        # POST /api/console/link
+        if not set(body) <= {"origin", "to"}:
+            await _send_json(send, 400, {"error": "invalid_request",
+                                         "hint": "send {\"origin\": \"<daemon origin>\"} and "
+                                                 "optionally \"to\": \"<Console page>\""})
+            return
+        origin = console_sessions.normalize_origin(body.get("origin"))
+        if origin is None:
+            await _send_json(send, 400, {
+                "error": "invalid_origin",
+                "hint": "origin is the daemon address the client reached: "
+                        "http(s)://host[:port], with no path"})
+            return
+        to = body.get("to")
+        if to is not None and not console_sessions.valid_route_id(to):
+            await _send_json(send, 400, {"error": "invalid_route",
+                                         "hint": "to is a Console page id, such as board"})
+            return
+        maintainer = service.config.coordination.maintainer
+        if maintainer.configured:
+            # Passkeys set up: the Console's one HTTPS address, wherever the
+            # client reached the daemon.
+            stored = console_sessions.normalize_origin(maintainer.origin)
+        elif console_sessions.is_loopback_origin(origin):
+            stored = origin
+        else:
+            await _send_json(send, 409, {
+                "error": "signin_origin_unsupported",
+                "hint": "a sign-in link opens the Console on the daemon's own machine "
+                        "(localhost) or at its HTTPS address: run `pseudolife-mcp console` "
+                        "on the daemon's host, or give the Console an HTTPS address with "
+                        "`pseudolife-mcp maintainer setup` there"})
+            return
+        issuer = _issuing_hash(scope, principal, source)
+        if issuer is None:
+            await _send_json(send, 403, {"error": "session_cannot_issue",
+                                         "hint": "a sign-in link needs a client's own token"})
+            return
+        try:
+            issued = await loop.run_in_executor(None, functools.partial(
+                console_sessions.issue_code, dsn, principal=principal, source=source,
+                issuer=issuer, origin=stored))
+        except Exception as exc:  # noqa: BLE001 - the type only
+            logger.error("console sign-in link failed (%s)", type(exc).__name__)
+            await _send_json(send, 503, {"error": "signin_unavailable"})
+            return
+        from pseudolife_memory.principals import format_pairing_code
+        shown = format_pairing_code(issued["code"])
+        url = f"{stored}/ui/#/signin?code={shown}" + (f"&to={to}" if to else "")
+        await _send_json(send, 200, {"code": shown, "url": url, "origin": stored,
+                                     "principal": principal,
+                                     "expires_at": issued["expires_at"],
+                                     "expires_in": console_sessions.CODE_TTL_S})
 
     async def app(scope, receive, send):
         if scope["type"] != "http":
@@ -804,6 +1081,13 @@ def build_console_app(
             await _pair(scope, receive, send, method)
             return
 
+        # 4h) Console sign-in-code redemption (spec 2026-11-02, section 4):
+        # the second unauthenticated route, browser-called, so it is routed
+        # before the bearer gate and checks the Origin against the code's.
+        if path == "/api/console/session":
+            await _signin(scope, receive, send, method)
+            return
+
         # 5) console REST API (token-gated like /mcp)
         if path.startswith("/api/") or path == "/api":
             denied = _browser_gate(scope)
@@ -813,8 +1097,18 @@ def build_console_app(
                     "hint": "tokenless /api serves loopback browsers only; "
                             "set PSEUDOLIFE_MCP_TOKEN for remote access"})
                 return
+            # /api/console/link resolves a session only to refuse it by name
+            # (a session cannot issue a session), rather than a bare 401.
+            session_site = path == "/api/console/link" or not (
+                path.startswith("/api/coordination/") or path in _SESSIONLESS_API_PATHS)
             try:
-                principal, source = _resolve_detailed(scope)
+                principal, source, issued_by = _resolve_detailed(scope, sessions=session_site)
+                if path == "/api/console/link" and source == SOURCE_SESSION:
+                    await _send_json(send, 403, {
+                        "error": "session_cannot_issue",
+                        "hint": "a sign-in link needs a client's own token: run "
+                                "`pseudolife-mcp console` on a machine that uses Pseudolife"})
+                    return
             except PrincipalsUnavailable:
                 await _principals_unavailable(send)
                 return
@@ -827,9 +1121,12 @@ def build_console_app(
                 await _send_json(send, 405, {"error": "method_not_allowed"})
                 return
             # An invited machine reads and writes the bank and the board, but
-            # does not reconfigure the daemon or speak as it.
+            # does not reconfigure the daemon or speak as it; nor does a
+            # Console session it signed in (an allowlist, spec 2026-11-02).
             if (method == "POST" and path in _OPERATOR_POST_PATHS
-                    and source == SOURCE_STORE):
+                    and not _operator(source, issued_by)):
+                # The body stays the bare code: the Rust daemon's goldens pin
+                # it, and the Console's Settings view explains it.
                 await _send_json(send, 403, {"error": "operator_principal_required"})
                 return
             params = _parse_query(scope)
@@ -871,6 +1168,10 @@ def build_console_app(
                     if not isinstance(body, dict):
                         await _send_json(send, 400, {"error": "body_must_be_object"})
                         return
+            if path.startswith(_CONSOLE_PREFIX):
+                await _console_route(scope, send, method, path, body, principal, source,
+                                     issued_by)
+                return
             try:
                 if coordination_path:
                     from pseudolife_memory.coordination import authenticated_principal
@@ -895,11 +1196,13 @@ def build_console_app(
                         bind_request_headers, unbind_request_headers)
                     headers = {k.decode().lower(): v.decode("latin-1")
                                for k, v in scope.get("headers", [])}
-                    if coordination_errors or maintainer_path:
+                    if (coordination_errors or maintainer_path) and source != SOURCE_SESSION:
                         # The board requires a configured bearer even on an
                         # otherwise open loopback Console installation, and
                         # so do the maintainer routes (v54): a tokenless
-                        # daemon refuses them outright.
+                        # daemon refuses them outright. A Console session
+                        # exists only where a token is configured, and the
+                        # gate above already resolved it.
                         from pseudolife_memory.coordination import authenticated_principal
                         authenticated_principal(headers, token_map=token_map, token=token)
                     # Bind the transport-validated principal, restoring the

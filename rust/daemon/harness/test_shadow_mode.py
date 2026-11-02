@@ -288,7 +288,9 @@ coordination:
             _, envelope = rust.rpc("tools/call", {"name": tool, "arguments": args})
             assert "read_only_shadow" in json.dumps(envelope), tool
         routes = json.loads((HERE / "goldens/routes.json").read_text())["POST"]
-        for path in routes + ["/api/pair", "/api/hook/session-start", "/api/hook/session-end"]:
+        for path in routes + ["/api/pair", "/api/hook/session-start", "/api/hook/session-end",
+                             "/api/console/link", "/api/console/session",
+                             "/api/console/sessions/revoke"]:
             status, body = rust.request("POST" if path != "/api/hook/session-start" else "GET", path, {})
             assert status == 403 and body["error"] == "read_only_shadow", path
         assert lease_holders(dsn) == held, "shadow acquired a lease"
