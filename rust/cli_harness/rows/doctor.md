@@ -16,11 +16,66 @@ starting with `-`), each at most once, any order (:548-554).
 `--disposable-proof` without a nonempty `PSEUDOLIFE_TEST_DATABASE_URL`
 keeps the existing refusal (:562-566, exit 2).
 
-Deferred before any effect: `--disposable-proof` with a nonempty DSN (it
-creates a fixture bank and drives the Python daemon's ASGI app and adapters
-in process, coordination_proof.py: there is no native daemon to drive);
-`--disposable-proof` with `--agent-state` (an argparse error); every other
-argv shape (abbreviations, `=` forms, repeats, help, bad values).
+`--disposable-proof` with a nonempty explicit fixture DSN creates a new bank,
+starts the native daemon on loopback, and drives the actual native adapter.
+It requires a sibling or PATH-resolved `pseudolife-daemon` and the host's
+provisioned default models. Missing prerequisites produce a repair instruction
+before any database connection. It carries the resolved model directory and
+`ORT_DYLIB_PATH` into an otherwise isolated child environment; it never
+provisions models or reads saved client registrations. The daemon verifies
+the model checksums before loading them.
+
+The fixture DSN's resolved user and password are bound before changing its
+database name or the child environment. URI query escaping is preserved.
+CREATE and DROP have client deadlines as well as server statement limits,
+so a lost reply reaches owned-bank cleanup or an explicit recovery report.
+DROP retains Python's 300-second checkpoint allowance, with a 315-second
+client deadline and a second connection attempt. `connect_timeout` and
+`application_name` are preserved. TLS modes requiring encryption and explicit
+certificate options are refused before CREATE because the sibling daemon's
+database transport cannot honor them end to end.
+Queued adapter file writes are drained before removing the fixture directory;
+if both bank and directory cleanup fail, the report names both resources.
+Signal receivers remain installed through cleanup. A Windows job owns the
+daemon tree; POSIX cleanup kills its process group before releasing the
+leader's PID. Linux parent-death signaling also kills the direct daemon if
+the CLI is forcibly terminated. Raw child diagnostics remain private: only
+bounded classification into model, runtime or listener repair messages is
+returned.
+
+The proof checks enqueue, hint and ring signal, receive, explicit ack and an
+empty mailbox after ack. It stops its owned child and removes its fixture
+directory and database on success, failure, timeout or handled interruption.
+The selected DSN supplies only the fixture server; its database is never reset.
+The new database name derives from that database's namespace plus a UUID.
+Host delivery and model acknowledgement stay explicitly unverified.
+
+`test_doctor_proof.py` contains prerequisite checks and an opt-in live parity
+cell (`PSEUDOLIFE_DOCTOR_LIVE_PROOF=1`, `PSEUDOLIFE_PROOF_CANDIDATE`, explicit
+`PSEUDOLIFE_TEST_DATABASE_URL` with an `r2_` database name, and the native model
+and ONNX Runtime environment). It invokes the Python doctor entry point and
+native CLI, validates both proofs, and compares their complete reports after
+checking and substituting UUIDs and the instrument name. The Python oracle's
+bank context uses the test host's `r2_` namespace; its schema, API, adapter and
+proof stay unchanged. The transport substitution is
+`disposable_asgi_actual_adapter` versus `disposable_http_actual_adapter`.
+Neither arm claims real host or model delivery. This cell is live acceptance,
+not a replayable golden; ordinary refusal cells remain in the doctor row.
+The POSIX interruption cell starts a sleeping fixture executable after bank
+creation, sends SIGTERM to the owned CLI, and checks its child, files and bank
+are gone. Database-admission cases also compare the oracle's error bytes.
+Loopback PostgreSQL wire cases lose CREATE/DROP replies and check bounded
+exit and recovery; the live proof also covers environment and password-file
+authentication (password-file isolation is POSIX-only). At `9a2a2ee2`, the
+production code passed 14 Linux proof cases and nine Windows admission/wire
+cases, with zero owned banks left on Linux. The seven private cleanup and
+authentication tests also compile into `cli_doctor_proof_contract` for hosted
+stress. The test helper accepts `PSEUDOLIFE_RUST_BINARY`, as supplied by the
+stress runner. Hosted stress remains pending.
+
+Deferred before any effect: other argv shapes (abbreviations, `=` forms,
+repeats, help, bad values). A saved `--agent-state` with the proof is a usage
+error and does not read that file.
 
 ## Exact contract items
 
@@ -45,7 +100,7 @@ argv shape (abbreviations, `=` forms, repeats, help, bad values).
 | The context POST's answer is decoded as httpx decodes it: `Content-Encoding` codings split on commas, `gzip` and `deflate` (zlib, else raw deflate) applied in reverse, `identity` and unknown codings left alone, a truncated stream yielding what decoded, a corrupt one `unavailable` (DecodingError) | httpx `_decoders.py` |
 | The bearer is snapshotted afresh for the maintainer probe and the `--agent-state` check, as each builds a new provider; a failed re-read is `not checked - no usable credential or URL` / `unavailable` | :432-443, :648-653 |
 | `json.loads` refusals Python makes and serde would not: integer literals over 4300 digits (CPython 3.11 `int_max_str_digits`), a leading U+FEFF; the context answer's RecursionError past nesting depth 978 (measured on CPython 3.11.9 against the oracle doctor) is `unavailable` | :476-503 |
-| No incidental mutation: doctor writes nothing; the only file a run leaves is the handshake shim's own `~/.pseudolife-mcp/handshake-cache/<sha256(url)[:16]>.json` (CLI-SHIM's file, written by the Python shim too) | shim.py:708-725 |
+| No incidental mutation in read-only diagnostics: the only file a run leaves is the handshake shim's own `~/.pseudolife-mcp/handshake-cache/<sha256(url)[:16]>.json` (CLI-SHIM's file, written by the Python shim too). Explicit disposable proof owns and removes a separate fixture bank and directory. | shim.py:708-725, coordination_proof.py |
 
 ## Free items
 
@@ -161,7 +216,7 @@ argv shape (abbreviations, `=` forms, repeats, help, bad values).
 
 ## Deferral domain (before the first request unless noted)
 
-nonempty-DSN `--disposable-proof`; noncanonical argv; `--timeout` past
+noncanonical argv; `--timeout` past
 1,000,000 seconds; an `--agent-state` path with a `..` component, a
 symlinked or junction ancestor of an existing file, or a stat error pathlib
 would raise (a missing file is `missing_registration` whatever its ancestors:
