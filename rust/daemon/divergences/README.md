@@ -25,13 +25,16 @@ unique bugs or implementation batches.
 Python remains the documented default until G2. This index changes no
 runtime default and does not close B12, G1 or G2.
 
+PR #1133 adds the native Codex bootstrap authority boundary and records the
+closed no-spawn planning difference; the counts below include these two rows.
+
 | D7 bucket | Entries |
 |---|---:|
 | presentation | 17 |
 | behaviour with no caller | 69 |
-| behaviour with a caller | 127 |
-| closed | 47 |
-| **Total** | **260** |
+| behaviour with a caller | 128 |
+| closed | 48 |
+| **Total** | **262** |
 
 ## Behaviour with a caller: B14b routing
 
@@ -75,6 +78,7 @@ whose remaining item is a proof keeps that boundary visible in its entry.
 | [CPU precision](startup-and-configuration/cpu-precision.md) | default `embedding.cpu_dtype: auto` in `pseudolife_memory/utils/config.py::EmbeddingConfig`, used by daemon search/store | B8 models/image via R3 |
 | [Embedding model](startup-and-configuration/embedding-model.md) | daemon `Service::init` and model configuration through `pseudolife_memory/utils/config.py::EmbeddingConfig` | B8 models/image via R3; B11 provisioning via R4/R5 |
 | [Plugin dir for `hooks_digest`](startup-and-configuration/plugin-dir-for-hooks-digest.md) | `pseudolife_memory/doctor_cli.py::_codex_hooks_line` and `rust/shim/src/cli/doctor/mod.rs` health digest checks on a native launch | B11 runtime/install layout via R4/R5 |
+| [R5-CODEX-BOOTSTRAP-AUTHORITY](startup-and-configuration/r5-codex-bootstrap-authority.md) | Native Codex credential bootstrap through `setup::codex::configure_credential_file` | R5 / B11 installers and client registration |
 | [Storage modes](startup-and-configuration/storage-modes.md) | installed no-DSN startup through Python `pseudolife_memory/service.py::MemoryService` and the lite installer path | B9 embedded Postgres (outside current R1-R7 scope); B11 migration via R4/R5 |
 | [TLS and libpq conventions](startup-and-configuration/tls-and-libpq-conventions.md) | configured external Postgres startup through `pseudolife_memory/service.py::MemoryService._ensure_postgres_storage`, including TLS-required servers | B4 lifecycle/storage; B11 connection setup via R1/R5 |
 | [YAML dialect](startup-and-configuration/yaml-dialect.md) | existing Python config.yaml files read by `rust/daemon/src/config.rs::load` on engine cutover | B15 configuration/environment; B11 existing-config cutover via R4/R5 |
