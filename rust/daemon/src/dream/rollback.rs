@@ -791,6 +791,9 @@ pub(crate) async fn rollback(
     {
         let _ws = ready.write.lock().await;
         save_cortex(svc, ready).await?;
+        if crate::mutants::active("mcp-dream-rollback-audit-kept") {
+            return Ok(json!({"run_id": target.id}));
+        }
         let (id, at) = (target.id, episodes::now());
         in_txn(client, |c| async move {
             c.execute(
