@@ -23,7 +23,8 @@ a mistaken ``--someone-else``.
 Where it runs: with ``PSEUDOLIFE_MCP_DATABASE_URL`` set, or the lite
 tier's embedded Postgres found (as ``export`` finds it), here. Otherwise, on
 a Docker install, inside the daemon container (``docker exec -i
-pseudolife-mcp-daemon python -m pseudolife_memory.cli invite ...``), after
+pseudolife-mcp-daemon pseudolife-mcp invite ...`` for a Rust-labelled image,
+with the Python module retained for other images), after
 checking the image has this command, so the host never handles the
 database password and the name checks see the daemon's real environment.
 
@@ -148,7 +149,7 @@ def run(cmd: list[str], input: str | None = None) -> subprocess.CompletedProcess
 
 
 def docker_available() -> bool:
-    return shutil.which("docker") is not None
+    return bool(os.environ.get("PSEUDOLIFE_DOCKER")) or shutil.which("docker") is not None
 
 
 def interactive() -> bool:
@@ -511,12 +512,12 @@ def _forward(args) -> list[str]:
 
 
 def _daemon_running() -> bool:
-    proc = run(["docker", "inspect", "-f", "{{.State.Running}}", CONTAINER])
+    proc = run([daemon_exec.docker_cmd(), "inspect", "-f", "{{.State.Running}}", CONTAINER])
     return proc.returncode == 0 and (proc.stdout or "").strip() == "true"
 
 
 def _psql(sql: str) -> subprocess.CompletedProcess:
-    return run(_PSQL, input=sql + "\n")
+    return run([daemon_exec.docker_cmd(), *_PSQL[1:]], input=sql + "\n")
 
 
 def _through_postgres(args, report: _Report) -> int:
@@ -567,16 +568,17 @@ def _through_postgres(args, report: _Report) -> int:
 
 
 def _in_container(args, report: _Report) -> int:
+    if os.environ.get(daemon_exec.NESTED_ENV):
+        return report.fail(EXIT_REFUSED, "no database found inside the daemon container: set PSEUDOLIFE_MCP_DATABASE_URL")
     if not _daemon_running():
         if args.list or args.revoke:
             return _through_postgres(args, report)
         return report.fail(EXIT_REFUSED, (
             f"the {CONTAINER} container is not running: start the daemon (an invite needs it to "
             "report its bank), then re-run"))
-    refusal = daemon_exec.rust_operator_refusal("docker", runner=run)
-    if refusal:
-        return report.fail(EXIT_REFUSED, refusal)
-    base = ["docker", "exec", CONTAINER, "python", "-m", "pseudolife_memory.cli", "invite"]
+    docker = daemon_exec.docker_cmd()
+    executable = daemon_exec.operator_cli(docker, runner=run)
+    base = [docker, "exec", "-e", f"{daemon_exec.NESTED_ENV}=1", CONTAINER, *executable, "invite"]
     check = run([*base, "--version-check"])
     version = _VERSION.match(check.stdout or "") if check.returncode == 0 else None
     if version is None:
@@ -588,7 +590,7 @@ def _in_container(args, report: _Report) -> int:
                                           "first (pseudolife-mcp update), then re-run"))
     if args.owned is not None and int(version.group(1)) < 2:
         return report.fail(EXIT_REFUSED, OWNERSHIP_NEEDS_NEWER_IMAGE)
-    proc = run(["docker", "exec", "-i", CONTAINER, "python", "-m", "pseudolife_memory.cli", "invite",
+    proc = run([docker, "exec", "-i", "-e", f"{daemon_exec.NESTED_ENV}=1", CONTAINER, *executable, "invite",
                 *_forward(args)])
     # The container's own report: relayed as it is (it carries the code).
     sys.stdout.write(proc.stdout or "")

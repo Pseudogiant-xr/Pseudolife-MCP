@@ -1,12 +1,8 @@
-//! `pseudolife-mcp maintainer` (maintainer_cli.py) for its canonical argv:
-//! `enrol-code [--no-wait]`, `confirm <prefix>`, `revoke <prefix>`,
-//! `reset [--yes]` and `list`, against the bank named by an explicit
-//! `PSEUDOLIFE_MCP_DATABASE_URL`. `setup`, help, every other argv shape, the
-//! lite tier's embedded instance and the daemon-container re-run defer
-//! before any effect: `run` answers `None` and the dispatcher prints the
-//! mode's deferral line.
+//! Native host passkey administration, help and polling, over PostgreSQL or
+//! the selected daemon container. Guided setup is integrated separately.
 mod bank;
 mod display;
+pub mod setup;
 mod sqlstate;
 use std::{
     ffi::OsString,
@@ -14,9 +10,9 @@ use std::{
 };
 
 /// One canonical action, as `maintainer_cli.main` parses it.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq)]
 enum Action {
-    EnrolCode { wait: bool },
+    EnrolCode { wait: bool, poll: f64 },
     Confirm(String),
     Revoke(String),
     Reset { yes: bool },
@@ -24,21 +20,37 @@ enum Action {
 }
 
 /// The argv shapes real producers use (the docs, `maintainer setup`, the
-/// guide). Anything else, including help, `setup`, `--poll`, repeated or
-/// reordered options and abbreviations, is `None`.
+/// guide), including explicit polling and the prefix delimiter. Help is
+/// handled before parsing; guided setup is integrated separately.
 fn parse(arguments: &[OsString]) -> Option<Action> {
     let arguments: Vec<&str> = arguments
         .iter()
         .map(|argument| argument.to_str())
         .collect::<Option<_>>()?;
+    if arguments.first() == Some(&"enrol-code") {
+        let mut wait = true;
+        let mut poll = 2.0;
+        let mut items = arguments[1..].iter();
+        while let Some(item) = items.next() {
+            match *item {
+                "--no-wait" => wait = false,
+                "--poll" => poll = items.next()?.parse().ok()?,
+                item if item.starts_with("--poll=") => poll = item[7..].parse().ok()?,
+                _ => return None,
+            }
+        }
+        return Some(Action::EnrolCode { wait, poll });
+    }
     Some(match arguments.as_slice() {
-        ["enrol-code"] => Action::EnrolCode { wait: true },
-        ["enrol-code", "--no-wait"] => Action::EnrolCode { wait: false },
         // `main` inserts `--` before a lone prefix that starts with `-`
         // (a base64url id does one time in 64), so every value but these
         // three is the prefix.
-        ["confirm", prefix] if prefix_argument(prefix) => Action::Confirm((*prefix).to_owned()),
-        ["revoke", prefix] if prefix_argument(prefix) => Action::Revoke((*prefix).to_owned()),
+        ["confirm", prefix] | ["confirm", "--", prefix] if prefix_argument(prefix) => {
+            Action::Confirm((*prefix).to_owned())
+        }
+        ["revoke", prefix] | ["revoke", "--", prefix] if prefix_argument(prefix) => {
+            Action::Revoke((*prefix).to_owned())
+        }
         ["reset"] => Action::Reset { yes: false },
         ["reset", "--yes"] => Action::Reset { yes: true },
         ["list"] => Action::List,
@@ -50,15 +62,54 @@ fn prefix_argument(value: &str) -> bool {
     !matches!(value, "-h" | "--help" | "--")
 }
 
+fn help(arguments: &[OsString]) -> Option<&'static str> {
+    if !arguments
+        .iter()
+        .take_while(|arg| *arg != "--")
+        .any(|arg| arg == "--help" || arg == "-h")
+    {
+        return None;
+    }
+    Some(match arguments.first().and_then(|arg| arg.to_str()) {
+        Some("enrol-code") => include_str!("enrol-code_help.txt"),
+        Some("confirm") => include_str!("confirm_help.txt"),
+        Some("revoke") => include_str!("revoke_help.txt"),
+        Some("reset") => include_str!("reset_help.txt"),
+        Some("list") => include_str!("list_help.txt"),
+        _ => include_str!("top_help.txt"),
+    })
+}
+
 /// Run the action after `maintainer`; `None` defers before any effect.
-pub fn run(arguments: Vec<OsString>) -> Option<u8> {
+pub fn run(arguments: Vec<OsString>) -> Option<i32> {
+    if arguments.first().is_some_and(|value| value == "setup") {
+        return Some(i32::from(setup::run(
+            arguments.into_iter().skip(1).collect(),
+        )));
+    }
+    if let Some(help) = help(&arguments) {
+        let _ = print(&help.replace("\r\n", "\n"));
+        return Some(0);
+    }
     let action = parse(&arguments)?;
-    let dsn = dsn()?;
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .ok()?;
-    runtime.block_on(bank::run(&dsn, action))
+    runtime.block_on(async {
+        if let Some(dsn) = dsn() {
+            return bank::run(&dsn, action).await.map(i32::from);
+        }
+        if std::env::var_os("PSEUDOLIFE_MCP_DATABASE_URL").is_some_and(|v| !v.is_empty()) {
+            // Preserve the shared client's explicit DSN-domain boundary.
+            return None;
+        }
+        if let Some(code) = crate::pg::resolution::run_in_daemon("maintainer", &arguments, None, None).await {
+            return Some(code);
+        }
+        crate::stderrln!("error: no bank found: set PSEUDOLIFE_MCP_DATABASE_URL to the bank's database URL, or run where the lite tier's data dir holds one (Docker tier: start the daemon, or run `docker exec -it pseudolife-mcp-daemon pseudolife-mcp maintainer ...` on its host)");
+        Some(2)
+    })
 }
 
 /// The configured DSN, or `None` (no or empty variable, a value that is not
@@ -200,11 +251,17 @@ mod tests {
     fn canonical_shapes_parse_and_every_other_shape_defers() {
         assert_eq!(
             parse(&argv(&["enrol-code"])),
-            Some(Action::EnrolCode { wait: true })
+            Some(Action::EnrolCode {
+                wait: true,
+                poll: 2.0
+            })
         );
         assert_eq!(
             parse(&argv(&["enrol-code", "--no-wait"])),
-            Some(Action::EnrolCode { wait: false })
+            Some(Action::EnrolCode {
+                wait: false,
+                poll: 2.0
+            })
         );
         assert_eq!(
             parse(&argv(&["confirm", "-abcdef"])),
@@ -226,15 +283,11 @@ mod tests {
             &["setup", "--check"],
             &["--help"],
             &["list", "--help"],
-            &["enrol-code", "--no-wait", "--no-wait"],
             &["enrol-code", "--no-w"],
-            &["enrol-code", "--poll", "0.1"],
-            &["enrol-code", "--poll=0.1", "--no-wait"],
             &["confirm"],
             &["confirm", "-h"],
             &["confirm", "--help"],
             &["confirm", "--"],
-            &["confirm", "--", "-abcdef"],
             &["confirm", "abcdef", "abcdef"],
             &["revoke", "--"],
             &["reset", "--yes", "--yes"],

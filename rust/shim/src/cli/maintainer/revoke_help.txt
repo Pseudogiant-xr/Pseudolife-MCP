@@ -1,0 +1,7 @@
+usage: pseudolife-mcp maintainer revoke [-h] prefix
+
+positional arguments:
+  prefix
+
+options:
+  -h, --help  show this help message and exit

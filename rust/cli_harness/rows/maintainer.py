@@ -690,12 +690,24 @@ CLOSED = WRITES + ("maintainer-stdout-closed-trailer",)
 
 
 def defer(case_id, kind, argv, **kwargs):
+    if case_id in {"defer-help", "defer-list-help", "defer-enrol-poll", "defer-confirm-double-dash", "defer-no-dsn"}:
+        return case(case_id, kind, argv, **kwargs)
     return case(case_id, kind, argv, rules=("maintainer-deferral",), **kwargs)
 
 
 def cases() -> list[core.Case]:
     pending, laptop = IDS["pending"], IDS["laptop"]
-    return [
+    from . import lease_transport
+    transport = []
+    for engine in ('rust', 'python', '<no value>'):
+        env = {'PSEUDOLIFE_DOCKER': '{HOME}/fake_docker.' + ('cmd' if core.WINDOWS else 'sh'),
+               'PSEUDOLIFE_MCP_DATABASE_URL': None, 'PSEUDOLIFE_DAEMON_EXEC': None,
+               'FIXTURE_DOCKER_ENGINE': engine}
+        transport.append(core.Case('container-' + engine, ['maintainer', 'list'], env=env,
+                                   stdin=b'container-input\x00\xff\n',
+                                   setup=lease_transport._docker_setup,
+                                   after=lease_transport._docker_after('list', [], engine, 'maintainer')))
+    return transport + [
         # list
         case("list-empty", "empty", ["list"]),
         case("list-pending", "pending", ["list"], rules=LISTING),

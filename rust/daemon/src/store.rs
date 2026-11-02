@@ -572,12 +572,17 @@ fn mcp_memory_store<'a>(
                 .filter(|_| !crate::mutants::active("mcp-store-no-session")),
             transport_session: call.ident.transport_session.clone(),
         };
-        memory_store(&ready, &app.service.config.memory, &caller, call.args)
-            .await
-            .map_err(|e| match e {
-                ToolError::Invalid(text) => McpError::Invalid(text),
-                ToolError::Internal(text) => McpError::Internal(anyhow::anyhow!(text)),
-            })
+        memory_store(
+            &ready,
+            &app.service.runtime_config().memory,
+            &caller,
+            call.args,
+        )
+        .await
+        .map_err(|e| match e {
+            ToolError::Invalid(text) => McpError::Invalid(text),
+            ToolError::Internal(text) => McpError::Internal(anyhow::anyhow!(text)),
+        })
     })
 }
 
