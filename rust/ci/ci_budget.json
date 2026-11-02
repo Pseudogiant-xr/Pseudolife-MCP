@@ -287,7 +287,7 @@
       "lock-resolve": "83bcc6b654896c6d",
       "test": "ac414107d3d9c71d",
       "test-lite-linux": "44e2a8f2c01baeab",
-      "test-lite-windows": "bcfe230f76563a56",
+      "test-lite-windows": "3bb6d833f0724f2e",
       "test-lite-macos": "d096d17d3377ee89",
       "frontend": "b1b6a1a1278f2e60"
     },
@@ -361,6 +361,11 @@
         "job": "test-lite-windows",
         "fingerprint": "bcfe230f76563a56",
         "reason": "Adds tests/test_update_engine.py (86 tests) to the existing pytest step: the 20 successful windows-latest runs in 41337404983 at c6078ec2 measured 10.235s median (6.41-16.05s), an estimated +0.17 runner-minutes. No new job, shard or setup step; accept this bounded addition within the unchanged budget limits. The recorded full-lane baseline is retained pending full-job remeasurement from the next batch run."
+      },
+      {
+        "job": "test-lite-windows",
+        "fingerprint": "3bb6d833f0724f2e",
+        "reason": "Add four stub-only Claude batch prompt regressions; the native Windows targeted run took 0.12 seconds, with no dependencies, jobs or shards added."
       }
     ]
   }
