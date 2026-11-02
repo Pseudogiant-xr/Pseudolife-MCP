@@ -302,7 +302,7 @@
       "lock-resolve": "83bcc6b654896c6d",
       "test": "ac414107d3d9c71d",
       "test-lite-linux": "44e2a8f2c01baeab",
-      "test-lite-windows": "3bb6d833f0724f2e",
+      "test-lite-windows": "c066a6c51580b631",
       "test-lite-macos": "d096d17d3377ee89",
       "frontend": "b1b6a1a1278f2e60"
     },
@@ -381,6 +381,11 @@
         "job": "test-lite-windows",
         "fingerprint": "3bb6d833f0724f2e",
         "reason": "Add four stub-only Claude batch prompt regressions; the native Windows targeted run took 0.12 seconds, with no dependencies, jobs or shards added."
+      },
+      {
+        "job": "test-lite-windows",
+        "fingerprint": "c066a6c51580b631",
+        "reason": "adds one test_suite_lock node (the ops/wsl-suite.ps1 marker-forwarding check, one short pwsh spawn), seconds against the lane's measured minutes"
       }
     ]
   }
