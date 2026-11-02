@@ -229,7 +229,7 @@
     "ops/dedup_cortex.py": "483aa26a4edaa5e75dc41b6133f7e663e0d826dbf61ebd83a20a9b3b29ac2727",
     "ops/docker-compose.ghcr.yml": "a64059a8d81e18ccb441bedd3510c366e90172e3d70681ce7a91e8aa58d174de",
     "ops/docker-compose.rust-daemon.yml": "035e8a3b34d6738fb16d1770719419e98d11940629a01895b57b49ffadf1647b",
-    "ops/docker-compose.rust-shadow.yml": "6e542f24e52cd05f03fbc0147091bfc6bb7e28f567c470edbe1f72818d609eed",
+    "ops/docker-compose.rust-shadow.yml": "0863cfdbfd60102526aa910d0db89d03ea82e97b3991ca7055211f575ad78030",
     "ops/docker-compose.rust.yml": "29b3590c58a8cd7a13a581d0e0488e48b2f934ad10844b4bf7b0b2eed4670ce0",
     "ops/docker-compose.yml": "dc564d1296a8179eb14c5c552334c827d5c3fa673539dd409a5ae0cf31bc7d5d",
     "ops/gen_llms_txt.py": "de91c3fc65ea1960cb1dd25c913cf8bf7dfef6302454468fcd03e42a9bbb2803",
@@ -25093,7 +25093,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/docker-compose.rust-shadow.yml:16",
+          "location": "ops/docker-compose.rust-shadow.yml:18",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -25106,7 +25106,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/docker-compose.rust-shadow.yml:17",
+          "location": "ops/docker-compose.rust-shadow.yml:19",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -30714,11 +30714,11 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/docker-compose.rust-shadow.yml:23",
+          "location": "ops/docker-compose.rust-shadow.yml:25",
           "shape": {
             "channel": "environment",
             "complete": false,
-            "expression": "postgresql://pseudolife_shadow:${PSEUDOLIFE_SHADOW_DB_PASSWORD:?Run update --engine rust --shadow}@pseudolife-pg:5432/pseudolife_memory",
+            "expression": "postgresql://pseudolife_shadow:${PSEUDOLIFE_SHADOW_DB_PASSWORD:?Run update --engine rust --shadow}@pseudolife-pg:5432/${PSEUDOLIFE_SHADOW_DB_NAME:-pseudolife_memory}",
             "omitted_optional": null,
             "parameters": {}
           },
@@ -31469,7 +31469,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/docker-compose.rust-shadow.yml:26",
+          "location": "ops/docker-compose.rust-shadow.yml:28",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -31788,7 +31788,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/docker-compose.rust-shadow.yml:24",
+          "location": "ops/docker-compose.rust-shadow.yml:26",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -32909,7 +32909,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/docker-compose.rust-shadow.yml:25",
+          "location": "ops/docker-compose.rust-shadow.yml:27",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -34317,7 +34317,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/docker-compose.rust-shadow.yml:29",
+          "location": "ops/docker-compose.rust-shadow.yml:31",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -35790,7 +35790,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/docker-compose.rust-shadow.yml:30",
+          "location": "ops/docker-compose.rust-shadow.yml:32",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -38823,7 +38823,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/docker-compose.rust-shadow.yml:28",
+          "location": "ops/docker-compose.rust-shadow.yml:30",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -60353,7 +60353,21 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "ops/docker-compose.rust-shadow.yml:22",
+      "location": "ops/docker-compose.rust-shadow.yml:15",
+      "name": "PSEUDOLIFE_SHADOW_CONFIGURATION",
+      "shape": {
+        "channel": "environment",
+        "complete": false,
+        "expression": "-}",
+        "parameters": {}
+      },
+      "usage": "assignment-candidate"
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "static",
+      "kind": "environment",
+      "location": "ops/docker-compose.rust-shadow.yml:24",
       "name": "PSEUDOLIFE_READ_ONLY",
       "shape": {
         "channel": "environment",
@@ -60367,12 +60381,12 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "ops/docker-compose.rust-shadow.yml:23",
-      "name": "PSEUDOLIFE_SHADOW_DB_PASSWORD",
+      "location": "ops/docker-compose.rust-shadow.yml:25",
+      "name": "PSEUDOLIFE_SHADOW_DB_NAME",
       "shape": {
         "channel": "environment",
         "complete": false,
-        "expression": "?Run update --engine rust --shadow}@pseudolife-pg:5432/pseudolife_memory",
+        "expression": "-pseudolife_memory}",
         "parameters": {}
       },
       "usage": "assignment-candidate"
@@ -60381,7 +60395,21 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "ops/docker-compose.rust-shadow.yml:27",
+      "location": "ops/docker-compose.rust-shadow.yml:25",
+      "name": "PSEUDOLIFE_SHADOW_DB_PASSWORD",
+      "shape": {
+        "channel": "environment",
+        "complete": false,
+        "expression": "?Run update --engine rust --shadow}@pseudolife-pg:5432/${PSEUDOLIFE_SHADOW_DB_NAME:-pseudolife_memory}",
+        "parameters": {}
+      },
+      "usage": "assignment-candidate"
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "static",
+      "kind": "environment",
+      "location": "ops/docker-compose.rust-shadow.yml:29",
       "name": "PSEUDOLIFE_DAEMON_MODELS_DIR",
       "shape": {
         "channel": "environment",
@@ -60395,7 +60423,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "ops/docker-compose.rust-shadow.yml:33",
+      "location": "ops/docker-compose.rust-shadow.yml:35",
       "name": "PSEUDOLIFE_SHADOW_PORT",
       "shape": {
         "channel": "environment",
@@ -80812,79 +80840,91 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/docker-compose.rust-shadow.yml:16",
+      "location": "ops/docker-compose.rust-shadow.yml:15",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:environment:PSEUDOLIFE_SHADOW_CONFIGURATION"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/docker-compose.rust-shadow.yml:18",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_DAEMON_MEM_LIMIT"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/docker-compose.rust-shadow.yml:17",
+      "location": "ops/docker-compose.rust-shadow.yml:19",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_DAEMON_MEM_LIMIT"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/docker-compose.rust-shadow.yml:22",
+      "location": "ops/docker-compose.rust-shadow.yml:24",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_READ_ONLY"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/docker-compose.rust-shadow.yml:23",
+      "location": "ops/docker-compose.rust-shadow.yml:25",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_DATABASE_URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/docker-compose.rust-shadow.yml:23",
+      "location": "ops/docker-compose.rust-shadow.yml:25",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:environment:PSEUDOLIFE_SHADOW_DB_NAME"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/docker-compose.rust-shadow.yml:25",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_SHADOW_DB_PASSWORD"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/docker-compose.rust-shadow.yml:24",
+      "location": "ops/docker-compose.rust-shadow.yml:26",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_HOST"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/docker-compose.rust-shadow.yml:25",
+      "location": "ops/docker-compose.rust-shadow.yml:27",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_PORT"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/docker-compose.rust-shadow.yml:26",
+      "location": "ops/docker-compose.rust-shadow.yml:28",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_DATA_DIR"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/docker-compose.rust-shadow.yml:27",
+      "location": "ops/docker-compose.rust-shadow.yml:29",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_DAEMON_MODELS_DIR"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/docker-compose.rust-shadow.yml:28",
+      "location": "ops/docker-compose.rust-shadow.yml:30",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TRUST_BIND"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/docker-compose.rust-shadow.yml:29",
+      "location": "ops/docker-compose.rust-shadow.yml:31",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/docker-compose.rust-shadow.yml:30",
+      "location": "ops/docker-compose.rust-shadow.yml:32",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKENS"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/docker-compose.rust-shadow.yml:33",
+      "location": "ops/docker-compose.rust-shadow.yml:35",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_SHADOW_PORT"
     },
