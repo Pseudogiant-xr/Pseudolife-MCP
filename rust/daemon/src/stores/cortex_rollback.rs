@@ -33,7 +33,7 @@ impl CortexStore {
         self.dirty_slots.insert(key);
         let anchor = LogAnchor::of(&self.records[i]);
         let row = LogRow {
-            new_value: &anchor.value.clone(),
+            new_value: anchor.value.clone(),
             new_conf: anchor.confidence,
             t: now,
             decision: "retired",
@@ -114,7 +114,7 @@ impl CortexStore {
         let (value, confidence) = (self.records[i].value.clone(), self.records[i].confidence);
         let anchor = LogAnchor::of(&self.records[cur.unwrap_or(i)]);
         let row = LogRow {
-            new_value: &value,
+            new_value: value.into(),
             new_conf: confidence,
             t: now,
             decision: "contested",
