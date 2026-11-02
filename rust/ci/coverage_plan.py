@@ -13,7 +13,8 @@ AUDIT_GOLDEN_CASES = json.loads((HERE / 'audit_golden_cases.json').read_text(enc
 W1A = ('tokens', 'tokenless', 'pair-budget', 'config', 'extractor', 'db-down',
        'lease-held', 'reaper', 'dim-mismatch', 'stamped', 'seeded',
        'json-float-shortest-ties', 'trust-bind', 'null-embedding',
-       'unconstrained-dims', 'db-lost', 'encodings', 'map-order', 'map-order-reversed')
+       'unconstrained-dims', 'db-lost', 'encodings', 'map-order', 'map-order-reversed',
+       'mcp-modern', 'mcp-modern-subscriptions', 'mcp-cancellation', 'mcp-modern-cancellation')
 
 # These are observed differences, not comparator relaxations. Each omitted
 # selection remains named so the inventory cannot silently erase the gap.
@@ -78,6 +79,9 @@ EXCEPTIONS = {
 }
 
 DAEMON_CONTROLS = {
+    'mcp-cancel-ignored': ['mcp-cancellation'],
+    'mcp-modern-envelope-ignored': ['mcp-modern'],
+    'mcp-modern-subscription-id-lost': ['mcp-modern-subscriptions'],
     'auth-candidate-order': ['encodings'],
     'skip-relation-seed': ['extractor'],
     'skip-lease-epoch': ['extractor'],

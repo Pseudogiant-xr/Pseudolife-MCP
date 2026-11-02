@@ -91,6 +91,7 @@ def register(harness):
     class McpModernSubscriptions(McpModern):
         name = "mcp-modern-subscriptions"
         golden_replay = True
+        env = {**McpModern.env, "PSEUDOLIFE_MCP_TOOLSET": "minimal"}
 
         def timeline(self, procs, holders):
             answers = [{}, {}]

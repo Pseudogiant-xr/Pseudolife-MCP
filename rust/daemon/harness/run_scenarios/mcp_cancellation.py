@@ -15,6 +15,7 @@ from mcp_wire import Session, request, sse_data
 def register(harness):
     class McpCancellation(harness.Scenario):
         name = "mcp-cancellation"
+        modern = False
         env = {"PSEUDOLIFE_MCP_TOKEN": harness.T_DEFAULT}
         golden_replay = True
         config_yaml = "memory:\n  dream:\n    enabled: false\n"
@@ -32,7 +33,10 @@ def register(harness):
             import psycopg
             answers, committed = {}, {}
             for side, proc in procs.items():
-                session = Session(proc.port, harness.T_DEFAULT)
+                session = None if self.modern else Session(proc.port, harness.T_DEFAULT)
+                headers = ([("Authorization", f"Bearer {harness.T_DEFAULT}"),
+                            ("Content-Type", "application/json"), ("Accept", "application/json, text/event-stream"),
+                            ("MCP-Protocol-Version", "2026-07-28")] if self.modern else session._headers())
                 dsn = proc.env["PSEUDOLIFE_MCP_DATABASE_URL"]
                 try:
                     with psycopg.connect(dsn, autocommit=True) as probe, psycopg.connect(dsn) as lock:
@@ -40,7 +44,15 @@ def register(harness):
                         harness.assert_disposable(lock)
                         lock.execute("LOCK TABLE entries IN ACCESS EXCLUSIVE MODE")
                         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                            future = pool.submit(session.tool, "memory_store", {"text": "memory cancellation probe"})
+                            if self.modern:
+                                body = {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                                        "params": {"name": "memory_store", "arguments": {"text": "memory cancellation probe"},
+                                                   "_meta": {"io.modelcontextprotocol/protocolVersion": "2026-07-28",
+                                                             "io.modelcontextprotocol/clientCapabilities": {}}}}
+                                future = pool.submit(request, proc.port, "POST", body,
+                                                     headers + [("Mcp-Method", "tools/call"), ("Mcp-Name", "memory_store")])
+                            else:
+                                future = pool.submit(session.tool, "memory_store", {"text": "memory cancellation probe"})
                             try:
                                 deadline = time.monotonic() + 30
                                 while not probe.execute("SELECT EXISTS (SELECT 1 FROM pg_stat_activity "
@@ -54,22 +66,27 @@ def register(harness):
                                     time.sleep(0.01)
                                 cancelled = request(proc.port, "POST", {
                                     "jsonrpc": "2.0", "method": "notifications/cancelled",
-                                    "params": {"requestId": 2, "reason": "fixture cancellation"}}, session._headers())
+                                    "params": {"requestId": " +0002 ", "reason": "fixture cancellation"}}, headers)
                                 assert cancelled["status"] == 202
                             finally:
                                 lock.rollback()
                             raw = future.result(timeout=60)
-                        payloads = sse_data(raw)
+                        payloads = [raw["body"]] if any(k == "content-type" and v.startswith("application/json") for k, v in raw["headers"]) else sse_data(raw)
                         assert len(payloads) == 1, f"{side}: expected one transport settlement"
                         answers[side] = {"status": raw["status"], "headers": {}, "json": json.loads(payloads[0])}
                         rows = probe.execute("SELECT text FROM entries WHERE text = %s", ("memory cancellation probe",)).fetchall()
                         committed[side] = {"status": 200, "headers": {}, "json": {"stored": [row[0] for row in rows]}}
                         assert rows == [("memory cancellation probe",)], f"{side}: shielded write was lost"
                 finally:
-                    session.close()
+                    if session is not None:
+                        session.close()
             for name, values in (("cancelled request settlement", answers), ("shielded store committed", committed)):
                 c = harness.case(name, "POST", "/mcp")
                 c["_answers"] = (values.get("python"), values["rust"])
                 yield c
 
-    return [McpCancellation]
+    class McpModernCancellation(McpCancellation):
+        name = "mcp-modern-cancellation"
+        modern = True
+
+    return [McpCancellation, McpModernCancellation]

@@ -173,6 +173,9 @@ fn envelope(
     params: &Map<String, Value>,
     headers: &HeaderMap,
 ) -> Result<(), Value> {
+    if crate::mutants::active("mcp-modern-envelope-ignored") {
+        return Ok(());
+    }
     for key in ["mcp-protocol-version", "mcp-method", "mcp-name"] {
         if headers.get_all(key).iter().count() > 1 {
             return Err(error(
@@ -397,6 +400,8 @@ pub(super) async fn handle(
     }
     // Shield synchronous tool work from a disconnect, just like Python's
     // anyio worker threads; only the HTTP response stops being delivered.
+    let interruptible = method != "tools/call"
+        || params.get("name").and_then(Value::as_str) == Some("memory_toolset");
     let mut work = tokio::spawn(dispatch(
         app.clone(),
         principal.to_string(),
@@ -405,10 +410,12 @@ pub(super) async fn handle(
         method,
         params,
     ));
+    let abort = AbortAsync(interruptible.then(|| work.abort_handle()));
     tokio::select! {
         done = &mut work => response(done.expect("request task")),
         _ = tokio::time::sleep(PING_EVERY) => {
             let stream = async_stream(move |tx| async move {
+                let _abort = abort;
                 let _ = tx.send(Ok(Bytes::from_static(b": ping\r\n\r\n"))).await;
                 loop {
                     tokio::select! {
@@ -424,6 +431,15 @@ pub(super) async fn handle(
                 }
             });
             stream_response(Body::from_stream(stream))
+        }
+    }
+}
+
+struct AbortAsync(Option<tokio::task::AbortHandle>);
+impl Drop for AbortAsync {
+    fn drop(&mut self) {
+        if let Some(task) = &self.0 {
+            task.abort();
         }
     }
 }
@@ -498,7 +514,7 @@ impl Subscriptions {
             token
         };
         let guard = SubscriptionGuard(self.clone(), token);
-        let meta = json!({SUBSCRIPTION_KEY: id});
+        let meta = json!({SUBSCRIPTION_KEY: if crate::mutants::active("mcp-modern-subscription-id-lost") { Value::Null } else { id.clone() }});
         let ack = json!({"jsonrpc":"2.0", "method":"notifications/subscriptions/acknowledged",
                          "params":{"_meta":meta, "notifications":honored}});
         let stream = async_stream(move |tx| async move {

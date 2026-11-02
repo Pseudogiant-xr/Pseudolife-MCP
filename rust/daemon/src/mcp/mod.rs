@@ -710,6 +710,7 @@ async fn post(
         Message::Request { id, method, params } => (id, method, params),
         Message::Notification { method, params } => {
             if method == "notifications/cancelled"
+                && !crate::mutants::active("mcp-cancel-ignored")
                 && let Some(id) = params.get("requestId")
             {
                 app.mcp.requests.cancel(sid, id);
