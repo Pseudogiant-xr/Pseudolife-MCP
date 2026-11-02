@@ -700,6 +700,12 @@ impl Replay<'_> {
 fn error_class(e: &ToolError) -> &'static str {
     match e {
         ToolError::Invalid(_) => "ValueError",
+        // save_cortex preserves Python's PersistenceError as an internal
+        // error with this fixed prefix (fact_set.rs). Keep its class in
+        // per-row outcomes while later reversals and the final save proceed.
+        ToolError::Internal(cause) if cause.to_string().starts_with("cortex save failed: ") => {
+            "PersistenceError"
+        }
         _ => "RuntimeError",
     }
 }

@@ -140,6 +140,27 @@ def scenarios(w) -> dict:
                 w.fact_get("Release Train", "owner"),
             ],
         },
+        "dream-rollback-persistence": {
+            "config": run["config"],
+            "extractor": run["extractor"],
+            "seed": run["seed"],
+            "ops": [
+                *first_pass,
+                # Sequences are not rolled back: only the first facts INSERT
+                # fails, so later reversals and the final save can succeed.
+                w.sql("CREATE SEQUENCE rollback_fail_once; "
+                      "CREATE FUNCTION rollback_fail_once() RETURNS trigger LANGUAGE plpgsql AS $$ "
+                      "BEGIN IF NOT (SELECT is_called FROM rollback_fail_once) THEN "
+                      "PERFORM nextval('rollback_fail_once'); "
+                      "RAISE EXCEPTION 'fixture cortex save failure'; END IF; RETURN NEW; END $$; "
+                      "CREATE TRIGGER rollback_fail_once BEFORE INSERT ON facts "
+                      "FOR EACH ROW EXECUTE FUNCTION rollback_fail_once()"),
+                w.dream("rollback"),
+                w.dream("runs"),
+                w.fact_get("Deploy Target", "region"),
+                w.fact_get("Release Runbook", "requirements"),
+            ],
+        },
         "dream-rollback-convert": {
             "config": w.DREAM_RUN_QUIET,
             "extractor": convert_extractor,
