@@ -1,5 +1,6 @@
 """The proposed Rust publisher stays disabled until the maintainer opts in."""
 from pathlib import Path
+from fnmatch import fnmatchcase
 
 import yaml
 
@@ -33,3 +34,17 @@ def test_dispatch_cannot_reach_any_publisher():
     assert "vars.PSEUDOLIFE_PUBLISH_RUST_ASSETS == 'true'" in jobs["rust-assets"]["if"]
     assert "publish" in jobs["rust-assets-publish"]["needs"]
     assert "vars.PSEUDOLIFE_PUBLISH_RUST_ASSETS == 'true'" in jobs["rust-assets-publish"]["if"]
+
+
+def test_bundle_rerun_downloads_only_target_archives():
+    root = Path(__file__).resolve().parents[1]
+    jobs = yaml.safe_load((root / ".github/workflows/release.yml").read_text(encoding="utf-8"))["jobs"]
+    uploaded = next(step["with"]["name"] for step in jobs["rust-assets"]["steps"]
+                    if step.get("uses", "").startswith("actions/upload-artifact@"))
+    pattern = next(step["with"]["pattern"] for step in jobs["rust-assets-bundle"]["steps"]
+                   if step.get("uses", "").startswith("actions/download-artifact@"))
+    complete = next(step["with"]["name"] for step in jobs["rust-assets-bundle"]["steps"]
+                    if step.get("uses", "").startswith("actions/upload-artifact@"))
+    for row in jobs["rust-assets"]["strategy"]["matrix"]["include"]:
+        assert fnmatchcase(uploaded.replace("${{ matrix.target }}", row["target"]), pattern)
+    assert not fnmatchcase(complete, pattern), "reruns must not ingest the previous complete bundle"
