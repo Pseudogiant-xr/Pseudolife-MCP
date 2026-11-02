@@ -1196,4 +1196,19 @@ mod tests {
         assert!(dsn_parts(Some("host=h application_name=x")).is_none());
         assert_eq!(dsn_parts(Some("")).map(|parts| parts.len()), Some(0));
     }
+
+    #[test]
+    fn daemon_dsn_connection_options_keep_deferring() {
+        for dsn in [
+            "host=h user=fixture dbname=fixture application_name=x",
+            "host=h user=fixture dbname=fixture application_name=''",
+            "host=h user=fixture dbname=fixture connect_timeout=10",
+            "postgresql://fixture@h/db?application_name=x",
+            "postgresql://fixture@h/db?application%5fname=x",
+            "postgresql://fixture@h/db?connect_timeout=0",
+            "postgresql://fixture@h/db?connect%5ftimeout=10",
+        ] {
+            assert!(dsn_parts(Some(dsn)).is_none());
+        }
+    }
 }

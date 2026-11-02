@@ -55,17 +55,18 @@ fn decode(text: &str) -> Result<String, Error> {
         .map(|s| s.into_owned())
         .map_err(|_| Error::InvalidDsn)
 }
-fn option(key: &str) -> Result<(), Error> {
+fn option(key: &str, connection_options: bool) -> Result<(), Error> {
     if key.is_empty() || !key.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_') {
         return Err(Error::InvalidDsn);
     }
     match key {
         "host" | "port" | "user" | "password" | "dbname" | "sslmode" | "sslrootcert" => Ok(()),
+        "connect_timeout" | "application_name" if connection_options => Ok(()),
         _ => Err(Error::UnsupportedOption(key.into())),
     }
 }
 // libpq keyword quoting/backslash rules; URI authority parsing remains in the driver.
-fn keywords(text: &str) -> Result<BTreeMap<String, String>, Error> {
+fn keywords(text: &str, connection_options: bool) -> Result<BTreeMap<String, String>, Error> {
     let mut input = text.chars().peekable();
     let mut fields = BTreeMap::new();
     loop {
@@ -82,7 +83,7 @@ fn keywords(text: &str) -> Result<BTreeMap<String, String>, Error> {
         {
             key.push(input.next().unwrap());
         }
-        option(&key)?;
+        option(&key, connection_options)?;
         while input.peek().is_some_and(|c| c.is_ascii_whitespace()) {
             input.next();
         }
@@ -118,6 +119,13 @@ fn keywords(text: &str) -> Result<BTreeMap<String, String>, Error> {
 }
 impl Dsn {
     pub fn parse(text: &str) -> Result<Self, Error> {
+        Self::parse_options(text, false)
+    }
+    /// Admit optional connection settings only for callers that preserve them.
+    pub fn parse_with_connection_options(text: &str) -> Result<Self, Error> {
+        Self::parse_options(text, true)
+    }
+    fn parse_options(text: &str, connection_options: bool) -> Result<Self, Error> {
         if text.contains('\0') {
             return Err(Error::InvalidDsn);
         }
@@ -131,12 +139,12 @@ impl Dsn {
                 for item in query.split('&').filter(|item| !item.is_empty()) {
                     let (key, value) = item.split_once('=').ok_or(Error::InvalidDsn)?;
                     let key = decode(key)?;
-                    option(&key)?;
+                    option(&key, connection_options)?;
                     fields.insert(key, decode(value)?);
                 }
                 (Some(base), fields)
             } else {
-                (None, keywords(text)?)
+                (None, keywords(text, connection_options)?)
             };
         let mode = fields
             .remove("sslmode")
@@ -199,6 +207,7 @@ impl Dsn {
             return Err(Error::InvalidOption("port"));
         }
         config.port(port);
+        let connect_timeout = fields.remove("connect_timeout");
         for (key, value) in fields {
             match key.as_str() {
                 "user" => {
@@ -206,6 +215,9 @@ impl Dsn {
                 }
                 "dbname" => {
                     config.dbname(value);
+                }
+                "application_name" => {
+                    config.application_name(value);
                 }
                 _ => unreachable!("admitted DSN option"),
             }
@@ -224,7 +236,16 @@ impl Dsn {
             config.ssl_mode(tokio_postgres::config::SslMode::Require);
             config.ssl_negotiation(tokio_postgres::config::SslNegotiation::Direct);
         }
-        config.connect_timeout(Duration::from_secs(10));
+        let seconds = connect_timeout
+            .as_deref()
+            .map(str::trim)
+            .map(str::parse::<u64>)
+            .transpose()
+            .map_err(|_| Error::InvalidOption("connect_timeout"))?
+            .unwrap_or(10);
+        if seconds != 0 {
+            config.connect_timeout(Duration::from_secs(seconds));
+        }
         Ok(Self {
             config,
             mode,
@@ -235,6 +256,13 @@ impl Dsn {
     }
     pub fn config(&self) -> &tokio_postgres::Config {
         &self.config
+    }
+    /// Resolve authentication once before passing a connection to an isolated child.
+    pub fn resolved_config(
+        &self,
+        environment: &super::PasswordEnvironment,
+    ) -> Result<tokio_postgres::Config, Error> {
+        super::password::configure(self, environment)
     }
     pub fn ssl_mode(&self) -> SslMode {
         self.mode
