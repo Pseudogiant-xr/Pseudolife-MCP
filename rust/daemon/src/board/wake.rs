@@ -557,58 +557,7 @@ pub async fn serve_wake(c: &impl GenericClient, agent_id: &str, now: f64) -> Res
     if !codex && !listening {
         return Ok(Value::Null);
     }
-    let privileged: Vec<String> = PRIVILEGED_WAKE_REASONS
-        .iter()
-        .map(|s| s.to_string())
-        .collect();
     let seq_floor = park_seq.unwrap_or(0);
-    let reopen: Vec<String> = REOPEN_ROW_REASONS
-        .iter()
-        .map(|s| s.to_string())
-        .chain(std::iter::once(MAINTAINER_WAKE_REASON.to_string()))
-        .collect();
-    let base = "UPDATE coordination_wakes SET served_at=$1 WHERE recipient_agent_id=$2 \
-                AND decision IN ('rung','attention') \
-                AND served_at IS NULL AND EXISTS (SELECT 1 FROM coordination_messages m \
-                WHERE m.message_id=coordination_wakes.message_id AND m.recipient_agent_id=$2 \
-                AND m.acknowledged_at IS NULL AND m.expires_at>$1)";
-    if codex {
-        let guard = " AND (decision='attention' OR ($3 AND reason=ANY($4)) OR ($5 AND EXISTS \
-                     (SELECT 1 FROM coordination_events s WHERE s.event='send' \
-                     AND s.message_id=coordination_wakes.message_id AND s.seq>$6)))";
-        if reopen_only {
-            let sql = format!("{base}{guard} AND decision='rung' AND reason=ANY($7)");
-            c.execute(
-                &sql,
-                &[
-                    &now,
-                    &agent_id,
-                    &listening,
-                    &privileged,
-                    &ring_allowed,
-                    &seq_floor,
-                    &reopen,
-                ],
-            )
-            .await?;
-        } else {
-            let sql = format!("{base}{guard}");
-            c.execute(
-                &sql,
-                &[
-                    &now,
-                    &agent_id,
-                    &listening,
-                    &privileged,
-                    &ring_allowed,
-                    &seq_floor,
-                ],
-            )
-            .await?;
-        }
-    } else {
-        c.execute(base, &[&now, &agent_id]).await?;
-    }
     let mut rows: Vec<Offerable> = c
         .query(
             "SELECT w.decision,w.reason,w.ring_at,w.created_at,w.wake_id,w.served_at,m.expires_at,\
@@ -619,8 +568,8 @@ pub async fn serve_wake(c: &impl GenericClient, agent_id: &str, now: f64) -> Res
              JOIN coordination_messages m ON m.message_id=w.message_id \
              AND m.recipient_agent_id=w.recipient_agent_id WHERE w.recipient_agent_id=$2 \
              AND w.decision IN ('rung','attention') \
-             AND (w.served_at IS NOT NULL OR $3) AND m.acknowledged_at IS NULL AND m.expires_at>$4",
-            &[&seq_floor, &agent_id, &codex, &now],
+             AND m.acknowledged_at IS NULL AND m.expires_at>$3",
+            &[&seq_floor, &agent_id, &now],
         )
         .await?
         .iter()
@@ -672,8 +621,8 @@ pub async fn serve_wake(c: &impl GenericClient, agent_id: &str, now: f64) -> Res
             return Ok(Value::Null);
         }
     }
-    // Peer staggering cannot delay a newer authority offer. An older
-    // unacknowledged authority offer must not mask a later peer bell.
+    // Authority gets its first handoff before a newer peer can delay or
+    // downgrade it. Only the selected rows are marked served below.
     let latest = rows
         .iter()
         .max_by(|a, b| {
@@ -689,14 +638,21 @@ pub async fn serve_wake(c: &impl GenericClient, agent_id: &str, now: f64) -> Res
             PRIVILEGED_WAKE_REASONS.contains(&item.reason.as_str())
                 && (codex
                     || item.queued
+                    || item.served_at.is_none()
                     || item
                         .served_at
                         .is_some_and(|at| at > now - WAKE_SERVE_REPEAT))
         })
         .cloned()
         .collect();
-    let immediate = !privileged.is_empty() && latest_privileged;
-    if immediate {
+    let unserved: Vec<Offerable> = privileged
+        .iter()
+        .filter(|item| item.served_at.is_none())
+        .cloned()
+        .collect();
+    if !unserved.is_empty() {
+        rows = unserved;
+    } else if !privileged.is_empty() && latest_privileged {
         rows = privileged;
     }
     let mut newest = &rows[0];
@@ -707,10 +663,18 @@ pub async fn serve_wake(c: &impl GenericClient, agent_id: &str, now: f64) -> Res
     }
     if !codex
         && !rows.iter().any(|r| r.queued)
-        && newest.served_at.unwrap_or(f64::NEG_INFINITY) <= now - WAKE_SERVE_REPEAT
+        && newest
+            .served_at
+            .is_some_and(|at| at <= now - WAKE_SERVE_REPEAT)
     {
         return Ok(Value::Null);
     }
+    let offered: Vec<i64> = rows.iter().map(|item| item.wake_id).collect();
+    c.execute(
+        "UPDATE coordination_wakes SET served_at=$1 WHERE wake_id=ANY($2) AND served_at IS NULL",
+        &[&now, &offered],
+    )
+    .await?;
     let ring_at = max_ring(&rows);
     let mut offer = json!({"decision": newest.decision, "reason": newest.reason,
                            "ring_at": float_value(ring_at)});

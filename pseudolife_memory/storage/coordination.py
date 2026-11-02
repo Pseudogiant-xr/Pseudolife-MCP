@@ -2807,24 +2807,8 @@ class CoordinationStore:
         # Maintainer and verified conductor rings need no park: a live listener
         # is enough, a done park included.
         listening = self._listener_path(row, now) is None
-        serve_guard = (" AND (decision='attention' OR (%s AND reason=ANY(%s)) OR (%s AND EXISTS "
-                       "(SELECT 1 FROM coordination_events s WHERE s.event='send' "
-                       "AND s.message_id=coordination_wakes.message_id AND s.seq>%s)))"
-                       ) if codex else ""
-        serve_values = (listening, list(_PRIVILEGED_WAKE_REASONS), ring_allowed,
-                        park_seq or 0) if codex else ()
-        if reopen_only:
-            serve_guard += " AND decision='rung' AND reason=ANY(%s)"
-            serve_values += ([*_REOPEN_ROW_REASONS, MAINTAINER_WAKE_REASON],)
         if not codex and self._listener_path(row, now) is not None:
             return None
-        self.storage.conn.execute(
-            "UPDATE coordination_wakes SET served_at=%s WHERE recipient_agent_id=%s "
-            "AND decision IN ('rung','attention') "
-            "AND served_at IS NULL AND EXISTS (SELECT 1 FROM coordination_messages m "
-            "WHERE m.message_id=coordination_wakes.message_id AND m.recipient_agent_id=%s "
-            "AND m.acknowledged_at IS NULL AND m.expires_at>%s)" + serve_guard,
-            (now, agent_id, agent_id, now, *serve_values))
         rows = self._all(
             "SELECT w.decision,w.reason,w.ring_at,w.created_at,w.wake_id,w.served_at,m.expires_at,"
             "coalesce(m.wake->>'queue_allowed'='true',false) AS queue_allowed,"
@@ -2834,8 +2818,8 @@ class CoordinationStore:
             "JOIN coordination_messages m ON m.message_id=w.message_id "
             "AND m.recipient_agent_id=w.recipient_agent_id WHERE w.recipient_agent_id=%s "
             "AND w.decision IN ('rung','attention') "
-            "AND (w.served_at IS NOT NULL OR %s) AND m.acknowledged_at IS NULL AND m.expires_at>%s",
-            (park_seq or 0, agent_id, codex, now))
+            "AND m.acknowledged_at IS NULL AND m.expires_at>%s",
+            (park_seq or 0, agent_id, now))
         if reopen_only:
             rows = [item for item in rows if item["reason"] in _PRIVILEGED_WAKE_REASONS or (
                 park_seq is not None and item["decision"] == "rung"
@@ -2858,16 +2842,25 @@ class CoordinationStore:
             rows = [item for item in rows if item["decision"] == "attention"]
             if not rows:
                 return None
-        # Peer staggering cannot delay a newer authority offer. An older
-        # unacknowledged authority offer must not mask a later peer bell.
+        # Offer authority rows before marking them served. A peer arriving
+        # after them cannot postpone or downgrade that first handoff.
+        # Thereafter newest-offer selection lets later peer bells through.
         newest = max(rows, key=lambda r: (r["created_at"], r["wake_id"]))
         privileged = [item for item in rows if item["reason"] in _PRIVILEGED_WAKE_REASONS
-                      and (codex or item["queued"] or item["served_at"] > now - WAKE_SERVE_REPEAT)]
-        if privileged and newest["reason"] in _PRIVILEGED_WAKE_REASONS:
+                      and (codex or item["queued"] or item["served_at"] is None
+                           or item["served_at"] > now - WAKE_SERVE_REPEAT)]
+        unserved = [item for item in privileged if item["served_at"] is None]
+        if unserved:
+            rows = unserved
+        elif privileged and newest["reason"] in _PRIVILEGED_WAKE_REASONS:
             rows = privileged
         newest = max(rows, key=lambda r: (r["created_at"], r["wake_id"]))
-        if not codex and not any(row["queued"] for row in rows) and newest["served_at"] <= now - WAKE_SERVE_REPEAT:
+        if (not codex and not any(row["queued"] for row in rows)
+                and newest["served_at"] is not None and newest["served_at"] <= now - WAKE_SERVE_REPEAT):
             return None
+        self.storage.conn.execute(
+            "UPDATE coordination_wakes SET served_at=%s WHERE wake_id=ANY(%s) AND served_at IS NULL",
+            (now, [item["wake_id"] for item in rows]))
         offer = {"decision": newest["decision"], "reason": newest["reason"],
                  "ring_at": max(r["ring_at"] for r in rows)}
         if codex:

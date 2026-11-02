@@ -150,6 +150,48 @@ class MaintainerWakeOffers(ConductorWakeOffers):
         return bootstrap() + super().steps()
 
 
+class UnservedConductorOffers(ConductorWakeOffers):
+    name = "unserved-conductor-offers"
+    config_yaml = BASE_CONFIG
+    parked = True
+
+    def steps(self):
+        return setup() + ([] if self.parked else [
+            act("unparked recipient", "update", agent="B", body={"park_reason": ""})]) + [
+            msg("older peer", "C", "B", "first peer", urgent=True),
+            *self.authority_mail("unserved authority"),
+            msg("newer peer", "C", "B", "second peer", urgent=True),
+            immediate_offer(self.offer("authority first handoff", self.reason)),
+            expect(act("peer handoff after authority", "heartbeat", agent="B", body=lambda c: {
+                "attachment_id": "listener", "generation": c.vals["generation"],
+                "ring_armed_until": c.now + 60}), "rung" if self.parked else "attention", "urgent"),
+        ]
+
+
+class UnservedConductorAttention(UnservedConductorOffers):
+    name = "unserved-conductor-attention"
+    parked = False
+
+
+class UnservedMaintainerOffers(UnservedConductorOffers):
+    name = "unserved-maintainer-offers"
+    config_yaml = CONFIG
+    normalizer = SignedNormalizer
+    extra_tables = TABLES
+    reason = "maintainer_message"
+    authority_mail = MaintainerWakeOffers.authority_mail
+
+    def steps(self):
+        return bootstrap() + super().steps()
+
+
+class UnservedMaintainerAttention(UnservedMaintainerOffers):
+    name = "unserved-maintainer-attention"
+    parked = False
+
+
 SCENARIOS = {s.name: s for s in (ConductorWake, ConductorWakeFences,
-                                ConductorWakeOffers, MaintainerWakeOffers)}
+                                ConductorWakeOffers, MaintainerWakeOffers,
+                                UnservedConductorOffers, UnservedConductorAttention,
+                                UnservedMaintainerOffers, UnservedMaintainerAttention)}
 

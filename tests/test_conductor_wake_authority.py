@@ -170,3 +170,28 @@ def test_authority_wakes_do_not_consume_peer_budgets(store, authority):
     peer = store.register("alice")
     assert _wake(store, peer, recipient)["decision"] == "rung"
     assert _wake(store, peer, recipient)["decision"] == "capped"
+
+
+@pytest.mark.parametrize("parked", [False, True])
+def test_unserved_authority_precedes_a_newer_peer_offer(store, parked):
+    sender, peer = _delegate(store), store.register("alice")
+    recipient = store.register("alice", project="proj", capabilities={"ring": True, "codex": False})
+    attached = store.attach(*creds(recipient), attachment_id="listener", ring=True,
+                           ring_armed_until=1060.0)
+    if parked:
+        store.update(*creds(recipient), park_reason="needs_info", park_needs="result",
+                     park_clear_by="maintainer")
+    _wake(store, peer, recipient, urgent=True)
+    store.test_time[0] += 1
+    _wake(store, sender, recipient)
+    store.test_time[0] += 1
+    _wake(store, peer, recipient, urgent=True)
+    def offer():
+        return store.heartbeat(*creds(recipient), attachment_id="listener",
+                               generation=attached["generation"], ring_armed_until=1062.0)["wake"]
+    first = offer()
+    assert (first["decision"], first["reason"], first["ring_at"]) == ("rung", "conductor", 1001.0)
+    second = offer()
+    assert second["reason"] == "urgent"
+    assert second["decision"] == ("rung" if parked else "attention")
+    assert second["ring_at"] == 1030.0
