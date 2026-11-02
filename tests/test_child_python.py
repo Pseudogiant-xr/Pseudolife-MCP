@@ -5,8 +5,8 @@ checkout): ``conductor-watch --detach`` from inside one failed with
 
 from __future__ import annotations
 
+import ast
 import os
-import re
 import subprocess
 import sys
 from pathlib import Path
@@ -87,27 +87,130 @@ def test_python_310_keeps_plain_dash_m(monkeypatch, tmp_path):
     assert child_python.cli_argv("serve") == [sys.executable, "-m", "pseudolife_memory.cli", "serve"]
 
 
+def test_python_310_names_a_package_in_the_working_directory_once(monkeypatch, tmp_path, capsys):
+    """3.10 cannot leave the working directory off the child's path, so a
+    ``pseudolife_memory`` there is named once, with the fix."""
+    checkout = _decoy(tmp_path / "old-checkout")
+    monkeypatch.chdir(checkout)
+    monkeypatch.setattr(child_python.sys, "version_info", (3, 10, 14))
+    monkeypatch.setattr(child_python, "_shadow_named", False)
+    assert child_python.cli_argv("serve") == [sys.executable, "-m", "pseudolife_memory.cli", "serve"]
+    child_python.cli_argv("serve")
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    lines = captured.err.splitlines()
+    assert len(lines) == 1
+    assert str(checkout / "pseudolife_memory") in lines[0]
+    assert "Python 3.10" in lines[0] and "run it from another directory" in lines[0]
+
+
+def test_python_310_says_nothing_without_a_package_in_the_working_directory(monkeypatch, tmp_path, capsys):
+    monkeypatch.setattr(child_python.sys, "version_info", (3, 10, 14))
+    monkeypatch.setattr(child_python, "_shadow_named", False)
+    (tmp_path / "pseudolife_memory.txt").write_text("not a package", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    child_python.cli_argv("serve")
+    # The package's own directory holds this process's package: nothing to name.
+    monkeypatch.chdir(PACKAGE.parent)
+    child_python.cli_argv("serve")
+    assert capsys.readouterr().err == ""
+
+
 @needs_safe_path
 def test_elsewhere_the_child_leaves_the_working_directory_off_its_path(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     assert child_python.cli_argv("serve") == [sys.executable, "-P", "-m", "pseudolife_memory.cli", "serve"]
 
 
-# Spawns of this package's modules that deliberately do not go through the
-# helper: the daemon container's own interpreter, and doctor's handshake,
-# which runs from a fresh empty directory with the package bound on its
-# PYTHONPATH (doctor_cli._bind_child_to_this_package).
-_NOT_THIS_PROCESS = {"daemon_exec.py", "doctor_cli.py", "child_python.py"}
-_LITERAL_SPAWN = re.compile(r"""["']-m["']\s*,\s*["']pseudolife_memory\b""")
+def _ours(value: str) -> bool:
+    return value == "pseudolife_memory" or value.startswith("pseudolife_memory.")
+
+
+def _spawns_in(source: str) -> list[tuple[int, str]]:
+    """``(line, enclosing function)`` of every list or tuple in ``source``
+    that runs one of this package's modules with ``-m``: ``"-m"`` followed by
+    a string naming one, or by a name. A module-level string constant is
+    resolved; any other name counts, since what it holds cannot be told."""
+    tree = ast.parse(source)
+    constants = {}
+    for node in tree.body:
+        targets = node.targets if isinstance(node, ast.Assign) else (
+            [node.target] if isinstance(node, ast.AnnAssign) and node.value is not None else [])
+        value = getattr(node, "value", None)
+        if isinstance(value, ast.Constant) and isinstance(value.value, str):
+            constants.update({t.id: value.value for t in targets if isinstance(t, ast.Name)})
+
+    def runs_ours(node: ast.expr) -> bool:
+        if isinstance(node, ast.Constant):
+            return isinstance(node.value, str) and _ours(node.value)
+        if isinstance(node, ast.Name):
+            return _ours(constants[node.id]) if node.id in constants else True
+        return False
+
+    found = []
+
+    def visit(node: ast.AST, function: str) -> None:
+        for child in ast.iter_child_nodes(node):
+            inner = child.name if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)) else function
+            if isinstance(child, (ast.List, ast.Tuple)):
+                pairs = zip(child.elts, child.elts[1:])
+                if any(isinstance(a, ast.Constant) and a.value == "-m" and runs_ours(b) for a, b in pairs):
+                    found.append((child.lineno, inner))
+            visit(child, inner)
+
+    visit(tree, "<module>")
+    return found
+
+
+# The call sites that start one of this package's modules without the
+# helper, each on purpose, with how many such lists each holds. A new site,
+# or one of these gone, fails the guard below.
+_EXEMPT = {
+    # The helper itself: plain -m and -P -m.
+    ("child_python.py", "module_argv"): 2,
+    # The daemon container's own interpreter, not this process's.
+    ("daemon_exec.py", "operator_cli"): 2,
+    # The docker tier runs the container's interpreter; the local tier
+    # beside it goes through the helper.
+    ("maintainer_setup.py", "_host"): 1,
+    # Doctor's handshake runs from a fresh empty directory with this
+    # package bound on its PYTHONPATH (_bind_child_to_this_package).
+    ("doctor_cli.py", "_handshake"): 1,
+}
 
 
 def test_every_child_of_this_package_goes_through_the_helper():
-    offenders = []
+    found: dict = {}
+    where: dict = {}
     for path in sorted(PACKAGE.rglob("*.py")):
-        if path.name in _NOT_THIS_PROCESS:
-            continue
-        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
-            if _LITERAL_SPAWN.search(line):
-                offenders.append(f"{path.relative_to(PACKAGE.parent)}:{number}: {line.strip()}")
-    assert not offenders, ("start these through pseudolife_memory.child_python.cli_argv / module_argv, "
-                           "or list the file with its reason:\n" + "\n".join(offenders))
+        for number, function in _spawns_in(path.read_text(encoding="utf-8")):
+            key = (path.name, function)
+            found[key] = found.get(key, 0) + 1
+            where.setdefault(key, []).append(f"{path.relative_to(PACKAGE.parent)}:{number}")
+    unexpected = {key: where[key] for key in found if found[key] != _EXEMPT.get(key)}
+    assert not unexpected, ("start these through pseudolife_memory.child_python.cli_argv / module_argv, "
+                            f"or exempt the call site with its reason: {unexpected}")
+    assert set(found) == set(_EXEMPT), f"exempt call sites that no longer exist: {set(_EXEMPT) - set(found)}"
+
+
+def test_the_guard_sees_a_spawn_split_over_lines_or_named_by_a_constant():
+    split = 'import sys\ndef start():\n    return [sys.executable,\n            "-m",\n            "pseudolife_memory.cli", "serve"]\n'
+    assert _spawns_in(split) == [(3, "start")]
+    named = 'MODULE = "pseudolife_memory.maintainer_setup"\ndef host(py):\n    return (py, "-m", MODULE)\n'
+    assert _spawns_in(named) == [(3, "host")]
+    unresolved = 'def run(py, module):\n    return [py, "-m", module]\n'
+    assert _spawns_in(unresolved) == [(2, "run")]
+
+
+def test_the_guard_ignores_near_misses():
+    # runtimes.migrated_args reads a registration's arguments; it starts nothing.
+    reads = ('def migrated_args(args):\n    if len(args) >= 2 and args[0] == "-m" and args[1] in '
+             '("pseudolife_memory.cli", "pseudolife_memory"):\n        return args[2:]\n')
+    assert _spawns_in(reads) == []
+    # credentials' repair hint is one string printed for a person to run.
+    hint = 'def hint():\n    module = "-m pseudolife_memory.credentials repair"\n    return module\n'
+    assert _spawns_in(hint) == []
+    other = 'def start(py):\n    return [py, "-m", "pseudolife_memory_extra"]\n'
+    assert _spawns_in(other) == []
+    pip = 'def start(py):\n    return [py, "-m", "pip", "install", "pseudolife_memory"]\n'
+    assert _spawns_in(pip) == []

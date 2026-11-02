@@ -13,10 +13,11 @@ would also drop the ``PSEUDOLIFE_*`` environment, and a neutral working
 directory would change what relative paths mean to the child, and a
 temporary one cannot outlive a detached child.
 
-Two cases keep plain ``-m``: Python 3.10, which has no ``-P``, and a parent
-that imported ``pseudolife_memory`` from the working directory itself (a
-checkout run with no install), where the working directory is the parent's
-own code and leaving it off would leave the child nothing to import.
+Two cases keep plain ``-m``: Python 3.10, which has no ``-P`` (it says so on
+stderr, once, when the working directory holds a ``pseudolife_memory``), and
+a parent that imported ``pseudolife_memory`` from the working directory
+itself (a checkout run with no install), where the working directory is the
+parent's own code and leaving it off would leave the child nothing to import.
 """
 
 from __future__ import annotations
@@ -27,6 +28,9 @@ from pathlib import Path
 
 CLI = "pseudolife_memory.cli"
 
+# Whether this process has named a package that 3.10 lets shadow its children.
+_shadow_named = False
+
 
 def module_argv(module: str, *args: str) -> list[str]:
     """``[python, -m, module, *args]`` for a child that inherits this
@@ -34,9 +38,28 @@ def module_argv(module: str, *args: str) -> list[str]:
     import path (an installed runtime's site-packages, an editable install's
     checkout), never from that working directory unless this process's own
     package came from there."""
-    if sys.version_info >= (3, 11) and not _imported_from_working_directory():
-        return [sys.executable, "-P", "-m", module, *args]
+    if not _imported_from_working_directory():
+        if sys.version_info >= (3, 11):
+            return [sys.executable, "-P", "-m", module, *args]
+        _name_a_shadowing_package()
     return [sys.executable, "-m", module, *args]
+
+
+def _name_a_shadowing_package() -> None:
+    """On Python 3.10, say once when the working directory holds a
+    ``pseudolife_memory`` the child will import instead of this one."""
+    global _shadow_named
+    try:
+        shadow = Path.cwd() / "pseudolife_memory"
+        present = shadow.is_dir()
+    except OSError:
+        return
+    if not present or _shadow_named:
+        return
+    _shadow_named = True
+    print(f"pseudolife-mcp: Python 3.10 cannot keep {shadow} off a child process's import path "
+          "(that needs Python 3.11's -P), so the child may run that copy instead of this one; "
+          "run it from another directory.", file=sys.stderr, flush=True)
 
 
 def _imported_from_working_directory() -> bool:

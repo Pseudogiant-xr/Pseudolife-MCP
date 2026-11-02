@@ -437,6 +437,20 @@ def test_stable_command_prefers_the_runtimes_launcher_over_path(tmp_path, monkey
     assert runtime.stable_command() == [str(older)]
 
 
+def test_stable_command_falls_back_to_this_interpreter_without_the_working_directory(tmp_path, monkeypatch):
+    """With no launcher and no venv the saved command names this
+    interpreter's module; written from a directory that is not the
+    package's own, it leaves that directory off the child's import path."""
+    import sys
+    monkeypatch.setattr(runtime, 'installed_launcher', lambda: None)
+    monkeypatch.setattr(runtime.shutil, 'which', lambda name: None)
+    monkeypatch.setattr(runtime.sys, 'base_prefix', runtime.sys.prefix)
+    monkeypatch.chdir(tmp_path)
+    command = runtime.stable_command()
+    assert command[-2:] == ['-m', 'pseudolife_memory.cli']
+    assert ('-P' in command) == (sys.version_info >= (3, 11))
+
+
 DIR, FILE, LINK = stat.S_IFDIR | 0o755, stat.S_IFREG | 0o755, stat.S_IFLNK | 0o777
 
 
