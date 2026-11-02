@@ -22,7 +22,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from pseudolife_memory import client_updates, unattended_update as uu, update_cli as up  # noqa: E402
+from pseudolife_memory import child_python, client_updates, unattended_update as uu, update_cli as up  # noqa: E402
 from tests.test_update_cli import World, _on_a_shim_runtime, _project, _runtime, clients, world  # noqa: E402,F401
 
 REAL_COMMAND = uu._command          # the scheduler fixture replaces it; one test wants the real one
@@ -578,7 +578,8 @@ def test_a_daemon_url_rides_into_the_scheduled_command(scheduler, tmp_path, monk
     monkeypatch.setattr(uu.sys, "executable", str(tmp_path / "py"))
     monkeypatch.setenv("PSEUDOLIFE_SHIM_LAUNCHER", str(tmp_path / "no-launcher"))
     monkeypatch.setenv("PSEUDOLIFE_SHIM_RUNTIMES", str(tmp_path / "rt"))
-    assert uu._command("http://127.0.0.1:8765") == [str(tmp_path / "py"), "-m", "pseudolife_memory.cli", "update", "--unattended"]
+    assert uu._command("http://127.0.0.1:8765") == child_python.cli_argv("update", "--unattended")
+    assert uu._command("http://127.0.0.1:8765")[0] == str(tmp_path / "py")
     assert uu._command("http://10.0.0.7:8765")[-2:] == ["--daemon-url", "http://10.0.0.7:8765"]
 
 

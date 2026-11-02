@@ -950,7 +950,8 @@ def stable_command() -> list[str]:
         if candidate and Path(candidate).is_file() and not ({p.lower() for p in Path(candidate).parts} & {'.venv', 'venv', 'site-packages'}):
             return [str(checked_path(candidate))]
     if sys.prefix == sys.base_prefix:
-        return [str(checked_path(sys.executable)), '-m', 'pseudolife_memory.cli']
+        from pseudolife_memory import child_python
+        return [str(checked_path(sys.executable)), *child_python.cli_argv()[1:]]
     raise TunnelError('a stable installed pseudolife-mcp launcher is required')
 
 
