@@ -107,7 +107,7 @@ own options (`_parser`, 456-482).
 
 ## Deferred (before any connection or file change)
 
-Any other argv (help at either level, `--opt=value`, abbreviations, repeats
+Any other argv (`--opt=value`, abbreviations, repeats
 other than `--bank`, values starting with `-`, empty values other than
 `--role`, `--`, extra positionals); a `--file` or
 `PSEUDOLIFE_TEST_PG_LOGIN_FILE` value that does not print as written
@@ -185,3 +185,18 @@ run too.
   those exact spellings (`127.0.0.1:<port>`, `pl-cf-w1c-testlogin-<token>-`,
   `...-absent-<token>`) are replaced in the streams, so a golden recorded by
   one harness process replays in another.
+
+## Operator transport extension (2026-11-02 candidate)
+
+Engine-labelled daemon reruns select `pseudolife-mcp` for `rust` and the
+Python module for Python or absent labels, retaining the nesting guard.
+Invite adds stopped-daemon psql list/revoke for v53 and v58; pair adds
+trusted/untrusted HTTPS and terminal code input; maintainer adds help and
+polling; test-login adds help while retaining its host-local login file.
+Linux native builds and the live differential rows passed, including the engine-selected transport and help cases. Native Windows contract tests passed; pairing interruption and backspace also passed both oracle and native console arms.
+The activated former deferral cases now compare the actual oracle outcome;
+their old case IDs remain stable. Linux goldens were re-recorded from the verified oracle tree at
+`7dcd738fa736c15c111fd67c5ffb83ea3f158b91` and replayed against the native candidate.
+The corresponding Windows goldens also replayed successfully. Hosted stress
+remains a separate qualification step. This extension makes
+no claim about guided setup or lite storage.

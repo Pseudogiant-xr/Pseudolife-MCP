@@ -1,6 +1,6 @@
 //! The bank through `PSEUDOLIFE_MCP_DATABASE_URL` only, read as
 //! `board_audit_cli._bank()` and `audit_events` read it. The lite tier's
-//! embedded instance and the daemon-container transport defer.
+//! embedded instance is separate; container forwarding lives in transport.rs.
 use super::{args::Export, chain, codec};
 use crate::pg;
 use serde_json::{Map, Number, Value};
@@ -59,7 +59,7 @@ pub(super) struct Filters<'a> {
 
 /// `audit_events(conn, ...)` in chain order, each row as the dict the
 /// Python generator yields (`payload` still the stored text).
-async fn audit_events(
+pub(super) async fn audit_events(
     client: &impl GenericClient,
     filters: &Filters<'_>,
 ) -> Result<Vec<(Map<String, Value>, f64)>, ()> {
@@ -138,7 +138,7 @@ async fn audit_events(
 }
 
 /// A read-only repeatable-read snapshot, as `_bank()` opens for reads.
-async fn snapshot(session: &mut pg::Session) -> Result<pg::Transaction<'_>, ()> {
+pub(super) async fn snapshot(session: &mut pg::Session) -> Result<pg::Transaction<'_>, ()> {
     session
         .client_mut()
         .build_transaction()
@@ -197,6 +197,51 @@ async fn verify_in(session: &mut pg::Session, expect: Option<super::args::Head>)
         Err(chain::Deferred) => Ending::Deferred,
         Err(chain::Failure::Python) => Ending::Exit(super::failed()),
     }
+}
+
+/// Both event and wake reads share one read-only repeatable-read snapshot.
+pub(super) async fn stats(
+    dsn: &pg::Dsn,
+    first: f64,
+    until: f64,
+    since: f64,
+) -> Result<(Vec<Value>, Option<Vec<Value>>), Ending> {
+    let mut session = pg::Session::open(dsn)
+        .await
+        .map_err(|_| Ending::Exit(super::failed()))?;
+    let result = async {
+        let tx = snapshot(&mut session).await.map_err(|_| Ending::Exit(super::failed()))?;
+        if !log_present(&tx).await.map_err(|_| Ending::Exit(super::failed()))? { return Err(no_log()); }
+        let rows = audit_events(&tx,&Filters { since:Some(first),until:Some(until),..Filters::default() })
+            .await.map_err(|_| Ending::Exit(super::failed()))?;
+        let mut events = Vec::new();
+        for (mut row,_) in rows {
+            let payload = row["payload"].as_str().ok_or_else(|| Ending::Exit(super::failed()))?;
+            let parsed = codec::python_loads(payload).map_err(|_| Ending::Exit(super::failed()))?;
+            row.insert("payload".into(),super::stats::payload(parsed)
+                .map_err(|_| Ending::Deferred)?);
+            events.push(Value::Object(row));
+        }
+        let present: bool = tx.query_one("SELECT to_regclass('public.coordination_wakes') IS NOT NULL",&[])
+            .await.and_then(|r| r.try_get(0)).map_err(|_| Ending::Exit(super::failed()))?;
+        let wakes = if present {
+            let rows = tx.query("SELECT recipient_agent_id,decision,created_at,served_at FROM coordination_wakes WHERE created_at >= $1 AND created_at < $2 ORDER BY created_at,wake_id",&[&since,&until])
+                .await.map_err(|_| Ending::Exit(super::failed()))?;
+            let mut wakes = Vec::new();
+            for row in rows {
+                let recipient: String = row.try_get(0).map_err(|_| Ending::Exit(super::failed()))?;
+                let decision: String = row.try_get(1).map_err(|_| Ending::Exit(super::failed()))?;
+                let created: f64 = row.try_get(2).map_err(|_| Ending::Exit(super::failed()))?;
+                let served: Option<f64> = row.try_get(3).map_err(|_| Ending::Exit(super::failed()))?;
+                wakes.push(serde_json::json!({"recipient_agent_id":recipient,"decision":decision,"created_at":created,"served_at":served}));
+            }
+            Some(wakes)
+        } else { None };
+        tx.rollback().await.map_err(|_| Ending::Exit(super::failed()))?;
+        Ok((events,wakes))
+    }.await;
+    let _ = session.close().await;
+    result
 }
 
 fn is_id_prefix(value: &str) -> bool {
@@ -364,7 +409,7 @@ async fn export_in(session: &mut pg::Session, args: &Export) -> Ending {
 /// library's `strerror` text, which std prints before ` (os error N)`.
 /// Windows: the C runtime maps Win32 file errors to errno, including
 /// missing parents, access denial, sharing violations and invalid names.
-fn write_strerror(error: &std::io::Error) -> Option<String> {
+pub(super) fn write_strerror(error: &std::io::Error) -> Option<String> {
     let code = error.raw_os_error()?;
     if cfg!(windows) {
         return match code {
@@ -432,7 +477,7 @@ impl Drop for Output<'_> {
 }
 
 #[cfg(unix)]
-fn created_destination(file: &std::fs::File, path: &std::path::Path) -> bool {
+pub(super) fn created_destination(file: &std::fs::File, path: &std::path::Path) -> bool {
     use std::os::unix::fs::MetadataExt;
     match (file.metadata(), std::fs::symlink_metadata(path)) {
         (Ok(created), Ok(current)) => {
@@ -444,7 +489,7 @@ fn created_destination(file: &std::fs::File, path: &std::path::Path) -> bool {
 
 #[cfg(windows)]
 #[allow(unsafe_code)]
-fn created_destination(file: &std::fs::File, path: &std::path::Path) -> bool {
+pub(super) fn created_destination(file: &std::fs::File, path: &std::path::Path) -> bool {
     use std::{
         mem,
         os::windows::{fs::OpenOptionsExt, io::AsRawHandle},
@@ -483,7 +528,7 @@ fn created_destination(file: &std::fs::File, path: &std::path::Path) -> bool {
 }
 
 #[cfg(not(any(unix, windows)))]
-fn created_destination(_: &std::fs::File, _: &std::path::Path) -> bool {
+pub(super) fn created_destination(_: &std::fs::File, _: &std::path::Path) -> bool {
     false
 }
 
