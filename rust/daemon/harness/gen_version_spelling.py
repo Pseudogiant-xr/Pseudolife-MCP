@@ -25,6 +25,10 @@ def main() -> None:
         ("0.20.0rc1", "0.21.0-rc1"),
         ("0.20.0rc1+local", "0.20.0-rc.1+other"),
         ("0.20.0rc1+local", "0.20.0-rc.1"),
+        ("0.20.0rc0", "0.20.0-rc"),
+        ("0.20.0a0", "0.20.0-alpha"),
+        ("0.20.0b0", "0.20.0-beta"),
+        ("0.20.0rc", "0.20.0-rc.0"),
     ]
     rows = [{"python": a, "native": b, "equal": Version(a) == Version(b)}
             for a, b in pairs]

@@ -40,7 +40,7 @@ pub(crate) fn same_version(a: &str, b: &str) -> bool {
         return true;
     }
     static PRERELEASE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
-        regex::Regex::new(r"(?i)^([0-9]+(?:\.[0-9]+)*)-?(alpha|beta|preview|pre|rc|a|b|c)[.-]?([0-9]+)(\+[a-z0-9.-]+)?$")
+        regex::Regex::new(r"(?i)^([0-9]+(?:\.[0-9]+)*)-?(alpha|beta|preview|pre|rc|a|b|c)(?:[.-]?([0-9]+))?(\+[a-z0-9.-]+)?$")
             .expect("prerelease version pattern")
     });
     let key = |value: &str| {
@@ -50,7 +50,10 @@ pub(crate) fn same_version(a: &str, b: &str) -> bool {
             "b" | "beta" => "b",
             _ => "rc",
         };
-        let number = parts[3].trim_start_matches('0');
+        let number = parts
+            .get(3)
+            .map_or("0", |n| n.as_str())
+            .trim_start_matches('0');
         Some((
             parts[1].to_owned(),
             kind,
@@ -259,6 +262,8 @@ mod tests {
         for (a, b) in [
             ("0.20.0-custom1", "0.20.0custom1"),
             ("0.20.0-rc1.extra", "0.20.0rc1"),
+            ("0.20.0-rc.", "0.20.0rc0"),
+            ("0.20.0-alpha-", "0.20.0a0"),
             ("0.20.0.dev1", "0.20.0"),
             ("0.20.0", "0.20"),
             ("not-a-version", "another-version"),

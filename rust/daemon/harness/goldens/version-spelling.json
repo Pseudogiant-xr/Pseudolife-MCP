@@ -78,5 +78,25 @@
     "python": "0.20.0rc1+local",
     "native": "0.20.0-rc.1",
     "equal": false
+  },
+  {
+    "python": "0.20.0rc0",
+    "native": "0.20.0-rc",
+    "equal": true
+  },
+  {
+    "python": "0.20.0a0",
+    "native": "0.20.0-alpha",
+    "equal": true
+  },
+  {
+    "python": "0.20.0b0",
+    "native": "0.20.0-beta",
+    "equal": true
+  },
+  {
+    "python": "0.20.0rc",
+    "native": "0.20.0-rc.0",
+    "equal": true
   }
 ]
