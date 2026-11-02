@@ -129,6 +129,32 @@ def pending(replaced, prefix=""):
     return prepare
 
 
+def override_config(arm):
+    setup("memory: {miras: {preset: continuum}}\n")(arm)
+    (arm.home / "bank" / "other.yaml").write_text("memory: {miras: {preset: continuum}}\n")
+
+
+def edited_pending(arm):
+    pending(True)(arm)
+    (arm.home / "bank" / "config.yaml").write_text("unrelated: edited\nmemory: {miras: {preset: flat}}\n")
+    with _bank.connect(DB) as conn:
+        conn.execute("INSERT INTO entries(band,text,embedding,ts) VALUES ('flat','written after migration',%s::vector,99)",
+                     ("[" + ",".join(["0.1"] * 1024) + "]",))
+        conn.commit()
+    arm.state["before"] = _bank.dump(DB)
+
+
+def rejected_finalization(arm):
+    pending(True)(arm)
+    with _bank.connect(DB) as conn:
+        conn.execute("CREATE FUNCTION reject_migration_finish() RETURNS trigger LANGUAGE plpgsql AS $$ "
+                     "BEGIN RAISE EXCEPTION 'fixture finalization refusal'; END $$")
+        conn.execute("CREATE TRIGGER reject_migration_finish BEFORE UPDATE ON meta FOR EACH ROW "
+                     "WHEN (OLD.key='flat_band_migration_v1') EXECUTE FUNCTION reject_migration_finish()")
+        conn.commit()
+    arm.state["before"] = _bank.dump(DB)
+
+
 @normalize.rule("flat-migration-files")
 def files(obs):
     pattern = re.compile(r"(?:^|/)bank/backups/migrate-flat-([0-9a-f]{32})(?:/|$)")
@@ -169,6 +195,13 @@ def cases():
         Case("missing-data-dir", ["migrate-flat", "--apply"]),
         Case("recovery-unverified", argv[:-1], env=env,
              setup=setup("memory: {miras: {preset: continuum}}\n"), after=refused),
+        Case("config-override-mismatch", argv,
+             env={**env, "PSEUDOLIFE_MCP_CONFIG": "{HOME}/bank/other.yaml"},
+             setup=override_config, after=refused),
+        Case("config-override-matches", argv,
+             env={**env, "PSEUDOLIFE_MCP_CONFIG": "{HOME}/bank/config.yaml"},
+             setup=setup("memory: {miras: {preset: continuum}}\n"), after=after,
+             rules=("flat-migration-files",), timeout=120, real_programs=("pg_dump",)),
         Case("writer-held", argv, env=env, setup=held_writer, after=refused),
         *[Case("refuse-" + name, argv, env=env, setup=setup(config), after=refused)
           for name, config in (
@@ -183,6 +216,11 @@ def cases():
           for state, replaced in (("before-replace", False), ("after-replace", True))],
         Case("resume-yaml11-strings", argv, env=env,
              setup=pending(False, "model: 1e5\nother: 0o17\n"), after=after),
+        Case("resume-edited-flat-config", argv, env=env, setup=edited_pending, after=after),
+        Case("resume-finalization-refused", argv, env=env, setup=rejected_finalization, after=refused),
+        Case("collapse-nonspecific-tags", argv, env=env,
+             setup=setup("updates: {check_releases: ! 'on'}\nmemory: {miras: {preset: continuum}}\n"),
+             after=after, rules=("flat-migration-files",), timeout=120, real_programs=("pg_dump",)),
         *[Case("collapse-" + preset, argv, env=env,
                setup=setup("unrelated: yes\nmemory:\n  miras:\n    preset: " + preset + "\n"),
                after=after, rules=("flat-migration-files",), timeout=120,

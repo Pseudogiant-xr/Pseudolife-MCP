@@ -7,6 +7,58 @@ from pseudolife_memory import migrate_flat_cli as migration
 from tests.pg_fixtures import pg_conn, pg_url  # noqa: F401
 
 
+def test_config_override_refuses_before_connect(tmp_path, monkeypatch, capsys):
+    import psycopg
+    (tmp_path / "config.yaml").write_text("memory: {miras: {preset: continuum}}\n")
+    alternate = tmp_path / "alternate.yaml"
+    alternate.write_text("memory: {miras: {preset: continuum}}\n")
+    monkeypatch.setenv("PSEUDOLIFE_MCP_CONFIG", str(alternate))
+    monkeypatch.setenv("PSEUDOLIFE_MCP_DATABASE_URL", "postgresql://unused.invalid/bank")
+    calls = []
+    def connect(*args, **kwargs):
+        calls.append(True)
+        raise AssertionError("must refuse before connecting")
+    monkeypatch.setattr(psycopg, "connect", connect)
+    assert migration.main(["--apply", "--external-recovery-verified", "--data-dir", str(tmp_path)]) == 1
+    assert calls == []
+    assert "PSEUDOLIFE_MCP_CONFIG does not resolve" in capsys.readouterr().err
+    assert not (tmp_path / "backups").exists()
+
+
+@pytest.mark.parametrize("config", [{"memory": None}, {"memory": {"miras": {"preset": "custom", "bands": [None]}}}])
+def test_malformed_flat_layout_returns_false(config):
+    assert migration._flat_layout(config, 5250) is False
+
+
+def test_pending_flat_config_edits_finalize_without_restoring_entries(pg_conn, tmp_path):
+    import json
+    config = tmp_path / "config.yaml"
+    config.write_text("unrelated: changed\nmemory: {miras: {preset: flat}}\n")
+    marker = {"complete": False, "capacity": 5250, "entries": 0,
+              "original_sha256": "original", "target_sha256": "target",
+              "backup": {"dump": "bank.sql.gz", "state": "state.tgz"}}
+    pg_conn.execute("INSERT INTO meta(key,value) VALUES (%s,%s::jsonb)", (migration.MARKER, json.dumps(marker)))
+    pg_conn.execute("INSERT INTO entries(band,text,embedding,ts) VALUES ('flat','new since migration',%s::vector,2)",
+                    ("[" + ",".join(["0.1"] * 1024) + "]",))
+    pg_conn.commit()
+    before = config.read_bytes()
+    result = migration.migrate(pg_conn, tmp_path, backup=lambda _: pytest.fail("backup repeated"))
+    assert result["status"] == "resumed"
+    assert pg_conn.execute("SELECT text FROM entries").fetchall() == [("new since migration",)]
+    assert pg_conn.execute("SELECT value->>'complete' FROM meta WHERE key=%s", (migration.MARKER,)).fetchone()[0] == "true"
+    assert config.read_bytes() == before
+
+
+def test_postcommit_refusal_reports_committed_bank(pg_conn, tmp_path, monkeypatch):
+    (tmp_path / "config.yaml").write_text("memory: {miras: {preset: continuum}}\n")
+    def fail(*args):
+        raise migration.MigrationError("fixture finalization failure; nothing changed")
+    monkeypatch.setattr(migration, "_finish", fail)
+    with pytest.raises(migration.MigrationError, match="bank migration committed") as caught:
+        migration.migrate(pg_conn, tmp_path, backup=lambda _: {"dump": "bank.sql.gz", "state": "state.tgz"})
+    assert "nothing changed" not in str(caught.value)
+
+
 def test_explicit_target_requires_recovery_acknowledgement_before_effects(tmp_path, monkeypatch, capsys):
     import psycopg
     calls = []

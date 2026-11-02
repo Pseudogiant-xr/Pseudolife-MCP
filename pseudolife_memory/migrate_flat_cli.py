@@ -86,14 +86,32 @@ def flat_config(config: dict, entries: int) -> tuple[dict, int]:
 
 
 def _flat_layout(config, capacity):
-    miras = config.get("memory", {}).get("miras", {})
+    memory = config.get("memory", {}) if isinstance(config, dict) else None
+    miras = memory.get("miras", {}) if isinstance(memory, dict) else None
+    if not isinstance(miras, dict):
+        return False
     if miras.get("preset", "flat") == "flat":
         return capacity <= 5250
     bands = miras.get("bands", [])
-    return (miras.get("preset") == "custom" and len(bands) == 1
+    return (miras.get("preset") == "custom" and isinstance(bands, list) and len(bands) == 1
+            and isinstance(bands[0], dict)
             and bands[0].get("name") == "flat"
             and bands[0].get("retention_policy", "balanced") == "balanced"
+            and type(bands[0].get("max_entries", 5000)) is int
             and bands[0].get("max_entries", 5000) >= capacity)
+
+
+def _migration_config_path(data_dir):
+    path = Path(data_dir).resolve() / "config.yaml"
+    override = os.environ.get("PSEUDOLIFE_MCP_CONFIG")
+    if override:
+        try:
+            matches = Path(override).resolve(strict=True) == path.resolve(strict=True)
+        except OSError:
+            matches = False
+        if not matches:
+            raise MigrationError("PSEUDOLIFE_MCP_CONFIG does not resolve to --data-dir/config.yaml; nothing changed; use a matching configuration path before retrying")
+    return path
 
 
 def _hash(data):
@@ -217,17 +235,20 @@ def _finish(conn, path, marker):
         if capacity != marker["capacity"] or _hash(rendered) != marker["target_sha256"]:
             raise MigrationError("migration config no longer matches its committed plan; restore bank and config together: " + recovery_instructions(marker["backup"]))
         _replace_config(path, rendered)
-    elif _hash(raw) != marker["target_sha256"]:
+    elif _hash(raw) != marker["target_sha256"] and not _flat_layout(config, marker["capacity"]):
         raise MigrationError("config.yaml changed after the migration committed; restore bank and config together: " + recovery_instructions(marker["backup"]))
     marker = {**marker, "complete": True}
-    with conn.transaction():
-        conn.execute("UPDATE public.meta SET value=%s::jsonb WHERE key=%s", (json.dumps(marker), MARKER))
+    try:
+        with conn.transaction():
+            conn.execute("UPDATE public.meta SET value=%s::jsonb WHERE key=%s", (json.dumps(marker), MARKER))
+    except Exception:
+        raise MigrationError("migration marker finalization failed") from None
 
 
 def migrate(conn, data_dir: Path, *, backup=None):
     """Use a dedicated idle connection; the caller owns closing it on failure."""
     data_dir = Path(data_dir).resolve()
-    path = data_dir / "config.yaml"
+    path = _migration_config_path(data_dir)
     original, config = _read_config(path)
     # Validate before backup, even for an empty bank.
     flat_config(config, 0)
@@ -277,11 +298,12 @@ def migrate(conn, data_dir: Path, *, backup=None):
         committed = True
         _finish(conn, path, marker)
         return {"status": "migrated", **marker, "complete": True}
-    except MigrationError:
-        raise
     except Exception as error:
         if committed:
-            raise MigrationError("bank migration committed but config finalization failed; keep the daemon stopped and retry migrate-flat --apply; restore bank and config together if needed: " + recovery_instructions(marker["backup"])) from error
+            reason = str(error).replace("; nothing changed", "") if isinstance(error, MigrationError) else "config replacement failed"
+            raise MigrationError("bank migration committed but config finalization failed; keep the daemon stopped and retry migrate-flat --apply; restore bank and config together if needed: " + recovery_instructions(marker["backup"]) + f" ({reason})") from error
+        if isinstance(error, MigrationError):
+            raise
         if marker is not None:
             raise MigrationError("migration did not confirm completion; keep the daemon stopped and retry migrate-flat --apply to reconcile; restore bank and config together if needed: " + recovery_instructions(marker["backup"])) from error
         raise MigrationError("migration could not finish; keep the daemon stopped and retry migrate-flat --apply; inspect the backup before restoring") from error
@@ -330,6 +352,7 @@ def main(argv=None):
     print(_RECOVERY_WARNING, file=sys.stderr)
     try:
         import psycopg
+        _migration_config_path(data_dir)
         with psycopg.connect(dsn, autocommit=True) as conn:
             result = migrate(conn, Path(data_dir))
     except MigrationError as error:

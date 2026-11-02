@@ -72,8 +72,14 @@ fn daemon() -> Result<PathBuf, String> {
     Err("pseudolife-daemon is unavailable; run migrate-flat --apply on the bank host with both native binaries installed; nothing changed".into())
 }
 
+fn planner_command(daemon: &Path) -> Command {
+    let mut command = Command::new(daemon);
+    command.env_remove("PSEUDOLIFE_MCP_DATABASE_URL");
+    command
+}
+
 fn plan(daemon: &Path, raw: &[u8], entries: i64) -> Result<Value, String> {
-    let mut child = Command::new(daemon).args(["migrate-flat-config", &entries.to_string()])
+    let mut child = planner_command(daemon).args(["migrate-flat-config", &entries.to_string()])
         .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn()
         .map_err(|_| "the native config planner could not start; install the matching daemon binary on the bank host; nothing changed")?;
     let mut input = child.stdin.take().expect("piped stdin");
@@ -82,16 +88,16 @@ fn plan(daemon: &Path, raw: &[u8], entries: i64) -> Result<Value, String> {
     let output = child
         .wait_with_output()
         .map_err(|_| "the native config planner did not finish; retry migrate-flat --apply")?;
-    writer
-        .join()
-        .map_err(|_| "config planner input failed")?
-        .map_err(|_| "config planner input failed")?;
+    let written = writer.join();
     if !output.status.success() {
         return Err(String::from_utf8_lossy(&output.stderr)
             .trim()
             .trim_start_matches("migrate-flat refused: ")
             .into());
     }
+    written
+        .map_err(|_| "config planner input failed")?
+        .map_err(|_| "config planner input failed")?;
     let result: Value = serde_json::from_slice(&output.stdout).map_err(
         |_| "the native config planner returned invalid JSON; install matching native binaries",
     )?;
@@ -177,7 +183,16 @@ async fn finish(
             ));
         }
         replace_config(path, rendered)?;
-    } else if hash(&raw) != marker["target_sha256"].as_str().unwrap_or("") {
+    } else if hash(&raw) != marker["target_sha256"].as_str().unwrap_or("")
+        && plan(
+            daemon,
+            &raw,
+            marker["capacity"]
+                .as_i64()
+                .ok_or("migration marker capacity is invalid")?,
+        )?["flat"]
+            != true
+    {
         return Err(format!(
             "config.yaml changed after the migration committed; restore bank and config together: {}",
             restore(&marker["backup"])
@@ -371,6 +386,17 @@ pub(super) fn run(arguments: Vec<OsString>) -> u8 {
             let text = data_dir.to_string_lossy();
             PathBuf::from(text.strip_prefix(r"\\?\").unwrap_or(&text))
         };
+        if let Some(override_path) =
+            std::env::var_os("PSEUDOLIFE_MCP_CONFIG").filter(|p| !p.is_empty())
+        {
+            let matches = fs::canonicalize(override_path)
+                .ok()
+                .zip(fs::canonicalize(data_dir.join("config.yaml")).ok())
+                .is_some_and(|(actual, expected)| actual == expected);
+            if !matches {
+                return Err("PSEUDOLIFE_MCP_CONFIG does not resolve to --data-dir/config.yaml; nothing changed; use a matching configuration path before retrying".into());
+            }
+        }
         let raw = read_config(&data_dir.join("config.yaml"))?;
         let daemon = daemon()?;
         plan(&daemon, &raw, 0)?;
@@ -420,5 +446,58 @@ pub(super) fn run(arguments: Vec<OsString>) -> u8 {
             emit(false, &format!("migrate-flat refused: {reason}\n"));
             1
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn planner_does_not_inherit_database_url() {
+        let output = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "cli::migrate_flat::tests::planner_environment_child",
+                "--ignored",
+                "--nocapture",
+            ])
+            .env(
+                "PSEUDOLIFE_MCP_DATABASE_URL",
+                "fixture-must-not-reach-planner",
+            )
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+    }
+
+    #[test]
+    #[ignore = "subprocess probe launched with an explicit database URL"]
+    fn planner_environment_child() {
+        assert_eq!(
+            std::env::var("PSEUDOLIFE_MCP_DATABASE_URL").unwrap(),
+            "fixture-must-not-reach-planner"
+        );
+        #[cfg(windows)]
+        let mut command = {
+            let mut command = planner_command(Path::new("cmd.exe"));
+            command.args([
+                "/D",
+                "/C",
+                "if defined PSEUDOLIFE_MCP_DATABASE_URL (exit 1) else (exit 0)",
+            ]);
+            command
+        };
+        #[cfg(unix)]
+        let mut command = {
+            let mut command = planner_command(Path::new("/bin/sh"));
+            command.args(["-c", "test -z \"${PSEUDOLIFE_MCP_DATABASE_URL+x}\""]);
+            command
+        };
+        assert!(command.status().unwrap().success());
     }
 }

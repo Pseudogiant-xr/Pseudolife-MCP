@@ -119,7 +119,7 @@ fn map(fields: Vec<(&str, Node)>) -> Node {
 }
 
 pub(crate) fn plan(text: &str, entries: i64) -> Result<Value, String> {
-    let config = yaml_load::load_rewriting(text).map_err(|error| {
+    let config = yaml_load::load_migrating(text).map_err(|error| {
         if [yaml_load::SHARED, yaml_load::BIG_INT, yaml_load::UNWRITABLE].contains(&error.as_str()) {
             error
         } else {
@@ -296,5 +296,18 @@ mod tests {
         let node = Node::Str("1e5".into());
         assert_eq!(yaml_dump::safe_dump(&node), "'1e5'\n");
         assert_eq!(yaml_dump::safe_dump_pyyaml(&node), "1e5\n...\n");
+    }
+
+    #[test]
+    fn migration_preserves_non_specific_scalar_tags() {
+        let result = plan(
+            "updates: {check_releases: ! 'on'}\nmemory: {miras: {preset: continuum}}\n",
+            0,
+        )
+        .unwrap();
+        assert_eq!(
+            result["yaml"],
+            "updates:\n  check_releases: true\nmemory:\n  miras:\n    preset: flat\n"
+        );
     }
 }

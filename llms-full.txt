@@ -7546,17 +7546,28 @@ every variant.
   eviction. IDs, timestamps, supersession, episode links and other entry
   fields stay unchanged, including rows in unrecognized bands. Capacity
   is at least the old total, the complete row count and 5,250; larger banks
-  use the single-band custom layout below. Ordinary starts still accept
-  the existing presets; this command does not retire them.
+  use the single-band custom layout below. Banks that have not run this
+  migration still accept existing presets. A migrated bank must keep its
+  matching flat layout: changing its preset back to continuum is refused
+  before hydration. A bank that has never been migrated can still switch
+  from flat to continuum through the existing startup rebalance; that is
+  not an inverse of this migration.
 
   The command commits its data migration before atomically replacing the
   config. If interrupted, keep the daemon stopped and repeat the same
-  command to finish the committed plan. A migrated bank refuses startup
+  command to finish the committed plan. If the config already has a flat
+  layout with sufficient capacity, a retry can complete a pending marker
+  after unrelated config edits, preserving entries written since migration.
+  A migrated bank refuses startup
   with a mismatched loaded layout. Both backup paths are printed: use your
   rehearsed tooling to restore **both bank and config** to this same target
   to undo the migration. The command never guesses a Docker restore target.
   Keep that pair; it is outside ordinary backup rotation. This is a data
   migration using the existing `meta` table, without a schema bump.
+
+  If `PSEUDOLIFE_MCP_CONFIG` is set, it must resolve to the same
+  `<data-dir>/config.yaml` file; otherwise migration refuses before connecting
+  to the bank. The command cannot back up and rewrite an external config path.
 
   Both engines refuse a rewrite containing YAML timestamp or binary
   values, integers outside signed 64-bit range, or shared mapping/list

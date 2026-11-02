@@ -11,3 +11,6 @@
   acknowledges a rehearsed external restore of this exact bank and config;
   it prints both backup paths and never guesses a Docker restore target.
   Existing presets remain supported.
+- Migration refuses mismatched config-path overrides and resumes a pending
+  marker after unrelated edits to a sufficient flat layout. Native planning
+  preserves non-specific YAML tags and cannot inherit the bank's database URL.
