@@ -336,11 +336,11 @@ def test_new_mount_is_allowed_without_replacing_existing_data(tmp_path, kind, mo
             {"type": kind, "source": "cache" if kind == "volume" else str(repo / "cache"),
              "target": "/new-cache"})
         state_path.write_text(json.dumps(state))
-        args = ["--json", "--no-test-login", "--no-cache-prune", "--health-retries", "1", "--health-delay-ms", "0"]
+        args = ["--json", "--no-cache-prune", "--health-retries", "1", "--health-delay-ms", "0"]
         if mode == "release":
-            args += ["--tag", "0.21.1"]
+            args += ["--tag", "0.21.1", "--daemon-only"]
         else:
-            args += ["--checkout", str(repo)]
+            args += ["--checkout", str(repo), "--no-test-login"]
             if mode == "engine":
                 args += ["--engine", "rust"]
         result = run_arm(repo, env, binary, args)
