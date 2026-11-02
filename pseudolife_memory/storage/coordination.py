@@ -2858,11 +2858,17 @@ class CoordinationStore:
             rows = [item for item in rows if item["decision"] == "attention"]
             if not rows:
                 return None
+        # Peer staggering cannot delay an authority offer. Expired
+        # non-Codex offers cannot mask a newer peer offer either.
+        privileged = [item for item in rows if item["reason"] in _PRIVILEGED_WAKE_REASONS
+                      and (codex or item["queued"] or item["served_at"] > now - WAKE_SERVE_REPEAT)]
+        if privileged:
+            rows = privileged
         newest = max(rows, key=lambda r: (r["created_at"], r["wake_id"]))
         if not codex and not any(row["queued"] for row in rows) and newest["served_at"] <= now - WAKE_SERVE_REPEAT:
             return None
         offer = {"decision": newest["decision"], "reason": newest["reason"],
-                 "ring_at": max(r["ring_at"] for r in rows)}
+                 "ring_at": (min if privileged else max)(r["ring_at"] for r in rows)}
         if codex:
             # Exact immutable message expiry, not a new lifetime on each heartbeat.
             offer["message_expires_at"] = newest["expires_at"]

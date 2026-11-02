@@ -20,6 +20,16 @@ def expect(step, decision, reason):
     return step
 
 
+def immediate_offer(step):
+    check_wake = step.check
+
+    def check(dsn, ctx, response, before):
+        check_wake(dsn, ctx, response, before)
+        assert response["json"]["wake"]["ring_at"] <= ctx.now, response
+    step.check = check
+    return step
+
+
 def setup():
     return [
         reg("conductor", "A", project="p1"),
@@ -72,6 +82,13 @@ class ConductorWakeFences(Scenario):
                 "UPDATE coordination_leases SET fence=nextval('coordination_lease_fence') "
                 "WHERE name='conductor:p1'")),
             expect(msg("stale fence withheld", "C", "B", "stale fence"), "withheld", "need_not_cleared"),
+            expect(msg("ordinary urgency", "C", "B", "first", urgent=True), "rung", "urgent"),
+            expect(msg("staggered peer urgency", "C", "B", "second", urgent=True), "rung", "urgent"),
+            seed("restore conductor", lambda s, c: s.grant_conductor("p1", c.id("A"), hold=3600)),
+            expect(msg("conductor bypasses pending stagger", "A", "B", "immediate"), "rung", "conductor"),
+            immediate_offer(expect(act("serve immediately", "heartbeat", agent="B", body=lambda c: {
+                "attachment_id": "listener", "generation": c.vals["generation"],
+                "ring_armed_until": c.now + 60}), "rung", "conductor")),
         ]
 
 

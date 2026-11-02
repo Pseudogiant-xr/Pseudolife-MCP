@@ -42,6 +42,33 @@ def test_conductor_bypasses_peer_caps_but_spends_its_own_budget(store):
         "decision": "capped", "reason": "authority_sender_hour"}
 
 
+@pytest.mark.parametrize("codex", [False, True])
+def test_pending_peer_stagger_cannot_delay_conductor_offer(store, codex):
+    sender, peer = _delegate(store), store.register("alice")
+    recipient = store.register("alice", project="proj", capabilities={
+        "ring": True, **({"codex": False} if codex else {})})
+    attached = store.attach(*creds(recipient), attachment_id="listener", ring=True,
+                           ring_armed_until=1060.0)
+    store.update(*creds(recipient), park_reason="needs_approval",
+                 park_needs="maintainer approval", park_clear_by="maintainer")
+    _wake(store, peer, recipient, urgent=True)
+    assert _wake(store, peer, recipient, urgent=True)["ring_at"] == 1030.0
+    store.test_time[0] = 1001.0
+    assert _wake(store, sender, recipient)["ring_at"] == 1001.0
+    offer = store.heartbeat(*creds(recipient), attachment_id="listener",
+                            generation=attached["generation"], ring_armed_until=1061.0)["wake"]
+    assert (offer["reason"], offer["ring_at"]) == ("conductor", 1001.0)
+
+    if not codex:
+        # Ordinary non-Codex offers lapse after one heartbeat interval;
+        # that old authority offer must not hide a subsequent peer ring.
+        store.test_time[0] = 1031.0
+        _wake(store, peer, recipient, urgent=True)
+        offer = store.heartbeat(*creds(recipient), attachment_id="listener",
+                                generation=attached["generation"], ring_armed_until=1091.0)["wake"]
+        assert offer["reason"] == "urgent"
+
+
 @pytest.mark.parametrize("invalid", ["expired", "stolen", "fence", "record", "project", "label"])
 def test_only_current_matching_grant_bypasses_need(store, invalid):
     sender, recipient = _delegate(store), _done(store)

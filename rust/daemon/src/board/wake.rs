@@ -671,6 +671,24 @@ pub async fn serve_wake(c: &impl GenericClient, agent_id: &str, now: f64) -> Res
             return Ok(Value::Null);
         }
     }
+    // Peer staggering cannot delay an authority offer; expired non-Codex
+    // authority offers must not mask a newer peer offer either.
+    let privileged: Vec<Offerable> = rows
+        .iter()
+        .filter(|item| {
+            PRIVILEGED_WAKE_REASONS.contains(&item.reason.as_str())
+                && (codex
+                    || item.queued
+                    || item
+                        .served_at
+                        .is_some_and(|at| at > now - WAKE_SERVE_REPEAT))
+        })
+        .cloned()
+        .collect();
+    let immediate = !privileged.is_empty();
+    if immediate {
+        rows = privileged;
+    }
     let mut newest = &rows[0];
     for r in &rows[1..] {
         if (r.created_at, r.wake_id) > (newest.created_at, newest.wake_id) {
@@ -683,8 +701,13 @@ pub async fn serve_wake(c: &impl GenericClient, agent_id: &str, now: f64) -> Res
     {
         return Ok(Value::Null);
     }
+    let ring_at = if immediate {
+        rows.iter().map(|r| r.ring_at).fold(f64::MAX, f64::min)
+    } else {
+        max_ring(&rows)
+    };
     let mut offer = json!({"decision": newest.decision, "reason": newest.reason,
-                           "ring_at": float_value(max_ring(&rows))});
+                           "ring_at": float_value(ring_at)});
     if codex {
         offer["message_expires_at"] = float_value(newest.expires_at);
         if newest.decision == "attention" {
