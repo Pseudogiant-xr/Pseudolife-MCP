@@ -245,22 +245,28 @@ impl Shim {
     }
     async fn request(
         self: Arc<Self>,
-        mut req: Request<Incoming>,
+        req: Request<Incoming>,
     ) -> Result<Response<Full<Bytes>>, Infallible> {
+        let (parts, body) = req.into_parts();
+        let req = Request::from_parts(parts, ());
+        let mut completion_body = Some(body);
         if req.method() != hyper::Method::POST
             || !matches!(
                 req.uri().path_and_query().map(|path| path.as_str()),
                 Some("/chat/completions" | "/v1/chat/completions")
             )
         {
-            // Dropping Incoming before a separately sent body arrives makes
-            // Hyper close the connection early. Discard ignored bodies through
-            // EOF so the existing response can be delivered without a reset.
-            while let Some(frame) = req.body_mut().frame().await {
-                if frame.is_err() {
-                    break;
+            // Keep Incoming alive while separately sent bytes arrive; dropping
+            // it makes Hyper close early. Preserve Python's immediate response
+            // for ignored bodies rather than waiting for the sender to finish.
+            let mut ignored = completion_body.take().expect("request body");
+            tokio::spawn(async move {
+                while let Some(frame) = ignored.frame().await {
+                    if frame.is_err() {
+                        break;
+                    }
                 }
-            }
+            });
         }
         if !matches!(req.method().as_str(), "GET" | "POST") {
             let method = req
@@ -315,7 +321,12 @@ impl Shim {
                 )
             }
             ("POST", "/chat/completions" | "/v1/chat/completions") => {
-                let result = match req.into_body().collect().await {
+                let result = match completion_body
+                    .take()
+                    .expect("completion body")
+                    .collect()
+                    .await
+                {
                     Ok(body) => {
                         let raw = body.to_bytes();
                         let text = String::from_utf8_lossy(&raw);
@@ -578,10 +589,40 @@ where
 #[cfg(test)]
 mod tests {
     #[tokio::test]
-    async fn ignored_request_body_is_drained_before_response() {
+    async fn ignored_request_body_keeps_early_response_and_connection() {
         use super::*;
-        use std::{future::Future, task::Poll};
         use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+
+        async fn response(
+            reader: &mut BufReader<tokio::io::ReadHalf<tokio::io::DuplexStream>>,
+            status: u16,
+        ) -> Vec<u8> {
+            let mut headers = String::new();
+            loop {
+                let mut line = String::new();
+                assert_ne!(
+                    reader.read_line(&mut line).await.unwrap(),
+                    0,
+                    "response closed early"
+                );
+                if line == "\r\n" {
+                    break;
+                }
+                headers.push_str(&line);
+            }
+            assert!(headers.starts_with(&format!("HTTP/1.1 {status} ")));
+            let length: usize = headers
+                .lines()
+                .find_map(|line| {
+                    let (key, value) = line.split_once(':')?;
+                    key.eq_ignore_ascii_case("content-length")
+                        .then(|| value.trim().parse().unwrap())
+                })
+                .unwrap();
+            let mut body = vec![0; length];
+            reader.read_exact(&mut body).await.unwrap();
+            body
+        }
 
         let config = config::parse(vec![
             "claude".into(),
@@ -601,35 +642,14 @@ mod tests {
         });
         for (method, path, status) in [
             ("POST", "/missing", 404),
-            ("PUT", "/models", 501),
             ("GET", "/models", 200),
+            ("PUT", "/models", 501),
         ] {
             let (client, server) = tokio::io::duplex(4096);
-            let (witness, ready) = tokio::sync::oneshot::channel();
-            let witness = Arc::new(Mutex::new(Some(witness)));
             let shim = shim.clone();
             let service = service_fn(move |req| {
                 let shim = shim.clone();
-                let witness = witness.lock().unwrap().take().unwrap();
-                async move {
-                    tokio::spawn(async move {
-                        let mut response = Box::pin(shim.request(req));
-                        let first = std::future::poll_fn(|cx| {
-                            Poll::Ready(match response.as_mut().poll(cx) {
-                                Poll::Pending => None,
-                                Poll::Ready(answer) => Some(answer),
-                            })
-                        })
-                        .await;
-                        let _ = witness.send(first.is_none());
-                        match first {
-                            Some(answer) => answer,
-                            None => response.await,
-                        }
-                    })
-                    .await
-                    .unwrap()
-                }
+                async move { tokio::spawn(shim.request(req)).await.unwrap() }
             });
             let connection = tokio::spawn(async move {
                 http1::Builder::new()
@@ -647,53 +667,46 @@ mod tests {
                 )
                 .await
                 .unwrap();
-            // The service has polled the actual request future with the body
-            // withheld, rather than merely not being scheduled yet.
-            assert!(
-                tokio::time::timeout(std::time::Duration::from_secs(5), ready)
+            // The completed response is the barrier: Python answers ignored
+            // bodies immediately, including when their bytes are withheld.
+            let body = tokio::time::timeout(
+                std::time::Duration::from_secs(5),
+                response(&mut reader, status),
+            )
+            .await
+            .unwrap();
+            match status {
+                404 => assert_eq!(body.as_slice(), br#"{"error": "not found"}"#),
+                501 => assert!(
+                    String::from_utf8(body)
+                        .unwrap()
+                        .contains("Unsupported method ('PUT')")
+                ),
+                _ => assert_eq!(
+                    serde_json::from_slice::<Value>(&body).unwrap()["data"][0]["id"],
+                    "fixture"
+                ),
+            }
+            if status != 501 {
+                // Python's unsupported-method reply explicitly closes.
+                // Only now release the ignored body (invalid JSON on purpose),
+                // followed by another request. Dropping Incoming closes this
+                // connection before the second response; retaining it does not.
+                writer
+                    .write_all(b"!?GET /models HTTP/1.1\r\nHost: fixture\r\n\r\n")
                     .await
-                    .unwrap()
-                    .unwrap(),
-                "{method} {path} answered before consuming its body"
-            );
-            writer.write_all(b"!?").await.unwrap(); // ignored, not JSON-decoded
-            let response = async {
-                let mut headers = String::new();
-                loop {
-                    let mut line = String::new();
-                    assert_ne!(reader.read_line(&mut line).await.unwrap(), 0);
-                    if line == "\r\n" {
-                        break;
-                    }
-                    headers.push_str(&line);
-                }
-                assert!(headers.starts_with(&format!("HTTP/1.1 {status} ")));
-                let length: usize = headers
-                    .lines()
-                    .find_map(|line| {
-                        let (key, value) = line.split_once(':')?;
-                        key.eq_ignore_ascii_case("content-length")
-                            .then(|| value.trim().parse().unwrap())
-                    })
                     .unwrap();
-                let mut body = vec![0; length];
-                reader.read_exact(&mut body).await.unwrap();
-                match status {
-                    404 => assert_eq!(body, br#"{"error": "not found"}"#),
-                    501 => assert!(
-                        String::from_utf8(body)
-                            .unwrap()
-                            .contains("Unsupported method ('PUT')")
-                    ),
-                    _ => assert_eq!(
-                        serde_json::from_slice::<Value>(&body).unwrap()["data"][0]["id"],
-                        "fixture"
-                    ),
-                }
-            };
-            tokio::time::timeout(std::time::Duration::from_secs(5), response)
+                let body = tokio::time::timeout(
+                    std::time::Duration::from_secs(5),
+                    response(&mut reader, 200),
+                )
                 .await
                 .unwrap();
+                assert_eq!(
+                    serde_json::from_slice::<Value>(&body).unwrap()["data"][0]["id"],
+                    "fixture"
+                );
+            }
             drop(reader);
             drop(writer);
             connection.await.unwrap().unwrap();
