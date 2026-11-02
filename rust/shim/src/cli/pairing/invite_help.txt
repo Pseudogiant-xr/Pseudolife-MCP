@@ -1,0 +1,34 @@
+usage: pseudolife-mcp invite [-h] [--tier {minimal,core,full}]
+                             [--board | --no-board] [--expires EXPIRES]
+                             [--replace] [--url URL] [--port PORT]
+                             [--bank FINGERPRINT] [--list] [--revoke NAME]
+                             [--yes] [--json]
+                             [name]
+
+Give another machine its own principal on this bank: prints a short-lived,
+single-use pairing code for `pseudolife-mcp pair`. Exit codes: 0 done, 1 the
+database failed, 2 usage or not confirmed, 4 refused before any change.
+
+positional arguments:
+  name                  the new machine's principal, e.g. laptop
+
+options:
+  -h, --help            show this help message and exit
+  --tier {minimal,core,full}
+                        its default toolset tier (default: the daemon's)
+  --board               admit it to the agent board (a new principal's
+                        default)
+  --no-board            do not admit it to the agent board
+  --expires EXPIRES     how long the code lives: 15m (default), at most 24h
+  --replace             give a paired principal a new code (its token works
+                        until redeemed)
+  --url URL             the daemon URL to print (default: expose status)
+  --port PORT           the local daemon's port (default: PSEUDOLIFE_MCP_PORT,
+                        else 8765)
+  --bank FINGERPRINT    refuse unless the database holds this bank (/health's
+                        bank)
+  --list                list principals with when each last connected, and
+                        refused tokens
+  --revoke NAME         revoke a stored principal
+  --yes                 revoke without asking
+  --json                one JSON report on stdout

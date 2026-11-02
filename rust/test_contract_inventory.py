@@ -58,8 +58,10 @@ def test_literal_parameterization_keeps_concrete_ids(tmp_path, monkeypatch):
 def test_audit_rejects_detached_cli_rows(monkeypatch, mode, status):
     original = inventory.source
     register = original("rust/PARITY.md").replace("\n\n| invite |", "\n| invite |")
-    row = f"| {mode} | 2 | deferred |"
-    register = register.replace(row, f"\n| {mode} | 2 | {status} |")
+    row = next(line for line in register.splitlines() if line.startswith(f"| {mode} |"))
+    cells = row.split("|")
+    cells[3] = f" {status} "
+    register = register.replace(row, "\n" + "|".join(cells))
     monkeypatch.setattr(inventory, "source", lambda path: register if path == "rust/PARITY.md" else original(path))
     with pytest.raises(AssertionError, match="CLI mode outside status table"):
         inventory.validate()
