@@ -324,7 +324,15 @@ pub(super) async fn running_name(port: u16) -> Option<(String, String)> {
     None
 }
 
+pub(super) fn setup_command(tier: &Tier) -> String {
+    super::setup_command(match tier {
+        Tier::Docker(_, container) => Some(container),
+        Tier::Local => None,
+    })
+}
+
 pub(super) async fn restart(tier: &Tier, port: u16) -> Result<()> {
+    let resume = setup_command(tier);
     let Tier::Docker(docker, container) = tier else {
         return Ok(());
     };
@@ -332,7 +340,7 @@ pub(super) async fn restart(tier: &Tier, port: u16) -> Result<()> {
     if output.code != 0 {
         return Err(Error::new(
             format!(
-                "the daemon restart failed ({}); the config is written: run `docker restart {container}`, then `pseudolife-mcp maintainer setup` again",
+                "the daemon restart failed ({}); the config is written: run `docker restart {container}`, then `{resume}` again",
                 output.detail()
             ),
             5,
@@ -348,7 +356,7 @@ pub(super) async fn restart(tier: &Tier, port: u16) -> Result<()> {
         if tokio::time::Instant::now() >= deadline {
             return Err(Error::new(
                 format!(
-                    "the daemon did not report healthy within 180 s of its restart: check `docker logs {container}`, then run `pseudolife-mcp maintainer setup` again"
+                    "the daemon did not report healthy within 180 s of its restart: check `docker logs {container}`, then run `{resume}` again"
                 ),
                 5,
             ));
