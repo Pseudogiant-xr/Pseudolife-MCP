@@ -23,6 +23,10 @@ mod tunnel;
 mod version;
 pub mod wait_mail;
 
+pub(crate) fn process_table() -> Result<Option<connect::ProcessTable>, ()> {
+    connect::process_table()
+}
+
 const HELP: &str = include_str!("cli_help.txt");
 const DEFERRED_MODES: &[&str] = &[
     "serve",

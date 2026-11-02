@@ -659,12 +659,12 @@ pub fn expose_launcher(layout: &Layout) -> Value {
         }
         let result = fs::create_dir_all(bin)
             .and_then(|_| std::os::unix::fs::symlink(&layout.launcher, &link));
-        return match result {
+        match result {
             Ok(()) => json!({"state":"linked","detail":"linked user bin to the stable launcher"}),
             Err(_) => {
                 json!({"state":"failed","detail":"could not create the user bin link; run the stable launcher by its full path"})
             }
-        };
+        }
     }
     #[cfg(windows)]
     {

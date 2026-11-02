@@ -1,11 +1,6 @@
 use super::*;
 use std::collections::BTreeSet;
 
-// Reuse the client connector's read-only process inspection rather than a
-// shell command, PID probe, or Windows console control event.
-#[path = "../cli/connect/procs.rs"]
-#[allow(dead_code)]
-mod inspection;
 pub type Process = (u32, u32, PathBuf);
 #[derive(Clone, Debug)]
 pub struct Evidence {
@@ -17,7 +12,7 @@ pub fn default_tunnel_root() -> PathBuf {
     home().join(".pseudolife-mcp/tunnel")
 }
 pub fn collect_evidence(layout: &Layout) -> Result<Evidence> {
-    let mut processes = inspection::list()
+    let mut processes = crate::cli::process_table()
         .map_err(|_| "process table is unreadable; no runtime was removed")?
         .ok_or("this platform has no process table; no runtime was removed")?;
     verify_process_evidence(&mut processes)?;
