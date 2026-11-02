@@ -201,10 +201,14 @@ pub fn plan_replace(
     if no_spawn
         && (effective_env.get(NO_SPAWN_KEY) != before.get(NO_SPAWN_KEY)
             || (forwarded.is_some_and(|f| f.iter().any(|v| v == NO_SPAWN_KEY))
-                && !before.contains_key(NO_SPAWN_KEY)))
+                && !before.contains_key(NO_SPAWN_KEY)
+                && !user_server
+                    .get("env_vars")
+                    .and_then(Value::as_array)
+                    .is_some_and(|vars| vars.iter().any(|v| v == NO_SPAWN_KEY))))
     {
         return Err(SetupError(
-            "No-spawn settings come from another Codex configuration layer; replace mode did not change them.",
+            "No-spawn settings come from another Codex configuration layer; remove PSEUDOLIFE_MCP_NO_SPAWN from that layer's env or env_vars, then retry replace mode.",
         ));
     }
     let mut after = before.clone();

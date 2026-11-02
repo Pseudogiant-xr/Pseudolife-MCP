@@ -289,6 +289,18 @@ fn replace_refuses_project_forwarded_no_spawn() {
     assert!(plan_replace(&config, &home.0, "https://example.com", None, true).is_err());
 }
 
+#[test]
+fn replace_accepts_user_owned_forwarded_no_spawn() {
+    let home = Home::new();
+    let mut config = config(&home.0);
+    for root in ["/config", "/layers/0/config"] {
+        config.pointer_mut(root).unwrap()["mcp_servers"]["pseudolife-memory"]["env_vars"] =
+            json!(["PSEUDOLIFE_MCP_NO_SPAWN"]);
+    }
+    let plan = plan_replace(&config, &home.0, "https://example.com", None, true).unwrap();
+    assert_eq!(plan.env()["PSEUDOLIFE_MCP_NO_SPAWN"], "1");
+}
+
 #[tokio::test]
 async fn concurrent_connection_setups_preserve_the_winners_credential() {
     struct Pausing {
