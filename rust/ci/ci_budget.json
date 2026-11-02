@@ -13,7 +13,7 @@
         "*": "the required Parity gate reads every gated job's result"
       },
       "source-mutants": {
-        "candidate": "nightly only: its 74 jobs start only once the candidate compiles, so a broken build spends no runners on them"
+        "candidate": "nightly only: its 76 jobs start only once the candidate compiles, so a broken build spends no runners on them"
       },
       "stress-report": {
         "stress-plan": "reports only a loop that was planned"
@@ -161,7 +161,7 @@
       "fixtures": "defc5e07c5ac3f94",
       "candidate": "d71c5590ce6f866a",
       "candidate-harness": "43b859ee9d5fd738",
-      "parity-checks": "06054831b8e7b5d2",
+      "parity-checks": "9d36c451eaf6958e",
       "daemon-image": "5c93764cb0f0bab7",
       "parity": "aa4ba434de948ea6"
     },
@@ -240,6 +240,11 @@
         "job": "daemon-image",
         "fingerprint": "5c93764cb0f0bab7",
         "reason": "Adds one network-disabled CLI version invocation to the existing image job; no new job or dependency setup. The shim shares the daemon dependency build; retain current budget pending batch measurement."
+      },
+      {
+        "job": "parity-checks",
+        "fingerprint": "9d36c451eaf6958e",
+        "reason": "Registers the update golden/live row and transaction/wrapper acceptance inside existing CLI steps; no new PR job, shard, dependency install or build. The afe57bbf Windows stress run 41425900902 measured the selected transaction cases at 122.69s median and wrappers at 46.72s across 20 successful runs; complete earlier Windows dev VM files took 204.55s and 49.64s before later regression additions. Allow up to eight additional minutes per CLI shard, including later cases: the retained 384.2-minute baseline plus sixteen is 400.2, within the unchanged 410-minute limit. The CLI step timeout rises from 10 to 15 minutes; the job limit stays 35. Other shards retain their measured costs. These are bounded estimates, not new full-job measurements; remeasure from batch/master runs. The update-0 source shard adds two nightly/manual-only jobs outside the PR budget."
       }
     ]
   },

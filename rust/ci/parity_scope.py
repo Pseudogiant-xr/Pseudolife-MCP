@@ -136,6 +136,7 @@ ALL = tuple(SUITES)
 # (the W1-C rows match their shard's w1c_rows; tests pin both).
 ROW_SUITES = {
     "mail": "cli", "hook": "cli", "episode": "cli", "lease": "cli", "lease_operator": "cli",
+    "update": "cli",
     "doctor": "w1c-doctor",
     "transfer": "w1c-pairing", "invite": "w1c-pairing", "pair": "w1c-pairing",
     "test_login": "w1c-connection", "connect": "w1c-connect", "maintainer": "w1c-connect",
@@ -149,13 +150,17 @@ SHIM = ("cli", "cli-live", "judges", "w1c-doctor", "w1c-pairing", "w1c-connectio
 # The pseudolife-daemon crate (and its graph and dream contract binaries).
 DAEMON = ("cli", "cli-store", "cli-daemon", "cli-daemon-2", "cli-live", "eval", "h5-w1a", "h5-background",
           "h5-daemon-mutants", "h5-graph-mutants")
-# rust/shim/src/cli entries that only one command's code uses, by the rows
-# that compare it; any other shim file reaches the whole binary. Shared
+# rust/shim/src/cli entries whose users are covered by the listed rows;
+# any other shim file reaches the whole binary. Shared
 # helpers (lease, pairing, hook_http, hook_json, doorbell_*) are left out:
 # other commands import them. test_parity_scope.py scans the shim source and
 # fails if another command starts using a mapped entry.
 SHIM_COMMANDS = {
-    "backup": ("backup",), "backup_help.txt": ("backup",), "board_audit": ("audit",),
+    # The conservative import scan also sees update's private backup module.
+    # Include that row rather than exempting the match from the coverage guard.
+    "backup": ("backup", "update"), "backup_help.txt": ("backup", "update"),
+    "board_audit": ("audit",),
+    "update": ("update",),
     "connect": ("connect",), "doctor": ("doctor",), "maintainer": ("maintainer",),
     "move_cli.rs": ("move",), "test_login": ("test_login",),
     "transfer": ("transfer",), "transfer.rs": ("transfer",), "tunnel": ("tunnel",),

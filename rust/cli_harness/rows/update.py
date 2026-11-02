@@ -10,6 +10,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import threading
 
 from ..core import Case, WINDOWS
+from ..mutants import Mutant
 
 
 class Health:
@@ -83,3 +84,10 @@ def cases():
              setup=setup, after=after, daemon=listener(), expect_output=True, golden=False,
              note="OS update lock holder state is observed live; transaction faults run in the dedicated acceptance file"),
     ]
+
+
+MUTANTS = [
+    Mutant("update-current-exit", "update", "shim/src/cli/update/mod.rs",
+           "self.report.exit_code = 3;", "self.report.exit_code = 0;",
+           ("update-check-current",)),
+]
