@@ -11,8 +11,14 @@ pub(crate) fn restore_existing(
     identity: &[u128],
     bytes: &[u8],
     published: &mut bool,
+    backup: Option<&Path>,
 ) -> Result<(), String> {
-    restore_after_check(source, target, identity, bytes, published, || {}, || {})
+    restore_after_check(source, target, identity, bytes, published, || {}, || {}).map_err(|error| {
+        match backup {
+            Some(path) => format!("{error} Backup retained at {path:?}."),
+            None => error,
+        }
+    })
 }
 
 fn restore_after_check(
@@ -46,9 +52,40 @@ fn restore_after_check(
         ));
     }
     *published = true;
+    cleanup_restored(
+        target,
+        &moved,
+        || sync_parent(target),
+        || fs::remove_file(&moved),
+    )
+}
+
+fn sync_parent(path: &Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        let parent = path.parent().ok_or(std::io::ErrorKind::InvalidInput)?;
+        fs::File::open(parent)?.sync_all()
+    }
+    #[cfg(windows)]
+    {
+        let _ = path;
+        Ok(())
+    }
+}
+
+fn cleanup_restored(
+    target: &Path,
+    moved: &Path,
+    sync: impl FnOnce() -> std::io::Result<()>,
+    remove: impl FnOnce() -> std::io::Result<()>,
+) -> Result<(), String> {
+    // The restored directory entry must reach disk even if cleanup fails.
+    sync().map_err(|error| format!(
+        "Setup file {target:?} was restored but its directory could not be synced ({:?}: {error}); previous owned file retained at {moved:?}. Review both paths before retrying recovery.", error.kind()
+    ))?;
     // The public path is restored now. An unlink failure retains the old owned
     // file at its private name; it must not turn this into an uncommitted write.
-    fs::remove_file(&moved).map_err(|error| format!(
+    remove().map_err(|error| format!(
         "Setup file {target:?} was restored, but the previous owned file remains at {moved:?}: {:?}: {error}. Review and remove that retained file before retrying recovery.", error.kind()
     ))
 }
@@ -79,24 +116,39 @@ fn move_aside(path: &Path) -> Result<PathBuf, String> {
         ".pseudolife-rollback-{}",
         uuid::Uuid::new_v4().simple()
     ));
-    restore_exclusive(path, &moved).map_err(|error| format!(
-        "Setup file {path:?} could not be moved for rollback ({:?}: {error}); resolve the reported filesystem error, then retry recovery.", error.kind()
-    ))?;
+    restore_exclusive(path, &moved).map_err(|error| move_error(path, &error))?;
     Ok(moved)
 }
 
+fn move_error(path: &Path, error: &std::io::Error) -> String {
+    if matches!(
+        error.kind(),
+        std::io::ErrorKind::InvalidInput | std::io::ErrorKind::Unsupported
+    ) {
+        return format!(
+            "Setup file {path:?} could not be moved for rollback: this filesystem does not support exclusive rename ({:?}: {error}). The file remains at {path:?}; review the retained file and recover manually on a filesystem supporting exclusive rename.",
+            error.kind()
+        );
+    }
+    format!(
+        "Setup file {path:?} could not be moved for rollback ({:?}: {error}); resolve the reported filesystem error, then retry recovery.",
+        error.kind()
+    )
+}
+
 fn verify_file(path: &Path, identity: &[u128], bytes: &[u8]) -> Result<(), String> {
-    let opened = crate::board::state::open(path).map_err(|cause| {
-        // state::open intentionally exposes only a small error vocabulary.
-        // On its OS-I/O error branch, capture the OS error immediately; on a
-        // security-validation refusal no OS error is implied.
-        let detail = if cause == "state_unavailable" {
-            let error = std::io::Error::last_os_error();
-            format!("{cause}; {:?}: {error}", error.kind())
-        } else {
-            cause.to_owned()
-        };
-        format!("could not open or validate private file {path:?}: {detail}")
+    verify_after_open_error(path, identity, bytes, || {})
+}
+
+fn verify_after_open_error(
+    path: &Path,
+    identity: &[u128],
+    bytes: &[u8],
+    after_error: impl FnOnce(),
+) -> Result<(), String> {
+    let opened = crate::board::state::open_detailed(path).map_err(|cause| {
+        after_error();
+        format!("could not open or validate private file {path:?}: {cause}")
     })?;
     if opened.identity != identity {
         return Err(format!(
@@ -175,16 +227,42 @@ fn restore_exclusive(_source: &Path, _target: &Path) -> std::io::Result<()> {
 #[cfg(windows)]
 #[allow(unsafe_code)] // Exclusive rename preserves a competing destination.
 fn restore_exclusive(source: &Path, target: &Path) -> std::io::Result<()> {
-    use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::Storage::FileSystem::MoveFileW;
-    let source: Vec<u16> = source.as_os_str().encode_wide().chain(Some(0)).collect();
-    let target: Vec<u16> = target.as_os_str().encode_wide().chain(Some(0)).collect();
+    let source = move_path(source)?;
+    let target = move_path(target)?;
     // SAFETY: the NUL-terminated path buffers live through this call.
     if unsafe { MoveFileW(source.as_ptr(), target.as_ptr()) } == 0 {
         Err(std::io::Error::last_os_error())
     } else {
         Ok(())
     }
+}
+
+#[cfg(windows)]
+pub(super) fn move_path(path: &Path) -> std::io::Result<Vec<u16>> {
+    use std::os::windows::ffi::OsStrExt;
+    use std::path::{Component, Prefix};
+    // GetFullPathNameW, used by absolute(), resolves relative paths and dot
+    // components before the verbatim prefix disables Win32 normalization.
+    let absolute = std::path::absolute(path)?;
+    let wide: Vec<u16> = absolute.as_os_str().encode_wide().collect();
+    if wide.contains(&0) {
+        return Err(std::io::ErrorKind::InvalidInput.into());
+    }
+    let mut result: Vec<u16> = match absolute.components().next() {
+        Some(Component::Prefix(prefix)) => match prefix.kind() {
+            Prefix::Verbatim(_) | Prefix::VerbatimDisk(_) | Prefix::VerbatimUNC(_, _) => wide,
+            Prefix::Disk(_) => r"\\?\".encode_utf16().chain(wide).collect(),
+            Prefix::UNC(_, _) => r"\\?\UNC\"
+                .encode_utf16()
+                .chain(wide.into_iter().skip(2))
+                .collect(),
+            Prefix::DeviceNS(_) => return Err(std::io::ErrorKind::InvalidInput.into()),
+        },
+        _ => return Err(std::io::ErrorKind::InvalidInput.into()),
+    };
+    result.push(0);
+    Ok(result)
 }
 
 #[cfg(test)]
@@ -205,6 +283,137 @@ mod tests {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.0);
         }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn review_long_rollback_sibling_preserves_short_public_path_support() {
+        use std::os::windows::ffi::OsStrExt;
+        let home = Home::new();
+        let length = home.0.as_os_str().encode_wide().count();
+        let parent = home.0.join("p".repeat(224 - length - 1));
+        fs::create_dir(&parent).unwrap();
+        let target = parent.join("f");
+        assert_eq!(target.as_os_str().encode_wide().count(), 226);
+        assert!(
+            parent
+                .join(format!(".pseudolife-rollback-{}", "0".repeat(32)))
+                .as_os_str()
+                .encode_wide()
+                .count()
+                > 260
+        );
+        state::atomic_create(&target, b"created-value").unwrap();
+        let identity = state::open(&target).unwrap().identity;
+        remove_created(&target, &identity, b"created-value").unwrap();
+        assert!(!target.exists());
+        state::atomic_create(&target, b"owned-value").unwrap();
+        let source = parent.join("before");
+        state::atomic_create(&source, b"before-value").unwrap();
+        let identity = state::open(&target).unwrap().identity;
+        let mut published = false;
+        restore_existing(
+            &source,
+            &target,
+            &identity,
+            b"owned-value",
+            &mut published,
+            None,
+        )
+        .unwrap();
+        assert!(published);
+        assert_eq!(state::read(&target, 4096).unwrap(), b"before-value");
+        assert_eq!(fs::read_dir(&parent).unwrap().count(), 1);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn review_move_paths_support_unc_and_preserve_verbatim_paths() {
+        for (input, expected) in [
+            (
+                r"\\server\share\folder\file",
+                r"\\?\UNC\server\share\folder\file",
+            ),
+            (r"\\?\C:\folder\file", r"\\?\C:\folder\file"),
+            (r"C:\folder\..\file", r"\\?\C:\file"),
+        ] {
+            let path = move_path(Path::new(input)).unwrap();
+            assert_eq!(
+                String::from_utf16(&path[..path.len() - 1]).unwrap(),
+                expected
+            );
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    #[allow(unsafe_code)] // Alter this test thread's last error after opening failed.
+    fn review_open_error_survives_an_intervening_os_call() {
+        let home = Home::new();
+        let error = verify_after_open_error(&home.0.join("absent"), &[], b"", || {
+            // SAFETY: SetLastError only changes the calling thread's error slot.
+            unsafe { windows_sys::Win32::Foundation::SetLastError(5) };
+        })
+        .unwrap_err();
+        assert!(error.contains("NotFound"), "{error}");
+        assert!(!error.contains("PermissionDenied"), "{error}");
+    }
+
+    #[test]
+    fn review_unsupported_exclusive_rename_gives_actionable_recovery() {
+        for kind in [
+            std::io::ErrorKind::InvalidInput,
+            std::io::ErrorKind::Unsupported,
+        ] {
+            let error = move_error(Path::new("retained-config"), &std::io::Error::from(kind));
+            assert!(
+                error.contains("this filesystem does not support exclusive rename"),
+                "{error}"
+            );
+            assert!(error.contains("retained-config"), "{error}");
+            assert!(!error.contains("then retry"), "{error}");
+        }
+    }
+
+    #[test]
+    fn review_restore_refusal_names_the_actual_backup() {
+        let home = Home::new();
+        let backup = home.0.join("config.bak-pseudolife-fixture");
+        state::atomic_create(&backup, b"before").unwrap();
+        let error = restore_existing(
+            &home.0.join("source"),
+            &home.0.join("absent"),
+            &[],
+            b"",
+            &mut false,
+            Some(&backup),
+        )
+        .unwrap_err();
+        assert!(error.contains(&format!("{backup:?}")), "{error}");
+        assert_eq!(state::read(&backup, 4096).unwrap(), b"before");
+    }
+
+    #[test]
+    fn review_restoration_sync_precedes_failed_cleanup() {
+        let calls = std::cell::RefCell::new(Vec::new());
+        let error = cleanup_restored(
+            Path::new("restored"),
+            Path::new("retained"),
+            || {
+                calls.borrow_mut().push("sync");
+                Ok(())
+            },
+            || {
+                calls.borrow_mut().push("remove");
+                Err(std::io::Error::from(std::io::ErrorKind::PermissionDenied))
+            },
+        )
+        .unwrap_err();
+        assert_eq!(*calls.borrow(), ["sync", "remove"]);
+        assert!(
+            error.contains("was restored") && error.contains("retained"),
+            "{error}"
+        );
     }
 
     #[test]
@@ -245,7 +454,15 @@ mod tests {
         state::atomic_create(&source, b"before-value").unwrap();
         let identity = state::open(&target).unwrap().identity;
         let mut published = false;
-        restore_existing(&source, &target, &identity, b"owned-value", &mut published).unwrap();
+        restore_existing(
+            &source,
+            &target,
+            &identity,
+            b"owned-value",
+            &mut published,
+            None,
+        )
+        .unwrap();
         assert!(published);
         assert_eq!(state::read(&target, 4096).unwrap(), b"before-value");
         assert_eq!(fs::read_dir(&home.0).unwrap().count(), 1);
@@ -366,6 +583,7 @@ mod tests {
             "open failure must remain distinct: {error}"
         );
         assert!(!error.contains("no longer matches"));
+        assert!(error.contains("NotFound"), "{error}");
     }
 
     #[test]

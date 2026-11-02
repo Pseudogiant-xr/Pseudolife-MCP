@@ -73,10 +73,9 @@ fn publish_exclusive(
     target: &Path,
     published: &mut bool,
 ) -> Result<(), &'static str> {
-    use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::Storage::FileSystem::MoveFileW;
-    let source: Vec<u16> = source.as_os_str().encode_wide().chain(Some(0)).collect();
-    let target: Vec<u16> = target.as_os_str().encode_wide().chain(Some(0)).collect();
+    let source = removal::move_path(source).map_err(publish_error)?;
+    let target = removal::move_path(target).map_err(publish_error)?;
     // SAFETY: both buffers are NUL-terminated paths that remain live for the
     // call. MoveFileW refuses an existing destination, preserving its inode.
     if unsafe { MoveFileW(source.as_ptr(), target.as_ptr()) } == 0 {
@@ -353,6 +352,7 @@ impl PrivateEdit {
                 &identity,
                 &self.after,
                 &mut staged.published,
+                self.backup.as_deref(),
             )
             .map_err(SetupError::detail);
             if staged.published {

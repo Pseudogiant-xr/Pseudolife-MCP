@@ -11,3 +11,6 @@
 - Restoration also preserves replacements made by a concurrent writer, and
   uses an exclusive rename without a partial hard-link state. Filesystem errors
   retain their actual cause; early recovery refusals report retained configuration.
+- Windows recovery and exclusive publication support long local and UNC paths.
+  Recovery retains original I/O errors and actual backup paths, explains when
+  exclusive rename is unsupported, and syncs restoration before cleanup.
