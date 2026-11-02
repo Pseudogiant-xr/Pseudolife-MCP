@@ -155,6 +155,29 @@ def test_python_310_saved_commands_name_no_package(monkeypatch, tmp_path, capsys
     assert len(capsys.readouterr().err.splitlines()) == 1
 
 
+def test_python_310_tunnel_service_preview_and_install_name_no_package(monkeypatch, tmp_path, capsys):
+    """``tunnel service preview`` and ``tunnel service install``, through the
+    CLI entry point, describe or write a command that runs later from the
+    service manager's working directory: no notice, and none used up."""
+    from pseudolife_memory import tunnel_cli, tunnel_service
+    from tests.test_tunnel_runtime import _ready_profile
+    _python_310_in_an_older_checkout(monkeypatch, tmp_path)
+    store, profile = _ready_profile(tmp_path)
+    where = ["--profile", profile.name, "--profile-dir", str(store.root)]
+    assert tunnel_cli.main(["service", "preview", *where]) == 0
+    preview = capsys.readouterr()
+    assert "pseudolife_memory.cli" in preview.out
+    assert preview.err == ""
+    installed = []
+    monkeypatch.setattr(tunnel_service, "install_service",
+                        lambda profile, store, command, **kw: installed.append(command) or {"installed": True})
+    assert tunnel_cli.main(["service", "install", *where, "--accept-autostart"]) == 0
+    assert installed and installed[0][1:4] == ["-m", "pseudolife_memory.cli", "tunnel"]
+    assert capsys.readouterr().err == ""
+    child_python.cli_argv("serve")
+    assert len(capsys.readouterr().err.splitlines()) == 1
+
+
 def test_python_310_a_tunnel_started_now_names_the_package_once(monkeypatch, tmp_path, capsys):
     """``tunnel start`` launches its supervisor at once from this working
     directory, so the child may import the checkout there: say so."""
