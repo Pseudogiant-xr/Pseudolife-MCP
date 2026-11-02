@@ -1787,6 +1787,19 @@ jobs:
           python rust/daemon/container_probe.py --timeout 180
           compose logs --no-color rust-daemon > "$RUNNER_TEMP/rust-daemon-startup.log"
           python rust/daemon/container_probe.py --startup-log "$RUNNER_TEMP/rust-daemon-startup.log"
+      - name: Prove network-disabled model reads after a cold restart
+        if: steps.image-inputs.outputs.needed == 'true'
+        run: |
+          python -m pip install --no-compile 'psycopg[binary]>=3.2.4'
+          python rust/daemon/harness/image_model_proof.py --image w3j-daemon-rust:prep --postgres-image pgvector/pgvector:pg18 --models "$RUNNER_TEMP/daemon-models" --out "$RUNNER_TEMP/image-model-proof.json"
+      - name: Retain network-disabled model proof
+        if: always() && steps.image-inputs.outputs.needed == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: rust-image-model-proof-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/image-model-proof.json
+          if-no-files-found: error
+          retention-days: 30
   parity:
     # Only a PR, a merge group or a master push may skip the CLI source
     # matrix. The nightly (and ordinary manual CI) require its success, never
