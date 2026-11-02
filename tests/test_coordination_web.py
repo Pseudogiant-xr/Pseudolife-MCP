@@ -579,6 +579,21 @@ def test_the_conductor_lookup_fails_closed_and_never_raises(monkeypatch):
     assert coordination.conductor_projects(service, {}, **args) == []
 
 
+@pytest.mark.parametrize("remaining", [float("nan"), float("inf"), -float("inf")])
+def test_nonfinite_conductor_lease_is_not_proof_or_cached(monkeypatch, remaining):
+    from pseudolife_memory import coordination
+
+    service, calls = _delegate_service(monkeypatch, {
+        "a" * 32: {"projects": ["p"], "remaining": remaining},
+    })
+    answer = coordination.conductor_projects(
+        service, {"authorization": "Bearer fixture-secret"}, agent="a" * 32,
+        token_map={}, token="fixture-secret", clock=lambda: 1000.0)
+    assert answer == []
+    assert getattr(service, "_conductor_cache", {}) == {}
+    assert calls == [("a" * 32, "default")]
+
+
 def test_a_cold_daemon_skips_the_conductor_lookup(monkeypatch):
     """Opening the board's connection waits on the service lock; the hook
     requests carrying the check-in or the memory note must not wait on it

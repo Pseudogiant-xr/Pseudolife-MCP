@@ -37,6 +37,9 @@ impl State {
         let Ok(remaining) = result else {
             return (now, false);
         };
+        if remaining.is_some_and(|r| !r.is_finite()) {
+            return (now, false);
+        }
         let ttl = remaining.map_or(TTL, |r| {
             Duration::from_secs_f64(r.clamp(0.0, TTL.as_secs_f64()))
         });
@@ -61,15 +64,50 @@ impl State {
 #[derive(Default)]
 pub(crate) struct Cache(Mutex<State>);
 
+// A detached lookup can panic or be dropped. Remove only its own channel,
+// never a later lookup admitted for the same key after this one completed.
+struct LookupCleanup {
+    cache: Arc<Cache>,
+    key: Key,
+    receiver: watch::Receiver<Option<Answer>>,
+}
+
+impl Drop for LookupCleanup {
+    fn drop(&mut self) {
+        let mut state = self.cache.lock();
+        if state
+            .inflight
+            .get(&self.key)
+            .is_some_and(|rx| rx.same_channel(&self.receiver))
+        {
+            state.inflight.remove(&self.key);
+        }
+    }
+}
+
 impl Cache {
+    fn lock(&self) -> std::sync::MutexGuard<'_, State> {
+        self.0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
     async fn lookup<F>(self: &Arc<Self>, key: Key, fetch: F) -> bool
     where
         F: Future<Output = Result<Option<f64>>> + Send + 'static,
     {
+        self.lookup_clock(key, fetch, Instant::now).await
+    }
+
+    async fn lookup_clock<F, C>(self: &Arc<Self>, key: Key, fetch: F, now: C) -> bool
+    where
+        F: Future<Output = Result<Option<f64>>> + Send + 'static,
+        C: Fn() -> Instant + Clone + Send + 'static,
+    {
         let mut rx = {
-            let mut state = self.0.lock().unwrap();
+            let mut state = self.lock();
             if let Some(&(until, answer)) = state.hits.get(&key)
-                && until > Instant::now()
+                && until > now()
             {
                 return answer;
             }
@@ -82,12 +120,19 @@ impl Cache {
                 let (tx, rx) = watch::channel(None);
                 state.inflight.insert(key.clone(), rx.clone());
                 let cache = self.clone();
+                let cleanup = LookupCleanup {
+                    cache: cache.clone(),
+                    key: key.clone(),
+                    receiver: rx.clone(),
+                };
+                let worker_clock = now.clone();
                 tokio::spawn(async move {
+                    let _cleanup = cleanup;
                     // Count from before the query, including any wait for the board lock.
-                    let started = Instant::now();
+                    let started = worker_clock();
                     let result = fetch.await;
-                    let mut state = cache.0.lock().unwrap();
-                    let answer = state.finish(key, result, started, Instant::now());
+                    let mut state = cache.lock();
+                    let answer = state.finish(key, result, started, worker_clock());
                     tx.send_replace(Some(answer));
                 });
                 rx
@@ -100,7 +145,7 @@ impl Cache {
                 .and_then(|answer| *answer)
                 // The worker may publish before expiry but this waiter can
                 // resume after it. Check the proof again on delivery.
-                .is_some_and(|(until, granted)| granted && until > Instant::now())
+                .is_some_and(|(until, granted)| granted && until > now())
         })
         .await
         .unwrap_or(false)
@@ -197,6 +242,54 @@ mod tests {
     }
 
     #[test]
+    fn cleanup_preserves_a_later_lookup_for_the_same_key() {
+        let cache = Arc::new(Cache::default());
+        let (_old_tx, old_rx) = watch::channel(None);
+        let (_new_tx, new_rx) = watch::channel(None);
+        let cleanup = LookupCleanup {
+            cache: cache.clone(),
+            key: key(0),
+            receiver: old_rx,
+        };
+        cache.lock().inflight.insert(key(0), new_rx.clone());
+        drop(cleanup);
+        assert!(cache.lock().inflight[&key(0)].same_channel(&new_rx));
+    }
+
+    #[test]
+    fn nonfinite_lease_remaining_is_not_cached() {
+        let mut state = State::default();
+        let start = Instant::now();
+        for remaining in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            assert!(!state.finish(key(0), Ok(Some(remaining)), start, start).1);
+            assert!(state.hits.is_empty());
+        }
+    }
+
+    #[tokio::test]
+    async fn poisoned_cache_does_not_break_later_hooks() {
+        let cache = Arc::new(Cache::default());
+        let result = std::panic::catch_unwind(|| {
+            let _held = cache.0.lock().unwrap();
+            panic!("fixture poisons cache lock");
+        });
+        assert!(result.is_err());
+        assert!(cache.lookup(key(0), async { Ok(Some(30.0)) }).await);
+    }
+
+    #[tokio::test]
+    async fn panicking_fetch_releases_the_inflight_slot() {
+        let cache = Arc::new(Cache::default());
+        assert!(
+            !cache
+                .lookup(key(0), async { panic!("fixture fetch panic") })
+                .await
+        );
+        assert!(cache.0.lock().unwrap().inflight.is_empty());
+        assert!(cache.lookup(key(0), async { Ok(Some(30.0)) }).await);
+    }
+
+    #[test]
     fn cache_expiry_uses_query_start_and_earliest_lease() {
         let mut state = State::default();
         let start = Instant::now();
@@ -265,27 +358,32 @@ mod tests {
         );
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn descheduled_waiter_rechecks_expiry_after_result_publication() {
         let cache = Arc::new(Cache::default());
-        let (published_tx, published_rx) = oneshot::channel();
-        let mut waiting = Box::pin(cache.lookup(key(0), async move {
-            published_tx.send(()).unwrap();
-            Ok(Some(0.05))
-        }));
-        // Admit the lookup and suspend this waiter before the worker publishes.
+        let clock = Arc::new(Mutex::new(Instant::now()));
+        let now = clock.clone();
+        let (release_tx, release_rx) = oneshot::channel();
+        let mut waiting = Box::pin(cache.lookup_clock(
+            key(0),
+            async move {
+                release_rx.await.unwrap();
+                Ok(Some(30.0))
+            },
+            move || *now.lock().unwrap(),
+        ));
+        // The fetch cannot complete until this waiter is suspended.
         std::future::poll_fn(|cx| {
             assert!(waiting.as_mut().poll(cx).is_pending());
             std::task::Poll::Ready(())
         })
         .await;
-        published_rx.await.unwrap();
-        let until = cache.0.lock().unwrap().hits[&key(0)].0;
-        // The result has been published; model a descheduled hook without
-        // allowing its future to consume the result until after expiry.
-        std::thread::sleep(
-            until.saturating_duration_since(Instant::now()) + Duration::from_millis(10),
-        );
+        let mut published = cache.lock().inflight[&key(0)].clone();
+        release_tx.send(()).unwrap();
+        // Observe the actual publication, then advance only the proof clock.
+        let (until, granted) = (*published.wait_for(Option::is_some).await.unwrap()).unwrap();
+        assert!(granted);
+        *clock.lock().unwrap() = until + Duration::from_nanos(1);
         assert!(!waiting.await);
     }
 

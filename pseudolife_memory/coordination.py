@@ -501,6 +501,9 @@ def _conductor_fetch(service, key, clock) -> tuple[float, tuple[str, ...]] | Non
         return None
     ttl = float(CONDUCTOR_CACHE_SECONDS)
     if projects and remaining is not None:
+        import math
+        if not math.isfinite(float(remaining)):
+            return None
         ttl = max(0.0, min(ttl, float(remaining)))
         if clock() >= now + ttl:   # the lease ended while the query ran
             return None
