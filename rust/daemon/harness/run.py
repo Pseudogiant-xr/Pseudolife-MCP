@@ -1286,7 +1286,8 @@ CONFIG_PROFILES = {
     "YAML 1.1 value mapping key": "memory: {scopes: {rollup: {=: general}}}\n",
     "YAML 1.1 disabled gates": "memory: {dream: {literal_gate: off, span_gate: off}, deep_dream: {judge_mode: off, link_judge_mode: off, junk_judge_mode: off, curation_judge_mode: off, candidate_judge_mode: off}}\n",
     "YAML 1.1 lenient timestamp readers": "memory: {reference: {max_results: 2024-01-01}}\ntime: {relative_age: 2024-01-01}\n",
-    "YAML 1.1 empty binary truthiness": "time: {relative_age: !!binary ''}\n",
+    "YAML 1.1 true gates": "memory: {dream: {literal_gate: true, span_gate: true}}\n",
+    "YAML 1.1 on gates": "memory: {dream: {literal_gate: on, span_gate: on}}\n",
 }
 for _boolean in ("yes", "Yes", "YES", "no", "No", "NO", "on", "On", "ON", "off", "Off", "OFF"):
     CONFIG_PROFILES[f"YAML 1.1 boolean {_boolean}"] = (
@@ -1334,8 +1335,8 @@ print(json.dumps({
  "updates.check_releases": u.check_releases, "updates.unattended_clients": u.unattended_clients,
  "updates.unattended_daemon": u.unattended_daemon, "updates.check_interval_seconds": u.check_interval_seconds,
  "memory.dream.enabled": d.enabled,
- "memory.dream.literal_gate_effective": "log" if d.literal_gate is False else d.literal_gate,
- "memory.dream.span_gate_effective": "log" if d.span_gate is False else d.span_gate,
+ "memory.dream.literal_gate_effective": "log" if isinstance(d.literal_gate, bool) else d.literal_gate,
+ "memory.dream.span_gate_effective": "log" if isinstance(d.span_gate, bool) else d.span_gate,
  "memory.deep_dream.judge_mode": c.memory.deep_dream.judge_mode,
  "time.relative_age_effective": bool(c.time.relative_age),
  "memory.reference.max_results_effective": reference_limit,

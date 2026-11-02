@@ -15,7 +15,7 @@ use yaml_rust2::scanner::TScalarStyle;
 use super::yaml_dump::{
     TAG_BOOL, TAG_FLOAT, TAG_INT, TAG_MERGE, TAG_NULL, TAG_STR, TAG_TIMESTAMP, resolve,
 };
-use crate::config::{Node, resolve_scalar, safe_load_startup_with, safe_load_with};
+use crate::config::{Node, UnsupportedKind, resolve_scalar, safe_load_startup_with, safe_load_with};
 
 /// Startup must preserve values exactly. The editor's read-only projection
 /// may display an oversized integer as a float; startup must not use it.
@@ -42,9 +42,10 @@ fn construct_startup(
             "int" => TAG_INT,
             "timestamp" => TAG_TIMESTAMP,
             "binary" => return Ok(Node::Unsupported {
+                kind: UnsupportedKind::Binary,
                 truthy: value.chars().any(|c| !c.is_whitespace()),
                 value,
-                reason: "YAML binary values cannot be used at startup; replace !!binary with a plain string".into(),
+                reason: "YAML binary values cannot be used at startup; use a plain value instead of !!binary".into(),
             }),
             _ => TAG_STR,
         },
@@ -53,6 +54,7 @@ fn construct_startup(
     };
     match resolved {
         TAG_TIMESTAMP => Ok(Node::Unsupported {
+            kind: UnsupportedKind::Timestamp,
             truthy: true,
             value,
             reason: "YAML timestamps cannot be used at startup; quote the date or timestamp to use it as a string".into(),
@@ -67,6 +69,7 @@ fn construct_startup(
             Ok(match construct_int_with(&value, startup_integer) {
             Ok(value) => Node::Int(value),
             Err(_) => Node::Unsupported {
+                kind: UnsupportedKind::Integer,
                 truthy: true,
                 value,
                 reason: "YAML integer is invalid or outside the signed 64-bit range; use a value from -9223372036854775808 to 9223372036854775807, or quote it for a string setting".into(),

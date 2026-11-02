@@ -144,8 +144,10 @@ pub struct ReferenceConfig {
     pub chunk_size: i64,
     pub chunk_overlap: i64,
     /// The pool read's LIMIT when `ref_top_k` is 0 or null (`top_k or
-    /// max_results`); `None` is a YAML null, which fails that read.
+    /// max_results`); `None` is a value Python cannot convert to an integer.
     pub max_results: Option<i64>,
+    /// Original value for the lenient-read diagnostic.
+    pub max_results_raw: Value,
 }
 
 impl Default for ReferenceConfig {
@@ -154,6 +156,7 @@ impl Default for ReferenceConfig {
             chunk_size: 512,
             chunk_overlap: 64,
             max_results: Some(5),
+            max_results_raw: Value::from(5),
         }
     }
 }
@@ -1270,7 +1273,15 @@ pub(crate) enum Node {
         value: String,
         reason: String,
         truthy: bool,
+        kind: UnsupportedKind,
     },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum UnsupportedKind {
+    Timestamp,
+    Binary,
+    Integer,
 }
 
 impl Node {
@@ -1350,6 +1361,18 @@ fn raw_lookup<'a>(entries: &'a [(Node, Node)], key: &str) -> Option<&'a Node> {
 
 fn supported(node: &Node) -> Result<&Node, ConfigError> {
     if let Node::Unsupported { reason, .. } = node {
+        return Err(refuse(reason));
+    }
+    Ok(node)
+}
+
+fn lenient_scalar(node: &Node) -> Result<&Node, ConfigError> {
+    if let Node::Unsupported {
+        kind: UnsupportedKind::Binary,
+        reason,
+        ..
+    } = node
+    {
         return Err(refuse(reason));
     }
     Ok(node)
@@ -1806,20 +1829,22 @@ fn want_py_limit(
 /// (`memory.reference.max_results`, the pool's fallback LIMIT): what `int()`
 /// takes is the LIMIT (a float truncates, a numeric string parses), and
 /// anything else is `None`, a read that fails and serves nothing. It never
-/// refuses the start.
+/// refuses the start, except unsupported binary values.
 fn py_lenient_limit(
     entries: &[(Node, Node)],
     key: &str,
     default: Option<i64>,
 ) -> Result<Option<i64>, ConfigError> {
-    Ok(match raw_lookup(entries, key) {
-        None => default,
-        Some(Node::Int(i)) => Some(*i),
-        Some(Node::Bool(b)) => Some(i64::from(*b)),
-        Some(Node::Float(f)) if f.is_finite() && f.abs() < 9.2e18 => Some(f.trunc() as i64),
-        Some(Node::Str(s)) => crate::read::search_route::py_int(s),
-        Some(_) => None,
-    })
+    Ok(
+        match raw_lookup(entries, key).map(lenient_scalar).transpose()? {
+            None => default,
+            Some(Node::Int(i)) => Some(*i),
+            Some(Node::Bool(b)) => Some(i64::from(*b)),
+            Some(Node::Float(f)) if f.is_finite() && f.abs() < 9.2e18 => Some(f.trunc() as i64),
+            Some(Node::Str(s)) => crate::read::search_route::py_int(s),
+            Some(_) => None,
+        },
+    )
 }
 
 fn node_f64(node: &Node) -> Option<f64> {
@@ -1853,9 +1878,14 @@ fn want_str(
     match lookup(entries, key)? {
         None => Ok(default.to_string()),
         Some(Node::Str(s)) => Ok(s.clone()),
-        // PyYAML reads an unquoted off as False. These Python readers use
-        // named-mode comparisons. Literal/span gates run for False != "off",
-        // but neither enforce nor contend: their effective behavior is log.
+        // Both YAML booleans run gates (neither equals "off"), but neither
+        // enforces nor contends: their effective behavior is log.
+        Some(Node::Bool(_))
+            if path == "memory.dream" && matches!(key, "literal_gate" | "span_gate") =>
+        {
+            Ok("log".into())
+        }
+        // False disables the five Python judge modes.
         Some(Node::Bool(false)) if off_mode(path, key) => {
             Ok(if path == "memory.dream" { "log" } else { "off" }.into())
         }
@@ -2092,6 +2122,9 @@ fn load_str(text: &str) -> Result<Config, ConfigError> {
                 chunk_size: want_int(r, "chunk_size", p, d.chunk_size)?,
                 chunk_overlap: want_int(r, "chunk_overlap", p, d.chunk_overlap)?,
                 max_results: py_lenient_limit(r, "max_results", d.max_results)?,
+                max_results_raw: raw_lookup(r, "max_results")
+                    .map(node_json)
+                    .unwrap_or(d.max_results_raw),
             };
         }
         // `mem_raw.get("ref_top_k", 3)`, untyped too: it slices the pool
@@ -2529,7 +2562,7 @@ fn load_str(text: &str) -> Result<Config, ConfigError> {
     if let Some(t) = section(entries, "time", "")?
         && let Some(v) = raw_lookup(t, "relative_age")
     {
-        config.time.relative_age = v.truthy();
+        config.time.relative_age = lenient_scalar(v)?.truthy();
     }
     config.user_leaves = leaves;
     Ok(config)
@@ -3794,7 +3827,7 @@ mod tests {
                 "embedding.query_prefix",
                 "YQ==",
                 2,
-                "plain string",
+                "plain value",
             ),
             (
                 "coordination:\n  wake:\n    nightly_total: 99999999999999999999\n",
@@ -3832,6 +3865,49 @@ mod tests {
     }
 
     #[test]
+    fn yaml_1_1_review7_binary_is_refused_on_untyped_readers() {
+        for scalar in [
+            "!!binary ''",
+            "!!binary '===='",
+            "!!binary 'A'",
+            "!!binary NQ==",
+        ] {
+            for (text, key) in [
+                (
+                    format!("time:\n  relative_age: {scalar}\n"),
+                    "time.relative_age",
+                ),
+                (
+                    format!("memory:\n  reference: {{max_results: {scalar}}}\n"),
+                    "memory.reference.max_results",
+                ),
+            ] {
+                let error = load_str(&text)
+                    .err()
+                    .expect("consumed binary must refuse")
+                    .to_string();
+                assert!(
+                    error.contains(key)
+                        && error.contains("line 2")
+                        && error.contains("plain value"),
+                    "{error}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn yaml_1_1_review7_true_gates_are_log_only() {
+        for scalar in ["on", "true", "yes", "True", "ON"] {
+            let config = cfg(&format!(
+                "memory: {{dream: {{literal_gate: {scalar}, span_gate: {scalar}}}}}\n"
+            ));
+            assert_eq!(config.dream.literal_gate, "log");
+            assert_eq!(config.dream.span_gate, "log");
+        }
+    }
+
+    #[test]
     fn yaml_1_1_off_modes_keep_python_effective_behavior() {
         for word in ["off", "Off", "OFF", "false", "no", "!!bool oFf", "! 'off'"] {
             let config = cfg(&format!(
@@ -3854,7 +3930,6 @@ mod tests {
             );
         }
         assert!(refused("embedding: {model_name: off}\n"));
-        assert!(refused("memory: {dream: {literal_gate: on}}\n"));
         assert_eq!(
             cfg("embedding: {model_name: 'off'}\n").embedding.model_name,
             "off"
@@ -3869,6 +3944,10 @@ mod tests {
         ) {
             Ok(config) => {
                 assert_eq!(config.memory.reference.max_results, None);
+                assert_eq!(
+                    config.memory.reference.max_results_raw,
+                    Value::from("2024-01-01")
+                );
                 assert!(config.time.relative_age);
             }
             Err(_) => failures.push("lenient timestamp readers"),
@@ -3883,7 +3962,7 @@ mod tests {
             failures.push("malformed integer location");
         }
         assert!(failures.is_empty(), "{failures:?}");
-        assert!(!cfg("time: {relative_age: !!binary ''}\n").time.relative_age);
+        assert!(refused("time: {relative_age: !!binary ''}\n"));
     }
 
     #[test]
