@@ -157,7 +157,7 @@
     },
     "fingerprints": {
       "scope": "42b22137f81048ce",
-      "rust": "59cc6066e4ac1f82",
+      "rust": "7e5f6fc858dd1367",
       "fixtures": "defc5e07c5ac3f94",
       "candidate": "d71c5590ce6f866a",
       "candidate-harness": "43b859ee9d5fd738",
@@ -240,6 +240,11 @@
         "job": "daemon-image",
         "fingerprint": "5c93764cb0f0bab7",
         "reason": "Adds one network-disabled CLI version invocation to the existing image job; no new job or dependency setup. The shim shares the daemon dependency build; retain current budget pending batch measurement."
+      },
+      {
+        "job": "rust",
+        "fingerprint": "7e5f6fc858dd1367",
+        "reason": "The existing Rust job runs setup planning parity after Nextest; the harness reuses the same workspace all-targets feature-unified artifacts, with no new job, matrix row, dependency installation or limit increase. The additional 22 disposable planning cases complete in seconds. Existing R1 workflow changes and their accepted costs are retained."
       }
     ]
   },
