@@ -322,7 +322,7 @@ def test_the_postgres_route_sql_runs_as_written(bank, pg_url, capsys):
         conn.execute("INSERT INTO rejected_bearers VALUES ('ab12cd34', 2, 1.0, 4.0)")
         listed = conn.execute(invite_cli.LIST_SQL).fetchone()[0]
         assert [(row[0], row[10], row[11], row[12]) for row in listed["principals"]] == [
-            ("codex", 5.0, False, True), ("laptop", 6.0, True, True)]
+            ("codex", 5.0, False, None), ("laptop", 6.0, True, True)]
         assert listed["rejected"] == [["ab12cd34", 2, 1.0, 4.0]]
         assert conn.execute(invite_cli.revoke_sql("laptop")).fetchone() == ("laptop",)
         assert conn.execute(invite_cli.BANK_SQL).fetchone() == (BANK_ID,)

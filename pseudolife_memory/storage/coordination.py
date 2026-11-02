@@ -1300,7 +1300,12 @@ CONSOLE_EVENTS_CAP = 101
 #   return the alphabetically last principal's events only); (2) the
 #   events of visible mail, by message (coordination_events_message_idx);
 #   (3) expiries naming visible mail. Each capped at ``cap`` by seq.
-# The detail and expired-count projection is unchanged from before v59.
+# Each LATERAL keys on one principal or agent through a one-value range
+# ordered by the index's own columns, as the pre-v59 query did: with an
+# equality and ``ORDER BY seq`` alone the planner walked the primary key
+# backwards, filtering every newer row (6,004 on a 6,000-send fixture,
+# tests/test_coordination_console.py). The detail and expired-count
+# projection is unchanged from before v59.
 _CONSOLE_KINDS = "('send','read','ack','attempt','served','woke','lease_expire')"
 CONSOLE_TIMELINE_SQL = (
     "WITH scope AS (SELECT DISTINCT unnest(%(scope)s::text[]) AS principal), "
@@ -1308,15 +1313,17 @@ CONSOLE_TIMELINE_SQL = (
     "WHERE a.principal=ANY(%(scope)s::text[])), "
     "visible_mail AS MATERIALIZED ("
     "SELECT e.message_id FROM scope s CROSS JOIN LATERAL "
-    "(SELECT message_id FROM coordination_events WHERE event='send' AND principal=s.principal "
-    "ORDER BY seq DESC LIMIT %(cap)s) e UNION "
+    "(SELECT message_id FROM coordination_events WHERE event='send' "
+    "AND principal>=s.principal AND principal<=s.principal "
+    "ORDER BY principal DESC,seq DESC LIMIT %(cap)s) e UNION "
     "SELECT e.message_id FROM scope_agents a CROSS JOIN LATERAL "
     "(SELECT message_id FROM coordination_events WHERE event='send' "
-    "AND recipient_agent_id=a.agent_id ORDER BY seq DESC LIMIT %(cap)s) e), "
+    "AND recipient_agent_id>=a.agent_id AND recipient_agent_id<=a.agent_id "
+    "ORDER BY recipient_agent_id DESC,seq DESC LIMIT %(cap)s) e), "
     "candidates AS ("
     "(SELECT e.* FROM scope s CROSS JOIN LATERAL "
-    "(SELECT * FROM coordination_events WHERE principal=s.principal "
-    f"AND event IN {_CONSOLE_KINDS} ORDER BY seq DESC LIMIT %(cap)s) e "
+    "(SELECT * FROM coordination_events WHERE principal>=s.principal AND principal<=s.principal "
+    f"AND event IN {_CONSOLE_KINDS} ORDER BY principal DESC,seq DESC LIMIT %(cap)s) e "
     "ORDER BY e.seq DESC LIMIT %(cap)s) UNION "
     "(SELECT e.* FROM visible_mail v CROSS JOIN LATERAL "
     "(SELECT * FROM coordination_events WHERE message_id>=v.message_id AND message_id<=v.message_id "
