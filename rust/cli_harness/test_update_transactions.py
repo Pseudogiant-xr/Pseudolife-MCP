@@ -51,7 +51,10 @@ elif a[:1]==["run"]: out="58" if "--schema-version" in a else "SCHEMA_META_VERSI
 elif a[:1]==["tag"]: s["images"][a[-1]]=a[-2]
 elif a[:1]==["compose"]:
  if "config" in a: out=json.dumps(s["config"])
- elif "ps" in a: out="fixture-pg" if a[-1]=="pseudolife-pg" else "fixture-daemon"
+ elif "ps" in a:
+  out="fixture-pg" if a[-1]=="pseudolife-pg" else "fixture-daemon"
+  if s["failure"]=="missing_project_daemon" and a[-1]=="pseudolife-daemon":out=""
+  if s["failure"]=="ambiguous_project_daemon" and a[-1]=="pseudolife-daemon":out="first\nsecond"
  elif "build" in a and s["failure"]=="build":code=1
  elif "up" in a:
   code=int(s["failure"]=="up")
@@ -258,6 +261,74 @@ def stages(state):
 
 
 @pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
+@pytest.mark.parametrize("failure", ["", "backup", "up", "health"])
+def test_ordinary_checkout_transaction_phase_parity(tmp_path, native, failure):
+    binary = os.environ.get("PSEUDOLIFE_UPDATE_TEST_BINARY") if native else None
+    if native and not binary:
+        pytest.skip("set PSEUDOLIFE_UPDATE_TEST_BINARY to the built native CLI")
+    with host(tmp_path, failure, "checkout") as (repo, env, state_path):
+        result = run_arm(repo, env, binary, ["--checkout", str(repo), "--no-test-login", "--no-cache-prune",
+                                           "--json", "--health-retries", "1", "--health-delay-ms", "0",
+                                           "--rollback-tag", "pre-fixture"])
+        assert result.returncode == (1 if failure else 0), result.stdout + result.stderr
+        report = json.loads(result.stdout)
+        assert stages(json.loads(state_path.read_text())) == (["backup"] if failure == "backup" else ["backup", "tag", "up"])
+        assert report["clients"] is None
+
+
+@pytest.mark.parametrize("script_backup", [True, False], ids=["checkout-script", "native-backup"])
+@pytest.mark.parametrize("failure", ["", "incomplete", "version", "schema", "read"])
+def test_native_checkout_scopes_backup_and_rollback_to_its_compose_project(tmp_path, script_backup, failure):
+    """Native safety repair: Python's ordinary checkout still uses global names.
+
+    Exercise the brief's version/schema/authenticated-read gate separately from
+    the legacy oracle's weaker ordinary-checkout health check.
+    """
+    binary = os.environ.get("PSEUDOLIFE_UPDATE_TEST_BINARY")
+    if not binary:
+        pytest.skip("set PSEUDOLIFE_UPDATE_TEST_BINARY to the built native CLI")
+    with host(tmp_path, failure, "checkout") as (repo, env, state_path):
+        if not script_backup:
+            (repo / "ops" / ("backup.ps1" if os.name == "nt" else "backup.sh")).unlink()
+        result = run_arm(repo, env, binary, ["--checkout", str(repo), "--no-test-login", "--no-cache-prune",
+                                           "--json", "--health-retries", "1", "--health-delay-ms", "0",
+                                           "--rollback-tag", "pre-fixture"])
+        assert result.returncode == (1 if failure else 0), result.stdout + result.stderr
+        state = json.loads(state_path.read_text())
+        calls = state["calls"]
+        assert not any("pseudolife-mcp-daemon" in args or "pseudolife-mcp-postgres" in args for args in calls)
+        if script_backup:
+            backup = next(args for args in calls if args[:1] == ["fixture-backup"])
+            flags = ("-Container", "-DaemonContainer", "-User", "-Db") if os.name == "nt" else (
+                "--container", "--daemon-container", "--user", "--db")
+            assert [backup[backup.index(flag) + 1] for flag in flags] == ["fixture-pg", "fixture-daemon", "fixture", "fixture"]
+        else:
+            backup = next(args for args in calls if args[:1] == ["exec"] and any("pg_dump" in part for part in args))
+            assert backup[1] == "fixture-pg" and backup[-2:] == ["fixture", "fixture"]
+        assert stages(state) == (["backup"] if failure == "incomplete" else ["backup", "tag", "up"])
+        report = json.loads(result.stdout)
+        assert report["clients"] is None
+        if failure != "incomplete":
+            assert ["inspect", "-f", "{{.Image}}|{{.Config.Image}}", "fixture-daemon"] in calls
+            assert report["rollback"]["state"] == "tagged"
+            assert state["images"][report["rollback"]["tag"]] == "sha256:validated"
+
+
+@pytest.mark.parametrize("failure", ["missing_project_daemon", "ambiguous_project_daemon"])
+def test_checkout_discovery_never_falls_back_to_another_projects_global_daemon(tmp_path, failure):
+    binary = os.environ.get("PSEUDOLIFE_UPDATE_TEST_BINARY")
+    if not binary:
+        pytest.skip("set PSEUDOLIFE_UPDATE_TEST_BINARY to the built native CLI")
+    with host(tmp_path, failure, "checkout") as (repo, env, state_path):
+        result = run_arm(repo, env, binary, ["--checkout", str(repo), "--allow-dirty", "--json"])
+        assert result.returncode == 2, result.stdout + result.stderr
+        state = json.loads(state_path.read_text())
+        assert stages(state) == []
+        assert not any("pseudolife-mcp-daemon" in args or "pseudolife-mcp-postgres" in args for args in state["calls"])
+        assert "restore its Compose project" in result.stdout
+
+
+@pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
 @pytest.mark.parametrize("failure", ["", "backup", "incomplete", "build", "up", "health", "version", "schema", "read"])
 def test_engine_activation_faults_preserve_rollback_and_retry_guard(tmp_path, native, failure):
     binary = os.environ.get("PSEUDOLIFE_UPDATE_TEST_BINARY") if native else None
@@ -343,3 +414,19 @@ def test_native_release_d2_guard_is_reached_before_pull_and_accepts_imported_row
             assert Path(report["rollback"]["overlay"]).is_file()
         else:
             assert report["rollback"] == {}
+
+
+def test_native_rust_release_rollback_supplies_required_compose_image_tag(tmp_path):
+    binary = os.environ.get("PSEUDOLIFE_UPDATE_TEST_BINARY")
+    if not binary:
+        pytest.skip("set PSEUDOLIFE_UPDATE_TEST_BINARY to the built native CLI")
+    with host(tmp_path, "health") as (repo, env, state_path):
+        env.pop("PSEUDOLIFE_IMAGE_TAG", None)
+        result = run_arm(repo, env, binary, ["--engine", "rust", "--tag", "0.21.1", "--daemon-only", "--json",
+                                           "--health-retries", "1", "--health-delay-ms", "0", "--rollback-tag", "pre-fixture"])
+        assert result.returncode == 1, result.stdout + result.stderr
+        assert stages(json.loads(state_path.read_text())) == ["pull", "backup", "tag", "up"]
+        report = json.loads(result.stdout)
+        assert report["rollback"]["state"] == "tagged"
+        assert "PSEUDOLIFE_IMAGE_TAG=" in result.stdout
+        assert "--pull never" in result.stdout

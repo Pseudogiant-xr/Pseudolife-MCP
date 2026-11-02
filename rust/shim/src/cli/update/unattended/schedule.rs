@@ -333,7 +333,21 @@ fn install_systemd(
     result
 }
 
-fn schedule_windows(argv: &[String]) -> Result<String> {
+fn powershell_literal(text: &str) -> Result<String> {
+    Ok(format!("'{}'", checked(text)?.replace('\'', "''")))
+}
+
+fn windows_powershell() -> Result<String> {
+    std::env::var_os("SystemRoot")
+        .map(PathBuf::from)
+        .ok_or_else(|| UpdateError::usage("SystemRoot is missing; cannot locate Windows PowerShell for the scheduled environment"))?
+        .join("System32/WindowsPowerShell/v1.0/powershell.exe")
+        .to_str()
+        .map(str::to_owned)
+        .ok_or_else(|| UpdateError::usage("the scheduler executable path must be UTF-8"))
+}
+
+fn schedule_windows(argv: &[String]) -> Result<(String, String)> {
     // Task Scheduler inherits the User environment, never the calling shell.
     // Carry only layout overrides in an encoded, noninteractive wrapper. No
     // bearer goes in task arguments, even when it exists only in this shell.
@@ -342,23 +356,25 @@ fn schedule_windows(argv: &[String]) -> Result<String> {
         .filter_map(|key| std::env::var(key).ok().map(|v| (*key, v)))
         .collect();
     if layout.is_empty() {
-        return argv
+        let executable = argv
+            .first()
+            .ok_or_else(|| UpdateError::usage("scheduled command is empty"))?;
+        checked(executable)?;
+        return argv[1..]
             .iter()
             .map(|s| windows_quote(s))
             .collect::<Result<Vec<_>>>()
-            .map(|v| v.join(" "));
+            .map(|v| (executable.clone(), v.join(" ")));
     }
-    let literal =
-        |text: &str| -> Result<String> { Ok(format!("'{}'", checked(text)?.replace('\'', "''"))) };
     let mut script = String::new();
     for (key, value) in layout {
-        script.push_str(&format!("$env:{key}={};", literal(&value)?));
+        script.push_str(&format!("$env:{key}={};", powershell_literal(&value)?));
     }
     script.push_str("& ");
     script.push_str(
         &argv
             .iter()
-            .map(|s| literal(s))
+            .map(|s| powershell_literal(s))
             .collect::<Result<Vec<_>>>()?
             .join(" "),
     );
@@ -367,14 +383,26 @@ fn schedule_windows(argv: &[String]) -> Result<String> {
     // The repository already uses a small base64 encoder for process surfaces;
     // keeping this local avoids adding a dependency for one task argument.
     let encoded = base64(&bytes);
-    let shell=std::env::var_os("SystemRoot").map(PathBuf::from).ok_or_else(||UpdateError::usage("SystemRoot is missing; cannot locate Windows PowerShell for the scheduled environment"))?.join("System32/WindowsPowerShell/v1.0/powershell.exe");
+    Ok((
+        windows_powershell()?,
+        format!("-NoLogo -NoProfile -NonInteractive -EncodedCommand {encoded}"),
+    ))
+}
+
+fn windows_registration(
+    task: &str,
+    hour: u8,
+    minute: u8,
+    executable: &str,
+    arguments: &str,
+) -> Result<String> {
+    // schtasks /TR is limited to 261 characters. Register the action through
+    // Task Scheduler's object API so layout overrides and long paths survive.
     Ok(format!(
-        "{} -NoLogo -NoProfile -NonInteractive -EncodedCommand {encoded}",
-        windows_quote(
-            shell
-                .to_str()
-                .ok_or_else(|| UpdateError::usage("the scheduler executable path must be UTF-8"))?
-        )?
+        "$ErrorActionPreference='Stop';$action=New-ScheduledTaskAction -Execute {} -Argument {};$trigger=New-ScheduledTaskTrigger -Daily -At '{hour:02}:{minute:02}';$principal=New-ScheduledTaskPrincipal -UserId ([System.Security.Principal.WindowsIdentity]::GetCurrent().Name) -LogonType Interactive -RunLevel Limited;Register-ScheduledTask -TaskName {} -Action $action -Trigger $trigger -Principal $principal -Force | Out-Null",
+        powershell_literal(executable)?,
+        powershell_literal(arguments)?,
+        powershell_literal(task)?
     ))
 }
 
@@ -438,20 +466,22 @@ pub(crate) fn schedule(update: &mut Update, when: &str) -> Result<()> {
     }
     if cfg!(windows) {
         let task = if client { CLIENT_TASK } else { TASK };
-        let shown = schedule_windows(&argv)?;
+        let (executable, arguments) = schedule_windows(&argv)?;
+        let script = windows_registration(task, hour, minute, &executable, &arguments)?;
+        let encoded = base64(
+            &script
+                .encode_utf16()
+                .flat_map(u16::to_le_bytes)
+                .collect::<Vec<_>>(),
+        );
         let code = seams::run_cli(
             &[
-                "schtasks".into(),
-                "/Create".into(),
-                "/F".into(),
-                "/SC".into(),
-                "DAILY".into(),
-                "/ST".into(),
-                format!("{hour:02}:{minute:02}"),
-                "/TN".into(),
-                task.into(),
-                "/TR".into(),
-                shown,
+                windows_powershell()?,
+                "-NoLogo".into(),
+                "-NoProfile".into(),
+                "-NonInteractive".into(),
+                "-EncodedCommand".into(),
+                encoded,
             ],
             None,
             30,
@@ -460,7 +490,7 @@ pub(crate) fn schedule(update: &mut Update, when: &str) -> Result<()> {
         .0;
         if code != 0 {
             return Err(UpdateError::usage(
-                "schtasks /Create failed. Task Scheduler may refuse per-user registration from an unelevated administrator account: open an elevated PowerShell fresh from the Start menu and run this command there once",
+                "Task Scheduler registration failed. Check that the Windows ScheduledTasks PowerShell module is available; an unelevated administrator account may need to run this command once from an elevated PowerShell fresh from the Start menu",
             ));
         }
         update.step(format!("registered the scheduled task '{task}' (daily at {hour:02}:{minute:02}); the task inherits your User-scope bearer environment, not this shell's"));
@@ -631,6 +661,66 @@ mod tests {
         assert_eq!(base64(b"f"), "Zg==");
         assert_eq!(base64(b"fo"), "Zm8=");
         assert_eq!(base64(b"foo"), "Zm9v");
+    }
+    #[test]
+    fn windows_registration_keeps_long_action_arguments_out_of_schtasks() {
+        let arguments = format!("-EncodedCommand {}", "A".repeat(400));
+        let script =
+            windows_registration("fixture ' task", 3, 30, "C:/fixture é/cli.exe", &arguments)
+                .unwrap();
+        assert!(script.contains("New-ScheduledTaskAction -Execute 'C:/fixture é/cli.exe'"));
+        assert!(script.contains(&format!("-Argument '{arguments}'")));
+        assert!(script.contains("-TaskName 'fixture '' task'"));
+        assert!(script.contains("-LogonType Interactive -RunLevel Limited"));
+        assert!(!script.contains("schtasks"));
+        assert!(windows_registration("bad\nname", 3, 30, "cli", "update").is_err());
+    }
+    #[cfg(windows)]
+    #[test]
+    fn windows_registration_passes_long_utf8_action_to_scheduler_objects() {
+        let arguments = format!("-EncodedCommand {}", "A".repeat(400));
+        let mut script = String::from(
+            r#"
+function New-ScheduledTaskAction { param($Execute,$Argument)
+ if ($Execute -ne 'C:/fixture é/cli.exe' -or $Argument.Length -ne 416) { throw 'action changed' }
+ [pscustomobject]@{Execute=$Execute;Arguments=$Argument}
+}
+function New-ScheduledTaskTrigger { param([switch]$Daily,$At)
+ if (!$Daily -or $At -ne '03:30') { throw 'trigger changed' }; 'trigger'
+}
+function New-ScheduledTaskPrincipal { param($UserId,$LogonType,$RunLevel)
+ if (!$UserId -or $LogonType -ne 'Interactive' -or $RunLevel -ne 'Limited') { throw 'principal changed' }; 'principal'
+}
+function Register-ScheduledTask { param($TaskName,$Action,$Trigger,$Principal,[switch]$Force)
+ if ($TaskName -ne "fixture ' task" -or !$Force -or $Action.Arguments.Length -ne 416 -or $Trigger -ne 'trigger' -or $Principal -ne 'principal') { throw 'registration changed' }
+}
+"#,
+        );
+        script.push_str(
+            &windows_registration("fixture ' task", 3, 30, "C:/fixture é/cli.exe", &arguments)
+                .unwrap(),
+        );
+        let encoded = base64(
+            &script
+                .encode_utf16()
+                .flat_map(u16::to_le_bytes)
+                .collect::<Vec<_>>(),
+        );
+        let output = std::process::Command::new(windows_powershell().unwrap())
+            .args([
+                "-NoLogo",
+                "-NoProfile",
+                "-NonInteractive",
+                "-EncodedCommand",
+                &encoded,
+            ])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
     #[test]
     fn failed_systemd_enable_restores_existing_utf8_units() {

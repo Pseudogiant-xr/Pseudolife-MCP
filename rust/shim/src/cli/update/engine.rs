@@ -95,9 +95,9 @@ pub(super) fn selected_checkout(u: &mut Update) -> Result<Option<PathBuf>> {
         let ids: Vec<_> = out.split_whitespace().collect();
         if code == 0 && ids.len() == 1 {
             container = ids[0].into();
-        } else if selected.is_some() {
+        } else {
             return Err(UpdateError::usage(
-                "cannot find this checkout's selected daemon; restore its Compose project and retry; nothing was changed",
+                "cannot find this checkout's daemon; restore its Compose project and retry; nothing was changed",
             ));
         }
     }
@@ -364,6 +364,7 @@ pub(super) fn rollback_commands(
     overlay: &Path,
     accepted: &Path,
     clear_selection: Option<&Path>,
+    image_tag: Option<&str>,
 ) -> Vec<String> {
     let mut args = base.to_vec();
     args.extend(["-f".into(), overlay.to_string_lossy().into_owned()]);
@@ -371,6 +372,16 @@ pub(super) fn rollback_commands(
         "docker compose {} up -d --no-deps --no-build --pull never {DAEMON_SERVICE}",
         display(&args)
     );
+    // Compose interpolates every base file before merging the rollback overlay.
+    // Release Rust compose requires a tag even though the overlay selects the
+    // locally retained image and recreation explicitly forbids pulling.
+    if let Some(tag) = image_tag {
+        restore = if cfg!(windows) {
+            format!("$env:PSEUDOLIFE_IMAGE_TAG={}; {restore}", seams::quote(tag))
+        } else {
+            format!("PSEUDOLIFE_IMAGE_TAG={} {restore}", seams::quote(tag))
+        };
+    }
     let copy = if cfg!(windows) {
         format!(
             "Copy-Item -LiteralPath {} -Destination {} -ErrorAction Stop",
@@ -533,6 +544,7 @@ pub(super) fn deploy(u: &mut Update, repo: &Path) -> Result<()> {
         &rollback_file,
         &accepted,
         (old == "python").then_some(selected.as_path()),
+        None,
     );
     u.rollback_lines.extend(u.schema_rollback_note());
     u.report.rollback =

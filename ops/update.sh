@@ -3,6 +3,7 @@
 # Bash port of ops/update.ps1 for Linux/macOS hosts.
 #
 #   ops/update.sh                  # backup -> tag rollback -> daemon-only rebuild -> health
+#   ops/update.sh --native         # use the installed native updater explicitly
 #   ops/update.sh --tag pre-x      # name the rollback image tag suffix
 #   ops/update.sh --no-backup      # skip the pg_dump (NOT recommended)
 #   ops/update.sh --keep-rollbacks 5  # rollback tags to retain (default 2)
@@ -42,28 +43,6 @@ step() {
     fi
 }
 
-env_file="$repo/ops/.env"
-# The Python deploy reads ops/.env itself; the rewrite happens here, before
-# it starts, so ops/install.sh and this script keep one identical block.
-# >>> env line endings >>>
-# An ops/.env copied from a Windows host carries CRLF line endings, and a
-# value read from it here then ends in a CR: `docker volume create` refused
-# "pseudolife-mcp-bank-pg18\r" as an invalid name (Debian 13, 2026-09-29).
-# Compose tolerates CRLF; the shell reads do not. The file is rewritten in
-# place with LF endings, keeping its mode (owner-only once a token is
-# minted) and a copy of the original beside it; a file already on LF is not
-# touched. ops/install.sh and ops/update.sh carry this same block, and
-# tests/test_installer_env_file.py keeps the two identical.
-normalize_env_line_endings() {  # $1 = env file; says so when it rewrote it
-    [ -f "$1" ] || return 0
-    grep -q "$(printf '\r')" "$1" || return 0
-    env_backup="$1.crlf-$(date +%Y%m%d-%H%M%S)"
-    cp -p "$1" "$env_backup"
-    tr -d '\r' < "$env_backup" > "$1"
-    step "Rewrote $(basename "$1") with LF line endings (it had CRLF, which put a stray CR into every value read from it); the original is kept as $(basename "$env_backup")"
-}
-normalize_env_line_endings "$env_file"
-# <<< env line endings <<<
 args=(--checkout "$repo" --health-retries "${HEALTH_RETRIES:-30}" --health-delay-ms "${HEALTH_DELAY_MS:-1500}")
 native_update="${PSEUDOLIFE_NATIVE_UPDATE:-0}"
 
@@ -88,26 +67,59 @@ while [ $# -gt 0 ]; do
     esac
 done
 
-# Opt in to the installed native CLI; no interpreter probe or fallback on
-# this path. The Python updater remains the default and the parity oracle.
+# Explicit native selection skips Python entirely and never falls back.
+native_cli="${PSEUDOLIFE_NATIVE_CLI:-${PSEUDOLIFE_SHIM_LAUNCHER:-${XDG_DATA_HOME:-$HOME/.local/share}/pseudolife-mcp/bin/pseudolife-mcp}}"
+python_cmd=""
 if [ "$native_update" = 1 ]; then
-    native_cli="${PSEUDOLIFE_NATIVE_CLI:-${PSEUDOLIFE_SHIM_LAUNCHER:-${XDG_DATA_HOME:-$HOME/.local/share}/pseudolife-mcp/bin/pseudolife-mcp}}"
-    if [ ! -x "$native_cli" ]; then
+    if [ ! -f "$native_cli" ] || [ ! -x "$native_cli" ]; then
         echo "native update CLI is missing; install the native runtime or set PSEUDOLIFE_NATIVE_CLI to its binary; nothing was changed" >&2
         exit 2
     fi
-    exec "$native_cli" update "${args[@]}"
+else
+    for candidate in python3 python; do
+        if command -v "$candidate" >/dev/null 2>&1 &&
+            "$candidate" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)' 2>/dev/null; then
+            python_cmd="$candidate"; break
+        fi
+    done
+    if [ -z "$python_cmd" ]; then
+        # A Python selector or unrelated executable is not a native runtime.
+        native_help='usage: pseudolife-mcp runtime install --archive <archive> --sha256sums <SUMS-file> --version <version> [--json]'
+        if [ -f "$native_cli" ] && [ -x "$native_cli" ] &&
+            help_output="$("$native_cli" runtime --help 2>/dev/null)" &&
+            [ "${help_output%$'\r'}" = "$native_help" ]; then
+            native_update=1
+            echo "No Python >= 3.10 on PATH; using the verified native update CLI." >&2
+        else
+            echo "No Python >= 3.10 or verified native update CLI is available; install the native runtime or install Python >= 3.10 and the pseudolife-mcp package, then re-run; nothing was changed" >&2
+            exit 1
+        fi
+    fi
 fi
 
-python_cmd=""
-for candidate in python3 python; do
-    if command -v "$candidate" >/dev/null 2>&1 &&
-        "$candidate" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)' 2>/dev/null; then
-        python_cmd="$candidate"; break
-    fi
-done
-if [ -z "$python_cmd" ]; then
-    echo "WARNING: no Python >= 3.10 on PATH: the deploy is Python (ops/update.py). Install one and re-run." >&2
-    exit 1
+env_file="$repo/ops/.env"
+# Check wrapper arguments and runtime availability before rewriting ops/.env.
+# Keep the installer normalization block identical.
+# >>> env line endings >>>
+# An ops/.env copied from a Windows host carries CRLF line endings, and a
+# value read from it here then ends in a CR: `docker volume create` refused
+# "pseudolife-mcp-bank-pg18\r" as an invalid name (Debian 13, 2026-09-29).
+# Compose tolerates CRLF; the shell reads do not. The file is rewritten in
+# place with LF endings, keeping its mode (owner-only once a token is
+# minted) and a copy of the original beside it; a file already on LF is not
+# touched. ops/install.sh and ops/update.sh carry this same block, and
+# tests/test_installer_env_file.py keeps the two identical.
+normalize_env_line_endings() {  # $1 = env file; says so when it rewrote it
+    [ -f "$1" ] || return 0
+    grep -q "$(printf '\r')" "$1" || return 0
+    env_backup="$1.crlf-$(date +%Y%m%d-%H%M%S)"
+    cp -p "$1" "$env_backup"
+    tr -d '\r' < "$env_backup" > "$1"
+    step "Rewrote $(basename "$1") with LF line endings (it had CRLF, which put a stray CR into every value read from it); the original is kept as $(basename "$env_backup")"
+}
+normalize_env_line_endings "$env_file"
+# <<< env line endings <<<
+if [ "$native_update" = 1 ]; then
+    exec "$native_cli" update "${args[@]}"
 fi
 exec "$python_cmd" "$repo/ops/update.py" "${args[@]}"

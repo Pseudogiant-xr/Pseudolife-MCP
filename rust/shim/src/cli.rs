@@ -195,12 +195,7 @@ pub fn dispatch(mode: Option<&str>) -> Option<ExitCode> {
     {
         return Some(code);
     }
-    let (message, code) = if mode == "update" {
-        (
-            "pseudolife-stdio: mode 'update' is deferred in this candidate; install a verified native archive with: pseudolife-mcp runtime install --archive <archive> --sha256sums <SHA256SUMS> --version <version>\n".to_owned(),
-            1,
-        )
-    } else if DEFERRED_MODES.contains(&mode) {
+    let (message, code) = if DEFERRED_MODES.contains(&mode) {
         (
             format!(
                 "pseudolife-stdio: mode {} is deferred in this candidate\n",

@@ -445,6 +445,7 @@ impl Update {
             &rollback_file,
             &engine::release_accepted(),
             None,
+            Some(&target),
         );
         self.rollback_lines.extend(self.schema_rollback_note());
         self.report.rollback =
@@ -545,6 +546,7 @@ impl Update {
     }
     pub fn deploy_checkout(&mut self, repo: &Path) -> Result<()> {
         let repo = fs::canonicalize(repo)
+            .map(seams::command_path)
             .map_err(|_| UpdateError::usage("--checkout must name a Pseudolife-MCP checkout"))?;
         let file = repo.join("ops/docker-compose.yml");
         if !file.is_file() {
@@ -589,7 +591,26 @@ impl Update {
             })?;
         let token = engine::daemon_token(&config)?;
         let (version, schema) = engine::checkout_version_schema(&repo)?;
-        self.backup(Some(&repo))?;
+        // A checkout can name a different Compose project. Never read a global
+        // daemon or back up a different bank while recreating this project.
+        let daemon = engine::container(self, &compose, Some(&env), DAEMON_SERVICE)?;
+        if self.o.no_backup {
+            self.backup(None)?;
+        } else {
+            let pg = engine::container(self, &compose, Some(&env), "pseudolife-pg")?;
+            let pg_env = &config["services"]["pseudolife-pg"]["environment"];
+            let user = pg_env["POSTGRES_USER"].as_str().ok_or_else(|| {
+                UpdateError::usage("cannot resolve the project's PostgreSQL user; set POSTGRES_USER in its Compose environment and retry; nothing was deployed")
+            })?;
+            let db = pg_env["POSTGRES_DB"].as_str().ok_or_else(|| {
+                UpdateError::usage("cannot resolve the project's PostgreSQL database; set POSTGRES_DB in its Compose environment and retry; nothing was deployed")
+            })?;
+            if self.checkout_script(&repo, "backup").is_some() {
+                self.project_backup(&repo, &pg, &daemon, user, db)?;
+            } else {
+                self.builtin_backup(&pg, &daemon, user, db, &data_dir().join("backups"))?;
+            }
+        }
         let text = fs::read_to_string(&file)?;
         let image = text
             .lines()
@@ -605,7 +626,7 @@ impl Update {
             })?;
         let (code, out) = self.docker_call(&["image", "inspect", "-f", "{{.Id}}", &image]);
         let tag_id = (code == 0).then(|| out.trim().to_owned());
-        let (running, reference) = self.running_image();
+        let (running, reference) = self.running_image_for(&daemon);
         let foreign = reference
             .as_deref()
             .is_some_and(|r| r.split(':').next() != image.split(':').next());

@@ -512,12 +512,11 @@ impl Update {
         Ok(())
     }
     pub fn running_image(&self) -> (Option<String>, Option<String>) {
-        let (code, out) = self.docker_call(&[
-            "inspect",
-            "-f",
-            "{{.Image}}|{{.Config.Image}}",
-            DAEMON_CONTAINER,
-        ]);
+        self.running_image_for(DAEMON_CONTAINER)
+    }
+    pub fn running_image_for(&self, container: &str) -> (Option<String>, Option<String>) {
+        let (code, out) =
+            self.docker_call(&["inspect", "-f", "{{.Image}}|{{.Config.Image}}", container]);
         if code == 0
             && let Some((a, b)) = out.trim().split_once('|')
         {

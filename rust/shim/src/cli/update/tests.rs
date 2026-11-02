@@ -214,6 +214,7 @@ fn native_update_rollback_records_commit_after_recreation() {
         &temp.0.join("rollback.json"),
         &temp.0.join("accepted.json"),
         Some(&temp.0.join("selected.json")),
+        Some("1.2.3"),
     );
     let command = commands.join("\n");
     let recreate = command.find("up -d --no-deps --no-build").unwrap();
@@ -235,6 +236,9 @@ fn native_update_rollback_records_commit_after_recreation() {
         "&&"
     }));
     assert!(command.contains("--pull never"));
+    let tag = command.find("PSEUDOLIFE_IMAGE_TAG=").unwrap();
+    assert!(tag < command.find("docker compose").unwrap());
+    assert!(command[tag..].contains("1.2.3"));
 }
 struct FaultFile {
     data: Cursor<Vec<u8>>,

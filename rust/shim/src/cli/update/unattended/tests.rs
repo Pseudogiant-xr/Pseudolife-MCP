@@ -81,6 +81,8 @@ fn fixture(replies: Vec<(u16, String, Value)>) -> (String, Requests, std::thread
                     Err(error) => panic!("fixture accept: {error}"),
                 }
             };
+            // Windows accepts inherit the listener's nonblocking mode.
+            stream.set_nonblocking(false).unwrap();
             stream
                 .set_read_timeout(Some(Duration::from_secs(3)))
                 .unwrap();
