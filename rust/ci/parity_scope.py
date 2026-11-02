@@ -162,7 +162,7 @@ SHIM_COMMANDS = {
     "backup": ("backup", "update"), "backup_help.txt": ("backup", "update"),
     "board_audit": ("audit", "coordination_recovery"),
     "update": ("update",),
-    "connect": ("connect",), "doctor": ("doctor",), "maintainer": ("maintainer", "maintainer_setup"),
+    "connect": ("connect",), "doctor": ("doctor",), "maintainer": ("maintainer", "maintainer_setup", "update"),
     "coordination_recovery": ("coordination_recovery",),
     "move_cli.rs": ("move",), "test_login": ("test_login",),
     "transfer": ("transfer",), "transfer.rs": ("transfer",), "tunnel": ("tunnel",),
