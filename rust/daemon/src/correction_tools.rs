@@ -383,7 +383,7 @@ fn spawn_correction<'a>(
             header_session: call.ident.header_session.clone(),
             transport_session: call.ident.transport_session.clone(),
         };
-        let cfg = app.service.config.memory.clone();
+        let cfg = app.service.runtime_config().memory.clone();
         let args = call.args.clone();
         let r2 = ready.clone();
         ready
@@ -984,7 +984,7 @@ fn mcp_memory_reinstate<'a>(app: &'a crate::http::App, call: ToolCall<'a>) -> To
         }
         let ready = app.service.ensure_init().await.map_err(internal)?;
         let args = call.args.clone();
-        let cfg = app.service.config.memory.clone();
+        let cfg = app.service.runtime_config().memory.clone();
         let r2 = ready.clone();
         ready
             .writes
