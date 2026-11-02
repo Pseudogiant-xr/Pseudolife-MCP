@@ -144,7 +144,7 @@ fn keywords(text: &str) -> Result<BTreeMap<String, String>, String> {
 
 #[derive(Default)]
 pub(super) struct Environment {
-    values: BTreeMap<String, String>,
+    pub(super) values: BTreeMap<String, String>,
     directory: Option<PathBuf>,
 }
 impl Environment {
@@ -170,6 +170,7 @@ impl Environment {
                             | "PGGSSLIB"
                             | "PGGSSDELEGATION"
                             | "PGREQUIRESSL"
+                            | "PGCHANNELBINDING"
                     ))
                 .then(|| (key, value.to_string_lossy().into_owned()))
             })
@@ -222,6 +223,7 @@ pub(super) fn parse_in(dsn: &str, environment: Environment) -> Result<Config, St
             "PGSSLCERT" => "sslcert",
             "PGSSLKEY" => "sslkey",
             "PGGSSENCMODE" => "gssencmode",
+            "PGCHANNELBINDING" => "channel_binding",
             _ => return Err(unsupported(&name)),
         };
         fields.entry(key.into()).or_insert(value);
@@ -294,7 +296,24 @@ pub(super) fn parse_in(dsn: &str, environment: Environment) -> Result<Config, St
             .collect::<Vec<_>>()
             .join(" ")
     };
-    let driver = driver_text.parse().map_err(|_| INVALID.to_owned())?;
+    let driver: tokio_postgres::Config = driver_text.parse().map_err(|_| INVALID.to_owned())?;
+    #[cfg(unix)]
+    {
+        use tokio_postgres::config::Host;
+        let unix = driver
+            .get_hosts()
+            .iter()
+            .any(|host| matches!(host, Host::Unix(_)));
+        if unix
+            && (driver
+                .get_hosts()
+                .iter()
+                .any(|host| matches!(host, Host::Tcp(_)))
+                || !driver.get_hostaddrs().is_empty())
+        {
+            return Err("mixed Unix-socket and TCP host lists are unsupported; use a single-transport DSN or the Python engine".into());
+        }
+    }
     Ok(Config {
         driver,
         mode,
@@ -318,6 +337,25 @@ fn exists(path: &Path, option: &str) -> Result<bool, String> {
 fn file_error(option: &str) -> String {
     format!("cannot load {option}; configure a readable PEM file or use the Python engine")
 }
+fn encrypted_key(bytes: &[u8]) -> bool {
+    let mut private_key = false;
+    for line in String::from_utf8_lossy(bytes).lines().map(str::trim) {
+        if line == "-----BEGIN ENCRYPTED PRIVATE KEY-----" {
+            return true;
+        }
+        if line.starts_with("-----BEGIN ") && line.ends_with("PRIVATE KEY-----") {
+            private_key = true;
+        } else if line.starts_with("-----END ") {
+            private_key = false;
+        } else if private_key
+            && let Some(value) = line.strip_prefix("Proc-Type:")
+            && value.split(',').map(str::trim).eq(["4", "ENCRYPTED"])
+        {
+            return true;
+        }
+    }
+    false
+}
 impl Config {
     fn path(&self, explicit: &Option<PathBuf>, default: &str) -> Option<PathBuf> {
         explicit
@@ -334,7 +372,7 @@ impl Config {
             && exists(&cert, "sslcert")?
             && let Some(key) = self.path(&self.key, "postgresql.key")
             && let Ok(bytes) = std::fs::read(key)
-            && bytes.windows(9).any(|v| v == b"ENCRYPTED")
+            && encrypted_key(&bytes)
         {
             return Err("encrypted sslkey is unsupported; use the Python engine or an appropriately protected unencrypted PEM key".into());
         }
@@ -407,7 +445,7 @@ impl Config {
             }
         }
         let bytes = std::fs::read(key).map_err(|_| file_error("sslkey"))?;
-        if bytes.windows(9).any(|v| v == b"ENCRYPTED") {
+        if encrypted_key(&bytes) {
             return Err("encrypted sslkey is unsupported; use the Python engine or an appropriately protected unencrypted PEM key".into());
         }
         let key = rustls_pemfile::private_key(&mut bytes.as_slice())
@@ -463,6 +501,18 @@ async fn plain(
     Ok(spawn(client, connection))
 }
 pub(super) async fn connect(config: &Config) -> Result<(Client, JoinHandle<()>), ConnectError> {
+    // libpq ignores SSL modes on Unix sockets. Mixed transport lists are
+    // refused at parse time so this cannot weaken any TCP connection.
+    #[cfg(unix)]
+    if !config.driver.get_hosts().is_empty()
+        && config
+            .driver
+            .get_hosts()
+            .iter()
+            .all(|host| matches!(host, tokio_postgres::config::Host::Unix(_)))
+    {
+        return plain(&config.driver).await.map_err(Into::into);
+    }
     if config.mode == SslMode::Disable {
         return plain(&config.driver).await.map_err(Into::into);
     }
@@ -481,6 +531,16 @@ pub(super) async fn connect(config: &Config) -> Result<(Client, JoinHandle<()>),
     config.supported_files().map_err(ConnectError::Config)?;
     let tls = transport::Negotiator::new(config.clone(), config.mode);
     let mut driver = config.driver.clone();
+    if driver.get_hosts().is_empty() && !driver.get_hostaddrs().is_empty() {
+        if config.mode == SslMode::VerifyFull {
+            return Err(ConnectError::Config("sslmode=verify-full requires host alongside hostaddr; set host to the certificate's DNS name or use the Python engine".into()));
+        }
+        // The driver's TLS gate requires a hostname even when our verifier
+        // only checks encryption or the CA. Keep hostaddr as the TCP target.
+        for address in config.driver.get_hostaddrs() {
+            driver.host(&address.to_string());
+        }
+    }
     driver
         .ssl_mode(DriverMode::Require)
         .ssl_negotiation(SslNegotiation::Direct);
@@ -518,6 +578,80 @@ mod tests {
     }
     fn parse(text: &str) -> Config {
         parse_in(text, Environment::default()).unwrap()
+    }
+    #[test]
+    fn review_channel_binding_environment_obeys_dsn_precedence() {
+        use tokio_postgres::config::ChannelBinding;
+        for (dsn, expected) in [
+            ("", ChannelBinding::Require),
+            ("channel_binding=disable", ChannelBinding::Disable),
+        ] {
+            let config = parse_in(
+                dsn,
+                Environment {
+                    values: BTreeMap::from([("PGCHANNELBINDING".into(), "require".into())]),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            assert_eq!(config.get_channel_binding(), expected);
+        }
+    }
+    #[test]
+    fn review_unencrypted_key_comments_are_not_encryption_headers() {
+        let directory = Directory::new();
+        let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("../shim/tests/fixtures/pg_tls");
+        std::fs::copy(
+            fixtures.join("server.pem"),
+            directory.path().join("postgresql.crt"),
+        )
+        .unwrap();
+        let key = directory.path().join("postgresql.key");
+        let bytes = std::fs::read(fixtures.join("server-key.pem")).unwrap();
+        std::fs::write(
+            &key,
+            [
+                b"# ENCRYPTED is a comment, not a PEM header\n".as_slice(),
+                &bytes,
+            ]
+            .concat(),
+        )
+        .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&key, std::fs::Permissions::from_mode(0o600)).unwrap();
+        }
+        let config = parse_in(
+            "",
+            Environment {
+                directory: Some(directory.path().into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert!(config.supported_files().is_ok());
+        assert!(config.identity().unwrap().is_some());
+    }
+    #[test]
+    fn encrypted_key_headers_still_refuse() {
+        assert!(encrypted_key(b"-----BEGIN ENCRYPTED PRIVATE KEY-----\n"));
+        assert!(encrypted_key(
+            b"-----BEGIN RSA PRIVATE KEY-----\nProc-Type: 4,ENCRYPTED\n"
+        ));
+        assert!(encrypted_key(
+            b"-----BEGIN EC PRIVATE KEY-----\nProc-Type: 4, ENCRYPTED\n"
+        ));
+        assert!(!encrypted_key(b"# ENCRYPTED\nProc-Type: 4,ENCRYPTED\n"));
+    }
+    #[cfg(unix)]
+    #[test]
+    fn mixed_transport_lists_name_the_repair() {
+        for dsn in ["host=/tmp,localhost", "host=/tmp hostaddr=127.0.0.1"] {
+            let error = parse_in(dsn, Environment::default()).unwrap_err();
+            assert!(error.contains("mixed Unix-socket and TCP"));
+            assert!(error.contains("single-transport DSN or the Python engine"));
+        }
     }
     #[test]
     fn empty_sslmode_is_invalid_like_libpq() {

@@ -10,6 +10,36 @@ from types import SimpleNamespace
 import pytest
 
 
+def test_tls_proof_isolates_libpq_default_certificate_files(monkeypatch, tmp_path):
+    from contextlib import contextmanager
+    import os
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parent))
+    tls = importlib.import_module("pg_tls")
+    ambient = tmp_path / "ambient"
+    (ambient / ".postgresql").mkdir(parents=True)
+    (ambient / ".postgresql/root.crt").write_text("unrelated certificate")
+    monkeypatch.setenv("HOME", str(ambient))
+    root = tmp_path / "proof"
+    root.mkdir()
+    monkeypatch.setattr(tls, "certificates", lambda root: None)
+
+    class Checked(Exception):
+        pass
+
+    @contextmanager
+    def inspect_before_connect(*args):
+        isolated = Path(os.environ["HOME"])
+        assert isolated != ambient
+        assert isolated.is_dir()
+        assert not (isolated / ".postgresql/root.crt").exists()
+        raise Checked
+        yield  # context manager; stop before opening any socket or process
+
+    monkeypatch.setattr(tls, "server", inspect_before_connect)
+    with pytest.raises(Checked):
+        tls.compare([], "unused", root, tmp_path, True)
+
+
 @pytest.fixture
 def harness(monkeypatch):
     monkeypatch.syspath_prepend(str(Path(__file__).resolve().parent))

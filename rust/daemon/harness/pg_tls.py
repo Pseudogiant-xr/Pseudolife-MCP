@@ -107,6 +107,14 @@ def compare(docker, image, root, evidence, oracle_only):
     certificates(root)
     # System trust is private to this proof process and its cargo child.
     environment = {k: v for k, v in os.environ.items() if not k.startswith("PG")}
+    # libpq reads HOME/.postgresql even when PG* variables are absent. Keep
+    # both readiness and the oracle inside a fresh empty client home. Retain
+    # the caller's Rust toolchain locations for the cargo subprocess.
+    environment.setdefault("CARGO_HOME", str(Path.home()/".cargo"))
+    environment.setdefault("RUSTUP_HOME", str(Path.home()/".rustup"))
+    client_home = root/"client-home"
+    client_home.mkdir()
+    environment["HOME"] = str(client_home)
     environment.update(SSL_CERT_FILE=str(root/"ca.pem"), SSL_CERT_DIR=str(root/"empty-roots"))
     (root/"empty-roots").mkdir()
     records = []
@@ -125,13 +133,26 @@ def compare(docker, image, root, evidence, oracle_only):
                             cases.append(dict(name=f"{policy}/{mode}/{ca}/client={identity}", guard_dsn=guard, dsn=guard+options))
                 if policy == "both":
                     cases.append(dict(name="system/implicit-verify-full",guard_dsn=guard,dsn=guard+" sslrootcert=system"))
+                    address_guard = guard.replace("host=localhost", "hostaddr=127.0.0.1")
+                    for mode in MODES:
+                        options = "" if mode == "default" else f" sslmode={mode}"
+                        cases.append(dict(name=f"hostaddr/{mode}", guard_dsn=address_guard,
+                                          dsn=address_guard+options+f" sslrootcert='{root/'ca.pem'}'"))
+                    for ambient, explicit in (("require", None), ("disable", None),
+                                              ("require", "disable"), ("disable", "require")):
+                        options = " sslmode=require"
+                        if explicit: options += f" channel_binding={explicit}"
+                        cases.append(dict(name=f"channel-binding/env={ambient}/dsn={explicit}",
+                                          guard_dsn=guard, dsn=guard+options,
+                                          environment={"PGCHANNELBINDING": ambient}))
                 for case in cases:
                     try:
-                        with psycopg.connect(case["dsn"], connect_timeout=3) as conn:
-                            case.update(accepted=True,tls=conn.execute("SELECT ssl FROM pg_stat_ssl WHERE pid=pg_backend_pid()").fetchone()[0])
+                        with patch.dict(os.environ, case.get("environment", {})):
+                            with psycopg.connect(case["dsn"], connect_timeout=3) as conn:
+                                case.update(accepted=True,tls=conn.execute("SELECT ssl FROM pg_stat_ssl WHERE pid=pg_backend_pid()").fetchone()[0])
                     except psycopg.Error:
                         case.update(accepted=False,tls=None)
-                records.extend({k:v for k,v in c.items() if k not in ("dsn","guard_dsn")} for c in cases)
+                records.extend({k:v for k,v in c.items() if k not in ("dsn","guard_dsn","environment")} for c in cases)
                 if not oracle_only:
                     casefile=root/"cases.json"
                     casefile.write_text(json.dumps(cases))
