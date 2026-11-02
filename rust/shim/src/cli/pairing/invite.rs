@@ -376,7 +376,7 @@ fn listed_in_config(name: &str) -> bool {
 /// `_not_owner_names` (v59): `coordination.not_owner_principals`, the
 /// environment principals that are someone else's; empty when the config
 /// cannot be read.
-fn not_owner_in_config() -> Vec<String> {
+pub(super) fn not_owner_in_config() -> Vec<String> {
     config_yaml()
         .and_then(|config| coordination_names(&config, "not_owner_principals"))
         .unwrap_or_default()

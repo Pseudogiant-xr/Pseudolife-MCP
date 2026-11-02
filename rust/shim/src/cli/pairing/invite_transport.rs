@@ -357,7 +357,7 @@ async fn through_postgres(args: &Args, report: &mut Report) -> Result<u8, Defer>
             .trim()
             .lines()
             .last()
-            .and_then(|s| decode_list(s).ok());
+            .and_then(|s| decode_list(s, &super::invite::not_owner_in_config()).ok());
         let Some((rows, rejected)) = listed else {
             return Ok(by_hand(
                 report,
@@ -382,11 +382,19 @@ async fn through_postgres(args: &Args, report: &mut Report) -> Result<u8, Defer>
     Ok(report.finish(EXIT_OK))
 }
 
-fn decode_list(text: &str) -> Result<(Vec<invite_db::Listed>, Vec<invite_db::Rejected>), Defer> {
+/// `describe_rows` over psql's JSON: a row is 12 columns, or 13 with v59's
+/// `owned` (null for an environment row, whose owner `not_owner` decides).
+fn decode_list(
+    text: &str,
+    not_owner: &[String],
+) -> Result<(Vec<invite_db::Listed>, Vec<invite_db::Rejected>), Defer> {
     let value: serde_json::Value = serde_json::from_str(text).map_err(|_| Defer)?;
     let mut rows = Vec::new();
     for row in value["principals"].as_array().ok_or(Defer)? {
-        let row = row.as_array().filter(|r| r.len() == 12).ok_or(Defer)?;
+        let row = row
+            .as_array()
+            .filter(|r| r.len() == 12 || r.len() == 13)
+            .ok_or(Defer)?;
         let time = |i: usize| -> Result<Option<f64>, Defer> {
             if row[i].is_null() {
                 Ok(None)
@@ -432,6 +440,11 @@ fn decode_list(text: &str) -> Result<(Vec<invite_db::Listed>, Vec<invite_db::Rej
             paired_at: if stored { time(7)? } else { None },
             revoked_at: if stored { revoked } else { None },
             last_seen_at: time(10)?,
+            owner: if stored {
+                row.get(12).and_then(serde_json::Value::as_bool).unwrap_or(true)
+            } else {
+                !not_owner.iter().any(|name| row[0].as_str() == Some(name))
+            },
         });
     }
     rows.sort_by(|a, b| a.principal.cmp(&b.principal));
@@ -453,13 +466,21 @@ mod tests {
     use super::*;
     #[test]
     fn stopped_daemon_rows_keep_state_and_environment_semantics() {
-        let (rows, rejected) = decode_list(r#"{"principals":[["z",null,null,false,false,null,null,null,null,100,99,false],["a","core",true,false,true,101,50,null,null,100,null,true]],"rejected":[["01234567",3,90,99]]}"#).unwrap();
+        let (rows, rejected) = decode_list(r#"{"principals":[["z",null,null,false,false,null,null,null,null,100,99,false],["a","core",true,false,true,101,50,null,null,100,null,true]],"rejected":[["01234567",3,90,99]]}"#, &[]).unwrap();
         assert_eq!(rows[0].principal, "a");
         assert_eq!(rows[0].state, "pending");
         assert_eq!(rows[1].state, "environment");
         assert_eq!(rows[1].board, None);
         assert_eq!(rejected[0].rejections, 3);
-        assert!(decode_list(r#"{"principals":[[]],"rejected":[]}"#).is_err());
+        assert!(decode_list(r#"{"principals":[[]],"rejected":[]}"#, &[]).is_err());
+        assert!(rows.iter().all(|row| row.owner));
+    }
+
+    #[test]
+    fn stopped_daemon_rows_carry_v59_ownership() {
+        let (rows, _) = decode_list(r#"{"principals":[["guest",null,true,true,false,null,1,2,null,100,null,true,false],["env",null,null,false,false,null,null,null,null,100,9,false,null],["mine",null,true,true,false,null,1,2,null,100,null,true,true]],"rejected":[]}"#, &["env".to_owned()]).unwrap();
+        let owner: Vec<(&str, bool)> = rows.iter().map(|r| (r.principal.as_str(), r.owner)).collect();
+        assert_eq!(owner, [("env", false), ("guest", false), ("mine", true)]);
     }
 
     #[test]
