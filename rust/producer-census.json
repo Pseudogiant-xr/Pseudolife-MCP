@@ -108,6 +108,8 @@
     "docs/specs/2026-10-19-merge-queue.md": "181217265899601a4205b0afd352a6ef8d94e4d56188216f47b965ef38bb7009",
     "docs/specs/2026-10-19-self-hosted-parity-lane.md": "39cdfc17adb157852cb4e28c83da0f4f9553230e7d60cfc72187b8c6c73edb01",
     "docs/specs/2026-10-20-suite-ci-optimization-plan.md": "5dd06d09718ddc4059b5744000959b99d1da4171c98bea281527fa9c44e3eb83",
+    "docs/specs/2026-11-02-console-owner-signin.md": "ada926c9fcd481dfa583fe554f95296b0312e2cc8c8f8715700f803c055be085",
+    "docs/specs/2026-11-02-coordination-roles-guards-onboarding.md": "f19f562c92022cae337365f432537806c018d7f205810e87a6649f4542c49f49",
     "docs/superpowers/plans/2026-06-25-cortex-console-v2-phase0.md": "131e2b6577abedcfb73428ba2d2e53686a73334c1a2cf6b789ebb05b5ce0a7f9",
     "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md": "d1496bd1de7572ecbdcb0bdeedcb60aa10cbba5aef94947066d3d7e96fbb0455",
     "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase2.md": "ecc0779882b6b317132236df74386baf01cec72346a9a50e09d03a1d9f907235",
@@ -206,8 +208,8 @@
     "docs/superpowers/specs/2026-10-02-expose-invite-move-design.md": "ff9661609e29787f664dcf071fa54e86101e446521112d3d1b09e9ed050a7588",
     "docs/superpowers/specs/2026-10-02-maintainer-wake-design.md": "6dfb0154ffc3ef98e925ea95faf9b74ace6ec6f55ce7d4388e953eca7b03b620",
     "docs/superpowers/specs/2026-10-04-board-roles-passkey.md": "5d68cb05bcdd0c5a7ebc5697cb11a07bb824c2aa22ed41e1b640173753099ee7",
-    "evals/claude_shim.py": "6acac1e3de2a37d43b5744b6f871421a36d32e9dfef24e5dea09fe4235611031",
-    "evals/codex_shim.py": "7be0b929dddc8c735f75b2d38c390e188d74d86b2173dd6bb93c2e224a846ed5",
+    "evals/claude_shim.py": "66326ead3e956cc2063a8f6f6ebb2447901cae7e7d1154c796b9e68082362191",
+    "evals/codex_shim.py": "f0a63b9591d24c97c626dabb635f356192ab3e314b5a63638c1227693c91a4ab",
     "examples/.mcp.json": "f18025ee2238d455f8ea46b606d6191b8d896314e6851247e93ad10ede06d829",
     "examples/CLAUDE.memory.md": "608f6691e4ce902427f8b4ea071d761d618a7d0803a131161a33889a3f4173b5",
     "examples/commands/dream.md": "a3482ef8ab9589d36e4b2368e3416e0497f51eaef83e0a29e2eff777af3c2129",
@@ -239,12 +241,12 @@
     "ops/install-autostart.ps1": "453da0472d4b9566f6774aca6128b531341a2ef91e79d44f980e0b571a22671b",
     "ops/install-backup-task.ps1": "5fa15b92ff18a616d3165436cc283ea32c3790590e6e4b969ca22461ae85830f",
     "ops/install-cache-retention.ps1": "5d56fb78696529456a075eba16537459331ecacd0a88053d560173b9c6634173",
-    "ops/install-codex-shim-autostart.ps1": "3324c831e25e27e28a75accfdd87799dcb096c0bacbea71fd635e6abb6385fdd",
-    "ops/install-codex-shim-autostart.sh": "cd6461b19fc0bd908a841bd77e53b7c3f4384433ee860cdcfbc8086a60ff5804",
+    "ops/install-codex-shim-autostart.ps1": "7726736515bd6c73eb0dc76cee83783cdd5f8e4c1c0d31945ee3963abc99179d",
+    "ops/install-codex-shim-autostart.sh": "9dc2b88c6725b57a203389563593da286caa59507e4c95905e7eeff00cb39d7f",
     "ops/install-hook.ps1": "5e5fcf3bc35b2a3ed5d8d32016af472ef4a3ff203b94fb5dcb68d4809688b5ef",
     "ops/install-hook.sh": "c5942d45d9fff70b854ee2e97531fc7b594450df59b00f2a2bbcea33fadaea7c",
-    "ops/install-shim-autostart.ps1": "87b5da0355343e797ce7895d4b2cc8725ccd0ac21f2cce346cf4967a6efc0646",
-    "ops/install-shim-autostart.sh": "6f32b1c2ebd688546fdfd1837a3b6445d3195db99e9668c0360d13582c248888",
+    "ops/install-shim-autostart.ps1": "44e117d39cb4f384a4ce3c2dc23d2af3b4b599f462219d63a31487de5a0ec2aa",
+    "ops/install-shim-autostart.sh": "a6ff60a60c644f6bd9e67b404f4ae7e2ec3f69c2c5d56253ad3b85277d9e8c30",
     "ops/install-worktree-retention.ps1": "1ff8d9a77f2cca9a19e38c89d85959a2d4ce03400e73eda3b8c79f1dabf52d29",
     "ops/install.ps1": "9363c47d844630b382031837d9159c4f80a8582fb882e87cc87e705a5d3f75ed",
     "ops/install.sh": "04ea76bcd659904ceba8e72669e4921dcd2e08e1758979beb19e192dca5bffb2",
@@ -462,10 +464,19 @@
     "rust/shim/src/credentials/unix_accounts.rs": "d30f56e73eb66cb4dad5989bab84e4ccb33692b0433262f50caca02dcf58a0be",
     "rust/shim/src/daemon_url.rs": "5aabc9e4811af93f9292d84e2abc7c182884ea201284b7bbc2f722ff94d3817e",
     "rust/shim/src/errors.rs": "dc2399e44394fae5bb48ad8a36ca5d9607a86b21cd252fd69388218f68e3bc28",
-    "rust/shim/src/lib.rs": "8709d74b05869f5ce776d9f1be942c6225100239008c6f16385cab260361c489",
+    "rust/shim/src/extractor_shim/autostart.ps1": "94ced52db56b942dc13a61eb2dc9596719d7ae641bdd1b56bba441582891b477",
+    "rust/shim/src/extractor_shim/autostart.rs": "563536975b8f245a3ca5cac2352906cc7d8c77010315a18ff0611dc6df8a73dc",
+    "rust/shim/src/extractor_shim/autostart.sh": "5f9b8fefb9e05a88b9c3c81ab465a38259ea4b111a10352b1dee7b9e66a0451b",
+    "rust/shim/src/extractor_shim/cli.rs": "c5abfe23903703581b3660b2526fb41f043d2247b972bc1d143cf38fc40eb279",
+    "rust/shim/src/extractor_shim/config.rs": "96e4f16f73623798f0d89bf26f811e5c9d6f9e57f34729f6e56cbd21f66970fa",
+    "rust/shim/src/extractor_shim/json.rs": "77f399cfb88ba751fb8ca01b4e2ceb59fbabe60492ea16c135c96743dba6e395",
+    "rust/shim/src/extractor_shim/mod.rs": "fd335326ead07a5b782f9ac45fc066a1e5e6809459137ca3362ca6bb2aedf544",
+    "rust/shim/src/extractor_shim/tool_preamble.txt": "bf23e1413f76e349563368df84da07a57ce33cc5dbd795218a32a70b489aacdb",
+    "rust/shim/src/extractor_shim/tools.rs": "53fa2e0a24cb81bc14b290179a8c5d5a6745cb23a1efe683d37cb7c2fd6bb8d2",
+    "rust/shim/src/lib.rs": "2c80a666c747d526ea339d3fb5e624d2e3f905da44cef456fedeadda1e36d198",
     "rust/shim/src/lifecycle.rs": "666d564a93aedaa697dc1239a4aff6e27d98a1e38b3f7841664f1ddf320b418d",
     "rust/shim/src/lifecycle_executable.rs": "da0f66066d4e12bd383ce4b505c0882425a8897a2ca6c548a2b6e7b3246f6995",
-    "rust/shim/src/main.rs": "4803f9e160206d9423d63393196151c4222b2757dec82063a57de8cd9c6f904c",
+    "rust/shim/src/main.rs": "00455e098769237db29ad2f3c1b6a821d4901b7db9cb43d33311fca408794485",
     "rust/shim/src/maintainer_sent.rs": "26a539f852d669eb93f1a99d4f96f757ea74c548fde1d3830e2dba6dbe661af3",
     "rust/shim/src/owned_transport.rs": "6723acb67817f2901774ff5ffd3ff401e96ab1fe50f1d063a985d50c7c23520e",
     "rust/shim/src/pg/dsn.rs": "6fcfc5e2ce0a2bdb06ab3d83b6f0bf38e074af2cddba669fe6bbb7be424117c4",
@@ -3282,7 +3293,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/main.rs:16",
+          "location": "rust/shim/src/main.rs:17",
           "shape": {
             "argv_source": "--help \",",
             "channel": "argv",
@@ -3389,6 +3400,23 @@
             "expression": "<name>",
             "omitted_optional": null,
             "parameters": {}
+          }
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "documented",
+          "location": "docs/specs/2026-11-02-console-owner-signin.md:46",
+          "shape": {
+            "argv_source": "invite <name> --someone-else",
+            "channel": "argv",
+            "complete": false,
+            "expression": "<name> --someone-else",
+            "omitted_optional": null,
+            "parameters": {
+              "--someone-else": {
+                "expression": "value not established"
+              }
+            }
           }
         },
         {
@@ -4097,6 +4125,19 @@
                 "expression": "<pid>"
               }
             }
+          }
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "documented",
+          "location": "docs/specs/2026-11-02-coordination-roles-guards-onboarding.md:107",
+          "shape": {
+            "argv_source": "lease run <name> -- <command>",
+            "channel": "argv",
+            "complete": false,
+            "expression": "run <name> -- <command>",
+            "omitted_optional": null,
+            "parameters": {}
           }
         },
         {
@@ -8406,6 +8447,38 @@
             "omitted_optional": null,
             "parameters": {
               "allowed_principals": {
+                "expression": "field reference"
+              }
+            }
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "documented",
+          "location": "docs/specs/2026-11-02-console-owner-signin.md:185",
+          "shape": {
+            "channel": "config",
+            "complete": false,
+            "omitted_optional": null,
+            "parameters": {
+              "maintainer_principals": {
+                "expression": "field reference"
+              }
+            }
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "documented",
+          "location": "docs/specs/2026-11-02-console-owner-signin.md:54",
+          "shape": {
+            "channel": "config",
+            "complete": false,
+            "omitted_optional": null,
+            "parameters": {
+              "maintainer": {
                 "expression": "field reference"
               }
             }
@@ -26579,7 +26652,7 @@
         },
         {
           "evidence": "documented",
-          "location": "ops/install-codex-shim-autostart.ps1:155",
+          "location": "ops/install-codex-shim-autostart.ps1:172",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -26594,7 +26667,7 @@
         },
         {
           "evidence": "documented",
-          "location": "ops/install-shim-autostart.ps1:284",
+          "location": "ops/install-shim-autostart.ps1:299",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -26609,7 +26682,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-codex-shim-autostart.sh:131",
+          "location": "ops/install-codex-shim-autostart.sh:147",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -26624,7 +26697,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-shim-autostart.sh:138",
+          "location": "ops/install-shim-autostart.sh:154",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -26918,7 +26991,7 @@
         },
         {
           "evidence": "documented",
-          "location": "ops/install-codex-shim-autostart.ps1:159",
+          "location": "ops/install-codex-shim-autostart.ps1:176",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -26933,7 +27006,7 @@
         },
         {
           "evidence": "documented",
-          "location": "ops/install-shim-autostart.ps1:288",
+          "location": "ops/install-shim-autostart.ps1:303",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -26948,7 +27021,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-codex-shim-autostart.sh:135",
+          "location": "ops/install-codex-shim-autostart.sh:151",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -26963,7 +27036,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-shim-autostart.sh:142",
+          "location": "ops/install-shim-autostart.sh:158",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -27371,7 +27444,7 @@
         },
         {
           "evidence": "documented",
-          "location": "ops/install-codex-shim-autostart.ps1:157",
+          "location": "ops/install-codex-shim-autostart.ps1:174",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -27386,7 +27459,7 @@
         },
         {
           "evidence": "documented",
-          "location": "ops/install-shim-autostart.ps1:286",
+          "location": "ops/install-shim-autostart.ps1:301",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -27401,7 +27474,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-codex-shim-autostart.sh:133",
+          "location": "ops/install-codex-shim-autostart.sh:149",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -27416,7 +27489,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-shim-autostart.sh:140",
+          "location": "ops/install-shim-autostart.sh:156",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -27639,7 +27712,7 @@
         },
         {
           "evidence": "documented",
-          "location": "ops/install-codex-shim-autostart.ps1:158",
+          "location": "ops/install-codex-shim-autostart.ps1:175",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -27654,7 +27727,7 @@
         },
         {
           "evidence": "documented",
-          "location": "ops/install-shim-autostart.ps1:287",
+          "location": "ops/install-shim-autostart.ps1:302",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -27669,7 +27742,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-codex-shim-autostart.sh:134",
+          "location": "ops/install-codex-shim-autostart.sh:150",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -27684,7 +27757,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-shim-autostart.sh:141",
+          "location": "ops/install-shim-autostart.sh:157",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -28105,7 +28178,7 @@
         },
         {
           "evidence": "documented",
-          "location": "ops/install-codex-shim-autostart.ps1:156",
+          "location": "ops/install-codex-shim-autostart.ps1:173",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -28120,7 +28193,7 @@
         },
         {
           "evidence": "documented",
-          "location": "ops/install-shim-autostart.ps1:285",
+          "location": "ops/install-shim-autostart.ps1:300",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -28135,7 +28208,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-codex-shim-autostart.sh:132",
+          "location": "ops/install-codex-shim-autostart.sh:148",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -28150,7 +28223,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-shim-autostart.sh:139",
+          "location": "ops/install-shim-autostart.sh:155",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -29574,6 +29647,19 @@
           "dynamic": "unresolved",
           "evidence": "documented",
           "location": "docs/specs/2026-06-10-v0.2-phase1-daemon-postgres-plan.md:105",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "documented",
+          "location": "docs/specs/2026-11-02-console-owner-signin.md:207",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -33752,7 +33838,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/lib.rs:387",
+          "location": "rust/shim/src/lib.rs:388",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -34729,6 +34815,19 @@
           "dynamic": "unresolved",
           "evidence": "documented",
           "location": "docs/specs/2026-06-26-session-briefing-plan.md:364",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "documented",
+          "location": "docs/specs/2026-11-02-console-owner-signin.md:49",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -36411,6 +36510,19 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
+          "location": "docs/specs/2026-11-02-console-owner-signin.md:50",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "documented",
           "location": "docs/superpowers/specs/2026-08-10-identity-rekeying-principal-tokens-design.md:158",
           "shape": {
             "channel": "environment",
@@ -37236,6 +37348,19 @@
           "dynamic": "unresolved",
           "evidence": "documented",
           "location": "docs/guide/remote-bank.md:560",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "documented",
+          "location": "docs/specs/2026-11-02-console-owner-signin.md:207",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -40102,7 +40227,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "evals/claude_shim.py:78",
+          "location": "evals/claude_shim.py:79",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -40115,7 +40240,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "evals/claude_shim.py:80",
+          "location": "evals/claude_shim.py:81",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -40162,7 +40287,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "evals/codex_shim.py:67",
+          "location": "evals/codex_shim.py:68",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -40175,7 +40300,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "evals/codex_shim.py:69",
+          "location": "evals/codex_shim.py:70",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -43534,6 +43659,38 @@
       "parameter_source": "pseudolife_memory/web/routes.py:152",
       "producers": [
         {
+          "dynamic": "unresolved",
+          "evidence": "documented",
+          "location": "docs/specs/2026-11-02-console-owner-signin.md:416",
+          "shape": {
+            "channel": "query",
+            "complete": false,
+            "expression": "Request helper, URL suffix or body requires resolution at this location.",
+            "omitted_optional": null,
+            "parameters": {
+              "view": {
+                "literal": "coordination"
+              }
+            }
+          }
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "documented",
+          "location": "docs/specs/2026-11-02-console-owner-signin.md:91",
+          "shape": {
+            "channel": "query",
+            "complete": false,
+            "expression": "Request helper, URL suffix or body requires resolution at this location.",
+            "omitted_optional": null,
+            "parameters": {
+              "view": {
+                "literal": "coordination"
+              }
+            }
+          }
+        },
+        {
           "evidence": "static",
           "location": "pseudolife_memory/web/static/assets/index-Ci6PPauE.js:2",
           "shape": {
@@ -46206,6 +46363,23 @@
         {
           "dynamic": "unresolved",
           "evidence": "unverified",
+          "location": "docs/specs/2026-11-02-coordination-roles-guards-onboarding.md:387",
+          "method": null,
+          "shape": {
+            "channel": "body",
+            "complete": false,
+            "expression": "Request helper, URL suffix or body requires resolution at this location.",
+            "omitted_optional": null,
+            "parameters": {
+              "agent": {
+                "literal": ""
+              }
+            }
+          }
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "unverified",
           "location": "rust/shim/src/cli/briefing_hook.rs:846",
           "method": null,
           "shape": {
@@ -47494,6 +47668,30 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
+          "location": "docs/specs/2026-11-02-console-owner-signin.md:171",
+          "shape": {
+            "channel": "body",
+            "complete": false,
+            "expression": "Request helper, URL suffix or body requires resolution at this location.",
+            "omitted_optional": null,
+            "parameters": {}
+          }
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "documented",
+          "location": "docs/specs/2026-11-02-console-owner-signin.md:53",
+          "shape": {
+            "channel": "body",
+            "complete": false,
+            "expression": "Request helper, URL suffix or body requires resolution at this location.",
+            "omitted_optional": null,
+            "parameters": {}
+          }
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "documented",
           "location": "docs/superpowers/specs/2026-10-02-expose-invite-move-design.md:64",
           "shape": {
             "channel": "body",
@@ -47759,6 +47957,30 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
+          "location": "docs/specs/2026-11-02-console-owner-signin.md:171",
+          "shape": {
+            "channel": "body",
+            "complete": false,
+            "expression": "Request helper, URL suffix or body requires resolution at this location.",
+            "omitted_optional": null,
+            "parameters": {}
+          }
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "documented",
+          "location": "docs/specs/2026-11-02-coordination-roles-guards-onboarding.md:419",
+          "shape": {
+            "channel": "body",
+            "complete": false,
+            "expression": "Request helper, URL suffix or body requires resolution at this location.",
+            "omitted_optional": null,
+            "parameters": {}
+          }
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "documented",
           "location": "docs/superpowers/specs/2026-10-02-expose-invite-move-design.md:67",
           "shape": {
             "channel": "body",
@@ -47808,6 +48030,19 @@
           "dynamic": "unresolved",
           "evidence": "static",
           "location": "docs/atlas/atlas.json:441",
+          "shape": {
+            "channel": "body",
+            "complete": false,
+            "expression": "Request helper, URL suffix or body requires resolution at this location.",
+            "omitted_optional": null,
+            "parameters": {}
+          }
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "unverified",
+          "location": "docs/specs/2026-11-02-console-owner-signin.md:133",
+          "method": null,
           "shape": {
             "channel": "body",
             "complete": false,
@@ -50523,6 +50758,31 @@
         },
         {
           "dynamic": "unresolved",
+          "evidence": "documented",
+          "location": "docs/specs/2026-11-02-coordination-roles-guards-onboarding.md:147",
+          "shape": {
+            "channel": "parameters",
+            "complete": false,
+            "expression": "action=\"order\", lease=..., first=<agent id>,\n  reason=...",
+            "omitted_optional": null,
+            "parameters": {
+              "action": {
+                "literal": "order"
+              },
+              "first": {
+                "expression": "<agent id>"
+              },
+              "lease": {
+                "expression": "..."
+              },
+              "reason": {
+                "expression": "..."
+              }
+            }
+          }
+        },
+        {
+          "dynamic": "unresolved",
           "evidence": "static",
           "location": "ops/install-hook.ps1:44",
           "shape": {
@@ -51583,7 +51843,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-codex-shim-autostart.sh:136",
+          "location": "ops/install-codex-shim-autostart.sh:152",
           "shape": {
             "channel": "parameters",
             "complete": false,
@@ -51599,7 +51859,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-shim-autostart.sh:143",
+          "location": "ops/install-shim-autostart.sh:159",
           "shape": {
             "channel": "parameters",
             "complete": false,
@@ -59363,6 +59623,76 @@
       "dynamic": "unresolved",
       "evidence": "documented",
       "kind": "config",
+      "location": "docs/specs/2026-11-02-console-owner-signin.md:185",
+      "name": "CoordinationConfig.maintainer_principals",
+      "shape": {
+        "channel": "config",
+        "complete": false,
+        "expression": "documented key",
+        "parameters": {}
+      },
+      "usage": "reference"
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "documented",
+      "kind": "config",
+      "location": "docs/specs/2026-11-02-console-owner-signin.md:221",
+      "name": "MaintainerConfig.origin",
+      "shape": {
+        "channel": "config",
+        "complete": false,
+        "expression": "documented key",
+        "parameters": {}
+      },
+      "usage": "reference"
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "documented",
+      "kind": "config",
+      "location": "docs/specs/2026-11-02-console-owner-signin.md:258",
+      "name": "MaintainerConfig.origin",
+      "shape": {
+        "channel": "config",
+        "complete": false,
+        "expression": "documented key",
+        "parameters": {}
+      },
+      "usage": "reference"
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "documented",
+      "kind": "config",
+      "location": "docs/specs/2026-11-02-console-owner-signin.md:285",
+      "name": "MaintainerConfig.origin",
+      "shape": {
+        "channel": "config",
+        "complete": false,
+        "expression": "documented key",
+        "parameters": {}
+      },
+      "usage": "reference"
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "documented",
+      "kind": "config",
+      "location": "docs/specs/2026-11-02-console-owner-signin.md:54",
+      "name": "CoordinationConfig.maintainer",
+      "shape": {
+        "channel": "config",
+        "complete": false,
+        "expression": "documented key",
+        "parameters": {}
+      },
+      "usage": "reference"
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "documented",
+      "kind": "config",
       "location": "docs/superpowers/specs/2026-10-02-maintainer-wake-design.md:368",
       "name": "CoordinationConfig.maintainer",
       "shape": {
@@ -59882,6 +60212,76 @@
       "location": "docs/specs/2026-06-27-memory-lifecycle-utilization-design.md:265",
       "method": "POST",
       "name": "/api/briefing",
+      "shape": {
+        "channel": "body",
+        "complete": false,
+        "expression": "Request helper, URL suffix or body requires resolution at this location.",
+        "parameters": {}
+      }
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "documented",
+      "kind": "route",
+      "location": "docs/specs/2026-11-02-console-owner-signin.md:164",
+      "method": "POST",
+      "name": "/api/console/link",
+      "shape": {
+        "channel": "body",
+        "complete": false,
+        "expression": "Request helper, URL suffix or body requires resolution at this location.",
+        "parameters": {}
+      }
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "documented",
+      "kind": "route",
+      "location": "docs/specs/2026-11-02-console-owner-signin.md:209",
+      "method": "POST",
+      "name": "/api/console/link",
+      "shape": {
+        "channel": "body",
+        "complete": false,
+        "expression": "Request helper, URL suffix or body requires resolution at this location.",
+        "parameters": {}
+      }
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "documented",
+      "kind": "route",
+      "location": "docs/specs/2026-11-02-console-owner-signin.md:244",
+      "method": "POST",
+      "name": "/api/console/session",
+      "shape": {
+        "channel": "body",
+        "complete": false,
+        "expression": "Request helper, URL suffix or body requires resolution at this location.",
+        "parameters": {}
+      }
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "documented",
+      "kind": "route",
+      "location": "docs/specs/2026-11-02-console-owner-signin.md:251",
+      "method": "POST",
+      "name": "/api/console/session",
+      "shape": {
+        "channel": "body",
+        "complete": false,
+        "expression": "Request helper, URL suffix or body requires resolution at this location.",
+        "parameters": {}
+      }
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "documented",
+      "kind": "route",
+      "location": "docs/specs/2026-11-02-console-owner-signin.md:289",
+      "method": "POST",
+      "name": "/api/console/passkey-challenge",
       "shape": {
         "channel": "body",
         "complete": false,
@@ -61348,6 +61748,42 @@
         "complete": false,
         "expression": "retry.\"",
         "parameters": {}
+      }
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "static",
+      "kind": "cli",
+      "location": "rust/shim/src/extractor_shim/autostart.rs:16",
+      "name": "extractor-shim",
+      "shape": {
+        "argv_source": "extractor-shim install-autostart claude|codex [--env-file PATH] [--repo PATH] [--name NAME] [--native-exe PATH] [--replace-sibling] [--startup-timeout SECONDS] [--task-logon-type Interactive|S4U] [shim settings]\\nDefault config: ~/.pseudolife-mcp/extractor-shims.env. Settings include --cli, --model, --host, --port, --prompt-file, --health-ttl and --log. An explicit --repo reads that checkout's ops/.env. Registration requires systemd --user on Linux, or an elevated PowerShell on Windows. S4U is an explicit local-only task principal for unattended hosts.\"",
+        "channel": "argv",
+        "complete": false,
+        "expression": "install-autostart claude|codex [--env-file PATH] [--repo PATH] [--name NAME] [--native-exe PATH] [--replace-sibling] [--startup-timeout SECONDS] [--task-logon-type Interactive|S4U] [shim settings]\\nDefault config: ~/.pseudolife-mcp/extractor-shims.env. Settings include --cli, --model, --host, --port, --prompt-file, --health-ttl and --log. An explicit --repo reads that checkout's ops/.env. Registration requires systemd --user on Linux, or an elevated PowerShell on Windows. S4U is an explicit local-only task principal for unattended hosts.\"",
+        "parameters": {
+          "--env-file": {
+            "expression": "PATH]"
+          },
+          "--health-ttl": {
+            "expression": "and"
+          },
+          "--name": {
+            "expression": "NAME]"
+          },
+          "--native-exe": {
+            "expression": "PATH]"
+          },
+          "--replace-sibling": {
+            "expression": "[--startup-timeout"
+          },
+          "--repo": {
+            "expression": "reads"
+          },
+          "--task-logon-type": {
+            "expression": "Interactive|S4U]"
+          }
+        }
       }
     },
     {
@@ -63236,6 +63672,34 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "route",
+      "location": "rust/shim/src/extractor_shim/autostart.ps1:209",
+      "method": "GET",
+      "name": "/health",
+      "shape": {
+        "channel": "query",
+        "complete": false,
+        "expression": "Request helper, URL suffix or body requires resolution at this location.",
+        "parameters": {}
+      }
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "static",
+      "kind": "route",
+      "location": "rust/shim/src/extractor_shim/mod.rs:300",
+      "method": "GET",
+      "name": "/health",
+      "shape": {
+        "channel": "query",
+        "complete": false,
+        "expression": "Request helper, URL suffix or body requires resolution at this location.",
+        "parameters": {}
+      }
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "static",
+      "kind": "route",
       "location": "rust/shim/src/lifecycle.rs:367",
       "method": "GET",
       "name": "/health",
@@ -64542,6 +65006,370 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
+      "location": "docs/specs/2026-11-02-console-owner-signin.md:11",
+      "method": null,
+      "name": "/api/console",
+      "shape": {
+        "channel": "body",
+        "complete": false,
+        "expression": "Request helper, URL suffix or body requires resolution at this location.",
+        "parameters": {}
+      }
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "unverified",
+      "kind": "route",
+      "location": "docs/specs/2026-11-02-console-owner-signin.md:123",
+      "method": null,
+      "name": "/mcp",
+      "shape": {
+        "channel": "body",
+        "complete": false,
+        "expression": "Request helper, URL suffix or body requires resolution at this location.",
+        "parameters": {}
+      }
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "unverified",
+      "kind": "route",
+      "location": "docs/specs/2026-11-02-console-owner-signin.md:124",
+      "method": null,
+      "name": "/api/coordination",
+      "shape": {
+        "channel": "body",
+        "complete": false,
+        "expression": "Request helper, URL suffix or body requires resolution at this location.",
+        "parameters": {}
+      }
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "unverified",
+      "kind": "route",
+      "location": "docs/specs/2026-11-02-console-owner-signin.md:132",
+      "method": null,
+      "name": "/api/console/link",
+      "shape": {
+        "channel": "body",
+        "complete": false,
+        "expression": "Request helper, URL suffix or body requires resolution at this location.",
+        "parameters": {}
+      }
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "unverified",
+      "kind": "route",
+      "location": "docs/specs/2026-11-02-console-owner-signin.md:132",
+      "method": null,
+      "name": "/api/coordination",
+      "shape": {
+        "channel": "body",
+        "complete": false,
+        "expression": "Request helper, URL suffix or body requires resolution at this location.",
+        "parameters": {}
+      }
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "unverified",
+      "kind": "route",
+      "location": "docs/specs/2026-11-02-console-owner-signin.md:132",
+      "method": null,
+      "name": "/api/hook",
+      "shape": {
+        "channel": "body",
+        "complete": false,
+        "expression": "Request helper, URL suffix or body requires resolution at this location.",
+        "parameters": {}
+      }
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "unverified",
+      "kind": "route",
+      "location": "docs/specs/2026-11-02-console-owner-signin.md:137",
+      "method": null,
+      "name": "/mcp",
+      "shape": {
+        "channel": "body",
+        "complete": false,
+        "expression": "Request helper, URL suffix or body requires resolution at this location.",
+        "parameters": {}
+      }
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "unverified",
+      "kind": "route",
+      "location": "docs/specs/2026-11-02-console-owner-signin.md:187",
+      "method": null,
+      "name": "/api/coordination",
+      "shape": {
+        "channel": "body",
+        "complete": false,
+        "expression": "Request helper, URL suffix or body requires resolution at this location.",
+        "parameters": {}
+      }
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "unverified",
+      "kind": "route",
+      "location": "docs/specs/2026-11-02-console-owner-signin.md:189",
+      "method": null,
+      "name": "/api/maintainer",
+      "shape": {
+        "channel": "body",
+        "complete": false,
+        "expression": "Request helper, URL suffix or body requires resolution at this location.",
+        "parameters": {}
+      }
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "unverified",
+      "kind": "route",
+      "location": "docs/specs/2026-11-02-console-owner-signin.md:199",
+      "method": null,
+      "name": "/api/pair",
+      "shape": {
+        "channel": "body",
+        "complete": false,
+        "expression": "Request helper, URL suffix or body requires resolution at this location.",
+        "parameters": {}
+      }
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "unverified",
+      "kind": "route",
+      "location": "docs/specs/2026-11-02-console-owner-signin.md:252",
+      "method": null,
+      "name": "/api/pair",
+      "shape": {
+        "channel": "body",
+        "complete": false,
+        "expression": "Request helper, URL suffix or body requires resolution at this location.",
+        "parameters": {}
+      }
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "unverified",
+      "kind": "route",
+      "location": "docs/specs/2026-11-02-console-owner-signin.md:266",
+      "method": null,
+      "name": "/api/pair",
+      "shape": {
+        "channel": "body",
+        "complete": false,
+        "expression": "Request helper, URL suffix or body requires resolution at this location.",
+        "parameters": {}
+      }
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "unverified",
+      "kind": "route",
+      "location": "docs/specs/2026-11-02-console-owner-signin.md:307",
+      "method": null,
+      "name": "/api/console/session",
+      "shape": {
+        "channel": "body",
+        "complete": false,
+        "expression": "Request helper, URL suffix or body requires resolution at this location.",
+        "parameters": {}
+      }
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "unverified",
+      "kind": "route",
+      "location": "docs/specs/2026-11-02-console-owner-signin.md:383",
+      "method": null,
+      "name": "/health",
+      "shape": {
+        "channel": "body",
+        "complete": false,
+        "expression": "Request helper, URL suffix or body requires resolution at this location.",
+        "parameters": {}
+      }
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "unverified",
+      "kind": "route",
+      "location": "docs/specs/2026-11-02-console-owner-signin.md:388",
+      "method": null,
+      "name": "/api/console",
+      "shape": {
+        "channel": "body",
+        "complete": false,
+        "expression": "Request helper, URL suffix or body requires resolution at this location.",
+        "parameters": {}
+      }
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "unverified",
+      "kind": "route",
+      "location": "docs/specs/2026-11-02-console-owner-signin.md:426",
+      "method": null,
+      "name": "/api/console/link",
+      "shape": {
+        "channel": "body",
+        "complete": false,
+        "expression": "Request helper, URL suffix or body requires resolution at this location.",
+        "parameters": {}
+      }
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "unverified",
+      "kind": "route",
+      "location": "docs/specs/2026-11-02-console-owner-signin.md:426",
+      "method": null,
+      "name": "/api/console/session",
+      "shape": {
+        "channel": "body",
+        "complete": false,
+        "expression": "Request helper, URL suffix or body requires resolution at this location.",
+        "parameters": {}
+      }
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "unverified",
+      "kind": "route",
+      "location": "docs/specs/2026-11-02-console-owner-signin.md:440",
+      "method": null,
+      "name": "/health",
+      "shape": {
+        "channel": "body",
+        "complete": false,
+        "expression": "Request helper, URL suffix or body requires resolution at this location.",
+        "parameters": {}
+      }
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "unverified",
+      "kind": "route",
+      "location": "docs/specs/2026-11-02-console-owner-signin.md:441",
+      "method": null,
+      "name": "/health",
+      "shape": {
+        "channel": "body",
+        "complete": false,
+        "expression": "Request helper, URL suffix or body requires resolution at this location.",
+        "parameters": {}
+      }
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "unverified",
+      "kind": "route",
+      "location": "docs/specs/2026-11-02-console-owner-signin.md:444",
+      "method": null,
+      "name": "/api/pair",
+      "shape": {
+        "channel": "body",
+        "complete": false,
+        "expression": "Request helper, URL suffix or body requires resolution at this location.",
+        "parameters": {}
+      }
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "unverified",
+      "kind": "route",
+      "location": "docs/specs/2026-11-02-console-owner-signin.md:501",
+      "method": null,
+      "name": "/api/coordination",
+      "shape": {
+        "channel": "body",
+        "complete": false,
+        "expression": "Request helper, URL suffix or body requires resolution at this location.",
+        "parameters": {}
+      }
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "unverified",
+      "kind": "route",
+      "location": "docs/specs/2026-11-02-console-owner-signin.md:501",
+      "method": null,
+      "name": "/mcp",
+      "shape": {
+        "channel": "body",
+        "complete": false,
+        "expression": "Request helper, URL suffix or body requires resolution at this location.",
+        "parameters": {}
+      }
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "unverified",
+      "kind": "route",
+      "location": "docs/specs/2026-11-02-console-owner-signin.md:503",
+      "method": null,
+      "name": "/health",
+      "shape": {
+        "channel": "body",
+        "complete": false,
+        "expression": "Request helper, URL suffix or body requires resolution at this location.",
+        "parameters": {}
+      }
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "unverified",
+      "kind": "route",
+      "location": "docs/specs/2026-11-02-coordination-roles-guards-onboarding.md:390",
+      "method": null,
+      "name": "/mcp",
+      "shape": {
+        "channel": "body",
+        "complete": false,
+        "expression": "Request helper, URL suffix or body requires resolution at this location.",
+        "parameters": {}
+      }
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "unverified",
+      "kind": "route",
+      "location": "docs/specs/2026-11-02-coordination-roles-guards-onboarding.md:394",
+      "method": null,
+      "name": "/mcp",
+      "shape": {
+        "channel": "body",
+        "complete": false,
+        "expression": "Request helper, URL suffix or body requires resolution at this location.",
+        "parameters": {}
+      }
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "unverified",
+      "kind": "route",
+      "location": "docs/specs/2026-11-02-coordination-roles-guards-onboarding.md:395",
+      "method": null,
+      "name": "/mcp",
+      "shape": {
+        "channel": "body",
+        "complete": false,
+        "expression": "Request helper, URL suffix or body requires resolution at this location.",
+        "parameters": {}
+      }
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "unverified",
+      "kind": "route",
       "location": "docs/superpowers/plans/2026-06-25-cortex-console-v2-phase0.md:314",
       "method": null,
       "name": "/health",
@@ -65438,7 +66266,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "ops/install-codex-shim-autostart.sh:127",
+      "location": "ops/install-codex-shim-autostart.sh:143",
       "method": null,
       "name": "/health",
       "shape": {
@@ -65452,7 +66280,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "ops/install-shim-autostart.sh:134",
+      "location": "ops/install-shim-autostart.sh:150",
       "method": null,
       "name": "/health",
       "shape": {
@@ -66096,6 +66924,48 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
+      "location": "rust/shim/src/extractor_shim/autostart.sh:62",
+      "method": null,
+      "name": "/health",
+      "shape": {
+        "channel": "body",
+        "complete": false,
+        "expression": "Request helper, URL suffix or body requires resolution at this location.",
+        "parameters": {}
+      }
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "unverified",
+      "kind": "route",
+      "location": "rust/shim/src/extractor_shim/mod.rs:110",
+      "method": null,
+      "name": "/health",
+      "shape": {
+        "channel": "body",
+        "complete": false,
+        "expression": "Request helper, URL suffix or body requires resolution at this location.",
+        "parameters": {}
+      }
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "unverified",
+      "kind": "route",
+      "location": "rust/shim/src/extractor_shim/mod.rs:114",
+      "method": null,
+      "name": "/health",
+      "shape": {
+        "channel": "body",
+        "complete": false,
+        "expression": "Request helper, URL suffix or body requires resolution at this location.",
+        "parameters": {}
+      }
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "unverified",
+      "kind": "route",
       "location": "rust/shim/src/lifecycle.rs:619",
       "method": null,
       "name": "/health",
@@ -66560,6 +67430,150 @@
         "channel": "argv",
         "complete": true,
         "parameters": {}
+      }
+    },
+    {
+      "evidence": "documented",
+      "kind": "cli",
+      "location": "docs/specs/2026-11-02-console-owner-signin.md:11",
+      "name": "console",
+      "shape": {
+        "argv_source": "console",
+        "channel": "argv",
+        "complete": true,
+        "parameters": {}
+      }
+    },
+    {
+      "evidence": "documented",
+      "kind": "cli",
+      "location": "docs/specs/2026-11-02-console-owner-signin.md:196",
+      "name": "console",
+      "shape": {
+        "argv_source": "console --list",
+        "channel": "argv",
+        "complete": true,
+        "parameters": {
+          "--list": {
+            "expression": "value not established"
+          }
+        }
+      }
+    },
+    {
+      "evidence": "documented",
+      "kind": "cli",
+      "location": "docs/specs/2026-11-02-console-owner-signin.md:204",
+      "name": "console",
+      "shape": {
+        "argv_source": "console",
+        "channel": "argv",
+        "complete": true,
+        "parameters": {}
+      }
+    },
+    {
+      "evidence": "documented",
+      "kind": "cli",
+      "location": "docs/specs/2026-11-02-console-owner-signin.md:334",
+      "name": "console",
+      "shape": {
+        "argv_source": "console",
+        "channel": "argv",
+        "complete": true,
+        "parameters": {}
+      }
+    },
+    {
+      "evidence": "documented",
+      "kind": "cli",
+      "location": "docs/specs/2026-11-02-console-owner-signin.md:358",
+      "name": "console",
+      "shape": {
+        "argv_source": "console",
+        "channel": "argv",
+        "complete": true,
+        "parameters": {}
+      }
+    },
+    {
+      "evidence": "documented",
+      "kind": "cli",
+      "location": "docs/specs/2026-11-02-console-owner-signin.md:364",
+      "name": "console",
+      "shape": {
+        "argv_source": "console",
+        "channel": "argv",
+        "complete": true,
+        "parameters": {}
+      }
+    },
+    {
+      "evidence": "documented",
+      "kind": "cli",
+      "location": "docs/specs/2026-11-02-console-owner-signin.md:427",
+      "name": "console",
+      "shape": {
+        "argv_source": "console",
+        "channel": "argv",
+        "complete": true,
+        "parameters": {}
+      }
+    },
+    {
+      "evidence": "documented",
+      "kind": "cli",
+      "location": "docs/specs/2026-11-02-console-owner-signin.md:472",
+      "name": "console",
+      "shape": {
+        "argv_source": "console",
+        "channel": "argv",
+        "complete": true,
+        "parameters": {}
+      }
+    },
+    {
+      "evidence": "documented",
+      "kind": "cli",
+      "location": "docs/specs/2026-11-02-coordination-roles-guards-onboarding.md:330",
+      "name": "console",
+      "shape": {
+        "argv_source": "console",
+        "channel": "argv",
+        "complete": true,
+        "parameters": {}
+      }
+    },
+    {
+      "evidence": "documented",
+      "kind": "cli",
+      "location": "docs/specs/2026-11-02-coordination-roles-guards-onboarding.md:335",
+      "name": "console",
+      "shape": {
+        "argv_source": "console --to welcome",
+        "channel": "argv",
+        "complete": true,
+        "parameters": {
+          "--to": {
+            "expression": "welcome"
+          }
+        }
+      }
+    },
+    {
+      "evidence": "documented",
+      "kind": "cli",
+      "location": "docs/specs/2026-11-02-coordination-roles-guards-onboarding.md:338",
+      "name": "console",
+      "shape": {
+        "argv_source": "console --unless-signed-in",
+        "channel": "argv",
+        "complete": true,
+        "parameters": {
+          "--unless-signed-in": {
+            "expression": "value not established"
+          }
+        }
       }
     },
     {
@@ -77193,6 +78207,399 @@
     },
     {
       "dynamic": "unresolved",
+      "location": "docs/specs/2026-11-02-console-owner-signin.md:11",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:route:/api/console"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/specs/2026-11-02-console-owner-signin.md:123",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:route:/mcp"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/specs/2026-11-02-console-owner-signin.md:124",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:route:/api/coordination"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/specs/2026-11-02-console-owner-signin.md:132",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:route:/api/console/link"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/specs/2026-11-02-console-owner-signin.md:132",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:route:/api/coordination"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/specs/2026-11-02-console-owner-signin.md:132",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:route:/api/hook"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/specs/2026-11-02-console-owner-signin.md:133",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "route:POST /api/daemon-notice"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/specs/2026-11-02-console-owner-signin.md:137",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:route:/mcp"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/specs/2026-11-02-console-owner-signin.md:164",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:route:/api/console/link"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/specs/2026-11-02-console-owner-signin.md:164",
+      "reason": "forwarded parameters"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/specs/2026-11-02-console-owner-signin.md:171",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "route:POST /api/config"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/specs/2026-11-02-console-owner-signin.md:171",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "route:POST /api/daemon-notice"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/specs/2026-11-02-console-owner-signin.md:171",
+      "reason": "forwarded parameters"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/specs/2026-11-02-console-owner-signin.md:185",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "config:CoordinationConfig"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/specs/2026-11-02-console-owner-signin.md:185",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:config:CoordinationConfig.maintainer_principals"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/specs/2026-11-02-console-owner-signin.md:187",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:route:/api/coordination"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/specs/2026-11-02-console-owner-signin.md:189",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:route:/api/maintainer"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/specs/2026-11-02-console-owner-signin.md:199",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:route:/api/pair"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/specs/2026-11-02-console-owner-signin.md:207",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_DAEMON_URL"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/specs/2026-11-02-console-owner-signin.md:207",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/specs/2026-11-02-console-owner-signin.md:209",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:route:/api/console/link"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/specs/2026-11-02-console-owner-signin.md:209",
+      "reason": "forwarded parameters"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/specs/2026-11-02-console-owner-signin.md:221",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:config:MaintainerConfig.origin"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/specs/2026-11-02-console-owner-signin.md:244",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:route:/api/console/session"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/specs/2026-11-02-console-owner-signin.md:251",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:route:/api/console/session"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/specs/2026-11-02-console-owner-signin.md:252",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:route:/api/pair"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/specs/2026-11-02-console-owner-signin.md:258",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:config:MaintainerConfig.origin"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/specs/2026-11-02-console-owner-signin.md:261",
+      "reason": "forwarded parameters"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/specs/2026-11-02-console-owner-signin.md:266",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:route:/api/pair"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/specs/2026-11-02-console-owner-signin.md:285",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:config:MaintainerConfig.origin"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/specs/2026-11-02-console-owner-signin.md:289",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:route:/api/console/passkey-challenge"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/specs/2026-11-02-console-owner-signin.md:289",
+      "reason": "forwarded parameters"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/specs/2026-11-02-console-owner-signin.md:306",
+      "reason": "forwarded parameters"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/specs/2026-11-02-console-owner-signin.md:307",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:route:/api/console/session"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/specs/2026-11-02-console-owner-signin.md:383",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:route:/health"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/specs/2026-11-02-console-owner-signin.md:388",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:route:/api/console"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/specs/2026-11-02-console-owner-signin.md:415",
+      "reason": "forwarded parameters"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/specs/2026-11-02-console-owner-signin.md:416",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "route:GET /api/agents"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/specs/2026-11-02-console-owner-signin.md:426",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:route:/api/console/link"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/specs/2026-11-02-console-owner-signin.md:426",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:route:/api/console/session"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/specs/2026-11-02-console-owner-signin.md:440",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:route:/health"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/specs/2026-11-02-console-owner-signin.md:441",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:route:/health"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/specs/2026-11-02-console-owner-signin.md:444",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:route:/api/pair"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/specs/2026-11-02-console-owner-signin.md:448",
+      "reason": "forwarded parameters"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/specs/2026-11-02-console-owner-signin.md:46",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "cli:invite"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/specs/2026-11-02-console-owner-signin.md:49",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/specs/2026-11-02-console-owner-signin.md:50",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOKENS"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/specs/2026-11-02-console-owner-signin.md:501",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:route:/api/coordination"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/specs/2026-11-02-console-owner-signin.md:501",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:route:/mcp"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/specs/2026-11-02-console-owner-signin.md:503",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:route:/health"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/specs/2026-11-02-console-owner-signin.md:53",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "route:POST /api/config"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/specs/2026-11-02-console-owner-signin.md:54",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "config:CoordinationConfig"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/specs/2026-11-02-console-owner-signin.md:54",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:config:CoordinationConfig.maintainer"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/specs/2026-11-02-console-owner-signin.md:62",
+      "reason": "forwarded parameters"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/specs/2026-11-02-console-owner-signin.md:91",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "route:GET /api/agents"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/specs/2026-11-02-coordination-roles-guards-onboarding.md:107",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "cli:lease"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/specs/2026-11-02-coordination-roles-guards-onboarding.md:134",
+      "reason": "forwarded parameters"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/specs/2026-11-02-coordination-roles-guards-onboarding.md:139",
+      "reason": "forwarded parameters"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/specs/2026-11-02-coordination-roles-guards-onboarding.md:147",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "tool:memory_agents"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/specs/2026-11-02-coordination-roles-guards-onboarding.md:237",
+      "reason": "forwarded parameters"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/specs/2026-11-02-coordination-roles-guards-onboarding.md:239",
+      "reason": "forwarded parameters"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/specs/2026-11-02-coordination-roles-guards-onboarding.md:288",
+      "reason": "forwarded parameters"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/specs/2026-11-02-coordination-roles-guards-onboarding.md:357",
+      "reason": "forwarded parameters"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/specs/2026-11-02-coordination-roles-guards-onboarding.md:387",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "route:GET /api/hook/memory-changes"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/specs/2026-11-02-coordination-roles-guards-onboarding.md:390",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:route:/mcp"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/specs/2026-11-02-coordination-roles-guards-onboarding.md:394",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:route:/mcp"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/specs/2026-11-02-coordination-roles-guards-onboarding.md:395",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:route:/mcp"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/specs/2026-11-02-coordination-roles-guards-onboarding.md:419",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "route:POST /api/daemon-notice"
+    },
+    {
+      "dynamic": "unresolved",
       "location": "docs/superpowers/plans/2026-06-25-cortex-console-v2-phase0.md:314",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
@@ -81926,7 +83333,7 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "evals/claude_shim.py:433",
+      "location": "evals/claude_shim.py:434",
       "reason": "forwarded parameters"
     },
     {
@@ -81937,13 +83344,13 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "evals/claude_shim.py:78",
+      "location": "evals/claude_shim.py:79",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_SHIM_CLAUDE_CLI"
     },
     {
       "dynamic": "unresolved",
-      "location": "evals/claude_shim.py:80",
+      "location": "evals/claude_shim.py:81",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_SHIM_CLAUDE_CLI"
     },
@@ -81960,13 +83367,13 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "evals/codex_shim.py:67",
+      "location": "evals/codex_shim.py:68",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_SHIM_CODEX_CLI"
     },
     {
       "dynamic": "unresolved",
-      "location": "evals/codex_shim.py:69",
+      "location": "evals/codex_shim.py:70",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_SHIM_CODEX_CLI"
     },
@@ -82873,18 +84280,18 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-codex-shim-autostart.sh:127",
+      "location": "ops/install-codex-shim-autostart.sh:143",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-codex-shim-autostart.sh:127",
+      "location": "ops/install-codex-shim-autostart.sh:143",
       "reason": "request target supplied dynamically or external"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-codex-shim-autostart.sh:136",
+      "location": "ops/install-codex-shim-autostart.sh:152",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "tool:memory_dream"
     },
@@ -83200,18 +84607,18 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-shim-autostart.sh:134",
+      "location": "ops/install-shim-autostart.sh:150",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-shim-autostart.sh:134",
+      "location": "ops/install-shim-autostart.sh:150",
       "reason": "request target supplied dynamically or external"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-shim-autostart.sh:143",
+      "location": "ops/install-shim-autostart.sh:159",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "tool:memory_dream"
     },
@@ -89619,7 +91026,63 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/lib.rs:387",
+      "location": "rust/shim/src/extractor_shim/autostart.ps1:176",
+      "reason": "shell-built command"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/extractor_shim/autostart.ps1:209",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:route:/health"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/extractor_shim/autostart.ps1:209",
+      "reason": "request target supplied dynamically or external"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/extractor_shim/autostart.rs:16",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:cli:extractor-shim"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/extractor_shim/autostart.sh:27",
+      "reason": "request target supplied dynamically or external"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/extractor_shim/autostart.sh:62",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:route:/health"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/extractor_shim/autostart.sh:62",
+      "reason": "request target supplied dynamically or external"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/extractor_shim/mod.rs:110",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:route:/health"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/extractor_shim/mod.rs:114",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:route:/health"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/extractor_shim/mod.rs:300",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:route:/health"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/lib.rs:388",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_PROXY_TIMEOUT_SECONDS"
     },
@@ -89817,7 +91280,7 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/main.rs:16",
+      "location": "rust/shim/src/main.rs:17",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:help"
     },
