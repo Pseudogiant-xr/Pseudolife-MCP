@@ -5804,7 +5804,12 @@ def drain_side(stubs: dict[str, StubExtractor], scn: dict, side: str) -> list[di
 
 # The tables the merge judge writes: settled when none of them changes.
 # The review-queue judges (P3b): their scenarios live in their own module.
+import w2e_dream_rollback  # noqa: E402
 import w2e_queue_judges  # noqa: E402
+
+SCENARIOS.update(w2e_dream_rollback.scenarios(sys.modules[__name__]))
+CLOCK |= w2e_dream_rollback.CLOCK
+MUTANTS += w2e_dream_rollback.MUTANTS
 
 _QUEUE_JUDGES = w2e_queue_judges.scenarios(sys.modules[__name__])
 SCENARIOS.update(_QUEUE_JUDGES)
