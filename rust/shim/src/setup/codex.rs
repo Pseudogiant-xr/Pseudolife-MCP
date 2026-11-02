@@ -198,7 +198,13 @@ fn environment(server: &Map<String, Value>) -> Result<Map<String, Value>, SetupE
 
 fn foreign_authority<'a>(config: &'a Value, key: &str) -> Option<&'a Value> {
     config["layers"].as_array().and_then(|layers| {
-        layers.iter().rev().find(|layer| {
+        let user = layers.iter().position(|layer| {
+            layer["name"]["type"] == "user"
+                && layer["name"]
+                    .get("profile")
+                    .is_none_or(|p| p.is_null() || p == "")
+        })?;
+        layers[user + 1..].iter().rev().find(|layer| {
             layer["name"]["type"] != "user"
                 && server(&layer["config"]).is_some_and(|s| {
                     s.get("env").is_some_and(|env| env.get(key).is_some())
