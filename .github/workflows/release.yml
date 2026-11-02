@@ -12,7 +12,7 @@
 # workflow release.yml, environment pypi. Then retire the API token.
 #
 # PyPI never accepts a same-version re-upload — a failed run after upload
-# or a version mistake means cutting a .postN, so BOTH version guards live
+# or a version mistake means cutting a .postN, so all version guards live
 # in the `build` job and fail fast BEFORE anything is built or uploaded
 # (moved server.json's guard here from the `registry` job, issue #185 — it
 # used to run after the irreversible publish, so a mismatch burned a
@@ -76,6 +76,9 @@ jobs:
             echo "::error::server.json versions ($SERVER_V / $PKG_V) do not both match release tag v$TAG" >&2
             exit 1
           fi
+
+      - name: Guard — native crate versions must match the release
+        run: python rust/ci/release_assets.py version
 
       - name: Build sdist + wheel
         run: |
@@ -327,11 +330,14 @@ jobs:
         with:
           name: native-release-complete
           path: release-assets
+      - name: Verify downloaded native assets before publication
+        working-directory: release-assets
+        run: sha256sum --check SHA256SUMS
       - name: Attach native assets to the approved release
         env:
           GH_TOKEN: ${{ github.token }}
-        # No --clobber: retries never silently replace published bytes.
-        run: gh release upload "$GITHUB_REF_NAME" release-assets/* --repo "$GITHUB_REPOSITORY"
+        # Verified bytes can finish a retry after a partial upload.
+        run: gh release upload "$GITHUB_REF_NAME" release-assets/* --repo "$GITHUB_REPOSITORY" --clobber
 
   registry:
     if: github.event_name == 'release'

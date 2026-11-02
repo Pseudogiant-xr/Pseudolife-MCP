@@ -4,4 +4,8 @@
   publication approval and separate maintainer-enabled repository variables.
   A build-only dispatch proves all targets without publishing. The image
   guard now uses the native provisioner's admitted model pin, and its build
-  context includes the shared extractor prompt for the native CLI.
+  context prepares the two prompts needed by the native extractor shims
+  being integrated separately.
+- Check native crate versions before PyPI publication, verify downloaded
+  assets before attachment, and allow verified partial-upload retries.
+  Archive metadata is fixed so packaging time does not change checksums.

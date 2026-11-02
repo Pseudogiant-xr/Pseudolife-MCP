@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
+import gzip
 import hashlib
 import io
 import os
@@ -54,6 +56,14 @@ def tar_member(stream: tarfile.TarFile, name: str, data: bytes, mode: int) -> No
     stream.addfile(member, io.BytesIO(data))
 
 
+@contextmanager
+def tar_archive(path: Path):
+    # Normalize archive metadata: retries with identical inputs have identical bytes.
+    with path.open("wb") as raw, gzip.GzipFile(filename="", mode="wb", fileobj=raw, mtime=0) as compressed:
+        with tarfile.open(fileobj=compressed, mode="w") as stream:
+            yield stream
+
+
 def package(binary: Path, value: str, target: str, out: Path) -> Path:
     archive = out / asset_name(value, target)
     if binary.is_symlink() or not binary.is_file() or binary.stat().st_size == 0:
@@ -61,9 +71,11 @@ def package(binary: Path, value: str, target: str, out: Path) -> Path:
     out.mkdir(parents=True, exist_ok=True)
     if target.endswith("msvc"):
         with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as stream:
-            stream.writestr("pseudolife-mcp.exe", binary.read_bytes())
+            member = zipfile.ZipInfo("pseudolife-mcp.exe", date_time=(1980, 1, 1, 0, 0, 0))
+            member.compress_type = zipfile.ZIP_DEFLATED
+            stream.writestr(member, binary.read_bytes())
     else:
-        with tarfile.open(archive, "w:gz") as stream:
+        with tar_archive(archive) as stream:
             tar_member(stream, "pseudolife-mcp", binary.read_bytes(), 0o755)
     return archive
 
@@ -110,7 +122,7 @@ def assemble(root: Path, value: str, out: Path) -> None:
     for target in TARGETS:
         binary_contents(out / asset_name(value, target), target)
     compose = out / f"pseudolife-compose-{checked_version(value)}.tar.gz"
-    with tarfile.open(compose, "w:gz") as stream:
+    with tar_archive(compose) as stream:
         for name in BUNDLE_FILES:
             tar_member(stream, name, (root / "ops" / name).read_bytes(), 0o644)
     names = sorted(expected | {compose.name})

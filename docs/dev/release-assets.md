@@ -103,4 +103,8 @@ candidate branch. The native build and bundle jobs upload an Actions
 artifact named `native-release-complete`; all publishing jobs are skipped,
 even if the opt-in variables are enabled. A release event builds the same
 archives only after `publish` succeeds and the assets variable is enabled,
-then attaches that complete set without replacing existing release assets.
+then verifies the downloaded `SHA256SUMS` immediately before attaching the
+complete set. Upload uses `--clobber`, so rerunning the publication job can
+finish a partial upload from the verified complete artifact. Packaging fixes
+gzip/tar timestamps at the Unix epoch and ZIP timestamps at 1980-01-01;
+identical input bytes produce identical archives with the same packager.

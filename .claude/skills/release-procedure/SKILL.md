@@ -179,6 +179,11 @@ them in this order (first done 2026-07-16, v0.8.0; GHCR images added
    every checksum and the archive-root layout in
    [the asset contract](../../../docs/dev/release-assets.md). The Rust
    GHCR package needs public visibility after its first approved push.
+   The build job checks native crate versions before PyPI publication.
+   If native asset attachment stops after a partial upload, rerun the
+   asset publication job: it checks the downloaded complete artifact against
+   `SHA256SUMS` before uploading with `--clobber`. Reuse that verified
+   artifact; a failed checksum must be investigated before publication.
    Missing opt-in assets are a failed native publication, not permission
    to enable a fallback or change the default engine; keep installation
    and update readiness as release prerequisites.

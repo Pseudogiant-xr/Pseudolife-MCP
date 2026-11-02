@@ -2,6 +2,7 @@
 import hashlib
 import tarfile
 import zipfile
+from unittest.mock import patch
 
 import pytest
 
@@ -84,3 +85,33 @@ def test_wrong_member_and_symlink_are_refused(tmp_path):
         stream.writestr("bin/pseudolife-mcp.exe", b"fixture")
     with pytest.raises(ValueError, match="archive members"):
         assets.binary_contents(archive, assets.TARGETS[-1])
+
+def test_archive_bytes_are_independent_of_packaging_time(tmp_path):
+    binary = tmp_path / "binary"
+    binary.write_bytes(b"fixture")
+    root = tmp_path / "repo"
+    (root / "ops").mkdir(parents=True)
+    for name in assets.BUNDLE_FILES:
+        (root / "ops" / name).write_bytes(name.encode())
+    snapshots = []
+    for index, timestamp in enumerate((1700000000, 1800000000)):
+        out = tmp_path / str(index)
+        with patch("time.time", return_value=timestamp):
+            for target in assets.TARGETS:
+                assets.package(binary, "1.2.3", target, out)
+            assets.assemble(root, "1.2.3", out)
+        snapshots.append({path.name: path.read_bytes() for path in out.iterdir()})
+    assert snapshots[0] == snapshots[1]
+
+
+@pytest.mark.parametrize("crate", ["shim", "daemon"])
+def test_version_refuses_either_mismatched_native_crate(tmp_path, crate):
+    (tmp_path / "pyproject.toml").write_text('[project]\nversion = "1.2.3"\n')
+    for name in ("shim", "daemon"):
+        directory = tmp_path / "rust" / name
+        directory.mkdir(parents=True)
+        (directory / "Cargo.toml").write_text('[package]\nversion = "1.2.3"\n')
+    assert assets.version(tmp_path) == "1.2.3"
+    (tmp_path / "rust" / crate / "Cargo.toml").write_text('[package]\nversion = "1.2.4"\n')
+    with pytest.raises(ValueError, match=crate + " version differs"):
+        assets.version(tmp_path)

@@ -12,6 +12,7 @@ import time
 from pathlib import Path
 import threading
 import unittest
+import yaml
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -37,11 +38,16 @@ def verified_graph():
 
 def require_python_defaults(contents, graph):
     # This is one cutover prerequisite, not authorization to switch defaults.
-    if graph == verified_graph():
-        return
     for path, text in contents.items():
+        if path == ".github/workflows/release.yml" and graph == verified_graph() and text:
+            workflow = yaml.safe_load(text)
+            # Only the opt-in job may refer to the admitted Rust image.
+            # The default image publisher and every other real path stay guarded.
+            workflow["jobs"].pop("rust-image", None)
+            text = yaml.safe_dump(workflow)
         assert not any(symbol in text for symbol in
-                       ("Dockerfile.daemon-rust", "docker-compose.rust.yml", "w3j-daemon-rust")), path
+                       ("Dockerfile.daemon-rust", "docker-compose.rust.yml", "w3j-daemon-rust",
+                        "pseudolife-daemon-rust")), path
     commands = [json.loads(line[4:]) for line in contents["ops/Dockerfile.daemon"].splitlines()
                 if line.startswith("CMD ")]
     assert commands[-1] == ["python", "-m", "pseudolife_memory.cli", "serve"]
@@ -79,13 +85,31 @@ class ContainerTests(unittest.TestCase):
         native_cmd["ops/Dockerfile.daemon"] = 'CMD ["pseudolife-daemon"]\n'
         with self.assertRaises(AssertionError):
             require_python_defaults(native_cmd, unverified)
-        require_python_defaults(counterfactual, verified_graph())
+        with self.assertRaises(AssertionError):
+            require_python_defaults(counterfactual, verified_graph())
 
     def test_verified_graph_comes_from_the_native_manifest(self):
         from unittest.mock import patch
         replacement = [("embedding/onnx/model.onnx", "repo", "revision", "model.onnx", "a" * 64, "1")]
         with patch.dict(verified_graph.__globals__, native_manifest=lambda: replacement):
             self.assertEqual(verified_graph(), "a" * 64)
+
+    def test_verified_graph_does_not_allow_switching_real_python_defaults(self):
+        contents = {path: (ROOT / path).read_text() for path in DEFAULT_PATHS}
+        require_python_defaults(contents, verified_graph())
+        for path, replacement in (
+            ("ops/docker-compose.yml", re.sub(r"(?m)^    image: pseudolife-daemon:.*$",
+                "    image: ghcr.io/pseudogiant-xr/pseudolife-daemon-rust:0.21.0", contents["ops/docker-compose.yml"])),
+            ("ops/Dockerfile.daemon", contents["ops/Dockerfile.daemon"].replace(
+                'CMD ["python", "-m", "pseudolife_memory.cli", "serve"]', 'CMD ["pseudolife-daemon"]')),
+            (".github/workflows/release.yml", contents[".github/workflows/release.yml"].replace(
+                "file: ops/Dockerfile.daemon\n", "file: ops/Dockerfile.daemon-rust\n")),
+        ):
+            with self.subTest(path=path), self.assertRaises(AssertionError):
+                require_python_defaults(dict(contents, **{path: replacement}), verified_graph())
+
+    def test_prompt_context_does_not_allow_the_whole_directory(self):
+        self.assertNotIn("!evals/prompts", (ROOT / ".dockerignore").read_text().splitlines())
 
     def test_image_gate_matches_inputs_and_skips_unrelated_changes(self):
         gate = load("container_inputs")
