@@ -1423,7 +1423,8 @@ async fn deferred_privileged_bell_survives_peer_attention() {
         let mut privileged = view(&[1, 2], 2, 2, 1.0);
         privileged.wake.as_mut().unwrap()["reason"] = json!(reason);
         privileged.wake.as_mut().unwrap()["message_expires_at"] = json!(now() + 3600.0);
-        rig.bell.observe(BANK, &privileged).await;
+        publish_initial_offer(&rig, &privileged).await;
+        wait_for(|| rig.ledger().iter().any(|row| row[1] == "bell_deferred")).await;
         assert_eq!(rig.calls(), 0);
         lock.unlock().unwrap();
         let mut peer = view(&[1, 2, 3], 3, 3, 2.0);
@@ -1441,6 +1442,21 @@ async fn deferred_privileged_bell_survives_peer_attention() {
                 .any(|row| row[5].starts_with(&format!("rung {reason} ")))
         );
     }
+}
+
+async fn publish_initial_offer(rig: &Harness, offered: &View) {
+    // Drive the subscribed watch first: its initial attach view must run
+    // before these tests start injecting subsequent observations directly.
+    let mut preview = offered.preview.clone();
+    for entry in &mut preview {
+        entry["sender_agent_id"] = json!("fixture-peer");
+        entry["sender_label"] = json!("fixture");
+    }
+    rig.adapter
+        .update_mailbox(&json!({"pending_count":offered.count,
+        "pending_preview":preview, "wake":offered.wake}))
+        .await;
+    assert_eq!(rig.adapter.view().await.watermark, 2);
 }
 
 #[tokio::test]
@@ -1472,7 +1488,8 @@ async fn deferred_privileged_bell_drops_on_empty_expired_or_delivered() {
             now() + 3600.0
         };
         privileged.wake.as_mut().unwrap()["message_expires_at"] = json!(expiry);
-        rig.bell.observe(BANK, &privileged).await;
+        publish_initial_offer(&rig, &privileged).await;
+        wait_for(|| rig.ledger().iter().any(|row| row[1] == "bell_deferred")).await;
         assert!(now() < expiry, "initial reservation must precede expiry");
         assert!(rig.ledger().iter().any(|row| row[1] == "bell_deferred"));
         let mut next = view(&[1, 2], 2, 2, 2.0);
@@ -1482,6 +1499,7 @@ async fn deferred_privileged_bell_drops_on_empty_expired_or_delivered() {
         );
         if end == "empty" {
             next.count = Some(0);
+            next.preview.clear();
         }
         if end == "delivered" {
             next.delivered = 2;
@@ -1533,16 +1551,16 @@ async fn deferred_privileged_bell_drops_on_empty_expired_or_delivered() {
 #[tokio::test]
 async fn already_rung_privileged_offer_is_not_retained_again() {
     let rig = Harness::new(true, Duration::ZERO).await;
-    let mut privileged = view(&[1], 1, 1, 0.0);
+    let mut privileged = view(&[1], 1, 2, 0.0);
     privileged.wake.as_mut().unwrap()["reason"] = json!("maintainer_message");
-    rig.bell.observe(BANK, &privileged).await;
+    publish_initial_offer(&rig, &privileged).await;
     let first = rig.accepted().await;
     assert!(
         rig.pending
             .note_prompt(&json!({"session_id":BANK,"prompt":first["text"]}), now())
     );
-    let mut peer = view(&[1, 2], 2, 2, 1.0);
-    peer.delivered = 1;
+    let mut peer = view(&[1, 2], 2, 3, 1.0);
+    peer.delivered = 2;
     peer.wake.as_mut().unwrap()["reason"] = json!("urgent");
     rig.bell.observe(BANK, &peer).await;
     let second = rig.accepted().await;
@@ -1550,12 +1568,12 @@ async fn already_rung_privileged_offer_is_not_retained_again() {
         rig.pending
             .note_prompt(&json!({"session_id":BANK,"prompt":second["text"]}), now())
     );
-    privileged.watermark = 3;
-    privileged.wake_watermark = Some(3);
-    privileged.delivered = 2;
+    privileged.watermark = 4;
+    privileged.wake_watermark = Some(4);
+    privileged.delivered = 3;
     rig.bell.observe(BANK, &privileged).await; // peer acknowledged, old mail remains
-    let mut fresh = view(&[1, 3], 2, 4, 3.0);
-    fresh.delivered = 2;
+    let mut fresh = view(&[1, 3], 2, 5, 3.0);
+    fresh.delivered = 3;
     fresh.wake = Some(
         json!({"decision":"attention", "reason":"urgent", "ring_at":3.0,
         "queue_allowed":true, "recipient_state":"unknown", "message_expires_at":now()+3600.0}),
