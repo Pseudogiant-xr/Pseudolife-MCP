@@ -62,10 +62,28 @@ def _admin():
 
 
 def _drop(name):
-    from pseudolife_memory.storage.schema import refuse_production_database
+    import psycopg
+    from pseudolife_memory.storage.schema import assert_disposable_database, refuse_production_database
     NAMES.require_owned(name)
     refuse_production_database(name)
     with _admin() as conn:
+        if not conn.execute("SELECT 1 FROM pg_database WHERE datname=%s", (name,)).fetchone():
+            _CREATED.discard(name)
+            return
+        try:
+            with psycopg.connect(_url(name), autocommit=True) as target:
+                assert_disposable_database(target)
+        except psycopg.OperationalError:
+            # A concurrently dropped database is gone already; a half-dropped
+            # database cannot accept connections but still needs its DROP.
+            row = conn.execute("SELECT datconnlimit, datallowconn FROM pg_database "
+                               "WHERE datname=%s", (name,)).fetchone()
+            if row is None:
+                _CREATED.discard(name)
+                return
+            if row[0] != -2 and row[1]:
+                raise
+            refuse_production_database(name)
         conn.execute("SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
                      "WHERE datname=%s AND usename=current_user AND pid<>pg_backend_pid()", (name,))
         conn.execute(f'DROP DATABASE IF EXISTS "{name}"')

@@ -161,7 +161,7 @@
       "fixtures": "defc5e07c5ac3f94",
       "candidate": "d71c5590ce6f866a",
       "candidate-harness": "43b859ee9d5fd738",
-      "parity-checks": "58db17279b01776f",
+      "parity-checks": "4de9fff08be0dfc5",
       "daemon-image": "5c93764cb0f0bab7",
       "parity": "aa4ba434de948ea6"
     },
@@ -255,6 +255,11 @@
         "job": "parity-checks",
         "fingerprint": "58db17279b01776f",
         "reason": "Add two terminal enrolment stream cases to the existing setup shard and run pairing console cases on both platforms; no new builds or jobs."
+      },
+      {
+        "job": "parity-checks",
+        "fingerprint": "4de9fff08be0dfc5",
+        "reason": "The existing setup terminal pytest invocation also runs two stub-only recovery cleanup ordering checks. No new process setup, shard, dependency, service or job; the measured parity budget is unchanged."
       }
     ]
   },

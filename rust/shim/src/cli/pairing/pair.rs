@@ -157,8 +157,29 @@ fn normalize_code(text: &str) -> Result<Option<String>, Defer> {
 
 /// `sys.stdin.readline()` on a piped stdin: up to and including the first
 /// line end (universal newlines), decoding the UTF-8 CLI stream.
-fn read_line() -> Result<String, Defer> {
+#[allow(unsafe_code)]
+async fn read_line() -> Result<String, Defer> {
     use std::io::Read;
+    #[cfg(unix)]
+    let _flags = {
+        struct Restore(i32);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                // stdin remains open throughout this CLI invocation.
+                unsafe { libc::fcntl(libc::STDIN_FILENO, libc::F_SETFL, self.0) };
+            }
+        }
+        // A blocking stdin read would prevent the surrounding SIGINT select
+        // from running. Restore the shared descriptor flags on cancellation.
+        let flags = unsafe { libc::fcntl(libc::STDIN_FILENO, libc::F_GETFL) };
+        if flags < 0
+            || unsafe { libc::fcntl(libc::STDIN_FILENO, libc::F_SETFL, flags | libc::O_NONBLOCK) }
+                < 0
+        {
+            return Err(Defer);
+        }
+        Restore(flags)
+    };
     let mut line = Vec::new();
     let mut stdin = std::io::stdin().lock();
     let mut byte = [0u8; 1];
@@ -172,8 +193,18 @@ fn read_line() -> Result<String, Defer> {
                 }
                 line.push(byte[0]);
             }
-            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {
+                tokio::task::yield_now().await;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                // Regular redirected files cannot be registered with epoll;
+                // this also handles pipes without a blocking runtime worker.
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
             Err(_) => return Err(Defer),
+        }
+        if !line.is_empty() && line.len().is_multiple_of(1024) {
+            tokio::task::yield_now().await;
         }
     }
     String::from_utf8(line).map_err(|_| Defer)
@@ -313,7 +344,7 @@ async fn run_inner(arguments: &[String]) -> Result<u8, Defer> {
                 Err(_) => return Err(Defer),
             }
         } else {
-            read_line()?
+            read_line().await?
         };
         if pyjson::py_strip(&line).is_empty() {
             return Ok(usage("--read-code read no code on stdin", Some(&url)));

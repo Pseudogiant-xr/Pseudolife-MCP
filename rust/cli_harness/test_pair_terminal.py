@@ -12,6 +12,51 @@ import threading
 import pytest
 
 
+@pytest.mark.skipif(os.name != "posix", reason="POSIX pipe interruption regression")
+@pytest.mark.parametrize("arm", ["python", "rust"])
+def test_interrupt_with_open_partial_stdin(tmp_path, arm):
+    import array
+    import fcntl
+    import termios
+
+    candidate = os.environ.get("R1_PAIR_CANDIDATE") or os.environ.get("PSEUDOLIFE_RUST_BINARY")
+    if arm == "rust" and not candidate:
+        pytest.skip("a native candidate is required")
+    command = ([sys.executable, "-m", "pseudolife_memory.cli"] if arm == "python"
+               else [candidate])
+    token = tmp_path / "token"
+    command += ["pair", "http://localhost:1", "--read-code", "--token-file", str(token)]
+    env = {k: v for k, v in os.environ.items() if not k.startswith("PSEUDOLIFE_")}
+    env.update(HOME=str(tmp_path), USERPROFILE=str(tmp_path),
+               PSEUDOLIFE_MCP_DATA_DIR=str(tmp_path / "data"))
+    reader, writer = os.pipe()
+    flags = fcntl.fcntl(reader, fcntl.F_GETFL)
+    child = subprocess.Popen(command, stdin=reader, stdout=subprocess.PIPE,
+                             stderr=subprocess.PIPE, env=env, start_new_session=True,
+                             cwd=Path(__file__).resolve().parents[2])
+    try:
+        os.write(writer, b"ABCD")  # No newline or EOF: the reader must still be waiting.
+        deadline = time.monotonic() + 15
+        while True:
+            queued = array.array("i", [0])
+            fcntl.ioctl(reader, termios.FIONREAD, queued, True)
+            if queued[0] == 0:
+                break  # The actual CLI consumed the partial line.
+            assert child.poll() is None, child.communicate()
+            assert time.monotonic() < deadline, "CLI never read its input"
+            time.sleep(0.01)
+        child.send_signal(signal.SIGINT)
+        assert child.wait(timeout=3) in (-signal.SIGINT, 130)
+        assert fcntl.fcntl(reader, fcntl.F_GETFL) == flags
+        assert not token.exists()
+    finally:
+        if child.poll() is None:
+            child.kill()
+        child.communicate()
+        os.close(reader)
+        os.close(writer)
+
+
 @pytest.mark.skipif(os.name != "posix", reason="POSIX controlling-terminal regression")
 @pytest.mark.parametrize("arm", ["python", "rust"])
 @pytest.mark.parametrize("phase", ["prompt", "health", "redemption"])
