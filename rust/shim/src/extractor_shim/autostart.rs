@@ -64,7 +64,7 @@ pub(super) fn install(args: &[OsString], remove: bool) -> Result<(), String> {
             .map(|a| PathBuf::from(&a[1]))
     };
     let repo = find("--repo")
-        .map(|p| std::path::absolute(p).map_err(|e| e.to_string()))
+        .map(|p| config::absolute_path(&p))
         .transpose()?;
     let env_file = find("--env-file")
         .or_else(|| repo.as_ref().map(|p| p.join("ops/.env")))
@@ -73,7 +73,7 @@ pub(super) fn install(args: &[OsString], remove: bool) -> Result<(), String> {
                 .ok_or("home directory unavailable")?
                 .join(".pseudolife-mcp/extractor-shims.env"),
         );
-    let env_file = std::path::absolute(env_file).map_err(|e| e.to_string())?;
+    let env_file = config::absolute_path(&env_file)?;
     settings.extend(["--env-file".into(), env_file.as_os_str().into()]);
     if let Some(repo) = &repo {
         settings.extend(["--repo".into(), repo.as_os_str().into()]);
@@ -86,9 +86,8 @@ pub(super) fn install(args: &[OsString], remove: bool) -> Result<(), String> {
     }
     for at in 0..settings.len().saturating_sub(1) {
         if settings[at] == "--log" && !settings[at + 1].to_string_lossy().starts_with("~/") {
-            settings[at + 1] = std::path::absolute(PathBuf::from(&settings[at + 1]))
-                .map_err(|e| e.to_string())?
-                .into_os_string();
+            settings[at + 1] =
+                config::absolute_path(&PathBuf::from(&settings[at + 1]))?.into_os_string();
         }
     }
     // Resolve and validate everything without invoking a provider or modifying registration.
@@ -106,9 +105,7 @@ pub(super) fn install(args: &[OsString], remove: bool) -> Result<(), String> {
         if !(cfg!(windows) && kind == "codex" && !settings.iter().any(|a| a == "--cli")) {
             settings.extend([
                 "--cli".into(),
-                std::path::absolute(&config.cli)
-                    .map_err(|e| e.to_string())?
-                    .into_os_string(),
+                config::absolute_path(&config.cli)?.into_os_string(),
             ]);
         }
     }
@@ -159,9 +156,8 @@ pub(super) fn install(args: &[OsString], remove: bool) -> Result<(), String> {
             return Ok(());
         }
     }
-    let owner_exe = std::env::current_exe().map_err(|e| e.to_string())?;
-    let native = std::path::absolute(launcher.unwrap_or_else(|| owner_exe.clone()))
-        .map_err(|e| e.to_string())?;
+    let owner_exe = config::absolute_path(&std::env::current_exe().map_err(|e| e.to_string())?)?;
+    let native = config::absolute_path(&launcher.unwrap_or_else(|| owner_exe.clone()))?;
     if !native.is_file() {
         return Err(format!("native launcher not found: {}", native.display()));
     }
@@ -179,6 +175,14 @@ pub(super) fn install(args: &[OsString], remove: bool) -> Result<(), String> {
     ];
     if let Some(repo) = repo {
         serve_args.extend(["--repo".into(), repo.to_string_lossy().into_owned()]);
+    }
+    if let Some(receipt_dir) = config.as_ref().and_then(|c| c.receipt_dir.as_ref()) {
+        // Pin the installer's resolved directory: systemd and Task Scheduler
+        // need not inherit its XDG_CACHE_HOME / LOCALAPPDATA environment.
+        serve_args.extend([
+            "--receipt-dir".into(),
+            receipt_dir.to_string_lossy().into_owned(),
+        ]);
     }
     let status = if cfg!(windows) {
         let script = scratch.0.join("register.ps1");

@@ -55,8 +55,8 @@ with timeline.open('a') as f:
     f.write('start\n')
 plan = json.loads(Path(os.environ['R6_PLAN']).read_text())
 if plan.get('descendant'):
-    marker = str(Path(os.environ['R6_JOURNAL'] + '.survivor'))
-    subprocess.Popen([sys.executable, '-c', 'import time,pathlib;time.sleep(.8);pathlib.Path(' + repr(marker) + ').write_text("survived")'])
+    witness_port = plan['descendant']
+    subprocess.Popen([sys.executable, '-c', 'import socket;s=socket.create_connection(("127.0.0.1",' + str(witness_port) + '));s.sendall(b"ready");s.settimeout(30);s.recv(1)'])
 time.sleep(plan.get('sleep', 0))
 sys.stdout.buffer.write(plan.get('stdout', '').encode())
 sys.stderr.buffer.write(plan.get('stderr', '').encode())
@@ -330,18 +330,14 @@ def lifecycle(binary, root):
                     assert all(c.result()[0] == 200 for c in calls)
                 timeline = Path(str(journal) + ".timeline").read_text().splitlines()
                 assert timeline == ["start", "end"] * 3, (arm, "calls overlapped", timeline)
-                plan.write_text(json.dumps({"sleep": 2, "descendant": True}))
-                start = time.monotonic()
+                plan.write_text(json.dumps({"sleep": 2}))
                 status, body = call(port, "POST", "/chat/completions", {})
                 assert status == 500 and b"timed out after 0.25 seconds" in body, (status, body)
-                assert time.monotonic() - start < .75, (arm, "descendant kept pipes open")
                 encoded_cli = json.dumps(repr(str(cli)))[1:-1].encode()
                 body = body.replace(encoded_cli, b"'<cli>'")
                 timeout_answers.append(body)
                 plan.write_text(json.dumps(canned(kind, "recovered")))
                 assert call(port, "POST", "/chat/completions", {})[0] == 200
-                time.sleep(.9)
-                assert not Path(str(journal) + ".survivor").exists(), (arm, "descendant survived timeout")
                 count += 3
         assert timeout_answers[0] == timeout_answers[1], (kind, "timeout bytes", timeout_answers)
     for arm, exe in (("python", None), ("rust", binary)):
@@ -364,9 +360,50 @@ def lifecycle(binary, root):
     return count
 
 
+def native_tree_cleanup(binary, root):
+    """Observe child termination, not taskkill/startup wall-clock speed."""
+    for kind in ("claude", "codex"):
+        # Five seconds allows fixture startup on hosted Windows. The witness
+        # must be ready before the timeout; neither it nor its pipes self-close
+        # within the HTTP guard. A broken tree kill therefore cannot pass by
+        # merely waiting for the descendant to finish naturally.
+        with server(binary, kind, root / (kind + "-tree"), canned(kind, "OK"), timeout=5) as (port, plan, _, _, _):
+            with socket.socket() as listener:
+                listener.bind(("127.0.0.1", 0))
+                listener.listen()
+                listener.settimeout(10)
+                plan.write_text(json.dumps({"sleep": 20, "descendant": listener.getsockname()[1]}))
+                child = None
+                with concurrent.futures.ThreadPoolExecutor(1) as pool:
+                    response = pool.submit(call, port, "POST", "/chat/completions", {})
+                    try:
+                        child, _ = listener.accept()
+                        child.settimeout(10)
+                        assert child.recv(5) == b"ready", "descendant fixture did not become ready"
+                        status, body = response.result(timeout=10)
+                        assert status == 500 and b"timed out after 5.0 seconds" in body, (status, body)
+                        child.settimeout(1)
+                        try:
+                            closed = child.recv(1) == b""
+                        except ConnectionResetError:
+                            closed = True
+                        except socket.timeout:
+                            closed = False
+                        assert closed, "native timeout returned while descendant remained alive"
+                    finally:
+                        if child is not None:
+                            try:
+                                child.sendall(b"release")
+                            except OSError:
+                                pass
+                            child.close()
+    return 2
+
+
 def main():
     global STUB_EXE
     subprocess.run([sys.executable, str(Path(__file__).with_name("test_prompt.py"))], check=True)
+    subprocess.run([sys.executable, str(Path(__file__).with_name("test_lifecycle.py"))], check=True)
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--binary", required=True, type=Path)
     parser.add_argument("--output", type=Path)
@@ -384,6 +421,7 @@ def main():
         count += tools_differential(args.binary.resolve(), root)
         count += health_differential(args.binary.resolve(), root)
         count += lifecycle(args.binary.resolve(), root)
+        count += native_tree_cleanup(args.binary.resolve(), root)
         count += configuration(args.binary.resolve(), root)
         count += settings_privacy(args.binary.resolve(), root)
         count += native_regressions(args.binary.resolve(), root)

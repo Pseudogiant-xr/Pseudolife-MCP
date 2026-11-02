@@ -6,6 +6,19 @@ $ownerExe = [string]$c.OwnerExe
 $kind = [string]$c.Kind
 $port = [int]$c.Port
 $name = [string]$c.Name
+function Test-SamePath([string]$left, [string]$right) {
+    if (-not $left -or -not $right) { return $false }
+    if ($left -eq $right) { return $true }
+    try { return (Get-Item -LiteralPath $left -ErrorAction Stop).FullName -eq (Get-Item -LiteralPath $right -ErrorAction Stop).FullName }
+    catch { return $false }
+}
+function Test-NativeInvocation([string]$command, [string]$provider, [string]$settingsFile) {
+    $pattern = '(?:^|\s)"?extractor-shim"?\s+"?' + [regex]::Escape($provider) + '"?\s+"?--env-file"?\s+(?:"([^"]+)"|(\S+))(?=\s|$)'
+    $match = [regex]::Match($command, $pattern, 'IgnoreCase')
+    if (-not $match.Success) { return $false }
+    $path = if ($match.Groups[1].Success) { $match.Groups[1].Value } else { $match.Groups[2].Value }
+    return Test-SamePath $path $settingsFile
+}
 function Format-ForeignCommand([string]$command) {
     # Once a credential-like argument occurs, omit the remaining arguments;
     # quoting and multi-token authorization values must not defeat redaction.
@@ -66,19 +79,20 @@ function Get-OwnedTaskProcesses($task) {
     $snapshot = @(Get-CimInstance Win32_Process)
     foreach ($invocation in @(Get-RegisteredInvocation $task)) {
         if ($invocation.PythonScript) {
-            $script = [regex]::Escape($invocation.PythonScript).Replace('\\', '[\\/]')
-            $pattern = '^(?:"[^"]+"|\S+)\s+"?' + $script + '"?(\s|$)'
             $ports = '--port\s+"?(' + ($invocation.Ports -join '|') + ')"?(\s|$)'
-            $captured += @($snapshot | Where-Object { $_.CommandLine -match $pattern -and $_.CommandLine -match $ports })
+            $captured += @($snapshot | Where-Object {
+                $command = [regex]::Match($_.CommandLine, '^(?:"[^"]+"|\S+)\s+(?:"([^"]+)"|(\S+))(?=\s|$)')
+                $script = if ($command.Groups[1].Success) { $command.Groups[1].Value } else { $command.Groups[2].Value }
+                $command.Success -and (Test-SamePath $script $invocation.PythonScript) -and $_.CommandLine -match $ports
+            })
             continue
         }
-        $pattern = '"?extractor-shim"?\s+"?' + [regex]::Escape($invocation.Kind) + '"?\s+"?--env-file"?\s+"?' + [regex]::Escape($invocation.EnvFile) + '"?(\s|$)'
-        foreach ($process in @($snapshot | Where-Object { $_.CommandLine -match $pattern })) {
-            $owned = $process.ExecutablePath -eq $invocation.Exe
+        foreach ($process in @($snapshot | Where-Object { Test-NativeInvocation $_.CommandLine $invocation.Kind $invocation.EnvFile })) {
+            $owned = Test-SamePath $process.ExecutablePath $invocation.Exe
             if (-not $owned) {
                 $parent = Get-CimInstance Win32_Process -Filter "ProcessId = $($process.ParentProcessId)" -ErrorAction SilentlyContinue
-                $owned = $parent -and $parent.ExecutablePath -eq $invocation.Exe -and
-                    $parent.CreationDate -le $process.CreationDate -and $parent.CommandLine -match $pattern
+                $owned = $parent -and (Test-SamePath $parent.ExecutablePath $invocation.Exe) -and
+                    $parent.CreationDate -le $process.CreationDate -and (Test-NativeInvocation $parent.CommandLine $invocation.Kind $invocation.EnvFile)
             }
             if ($owned) { $captured += $process }
         }
@@ -115,8 +129,6 @@ if ($c.Remove) {
     if ($script:removedRegistration) { Write-Host "Removed $name" }
     return
 }
-$marker = [regex]::Escape([string]$c.EnvFile)
-$nativePattern = "`"?extractor-shim`"?\s+`"?$kind`"?\s+`"?--env-file`"?\s+`"?$marker`"?(\s|$)"
 $registered = Get-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue
 $legacy = if ($name -eq 'Pseudolife Claude Shim') { Get-ScheduledTask -TaskName 'Pseudolife Sonnet Shim' -ErrorAction SilentlyContinue } else { $null }
 $legacyProcesses = @(Get-OwnedTaskProcesses $legacy)
@@ -162,7 +174,7 @@ function Test-HealthyListener {
     $candidate = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($candidate) {
         $owner = Get-CimInstance Win32_Process -Filter "ProcessId = $($candidate.OwningProcess)" -ErrorAction SilentlyContinue
-        if ($owner -and $owner.ExecutablePath -eq $ownerExe -and $owner.CommandLine -match $nativePattern) {
+        if ($owner -and (Test-SamePath $owner.ExecutablePath $ownerExe) -and (Test-NativeInvocation $owner.CommandLine $kind $c.EnvFile)) {
             try {
                 $null = Invoke-WebRequest -UseBasicParsing -Uri "http://$($c.Host):$port/health" -TimeoutSec 2
                 $verifyArgs = @('extractor-shim', 'verify-settings', [string]$candidate.OwningProcess) + @($c.ServeArgs | Select-Object -Skip 1)

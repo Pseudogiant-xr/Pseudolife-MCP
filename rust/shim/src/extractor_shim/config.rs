@@ -82,6 +82,7 @@ pub(super) struct Config {
     pub emulate: bool,
     pub managed: bool,
     pub log: Option<PathBuf>,
+    pub receipt_dir: Option<PathBuf>,
 }
 
 impl Config {
@@ -110,18 +111,58 @@ impl Config {
     }
 }
 
-fn receipt_path(pid: u32) -> Result<PathBuf, String> {
-    Ok(dirs::cache_dir()
-        .or_else(|| dirs::home_dir().map(|home| home.join(".cache")))
-        .ok_or("user cache directory unavailable")?
-        .join("pseudolife-mcp/extractor-settings")
+pub(super) fn default_receipt_dir() -> Result<PathBuf, String> {
+    absolute_path(
+        &dirs::cache_dir()
+            .or_else(|| dirs::home_dir().map(|home| home.join(".cache")))
+            .ok_or("user cache directory unavailable")?
+            .join("pseudolife-mcp/extractor-settings"),
+    )
+}
+
+// Expand existing Windows ancestors so a short temp/home path and its long
+// spelling produce the same registration, including not-yet-created files.
+pub(super) fn absolute_path(path: &Path) -> Result<PathBuf, String> {
+    let absolute = std::path::absolute(path).map_err(|e| e.to_string())?;
+    #[cfg(windows)]
+    {
+        let mut head = absolute.as_path();
+        let mut tail = vec![];
+        loop {
+            if let Ok(resolved) = fs::canonicalize(head) {
+                let text = resolved.to_string_lossy();
+                let text = if let Some(unc) = text.strip_prefix(r"\\?\UNC\") {
+                    format!(r"\\{unc}")
+                } else {
+                    text.strip_prefix(r"\\?\").unwrap_or(&text).to_owned()
+                };
+                let mut resolved = PathBuf::from(text);
+                for part in tail.iter().rev() {
+                    resolved.push(part);
+                }
+                return Ok(resolved);
+            }
+            let Some(name) = head.file_name() else { break };
+            tail.push(name);
+            let Some(parent) = head.parent() else { break };
+            head = parent;
+        }
+    }
+    Ok(absolute)
+}
+
+fn receipt_path(config: &Config, pid: u32) -> Result<PathBuf, String> {
+    Ok(config
+        .receipt_dir
+        .as_ref()
+        .ok_or("managed settings required")?
         .join(format!("{pid}.sha256")))
 }
 
 pub(super) struct SettingsReceipt(PathBuf);
 impl SettingsReceipt {
     pub fn create(config: &Config) -> Result<Self, String> {
-        let path = receipt_path(std::process::id())?;
+        let path = receipt_path(config, std::process::id())?;
         let parent = path.parent().expect("receipt parent");
         let mut builder = fs::DirBuilder::new();
         builder.recursive(true);
@@ -174,7 +215,7 @@ impl Drop for SettingsReceipt {
 }
 
 pub(super) fn verify_settings(config: &Config, pid: u32) -> Result<(), String> {
-    let loaded = fs::read_to_string(receipt_path(pid)?).map_err(|e| e.to_string())?;
+    let loaded = fs::read_to_string(receipt_path(config, pid)?).map_err(|e| e.to_string())?;
     if loaded == config.fingerprint() {
         Ok(())
     } else {
@@ -413,6 +454,7 @@ pub(super) fn parse(args: Vec<OsString>) -> Result<Option<Config>, String> {
         if ![
             "repo",
             "env-file",
+            "receipt-dir",
             "cli",
             "model",
             "host",
@@ -448,6 +490,10 @@ pub(super) fn parse(args: Vec<OsString>) -> Result<Option<Config>, String> {
         .remove("env-file")
         .map(PathBuf::from)
         .or_else(|| repo.as_ref().map(|r| r.join("ops/.env")));
+    let receipt_dir = opts
+        .remove("receipt-dir")
+        .map(|p| absolute_path(Path::new(&p)))
+        .transpose()?;
     if writing {
         for key in ["model", "reasoning-effort"] {
             if let Some(value) = opts.get(key).filter(|s| !s.is_empty()) {
@@ -465,6 +511,11 @@ pub(super) fn parse(args: Vec<OsString>) -> Result<Option<Config>, String> {
         return Ok(None);
     }
     let managed = repo.is_some() || settings_path.is_some();
+    let receipt_dir = if managed {
+        Some(receipt_dir.map_or_else(default_receipt_dir, Ok)?)
+    } else {
+        receipt_dir
+    };
     let mut vals = BTreeMap::from([
         (
             "model".into(),
@@ -618,5 +669,6 @@ pub(super) fn parse(args: Vec<OsString>) -> Result<Option<Config>, String> {
         emulate,
         managed,
         log,
+        receipt_dir,
     }))
 }

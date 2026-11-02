@@ -63,6 +63,9 @@ An unchanged, healthy registration is a quiet no-op. Installation verifies
 Managed processes keep a local receipt in the user's private cache containing
 a hash of canonical effective shim settings. Reinstallation checks that receipt
 only after proving socket ownership; no settings fingerprint is served over HTTP.
+Registration pins an explicit receipt directory in the service arguments so the
+installer and scheduler can have different cache environments. Windows ownership
+checks accept short and long path spellings of the same files.
 Unrelated environment keys and formatting do not trigger a restart.
 A disabled but healthy Linux service is re-enabled without restarting it.
 Masked Linux units are refused with the command to unmask them.
@@ -77,6 +80,10 @@ Python installation paths remain available. Custom `--name` registration
 names support isolated installations and tests. When installing through a versioned runtime launcher, pass its stable path with `--native-exe PATH` so future starts follow the selected runtime.
 
 ## Stub-only verification
+
+Timeout checks observe descendant termination and pipe reaping through a socket
+witness, including a slow correct kill and a root-only mutation control. HTTP
+round-trip duration is not used as evidence that a descendant survived.
 
 ```sh
 cargo test --manifest-path rust/Cargo.toml -p pseudolife-stdio --test extractor_shim

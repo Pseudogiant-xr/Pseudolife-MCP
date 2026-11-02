@@ -5,6 +5,7 @@ then removes precisely those registrations. Never run on the maintainer's PC.
 """
 from __future__ import annotations
 import argparse
+import ctypes
 import json
 import os
 from pathlib import Path
@@ -39,7 +40,7 @@ if (Get-ScheduledTask -TaskName $Task -ErrorAction SilentlyContinue) { throw 'fi
 '''
     path = repo / "cleanup.ps1"
     path.write_text(script)
-    checked(["pwsh", "-NoProfile", "-File", str(path), task, str(native), str(repo)])
+    checked(["pwsh", "-NoProfile", "-File", str(path), task, str(native.resolve()), str(repo.resolve())])
 
 
 
@@ -67,7 +68,7 @@ def legacy_windows(native, root, kind, cli, env):
     run.autostart_oracle.write_config(repo, kind, values)
     name = "r6-legacy-" + uuid.uuid4().hex[:12]
     config = root / f"{kind}-legacy.json"
-    config.write_text(json.dumps({"Name": name, "Python": sys.executable, "Repo": str(repo), "Kind": kind}))
+    config.write_text(json.dumps({"Name": name, "Python": sys.executable, "Repo": str(repo.resolve()), "Kind": kind}))
     helper = root / "legacy-task.ps1"
     helper.write_text(r'''
 param($ConfigPath, [switch]$Cleanup)
@@ -130,7 +131,7 @@ def wrapper_forwarding(root):
         if script == "install-shim-autostart.ps1":
             command += ["-StartupTimeoutSec", "321"]
         args = json.loads(checked(command, cwd=root).stdout)
-        assert Path(args[args.index("--log") + 1]) == root / "logs/fixture.log", args
+        assert Path(args[args.index("--log") + 1]).resolve() == (root / "logs/fixture.log").resolve(), args
         if script == "install-shim-autostart.ps1":
             assert args[args.index("--startup-timeout") + 1] == "321", args
 
@@ -153,6 +154,9 @@ def proof(binary, root):
     checked(["rustc", "--edition=2024", str(Path(__file__).with_name("launcher.rs")), "-o", str(launcher)])
     launcher.with_suffix(".target").write_text(str(native))
     env = os.environ.copy()
+    # The scheduler deliberately does not inherit this installer-only cache.
+    # The registration must pin its receipt directory for both processes.
+    env["LOCALAPPDATA" if windows else "XDG_CACHE_HOME"] = str(root / "installer cache")
     # Registration is real, but providers are always pinned to the fixture.
     env["PATH"] = str(bin_dir) + os.pathsep + env["PATH"]
     for k in list(env):
@@ -317,7 +321,21 @@ def main():
     if not allowed:
         p.error("real autostart proof requires PSEUDOLIFE_TEST_REAL_AUTOSTART=1 on a designated dev machine")
     with tempfile.TemporaryDirectory(prefix="r6-autostart-") as directory:
-        proof(args.binary.resolve(), Path(directory))
+        root = Path(directory)
+        if os.name == "nt":
+            kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+            kernel.GetShortPathNameW.argtypes = [ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_uint32]
+            kernel.GetShortPathNameW.restype = ctypes.c_uint32
+            size = kernel.GetShortPathNameW(str(root), None, 0)
+            if not size:
+                raise ctypes.WinError(ctypes.get_last_error())
+            short = ctypes.create_unicode_buffer(size)
+            length = kernel.GetShortPathNameW(str(root), short, size)
+            assert 0 < length < size, "short-path fixture lookup failed"
+            root = Path(short.value)
+            assert root.samefile(directory)
+            print(f"short-path alias available: {str(root).lower() != str(root.resolve()).lower()}", flush=True)
+        proof(args.binary.resolve(), root)
 
 
 if __name__ == "__main__":
