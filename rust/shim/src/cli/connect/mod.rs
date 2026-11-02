@@ -37,6 +37,12 @@ mod url;
 use discover::{Ctx, Row};
 use pyjson::J;
 
+pub(super) type ProcessTable = procs::Table;
+
+pub(super) fn process_table() -> Result<Option<ProcessTable>, ()> {
+    procs::list()
+}
+
 /// This run is outside the native domain: nothing has been printed or
 /// written, and the dispatcher reports the deferral.
 #[derive(Debug)]
