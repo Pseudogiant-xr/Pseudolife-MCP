@@ -1828,7 +1828,8 @@ pub fn load(path: &Path) -> Result<Config, ConfigError> {
 }
 
 fn load_str(text: &str) -> Result<Config, ConfigError> {
-    let doc = safe_load(text).map_err(|e| refuse(format!("config.yaml: {e}")))?;
+    let doc = crate::config_io::yaml_load::load_startup(text)
+        .map_err(|e| refuse(format!("config.yaml: {e}")))?;
     // `yaml.safe_load(f) or {}`.
     let raw = match doc {
         Some(node) if node.truthy() => node,
@@ -3519,31 +3520,65 @@ mod tests {
         }
     }
 
-    /// yaml-rust2 resolves plain scalars by YAML 1.2 core rules; PyYAML by
-    /// YAML 1.1. What each form gives here, with PyYAML's reading beside it.
+    /// PyYAML SafeLoader's exact implicit boolean spellings, including the
+    /// near misses it keeps as strings. Quotes never opt into bool coercion.
+    #[test]
+    fn yaml_1_1_boolean_spellings() {
+        for (spellings, expected) in [
+            (
+                [
+                    "yes", "Yes", "YES", "true", "True", "TRUE", "on", "On", "ON",
+                ],
+                true,
+            ),
+            (
+                [
+                    "no", "No", "NO", "false", "False", "FALSE", "off", "Off", "OFF",
+                ],
+                false,
+            ),
+        ] {
+            for spelling in spellings {
+                let text = format!(
+                    "memory:\n  hide_superseded: {spelling}\ncoordination:\n  enabled: {spelling}\nupdates:\n  check_releases: {spelling}\n"
+                );
+                let loaded = cfg(&text);
+                assert_eq!(loaded.memory.hide_superseded, expected, "{spelling}");
+                assert_eq!(loaded.coordination.enabled, expected, "{spelling}");
+                assert_eq!(loaded.updates.check_releases, expected, "{spelling}");
+                assert!(refused(&format!(
+                    "updates:\n  check_releases: '{spelling}'\n"
+                )));
+            }
+        }
+        for spelling in [
+            "y", "Y", "n", "N", "yEs", "nO", "oN", "oFF", "tRuE", "fAlSe",
+        ] {
+            assert!(
+                refused(&format!("updates:\n  check_releases: {spelling}\n")),
+                "{spelling}"
+            );
+        }
+    }
+
+    /// Numeric and null values match Python, rather than silently changing
+    /// an existing config's values at the engine switch.
     #[test]
     fn yaml_1_1_forms_documented() {
-        // Python: True. Here: the string "yes" -> refused as a non-bool.
-        assert!(refused("memory:\n  hide_superseded: yes\n"));
-        assert!(refused("coordination:\n  enabled: on\n"));
-        // Python: 8 (octal). Here: 10.
-        assert_eq!(cfg("memory:\n  top_k: 010\n").memory.top_k, 10);
-        // Python: 10. Here: the string "1_0" -> refused.
-        assert!(refused("memory:\n  top_k: 1_0\n"));
-        // Both: 16.
-        assert_eq!(cfg("memory:\n  top_k: 0x10\n").memory.top_k, 16);
-        // Python: the string "0o10". Here: 8.
-        assert_eq!(cfg("memory:\n  top_k: 0o10\n").memory.top_k, 8);
-        // Python: the string "1e-1" (refused by the min_score validator).
-        // Here: 0.1.
-        assert_eq!(
-            cfg("memory:\n  search:\n    min_score: 1e-1\n")
-                .memory
-                .search
-                .min_score,
-            0.1
-        );
-        // Both: 0.1.
+        for (spelling, expected) in [
+            ("010", 8),
+            ("1_0", 10),
+            ("0x10", 16),
+            ("1:30", 90),
+            ("0b11", 3),
+        ] {
+            assert_eq!(
+                cfg(&format!("memory:\n  top_k: {spelling}\n")).memory.top_k,
+                expected
+            );
+        }
+        assert!(refused("memory:\n  top_k: 0o10\n"));
+        assert!(refused("memory:\n  search:\n    min_score: 1e-1\n"));
         assert_eq!(
             cfg("memory:\n  search:\n    min_score: 1.0e-1\n")
                 .memory
@@ -3551,23 +3586,63 @@ mod tests {
                 .min_score,
             0.1
         );
-        // Python: 90 (sexagesimal) and 3 (binary). Here: strings -> refused.
-        assert!(refused("memory:\n  top_k: 1:30\n"));
-        assert!(refused("memory:\n  top_k: 0b11\n"));
-        // Python: None. Here: the string "Null"; a flat preset ignores it
-        // either way.
         assert_eq!(
-            cfg("memory:\n  miras:\n    bands: Null\n").memory.bands,
-            vec!["flat"]
+            cfg("memory:\n  recency_base_half_life_s: 1:30.5\n")
+                .memory
+                .recency_base_half_life_s,
+            90.5
         );
-        // Python: a date at the top level (TypeError, refused). Here: a
-        // string naming no section -> defaults.
-        assert_eq!(cfg("2024-01-01\n"), Config::default());
-        // Python: an int past i64 is still an int (accepted). Here: a float
-        // -> refused.
-        assert!(refused(
-            "coordination:\n  wake:\n    nightly_total: 99999999999999999999\n"
-        ));
+        for spelling in ["null", "Null", "NULL", "~", ""] {
+            assert_eq!(
+                crate::config_io::yaml_load::load_startup(spelling)
+                    .unwrap()
+                    .unwrap_or(Node::Null),
+                Node::Null
+            );
+        }
+        assert_eq!(
+            cfg("embedding:\n  query_prefix: 1e5\n")
+                .embedding
+                .query_prefix,
+            "1e5"
+        );
+        assert_eq!(
+            cfg("embedding:\n  query_prefix: 0o10\n")
+                .embedding
+                .query_prefix,
+            "0o10"
+        );
+    }
+
+    #[test]
+    fn yaml_1_1_unrepresentable_values_name_the_fix() {
+        for (text, fix) in [
+            ("2024-01-01\n", "quote"),
+            (
+                "embedding:\n  query_prefix: !!binary YQ==\n",
+                "plain string",
+            ),
+            (
+                "coordination:\n  wake:\n    nightly_total: 99999999999999999999\n",
+                "64-bit",
+            ),
+        ] {
+            let error = load_str(text).unwrap_err().to_string();
+            assert!(error.contains(fix), "{error}");
+        }
+    }
+
+    #[test]
+    fn yaml_1_1_scalar_oracle() {
+        let corpus: Value =
+            serde_json::from_str(include_str!("../harness/goldens/startup-yaml11.json")).unwrap();
+        for case in corpus["cases"].as_array().unwrap() {
+            let text = case["yaml"].as_str().unwrap();
+            let node = crate::config_io::yaml_load::load_startup(text)
+                .unwrap_or_else(|e| panic!("{text:?}: {e}"))
+                .unwrap_or(Node::Null);
+            assert_eq!(node_json(&node), case["expected"], "{text:?}");
+        }
     }
 
     #[test]

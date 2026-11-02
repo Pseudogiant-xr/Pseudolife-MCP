@@ -17,7 +17,7 @@
 //! `config-write-restart-only`).
 
 mod yaml_dump;
-mod yaml_load;
+pub(crate) mod yaml_load;
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};

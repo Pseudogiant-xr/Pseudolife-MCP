@@ -1275,7 +1275,14 @@ CONFIG_PROFILES = {
     "duplicate keys": "memory:\n  top_k: 3\n  top_k: 5\n",
     "anchors and merge": "base: &b {top_k: 4}\nmemory:\n  <<: *b\n  hide_superseded: true\n",
     "memory policy": "memory_policy:\n  variant: full_separate_hook\n  ab_arms: [none, compact, compact]\n",
+    "YAML 1.1 numbers": "memory:\n  top_k: 010\n  recency_base_half_life_s: 1:30.5\ncoordination:\n  wake:\n    nightly_total: 1_000\nupdates:\n  check_interval_seconds: 1:30\n",
+    "YAML 1.1 strings": "embedding:\n  query_prefix: 1e5\n  model_name: 0o10\n",
+    "YAML 1.1 null": "time:\n  relative_age: NULL\nmemory:\n  miras:\n    bands: Null\n",
 }
+for _boolean in ("yes", "Yes", "YES", "no", "No", "NO", "on", "On", "ON", "off", "Off", "OFF"):
+    CONFIG_PROFILES[f"YAML 1.1 boolean {_boolean}"] = (
+        f"memory:\n  hide_superseded: {_boolean}\ncoordination:\n  enabled: {_boolean}\n"
+        f"updates:\n  check_releases: {_boolean}\n")
 
 
 def python_config_dump(home: Path, config_yaml: str | None) -> dict:
