@@ -1,7 +1,7 @@
 {
  "row": "CLI-AUDIT",
  "platform": "linux",
- "oracle_commit": "2c770c4dab8dfaba058fc25d2f935bcdd10ffada",
+ "oracle_commit": "7dcd738fa736c15c111fd67c5ffb83ea3f158b91",
  "oracle_commit_source": "git",
  "cases": {
   "audit-reserved-number-key-duplicates": {
@@ -11,8 +11,8 @@
    "stdout": "",
    "stderr": "Ym9hcmQtYXVkaXQ6IHtIT01FfS9hcmNoaXZlLmpzb25sIGxpbmUgMSBoYXMgYSBkdXBsaWNhdGUga2V5LCBzbyBhIHJlYWRlciBhbmQgdmVyaWZ5IGNvdWxkIHNlZSBkaWZmZXJlbnQgdmFsdWVzOyBpdCBjYW5ub3QgYmUgY2hlY2tlZAo=",
    "window": [
-    1793591812.1369328,
-    1793591812.5645306
+    1793599533.3921676,
+    1793599533.8037617
    ],
    "arm": "python",
    "before": {
@@ -24,8 +24,8 @@
     "cwd": "dir"
    },
    "modes": {
-    "archive.jsonl": "0o664",
-    "cwd": "0o775"
+    "archive.jsonl": "0o644",
+    "cwd": "0o755"
    }
   },
   "input-empty": {
@@ -35,8 +35,8 @@
    "stdout": "eyJvayI6IHRydWUsICJldmVudHMiOiAwLCAiZmlyc3Rfc2VxIjogbnVsbCwgImhlYWRfc2VxIjogbnVsbCwgImhlYWRfaGFzaCI6IG51bGwsICJoZWFkX2NyZWF0ZWRfYXQiOiBudWxsLCAic3RhcnRfY3V0IjogbnVsbH0K",
    "stderr": "",
    "window": [
-    1793591816.9396021,
-    1793591817.387258
+    1793599533.8050408,
+    1793599534.2278545
    ],
    "arm": "python",
    "before": {
@@ -48,8 +48,8 @@
     "cwd": "dir"
    },
    "modes": {
-    "archive.jsonl": "0o664",
-    "cwd": "0o775"
+    "archive.jsonl": "0o644",
+    "cwd": "0o755"
    }
   },
   "input-missing": {
@@ -59,8 +59,8 @@
    "stdout": "",
    "stderr": "Ym9hcmQtYXVkaXQ6IGNhbm5vdCByZWFkIHtIT01FfS9taXNzaW5nLmpzb25sCg==",
    "window": [
-    1793591817.3882766,
-    1793591817.8156095
+    1793599534.228674,
+    1793599534.644588
    ],
    "arm": "python",
    "before": {
@@ -70,7 +70,7 @@
     "cwd": "dir"
    },
    "modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    }
   },
   "bank-verify-head-mismatch": {
@@ -80,8 +80,8 @@
    "stdout": "eyJvayI6IGZhbHNlLCAic2VxIjogNDUsICJyZWFzb24iOiAiaGVhZF9taXNtYXRjaCJ9Cg==",
    "stderr": "",
    "window": [
-    1793591839.4590886,
-    1793591839.900205
+    1793599542.1780896,
+    1793599542.61991
    ],
    "arm": "python",
    "before": {
@@ -92,7 +92,7 @@
     "cwd": "dir"
    },
    "modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    }
   },
   "bank-verify-head-missing": {
@@ -102,8 +102,8 @@
    "stdout": "eyJvayI6IGZhbHNlLCAic2VxIjogOTk5OSwgInJlYXNvbiI6ICJoZWFkX21pc3NpbmcifQo=",
    "stderr": "",
    "window": [
-    1793591839.9274523,
-    1793591840.3731167
+    1793599542.6475775,
+    1793599543.0883021
    ],
    "arm": "python",
    "before": {
@@ -114,7 +114,7 @@
     "cwd": "dir"
    },
    "modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    }
   },
   "bank-verify-head-pruned": {
@@ -124,8 +124,8 @@
    "stdout": "eyJvayI6IGZhbHNlLCAic2VxIjogMiwgInJlYXNvbiI6ICJoZWFkX3BydW5lZCIsICJzdGFydF9jdXQiOiB7InNlcSI6IDYsICJjcmVhdGVkX2F0IjogMTcwMDI1OTIwMC4wLCAiY3V0b2ZmIjogMTcwMDA5MjgwMCwgInJldGVudGlvbl9kYXlzIjogMSwgInRocm91Z2hfc2VxIjogM319Cg==",
    "stderr": "",
    "window": [
-    1793591840.9010537,
-    1793591841.350154
+    1793599543.2864945,
+    1793599543.7240574
    ],
    "arm": "python",
    "before": {
@@ -136,7 +136,7 @@
     "cwd": "dir"
    },
    "modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    }
   },
   "bank-verify-empty": {
@@ -146,8 +146,8 @@
    "stdout": "eyJvayI6IHRydWUsICJldmVudHMiOiAwLCAiZmlyc3Rfc2VxIjogbnVsbCwgImhlYWRfc2VxIjogbnVsbCwgImhlYWRfaGFzaCI6IG51bGwsICJoZWFkX2NyZWF0ZWRfYXQiOiBudWxsLCAic3RhcnRfY3V0IjogbnVsbH0K",
    "stderr": "",
    "window": [
-    1793591841.533515,
-    1793591841.9786775
+    1793599543.9063263,
+    1793599544.3456893
    ],
    "arm": "python",
    "before": {
@@ -158,7 +158,7 @@
     "cwd": "dir"
    },
    "modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    }
   },
   "bank-verify-nolog": {
@@ -168,8 +168,8 @@
    "stdout": "",
    "stderr": "Ym9hcmQtYXVkaXQ6IHRoaXMgYmFuayBoYXMgbm8gYXVkaXQgbG9nIHlldCAoc2NoZW1hIG9sZGVyIHRoYW4gdjQyKTsgc3RhcnQgYSB2NDIgZGFlbW9uIG9uY2UgdG8gY3JlYXRlIGl0Cg==",
    "window": [
-    1793591842.1950622,
-    1793591842.6388059
+    1793599544.4385176,
+    1793599544.8830018
    ],
    "arm": "python",
    "before": {
@@ -180,7 +180,7 @@
     "cwd": "dir"
    },
    "modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    }
   },
   "bank-verify-tampered": {
@@ -190,8 +190,8 @@
    "stdout": "eyJvayI6IGZhbHNlLCAic2VxIjogMiwgInJlYXNvbiI6ICJoYXNoX21pc21hdGNoIn0K",
    "stderr": "",
    "window": [
-    1793591842.7575371,
-    1793591843.1981587
+    1793599545.0021598,
+    1793599545.4409738
    ],
    "arm": "python",
    "before": {
@@ -202,7 +202,7 @@
     "cwd": "dir"
    },
    "modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    }
   },
   "export-agent-literal": {
@@ -212,8 +212,8 @@
    "stdout": "",
    "stderr": "",
    "window": [
-    1793591848.6511478,
-    1793591849.1046045
+    1793599545.4694386,
+    1793599545.907391
    ],
    "arm": "python",
    "before": {
@@ -224,7 +224,7 @@
     "cwd": "dir"
    },
    "modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    }
   },
   "export-agent-unknown": {
@@ -234,8 +234,8 @@
    "stdout": "",
    "stderr": "Ym9hcmQtYXVkaXQ6IG5vIGFnZW50IGlkIHN0YXJ0cyB3aXRoIGZmZmZmZmZmMAo=",
    "window": [
-    1793591849.1316884,
-    1793591849.5762916
+    1793599545.9380789,
+    1793599546.383049
    ],
    "arm": "python",
    "before": {
@@ -246,7 +246,7 @@
     "cwd": "dir"
    },
    "modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    }
   },
   "export-agent-unknown-out": {
@@ -256,8 +256,8 @@
    "stdout": "",
    "stderr": "Ym9hcmQtYXVkaXQ6IG5vIGFnZW50IGlkIHN0YXJ0cyB3aXRoIGZmZmZmZmZmMAo=",
    "window": [
-    1793591849.604664,
-    1793591850.0545628
+    1793599546.4116564,
+    1793599546.849173
    ],
    "arm": "python",
    "before": {
@@ -269,8 +269,8 @@
     "out.jsonl": "file:"
    },
    "modes": {
-    "cwd": "0o775",
-    "out.jsonl": "0o664"
+    "cwd": "0o755",
+    "out.jsonl": "0o644"
    }
   },
   "export-out-exists": {
@@ -280,8 +280,8 @@
    "stdout": "",
    "stderr": "Ym9hcmQtYXVkaXQ6IHtIT01FfS9vdXQuanNvbmwgZXhpc3RzOyBleHBvcnQgbmV2ZXIgcmVwbGFjZXMgYSBmaWxlCg==",
    "window": [
-    1793591851.0228004,
-    1793591851.4405327
+    1793599546.8775148,
+    1793599547.2955315
    ],
    "arm": "python",
    "before": {
@@ -294,8 +294,8 @@
     "out.jsonl": "file:a2VlcA=="
    },
    "modes": {
-    "cwd": "0o775",
-    "out.jsonl": "0o664"
+    "cwd": "0o755",
+    "out.jsonl": "0o644"
    }
   },
   "export-empty": {
@@ -305,8 +305,8 @@
    "stdout": "",
    "stderr": "",
    "window": [
-    1793591852.4212382,
-    1793591852.8588321
+    1793599547.3244889,
+    1793599547.7632256
    ],
    "arm": "python",
    "before": {
@@ -317,7 +317,7 @@
     "cwd": "dir"
    },
    "modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    }
   },
   "export-nolog": {
@@ -327,8 +327,8 @@
    "stdout": "",
    "stderr": "Ym9hcmQtYXVkaXQ6IHRoaXMgYmFuayBoYXMgbm8gYXVkaXQgbG9nIHlldCAoc2NoZW1hIG9sZGVyIHRoYW4gdjQyKTsgc3RhcnQgYSB2NDIgZGFlbW9uIG9uY2UgdG8gY3JlYXRlIGl0Cg==",
    "window": [
-    1793591852.8860095,
-    1793591853.3233867
+    1793599547.7907798,
+    1793599548.2259724
    ],
    "arm": "python",
    "before": {
@@ -339,7 +339,7 @@
     "cwd": "dir"
    },
    "modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    }
   },
   "export-stdout-closed": {
@@ -349,8 +349,8 @@
    "stdout": "",
    "stderr": "Ym9hcmQtYXVkaXQ6IHRoZSBvdXRwdXQgd2FzIGNsb3NlZCBiZWZvcmUgdGhlIGV4cG9ydCBmaW5pc2hlZAo=",
    "window": [
-    1793591853.3356307,
-    1793591853.7724144
+    1793599548.2385342,
+    1793599548.6794314
    ],
    "arm": "python",
    "before": {
@@ -361,7 +361,7 @@
     "cwd": "dir"
    },
    "modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    }
   },
   "redact-nolog": {
@@ -371,8 +371,8 @@
    "stdout": "",
    "stderr": "Ym9hcmQtYXVkaXQ6IHRoaXMgYmFuayBoYXMgbm8gYXVkaXQgbG9nIHlldCAoc2NoZW1hIG9sZGVyIHRoYW4gdjQyKTsgc3RhcnQgYSB2NDIgZGFlbW9uIG9uY2UgdG8gY3JlYXRlIGl0Cg==",
    "window": [
-    1793591868.4585845,
-    1793591868.9177847
+    1793599548.7622786,
+    1793599549.1979825
    ],
    "arm": "python",
    "before": {
@@ -389,7 +389,7 @@
     "cwd": "dir"
    },
    "modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    }
   },
   "stats-invalid-window": {
@@ -399,8 +399,8 @@
    "stdout": "",
    "stderr": "Ym9hcmQtYXVkaXQ6IC0tc2luY2UgbXVzdCBiZSBiZWZvcmUgLS11bnRpbAo=",
    "window": [
-    1793591868.930446,
-    1793591869.3605816
+    1793599549.2097945,
+    1793599549.621933
    ],
    "arm": "python",
    "before": {
@@ -414,7 +414,7 @@
     "cwd": "dir"
    },
    "modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    }
   },
   "transport-python-verify-23": {
@@ -424,8 +424,8 @@
    "stdout": "eyJjb250YWluZXIiOiJmaXh0dXJlIn0K",
    "stderr": "cHNldWRvbGlmZS1tY3AgYm9hcmQtYXVkaXQ6IG5vIGJhbmsgaW4gdGhpcyBzaGVsbDsgcnVubmluZyBpdCBpbnNpZGUgdGhlIHBzZXVkb2xpZmUtbWNwLWRhZW1vbiBjb250YWluZXIKZml4dHVyZSBzdGRlcnIK",
    "window": [
-    1793591869.3778381,
-    1793591870.015355
+    1793599549.638871,
+    1793599550.2703035
    ],
    "files": {
     "cwd": "dir",
@@ -436,13 +436,13 @@
    "before": {
     "cwd": "dir",
     "docker_fixture.py": "file:aW1wb3J0IGpzb24sIG9zLCBzeXMKZnJvbSBwYXRobGliIGltcG9ydCBQYXRoCnJvb3QgPSBQYXRoKG9zLmVudmlyb25bJ0hPTUUnXSkKYXJndiA9IHN5cy5hcmd2WzE6XQp3aXRoIChyb290Lydkb2NrZXIuanNvbmwnKS5vcGVuKCdhJyxlbmNvZGluZz0ndXRmLTgnKSBhcyBvdXQ6CiAgICBvdXQud3JpdGUoanNvbi5kdW1wcyhhcmd2KSsnXG4nKQppZiBhcmd2WzBdID09ICdpbnNwZWN0JzoKICAgIHByaW50KCd0cnVlJyBpZiBhcmd2WzJdID09ICd7ey5TdGF0ZS5SdW5uaW5nfX0nIGVsc2Ugb3MuZW52aXJvblsnRklYVFVSRV9FTkdJTkUnXSkKICAgIHJhaXNlIFN5c3RlbUV4aXQoMCkKKHJvb3QvJ2RvY2tlci5zdGRpbicpLndyaXRlX2J5dGVzKHN5cy5zdGRpbi5idWZmZXIucmVhZCgpKQpzeXMuc3Rkb3V0LmJ1ZmZlci53cml0ZShiJ3siY29udGFpbmVyIjoiZml4dHVyZSJ9XG4nKQpzeXMuc3RkZXJyLmJ1ZmZlci53cml0ZShiJ2ZpeHR1cmUgc3RkZXJyXG4nKQpyYWlzZSBTeXN0ZW1FeGl0KGludChvcy5lbnZpcm9uWydGSVhUVVJFX0VYSVQnXSkpCg==",
-    "docker_fixture.sh": "file:IyEvYmluL3NoCmV4ZWMgL2hvbWUvZGV2Ly52ZW52cy9iMnItZHJlYW0vYmluL3B5dGhvbiAvdG1wL3BsLWNsaS1kaWZmLTczNTk4OS9oL2RvY2tlcl9maXh0dXJlLnB5ICIkQCIK",
+    "docker_fixture.sh": "file:IyEvYmluL3NoCmV4ZWMgL2hvbWUvZGV2Ly52ZW52cy9iMnItZHJlYW0vYmluL3B5dGhvbiAvdG1wL3BsLWNsaS1kaWZmLTgwODEzMy9oL2RvY2tlcl9maXh0dXJlLnB5ICIkQCIK",
     "durations.jsonl": "file:eyJzZWNvbmRzIjoyLjI1fQo="
    },
    "modes": {
-    "cwd": "0o775",
-    "docker.jsonl": "0o664",
-    "docker.stdin": "0o664"
+    "cwd": "0o755",
+    "docker.jsonl": "0o644",
+    "docker.stdin": "0o644"
    }
   },
   "transport-python-redact-23": {
@@ -452,8 +452,8 @@
    "stdout": "eyJjb250YWluZXIiOiJmaXh0dXJlIn0K",
    "stderr": "cHNldWRvbGlmZS1tY3AgYm9hcmQtYXVkaXQ6IG5vIGJhbmsgaW4gdGhpcyBzaGVsbDsgcnVubmluZyBpdCBpbnNpZGUgdGhlIHBzZXVkb2xpZmUtbWNwLWRhZW1vbiBjb250YWluZXIKZml4dHVyZSBzdGRlcnIK",
    "window": [
-    1793591870.0168283,
-    1793591870.654512
+    1793599550.2716434,
+    1793599550.8937929
    ],
    "files": {
     "cwd": "dir",
@@ -464,13 +464,13 @@
    "before": {
     "cwd": "dir",
     "docker_fixture.py": "file:aW1wb3J0IGpzb24sIG9zLCBzeXMKZnJvbSBwYXRobGliIGltcG9ydCBQYXRoCnJvb3QgPSBQYXRoKG9zLmVudmlyb25bJ0hPTUUnXSkKYXJndiA9IHN5cy5hcmd2WzE6XQp3aXRoIChyb290Lydkb2NrZXIuanNvbmwnKS5vcGVuKCdhJyxlbmNvZGluZz0ndXRmLTgnKSBhcyBvdXQ6CiAgICBvdXQud3JpdGUoanNvbi5kdW1wcyhhcmd2KSsnXG4nKQppZiBhcmd2WzBdID09ICdpbnNwZWN0JzoKICAgIHByaW50KCd0cnVlJyBpZiBhcmd2WzJdID09ICd7ey5TdGF0ZS5SdW5uaW5nfX0nIGVsc2Ugb3MuZW52aXJvblsnRklYVFVSRV9FTkdJTkUnXSkKICAgIHJhaXNlIFN5c3RlbUV4aXQoMCkKKHJvb3QvJ2RvY2tlci5zdGRpbicpLndyaXRlX2J5dGVzKHN5cy5zdGRpbi5idWZmZXIucmVhZCgpKQpzeXMuc3Rkb3V0LmJ1ZmZlci53cml0ZShiJ3siY29udGFpbmVyIjoiZml4dHVyZSJ9XG4nKQpzeXMuc3RkZXJyLmJ1ZmZlci53cml0ZShiJ2ZpeHR1cmUgc3RkZXJyXG4nKQpyYWlzZSBTeXN0ZW1FeGl0KGludChvcy5lbnZpcm9uWydGSVhUVVJFX0VYSVQnXSkpCg==",
-    "docker_fixture.sh": "file:IyEvYmluL3NoCmV4ZWMgL2hvbWUvZGV2Ly52ZW52cy9iMnItZHJlYW0vYmluL3B5dGhvbiAvdG1wL3BsLWNsaS1kaWZmLTczNTk4OS9oL2RvY2tlcl9maXh0dXJlLnB5ICIkQCIK",
+    "docker_fixture.sh": "file:IyEvYmluL3NoCmV4ZWMgL2hvbWUvZGV2Ly52ZW52cy9iMnItZHJlYW0vYmluL3B5dGhvbiAvdG1wL3BsLWNsaS1kaWZmLTgwODEzMy9oL2RvY2tlcl9maXh0dXJlLnB5ICIkQCIK",
     "durations.jsonl": "file:eyJzZWNvbmRzIjoyLjI1fQo="
    },
    "modes": {
-    "cwd": "0o775",
-    "docker.jsonl": "0o664",
-    "docker.stdin": "0o664"
+    "cwd": "0o755",
+    "docker.jsonl": "0o644",
+    "docker.stdin": "0o644"
    }
   },
   "transport-python-export-0": {
@@ -480,8 +480,8 @@
    "stdout": "",
    "stderr": "cHNldWRvbGlmZS1tY3AgYm9hcmQtYXVkaXQ6IG5vIGJhbmsgaW4gdGhpcyBzaGVsbDsgcnVubmluZyBpdCBpbnNpZGUgdGhlIHBzZXVkb2xpZmUtbWNwLWRhZW1vbiBjb250YWluZXIKZml4dHVyZSBzdGRlcnIK",
    "window": [
-    1793591870.6727521,
-    1793591871.3045135
+    1793599550.9113376,
+    1793599551.553832
    ],
    "files": {
     "cwd": "dir",
@@ -493,14 +493,14 @@
    "before": {
     "cwd": "dir",
     "docker_fixture.py": "file:aW1wb3J0IGpzb24sIG9zLCBzeXMKZnJvbSBwYXRobGliIGltcG9ydCBQYXRoCnJvb3QgPSBQYXRoKG9zLmVudmlyb25bJ0hPTUUnXSkKYXJndiA9IHN5cy5hcmd2WzE6XQp3aXRoIChyb290Lydkb2NrZXIuanNvbmwnKS5vcGVuKCdhJyxlbmNvZGluZz0ndXRmLTgnKSBhcyBvdXQ6CiAgICBvdXQud3JpdGUoanNvbi5kdW1wcyhhcmd2KSsnXG4nKQppZiBhcmd2WzBdID09ICdpbnNwZWN0JzoKICAgIHByaW50KCd0cnVlJyBpZiBhcmd2WzJdID09ICd7ey5TdGF0ZS5SdW5uaW5nfX0nIGVsc2Ugb3MuZW52aXJvblsnRklYVFVSRV9FTkdJTkUnXSkKICAgIHJhaXNlIFN5c3RlbUV4aXQoMCkKKHJvb3QvJ2RvY2tlci5zdGRpbicpLndyaXRlX2J5dGVzKHN5cy5zdGRpbi5idWZmZXIucmVhZCgpKQpzeXMuc3Rkb3V0LmJ1ZmZlci53cml0ZShiJ3siY29udGFpbmVyIjoiZml4dHVyZSJ9XG4nKQpzeXMuc3RkZXJyLmJ1ZmZlci53cml0ZShiJ2ZpeHR1cmUgc3RkZXJyXG4nKQpyYWlzZSBTeXN0ZW1FeGl0KGludChvcy5lbnZpcm9uWydGSVhUVVJFX0VYSVQnXSkpCg==",
-    "docker_fixture.sh": "file:IyEvYmluL3NoCmV4ZWMgL2hvbWUvZGV2Ly52ZW52cy9iMnItZHJlYW0vYmluL3B5dGhvbiAvdG1wL3BsLWNsaS1kaWZmLTczNTk4OS9oL2RvY2tlcl9maXh0dXJlLnB5ICIkQCIK",
+    "docker_fixture.sh": "file:IyEvYmluL3NoCmV4ZWMgL2hvbWUvZGV2Ly52ZW52cy9iMnItZHJlYW0vYmluL3B5dGhvbiAvdG1wL3BsLWNsaS1kaWZmLTgwODEzMy9oL2RvY2tlcl9maXh0dXJlLnB5ICIkQCIK",
     "durations.jsonl": "file:eyJzZWNvbmRzIjoyLjI1fQo="
    },
    "modes": {
-    "cwd": "0o775",
-    "docker.jsonl": "0o664",
-    "docker.stdin": "0o664",
-    "out.jsonl": "0o664"
+    "cwd": "0o755",
+    "docker.jsonl": "0o644",
+    "docker.stdin": "0o644",
+    "out.jsonl": "0o644"
    }
   },
   "transport-python-export-23": {
@@ -510,8 +510,8 @@
    "stdout": "",
    "stderr": "cHNldWRvbGlmZS1tY3AgYm9hcmQtYXVkaXQ6IG5vIGJhbmsgaW4gdGhpcyBzaGVsbDsgcnVubmluZyBpdCBpbnNpZGUgdGhlIHBzZXVkb2xpZmUtbWNwLWRhZW1vbiBjb250YWluZXIKZml4dHVyZSBzdGRlcnIK",
    "window": [
-    1793591871.3060746,
-    1793591871.9363594
+    1793599551.5553334,
+    1793599552.172968
    ],
    "files": {
     "cwd": "dir",
@@ -522,13 +522,13 @@
    "before": {
     "cwd": "dir",
     "docker_fixture.py": "file:aW1wb3J0IGpzb24sIG9zLCBzeXMKZnJvbSBwYXRobGliIGltcG9ydCBQYXRoCnJvb3QgPSBQYXRoKG9zLmVudmlyb25bJ0hPTUUnXSkKYXJndiA9IHN5cy5hcmd2WzE6XQp3aXRoIChyb290Lydkb2NrZXIuanNvbmwnKS5vcGVuKCdhJyxlbmNvZGluZz0ndXRmLTgnKSBhcyBvdXQ6CiAgICBvdXQud3JpdGUoanNvbi5kdW1wcyhhcmd2KSsnXG4nKQppZiBhcmd2WzBdID09ICdpbnNwZWN0JzoKICAgIHByaW50KCd0cnVlJyBpZiBhcmd2WzJdID09ICd7ey5TdGF0ZS5SdW5uaW5nfX0nIGVsc2Ugb3MuZW52aXJvblsnRklYVFVSRV9FTkdJTkUnXSkKICAgIHJhaXNlIFN5c3RlbUV4aXQoMCkKKHJvb3QvJ2RvY2tlci5zdGRpbicpLndyaXRlX2J5dGVzKHN5cy5zdGRpbi5idWZmZXIucmVhZCgpKQpzeXMuc3Rkb3V0LmJ1ZmZlci53cml0ZShiJ3siY29udGFpbmVyIjoiZml4dHVyZSJ9XG4nKQpzeXMuc3RkZXJyLmJ1ZmZlci53cml0ZShiJ2ZpeHR1cmUgc3RkZXJyXG4nKQpyYWlzZSBTeXN0ZW1FeGl0KGludChvcy5lbnZpcm9uWydGSVhUVVJFX0VYSVQnXSkpCg==",
-    "docker_fixture.sh": "file:IyEvYmluL3NoCmV4ZWMgL2hvbWUvZGV2Ly52ZW52cy9iMnItZHJlYW0vYmluL3B5dGhvbiAvdG1wL3BsLWNsaS1kaWZmLTczNTk4OS9oL2RvY2tlcl9maXh0dXJlLnB5ICIkQCIK",
+    "docker_fixture.sh": "file:IyEvYmluL3NoCmV4ZWMgL2hvbWUvZGV2Ly52ZW52cy9iMnItZHJlYW0vYmluL3B5dGhvbiAvdG1wL3BsLWNsaS1kaWZmLTgwODEzMy9oL2RvY2tlcl9maXh0dXJlLnB5ICIkQCIK",
     "durations.jsonl": "file:eyJzZWNvbmRzIjoyLjI1fQo="
    },
    "modes": {
-    "cwd": "0o775",
-    "docker.jsonl": "0o664",
-    "docker.stdin": "0o664"
+    "cwd": "0o755",
+    "docker.jsonl": "0o644",
+    "docker.stdin": "0o644"
    }
   },
   "transport-python-stats-0": {
@@ -538,8 +538,8 @@
    "stdout": "",
    "stderr": "cHNldWRvbGlmZS1tY3AgYm9hcmQtYXVkaXQ6IG5vIGJhbmsgaW4gdGhpcyBzaGVsbDsgcnVubmluZyBpdCBpbnNpZGUgdGhlIHBzZXVkb2xpZmUtbWNwLWRhZW1vbiBjb250YWluZXIKZml4dHVyZSBzdGRlcnIK",
    "window": [
-    1793591871.9377618,
-    1793591872.5644774
+    1793599552.1742823,
+    1793599552.7961686
    ],
    "files": {
     "cwd": "dir",
@@ -552,15 +552,15 @@
    "before": {
     "cwd": "dir",
     "docker_fixture.py": "file:aW1wb3J0IGpzb24sIG9zLCBzeXMKZnJvbSBwYXRobGliIGltcG9ydCBQYXRoCnJvb3QgPSBQYXRoKG9zLmVudmlyb25bJ0hPTUUnXSkKYXJndiA9IHN5cy5hcmd2WzE6XQp3aXRoIChyb290Lydkb2NrZXIuanNvbmwnKS5vcGVuKCdhJyxlbmNvZGluZz0ndXRmLTgnKSBhcyBvdXQ6CiAgICBvdXQud3JpdGUoanNvbi5kdW1wcyhhcmd2KSsnXG4nKQppZiBhcmd2WzBdID09ICdpbnNwZWN0JzoKICAgIHByaW50KCd0cnVlJyBpZiBhcmd2WzJdID09ICd7ey5TdGF0ZS5SdW5uaW5nfX0nIGVsc2Ugb3MuZW52aXJvblsnRklYVFVSRV9FTkdJTkUnXSkKICAgIHJhaXNlIFN5c3RlbUV4aXQoMCkKKHJvb3QvJ2RvY2tlci5zdGRpbicpLndyaXRlX2J5dGVzKHN5cy5zdGRpbi5idWZmZXIucmVhZCgpKQpzeXMuc3Rkb3V0LmJ1ZmZlci53cml0ZShiJ3siY29udGFpbmVyIjoiZml4dHVyZSJ9XG4nKQpzeXMuc3RkZXJyLmJ1ZmZlci53cml0ZShiJ2ZpeHR1cmUgc3RkZXJyXG4nKQpyYWlzZSBTeXN0ZW1FeGl0KGludChvcy5lbnZpcm9uWydGSVhUVVJFX0VYSVQnXSkpCg==",
-    "docker_fixture.sh": "file:IyEvYmluL3NoCmV4ZWMgL2hvbWUvZGV2Ly52ZW52cy9iMnItZHJlYW0vYmluL3B5dGhvbiAvdG1wL3BsLWNsaS1kaWZmLTczNTk4OS9oL2RvY2tlcl9maXh0dXJlLnB5ICIkQCIK",
+    "docker_fixture.sh": "file:IyEvYmluL3NoCmV4ZWMgL2hvbWUvZGV2Ly52ZW52cy9iMnItZHJlYW0vYmluL3B5dGhvbiAvdG1wL3BsLWNsaS1kaWZmLTgwODEzMy9oL2RvY2tlcl9maXh0dXJlLnB5ICIkQCIK",
     "durations.jsonl": "file:eyJzZWNvbmRzIjoyLjI1fQo="
    },
    "modes": {
-    "cwd": "0o775",
-    "docker.jsonl": "0o664",
-    "docker.stdin": "0o664",
-    "log.jsonl": "0o664",
-    "out.jsonl": "0o664"
+    "cwd": "0o755",
+    "docker.jsonl": "0o644",
+    "docker.stdin": "0o644",
+    "log.jsonl": "0o644",
+    "out.jsonl": "0o644"
    }
   },
   "transport-python-stats-23": {
@@ -570,8 +570,8 @@
    "stdout": "",
    "stderr": "cHNldWRvbGlmZS1tY3AgYm9hcmQtYXVkaXQ6IG5vIGJhbmsgaW4gdGhpcyBzaGVsbDsgcnVubmluZyBpdCBpbnNpZGUgdGhlIHBzZXVkb2xpZmUtbWNwLWRhZW1vbiBjb250YWluZXIKZml4dHVyZSBzdGRlcnIK",
    "window": [
-    1793591872.5659907,
-    1793591873.2012239
+    1793599552.79773,
+    1793599553.419922
    ],
    "files": {
     "cwd": "dir",
@@ -582,13 +582,13 @@
    "before": {
     "cwd": "dir",
     "docker_fixture.py": "file:aW1wb3J0IGpzb24sIG9zLCBzeXMKZnJvbSBwYXRobGliIGltcG9ydCBQYXRoCnJvb3QgPSBQYXRoKG9zLmVudmlyb25bJ0hPTUUnXSkKYXJndiA9IHN5cy5hcmd2WzE6XQp3aXRoIChyb290Lydkb2NrZXIuanNvbmwnKS5vcGVuKCdhJyxlbmNvZGluZz0ndXRmLTgnKSBhcyBvdXQ6CiAgICBvdXQud3JpdGUoanNvbi5kdW1wcyhhcmd2KSsnXG4nKQppZiBhcmd2WzBdID09ICdpbnNwZWN0JzoKICAgIHByaW50KCd0cnVlJyBpZiBhcmd2WzJdID09ICd7ey5TdGF0ZS5SdW5uaW5nfX0nIGVsc2Ugb3MuZW52aXJvblsnRklYVFVSRV9FTkdJTkUnXSkKICAgIHJhaXNlIFN5c3RlbUV4aXQoMCkKKHJvb3QvJ2RvY2tlci5zdGRpbicpLndyaXRlX2J5dGVzKHN5cy5zdGRpbi5idWZmZXIucmVhZCgpKQpzeXMuc3Rkb3V0LmJ1ZmZlci53cml0ZShiJ3siY29udGFpbmVyIjoiZml4dHVyZSJ9XG4nKQpzeXMuc3RkZXJyLmJ1ZmZlci53cml0ZShiJ2ZpeHR1cmUgc3RkZXJyXG4nKQpyYWlzZSBTeXN0ZW1FeGl0KGludChvcy5lbnZpcm9uWydGSVhUVVJFX0VYSVQnXSkpCg==",
-    "docker_fixture.sh": "file:IyEvYmluL3NoCmV4ZWMgL2hvbWUvZGV2Ly52ZW52cy9iMnItZHJlYW0vYmluL3B5dGhvbiAvdG1wL3BsLWNsaS1kaWZmLTczNTk4OS9oL2RvY2tlcl9maXh0dXJlLnB5ICIkQCIK",
+    "docker_fixture.sh": "file:IyEvYmluL3NoCmV4ZWMgL2hvbWUvZGV2Ly52ZW52cy9iMnItZHJlYW0vYmluL3B5dGhvbiAvdG1wL3BsLWNsaS1kaWZmLTgwODEzMy9oL2RvY2tlcl9maXh0dXJlLnB5ICIkQCIK",
     "durations.jsonl": "file:eyJzZWNvbmRzIjoyLjI1fQo="
    },
    "modes": {
-    "cwd": "0o775",
-    "docker.jsonl": "0o664",
-    "docker.stdin": "0o664"
+    "cwd": "0o755",
+    "docker.jsonl": "0o644",
+    "docker.stdin": "0o644"
    }
   },
   "transport-rust-verify-23": {
@@ -598,8 +598,8 @@
    "stdout": "eyJjb250YWluZXIiOiJmaXh0dXJlIn0K",
    "stderr": "cHNldWRvbGlmZS1tY3AgYm9hcmQtYXVkaXQ6IG5vIGJhbmsgaW4gdGhpcyBzaGVsbDsgcnVubmluZyBpdCBpbnNpZGUgdGhlIHBzZXVkb2xpZmUtbWNwLWRhZW1vbiBjb250YWluZXIKZml4dHVyZSBzdGRlcnIK",
    "window": [
-    1793591873.2190669,
-    1793591873.849776
+    1793599553.4378436,
+    1793599554.0579123
    ],
    "files": {
     "cwd": "dir",
@@ -610,13 +610,13 @@
    "before": {
     "cwd": "dir",
     "docker_fixture.py": "file:aW1wb3J0IGpzb24sIG9zLCBzeXMKZnJvbSBwYXRobGliIGltcG9ydCBQYXRoCnJvb3QgPSBQYXRoKG9zLmVudmlyb25bJ0hPTUUnXSkKYXJndiA9IHN5cy5hcmd2WzE6XQp3aXRoIChyb290Lydkb2NrZXIuanNvbmwnKS5vcGVuKCdhJyxlbmNvZGluZz0ndXRmLTgnKSBhcyBvdXQ6CiAgICBvdXQud3JpdGUoanNvbi5kdW1wcyhhcmd2KSsnXG4nKQppZiBhcmd2WzBdID09ICdpbnNwZWN0JzoKICAgIHByaW50KCd0cnVlJyBpZiBhcmd2WzJdID09ICd7ey5TdGF0ZS5SdW5uaW5nfX0nIGVsc2Ugb3MuZW52aXJvblsnRklYVFVSRV9FTkdJTkUnXSkKICAgIHJhaXNlIFN5c3RlbUV4aXQoMCkKKHJvb3QvJ2RvY2tlci5zdGRpbicpLndyaXRlX2J5dGVzKHN5cy5zdGRpbi5idWZmZXIucmVhZCgpKQpzeXMuc3Rkb3V0LmJ1ZmZlci53cml0ZShiJ3siY29udGFpbmVyIjoiZml4dHVyZSJ9XG4nKQpzeXMuc3RkZXJyLmJ1ZmZlci53cml0ZShiJ2ZpeHR1cmUgc3RkZXJyXG4nKQpyYWlzZSBTeXN0ZW1FeGl0KGludChvcy5lbnZpcm9uWydGSVhUVVJFX0VYSVQnXSkpCg==",
-    "docker_fixture.sh": "file:IyEvYmluL3NoCmV4ZWMgL2hvbWUvZGV2Ly52ZW52cy9iMnItZHJlYW0vYmluL3B5dGhvbiAvdG1wL3BsLWNsaS1kaWZmLTczNTk4OS9oL2RvY2tlcl9maXh0dXJlLnB5ICIkQCIK",
+    "docker_fixture.sh": "file:IyEvYmluL3NoCmV4ZWMgL2hvbWUvZGV2Ly52ZW52cy9iMnItZHJlYW0vYmluL3B5dGhvbiAvdG1wL3BsLWNsaS1kaWZmLTgwODEzMy9oL2RvY2tlcl9maXh0dXJlLnB5ICIkQCIK",
     "durations.jsonl": "file:eyJzZWNvbmRzIjoyLjI1fQo="
    },
    "modes": {
-    "cwd": "0o775",
-    "docker.jsonl": "0o664",
-    "docker.stdin": "0o664"
+    "cwd": "0o755",
+    "docker.jsonl": "0o644",
+    "docker.stdin": "0o644"
    }
   },
   "transport-rust-redact-23": {
@@ -626,8 +626,8 @@
    "stdout": "eyJjb250YWluZXIiOiJmaXh0dXJlIn0K",
    "stderr": "cHNldWRvbGlmZS1tY3AgYm9hcmQtYXVkaXQ6IG5vIGJhbmsgaW4gdGhpcyBzaGVsbDsgcnVubmluZyBpdCBpbnNpZGUgdGhlIHBzZXVkb2xpZmUtbWNwLWRhZW1vbiBjb250YWluZXIKZml4dHVyZSBzdGRlcnIK",
    "window": [
-    1793591873.8512065,
-    1793591874.4757016
+    1793599554.0595334,
+    1793599554.6761358
    ],
    "files": {
     "cwd": "dir",
@@ -638,13 +638,13 @@
    "before": {
     "cwd": "dir",
     "docker_fixture.py": "file:aW1wb3J0IGpzb24sIG9zLCBzeXMKZnJvbSBwYXRobGliIGltcG9ydCBQYXRoCnJvb3QgPSBQYXRoKG9zLmVudmlyb25bJ0hPTUUnXSkKYXJndiA9IHN5cy5hcmd2WzE6XQp3aXRoIChyb290Lydkb2NrZXIuanNvbmwnKS5vcGVuKCdhJyxlbmNvZGluZz0ndXRmLTgnKSBhcyBvdXQ6CiAgICBvdXQud3JpdGUoanNvbi5kdW1wcyhhcmd2KSsnXG4nKQppZiBhcmd2WzBdID09ICdpbnNwZWN0JzoKICAgIHByaW50KCd0cnVlJyBpZiBhcmd2WzJdID09ICd7ey5TdGF0ZS5SdW5uaW5nfX0nIGVsc2Ugb3MuZW52aXJvblsnRklYVFVSRV9FTkdJTkUnXSkKICAgIHJhaXNlIFN5c3RlbUV4aXQoMCkKKHJvb3QvJ2RvY2tlci5zdGRpbicpLndyaXRlX2J5dGVzKHN5cy5zdGRpbi5idWZmZXIucmVhZCgpKQpzeXMuc3Rkb3V0LmJ1ZmZlci53cml0ZShiJ3siY29udGFpbmVyIjoiZml4dHVyZSJ9XG4nKQpzeXMuc3RkZXJyLmJ1ZmZlci53cml0ZShiJ2ZpeHR1cmUgc3RkZXJyXG4nKQpyYWlzZSBTeXN0ZW1FeGl0KGludChvcy5lbnZpcm9uWydGSVhUVVJFX0VYSVQnXSkpCg==",
-    "docker_fixture.sh": "file:IyEvYmluL3NoCmV4ZWMgL2hvbWUvZGV2Ly52ZW52cy9iMnItZHJlYW0vYmluL3B5dGhvbiAvdG1wL3BsLWNsaS1kaWZmLTczNTk4OS9oL2RvY2tlcl9maXh0dXJlLnB5ICIkQCIK",
+    "docker_fixture.sh": "file:IyEvYmluL3NoCmV4ZWMgL2hvbWUvZGV2Ly52ZW52cy9iMnItZHJlYW0vYmluL3B5dGhvbiAvdG1wL3BsLWNsaS1kaWZmLTgwODEzMy9oL2RvY2tlcl9maXh0dXJlLnB5ICIkQCIK",
     "durations.jsonl": "file:eyJzZWNvbmRzIjoyLjI1fQo="
    },
    "modes": {
-    "cwd": "0o775",
-    "docker.jsonl": "0o664",
-    "docker.stdin": "0o664"
+    "cwd": "0o755",
+    "docker.jsonl": "0o644",
+    "docker.stdin": "0o644"
    }
   },
   "transport-rust-export-0": {
@@ -654,8 +654,8 @@
    "stdout": "",
    "stderr": "cHNldWRvbGlmZS1tY3AgYm9hcmQtYXVkaXQ6IG5vIGJhbmsgaW4gdGhpcyBzaGVsbDsgcnVubmluZyBpdCBpbnNpZGUgdGhlIHBzZXVkb2xpZmUtbWNwLWRhZW1vbiBjb250YWluZXIKZml4dHVyZSBzdGRlcnIK",
    "window": [
-    1793591874.4937654,
-    1793591875.1292999
+    1793599554.693365,
+    1793599555.3188956
    ],
    "files": {
     "cwd": "dir",
@@ -667,14 +667,14 @@
    "before": {
     "cwd": "dir",
     "docker_fixture.py": "file:aW1wb3J0IGpzb24sIG9zLCBzeXMKZnJvbSBwYXRobGliIGltcG9ydCBQYXRoCnJvb3QgPSBQYXRoKG9zLmVudmlyb25bJ0hPTUUnXSkKYXJndiA9IHN5cy5hcmd2WzE6XQp3aXRoIChyb290Lydkb2NrZXIuanNvbmwnKS5vcGVuKCdhJyxlbmNvZGluZz0ndXRmLTgnKSBhcyBvdXQ6CiAgICBvdXQud3JpdGUoanNvbi5kdW1wcyhhcmd2KSsnXG4nKQppZiBhcmd2WzBdID09ICdpbnNwZWN0JzoKICAgIHByaW50KCd0cnVlJyBpZiBhcmd2WzJdID09ICd7ey5TdGF0ZS5SdW5uaW5nfX0nIGVsc2Ugb3MuZW52aXJvblsnRklYVFVSRV9FTkdJTkUnXSkKICAgIHJhaXNlIFN5c3RlbUV4aXQoMCkKKHJvb3QvJ2RvY2tlci5zdGRpbicpLndyaXRlX2J5dGVzKHN5cy5zdGRpbi5idWZmZXIucmVhZCgpKQpzeXMuc3Rkb3V0LmJ1ZmZlci53cml0ZShiJ3siY29udGFpbmVyIjoiZml4dHVyZSJ9XG4nKQpzeXMuc3RkZXJyLmJ1ZmZlci53cml0ZShiJ2ZpeHR1cmUgc3RkZXJyXG4nKQpyYWlzZSBTeXN0ZW1FeGl0KGludChvcy5lbnZpcm9uWydGSVhUVVJFX0VYSVQnXSkpCg==",
-    "docker_fixture.sh": "file:IyEvYmluL3NoCmV4ZWMgL2hvbWUvZGV2Ly52ZW52cy9iMnItZHJlYW0vYmluL3B5dGhvbiAvdG1wL3BsLWNsaS1kaWZmLTczNTk4OS9oL2RvY2tlcl9maXh0dXJlLnB5ICIkQCIK",
+    "docker_fixture.sh": "file:IyEvYmluL3NoCmV4ZWMgL2hvbWUvZGV2Ly52ZW52cy9iMnItZHJlYW0vYmluL3B5dGhvbiAvdG1wL3BsLWNsaS1kaWZmLTgwODEzMy9oL2RvY2tlcl9maXh0dXJlLnB5ICIkQCIK",
     "durations.jsonl": "file:eyJzZWNvbmRzIjoyLjI1fQo="
    },
    "modes": {
-    "cwd": "0o775",
-    "docker.jsonl": "0o664",
-    "docker.stdin": "0o664",
-    "out.jsonl": "0o664"
+    "cwd": "0o755",
+    "docker.jsonl": "0o644",
+    "docker.stdin": "0o644",
+    "out.jsonl": "0o644"
    }
   },
   "transport-rust-export-23": {
@@ -684,8 +684,8 @@
    "stdout": "",
    "stderr": "cHNldWRvbGlmZS1tY3AgYm9hcmQtYXVkaXQ6IG5vIGJhbmsgaW4gdGhpcyBzaGVsbDsgcnVubmluZyBpdCBpbnNpZGUgdGhlIHBzZXVkb2xpZmUtbWNwLWRhZW1vbiBjb250YWluZXIKZml4dHVyZSBzdGRlcnIK",
    "window": [
-    1793591875.1307316,
-    1793591875.7650764
+    1793599555.320448,
+    1793599555.953438
    ],
    "files": {
     "cwd": "dir",
@@ -696,13 +696,13 @@
    "before": {
     "cwd": "dir",
     "docker_fixture.py": "file:aW1wb3J0IGpzb24sIG9zLCBzeXMKZnJvbSBwYXRobGliIGltcG9ydCBQYXRoCnJvb3QgPSBQYXRoKG9zLmVudmlyb25bJ0hPTUUnXSkKYXJndiA9IHN5cy5hcmd2WzE6XQp3aXRoIChyb290Lydkb2NrZXIuanNvbmwnKS5vcGVuKCdhJyxlbmNvZGluZz0ndXRmLTgnKSBhcyBvdXQ6CiAgICBvdXQud3JpdGUoanNvbi5kdW1wcyhhcmd2KSsnXG4nKQppZiBhcmd2WzBdID09ICdpbnNwZWN0JzoKICAgIHByaW50KCd0cnVlJyBpZiBhcmd2WzJdID09ICd7ey5TdGF0ZS5SdW5uaW5nfX0nIGVsc2Ugb3MuZW52aXJvblsnRklYVFVSRV9FTkdJTkUnXSkKICAgIHJhaXNlIFN5c3RlbUV4aXQoMCkKKHJvb3QvJ2RvY2tlci5zdGRpbicpLndyaXRlX2J5dGVzKHN5cy5zdGRpbi5idWZmZXIucmVhZCgpKQpzeXMuc3Rkb3V0LmJ1ZmZlci53cml0ZShiJ3siY29udGFpbmVyIjoiZml4dHVyZSJ9XG4nKQpzeXMuc3RkZXJyLmJ1ZmZlci53cml0ZShiJ2ZpeHR1cmUgc3RkZXJyXG4nKQpyYWlzZSBTeXN0ZW1FeGl0KGludChvcy5lbnZpcm9uWydGSVhUVVJFX0VYSVQnXSkpCg==",
-    "docker_fixture.sh": "file:IyEvYmluL3NoCmV4ZWMgL2hvbWUvZGV2Ly52ZW52cy9iMnItZHJlYW0vYmluL3B5dGhvbiAvdG1wL3BsLWNsaS1kaWZmLTczNTk4OS9oL2RvY2tlcl9maXh0dXJlLnB5ICIkQCIK",
+    "docker_fixture.sh": "file:IyEvYmluL3NoCmV4ZWMgL2hvbWUvZGV2Ly52ZW52cy9iMnItZHJlYW0vYmluL3B5dGhvbiAvdG1wL3BsLWNsaS1kaWZmLTgwODEzMy9oL2RvY2tlcl9maXh0dXJlLnB5ICIkQCIK",
     "durations.jsonl": "file:eyJzZWNvbmRzIjoyLjI1fQo="
    },
    "modes": {
-    "cwd": "0o775",
-    "docker.jsonl": "0o664",
-    "docker.stdin": "0o664"
+    "cwd": "0o755",
+    "docker.jsonl": "0o644",
+    "docker.stdin": "0o644"
    }
   },
   "transport-rust-stats-0": {
@@ -712,8 +712,8 @@
    "stdout": "",
    "stderr": "cHNldWRvbGlmZS1tY3AgYm9hcmQtYXVkaXQ6IG5vIGJhbmsgaW4gdGhpcyBzaGVsbDsgcnVubmluZyBpdCBpbnNpZGUgdGhlIHBzZXVkb2xpZmUtbWNwLWRhZW1vbiBjb250YWluZXIKZml4dHVyZSBzdGRlcnIK",
    "window": [
-    1793591875.7665284,
-    1793591876.3967323
+    1793599555.954821,
+    1793599556.5823033
    ],
    "files": {
     "cwd": "dir",
@@ -726,15 +726,15 @@
    "before": {
     "cwd": "dir",
     "docker_fixture.py": "file:aW1wb3J0IGpzb24sIG9zLCBzeXMKZnJvbSBwYXRobGliIGltcG9ydCBQYXRoCnJvb3QgPSBQYXRoKG9zLmVudmlyb25bJ0hPTUUnXSkKYXJndiA9IHN5cy5hcmd2WzE6XQp3aXRoIChyb290Lydkb2NrZXIuanNvbmwnKS5vcGVuKCdhJyxlbmNvZGluZz0ndXRmLTgnKSBhcyBvdXQ6CiAgICBvdXQud3JpdGUoanNvbi5kdW1wcyhhcmd2KSsnXG4nKQppZiBhcmd2WzBdID09ICdpbnNwZWN0JzoKICAgIHByaW50KCd0cnVlJyBpZiBhcmd2WzJdID09ICd7ey5TdGF0ZS5SdW5uaW5nfX0nIGVsc2Ugb3MuZW52aXJvblsnRklYVFVSRV9FTkdJTkUnXSkKICAgIHJhaXNlIFN5c3RlbUV4aXQoMCkKKHJvb3QvJ2RvY2tlci5zdGRpbicpLndyaXRlX2J5dGVzKHN5cy5zdGRpbi5idWZmZXIucmVhZCgpKQpzeXMuc3Rkb3V0LmJ1ZmZlci53cml0ZShiJ3siY29udGFpbmVyIjoiZml4dHVyZSJ9XG4nKQpzeXMuc3RkZXJyLmJ1ZmZlci53cml0ZShiJ2ZpeHR1cmUgc3RkZXJyXG4nKQpyYWlzZSBTeXN0ZW1FeGl0KGludChvcy5lbnZpcm9uWydGSVhUVVJFX0VYSVQnXSkpCg==",
-    "docker_fixture.sh": "file:IyEvYmluL3NoCmV4ZWMgL2hvbWUvZGV2Ly52ZW52cy9iMnItZHJlYW0vYmluL3B5dGhvbiAvdG1wL3BsLWNsaS1kaWZmLTczNTk4OS9oL2RvY2tlcl9maXh0dXJlLnB5ICIkQCIK",
+    "docker_fixture.sh": "file:IyEvYmluL3NoCmV4ZWMgL2hvbWUvZGV2Ly52ZW52cy9iMnItZHJlYW0vYmluL3B5dGhvbiAvdG1wL3BsLWNsaS1kaWZmLTgwODEzMy9oL2RvY2tlcl9maXh0dXJlLnB5ICIkQCIK",
     "durations.jsonl": "file:eyJzZWNvbmRzIjoyLjI1fQo="
    },
    "modes": {
-    "cwd": "0o775",
-    "docker.jsonl": "0o664",
-    "docker.stdin": "0o664",
-    "log.jsonl": "0o664",
-    "out.jsonl": "0o664"
+    "cwd": "0o755",
+    "docker.jsonl": "0o644",
+    "docker.stdin": "0o644",
+    "log.jsonl": "0o644",
+    "out.jsonl": "0o644"
    }
   },
   "transport-rust-stats-23": {
@@ -744,8 +744,8 @@
    "stdout": "",
    "stderr": "cHNldWRvbGlmZS1tY3AgYm9hcmQtYXVkaXQ6IG5vIGJhbmsgaW4gdGhpcyBzaGVsbDsgcnVubmluZyBpdCBpbnNpZGUgdGhlIHBzZXVkb2xpZmUtbWNwLWRhZW1vbiBjb250YWluZXIKZml4dHVyZSBzdGRlcnIK",
    "window": [
-    1793591876.3984497,
-    1793591877.031809
+    1793599556.5842528,
+    1793599557.2370324
    ],
    "files": {
     "cwd": "dir",
@@ -756,13 +756,13 @@
    "before": {
     "cwd": "dir",
     "docker_fixture.py": "file:aW1wb3J0IGpzb24sIG9zLCBzeXMKZnJvbSBwYXRobGliIGltcG9ydCBQYXRoCnJvb3QgPSBQYXRoKG9zLmVudmlyb25bJ0hPTUUnXSkKYXJndiA9IHN5cy5hcmd2WzE6XQp3aXRoIChyb290Lydkb2NrZXIuanNvbmwnKS5vcGVuKCdhJyxlbmNvZGluZz0ndXRmLTgnKSBhcyBvdXQ6CiAgICBvdXQud3JpdGUoanNvbi5kdW1wcyhhcmd2KSsnXG4nKQppZiBhcmd2WzBdID09ICdpbnNwZWN0JzoKICAgIHByaW50KCd0cnVlJyBpZiBhcmd2WzJdID09ICd7ey5TdGF0ZS5SdW5uaW5nfX0nIGVsc2Ugb3MuZW52aXJvblsnRklYVFVSRV9FTkdJTkUnXSkKICAgIHJhaXNlIFN5c3RlbUV4aXQoMCkKKHJvb3QvJ2RvY2tlci5zdGRpbicpLndyaXRlX2J5dGVzKHN5cy5zdGRpbi5idWZmZXIucmVhZCgpKQpzeXMuc3Rkb3V0LmJ1ZmZlci53cml0ZShiJ3siY29udGFpbmVyIjoiZml4dHVyZSJ9XG4nKQpzeXMuc3RkZXJyLmJ1ZmZlci53cml0ZShiJ2ZpeHR1cmUgc3RkZXJyXG4nKQpyYWlzZSBTeXN0ZW1FeGl0KGludChvcy5lbnZpcm9uWydGSVhUVVJFX0VYSVQnXSkpCg==",
-    "docker_fixture.sh": "file:IyEvYmluL3NoCmV4ZWMgL2hvbWUvZGV2Ly52ZW52cy9iMnItZHJlYW0vYmluL3B5dGhvbiAvdG1wL3BsLWNsaS1kaWZmLTczNTk4OS9oL2RvY2tlcl9maXh0dXJlLnB5ICIkQCIK",
+    "docker_fixture.sh": "file:IyEvYmluL3NoCmV4ZWMgL2hvbWUvZGV2Ly52ZW52cy9iMnItZHJlYW0vYmluL3B5dGhvbiAvdG1wL3BsLWNsaS1kaWZmLTgwODEzMy9oL2RvY2tlcl9maXh0dXJlLnB5ICIkQCIK",
     "durations.jsonl": "file:eyJzZWNvbmRzIjoyLjI1fQo="
    },
    "modes": {
-    "cwd": "0o775",
-    "docker.jsonl": "0o664",
-    "docker.stdin": "0o664"
+    "cwd": "0o755",
+    "docker.jsonl": "0o644",
+    "docker.stdin": "0o644"
    }
   },
   "transport-unlabelled-verify-23": {
@@ -772,8 +772,8 @@
    "stdout": "eyJjb250YWluZXIiOiJmaXh0dXJlIn0K",
    "stderr": "cHNldWRvbGlmZS1tY3AgYm9hcmQtYXVkaXQ6IG5vIGJhbmsgaW4gdGhpcyBzaGVsbDsgcnVubmluZyBpdCBpbnNpZGUgdGhlIHBzZXVkb2xpZmUtbWNwLWRhZW1vbiBjb250YWluZXIKZml4dHVyZSBzdGRlcnIK",
    "window": [
-    1793591877.0495808,
-    1793591877.6780226
+    1793599557.2545464,
+    1793599557.8806293
    ],
    "files": {
     "cwd": "dir",
@@ -784,13 +784,13 @@
    "before": {
     "cwd": "dir",
     "docker_fixture.py": "file:aW1wb3J0IGpzb24sIG9zLCBzeXMKZnJvbSBwYXRobGliIGltcG9ydCBQYXRoCnJvb3QgPSBQYXRoKG9zLmVudmlyb25bJ0hPTUUnXSkKYXJndiA9IHN5cy5hcmd2WzE6XQp3aXRoIChyb290Lydkb2NrZXIuanNvbmwnKS5vcGVuKCdhJyxlbmNvZGluZz0ndXRmLTgnKSBhcyBvdXQ6CiAgICBvdXQud3JpdGUoanNvbi5kdW1wcyhhcmd2KSsnXG4nKQppZiBhcmd2WzBdID09ICdpbnNwZWN0JzoKICAgIHByaW50KCd0cnVlJyBpZiBhcmd2WzJdID09ICd7ey5TdGF0ZS5SdW5uaW5nfX0nIGVsc2Ugb3MuZW52aXJvblsnRklYVFVSRV9FTkdJTkUnXSkKICAgIHJhaXNlIFN5c3RlbUV4aXQoMCkKKHJvb3QvJ2RvY2tlci5zdGRpbicpLndyaXRlX2J5dGVzKHN5cy5zdGRpbi5idWZmZXIucmVhZCgpKQpzeXMuc3Rkb3V0LmJ1ZmZlci53cml0ZShiJ3siY29udGFpbmVyIjoiZml4dHVyZSJ9XG4nKQpzeXMuc3RkZXJyLmJ1ZmZlci53cml0ZShiJ2ZpeHR1cmUgc3RkZXJyXG4nKQpyYWlzZSBTeXN0ZW1FeGl0KGludChvcy5lbnZpcm9uWydGSVhUVVJFX0VYSVQnXSkpCg==",
-    "docker_fixture.sh": "file:IyEvYmluL3NoCmV4ZWMgL2hvbWUvZGV2Ly52ZW52cy9iMnItZHJlYW0vYmluL3B5dGhvbiAvdG1wL3BsLWNsaS1kaWZmLTczNTk4OS9oL2RvY2tlcl9maXh0dXJlLnB5ICIkQCIK",
+    "docker_fixture.sh": "file:IyEvYmluL3NoCmV4ZWMgL2hvbWUvZGV2Ly52ZW52cy9iMnItZHJlYW0vYmluL3B5dGhvbiAvdG1wL3BsLWNsaS1kaWZmLTgwODEzMy9oL2RvY2tlcl9maXh0dXJlLnB5ICIkQCIK",
     "durations.jsonl": "file:eyJzZWNvbmRzIjoyLjI1fQo="
    },
    "modes": {
-    "cwd": "0o775",
-    "docker.jsonl": "0o664",
-    "docker.stdin": "0o664"
+    "cwd": "0o755",
+    "docker.jsonl": "0o644",
+    "docker.stdin": "0o644"
    }
   },
   "transport-unlabelled-redact-23": {
@@ -800,8 +800,8 @@
    "stdout": "eyJjb250YWluZXIiOiJmaXh0dXJlIn0K",
    "stderr": "cHNldWRvbGlmZS1tY3AgYm9hcmQtYXVkaXQ6IG5vIGJhbmsgaW4gdGhpcyBzaGVsbDsgcnVubmluZyBpdCBpbnNpZGUgdGhlIHBzZXVkb2xpZmUtbWNwLWRhZW1vbiBjb250YWluZXIKZml4dHVyZSBzdGRlcnIK",
    "window": [
-    1793591877.6794248,
-    1793591878.3100264
+    1793599557.8819032,
+    1793599558.5116897
    ],
    "files": {
     "cwd": "dir",
@@ -812,13 +812,13 @@
    "before": {
     "cwd": "dir",
     "docker_fixture.py": "file:aW1wb3J0IGpzb24sIG9zLCBzeXMKZnJvbSBwYXRobGliIGltcG9ydCBQYXRoCnJvb3QgPSBQYXRoKG9zLmVudmlyb25bJ0hPTUUnXSkKYXJndiA9IHN5cy5hcmd2WzE6XQp3aXRoIChyb290Lydkb2NrZXIuanNvbmwnKS5vcGVuKCdhJyxlbmNvZGluZz0ndXRmLTgnKSBhcyBvdXQ6CiAgICBvdXQud3JpdGUoanNvbi5kdW1wcyhhcmd2KSsnXG4nKQppZiBhcmd2WzBdID09ICdpbnNwZWN0JzoKICAgIHByaW50KCd0cnVlJyBpZiBhcmd2WzJdID09ICd7ey5TdGF0ZS5SdW5uaW5nfX0nIGVsc2Ugb3MuZW52aXJvblsnRklYVFVSRV9FTkdJTkUnXSkKICAgIHJhaXNlIFN5c3RlbUV4aXQoMCkKKHJvb3QvJ2RvY2tlci5zdGRpbicpLndyaXRlX2J5dGVzKHN5cy5zdGRpbi5idWZmZXIucmVhZCgpKQpzeXMuc3Rkb3V0LmJ1ZmZlci53cml0ZShiJ3siY29udGFpbmVyIjoiZml4dHVyZSJ9XG4nKQpzeXMuc3RkZXJyLmJ1ZmZlci53cml0ZShiJ2ZpeHR1cmUgc3RkZXJyXG4nKQpyYWlzZSBTeXN0ZW1FeGl0KGludChvcy5lbnZpcm9uWydGSVhUVVJFX0VYSVQnXSkpCg==",
-    "docker_fixture.sh": "file:IyEvYmluL3NoCmV4ZWMgL2hvbWUvZGV2Ly52ZW52cy9iMnItZHJlYW0vYmluL3B5dGhvbiAvdG1wL3BsLWNsaS1kaWZmLTczNTk4OS9oL2RvY2tlcl9maXh0dXJlLnB5ICIkQCIK",
+    "docker_fixture.sh": "file:IyEvYmluL3NoCmV4ZWMgL2hvbWUvZGV2Ly52ZW52cy9iMnItZHJlYW0vYmluL3B5dGhvbiAvdG1wL3BsLWNsaS1kaWZmLTgwODEzMy9oL2RvY2tlcl9maXh0dXJlLnB5ICIkQCIK",
     "durations.jsonl": "file:eyJzZWNvbmRzIjoyLjI1fQo="
    },
    "modes": {
-    "cwd": "0o775",
-    "docker.jsonl": "0o664",
-    "docker.stdin": "0o664"
+    "cwd": "0o755",
+    "docker.jsonl": "0o644",
+    "docker.stdin": "0o644"
    }
   },
   "transport-unlabelled-export-0": {
@@ -828,8 +828,8 @@
    "stdout": "",
    "stderr": "cHNldWRvbGlmZS1tY3AgYm9hcmQtYXVkaXQ6IG5vIGJhbmsgaW4gdGhpcyBzaGVsbDsgcnVubmluZyBpdCBpbnNpZGUgdGhlIHBzZXVkb2xpZmUtbWNwLWRhZW1vbiBjb250YWluZXIKZml4dHVyZSBzdGRlcnIK",
    "window": [
-    1793591878.327727,
-    1793591878.9562933
+    1793599558.5291357,
+    1793599559.175344
    ],
    "files": {
     "cwd": "dir",
@@ -841,14 +841,14 @@
    "before": {
     "cwd": "dir",
     "docker_fixture.py": "file:aW1wb3J0IGpzb24sIG9zLCBzeXMKZnJvbSBwYXRobGliIGltcG9ydCBQYXRoCnJvb3QgPSBQYXRoKG9zLmVudmlyb25bJ0hPTUUnXSkKYXJndiA9IHN5cy5hcmd2WzE6XQp3aXRoIChyb290Lydkb2NrZXIuanNvbmwnKS5vcGVuKCdhJyxlbmNvZGluZz0ndXRmLTgnKSBhcyBvdXQ6CiAgICBvdXQud3JpdGUoanNvbi5kdW1wcyhhcmd2KSsnXG4nKQppZiBhcmd2WzBdID09ICdpbnNwZWN0JzoKICAgIHByaW50KCd0cnVlJyBpZiBhcmd2WzJdID09ICd7ey5TdGF0ZS5SdW5uaW5nfX0nIGVsc2Ugb3MuZW52aXJvblsnRklYVFVSRV9FTkdJTkUnXSkKICAgIHJhaXNlIFN5c3RlbUV4aXQoMCkKKHJvb3QvJ2RvY2tlci5zdGRpbicpLndyaXRlX2J5dGVzKHN5cy5zdGRpbi5idWZmZXIucmVhZCgpKQpzeXMuc3Rkb3V0LmJ1ZmZlci53cml0ZShiJ3siY29udGFpbmVyIjoiZml4dHVyZSJ9XG4nKQpzeXMuc3RkZXJyLmJ1ZmZlci53cml0ZShiJ2ZpeHR1cmUgc3RkZXJyXG4nKQpyYWlzZSBTeXN0ZW1FeGl0KGludChvcy5lbnZpcm9uWydGSVhUVVJFX0VYSVQnXSkpCg==",
-    "docker_fixture.sh": "file:IyEvYmluL3NoCmV4ZWMgL2hvbWUvZGV2Ly52ZW52cy9iMnItZHJlYW0vYmluL3B5dGhvbiAvdG1wL3BsLWNsaS1kaWZmLTczNTk4OS9oL2RvY2tlcl9maXh0dXJlLnB5ICIkQCIK",
+    "docker_fixture.sh": "file:IyEvYmluL3NoCmV4ZWMgL2hvbWUvZGV2Ly52ZW52cy9iMnItZHJlYW0vYmluL3B5dGhvbiAvdG1wL3BsLWNsaS1kaWZmLTgwODEzMy9oL2RvY2tlcl9maXh0dXJlLnB5ICIkQCIK",
     "durations.jsonl": "file:eyJzZWNvbmRzIjoyLjI1fQo="
    },
    "modes": {
-    "cwd": "0o775",
-    "docker.jsonl": "0o664",
-    "docker.stdin": "0o664",
-    "out.jsonl": "0o664"
+    "cwd": "0o755",
+    "docker.jsonl": "0o644",
+    "docker.stdin": "0o644",
+    "out.jsonl": "0o644"
    }
   },
   "transport-unlabelled-export-23": {
@@ -858,8 +858,8 @@
    "stdout": "",
    "stderr": "cHNldWRvbGlmZS1tY3AgYm9hcmQtYXVkaXQ6IG5vIGJhbmsgaW4gdGhpcyBzaGVsbDsgcnVubmluZyBpdCBpbnNpZGUgdGhlIHBzZXVkb2xpZmUtbWNwLWRhZW1vbiBjb250YWluZXIKZml4dHVyZSBzdGRlcnIK",
    "window": [
-    1793591878.9578063,
-    1793591879.5923226
+    1793599559.176818,
+    1793599559.8109307
    ],
    "files": {
     "cwd": "dir",
@@ -870,13 +870,13 @@
    "before": {
     "cwd": "dir",
     "docker_fixture.py": "file:aW1wb3J0IGpzb24sIG9zLCBzeXMKZnJvbSBwYXRobGliIGltcG9ydCBQYXRoCnJvb3QgPSBQYXRoKG9zLmVudmlyb25bJ0hPTUUnXSkKYXJndiA9IHN5cy5hcmd2WzE6XQp3aXRoIChyb290Lydkb2NrZXIuanNvbmwnKS5vcGVuKCdhJyxlbmNvZGluZz0ndXRmLTgnKSBhcyBvdXQ6CiAgICBvdXQud3JpdGUoanNvbi5kdW1wcyhhcmd2KSsnXG4nKQppZiBhcmd2WzBdID09ICdpbnNwZWN0JzoKICAgIHByaW50KCd0cnVlJyBpZiBhcmd2WzJdID09ICd7ey5TdGF0ZS5SdW5uaW5nfX0nIGVsc2Ugb3MuZW52aXJvblsnRklYVFVSRV9FTkdJTkUnXSkKICAgIHJhaXNlIFN5c3RlbUV4aXQoMCkKKHJvb3QvJ2RvY2tlci5zdGRpbicpLndyaXRlX2J5dGVzKHN5cy5zdGRpbi5idWZmZXIucmVhZCgpKQpzeXMuc3Rkb3V0LmJ1ZmZlci53cml0ZShiJ3siY29udGFpbmVyIjoiZml4dHVyZSJ9XG4nKQpzeXMuc3RkZXJyLmJ1ZmZlci53cml0ZShiJ2ZpeHR1cmUgc3RkZXJyXG4nKQpyYWlzZSBTeXN0ZW1FeGl0KGludChvcy5lbnZpcm9uWydGSVhUVVJFX0VYSVQnXSkpCg==",
-    "docker_fixture.sh": "file:IyEvYmluL3NoCmV4ZWMgL2hvbWUvZGV2Ly52ZW52cy9iMnItZHJlYW0vYmluL3B5dGhvbiAvdG1wL3BsLWNsaS1kaWZmLTczNTk4OS9oL2RvY2tlcl9maXh0dXJlLnB5ICIkQCIK",
+    "docker_fixture.sh": "file:IyEvYmluL3NoCmV4ZWMgL2hvbWUvZGV2Ly52ZW52cy9iMnItZHJlYW0vYmluL3B5dGhvbiAvdG1wL3BsLWNsaS1kaWZmLTgwODEzMy9oL2RvY2tlcl9maXh0dXJlLnB5ICIkQCIK",
     "durations.jsonl": "file:eyJzZWNvbmRzIjoyLjI1fQo="
    },
    "modes": {
-    "cwd": "0o775",
-    "docker.jsonl": "0o664",
-    "docker.stdin": "0o664"
+    "cwd": "0o755",
+    "docker.jsonl": "0o644",
+    "docker.stdin": "0o644"
    }
   },
   "transport-unlabelled-stats-0": {
@@ -886,8 +886,8 @@
    "stdout": "",
    "stderr": "cHNldWRvbGlmZS1tY3AgYm9hcmQtYXVkaXQ6IG5vIGJhbmsgaW4gdGhpcyBzaGVsbDsgcnVubmluZyBpdCBpbnNpZGUgdGhlIHBzZXVkb2xpZmUtbWNwLWRhZW1vbiBjb250YWluZXIKZml4dHVyZSBzdGRlcnIK",
    "window": [
-    1793591879.5938478,
-    1793591880.2395096
+    1793599559.8123336,
+    1793599560.433947
    ],
    "files": {
     "cwd": "dir",
@@ -900,15 +900,15 @@
    "before": {
     "cwd": "dir",
     "docker_fixture.py": "file:aW1wb3J0IGpzb24sIG9zLCBzeXMKZnJvbSBwYXRobGliIGltcG9ydCBQYXRoCnJvb3QgPSBQYXRoKG9zLmVudmlyb25bJ0hPTUUnXSkKYXJndiA9IHN5cy5hcmd2WzE6XQp3aXRoIChyb290Lydkb2NrZXIuanNvbmwnKS5vcGVuKCdhJyxlbmNvZGluZz0ndXRmLTgnKSBhcyBvdXQ6CiAgICBvdXQud3JpdGUoanNvbi5kdW1wcyhhcmd2KSsnXG4nKQppZiBhcmd2WzBdID09ICdpbnNwZWN0JzoKICAgIHByaW50KCd0cnVlJyBpZiBhcmd2WzJdID09ICd7ey5TdGF0ZS5SdW5uaW5nfX0nIGVsc2Ugb3MuZW52aXJvblsnRklYVFVSRV9FTkdJTkUnXSkKICAgIHJhaXNlIFN5c3RlbUV4aXQoMCkKKHJvb3QvJ2RvY2tlci5zdGRpbicpLndyaXRlX2J5dGVzKHN5cy5zdGRpbi5idWZmZXIucmVhZCgpKQpzeXMuc3Rkb3V0LmJ1ZmZlci53cml0ZShiJ3siY29udGFpbmVyIjoiZml4dHVyZSJ9XG4nKQpzeXMuc3RkZXJyLmJ1ZmZlci53cml0ZShiJ2ZpeHR1cmUgc3RkZXJyXG4nKQpyYWlzZSBTeXN0ZW1FeGl0KGludChvcy5lbnZpcm9uWydGSVhUVVJFX0VYSVQnXSkpCg==",
-    "docker_fixture.sh": "file:IyEvYmluL3NoCmV4ZWMgL2hvbWUvZGV2Ly52ZW52cy9iMnItZHJlYW0vYmluL3B5dGhvbiAvdG1wL3BsLWNsaS1kaWZmLTczNTk4OS9oL2RvY2tlcl9maXh0dXJlLnB5ICIkQCIK",
+    "docker_fixture.sh": "file:IyEvYmluL3NoCmV4ZWMgL2hvbWUvZGV2Ly52ZW52cy9iMnItZHJlYW0vYmluL3B5dGhvbiAvdG1wL3BsLWNsaS1kaWZmLTgwODEzMy9oL2RvY2tlcl9maXh0dXJlLnB5ICIkQCIK",
     "durations.jsonl": "file:eyJzZWNvbmRzIjoyLjI1fQo="
    },
    "modes": {
-    "cwd": "0o775",
-    "docker.jsonl": "0o664",
-    "docker.stdin": "0o664",
-    "log.jsonl": "0o664",
-    "out.jsonl": "0o664"
+    "cwd": "0o755",
+    "docker.jsonl": "0o644",
+    "docker.stdin": "0o644",
+    "log.jsonl": "0o644",
+    "out.jsonl": "0o644"
    }
   },
   "transport-unlabelled-stats-23": {
@@ -918,8 +918,8 @@
    "stdout": "",
    "stderr": "cHNldWRvbGlmZS1tY3AgYm9hcmQtYXVkaXQ6IG5vIGJhbmsgaW4gdGhpcyBzaGVsbDsgcnVubmluZyBpdCBpbnNpZGUgdGhlIHBzZXVkb2xpZmUtbWNwLWRhZW1vbiBjb250YWluZXIKZml4dHVyZSBzdGRlcnIK",
    "window": [
-    1793591880.2411323,
-    1793591880.8888268
+    1793599560.435577,
+    1793599561.0671048
    ],
    "files": {
     "cwd": "dir",
@@ -930,24 +930,24 @@
    "before": {
     "cwd": "dir",
     "docker_fixture.py": "file:aW1wb3J0IGpzb24sIG9zLCBzeXMKZnJvbSBwYXRobGliIGltcG9ydCBQYXRoCnJvb3QgPSBQYXRoKG9zLmVudmlyb25bJ0hPTUUnXSkKYXJndiA9IHN5cy5hcmd2WzE6XQp3aXRoIChyb290Lydkb2NrZXIuanNvbmwnKS5vcGVuKCdhJyxlbmNvZGluZz0ndXRmLTgnKSBhcyBvdXQ6CiAgICBvdXQud3JpdGUoanNvbi5kdW1wcyhhcmd2KSsnXG4nKQppZiBhcmd2WzBdID09ICdpbnNwZWN0JzoKICAgIHByaW50KCd0cnVlJyBpZiBhcmd2WzJdID09ICd7ey5TdGF0ZS5SdW5uaW5nfX0nIGVsc2Ugb3MuZW52aXJvblsnRklYVFVSRV9FTkdJTkUnXSkKICAgIHJhaXNlIFN5c3RlbUV4aXQoMCkKKHJvb3QvJ2RvY2tlci5zdGRpbicpLndyaXRlX2J5dGVzKHN5cy5zdGRpbi5idWZmZXIucmVhZCgpKQpzeXMuc3Rkb3V0LmJ1ZmZlci53cml0ZShiJ3siY29udGFpbmVyIjoiZml4dHVyZSJ9XG4nKQpzeXMuc3RkZXJyLmJ1ZmZlci53cml0ZShiJ2ZpeHR1cmUgc3RkZXJyXG4nKQpyYWlzZSBTeXN0ZW1FeGl0KGludChvcy5lbnZpcm9uWydGSVhUVVJFX0VYSVQnXSkpCg==",
-    "docker_fixture.sh": "file:IyEvYmluL3NoCmV4ZWMgL2hvbWUvZGV2Ly52ZW52cy9iMnItZHJlYW0vYmluL3B5dGhvbiAvdG1wL3BsLWNsaS1kaWZmLTczNTk4OS9oL2RvY2tlcl9maXh0dXJlLnB5ICIkQCIK",
+    "docker_fixture.sh": "file:IyEvYmluL3NoCmV4ZWMgL2hvbWUvZGV2Ly52ZW52cy9iMnItZHJlYW0vYmluL3B5dGhvbiAvdG1wL3BsLWNsaS1kaWZmLTgwODEzMy9oL2RvY2tlcl9maXh0dXJlLnB5ICIkQCIK",
     "durations.jsonl": "file:eyJzZWNvbmRzIjoyLjI1fQo="
    },
    "modes": {
-    "cwd": "0o775",
-    "docker.jsonl": "0o664",
-    "docker.stdin": "0o664"
+    "cwd": "0o755",
+    "docker.jsonl": "0o644",
+    "docker.stdin": "0o644"
    }
   },
   "defer-dsn-option": {
    "home": null,
    "utc_offset": 0,
    "exit": 0,
-   "stdout": "eyJvayI6IHRydWUsICJldmVudHMiOiA0NSwgImZpcnN0X3NlcSI6IDEsICJoZWFkX3NlcSI6IDQ1LCAiaGVhZF9oYXNoIjogImUyOGQ5MTI3NmZhYjFiNjlkOTgxYTc5NDllYWQ0NzQ1YTE2ODUxYTU2YjhkMjEyMmMyYzhiZDdkZTdiODZmNDYiLCAiaGVhZF9jcmVhdGVkX2F0IjogMTc5MzU5MTgwMi4zMzI0ODMzLCAic3RhcnRfY3V0IjogbnVsbH0K",
+   "stdout": "eyJvayI6IHRydWUsICJldmVudHMiOiA0NSwgImZpcnN0X3NlcSI6IDEsICJoZWFkX3NlcSI6IDQ1LCAiaGVhZF9oYXNoIjogImVjN2UzYmNmY2U0Yjk5MDQ0YjZkNjQxZjQyYzA2Y2M4YTI3YzRmZThlZGM5Yjk5NTk2MTg0MWY1YjY3MTk2ZjUiLCAiaGVhZF9jcmVhdGVkX2F0IjogMTc5MzU5OTU1Ni42MTk4NzgsICJzdGFydF9jdXQiOiBudWxsfQo=",
    "stderr": "",
    "window": [
-    1793591882.2781622,
-    1793591882.7283306
+    1793599561.085348,
+    1793599561.53124
    ],
    "arm": "python",
    "before": {
@@ -958,7 +958,7 @@
     "cwd": "dir"
    },
    "modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    }
   },
   "no-bank": {
@@ -968,8 +968,8 @@
    "stdout": "",
    "stderr": "Ym9hcmQtYXVkaXQ6IG5vIGJhbmsgZm91bmQ6IHNldCBQU0VVRE9MSUZFX01DUF9EQVRBQkFTRV9VUkwgdG8gdGhlIGJhbmsncyBkYXRhYmFzZSBVUkwsIG9yIHJ1biB3aGVyZSB0aGUgbGl0ZSB0aWVyJ3MgZGF0YSBkaXIgaG9sZHMgb25lIChEb2NrZXIgdGllcjogc3RhcnQgdGhlIGRhZW1vbiwgb3IgcnVuIGBkb2NrZXIgZXhlYyAtaXQgcHNldWRvbGlmZS1tY3AtZGFlbW9uIHBzZXVkb2xpZmUtbWNwIGJvYXJkLWF1ZGl0IC4uLmAgb24gaXRzIGhvc3QpCg==",
    "window": [
-    1793591883.7005434,
-    1793591884.1328113
+    1793599561.5591617,
+    1793599562.0117803
    ],
    "arm": "python",
    "before": {
@@ -979,7 +979,7 @@
     "cwd": "dir"
    },
    "modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    }
   },
   "defer-bank-verify-stdout-closed": {
@@ -989,8 +989,8 @@
    "stdout": "",
    "stderr": "RXhjZXB0aW9uIGlnbm9yZWQgaW46IDxfaW8uVGV4dElPV3JhcHBlciBuYW1lPSc8c3Rkb3V0PicgbW9kZT0ndycgZW5jb2Rpbmc9J3V0Zi04Jz4KQnJva2VuUGlwZUVycm9yOiBbRXJybm8gMzJdIEJyb2tlbiBwaXBlCg==",
    "window": [
-    1793591888.0736845,
-    1793591888.5183215
+    1793599562.0125332,
+    1793599562.4606369
    ],
    "arm": "python",
    "before": {
@@ -1001,7 +1001,7 @@
     "cwd": "dir"
    },
    "modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    }
   },
   "export-agent-ambiguous": {
@@ -1011,8 +1011,8 @@
    "stdout": "",
    "stderr": "Ym9hcmQtYXVkaXQ6IC0tYWdlbnQgYWIxMmNkMzQgbWF0Y2hlcyBzZXZlcmFsIGlkczogYWIxMmNkMzRlZjU2LCBhYjEyY2QzNGVmNTc7IGdpdmUgYSBsb25nZXIgcHJlZml4Cg==",
    "window": [
-    1793591890.3792043,
-    1793591890.8289003
+    1793599562.4887207,
+    1793599562.9322042
    ],
    "arm": "python",
    "before": {
@@ -1023,7 +1023,7 @@
     "cwd": "dir"
    },
    "modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    }
   },
   "export-agent-ambiguous-out": {
@@ -1033,8 +1033,8 @@
    "stdout": "",
    "stderr": "Ym9hcmQtYXVkaXQ6IC0tYWdlbnQgYWIxMmNkMzRlZjUgbWF0Y2hlcyBzZXZlcmFsIGlkczogYWIxMmNkMzRlZjU2LCBhYjEyY2QzNGVmNTc7IGdpdmUgYSBsb25nZXIgcHJlZml4Cg==",
    "window": [
-    1793591890.8591187,
-    1793591891.3069959
+    1793599562.9631155,
+    1793599563.4175248
    ],
    "arm": "python",
    "before": {
@@ -1046,8 +1046,8 @@
     "out.jsonl": "file:"
    },
    "modes": {
-    "cwd": "0o775",
-    "out.jsonl": "0o664"
+    "cwd": "0o755",
+    "out.jsonl": "0o644"
    }
   }
  }

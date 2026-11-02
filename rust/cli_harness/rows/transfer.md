@@ -239,7 +239,7 @@ New bank cases remain live-only. Linux validation uses a private allocator
 adapter that prefixes disposable database names with `r1_` and retains the
 original labels for normalization. No shared or production bank is involved.
 Windows stress selection: `row:transfer` (20 hosted runs for connection,
-lock and commit paths). All six Linux goldens were refreshed from the verified oracle at `2c770c4d`
+lock and commit paths). All six Linux goldens were refreshed from the verified oracle at `7dcd738f`
 and replayed. A Python-free Rust image proof initialized a blank bank through
 native import. Five Windows live schema cases and all six goldens passed; hosted stress
 remains pending.

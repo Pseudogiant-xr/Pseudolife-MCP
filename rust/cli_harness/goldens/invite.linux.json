@@ -1,7 +1,7 @@
 {
  "row": "CLI-PAIRING",
  "platform": "linux",
- "oracle_commit": "2c770c4dab8dfaba058fc25d2f935bcdd10ffada",
+ "oracle_commit": "7dcd738fa736c15c111fd67c5ffb83ea3f158b91",
  "oracle_commit_source": "git",
  "cases": {
   "container-rust": {
@@ -11,16 +11,16 @@
    "stdout": "Y29udGFpbmVyLWludml0ZQo=",
    "stderr": "",
    "window": [
-    1793591905.5420213,
-    1793591906.0172322
+    1793599603.8417237,
+    1793599604.3111813
    ],
    "files": {
     "cwd": "dir",
     "docker.jsonl": "file:eyJhcmd2IjogWyJpbnNwZWN0IiwgIi1mIiwgInt7LlN0YXRlLlJ1bm5pbmd9fSIsICJwc2V1ZG9saWZlLW1jcC1kYWVtb24iXSwgInN0ZGluIjogIiJ9CnsiYXJndiI6IFsiaW5zcGVjdCIsICItZiIsICJ7e2luZGV4IC5Db25maWcuTGFiZWxzIFwib3JnLnBzZXVkb2xpZmUuZW5naW5lXCJ9fSIsICJwc2V1ZG9saWZlLW1jcC1kYWVtb24iXSwgInN0ZGluIjogIiJ9CnsiYXJndiI6IFsiZXhlYyIsICItZSIsICJQU0VVRE9MSUZFX0RBRU1PTl9FWEVDPTEiLCAicHNldWRvbGlmZS1tY3AtZGFlbW9uIiwgInBzZXVkb2xpZmUtbWNwIiwgImludml0ZSIsICItLXZlcnNpb24tY2hlY2siXSwgInN0ZGluIjogIiJ9CnsiYXJndiI6IFsiZXhlYyIsICItaSIsICItZSIsICJQU0VVRE9MSUZFX0RBRU1PTl9FWEVDPTEiLCAicHNldWRvbGlmZS1tY3AtZGFlbW9uIiwgInBzZXVkb2xpZmUtbWNwIiwgImludml0ZSIsICJsYXB0b3AiLCAiLS1leHBpcmVzIiwgIjkwMHMiLCAiLS11cmwiLCAiaHR0cHM6Ly9leGFtcGxlLmNvbSIsICItLWpzb24iXSwgInN0ZGluIjogIiJ9Cg=="
    },
    "modes": {
-    "cwd": "0o775",
-    "docker.jsonl": "0o664"
+    "cwd": "0o755",
+    "docker.jsonl": "0o644"
    }
   },
   "container-python": {
@@ -30,16 +30,16 @@
    "stdout": "Y29udGFpbmVyLWludml0ZQo=",
    "stderr": "",
    "window": [
-    1793591906.0193138,
-    1793591906.4839706
+    1793599604.3122087,
+    1793599604.7841592
    ],
    "files": {
     "cwd": "dir",
     "docker.jsonl": "file:eyJhcmd2IjogWyJpbnNwZWN0IiwgIi1mIiwgInt7LlN0YXRlLlJ1bm5pbmd9fSIsICJwc2V1ZG9saWZlLW1jcC1kYWVtb24iXSwgInN0ZGluIjogIiJ9CnsiYXJndiI6IFsiaW5zcGVjdCIsICItZiIsICJ7e2luZGV4IC5Db25maWcuTGFiZWxzIFwib3JnLnBzZXVkb2xpZmUuZW5naW5lXCJ9fSIsICJwc2V1ZG9saWZlLW1jcC1kYWVtb24iXSwgInN0ZGluIjogIiJ9CnsiYXJndiI6IFsiZXhlYyIsICItZSIsICJQU0VVRE9MSUZFX0RBRU1PTl9FWEVDPTEiLCAicHNldWRvbGlmZS1tY3AtZGFlbW9uIiwgInB5dGhvbiIsICItbSIsICJwc2V1ZG9saWZlX21lbW9yeS5jbGkiLCAiaW52aXRlIiwgIi0tdmVyc2lvbi1jaGVjayJdLCAic3RkaW4iOiAiIn0KeyJhcmd2IjogWyJleGVjIiwgIi1pIiwgIi1lIiwgIlBTRVVET0xJRkVfREFFTU9OX0VYRUM9MSIsICJwc2V1ZG9saWZlLW1jcC1kYWVtb24iLCAicHl0aG9uIiwgIi1tIiwgInBzZXVkb2xpZmVfbWVtb3J5LmNsaSIsICJpbnZpdGUiLCAibGFwdG9wIiwgIi0tZXhwaXJlcyIsICI5MDBzIiwgIi0tdXJsIiwgImh0dHBzOi8vZXhhbXBsZS5jb20iLCAiLS1qc29uIl0sICJzdGRpbiI6ICIifQo="
    },
    "modes": {
-    "cwd": "0o775",
-    "docker.jsonl": "0o664"
+    "cwd": "0o755",
+    "docker.jsonl": "0o644"
    }
   },
   "container-<no value>": {
@@ -49,16 +49,16 @@
    "stdout": "Y29udGFpbmVyLWludml0ZQo=",
    "stderr": "",
    "window": [
-    1793591906.4849215,
-    1793591906.9538531
+    1793599604.7849271,
+    1793599605.2581134
    ],
    "files": {
     "cwd": "dir",
     "docker.jsonl": "file:eyJhcmd2IjogWyJpbnNwZWN0IiwgIi1mIiwgInt7LlN0YXRlLlJ1bm5pbmd9fSIsICJwc2V1ZG9saWZlLW1jcC1kYWVtb24iXSwgInN0ZGluIjogIiJ9CnsiYXJndiI6IFsiaW5zcGVjdCIsICItZiIsICJ7e2luZGV4IC5Db25maWcuTGFiZWxzIFwib3JnLnBzZXVkb2xpZmUuZW5naW5lXCJ9fSIsICJwc2V1ZG9saWZlLW1jcC1kYWVtb24iXSwgInN0ZGluIjogIiJ9CnsiYXJndiI6IFsiZXhlYyIsICItZSIsICJQU0VVRE9MSUZFX0RBRU1PTl9FWEVDPTEiLCAicHNldWRvbGlmZS1tY3AtZGFlbW9uIiwgInB5dGhvbiIsICItbSIsICJwc2V1ZG9saWZlX21lbW9yeS5jbGkiLCAiaW52aXRlIiwgIi0tdmVyc2lvbi1jaGVjayJdLCAic3RkaW4iOiAiIn0KeyJhcmd2IjogWyJleGVjIiwgIi1pIiwgIi1lIiwgIlBTRVVET0xJRkVfREFFTU9OX0VYRUM9MSIsICJwc2V1ZG9saWZlLW1jcC1kYWVtb24iLCAicHl0aG9uIiwgIi1tIiwgInBzZXVkb2xpZmVfbWVtb3J5LmNsaSIsICJpbnZpdGUiLCAibGFwdG9wIiwgIi0tZXhwaXJlcyIsICI5MDBzIiwgIi0tdXJsIiwgImh0dHBzOi8vZXhhbXBsZS5jb20iLCAiLS1qc29uIl0sICJzdGRpbiI6ICIifQo="
    },
    "modes": {
-    "cwd": "0o775",
-    "docker.jsonl": "0o664"
+    "cwd": "0o755",
+    "docker.jsonl": "0o644"
    }
   },
   "stopped-list-v58": {
@@ -68,16 +68,16 @@
    "stdout": "ewogICJlcnJvciI6IG51bGwsCiAgIm5vdGVzIjogW10sCiAgImV4aXQiOiAwLAogICJwcmluY2lwYWxzIjogWwogICAgewogICAgICAicHJpbmNpcGFsIjogImxhcHRvcCIsCiAgICAgICJzdGF0ZSI6ICJwYWlyZWQiLAogICAgICAicGFpcmVkIjogdHJ1ZSwKICAgICAgInRpZXIiOiAiY29yZSIsCiAgICAgICJib2FyZCI6IHRydWUsCiAgICAgICJjb2RlX2V4cGlyZXNfYXQiOiBudWxsLAogICAgICAiY3JlYXRlZF9hdCI6IDE3MDAwMDAwMDAuMCwKICAgICAgInBhaXJlZF9hdCI6IDE3MDAwMDAwMDEuMCwKICAgICAgInJldm9rZWRfYXQiOiBudWxsLAogICAgICAibGFzdF9zZWVuX2F0IjogbnVsbAogICAgfQogIF0sCiAgInJlamVjdGVkIjogW10KfQo=",
    "stderr": "",
    "window": [
-    1793591906.9548473,
-    1793591907.3951242
+    1793599605.2588685,
+    1793599605.6912441
    ],
    "files": {
     "cwd": "dir",
     "docker.jsonl": "file:eyJhcmd2IjogWyJpbnNwZWN0IiwgIi1mIiwgInt7LlN0YXRlLlJ1bm5pbmd9fSIsICJwc2V1ZG9saWZlLW1jcC1kYWVtb24iXSwgInN0ZGluIjogIiJ9CnsiYXJndiI6IFsiZXhlYyIsICItaSIsICJwc2V1ZG9saWZlLW1jcC1wb3N0Z3JlcyIsICJzaCIsICItYyIsICJwc3FsIC1YIC1xIC10QSAtdiBPTl9FUlJPUl9TVE9QPTEgLVUgXCIkUE9TVEdSRVNfVVNFUlwiIC1kIFwiJFBPU1RHUkVTX0RCXCIiXSwgInN0ZGluIjogIlNFTEVDVCB0b19yZWdjbGFzcygncHVibGljLnByaW5jaXBhbF9hY3Rpdml0eScpIElTIE5PVCBOVUxMO1xuIn0KeyJhcmd2IjogWyJleGVjIiwgIi1pIiwgInBzZXVkb2xpZmUtbWNwLXBvc3RncmVzIiwgInNoIiwgIi1jIiwgInBzcWwgLVggLXEgLXRBIC12IE9OX0VSUk9SX1NUT1A9MSAtVSBcIiRQT1NUR1JFU19VU0VSXCIgLWQgXCIkUE9TVEdSRVNfREJcIiJdLCAic3RkaW4iOiAiU0VMRUNUIGpzb25fYnVpbGRfb2JqZWN0KCdwcmluY2lwYWxzJywgKFNFTEVDVCBjb2FsZXNjZShqc29uX2FnZyhqc29uX2J1aWxkX2FycmF5KGwucHJpbmNpcGFsLCBsLnRpZXIsIGwuYm9hcmQsIGwucGFpcmVkLCBsLnBlbmRpbmcsIGwuY29kZV9leHBpcmVzX2F0LCBsLmNyZWF0ZWRfYXQsIGwucGFpcmVkX2F0LCBsLnJldm9rZWRfYXQsIGwubm93LCBsLmxhc3Rfc2Vlbl9hdCwgbC5zdG9yZWQpIE9SREVSIEJZIGwucHJpbmNpcGFsKSwgJ1tdJzo6anNvbikgRlJPTSAoU0VMRUNUIHAucHJpbmNpcGFsLCBwLnRpZXIsIHAuYm9hcmQsIHAudG9rZW5faGFzaCBJUyBOT1QgTlVMTCBBUyBwYWlyZWQsIHAuY29kZV9oYXNoIElTIE5PVCBOVUxMIEFTIHBlbmRpbmcsIHAuY29kZV9leHBpcmVzX2F0LCBwLmNyZWF0ZWRfYXQsIHAucGFpcmVkX2F0LCBwLnJldm9rZWRfYXQsIEVYVFJBQ1QoRVBPQ0ggRlJPTSBjbG9ja190aW1lc3RhbXAoKSk6OmRvdWJsZSBwcmVjaXNpb24gQVMgbm93LCBhLmxhc3Rfc2Vlbl9hdCwgVFJVRSBBUyBzdG9yZWQgRlJPTSBwdWJsaWMucHJpbmNpcGFscyBwIExFRlQgSk9JTiBwdWJsaWMucHJpbmNpcGFsX2FjdGl2aXR5IGEgT04gYS5wcmluY2lwYWwgPSBwLnByaW5jaXBhbCBVTklPTiBBTEwgU0VMRUNUIGEucHJpbmNpcGFsLCBOVUxMLCBOVUxMLCBGQUxTRSwgRkFMU0UsIE5VTEwsIE5VTEwsIE5VTEwsIE5VTEwsIEVYVFJBQ1QoRVBPQ0ggRlJPTSBjbG9ja190aW1lc3RhbXAoKSk6OmRvdWJsZSBwcmVjaXNpb24sIGEubGFzdF9zZWVuX2F0LCBGQUxTRSBGUk9NIHB1YmxpYy5wcmluY2lwYWxfYWN0aXZpdHkgYSBXSEVSRSBOT1QgRVhJU1RTIChTRUxFQ1QgMSBGUk9NIHB1YmxpYy5wcmluY2lwYWxzIHAgV0hFUkUgcC5wcmluY2lwYWwgPSBhLnByaW5jaXBhbCkpIGwpLCAncmVqZWN0ZWQnLCAoU0VMRUNUIGNvYWxlc2NlKGpzb25fYWdnKGpzb25fYnVpbGRfYXJyYXkoaGFzaF9wcmVmaXgsIHJlamVjdGlvbnMsIGZpcnN0X3NlZW5fYXQsIGxhc3Rfc2Vlbl9hdCkgT1JERVIgQlkgbGFzdF9zZWVuX2F0IERFU0MsIGhhc2hfcHJlZml4KSwgJ1tdJzo6anNvbikgRlJPTSBwdWJsaWMucmVqZWN0ZWRfYmVhcmVycykpO1xuIn0K"
    },
    "modes": {
-    "cwd": "0o775",
-    "docker.jsonl": "0o664"
+    "cwd": "0o755",
+    "docker.jsonl": "0o644"
    }
   },
   "stopped-list-v53": {
@@ -87,16 +87,16 @@
    "stdout": "ICBuYW1lICAgICAgICAgICAgICAgICAgICAgc3RhdGUgICAgICAgbGFzdCBzZWVuICAgICAgICAgICAgIHRpZXIgICAgIGJvYXJkICBjcmVhdGVkICAgICAgICAgICAgICAgcGFpcmVkICAgICAgICAgICAgICAgIHJldm9rZWQKICBsYXB0b3AgICAgICAgICAgICAgICAgICAgcGFpcmVkICAgICAgbmV2ZXIgICAgICAgICAgICAgICAgIGNvcmUgICAgIG9uICAgICAyMDIzLTExLTE0IDIyOjEzIFVUQyAgMjAyMy0xMS0xNCAyMjoxMyBVVEMgIC0KICAoZW52aXJvbm1lbnQ6IGEgdG9rZW4gaW4gdGhlIGRhZW1vbidzIFBTRVVET0xJRkVfTUNQX1RPS0VOUyBvciBQU0VVRE9MSUZFX01DUF9UT0tFTjsgbGFzdCBzZWVuOiBpdHMgbGFzdCBhY2NlcHRlZCByZXF1ZXN0LCB3cml0dGVuIG9uY2UgYSBtaW51dGUpCgpubyByZWZ1c2VkIHRva2VucyByZWNvcmRlZAo=",
    "stderr": "",
    "window": [
-    1793591907.4016905,
-    1793591907.8467093
+    1793599605.728949,
+    1793599606.1582072
    ],
    "files": {
     "cwd": "dir",
     "docker.jsonl": "file:eyJhcmd2IjogWyJpbnNwZWN0IiwgIi1mIiwgInt7LlN0YXRlLlJ1bm5pbmd9fSIsICJwc2V1ZG9saWZlLW1jcC1kYWVtb24iXSwgInN0ZGluIjogIiJ9CnsiYXJndiI6IFsiZXhlYyIsICItaSIsICJwc2V1ZG9saWZlLW1jcC1wb3N0Z3JlcyIsICJzaCIsICItYyIsICJwc3FsIC1YIC1xIC10QSAtdiBPTl9FUlJPUl9TVE9QPTEgLVUgXCIkUE9TVEdSRVNfVVNFUlwiIC1kIFwiJFBPU1RHUkVTX0RCXCIiXSwgInN0ZGluIjogIlNFTEVDVCB0b19yZWdjbGFzcygncHVibGljLnByaW5jaXBhbF9hY3Rpdml0eScpIElTIE5PVCBOVUxMO1xuIn0KeyJhcmd2IjogWyJleGVjIiwgIi1pIiwgInBzZXVkb2xpZmUtbWNwLXBvc3RncmVzIiwgInNoIiwgIi1jIiwgInBzcWwgLVggLXEgLXRBIC12IE9OX0VSUk9SX1NUT1A9MSAtVSBcIiRQT1NUR1JFU19VU0VSXCIgLWQgXCIkUE9TVEdSRVNfREJcIiJdLCAic3RkaW4iOiAiU0VMRUNUIGpzb25fYnVpbGRfb2JqZWN0KCdwcmluY2lwYWxzJywgKFNFTEVDVCBjb2FsZXNjZShqc29uX2FnZyhqc29uX2J1aWxkX2FycmF5KHByaW5jaXBhbCwgdGllciwgYm9hcmQsIHRva2VuX2hhc2ggSVMgTk9UIE5VTEwsIGNvZGVfaGFzaCBJUyBOT1QgTlVMTCwgY29kZV9leHBpcmVzX2F0LCBjcmVhdGVkX2F0LCBwYWlyZWRfYXQsIHJldm9rZWRfYXQsIEVYVFJBQ1QoRVBPQ0ggRlJPTSBjbG9ja190aW1lc3RhbXAoKSk6OmRvdWJsZSBwcmVjaXNpb24sIE5VTEw6OmRvdWJsZSBwcmVjaXNpb24sIFRSVUUpIE9SREVSIEJZIHByaW5jaXBhbCksICdbXSc6Ompzb24pIEZST00gcHVibGljLnByaW5jaXBhbHMpLCAncmVqZWN0ZWQnLCAnW10nOjpqc29uKTtcbiJ9Cg=="
    },
    "modes": {
-    "cwd": "0o775",
-    "docker.jsonl": "0o664"
+    "cwd": "0o755",
+    "docker.jsonl": "0o644"
    }
   },
   "stopped-revoke": {
@@ -106,16 +106,16 @@
    "stdout": "bGFwdG9wOiByZXZva2VkOyB0aGUgZGFlbW9uIHN0b3BzIGFjY2VwdGluZyBpdHMgdG9rZW4gd2l0aGluIDEwIHNlY29uZHMgb2Ygc3RhcnRpbmcgYWdhaW4K",
    "stderr": "",
    "window": [
-    1793591907.8475342,
-    1793591908.219313
+    1793599606.1589599,
+    1793599606.5273325
    ],
    "files": {
     "cwd": "dir",
     "docker.jsonl": "file:eyJhcmd2IjogWyJpbnNwZWN0IiwgIi1mIiwgInt7LlN0YXRlLlJ1bm5pbmd9fSIsICJwc2V1ZG9saWZlLW1jcC1kYWVtb24iXSwgInN0ZGluIjogIiJ9CnsiYXJndiI6IFsiZXhlYyIsICItaSIsICJwc2V1ZG9saWZlLW1jcC1wb3N0Z3JlcyIsICJzaCIsICItYyIsICJwc3FsIC1YIC1xIC10QSAtdiBPTl9FUlJPUl9TVE9QPTEgLVUgXCIkUE9TVEdSRVNfVVNFUlwiIC1kIFwiJFBPU1RHUkVTX0RCXCIiXSwgInN0ZGluIjogIlVQREFURSBwdWJsaWMucHJpbmNpcGFscyBTRVQgcmV2b2tlZF9hdCA9IENPQUxFU0NFKHJldm9rZWRfYXQsIEVYVFJBQ1QoRVBPQ0ggRlJPTSBjbG9ja190aW1lc3RhbXAoKSk6OmRvdWJsZSBwcmVjaXNpb24pLCBjb2RlX2hhc2ggPSBOVUxMLCBjb2RlX2V4cGlyZXNfYXQgPSBOVUxMLCBwYWlyZWRfY29kZV9oYXNoID0gTlVMTCBXSEVSRSBwcmluY2lwYWwgPSAnbGFwdG9wJyBSRVRVUk5JTkcgcHJpbmNpcGFsO1xuIn0K"
    },
    "modes": {
-    "cwd": "0o775",
-    "docker.jsonl": "0o664"
+    "cwd": "0o755",
+    "docker.jsonl": "0o644"
    }
   },
   "nested-no-bank": {
@@ -125,14 +125,14 @@
    "stdout": "ewogICJlcnJvciI6ICJubyBkYXRhYmFzZSBmb3VuZCBpbnNpZGUgdGhlIGRhZW1vbiBjb250YWluZXI6IHNldCBQU0VVRE9MSUZFX01DUF9EQVRBQkFTRV9VUkwiLAogICJub3RlcyI6IFtdLAogICJleGl0IjogNAp9Cg==",
    "stderr": "",
    "window": [
-    1793591908.220116,
-    1793591908.432543
+    1793599606.5280793,
+    1793599606.7420456
    ],
    "files": {
     "cwd": "dir"
    },
    "modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    }
   },
   "usage-no-mode": {
@@ -142,22 +142,22 @@
    "stdout": "",
    "stderr": "aW52aXRlOiBnaXZlIG9uZSBvZjogYSBuYW1lIHRvIGludml0ZSwgLS1saXN0LCBvciAtLXJldm9rZSBOQU1FCg==",
    "window": [
-    1793591908.6182163,
-    1793591908.8306787
+    1793599607.1020372,
+    1793599607.3133335
    ],
    "arm": "python",
    "before": {
     "cwd": "dir"
    },
    "before_modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    },
    "db": "unchanged",
    "files": {
     "cwd": "dir"
    },
    "modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    }
   },
   "usage-two-modes-json": {
@@ -167,22 +167,22 @@
    "stdout": "ewogICJlcnJvciI6ICJnaXZlIG9uZSBvZjogYSBuYW1lIHRvIGludml0ZSwgLS1saXN0LCBvciAtLXJldm9rZSBOQU1FIiwKICAibm90ZXMiOiBbXSwKICAiZXhpdCI6IDIKfQo=",
    "stderr": "",
    "window": [
-    1793591908.8584898,
-    1793591909.0716302
+    1793599607.340283,
+    1793599607.5556154
    ],
    "arm": "python",
    "before": {
     "cwd": "dir"
    },
    "before_modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    },
    "db": "unchanged",
    "files": {
     "cwd": "dir"
    },
    "modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    }
   },
   "usage-empty-name": {
@@ -192,22 +192,22 @@
    "stdout": "",
    "stderr": "aW52aXRlOiBnaXZlIG9uZSBvZjogYSBuYW1lIHRvIGludml0ZSwgLS1saXN0LCBvciAtLXJldm9rZSBOQU1FCg==",
    "window": [
-    1793591909.0991838,
-    1793591909.3115041
+    1793599607.5823967,
+    1793599607.7920456
    ],
    "arm": "python",
    "before": {
     "cwd": "dir"
    },
    "before_modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    },
    "db": "unchanged",
    "files": {
     "cwd": "dir"
    },
    "modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    }
   },
   "usage-bad-name": {
@@ -217,22 +217,22 @@
    "stdout": "",
    "stderr": "aW52aXRlOiAnTGFwdG9wJyBpcyBub3QgYSBwcmluY2lwYWwgbmFtZTogbG93ZXJjYXNlIGxldHRlcnMsIGRpZ2l0cywgJy4nLCAnXycgYW5kICctJywgc3RhcnRpbmcgd2l0aCBhIGxldHRlciBvciBkaWdpdCwgYXQgbW9zdCA2NCBjaGFyYWN0ZXJzCg==",
    "window": [
-    1793591909.33979,
-    1793591909.5531888
+    1793599607.818385,
+    1793599608.0285168
    ],
    "arm": "python",
    "before": {
     "cwd": "dir"
    },
    "before_modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    },
    "db": "unchanged",
    "files": {
     "cwd": "dir"
    },
    "modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    }
   },
   "usage-bad-name-json": {
@@ -242,22 +242,22 @@
    "stdout": "ewogICJlcnJvciI6ICInYS9iJyBpcyBub3QgYSBwcmluY2lwYWwgbmFtZTogbG93ZXJjYXNlIGxldHRlcnMsIGRpZ2l0cywgJy4nLCAnXycgYW5kICctJywgc3RhcnRpbmcgd2l0aCBhIGxldHRlciBvciBkaWdpdCwgYXQgbW9zdCA2NCBjaGFyYWN0ZXJzIiwKICAibm90ZXMiOiBbXSwKICAiZXhpdCI6IDIKfQo=",
    "stderr": "",
    "window": [
-    1793591909.5806475,
-    1793591909.7914612
+    1793599608.056604,
+    1793599608.2682636
    ],
    "arm": "python",
    "before": {
     "cwd": "dir"
    },
    "before_modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    },
    "db": "unchanged",
    "files": {
     "cwd": "dir"
    },
    "modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    }
   },
   "usage-long-name": {
@@ -267,22 +267,22 @@
    "stdout": "",
    "stderr": "aW52aXRlOiAnYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWEnIGlzIG5vdCBhIHByaW5jaXBhbCBuYW1lOiBsb3dlcmNhc2UgbGV0dGVycywgZGlnaXRzLCAnLicsICdfJyBhbmQgJy0nLCBzdGFydGluZyB3aXRoIGEgbGV0dGVyIG9yIGRpZ2l0LCBhdCBtb3N0IDY0IGNoYXJhY3RlcnMK",
    "window": [
-    1793591909.8201644,
-    1793591910.0325515
+    1793599608.2942967,
+    1793599608.5041776
    ],
    "arm": "python",
    "before": {
     "cwd": "dir"
    },
    "before_modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    },
    "db": "unchanged",
    "files": {
     "cwd": "dir"
    },
    "modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    }
   },
   "usage-bad-revoke": {
@@ -292,22 +292,22 @@
    "stdout": "",
    "stderr": "aW52aXRlOiAnLi4nIGlzIG5vdCBhIHByaW5jaXBhbCBuYW1lOiBsb3dlcmNhc2UgbGV0dGVycywgZGlnaXRzLCAnLicsICdfJyBhbmQgJy0nLCBzdGFydGluZyB3aXRoIGEgbGV0dGVyIG9yIGRpZ2l0LCBhdCBtb3N0IDY0IGNoYXJhY3RlcnMK",
    "window": [
-    1793591910.065331,
-    1793591910.2785244
+    1793599608.5299168,
+    1793599608.741505
    ],
    "arm": "python",
    "before": {
     "cwd": "dir"
    },
    "before_modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    },
    "db": "unchanged",
    "files": {
     "cwd": "dir"
    },
    "modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    }
   },
   "refused-reserved": {
@@ -317,22 +317,22 @@
    "stdout": "",
    "stderr": "aW52aXRlOiAnZGFlbW9uJyBpcyByZXNlcnZlZDsgY2hvb3NlIGFub3RoZXIgbmFtZQo=",
    "window": [
-    1793591910.312048,
-    1793591910.5246873
+    1793599608.7672188,
+    1793599608.9774942
    ],
    "arm": "python",
    "before": {
     "cwd": "dir"
    },
    "before_modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    },
    "db": "unchanged",
    "files": {
     "cwd": "dir"
    },
    "modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    }
   },
   "refused-reserved-json": {
@@ -342,22 +342,22 @@
    "stdout": "ewogICJlcnJvciI6ICInbWFpbnRhaW5lcicgaXMgcmVzZXJ2ZWQ7IGNob29zZSBhbm90aGVyIG5hbWUiLAogICJub3RlcyI6IFtdLAogICJleGl0IjogNAp9Cg==",
    "stderr": "",
    "window": [
-    1793591910.5535307,
-    1793591910.7661994
+    1793599609.0045176,
+    1793599609.2157176
    ],
    "arm": "python",
    "before": {
     "cwd": "dir"
    },
    "before_modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    },
    "db": "unchanged",
    "files": {
     "cwd": "dir"
    },
    "modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    }
   },
   "refused-env-token": {
@@ -367,22 +367,22 @@
    "stdout": "",
    "stderr": "aW52aXRlOiBsYXB0b3AgYWxyZWFkeSBoYXMgYSB0b2tlbiBpbiBQU0VVRE9MSUZFX01DUF9UT0tFTlM7IGFuIGVudmlyb25tZW50IHByaW5jaXBhbCBrZWVwcyB3b3JraW5nIGFzIGl0IGlzLCBhbmQgYSBzdG9yZWQgb25lIG9mIHRoZSBzYW1lIG5hbWUgd291bGQgYmUgc2hhZG93ZWQgYnkgaXQK",
    "window": [
-    1793591910.8127022,
-    1793591911.0365667
+    1793599609.259514,
+    1793599609.470671
    ],
    "arm": "python",
    "before": {
     "cwd": "dir"
    },
    "before_modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    },
    "db": "unchanged",
    "files": {
     "cwd": "dir"
    },
    "modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    }
   },
   "refused-env-tier": {
@@ -392,22 +392,22 @@
    "stdout": "ewogICJlcnJvciI6ICJsYXB0b3AgaXMgbmFtZWQgaW4gUFNFVURPTElGRV9NQ1BfVElFUl9NQVA7IHJlbW92ZSBpdCB0aGVyZSBmaXJzdCwgb3IgY2hvb3NlIGFub3RoZXIgbmFtZSIsCiAgIm5vdGVzIjogW10sCiAgImV4aXQiOiA0Cn0K",
    "stderr": "",
    "window": [
-    1793591911.0828412,
-    1793591911.2966032
+    1793599609.5156486,
+    1793599609.74965
    ],
    "arm": "python",
    "before": {
     "cwd": "dir"
    },
    "before_modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    },
    "db": "unchanged",
    "files": {
     "cwd": "dir"
    },
    "modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    }
   },
   "revoke-not-interactive": {
@@ -417,22 +417,22 @@
    "stdout": "",
    "stderr": "aW52aXRlOiBub3QgaW50ZXJhY3RpdmU6IHJlLXJ1biB3aXRoIC0teWVzIHRvIHJldm9rZQo=",
    "window": [
-    1793591911.323996,
-    1793591911.534091
+    1793599609.7795756,
+    1793599609.9967914
    ],
    "arm": "python",
    "before": {
     "cwd": "dir"
    },
    "before_modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    },
    "db": "unchanged",
    "files": {
     "cwd": "dir"
    },
    "modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    }
   },
   "version-check": {
@@ -442,22 +442,22 @@
    "stdout": "cHNldWRvbGlmZS1tY3AgaW52aXRlIDEK",
    "stderr": "",
    "window": [
-    1793591911.5612257,
-    1793591911.7737348
+    1793599610.0269234,
+    1793599610.2474918
    ],
    "arm": "python",
    "before": {
     "cwd": "dir"
    },
    "before_modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    },
    "db": "unchanged",
    "files": {
     "cwd": "dir"
    },
    "modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    }
   },
   "daemon-unreachable": {
@@ -465,25 +465,25 @@
    "utc_offset": 0,
    "exit": 4,
    "stdout": "",
-   "stderr": "aW52aXRlOiBubyBoZWFsdGh5IGRhZW1vbiBhbnN3ZXJzIGF0IGh0dHA6Ly8xMjcuMC4wLjE6NDQ1NTMvaGVhbHRoOiBzdGFydCBpdCAob3IgcGFzcyAtLXBvcnQpLCB0aGVuIHJlLXJ1bgo=",
+   "stderr": "aW52aXRlOiBubyBoZWFsdGh5IGRhZW1vbiBhbnN3ZXJzIGF0IGh0dHA6Ly8xMjcuMC4wLjE6NDc2OTkvaGVhbHRoOiBzdGFydCBpdCAob3IgcGFzcyAtLXBvcnQpLCB0aGVuIHJlLXJ1bgo=",
    "window": [
-    1793591911.8024328,
-    1793591912.1994853
+    1793599610.2744038,
+    1793599610.6760914
    ],
    "arm": "python",
    "before": {
     "cwd": "dir"
    },
    "before_modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    },
-   "argv_port": "44553",
+   "argv_port": "47699",
    "db": "unchanged",
    "files": {
     "cwd": "dir"
    },
    "modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    }
   },
   "daemon-degraded": {
@@ -493,8 +493,8 @@
    "stdout": "",
    "stderr": "aW52aXRlOiBubyBoZWFsdGh5IGRhZW1vbiBhbnN3ZXJzIGF0IHtEQUVNT059L2hlYWx0aDogc3RhcnQgaXQgKG9yIHBhc3MgLS1wb3J0KSwgdGhlbiByZS1ydW4K",
    "window": [
-    1793591912.2443304,
-    1793591912.6401162
+    1793599610.723957,
+    1793599611.124408
    ],
    "requests": [
     {
@@ -509,15 +509,15 @@
     "cwd": "dir"
    },
    "before_modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    },
-   "argv_port": "34777",
+   "argv_port": "35241",
    "db": "unchanged",
    "files": {
     "cwd": "dir"
    },
    "modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    }
   },
   "daemon-no-auth-json": {
@@ -527,8 +527,8 @@
    "stdout": "ewogICJlcnJvciI6ICJ0aGUgZGFlbW9uIGF0IHtEQUVNT059IGRvZXMgbm90IHJlcG9ydCBcImF1dGhcIjogdHJ1ZS4gU3RvcmVkIHByaW5jaXBhbHMgZG8gbm90IHR1cm4gYXV0aGVudGljYXRpb24gb246IGdpdmUgdGhlIGRhZW1vbiBhIHRva2VuIGZpcnN0IChkb2NzL2d1aWRlL3JlbW90ZS1iYW5rLm1kKSIsCiAgIm5vdGVzIjogW10sCiAgImV4aXQiOiA0LAogICJkYWVtb24iOiB7CiAgICAiYXV0aCI6IGZhbHNlLAogICAgInNjaGVtYSI6IDU1LAogICAgImJhbmsiOiAiN2Y4NDAyMjM4Mzk3MzY1YyIKICB9Cn0K",
    "stderr": "",
    "window": [
-    1793591913.1404102,
-    1793591913.5428407
+    1793599611.622498,
+    1793599612.0170069
    ],
    "requests": [
     {
@@ -543,15 +543,15 @@
     "cwd": "dir"
    },
    "before_modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    },
-   "argv_port": "56473",
+   "argv_port": "57429",
    "db": "unchanged",
    "files": {
     "cwd": "dir"
    },
    "modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    }
   },
   "daemon-auth-absent": {
@@ -561,8 +561,8 @@
    "stdout": "",
    "stderr": "aW52aXRlOiB0aGUgZGFlbW9uIGF0IHtEQUVNT059IGRvZXMgbm90IHJlcG9ydCAiYXV0aCI6IHRydWUuIFN0b3JlZCBwcmluY2lwYWxzIGRvIG5vdCB0dXJuIGF1dGhlbnRpY2F0aW9uIG9uOiBnaXZlIHRoZSBkYWVtb24gYSB0b2tlbiBmaXJzdCAoZG9jcy9ndWlkZS9yZW1vdGUtYmFuay5tZCkK",
    "window": [
-    1793591914.0429654,
-    1793591914.4438071
+    1793599612.5178015,
+    1793599612.9169717
    ],
    "requests": [
     {
@@ -577,15 +577,15 @@
     "cwd": "dir"
    },
    "before_modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    },
-   "argv_port": "47187",
+   "argv_port": "55037",
    "db": "unchanged",
    "files": {
     "cwd": "dir"
    },
    "modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    }
   },
   "daemon-old-schema": {
@@ -595,8 +595,8 @@
    "stdout": "",
    "stderr": "aW52aXRlOiB0aGUgZGFlbW9uIHJ1bnMgc2NoZW1hIDUyLCBvbGRlciB0aGFuIGludml0ZSAodjUzKTogdXBkYXRlIHRoZSBkYWVtb24gZmlyc3QK",
    "window": [
-    1793591914.9431746,
-    1793591915.3520062
+    1793599613.4181755,
+    1793599613.8138285
    ],
    "requests": [
     {
@@ -611,15 +611,15 @@
     "cwd": "dir"
    },
    "before_modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    },
-   "argv_port": "49175",
+   "argv_port": "51687",
    "db": "unchanged",
    "files": {
     "cwd": "dir"
    },
    "modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    }
   },
   "daemon-schema-null-json": {
@@ -629,8 +629,8 @@
    "stdout": "ewogICJlcnJvciI6ICJ0aGUgZGFlbW9uIHJ1bnMgc2NoZW1hIE5vbmUsIG9sZGVyIHRoYW4gaW52aXRlICh2NTMpOiB1cGRhdGUgdGhlIGRhZW1vbiBmaXJzdCIsCiAgIm5vdGVzIjogW10sCiAgImV4aXQiOiA0LAogICJkYWVtb24iOiB7CiAgICAiYXV0aCI6IHRydWUsCiAgICAic2NoZW1hIjogbnVsbCwKICAgICJiYW5rIjogIjdmODQwMjIzODM5NzM2NWMiCiAgfQp9Cg==",
    "stderr": "",
    "window": [
-    1793591915.852263,
-    1793591916.2531297
+    1793599614.3148122,
+    1793599614.718324
    ],
    "requests": [
     {
@@ -645,15 +645,15 @@
     "cwd": "dir"
    },
    "before_modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    },
-   "argv_port": "60437",
+   "argv_port": "38159",
    "db": "unchanged",
    "files": {
     "cwd": "dir"
    },
    "modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    }
   },
   "daemon-schema-text": {
@@ -663,8 +663,8 @@
    "stdout": "",
    "stderr": "aW52aXRlOiB0aGUgZGFlbW9uIHJ1bnMgc2NoZW1hIDU1LCBvbGRlciB0aGFuIGludml0ZSAodjUzKTogdXBkYXRlIHRoZSBkYWVtb24gZmlyc3QK",
    "window": [
-    1793591916.753644,
-    1793591917.1677616
+    1793599615.217547,
+    1793599615.6162298
    ],
    "requests": [
     {
@@ -679,15 +679,15 @@
     "cwd": "dir"
    },
    "before_modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    },
-   "argv_port": "42577",
+   "argv_port": "39533",
    "db": "unchanged",
    "files": {
     "cwd": "dir"
    },
    "modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    }
   },
   "daemon-schema-bool": {
@@ -697,8 +697,8 @@
    "stdout": "",
    "stderr": "aW52aXRlOiB0aGUgZGFlbW9uIHJ1bnMgc2NoZW1hIFRydWUsIG9sZGVyIHRoYW4gaW52aXRlICh2NTMpOiB1cGRhdGUgdGhlIGRhZW1vbiBmaXJzdAo=",
    "window": [
-    1793591917.6662843,
-    1793591918.0701685
+    1793599616.1171103,
+    1793599616.5145154
    ],
    "requests": [
     {
@@ -713,15 +713,15 @@
     "cwd": "dir"
    },
    "before_modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    },
-   "argv_port": "49223",
+   "argv_port": "46879",
    "db": "unchanged",
    "files": {
     "cwd": "dir"
    },
    "modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    }
   },
   "daemon-bank-null-json": {
@@ -731,8 +731,8 @@
    "stdout": "ewogICJlcnJvciI6ICJ0aGUgZGFlbW9uIGhhcyBub3QgcmVwb3J0ZWQgd2hpY2ggYmFuayBpdCBzZXJ2ZXMgeWV0ICgvaGVhbHRoIGJhbmsgaXMgbnVsbCB1bnRpbCBpdHMgc3RvcmFnZSBoYXMgc3RhcnRlZCBhbmQgdGhlIGFnZW50IGJvYXJkIGhhcyBiZWVuIHVzZWQgb25jZSk6IHN0YXJ0IGEgc2Vzc2lvbiBhZ2FpbnN0IGl0LCB0aGVuIHJlLXJ1biIsCiAgIm5vdGVzIjogW10sCiAgImV4aXQiOiA0LAogICJkYWVtb24iOiB7CiAgICAiYXV0aCI6IHRydWUsCiAgICAic2NoZW1hIjogNTUsCiAgICAiYmFuayI6IG51bGwKICB9Cn0K",
    "stderr": "",
    "window": [
-    1793591918.5687451,
-    1793591918.973862
+    1793599617.016145,
+    1793599617.4306142
    ],
    "requests": [
     {
@@ -747,15 +747,15 @@
     "cwd": "dir"
    },
    "before_modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    },
-   "argv_port": "35415",
+   "argv_port": "43253",
    "db": "unchanged",
    "files": {
     "cwd": "dir"
    },
    "modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    }
   },
   "daemon-not-json": {
@@ -765,8 +765,8 @@
    "stdout": "ewogICJlcnJvciI6ICJubyBoZWFsdGh5IGRhZW1vbiBhbnN3ZXJzIGF0IHtEQUVNT059L2hlYWx0aDogc3RhcnQgaXQgKG9yIHBhc3MgLS1wb3J0KSwgdGhlbiByZS1ydW4iLAogICJub3RlcyI6IFtdLAogICJleGl0IjogNAp9Cg==",
    "stderr": "",
    "window": [
-    1793591919.474472,
-    1793591919.8779886
+    1793599617.9318483,
+    1793599618.3262153
    ],
    "requests": [
     {
@@ -781,15 +781,15 @@
     "cwd": "dir"
    },
    "before_modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    },
-   "argv_port": "58495",
+   "argv_port": "60765",
    "db": "unchanged",
    "files": {
     "cwd": "dir"
    },
    "modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    }
   },
   "daemon-list-body": {
@@ -799,8 +799,8 @@
    "stdout": "",
    "stderr": "aW52aXRlOiBubyBoZWFsdGh5IGRhZW1vbiBhbnN3ZXJzIGF0IHtEQUVNT059L2hlYWx0aDogc3RhcnQgaXQgKG9yIHBhc3MgLS1wb3J0KSwgdGhlbiByZS1ydW4K",
    "window": [
-    1793591920.3742473,
-    1793591920.7852721
+    1793599618.8286307,
+    1793599619.2279687
    ],
    "requests": [
     {
@@ -815,15 +815,15 @@
     "cwd": "dir"
    },
    "before_modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    },
-   "argv_port": "42587",
+   "argv_port": "53451",
    "db": "unchanged",
    "files": {
     "cwd": "dir"
    },
    "modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    }
   },
   "daemon-other-bank": {
@@ -831,10 +831,10 @@
    "utc_offset": 0,
    "exit": 4,
    "stdout": "",
-   "stderr": "aW52aXRlOiB0aGlzIGRhdGFiYXNlIGhvbGRzIGJhbmsgN2Y4NDAyMjM4Mzk3MzY1YywgYnV0IHRoZSBkYWVtb24gb24gcG9ydCAzNDAzMyBzZXJ2ZXMgaXMgYmFuayAwMTIzNDU2Nzg5YWJjZGVmOiBpdCBpcyBhbm90aGVyIGRhdGFiYXNlLiBOb3RoaW5nIHdhcyBjaGFuZ2VkCg==",
+   "stderr": "aW52aXRlOiB0aGlzIGRhdGFiYXNlIGhvbGRzIGJhbmsgN2Y4NDAyMjM4Mzk3MzY1YywgYnV0IHRoZSBkYWVtb24gb24gcG9ydCA1MzQ5MSBzZXJ2ZXMgaXMgYmFuayAwMTIzNDU2Nzg5YWJjZGVmOiBpdCBpcyBhbm90aGVyIGRhdGFiYXNlLiBOb3RoaW5nIHdhcyBjaGFuZ2VkCg==",
    "window": [
-    1793591921.2832327,
-    1793591921.7316093
+    1793599619.7287545,
+    1793599620.1841085
    ],
    "requests": [
     {
@@ -849,26 +849,26 @@
     "cwd": "dir"
    },
    "before_modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    },
-   "argv_port": "34033",
+   "argv_port": "53491",
    "db": "unchanged",
    "files": {
     "cwd": "dir"
    },
    "modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    }
   },
   "daemon-other-bank-json": {
    "home": null,
    "utc_offset": 0,
    "exit": 4,
-   "stdout": "ewogICJlcnJvciI6ICJ0aGlzIGRhdGFiYXNlIGhvbGRzIGJhbmsgKG5vbmUpLCBidXQgdGhlIGRhZW1vbiBvbiBwb3J0IDQ0NjM5IHNlcnZlcyBpcyBiYW5rIDdmODQwMjIzODM5NzM2NWM6IGl0IGlzIGFub3RoZXIgZGF0YWJhc2UuIE5vdGhpbmcgd2FzIGNoYW5nZWQiLAogICJub3RlcyI6IFtdLAogICJleGl0IjogNCwKICAiZGFlbW9uIjogewogICAgImF1dGgiOiB0cnVlLAogICAgInNjaGVtYSI6IDU1LAogICAgImJhbmsiOiAiN2Y4NDAyMjM4Mzk3MzY1YyIKICB9Cn0K",
+   "stdout": "ewogICJlcnJvciI6ICJ0aGlzIGRhdGFiYXNlIGhvbGRzIGJhbmsgKG5vbmUpLCBidXQgdGhlIGRhZW1vbiBvbiBwb3J0IDU0OTkzIHNlcnZlcyBpcyBiYW5rIDdmODQwMjIzODM5NzM2NWM6IGl0IGlzIGFub3RoZXIgZGF0YWJhc2UuIE5vdGhpbmcgd2FzIGNoYW5nZWQiLAogICJub3RlcyI6IFtdLAogICJleGl0IjogNCwKICAiZGFlbW9uIjogewogICAgImF1dGgiOiB0cnVlLAogICAgInNjaGVtYSI6IDU1LAogICAgImJhbmsiOiAiN2Y4NDAyMjM4Mzk3MzY1YyIKICB9Cn0K",
    "stderr": "",
    "window": [
-    1793591922.3546085,
-    1793591922.8381298
+    1793599620.7784529,
+    1793599621.2438705
    ],
    "requests": [
     {
@@ -883,15 +883,15 @@
     "cwd": "dir"
    },
    "before_modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    },
-   "argv_port": "44639",
+   "argv_port": "54993",
    "db": "unchanged",
    "files": {
     "cwd": "dir"
    },
    "modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    }
   },
   "no-principals-table": {
@@ -901,8 +901,8 @@
    "stdout": "",
    "stderr": "aW52aXRlOiB0aGlzIGJhbmsgaGFzIG5vIHByaW5jaXBhbHMgdGFibGUgeWV0IChzY2hlbWEgdjUzKTogdXBkYXRlIHRoZSBkYWVtb24gYW5kIGxldCBpdCBzdGFydCwgdGhlbiByZS1ydW4K",
    "window": [
-    1793591923.3031068,
-    1793591923.761869
+    1793599621.737934,
+    1793599622.1823
    ],
    "requests": [
     {
@@ -917,15 +917,15 @@
     "cwd": "dir"
    },
    "before_modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    },
-   "argv_port": "41141",
+   "argv_port": "55203",
    "db": "unchanged",
    "files": {
     "cwd": "dir"
    },
    "modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    }
   },
   "health-surrogate-schema": {
@@ -935,8 +935,8 @@
    "stdout": "",
    "stderr": "aW52aXRlOiB0aGUgZGFlbW9uIHJ1bnMgc2NoZW1hIFx1ZDgwMHgsIG9sZGVyIHRoYW4gaW52aXRlICh2NTMpOiB1cGRhdGUgdGhlIGRhZW1vbiBmaXJzdAo=",
    "window": [
-    1793591924.209359,
-    1793591924.612784
+    1793599622.6353967,
+    1793599623.0351768
    ],
    "requests": [
     {
@@ -951,15 +951,15 @@
     "cwd": "dir"
    },
    "before_modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    },
-   "argv_port": "54435",
+   "argv_port": "43127",
    "db": "unchanged",
    "files": {
     "cwd": "dir"
    },
    "modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    }
   },
   "health-surrogate-schema-json": {
@@ -969,8 +969,8 @@
    "stdout": "ewogICJlcnJvciI6ICJ0aGUgZGFlbW9uIHJ1bnMgc2NoZW1hIFx1ZDgwMHgsIG9sZGVyIHRoYW4gaW52aXRlICh2NTMpOiB1cGRhdGUgdGhlIGRhZW1vbiBmaXJzdCIsCiAgIm5vdGVzIjogW10sCiAgImV4aXQiOiA0LAogICJkYWVtb24iOiB7CiAgICAiYXV0aCI6IHRydWUsCiAgICAic2NoZW1hIjogIlx1ZDgwMHgiLAogICAgImJhbmsiOiAiN2Y4NDAyMjM4Mzk3MzY1YyIKICB9Cn0K",
    "stderr": "",
    "window": [
-    1793591925.1110132,
-    1793591925.5163198
+    1793599623.536289,
+    1793599623.936168
    ],
    "requests": [
     {
@@ -985,15 +985,15 @@
     "cwd": "dir"
    },
    "before_modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    },
-   "argv_port": "38785",
+   "argv_port": "36651",
    "db": "unchanged",
    "files": {
     "cwd": "dir"
    },
    "modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    }
   },
   "health-surrogate-bank": {
@@ -1001,10 +1001,10 @@
    "utc_offset": 0,
    "exit": 4,
    "stdout": "",
-   "stderr": "aW52aXRlOiB0aGlzIGRhdGFiYXNlIGhvbGRzIGJhbmsgN2Y4NDAyMjM4Mzk3MzY1YywgYnV0IHRoZSBkYWVtb24gb24gcG9ydCA0NTk4MyBzZXJ2ZXMgaXMgYmFuayBiXHVkYzAwOiBpdCBpcyBhbm90aGVyIGRhdGFiYXNlLiBOb3RoaW5nIHdhcyBjaGFuZ2VkCg==",
+   "stderr": "aW52aXRlOiB0aGlzIGRhdGFiYXNlIGhvbGRzIGJhbmsgN2Y4NDAyMjM4Mzk3MzY1YywgYnV0IHRoZSBkYWVtb24gb24gcG9ydCA0ODUzOSBzZXJ2ZXMgaXMgYmFuayBiXHVkYzAwOiBpdCBpcyBhbm90aGVyIGRhdGFiYXNlLiBOb3RoaW5nIHdhcyBjaGFuZ2VkCg==",
    "window": [
-    1793591926.0129623,
-    1793591926.4703732
+    1793599624.4369204,
+    1793599624.8823457
    ],
    "requests": [
     {
@@ -1019,26 +1019,26 @@
     "cwd": "dir"
    },
    "before_modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    },
-   "argv_port": "45983",
+   "argv_port": "48539",
    "db": "unchanged",
    "files": {
     "cwd": "dir"
    },
    "modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    }
   },
   "health-surrogate-bank-json": {
    "home": null,
    "utc_offset": 0,
    "exit": 4,
-   "stdout": "ewogICJlcnJvciI6ICJ0aGlzIGRhdGFiYXNlIGhvbGRzIGJhbmsgN2Y4NDAyMjM4Mzk3MzY1YywgYnV0IHRoZSBkYWVtb24gb24gcG9ydCA0ODgzOSBzZXJ2ZXMgaXMgYmFuayBiXHVkYzAwOiBpdCBpcyBhbm90aGVyIGRhdGFiYXNlLiBOb3RoaW5nIHdhcyBjaGFuZ2VkIiwKICAibm90ZXMiOiBbXSwKICAiZXhpdCI6IDQsCiAgImRhZW1vbiI6IHsKICAgICJhdXRoIjogdHJ1ZSwKICAgICJzY2hlbWEiOiA1NSwKICAgICJiYW5rIjogImJcdWRjMDAiCiAgfQp9Cg==",
+   "stdout": "ewogICJlcnJvciI6ICJ0aGlzIGRhdGFiYXNlIGhvbGRzIGJhbmsgN2Y4NDAyMjM4Mzk3MzY1YywgYnV0IHRoZSBkYWVtb24gb24gcG9ydCAzMzA2OSBzZXJ2ZXMgaXMgYmFuayBiXHVkYzAwOiBpdCBpcyBhbm90aGVyIGRhdGFiYXNlLiBOb3RoaW5nIHdhcyBjaGFuZ2VkIiwKICAibm90ZXMiOiBbXSwKICAiZXhpdCI6IDQsCiAgImRhZW1vbiI6IHsKICAgICJhdXRoIjogdHJ1ZSwKICAgICJzY2hlbWEiOiA1NSwKICAgICJiYW5rIjogImJcdWRjMDAiCiAgfQp9Cg==",
    "stderr": "",
    "window": [
-    1793591926.9170082,
-    1793591927.3729293
+    1793599625.3326325,
+    1793599625.7934368
    ],
    "requests": [
     {
@@ -1053,15 +1053,15 @@
     "cwd": "dir"
    },
    "before_modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    },
-   "argv_port": "48839",
+   "argv_port": "33069",
    "db": "unchanged",
    "files": {
     "cwd": "dir"
    },
    "modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    }
   },
   "health-surrogate-in-list-json": {
@@ -1071,8 +1071,8 @@
    "stdout": "ewogICJlcnJvciI6ICJ0aGUgZGFlbW9uIHJ1bnMgc2NoZW1hIFsnXFx1ZDgwMCcsIHsnXFx1ZGMwMCc6IDF9XSwgb2xkZXIgdGhhbiBpbnZpdGUgKHY1Myk6IHVwZGF0ZSB0aGUgZGFlbW9uIGZpcnN0IiwKICAibm90ZXMiOiBbXSwKICAiZXhpdCI6IDQsCiAgImRhZW1vbiI6IHsKICAgICJhdXRoIjogdHJ1ZSwKICAgICJzY2hlbWEiOiBbCiAgICAgICJcdWQ4MDAiLAogICAgICB7CiAgICAgICAgIlx1ZGMwMCI6IDEKICAgICAgfQogICAgXSwKICAgICJiYW5rIjogIjdmODQwMjIzODM5NzM2NWMiCiAgfQp9Cg==",
    "stderr": "",
    "window": [
-    1793591927.81947,
-    1793591928.216242
+    1793599626.2378988,
+    1793599626.6657932
    ],
    "requests": [
     {
@@ -1087,15 +1087,15 @@
     "cwd": "dir"
    },
    "before_modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    },
-   "argv_port": "55887",
+   "argv_port": "60157",
    "db": "unchanged",
    "files": {
     "cwd": "dir"
    },
    "modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    }
   },
   "health-nested-at-limit": {
@@ -1105,8 +1105,8 @@
    "stdout": "",
    "stderr": "aW52aXRlOiB0aGUgZGFlbW9uIGF0IHtEQUVNT059IGRvZXMgbm90IHJlcG9ydCAiYXV0aCI6IHRydWUuIFN0b3JlZCBwcmluY2lwYWxzIGRvIG5vdCB0dXJuIGF1dGhlbnRpY2F0aW9uIG9uOiBnaXZlIHRoZSBkYWVtb24gYSB0b2tlbiBmaXJzdCAoZG9jcy9ndWlkZS9yZW1vdGUtYmFuay5tZCkK",
    "window": [
-    1793591928.716646,
-    1793591929.124503
+    1793599627.162986,
+    1793599627.5695298
    ],
    "requests": [
     {
@@ -1121,15 +1121,15 @@
     "cwd": "dir"
    },
    "before_modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    },
-   "argv_port": "53403",
+   "argv_port": "50057",
    "db": "unchanged",
    "files": {
     "cwd": "dir"
    },
    "modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    }
   },
   "health-nested-past-limit": {
@@ -1139,8 +1139,8 @@
    "stdout": "",
    "stderr": "VHJhY2ViYWNrIChtb3N0IHJlY2VudCBjYWxsIGxhc3QpOgogIEZpbGUgIjxmcm96ZW4gcnVucHk+IiwgbGluZSAxOTgsIGluIF9ydW5fbW9kdWxlX2FzX21haW4KICBGaWxlICI8ZnJvemVuIHJ1bnB5PiIsIGxpbmUgODgsIGluIF9ydW5fY29kZQogIEZpbGUgIntPUkFDTEV9L3BzZXVkb2xpZmVfbWVtb3J5L2NsaS5weSIsIGxpbmUgMjMzLCBpbiA8bW9kdWxlPgogICAgbWFpbigpCiAgRmlsZSAie09SQUNMRX0vcHNldWRvbGlmZV9tZW1vcnkvY2xpLnB5IiwgbGluZSAxODEsIGluIG1haW4KICAgIHN5cy5leGl0KGludml0ZV9tYWluKHN5cy5hcmd2WzI6XSkpCiAgICAgICAgICAgICBeXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eCiAgRmlsZSAie09SQUNMRX0vcHNldWRvbGlmZV9tZW1vcnkvaW52aXRlX2NsaS5weSIsIGxpbmUgNjA2LCBpbiBtYWluCiAgICByZXR1cm4gX2xvY2FsKGFyZ3MsIHJlcG9ydCwgZHNuKQogICAgICAgICAgIF5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl4KICBGaWxlICJ7T1JBQ0xFfS9wc2V1ZG9saWZlX21lbW9yeS9pbnZpdGVfY2xpLnB5IiwgbGluZSAzMjksIGluIF9sb2NhbAogICAgaGVhbHRoLCByZWZ1c2FsID0gX2RhZW1vbl9jaGVjayhhcmdzLnBvcnQsIHJlcG9ydCwgbmVlZF9hdXRoPVRydWUpCiAgICAgICAgICAgICAgICAgICAgICBeXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl4KICBGaWxlICJ7T1JBQ0xFfS9wc2V1ZG9saWZlX21lbW9yeS9pbnZpdGVfY2xpLnB5IiwgbGluZSAyNDcsIGluIF9kYWVtb25fY2hlY2sKICAgIGhlYWx0aCA9IHByb2JlX2hlYWx0aChsb2NhbCkKICAgICAgICAgICAgIF5eXl5eXl5eXl5eXl5eXl5eXl4KICBGaWxlICJ7T1JBQ0xFfS9wc2V1ZG9saWZlX21lbW9yeS9pbnZpdGVfY2xpLnB5IiwgbGluZSAxMjMsIGluIHByb2JlX2hlYWx0aAogICAgcmV0dXJuIGV4cG9zZV9jbGkucHJvYmVfaGVhbHRoKHVybCwgZXhwb3NlX2NsaS5MT0NBTF9IRUFMVEhfVElNRU9VVF9TKQogICAgICAgICAgIF5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXgogIEZpbGUgIntPUkFDTEV9L3BzZXVkb2xpZmVfbWVtb3J5L2V4cG9zZV9jbGkucHkiLCBsaW5lIDE0NiwgaW4gcHJvYmVfaGVhbHRoCiAgICByZXR1cm4gZmV0Y2hfaGVhbHRoKHVybCwgdGltZW91dClbMV0KICAgICAgICAgICBeXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXgogIEZpbGUgIntPUkFDTEV9L3BzZXVkb2xpZmVfbWVtb3J5L2V4cG9zZV9jbGkucHkiLCBsaW5lIDEzNywgaW4gZmV0Y2hfaGVhbHRoCiAgICBwYXlsb2FkID0ganNvbi5sb2Fkcyhib2R5LmRlY29kZSgidXRmLTgiKSkKICAgICAgICAgICAgICBeXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXgogIEZpbGUgIntQWVRIT059L2xpYi9weXRob24zLjExL2pzb24vX19pbml0X18ucHkiLCBsaW5lIDM0NiwgaW4gbG9hZHMKICAgIHJldHVybiBfZGVmYXVsdF9kZWNvZGVyLmRlY29kZShzKQogICAgICAgICAgIF5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eCiAgRmlsZSAie1BZVEhPTn0vbGliL3B5dGhvbjMuMTEvanNvbi9kZWNvZGVyLnB5IiwgbGluZSAzMzcsIGluIGRlY29kZQogICAgb2JqLCBlbmQgPSBzZWxmLnJhd19kZWNvZGUocywgaWR4PV93KHMsIDApLmVuZCgpKQogICAgICAgICAgICAgICBeXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXgogIEZpbGUgIntQWVRIT059L2xpYi9weXRob24zLjExL2pzb24vZGVjb2Rlci5weSIsIGxpbmUgMzUzLCBpbiByYXdfZGVjb2RlCiAgICBvYmosIGVuZCA9IHNlbGYuc2Nhbl9vbmNlKHMsIGlkeCkKICAgICAgICAgICAgICAgXl5eXl5eXl5eXl5eXl5eXl5eXl5eXgpSZWN1cnNpb25FcnJvcjogbWF4aW11bSByZWN1cnNpb24gZGVwdGggZXhjZWVkZWQgd2hpbGUgZGVjb2RpbmcgYSBKU09OIGFycmF5IGZyb20gYSB1bmljb2RlIHN0cmluZwo=",
    "window": [
-    1793591929.6236527,
-    1793591930.030195
+    1793599628.069162,
+    1793599628.462041
    ],
    "requests": [
     {
@@ -1155,15 +1155,15 @@
     "cwd": "dir"
    },
    "before_modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    },
-   "argv_port": "52167",
+   "argv_port": "52059",
    "db": "unchanged",
    "files": {
     "cwd": "dir"
    },
    "modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    }
   },
   "health-int-past-limit": {
@@ -1173,8 +1173,8 @@
    "stdout": "",
    "stderr": "aW52aXRlOiBubyBoZWFsdGh5IGRhZW1vbiBhbnN3ZXJzIGF0IHtEQUVNT059L2hlYWx0aDogc3RhcnQgaXQgKG9yIHBhc3MgLS1wb3J0KSwgdGhlbiByZS1ydW4K",
    "window": [
-    1793591930.5279725,
-    1793591930.9311585
+    1793599628.9631255,
+    1793599629.3669012
    ],
    "requests": [
     {
@@ -1189,15 +1189,15 @@
     "cwd": "dir"
    },
    "before_modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    },
-   "argv_port": "37951",
+   "argv_port": "43665",
    "db": "unchanged",
    "files": {
     "cwd": "dir"
    },
    "modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    }
   },
   "usage-empty-revoke-with-list": {
@@ -1207,22 +1207,22 @@
    "stdout": "",
    "stderr": "aW52aXRlOiAnJyBpcyBub3QgYSBwcmluY2lwYWwgbmFtZTogbG93ZXJjYXNlIGxldHRlcnMsIGRpZ2l0cywgJy4nLCAnXycgYW5kICctJywgc3RhcnRpbmcgd2l0aCBhIGxldHRlciBvciBkaWdpdCwgYXQgbW9zdCA2NCBjaGFyYWN0ZXJzCg==",
    "window": [
-    1793591931.412352,
-    1793591931.6253304
+    1793599629.8511138,
+    1793599630.0677192
    ],
    "arm": "python",
    "before": {
     "cwd": "dir"
    },
    "before_modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    },
    "db": "unchanged",
    "files": {
     "cwd": "dir"
    },
    "modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    }
   },
   "usage-empty-name-and-revoke-json": {
@@ -1232,22 +1232,22 @@
    "stdout": "ewogICJlcnJvciI6ICInJyBpcyBub3QgYSBwcmluY2lwYWwgbmFtZTogbG93ZXJjYXNlIGxldHRlcnMsIGRpZ2l0cywgJy4nLCAnXycgYW5kICctJywgc3RhcnRpbmcgd2l0aCBhIGxldHRlciBvciBkaWdpdCwgYXQgbW9zdCA2NCBjaGFyYWN0ZXJzIiwKICAibm90ZXMiOiBbXSwKICAiZXhpdCI6IDIKfQo=",
    "stderr": "",
    "window": [
-    1793591931.6557932,
-    1793591931.8661706
+    1793599630.0956326,
+    1793599630.3063858
    ],
    "arm": "python",
    "before": {
     "cwd": "dir"
    },
    "before_modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    },
    "db": "unchanged",
    "files": {
     "cwd": "dir"
    },
    "modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    }
   },
   "list-other-bank-json": {
@@ -1257,22 +1257,22 @@
    "stdout": "ewogICJlcnJvciI6ICJ0aGlzIGRhdGFiYXNlIGhvbGRzIGJhbmsgN2Y4NDAyMjM4Mzk3MzY1YywgYnV0IC0tYmFuayBpcyBiYW5rIDAxMjM0NTY3ODlhYmNkZWY6IGl0IGlzIGFub3RoZXIgZGF0YWJhc2UuIE5vdGhpbmcgd2FzIGNoYW5nZWQiLAogICJub3RlcyI6IFtdLAogICJleGl0IjogNAp9Cg==",
    "stderr": "",
    "window": [
-    1793591931.8934293,
-    1793591932.3469284
+    1793599630.332726,
+    1793599630.7784822
    ],
    "arm": "python",
    "before": {
     "cwd": "dir"
    },
    "before_modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    },
    "db": "unchanged",
    "files": {
     "cwd": "dir"
    },
    "modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    }
   },
   "list-activity": {
@@ -1282,22 +1282,22 @@
    "stdout": "ICBuYW1lICAgICAgICAgICAgICAgICAgICAgc3RhdGUgICAgICAgbGFzdCBzZWVuICAgICAgICAgICAgIHRpZXIgICAgIGJvYXJkICBjcmVhdGVkICAgICAgICAgICAgICAgcGFpcmVkICAgICAgICAgICAgICAgIHJldm9rZWQKICBjb2RleCAgICAgICAgICAgICAgICAgICAgZW52aXJvbm1lbnQgMjAyNi0xMC0yNiAwNzozMyBVVEMgIGRlZmF1bHQgIC0gICAgICAtICAgICAgICAgICAgICAgICAgICAgLSAgICAgICAgICAgICAgICAgICAgIC0KICBkZWZhdWx0ICAgICAgICAgICAgICAgICAgZW52aXJvbm1lbnQgMjAyNi0xMC0yNSAwMzo0NiBVVEMgIGRlZmF1bHQgIC0gICAgICAtICAgICAgICAgICAgICAgICAgICAgLSAgICAgICAgICAgICAgICAgICAgIC0KICBkZXNrICAgICAgICAgICAgICAgICAgICAgZW52aXJvbm1lbnQgbmV2ZXIgICAgICAgICAgICAgICAgIGRlZmF1bHQgIC0gICAgICAtICAgICAgICAgICAgICAgICAgICAgLSAgICAgICAgICAgICAgICAgICAgIC0KICBvbGQtbGFwdG9wICAgICAgICAgICAgICAgZW52aXJvbm1lbnQgMjAyNi0xMC0xNCAxNzo0NiBVVEMgIGRlZmF1bHQgIC0gICAgICAtICAgICAgICAgICAgICAgICAgICAgLSAgICAgICAgICAgICAgICAgICAgIC0KICAoZW52aXJvbm1lbnQ6IGEgdG9rZW4gaW4gdGhlIGRhZW1vbidzIFBTRVVET0xJRkVfTUNQX1RPS0VOUyBvciBQU0VVRE9MSUZFX01DUF9UT0tFTjsgbGFzdCBzZWVuOiBpdHMgbGFzdCBhY2NlcHRlZCByZXF1ZXN0LCB3cml0dGVuIG9uY2UgYSBtaW51dGUpCgpyZWZ1c2VkIHRva2VucywgYnkgdGhlIGZpcnN0IDggY2hhcmFjdGVycyBvZiB0aGVpciBTSEEtMjU2IChgcHNldWRvbGlmZS1tY3AgZG9jdG9yYCBvbiBhIGNsaWVudCBwcmludHMgaXRzIG93biB0b2tlbidzIGFzIHRva2VuX3NoYTI1Nl9wcmVmaXgpOgogIHByZWZpeCAgICByZWZ1c2VkICBmaXJzdCAgICAgICAgICAgICAgICAgbGFzdAogIGFiMTJjZDM0ICAgICAgIDM3ICAyMDI2LTEwLTE0IDE3OjQ2IFVUQyAgMjAyNi0xMC0yNiAwNzozMyBVVEMKICBmZmZmZmZmZiAxMjM0NTY3OCAgMjAyNi0xMC0wMyAwNDowMCBVVEMgIDIwMjYtMTAtMjYgMDc6MzMgVVRDCiAgMDBmZjAwZmYgICAgICAgIDEgIDIwMjYtMTAtMjAgMTI6NDAgVVRDICAyMDI2LTEwLTIwIDEyOjQwIFVUQwo=",
    "stderr": "",
    "window": [
-    1793591932.5477154,
-    1793591932.9660654
+    1793599630.973957,
+    1793599631.3837063
    ],
    "arm": "python",
    "before": {
     "cwd": "dir"
    },
    "before_modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    },
    "db": "unchanged",
    "files": {
     "cwd": "dir"
    },
    "modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    }
   },
   "list-activity-json": {
@@ -1307,22 +1307,22 @@
    "stdout": "ewogICJlcnJvciI6IG51bGwsCiAgIm5vdGVzIjogW10sCiAgImV4aXQiOiAwLAogICJwcmluY2lwYWxzIjogWwogICAgewogICAgICAicHJpbmNpcGFsIjogImNvZGV4IiwKICAgICAgInN0YXRlIjogImVudmlyb25tZW50IiwKICAgICAgInBhaXJlZCI6IGZhbHNlLAogICAgICAidGllciI6IG51bGwsCiAgICAgICJib2FyZCI6IG51bGwsCiAgICAgICJjb2RlX2V4cGlyZXNfYXQiOiBudWxsLAogICAgICAiY3JlYXRlZF9hdCI6IG51bGwsCiAgICAgICJwYWlyZWRfYXQiOiBudWxsLAogICAgICAicmV2b2tlZF9hdCI6IG51bGwsCiAgICAgICJsYXN0X3NlZW5fYXQiOiAxNzkzMDAwMDAwLjAKICAgIH0sCiAgICB7CiAgICAgICJwcmluY2lwYWwiOiAiZGVmYXVsdCIsCiAgICAgICJzdGF0ZSI6ICJlbnZpcm9ubWVudCIsCiAgICAgICJwYWlyZWQiOiBmYWxzZSwKICAgICAgInRpZXIiOiBudWxsLAogICAgICAiYm9hcmQiOiBudWxsLAogICAgICAiY29kZV9leHBpcmVzX2F0IjogbnVsbCwKICAgICAgImNyZWF0ZWRfYXQiOiBudWxsLAogICAgICAicGFpcmVkX2F0IjogbnVsbCwKICAgICAgInJldm9rZWRfYXQiOiBudWxsLAogICAgICAibGFzdF9zZWVuX2F0IjogMTc5MjkwMDAwMC41CiAgICB9LAogICAgewogICAgICAicHJpbmNpcGFsIjogImRlc2siLAogICAgICAic3RhdGUiOiAiZW52aXJvbm1lbnQiLAogICAgICAicGFpcmVkIjogZmFsc2UsCiAgICAgICJ0aWVyIjogbnVsbCwKICAgICAgImJvYXJkIjogbnVsbCwKICAgICAgImNvZGVfZXhwaXJlc19hdCI6IG51bGwsCiAgICAgICJjcmVhdGVkX2F0IjogbnVsbCwKICAgICAgInBhaXJlZF9hdCI6IG51bGwsCiAgICAgICJyZXZva2VkX2F0IjogbnVsbCwKICAgICAgImxhc3Rfc2Vlbl9hdCI6IG51bGwKICAgIH0sCiAgICB7CiAgICAgICJwcmluY2lwYWwiOiAib2xkLWxhcHRvcCIsCiAgICAgICJzdGF0ZSI6ICJlbnZpcm9ubWVudCIsCiAgICAgICJwYWlyZWQiOiBmYWxzZSwKICAgICAgInRpZXIiOiBudWxsLAogICAgICAiYm9hcmQiOiBudWxsLAogICAgICAiY29kZV9leHBpcmVzX2F0IjogbnVsbCwKICAgICAgImNyZWF0ZWRfYXQiOiBudWxsLAogICAgICAicGFpcmVkX2F0IjogbnVsbCwKICAgICAgInJldm9rZWRfYXQiOiBudWxsLAogICAgICAibGFzdF9zZWVuX2F0IjogMTc5MjAwMDAwMC4wCiAgICB9CiAgXSwKICAicmVqZWN0ZWQiOiBbCiAgICB7CiAgICAgICJoYXNoX3ByZWZpeCI6ICJhYjEyY2QzNCIsCiAgICAgICJyZWplY3Rpb25zIjogMzcsCiAgICAgICJmaXJzdF9zZWVuX2F0IjogMTc5MjAwMDAwMC4wLAogICAgICAibGFzdF9zZWVuX2F0IjogMTc5MzAwMDAwMC4wCiAgICB9LAogICAgewogICAgICAiaGFzaF9wcmVmaXgiOiAiZmZmZmZmZmYiLAogICAgICAicmVqZWN0aW9ucyI6IDEyMzQ1Njc4LAogICAgICAiZmlyc3Rfc2Vlbl9hdCI6IDE3OTEwMDAwMDAuMCwKICAgICAgImxhc3Rfc2Vlbl9hdCI6IDE3OTMwMDAwMDAuMAogICAgfSwKICAgIHsKICAgICAgImhhc2hfcHJlZml4IjogIjAwZmYwMGZmIiwKICAgICAgInJlamVjdGlvbnMiOiAxLAogICAgICAiZmlyc3Rfc2Vlbl9hdCI6IDE3OTI1MDAwMDAuMCwKICAgICAgImxhc3Rfc2Vlbl9hdCI6IDE3OTI1MDAwMDAuMAogICAgfQogIF0KfQo=",
    "stderr": "",
    "window": [
-    1793591932.9928074,
-    1793591933.4125657
+    1793599631.4110928,
+    1793599631.8175035
    ],
    "arm": "python",
    "before": {
     "cwd": "dir"
    },
    "before_modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    },
    "db": "unchanged",
    "files": {
     "cwd": "dir"
    },
    "modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    }
   },
   "list-activity-no-env": {
@@ -1332,22 +1332,22 @@
    "stdout": "ICBuYW1lICAgICAgICAgICAgICAgICAgICAgc3RhdGUgICAgICAgbGFzdCBzZWVuICAgICAgICAgICAgIHRpZXIgICAgIGJvYXJkICBjcmVhdGVkICAgICAgICAgICAgICAgcGFpcmVkICAgICAgICAgICAgICAgIHJldm9rZWQKICBjb2RleCAgICAgICAgICAgICAgICAgICAgZW52aXJvbm1lbnQgMjAyNi0xMC0yNiAwNzozMyBVVEMgIGRlZmF1bHQgIC0gICAgICAtICAgICAgICAgICAgICAgICAgICAgLSAgICAgICAgICAgICAgICAgICAgIC0KICBkZWZhdWx0ICAgICAgICAgICAgICAgICAgZW52aXJvbm1lbnQgMjAyNi0xMC0yNSAwMzo0NiBVVEMgIGRlZmF1bHQgIC0gICAgICAtICAgICAgICAgICAgICAgICAgICAgLSAgICAgICAgICAgICAgICAgICAgIC0KICBvbGQtbGFwdG9wICAgICAgICAgICAgICAgZW52aXJvbm1lbnQgMjAyNi0xMC0xNCAxNzo0NiBVVEMgIGRlZmF1bHQgIC0gICAgICAtICAgICAgICAgICAgICAgICAgICAgLSAgICAgICAgICAgICAgICAgICAgIC0KICAoZW52aXJvbm1lbnQ6IGEgdG9rZW4gaW4gdGhlIGRhZW1vbidzIFBTRVVET0xJRkVfTUNQX1RPS0VOUyBvciBQU0VVRE9MSUZFX01DUF9UT0tFTjsgbGFzdCBzZWVuOiBpdHMgbGFzdCBhY2NlcHRlZCByZXF1ZXN0LCB3cml0dGVuIG9uY2UgYSBtaW51dGUpCgpyZWZ1c2VkIHRva2VucywgYnkgdGhlIGZpcnN0IDggY2hhcmFjdGVycyBvZiB0aGVpciBTSEEtMjU2IChgcHNldWRvbGlmZS1tY3AgZG9jdG9yYCBvbiBhIGNsaWVudCBwcmludHMgaXRzIG93biB0b2tlbidzIGFzIHRva2VuX3NoYTI1Nl9wcmVmaXgpOgogIHByZWZpeCAgICByZWZ1c2VkICBmaXJzdCAgICAgICAgICAgICAgICAgbGFzdAogIGFiMTJjZDM0ICAgICAgIDM3ICAyMDI2LTEwLTE0IDE3OjQ2IFVUQyAgMjAyNi0xMC0yNiAwNzozMyBVVEMKICBmZmZmZmZmZiAxMjM0NTY3OCAgMjAyNi0xMC0wMyAwNDowMCBVVEMgIDIwMjYtMTAtMjYgMDc6MzMgVVRDCiAgMDBmZjAwZmYgICAgICAgIDEgIDIwMjYtMTAtMjAgMTI6NDAgVVRDICAyMDI2LTEwLTIwIDEyOjQwIFVUQwo=",
    "stderr": "",
    "window": [
-    1793591933.4591675,
-    1793591933.8638105
+    1793599631.8612428,
+    1793599632.263055
    ],
    "arm": "python",
    "before": {
     "cwd": "dir"
    },
    "before_modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    },
    "db": "unchanged",
    "files": {
     "cwd": "dir"
    },
    "modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    }
   },
   "list-empty": {
@@ -1357,22 +1357,22 @@
    "stdout": "bm8gc3RvcmVkIHByaW5jaXBhbHMKCm5vIHJlZnVzZWQgdG9rZW5zIHJlY29yZGVkCg==",
    "stderr": "",
    "window": [
-    1793591934.0686958,
-    1793591934.4743578
+    1793599632.4572232,
+    1793599632.861941
    ],
    "arm": "python",
    "before": {
     "cwd": "dir"
    },
    "before_modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    },
    "db": "unchanged",
    "files": {
     "cwd": "dir"
    },
    "modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    }
   },
   "list-empty-json": {
@@ -1382,22 +1382,22 @@
    "stdout": "ewogICJlcnJvciI6IG51bGwsCiAgIm5vdGVzIjogW10sCiAgImV4aXQiOiAwLAogICJwcmluY2lwYWxzIjogW10sCiAgInJlamVjdGVkIjogW10KfQo=",
    "stderr": "",
    "window": [
-    1793591934.5030475,
-    1793591934.9045246
+    1793599632.8885074,
+    1793599633.2919707
    ],
    "arm": "python",
    "before": {
     "cwd": "dir"
    },
    "before_modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    },
    "db": "unchanged",
    "files": {
     "cwd": "dir"
    },
    "modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    }
   },
   "list-no-table": {
@@ -1407,22 +1407,22 @@
    "stdout": "",
    "stderr": "aW52aXRlOiB0aGlzIGJhbmsgaGFzIG5vIHByaW5jaXBhbHMgdGFibGUgeWV0IChzY2hlbWEgdjUzKTogdXBkYXRlIHRoZSBkYWVtb24gYW5kIGxldCBpdCBzdGFydCwgdGhlbiByZS1ydW4K",
    "window": [
-    1793591934.9508657,
-    1793591935.349862
+    1793599633.3364012,
+    1793599633.7394543
    ],
    "arm": "python",
    "before": {
     "cwd": "dir"
    },
    "before_modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    },
    "db": "unchanged",
    "files": {
     "cwd": "dir"
    },
    "modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    }
   },
   "list-no-meta-bank": {
@@ -1432,22 +1432,22 @@
    "stdout": "",
    "stderr": "aW52aXRlOiB0aGlzIGRhdGFiYXNlIGhvbGRzIGJhbmsgKG5vbmUpLCBidXQgLS1iYW5rIGlzIGJhbmsgN2Y4NDAyMjM4Mzk3MzY1YzogaXQgaXMgYW5vdGhlciBkYXRhYmFzZS4gTm90aGluZyB3YXMgY2hhbmdlZAo=",
    "window": [
-    1793591935.378695,
-    1793591935.826133
+    1793599633.767617,
+    1793599634.219556
    ],
    "arm": "python",
    "before": {
     "cwd": "dir"
    },
    "before_modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    },
    "db": "unchanged",
    "files": {
     "cwd": "dir"
    },
    "modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    }
   },
   "paired-needs-replace": {
@@ -1457,8 +1457,8 @@
    "stdout": "",
    "stderr": "aW52aXRlOiBicmF2byBpcyBhbHJlYWR5IHBhaXJlZDsgcGFzcyAtLXJlcGxhY2UgdG8gZ2l2ZSBpdCBhIG5ldyBjb2RlIChpdHMgY3VycmVudCB0b2tlbiBrZWVwcyB3b3JraW5nIHVudGlsIHRoZSBuZXcgY29kZSBpcyByZWRlZW1lZCksIG9yIC0tcmV2b2tlIGJyYXZvIGZpcnN0LiBOb3RoaW5nIHdhcyBjaGFuZ2VkCg==",
    "window": [
-    1793591936.0653858,
-    1793591936.5920105
+    1793599634.424456,
+    1793599634.9258132
    ],
    "requests": [
     {
@@ -1473,57 +1473,57 @@
     "cwd": "dir"
    },
    "before_modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    },
-   "argv_port": "49993",
+   "argv_port": "36757",
    "ttl": 900,
    "seed_rows": [
     {
      "tier": "core",
      "board": true,
      "code_hash": null,
-     "paired_at": 1793591908.583902,
+     "paired_at": 1793599607.070922,
      "principal": "bravo",
-     "created_at": 1793591908.577005,
+     "created_at": 1793599607.064868,
      "revoked_at": null,
      "token_hash": "217d3f53b8e94284ef6cfc5ea68648796764a3173189d2484d9d120c7178107d",
      "code_expires_at": null,
-     "paired_code_hash": "f0a12416fb7ed1559409e6d9acec55e5dd23daf84340c2843cd008fd7e6f0c66"
+     "paired_code_hash": "7075920ab7d9b6ba1cb0f7c37e15a473f2e6eea3d2d43071c5f42f68f05aba07"
     },
     {
      "tier": "full",
      "board": true,
-     "code_hash": "09f3c16e1e85ab416800b65a2edcd4bc33264970cc12fa856e1e298b2d1e0313",
+     "code_hash": "6143158aa1fe83103d96e3ef16e5e636a4c6400b79b089f8c271d03b09457601",
      "paired_at": null,
      "principal": "a-rather-long-principal-name.x",
-     "created_at": 1793591908.587434,
+     "created_at": 1793599607.074201,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793595508.587432,
+     "code_expires_at": 1793603207.074199,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": false,
-     "code_hash": "aa7e155a14693ef798e4d6aaaf53876decf324f88e0d5822a7fc8959a053b871",
+     "code_hash": "d53d2cb4c06c9a901c539089dd9820ac49eb3a5126d697c5a2aeea488c0b5320",
      "paired_at": null,
      "principal": "delta",
-     "created_at": 1793591908.5867,
+     "created_at": 1793599607.073464,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793591848.586698,
+     "code_expires_at": 1793599547.073462,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": true,
-     "code_hash": "3b01334f0ec371582663ce7b8b1dcb904b9799be991a1ed6d016a6af163e5300",
+     "code_hash": "529eb40aaaf94da3dcb594ded0db53c39cac7a72cdaf405309a085e300f91a7a",
      "paired_at": null,
      "principal": "alpha",
-     "created_at": 1793591908.576089,
+     "created_at": 1793599607.06393,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793592808.576056,
+     "code_expires_at": 1793600507.06379,
      "paired_code_hash": null
     },
     {
@@ -1532,8 +1532,8 @@
      "code_hash": null,
      "paired_at": null,
      "principal": "charlie",
-     "created_at": 1793591908.585122,
-     "revoked_at": 1793591908.585837,
+     "created_at": 1793599607.071953,
+     "revoked_at": 1793599607.072683,
      "token_hash": null,
      "code_expires_at": null,
      "paired_code_hash": null
@@ -1544,7 +1544,7 @@
     "cwd": "dir"
    },
    "modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    }
   },
   "paired-needs-replace-json": {
@@ -1554,8 +1554,8 @@
    "stdout": "ewogICJlcnJvciI6ICJicmF2byBpcyBhbHJlYWR5IHBhaXJlZDsgcGFzcyAtLXJlcGxhY2UgdG8gZ2l2ZSBpdCBhIG5ldyBjb2RlIChpdHMgY3VycmVudCB0b2tlbiBrZWVwcyB3b3JraW5nIHVudGlsIHRoZSBuZXcgY29kZSBpcyByZWRlZW1lZCksIG9yIC0tcmV2b2tlIGJyYXZvIGZpcnN0LiBOb3RoaW5nIHdhcyBjaGFuZ2VkIiwKICAibm90ZXMiOiBbXSwKICAiZXhpdCI6IDQsCiAgImRhZW1vbiI6IHsKICAgICJhdXRoIjogdHJ1ZSwKICAgICJzY2hlbWEiOiA1NSwKICAgICJiYW5rIjogIjdmODQwMjIzODM5NzM2NWMiCiAgfQp9Cg==",
    "stderr": "",
    "window": [
-    1793591938.8161168,
-    1793591939.322224
+    1793599636.2891533,
+    1793599636.7882488
    ],
    "requests": [
     {
@@ -1570,57 +1570,57 @@
     "cwd": "dir"
    },
    "before_modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    },
-   "argv_port": "41993",
+   "argv_port": "50713",
    "ttl": 900,
    "seed_rows": [
     {
      "tier": "core",
      "board": true,
      "code_hash": null,
-     "paired_at": 1793591908.583902,
+     "paired_at": 1793599607.070922,
      "principal": "bravo",
-     "created_at": 1793591908.577005,
+     "created_at": 1793599607.064868,
      "revoked_at": null,
      "token_hash": "217d3f53b8e94284ef6cfc5ea68648796764a3173189d2484d9d120c7178107d",
      "code_expires_at": null,
-     "paired_code_hash": "f0a12416fb7ed1559409e6d9acec55e5dd23daf84340c2843cd008fd7e6f0c66"
+     "paired_code_hash": "7075920ab7d9b6ba1cb0f7c37e15a473f2e6eea3d2d43071c5f42f68f05aba07"
     },
     {
      "tier": "full",
      "board": true,
-     "code_hash": "09f3c16e1e85ab416800b65a2edcd4bc33264970cc12fa856e1e298b2d1e0313",
+     "code_hash": "6143158aa1fe83103d96e3ef16e5e636a4c6400b79b089f8c271d03b09457601",
      "paired_at": null,
      "principal": "a-rather-long-principal-name.x",
-     "created_at": 1793591908.587434,
+     "created_at": 1793599607.074201,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793595508.587432,
+     "code_expires_at": 1793603207.074199,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": false,
-     "code_hash": "aa7e155a14693ef798e4d6aaaf53876decf324f88e0d5822a7fc8959a053b871",
+     "code_hash": "d53d2cb4c06c9a901c539089dd9820ac49eb3a5126d697c5a2aeea488c0b5320",
      "paired_at": null,
      "principal": "delta",
-     "created_at": 1793591908.5867,
+     "created_at": 1793599607.073464,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793591848.586698,
+     "code_expires_at": 1793599547.073462,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": true,
-     "code_hash": "3b01334f0ec371582663ce7b8b1dcb904b9799be991a1ed6d016a6af163e5300",
+     "code_hash": "529eb40aaaf94da3dcb594ded0db53c39cac7a72cdaf405309a085e300f91a7a",
      "paired_at": null,
      "principal": "alpha",
-     "created_at": 1793591908.576089,
+     "created_at": 1793599607.06393,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793592808.576056,
+     "code_expires_at": 1793600507.06379,
      "paired_code_hash": null
     },
     {
@@ -1629,8 +1629,8 @@
      "code_hash": null,
      "paired_at": null,
      "principal": "charlie",
-     "created_at": 1793591908.585122,
-     "revoked_at": 1793591908.585837,
+     "created_at": 1793599607.071953,
+     "revoked_at": 1793599607.072683,
      "token_hash": null,
      "code_expires_at": null,
      "paired_code_hash": null
@@ -1641,7 +1641,7 @@
     "cwd": "dir"
    },
    "modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    }
   },
   "invite-bank-other": {
@@ -1651,8 +1651,8 @@
    "stdout": "",
    "stderr": "aW52aXRlOiB0aGlzIGRhdGFiYXNlIGhvbGRzIGJhbmsgN2Y4NDAyMjM4Mzk3MzY1YywgYnV0IC0tYmFuayBpcyBiYW5rIDAxMjM0NTY3ODlhYmNkZWY6IGl0IGlzIGFub3RoZXIgZGF0YWJhc2UuIE5vdGhpbmcgd2FzIGNoYW5nZWQK",
    "window": [
-    1793591939.9091072,
-    1793591940.365857
+    1793599637.373833,
+    1793599637.8177447
    ],
    "requests": [
     {
@@ -1667,57 +1667,57 @@
     "cwd": "dir"
    },
    "before_modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    },
-   "argv_port": "33067",
+   "argv_port": "60483",
    "ttl": 900,
    "seed_rows": [
     {
      "tier": "core",
      "board": true,
      "code_hash": null,
-     "paired_at": 1793591908.583902,
+     "paired_at": 1793599607.070922,
      "principal": "bravo",
-     "created_at": 1793591908.577005,
+     "created_at": 1793599607.064868,
      "revoked_at": null,
      "token_hash": "217d3f53b8e94284ef6cfc5ea68648796764a3173189d2484d9d120c7178107d",
      "code_expires_at": null,
-     "paired_code_hash": "f0a12416fb7ed1559409e6d9acec55e5dd23daf84340c2843cd008fd7e6f0c66"
+     "paired_code_hash": "7075920ab7d9b6ba1cb0f7c37e15a473f2e6eea3d2d43071c5f42f68f05aba07"
     },
     {
      "tier": "full",
      "board": true,
-     "code_hash": "09f3c16e1e85ab416800b65a2edcd4bc33264970cc12fa856e1e298b2d1e0313",
+     "code_hash": "6143158aa1fe83103d96e3ef16e5e636a4c6400b79b089f8c271d03b09457601",
      "paired_at": null,
      "principal": "a-rather-long-principal-name.x",
-     "created_at": 1793591908.587434,
+     "created_at": 1793599607.074201,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793595508.587432,
+     "code_expires_at": 1793603207.074199,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": false,
-     "code_hash": "aa7e155a14693ef798e4d6aaaf53876decf324f88e0d5822a7fc8959a053b871",
+     "code_hash": "d53d2cb4c06c9a901c539089dd9820ac49eb3a5126d697c5a2aeea488c0b5320",
      "paired_at": null,
      "principal": "delta",
-     "created_at": 1793591908.5867,
+     "created_at": 1793599607.073464,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793591848.586698,
+     "code_expires_at": 1793599547.073462,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": true,
-     "code_hash": "3b01334f0ec371582663ce7b8b1dcb904b9799be991a1ed6d016a6af163e5300",
+     "code_hash": "529eb40aaaf94da3dcb594ded0db53c39cac7a72cdaf405309a085e300f91a7a",
      "paired_at": null,
      "principal": "alpha",
-     "created_at": 1793591908.576089,
+     "created_at": 1793599607.06393,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793592808.576056,
+     "code_expires_at": 1793600507.06379,
      "paired_code_hash": null
     },
     {
@@ -1726,8 +1726,8 @@
      "code_hash": null,
      "paired_at": null,
      "principal": "charlie",
-     "created_at": 1793591908.585122,
-     "revoked_at": 1793591908.585837,
+     "created_at": 1793599607.071953,
+     "revoked_at": 1793599607.072683,
      "token_hash": null,
      "code_expires_at": null,
      "paired_code_hash": null
@@ -1738,18 +1738,18 @@
     "cwd": "dir"
    },
    "modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    }
   },
   "invite-empty-bank": {
    "home": null,
    "utc_offset": 0,
    "exit": 0,
-   "stdout": "ewogICJlcnJvciI6IG51bGwsCiAgIm5vdGVzIjogWwogICAgImFuIGludml0ZWQgbWFjaGluZSBjYW4gcmVhZCBhbmQgd3JpdGUgdGhlIHdob2xlIGJhbmsgYW5kIHVzZSB0aGUgYWdlbnQgYm9hcmQsIGJ1dCBub3QgY2hhbmdlIHRoZSBkYWVtb24ncyBjb25maWd1cmF0aW9uIgogIF0sCiAgImV4aXQiOiAwLAogICJkYWVtb24iOiB7CiAgICAiYXV0aCI6IHRydWUsCiAgICAic2NoZW1hIjogNTUsCiAgICAiYmFuayI6ICI3Zjg0MDIyMzgzOTczNjVjIgogIH0sCiAgInByaW5jaXBhbCI6ICJ6dWx1LjEiLAogICJzdGF0ZSI6ICJuZXciLAogICJjb2RlIjogIktSWUotN05ENS1QWUhOIiwKICAiZXhwaXJlc19hdCI6IDE3OTM1OTI4NDEuNDk1NDYzLAogICJ0aWVyIjogbnVsbCwKICAiYm9hcmQiOiB0cnVlLAogICJ1cmwiOiAidSIsCiAgInBhaXJfY29tbWFuZCI6ICJwc2V1ZG9saWZlLW1jcCBwYWlyIHUgS1JZSi03TkQ1LVBZSE4iCn0K",
+   "stdout": "ewogICJlcnJvciI6IG51bGwsCiAgIm5vdGVzIjogWwogICAgImFuIGludml0ZWQgbWFjaGluZSBjYW4gcmVhZCBhbmQgd3JpdGUgdGhlIHdob2xlIGJhbmsgYW5kIHVzZSB0aGUgYWdlbnQgYm9hcmQsIGJ1dCBub3QgY2hhbmdlIHRoZSBkYWVtb24ncyBjb25maWd1cmF0aW9uIgogIF0sCiAgImV4aXQiOiAwLAogICJkYWVtb24iOiB7CiAgICAiYXV0aCI6IHRydWUsCiAgICAic2NoZW1hIjogNTUsCiAgICAiYmFuayI6ICI3Zjg0MDIyMzgzOTczNjVjIgogIH0sCiAgInByaW5jaXBhbCI6ICJ6dWx1LjEiLAogICJzdGF0ZSI6ICJuZXciLAogICJjb2RlIjogIjdWVlctTUsxWi1KMkVHIiwKICAiZXhwaXJlc19hdCI6IDE3OTM2MDA1MzguOTM1MzE4LAogICJ0aWVyIjogbnVsbCwKICAiYm9hcmQiOiB0cnVlLAogICJ1cmwiOiAidSIsCiAgInBhaXJfY29tbWFuZCI6ICJwc2V1ZG9saWZlLW1jcCBwYWlyIHUgN1ZWVy1NSzFaLUoyRUciCn0K",
    "stderr": "",
    "window": [
-    1793591941.0060303,
-    1793591941.5204651
+    1793599638.4519768,
+    1793599638.9570687
    ],
    "requests": [
     {
@@ -1764,9 +1764,9 @@
     "cwd": "dir"
    },
    "before_modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    },
-   "argv_port": "48199",
+   "argv_port": "47645",
    "ttl": 900,
    "seed_rows": [],
    "db": {
@@ -1812,11 +1812,11 @@
      ],
      "outcome_signals": [],
      "pl_cf_clock": [
-      "{\"at\": 1793591941.495992, \"principal\": \"zulu.1\"}"
+      "{\"at\": 1793599638.935809, \"principal\": \"zulu.1\"}"
      ],
      "principal_activity": [],
      "principals": [
-      "{\"tier\": null, \"board\": true, \"code_hash\": \"bd8903a77beb6d3d0bda2cc8d86562044bcb5f99f4332e5ef79578dd569f0c26\", \"paired_at\": null, \"principal\": \"zulu.1\", \"created_at\": 1793591941.495503, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1793592841.495463, \"paired_code_hash\": null}"
+      "{\"tier\": null, \"board\": true, \"code_hash\": \"420e50b3affb940c1ba63924f12c33eb7793f7e249e296777e50833242bf1321\", \"paired_at\": null, \"principal\": \"zulu.1\", \"created_at\": 1793599638.935353, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1793600538.935318, \"paired_code_hash\": null}"
      ],
      "reference_chunks": [],
      "rejected_bearers": [],
@@ -8475,7 +8475,7 @@
     "cwd": "dir"
    },
    "modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    }
   },
   "revoke-missing": {
@@ -8485,15 +8485,15 @@
    "stdout": "",
    "stderr": "aW52aXRlOiBubyBzdG9yZWQgcHJpbmNpcGFsIGlzIG5hbWVkIG5vYm9keQo=",
    "window": [
-    1793591942.2159011,
-    1793591942.628837
+    1793599639.5640993,
+    1793599639.9628575
    ],
    "arm": "python",
    "before": {
     "cwd": "dir"
    },
    "before_modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    },
    "ttl": 900,
    "seed_rows": [
@@ -8501,48 +8501,48 @@
      "tier": "core",
      "board": true,
      "code_hash": null,
-     "paired_at": 1793591908.583902,
+     "paired_at": 1793599607.070922,
      "principal": "bravo",
-     "created_at": 1793591908.577005,
+     "created_at": 1793599607.064868,
      "revoked_at": null,
      "token_hash": "217d3f53b8e94284ef6cfc5ea68648796764a3173189d2484d9d120c7178107d",
      "code_expires_at": null,
-     "paired_code_hash": "f0a12416fb7ed1559409e6d9acec55e5dd23daf84340c2843cd008fd7e6f0c66"
+     "paired_code_hash": "7075920ab7d9b6ba1cb0f7c37e15a473f2e6eea3d2d43071c5f42f68f05aba07"
     },
     {
      "tier": "full",
      "board": true,
-     "code_hash": "09f3c16e1e85ab416800b65a2edcd4bc33264970cc12fa856e1e298b2d1e0313",
+     "code_hash": "6143158aa1fe83103d96e3ef16e5e636a4c6400b79b089f8c271d03b09457601",
      "paired_at": null,
      "principal": "a-rather-long-principal-name.x",
-     "created_at": 1793591908.587434,
+     "created_at": 1793599607.074201,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793595508.587432,
+     "code_expires_at": 1793603207.074199,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": false,
-     "code_hash": "aa7e155a14693ef798e4d6aaaf53876decf324f88e0d5822a7fc8959a053b871",
+     "code_hash": "d53d2cb4c06c9a901c539089dd9820ac49eb3a5126d697c5a2aeea488c0b5320",
      "paired_at": null,
      "principal": "delta",
-     "created_at": 1793591908.5867,
+     "created_at": 1793599607.073464,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793591848.586698,
+     "code_expires_at": 1793599547.073462,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": true,
-     "code_hash": "3b01334f0ec371582663ce7b8b1dcb904b9799be991a1ed6d016a6af163e5300",
+     "code_hash": "529eb40aaaf94da3dcb594ded0db53c39cac7a72cdaf405309a085e300f91a7a",
      "paired_at": null,
      "principal": "alpha",
-     "created_at": 1793591908.576089,
+     "created_at": 1793599607.06393,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793592808.576056,
+     "code_expires_at": 1793600507.06379,
      "paired_code_hash": null
     },
     {
@@ -8551,8 +8551,8 @@
      "code_hash": null,
      "paired_at": null,
      "principal": "charlie",
-     "created_at": 1793591908.585122,
-     "revoked_at": 1793591908.585837,
+     "created_at": 1793599607.071953,
+     "revoked_at": 1793599607.072683,
      "token_hash": null,
      "code_expires_at": null,
      "paired_code_hash": null
@@ -8563,7 +8563,7 @@
     "cwd": "dir"
    },
    "modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    }
   },
   "revoke-reserved-name": {
@@ -8573,15 +8573,15 @@
    "stdout": "ewogICJlcnJvciI6ICJubyBzdG9yZWQgcHJpbmNpcGFsIGlzIG5hbWVkIGRlZmF1bHQiLAogICJub3RlcyI6IFtdLAogICJleGl0IjogNAp9Cg==",
    "stderr": "",
    "window": [
-    1793591942.850787,
-    1793591943.2558231
+    1793599640.171885,
+    1793599640.5816796
    ],
    "arm": "python",
    "before": {
     "cwd": "dir"
    },
    "before_modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    },
    "ttl": 900,
    "seed_rows": [
@@ -8589,48 +8589,48 @@
      "tier": "core",
      "board": true,
      "code_hash": null,
-     "paired_at": 1793591908.583902,
+     "paired_at": 1793599607.070922,
      "principal": "bravo",
-     "created_at": 1793591908.577005,
+     "created_at": 1793599607.064868,
      "revoked_at": null,
      "token_hash": "217d3f53b8e94284ef6cfc5ea68648796764a3173189d2484d9d120c7178107d",
      "code_expires_at": null,
-     "paired_code_hash": "f0a12416fb7ed1559409e6d9acec55e5dd23daf84340c2843cd008fd7e6f0c66"
+     "paired_code_hash": "7075920ab7d9b6ba1cb0f7c37e15a473f2e6eea3d2d43071c5f42f68f05aba07"
     },
     {
      "tier": "full",
      "board": true,
-     "code_hash": "09f3c16e1e85ab416800b65a2edcd4bc33264970cc12fa856e1e298b2d1e0313",
+     "code_hash": "6143158aa1fe83103d96e3ef16e5e636a4c6400b79b089f8c271d03b09457601",
      "paired_at": null,
      "principal": "a-rather-long-principal-name.x",
-     "created_at": 1793591908.587434,
+     "created_at": 1793599607.074201,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793595508.587432,
+     "code_expires_at": 1793603207.074199,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": false,
-     "code_hash": "aa7e155a14693ef798e4d6aaaf53876decf324f88e0d5822a7fc8959a053b871",
+     "code_hash": "d53d2cb4c06c9a901c539089dd9820ac49eb3a5126d697c5a2aeea488c0b5320",
      "paired_at": null,
      "principal": "delta",
-     "created_at": 1793591908.5867,
+     "created_at": 1793599607.073464,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793591848.586698,
+     "code_expires_at": 1793599547.073462,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": true,
-     "code_hash": "3b01334f0ec371582663ce7b8b1dcb904b9799be991a1ed6d016a6af163e5300",
+     "code_hash": "529eb40aaaf94da3dcb594ded0db53c39cac7a72cdaf405309a085e300f91a7a",
      "paired_at": null,
      "principal": "alpha",
-     "created_at": 1793591908.576089,
+     "created_at": 1793599607.06393,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793592808.576056,
+     "code_expires_at": 1793600507.06379,
      "paired_code_hash": null
     },
     {
@@ -8639,8 +8639,8 @@
      "code_hash": null,
      "paired_at": null,
      "principal": "charlie",
-     "created_at": 1793591908.585122,
-     "revoked_at": 1793591908.585837,
+     "created_at": 1793599607.071953,
+     "revoked_at": 1793599607.072683,
      "token_hash": null,
      "code_expires_at": null,
      "paired_code_hash": null
@@ -8651,7 +8651,7 @@
     "cwd": "dir"
    },
    "modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    }
   },
   "revoke-other-bank": {
@@ -8661,15 +8661,15 @@
    "stdout": "",
    "stderr": "aW52aXRlOiB0aGlzIGRhdGFiYXNlIGhvbGRzIGJhbmsgN2Y4NDAyMjM4Mzk3MzY1YywgYnV0IC0tYmFuayBpcyBiYW5rIDAxMjM0NTY3ODlhYmNkZWY6IGl0IGlzIGFub3RoZXIgZGF0YWJhc2UuIE5vdGhpbmcgd2FzIGNoYW5nZWQK",
    "window": [
-    1793591943.4749756,
-    1793591943.9344292
+    1793599640.7990863,
+    1793599641.2505012
    ],
    "arm": "python",
    "before": {
     "cwd": "dir"
    },
    "before_modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    },
    "ttl": 900,
    "seed_rows": [
@@ -8677,48 +8677,48 @@
      "tier": "core",
      "board": true,
      "code_hash": null,
-     "paired_at": 1793591908.583902,
+     "paired_at": 1793599607.070922,
      "principal": "bravo",
-     "created_at": 1793591908.577005,
+     "created_at": 1793599607.064868,
      "revoked_at": null,
      "token_hash": "217d3f53b8e94284ef6cfc5ea68648796764a3173189d2484d9d120c7178107d",
      "code_expires_at": null,
-     "paired_code_hash": "f0a12416fb7ed1559409e6d9acec55e5dd23daf84340c2843cd008fd7e6f0c66"
+     "paired_code_hash": "7075920ab7d9b6ba1cb0f7c37e15a473f2e6eea3d2d43071c5f42f68f05aba07"
     },
     {
      "tier": "full",
      "board": true,
-     "code_hash": "09f3c16e1e85ab416800b65a2edcd4bc33264970cc12fa856e1e298b2d1e0313",
+     "code_hash": "6143158aa1fe83103d96e3ef16e5e636a4c6400b79b089f8c271d03b09457601",
      "paired_at": null,
      "principal": "a-rather-long-principal-name.x",
-     "created_at": 1793591908.587434,
+     "created_at": 1793599607.074201,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793595508.587432,
+     "code_expires_at": 1793603207.074199,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": false,
-     "code_hash": "aa7e155a14693ef798e4d6aaaf53876decf324f88e0d5822a7fc8959a053b871",
+     "code_hash": "d53d2cb4c06c9a901c539089dd9820ac49eb3a5126d697c5a2aeea488c0b5320",
      "paired_at": null,
      "principal": "delta",
-     "created_at": 1793591908.5867,
+     "created_at": 1793599607.073464,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793591848.586698,
+     "code_expires_at": 1793599547.073462,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": true,
-     "code_hash": "3b01334f0ec371582663ce7b8b1dcb904b9799be991a1ed6d016a6af163e5300",
+     "code_hash": "529eb40aaaf94da3dcb594ded0db53c39cac7a72cdaf405309a085e300f91a7a",
      "paired_at": null,
      "principal": "alpha",
-     "created_at": 1793591908.576089,
+     "created_at": 1793599607.06393,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793592808.576056,
+     "code_expires_at": 1793600507.06379,
      "paired_code_hash": null
     },
     {
@@ -8727,8 +8727,8 @@
      "code_hash": null,
      "paired_at": null,
      "principal": "charlie",
-     "created_at": 1793591908.585122,
-     "revoked_at": 1793591908.585837,
+     "created_at": 1793599607.071953,
+     "revoked_at": 1793599607.072683,
      "token_hash": null,
      "code_expires_at": null,
      "paired_code_hash": null
@@ -8739,7 +8739,7 @@
     "cwd": "dir"
    },
    "modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    }
   },
   "defer-no-dsn": {
@@ -8749,8 +8749,8 @@
    "stdout": "",
    "stderr": "aW52aXRlOiBubyBkYXRhYmFzZSBmb3VuZDogc2V0IFBTRVVET0xJRkVfTUNQX0RBVEFCQVNFX1VSTCwgb3IgcnVuIHRoaXMgb24gdGhlIGRhZW1vbidzIGhvc3QgKGEgRG9ja2VyIGluc3RhbGwgcnVucyBpdCBpbiB0aGUgZGFlbW9uIGNvbnRhaW5lcikK",
    "window": [
-    1793591944.17569,
-    1793591944.3979115
+    1793599641.4772167,
+    1793599641.69194
    ],
    "requests": [],
    "arm": "python",
@@ -8758,57 +8758,57 @@
     "cwd": "dir"
    },
    "before_modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    },
-   "argv_port": "59057",
+   "argv_port": "42011",
    "ttl": 900,
    "seed_rows": [
     {
      "tier": "core",
      "board": true,
      "code_hash": null,
-     "paired_at": 1793591908.583902,
+     "paired_at": 1793599607.070922,
      "principal": "bravo",
-     "created_at": 1793591908.577005,
+     "created_at": 1793599607.064868,
      "revoked_at": null,
      "token_hash": "217d3f53b8e94284ef6cfc5ea68648796764a3173189d2484d9d120c7178107d",
      "code_expires_at": null,
-     "paired_code_hash": "f0a12416fb7ed1559409e6d9acec55e5dd23daf84340c2843cd008fd7e6f0c66"
+     "paired_code_hash": "7075920ab7d9b6ba1cb0f7c37e15a473f2e6eea3d2d43071c5f42f68f05aba07"
     },
     {
      "tier": "full",
      "board": true,
-     "code_hash": "09f3c16e1e85ab416800b65a2edcd4bc33264970cc12fa856e1e298b2d1e0313",
+     "code_hash": "6143158aa1fe83103d96e3ef16e5e636a4c6400b79b089f8c271d03b09457601",
      "paired_at": null,
      "principal": "a-rather-long-principal-name.x",
-     "created_at": 1793591908.587434,
+     "created_at": 1793599607.074201,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793595508.587432,
+     "code_expires_at": 1793603207.074199,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": false,
-     "code_hash": "aa7e155a14693ef798e4d6aaaf53876decf324f88e0d5822a7fc8959a053b871",
+     "code_hash": "d53d2cb4c06c9a901c539089dd9820ac49eb3a5126d697c5a2aeea488c0b5320",
      "paired_at": null,
      "principal": "delta",
-     "created_at": 1793591908.5867,
+     "created_at": 1793599607.073464,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793591848.586698,
+     "code_expires_at": 1793599547.073462,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": true,
-     "code_hash": "3b01334f0ec371582663ce7b8b1dcb904b9799be991a1ed6d016a6af163e5300",
+     "code_hash": "529eb40aaaf94da3dcb594ded0db53c39cac7a72cdaf405309a085e300f91a7a",
      "paired_at": null,
      "principal": "alpha",
-     "created_at": 1793591908.576089,
+     "created_at": 1793599607.06393,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793592808.576056,
+     "code_expires_at": 1793600507.06379,
      "paired_code_hash": null
     },
     {
@@ -8817,8 +8817,8 @@
      "code_hash": null,
      "paired_at": null,
      "principal": "charlie",
-     "created_at": 1793591908.585122,
-     "revoked_at": 1793591908.585837,
+     "created_at": 1793599607.071953,
+     "revoked_at": 1793599607.072683,
      "token_hash": null,
      "code_expires_at": null,
      "paired_code_hash": null
@@ -8829,7 +8829,7 @@
     "cwd": "dir"
    },
    "modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    }
   },
   "defer-refused-login": {
@@ -8839,8 +8839,8 @@
    "stdout": "",
    "stderr": "aW52aXRlOiBjb3VsZCBub3QgY29ubmVjdCB0byB0aGUgYmFuaydzIGRhdGFiYXNlIChPcGVyYXRpb25hbEVycm9yKQo=",
    "window": [
-    1793591944.6782732,
-    1793591945.1033914
+    1793599641.9902148,
+    1793599642.419395
    ],
    "requests": [
     {
@@ -8855,57 +8855,57 @@
     "cwd": "dir"
    },
    "before_modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    },
-   "argv_port": "45997",
+   "argv_port": "49495",
    "ttl": 900,
    "seed_rows": [
     {
      "tier": "core",
      "board": true,
      "code_hash": null,
-     "paired_at": 1793591908.583902,
+     "paired_at": 1793599607.070922,
      "principal": "bravo",
-     "created_at": 1793591908.577005,
+     "created_at": 1793599607.064868,
      "revoked_at": null,
      "token_hash": "217d3f53b8e94284ef6cfc5ea68648796764a3173189d2484d9d120c7178107d",
      "code_expires_at": null,
-     "paired_code_hash": "f0a12416fb7ed1559409e6d9acec55e5dd23daf84340c2843cd008fd7e6f0c66"
+     "paired_code_hash": "7075920ab7d9b6ba1cb0f7c37e15a473f2e6eea3d2d43071c5f42f68f05aba07"
     },
     {
      "tier": "full",
      "board": true,
-     "code_hash": "09f3c16e1e85ab416800b65a2edcd4bc33264970cc12fa856e1e298b2d1e0313",
+     "code_hash": "6143158aa1fe83103d96e3ef16e5e636a4c6400b79b089f8c271d03b09457601",
      "paired_at": null,
      "principal": "a-rather-long-principal-name.x",
-     "created_at": 1793591908.587434,
+     "created_at": 1793599607.074201,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793595508.587432,
+     "code_expires_at": 1793603207.074199,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": false,
-     "code_hash": "aa7e155a14693ef798e4d6aaaf53876decf324f88e0d5822a7fc8959a053b871",
+     "code_hash": "d53d2cb4c06c9a901c539089dd9820ac49eb3a5126d697c5a2aeea488c0b5320",
      "paired_at": null,
      "principal": "delta",
-     "created_at": 1793591908.5867,
+     "created_at": 1793599607.073464,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793591848.586698,
+     "code_expires_at": 1793599547.073462,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": true,
-     "code_hash": "3b01334f0ec371582663ce7b8b1dcb904b9799be991a1ed6d016a6af163e5300",
+     "code_hash": "529eb40aaaf94da3dcb594ded0db53c39cac7a72cdaf405309a085e300f91a7a",
      "paired_at": null,
      "principal": "alpha",
-     "created_at": 1793591908.576089,
+     "created_at": 1793599607.06393,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793592808.576056,
+     "code_expires_at": 1793600507.06379,
      "paired_code_hash": null
     },
     {
@@ -8914,8 +8914,8 @@
      "code_hash": null,
      "paired_at": null,
      "principal": "charlie",
-     "created_at": 1793591908.585122,
-     "revoked_at": 1793591908.585837,
+     "created_at": 1793599607.071953,
+     "revoked_at": 1793599607.072683,
      "token_hash": null,
      "code_expires_at": null,
      "paired_code_hash": null
@@ -8926,7 +8926,7 @@
     "cwd": "dir"
    },
    "modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    }
   },
   "defer-list-no-dsn": {
@@ -8936,8 +8936,8 @@
    "stdout": "",
    "stderr": "aW52aXRlOiBubyBkYXRhYmFzZSBmb3VuZDogc2V0IFBTRVVET0xJRkVfTUNQX0RBVEFCQVNFX1VSTCwgb3IgcnVuIHRoaXMgb24gdGhlIGRhZW1vbidzIGhvc3QgKGEgRG9ja2VyIGluc3RhbGwgcnVucyBpdCBpbiB0aGUgZGFlbW9uIGNvbnRhaW5lcikK",
    "window": [
-    1793591945.7762291,
-    1793591945.9984133
+    1793599643.1044457,
+    1793599643.3254683
    ],
    "requests": [],
    "arm": "python",
@@ -8945,57 +8945,57 @@
     "cwd": "dir"
    },
    "before_modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    },
-   "argv_port": "60031",
+   "argv_port": "59527",
    "ttl": 900,
    "seed_rows": [
     {
      "tier": "core",
      "board": true,
      "code_hash": null,
-     "paired_at": 1793591908.583902,
+     "paired_at": 1793599607.070922,
      "principal": "bravo",
-     "created_at": 1793591908.577005,
+     "created_at": 1793599607.064868,
      "revoked_at": null,
      "token_hash": "217d3f53b8e94284ef6cfc5ea68648796764a3173189d2484d9d120c7178107d",
      "code_expires_at": null,
-     "paired_code_hash": "f0a12416fb7ed1559409e6d9acec55e5dd23daf84340c2843cd008fd7e6f0c66"
+     "paired_code_hash": "7075920ab7d9b6ba1cb0f7c37e15a473f2e6eea3d2d43071c5f42f68f05aba07"
     },
     {
      "tier": "full",
      "board": true,
-     "code_hash": "09f3c16e1e85ab416800b65a2edcd4bc33264970cc12fa856e1e298b2d1e0313",
+     "code_hash": "6143158aa1fe83103d96e3ef16e5e636a4c6400b79b089f8c271d03b09457601",
      "paired_at": null,
      "principal": "a-rather-long-principal-name.x",
-     "created_at": 1793591908.587434,
+     "created_at": 1793599607.074201,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793595508.587432,
+     "code_expires_at": 1793603207.074199,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": false,
-     "code_hash": "aa7e155a14693ef798e4d6aaaf53876decf324f88e0d5822a7fc8959a053b871",
+     "code_hash": "d53d2cb4c06c9a901c539089dd9820ac49eb3a5126d697c5a2aeea488c0b5320",
      "paired_at": null,
      "principal": "delta",
-     "created_at": 1793591908.5867,
+     "created_at": 1793599607.073464,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793591848.586698,
+     "code_expires_at": 1793599547.073462,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": true,
-     "code_hash": "3b01334f0ec371582663ce7b8b1dcb904b9799be991a1ed6d016a6af163e5300",
+     "code_hash": "529eb40aaaf94da3dcb594ded0db53c39cac7a72cdaf405309a085e300f91a7a",
      "paired_at": null,
      "principal": "alpha",
-     "created_at": 1793591908.576089,
+     "created_at": 1793599607.06393,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793592808.576056,
+     "code_expires_at": 1793600507.06379,
      "paired_code_hash": null
     },
     {
@@ -9004,8 +9004,8 @@
      "code_hash": null,
      "paired_at": null,
      "principal": "charlie",
-     "created_at": 1793591908.585122,
-     "revoked_at": 1793591908.585837,
+     "created_at": 1793599607.071953,
+     "revoked_at": 1793599607.072683,
      "token_hash": null,
      "code_expires_at": null,
      "paired_code_hash": null
@@ -9016,18 +9016,18 @@
     "cwd": "dir"
    },
    "modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    }
   },
   "defer-malformed-token-map": {
    "home": null,
    "utc_offset": 0,
    "exit": 0,
-   "stdout": "bGFwdG9wOiBpbnZpdGVkOyB0aWVyIHRoZSBkYWVtb24gZGVmYXVsdCwgYWdlbnQgYm9hcmQgb24KICBjb2RlICAgICAyUUE5LTgxRlgtRTNKWiAgIHNpbmdsZSB1c2UsIGV4cGlyZXMgaW4gMTUgbWluICgyMDI2LTExLTAyIDA0OjE0IFVUQykKICBvbiB0aGUgbmV3IG1hY2hpbmU6ICBwc2V1ZG9saWZlLW1jcCBwYWlyIHUgMlFBOS04MUZYLUUzSloKICBvciBydW4gdGhlIGluc3RhbGxlciB0aGVyZSBhbmQgYW5zd2VyIDIsIGdpdmluZyB0aGlzIGNvZGUgd2hlcmUgaXQgYXNrcyBmb3IgdGhlIHRva2VuCmFuIGludml0ZWQgbWFjaGluZSBjYW4gcmVhZCBhbmQgd3JpdGUgdGhlIHdob2xlIGJhbmsgYW5kIHVzZSB0aGUgYWdlbnQgYm9hcmQsIGJ1dCBub3QgY2hhbmdlIHRoZSBkYWVtb24ncyBjb25maWd1cmF0aW9uCg==",
+   "stdout": "bGFwdG9wOiBpbnZpdGVkOyB0aWVyIHRoZSBkYWVtb24gZGVmYXVsdCwgYWdlbnQgYm9hcmQgb24KICBjb2RlICAgICA4SjNILUdUMEItRzZSWiAgIHNpbmdsZSB1c2UsIGV4cGlyZXMgaW4gMTUgbWluICgyMDI2LTExLTAyIDA2OjIyIFVUQykKICBvbiB0aGUgbmV3IG1hY2hpbmU6ICBwc2V1ZG9saWZlLW1jcCBwYWlyIHUgOEozSC1HVDBCLUc2UloKICBvciBydW4gdGhlIGluc3RhbGxlciB0aGVyZSBhbmQgYW5zd2VyIDIsIGdpdmluZyB0aGlzIGNvZGUgd2hlcmUgaXQgYXNrcyBmb3IgdGhlIHRva2VuCmFuIGludml0ZWQgbWFjaGluZSBjYW4gcmVhZCBhbmQgd3JpdGUgdGhlIHdob2xlIGJhbmsgYW5kIHVzZSB0aGUgYWdlbnQgYm9hcmQsIGJ1dCBub3QgY2hhbmdlIHRoZSBkYWVtb24ncyBjb25maWd1cmF0aW9uCg==",
    "stderr": "dG9rZW4tbWFwIGVudHJ5ICMxIG1hbGZvcm1lZCAod2FudCB0b2tlbjpwcmluY2lwYWwpIOKAlCBza2lwcGVkOyB0aGF0IHRva2VuIHdpbGwgbm90IGF1dGhlbnRpY2F0ZQo=",
    "window": [
-    1793591946.2970283,
-    1793591946.8113186
+    1793599643.594431,
+    1793599644.1025183
    ],
    "requests": [
     {
@@ -9042,57 +9042,57 @@
     "cwd": "dir"
    },
    "before_modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    },
-   "argv_port": "33501",
+   "argv_port": "40469",
    "ttl": 900,
    "seed_rows": [
     {
      "tier": "core",
      "board": true,
      "code_hash": null,
-     "paired_at": 1793591908.583902,
+     "paired_at": 1793599607.070922,
      "principal": "bravo",
-     "created_at": 1793591908.577005,
+     "created_at": 1793599607.064868,
      "revoked_at": null,
      "token_hash": "217d3f53b8e94284ef6cfc5ea68648796764a3173189d2484d9d120c7178107d",
      "code_expires_at": null,
-     "paired_code_hash": "f0a12416fb7ed1559409e6d9acec55e5dd23daf84340c2843cd008fd7e6f0c66"
+     "paired_code_hash": "7075920ab7d9b6ba1cb0f7c37e15a473f2e6eea3d2d43071c5f42f68f05aba07"
     },
     {
      "tier": "full",
      "board": true,
-     "code_hash": "09f3c16e1e85ab416800b65a2edcd4bc33264970cc12fa856e1e298b2d1e0313",
+     "code_hash": "6143158aa1fe83103d96e3ef16e5e636a4c6400b79b089f8c271d03b09457601",
      "paired_at": null,
      "principal": "a-rather-long-principal-name.x",
-     "created_at": 1793591908.587434,
+     "created_at": 1793599607.074201,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793595508.587432,
+     "code_expires_at": 1793603207.074199,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": false,
-     "code_hash": "aa7e155a14693ef798e4d6aaaf53876decf324f88e0d5822a7fc8959a053b871",
+     "code_hash": "d53d2cb4c06c9a901c539089dd9820ac49eb3a5126d697c5a2aeea488c0b5320",
      "paired_at": null,
      "principal": "delta",
-     "created_at": 1793591908.5867,
+     "created_at": 1793599607.073464,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793591848.586698,
+     "code_expires_at": 1793599547.073462,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": true,
-     "code_hash": "3b01334f0ec371582663ce7b8b1dcb904b9799be991a1ed6d016a6af163e5300",
+     "code_hash": "529eb40aaaf94da3dcb594ded0db53c39cac7a72cdaf405309a085e300f91a7a",
      "paired_at": null,
      "principal": "alpha",
-     "created_at": 1793591908.576089,
+     "created_at": 1793599607.06393,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793592808.576056,
+     "code_expires_at": 1793600507.06379,
      "paired_code_hash": null
     },
     {
@@ -9101,8 +9101,8 @@
      "code_hash": null,
      "paired_at": null,
      "principal": "charlie",
-     "created_at": 1793591908.585122,
-     "revoked_at": 1793591908.585837,
+     "created_at": 1793599607.071953,
+     "revoked_at": 1793599607.072683,
      "token_hash": null,
      "code_expires_at": null,
      "paired_code_hash": null
@@ -9151,16 +9151,16 @@
      ],
      "outcome_signals": [],
      "pl_cf_clock": [
-      "{\"at\": 1793591946.788441, \"principal\": \"laptop\"}"
+      "{\"at\": 1793599644.078791, \"principal\": \"laptop\"}"
      ],
      "principal_activity": [],
      "principals": [
-      "{\"tier\": \"core\", \"board\": true, \"code_hash\": null, \"paired_at\": 1793591908.583902, \"principal\": \"bravo\", \"created_at\": 1793591908.577005, \"revoked_at\": null, \"token_hash\": \"217d3f53b8e94284ef6cfc5ea68648796764a3173189d2484d9d120c7178107d\", \"code_expires_at\": null, \"paired_code_hash\": \"f0a12416fb7ed1559409e6d9acec55e5dd23daf84340c2843cd008fd7e6f0c66\"}",
-      "{\"tier\": \"full\", \"board\": true, \"code_hash\": \"09f3c16e1e85ab416800b65a2edcd4bc33264970cc12fa856e1e298b2d1e0313\", \"paired_at\": null, \"principal\": \"a-rather-long-principal-name.x\", \"created_at\": 1793591908.587434, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1793595508.587432, \"paired_code_hash\": null}",
-      "{\"tier\": null, \"board\": false, \"code_hash\": \"aa7e155a14693ef798e4d6aaaf53876decf324f88e0d5822a7fc8959a053b871\", \"paired_at\": null, \"principal\": \"delta\", \"created_at\": 1793591908.5867, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1793591848.586698, \"paired_code_hash\": null}",
-      "{\"tier\": null, \"board\": true, \"code_hash\": \"3b01334f0ec371582663ce7b8b1dcb904b9799be991a1ed6d016a6af163e5300\", \"paired_at\": null, \"principal\": \"alpha\", \"created_at\": 1793591908.576089, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1793592808.576056, \"paired_code_hash\": null}",
-      "{\"tier\": null, \"board\": true, \"code_hash\": \"84fd4a173d11509d7b72384693d646caabd4c8afd5ae71bec4d989292f9acfbb\", \"paired_at\": null, \"principal\": \"laptop\", \"created_at\": 1793591946.787962, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1793592846.787925, \"paired_code_hash\": null}",
-      "{\"tier\": null, \"board\": true, \"code_hash\": null, \"paired_at\": null, \"principal\": \"charlie\", \"created_at\": 1793591908.585122, \"revoked_at\": 1793591908.585837, \"token_hash\": null, \"code_expires_at\": null, \"paired_code_hash\": null}"
+      "{\"tier\": \"core\", \"board\": true, \"code_hash\": null, \"paired_at\": 1793599607.070922, \"principal\": \"bravo\", \"created_at\": 1793599607.064868, \"revoked_at\": null, \"token_hash\": \"217d3f53b8e94284ef6cfc5ea68648796764a3173189d2484d9d120c7178107d\", \"code_expires_at\": null, \"paired_code_hash\": \"7075920ab7d9b6ba1cb0f7c37e15a473f2e6eea3d2d43071c5f42f68f05aba07\"}",
+      "{\"tier\": \"full\", \"board\": true, \"code_hash\": \"6143158aa1fe83103d96e3ef16e5e636a4c6400b79b089f8c271d03b09457601\", \"paired_at\": null, \"principal\": \"a-rather-long-principal-name.x\", \"created_at\": 1793599607.074201, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1793603207.074199, \"paired_code_hash\": null}",
+      "{\"tier\": null, \"board\": false, \"code_hash\": \"d53d2cb4c06c9a901c539089dd9820ac49eb3a5126d697c5a2aeea488c0b5320\", \"paired_at\": null, \"principal\": \"delta\", \"created_at\": 1793599607.073464, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1793599547.073462, \"paired_code_hash\": null}",
+      "{\"tier\": null, \"board\": true, \"code_hash\": \"529eb40aaaf94da3dcb594ded0db53c39cac7a72cdaf405309a085e300f91a7a\", \"paired_at\": null, \"principal\": \"alpha\", \"created_at\": 1793599607.06393, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1793600507.06379, \"paired_code_hash\": null}",
+      "{\"tier\": null, \"board\": true, \"code_hash\": \"993bf05dd9d39ee1796f3518e641f6c36ffcef7ec3df49c8a8476627f6cf5174\", \"paired_at\": null, \"principal\": \"laptop\", \"created_at\": 1793599644.078196, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1793600544.078138, \"paired_code_hash\": null}",
+      "{\"tier\": null, \"board\": true, \"code_hash\": null, \"paired_at\": null, \"principal\": \"charlie\", \"created_at\": 1793599607.071953, \"revoked_at\": 1793599607.072683, \"token_hash\": null, \"code_expires_at\": null, \"paired_code_hash\": null}"
      ],
      "reference_chunks": [],
      "rejected_bearers": [],
@@ -15819,7 +15819,7 @@
     "cwd": "dir"
    },
    "modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    }
   },
   "defer-help": {
@@ -15829,8 +15829,8 @@
    "stdout": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIGludml0ZSBbLWhdIFstLXRpZXIge21pbmltYWwsY29yZSxmdWxsfV0KICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1ib2FyZCB8IC0tbm8tYm9hcmRdIFstLWV4cGlyZXMgRVhQSVJFU10KICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1yZXBsYWNlXSBbLS11cmwgVVJMXSBbLS1wb3J0IFBPUlRdCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgWy0tYmFuayBGSU5HRVJQUklOVF0gWy0tbGlzdF0gWy0tcmV2b2tlIE5BTUVdCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgWy0teWVzXSBbLS1qc29uXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgIFtuYW1lXQoKR2l2ZSBhbm90aGVyIG1hY2hpbmUgaXRzIG93biBwcmluY2lwYWwgb24gdGhpcyBiYW5rOiBwcmludHMgYSBzaG9ydC1saXZlZCwKc2luZ2xlLXVzZSBwYWlyaW5nIGNvZGUgZm9yIGBwc2V1ZG9saWZlLW1jcCBwYWlyYC4gRXhpdCBjb2RlczogMCBkb25lLCAxIHRoZQpkYXRhYmFzZSBmYWlsZWQsIDIgdXNhZ2Ugb3Igbm90IGNvbmZpcm1lZCwgNCByZWZ1c2VkIGJlZm9yZSBhbnkgY2hhbmdlLgoKcG9zaXRpb25hbCBhcmd1bWVudHM6CiAgbmFtZSAgICAgICAgICAgICAgICAgIHRoZSBuZXcgbWFjaGluZSdzIHByaW5jaXBhbCwgZS5nLiBsYXB0b3AKCm9wdGlvbnM6CiAgLWgsIC0taGVscCAgICAgICAgICAgIHNob3cgdGhpcyBoZWxwIG1lc3NhZ2UgYW5kIGV4aXQKICAtLXRpZXIge21pbmltYWwsY29yZSxmdWxsfQogICAgICAgICAgICAgICAgICAgICAgICBpdHMgZGVmYXVsdCB0b29sc2V0IHRpZXIgKGRlZmF1bHQ6IHRoZSBkYWVtb24ncykKICAtLWJvYXJkICAgICAgICAgICAgICAgYWRtaXQgaXQgdG8gdGhlIGFnZW50IGJvYXJkIChhIG5ldyBwcmluY2lwYWwncwogICAgICAgICAgICAgICAgICAgICAgICBkZWZhdWx0KQogIC0tbm8tYm9hcmQgICAgICAgICAgICBkbyBub3QgYWRtaXQgaXQgdG8gdGhlIGFnZW50IGJvYXJkCiAgLS1leHBpcmVzIEVYUElSRVMgICAgIGhvdyBsb25nIHRoZSBjb2RlIGxpdmVzOiAxNW0gKGRlZmF1bHQpLCBhdCBtb3N0IDI0aAogIC0tcmVwbGFjZSAgICAgICAgICAgICBnaXZlIGEgcGFpcmVkIHByaW5jaXBhbCBhIG5ldyBjb2RlIChpdHMgdG9rZW4gd29ya3MKICAgICAgICAgICAgICAgICAgICAgICAgdW50aWwgcmVkZWVtZWQpCiAgLS11cmwgVVJMICAgICAgICAgICAgIHRoZSBkYWVtb24gVVJMIHRvIHByaW50IChkZWZhdWx0OiBleHBvc2Ugc3RhdHVzKQogIC0tcG9ydCBQT1JUICAgICAgICAgICB0aGUgbG9jYWwgZGFlbW9uJ3MgcG9ydCAoZGVmYXVsdDogUFNFVURPTElGRV9NQ1BfUE9SVCwKICAgICAgICAgICAgICAgICAgICAgICAgZWxzZSA4NzY1KQogIC0tYmFuayBGSU5HRVJQUklOVCAgICByZWZ1c2UgdW5sZXNzIHRoZSBkYXRhYmFzZSBob2xkcyB0aGlzIGJhbmsgKC9oZWFsdGgncwogICAgICAgICAgICAgICAgICAgICAgICBiYW5rKQogIC0tbGlzdCAgICAgICAgICAgICAgICBsaXN0IHByaW5jaXBhbHMgd2l0aCB3aGVuIGVhY2ggbGFzdCBjb25uZWN0ZWQsIGFuZAogICAgICAgICAgICAgICAgICAgICAgICByZWZ1c2VkIHRva2VucwogIC0tcmV2b2tlIE5BTUUgICAgICAgICByZXZva2UgYSBzdG9yZWQgcHJpbmNpcGFsCiAgLS15ZXMgICAgICAgICAgICAgICAgIHJldm9rZSB3aXRob3V0IGFza2luZwogIC0tanNvbiAgICAgICAgICAgICAgICBvbmUgSlNPTiByZXBvcnQgb24gc3Rkb3V0Cg==",
    "stderr": "",
    "window": [
-    1793591947.5058863,
-    1793591947.7231147
+    1793599644.710957,
+    1793599644.9241033
    ],
    "requests": [],
    "arm": "python",
@@ -15838,57 +15838,57 @@
     "cwd": "dir"
    },
    "before_modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    },
-   "argv_port": "39171",
+   "argv_port": "38103",
    "ttl": 900,
    "seed_rows": [
     {
      "tier": "core",
      "board": true,
      "code_hash": null,
-     "paired_at": 1793591908.583902,
+     "paired_at": 1793599607.070922,
      "principal": "bravo",
-     "created_at": 1793591908.577005,
+     "created_at": 1793599607.064868,
      "revoked_at": null,
      "token_hash": "217d3f53b8e94284ef6cfc5ea68648796764a3173189d2484d9d120c7178107d",
      "code_expires_at": null,
-     "paired_code_hash": "f0a12416fb7ed1559409e6d9acec55e5dd23daf84340c2843cd008fd7e6f0c66"
+     "paired_code_hash": "7075920ab7d9b6ba1cb0f7c37e15a473f2e6eea3d2d43071c5f42f68f05aba07"
     },
     {
      "tier": "full",
      "board": true,
-     "code_hash": "09f3c16e1e85ab416800b65a2edcd4bc33264970cc12fa856e1e298b2d1e0313",
+     "code_hash": "6143158aa1fe83103d96e3ef16e5e636a4c6400b79b089f8c271d03b09457601",
      "paired_at": null,
      "principal": "a-rather-long-principal-name.x",
-     "created_at": 1793591908.587434,
+     "created_at": 1793599607.074201,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793595508.587432,
+     "code_expires_at": 1793603207.074199,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": false,
-     "code_hash": "aa7e155a14693ef798e4d6aaaf53876decf324f88e0d5822a7fc8959a053b871",
+     "code_hash": "d53d2cb4c06c9a901c539089dd9820ac49eb3a5126d697c5a2aeea488c0b5320",
      "paired_at": null,
      "principal": "delta",
-     "created_at": 1793591908.5867,
+     "created_at": 1793599607.073464,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793591848.586698,
+     "code_expires_at": 1793599547.073462,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": true,
-     "code_hash": "3b01334f0ec371582663ce7b8b1dcb904b9799be991a1ed6d016a6af163e5300",
+     "code_hash": "529eb40aaaf94da3dcb594ded0db53c39cac7a72cdaf405309a085e300f91a7a",
      "paired_at": null,
      "principal": "alpha",
-     "created_at": 1793591908.576089,
+     "created_at": 1793599607.06393,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793592808.576056,
+     "code_expires_at": 1793600507.06379,
      "paired_code_hash": null
     },
     {
@@ -15897,8 +15897,8 @@
      "code_hash": null,
      "paired_at": null,
      "principal": "charlie",
-     "created_at": 1793591908.585122,
-     "revoked_at": 1793591908.585837,
+     "created_at": 1793599607.071953,
+     "revoked_at": 1793599607.072683,
      "token_hash": null,
      "code_expires_at": null,
      "paired_code_hash": null
@@ -15909,7 +15909,7 @@
     "cwd": "dir"
    },
    "modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    }
   },
   "defer-expires-too-short": {
@@ -15919,8 +15919,8 @@
    "stdout": "",
    "stderr": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIGludml0ZSBbLWhdIFstLXRpZXIge21pbmltYWwsY29yZSxmdWxsfV0KICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1ib2FyZCB8IC0tbm8tYm9hcmRdIFstLWV4cGlyZXMgRVhQSVJFU10KICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1yZXBsYWNlXSBbLS11cmwgVVJMXSBbLS1wb3J0IFBPUlRdCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgWy0tYmFuayBGSU5HRVJQUklOVF0gWy0tbGlzdF0gWy0tcmV2b2tlIE5BTUVdCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgWy0teWVzXSBbLS1qc29uXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgIFtuYW1lXQpwc2V1ZG9saWZlLW1jcCBpbnZpdGU6IGVycm9yOiBhcmd1bWVudCAtLWV4cGlyZXM6IC0tZXhwaXJlcyBtdXN0IGJlIGJldHdlZW4gMSBtaW51dGUgYW5kIDI0IGhvdXJzCg==",
    "window": [
-    1793591948.0038352,
-    1793591948.2179115
+    1793599645.20286,
+    1793599645.4126687
    ],
    "requests": [],
    "arm": "python",
@@ -15928,57 +15928,57 @@
     "cwd": "dir"
    },
    "before_modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    },
-   "argv_port": "51019",
+   "argv_port": "60431",
    "ttl": 900,
    "seed_rows": [
     {
      "tier": "core",
      "board": true,
      "code_hash": null,
-     "paired_at": 1793591908.583902,
+     "paired_at": 1793599607.070922,
      "principal": "bravo",
-     "created_at": 1793591908.577005,
+     "created_at": 1793599607.064868,
      "revoked_at": null,
      "token_hash": "217d3f53b8e94284ef6cfc5ea68648796764a3173189d2484d9d120c7178107d",
      "code_expires_at": null,
-     "paired_code_hash": "f0a12416fb7ed1559409e6d9acec55e5dd23daf84340c2843cd008fd7e6f0c66"
+     "paired_code_hash": "7075920ab7d9b6ba1cb0f7c37e15a473f2e6eea3d2d43071c5f42f68f05aba07"
     },
     {
      "tier": "full",
      "board": true,
-     "code_hash": "09f3c16e1e85ab416800b65a2edcd4bc33264970cc12fa856e1e298b2d1e0313",
+     "code_hash": "6143158aa1fe83103d96e3ef16e5e636a4c6400b79b089f8c271d03b09457601",
      "paired_at": null,
      "principal": "a-rather-long-principal-name.x",
-     "created_at": 1793591908.587434,
+     "created_at": 1793599607.074201,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793595508.587432,
+     "code_expires_at": 1793603207.074199,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": false,
-     "code_hash": "aa7e155a14693ef798e4d6aaaf53876decf324f88e0d5822a7fc8959a053b871",
+     "code_hash": "d53d2cb4c06c9a901c539089dd9820ac49eb3a5126d697c5a2aeea488c0b5320",
      "paired_at": null,
      "principal": "delta",
-     "created_at": 1793591908.5867,
+     "created_at": 1793599607.073464,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793591848.586698,
+     "code_expires_at": 1793599547.073462,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": true,
-     "code_hash": "3b01334f0ec371582663ce7b8b1dcb904b9799be991a1ed6d016a6af163e5300",
+     "code_hash": "529eb40aaaf94da3dcb594ded0db53c39cac7a72cdaf405309a085e300f91a7a",
      "paired_at": null,
      "principal": "alpha",
-     "created_at": 1793591908.576089,
+     "created_at": 1793599607.06393,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793592808.576056,
+     "code_expires_at": 1793600507.06379,
      "paired_code_hash": null
     },
     {
@@ -15987,8 +15987,8 @@
      "code_hash": null,
      "paired_at": null,
      "principal": "charlie",
-     "created_at": 1793591908.585122,
-     "revoked_at": 1793591908.585837,
+     "created_at": 1793599607.071953,
+     "revoked_at": 1793599607.072683,
      "token_hash": null,
      "code_expires_at": null,
      "paired_code_hash": null
@@ -15999,7 +15999,7 @@
     "cwd": "dir"
    },
    "modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    }
   },
   "defer-unknown-tier": {
@@ -16009,8 +16009,8 @@
    "stdout": "",
    "stderr": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIGludml0ZSBbLWhdIFstLXRpZXIge21pbmltYWwsY29yZSxmdWxsfV0KICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1ib2FyZCB8IC0tbm8tYm9hcmRdIFstLWV4cGlyZXMgRVhQSVJFU10KICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1yZXBsYWNlXSBbLS11cmwgVVJMXSBbLS1wb3J0IFBPUlRdCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgWy0tYmFuayBGSU5HRVJQUklOVF0gWy0tbGlzdF0gWy0tcmV2b2tlIE5BTUVdCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgWy0teWVzXSBbLS1qc29uXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgIFtuYW1lXQpwc2V1ZG9saWZlLW1jcCBpbnZpdGU6IGVycm9yOiBhcmd1bWVudCAtLXRpZXI6IGludmFsaWQgY2hvaWNlOiAnd3JpdGVyJyAoY2hvb3NlIGZyb20gJ21pbmltYWwnLCAnY29yZScsICdmdWxsJykK",
    "window": [
-    1793591948.5065107,
-    1793591948.7198114
+    1793599645.711442,
+    1793599645.9259
    ],
    "requests": [],
    "arm": "python",
@@ -16018,57 +16018,57 @@
     "cwd": "dir"
    },
    "before_modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    },
-   "argv_port": "38811",
+   "argv_port": "42493",
    "ttl": 900,
    "seed_rows": [
     {
      "tier": "core",
      "board": true,
      "code_hash": null,
-     "paired_at": 1793591908.583902,
+     "paired_at": 1793599607.070922,
      "principal": "bravo",
-     "created_at": 1793591908.577005,
+     "created_at": 1793599607.064868,
      "revoked_at": null,
      "token_hash": "217d3f53b8e94284ef6cfc5ea68648796764a3173189d2484d9d120c7178107d",
      "code_expires_at": null,
-     "paired_code_hash": "f0a12416fb7ed1559409e6d9acec55e5dd23daf84340c2843cd008fd7e6f0c66"
+     "paired_code_hash": "7075920ab7d9b6ba1cb0f7c37e15a473f2e6eea3d2d43071c5f42f68f05aba07"
     },
     {
      "tier": "full",
      "board": true,
-     "code_hash": "09f3c16e1e85ab416800b65a2edcd4bc33264970cc12fa856e1e298b2d1e0313",
+     "code_hash": "6143158aa1fe83103d96e3ef16e5e636a4c6400b79b089f8c271d03b09457601",
      "paired_at": null,
      "principal": "a-rather-long-principal-name.x",
-     "created_at": 1793591908.587434,
+     "created_at": 1793599607.074201,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793595508.587432,
+     "code_expires_at": 1793603207.074199,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": false,
-     "code_hash": "aa7e155a14693ef798e4d6aaaf53876decf324f88e0d5822a7fc8959a053b871",
+     "code_hash": "d53d2cb4c06c9a901c539089dd9820ac49eb3a5126d697c5a2aeea488c0b5320",
      "paired_at": null,
      "principal": "delta",
-     "created_at": 1793591908.5867,
+     "created_at": 1793599607.073464,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793591848.586698,
+     "code_expires_at": 1793599547.073462,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": true,
-     "code_hash": "3b01334f0ec371582663ce7b8b1dcb904b9799be991a1ed6d016a6af163e5300",
+     "code_hash": "529eb40aaaf94da3dcb594ded0db53c39cac7a72cdaf405309a085e300f91a7a",
      "paired_at": null,
      "principal": "alpha",
-     "created_at": 1793591908.576089,
+     "created_at": 1793599607.06393,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793592808.576056,
+     "code_expires_at": 1793600507.06379,
      "paired_code_hash": null
     },
     {
@@ -16077,8 +16077,8 @@
      "code_hash": null,
      "paired_at": null,
      "principal": "charlie",
-     "created_at": 1793591908.585122,
-     "revoked_at": 1793591908.585837,
+     "created_at": 1793599607.071953,
+     "revoked_at": 1793599607.072683,
      "token_hash": null,
      "code_expires_at": null,
      "paired_code_hash": null
@@ -16089,18 +16089,18 @@
     "cwd": "dir"
    },
    "modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    }
   },
   "defer-repeated-option": {
    "home": null,
    "utc_offset": 0,
    "exit": 0,
-   "stdout": "bGFwdG9wOiBpbnZpdGVkOyB0aWVyIHRoZSBkYWVtb24gZGVmYXVsdCwgYWdlbnQgYm9hcmQgb24KICBjb2RlICAgICBNMUgwLVRYMlAtOEZCNyAgIHNpbmdsZSB1c2UsIGV4cGlyZXMgaW4gMTUgbWluICgyMDI2LTExLTAyIDA0OjE0IFVUQykKICBvbiB0aGUgbmV3IG1hY2hpbmU6ICBwc2V1ZG9saWZlLW1jcCBwYWlyIHYgTTFIMC1UWDJQLThGQjcKICBvciBydW4gdGhlIGluc3RhbGxlciB0aGVyZSBhbmQgYW5zd2VyIDIsIGdpdmluZyB0aGlzIGNvZGUgd2hlcmUgaXQgYXNrcyBmb3IgdGhlIHRva2VuCmFuIGludml0ZWQgbWFjaGluZSBjYW4gcmVhZCBhbmQgd3JpdGUgdGhlIHdob2xlIGJhbmsgYW5kIHVzZSB0aGUgYWdlbnQgYm9hcmQsIGJ1dCBub3QgY2hhbmdlIHRoZSBkYWVtb24ncyBjb25maWd1cmF0aW9uCg==",
+   "stdout": "bGFwdG9wOiBpbnZpdGVkOyB0aWVyIHRoZSBkYWVtb24gZGVmYXVsdCwgYWdlbnQgYm9hcmQgb24KICBjb2RlICAgICA2SzZSLUdLNkEtSDcwOSAgIHNpbmdsZSB1c2UsIGV4cGlyZXMgaW4gMTUgbWluICgyMDI2LTExLTAyIDA2OjIyIFVUQykKICBvbiB0aGUgbmV3IG1hY2hpbmU6ICBwc2V1ZG9saWZlLW1jcCBwYWlyIHYgNks2Ui1HSzZBLUg3MDkKICBvciBydW4gdGhlIGluc3RhbGxlciB0aGVyZSBhbmQgYW5zd2VyIDIsIGdpdmluZyB0aGlzIGNvZGUgd2hlcmUgaXQgYXNrcyBmb3IgdGhlIHRva2VuCmFuIGludml0ZWQgbWFjaGluZSBjYW4gcmVhZCBhbmQgd3JpdGUgdGhlIHdob2xlIGJhbmsgYW5kIHVzZSB0aGUgYWdlbnQgYm9hcmQsIGJ1dCBub3QgY2hhbmdlIHRoZSBkYWVtb24ncyBjb25maWd1cmF0aW9uCg==",
    "stderr": "",
    "window": [
-    1793591949.119463,
-    1793591949.624862
+    1793599646.2069776,
+    1793599646.70202
    ],
    "requests": [
     {
@@ -16115,57 +16115,57 @@
     "cwd": "dir"
    },
    "before_modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    },
-   "argv_port": "52983",
+   "argv_port": "36219",
    "ttl": 900,
    "seed_rows": [
     {
      "tier": "core",
      "board": true,
      "code_hash": null,
-     "paired_at": 1793591908.583902,
+     "paired_at": 1793599607.070922,
      "principal": "bravo",
-     "created_at": 1793591908.577005,
+     "created_at": 1793599607.064868,
      "revoked_at": null,
      "token_hash": "217d3f53b8e94284ef6cfc5ea68648796764a3173189d2484d9d120c7178107d",
      "code_expires_at": null,
-     "paired_code_hash": "f0a12416fb7ed1559409e6d9acec55e5dd23daf84340c2843cd008fd7e6f0c66"
+     "paired_code_hash": "7075920ab7d9b6ba1cb0f7c37e15a473f2e6eea3d2d43071c5f42f68f05aba07"
     },
     {
      "tier": "full",
      "board": true,
-     "code_hash": "09f3c16e1e85ab416800b65a2edcd4bc33264970cc12fa856e1e298b2d1e0313",
+     "code_hash": "6143158aa1fe83103d96e3ef16e5e636a4c6400b79b089f8c271d03b09457601",
      "paired_at": null,
      "principal": "a-rather-long-principal-name.x",
-     "created_at": 1793591908.587434,
+     "created_at": 1793599607.074201,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793595508.587432,
+     "code_expires_at": 1793603207.074199,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": false,
-     "code_hash": "aa7e155a14693ef798e4d6aaaf53876decf324f88e0d5822a7fc8959a053b871",
+     "code_hash": "d53d2cb4c06c9a901c539089dd9820ac49eb3a5126d697c5a2aeea488c0b5320",
      "paired_at": null,
      "principal": "delta",
-     "created_at": 1793591908.5867,
+     "created_at": 1793599607.073464,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793591848.586698,
+     "code_expires_at": 1793599547.073462,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": true,
-     "code_hash": "3b01334f0ec371582663ce7b8b1dcb904b9799be991a1ed6d016a6af163e5300",
+     "code_hash": "529eb40aaaf94da3dcb594ded0db53c39cac7a72cdaf405309a085e300f91a7a",
      "paired_at": null,
      "principal": "alpha",
-     "created_at": 1793591908.576089,
+     "created_at": 1793599607.06393,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793592808.576056,
+     "code_expires_at": 1793600507.06379,
      "paired_code_hash": null
     },
     {
@@ -16174,8 +16174,8 @@
      "code_hash": null,
      "paired_at": null,
      "principal": "charlie",
-     "created_at": 1793591908.585122,
-     "revoked_at": 1793591908.585837,
+     "created_at": 1793599607.071953,
+     "revoked_at": 1793599607.072683,
      "token_hash": null,
      "code_expires_at": null,
      "paired_code_hash": null
@@ -16224,16 +16224,16 @@
      ],
      "outcome_signals": [],
      "pl_cf_clock": [
-      "{\"at\": 1793591949.600548, \"principal\": \"laptop\"}"
+      "{\"at\": 1793599646.682215, \"principal\": \"laptop\"}"
      ],
      "principal_activity": [],
      "principals": [
-      "{\"tier\": \"core\", \"board\": true, \"code_hash\": null, \"paired_at\": 1793591908.583902, \"principal\": \"bravo\", \"created_at\": 1793591908.577005, \"revoked_at\": null, \"token_hash\": \"217d3f53b8e94284ef6cfc5ea68648796764a3173189d2484d9d120c7178107d\", \"code_expires_at\": null, \"paired_code_hash\": \"f0a12416fb7ed1559409e6d9acec55e5dd23daf84340c2843cd008fd7e6f0c66\"}",
-      "{\"tier\": \"full\", \"board\": true, \"code_hash\": \"09f3c16e1e85ab416800b65a2edcd4bc33264970cc12fa856e1e298b2d1e0313\", \"paired_at\": null, \"principal\": \"a-rather-long-principal-name.x\", \"created_at\": 1793591908.587434, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1793595508.587432, \"paired_code_hash\": null}",
-      "{\"tier\": null, \"board\": false, \"code_hash\": \"aa7e155a14693ef798e4d6aaaf53876decf324f88e0d5822a7fc8959a053b871\", \"paired_at\": null, \"principal\": \"delta\", \"created_at\": 1793591908.5867, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1793591848.586698, \"paired_code_hash\": null}",
-      "{\"tier\": null, \"board\": true, \"code_hash\": \"3b01334f0ec371582663ce7b8b1dcb904b9799be991a1ed6d016a6af163e5300\", \"paired_at\": null, \"principal\": \"alpha\", \"created_at\": 1793591908.576089, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1793592808.576056, \"paired_code_hash\": null}",
-      "{\"tier\": null, \"board\": true, \"code_hash\": \"ea5e75c7e0d04b149620c53df92ad7d12bac240a38c77286d61f7e0063b20d67\", \"paired_at\": null, \"principal\": \"laptop\", \"created_at\": 1793591949.600048, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1793592849.600006, \"paired_code_hash\": null}",
-      "{\"tier\": null, \"board\": true, \"code_hash\": null, \"paired_at\": null, \"principal\": \"charlie\", \"created_at\": 1793591908.585122, \"revoked_at\": 1793591908.585837, \"token_hash\": null, \"code_expires_at\": null, \"paired_code_hash\": null}"
+      "{\"tier\": \"core\", \"board\": true, \"code_hash\": null, \"paired_at\": 1793599607.070922, \"principal\": \"bravo\", \"created_at\": 1793599607.064868, \"revoked_at\": null, \"token_hash\": \"217d3f53b8e94284ef6cfc5ea68648796764a3173189d2484d9d120c7178107d\", \"code_expires_at\": null, \"paired_code_hash\": \"7075920ab7d9b6ba1cb0f7c37e15a473f2e6eea3d2d43071c5f42f68f05aba07\"}",
+      "{\"tier\": \"full\", \"board\": true, \"code_hash\": \"6143158aa1fe83103d96e3ef16e5e636a4c6400b79b089f8c271d03b09457601\", \"paired_at\": null, \"principal\": \"a-rather-long-principal-name.x\", \"created_at\": 1793599607.074201, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1793603207.074199, \"paired_code_hash\": null}",
+      "{\"tier\": null, \"board\": false, \"code_hash\": \"d53d2cb4c06c9a901c539089dd9820ac49eb3a5126d697c5a2aeea488c0b5320\", \"paired_at\": null, \"principal\": \"delta\", \"created_at\": 1793599607.073464, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1793599547.073462, \"paired_code_hash\": null}",
+      "{\"tier\": null, \"board\": true, \"code_hash\": \"529eb40aaaf94da3dcb594ded0db53c39cac7a72cdaf405309a085e300f91a7a\", \"paired_at\": null, \"principal\": \"alpha\", \"created_at\": 1793599607.06393, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1793600507.06379, \"paired_code_hash\": null}",
+      "{\"tier\": null, \"board\": true, \"code_hash\": \"afae475d1c0f69d444e71e2d09cb50f1ee03f26575cefec446a812e1333cebfb\", \"paired_at\": null, \"principal\": \"laptop\", \"created_at\": 1793599646.681704, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1793600546.681661, \"paired_code_hash\": null}",
+      "{\"tier\": null, \"board\": true, \"code_hash\": null, \"paired_at\": null, \"principal\": \"charlie\", \"created_at\": 1793599607.071953, \"revoked_at\": 1793599607.072683, \"token_hash\": null, \"code_expires_at\": null, \"paired_code_hash\": null}"
      ],
      "reference_chunks": [],
      "rejected_bearers": [],
@@ -22892,18 +22892,18 @@
     "cwd": "dir"
    },
    "modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    }
   },
   "defer-equals-spelling": {
    "home": null,
    "utc_offset": 0,
    "exit": 0,
-   "stdout": "bGFwdG9wOiBpbnZpdGVkOyB0aWVyIHRoZSBkYWVtb24gZGVmYXVsdCwgYWdlbnQgYm9hcmQgb24KICBjb2RlICAgICBHQTFYLUVUVkotMTlOQiAgIHNpbmdsZSB1c2UsIGV4cGlyZXMgaW4gMTUgbWluICgyMDI2LTExLTAyIDA0OjE0IFVUQykKICBvbiB0aGUgbmV3IG1hY2hpbmU6ICBwc2V1ZG9saWZlLW1jcCBwYWlyIHUgR0ExWC1FVFZKLTE5TkIKICBvciBydW4gdGhlIGluc3RhbGxlciB0aGVyZSBhbmQgYW5zd2VyIDIsIGdpdmluZyB0aGlzIGNvZGUgd2hlcmUgaXQgYXNrcyBmb3IgdGhlIHRva2VuCmFuIGludml0ZWQgbWFjaGluZSBjYW4gcmVhZCBhbmQgd3JpdGUgdGhlIHdob2xlIGJhbmsgYW5kIHVzZSB0aGUgYWdlbnQgYm9hcmQsIGJ1dCBub3QgY2hhbmdlIHRoZSBkYWVtb24ncyBjb25maWd1cmF0aW9uCg==",
+   "stdout": "bGFwdG9wOiBpbnZpdGVkOyB0aWVyIHRoZSBkYWVtb24gZGVmYXVsdCwgYWdlbnQgYm9hcmQgb24KICBjb2RlICAgICBZWkUzLVJSVFktVlAyWSAgIHNpbmdsZSB1c2UsIGV4cGlyZXMgaW4gMTUgbWluICgyMDI2LTExLTAyIDA2OjIyIFVUQykKICBvbiB0aGUgbmV3IG1hY2hpbmU6ICBwc2V1ZG9saWZlLW1jcCBwYWlyIHUgWVpFMy1SUlRZLVZQMlkKICBvciBydW4gdGhlIGluc3RhbGxlciB0aGVyZSBhbmQgYW5zd2VyIDIsIGdpdmluZyB0aGlzIGNvZGUgd2hlcmUgaXQgYXNrcyBmb3IgdGhlIHRva2VuCmFuIGludml0ZWQgbWFjaGluZSBjYW4gcmVhZCBhbmQgd3JpdGUgdGhlIHdob2xlIGJhbmsgYW5kIHVzZSB0aGUgYWdlbnQgYm9hcmQsIGJ1dCBub3QgY2hhbmdlIHRoZSBkYWVtb24ncyBjb25maWd1cmF0aW9uCg==",
    "stderr": "",
    "window": [
-    1793591950.3111105,
-    1793591950.8370607
+    1793599647.310807,
+    1793599647.8220606
    ],
    "requests": [
     {
@@ -22918,57 +22918,57 @@
     "cwd": "dir"
    },
    "before_modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    },
-   "argv_port": "50079",
+   "argv_port": "47865",
    "ttl": 900,
    "seed_rows": [
     {
      "tier": "core",
      "board": true,
      "code_hash": null,
-     "paired_at": 1793591908.583902,
+     "paired_at": 1793599607.070922,
      "principal": "bravo",
-     "created_at": 1793591908.577005,
+     "created_at": 1793599607.064868,
      "revoked_at": null,
      "token_hash": "217d3f53b8e94284ef6cfc5ea68648796764a3173189d2484d9d120c7178107d",
      "code_expires_at": null,
-     "paired_code_hash": "f0a12416fb7ed1559409e6d9acec55e5dd23daf84340c2843cd008fd7e6f0c66"
+     "paired_code_hash": "7075920ab7d9b6ba1cb0f7c37e15a473f2e6eea3d2d43071c5f42f68f05aba07"
     },
     {
      "tier": "full",
      "board": true,
-     "code_hash": "09f3c16e1e85ab416800b65a2edcd4bc33264970cc12fa856e1e298b2d1e0313",
+     "code_hash": "6143158aa1fe83103d96e3ef16e5e636a4c6400b79b089f8c271d03b09457601",
      "paired_at": null,
      "principal": "a-rather-long-principal-name.x",
-     "created_at": 1793591908.587434,
+     "created_at": 1793599607.074201,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793595508.587432,
+     "code_expires_at": 1793603207.074199,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": false,
-     "code_hash": "aa7e155a14693ef798e4d6aaaf53876decf324f88e0d5822a7fc8959a053b871",
+     "code_hash": "d53d2cb4c06c9a901c539089dd9820ac49eb3a5126d697c5a2aeea488c0b5320",
      "paired_at": null,
      "principal": "delta",
-     "created_at": 1793591908.5867,
+     "created_at": 1793599607.073464,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793591848.586698,
+     "code_expires_at": 1793599547.073462,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": true,
-     "code_hash": "3b01334f0ec371582663ce7b8b1dcb904b9799be991a1ed6d016a6af163e5300",
+     "code_hash": "529eb40aaaf94da3dcb594ded0db53c39cac7a72cdaf405309a085e300f91a7a",
      "paired_at": null,
      "principal": "alpha",
-     "created_at": 1793591908.576089,
+     "created_at": 1793599607.06393,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793592808.576056,
+     "code_expires_at": 1793600507.06379,
      "paired_code_hash": null
     },
     {
@@ -22977,8 +22977,8 @@
      "code_hash": null,
      "paired_at": null,
      "principal": "charlie",
-     "created_at": 1793591908.585122,
-     "revoked_at": 1793591908.585837,
+     "created_at": 1793599607.071953,
+     "revoked_at": 1793599607.072683,
      "token_hash": null,
      "code_expires_at": null,
      "paired_code_hash": null
@@ -23027,16 +23027,16 @@
      ],
      "outcome_signals": [],
      "pl_cf_clock": [
-      "{\"at\": 1793591950.807586, \"principal\": \"laptop\"}"
+      "{\"at\": 1793599647.798302, \"principal\": \"laptop\"}"
      ],
      "principal_activity": [],
      "principals": [
-      "{\"tier\": \"core\", \"board\": true, \"code_hash\": null, \"paired_at\": 1793591908.583902, \"principal\": \"bravo\", \"created_at\": 1793591908.577005, \"revoked_at\": null, \"token_hash\": \"217d3f53b8e94284ef6cfc5ea68648796764a3173189d2484d9d120c7178107d\", \"code_expires_at\": null, \"paired_code_hash\": \"f0a12416fb7ed1559409e6d9acec55e5dd23daf84340c2843cd008fd7e6f0c66\"}",
-      "{\"tier\": \"full\", \"board\": true, \"code_hash\": \"09f3c16e1e85ab416800b65a2edcd4bc33264970cc12fa856e1e298b2d1e0313\", \"paired_at\": null, \"principal\": \"a-rather-long-principal-name.x\", \"created_at\": 1793591908.587434, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1793595508.587432, \"paired_code_hash\": null}",
-      "{\"tier\": null, \"board\": false, \"code_hash\": \"aa7e155a14693ef798e4d6aaaf53876decf324f88e0d5822a7fc8959a053b871\", \"paired_at\": null, \"principal\": \"delta\", \"created_at\": 1793591908.5867, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1793591848.586698, \"paired_code_hash\": null}",
-      "{\"tier\": null, \"board\": true, \"code_hash\": \"3b01334f0ec371582663ce7b8b1dcb904b9799be991a1ed6d016a6af163e5300\", \"paired_at\": null, \"principal\": \"alpha\", \"created_at\": 1793591908.576089, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1793592808.576056, \"paired_code_hash\": null}",
-      "{\"tier\": null, \"board\": true, \"code_hash\": \"e0bf3a04a35765738b85ea404715ba780d498de665ad0f8cb46730c59d733d15\", \"paired_at\": null, \"principal\": \"laptop\", \"created_at\": 1793591950.807005, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1793592850.806966, \"paired_code_hash\": null}",
-      "{\"tier\": null, \"board\": true, \"code_hash\": null, \"paired_at\": null, \"principal\": \"charlie\", \"created_at\": 1793591908.585122, \"revoked_at\": 1793591908.585837, \"token_hash\": null, \"code_expires_at\": null, \"paired_code_hash\": null}"
+      "{\"tier\": \"core\", \"board\": true, \"code_hash\": null, \"paired_at\": 1793599607.070922, \"principal\": \"bravo\", \"created_at\": 1793599607.064868, \"revoked_at\": null, \"token_hash\": \"217d3f53b8e94284ef6cfc5ea68648796764a3173189d2484d9d120c7178107d\", \"code_expires_at\": null, \"paired_code_hash\": \"7075920ab7d9b6ba1cb0f7c37e15a473f2e6eea3d2d43071c5f42f68f05aba07\"}",
+      "{\"tier\": \"full\", \"board\": true, \"code_hash\": \"6143158aa1fe83103d96e3ef16e5e636a4c6400b79b089f8c271d03b09457601\", \"paired_at\": null, \"principal\": \"a-rather-long-principal-name.x\", \"created_at\": 1793599607.074201, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1793603207.074199, \"paired_code_hash\": null}",
+      "{\"tier\": null, \"board\": false, \"code_hash\": \"d53d2cb4c06c9a901c539089dd9820ac49eb3a5126d697c5a2aeea488c0b5320\", \"paired_at\": null, \"principal\": \"delta\", \"created_at\": 1793599607.073464, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1793599547.073462, \"paired_code_hash\": null}",
+      "{\"tier\": null, \"board\": true, \"code_hash\": \"529eb40aaaf94da3dcb594ded0db53c39cac7a72cdaf405309a085e300f91a7a\", \"paired_at\": null, \"principal\": \"alpha\", \"created_at\": 1793599607.06393, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1793600507.06379, \"paired_code_hash\": null}",
+      "{\"tier\": null, \"board\": true, \"code_hash\": \"de6bdb811d7fe3a3ddb5e8142bd293254e76666a16b60eb278fc7083b0e56ecf\", \"paired_at\": null, \"principal\": \"laptop\", \"created_at\": 1793599647.79781, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1793600547.797769, \"paired_code_hash\": null}",
+      "{\"tier\": null, \"board\": true, \"code_hash\": null, \"paired_at\": null, \"principal\": \"charlie\", \"created_at\": 1793599607.071953, \"revoked_at\": 1793599607.072683, \"token_hash\": null, \"code_expires_at\": null, \"paired_code_hash\": null}"
      ],
      "reference_chunks": [],
      "rejected_bearers": [],
@@ -29695,18 +29695,18 @@
     "cwd": "dir"
    },
    "modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    }
   },
   "defer-env-port-spelling": {
    "home": null,
    "utc_offset": 0,
    "exit": 0,
-   "stdout": "bGFwdG9wOiBpbnZpdGVkOyB0aWVyIHRoZSBkYWVtb24gZGVmYXVsdCwgYWdlbnQgYm9hcmQgb24KICBjb2RlICAgICBaSFk0LUtRNEstQlBTNCAgIHNpbmdsZSB1c2UsIGV4cGlyZXMgaW4gMTUgbWluICgyMDI2LTExLTAyIDA0OjE0IFVUQykKICBvbiB0aGUgbmV3IG1hY2hpbmU6ICBwc2V1ZG9saWZlLW1jcCBwYWlyIHUgWkhZNC1LUTRLLUJQUzQKICBvciBydW4gdGhlIGluc3RhbGxlciB0aGVyZSBhbmQgYW5zd2VyIDIsIGdpdmluZyB0aGlzIGNvZGUgd2hlcmUgaXQgYXNrcyBmb3IgdGhlIHRva2VuCmFuIGludml0ZWQgbWFjaGluZSBjYW4gcmVhZCBhbmQgd3JpdGUgdGhlIHdob2xlIGJhbmsgYW5kIHVzZSB0aGUgYWdlbnQgYm9hcmQsIGJ1dCBub3QgY2hhbmdlIHRoZSBkYWVtb24ncyBjb25maWd1cmF0aW9uCg==",
+   "stdout": "bGFwdG9wOiBpbnZpdGVkOyB0aWVyIHRoZSBkYWVtb24gZGVmYXVsdCwgYWdlbnQgYm9hcmQgb24KICBjb2RlICAgICBLWVJTLUc0NVQtOE5TViAgIHNpbmdsZSB1c2UsIGV4cGlyZXMgaW4gMTUgbWluICgyMDI2LTExLTAyIDA2OjIyIFVUQykKICBvbiB0aGUgbmV3IG1hY2hpbmU6ICBwc2V1ZG9saWZlLW1jcCBwYWlyIHUgS1lSUy1HNDVULThOU1YKICBvciBydW4gdGhlIGluc3RhbGxlciB0aGVyZSBhbmQgYW5zd2VyIDIsIGdpdmluZyB0aGlzIGNvZGUgd2hlcmUgaXQgYXNrcyBmb3IgdGhlIHRva2VuCmFuIGludml0ZWQgbWFjaGluZSBjYW4gcmVhZCBhbmQgd3JpdGUgdGhlIHdob2xlIGJhbmsgYW5kIHVzZSB0aGUgYWdlbnQgYm9hcmQsIGJ1dCBub3QgY2hhbmdlIHRoZSBkYWVtb24ncyBjb25maWd1cmF0aW9uCg==",
    "stderr": "",
    "window": [
-    1793591951.5168984,
-    1793591952.0456638
+    1793599648.4247904,
+    1793599648.926893
    ],
    "requests": [
     {
@@ -29721,57 +29721,57 @@
     "cwd": "dir"
    },
    "before_modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    },
-   "argv_port": "38809",
+   "argv_port": "48089",
    "ttl": 900,
    "seed_rows": [
     {
      "tier": "core",
      "board": true,
      "code_hash": null,
-     "paired_at": 1793591908.583902,
+     "paired_at": 1793599607.070922,
      "principal": "bravo",
-     "created_at": 1793591908.577005,
+     "created_at": 1793599607.064868,
      "revoked_at": null,
      "token_hash": "217d3f53b8e94284ef6cfc5ea68648796764a3173189d2484d9d120c7178107d",
      "code_expires_at": null,
-     "paired_code_hash": "f0a12416fb7ed1559409e6d9acec55e5dd23daf84340c2843cd008fd7e6f0c66"
+     "paired_code_hash": "7075920ab7d9b6ba1cb0f7c37e15a473f2e6eea3d2d43071c5f42f68f05aba07"
     },
     {
      "tier": "full",
      "board": true,
-     "code_hash": "09f3c16e1e85ab416800b65a2edcd4bc33264970cc12fa856e1e298b2d1e0313",
+     "code_hash": "6143158aa1fe83103d96e3ef16e5e636a4c6400b79b089f8c271d03b09457601",
      "paired_at": null,
      "principal": "a-rather-long-principal-name.x",
-     "created_at": 1793591908.587434,
+     "created_at": 1793599607.074201,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793595508.587432,
+     "code_expires_at": 1793603207.074199,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": false,
-     "code_hash": "aa7e155a14693ef798e4d6aaaf53876decf324f88e0d5822a7fc8959a053b871",
+     "code_hash": "d53d2cb4c06c9a901c539089dd9820ac49eb3a5126d697c5a2aeea488c0b5320",
      "paired_at": null,
      "principal": "delta",
-     "created_at": 1793591908.5867,
+     "created_at": 1793599607.073464,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793591848.586698,
+     "code_expires_at": 1793599547.073462,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": true,
-     "code_hash": "3b01334f0ec371582663ce7b8b1dcb904b9799be991a1ed6d016a6af163e5300",
+     "code_hash": "529eb40aaaf94da3dcb594ded0db53c39cac7a72cdaf405309a085e300f91a7a",
      "paired_at": null,
      "principal": "alpha",
-     "created_at": 1793591908.576089,
+     "created_at": 1793599607.06393,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1793592808.576056,
+     "code_expires_at": 1793600507.06379,
      "paired_code_hash": null
     },
     {
@@ -29780,8 +29780,8 @@
      "code_hash": null,
      "paired_at": null,
      "principal": "charlie",
-     "created_at": 1793591908.585122,
-     "revoked_at": 1793591908.585837,
+     "created_at": 1793599607.071953,
+     "revoked_at": 1793599607.072683,
      "token_hash": null,
      "code_expires_at": null,
      "paired_code_hash": null
@@ -29830,16 +29830,16 @@
      ],
      "outcome_signals": [],
      "pl_cf_clock": [
-      "{\"at\": 1793591952.022514, \"principal\": \"laptop\"}"
+      "{\"at\": 1793599648.90295, \"principal\": \"laptop\"}"
      ],
      "principal_activity": [],
      "principals": [
-      "{\"tier\": \"core\", \"board\": true, \"code_hash\": null, \"paired_at\": 1793591908.583902, \"principal\": \"bravo\", \"created_at\": 1793591908.577005, \"revoked_at\": null, \"token_hash\": \"217d3f53b8e94284ef6cfc5ea68648796764a3173189d2484d9d120c7178107d\", \"code_expires_at\": null, \"paired_code_hash\": \"f0a12416fb7ed1559409e6d9acec55e5dd23daf84340c2843cd008fd7e6f0c66\"}",
-      "{\"tier\": \"full\", \"board\": true, \"code_hash\": \"09f3c16e1e85ab416800b65a2edcd4bc33264970cc12fa856e1e298b2d1e0313\", \"paired_at\": null, \"principal\": \"a-rather-long-principal-name.x\", \"created_at\": 1793591908.587434, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1793595508.587432, \"paired_code_hash\": null}",
-      "{\"tier\": null, \"board\": false, \"code_hash\": \"aa7e155a14693ef798e4d6aaaf53876decf324f88e0d5822a7fc8959a053b871\", \"paired_at\": null, \"principal\": \"delta\", \"created_at\": 1793591908.5867, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1793591848.586698, \"paired_code_hash\": null}",
-      "{\"tier\": null, \"board\": true, \"code_hash\": \"3b01334f0ec371582663ce7b8b1dcb904b9799be991a1ed6d016a6af163e5300\", \"paired_at\": null, \"principal\": \"alpha\", \"created_at\": 1793591908.576089, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1793592808.576056, \"paired_code_hash\": null}",
-      "{\"tier\": null, \"board\": true, \"code_hash\": \"76ed89d969169e39ffe197e8ed6fa215d515e9622d69efb5de71206c355a9446\", \"paired_at\": null, \"principal\": \"laptop\", \"created_at\": 1793591952.022008, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1793592852.021969, \"paired_code_hash\": null}",
-      "{\"tier\": null, \"board\": true, \"code_hash\": null, \"paired_at\": null, \"principal\": \"charlie\", \"created_at\": 1793591908.585122, \"revoked_at\": 1793591908.585837, \"token_hash\": null, \"code_expires_at\": null, \"paired_code_hash\": null}"
+      "{\"tier\": \"core\", \"board\": true, \"code_hash\": null, \"paired_at\": 1793599607.070922, \"principal\": \"bravo\", \"created_at\": 1793599607.064868, \"revoked_at\": null, \"token_hash\": \"217d3f53b8e94284ef6cfc5ea68648796764a3173189d2484d9d120c7178107d\", \"code_expires_at\": null, \"paired_code_hash\": \"7075920ab7d9b6ba1cb0f7c37e15a473f2e6eea3d2d43071c5f42f68f05aba07\"}",
+      "{\"tier\": \"full\", \"board\": true, \"code_hash\": \"6143158aa1fe83103d96e3ef16e5e636a4c6400b79b089f8c271d03b09457601\", \"paired_at\": null, \"principal\": \"a-rather-long-principal-name.x\", \"created_at\": 1793599607.074201, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1793603207.074199, \"paired_code_hash\": null}",
+      "{\"tier\": null, \"board\": false, \"code_hash\": \"d53d2cb4c06c9a901c539089dd9820ac49eb3a5126d697c5a2aeea488c0b5320\", \"paired_at\": null, \"principal\": \"delta\", \"created_at\": 1793599607.073464, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1793599547.073462, \"paired_code_hash\": null}",
+      "{\"tier\": null, \"board\": true, \"code_hash\": \"529eb40aaaf94da3dcb594ded0db53c39cac7a72cdaf405309a085e300f91a7a\", \"paired_at\": null, \"principal\": \"alpha\", \"created_at\": 1793599607.06393, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1793600507.06379, \"paired_code_hash\": null}",
+      "{\"tier\": null, \"board\": true, \"code_hash\": \"90a507a079a6bd2d99d844831e64f1f6bd05487747290eaaa79aaf1ae1d91b3b\", \"paired_at\": null, \"principal\": \"laptop\", \"created_at\": 1793599648.902467, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1793600548.902406, \"paired_code_hash\": null}",
+      "{\"tier\": null, \"board\": true, \"code_hash\": null, \"paired_at\": null, \"principal\": \"charlie\", \"created_at\": 1793599607.071953, \"revoked_at\": 1793599607.072683, \"token_hash\": null, \"code_expires_at\": null, \"paired_code_hash\": null}"
      ],
      "reference_chunks": [],
      "rejected_bearers": [],
@@ -36498,7 +36498,7 @@
     "cwd": "dir"
    },
    "modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    }
   }
  }

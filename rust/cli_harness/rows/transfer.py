@@ -532,6 +532,9 @@ def _import_setup(archive: str, seed=None, holder=False, schema=True, ascii_bank
             with _bank._admin() as conn:
                 conn.execute(f'CREATE DATABASE "{TGT}" TEMPLATE template0 '
                              "ENCODING 'SQL_ASCII' LC_COLLATE 'C' LC_CTYPE 'C'")
+                # Keep fixture observers' catalog names as text; this does not
+                # change the server_encoding that native admission checks.
+                conn.execute(f'ALTER DATABASE "{TGT}" SET client_encoding TO \'UTF8\'')
         else:
             _create(TGT, schema=schema)
         if seed:
@@ -842,6 +845,9 @@ def _cases() -> list[core.Case]:
 
 
 MUTANTS = [
+    Mutant("transfer-server-encoding", ROW, "shim/src/cli/transfer/import.rs",
+           '!= Some("UTF8")', '== Some("unsupported-encoding")',
+           ("import-non-utf8-defers",)),
     Mutant("transfer-roster-guard", ROW, "shim/src/cli/transfer/export.rs",
            "if !EXPORTED_TABLES.contains(&name.as_str()) && !EXCLUDED_TABLES.contains(&name.as_str()) {",
            "if false && !EXCLUDED_TABLES.contains(&name.as_str()) {",

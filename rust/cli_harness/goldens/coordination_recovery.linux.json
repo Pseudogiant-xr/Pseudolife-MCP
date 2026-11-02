@@ -1,7 +1,7 @@
 {
  "row": "CLI-COORDINATION-RECOVERY",
  "platform": "linux",
- "oracle_commit": "2c770c4dab8dfaba058fc25d2f935bcdd10ffada",
+ "oracle_commit": "7dcd738fa736c15c111fd67c5ffb83ea3f158b91",
  "oracle_commit_source": "git",
  "cases": {
   "recovery-help": {
@@ -11,14 +11,14 @@
    "stdout": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIGNvb3JkaW5hdGlvbi1yZWNvdmVyeSBbLWhdIC0tY29uZmlnIENPTkZJRwogICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIFstLWNvbmZpcm0tZGFlbW9uLXN0b3BwZWRdCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgWy0tY29uZmlybS1yZXN0b3JlXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIFstLWFnZW50IEFHRU5UXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIFstLXByaW5jaXBhbCBQUklOQ0lQQUxdCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgWy0tYmFuay11cmwgQkFOS19VUkxdCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgWy0tc3RhdGUgU1RBVEVdCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAge3JlY292ZXIscmViaW5kfQoKT2ZmbGluZSwgb3BlcmF0b3Itb25seSBtYWlsYm94IHJlY292ZXJ5IGFmdGVyIGFuIGV4cGxpY2l0IGRhdGFiYXNlIHJlc3RvcmUuCk5ldmVyIHN0YXJ0cyBhIGRhZW1vbiwgb3BlbnMgYSBtb2RlbCBzZXNzaW9uLCBtaWdyYXRlcyBhIHNjaGVtYSwgb3IgcHJpbnRzCmtleXMuIFN0b3BwaW5nIHRoZSBkYWVtb24gaXMgYW4gb3BlcmF0b3IgcHJlY29uZGl0aW9uLCBub3QgaW5mZXJyZWQgZnJvbSBhCmNvbmZpZyBmaWxlLgoKcG9zaXRpb25hbCBhcmd1bWVudHM6CiAge3JlY292ZXIscmViaW5kfQoKb3B0aW9uczoKICAtaCwgLS1oZWxwICAgICAgICAgICAgc2hvdyB0aGlzIGhlbHAgbWVzc2FnZSBhbmQgZXhpdAogIC0tY29uZmlnIENPTkZJRyAgICAgICBSZXN0b3JlZCBkYWVtb24gY29uZmlndXJhdGlvbiBmaWxlCiAgLS1jb25maXJtLWRhZW1vbi1zdG9wcGVkCiAgLS1jb25maXJtLXJlc3RvcmUKICAtLWFnZW50IEFHRU5UICAgICAgICAgdGhlIG1haWxib3ggdG8gcmViaW5kOiBhIGZ1bGwgaWQsIG9yIGEgdW5pcXVlIHByZWZpeAogICAgICAgICAgICAgICAgICAgICAgICBvZiA4IG9yIG1vcmUgY2hhcmFjdGVycwogIC0tcHJpbmNpcGFsIFBSSU5DSVBBTAogIC0tYmFuay11cmwgQkFOS19VUkwKICAtLXN0YXRlIFNUQVRFICAgICAgICAgTmV3IHByaXZhdGUgYWRhcHRlciBzdGF0ZSBmaWxlIG91dHNpZGUgdGhlIHJlcG9zaXRvcnkK",
    "stderr": "",
    "window": [
-    1793591753.0681155,
-    1793591753.5399985
+    1793599486.2408683,
+    1793599486.6872497
    ],
    "files": {
     "cwd": "dir"
    },
    "modes": {
-    "cwd": "0o775"
+    "cwd": "0o755"
    }
   },
   "recovery-default-on": {
@@ -28,16 +28,16 @@
    "stdout": "",
    "stderr": "Y29vcmRpbmF0aW9uIHJlY292ZXJ5OiBjb29yZGluYXRpb24gbXVzdCBiZSBkaXNhYmxlZCBpbiB0aGUgZGFlbW9uIGNvbmZpZ3VyYXRpb246IHNldCBjb29yZGluYXRpb24uZW5hYmxlZDogZmFsc2UK",
    "window": [
-    1793591753.540687,
-    1793591753.9957073
+    1793599486.6878161,
+    1793599487.13329
    ],
    "files": {
     "config.yaml": "file:bWVtb3J5OiB7cHJlc2V0OiBmbGF0fQo=",
     "cwd": "dir"
    },
    "modes": {
-    "config.yaml": "0o664",
-    "cwd": "0o775"
+    "config.yaml": "0o644",
+    "cwd": "0o755"
    }
   },
   "recovery-stop-required": {
@@ -47,16 +47,16 @@
    "stdout": "",
    "stderr": "Y29vcmRpbmF0aW9uIHJlY292ZXJ5OiBzdG9wIHRoZSBkYWVtb24gYW5kIGFkYXB0ZXJzLCB0aGVuIHBhc3MgLS1jb25maXJtLWRhZW1vbi1zdG9wcGVkCg==",
    "window": [
-    1793591753.996581,
-    1793591754.450677
+    1793599487.1338875,
+    1793599487.588715
    ],
    "files": {
     "config.yaml": "file:Y29vcmRpbmF0aW9uOgogIGVuYWJsZWQ6IGZhbHNlCiAgYWxsb3dlZF9wcmluY2lwYWxzOiBbYWxpY2UsIGRhZW1vbiwgbWFpbnRhaW5lcl0K",
     "cwd": "dir"
    },
    "modes": {
-    "config.yaml": "0o664",
-    "cwd": "0o775"
+    "config.yaml": "0o644",
+    "cwd": "0o755"
    }
   },
   "recovery-restore-required": {
@@ -66,16 +66,16 @@
    "stdout": "",
    "stderr": "Y29vcmRpbmF0aW9uIHJlY292ZXJ5OiByZXN0b3JlIHJlY292ZXJ5IHJldm9rZXMgZXZlcnkgaW5zdGFuY2UgY3JlZGVudGlhbDsgLS1jb25maXJtLXJlc3RvcmUgaXMgcmVxdWlyZWQK",
    "window": [
-    1793591754.4515023,
-    1793591754.9241188
+    1793599487.5892875,
+    1793599488.0326383
    ],
    "files": {
     "config.yaml": "file:Y29vcmRpbmF0aW9uOgogIGVuYWJsZWQ6IGZhbHNlCiAgYWxsb3dlZF9wcmluY2lwYWxzOiBbYWxpY2UsIGRhZW1vbiwgbWFpbnRhaW5lcl0K",
     "cwd": "dir"
    },
    "modes": {
-    "config.yaml": "0o664",
-    "cwd": "0o775"
+    "config.yaml": "0o644",
+    "cwd": "0o755"
    }
   },
   "recovery-no-automatic-database": {
@@ -85,16 +85,16 @@
    "stdout": "",
    "stderr": "Y29vcmRpbmF0aW9uIHJlY292ZXJ5OiBQU0VVRE9MSUZFX01DUF9EQVRBQkFTRV9VUkwgaXMgcmVxdWlyZWQ7IG5vIGRhdGFiYXNlIGlzIHN0YXJ0ZWQgYXV0b21hdGljYWxseQo=",
    "window": [
-    1793591754.9246988,
-    1793591755.4075823
+    1793599488.0331874,
+    1793599488.482442
    ],
    "files": {
     "config.yaml": "file:Y29vcmRpbmF0aW9uOgogIGVuYWJsZWQ6IGZhbHNlCiAgYWxsb3dlZF9wcmluY2lwYWxzOiBbYWxpY2UsIGRhZW1vbiwgbWFpbnRhaW5lcl0K",
     "cwd": "dir"
    },
    "modes": {
-    "config.yaml": "0o664",
-    "cwd": "0o775"
+    "config.yaml": "0o644",
+    "cwd": "0o755"
    }
   },
   "recovery-rebind-flags-refused": {
@@ -104,16 +104,16 @@
    "stdout": "",
    "stderr": "Y29vcmRpbmF0aW9uIHJlY292ZXJ5OiByZWJpbmQgcGFyYW1ldGVycyBjYW5ub3QgYmUgdXNlZCBmb3IgcmVjb3Zlcgo=",
    "window": [
-    1793591755.408209,
-    1793591755.8567746
+    1793599488.4830027,
+    1793599488.9323115
    ],
    "files": {
     "config.yaml": "file:Y29vcmRpbmF0aW9uOgogIGVuYWJsZWQ6IGZhbHNlCiAgYWxsb3dlZF9wcmluY2lwYWxzOiBbYWxpY2UsIGRhZW1vbiwgbWFpbnRhaW5lcl0K",
     "cwd": "dir"
    },
    "modes": {
-    "config.yaml": "0o664",
-    "cwd": "0o775"
+    "config.yaml": "0o644",
+    "cwd": "0o755"
    }
   },
   "rebind-existing-file": {
@@ -123,8 +123,8 @@
    "stdout": "",
    "stderr": "Y29vcmRpbmF0aW9uIHJlY292ZXJ5OiBzdGF0ZSBvdXRwdXQgbXVzdCBiZSBhIG5ldyBwcml2YXRlIGZpbGU7IGV4aXN0aW5nIGZpbGVzIGFyZSBuZXZlciByZXBsYWNlZAo=",
    "window": [
-    1793591755.85764,
-    1793591757.2290256
+    1793599488.9329197,
+    1793599490.2655845
    ],
    "files": {
     "agent.json": "file:dW5jaGFuZ2Vk",
@@ -132,9 +132,9 @@
     "cwd": "dir"
    },
    "modes": {
-    "agent.json": "0o664",
-    "config.yaml": "0o664",
-    "cwd": "0o775"
+    "agent.json": "0o644",
+    "config.yaml": "0o644",
+    "cwd": "0o755"
    }
   },
   "rebind-git-worktree-refused": {
@@ -144,8 +144,8 @@
    "stdout": "",
    "stderr": "Y29vcmRpbmF0aW9uIHJlY292ZXJ5OiBwcml2YXRlIHN0YXRlIG11c3QgYmUgb3V0c2lkZSBhIEdpdCByZXBvc2l0b3J5Cg==",
    "window": [
-    1793591757.2302456,
-    1793591757.6789317
+    1793599490.2662785,
+    1793599490.7171826
    ],
    "files": {
     "checkout": "dir",
@@ -154,10 +154,10 @@
     "checkout/.git": "file:Z2l0ZGlyOiBmaXh0dXJl"
    },
    "modes": {
-    "checkout": "0o775",
-    "checkout/.git": "0o664",
-    "config.yaml": "0o664",
-    "cwd": "0o775"
+    "checkout": "0o755",
+    "checkout/.git": "0o644",
+    "config.yaml": "0o644",
+    "cwd": "0o755"
    }
   },
   "rebind-no-database-keeps-reservation": {
@@ -167,8 +167,8 @@
    "stdout": "",
    "stderr": "Y29vcmRpbmF0aW9uIHJlY292ZXJ5OiBQU0VVRE9MSUZFX01DUF9EQVRBQkFTRV9VUkwgaXMgcmVxdWlyZWQ7IG5vIGRhdGFiYXNlIGlzIHN0YXJ0ZWQgYXV0b21hdGljYWxseQo=",
    "window": [
-    1793591757.67981,
-    1793591758.9919212
+    1793599490.7181215,
+    1793599491.991555
    ],
    "files": {
     "agent.json": "file:",
@@ -177,8 +177,8 @@
    },
    "modes": {
     "agent.json": "0o600",
-    "config.yaml": "0o664",
-    "cwd": "0o775"
+    "config.yaml": "0o644",
+    "cwd": "0o755"
    }
   }
  }

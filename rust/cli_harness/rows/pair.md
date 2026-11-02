@@ -92,8 +92,9 @@ Others:
 
 Both Python and Rust token verification refuse same-origin and cross-origin
 redirects, preserve the token for recovery, and record no redirected request.
-The plain-HTTP warning fixtures use the DNS-independent numeric origin `127.1`,
-which reaches the loopback fixture without passing either arm's strict loopback
+The plain-HTTP warning fixtures use the DNS-independent numeric origin `127.1`
+on Linux and the tested `localhost.` spelling on Windows, whose resolver rejects
+the numeric abbreviation. Both remain outside either arm's strict loopback
 classification; both cases must pair successfully and emit the warning.
 
 Both Parity lanes run the row live and against `goldens/pair.<os>.json`.
@@ -113,7 +114,7 @@ polling; test-login adds help while retaining its host-local login file.
 Linux native builds and the live differential rows passed, including the engine-selected transport and help cases. Native Windows contract tests passed; pairing interruption and backspace also passed both oracle and native console arms.
 The activated former deferral cases now compare the actual oracle outcome;
 their old case IDs remain stable. Linux goldens were re-recorded from the verified oracle tree at
-`2c770c4dab8dfaba058fc25d2f935bcdd10ffada` and replayed against the native candidate.
+`7dcd738fa736c15c111fd67c5ffb83ea3f158b91` and replayed against the native candidate.
 The corresponding Windows goldens also replayed successfully. Hosted stress
 remains a separate qualification step. This extension makes
 no claim about guided setup or lite storage.

@@ -7,7 +7,7 @@ Python, starts a daemon or PostgreSQL instance, or migrates a restored bank.
 The bank-free cases cover help, default-enabled coordination, both required
 confirmations, incompatible recover/rebind options, existing private files,
 Git worktree rejection, and retention of the reservation after a failed
-connection. Linux goldens were recorded from the verified oracle tree at `2c770c4d`
+connection. Linux goldens were recorded from the verified oracle tree at `7dcd738f`
 and all nine replayed successfully. No expectations come from the candidate.
 Both platform recordings come from the same bound oracle and replay successfully.
 
