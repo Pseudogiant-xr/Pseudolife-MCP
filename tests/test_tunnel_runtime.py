@@ -583,7 +583,7 @@ def test_root_run_refuses_a_chain_a_user_could_change_before_anything_starts(tmp
     monkeypatch.setattr(runtime, '_root_linux', lambda: True)
     monkeypatch.setattr(runtime, 'root_command_chain', lambda command, store: [launcher])
     _tree(monkeypatch, {'/': (0, DIR), '/opt': (0, DIR), '/opt/pl': (1000, DIR), '/opt/pl/bin': (0, DIR), launcher: (0, FILE)})
-    monkeypatch.setattr(runtime, 'stable_command', lambda: [launcher])
+    monkeypatch.setattr(runtime, 'stable_command', lambda saved=False: [launcher])
     monkeypatch.setattr(runtime, 'ensure_runtime', lambda *a, **k: pytest.fail('runtime prepared'))
     monkeypatch.setattr(runtime, 'snapshot_bridge', lambda *a, **k: pytest.fail('bridge frozen'))
     monkeypatch.setattr(runtime.subprocess, 'Popen', lambda *a, **k: pytest.fail('process started'))

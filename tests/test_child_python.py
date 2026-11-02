@@ -116,15 +116,18 @@ def test_python_310_says_nothing_without_a_package_in_the_working_directory(monk
     assert capsys.readouterr().err == ""
 
 
-def test_python_310_saved_commands_name_no_package(monkeypatch, tmp_path, capsys):
-    """A saved command (the scheduled update's, the tunnel service's) runs
-    later from the scheduler's working directory, not this one: naming the
-    package here would point at the wrong directory. An immediate spawn
-    afterwards still names it."""
-    from pseudolife_memory import tunnel_runtime, unattended_update
+def _python_310_in_an_older_checkout(monkeypatch, tmp_path):
+    """Python 3.10 with no installed launcher and no venv, run from a
+    directory holding another checkout's package: the tunnel and the
+    scheduled update fall back to ``python -m pseudolife_memory.cli``."""
+    from pseudolife_memory import tunnel_runtime, tunnel_service
     checkout = _decoy(tmp_path / "old-checkout")
+    python = tmp_path / "bin" / "python"
+    python.parent.mkdir()
+    python.write_text("interpreter", encoding="utf-8")
     monkeypatch.chdir(checkout)
     monkeypatch.setattr(child_python.sys, "version_info", (3, 10, 14))
+    monkeypatch.setattr(child_python.sys, "executable", str(python))
     monkeypatch.setattr(child_python, "_shadow_named", False)
     monkeypatch.setenv("PSEUDOLIFE_SHIM_LAUNCHER", str(tmp_path / "no-launcher"))
     monkeypatch.setenv("PSEUDOLIFE_SHIM_RUNTIMES", str(tmp_path / "rt"))
@@ -132,11 +135,51 @@ def test_python_310_saved_commands_name_no_package(monkeypatch, tmp_path, capsys
     monkeypatch.setattr(tunnel_runtime.shutil, "which", lambda name: None)
     monkeypatch.setattr(tunnel_runtime.sys, "base_prefix", tunnel_runtime.sys.prefix)
     monkeypatch.setattr(tunnel_runtime, "checked_path", lambda path: Path(path))
+    monkeypatch.setattr(tunnel_service, "checked_path", lambda path: Path(path))
+
+
+def test_python_310_saved_commands_name_no_package(monkeypatch, tmp_path, capsys):
+    """A saved command (the scheduled update's, the tunnel service's) runs
+    later from another working directory, not this one: naming the package
+    here would point at the wrong directory. An immediate spawn afterwards
+    still names it."""
+    from pseudolife_memory import tunnel_service, unattended_update
+    from tests.test_tunnel_runtime import _ready_profile
+    _python_310_in_an_older_checkout(monkeypatch, tmp_path)
+    store, profile = _ready_profile(tmp_path)
     assert unattended_update._command()[-4:] == ["-m", "pseudolife_memory.cli", "update", "--unattended"]
-    assert tunnel_runtime.stable_command()[-2:] == ["-m", "pseudolife_memory.cli"]
+    unit = tunnel_service.render_service(profile, store, ["pseudolife-mcp", "tunnel", "shim"], platform="linux")
+    assert "pseudolife_memory.cli" in unit
     assert capsys.readouterr().err == ""
     child_python.cli_argv("serve")
     assert len(capsys.readouterr().err.splitlines()) == 1
+
+
+def test_python_310_a_tunnel_started_now_names_the_package_once(monkeypatch, tmp_path, capsys):
+    """``tunnel start`` launches its supervisor at once from this working
+    directory, so the child may import the checkout there: say so."""
+    from pseudolife_memory import tunnel_runtime
+    from tests.test_tunnel_runtime import _ready_profile
+    _python_310_in_an_older_checkout(monkeypatch, tmp_path)
+    store, profile = _ready_profile(tmp_path)
+    launched = []
+
+    class Supervisor:
+        def poll(self):
+            return None
+
+    def popen(argv, **kwargs):
+        launched.append(argv)
+        return Supervisor()
+
+    monkeypatch.setattr(tunnel_runtime, "status_profile", lambda *a: {"running": False, "ready": True})
+    monkeypatch.setattr(tunnel_runtime, "_root_linux", lambda: False)
+    monkeypatch.setattr(tunnel_runtime, "ensure_runtime", lambda *a, **k: Path("unused"))
+    monkeypatch.setattr(tunnel_runtime.subprocess, "Popen", popen)
+    tunnel_runtime.start_profile(profile, store, ["pseudolife-mcp", "tunnel", "shim"])
+    assert launched and launched[0][1:4] == ["-m", "pseudolife_memory.cli", "tunnel"]
+    lines = capsys.readouterr().err.splitlines()
+    assert len(lines) == 1 and "pseudolife_memory" in lines[0]
 
 
 @needs_safe_path
