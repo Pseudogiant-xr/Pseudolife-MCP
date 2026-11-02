@@ -24,10 +24,14 @@ if [ "$action" = remove ]; then
     echo "Removed $name"
     exit 0
 fi
-for tool in systemctl ss curl cmp mktemp cp sha256sum; do
+for tool in systemctl ss curl cmp mktemp cp; do
     command -v "$tool" >/dev/null || { echo "native autostart requires $tool" >&2; exit 1; }
 done
 systemctl --user show-environment >/dev/null || { echo 'systemd user manager unavailable' >&2; exit 1; }
+if [ "$(systemctl --user show "$name" --property LoadState --value 2>/dev/null || true)" = masked ]; then
+    echo "unit $name is masked; run: systemctl --user unmask $name" >&2
+    exit 1
+fi
 # A waiting launcher and its runtime child belong to the same service cgroup.
 owned_by_unit() {
     local process_id=$1 hierarchy controllers group
@@ -52,15 +56,12 @@ if [ -n "$listeners" ]; then
     fi
 fi
 healthy_listener() {
-    local expected headers
-    expected="$(sha256sum < "$env_file")"
-    expected="${expected%% *}"
     unit_group="$(systemctl --user show "$name" --property ControlGroup --value)"
     for pid in $(socket_pids "$(ss -H -ltnp "sport = :$port")"); do
         if owned_by_unit "$pid" && [ "$(readlink "/proc/$pid/exe" 2>/dev/null || true)" = "$owner_exe" ] &&
-            headers="$(curl --silent --fail --max-time 2 --dump-header - --output /dev/null "http://$host:$port/health")"; then
-            headers="${headers//$'\r'/}"
-            if grep -qi "^x-pseudolife-config-sha256: $expected$" <<< "$headers"; then return 0; fi
+            curl --silent --fail --max-time 2 "http://$host:$port/health" >/dev/null &&
+            "$owner_exe" extractor-shim verify-settings "$pid" "${serve[@]:1}" >/dev/null 2>&1; then
+            return 0
         fi
     done
     return 1
@@ -102,7 +103,7 @@ unit_quote() {
     printf '\nRestart=on-failure\nRestartSec=60\nStandardOutput=null\nStandardError=journal\n\n[Install]\nWantedBy=default.target\n'
 } > "$desired"
 unchanged=0
-if [ "$had_config" = 1 ] && [ "$had_unit" = 1 ] && cmp -s "$config_backup" "$env_file" && cmp -s "$desired" "$unit" && healthy_listener; then
+if [ "$had_unit" = 1 ] && cmp -s "$desired" "$unit" && healthy_listener; then
     unchanged=1
     if ! systemctl --user is-enabled --quiet "$name"; then
         systemctl --user enable "$name" >/dev/null

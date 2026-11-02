@@ -6,6 +6,14 @@ $ownerExe = [string]$c.OwnerExe
 $kind = [string]$c.Kind
 $port = [int]$c.Port
 $name = [string]$c.Name
+function Format-ForeignCommand([string]$command) {
+    # Once a credential-like argument occurs, omit the remaining arguments;
+    # quoting and multi-token authorization values must not defeat redaction.
+    $sensitive = '(?i)(?:^|\s)["'']?(?:--?|/)?[\w-]*(?:token|password|secret|credential|api[-_]?key|authorization|cookie|encodedcommand)[\w-]*["'']?(?:\s|[:=])|\bBearer\s+'
+    $match = [regex]::Match($command, $sensitive)
+    if ($match.Success) { return $command.Substring(0, $match.Index) + ' [redacted sensitive arguments]' }
+    return $command
+}
 function Get-RegisteredInvocation($task) {
     foreach ($item in $task.Actions) {
         $exe = $item.Execute
@@ -122,7 +130,7 @@ foreach ($listener in $listeners) {
     if ($listener.OwningProcess -notin @($stale | ForEach-Object ProcessId)) {
         $conflict = Get-CimInstance Win32_Process -Filter "ProcessId = $($listener.OwningProcess)" -ErrorAction SilentlyContinue
         $image = if ($conflict.ExecutablePath) { $conflict.ExecutablePath } elseif ($conflict.Name) { $conflict.Name } else { '<unavailable>' }
-        $command = if ($conflict.CommandLine) { $conflict.CommandLine } else { '<unavailable>' }
+        $command = if ($conflict.CommandLine) { Format-ForeignCommand $conflict.CommandLine } else { '<unavailable>' }
         throw "port $port belongs to another process (pid $($listener.OwningProcess), image: $image, command: $command); choose --port or stop its owner"
     }
 }
@@ -156,11 +164,10 @@ function Test-HealthyListener {
         $owner = Get-CimInstance Win32_Process -Filter "ProcessId = $($candidate.OwningProcess)" -ErrorAction SilentlyContinue
         if ($owner -and $owner.ExecutablePath -eq $ownerExe -and $owner.CommandLine -match $nativePattern) {
             try {
-                $health = Invoke-WebRequest -UseBasicParsing -Uri "http://$($c.Host):$port/health" -TimeoutSec 2
-                $sha = [Security.Cryptography.SHA256]::Create()
-                try { $expected = -join ($sha.ComputeHash([IO.File]::ReadAllBytes($c.EnvFile)) | ForEach-Object { $_.ToString('x2') }) }
-                finally { $sha.Dispose() }
-                if ($health.Headers['X-Pseudolife-Config-SHA256'] -ne $expected) { return $false }
+                $null = Invoke-WebRequest -UseBasicParsing -Uri "http://$($c.Host):$port/health" -TimeoutSec 2
+                $verifyArgs = @('extractor-shim', 'verify-settings', [string]$candidate.OwningProcess) + @($c.ServeArgs | Select-Object -Skip 1)
+                & $ownerExe @verifyArgs *> $null
+                if ($LASTEXITCODE -ne 0) { return $false }
                 $script:verifiedPid = $candidate.OwningProcess
                 return $true
             } catch { }
@@ -179,11 +186,10 @@ try {
     $configArgs = @($c.ConfigArgs)
     & $native @configArgs | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'could not write native shim settings' }
-    $sameConfig = $configExisted -and [Convert]::ToBase64String([byte[]]$configBefore) -eq [Convert]::ToBase64String([IO.File]::ReadAllBytes($c.EnvFile))
     $sameTask = $registered -and @($registered.Actions).Count -eq 1 -and
         $registered.Actions[0].Execute -eq $action.Execute -and $registered.Actions[0].Arguments -eq $action.Arguments -and
         [string]$registered.Principal.LogonType -eq [string]$c.LogonType
-    $unchanged = $sameConfig -and $sameTask -and (Test-HealthyListener)
+    $unchanged = $sameTask -and (Test-HealthyListener)
     if (-not $unchanged) {
         $mutated = $true
         Stop-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue

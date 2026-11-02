@@ -60,12 +60,15 @@ elevated shell; its default principal is the current interactive user.
 Linux uses the Docker bridge address when available; `--host` overrides it.
 An unchanged, healthy registration is a quiet no-op. Installation verifies
 `/health`, and a failed replacement restores the prior registration and settings.
-Managed health responses include an `X-Pseudolife-Config-SHA256` header for the
-settings bytes loaded at startup; the JSON body is unchanged. Reinstallation
-compares that fingerprint with disk so prior configuration edits trigger a restart.
+Managed processes keep a local receipt in the user's private cache containing
+a hash of canonical effective shim settings. Reinstallation checks that receipt
+only after proving socket ownership; no settings fingerprint is served over HTTP.
+Unrelated environment keys and formatting do not trigger a restart.
 A disabled but healthy Linux service is re-enabled without restarting it.
+Masked Linux units are refused with the command to unmask them.
 If restoring a Windows password-logon task fails because its credentials are
 unavailable, the original failure is preserved alongside the remaining task state.
+Foreign-listener diagnostics redact credential-like command arguments.
 Removing an absent Linux registration needs no service manager or Python.
 
 The existing `install-*shim-autostart.sh` scripts accept `--native PATH`;

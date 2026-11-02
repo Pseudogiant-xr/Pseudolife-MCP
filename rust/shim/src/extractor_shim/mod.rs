@@ -275,9 +275,6 @@ impl Shim {
             .path_and_query()
             .map(|s| s.as_str())
             .unwrap_or("/");
-        let config_hash = (req.method() == hyper::Method::GET && path == "/health")
-            .then_some(self.config.config_hash.as_deref())
-            .flatten();
         let (status, body) = match (req.method().as_str(), path) {
             ("GET", "/health") => {
                 let (ok, body) = self.health().await;
@@ -328,13 +325,10 @@ impl Shim {
             _ => (404, json!({"error":"not found"})),
         };
         let body = json::dumps(&body, true);
-        let mut response = Response::builder()
+        let response = Response::builder()
             .status(status)
             .header("content-type", "application/json")
             .header("content-length", body.len());
-        if let Some(hash) = config_hash {
-            response = response.header("x-pseudolife-config-sha256", hash);
-        }
         Ok(response
             .body(Full::new(Bytes::from(body)))
             .expect("HTTP response"))
@@ -416,7 +410,7 @@ pub fn dispatch_if_requested(args: &[OsString]) {
     }
 }
 
-pub fn run(args: Vec<OsString>) -> u8 {
+pub fn run(mut args: Vec<OsString>) -> u8 {
     if args
         .first()
         .is_some_and(|a| a == "install-autostart" || a == "uninstall-autostart")
@@ -429,6 +423,22 @@ pub fn run(args: Vec<OsString>) -> u8 {
             }
         };
     }
+    // Local-only check, used after the registration helper proves socket
+    // ownership. Neither loaded settings nor their hash cross the HTTP API.
+    let verify_pid = if args.first().is_some_and(|a| a == "verify-settings") {
+        let pid = args
+            .get(1)
+            .and_then(|p| p.to_str())
+            .and_then(|p| p.parse::<u32>().ok());
+        let Some(pid) = pid.filter(|p| *p != 0) else {
+            eprintln!("extractor-shim: verify-settings needs a process ID and provider");
+            return 2;
+        };
+        args.drain(..2);
+        Some(pid)
+    } else {
+        None
+    };
     let config = match config::parse(args) {
         Ok(Some(c)) => c,
         Ok(None) => return 0,
@@ -437,6 +447,9 @@ pub fn run(args: Vec<OsString>) -> u8 {
             return 2;
         }
     };
+    if let Some(pid) = verify_pid {
+        return u8::from(config::verify_settings(&config, pid).is_err());
+    }
     let runtime = match tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -457,6 +470,11 @@ pub fn run(args: Vec<OsString>) -> u8 {
 }
 
 async fn serve(config: Config) -> Result<(), Box<dyn std::error::Error>> {
+    let _settings_receipt = if config.managed {
+        Some(config::SettingsReceipt::create(&config)?)
+    } else {
+        None
+    };
     let shim = Arc::new(Shim {
         config,
         calls: tokio::sync::Mutex::new(None),

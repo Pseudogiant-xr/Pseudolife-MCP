@@ -236,6 +236,10 @@ def proof(binary, root):
             repeated = checked(args, env=env)
             assert not repeated.stdout.strip(), repeated.stdout
             assert len(run.journal_rows(journal)) == initial_calls, "unchanged install restarted its provider"
+            with config_file.open("a") as settings:
+                settings.write("\nUNRELATED_PASSWORD=synthetic-only\n")
+            assert not checked(args, env=env).stdout.strip(), "unrelated setting forced reinstall"
+            assert len(run.journal_rows(journal)) == initial_calls, "unrelated settings restarted its provider"
             if not windows:
                 checked(["systemctl", "--user", "disable", registration])
                 checked(args, env=env)

@@ -76,3 +76,13 @@ if ($Case -eq 'PasswordRollback') {
     throw 'legacy registration was not recognized and restored'
 }
 Write-Output "$Case passed without real scheduler operations"
+$ast = [Management.Automation.Language.Parser]::ParseFile($Source, [ref]$null, [ref]$null)
+$formatter = $ast.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Format-ForeignCommand' }, $true)
+Invoke-Expression $formatter.Extent.Text
+foreach ($arguments in @('--token secret-value', '--api-key="secret-value"', '"--password" "secret-value with spaces"', '/credential:secret-value', '--header "Authorization: Bearer secret-value"', '-EncodedCommand secret-value')) {
+    $command = 'python.exe "fixture/claude_shim.py" --port 12345 ' + $arguments
+    $redacted = Format-ForeignCommand $command
+    if ($redacted -like '*secret-value*' -or $redacted -notlike '*claude_shim.py*' -or $redacted -notlike '*redacted*') { throw 'foreign credential argument was not safely redacted' }
+}
+if ((Format-ForeignCommand 'python.exe fixture/claude_shim.py --port 12345') -ne 'python.exe fixture/claude_shim.py --port 12345') { throw 'ordinary command detail was lost' }
+Write-Output 'Foreign command redaction passed'

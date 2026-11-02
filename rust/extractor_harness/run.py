@@ -385,6 +385,7 @@ def main():
         count += health_differential(args.binary.resolve(), root)
         count += lifecycle(args.binary.resolve(), root)
         count += configuration(args.binary.resolve(), root)
+        count += settings_privacy(args.binary.resolve(), root)
         count += native_regressions(args.binary.resolve(), root)
         if os.name == "nt":
             STUB_EXE = None
@@ -394,6 +395,36 @@ def main():
     if args.output:
         args.output.write_text(json.dumps(result, indent=2) + "\n")
     print(json.dumps(result))
+
+
+def settings_privacy(binary, root):
+    for kind in ("claude", "codex"):
+        directory = root / (kind + "-private-settings")
+        with server(binary, kind, directory, canned(kind, "OK"), managed=True) as (port, _, _, proc, _):
+            connection = http.client.HTTPConnection("127.0.0.1", port)
+            connection.request("GET", "/health")
+            response = connection.getresponse()
+            assert response.status == 200
+            assert not any("config" in key.lower() or "fingerprint" in key.lower() for key, _ in response.getheaders()), "settings leaked in health headers"
+            response.read()
+            connection.close()
+            env = dict(os.environ, HOME=str(directory / "home"), USERPROFILE=str(directory / "home"))
+            env.pop("XDG_CACHE_HOME", None)
+            env.pop("LOCALAPPDATA", None)
+            args = [str(binary), "extractor-shim", "verify-settings", str(proc.pid), kind, "--repo", str(directory)]
+            assert subprocess.run(args, env=env, capture_output=True).returncode == 0
+            settings = directory / "ops/.env"
+            original = settings.read_text()
+            # Unknown keys (including within this provider's prefix), another
+            # provider, ordering and quoting are not effective settings.
+            other = "CODEX" if kind == "claude" else "CLAUDE"
+            changed = original + f"\nUNRELATED_PASSWORD=synthetic-only\nPSEUDOLIFE_{kind.upper()}_SHIM_UNKNOWN=ignored\nPSEUDOLIFE_{other}_SHIM_MODEL=other-model\n"
+            changed = changed.replace("=127.0.0.1", " = '127.0.0.1'")
+            settings.write_text(changed)
+            assert subprocess.run(args, env=env, capture_output=True).returncode == 0, "unrelated settings changed the fingerprint"
+            settings.write_text(changed + f"\nPSEUDOLIFE_{kind.upper()}_SHIM_MODEL=changed-model\n")
+            assert subprocess.run(args, env=env, capture_output=True).returncode != 0, "effective settings edit was missed"
+    return 6
 
 
 def native_regressions(binary, root):
@@ -454,6 +485,15 @@ def native_regressions(binary, root):
         manager.chmod(0o700)
         result = subprocess.run([str(binary), "extractor-shim", "uninstall-autostart", "claude", "--name", unit.name], env=env, capture_output=True)
         assert result.returncode == 0 and b"manager unavailable" in result.stdout and unit.exists(), result
+        count += 1
+        for tool in ("ss", "curl", "cmp", "mktemp", "cp", "grep", "cut", "sort", "readlink", "mkdir", "rm", "sleep"):
+            (commands / tool).symlink_to(shutil.which(tool))
+        manager.write_text('#!/bin/sh\ncase "$*" in *LoadState*) echo masked;; esac\nexit 0\n')
+        result = subprocess.run([str(binary), "extractor-shim", "install-autostart", "claude",
+            "--env-file", str(target), "--cli", str(root / "claude-validation/stub"),
+            "--host", "127.0.0.1", "--port", str(unused_port()), "--startup-timeout", "1",
+            "--name", "r6-masked.service"], env=env, capture_output=True)
+        assert result.returncode != 0 and b"systemctl --user unmask r6-masked.service" in result.stderr and not target.exists(), result
         count += 1
     return count
 

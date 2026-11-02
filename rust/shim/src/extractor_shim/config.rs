@@ -82,7 +82,104 @@ pub(super) struct Config {
     pub emulate: bool,
     pub managed: bool,
     pub log: Option<PathBuf>,
-    pub config_hash: Option<String>,
+}
+
+impl Config {
+    // Serialize only values the shim actually uses, after defaults, overrides
+    // and path resolution. Unrelated ops/.env values must never enter this hash.
+    pub fn fingerprint(&self) -> String {
+        let values = serde_json::json!([
+            self.kind.name(),
+            self.cli,
+            self.cwd,
+            self.model,
+            self.host,
+            self.port,
+            self.timeout.as_nanos().to_string(),
+            self.ttl.as_nanos().to_string(),
+            self.effort,
+            self.system,
+            self.emulate,
+            self.managed,
+            self.log
+        ]);
+        format!(
+            "{:x}",
+            Sha256::digest(serde_json::to_vec(&values).expect("settings JSON"))
+        )
+    }
+}
+
+fn receipt_path(pid: u32) -> Result<PathBuf, String> {
+    Ok(dirs::cache_dir()
+        .or_else(|| dirs::home_dir().map(|home| home.join(".cache")))
+        .ok_or("user cache directory unavailable")?
+        .join("pseudolife-mcp/extractor-settings")
+        .join(format!("{pid}.sha256")))
+}
+
+pub(super) struct SettingsReceipt(PathBuf);
+impl SettingsReceipt {
+    pub fn create(config: &Config) -> Result<Self, String> {
+        let path = receipt_path(std::process::id())?;
+        let parent = path.parent().expect("receipt parent");
+        let mut builder = fs::DirBuilder::new();
+        builder.recursive(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::DirBuilderExt;
+            builder.mode(0o700);
+        }
+        builder.create(parent).map_err(|e| e.to_string())?;
+        // The directory is in the user's private cache (LocalAppData on
+        // Windows). Reject links and keep the Unix directory owner-only.
+        if fs::symlink_metadata(parent)
+            .map_err(|e| e.to_string())?
+            .file_type()
+            .is_symlink()
+        {
+            return Err("settings receipt directory must not be a symlink".into());
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(parent, fs::Permissions::from_mode(0o700))
+                .map_err(|e| e.to_string())?;
+        }
+        // A killed process can leave its receipt behind; replace only this
+        // process's PID entry, without following a stale symlink.
+        match fs::remove_file(&path) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e.to_string()),
+        }
+        let mut options = fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let mut file = options.open(&path).map_err(|e| e.to_string())?;
+        use std::io::Write;
+        file.write_all(config.fingerprint().as_bytes())
+            .map_err(|e| e.to_string())?;
+        Ok(Self(path))
+    }
+}
+impl Drop for SettingsReceipt {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.0);
+    }
+}
+
+pub(super) fn verify_settings(config: &Config, pid: u32) -> Result<(), String> {
+    let loaded = fs::read_to_string(receipt_path(pid)?).map_err(|e| e.to_string())?;
+    if loaded == config.fingerprint() {
+        Ok(())
+    } else {
+        Err("running shim settings differ from requested settings".into())
+    }
 }
 
 const BEGIN: &str = "# >>> pseudolife shim autostart (managed by ops/shim_autostart.py; edit values here, then: python ops/shim_autostart.py restart claude|codex) >>>";
@@ -121,13 +218,12 @@ fn env_line(line: &str) -> Option<(String, String)> {
     Some((key.into(), v))
 }
 
-fn env_file(path: &Path) -> (BTreeMap<String, String>, String) {
+fn env_file(path: &Path) -> BTreeMap<String, String> {
     let raw = fs::read(path).unwrap_or_default();
-    let values = String::from_utf8_lossy(&raw)
+    String::from_utf8_lossy(&raw)
         .lines()
         .filter_map(env_line)
-        .collect();
-    (values, format!("{:x}", Sha256::digest(&raw)))
+        .collect()
 }
 
 fn default_host(managed: bool) -> String {
@@ -407,11 +503,8 @@ pub(super) fn parse(args: Vec<OsString>) -> Result<Option<Config>, String> {
             "evals/prompts/sonnet_extractor_v5.md".into(),
         );
     }
-    let mut config_hash = None;
     if let Some(path) = &settings_path {
-        let (values, hash) = env_file(path);
-        config_hash = Some(hash);
-        for (k, v) in values {
+        for (k, v) in env_file(path) {
             if let Some(k) = k.strip_prefix(&kind.prefix())
                 && !v.is_empty()
             {
@@ -525,6 +618,5 @@ pub(super) fn parse(args: Vec<OsString>) -> Result<Option<Config>, String> {
         emulate,
         managed,
         log,
-        config_hash,
     }))
 }
