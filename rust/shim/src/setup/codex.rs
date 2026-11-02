@@ -226,8 +226,17 @@ fn foreign_authority<'a>(config: &'a Value, key: &str) -> Option<&'a Value> {
 
 fn authority_error(config: &Value, key: &str) -> SetupError {
     let location = foreign_authority(config, key)
-        .and_then(|layer| layer["name"]["file"].as_str())
-        .map(|file| format!("{:?}", Path::new(file)))
+        .and_then(|layer| {
+            layer["name"]["file"]
+                .as_str()
+                .map(PathBuf::from)
+                .or_else(|| {
+                    layer["name"]["dotCodexFolder"]
+                        .as_str()
+                        .map(|folder| Path::new(folder).join("config.toml"))
+                })
+        })
+        .map(|file| format!("{file:?}"))
         .unwrap_or_else(|| "the project or managed configuration layer".into());
     SetupError::detail(format!(
         "{key} comes from {location}; remove that key from its env or env_vars and retry. No connection settings were changed."
@@ -425,6 +434,7 @@ pub fn plan_registration(
 }
 
 /// A single scoped replacement, never an entire effective configuration.
+#[derive(Clone)]
 pub struct Edit {
     path: Vec<String>,
     value: Value,
@@ -448,6 +458,8 @@ pub struct WritePlan {
     home: PathBuf,
     user: UserConfig,
     edits: Vec<Edit>,
+    verification: Vec<Edit>,
+    server_before: Option<Map<String, Value>>,
     before: Vec<Value>,
     verify_no_spawn: bool,
 }
@@ -477,12 +489,14 @@ impl WritePlan {
     pub fn new(config: &Value, home: &Path, edits: Vec<Edit>) -> Result<Self, SetupError> {
         let user = user_config(config, home)?;
         let mut changed = Vec::new();
+        let mut verification = Vec::new();
         let mut before = Vec::new();
         for edit in edits {
             if edit.path.is_empty() {
                 return Err(SetupError("A scoped Codex setting is required."));
             }
             let original = edit.value_at(&user.config).cloned().unwrap_or(Value::Null);
+            verification.push(edit.clone());
             if original != edit.value {
                 before.push(original);
                 changed.push(edit);
@@ -494,6 +508,8 @@ impl WritePlan {
             home: config_path(home)?,
             user,
             edits: changed,
+            verification,
+            server_before: server(&config["config"]).cloned(),
             before,
             verify_no_spawn: false,
         })
@@ -518,9 +534,6 @@ impl WritePlan {
     }
 
     async fn verify_unchanged(&self, client: &mut impl Rpc, cwd: &Path) -> Result<(), SetupError> {
-        if !self.verify_no_spawn {
-            return Ok(());
-        }
         let current = client
             .rpc("config/read", json!({"includeLayers":true,"cwd":cwd}))
             .await?;
@@ -528,13 +541,64 @@ impl WritePlan {
         if user.version != self.user.version || user.config != self.user.config {
             return Err(CONFIG_CHANGED);
         }
-        if !server(&current["config"])
-            .and_then(|s| s.get("env"))
-            .and_then(|env| env.get(NO_SPAWN_KEY))
-            .and_then(Value::as_str)
-            .is_some_and(truthy)
+        if self.verify_no_spawn
+            && !server(&current["config"])
+                .and_then(|s| s.get("env"))
+                .and_then(|env| env.get(NO_SPAWN_KEY))
+                .and_then(Value::as_str)
+                .is_some_and(truthy)
         {
             return Err(authority_error(&current, NO_SPAWN_KEY));
+        }
+        if self.verification.is_empty() && server(&current["config"]) != self.server_before.as_ref()
+        {
+            return Err(SetupError(
+                "Codex's effective server changed during setup; review project or managed overrides and retry.",
+            ));
+        }
+        self.verify_effective(&current, &user)
+    }
+
+    fn verify_effective(&self, current: &Value, user: &UserConfig) -> Result<(), SetupError> {
+        let mut effective = current["config"].clone();
+        if self.verify_no_spawn {
+            let configured = server(&effective).ok_or(SetupError(
+                "Codex's effective server disappeared during setup.",
+            ))?;
+            if !configured
+                .get("env")
+                .and_then(|env| env.get(NO_SPAWN_KEY))
+                .and_then(Value::as_str)
+                .is_some_and(truthy)
+            {
+                return Err(SetupError(
+                    "Codex's effective no-spawn setting changed during setup; retry after reviewing the overriding layer.",
+                ));
+            }
+            // Equivalent truthy spellings are allowed while the user value
+            // must survive exactly; every other requested field is verified.
+            let user_value = server(&user.config)
+                .and_then(|s| s.get("env"))
+                .and_then(|env| env.get(NO_SPAWN_KEY))
+                .cloned();
+            if let Some(env) = effective["mcp_servers"][SERVER]["env"].as_object_mut() {
+                if let Some(value) = user_value {
+                    env.insert(NO_SPAWN_KEY.into(), value);
+                } else {
+                    env.remove(NO_SPAWN_KEY);
+                }
+            }
+        }
+        if self.verification.iter().any(|edit| {
+            !matches_write(
+                edit.value_at(&self.user.config).unwrap_or(&Value::Null),
+                &edit.value,
+                edit.value_at(&effective),
+            )
+        }) {
+            return Err(SetupError(
+                "Codex effective settings differ from the requested configuration; check project or managed overrides before reconnecting.",
+            ));
         }
         Ok(())
     }
@@ -604,28 +668,16 @@ impl WritePlan {
                 .to_owned(),
         );
         let result = async {
-            let current = client.rpc("config/read", json!({"includeLayers":true,"cwd":cwd})).await?;
-            let user=user_config(&current,&applied.plan.home)?;
-            if Some(&user.version)!=applied.written_version.as_ref() {return Err(ROLLBACK_UNVERIFIED);}
-            let mut effective = current["config"].clone();
-            if applied.plan.verify_no_spawn {
-                let configured = server(&effective).ok_or(SetupError("Codex's effective server disappeared during setup."))?;
-                if !configured.get("env").and_then(|env|env.get(NO_SPAWN_KEY)).and_then(Value::as_str).is_some_and(truthy) {
-                    return Err(SetupError("Codex's effective no-spawn setting changed during setup; retry after reviewing the overriding layer."));
-                }
-                // Equivalent truthy project spellings are acceptable, but the
-                // requested user value must also survive the versioned write.
-                let user_value = server(&user.config).and_then(|s| s.get("env")).and_then(|e| e.get(NO_SPAWN_KEY)).cloned();
-                if let Some(env) = effective["mcp_servers"][SERVER]["env"].as_object_mut() {
-                    if let Some(value) = user_value { env.insert(NO_SPAWN_KEY.into(), value); }
-                    else { env.remove(NO_SPAWN_KEY); }
-                }
+            let current = client
+                .rpc("config/read", json!({"includeLayers":true,"cwd":cwd}))
+                .await?;
+            let user = user_config(&current, &applied.plan.home)?;
+            if Some(&user.version) != applied.written_version.as_ref() {
+                return Err(ROLLBACK_UNVERIFIED);
             }
-            if applied.plan.edits.iter().zip(&applied.plan.before).any(|(edit,before)| !matches_write(before,&edit.value,edit.value_at(&effective))) {
-                return Err(SetupError("Codex saved settings but its effective configuration differs; check project or managed overrides before reconnecting."));
-            }
-            Ok(())
-        }.await;
+            applied.plan.verify_effective(&current, &user)
+        }
+        .await;
         if let Err(error) = result {
             applied
                 .rollback_locked(client, cwd)
