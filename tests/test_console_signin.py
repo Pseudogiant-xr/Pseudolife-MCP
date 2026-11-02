@@ -329,8 +329,10 @@ def test_a_link_for_a_loopback_console(snapshot, sessions, issued):
     assert out["url"] == f"{ORIGIN}/ui/#/signin?code={CODE}"
     assert (out["code"], out["origin"], out["principal"]) == (CODE, ORIGIN, "default")
     assert out["expires_in"] == 300
+    # Stored under the loopback key, so any loopback alias redeems it.
     assert issued["calls"] == [{"principal": "default", "source": "environment",
-                                "issuer": secret_sha256(ENV_TOKEN), "origin": ORIGIN}]
+                                "issuer": secret_sha256(ENV_TOKEN),
+                                "origin": "http://localhost:8765"}]
 
 
 def test_a_link_can_land_on_a_page(snapshot, sessions, issued):
@@ -436,7 +438,7 @@ def test_a_code_signs_the_browser_in_and_its_token_works_at_once(snapshot, sessi
     assert status == 200
     assert json.loads(out)["principal"] == "default" and json.loads(out)["session_id"] == "new1"
     assert redeemed["calls"][0]["code_hash"] == secret_sha256("ABCDEFGHJKMN")
-    assert redeemed["calls"][0]["origin"] == ORIGIN
+    assert redeemed["calls"][0]["origin"] == "http://localhost:8765"
     assert redeemed["calls"][0]["valid"] is True
     status, _ = call(app, "GET", "/api/stats", headers=_auth(SESSION_TOKEN))
     assert status == 200
@@ -452,7 +454,10 @@ def test_the_origin_must_be_a_browsers(snapshot, sessions, redeemed):
 def test_the_origin_is_compared_in_its_normal_form(snapshot, sessions, redeemed):
     app, _ = _app()
     assert _signin(app, origin="http://127.0.0.1:8765/")[0] == 200
-    assert redeemed["calls"][0]["origin"] == ORIGIN
+    assert _signin(app, origin="http://[::1]:8765")[0] == 200
+    assert _signin(app, origin="https://bank.example.com")[0] == 200
+    assert [c["origin"] for c in redeemed["calls"]] == [
+        "http://localhost:8765", "http://localhost:8765", "https://bank.example.com"]
 
 
 def test_only_a_json_body_is_read(snapshot, sessions, redeemed):
@@ -589,3 +594,104 @@ def test_health_says_which_sign_ins_the_daemon_offers(sessions):
     assert _build_health_payload(service, False)["console_signin"]["link"] is False
     service._db_url = None
     assert _build_health_payload(service, True)["console_signin"]["link"] is False
+
+
+# -- review follow-ups: the gate's other call sites, staleness, near misses -------
+
+def test_a_session_reads_the_board_view_and_the_maintainer_status(snapshot, sessions):
+    sessions.add(_session())
+    app, _ = _app()
+    for path, query in (("/api/agents", "view=coordination"), ("/api/maintainer/status", "")):
+        status, out = call(app, "GET", path, headers=_auth(SESSION_TOKEN), query=query)
+        assert status != 401, (path, out)
+        assert b'"unauthorized"' not in out and b"authentication_required" not in out, (path, out)
+
+
+def test_a_stale_session_view_is_503_through_the_gate(snapshot):
+    previous = installed_sessions()
+    snap = SessionSnapshot(max_age=60.0, clock=lambda: 0.0)
+    snap.refresh(lambda: ([_session()], []))
+    snap._clock = lambda: 1000.0
+    install_sessions(snap)
+    try:
+        app, _ = _app()
+        status, out = call(app, "GET", "/api/stats", headers=_auth(SESSION_TOKEN))
+    finally:
+        install_sessions(previous)
+    assert (status, json.loads(out)) == (503, {"error": "principals_unavailable"})
+
+
+def test_an_environment_session_resolves_while_the_stored_view_is_stale(sessions):
+    previous = installed_store()
+    store = PrincipalSnapshot(max_age=60.0, clock=lambda: 0.0)
+    store.refresh(lambda: ([], None))
+    store._clock = lambda: 1000.0
+    install_store(store)
+    try:
+        sessions.add(_session())
+        app, _ = _app()
+        status, _ = call(app, "GET", "/api/stats", headers=_auth(SESSION_TOKEN))
+    finally:
+        install_store(previous)
+    assert status == 200
+
+
+def test_a_session_a_paired_machine_issued_cannot_issue_either(snapshot, sessions):
+    _store_session(sessions, snapshot)
+    app, _ = _app()
+    status, out = call(app, "POST", "/api/console/link", headers=_auth(STORE_SESSION_TOKEN),
+                       body=json.dumps({"origin": ORIGIN}).encode())
+    assert status == 403 and json.loads(out)["error"] == "session_cannot_issue"
+
+
+@pytest.mark.parametrize("path", ["/mcp/", "/mcp/messages", "/api/coordination/send"])
+def test_near_miss_agent_paths_refuse_a_session(snapshot, sessions, path):
+    sessions.add(_session())
+    app, _ = _app()
+    status, _ = call(app, "POST", path, headers=_auth(SESSION_TOKEN), body=b"{}")
+    assert status == 401
+
+
+def test_a_stale_stored_view_at_redemption_is_unavailable_not_refused(sessions, monkeypatch):
+    previous = installed_store()
+    store = PrincipalSnapshot(max_age=60.0, clock=lambda: 0.0)
+    store.refresh(lambda: ([], None))
+    store._clock = lambda: 1000.0
+    install_store(store)
+
+    def fake(dsn, code_hash, token_hash, *, origin, label, still_valid):
+        still_valid("laptop", "store", secret_sha256(STORED_TOKEN))
+        raise AssertionError("still_valid should have raised")
+
+    monkeypatch.setattr(console_sessions, "redeem_code", fake)
+    try:
+        app, _ = _app()
+        status, out = _signin(app)
+    finally:
+        install_store(previous)
+    assert (status, json.loads(out)) == (503, {"error": "signin_unavailable"})
+
+
+def test_the_list_leaves_out_sessions_that_no_longer_resolve(snapshot, sessions, listed):
+    # s1's issuing environment token is gone (another token signed it in).
+    sessions.add(_session(issuer=secret_sha256("a-removed-token")))
+    _store_session(sessions, snapshot)
+    app, _ = _app()
+    status, out = call(app, "GET", "/api/console/sessions", headers=_auth(ENV_TOKEN))
+    assert [s["session_id"] for s in json.loads(out)["sessions"]] == ["s2"]
+
+
+def test_re_pairing_through_the_route_signs_the_old_tokens_session_out(snapshot, sessions,
+                                                                      monkeypatch):
+    _store_session(sessions, snapshot)
+    new = StoredPrincipal("laptop", secret_sha256("a-new-paired-token"), None, True, False)
+    monkeypatch.setattr("pseudolife_memory.principal_store.redeem",
+                        lambda dsn, code_hash, token_hash, *, excluded=(): new)
+    app, _ = _app()
+    status, _ = call(app, "GET", "/api/stats", headers=_auth(STORE_SESSION_TOKEN))
+    assert status == 200
+    status, _ = call(app, "POST", "/api/pair", headers=[JSON], body=json.dumps(
+        {"code": CODE, "token_sha256": secret_sha256("a-new-paired-token")}).encode())
+    assert status == 200
+    status, _ = call(app, "GET", "/api/stats", headers=_auth(STORE_SESSION_TOKEN))
+    assert status == 401

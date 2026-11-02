@@ -102,6 +102,19 @@ def normalize_origin(value) -> str | None:
     return f"{scheme}://{host}" + (f":{port}" if port is not None else "")
 
 
+def origin_key(origin: str) -> str:
+    """The form a code's origin is stored and compared in: a loopback
+    origin's host is ``localhost`` whichever alias names it (``127.0.0.1``,
+    ``[::1]``), so a code made through one redeems in a Console opened at
+    another. Safe because a page from any other site never sends a loopback
+    ``Origin``; scheme and port still have to match."""
+    parts = urlsplit(origin)
+    if (parts.hostname or "") in _LOOPBACK_HOSTS:
+        port = f":{parts.port}" if parts.port is not None else ""
+        return f"{parts.scheme}://localhost{port}"
+    return origin
+
+
 def is_loopback_origin(origin: str) -> bool:
     host = urlsplit(origin).hostname or ""
     return host in _LOOPBACK_HOSTS
@@ -201,6 +214,9 @@ class SessionSnapshot:
             for _seq, row in self._added.values():
                 merged[row.token_hash] = row
             self._by_hash = merged
+            live = {row.session_id for row in merged.values()}
+            # Uses of sessions that are gone have nothing left to extend.
+            self._used = {sid: t for sid, t in self._used.items() if sid in live}
             self.active_passkeys = frozenset(passkeys)
             self._loaded_at = started_at
 
@@ -236,6 +252,10 @@ class SessionSnapshot:
     def lookup(self, token_hash: str) -> ConsoleSession | None:
         with self._lock:
             return self._by_hash.get(token_hash)
+
+    def rows(self) -> list[ConsoleSession]:
+        with self._lock:
+            return list(self._by_hash.values())
 
     def last_used(self, row: ConsoleSession) -> float:
         with self._lock:
@@ -331,33 +351,42 @@ def resolve(auth_header: str | None, *, sessions: SessionSnapshot | None,
     if row is None:
         return None
     now = time.time() if now is None else now
+    if not still_resolves(row, sessions=sessions, env_issuers=env_issuers,
+                          env_principals=env_principals, store=store, now=now):
+        return None
+    sessions.note_use(row.session_id, now)
+    return SessionHit(row.principal, row.source, row)
+
+
+def still_resolves(row: ConsoleSession, *, sessions: SessionSnapshot, env_issuers: dict[str, str],
+                   env_principals, store, now: float) -> bool:
+    """Whether ``row`` still signs a browser in: both lifetimes, its issuer
+    and its principal (see :func:`resolve`). Raises
+    :class:`PrincipalsUnavailable` when that depends on a stale stored view."""
     if now >= row.expires_at or now >= row.created_at + SESSION_MAX_S:
-        return None
+        return False
     if now - sessions.last_used(row) > SESSION_IDLE_S:
-        return None
+        return False
     if row.method == METHOD_LINK:
         if row.source == SOURCE_ENVIRONMENT:
             if env_issuers.get(row.issuer) != row.principal:
-                return None
+                return False
         elif row.source == SOURCE_STORE:
             if store is None:
-                return None
+                return False
             if not store.available():
                 raise PrincipalsUnavailable()
             issuing = store.lookup(row.issuer)
             if issuing is None or issuing.principal != row.principal:
-                return None
+                return False
         else:
-            return None
+            return False
     elif row.method == METHOD_PASSKEY:
         if row.issuer not in sessions.active_passkeys:
-            return None
+            return False
     else:
-        return None
-    if not _principal_resolves(row.principal, row.source, env_principals, store):
-        return None
-    sessions.note_use(row.session_id, now)
-    return SessionHit(row.principal, row.source, row)
+        return False
+    return _principal_resolves(row.principal, row.source, env_principals, store)
 
 
 # -- the database side ---------------------------------------------------------
@@ -419,9 +448,15 @@ def issue_code(dsn: str, *, principal: str, source: str, issuer: str, origin: st
     from pseudolife_memory.principal_store import new_pairing_code
 
     with _connect(dsn, autocommit=False) as conn:
-        conn.execute("SET LOCAL statement_timeout = '5s'")
+        # For the whole connection: the prune commits before the insert.
+        conn.execute("SET statement_timeout = '5s'")
         conn.execute(f"DELETE FROM public.console_signin_codes "
                      f"WHERE expires_at < {_NOW} - %s", (CODE_KEEP_S,))
+        # Signed-out and expired sessions are kept a day for the record,
+        # then go, so the refresher's scan stays small.
+        conn.execute(f"DELETE FROM public.console_sessions "
+                     f"WHERE revoked_at < {_NOW} - %(keep)s OR expires_at < {_NOW} - %(keep)s",
+                     {"keep": CODE_KEEP_S})
         conn.commit()
         for _attempt in range(5):
             code = new_pairing_code()
@@ -563,6 +598,6 @@ __all__ = [
     "SESSION_MAX_S", "SessionHit", "SessionSnapshot", "bearer_hashes", "clean_label",
     "describe", "environment_issuers", "flush_uses", "install_sessions",
     "installed_sessions", "is_loopback_origin", "issue_code", "list_sessions",
-    "load_sessions", "normalize_origin", "redeem_code", "resolve",
+    "load_sessions", "normalize_origin", "origin_key", "redeem_code", "resolve", "still_resolves",
     "revoke_principal_sessions", "revoke_session", "valid_route_id", "with_last_use",
 ]

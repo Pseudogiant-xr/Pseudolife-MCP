@@ -57,6 +57,8 @@ _SIGNIN_BODY_LIMIT = 1024
 # session resolver at all.
 _SESSIONLESS_API_PATHS = frozenset({"/api/console/link", "/api/daemon-notice"})
 _CONSOLE_PREFIX = "/api/console/"
+_BANK_UNREACHABLE = ("the daemon could not reach its bank just now; try again in a minute, "
+                     "and if it keeps failing, check the daemon log")
 _TEXT_BODY_PATHS = {"/api/facts/set", "/api/consolidate", "/api/supersede"}
 # Routes that reconfigure the daemon or speak as it: an invited (stored)
 # principal is refused them (spec 2026-10-02, "What an invited principal
@@ -543,8 +545,11 @@ def build_console_app(
             return env_issuers.get(issuer) == principal
         if source == SOURCE_STORE:
             store = installed_store()
-            if store is None or not store.available():
+            if store is None:
                 return False
+            if not store.available():
+                # Unknown, not refused: the caller answers 503.
+                raise PrincipalsUnavailable()
             row = store.lookup(issuer)
             return row is not None and row.principal == principal
         return False
@@ -609,8 +614,13 @@ def build_console_app(
             row = await asyncio.get_running_loop().run_in_executor(
                 signin_gate.executor,
                 functools.partial(console_sessions.redeem_code, dsn, secret_sha256(code),
-                                  token_hash, origin=origin, label=label,
-                                  still_valid=_issuer_still_valid))
+                                  token_hash, origin=console_sessions.origin_key(origin),
+                                  label=label, still_valid=_issuer_still_valid))
+        except PrincipalsUnavailable:
+            # The issuing token could not be checked: nothing was spent.
+            signin_failures.refund(attempt)
+            await _send_json(send, 503, {"error": "signin_unavailable"})
+            return
         except Exception as exc:  # noqa: BLE001 - the outcome is unknown; the type only
             logger.error("console sign-in failed (%s)", type(exc).__name__)
             await _send_json(send, 503, {"error": "signin_unavailable"})
@@ -624,6 +634,21 @@ def build_console_app(
         sessions.add(row)
         await _send_json(send, 200, {"principal": row.principal, "session_id": row.session_id,
                                      "expires_at": row.expires_at})
+
+    def _dead_session_ids(sessions) -> set[str]:
+        """The ids of the sessions in the daemon's view that no longer
+        resolve; none when that cannot be told now (a stale view)."""
+        if not sessions.available():
+            return set()
+        import time as _time
+        now = _time.time()
+        try:
+            return {row.session_id for row in sessions.rows()
+                    if not console_sessions.still_resolves(
+                        row, sessions=sessions, env_issuers=env_issuers,
+                        env_principals=env_names, store=installed_store(), now=now)}
+        except PrincipalsUnavailable:
+            return set()
 
     async def _console_route(scope, send, method: str, path: str, body: dict,
                              principal: str, source: str | None,
@@ -670,9 +695,14 @@ def build_console_app(
                     principal=None if operator else principal))
             except Exception as exc:  # noqa: BLE001 - the type only
                 logger.error("console sessions: list failed (%s)", type(exc).__name__)
-                await _send_json(send, 503, {"error": "signin_unavailable"})
+                await _send_json(send, 503, {"error": "signin_unavailable",
+                                             "hint": _BANK_UNREACHABLE})
                 return
             rows = console_sessions.with_last_use(rows, sessions)
+            # A session whose issuer or principal is gone no longer signs
+            # anything in, though its row has not been revoked yet.
+            dead = _dead_session_ids(sessions)
+            rows = [r for r in rows if r["session_id"] not in dead]
             await _send_json(send, 200, {
                 "sessions": [{**r, "current": r["session_id"] == current} for r in rows],
                 "operator": operator, "available": True})
@@ -693,7 +723,8 @@ def build_console_app(
                     principal=None if operator else principal))
             except Exception as exc:  # noqa: BLE001 - the type only
                 logger.error("console sessions: revoke failed (%s)", type(exc).__name__)
-                await _send_json(send, 503, {"error": "signin_unavailable"})
+                await _send_json(send, 503, {"error": "signin_unavailable",
+                                             "hint": _BANK_UNREACHABLE})
                 return
             if revoked:
                 sessions.drop([session_id])
@@ -727,10 +758,12 @@ def build_console_app(
         else:
             await _send_json(send, 409, {
                 "error": "signin_origin_unsupported",
-                "hint": "a sign-in link opens the Console on the daemon's own machine "
-                        "(localhost) or at its HTTPS address: run `pseudolife-mcp console` "
-                        "on the daemon's host, or give the Console an HTTPS address with "
-                        "`pseudolife-mcp maintainer setup` there"})
+                "hint": f"without passkeys, a sign-in link opens the Console only on the "
+                        f"daemon's own machine, and {origin} is not a local address: on the "
+                        f"daemon's host run `pseudolife-mcp console` with "
+                        f"PSEUDOLIFE_MCP_DAEMON_URL set to its local address (such as "
+                        f"http://127.0.0.1:8765), or give the Console an HTTPS address with "
+                        f"`pseudolife-mcp maintainer setup` there"})
             return
         issuer = _issuing_hash(scope, principal, source)
         if issuer is None:
@@ -740,10 +773,11 @@ def build_console_app(
         try:
             issued = await loop.run_in_executor(None, functools.partial(
                 console_sessions.issue_code, dsn, principal=principal, source=source,
-                issuer=issuer, origin=stored))
+                issuer=issuer, origin=console_sessions.origin_key(stored)))
         except Exception as exc:  # noqa: BLE001 - the type only
             logger.error("console sign-in link failed (%s)", type(exc).__name__)
-            await _send_json(send, 503, {"error": "signin_unavailable"})
+            await _send_json(send, 503, {"error": "signin_unavailable",
+                                         "hint": _BANK_UNREACHABLE})
             return
         from pseudolife_memory.principals import format_pairing_code
         shown = format_pairing_code(issued["code"])

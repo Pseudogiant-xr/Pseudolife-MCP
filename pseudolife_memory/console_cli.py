@@ -54,8 +54,10 @@ _REFUSALS = {
     "signin_unavailable": None,
     "session_cannot_issue": None,
     "operator_principal_required": None,
-    "unauthorized": ("the daemon refused this machine's token: re-pair it (`pseudolife-mcp pair`) "
-                     "or set PSEUDOLIFE_MCP_TOKEN_FILE to a token the daemon accepts"),
+    "unauthorized": ("the daemon refused this machine's token: check that "
+                     "PSEUDOLIFE_MCP_TOKEN_FILE (or PSEUDOLIFE_MCP_TOKEN) holds the token this "
+                     "machine's clients use; a paired machine whose token was revoked pairs "
+                     "again with `pseudolife-mcp pair`"),
     "principals_unavailable": ("the daemon cannot check tokens right now (its bank is "
                                "unreachable); try again in a minute"),
 }
@@ -252,9 +254,22 @@ def _list(payload: dict, as_json: bool) -> int:
     return EXIT_OK
 
 
+def link_is_safe(url, origin) -> bool:
+    """Whether ``url`` is a Console sign-in link at ``origin``: the only
+    thing this command hands to the system browser, so an answer from
+    something else at the daemon's address cannot make it open a file or
+    another program's URL."""
+    origin = normalize_origin(origin)
+    if origin is None or not isinstance(url, str):
+        return False
+    if any(ord(ch) < 33 or ord(ch) == 127 for ch in url):
+        return False
+    return url.startswith(origin + "/ui/#/signin?code=")
+
+
 def _opened(payload: dict, args, environ) -> int:
     url, code = payload.get("url"), payload.get("code")
-    if not isinstance(url, str) or not isinstance(code, str):
+    if not isinstance(code, str) or not link_is_safe(url, payload.get("origin")):
         return _emit({"state": "refused", "error": "bad_answer"}, args.json,
                      "pseudolife-mcp console: the daemon's answer had no sign-in link",
                      EXIT_REFUSED)
@@ -268,7 +283,7 @@ def _opened(payload: dict, args, environ) -> int:
         print(json.dumps(out))
         return EXIT_OK
     minutes = max(1, int(payload.get("expires_in") or 300) // 60)
-    lead = ("Opened the Console in your browser, signed in." if opened
+    lead = ("Opened the Console in your browser: confirm the sign-in there." if opened
             else "Open this link to sign in to the Console:")
     print(lead)
     print(f"  {url}")

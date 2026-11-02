@@ -44,7 +44,7 @@ def test_it_asks_for_a_link_for_the_address_it_reached_and_opens_it(daemon, caps
                                 {"origin": "http://localhost:8765"})]
     assert daemon["opened"] == [LINK["url"]]
     out = capsys.readouterr().out
-    assert "signed in" in out and LINK["code"] in out and TOKEN not in out
+    assert "confirm the sign-in" in out and LINK["code"] in out and TOKEN not in out
 
 
 def test_no_open_only_prints(daemon, capsys):
@@ -131,3 +131,20 @@ def test_the_mode_is_dispatched():
     from pseudolife_memory import cli
     assert 'mode == "console"' in inspect.getsource(cli.main)
     assert "\n  console " in cli._USAGE
+
+
+@pytest.mark.parametrize("url", [
+    "file:///etc/passwd", "http://127.0.0.1:8765/ui/#/settings",
+    "http://127.0.0.1:8765.evil.example/ui/#/signin?code=X", "javascript:alert(1)",
+    "http://127.0.0.1:8765/ui/#/signin?code=X Y", None,
+])
+def test_only_a_sign_in_link_at_the_daemons_origin_is_opened(daemon, url):
+    daemon["answer"] = (200, {**LINK, "url": url})
+    assert console_cli.main([], environ=ENV) == 4
+    assert daemon["opened"] == []
+
+
+def test_the_daemons_bank_problem_is_named(daemon, capsys):
+    daemon["answer"] = (503, {"error": "signin_unavailable", "hint": "could not reach its bank"})
+    assert console_cli.main([], environ=ENV) == 4
+    assert "could not reach its bank" in capsys.readouterr().err

@@ -672,6 +672,12 @@ def create_invite(conn, name: str, *, tier=KEEP, board=KEEP, owned=KEEP, ttl_sec
                          WHERE principal = %(name)s
                      RETURNING code_expires_at, tier, board, {OWNED_SQL}
                         """, params).fetchone()
+                    if reset:
+                        # v59: a revoked name starts with no Console sessions,
+                        # even ones its revocation missed (the psql path).
+                        from pseudolife_memory.console_sessions import (
+                            revoke_principal_sessions)
+                        revoke_principal_sessions(conn, name)
         except psycopg.errors.UniqueViolation:
             continue    # a code-hash collision: draw again
         return {"code": code, "expires_at": row[0], "state": state, "tier": row[1],

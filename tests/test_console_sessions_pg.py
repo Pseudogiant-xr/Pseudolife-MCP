@@ -169,3 +169,21 @@ def test_spent_codes_are_pruned_after_a_day(db, pg_url):
     db.execute("UPDATE console_signin_codes SET expires_at = expires_at - 2 * 86400")
     _issue(pg_url)
     assert db.execute("SELECT count(*) FROM console_signin_codes").fetchone()[0] == 1
+
+
+def test_re_inviting_a_revoked_name_leaves_no_session_behind(db, pg_url):
+    store.create_invite(db, "laptop", tier=None, board=True, ttl_seconds=900, replace=False)
+    session = _redeem(pg_url, _issue(pg_url, principal="laptop", source="store")["code"])
+    # A revocation that missed its sessions (the psql path revokes the row only).
+    db.execute("UPDATE principals SET revoked_at = 1 WHERE principal = 'laptop'")
+    assert [r.session_id for r in cs.load_sessions(db)[0]] == [session.session_id]
+    store.create_invite(db, "laptop", tier=None, board=True, ttl_seconds=900, replace=False)
+    assert cs.load_sessions(db)[0] == []
+
+
+def test_dead_sessions_are_pruned_after_a_day(db, pg_url):
+    session = _redeem(pg_url, _issue(pg_url)["code"])
+    cs.revoke_session(pg_url, session.session_id)
+    db.execute("UPDATE console_sessions SET revoked_at = revoked_at - 2 * 86400")
+    _issue(pg_url)
+    assert db.execute("SELECT count(*) FROM console_sessions").fetchone()[0] == 0
