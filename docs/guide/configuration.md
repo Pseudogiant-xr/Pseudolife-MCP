@@ -211,7 +211,8 @@ principals that are someone else's rather than the bank owner's. Every
 principal is the owner's unless it says otherwise: the `PSEUDOLIFE_MCP_TOKENS`
 names and `default` (for `PSEUDOLIFE_MCP_TOKEN`) unless listed here, and
 every machine invited with `pseudolife-mcp invite` unless it was invited with
-`--someone-else`. A Console holding an owner principal's token shows the
+`--someone-else` (a re-invite keeps what the name was; `invite <name> --mine`
+undoes a mistaken `--someone-else`). A Console holding an owner principal's token shows the
 board mail of all the owner's principals (see
 [whose mail the Console's Board shows](#whose-mail-the-consoles-board-shows)).
 List a name here when its token belongs to someone else: before `invite`
@@ -998,7 +999,8 @@ timeline follow the principal of the token the Console uses (schema v59).
 When that principal is the bank owner's, they cover every principal of the
 owner's: the environment principals not listed in
 `coordination.not_owner_principals`, every invited machine not invited with
-`pseudolife-mcp invite --someone-else` (and not revoked), and passkey-signed
+`pseudolife-mcp invite --someone-else` (and not revoked; `--mine` undoes
+that), and passkey-signed
 maintainer mail. Any other principal sees its own mail only. The timeline
 shows who mailed whom and when, the wake decision and the delivery path,
 never a message body, and holds the newest 100 events across those
@@ -1009,7 +1011,7 @@ This widens what a token can read: any token of the owner's, on any of the
 owner's machines, can read the board metadata of every one of the owner's
 sessions through `GET /api/agents?view=coordination`. Those tokens already
 read and write the whole bank, so the widening is of mail metadata, not of
-content. The Rust daemon still shows the token's own principal only.
+content.
 
 ### Maintainer messages and roles from the Console
 

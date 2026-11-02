@@ -1277,23 +1277,23 @@ def audit_events(conn, *, project=None, task=None, agent_id=None, since=None, un
 
 # The Console's board timeline (``console_snapshot``): the newest events a
 # scope of principals may see, 100 shown and one more to say the list was
-# cut. Every branch is bounded per principal or per agent, so the cost
-# follows the scope's size, not the retained log's (spec 2026-11-02,
-# section 2). A design bound, not a measurement.
+# cut (spec 2026-11-02, section 2). A design bound, not a measurement.
 CONSOLE_EVENTS_CAP = 101
 # Rewritten for v59's owner scope, which may hold several principals:
 # * ``scope`` is the principal array; ``scope_agents`` every agent row
 #   registered under one of them.
-# * ``visible_mail``: per scope principal its newest ``cap`` sends
-#   (coordination_events_send_principal_idx), and per scope agent the
-#   newest ``cap`` sends addressed to it (send_recipient_idx). Bounded, so
-#   an owner scope never gathers every send in the retention window. For
-#   one principal it matches the unbounded pre-v59 set wherever a row can
-#   still reach the page: a send older than ``cap`` newer sends of the same
-#   sender or to the same recipient is below ``cap`` newer candidates. Only
-#   a later event of such an old message carrying someone else's principal
-#   (an outside recipient's read or ack, or the daemon's expiry) can drop
-#   out of the page.
+# * ``visible_mail``: per scope agent its newest ``cap`` sends
+#   (coordination_events_send_sender_idx) and its newest ``cap`` received
+#   sends (send_recipient_idx). What is bounded is each agent's share, not
+#   the set: it holds at most 2 x ``cap`` messages per scope agent, so on a
+#   board where few agents pass the cap it can still hold most retained
+#   sends from and to the scope's agents. For one principal it matches the
+#   unbounded pre-v59 set wherever a row can still reach the page: a send
+#   older than ``cap`` newer sends of the same agent, or to the same agent,
+#   is below ``cap`` newer candidates. Only a later event of such an old
+#   message carrying someone else's principal (an outside recipient's read
+#   or ack, or the daemon's expiry) drops out of the page, and so do those
+#   of mail whose sending agent's row prune has removed.
 # * ``candidates``: (1) per scope principal its newest ``cap`` events
 #   through LATERAL on coordination_events_principal_idx, merged by seq
 #   (``principal = ANY(...) ORDER BY principal DESC, seq DESC`` would
@@ -1305,17 +1305,20 @@ CONSOLE_EVENTS_CAP = 101
 # equality and ``ORDER BY seq`` alone the planner walked the primary key
 # backwards, filtering every newer row (6,004 on a 6,000-send fixture,
 # tests/test_coordination_console.py). The detail and expired-count
-# projection is unchanged from before v59.
+# projection is unchanged from before v59. The Rust daemon runs the same
+# text (rust/daemon/src/board/console_timeline.sql, ``$1`` the scope and
+# ``$2`` the cap), pinned equal by tests/test_coordination_console.py.
 _CONSOLE_KINDS = "('send','read','ack','attempt','served','woke','lease_expire')"
 CONSOLE_TIMELINE_SQL = (
     "WITH scope AS (SELECT DISTINCT unnest(%(scope)s::text[]) AS principal), "
-    "scope_agents AS (SELECT a.agent_id FROM coordination_agents a "
+    "scope_agents AS (SELECT a.agent_id,a.principal FROM coordination_agents a "
     "WHERE a.principal=ANY(%(scope)s::text[])), "
     "visible_mail AS MATERIALIZED ("
-    "SELECT e.message_id FROM scope s CROSS JOIN LATERAL "
+    "SELECT e.message_id FROM scope_agents a CROSS JOIN LATERAL "
     "(SELECT message_id FROM coordination_events WHERE event='send' "
-    "AND principal>=s.principal AND principal<=s.principal "
-    "ORDER BY principal DESC,seq DESC LIMIT %(cap)s) e UNION "
+    "AND agent_id>=a.agent_id AND agent_id<=a.agent_id "
+    "AND principal>=a.principal AND principal<=a.principal "
+    "ORDER BY agent_id DESC,principal DESC,seq DESC LIMIT %(cap)s) e UNION "
     "SELECT e.message_id FROM scope_agents a CROSS JOIN LATERAL "
     "(SELECT message_id FROM coordination_events WHERE event='send' "
     "AND recipient_agent_id>=a.agent_id AND recipient_agent_id<=a.agent_id "

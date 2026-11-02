@@ -1,7 +1,8 @@
 """``pseudolife-mcp invite``: give another machine its own identity on this bank.
 
     pseudolife-mcp invite <name> [--tier TIER] [--board | --no-board] [--expires 15m]
-                                 [--someone-else] [--replace] [--url URL] [--port 8765]
+                                 [--someone-else | --mine] [--replace] [--url URL]
+                                 [--port 8765]
                                  [--bank FP] [--json]
     pseudolife-mcp invite --list [--bank FP] [--json]   (with last seen, and refused tokens)
     pseudolife-mcp invite --revoke <name> [--yes] [--bank FP] [--json]
@@ -16,7 +17,8 @@ which mints the bearer token there and registers only its SHA-256: no
 token ever leaves that machine, and no daemon restart is needed. Only the
 code's SHA-256 is stored. An invited machine is the bank owner's (schema
 v59: the owner's Console shows its board mail) unless ``--someone-else``
-says it is not; a re-invite keeps what the name was.
+says it is not; a re-invite keeps what the name was, and ``--mine`` undoes
+a mistaken ``--someone-else``.
 
 Where it runs: with ``PSEUDOLIFE_MCP_DATABASE_URL`` set, or the lite
 tier's embedded Postgres found (as ``export`` finds it), here. Otherwise, on
@@ -385,7 +387,7 @@ def _invite(args, report: _Report, store, conn) -> int:
     created = store.create_invite(conn, args.name,
                                   tier=store.KEEP if args.tier is None else args.tier,
                                   board=store.KEEP if args.board is None else args.board,
-                                  owned=False if args.someone_else else store.KEEP,
+                                  owned=store.KEEP if args.owned is None else args.owned,
                                   ttl_seconds=args.expires, replace=args.replace)
     code = format_pairing_code(created["code"])
     url = args.url or exposed_url(args.port) or URL_PLACEHOLDER
@@ -409,7 +411,7 @@ def _invite(args, report: _Report, store, conn) -> int:
                     "<daemon-url> (`pseudolife-mcp expose tailscale` exposes it), or pass --url")
     if note:
         report.note(note)
-    if created["owned"] and not args.someone_else:
+    if created["owned"] and args.owned is None:
         report.note("for a machine that is not yours, add --someone-else")
     report.note("an invited machine can read and write the whole bank and use the agent board, "
                 "but not change the daemon's configuration")
@@ -474,8 +476,8 @@ def _forward(args) -> list[str]:
         if args.board is not None:
             out.append("--board" if args.board else "--no-board")
         out += ["--expires", f"{args.expires}s"]
-        if args.someone_else:
-            out.append("--someone-else")
+        if args.owned is not None:
+            out.append("--mine" if args.owned else "--someone-else")
         if args.replace:
             out.append("--replace")
         out += ["--url", args.url or exposed_url(args.port) or URL_PLACEHOLDER]
@@ -586,9 +588,13 @@ def _parser() -> argparse.ArgumentParser:
                        help="do not admit it to the agent board")
     parser.add_argument("--expires", type=_expires, default=15 * 60,
                         help="how long the code lives: 15m (default), at most 24h")
-    parser.add_argument("--someone-else", dest="someone_else", action="store_true",
-                        help="the machine is not yours: the bank owner's Console does not show "
-                             "its board mail (a re-invite keeps what the name was)")
+    owner = parser.add_mutually_exclusive_group()
+    owner.add_argument("--someone-else", dest="owned", action="store_const", const=False,
+                       default=None,
+                       help="the machine is not yours: the bank owner's Console does not show "
+                            "its board mail (a re-invite keeps what the name was)")
+    owner.add_argument("--mine", dest="owned", action="store_const", const=True,
+                       help="the machine is yours (a new name's default; undoes --someone-else)")
     parser.add_argument("--replace", action="store_true",
                         help="give a paired principal a new code (its token works until redeemed)")
     parser.add_argument("--url", help="the daemon URL to print (default: expose status)")

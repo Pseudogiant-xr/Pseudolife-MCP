@@ -506,6 +506,19 @@ def redeem(dsn: str, code_hash: str, token_hash: str, *,
 
 # -- invite's operations (out of process, on the daemon host) -------------------
 
+#: The refusal of ``--someone-else`` / ``--mine`` on a bank before v59.
+OWNED_NEEDS_V59 = ("--someone-else and --mine need schema v59, and this bank is older: update "
+                   "the daemon to schema 59 (`pseudolife-mcp update`) and let it start, then "
+                   "re-run")
+HAS_OWNED_SQL = ("SELECT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = "
+                 "to_regclass('public.principals') AND attname = 'owned' AND attnum > 0 "
+                 "AND NOT attisdropped)")
+
+
+def has_owned_column(conn) -> bool:
+    """Whether ``principals`` has v59's ``owned`` column."""
+    return bool(conn.execute(HAS_OWNED_SQL).fetchone()[0])
+
 class InviteRefused(Exception):
     """An invite the table's state refuses; the message is for the operator."""
 
@@ -530,9 +543,13 @@ def create_invite(conn, name: str, *, tier=KEEP, board=KEEP, owned=KEEP, ttl_sec
     until the new code is redeemed. A revoked name is reset (token and
     revocation cleared). An existing row keeps its tier, board access and
     ownership (v59: ``owned`` false is someone else's machine) unless they
-    are given."""
+    are given. A bank before v59 takes an invite that leaves ownership as
+    it is (every row there is the owner's); one that sets it is refused
+    before anything is written."""
     import psycopg
 
+    if owned is not KEEP and not has_owned_column(conn):
+        raise InviteRefused(OWNED_NEEDS_V59)
     for _attempt in range(5):
         code = new_pairing_code()
         code_hash = secret_sha256(code)
@@ -547,14 +564,18 @@ def create_invite(conn, name: str, *, tier=KEEP, board=KEEP, owned=KEEP, ttl_sec
                           "owned": True if owned is KEEP else bool(owned)}
                 if existing is None:
                     state = "new"
+                    # Ownership left as it is takes the column's default
+                    # (TRUE), so the statement also fits a bank before v59.
+                    column, value = ((", owned", ", %(owned)s") if owned is not KEEP
+                                     else ("", ""))
                     row = conn.execute(
                         f"""
-                        INSERT INTO public.principals
-                            (principal, tier, board, owned, code_hash, code_expires_at,
+                        INSERT INTO public.principals AS p
+                            (principal, tier, board{column}, code_hash, code_expires_at,
                              created_at)
-                        VALUES (%(name)s, %(tier)s, %(board)s, %(owned)s, %(code)s,
+                        VALUES (%(name)s, %(tier)s, %(board)s{value}, %(code)s,
                                 {_NOW} + %(ttl)s, {_NOW})
-                        RETURNING code_expires_at, tier, board, owned
+                        RETURNING code_expires_at, tier, board, {OWNED_SQL}
                         """, params).fetchone()
                 else:
                     paired, revoked = existing
@@ -572,11 +593,11 @@ def create_invite(conn, name: str, *, tier=KEEP, board=KEEP, owned=KEEP, ttl_sec
                                       ", owned = %(owned)s" if owned is not KEEP else ""]))
                     row = conn.execute(
                         f"""
-                        UPDATE public.principals
+                        UPDATE public.principals p
                            SET code_hash = %(code)s, code_expires_at = {_NOW} + %(ttl)s,
                                paired_code_hash = NULL{given}{reset}
                          WHERE principal = %(name)s
-                     RETURNING code_expires_at, tier, board, owned
+                     RETURNING code_expires_at, tier, board, {OWNED_SQL}
                         """, params).fetchone()
         except psycopg.errors.UniqueViolation:
             continue    # a code-hash collision: draw again

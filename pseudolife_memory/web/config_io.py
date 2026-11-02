@@ -915,6 +915,11 @@ def _write_config_locked(service: Any, patch: dict[str, Any]) -> dict[str, Any]:
         folded = str(path).strip().casefold()
         if folded == "coordination.maintainer" or folded.startswith("coordination.maintainer."):
             raise ValueError("config_protected")
+        # v59: whose principals are the owner's decides whose board mail an
+        # owner's Console reads; config.yaml on the daemon host only.
+        if (folded == "coordination.not_owner_principals"
+                or folded.startswith("coordination.not_owner_principals.")):
+            raise ValueError("config_protected")
     coerced: dict[str, Any] = {}
     for path, raw in patch.items():
         knob = _KNOB_BY_PATH.get(path)

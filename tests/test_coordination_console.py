@@ -373,3 +373,94 @@ def test_an_owner_scope_takes_the_newest_events_across_its_principals(store):
     assert [e["seq"] for e in result["events"]] == expected
     assert result["events_truncated"]
     assert {e["agent_id"] for e in result["events"]} == {a["agent_id"], b["agent_id"]}
+
+
+def _insert_events(store, rows):
+    """Append synthetic audit rows after the current head (the snapshot
+    reads them; the hash chain is not under test here)."""
+    base = store.storage.conn.execute(
+        "SELECT coalesce(max(seq),0) FROM coordination_events").fetchone()[0]
+    for n, (event, agent, principal, recipient, message) in enumerate(rows, start=1):
+        store.storage.conn.execute(
+            "INSERT INTO coordination_events (seq,event,actor,principal,agent_id,"
+            "recipient_agent_id,message_id,payload,created_at,prev_hash,hash) "
+            "VALUES (%s,%s,'agent',%s,%s,%s,%s,'{}',%s,'','')",
+            (base + n, event, principal, agent, recipient, message, 2000.0 + n))
+
+
+def _busy_board(store):
+    """alice's agent sends 150 messages to carol's and receives 150 from
+    it, past the per-agent cap on both sides; then carol acks alice's
+    oldest message and alice acks carol's oldest, both after everything."""
+    a, c = store.register("alice"), store.register("carol")
+    rows = [("send", a["agent_id"], "alice", c["agent_id"], f"out-{n}") for n in range(150)]
+    rows += [("send", c["agent_id"], "carol", a["agent_id"], f"in-{n}") for n in range(150)]
+    rows += [("ack", c["agent_id"], "carol", c["agent_id"], "out-0"),
+             ("ack", a["agent_id"], "alice", a["agent_id"], "in-0")]
+    _insert_events(store, rows)
+    return a, c
+
+
+def test_past_the_cap_only_a_late_outside_follow_up_of_old_mail_drops_out(store):
+    """The documented exception, pinned so it stays deliberate: carol's
+    late ack of a message older than the 101 newest sends of alice's agent
+    drops out of alice's page, which the unbounded pre-v59 query showed;
+    alice's own late ack (her principal's events) and everything else
+    stays."""
+    _busy_board(store)
+    result = store.console_snapshot("alice")
+    reference, _truncated, _pending = _reference(store, "alice", result["agents"])
+    late = ("ack", "out-0")
+    assert late in {(e["event"], e["message_id"]) for e in reference}
+    assert late not in {(e["event"], e["message_id"]) for e in result["events"]}
+    assert ("ack", "in-0") in {(e["event"], e["message_id"]) for e in result["events"]}
+    assert [e for e in reference if (e["event"], e["message_id"]) != late] == \
+        result["events"][:len(reference) - 1]
+
+
+def test_visible_mail_is_capped_per_agent(store):
+    """300 sends from and to alice's one agent: the visible-mail set holds
+    at most the cap on each side. Without either LIMIT it would hold more."""
+    from pseudolife_memory.storage.coordination import CONSOLE_EVENTS_CAP, CONSOLE_TIMELINE_SQL
+    _busy_board(store)
+    plan = store.storage.conn.execute(
+        "EXPLAIN (ANALYZE, FORMAT JSON) " + CONSOLE_TIMELINE_SQL,
+        {"scope": ["alice"], "cap": CONSOLE_EVENTS_CAP}).fetchone()[0]
+
+    def nodes(node):
+        if isinstance(node, dict):
+            yield node
+            for value in node.values():
+                yield from nodes(value)
+        elif isinstance(node, list):
+            for value in node:
+                yield from nodes(value)
+    visible = [n for n in nodes(plan) if n.get("Subplan Name") == "CTE visible_mail"]
+    assert len(visible) == 1
+    held = visible[0]["Actual Rows"] * visible[0]["Actual Loops"]
+    assert 0 < held <= 2 * CONSOLE_EVENTS_CAP, held
+
+
+def test_the_rust_daemon_runs_the_same_timeline_sql():
+    from pathlib import Path
+    from pseudolife_memory.storage.coordination import CONSOLE_TIMELINE_SQL
+    shared = Path(__file__).resolve().parents[1] / "rust/daemon/src/board/console_timeline.sql"
+    assert shared.read_text(encoding="utf-8").strip() == (
+        CONSOLE_TIMELINE_SQL.replace("%(scope)s", "$1").replace("%(cap)s", "$2"))
+
+
+def test_the_cap_is_per_agent_so_a_principal_with_two_busy_agents_matches_pre_v59(store):
+    """alice's two agents send 80 each (160 by the principal, under the
+    cap per agent): carol's late ack of the oldest still shows, as before
+    v59. A cap per sending principal would have dropped it."""
+    a1, a2, c = store.register("alice"), store.register("alice"), store.register("carol")
+    rows = []
+    for n in range(80):
+        rows += [("send", a1["agent_id"], "alice", c["agent_id"], f"one-{n}"),
+                 ("send", a2["agent_id"], "alice", c["agent_id"], f"two-{n}")]
+    rows.append(("ack", c["agent_id"], "carol", c["agent_id"], "one-0"))
+    _insert_events(store, rows)
+    result = store.console_snapshot("alice")
+    reference, truncated, _pending = _reference(store, "alice", result["agents"])
+    assert ("ack", "one-0") in {(e["event"], e["message_id"]) for e in result["events"]}
+    assert result["events"] == reference and result["events_truncated"] == truncated

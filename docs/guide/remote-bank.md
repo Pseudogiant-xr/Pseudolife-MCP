@@ -254,7 +254,9 @@ The rules:
   not yours: the bank owner's Console then does not show its board mail
   (schema v59; every other invited machine is the owner's, and so are the
   `PSEUDOLIFE_MCP_TOKENS` principals unless `coordination.not_owner_principals`
-  lists them). Re-inviting a name keeps all three unless given. A tier sets
+  lists them). `--mine` undoes a mistaken `--someone-else`. Both need the
+  daemon at schema v59; an older bank refuses them and names the update.
+  Re-inviting a name keeps all three unless given. A tier sets
   which tools a client sees at first, not what it may call:
   `memory_toolset` expands any session to the full set.
 - `invite --list` shows each name, whether it is paired or pending, its

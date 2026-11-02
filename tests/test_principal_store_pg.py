@@ -472,3 +472,15 @@ def test_the_list_says_whose_each_principal_is(db, pg_url):
     rows = {r["principal"]: r["owner"] for r in store.list_principals(
         db, environment=["codex", "friend"], not_owner=["friend"])}
     assert rows == {"codex": True, "friend": False, "guest": False, "laptop": True}
+
+
+def test_a_pre_v59_bank_takes_an_invite_that_leaves_ownership_alone(db):
+    _invite(db, "laptop")
+    db.execute("ALTER TABLE principals DROP COLUMN owned")
+    db.commit()
+    assert not store.has_owned_column(db)
+    assert _invite(db, "laptop")["owned"] is True
+    assert _invite(db, "phone")["state"] == "new"
+    for owned in (False, True):
+        with pytest.raises(store.InviteRefused, match="need schema v59"):
+            _invite(db, "laptop", owned=owned)

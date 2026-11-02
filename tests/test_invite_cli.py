@@ -500,3 +500,45 @@ def test_a_stopped_container_lists_ownership_through_postgres(bank, pg_url, env,
     report = json.loads(_run(capsys, "--list", "--json")[1])
     assert {r["principal"]: r["owner"] for r in report["principals"]} == {
         "guest": True, "laptop": True}
+
+
+def test_mine_undoes_a_mistaken_someone_else(bank, pg_url, capsys):
+    _run(capsys, "laptop", "--someone-else")
+    code, out, _err = _run(capsys, "laptop", "--mine")
+    assert code == 0 and _owned(pg_url) == {"laptop": True}
+    assert "someone else's" not in out and "--someone-else" not in out
+    report = json.loads(_run(capsys, "phone", "--mine", "--json")[1])
+    assert report["owned"] is True and report["notes"] == [
+        "an invited machine can read and write the whole bank and use the agent board, but not "
+        "change the daemon's configuration"]
+    assert _run(capsys, "laptop", "--mine", "--someone-else")[0] == 2
+
+
+def test_mine_is_forwarded_to_the_daemon_container(docker, capsys):
+    assert _run(capsys, "laptop", "--mine")[0] == 0
+    assert "--mine" in docker.calls[-1] and "--someone-else" not in docker.calls[-1]
+
+
+@pytest.mark.parametrize("flag", [None, "--someone-else", "--mine"])
+def test_a_pre_v59_bank_invites_but_refuses_to_record_ownership(bank, pg_url, capsys, flag):
+    """A newer CLI against a v53-v58 bank: an invite that leaves ownership
+    as it is works there (create and re-invite); one that sets it is
+    refused before anything is written, naming the update."""
+    import psycopg
+    _run(capsys, "laptop")
+    with psycopg.connect(pg_url, autocommit=True) as conn:
+        conn.execute("ALTER TABLE principals DROP COLUMN owned")
+        before = conn.execute("SELECT code_hash FROM principals").fetchall()
+    argv = ["laptop"] + ([flag] if flag else [])
+    code, out, err = _run(capsys, *argv)
+    if flag is None:
+        assert code == 0 and "re-invited" in out
+        assert _run(capsys, "phone")[0] == 0
+        assert [r[0] for r in _rows(pg_url)] == ["laptop", "phone"]
+        return
+    assert code == 4
+    assert err == ("invite: --someone-else and --mine need schema v59, and this bank is older: "
+                   "update the daemon to schema 59 (`pseudolife-mcp update`) and let it start, "
+                   "then re-run. Nothing was changed\n")
+    with psycopg.connect(pg_url, autocommit=True) as conn:
+        assert conn.execute("SELECT code_hash FROM principals").fetchall() == before

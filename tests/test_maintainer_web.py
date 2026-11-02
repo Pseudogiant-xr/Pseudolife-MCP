@@ -178,22 +178,32 @@ def test_the_config_route_cannot_set_the_maintainer_keys(tmp_path, monkeypatch, 
 @pytest.mark.parametrize("patch", [
     {"coordination.not_owner_principals": ["fixture-guest"]},
     {"Coordination.Not_Owner_Principals": []},
-    {"coordination": {"not_owner_principals": ["fixture-guest"]}},
+    {" coordination.not_owner_principals.0": "fixture-guest"},
 ])
 def test_the_config_route_cannot_set_who_is_not_the_owner(tmp_path, monkeypatch, patch):
     """v59: ``coordination.not_owner_principals`` widens or narrows whose
     board metadata an owner's Console reads, and every environment
-    principal can call this route, so it is set in config.yaml only. It is
-    not a knob, so the route refuses it as one, writing nothing."""
+    principal can call this route, so it is set in config.yaml only:
+    refused as protected, as the maintainer keys are, writing nothing."""
     monkeypatch.delenv("PSEUDOLIFE_MCP_CONFIG", raising=False)
     service = FixtureService()
     service.data_dir = tmp_path
-    with pytest.raises(ValueError, match="^unknown knob: "):
+    with pytest.raises(ValueError, match="^config_protected$"):
         config_io.write_config(service, patch)
     status, out = _hit(_app(service), "POST", "/api/config", {"patch": patch})
-    assert status == 400 and json.loads(out)["error"].startswith("unknown knob: ")
+    assert (status, json.loads(out)) == (400, {"error": "config_protected"})
     assert not (tmp_path / "config.yaml").exists()
     assert service.config.coordination.not_owner_principals == []
+
+
+def test_the_whole_coordination_mapping_is_not_a_knob(tmp_path, monkeypatch):
+    monkeypatch.delenv("PSEUDOLIFE_MCP_CONFIG", raising=False)
+    service = FixtureService()
+    service.data_dir = tmp_path
+    patch = {"coordination": {"not_owner_principals": ["fixture-guest"]}}
+    status, out = _hit(_app(service), "POST", "/api/config", {"patch": patch})
+    assert (status, json.loads(out)) == (400, {"error": "unknown knob: coordination"})
+    assert not (tmp_path / "config.yaml").exists()
 
 
 def test_the_config_file_carries_the_maintainer_keys():
