@@ -20,6 +20,123 @@ fn no_env(_: &str) -> Option<String> {
     None
 }
 
+#[test]
+fn maintenance_and_presentation_patch_is_applied_without_restart() {
+    let dir = scratch("live-maintenance");
+    let patch = json!({
+        "memory.surprise_threshold": 0.9,
+        "memory.compaction.enabled": false,
+        "memory.compaction.keep_per_slot": 1,
+        "memory.compaction.min_age_days": 7,
+        "memory.retrieval_log.retention_days": 30,
+        "memory.lessons.signal_retention_days": 60,
+        "memory.dream.runs_keep": 5
+    });
+    let service = crate::service::Service::new(
+        Config::default(),
+        crate::config::DaemonEnv::from_env(&no_env).unwrap(),
+        dir.clone(),
+        String::new(),
+        false,
+    );
+    let boot = service.runtime_config();
+    let answer = write_config(&service, &no_env, &patch).unwrap();
+    let paths: Vec<_> = patch.as_object().unwrap().keys().cloned().collect();
+    assert_eq!(answer["applied"], json!(paths));
+    assert_eq!(answer["restart_required"], json!([]));
+    let live = service.runtime_config();
+    assert_eq!(boot.memory.surprise_threshold, 0.0);
+    for (path, value) in patch.as_object().unwrap() {
+        assert!(py_eq(&setting(&live, path).unwrap(), value), "{path}");
+        assert_eq!(
+            running(&live, knob(path).unwrap()),
+            coerce(knob(path).unwrap(), value).unwrap(),
+            "{path}"
+        );
+    }
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+fn live_service(dir: std::path::PathBuf) -> crate::service::Service {
+    crate::service::Service::new(
+        Config::default(),
+        crate::config::DaemonEnv::from_env(&no_env).unwrap(),
+        dir,
+        String::new(),
+        false,
+    )
+}
+
+#[test]
+fn failed_config_persistence_never_changes_the_running_snapshot() {
+    let dir = scratch("live-failure");
+    std::fs::create_dir(dir.join("config.yaml")).unwrap();
+    let service = live_service(dir.clone());
+    let before = service.runtime_config();
+    assert!(
+        write_config(
+            &service,
+            &no_env,
+            &json!({"memory.surprise_threshold": 0.9})
+        )
+        .is_err()
+    );
+    assert!(std::sync::Arc::ptr_eq(&before, &service.runtime_config()));
+    assert_eq!(service.runtime_config().memory.surprise_threshold, 0.0);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn live_patch_leaves_unimplemented_and_restart_settings_at_their_boot_values() {
+    let dir = scratch("live-mixed");
+    let service = live_service(dir.clone());
+    let before = service.runtime_config();
+    let patch = json!({"memory.surprise_threshold": 0.9,
+                       "memory.top_k": 9, "memory.reranker.top_n": 30});
+    let answer = write_config(&service, &no_env, &patch).unwrap();
+    assert_eq!(answer["applied"], json!(["memory.surprise_threshold"]));
+    assert_eq!(
+        answer["restart_required"],
+        json!(["memory.top_k", "memory.reranker.top_n"])
+    );
+    let after = service.runtime_config();
+    assert_eq!(after.memory.top_k, before.memory.top_k);
+    assert_eq!(after.memory.reranker.top_n, before.memory.reranker.top_n);
+    assert_eq!(after.memory.surprise_threshold, 0.9);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn concurrent_config_patches_preserve_both_saved_and_running_changes() {
+    let dir = scratch("live-concurrent");
+    let service = std::sync::Arc::new(live_service(dir.clone()));
+    let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+    let threads: Vec<_> = [
+        json!({"memory.surprise_threshold": 0.9}),
+        json!({"memory.compaction.keep_per_slot": 1}),
+    ]
+    .into_iter()
+    .map(|patch| {
+        let service = service.clone();
+        let barrier = barrier.clone();
+        std::thread::spawn(move || {
+            barrier.wait();
+            write_config(&service, &no_env, &patch).unwrap()
+        })
+    })
+    .collect();
+    for thread in threads {
+        assert_eq!(thread.join().unwrap()["restart_required"], json!([]));
+    }
+    let saved = crate::config::load(&dir.join("config.yaml")).unwrap();
+    let live = service.runtime_config();
+    assert_eq!(saved.memory.surprise_threshold, 0.9);
+    assert_eq!(live.memory.surprise_threshold, 0.9);
+    assert_eq!(saved.memory.compaction_keep_per_slot, 1);
+    assert_eq!(live.memory.compaction_keep_per_slot, 1);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 fn scratch(name: &str) -> std::path::PathBuf {
     let dir = std::env::temp_dir().join(format!("pl-config-io-{}-{name}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
