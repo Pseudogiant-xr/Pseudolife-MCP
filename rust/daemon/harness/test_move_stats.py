@@ -26,6 +26,81 @@ import tempfile
 HERE = Path(__file__).resolve().parent
 
 
+def test_retrieval_event_clock_normalization_keeps_other_columns_exact():
+    import copy
+    sys.path.insert(0, str(HERE))
+    import run
+
+    before = {"rows": {}}
+    oracle = {"rows": {"public.retrieval_events": {
+        "columns": ["id", "created_at", "query_text", "episode_id", "served"],
+        "rows": [[1, 100.25, "fixture query", "fixture episode", [2, 3]]],
+    }}}
+    candidate = copy.deepcopy(oracle)
+    candidate["rows"]["public.retrieval_events"]["rows"][0][1] = 200.5
+
+    def compare(left, right, prior=before):
+        return run.dbstate.diff(
+            run.dbstate.normalize(left, run.DB_NONDETERMINISTIC, prior),
+            run.dbstate.normalize(right, run.DB_NONDETERMINISTIC, prior),
+        )
+
+    assert not compare(oracle, candidate)
+    for column, value in ((2, "changed query"), (3, "changed episode"), (4, [3, 2])):
+        changed = copy.deepcopy(candidate)
+        changed["rows"]["public.retrieval_events"]["rows"][0][column] = value
+        assert compare(oracle, changed)
+    # Existing timestamps and invalid new timestamps remain observable.
+    assert compare(oracle, candidate, oracle)
+    for value in (None, True, "200.5"):
+        changed = copy.deepcopy(candidate)
+        changed["rows"]["public.retrieval_events"]["rows"][0][1] = value
+        assert compare(oracle, changed)
+
+
+def test_existing_stats_comparator_accepts_only_clock_differences():
+    """Exercise the same comparator used by tokens/tokenless live and replay."""
+    import copy
+    sys.path.insert(0, str(HERE))
+    import run
+
+    case = {"name": "stats", "method": "GET", "path": "/api/stats", "declared": None}
+
+    def response(clock):
+        body = {"entry_count": 3, "retrieval_log": {"last_event_at": clock},
+                "last_true_drop": {"at": clock}}
+        return {"status": 200, "headers": {}, "json": body, "raw": json.dumps(body)}
+
+    oracle, candidate = response(100.25), response(200.5)
+    assert not run.compare_case(case, oracle, candidate)["diffs"]
+    recorded = run.normalize_response(oracle, case["path"], [])
+    recorded.pop("raw")
+    recorded["number_tokens"] = run.number_tokens(oracle, recorded)
+    assert not run.compare_case(case, recorded, candidate, golden=True)["diffs"]
+    # Old recordings containing numeric clock values remain replayable.
+    assert not run.compare_case(case, oracle, candidate, golden=True)["diffs"]
+    for parent, leaf in (("retrieval_log", "last_event_at"), ("last_true_drop", "at")):
+        for invalid in (None, True, 200, "200.5", "<stats clock>", float("nan"), float("inf")):
+            changed = copy.deepcopy(candidate)
+            changed["json"][parent][leaf] = invalid
+            changed["raw"] = json.dumps(changed["json"])
+            assert run.compare_case(case, recorded, changed, golden=True)["diffs"]
+        changed = copy.deepcopy(candidate)
+        del changed["json"][parent][leaf]
+        changed["raw"] = json.dumps(changed["json"])
+        assert run.compare_case(case, recorded, changed, golden=True)["diffs"]
+    changed = copy.deepcopy(candidate)
+    changed["json"]["entry_count"] = 4
+    changed["raw"] = json.dumps(changed["json"])
+    assert run.compare_case(case, recorded, changed, golden=True)["diffs"]
+    assert not run.compare_case(case, response(None), response(None))["diffs"]
+    for invalid in (True, 100, "<stats clock>", float("nan")):
+        assert run.compare_case(case, response(invalid), response(invalid))["diffs"]
+    # The same fields on unrelated routes are still exact.
+    other = dict(case, path="/api/other")
+    assert run.compare_case(other, oracle, candidate)["diffs"]
+
+
 def register(harness):
     """Reuse the exact three memory_stats scenarios; add REST/MCP/REST pairs.
 
