@@ -1,4 +1,4 @@
-"""Build and check the native release archives without publishing anything."""
+"""Package and verify native release assets, with an explicit publication command."""
 from __future__ import annotations
 
 import argparse
@@ -6,6 +6,7 @@ from contextlib import contextmanager
 import gzip
 import hashlib
 import io
+import json
 import os
 from pathlib import Path
 import re
@@ -131,9 +132,52 @@ def assemble(root: Path, value: str, out: Path) -> None:
     print("complete native release asset set: " + ", ".join(names))
 
 
+def verified_assets(value: str, out: Path) -> dict[str, str]:
+    expected = {asset_name(value, target) for target in TARGETS}
+    expected.add(f"pseudolife-compose-{checked_version(value)}.tar.gz")
+    files = {path.name: path for path in out.iterdir()}
+    if set(files) != expected | {"SHA256SUMS"} or any(
+        path.is_symlink() or not path.is_file() for path in files.values()
+    ):
+        raise ValueError("release directory must contain exactly the six archives and SHA256SUMS")
+    digests = {}
+    for line in files["SHA256SUMS"].read_text(encoding="utf-8").splitlines():
+        match = re.fullmatch(r"([0-9a-f]{64})  ([A-Za-z0-9_.-]+)", line)
+        if not match or match[2] in digests:
+            raise ValueError("invalid or duplicate checksum entry")
+        digests[match[2]] = match[1]
+    if set(digests) != expected:
+        raise ValueError("checksum manifest must list exactly the six release archives")
+    for name, digest in digests.items():
+        if hashlib.sha256(files[name].read_bytes()).hexdigest() != digest:
+            raise ValueError(f"local asset checksum differs: {name}")
+    digests["SHA256SUMS"] = hashlib.sha256(files["SHA256SUMS"].read_bytes()).hexdigest()
+    return digests
+
+
+def publish_assets(value: str, out: Path, tag: str, repo: str) -> None:
+    if tag != "v" + checked_version(value):
+        raise ValueError("release tag differs from native package version")
+    digests = verified_assets(value, out)
+    release = json.loads(subprocess.check_output(
+        ["gh", "release", "view", tag, "--repo", repo, "--json", "assets"]))
+    present = {asset["name"] for asset in release["assets"]}
+    # Check every existing asset before uploading any missing one. A retry
+    # never replaces published bytes, including the checksum manifest itself.
+    with tempfile.TemporaryDirectory(prefix="native-published-") as directory:
+        for name in sorted(present.intersection(digests)):
+            subprocess.run(["gh", "release", "download", tag, "--repo", repo,
+                            "--pattern", name, "--dir", directory], check=True)
+            if hashlib.sha256((Path(directory) / name).read_bytes()).hexdigest() != digests[name]:
+                raise ValueError(f"published asset differs: {name}")
+    for name in sorted(digests.keys() - present):
+        subprocess.run(["gh", "release", "upload", tag, str(out / name), "--repo", repo], check=True)
+    print("native release assets verified; only missing assets uploaded")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("version", "package", "smoke", "assemble"))
+    parser.add_argument("command", choices=("version", "package", "smoke", "assemble", "publish"))
     parser.add_argument("--target", choices=TARGETS)
     parser.add_argument("--binary", type=Path)
     parser.add_argument("--out", type=Path, default=Path("release-assets"))
@@ -145,6 +189,8 @@ def main() -> None:
         print(value)
     elif args.command == "assemble":
         assemble(ROOT, value, args.out)
+    elif args.command == "publish":
+        publish_assets(value, args.out, os.environ["GITHUB_REF_NAME"], os.environ["GITHUB_REPOSITORY"])
     else:
         if not args.target or (args.command == "package" and not args.binary):
             parser.error("package needs --binary and --target; smoke needs --target")

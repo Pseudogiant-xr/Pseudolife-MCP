@@ -181,9 +181,10 @@ them in this order (first done 2026-07-16, v0.8.0; GHCR images added
    GHCR package needs public visibility after its first approved push.
    The build job checks native crate versions before PyPI publication.
    If native asset attachment stops after a partial upload, rerun the
-   asset publication job: it checks the downloaded complete artifact against
-   `SHA256SUMS` before uploading with `--clobber`. Reuse that verified
-   artifact; a failed checksum must be investigated before publication.
+   asset publication job with the same complete artifact. It requires the
+   exact file set and checksums, downloads and verifies already published
+   assets (including `SHA256SUMS`), and uploads only missing ones. It never
+   replaces existing bytes; investigate a mismatch before publication.
    Missing opt-in assets are a failed native publication, not permission
    to enable a fallback or change the default engine; keep installation
    and update readiness as release prerequisites.

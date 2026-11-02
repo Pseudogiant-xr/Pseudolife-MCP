@@ -6,6 +6,7 @@
   guard now uses the native provisioner's admitted model pin, and its build
   context prepares the two prompts needed by the native extractor shims
   being integrated separately.
-- Check native crate versions before PyPI publication, verify downloaded
-  assets before attachment, and allow verified partial-upload retries.
+- Check native crate versions before PyPI publication, verify the exact
+  downloaded asset set before attachment, and recover partial uploads by
+  verifying existing bytes and uploading only missing assets.
   Archive metadata is fixed so packaging time does not change checksums.

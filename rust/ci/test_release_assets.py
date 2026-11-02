@@ -1,5 +1,8 @@
 """The archives consumed by native installers have one fixed layout."""
 import hashlib
+import json
+from pathlib import Path
+import subprocess
 import tarfile
 import zipfile
 from unittest.mock import patch
@@ -115,3 +118,85 @@ def test_version_refuses_either_mismatched_native_crate(tmp_path, crate):
     (tmp_path / "rust" / crate / "Cargo.toml").write_text('[package]\nversion = "1.2.4"\n')
     with pytest.raises(ValueError, match=crate + " version differs"):
         assets.version(tmp_path)
+
+
+def complete_assets(tmp_path):
+    binary = tmp_path / "binary"
+    binary.write_bytes(b"fixture")
+    out = tmp_path / "out"
+    for target in assets.TARGETS:
+        assets.package(binary, "1.2.3", target, out)
+    assets.assemble(assets.ROOT, "1.2.3", out)
+    return out
+
+
+def fake_release(monkeypatch, remote, fail_upload=None):
+    calls = []
+
+    def view(args):
+        assert args == ["gh", "release", "view", "v1.2.3", "--repo", "owner/repo", "--json", "assets"]
+        calls.append(args)
+        return json.dumps({"assets": [{"name": name} for name in remote]}).encode()
+
+    def run(args, *, check):
+        assert check and args[:2] == ["gh", "release"]
+        assert "--clobber" not in args
+        calls.append(args)
+        if args[2] == "download":
+            name = args[args.index("--pattern") + 1]
+            (Path(args[args.index("--dir") + 1]) / name).write_bytes(remote[name])
+        else:
+            assert args[2] == "upload"
+            path = Path(args[4])
+            if path.name == fail_upload:
+                raise subprocess.CalledProcessError(1, args)
+            assert path.name not in remote, "existing assets must never be overwritten"
+            remote[path.name] = path.read_bytes()
+
+    monkeypatch.setattr(assets.subprocess, "check_output", view)
+    monkeypatch.setattr(assets.subprocess, "run", run)
+    return calls
+
+
+def test_publication_recovers_partial_upload_without_replacing_bytes(tmp_path, monkeypatch):
+    out = complete_assets(tmp_path)
+    expected = {path.name: path.read_bytes() for path in out.iterdir()}
+    names = sorted(expected)
+    remote = {"unrelated-wheel.whl": b"leave untouched"}
+    fake_release(monkeypatch, remote, fail_upload=names[1])
+    with pytest.raises(subprocess.CalledProcessError):
+        assets.publish_assets("1.2.3", out, "v1.2.3", "owner/repo")
+    assert remote[names[0]] == expected[names[0]]
+    calls = fake_release(monkeypatch, remote)
+    assets.publish_assets("1.2.3", out, "v1.2.3", "owner/repo")
+    assert remote == {**expected, "unrelated-wheel.whl": b"leave untouched"}
+    assert [call[2] for call in calls].count("download") == 1
+    assert [call[2] for call in calls].count("upload") == 6
+
+
+@pytest.mark.parametrize("name", ["SHA256SUMS", assets.asset_name("1.2.3", assets.TARGETS[0])])
+def test_publication_refuses_existing_mismatch_before_any_upload(tmp_path, monkeypatch, name):
+    out = complete_assets(tmp_path)
+    calls = fake_release(monkeypatch, {name: b"different published bytes"})
+    with pytest.raises(ValueError, match="published asset differs"):
+        assets.publish_assets("1.2.3", out, "v1.2.3", "owner/repo")
+    assert not any(call[2] == "upload" for call in calls)
+
+
+@pytest.mark.parametrize("damage", ["extra", "missing", "corrupt", "duplicate"])
+def test_publication_refuses_invalid_local_set_before_contacting_github(tmp_path, monkeypatch, damage):
+    out = complete_assets(tmp_path)
+    binary = out / assets.asset_name("1.2.3", assets.TARGETS[0])
+    if damage == "extra":
+        (out / "unlisted.txt").write_bytes(b"extra")
+    elif damage == "missing":
+        binary.unlink()
+    elif damage == "corrupt":
+        binary.write_bytes(b"corrupt")
+    else:
+        sums = out / "SHA256SUMS"
+        sums.write_text(sums.read_text() * 2)
+    calls = fake_release(monkeypatch, {})
+    with pytest.raises(ValueError):
+        assets.publish_assets("1.2.3", out, "v1.2.3", "owner/repo")
+    assert not calls

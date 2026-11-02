@@ -39,8 +39,8 @@ def test_rust_release_image_requires_maintainer_decision():
     build = next(s for s in job["steps"] if s.get("uses", "").startswith("docker/build-push-action@"))
     assert build["with"]["file"] == "ops/Dockerfile.daemon-rust"
     assert build["with"]["push"] is True
-    assert "pseudolife-daemon-rust:${{ env.VERSION }}" in build["with"]["tags"]
-    assert ":latest" not in build["with"]["tags"]
+    assert build["with"]["tags"].splitlines() == [
+        "ghcr.io/${{ env.OWNER_LC }}/pseudolife-daemon-rust:${{ env.VERSION }}"]
     assert "BUILD_SOURCE=release" in build["with"]["build-args"]
 
 
@@ -86,7 +86,9 @@ def test_asset_upload_verifies_downloads_and_supports_partial_retry():
     steps = jobs["rust-assets-publish"]["steps"]
     download = next(i for i, step in enumerate(steps) if step.get("uses", "").startswith("actions/download-artifact@"))
     verify = next(i for i, step in enumerate(steps) if step.get("run", "").strip() == "sha256sum --check SHA256SUMS")
-    upload = next(i for i, step in enumerate(steps) if "gh release upload" in step.get("run", ""))
+    upload = next(i for i, step in enumerate(steps)
+                  if step.get("run", "").strip() == "python rust/ci/release_assets.py publish")
     assert download < verify < upload
     assert steps[verify]["working-directory"] == "release-assets"
-    assert "--clobber" in steps[upload]["run"]
+    assert any(step.get("uses", "").startswith("actions/checkout@") for step in steps[:upload])
+    assert any(step.get("uses", "").startswith("actions/setup-python@") for step in steps[:upload])
