@@ -24,6 +24,10 @@ mod tunnel;
 mod version;
 pub mod wait_mail;
 
+pub(crate) fn process_table() -> Result<Option<connect::ProcessTable>, ()> {
+    connect::process_table()
+}
+
 const HELP: &str = include_str!("cli_help.txt");
 const DEFERRED_MODES: &[&str] = &[
     "serve",
@@ -105,6 +109,11 @@ fn mode_repr(mode: &str) -> String {
 /// Handle leaves before daemon attachment; default/shim/channel keep the proxy path.
 pub fn dispatch(mode: Option<&str>) -> Option<ExitCode> {
     let mode = mode.unwrap_or("shim");
+    if mode == "runtime" {
+        return Some(ExitCode::from(crate::runtime::run(
+            std::env::args_os().skip(2).collect(),
+        )));
+    }
     if mode == "backup"
         && let Some(code) = backup::run(std::env::args_os().skip(2).collect())
     {
@@ -181,7 +190,12 @@ pub fn dispatch(mode: Option<&str>) -> Option<ExitCode> {
     {
         return Some(code);
     }
-    let (message, code) = if DEFERRED_MODES.contains(&mode) {
+    let (message, code) = if mode == "update" {
+        (
+            "pseudolife-stdio: mode 'update' is deferred in this candidate; install a verified native archive with: pseudolife-mcp runtime install --archive <archive> --sha256sums <SHA256SUMS> --version <version>\n".to_owned(),
+            1,
+        )
+    } else if DEFERRED_MODES.contains(&mode) {
         (
             format!(
                 "pseudolife-stdio: mode {} is deferred in this candidate\n",

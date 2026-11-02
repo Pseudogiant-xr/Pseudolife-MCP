@@ -124,6 +124,16 @@ pub(super) fn python_text(value: &Value, nested: bool) -> String {
 }
 
 fn runtime_line() -> Option<String> {
+    if let Some(runtime) = crate::runtime::default_layout()
+        .ok()
+        .and_then(|layout| crate::runtime::running_runtime(&layout))
+    {
+        let origin = runtime.source_commit.map_or_else(
+            || format!("source {}", runtime.source),
+            |commit| format!("source commit {commit}"),
+        );
+        return Some(format!("runtime {} ({origin})\n", runtime.path.display()));
+    }
     let executable = std::env::current_exe().ok()?;
     if !executable.is_file()
         || executable.parent()?.file_name()? != if cfg!(windows) { "Scripts" } else { "bin" }

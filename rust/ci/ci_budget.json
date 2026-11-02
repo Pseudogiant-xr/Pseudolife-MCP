@@ -157,7 +157,7 @@
     },
     "fingerprints": {
       "scope": "42b22137f81048ce",
-      "rust": "59cc6066e4ac1f82",
+      "rust": "7e5f6fc858dd1367",
       "fixtures": "defc5e07c5ac3f94",
       "candidate": "d71c5590ce6f866a",
       "candidate-harness": "43b859ee9d5fd738",
@@ -242,29 +242,14 @@
         "reason": "Adds one network-disabled CLI version invocation to the existing image job; no new job or dependency setup. The shim shares the daemon dependency build; retain current budget pending batch measurement."
       },
       {
-        "job": "parity-checks",
-        "fingerprint": "7ccc52c664b9b41b",
-        "reason": "Adds the bounded recovery and setup rows to the existing w1c-connect shard and a two-case POSIX terminal regression to w1c-pairing. No new pull-request jobs, provisioning, or dependency edges. Linux dev validation of the 45 new live cases takes under three minutes, within the existing shard timeout and total runner-minute headroom; retain the full-lane baseline pending batch remeasurement."
-      },
-      {
-        "job": "parity-checks",
-        "fingerprint": "c004c0452836f94a",
-        "reason": "Run the two terminal interruption arms on Windows as well as Linux inside the existing pairing job; no added job or build."
-      },
-      {
-        "job": "parity-checks",
-        "fingerprint": "58db17279b01776f",
-        "reason": "Add two terminal enrolment stream cases to the existing setup shard and run pairing console cases on both platforms; no new builds or jobs."
-      },
-      {
-        "job": "parity-checks",
-        "fingerprint": "4de9fff08be0dfc5",
-        "reason": "The existing setup terminal pytest invocation also runs two stub-only recovery cleanup ordering checks. No new process setup, shard, dependency, service or job; the measured parity budget is unchanged."
+        "job": "rust",
+        "fingerprint": "7e5f6fc858dd1367",
+        "reason": "The existing Rust job runs setup planning parity after Nextest; the harness reuses the same workspace all-targets feature-unified artifacts, with no new job, matrix row, dependency installation or limit increase. The additional 22 disposable planning cases complete in seconds. Existing R1 workflow changes and their accepted costs are retained."
       },
       {
         "job": "parity-checks",
         "fingerprint": "fc8882ae92b7f9bb",
-        "reason": "Wire the bounded operator/config/stats regression files into the existing W1-C pytest invocation; no new job, shard, dependency installation or setup step, and all budget limits stay unchanged. Re-measure the combined step from the next batch run."
+        "reason": "Integrate the bounded R1 recovery, setup, transport, config and stats checks into the existing W1-C shards after the installer workflow merge; no new jobs, shards, dependency installation or setup steps, and budget limits remain unchanged. Re-measure the combined steps from the next integration batch."
       }
     ]
   },

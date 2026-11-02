@@ -383,6 +383,9 @@ jobs:
           exit $LASTEXITCODE
       - name: Nextest
         run: cargo nextest run --locked --all-targets -j 4
+      - name: Codex setup Python and Rust planning parity
+        timeout-minutes: 3
+        run: python shim/tests/setup_codex_parity.py --cargo
       - name: Check all targets without default features
         run: cargo check --locked --all-targets --no-default-features -j 4
       - name: Clippy without default features
