@@ -28,13 +28,15 @@ board.
 
 ```bash
 npm run check        # svelte-check, warnings fail
-npm test             # vitest: the pure logic under src/lib/*.test.ts
+npm test             # vitest: src/**/*.test.ts and scripts/**/*.test.mjs
 npm run build        # writes ../pseudolife_memory/web/static/
 ```
 
 `npm run build` empties `pseudolife_memory/web/static/` and writes the build
 there, then runs `scripts/check-dist.mjs`, which fails if the output contains
-an absolute local path or this machine's user or host name.
+an absolute local path or this machine's user or host name. A generic account
+name such as `dev` or `runner` identifies no one and is skipped, with one line
+saying so (`scripts/local-ids.mjs`).
 
 **The build output is committed.** The Python wheel ships
 `pseudolife_memory/web/static/**` and is built without Node, so a source
