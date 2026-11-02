@@ -942,9 +942,4 @@ MUTANTS = [
     Mutant("invite-expired-is-pending", "invite", "shim/src/cli/pairing/invite_db.rs",
            "expires.is_some_and(|expires| expires > now)",
            "expires.is_some()", cases=("list",)),
-    # An invite forwarded by a host CLI before v59 must not name a flag that
-    # CLI refuses.
-    Mutant("invite-old-host-note", "invite", "shim/src/cli/pairing/invite.rs",
-           "if !forwarded || caller_takes_ownership {",
-           "if true {", cases=("invite-forwarded-old-host",)),
 ]

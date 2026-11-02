@@ -115,7 +115,7 @@ wall clock and draw their codes and tokens at random in every harness
 process, so the cases run live only (`Case.golden` False).
 `health-nested-at-limit-json` is live-only too: its report pretty-prints
 the daemon's auth value nested to the limit, 2.6 MB of indentation. The
-goldens hold the other 61.
+goldens hold the other 85.
 
 ## Operator transport extension (2026-11-02 candidate)
 
