@@ -538,7 +538,7 @@ pub(super) async fn connect(config: &Config) -> Result<(Client, JoinHandle<()>),
         // The driver's TLS gate requires a hostname even when our verifier
         // only checks encryption or the CA. Keep hostaddr as the TCP target.
         for address in config.driver.get_hostaddrs() {
-            driver.host(&address.to_string());
+            driver.host(address.to_string());
         }
     }
     driver
