@@ -2,32 +2,32 @@
  "db_state": {
   "catalog": {
    "column_types": {
-    "rows": 479,
-    "sha256": "959d3a0824286d778e1dcd50"
+    "rows": 520,
+    "sha256": "ef9953fff052e57fbc89baa9"
    },
    "columns": {
-    "rows": 479,
-    "sha256": "7d7a406b70e80acb80375191"
+    "rows": 520,
+    "sha256": "b8115ba89a92ec0cd5dfa329"
    },
    "constraints": {
-    "rows": 356,
-    "sha256": "9bce460b3ecd0f8909edebb6"
+    "rows": 384,
+    "sha256": "3fcb9795b8792dc379f78350"
    },
    "extensions": {
     "rows": 2,
-    "sha256": "f58378ad9e787652d80b1192"
+    "sha256": "72f5d55162b7c92f099b470b"
    },
    "functions": {
     "rows": 0,
     "sha256": "4f53cda18c2baa0c0354bb5f"
    },
    "indexes": {
-    "rows": 99,
-    "sha256": "3b955cd29ea7c77a4ed4a2ff"
+    "rows": 104,
+    "sha256": "484e2fccacb2f852dc18c783"
    },
    "owners_and_comments": {
-    "rows": 161,
-    "sha256": "221ce8131afb68c41151a482"
+    "rows": 170,
+    "sha256": "33a115196978de52679bade1"
    },
    "schemas": {
     "rows": 1,
@@ -39,7 +39,7 @@
    },
    "sequences": {
     "rows": 19,
-    "sha256": "62e2c919c4ada0e8138a969a"
+    "sha256": "f9b8e9b1d2ad4949955362aa"
    },
    "triggers": {
     "rows": 0,
@@ -81,6 +81,20 @@
      "policy_variant",
      "episode_ids",
      "start_times"
+    ],
+    "rows": []
+   },
+   "public.cms_counters": {
+    "columns": [
+     "id",
+     "preset_name",
+     "interaction_count",
+     "logical_turn_count",
+     "tier_queries",
+     "tier_hits",
+     "surprise_history",
+     "consolidation_events",
+     "updated_at"
     ],
     "rows": []
    },
@@ -312,7 +326,15 @@
      "judged_at",
      "judge_relation",
      "decided_by",
-     "decided_at"
+     "decided_at",
+     "judge_served_model",
+     "judge2_verdict",
+     "judge2_confidence",
+     "judge2_model",
+     "judged2_at",
+     "judge2_relation",
+     "judge2_served_model",
+     "judge2_policy"
     ],
     "rows": []
    },
@@ -391,7 +413,16 @@
      "judge2_verdict",
      "judge2_confidence",
      "judge2_model",
-     "judged2_at"
+     "judged2_at",
+     "judge_served_model",
+     "judge2_served_model",
+     "judge2_policy",
+     "judge3_verdict",
+     "judge3_confidence",
+     "judge3_model",
+     "judged3_at",
+     "judge3_served_model",
+     "judge3_policy"
     ],
     "rows": []
    },
@@ -608,7 +639,8 @@
      "score",
      "reason",
      "decided_by",
-     "decided_at"
+     "decided_at",
+     "votes"
     ],
     "rows": []
    },
@@ -620,7 +652,7 @@
     "rows": [
      [
       "schema_version",
-      55
+      58
      ],
      [
       "writer_lease_epoch",
@@ -644,6 +676,13 @@
     ],
     "rows": []
    },
+   "public.principal_activity": {
+    "columns": [
+     "principal",
+     "last_seen_at"
+    ],
+    "rows": []
+   },
    "public.principals": {
     "columns": [
      "principal",
@@ -656,6 +695,28 @@
      "created_at",
      "paired_at",
      "revoked_at"
+    ],
+    "rows": []
+   },
+   "public.reference_chunks": {
+    "columns": [
+     "id",
+     "source",
+     "chunk_index",
+     "text",
+     "embedding",
+     "metadata",
+     "ingested_at",
+     "created_at"
+    ],
+    "rows": []
+   },
+   "public.rejected_bearers": {
+    "columns": [
+     "hash_prefix",
+     "rejections",
+     "first_seen_at",
+     "last_seen_at"
     ],
     "rows": []
    },
@@ -795,7 +856,116 @@
      "params",
      "served_facts"
     ],
-    "rows": []
+    "rows": [
+     [
+      1,
+      "warmup probe",
+      "search",
+      null,
+      null,
+      [],
+      "<created_at>",
+      {
+       "band_count": 1,
+       "bm25": {
+        "b": 0.75,
+        "enabled": true,
+        "k1": 1.5,
+        "min_score": 0.1,
+        "top_n": 20,
+        "weight": 0.3
+       },
+       "candidate_pool": {
+        "fusion": "weighted_sum",
+        "multiplier": 1,
+        "pool_size": 0,
+        "rerank_position": "after_cut"
+       },
+       "contiguity_neighbors": 0,
+       "filters": {
+        "bands": null,
+        "episodes": null,
+        "min_logical_turn": null,
+        "sources": null,
+        "tags": null
+       },
+       "hide_superseded": false,
+       "min_score": 0.25,
+       "min_score_explicit": false,
+       "recency_base_half_life_s": 86400.0,
+       "recency_boost": false,
+       "reranker": {
+        "candidate_count": 0,
+        "enabled": false,
+        "fired": false,
+        "scored_candidates": 0,
+        "scoring_policy": "complete_pool_or_skip",
+        "skip_reason": null,
+        "top_n": 20
+       },
+       "timeline": {
+        "enabled": false,
+        "fired": false
+       },
+       "top_k": 1
+      },
+      null
+     ],
+     [
+      2,
+      "\u007f",
+      "search",
+      null,
+      null,
+      [],
+      "<created_at>",
+      {
+       "band_count": 1,
+       "bm25": {
+        "b": 0.75,
+        "enabled": true,
+        "k1": 1.5,
+        "min_score": 0.1,
+        "top_n": 20,
+        "weight": 0.3
+       },
+       "candidate_pool": {
+        "fusion": "weighted_sum",
+        "multiplier": 1,
+        "pool_size": 0,
+        "rerank_position": "after_cut"
+       },
+       "contiguity_neighbors": 0,
+       "filters": {
+        "bands": null,
+        "episodes": null,
+        "min_logical_turn": null,
+        "sources": null,
+        "tags": null
+       },
+       "hide_superseded": false,
+       "min_score": 0.25,
+       "min_score_explicit": false,
+       "recency_base_half_life_s": 86400.0,
+       "recency_boost": false,
+       "reranker": {
+        "candidate_count": 0,
+        "enabled": false,
+        "fired": false,
+        "scored_candidates": 0,
+        "scoring_policy": "complete_pool_or_skip",
+        "skip_reason": null,
+        "top_n": 20
+       },
+       "timeline": {
+        "enabled": false,
+        "fired": false
+       },
+       "top_k": 12
+      },
+      null
+     ]
+    ]
    },
    "public.retrieval_uses": {
     "columns": [
@@ -882,16 +1052,10 @@
     "the listing-spelling carry-over stamps the clock (W2-E)"
    ],
    [
-    "table",
+    "warmup",
     "retrieval_events",
     null,
-    "the warmup search logs a retrieval event (W2-D telemetry)"
-   ],
-   [
-    "sequence",
-    "retrieval_events_id_seq",
-    null,
-    "advanced by that retrieval event (W2-D telemetry)"
+    "one warmup probe and its sequence increment (W2-D telemetry)"
    ]
   ],
   "db_nondeterministic": [
@@ -899,6 +1063,11 @@
     "relations",
     "created_at",
     "clock: wall clock per row (storage/postgres.py:765)"
+   ],
+   [
+    "retrieval_events",
+    "created_at",
+    "clock: retrieval event wall clock per row"
    ]
   ],
   "golden": "golden_scrub in run.py",
@@ -932,14 +1101,28 @@
      "dtype": "<str|null>"
     },
     "extractor": "none",
-    "hooks_digest": "c5f1ef7c6da48574d68a738f412e136941bb4b3ff0bc625a57bd633de02481d7",
+    "hooks_digest": "52693b4f613ebabf14e6933249cbd8da609dafef1882a8fb4c04916fcff2af39",
     "memory": {
-     "source": "unavailable"
+     "anon_bytes": "<free int>",
+     "current_bytes": "<free int>",
+     "events": {
+      "max": "<free int>",
+      "oom": "<free int>",
+      "oom_kill": "<free int>"
+     },
+     "file_bytes": "<free int>",
+     "limit_bytes": null,
+     "near_limit": null,
+     "rss_bytes": "<free int>",
+     "rss_peak_bytes": "<free int>",
+     "source": "cgroup",
+     "used_fraction": null,
+     "working_set_bytes": "<free int>"
     },
     "pending": [],
     "persist_errors": 0,
     "ready": true,
-    "schema": 55,
+    "schema": 58,
     "status": "ok",
     "storage": "postgres",
     "updates": {
@@ -951,6 +1134,68 @@
     },
     "version": "<free str>"
    },
+   "number_tokens": [
+    {
+     "path": [
+      "schema"
+     ],
+     "token": "58"
+    },
+    {
+     "path": [
+      "persist_errors"
+     ],
+     "token": "0"
+    },
+    {
+     "path": [
+      "coordination",
+      "wake",
+      "per_recipient_per_hour"
+     ],
+     "token": "20"
+    },
+    {
+     "path": [
+      "coordination",
+      "wake",
+      "urgent_per_sender_per_hour"
+     ],
+     "token": "6"
+    },
+    {
+     "path": [
+      "coordination",
+      "wake",
+      "nightly_total"
+     ],
+     "token": "200"
+    },
+    {
+     "path": [
+      "coordination",
+      "wake",
+      "fan_out_stagger_seconds"
+     ],
+     "token": "30"
+    },
+    {
+     "path": [
+      "coordination",
+      "wake",
+      "active_seconds"
+     ],
+     "token": "60"
+    },
+    {
+     "path": [
+      "coordination",
+      "wake",
+      "authority_per_sender_per_hour"
+     ],
+     "token": "12"
+    }
+   ],
    "status": 200
   },
   {
@@ -980,14 +1225,28 @@
      "dtype": "<str|null>"
     },
     "extractor": "none",
-    "hooks_digest": "c5f1ef7c6da48574d68a738f412e136941bb4b3ff0bc625a57bd633de02481d7",
+    "hooks_digest": "52693b4f613ebabf14e6933249cbd8da609dafef1882a8fb4c04916fcff2af39",
     "memory": {
-     "source": "unavailable"
+     "anon_bytes": "<free int>",
+     "current_bytes": "<free int>",
+     "events": {
+      "max": "<free int>",
+      "oom": "<free int>",
+      "oom_kill": "<free int>"
+     },
+     "file_bytes": "<free int>",
+     "limit_bytes": null,
+     "near_limit": null,
+     "rss_bytes": "<free int>",
+     "rss_peak_bytes": "<free int>",
+     "source": "cgroup",
+     "used_fraction": null,
+     "working_set_bytes": "<free int>"
     },
     "pending": [],
     "persist_errors": 0,
     "ready": true,
-    "schema": 55,
+    "schema": 58,
     "status": "ok",
     "storage": "postgres",
     "updates": {
@@ -999,6 +1258,68 @@
     },
     "version": "<free str>"
    },
+   "number_tokens": [
+    {
+     "path": [
+      "schema"
+     ],
+     "token": "58"
+    },
+    {
+     "path": [
+      "persist_errors"
+     ],
+     "token": "0"
+    },
+    {
+     "path": [
+      "coordination",
+      "wake",
+      "per_recipient_per_hour"
+     ],
+     "token": "20"
+    },
+    {
+     "path": [
+      "coordination",
+      "wake",
+      "urgent_per_sender_per_hour"
+     ],
+     "token": "6"
+    },
+    {
+     "path": [
+      "coordination",
+      "wake",
+      "nightly_total"
+     ],
+     "token": "200"
+    },
+    {
+     "path": [
+      "coordination",
+      "wake",
+      "fan_out_stagger_seconds"
+     ],
+     "token": "30"
+    },
+    {
+     "path": [
+      "coordination",
+      "wake",
+      "active_seconds"
+     ],
+     "token": "60"
+    },
+    {
+     "path": [
+      "coordination",
+      "wake",
+      "authority_per_sender_per_hour"
+     ],
+     "token": "12"
+    }
+   ],
    "status": 200
   },
   {
@@ -1028,14 +1349,28 @@
      "dtype": "<str|null>"
     },
     "extractor": "none",
-    "hooks_digest": "c5f1ef7c6da48574d68a738f412e136941bb4b3ff0bc625a57bd633de02481d7",
+    "hooks_digest": "52693b4f613ebabf14e6933249cbd8da609dafef1882a8fb4c04916fcff2af39",
     "memory": {
-     "source": "unavailable"
+     "anon_bytes": "<free int>",
+     "current_bytes": "<free int>",
+     "events": {
+      "max": "<free int>",
+      "oom": "<free int>",
+      "oom_kill": "<free int>"
+     },
+     "file_bytes": "<free int>",
+     "limit_bytes": null,
+     "near_limit": null,
+     "rss_bytes": "<free int>",
+     "rss_peak_bytes": "<free int>",
+     "source": "cgroup",
+     "used_fraction": null,
+     "working_set_bytes": "<free int>"
     },
     "pending": [],
     "persist_errors": 0,
     "ready": true,
-    "schema": 55,
+    "schema": 58,
     "status": "ok",
     "storage": "postgres",
     "updates": {
@@ -1047,6 +1382,68 @@
     },
     "version": "<free str>"
    },
+   "number_tokens": [
+    {
+     "path": [
+      "schema"
+     ],
+     "token": "58"
+    },
+    {
+     "path": [
+      "persist_errors"
+     ],
+     "token": "0"
+    },
+    {
+     "path": [
+      "coordination",
+      "wake",
+      "per_recipient_per_hour"
+     ],
+     "token": "20"
+    },
+    {
+     "path": [
+      "coordination",
+      "wake",
+      "urgent_per_sender_per_hour"
+     ],
+     "token": "6"
+    },
+    {
+     "path": [
+      "coordination",
+      "wake",
+      "nightly_total"
+     ],
+     "token": "200"
+    },
+    {
+     "path": [
+      "coordination",
+      "wake",
+      "fan_out_stagger_seconds"
+     ],
+     "token": "30"
+    },
+    {
+     "path": [
+      "coordination",
+      "wake",
+      "active_seconds"
+     ],
+     "token": "60"
+    },
+    {
+     "path": [
+      "coordination",
+      "wake",
+      "authority_per_sender_per_hour"
+     ],
+     "token": "12"
+    }
+   ],
    "status": 200
   },
   {
@@ -1061,7 +1458,7 @@
    "status": 307
   },
   {
-   "bytes": "<!doctype html>\n<html lang=\"en\" data-theme=\"dark\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />\n    <meta name=\"color-scheme\" content=\"dark light\" />\n    <meta name=\"robots\" content=\"noindex\" />\n    <title>Cortex Console</title>\n    <!-- Classic, blocking: applies the stored theme before first paint. -->\n    <script src=\"/ui/theme.js\"></script>\n    <script type=\"module\" crossorigin src=\"/ui/assets/index-9XuDbQle.js\"></script>\n    <link rel=\"stylesheet\" crossorigin href=\"/ui/assets/index-BFOM-F8H.css\">\n  </head>\n  <body>\n    <div id=\"app\"></div>\n  </body>\n</html>\n",
+   "bytes": "<!doctype html>\n<html lang=\"en\" data-theme=\"dark\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />\n    <meta name=\"color-scheme\" content=\"dark light\" />\n    <meta name=\"robots\" content=\"noindex\" />\n    <title>Cortex Console</title>\n    <!-- Classic, blocking: applies the stored theme before first paint. -->\n    <script src=\"/ui/theme.js\"></script>\n    <script type=\"module\" crossorigin src=\"/ui/assets/index-Ci6PPauE.js\"></script>\n    <link rel=\"stylesheet\" crossorigin href=\"/ui/assets/index-CODtH-60.css\">\n  </head>\n  <body>\n    <div id=\"app\"></div>\n  </body>\n</html>\n",
    "headers": {
     "cache-control": "no-store",
     "content-security-policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
@@ -1073,7 +1470,7 @@
    "status": 200
   },
   {
-   "bytes": "<!doctype html>\n<html lang=\"en\" data-theme=\"dark\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />\n    <meta name=\"color-scheme\" content=\"dark light\" />\n    <meta name=\"robots\" content=\"noindex\" />\n    <title>Cortex Console</title>\n    <!-- Classic, blocking: applies the stored theme before first paint. -->\n    <script src=\"/ui/theme.js\"></script>\n    <script type=\"module\" crossorigin src=\"/ui/assets/index-9XuDbQle.js\"></script>\n    <link rel=\"stylesheet\" crossorigin href=\"/ui/assets/index-BFOM-F8H.css\">\n  </head>\n  <body>\n    <div id=\"app\"></div>\n  </body>\n</html>\n",
+   "bytes": "<!doctype html>\n<html lang=\"en\" data-theme=\"dark\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />\n    <meta name=\"color-scheme\" content=\"dark light\" />\n    <meta name=\"robots\" content=\"noindex\" />\n    <title>Cortex Console</title>\n    <!-- Classic, blocking: applies the stored theme before first paint. -->\n    <script src=\"/ui/theme.js\"></script>\n    <script type=\"module\" crossorigin src=\"/ui/assets/index-Ci6PPauE.js\"></script>\n    <link rel=\"stylesheet\" crossorigin href=\"/ui/assets/index-CODtH-60.css\">\n  </head>\n  <body>\n    <div id=\"app\"></div>\n  </body>\n</html>\n",
    "headers": {
     "cache-control": "no-store",
     "content-security-policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
@@ -1097,7 +1494,7 @@
    "status": 200
   },
   {
-   "bytes": "<113746 bytes sha256:6afbf1fac617203b6d7f9187>",
+   "bytes": "<113964 bytes sha256:bd2c83aee49d0a8f77cea5b9>",
    "headers": {
     "cache-control": "no-store",
     "content-security-policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
@@ -1157,7 +1554,7 @@
    "status": 200
   },
   {
-   "bytes": "<!doctype html>\n<html lang=\"en\" data-theme=\"dark\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />\n    <meta name=\"color-scheme\" content=\"dark light\" />\n    <meta name=\"robots\" content=\"noindex\" />\n    <title>Cortex Console</title>\n    <!-- Classic, blocking: applies the stored theme before first paint. -->\n    <script src=\"/ui/theme.js\"></script>\n    <script type=\"module\" crossorigin src=\"/ui/assets/index-9XuDbQle.js\"></script>\n    <link rel=\"stylesheet\" crossorigin href=\"/ui/assets/index-BFOM-F8H.css\">\n  </head>\n  <body>\n    <div id=\"app\"></div>\n  </body>\n</html>\n",
+   "bytes": "<!doctype html>\n<html lang=\"en\" data-theme=\"dark\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />\n    <meta name=\"color-scheme\" content=\"dark light\" />\n    <meta name=\"robots\" content=\"noindex\" />\n    <title>Cortex Console</title>\n    <!-- Classic, blocking: applies the stored theme before first paint. -->\n    <script src=\"/ui/theme.js\"></script>\n    <script type=\"module\" crossorigin src=\"/ui/assets/index-Ci6PPauE.js\"></script>\n    <link rel=\"stylesheet\" crossorigin href=\"/ui/assets/index-CODtH-60.css\">\n  </head>\n  <body>\n    <div id=\"app\"></div>\n  </body>\n</html>\n",
    "headers": {
     "cache-control": "no-store",
     "content-security-policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
@@ -1216,6 +1613,7 @@
     "error": "not_found",
     "path": "/api"
    },
+   "number_tokens": [],
    "status": 404
   },
   {
@@ -1228,6 +1626,7 @@
     "error": "not_found",
     "path": "/api/nope"
    },
+   "number_tokens": [],
    "status": 404
   },
   {
@@ -1240,6 +1639,7 @@
     "error": "not_found",
     "path": "/api/nope"
    },
+   "number_tokens": [],
    "status": 404
   },
   {
@@ -1252,6 +1652,7 @@
     "error": "method_not_allowed",
     "path": "/api/delete"
    },
+   "number_tokens": [],
    "status": 405
   },
   {
@@ -1264,6 +1665,7 @@
     "error": "method_not_allowed",
     "path": "/api/stats"
    },
+   "number_tokens": [],
    "status": 405
   },
   {
@@ -1275,6 +1677,7 @@
    "json": {
     "error": "method_not_allowed"
    },
+   "number_tokens": [],
    "status": 405
   },
   {
@@ -1286,6 +1689,7 @@
    "json": {
     "error": "method_not_allowed"
    },
+   "number_tokens": [],
    "status": 405
   },
   {
@@ -1297,6 +1701,7 @@
    "json": {
     "error": "content_type_must_be_application_json"
    },
+   "number_tokens": [],
    "status": 415
   },
   {
@@ -1308,6 +1713,7 @@
    "json": {
     "error": "invalid_json"
    },
+   "number_tokens": [],
    "status": 400
   },
   {
@@ -1319,6 +1725,7 @@
    "json": {
     "error": "body_must_be_object"
    },
+   "number_tokens": [],
    "status": 400
   },
   {
@@ -1331,6 +1738,7 @@
     "error": "not_found",
     "path": "/api/nope"
    },
+   "number_tokens": [],
    "status": 404
   },
   {
@@ -1342,6 +1750,7 @@
    "json": {
     "error": "request_too_large"
    },
+   "number_tokens": [],
    "status": 413
   },
   {
@@ -1354,6 +1763,7 @@
     "error": "method_not_allowed",
     "path": "/api/facts/set"
    },
+   "number_tokens": [],
    "status": 405
   },
   {
@@ -1372,6 +1782,7 @@
    "json": {
     "error": "invalid_json"
    },
+   "number_tokens": [],
    "status": 400
   },
   {
@@ -1383,6 +1794,7 @@
    "json": {
     "error": "method_not_allowed"
    },
+   "number_tokens": [],
    "status": 405
   },
   {
@@ -1394,6 +1806,7 @@
    "json": {
     "error": "request_too_large"
    },
+   "number_tokens": [],
    "status": 413
   },
   {
@@ -1405,6 +1818,7 @@
    "json": {
     "error": "authentication_required"
    },
+   "number_tokens": [],
    "status": 401
   },
   {
@@ -1416,6 +1830,7 @@
    "json": {
     "error": "authentication_required"
    },
+   "number_tokens": [],
    "status": 401
   },
   {
@@ -1427,6 +1842,7 @@
    "json": {
     "error": "authentication_required"
    },
+   "number_tokens": [],
    "status": 401
   },
   {
@@ -1438,6 +1854,7 @@
    "json": {
     "error": "authentication_required"
    },
+   "number_tokens": [],
    "status": 401
   },
   {
@@ -1511,7 +1928,7 @@
     "retrieval_log": {
      "enabled": true,
      "events": 1,
-     "last_event_at": 1791540654.4547553,
+     "last_event_at": "<stats clock>",
      "lesson_searches": 0,
      "uses": 0,
      "write_errors": 0
@@ -1525,6 +1942,319 @@
     "true_drops_total": 0,
     "weights_reset": false
    },
+   "number_tokens": [
+    {
+     "path": [
+      "bands",
+      0,
+      "size"
+     ],
+     "token": "0"
+    },
+    {
+     "path": [
+      "bands",
+      0,
+      "capacity"
+     ],
+     "token": "5250"
+    },
+    {
+     "path": [
+      "bands",
+      0,
+      "update_interval"
+     ],
+     "token": "1000000000"
+    },
+    {
+     "path": [
+      "bands",
+      0,
+      "hit_rate"
+     ],
+     "token": "0.0"
+    },
+    {
+     "path": [
+      "bands",
+      0,
+      "hit_count"
+     ],
+     "token": "0"
+    },
+    {
+     "path": [
+      "total_memories"
+     ],
+     "token": "0"
+    },
+    {
+     "path": [
+      "interaction_count"
+     ],
+     "token": "0"
+    },
+    {
+     "path": [
+      "logical_turn_count"
+     ],
+     "token": "0"
+    },
+    {
+     "path": [
+      "retrieval_queries"
+     ],
+     "token": "0"
+    },
+    {
+     "path": [
+      "true_drops"
+     ],
+     "token": "0"
+    },
+    {
+     "path": [
+      "slot_index_shadow_divergences"
+     ],
+     "token": "0"
+    },
+    {
+     "path": [
+      "instant_bank_size"
+     ],
+     "token": "0"
+    },
+    {
+     "path": [
+      "instant_bank_capacity"
+     ],
+     "token": "5250"
+    },
+    {
+     "path": [
+      "short_term_bank_size"
+     ],
+     "token": "0"
+    },
+    {
+     "path": [
+      "short_term_bank_capacity"
+     ],
+     "token": "5250"
+    },
+    {
+     "path": [
+      "long_term_bank_size"
+     ],
+     "token": "0"
+    },
+    {
+     "path": [
+      "long_term_bank_capacity"
+     ],
+     "token": "5250"
+    },
+    {
+     "path": [
+      "reference_bank_size"
+     ],
+     "token": "0"
+    },
+    {
+     "path": [
+      "reference_document_count"
+     ],
+     "token": "0"
+    },
+    {
+     "path": [
+      "communities"
+     ],
+     "token": "0"
+    },
+    {
+     "path": [
+      "true_drops_total"
+     ],
+     "token": "0"
+    },
+    {
+     "path": [
+      "retrieval_log",
+      "events"
+     ],
+     "token": "1"
+    },
+    {
+     "path": [
+      "retrieval_log",
+      "uses"
+     ],
+     "token": "0"
+    },
+    {
+     "path": [
+      "retrieval_log",
+      "lesson_searches"
+     ],
+     "token": "0"
+    },
+    {
+     "path": [
+      "retrieval_log",
+      "write_errors"
+     ],
+     "token": "0"
+    },
+    {
+     "path": [
+      "read_audit",
+      "entries",
+      "total"
+     ],
+     "token": "0"
+    },
+    {
+     "path": [
+      "read_audit",
+      "entries",
+      "never_read"
+     ],
+     "token": "0"
+    },
+    {
+     "path": [
+      "read_audit",
+      "entries",
+      "never_read_pct"
+     ],
+     "token": "0.0"
+    },
+    {
+     "path": [
+      "read_audit",
+      "entries",
+      "reads_total"
+     ],
+     "token": "0"
+    },
+    {
+     "path": [
+      "read_audit",
+      "entries",
+      "reads_median"
+     ],
+     "token": "0.0"
+    },
+    {
+     "path": [
+      "read_audit",
+      "entries",
+      "by_age",
+      "lt_14d",
+      "n"
+     ],
+     "token": "0"
+    },
+    {
+     "path": [
+      "read_audit",
+      "entries",
+      "by_age",
+      "lt_14d",
+      "never_read"
+     ],
+     "token": "0"
+    },
+    {
+     "path": [
+      "read_audit",
+      "entries",
+      "by_age",
+      "d14_45",
+      "n"
+     ],
+     "token": "0"
+    },
+    {
+     "path": [
+      "read_audit",
+      "entries",
+      "by_age",
+      "d14_45",
+      "never_read"
+     ],
+     "token": "0"
+    },
+    {
+     "path": [
+      "read_audit",
+      "entries",
+      "by_age",
+      "gt_45d",
+      "n"
+     ],
+     "token": "0"
+    },
+    {
+     "path": [
+      "read_audit",
+      "entries",
+      "by_age",
+      "gt_45d",
+      "never_read"
+     ],
+     "token": "0"
+    },
+    {
+     "path": [
+      "read_audit",
+      "slots",
+      "current_slots"
+     ],
+     "token": "0"
+    },
+    {
+     "path": [
+      "read_audit",
+      "slots",
+      "slots_read"
+     ],
+     "token": "0"
+    },
+    {
+     "path": [
+      "read_audit",
+      "slots",
+      "reads_total"
+     ],
+     "token": "0"
+    },
+    {
+     "path": [
+      "read_audit",
+      "reinforcements",
+      "total"
+     ],
+     "token": "0"
+    },
+    {
+     "path": [
+      "read_audit",
+      "reinforcements",
+      "explicit"
+     ],
+     "token": "0"
+    },
+    {
+     "path": [
+      "read_audit",
+      "slot_read_write_errors"
+     ],
+     "token": "0"
+    }
+   ],
    "status": 200
   },
   {
@@ -1534,7 +2264,7 @@
     "x-content-type-options": "nosniff"
    },
    "json": {
-    "config_path": "<machine path>\\tokenless-py\\data\\config.yaml",
+    "config_path": "<home>/data/config.yaml",
     "groups": [
      {
       "knobs": [
@@ -2025,7 +2755,7 @@
       "knobs": [
        {
         "default": "shadow",
-        "help": "How the autonomous Step-C judge handles pending merge proposals: \"shadow\" records verdicts without applying them; \"auto-reject\" additionally applies reject verdicts at/above the confidence gate (judge_reject_min_confidence, 0.8) and, with the second opinion on, two agreeing rejects from different models at mean >= judge_reject_min_confidence_2 (0.7); \"auto\" additionally folds a pair when two independent accepts agree on non-low-differential evidence at mean >= judge_accept_min_confidence (0.6) and only when the two opinions come from different models (judge_second_model) \u2014 the only path that ever auto-applies an accept (6/6 on the 2026-09-02 panel, evals/results/queue-judge-panel-20260902.json). Caveat: both auto modes are only measured-safe on an Opus-class judge endpoint (live auto-reject precision 1.000, evals/results/judge-shadow-live-20260821.json); the 2026-08-16 judge ladder shows weaker judges mis-reject with confident scores (local Qwen 0.918, confidence uninformative), so leave \"shadow\" unless the dream extractor or judge_url resolves to an Opus-class model.",
+        "help": "How the autonomous Step-C judge handles pending merge proposals: \"shadow\" records verdicts without applying them; \"auto-reject\" additionally applies reject verdicts at/above the confidence gate (judge_reject_min_confidence, 0.8) and, with the second opinion on, two agreeing rejects from different models at mean >= judge_reject_min_confidence_2 (0.7); \"auto\" additionally folds a pair when two independent accepts agree on non-low-differential evidence at mean >= judge_accept_min_confidence (0.6) and only when the two opinions come from different models (judge_second_model) \u2014 with the tiebreak's 2-of-3 accept (judge_tiebreak_mode auto), the only paths that ever auto-apply an accept (two-vote: 6/6 on the 2026-09-02 panel, evals/results/queue-judge-panel-20260902.json). Caveat: both auto modes are only measured-safe on an Opus-class judge endpoint (live auto-reject precision 1.000, evals/results/judge-shadow-live-20260821.json); the 2026-08-16 judge ladder shows weaker judges mis-reject with confident scores (local Qwen 0.918, confidence uninformative), so leave \"shadow\" unless the dream extractor or judge_url resolves to an Opus-class model.",
         "label": "Step-C merge judge",
         "options": [
          "off",
@@ -2135,6 +2865,74 @@
         "restart": false,
         "type": "enum",
         "value": "shadow"
+       },
+       {
+        "default": "shadow",
+        "help": "A link proposal whose first accept or reject sat below its single-vote gate (0.8) is judged once more, in a fresh batch, by the merge judge's second model and endpoint (asked only while the merge judge's second opinion is on). \"shadow\" records the second verdict; \"auto\" additionally applies two agreeing accepts or rejects from DIFFERENT models at mean >= link_two_vote_min_confidence (0.7), and only while the link judge itself is \"auto\". A retype is never applied. Rescoring the 2026-09-29 ladder (37 link rows) at that gate gave 7/7 and 8/8 correct accepts and 6/6 and 7/7 correct rejects per replicate; the panel is small, hence shadow. Promoting it to \"auto\" keeps the recorded votes: the next sweep applies the gate to them with no model call.",
+        "label": "Link judge second opinion",
+        "options": [
+         "off",
+         "shadow",
+         "auto"
+        ],
+        "path": "memory.deep_dream.link_judge_two_vote",
+        "restart": false,
+        "type": "enum",
+        "value": "shadow"
+       },
+       {
+        "default": 0.7,
+        "help": "Mean confidence two agreeing link votes need before the link judge's second opinion applies them (auto only). 0.7 is the gate the 2026-09-29 ladder rescoring was measured at. Changing it changes the judging policy: recorded verdicts in every review queue are re-judged and automatic decisions reconsidered.",
+        "label": "Link two-vote gate",
+        "max": 1.0,
+        "min": 0.0,
+        "path": "memory.deep_dream.link_two_vote_min_confidence",
+        "restart": false,
+        "step": 0.05,
+        "type": "float",
+        "value": 0.7
+       },
+       {
+        "default": "shadow",
+        "help": "A merge proposal whose first two opinions disagree (\"split\") gets one third opinion from the third model below, only when that model is set and is neither the first nor the second. \"shadow\" records it; \"auto\" applies a 2-of-3 majority through the two-vote gates: two reject-class votes at mean >= judge_reject_min_confidence_2 (0.7) reject, and two accepts at mean >= judge_accept_min_confidence (0.6) fold only while the merge judge is \"auto\" and the row is not low-differential. Unmeasured by any ladder yet, hence shadow. Promoting it to \"auto\" keeps the recorded votes: the next sweep applies the majority to them with no model call.",
+        "label": "Merge judge tiebreak",
+        "options": [
+         "off",
+         "shadow",
+         "auto"
+        ],
+        "path": "memory.deep_dream.judge_tiebreak_mode",
+        "restart": false,
+        "type": "enum",
+        "value": "shadow"
+       },
+       {
+        "help": "Model for the merge tiebreak's third opinion, served by the third endpoint URL when set, else by the first opinion's endpoint. Empty = no third opinion is asked. A name equal to the first or the second model is skipped with no call, and a third vote served by either of them applies nothing. Setting it changes the judging policy: recorded verdicts in every review queue are re-judged and automatic decisions reconsidered.",
+        "label": "Merge judge third model",
+        "path": "memory.deep_dream.judge_third_model",
+        "restart": false,
+        "suggestions": [
+         "claude-fable-5",
+         "claude-opus-5",
+         "claude-sonnet-5",
+         "gpt-5.6-terra",
+         "gpt-5.6-luna"
+        ],
+        "type": "string",
+        "value": ""
+       },
+       {
+        "format": "url",
+        "help": "OpenAI-compatible /v1 endpoint for the merge tiebreak's third opinion, serving the third model above (empty = its launch default). Empty = the first opinion's endpoint. Its bearer key is env-only: PSEUDOLIFE_JUDGE_THIRD_API_KEY, sent to this endpoint and nowhere else. Changing it changes the judging policy: recorded verdicts in every review queue are re-judged and automatic decisions reconsidered.",
+        "label": "Merge judge third endpoint URL",
+        "path": "memory.deep_dream.judge_third_url",
+        "restart": false,
+        "suggestions": [
+         "http://host.docker.internal:8082/v1",
+         "http://host.docker.internal:8086/v1"
+        ],
+        "type": "string",
+        "value": ""
        },
        {
         "default": "shadow",
@@ -2570,6 +3368,1958 @@
      }
     ]
    },
+   "number_tokens": [
+    {
+     "path": [
+      "groups",
+      0,
+      "knobs",
+      0,
+      "default"
+     ],
+     "token": "0.0"
+    },
+    {
+     "path": [
+      "groups",
+      0,
+      "knobs",
+      0,
+      "min"
+     ],
+     "token": "0.0"
+    },
+    {
+     "path": [
+      "groups",
+      0,
+      "knobs",
+      0,
+      "max"
+     ],
+     "token": "1.0"
+    },
+    {
+     "path": [
+      "groups",
+      0,
+      "knobs",
+      0,
+      "step"
+     ],
+     "token": "0.01"
+    },
+    {
+     "path": [
+      "groups",
+      0,
+      "knobs",
+      0,
+      "value"
+     ],
+     "token": "0.0"
+    },
+    {
+     "path": [
+      "groups",
+      0,
+      "knobs",
+      1,
+      "default"
+     ],
+     "token": "0.0"
+    },
+    {
+     "path": [
+      "groups",
+      0,
+      "knobs",
+      1,
+      "min"
+     ],
+     "token": "0.0"
+    },
+    {
+     "path": [
+      "groups",
+      0,
+      "knobs",
+      1,
+      "max"
+     ],
+     "token": "1.0"
+    },
+    {
+     "path": [
+      "groups",
+      0,
+      "knobs",
+      1,
+      "step"
+     ],
+     "token": "0.01"
+    },
+    {
+     "path": [
+      "groups",
+      0,
+      "knobs",
+      1,
+      "value"
+     ],
+     "token": "0.0"
+    },
+    {
+     "path": [
+      "groups",
+      0,
+      "knobs",
+      2,
+      "default"
+     ],
+     "token": "8"
+    },
+    {
+     "path": [
+      "groups",
+      0,
+      "knobs",
+      2,
+      "min"
+     ],
+     "token": "1"
+    },
+    {
+     "path": [
+      "groups",
+      0,
+      "knobs",
+      2,
+      "max"
+     ],
+     "token": "50"
+    },
+    {
+     "path": [
+      "groups",
+      0,
+      "knobs",
+      2,
+      "step"
+     ],
+     "token": "1"
+    },
+    {
+     "path": [
+      "groups",
+      0,
+      "knobs",
+      2,
+      "value"
+     ],
+     "token": "8"
+    },
+    {
+     "path": [
+      "groups",
+      1,
+      "knobs",
+      1,
+      "default"
+     ],
+     "token": "0.7"
+    },
+    {
+     "path": [
+      "groups",
+      1,
+      "knobs",
+      1,
+      "min"
+     ],
+     "token": "0.0"
+    },
+    {
+     "path": [
+      "groups",
+      1,
+      "knobs",
+      1,
+      "max"
+     ],
+     "token": "1.0"
+    },
+    {
+     "path": [
+      "groups",
+      1,
+      "knobs",
+      1,
+      "step"
+     ],
+     "token": "0.05"
+    },
+    {
+     "path": [
+      "groups",
+      1,
+      "knobs",
+      1,
+      "value"
+     ],
+     "token": "0.7"
+    },
+    {
+     "path": [
+      "groups",
+      1,
+      "knobs",
+      2,
+      "default"
+     ],
+     "token": "20"
+    },
+    {
+     "path": [
+      "groups",
+      1,
+      "knobs",
+      2,
+      "min"
+     ],
+     "token": "1"
+    },
+    {
+     "path": [
+      "groups",
+      1,
+      "knobs",
+      2,
+      "max"
+     ],
+     "token": "100"
+    },
+    {
+     "path": [
+      "groups",
+      1,
+      "knobs",
+      2,
+      "step"
+     ],
+     "token": "1"
+    },
+    {
+     "path": [
+      "groups",
+      1,
+      "knobs",
+      2,
+      "value"
+     ],
+     "token": "20"
+    },
+    {
+     "path": [
+      "groups",
+      1,
+      "knobs",
+      4,
+      "default"
+     ],
+     "token": "0.3"
+    },
+    {
+     "path": [
+      "groups",
+      1,
+      "knobs",
+      4,
+      "min"
+     ],
+     "token": "0.0"
+    },
+    {
+     "path": [
+      "groups",
+      1,
+      "knobs",
+      4,
+      "max"
+     ],
+     "token": "1.0"
+    },
+    {
+     "path": [
+      "groups",
+      1,
+      "knobs",
+      4,
+      "step"
+     ],
+     "token": "0.05"
+    },
+    {
+     "path": [
+      "groups",
+      1,
+      "knobs",
+      4,
+      "value"
+     ],
+     "token": "0.3"
+    },
+    {
+     "path": [
+      "groups",
+      1,
+      "knobs",
+      6,
+      "default"
+     ],
+     "token": "0.0"
+    },
+    {
+     "path": [
+      "groups",
+      1,
+      "knobs",
+      6,
+      "min"
+     ],
+     "token": "0.0"
+    },
+    {
+     "path": [
+      "groups",
+      1,
+      "knobs",
+      6,
+      "max"
+     ],
+     "token": "1.0"
+    },
+    {
+     "path": [
+      "groups",
+      1,
+      "knobs",
+      6,
+      "step"
+     ],
+     "token": "0.01"
+    },
+    {
+     "path": [
+      "groups",
+      1,
+      "knobs",
+      6,
+      "value"
+     ],
+     "token": "0.0"
+    },
+    {
+     "path": [
+      "groups",
+      2,
+      "knobs",
+      1,
+      "default"
+     ],
+     "token": "365"
+    },
+    {
+     "path": [
+      "groups",
+      2,
+      "knobs",
+      1,
+      "min"
+     ],
+     "token": "1"
+    },
+    {
+     "path": [
+      "groups",
+      2,
+      "knobs",
+      1,
+      "max"
+     ],
+     "token": "3650"
+    },
+    {
+     "path": [
+      "groups",
+      2,
+      "knobs",
+      1,
+      "step"
+     ],
+     "token": "1"
+    },
+    {
+     "path": [
+      "groups",
+      2,
+      "knobs",
+      1,
+      "value"
+     ],
+     "token": "365"
+    },
+    {
+     "path": [
+      "groups",
+      2,
+      "knobs",
+      2,
+      "default"
+     ],
+     "token": "3600"
+    },
+    {
+     "path": [
+      "groups",
+      2,
+      "knobs",
+      2,
+      "min"
+     ],
+     "token": "60"
+    },
+    {
+     "path": [
+      "groups",
+      2,
+      "knobs",
+      2,
+      "max"
+     ],
+     "token": "86400"
+    },
+    {
+     "path": [
+      "groups",
+      2,
+      "knobs",
+      2,
+      "step"
+     ],
+     "token": "60"
+    },
+    {
+     "path": [
+      "groups",
+      2,
+      "knobs",
+      2,
+      "value"
+     ],
+     "token": "3600"
+    },
+    {
+     "path": [
+      "groups",
+      3,
+      "knobs",
+      1,
+      "default"
+     ],
+     "token": "600"
+    },
+    {
+     "path": [
+      "groups",
+      3,
+      "knobs",
+      1,
+      "min"
+     ],
+     "token": "80"
+    },
+    {
+     "path": [
+      "groups",
+      3,
+      "knobs",
+      1,
+      "max"
+     ],
+     "token": "10000"
+    },
+    {
+     "path": [
+      "groups",
+      3,
+      "knobs",
+      1,
+      "step"
+     ],
+     "token": "20"
+    },
+    {
+     "path": [
+      "groups",
+      3,
+      "knobs",
+      1,
+      "value"
+     ],
+     "token": "600"
+    },
+    {
+     "path": [
+      "groups",
+      4,
+      "knobs",
+      1,
+      "default"
+     ],
+     "token": "0.2"
+    },
+    {
+     "path": [
+      "groups",
+      4,
+      "knobs",
+      1,
+      "min"
+     ],
+     "token": "0.0"
+    },
+    {
+     "path": [
+      "groups",
+      4,
+      "knobs",
+      1,
+      "max"
+     ],
+     "token": "1.0"
+    },
+    {
+     "path": [
+      "groups",
+      4,
+      "knobs",
+      1,
+      "step"
+     ],
+     "token": "0.01"
+    },
+    {
+     "path": [
+      "groups",
+      4,
+      "knobs",
+      1,
+      "value"
+     ],
+     "token": "0.2"
+    },
+    {
+     "path": [
+      "groups",
+      4,
+      "knobs",
+      3,
+      "default"
+     ],
+     "token": "0.15"
+    },
+    {
+     "path": [
+      "groups",
+      4,
+      "knobs",
+      3,
+      "min"
+     ],
+     "token": "0.0"
+    },
+    {
+     "path": [
+      "groups",
+      4,
+      "knobs",
+      3,
+      "max"
+     ],
+     "token": "1.0"
+    },
+    {
+     "path": [
+      "groups",
+      4,
+      "knobs",
+      3,
+      "step"
+     ],
+     "token": "0.01"
+    },
+    {
+     "path": [
+      "groups",
+      4,
+      "knobs",
+      3,
+      "value"
+     ],
+     "token": "0.15"
+    },
+    {
+     "path": [
+      "groups",
+      4,
+      "knobs",
+      5,
+      "default"
+     ],
+     "token": "0.0"
+    },
+    {
+     "path": [
+      "groups",
+      4,
+      "knobs",
+      5,
+      "min"
+     ],
+     "token": "0.0"
+    },
+    {
+     "path": [
+      "groups",
+      4,
+      "knobs",
+      5,
+      "max"
+     ],
+     "token": "1.0"
+    },
+    {
+     "path": [
+      "groups",
+      4,
+      "knobs",
+      5,
+      "step"
+     ],
+     "token": "0.01"
+    },
+    {
+     "path": [
+      "groups",
+      4,
+      "knobs",
+      5,
+      "value"
+     ],
+     "token": "0.0"
+    },
+    {
+     "path": [
+      "groups",
+      5,
+      "knobs",
+      1,
+      "default"
+     ],
+     "token": "8"
+    },
+    {
+     "path": [
+      "groups",
+      5,
+      "knobs",
+      1,
+      "min"
+     ],
+     "token": "1"
+    },
+    {
+     "path": [
+      "groups",
+      5,
+      "knobs",
+      1,
+      "max"
+     ],
+     "token": "1000"
+    },
+    {
+     "path": [
+      "groups",
+      5,
+      "knobs",
+      1,
+      "step"
+     ],
+     "token": "1"
+    },
+    {
+     "path": [
+      "groups",
+      5,
+      "knobs",
+      1,
+      "value"
+     ],
+     "token": "8"
+    },
+    {
+     "path": [
+      "groups",
+      5,
+      "knobs",
+      2,
+      "default"
+     ],
+     "token": "600.0"
+    },
+    {
+     "path": [
+      "groups",
+      5,
+      "knobs",
+      2,
+      "min"
+     ],
+     "token": "0.0"
+    },
+    {
+     "path": [
+      "groups",
+      5,
+      "knobs",
+      2,
+      "max"
+     ],
+     "token": "86400.0"
+    },
+    {
+     "path": [
+      "groups",
+      5,
+      "knobs",
+      2,
+      "step"
+     ],
+     "token": "60.0"
+    },
+    {
+     "path": [
+      "groups",
+      5,
+      "knobs",
+      2,
+      "value"
+     ],
+     "token": "600.0"
+    },
+    {
+     "path": [
+      "groups",
+      5,
+      "knobs",
+      3,
+      "default"
+     ],
+     "token": "40"
+    },
+    {
+     "path": [
+      "groups",
+      5,
+      "knobs",
+      3,
+      "min"
+     ],
+     "token": "1"
+    },
+    {
+     "path": [
+      "groups",
+      5,
+      "knobs",
+      3,
+      "max"
+     ],
+     "token": "1000"
+    },
+    {
+     "path": [
+      "groups",
+      5,
+      "knobs",
+      3,
+      "step"
+     ],
+     "token": "1"
+    },
+    {
+     "path": [
+      "groups",
+      5,
+      "knobs",
+      3,
+      "value"
+     ],
+     "token": "40"
+    },
+    {
+     "path": [
+      "groups",
+      5,
+      "knobs",
+      4,
+      "default"
+     ],
+     "token": "600.0"
+    },
+    {
+     "path": [
+      "groups",
+      5,
+      "knobs",
+      4,
+      "min"
+     ],
+     "token": "30.0"
+    },
+    {
+     "path": [
+      "groups",
+      5,
+      "knobs",
+      4,
+      "max"
+     ],
+     "token": "86400.0"
+    },
+    {
+     "path": [
+      "groups",
+      5,
+      "knobs",
+      4,
+      "step"
+     ],
+     "token": "30.0"
+    },
+    {
+     "path": [
+      "groups",
+      5,
+      "knobs",
+      4,
+      "value"
+     ],
+     "token": "600.0"
+    },
+    {
+     "path": [
+      "groups",
+      5,
+      "knobs",
+      6,
+      "default"
+     ],
+     "token": "0.6"
+    },
+    {
+     "path": [
+      "groups",
+      5,
+      "knobs",
+      6,
+      "min"
+     ],
+     "token": "0.0"
+    },
+    {
+     "path": [
+      "groups",
+      5,
+      "knobs",
+      6,
+      "max"
+     ],
+     "token": "1.0"
+    },
+    {
+     "path": [
+      "groups",
+      5,
+      "knobs",
+      6,
+      "step"
+     ],
+     "token": "0.05"
+    },
+    {
+     "path": [
+      "groups",
+      5,
+      "knobs",
+      6,
+      "value"
+     ],
+     "token": "0.6"
+    },
+    {
+     "path": [
+      "groups",
+      5,
+      "knobs",
+      7,
+      "default"
+     ],
+     "token": "0.7"
+    },
+    {
+     "path": [
+      "groups",
+      5,
+      "knobs",
+      7,
+      "min"
+     ],
+     "token": "0.0"
+    },
+    {
+     "path": [
+      "groups",
+      5,
+      "knobs",
+      7,
+      "max"
+     ],
+     "token": "1.0"
+    },
+    {
+     "path": [
+      "groups",
+      5,
+      "knobs",
+      7,
+      "step"
+     ],
+     "token": "0.05"
+    },
+    {
+     "path": [
+      "groups",
+      5,
+      "knobs",
+      7,
+      "value"
+     ],
+     "token": "0.7"
+    },
+    {
+     "path": [
+      "groups",
+      5,
+      "knobs",
+      8,
+      "default"
+     ],
+     "token": "0.2"
+    },
+    {
+     "path": [
+      "groups",
+      5,
+      "knobs",
+      8,
+      "min"
+     ],
+     "token": "0.0"
+    },
+    {
+     "path": [
+      "groups",
+      5,
+      "knobs",
+      8,
+      "max"
+     ],
+     "token": "1.0"
+    },
+    {
+     "path": [
+      "groups",
+      5,
+      "knobs",
+      8,
+      "step"
+     ],
+     "token": "0.05"
+    },
+    {
+     "path": [
+      "groups",
+      5,
+      "knobs",
+      8,
+      "value"
+     ],
+     "token": "0.2"
+    },
+    {
+     "path": [
+      "groups",
+      5,
+      "knobs",
+      9,
+      "default"
+     ],
+     "token": "0.5"
+    },
+    {
+     "path": [
+      "groups",
+      5,
+      "knobs",
+      9,
+      "min"
+     ],
+     "token": "0.0"
+    },
+    {
+     "path": [
+      "groups",
+      5,
+      "knobs",
+      9,
+      "max"
+     ],
+     "token": "1.0"
+    },
+    {
+     "path": [
+      "groups",
+      5,
+      "knobs",
+      9,
+      "step"
+     ],
+     "token": "0.05"
+    },
+    {
+     "path": [
+      "groups",
+      5,
+      "knobs",
+      9,
+      "value"
+     ],
+     "token": "0.5"
+    },
+    {
+     "path": [
+      "groups",
+      5,
+      "knobs",
+      10,
+      "default"
+     ],
+     "token": "3"
+    },
+    {
+     "path": [
+      "groups",
+      5,
+      "knobs",
+      10,
+      "min"
+     ],
+     "token": "0"
+    },
+    {
+     "path": [
+      "groups",
+      5,
+      "knobs",
+      10,
+      "max"
+     ],
+     "token": "20"
+    },
+    {
+     "path": [
+      "groups",
+      5,
+      "knobs",
+      10,
+      "step"
+     ],
+     "token": "1"
+    },
+    {
+     "path": [
+      "groups",
+      5,
+      "knobs",
+      10,
+      "value"
+     ],
+     "token": "3"
+    },
+    {
+     "path": [
+      "groups",
+      5,
+      "knobs",
+      16,
+      "default"
+     ],
+     "token": "1200"
+    },
+    {
+     "path": [
+      "groups",
+      5,
+      "knobs",
+      16,
+      "min"
+     ],
+     "token": "200"
+    },
+    {
+     "path": [
+      "groups",
+      5,
+      "knobs",
+      16,
+      "max"
+     ],
+     "token": "4000"
+    },
+    {
+     "path": [
+      "groups",
+      5,
+      "knobs",
+      16,
+      "step"
+     ],
+     "token": "100"
+    },
+    {
+     "path": [
+      "groups",
+      5,
+      "knobs",
+      16,
+      "value"
+     ],
+     "token": "1200"
+    },
+    {
+     "path": [
+      "groups",
+      5,
+      "knobs",
+      17,
+      "default"
+     ],
+     "token": "24000"
+    },
+    {
+     "path": [
+      "groups",
+      5,
+      "knobs",
+      17,
+      "min"
+     ],
+     "token": "1000"
+    },
+    {
+     "path": [
+      "groups",
+      5,
+      "knobs",
+      17,
+      "max"
+     ],
+     "token": "200000"
+    },
+    {
+     "path": [
+      "groups",
+      5,
+      "knobs",
+      17,
+      "step"
+     ],
+     "token": "1000"
+    },
+    {
+     "path": [
+      "groups",
+      5,
+      "knobs",
+      17,
+      "value"
+     ],
+     "token": "24000"
+    },
+    {
+     "path": [
+      "groups",
+      6,
+      "knobs",
+      2,
+      "default"
+     ],
+     "token": "240"
+    },
+    {
+     "path": [
+      "groups",
+      6,
+      "knobs",
+      2,
+      "min"
+     ],
+     "token": "0"
+    },
+    {
+     "path": [
+      "groups",
+      6,
+      "knobs",
+      2,
+      "max"
+     ],
+     "token": "20000"
+    },
+    {
+     "path": [
+      "groups",
+      6,
+      "knobs",
+      2,
+      "step"
+     ],
+     "token": "100"
+    },
+    {
+     "path": [
+      "groups",
+      6,
+      "knobs",
+      2,
+      "value"
+     ],
+     "token": "240"
+    },
+    {
+     "path": [
+      "groups",
+      6,
+      "knobs",
+      10,
+      "default"
+     ],
+     "token": "0.7"
+    },
+    {
+     "path": [
+      "groups",
+      6,
+      "knobs",
+      10,
+      "min"
+     ],
+     "token": "0.0"
+    },
+    {
+     "path": [
+      "groups",
+      6,
+      "knobs",
+      10,
+      "max"
+     ],
+     "token": "1.0"
+    },
+    {
+     "path": [
+      "groups",
+      6,
+      "knobs",
+      10,
+      "step"
+     ],
+     "token": "0.05"
+    },
+    {
+     "path": [
+      "groups",
+      6,
+      "knobs",
+      10,
+      "value"
+     ],
+     "token": "0.7"
+    },
+    {
+     "path": [
+      "groups",
+      7,
+      "knobs",
+      5,
+      "default"
+     ],
+     "token": "240.0"
+    },
+    {
+     "path": [
+      "groups",
+      7,
+      "knobs",
+      5,
+      "min"
+     ],
+     "token": "10.0"
+    },
+    {
+     "path": [
+      "groups",
+      7,
+      "knobs",
+      5,
+      "max"
+     ],
+     "token": "3600.0"
+    },
+    {
+     "path": [
+      "groups",
+      7,
+      "knobs",
+      5,
+      "step"
+     ],
+     "token": "10.0"
+    },
+    {
+     "path": [
+      "groups",
+      7,
+      "knobs",
+      5,
+      "value"
+     ],
+     "token": "240.0"
+    },
+    {
+     "path": [
+      "groups",
+      7,
+      "knobs",
+      6,
+      "default"
+     ],
+     "token": "2048"
+    },
+    {
+     "path": [
+      "groups",
+      7,
+      "knobs",
+      6,
+      "min"
+     ],
+     "token": "128"
+    },
+    {
+     "path": [
+      "groups",
+      7,
+      "knobs",
+      6,
+      "max"
+     ],
+     "token": "32768"
+    },
+    {
+     "path": [
+      "groups",
+      7,
+      "knobs",
+      6,
+      "step"
+     ],
+     "token": "128"
+    },
+    {
+     "path": [
+      "groups",
+      7,
+      "knobs",
+      6,
+      "value"
+     ],
+     "token": "2048"
+    },
+    {
+     "path": [
+      "groups",
+      8,
+      "knobs",
+      1,
+      "default"
+     ],
+     "token": "5"
+    },
+    {
+     "path": [
+      "groups",
+      8,
+      "knobs",
+      1,
+      "min"
+     ],
+     "token": "1"
+    },
+    {
+     "path": [
+      "groups",
+      8,
+      "knobs",
+      1,
+      "max"
+     ],
+     "token": "50"
+    },
+    {
+     "path": [
+      "groups",
+      8,
+      "knobs",
+      1,
+      "step"
+     ],
+     "token": "1"
+    },
+    {
+     "path": [
+      "groups",
+      8,
+      "knobs",
+      1,
+      "value"
+     ],
+     "token": "5"
+    },
+    {
+     "path": [
+      "groups",
+      8,
+      "knobs",
+      2,
+      "default"
+     ],
+     "token": "3650"
+    },
+    {
+     "path": [
+      "groups",
+      8,
+      "knobs",
+      2,
+      "min"
+     ],
+     "token": "1"
+    },
+    {
+     "path": [
+      "groups",
+      8,
+      "knobs",
+      2,
+      "max"
+     ],
+     "token": "3650"
+    },
+    {
+     "path": [
+      "groups",
+      8,
+      "knobs",
+      2,
+      "step"
+     ],
+     "token": "1"
+    },
+    {
+     "path": [
+      "groups",
+      8,
+      "knobs",
+      2,
+      "value"
+     ],
+     "token": "3650"
+    },
+    {
+     "path": [
+      "groups",
+      8,
+      "knobs",
+      5,
+      "default"
+     ],
+     "token": "3"
+    },
+    {
+     "path": [
+      "groups",
+      8,
+      "knobs",
+      5,
+      "min"
+     ],
+     "token": "0"
+    },
+    {
+     "path": [
+      "groups",
+      8,
+      "knobs",
+      5,
+      "max"
+     ],
+     "token": "10"
+    },
+    {
+     "path": [
+      "groups",
+      8,
+      "knobs",
+      5,
+      "step"
+     ],
+     "token": "1"
+    },
+    {
+     "path": [
+      "groups",
+      8,
+      "knobs",
+      5,
+      "value"
+     ],
+     "token": "3"
+    },
+    {
+     "path": [
+      "groups",
+      9,
+      "knobs",
+      1,
+      "default"
+     ],
+     "token": "3"
+    },
+    {
+     "path": [
+      "groups",
+      9,
+      "knobs",
+      1,
+      "min"
+     ],
+     "token": "1"
+    },
+    {
+     "path": [
+      "groups",
+      9,
+      "knobs",
+      1,
+      "max"
+     ],
+     "token": "5"
+    },
+    {
+     "path": [
+      "groups",
+      9,
+      "knobs",
+      1,
+      "step"
+     ],
+     "token": "1"
+    },
+    {
+     "path": [
+      "groups",
+      9,
+      "knobs",
+      1,
+      "value"
+     ],
+     "token": "3"
+    },
+    {
+     "path": [
+      "groups",
+      9,
+      "knobs",
+      2,
+      "default"
+     ],
+     "token": "5"
+    },
+    {
+     "path": [
+      "groups",
+      9,
+      "knobs",
+      2,
+      "min"
+     ],
+     "token": "1"
+    },
+    {
+     "path": [
+      "groups",
+      9,
+      "knobs",
+      2,
+      "max"
+     ],
+     "token": "50"
+    },
+    {
+     "path": [
+      "groups",
+      9,
+      "knobs",
+      2,
+      "step"
+     ],
+     "token": "1"
+    },
+    {
+     "path": [
+      "groups",
+      9,
+      "knobs",
+      2,
+      "value"
+     ],
+     "token": "5"
+    },
+    {
+     "path": [
+      "groups",
+      9,
+      "knobs",
+      3,
+      "default"
+     ],
+     "token": "6"
+    },
+    {
+     "path": [
+      "groups",
+      9,
+      "knobs",
+      3,
+      "min"
+     ],
+     "token": "0"
+    },
+    {
+     "path": [
+      "groups",
+      9,
+      "knobs",
+      3,
+      "max"
+     ],
+     "token": "50"
+    },
+    {
+     "path": [
+      "groups",
+      9,
+      "knobs",
+      3,
+      "step"
+     ],
+     "token": "1"
+    },
+    {
+     "path": [
+      "groups",
+      9,
+      "knobs",
+      3,
+      "value"
+     ],
+     "token": "6"
+    },
+    {
+     "path": [
+      "groups",
+      9,
+      "knobs",
+      4,
+      "default"
+     ],
+     "token": "31"
+    },
+    {
+     "path": [
+      "groups",
+      9,
+      "knobs",
+      4,
+      "min"
+     ],
+     "token": "0"
+    },
+    {
+     "path": [
+      "groups",
+      9,
+      "knobs",
+      4,
+      "max"
+     ],
+     "token": "200"
+    },
+    {
+     "path": [
+      "groups",
+      9,
+      "knobs",
+      4,
+      "step"
+     ],
+     "token": "1"
+    },
+    {
+     "path": [
+      "groups",
+      9,
+      "knobs",
+      4,
+      "value"
+     ],
+     "token": "31"
+    },
+    {
+     "path": [
+      "groups",
+      9,
+      "knobs",
+      5,
+      "default"
+     ],
+     "token": "20.0"
+    },
+    {
+     "path": [
+      "groups",
+      9,
+      "knobs",
+      5,
+      "min"
+     ],
+     "token": "0.0"
+    },
+    {
+     "path": [
+      "groups",
+      9,
+      "knobs",
+      5,
+      "max"
+     ],
+     "token": "300.0"
+    },
+    {
+     "path": [
+      "groups",
+      9,
+      "knobs",
+      5,
+      "step"
+     ],
+     "token": "1.0"
+    },
+    {
+     "path": [
+      "groups",
+      9,
+      "knobs",
+      5,
+      "value"
+     ],
+     "token": "20.0"
+    },
+    {
+     "path": [
+      "groups",
+      10,
+      "knobs",
+      1,
+      "default"
+     ],
+     "token": "3"
+    },
+    {
+     "path": [
+      "groups",
+      10,
+      "knobs",
+      1,
+      "min"
+     ],
+     "token": "0"
+    },
+    {
+     "path": [
+      "groups",
+      10,
+      "knobs",
+      1,
+      "max"
+     ],
+     "token": "50"
+    },
+    {
+     "path": [
+      "groups",
+      10,
+      "knobs",
+      1,
+      "step"
+     ],
+     "token": "1"
+    },
+    {
+     "path": [
+      "groups",
+      10,
+      "knobs",
+      1,
+      "value"
+     ],
+     "token": "3"
+    },
+    {
+     "path": [
+      "groups",
+      10,
+      "knobs",
+      2,
+      "default"
+     ],
+     "token": "30.0"
+    },
+    {
+     "path": [
+      "groups",
+      10,
+      "knobs",
+      2,
+      "min"
+     ],
+     "token": "0.0"
+    },
+    {
+     "path": [
+      "groups",
+      10,
+      "knobs",
+      2,
+      "max"
+     ],
+     "token": "365.0"
+    },
+    {
+     "path": [
+      "groups",
+      10,
+      "knobs",
+      2,
+      "step"
+     ],
+     "token": "1.0"
+    },
+    {
+     "path": [
+      "groups",
+      10,
+      "knobs",
+      2,
+      "value"
+     ],
+     "token": "30.0"
+    },
+    {
+     "path": [
+      "groups",
+      10,
+      "knobs",
+      3,
+      "default"
+     ],
+     "token": "50"
+    },
+    {
+     "path": [
+      "groups",
+      10,
+      "knobs",
+      3,
+      "min"
+     ],
+     "token": "1"
+    },
+    {
+     "path": [
+      "groups",
+      10,
+      "knobs",
+      3,
+      "max"
+     ],
+     "token": "1000"
+    },
+    {
+     "path": [
+      "groups",
+      10,
+      "knobs",
+      3,
+      "step"
+     ],
+     "token": "1"
+    },
+    {
+     "path": [
+      "groups",
+      10,
+      "knobs",
+      3,
+      "value"
+     ],
+     "token": "50"
+    }
+   ],
    "status": 200
   },
   {
@@ -2582,6 +5332,7 @@
     "error": "not_found",
     "path": "/api/hook/nope"
    },
+   "number_tokens": [],
    "status": 404
   },
   {
@@ -2593,6 +5344,7 @@
    "json": {
     "error": "method_not_allowed"
    },
+   "number_tokens": [],
    "status": 405
   },
   {
@@ -2604,6 +5356,7 @@
    "json": {
     "error": "method_not_allowed"
    },
+   "number_tokens": [],
    "status": 405
   },
   {
@@ -2615,6 +5368,7 @@
    "json": {
     "error": "method_not_allowed"
    },
+   "number_tokens": [],
    "status": 405
   },
   {
@@ -2626,6 +5380,7 @@
    "json": {
     "error": "method_not_allowed"
    },
+   "number_tokens": [],
    "status": 405
   },
   {
@@ -2637,6 +5392,7 @@
    "json": {
     "error": "method_not_allowed"
    },
+   "number_tokens": [],
    "status": 405
   },
   {
@@ -2648,6 +5404,7 @@
    "json": {
     "error": "method_not_allowed"
    },
+   "number_tokens": [],
    "status": 405
   },
   {
@@ -2659,6 +5416,7 @@
    "json": {
     "error": "method_not_allowed"
    },
+   "number_tokens": [],
    "status": 405
   },
   {
@@ -2670,6 +5428,7 @@
    "json": {
     "error": "method_not_allowed"
    },
+   "number_tokens": [],
    "status": 405
   },
   {
@@ -2681,6 +5440,7 @@
    "json": {
     "error": "method_not_allowed"
    },
+   "number_tokens": [],
    "status": 405
   },
   {
@@ -2692,6 +5452,7 @@
    "json": {
     "error": "forbidden_origin"
    },
+   "number_tokens": [],
    "status": 403
   },
   {
@@ -2703,6 +5464,7 @@
    "json": {
     "error": "content_type_must_be_application_json"
    },
+   "number_tokens": [],
    "status": 415
   },
   {
@@ -2714,6 +5476,7 @@
    "json": {
     "error": "request_too_large"
    },
+   "number_tokens": [],
    "status": 413
   },
   {
@@ -2725,6 +5488,7 @@
    "json": {
     "error": "pairing_refused"
    },
+   "number_tokens": [],
    "status": 400
   },
   {
@@ -2736,6 +5500,7 @@
    "json": {
     "error": "pairing_refused"
    },
+   "number_tokens": [],
    "status": 400
   },
   {
@@ -2747,6 +5512,7 @@
    "json": {
     "error": "pairing_refused"
    },
+   "number_tokens": [],
    "status": 400
   },
   {
@@ -2758,6 +5524,7 @@
    "json": {
     "error": "pairing_refused"
    },
+   "number_tokens": [],
    "status": 400
   },
   {
@@ -2772,6 +5539,15 @@
     "id": null,
     "jsonrpc": "2.0"
    },
+   "number_tokens": [
+    {
+     "path": [
+      "error",
+      "code"
+     ],
+     "token": "-32600"
+    }
+   ],
    "status": 406
   },
   {
@@ -2784,6 +5560,7 @@
     "error": "forbidden_origin",
     "hint": "tokenless /api serves loopback browsers only; set PSEUDOLIFE_MCP_TOKEN for remote access"
    },
+   "number_tokens": [],
    "status": 403
   },
   {
@@ -2796,6 +5573,7 @@
     "error": "not_found",
     "path": "/api/nope"
    },
+   "number_tokens": [],
    "status": 404
   },
   {
@@ -2808,6 +5586,7 @@
     "error": "forbidden_origin",
     "hint": "tokenless /api serves loopback browsers only; set PSEUDOLIFE_MCP_TOKEN for remote access"
    },
+   "number_tokens": [],
    "status": 403
   },
   {
@@ -2820,6 +5599,7 @@
     "error": "not_found",
     "path": "/api/nope"
    },
+   "number_tokens": [],
    "status": 404
   },
   {
@@ -2832,6 +5612,7 @@
     "error": "forbidden_host",
     "hint": "tokenless /api serves loopback browsers only; set PSEUDOLIFE_MCP_TOKEN for remote access"
    },
+   "number_tokens": [],
    "status": 403
   },
   {
@@ -2843,6 +5624,7 @@
    "json": {
     "error": "forbidden_origin"
    },
+   "number_tokens": [],
    "status": 403
   },
   {
@@ -2854,6 +5636,7 @@
    "json": {
     "error": "pairing_refused"
    },
+   "number_tokens": [],
    "status": 400
   },
   {
@@ -2865,6 +5648,7 @@
    "json": {
     "error": "pairing_refused"
    },
+   "number_tokens": [],
    "status": 400
   },
   {
@@ -2876,6 +5660,7 @@
    "json": {
     "error": "authentication_required"
    },
+   "number_tokens": [],
    "status": 401
   },
   {
@@ -2887,6 +5672,7 @@
    "json": {
     "error": "authentication_required"
    },
+   "number_tokens": [],
    "status": 401
   },
   {
@@ -2898,6 +5684,7 @@
    "json": {
     "error": "authentication_required"
    },
+   "number_tokens": [],
    "status": 401
   },
   {
@@ -2920,6 +5707,15 @@
     "id": null,
     "jsonrpc": "2.0"
    },
+   "number_tokens": [
+    {
+     "path": [
+      "error",
+      "code"
+     ],
+     "token": "-32600"
+    }
+   ],
    "status": 406
   },
   {
@@ -2953,6 +5749,7 @@
     "error": "forbidden_origin",
     "hint": "tokenless /api serves loopback browsers only; set PSEUDOLIFE_MCP_TOKEN for remote access"
    },
+   "number_tokens": [],
    "status": 403
   },
   {
@@ -2965,6 +5762,7 @@
     "error": "not_found",
     "path": "/api/nope"
    },
+   "number_tokens": [],
    "status": 404
   },
   {
@@ -2984,6 +5782,7 @@
     "error": "forbidden_origin",
     "hint": "tokenless /api serves loopback browsers only; set PSEUDOLIFE_MCP_TOKEN for remote access"
    },
+   "number_tokens": [],
    "status": 403
   },
   {
@@ -2996,6 +5795,7 @@
     "error": "not_found",
     "path": "/api/nope"
    },
+   "number_tokens": [],
    "status": 404
   },
   {
@@ -3019,6 +5819,7 @@
    "json": {
     "error": "authentication_required"
    },
+   "number_tokens": [],
    "status": 401
   },
   {
@@ -3030,6 +5831,7 @@
    "json": {
     "error": "authentication_required"
    },
+   "number_tokens": [],
    "status": 401
   },
   {
@@ -3053,6 +5855,14 @@
     "low_confidence": true,
     "query": "\u007f"
    },
+   "number_tokens": [
+    {
+     "path": [
+      "count"
+     ],
+     "token": "0"
+    }
+   ],
    "status": 200
   }
  ]
