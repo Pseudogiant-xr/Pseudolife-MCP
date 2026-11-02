@@ -201,6 +201,12 @@ def host(tmp_path, failure="", mode="release"):
                 body = b"" if current.get("missing_checksum") else f"{hashlib.sha256(asset).hexdigest()}  pseudolife-compose-{self.path.split(chr(47))[-2][1:]}.tar.gz\n".encode()
             elif self.path.endswith(".tar.gz"):
                 body = asset
+            elif self.path.startswith("/releases/tags/"):
+                if current.get("missing_release"):
+                    self.send_response(404)
+                    self.end_headers()
+                    return
+                body = json.dumps({"tag_name": self.path.rsplit("/", 1)[-1], "draft": False}).encode()
             elif self.path == "/health":
                 deployed = current["deployed"]
                 body = json.dumps({"status": "error" if deployed and failure == "health" or not deployed and failure == "stopped" else "ok",
@@ -269,6 +275,7 @@ def host(tmp_path, failure="", mode="release"):
                PATH=str(programs) + os.pathsep + shell_dir, PYTHONPATH=str(ROOT), PYTHONUTF8="1",
                PSEUDOLIFE_DOCKER=str(docker), PSEUDOLIFE_MCP_DATA_DIR=str(home / "data"),
                PSEUDOLIFE_MCP_DAEMON_URL=url, PSEUDOLIFE_RELEASE_BASE_URL=url,
+               PSEUDOLIFE_RELEASE_API_BASE_URL=url + "/releases/tags",
                PSEUDOLIFE_SHIM_RUNTIMES=str(home / "runtimes"),
                PSEUDOLIFE_SHIM_LAUNCHER=str(home / ("launcher.exe" if os.name == "nt" else "launcher")),
                UPDATE_FIXTURE_STATE=str(state_path), UPDATE_FIXTURE_BACKUPS=str(repo / "data/backups"))
@@ -311,7 +318,7 @@ def stages(state):
 def test_ordinary_checkout_transaction_phase_parity(tmp_path, native, failure):
     binary = _native_binary() if native else None
     if native and not binary:
-        pytest.skip("set PSEUDOLIFE_UPDATE_TEST_BINARY to the built native CLI")
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY to the built native CLI")
     with host(tmp_path, failure, "checkout") as (repo, env, state_path):
         result = run_arm(repo, env, binary, ["--checkout", str(repo), "--no-test-login", "--no-cache-prune",
                                            "--json", "--health-retries", "1", "--health-delay-ms", "0",
@@ -328,7 +335,7 @@ def test_native_checkout_scopes_backup_and_rollback_to_its_compose_project(tmp_p
     """Plain checkout retains project scoping and Python's health-only gate."""
     binary = _native_binary()
     if not binary:
-        pytest.skip("set PSEUDOLIFE_UPDATE_TEST_BINARY to the built native CLI")
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY to the built native CLI")
     with host(tmp_path, failure, "checkout") as (repo, env, state_path):
         if not script_backup:
             (repo / "ops" / ("backup.ps1" if os.name == "nt" else "backup.sh")).unlink()
@@ -360,7 +367,7 @@ def test_native_checkout_scopes_backup_and_rollback_to_its_compose_project(tmp_p
 def test_checkout_discovery_never_falls_back_to_another_projects_global_daemon(tmp_path, failure):
     binary = _native_binary()
     if not binary:
-        pytest.skip("set PSEUDOLIFE_UPDATE_TEST_BINARY to the built native CLI")
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY to the built native CLI")
     with host(tmp_path, failure, "checkout") as (repo, env, state_path):
         result = run_arm(repo, env, binary, ["--checkout", str(repo), "--allow-dirty", "--json"])
         assert result.returncode == 2, result.stdout + result.stderr
@@ -375,7 +382,7 @@ def test_checkout_discovery_never_falls_back_to_another_projects_global_daemon(t
 def test_engine_activation_faults_preserve_rollback_and_retry_guard(tmp_path, native, failure):
     binary = _native_binary() if native else None
     if native and not binary:
-        pytest.skip("native binary build is owned by the parent; set PSEUDOLIFE_UPDATE_TEST_BINARY")
+        pytest.skip("native binary build is owned by the parent; set PSEUDOLIFE_RUST_BINARY")
     with host(tmp_path, failure, "engine") as (repo, env, state_path):
         args = ["--checkout", str(repo), "--engine", "rust", "--no-test-login", "--no-cache-prune", "--json",
                 "--health-retries", "1", "--health-delay-ms", "0", "--rollback-tag", "pre-fixture"]
@@ -403,7 +410,7 @@ def test_engine_activation_faults_preserve_rollback_and_retry_guard(tmp_path, na
 def test_release_fault_chronology_and_no_client_movement(tmp_path, native, failure):
     binary = _native_binary() if native else None
     if native and not binary:
-        pytest.skip("native binary build is owned by the parent; set PSEUDOLIFE_UPDATE_TEST_BINARY")
+        pytest.skip("native binary build is owned by the parent; set PSEUDOLIFE_RUST_BINARY")
     with host(tmp_path, failure) as (repo, env, state_path):
         result = run_arm(repo, env, binary, ["--tag", "0.21.1", "--daemon-only", "--json", "--health-retries", "1", "--rollback-tag", "pre-fixture"])
         assert result.returncode == (1 if failure else 0), result.stdout + result.stderr
@@ -420,7 +427,7 @@ def test_release_fault_chronology_and_no_client_movement(tmp_path, native, failu
 def test_checkout_d2_guard_is_reached_before_backup_and_accepts_imported_row(tmp_path, native, failure):
     binary = _native_binary() if native else None
     if native and not binary:
-        pytest.skip("native binary build is owned by the parent; set PSEUDOLIFE_UPDATE_TEST_BINARY")
+        pytest.skip("native binary build is owned by the parent; set PSEUDOLIFE_RUST_BINARY")
     with host(tmp_path, failure, "engine") as (repo, env, state_path):
         result = run_arm(repo, env, binary, ["--checkout", str(repo), "--engine", "rust", "--no-test-login", "--no-cache-prune",
                                            "--json", "--health-retries", "1", "--rollback-tag", "pre-fixture"])
@@ -441,7 +448,7 @@ def test_checkout_d2_guard_is_reached_before_backup_and_accepts_imported_row(tmp
 def test_release_rust_refuses_unpublished_image_before_any_effect(tmp_path, native):
     binary = _native_binary()
     if native and not binary:
-        pytest.skip("set PSEUDOLIFE_UPDATE_TEST_BINARY")
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
     with host(tmp_path) as (repo, env, state_path):
         result = run_arm(repo, env, binary if native else None, ["--engine", "rust", "--tag", "0.21.1", "--json"])
         assert result.returncode == 2, result.stdout + result.stderr
@@ -453,7 +460,7 @@ def test_release_rust_refuses_unpublished_image_before_any_effect(tmp_path, nati
 def test_native_release_rollback_supplies_required_compose_image_tag(tmp_path):
     binary = _native_binary()
     if not binary:
-        pytest.skip("set PSEUDOLIFE_UPDATE_TEST_BINARY to the built native CLI")
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY to the built native CLI")
     with host(tmp_path, "health") as (repo, env, state_path):
         env.pop("PSEUDOLIFE_IMAGE_TAG", None)
         result = run_arm(repo, env, binary, ["--tag", "0.21.1", "--daemon-only", "--json",
@@ -471,7 +478,7 @@ def test_native_release_rollback_supplies_required_compose_image_tag(tmp_path):
 def test_release_updaters_can_follow_each_other(tmp_path, native_first, explicit_python):
     binary = _native_binary()
     if not binary:
-        pytest.skip("set PSEUDOLIFE_UPDATE_TEST_BINARY")
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
     with host(tmp_path) as (repo, env, state_path):
         for index, native in enumerate([native_first, not native_first]):
             args = ["--tag", "0.21.1", "--daemon-only", "--reinstall", "--json",
@@ -491,7 +498,7 @@ def test_release_updaters_can_follow_each_other(tmp_path, native_first, explicit
 def test_plain_update_accepts_tokenless_host_and_scaffolded_env(tmp_path, mode):
     binary = _native_binary()
     if not binary:
-        pytest.skip("set PSEUDOLIFE_UPDATE_TEST_BINARY")
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
     with host(tmp_path, mode=mode) as (repo, env, state_path):
         state = json.loads(state_path.read_text())
         state["config"]["services"][SERVICE]["environment"].pop("PSEUDOLIFE_MCP_TOKEN")
@@ -509,7 +516,7 @@ def test_plain_update_accepts_tokenless_host_and_scaffolded_env(tmp_path, mode):
 def test_plain_release_can_recover_an_unhealthy_daemon(tmp_path):
     binary = _native_binary()
     if not binary:
-        pytest.skip("set PSEUDOLIFE_UPDATE_TEST_BINARY")
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
     with host(tmp_path, "stopped") as (repo, env, state_path):
         result = run_arm(repo, env, binary, ["--tag", "0.21.1", "--daemon-only", "--json", "--health-retries", "1"])
         assert result.returncode == 0, result.stdout + result.stderr
@@ -519,7 +526,7 @@ def test_plain_release_can_recover_an_unhealthy_daemon(tmp_path):
 def test_deferred_maintainer_setup_does_not_claim_passkeys_are_missing(tmp_path):
     binary = _native_binary()
     if not binary:
-        pytest.skip("set PSEUDOLIFE_UPDATE_TEST_BINARY")
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
     with host(tmp_path) as (repo, env, _):
         result = run_arm(repo, env, binary, ["--tag", "0.21.1", "--daemon-only", "--json", "--health-retries", "1"])
         assert result.returncode == 0, result.stdout + result.stderr
@@ -530,7 +537,7 @@ def test_deferred_maintainer_setup_does_not_claim_passkeys_are_missing(tmp_path)
 def test_native_unattended_rechecks_board_after_backup_before_tagging(tmp_path):
     binary = _native_binary()
     if not binary:
-        pytest.skip("set PSEUDOLIFE_UPDATE_TEST_BINARY")
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
     with host(tmp_path) as (repo, env, state_path):
         env["PSEUDOLIFE_MCP_TOKEN"] = "fixture-bearer"
         result = run_arm(repo, env, binary, ["--unattended", "--tag", "0.21.1", "--json"])
@@ -542,7 +549,7 @@ def test_native_unattended_rechecks_board_after_backup_before_tagging(tmp_path):
 def test_release_retains_original_project_directory_for_relative_mounts(tmp_path):
     binary = _native_binary()
     if not binary:
-        pytest.skip("set PSEUDOLIFE_UPDATE_TEST_BINARY")
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
     with host(tmp_path) as (repo, env, state_path):
         override = repo / "ops/docker-compose.override.yml"
         override.write_text("services:\n  pseudolife-daemon:\n    volumes:\n      - ./config.yaml:/data/config.yaml:ro\n")
@@ -565,7 +572,7 @@ def test_release_retains_original_project_directory_for_relative_mounts(tmp_path
 def test_changed_mount_or_wrong_checkout_endpoint_refuses_before_backup(tmp_path, mode):
     binary = _native_binary()
     if not binary:
-        pytest.skip("set PSEUDOLIFE_UPDATE_TEST_BINARY")
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
     with host(tmp_path, mode=mode) as (repo, env, state_path):
         state = json.loads(state_path.read_text())
         state["config"]["services"][SERVICE]["volumes"].append({
@@ -584,7 +591,7 @@ def test_changed_mount_or_wrong_checkout_endpoint_refuses_before_backup(tmp_path
 def test_plain_checkout_unavailable_rollback_prints_recovery(tmp_path, rollback_state):
     binary = _native_binary()
     if not binary:
-        pytest.skip("set PSEUDOLIFE_UPDATE_TEST_BINARY")
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
     with host(tmp_path, "health", "checkout") as (repo, env, state_path):
         state = json.loads(state_path.read_text())
         state["images"] = {} if rollback_state == "none" else {"pseudolife-daemon:0.21.0": "sha256:unvalidated"}
@@ -601,7 +608,7 @@ def test_plain_checkout_unavailable_rollback_prints_recovery(tmp_path, rollback_
 def test_plain_checkout_allows_a_forwarded_health_endpoint(tmp_path):
     binary = _native_binary()
     if not binary:
-        pytest.skip("set PSEUDOLIFE_UPDATE_TEST_BINARY")
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
     with host(tmp_path, mode="checkout") as (repo, env, state_path):
         state = json.loads(state_path.read_text())
         state["config"]["services"][SERVICE]["ports"][0]["published"] = "1"
@@ -617,7 +624,7 @@ def test_plain_checkout_allows_a_forwarded_health_endpoint(tmp_path):
 def test_release_without_native_bundle_names_python_or_new_release(tmp_path, missing):
     binary = _native_binary()
     if not binary:
-        pytest.skip("set PSEUDOLIFE_UPDATE_TEST_BINARY")
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
     with host(tmp_path) as (repo, env, state_path):
         state = json.loads(state_path.read_text())
         state[missing] = True
@@ -695,3 +702,58 @@ def test_release_with_native_bundle_is_not_rejected_by_version_cutoff(tmp_path):
         state_path.write_text(json.dumps(state))
         result = run_arm(repo, env, binary, ["--tag", "0.21.0", "--reinstall", "--daemon-only", "--json", "--health-retries", "1"])
         assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.parametrize("previous", ["bind", "volume"])
+@pytest.mark.parametrize("replacement", ["tmpfs", "anonymous"])
+def test_ephemeral_mount_cannot_replace_persistent_contents(tmp_path, previous, replacement):
+    binary = _native_binary()
+    if not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path, mode="checkout") as (repo, env, state_path):
+        state = json.loads(state_path.read_text())
+        desired = {"type": "tmpfs" if replacement == "tmpfs" else "volume", "target": "/cache"}
+        state["config"]["services"][SERVICE]["volumes"].append(desired)
+        state["running"]["Mounts"].append({"Type": previous, "Destination": "/cache", "RW": False,
+                                            "Source": "/persistent/cache", "Name": "persistent-cache" if previous == "volume" else ""})
+        state_path.write_text(json.dumps(state))
+        result = run_arm(repo, env, binary, ["--checkout", str(repo), "--json", "--no-test-login", "--no-cache-prune"])
+        assert result.returncode == 2, result.stdout + result.stderr
+        assert "/cache" in result.stdout and "restore" in result.stdout
+        assert stages(json.loads(state_path.read_text())) == []
+
+
+@pytest.mark.parametrize("previous", ["tmpfs", "anonymous", "absent"])
+@pytest.mark.parametrize("replacement", ["tmpfs", "anonymous"])
+def test_ephemeral_mount_remains_safe_to_recreate(tmp_path, previous, replacement):
+    binary = _native_binary()
+    if not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path, mode="checkout") as (repo, env, state_path):
+        state = json.loads(state_path.read_text())
+        state["config"]["services"][SERVICE]["volumes"].append({
+            "type": "tmpfs" if replacement == "tmpfs" else "volume", "target": "/cache"})
+        if previous != "absent":
+            state["running"]["Mounts"].append({"Type": "tmpfs" if previous == "tmpfs" else "volume",
+                                                "Name": "generated", "Source": "/docker/generated", "Destination": "/cache", "RW": True})
+        if previous == "anonymous":
+            state["running"]["HostConfig"] = {"Mounts": [{"Type": "volume", "Target": "/cache"}]}
+        state_path.write_text(json.dumps(state))
+        result = run_arm(repo, env, binary, ["--checkout", str(repo), "--json", "--no-test-login", "--no-cache-prune", "--health-retries", "1"])
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert stages(json.loads(state_path.read_text()))[-1] == "up"
+
+
+def test_nonexistent_release_does_not_recommend_another_updater(tmp_path):
+    binary = _native_binary()
+    if not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path) as (repo, env, state_path):
+        state = json.loads(state_path.read_text())
+        state.update(missing_sums=True, missing_release=True)
+        state_path.write_text(json.dumps(state))
+        result = run_arm(repo, env, binary, ["--tag", "9.9.9", "--daemon-only", "--json"])
+        assert result.returncode == 2, result.stdout + result.stderr
+        assert "9.9.9" in result.stdout and "published" in result.stdout
+        assert "Python updater" not in result.stdout
+        assert stages(json.loads(state_path.read_text())) == []

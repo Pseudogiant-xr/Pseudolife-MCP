@@ -264,7 +264,7 @@ fn native_update_mount_identity_ignores_tmpfs_and_sourceless_mounts() {
         {"type":"volume","target":"/cache"},
         {"type":"tmpfs","target":"/tmp"}
     ]}},"volumes":{"state":{"name":"fixture-state"}}});
-    let running = json!({"Config":{"Env":["PSEUDOLIFE_MCP_DATABASE_URL=fixture"]},"Mounts":[
+    let running = json!({"Config":{"Env":["PSEUDOLIFE_MCP_DATABASE_URL=fixture"]},"HostConfig":{"Mounts":[{"Type":"volume","Target":"/cache"}]},"Mounts":[
         {"Type":"volume","Name":"fixture-state","Destination":"/data","RW":true},
         {"Type":"volume","Name":"generated-anonymous","Destination":"/cache","RW":true},
         {"Type":"tmpfs","Destination":"/tmp","RW":true},
@@ -272,6 +272,28 @@ fn native_update_mount_identity_ignores_tmpfs_and_sourceless_mounts() {
         {"Type":"bind","Destination":"/sourceless","RW":true}
     ]});
     assert!(engine::verify_bank_identity(&config, &running).is_ok());
+}
+
+#[test]
+fn native_update_ephemeral_mount_cannot_hide_persistent_contents() {
+    for previous in ["bind", "volume"] {
+        for replacement in ["tmpfs", "volume"] {
+            let config = json!({"services":{DAEMON_SERVICE:{"environment":{"PSEUDOLIFE_MCP_DATABASE_URL":"fixture"},"volumes":[
+                {"type":"volume","source":"state","target":"/data"},
+                {"type":replacement,"target":"/cache"}
+            ]}},"volumes":{"state":{"name":"fixture-state"}}});
+            let mut running = json!({"Config":{"Env":["PSEUDOLIFE_MCP_DATABASE_URL=fixture"]},"Mounts":[
+                {"Type":"volume","Name":"fixture-state","Destination":"/data","RW":true},
+                {"Type":previous,"Name":"persistent-cache","Source":"/persistent/cache","Destination":"/cache","RW":false}
+            ]});
+            let refusal = engine::verify_bank_identity(&config, &running).unwrap_err();
+            assert!(refusal.message.contains("/cache") && refusal.message.contains("restore"));
+            running["Mounts"][1] = json!({"Type":"tmpfs","Destination":"/cache"});
+            assert!(engine::verify_bank_identity(&config, &running).is_ok());
+            running["Mounts"].as_array_mut().unwrap().pop();
+            assert!(engine::verify_bank_identity(&config, &running).is_ok());
+        }
+    }
 }
 #[test]
 fn native_update_rollback_records_commit_after_recreation() {

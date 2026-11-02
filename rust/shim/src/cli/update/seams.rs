@@ -156,18 +156,17 @@ pub(crate) fn authenticated_read(url: &str, token: &str) -> bool {
                 .is_some_and(|v| v["entries"].is_array() && !super::truthy(&v["error"]))
     })
 }
-pub(crate) fn download(url: &str) -> Result<Vec<u8>> {
+pub(crate) fn download(url: &str) -> Result<Option<Vec<u8>>> {
     block_on(async {
         let client = reqwest::Client::builder()
+            .user_agent("pseudolife-mcp")
             .timeout(Duration::from_secs(120))
             .build()
             .map_err(|_| UpdateError::new("cannot initialize release download"))?;
         let response = client.get(url).send().await
             .map_err(|_| UpdateError::usage("cannot download the release asset; check the published version and retry; nothing was deployed"))?;
         if response.status() == reqwest::StatusCode::NOT_FOUND {
-            return Err(UpdateError::usage(
-                "this release does not publish the native Compose bundle and checksums; use the Python updater, or --tag a release that ships pseudolife-compose-<version>.tar.gz; nothing was deployed",
-            ));
+            return Ok(None);
         }
         let response = response.error_for_status()
             .map_err(|_| UpdateError::usage("cannot download the release asset; check the published version and retry; nothing was deployed"))?;
@@ -189,7 +188,7 @@ pub(crate) fn download(url: &str) -> Result<Vec<u8>> {
             }
             bytes.extend_from_slice(&chunk);
         }
-        Ok(bytes)
+        Ok(Some(bytes))
     })
 }
 pub(crate) fn env_file_sets_credentials(files: &[PathBuf]) -> bool {

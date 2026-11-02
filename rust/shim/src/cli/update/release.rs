@@ -153,6 +153,42 @@ pub(super) fn publish_compose(
 }
 
 impl Update {
+    fn missing_release_asset(&self, target: &str) -> UpdateError {
+        // A missing asset can mean either an older release or a nonexistent
+        // tag. Only a confirmed published release justifies the Python remedy.
+        let verify = || -> Result<()> {
+            let base = std::env::var("PSEUDOLIFE_RELEASE_API_BASE_URL").unwrap_or_else(|_| {
+                "https://api.github.com/repos/Pseudogiant-xr/Pseudolife-MCP/releases/tags".into()
+            });
+            let parsed = reqwest::Url::parse(&base)
+                .map_err(|_| UpdateError::usage("invalid release metadata URL"))?;
+            if parsed.scheme() != "https"
+                && !(parsed.scheme() == "http"
+                    && matches!(parsed.host_str(), Some("127.0.0.1" | "localhost" | "::1")))
+            {
+                return Err(UpdateError::usage(
+                    "release metadata requires HTTPS (or a loopback fixture endpoint)",
+                ));
+            }
+            let tag = format!("v{target}");
+            let Some(bytes) = seams::download(&format!("{}/{tag}", base.trim_end_matches('/')))?
+            else {
+                return Err(UpdateError::usage(format!(
+                    "release {tag} is not published; choose a published version with --tag <version>; nothing was deployed"
+                )));
+            };
+            let release: Value = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
+            if release["tag_name"] != tag || release["draft"] != false {
+                return Err(UpdateError::usage(
+                    "cannot verify the published release; check --tag and retry; nothing was deployed",
+                ));
+            }
+            Ok(())
+        };
+        verify().err().unwrap_or_else(|| UpdateError::usage(
+            "this release does not publish the native Compose bundle and checksums; use the Python updater, or --tag a release that ships pseudolife-compose-<version>.tar.gz; nothing was deployed",
+        ))
+    }
     fn release_compose(&self, target: &str) -> Result<PathBuf> {
         let base = std::env::var("PSEUDOLIFE_RELEASE_BASE_URL").unwrap_or_else(|_| {
             "https://github.com/Pseudogiant-xr/Pseudolife-MCP/releases/download".into()
@@ -168,8 +204,10 @@ impl Update {
             ));
         }
         let base = format!("{}/v{target}", base.trim_end_matches('/'));
-        let sums = seams::download(&format!("{base}/SHA256SUMS"))?;
-        let archive = seams::download(&format!("{base}/pseudolife-compose-{target}.tar.gz"))?;
+        let sums = seams::download(&format!("{base}/SHA256SUMS"))?
+            .ok_or_else(|| self.missing_release_asset(target))?;
+        let archive = seams::download(&format!("{base}/pseudolife-compose-{target}.tar.gz"))?
+            .ok_or_else(|| self.missing_release_asset(target))?;
         let files = verified_compose(target, &sums, &archive)?;
         publish_compose(&compose_root(), target, &files)
     }
@@ -313,8 +351,7 @@ impl Update {
                 "Rust images are not published; use --engine rust --checkout <repo> (checkout mode); nothing was changed",
             ));
         }
-        let activating = self.o.engine.is_some()
-            || (choice != "python" && truthy(&labels[engine::ACTIVATION_LABEL]));
+        let activating = self.o.engine.is_some();
         if current.as_deref() == Some(&target) && !self.o.reinstall && choice == selected {
             self.step(format!("the daemon already runs {target}; nothing to do (--reinstall to recreate it anyway, --clients-only for the shim and plugin)"));
             return Ok(());

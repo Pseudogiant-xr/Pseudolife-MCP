@@ -228,6 +228,19 @@ fn bind_source(source: &str) -> String {
     // Preserve POSIX case and backslashes: they can name distinct files.
     source.to_owned()
 }
+fn ephemeral_mount(running: &Value, mount: &Value) -> bool {
+    mount["Type"] == "tmpfs"
+        || (mount["Type"] == "volume"
+            && running["HostConfig"]["Mounts"]
+                .as_array()
+                .is_some_and(|mounts| {
+                    mounts.iter().any(|configured| {
+                        configured["Target"] == mount["Destination"]
+                            && configured["Type"] == "volume"
+                            && (configured["Source"].is_null() || configured["Source"] == "")
+                    })
+                }))
+}
 pub(super) fn verify_bank_identity(config: &Value, running: &Value) -> Result<()> {
     let service = &config["services"][DAEMON_SERVICE];
     let env = &service["environment"];
@@ -264,11 +277,17 @@ pub(super) fn verify_bank_identity(config: &Value, running: &Value) -> Result<()
         "cannot read the daemon's mounts; restore its Compose project and retry; nothing was changed"
     ))?;
     for volume in service["volumes"].as_array().into_iter().flatten() {
-        if volume["type"] == "tmpfs" || volume["source"].as_str().is_none_or(str::is_empty) {
-            continue;
-        }
         let target = volume["target"].as_str();
         let actual = mounts.iter().find(|m| m["Destination"].as_str() == target);
+        if volume["type"] == "tmpfs" || volume["source"].as_str().is_none_or(str::is_empty) {
+            if actual.is_some_and(|mount| !ephemeral_mount(running, mount)) {
+                return Err(UpdateError::usage(format!(
+                    "the Compose configuration replaces the persistent mount at {} with an ephemeral mount; restore its original mount type, source and access before updating; nothing was changed",
+                    target.unwrap_or("an unreadable destination"),
+                )));
+            }
+            continue;
+        }
         let expected_source = if volume["type"] == "volume" {
             volume["source"]
                 .as_str()

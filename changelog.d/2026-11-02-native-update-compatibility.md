@@ -4,3 +4,4 @@
 - Plain updates keep the existing health policy; engine activation and shadow mode retain authenticated version and schema checks.
 - Checkout updates verify Compose project identity without requiring a loopback health URL, recognize Docker Desktop bind paths, and require complete state backups when the discovered engine is Rust. Releases missing native assets name the Python updater as the remedy.
 - Client refresh preserves absent settings, reports migration failures, respects SSH configuration and requires a verified stable launcher for unattended work.
+- Updates refuse to replace persistent mounts with temporary or anonymous mounts, and distinguish nonexistent release tags from published releases missing native assets before recommending the Python updater.

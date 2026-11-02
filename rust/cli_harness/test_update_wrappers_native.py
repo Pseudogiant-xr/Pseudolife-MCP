@@ -358,7 +358,7 @@ def test_windows_python_free_wrapper_finds_verified_installed_native_runtime(tmp
 
     binary = os.environ.get("PSEUDOLIFE_UPDATE_TEST_BINARY") or os.environ.get("PSEUDOLIFE_RUST_BINARY")
     if not binary:
-        pytest.skip("set PSEUDOLIFE_UPDATE_TEST_BINARY to the built native CLI")
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY to the built native CLI")
     binary = str(Path(binary).resolve())
     wrapper = Wrapper(tmp_path, "pwsh")
     wrapper.env.pop("PSEUDOLIFE_NATIVE_CLI")
