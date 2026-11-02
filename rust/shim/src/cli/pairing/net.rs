@@ -176,7 +176,8 @@ mod tests {
                     _ = &mut finish => break,
                 };
                 let mut request = [0; 4096];
-                stream.read(&mut request).await.unwrap();
+                let read = stream.read(&mut request).await.unwrap();
+                assert!(read > 0, "credential probe must send a request");
                 requests += 1;
                 let response = if requests == 1 {
                     "HTTP/1.1 302 Found\r\nLocation: /accepted\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"

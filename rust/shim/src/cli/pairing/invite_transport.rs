@@ -230,10 +230,10 @@ fn forward(args: &Args, url: Option<String>) -> Vec<OsString> {
             url.unwrap_or_else(|| URL_PLACEHOLDER.into()),
         ]);
     }
-    if let Some(bank) = &args.bank {
-        if !bank.is_empty() {
-            out.extend(["--bank".into(), bank.clone()]);
-        }
+    if let Some(bank) = &args.bank
+        && !bank.is_empty()
+    {
+        out.extend(["--bank".into(), bank.clone()]);
     }
     if args.json {
         out.push("--json".into());

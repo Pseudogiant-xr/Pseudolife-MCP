@@ -73,17 +73,14 @@ async fn execute(client: &Client) -> Result<(), Error> {
                 if matches!(
                     first(client, "SELECT to_regclass('public.meta')").await?,
                     Some(Some(_))
-                ) {
-                    if let Some(Some(value)) = first(
-                        client,
-                        "SELECT value::text FROM public.meta WHERE key = 'schema_version'",
-                    )
-                    .await?
-                    {
-                        if let Some(message) = version_refusal(&value) {
-                            return Err(Error::Refused(message));
-                        }
-                    }
+                ) && let Some(Some(value)) = first(
+                    client,
+                    "SELECT value::text FROM public.meta WHERE key = 'schema_version'",
+                )
+                .await?
+                    && let Some(message) = version_refusal(&value)
+                {
+                    return Err(Error::Refused(message));
                 }
             }
             "embedding_guard" => {

@@ -144,38 +144,6 @@ pub(super) async fn run(command: &[OsString], seconds: u64) -> Output {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn timeout_output_fixture() {
-        let name = "cli::maintainer::setup::system::tests::timeout_output_fixture";
-        let args: Vec<_> = std::env::args().collect();
-        if !args.windows(2).any(|v| v[0] == "--exact" && v[1] == name) {
-            return;
-        }
-        println!("https://login.tailscale.com/fixture-enable");
-        std::thread::sleep(Duration::from_secs(60));
-    }
-    #[tokio::test]
-    async fn timeout_preserves_the_enable_link_and_reaps_its_child() {
-        let command = vec![
-            std::env::current_exe().unwrap().into_os_string(),
-            "--exact".into(),
-            "cli::maintainer::setup::system::tests::timeout_output_fixture".into(),
-            "--nocapture".into(),
-        ];
-        let output = run(&command, 2).await;
-        assert_eq!(output.code, 124);
-        assert!(
-            output
-                .out
-                .contains("https://login.tailscale.com/fixture-enable")
-        );
-        assert_eq!(output.err, "timed out after 2s");
-    }
-}
-
 pub(super) async fn tier() -> Result<Tier> {
     // The in-image helpers never inspect or recurse into Docker.
     if std::env::var_os("PSEUDOLIFE_DAEMON_EXEC").is_some_and(|v| !v.is_empty()) {
@@ -362,5 +330,37 @@ pub(super) async fn restart(tier: &Tier, port: u16) -> Result<()> {
             ));
         }
         tokio::time::sleep(Duration::from_secs(2)).await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn timeout_output_fixture() {
+        let name = "cli::maintainer::setup::system::tests::timeout_output_fixture";
+        let args: Vec<_> = std::env::args().collect();
+        if !args.windows(2).any(|v| v[0] == "--exact" && v[1] == name) {
+            return;
+        }
+        println!("https://login.tailscale.com/fixture-enable");
+        std::thread::sleep(Duration::from_secs(60));
+    }
+    #[tokio::test]
+    async fn timeout_preserves_the_enable_link_and_reaps_its_child() {
+        let command = vec![
+            std::env::current_exe().unwrap().into_os_string(),
+            "--exact".into(),
+            "cli::maintainer::setup::system::tests::timeout_output_fixture".into(),
+            "--nocapture".into(),
+        ];
+        let output = run(&command, 2).await;
+        assert_eq!(output.code, 124);
+        assert!(
+            output
+                .out
+                .contains("https://login.tailscale.com/fixture-enable")
+        );
+        assert_eq!(output.err, "timed out after 2s");
     }
 }

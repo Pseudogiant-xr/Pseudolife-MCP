@@ -20,12 +20,12 @@ pub(super) fn window(args: &Stats, now: f64) -> Result<(f64, f64), u8> {
     if since >= until {
         return Err(error("--since must be before --until"));
     }
-    if let Some(out) = &args.out {
-        if std::path::Path::new(out).exists() {
-            return Err(error(format!(
-                "{out} exists; stats never replaces a file (--append adds a line to a running log instead)"
-            )));
-        }
+    if let Some(out) = &args.out
+        && std::path::Path::new(out).exists()
+    {
+        return Err(error(format!(
+            "{out} exists; stats never replaces a file (--append adds a line to a running log instead)"
+        )));
     }
     Ok((since, until))
 }
@@ -138,31 +138,29 @@ fn export_events(input: &str) -> Result<Vec<Value>, u8> {
 }
 
 pub(super) fn emit(args: &Stats, line: &[u8]) -> u8 {
-    if let Some(out) = &args.out {
-        if let Err(e) = std::fs::OpenOptions::new()
+    if let Some(out) = &args.out
+        && let Err(e) = std::fs::OpenOptions::new()
             .write(true)
             .create_new(true)
             .open(out)
             .and_then(|mut f| f.write_all(line).and_then(|()| f.flush()))
-        {
-            return error(format!(
-                "cannot write {out}: {}",
-                bank::write_strerror(&e).unwrap_or_else(|| "I/O error".into())
-            ));
-        }
+    {
+        return error(format!(
+            "cannot write {out}: {}",
+            bank::write_strerror(&e).unwrap_or_else(|| "I/O error".into())
+        ));
     }
-    if let Some(append) = &args.append {
-        if let Err(e) = std::fs::OpenOptions::new()
+    if let Some(append) = &args.append
+        && let Err(e) = std::fs::OpenOptions::new()
             .append(true)
             .create(true)
             .open(append)
             .and_then(|mut f| f.write_all(line).and_then(|()| f.flush()))
-        {
-            return error(format!(
-                "cannot append to {append}: {}",
-                bank::write_strerror(&e).unwrap_or_else(|| "I/O error".into())
-            ));
-        }
+    {
+        return error(format!(
+            "cannot append to {append}: {}",
+            bank::write_strerror(&e).unwrap_or_else(|| "I/O error".into())
+        ));
     }
     if args.out.is_none() && args.append.is_none() {
         let text = String::from_utf8_lossy(line);

@@ -64,10 +64,10 @@ fn latency_summary(values: &[Option<V>]) -> V {
 }
 
 fn difference(a: &V, b: &V) -> V {
-    if let (Some(a), Some(b)) = (a.as_i64(), b.as_i64()) {
-        if let Some(difference) = a.checked_sub(b) {
-            return json!(difference);
-        }
+    if let (Some(a), Some(b)) = (a.as_i64(), b.as_i64())
+        && let Some(difference) = a.checked_sub(b)
+    {
+        return json!(difference);
     }
     json!(number(a).unwrap() - number(b).unwrap())
 }
@@ -506,10 +506,10 @@ fn suite_times(records: &[V], since: f64, until: f64) -> V {
         if let Some(hold) = number(&record["seconds"]).filter(|t| *t >= 0.0) {
             holds.push(hold);
         }
-        if let (Some(q), Some(s)) = (stamp("queued_at"), stamp("started_at")) {
-            if s >= q {
-                waits.push(s - q);
-            }
+        if let (Some(q), Some(s)) = (stamp("queued_at"), stamp("started_at"))
+            && s >= q
+        {
+            waits.push(s - q);
         }
     }
     json!({"runs":holds.len(),"hold":percentiles(holds),"queue_wait":percentiles(waits)})
