@@ -23,7 +23,8 @@ import pytest
 
 
 @pytest.mark.parametrize("operation", ["notice", "board", "read"])
-def test_daemon_credentials_bypass_environment_proxies(monkeypatch, operation):
+@pytest.mark.parametrize("tls", [False, True], ids=["http", "https-private-ca"])
+def test_daemon_credentials_bypass_environment_proxies(monkeypatch, tmp_path, operation, tls):
     from pseudolife_memory import unattended_update as uu
     contacted = []
     authenticated = []
@@ -52,6 +53,32 @@ def test_daemon_credentials_bypass_environment_proxies(monkeypatch, operation):
         do_GET = do_POST
 
     servers = [ThreadingHTTPServer(("127.0.0.1", 0), Handler) for _ in range(2)]
+    if tls:
+        import datetime
+        import ipaddress
+        import ssl
+        from cryptography import x509
+        from cryptography.hazmat.primitives import hashes, serialization
+        from cryptography.hazmat.primitives.asymmetric import ec
+        from cryptography.x509.oid import NameOID
+        key = ec.generate_private_key(ec.SECP256R1())
+        subject = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "fixture daemon")])
+        now = datetime.datetime.now(datetime.timezone.utc)
+        cert = (x509.CertificateBuilder().subject_name(subject).issuer_name(subject)
+                .public_key(key.public_key()).serial_number(x509.random_serial_number())
+                .not_valid_before(now - datetime.timedelta(days=1))
+                .not_valid_after(now + datetime.timedelta(days=1))
+                .add_extension(x509.BasicConstraints(ca=True, path_length=None), critical=True)
+                .add_extension(x509.SubjectAlternativeName([x509.IPAddress(ipaddress.ip_address("127.0.0.1"))]), critical=False)
+                .sign(key, hashes.SHA256()))
+        cert_file, key_file = tmp_path / "ca.pem", tmp_path / "key.pem"
+        cert_file.write_bytes(cert.public_bytes(serialization.Encoding.PEM))
+        key_file.write_bytes(key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()))
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.load_cert_chain(cert_file, key_file)
+        servers[0].socket = context.wrap_socket(servers[0].socket, server_side=True)
+        monkeypatch.setenv("SSL_CERT_FILE", str(cert_file))
+        monkeypatch.delenv("SSL_CERT_DIR", raising=False)
     threads = []
     try:
         for index, server in enumerate(servers):
@@ -64,7 +91,7 @@ def test_daemon_credentials_bypass_environment_proxies(monkeypatch, operation):
             monkeypatch.setenv(key, proxy)
         monkeypatch.setenv("NO_PROXY", "")
         monkeypatch.setenv("no_proxy", "")
-        url = f"http://127.0.0.1:{servers[0].server_port}"
+        url = f"{'https' if tls else 'http'}://127.0.0.1:{servers[0].server_port}"
         if operation == "notice":
             reply = uu.post_json(url + "/api/daemon-notice", "fixture-bearer", {"text": "fixture"})
             assert reply is not None and "error" not in reply

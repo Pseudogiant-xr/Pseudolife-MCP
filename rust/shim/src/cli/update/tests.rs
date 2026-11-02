@@ -56,6 +56,9 @@ fn native_update_release_discovery_honors_http_and_https_proxy() {
             loop {
                 match listener.accept() {
                     Ok((mut stream, _)) => {
+                        // Windows accepts inherit the listener's nonblocking
+                        // mode; wait for the client's request bytes normally.
+                        stream.set_nonblocking(false).unwrap();
                         stream
                             .set_read_timeout(Some(Duration::from_secs(2)))
                             .unwrap();

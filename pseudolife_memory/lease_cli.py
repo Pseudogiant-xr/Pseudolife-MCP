@@ -381,11 +381,19 @@ class _Board:
 
     def __init__(self, url: str, token: str, transport=None):
         import httpx  # the mcp SDK's HTTP client; not needed without a board
+        import ssl
 
         self._httpx = httpx
         self.url = url
+        # Keep HTTPX's CA-file/CA-directory precedence while excluding its
+        # environment proxy routing from credential-bearing daemon traffic.
+        verify = True
+        if os.environ.get("SSL_CERT_FILE"):
+            verify = ssl.create_default_context(cafile=os.environ["SSL_CERT_FILE"])
+        elif os.environ.get("SSL_CERT_DIR"):
+            verify = ssl.create_default_context(capath=os.environ["SSL_CERT_DIR"])
         self._client = httpx.Client(
-            base_url=url, transport=transport, follow_redirects=False, trust_env=False,
+            base_url=url, transport=transport, follow_redirects=False, trust_env=False, verify=verify,
             timeout=REQUEST_TIMEOUT, headers={"Authorization": f"Bearer {token}"})
         self._lock = threading.Lock()
         self._agent_id: str | None = None
