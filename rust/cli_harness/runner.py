@@ -411,6 +411,10 @@ def _write_summary(out: Path | None, summary: dict) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     global GOLDENS
+    if os.name != "nt":
+        # Fixtures and both CLI children inherit one mode baseline in live,
+        # recording and replay runs; permissions remain compared exactly.
+        os.umask(0o022)
     parser = argparse.ArgumentParser(prog="cli_harness",
                                      description="Python CLI vs Rust CLI differential harness")
     parser.add_argument("--row", action="append", choices=sorted(rows.ROWS), required=True)

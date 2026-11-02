@@ -34,6 +34,35 @@ def test_equal_observations_have_no_diff():
     assert compare.diff(obs(stdout=b"x"), obs(stdout=b"x"), ()) == []
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX umask inheritance")
+@pytest.mark.parametrize("inherited", [0o002, 0o077])
+def test_harness_process_pins_fixture_and_child_modes(tmp_path, inherited):
+    import json
+    import subprocess
+
+    entry = Path(__file__).with_name("__main__.py")
+    script = r'''
+import json, os, pathlib, stat, subprocess, sys
+os.umask(int(sys.argv[2]))
+entry, root = sys.argv[1], pathlib.Path(sys.argv[3])
+sys.path.insert(0, str(pathlib.Path(entry).parent.parent))
+from cli_harness import runner
+try:
+    runner.main(["--help"])
+except SystemExit as error:
+    assert error.code == 0
+(root / "fixture").mkdir()
+(root / "fixture/input").write_bytes(b"fixture")
+subprocess.run([sys.executable, "-c", "from pathlib import Path; Path('child').write_bytes(b'fixture')"], cwd=root, check=True)
+print(json.dumps([stat.S_IMODE((root / path).stat().st_mode)
+                  for path in ("fixture", "fixture/input", "child")]))
+'''
+    result = subprocess.run([sys.executable, "-B", "-c", script, str(entry),
+                             str(inherited), str(tmp_path)], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout.splitlines()[-1]) == [0o755, 0o644, 0o644]
+
+
 @pytest.mark.parametrize("fault", [
     {"mismatches": ["fifo:missing"]},
     {"hardlink_same_inode": False},
