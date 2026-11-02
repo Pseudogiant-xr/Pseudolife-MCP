@@ -3585,6 +3585,14 @@ mod tests {
             );
         }
         assert!(refused("memory:\n  top_k: 0o10\n"));
+        for (text, expected) in [
+            ("memory: {top_k: !!int ' 10 '}\n", 10),
+            ("memory:\n  top_k: !!int |\n    10\n", 10),
+            ("memory: {top_k: !!int ' 010 '}\n", 10),
+            ("memory: {top_k: !!int '010 '}\n", 8),
+        ] {
+            assert_eq!(cfg(text).memory.top_k, expected, "{text}");
+        }
         assert!(refused("memory:\n  search:\n    min_score: 1e-1\n"));
         assert_eq!(
             cfg("memory:\n  search:\n    min_score: 1.0e-1\n")

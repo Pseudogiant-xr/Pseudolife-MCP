@@ -53,8 +53,8 @@ fn construct_startup(
         TAG_TIMESTAMP => Err(
             "YAML timestamps cannot be used at startup; quote the date or timestamp to use it as a string".into()
         ),
-        TAG_INT => construct_int(&value).map(Node::Int).map_err(|_| {
-            "YAML integer is outside the signed 64-bit range; use a value from -9223372036854775808 to 9223372036854775807, or quote it for a string setting".into()
+        TAG_INT => construct_int_with(&value, startup_integer).map(Node::Int).map_err(|_| {
+            "YAML integer is invalid or outside the signed 64-bit range; use a value from -9223372036854775808 to 9223372036854775807, or quote it for a string setting".into()
         }),
         _ => construct(value, style, tag, false),
     }
@@ -132,6 +132,45 @@ fn construct(
 
 /// `construct_yaml_int`, refused past the i64 range this tree holds.
 fn construct_int(text: &str) -> Result<i64, String> {
+    construct_int_with(text, |digits, radix| {
+        i128::from_str_radix(digits, radix).ok()
+    })
+}
+
+/// PyYAML selects the radix before Python's `int()` consumes whitespace.
+/// Thus `!!int ' 010 '` is decimal 10, while `!!int '010 '` is octal 8.
+fn startup_integer(text: &str, radix: u32) -> Option<i128> {
+    let normalized: String = text
+        .trim()
+        .chars()
+        .map(|c| {
+            crate::graph_review::decimal_value(c)
+                .and_then(|d| char::from_digit(d, 10))
+                .unwrap_or(c)
+        })
+        .collect();
+    let (sign, digits) = match normalized.as_bytes().first() {
+        Some(b'-') => ("-", &normalized[1..]),
+        Some(b'+') => ("+", &normalized[1..]),
+        _ => ("", normalized.as_str()),
+    };
+    let prefix = match radix {
+        2 => ["0b", "0B"],
+        8 => ["0o", "0O"],
+        16 => ["0x", "0X"],
+        _ => ["", ""],
+    };
+    let digits = digits
+        .strip_prefix(prefix[0])
+        .or_else(|| digits.strip_prefix(prefix[1]))
+        .unwrap_or(digits);
+    i128::from_str_radix(&format!("{sign}{digits}"), radix).ok()
+}
+
+fn construct_int_with(
+    text: &str,
+    parse: impl Fn(&str, u32) -> Option<i128>,
+) -> Result<i64, String> {
     let value: String = text.chars().filter(|&c| c != '_').collect();
     let (negative, digits) = match value.as_bytes().first() {
         Some(b'-') => (true, &value[1..]),
@@ -141,22 +180,20 @@ fn construct_int(text: &str) -> Result<i64, String> {
     let magnitude: Option<i128> = if digits == "0" {
         Some(0)
     } else if let Some(bin) = digits.strip_prefix("0b") {
-        i128::from_str_radix(bin, 2).ok()
+        parse(bin, 2)
     } else if let Some(hex) = digits.strip_prefix("0x") {
-        i128::from_str_radix(hex, 16).ok()
+        parse(hex, 16)
     } else if digits.starts_with('0') {
-        i128::from_str_radix(digits, 8).ok()
+        parse(digits, 8)
     } else if digits.contains(':') {
         digits.split(':').try_fold(0i128, |total, part| {
-            total
-                .checked_mul(60)?
-                .checked_add(part.parse::<i128>().ok()?)
+            total.checked_mul(60)?.checked_add(parse(part, 10)?)
         })
     } else {
-        digits.parse::<i128>().ok()
+        parse(digits, 10)
     };
     magnitude
-        .map(|m| if negative { -m } else { m })
+        .and_then(|m| if negative { m.checked_neg() } else { Some(m) })
         .and_then(|v| i64::try_from(v).ok())
         .ok_or_else(|| format!("config.yaml holds an integer out of range: {text}"))
 }

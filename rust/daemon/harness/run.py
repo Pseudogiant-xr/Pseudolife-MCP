@@ -1278,6 +1278,8 @@ CONFIG_PROFILES = {
     "YAML 1.1 numbers": "memory:\n  top_k: 010\n  recency_base_half_life_s: 1:30.5\ncoordination:\n  wake:\n    nightly_total: 1_000\nupdates:\n  check_interval_seconds: 1:30\n",
     "YAML 1.1 strings": "embedding:\n  query_prefix: 1e5\n  model_name: 0o10\n",
     "YAML 1.1 null": "time:\n  relative_age: NULL\nmemory:\n  miras:\n    bands: Null\n",
+    "YAML 1.1 tagged integer spaces": "memory: {top_k: !!int ' 10 '}\n",
+    "YAML 1.1 tagged integer block": "memory:\n  top_k: !!int |\n    10\n",
 }
 for _boolean in ("yes", "Yes", "YES", "no", "No", "NO", "on", "On", "ON", "off", "Off", "OFF"):
     CONFIG_PROFILES[f"YAML 1.1 boolean {_boolean}"] = (

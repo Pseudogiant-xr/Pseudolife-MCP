@@ -252,6 +252,38 @@
     {
       "yaml": "-9223372036854775808",
       "expected": -9223372036854775808
+    },
+    {
+      "yaml": "!!int ' 10 '",
+      "expected": 10
+    },
+    {
+      "yaml": "!!int |\n  10\n",
+      "expected": 10
+    },
+    {
+      "yaml": "!!int ' 010 '",
+      "expected": 10
+    },
+    {
+      "yaml": "!!int '010 '",
+      "expected": 8
+    },
+    {
+      "yaml": "!!int ' 1 : 30 '",
+      "expected": 90
+    },
+    {
+      "yaml": "!!int '0x FF '",
+      "expected": 255
+    },
+    {
+      "yaml": "!!int '١٢'",
+      "expected": 12
+    },
+    {
+      "yaml": "!!int '0b0b10'",
+      "expected": 2
     }
   ]
 }

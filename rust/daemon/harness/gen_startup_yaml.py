@@ -18,6 +18,8 @@ def cases() -> list[dict]:
         "! yes", "! 'yes'", "! '010'", "! 'NULL'", "! 'yEs'", "!!str yes",
         "'yes'", '"off"', "'010'", "'NULL'",
         "9223372036854775807", "-9223372036854775808",
+        "!!int ' 10 '", "!!int |\n  10\n", "!!int ' 010 '", "!!int '010 '",
+        "!!int ' 1 : 30 '", "!!int '0x FF '", "!!int '١٢'", "!!int '0b0b10'",
     ]
     return [{"yaml": text, "expected": yaml.safe_load(text)} for text in spellings]
 
