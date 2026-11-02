@@ -6032,6 +6032,9 @@ SCENARIOS.update(w2e_hooks.register(sys.modules[__name__]))
 MUTANTS += w2e_hooks.MUTANTS
 HOME_OPS += w2e_hooks.HOME_OPS
 
+import w2e_auto_promote  # noqa: E402
+SCENARIOS.update(w2e_auto_promote.register(sys.modules[__name__]))
+
 
 def configure_clean_exit(procs: dict, scn: dict) -> None:
     """Use the existing lifecycle harness's normal-return signal fixture.

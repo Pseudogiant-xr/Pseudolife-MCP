@@ -71,6 +71,7 @@ pub struct MemoryConfig {
     pub surprise_threshold: f64,
     pub meta_filter_enabled: bool,
     pub cortex_auto_promote: bool,
+    pub cortex_promote_confidence: f64,
     pub retention_boost: f64,
     pub search: SearchConfig,
     pub bm25: Bm25Config,
@@ -870,6 +871,7 @@ impl Default for MemoryConfig {
             surprise_threshold: 0.0,
             meta_filter_enabled: false,
             cortex_auto_promote: false,
+            cortex_promote_confidence: 0.5,
             search: SearchConfig::default(),
             bm25: Bm25Config::default(),
             reranker_enabled: false,
@@ -1940,6 +1942,8 @@ fn load_str(text: &str) -> Result<Config, ConfigError> {
         }
         if let Some(c) = section(m, "cortex", "memory.")? {
             memory.cortex_auto_promote = want_bool(c, "auto_promote", "memory.cortex", false)?;
+            memory.cortex_promote_confidence =
+                want_float(c, "promote_confidence", "memory.cortex", 0.5)?;
         }
         // `self.config.memory.reference.persist_dir = ...` (service.py:857).
         // `_dict_to_dataclass` checks no types; a non-integer size makes
