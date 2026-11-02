@@ -715,31 +715,6 @@ fn error_class(e: &ToolError) -> &'static str {
     }
 }
 
-#[cfg(test)]
-mod error_tests {
-    use super::*;
-
-    #[test]
-    fn typed_save_error_survives_context_without_parsing_its_message() {
-        let saved =
-            anyhow::Error::new(PersistenceError("fixture".into())).context("another diagnostic");
-        assert_eq!(error_class(&ToolError::Internal(saved)), "PersistenceError");
-        let misleading = internal(anyhow::anyhow!("cortex save failed: fixture"));
-        assert_eq!(error_class(&misleading), "RuntimeError");
-    }
-
-    #[test]
-    fn database_class_uses_sqlstate_and_transport_errors_stay_operational() {
-        assert_eq!(pg_errors::class(Some("22012")), "DivisionByZero");
-        assert_eq!(pg_errors::class(Some("P0001")), "RaiseException");
-        assert_eq!(pg_errors::class(Some("XX000")), "InternalError_");
-        assert_eq!(pg_errors::class(Some("22ZZZ")), "DataError");
-        assert_eq!(pg_errors::class(Some("P9999")), "ProgrammingError");
-        assert_eq!(pg_errors::class(Some("ZZZZZ")), "DatabaseError");
-        assert_eq!(pg_errors::class(None), "OperationalError");
-    }
-}
-
 /// `dream_rollback(run_id=run_id)`. `run_id` is None when omitted or null,
 /// and `Some(None)` for an integer no run id can equal (beyond i64), which
 /// is stale as in Python.
@@ -849,4 +824,29 @@ pub(crate) async fn rollback(
     }
     out.insert("details".into(), Value::Array(details));
     Ok(Value::Object(out))
+}
+
+#[cfg(test)]
+mod error_tests {
+    use super::*;
+
+    #[test]
+    fn typed_save_error_survives_context_without_parsing_its_message() {
+        let saved =
+            anyhow::Error::new(PersistenceError("fixture".into())).context("another diagnostic");
+        assert_eq!(error_class(&ToolError::Internal(saved)), "PersistenceError");
+        let misleading = internal(anyhow::anyhow!("cortex save failed: fixture"));
+        assert_eq!(error_class(&misleading), "RuntimeError");
+    }
+
+    #[test]
+    fn database_class_uses_sqlstate_and_transport_errors_stay_operational() {
+        assert_eq!(pg_errors::class(Some("22012")), "DivisionByZero");
+        assert_eq!(pg_errors::class(Some("P0001")), "RaiseException");
+        assert_eq!(pg_errors::class(Some("XX000")), "InternalError_");
+        assert_eq!(pg_errors::class(Some("22ZZZ")), "DataError");
+        assert_eq!(pg_errors::class(Some("P9999")), "ProgrammingError");
+        assert_eq!(pg_errors::class(Some("ZZZZZ")), "DatabaseError");
+        assert_eq!(pg_errors::class(None), "OperationalError");
+    }
 }

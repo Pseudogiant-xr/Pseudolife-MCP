@@ -18726,13 +18726,13 @@
        [
         "curation_listing_spelling_v2",
         {
-         "at": 1793632556.0899696,
+         "at": 1793633872.2958899,
          "copied": 0
         }
        ],
        [
         "dream_ack_secret_v1",
-        "910ad6081d22e5306720e4b1016952c12b833548d5a8092a580efbb66e08fdc7"
+        "33d06d44934e82d9073c1317b24ed21b87ace71aef94a519908e26c061101313"
        ],
        [
         "schema_version",
@@ -19085,14 +19085,14 @@
     "value": {
      "action": "inserted",
      "age": "just now",
-     "asserted_at": 1793632614.2973726,
+     "asserted_at": 1793633931.3783538,
      "attribute": "host",
      "confidence": 0.8,
      "effective_confidence": 0.8,
      "entity": "CI Cache",
      "freshness_class": "evergreen",
      "kind": "scalar",
-     "last_confirmed": 1793632614.2973726,
+     "last_confirmed": 1793633931.3783538,
      "origin": "agent",
      "polarity": "+",
      "provenance": [],
@@ -19105,8 +19105,8 @@
      "support": [
       "agent"
      ],
-     "tx_time": 1793632614.2973726,
-     "valid_time": 1793632614.2973726,
+     "tx_time": 1793633931.3783538,
+     "valid_time": 1793633931.3783538,
      "value": "build-02",
      "writer_id": "unknown"
     }
@@ -19775,13 +19775,13 @@
        [
         "curation_listing_spelling_v2",
         {
-         "at": 1793632556.0899696,
+         "at": 1793633872.2958899,
          "copied": 0
         }
        ],
        [
         "dream_ack_secret_v1",
-        "910ad6081d22e5306720e4b1016952c12b833548d5a8092a580efbb66e08fdc7"
+        "33d06d44934e82d9073c1317b24ed21b87ace71aef94a519908e26c061101313"
        ],
        [
         "schema_version",
@@ -20025,14 +20025,14 @@
     "value": {
      "action": "inserted",
      "age": "just now",
-     "asserted_at": 1793632615.1357057,
+     "asserted_at": 1793633932.2349107,
      "attribute": "version",
      "confidence": 0.8,
      "effective_confidence": 0.8,
      "entity": "Staging DB",
      "freshness_class": "evergreen",
      "kind": "scalar",
-     "last_confirmed": 1793632615.1357057,
+     "last_confirmed": 1793633932.2349107,
      "origin": "agent",
      "polarity": "+",
      "provenance": [],
@@ -20045,8 +20045,8 @@
      "support": [
       "agent"
      ],
-     "tx_time": 1793632615.1357057,
-     "valid_time": 1793632615.1357057,
+     "tx_time": 1793633932.2349107,
+     "valid_time": 1793633932.2349107,
      "value": "PostgreSQL 16",
      "writer_id": "unknown"
     }
@@ -20759,13 +20759,13 @@
        [
         "curation_listing_spelling_v2",
         {
-         "at": 1793632556.0899696,
+         "at": 1793633872.2958899,
          "copied": 0
         }
        ],
        [
         "dream_ack_secret_v1",
-        "910ad6081d22e5306720e4b1016952c12b833548d5a8092a580efbb66e08fdc7"
+        "33d06d44934e82d9073c1317b24ed21b87ace71aef94a519908e26c061101313"
        ],
        [
         "schema_version",
@@ -21748,13 +21748,13 @@
        [
         "curation_listing_spelling_v2",
         {
-         "at": 1793632556.0899696,
+         "at": 1793633872.2958899,
          "copied": 0
         }
        ],
        [
         "dream_ack_secret_v1",
-        "910ad6081d22e5306720e4b1016952c12b833548d5a8092a580efbb66e08fdc7"
+        "33d06d44934e82d9073c1317b24ed21b87ace71aef94a519908e26c061101313"
        ],
        [
         "schema_version",
@@ -22759,13 +22759,13 @@
        [
         "curation_listing_spelling_v2",
         {
-         "at": 1793632556.0899696,
+         "at": 1793633872.2958899,
          "copied": 0
         }
        ],
        [
         "dream_ack_secret_v1",
-        "910ad6081d22e5306720e4b1016952c12b833548d5a8092a580efbb66e08fdc7"
+        "33d06d44934e82d9073c1317b24ed21b87ace71aef94a519908e26c061101313"
        ],
        [
         "schema_version",
@@ -23792,13 +23792,13 @@
        [
         "curation_listing_spelling_v2",
         {
-         "at": 1793632556.0899696,
+         "at": 1793633872.2958899,
          "copied": 0
         }
        ],
        [
         "dream_ack_secret_v1",
-        "910ad6081d22e5306720e4b1016952c12b833548d5a8092a580efbb66e08fdc7"
+        "33d06d44934e82d9073c1317b24ed21b87ace71aef94a519908e26c061101313"
        ],
        [
         "schema_version",
@@ -24847,13 +24847,13 @@
        [
         "curation_listing_spelling_v2",
         {
-         "at": 1793632556.0899696,
+         "at": 1793633872.2958899,
          "copied": 0
         }
        ],
        [
         "dream_ack_secret_v1",
-        "910ad6081d22e5306720e4b1016952c12b833548d5a8092a580efbb66e08fdc7"
+        "33d06d44934e82d9073c1317b24ed21b87ace71aef94a519908e26c061101313"
        ],
        [
         "schema_version",
@@ -25924,13 +25924,13 @@
        [
         "curation_listing_spelling_v2",
         {
-         "at": 1793632556.0899696,
+         "at": 1793633872.2958899,
          "copied": 0
         }
        ],
        [
         "dream_ack_secret_v1",
-        "910ad6081d22e5306720e4b1016952c12b833548d5a8092a580efbb66e08fdc7"
+        "33d06d44934e82d9073c1317b24ed21b87ace71aef94a519908e26c061101313"
        ],
        [
         "schema_version",
@@ -27025,13 +27025,13 @@
        [
         "curation_listing_spelling_v2",
         {
-         "at": 1793632556.0899696,
+         "at": 1793633872.2958899,
          "copied": 0
         }
        ],
        [
         "dream_ack_secret_v1",
-        "910ad6081d22e5306720e4b1016952c12b833548d5a8092a580efbb66e08fdc7"
+        "33d06d44934e82d9073c1317b24ed21b87ace71aef94a519908e26c061101313"
        ],
        [
         "schema_version",
@@ -28146,13 +28146,13 @@
        [
         "curation_listing_spelling_v2",
         {
-         "at": 1793632556.0899696,
+         "at": 1793633872.2958899,
          "copied": 0
         }
        ],
        [
         "dream_ack_secret_v1",
-        "910ad6081d22e5306720e4b1016952c12b833548d5a8092a580efbb66e08fdc7"
+        "33d06d44934e82d9073c1317b24ed21b87ace71aef94a519908e26c061101313"
        ],
        [
         "schema_version",
@@ -29289,13 +29289,13 @@
        [
         "curation_listing_spelling_v2",
         {
-         "at": 1793632556.0899696,
+         "at": 1793633872.2958899,
          "copied": 0
         }
        ],
        [
         "dream_ack_secret_v1",
-        "910ad6081d22e5306720e4b1016952c12b833548d5a8092a580efbb66e08fdc7"
+        "33d06d44934e82d9073c1317b24ed21b87ace71aef94a519908e26c061101313"
        ],
        [
         "schema_version",
@@ -30570,13 +30570,13 @@
        [
         "curation_listing_spelling_v2",
         {
-         "at": 1793632556.0899696,
+         "at": 1793633872.2958899,
          "copied": 0
         }
        ],
        [
         "dream_ack_secret_v1",
-        "910ad6081d22e5306720e4b1016952c12b833548d5a8092a580efbb66e08fdc7"
+        "33d06d44934e82d9073c1317b24ed21b87ace71aef94a519908e26c061101313"
        ],
        [
         "schema_version",
@@ -32255,13 +32255,13 @@
        [
         "curation_listing_spelling_v2",
         {
-         "at": 1793632556.0899696,
+         "at": 1793633872.2958899,
          "copied": 0
         }
        ],
        [
         "dream_ack_secret_v1",
-        "910ad6081d22e5306720e4b1016952c12b833548d5a8092a580efbb66e08fdc7"
+        "33d06d44934e82d9073c1317b24ed21b87ace71aef94a519908e26c061101313"
        ],
        [
         "schema_version",
@@ -32491,9 +32491,9 @@
   {
    "numeric_new": {},
    "op": {
-    "after_stop": false,
+    "external": true,
     "op": "sql",
-    "sql": "CREATE SEQUENCE rollback_fail_once; CREATE FUNCTION rollback_fail_once() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NOT (SELECT is_called FROM rollback_fail_once) THEN PERFORM nextval('rollback_fail_once'); RAISE EXCEPTION 'fixture cortex save failure'; END IF; RETURN NEW; END $$; CREATE TRIGGER rollback_fail_once BEFORE INSERT ON facts FOR EACH ROW EXECUTE FUNCTION rollback_fail_once()"
+    "sql": "CREATE SEQUENCE rollback_fail_once; CREATE FUNCTION rollback_fail_once() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NOT (SELECT is_called FROM rollback_fail_once) THEN PERFORM nextval('rollback_fail_once'); RAISE EXCEPTION 'fixture cortex save failure'; END IF; RETURN NEW; END $$; CREATE TRIGGER rollback_fail_once BEFORE INSERT ON facts FOR EACH ROW EXECUTE FUNCTION rollback_fail_once(); CREATE SEQUENCE rollback_event_fail_once; CREATE FUNCTION rollback_event_fail_once() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NOT (SELECT is_called FROM rollback_event_fail_once) THEN PERFORM nextval('rollback_event_fail_once'); RAISE EXCEPTION 'fixture chronicle delete failure' USING ERRCODE = '22012'; END IF; RETURN OLD; END $$; CREATE TRIGGER rollback_event_fail_once BEFORE DELETE ON chronicle_events FOR EACH ROW EXECUTE FUNCTION rollback_event_fail_once()"
    },
    "python": {
     "isError": false,
@@ -32637,6 +32637,14 @@
        1,
        1,
        1
+      ],
+      [
+       "public",
+       "rollback_event_fail_once",
+       "bigint",
+       1,
+       1,
+       null
       ],
       [
        "public",
@@ -33892,13 +33900,13 @@
        [
         "curation_listing_spelling_v2",
         {
-         "at": 1793632556.0899696,
+         "at": 1793633872.2958899,
          "copied": 0
         }
        ],
        [
         "dream_ack_secret_v1",
-        "910ad6081d22e5306720e4b1016952c12b833548d5a8092a580efbb66e08fdc7"
+        "33d06d44934e82d9073c1317b24ed21b87ace71aef94a519908e26c061101313"
        ],
        [
         "schema_version",
@@ -34143,7 +34151,7 @@
        "action": "event_inserted",
        "attribute": "event",
        "entity": "team",
-       "outcome": "reverted",
+       "outcome": "partial:error:DivisionByZero",
        "seq": 14
       },
       {
@@ -34245,8 +34253,8 @@
        "seq": 0
       }
      ],
-     "partial": 1,
-     "reverted": 13,
+     "partial": 2,
+     "reverted": 12,
      "run_id": 1,
      "skipped": 1
     }
@@ -34385,6 +34393,14 @@
       [
        "public",
        "retrieval_events_id_seq",
+       "bigint",
+       1,
+       1,
+       1
+      ],
+      [
+       "public",
+       "rollback_event_fail_once",
        "bigint",
        1,
        1,
@@ -35896,13 +35912,13 @@
        [
         "curation_listing_spelling_v2",
         {
-         "at": 1793632556.0899696,
+         "at": 1793633872.2958899,
          "copied": 0
         }
        ],
        [
         "dream_ack_secret_v1",
-        "910ad6081d22e5306720e4b1016952c12b833548d5a8092a580efbb66e08fdc7"
+        "33d06d44934e82d9073c1317b24ed21b87ace71aef94a519908e26c061101313"
        ],
        [
         "schema_version",
@@ -36153,7 +36169,7 @@
        "id": 1,
        "pulled": 8,
        "rolled_back_at": "<clock>",
-       "started_at": 1793632620.826139,
+       "started_at": 1793633938.0612233,
        "status": "rolled_back",
        "tallies": {
         "confirmed": 2,
@@ -36318,6 +36334,14 @@
       [
        "public",
        "retrieval_events_id_seq",
+       "bigint",
+       1,
+       1,
+       1
+      ],
+      [
+       "public",
+       "rollback_event_fail_once",
        "bigint",
        1,
        1,
@@ -37829,13 +37853,13 @@
        [
         "curation_listing_spelling_v2",
         {
-         "at": 1793632556.0899696,
+         "at": 1793633872.2958899,
          "copied": 0
         }
        ],
        [
         "dream_ack_secret_v1",
-        "910ad6081d22e5306720e4b1016952c12b833548d5a8092a580efbb66e08fdc7"
+        "33d06d44934e82d9073c1317b24ed21b87ace71aef94a519908e26c061101313"
        ],
        [
         "schema_version",
@@ -38085,13 +38109,13 @@
      },
      "record": {
       "age": "just now",
-      "asserted_at": 1793632628.7505887,
+      "asserted_at": 1793633945.6026824,
       "attribute": "region",
       "confidence": 0.8,
       "entity": "Deploy Target",
       "freshness_class": "evergreen",
       "kind": "scalar",
-      "last_confirmed": 1793632628.7583418,
+      "last_confirmed": 1793633945.6098893,
       "origin": "agent",
       "source_entries": [
        1
@@ -38235,6 +38259,14 @@
       [
        "public",
        "retrieval_events_id_seq",
+       "bigint",
+       1,
+       1,
+       1
+      ],
+      [
+       "public",
+       "rollback_event_fail_once",
        "bigint",
        1,
        1,
@@ -39746,13 +39778,13 @@
        [
         "curation_listing_spelling_v2",
         {
-         "at": 1793632556.0899696,
+         "at": 1793633872.2958899,
          "copied": 0
         }
        ],
        [
         "dream_ack_secret_v1",
-        "910ad6081d22e5306720e4b1016952c12b833548d5a8092a580efbb66e08fdc7"
+        "33d06d44934e82d9073c1317b24ed21b87ace71aef94a519908e26c061101313"
        ],
        [
         "schema_version",
@@ -40014,13 +40046,13 @@
       "members": [
        {
         "age": "just now",
-        "asserted_at": 1793632628.5146236,
+        "asserted_at": 1793633945.3829815,
         "attribute": "requirements",
         "confidence": 0.7,
         "entity": "Release Runbook",
         "freshness_class": "evergreen",
         "kind": "member",
-        "last_confirmed": 1793632628.5146236,
+        "last_confirmed": 1793633945.3829815,
         "origin": "agent",
         "stale": false,
         "value": "signed tag"
@@ -40029,26 +40061,26 @@
       "removed": [
        {
         "age": "1 minute ago",
-        "asserted_at": 1793632558.1920397,
+        "asserted_at": 1793633874.2926772,
         "attribute": "requirements",
         "confidence": 0.7,
         "entity": "Release Runbook",
         "freshness_class": "evergreen",
         "kind": "member",
-        "last_confirmed": 1793632558.1920397,
+        "last_confirmed": 1793633874.2926772,
         "origin": "",
         "stale": false,
         "value": "signed tag"
        },
        {
         "age": "just now",
-        "asserted_at": 1793632622.4877417,
+        "asserted_at": 1793633939.762666,
         "attribute": "requirements",
         "confidence": 0.7,
         "entity": "Release Runbook",
         "freshness_class": "evergreen",
         "kind": "member",
-        "last_confirmed": 1793632622.4877417,
+        "last_confirmed": 1793633939.762666,
         "origin": "action",
         "stale": false,
         "value": "changelog entry"
@@ -40191,6 +40223,14 @@
       [
        "public",
        "retrieval_events_id_seq",
+       "bigint",
+       1,
+       1,
+       1
+      ],
+      [
+       "public",
+       "rollback_event_fail_once",
        "bigint",
        1,
        1,
@@ -41702,13 +41742,13 @@
        [
         "curation_listing_spelling_v2",
         {
-         "at": 1793632556.0899696,
+         "at": 1793633872.2958899,
          "copied": 0
         }
        ],
        [
         "dream_ack_secret_v1",
-        "910ad6081d22e5306720e4b1016952c12b833548d5a8092a580efbb66e08fdc7"
+        "33d06d44934e82d9073c1317b24ed21b87ace71aef94a519908e26c061101313"
        ],
        [
         "schema_version",
