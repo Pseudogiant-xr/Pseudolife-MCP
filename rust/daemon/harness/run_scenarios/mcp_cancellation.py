@@ -31,7 +31,7 @@ def register(harness):
 
         def timeline(self, procs, holders):
             import psycopg
-            answers, committed = {}, {}
+            answers, committed, invalid_id = {}, {}, {}
             for side, proc in procs.items():
                 session = None if self.modern else Session(proc.port, harness.T_DEFAULT)
                 headers = ([("Authorization", f"Bearer {harness.T_DEFAULT}"),
@@ -77,12 +77,24 @@ def register(harness):
                         rows = probe.execute("SELECT text FROM entries WHERE text = %s", ("memory cancellation probe",)).fetchall()
                         committed[side] = {"status": 200, "headers": {}, "json": {"stored": [row[0] for row in rows]}}
                         assert rows == [("memory cancellation probe",)], f"{side}: shielded write was lost"
+                        if self.modern:
+                            body["id"] = float("nan")
+                            body["params"]["arguments"]["text"] = "invalid request must not store"
+                            rejected = request(proc.port, "POST", body,
+                                               headers + [("Mcp-Method", "tools/call"), ("Mcp-Name", "memory_store")])
+                            invalid_id[side] = {"status": rejected["status"], "headers": {}, "json": json.loads(rejected["body"])}
+                            assert probe.execute("SELECT count(*) FROM entries WHERE text=%s",
+                                                 ("invalid request must not store",)).fetchone()[0] == 0, side
                 finally:
                     if session is not None:
                         session.close()
             for name, values in (("cancelled request settlement", answers), ("shielded store committed", committed)):
                 c = harness.case(name, "POST", "/mcp")
                 c["_answers"] = (values.get("python"), values["rust"])
+                yield c
+            if self.modern:
+                c = harness.case("NaN id rejects before store dispatch", "POST", "/mcp")
+                c["_answers"] = (invalid_id.get("python"), invalid_id["rust"])
                 yield c
 
     class McpModernCancellation(McpCancellation):

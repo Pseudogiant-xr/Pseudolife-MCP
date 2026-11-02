@@ -23,7 +23,14 @@ const MAX_INT_DIGITS: usize = 4300;
 pub const LONE_SURROGATE_BASE: u32 = 0x10F800;
 
 pub fn loads(text: &str) -> Option<Value> {
-    parse(text, false)
+    parse(text, false, false)
+}
+
+/// Modern request envelopes permit opaque extension metadata. Discard those
+/// unused values while parsing, so unpaired surrogate escapes in them do not
+/// reject an otherwise valid request. Known metadata retains its validation.
+pub fn loads_request(text: &str) -> Option<Value> {
+    parse(text, false, true)
 }
 
 /// `json.loads` of an extractor's model reply. It differs from [`loads`]
@@ -34,15 +41,17 @@ pub fn loads(text: &str) -> Option<Value> {
 /// each database write, the strings psycopg would refuse to encode. MCP
 /// tool arguments keep [`loads`] (MCP-BIND-PRE-PARSE).
 pub fn loads_reply(text: &str) -> Option<Value> {
-    parse(text, true)
+    parse(text, true, false)
 }
 
-fn parse(text: &str, lone_surrogates: bool) -> Option<Value> {
+fn parse(text: &str, lone_surrogates: bool, discard_metadata: bool) -> Option<Value> {
     let mut p = Parser {
         text,
         s: text.as_bytes(),
         i: 0,
         lone_surrogates,
+        discard_metadata,
+        path: 0,
     };
     p.ws();
     let v = p.value(0)?;
@@ -62,6 +71,9 @@ struct Parser<'a> {
     i: usize,
     /// Keep unpaired surrogate escapes as stand-ins ([`loads_reply`]).
     lone_surrogates: bool,
+    discard_metadata: bool,
+    /// 0=root, 1=params, 2=params._meta, 3=any other location.
+    path: u8,
 }
 
 impl Parser<'_> {
@@ -104,6 +116,7 @@ impl Parser<'_> {
     }
 
     fn object(&mut self, depth: usize) -> Option<Value> {
+        let path = self.path;
         self.i += 1;
         let mut map = Map::new();
         self.ws();
@@ -116,15 +129,38 @@ impl Parser<'_> {
             if self.s.get(self.i) != Some(&b'"') {
                 return None;
             }
+            let lone_surrogates = self.lone_surrogates;
+            self.lone_surrogates |= self.discard_metadata && path == 2;
             let key = self.string()?;
+            self.lone_surrogates = lone_surrogates;
             self.ws();
             if self.s.get(self.i) != Some(&b':') {
                 return None;
             }
             self.i += 1;
             self.ws();
+            let ignored = self.discard_metadata
+                && path == 2
+                && !matches!(
+                    key.as_str(),
+                    "io.modelcontextprotocol/protocolVersion"
+                        | "io.modelcontextprotocol/clientCapabilities"
+                        | "io.modelcontextprotocol/clientInfo"
+                        | "io.modelcontextprotocol/logLevel"
+                        | "progressToken"
+                );
+            self.path = match (path, key.as_str()) {
+                (0, "params") => 1,
+                (1, "_meta") => 2,
+                _ => 3,
+            };
+            self.lone_surrogates |= ignored;
             let v = self.value(depth + 1)?;
-            map.insert(key, v);
+            self.lone_surrogates = lone_surrogates;
+            self.path = path;
+            if !ignored {
+                map.insert(key, v);
+            }
             self.ws();
             match self.s.get(self.i) {
                 Some(b',') => self.i += 1,

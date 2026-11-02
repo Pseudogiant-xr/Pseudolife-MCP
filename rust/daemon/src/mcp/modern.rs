@@ -370,7 +370,7 @@ pub(super) async fn handle(
     if accepts(&headers) != (true, true) {
         return plain(406, "");
     }
-    let raw = match decode_body(&body).and_then(|s| py_loads::loads(&s)) {
+    let raw = match decode_body(&body).and_then(|s| py_loads::loads_request(&s)) {
         Some(value) => value,
         None => return response(error(&Value::Null, PARSE_ERROR, "Parse error", None)),
     };

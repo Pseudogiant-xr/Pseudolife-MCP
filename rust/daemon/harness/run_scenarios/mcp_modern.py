@@ -83,9 +83,11 @@ def register(harness):
             discover_headers = base + [("Mcp-Method", "server/discover")]
             for encoding in ("utf-8-sig", "utf-16", "utf-16-be", "utf-32", "utf-32-be"):
                 rows.append(harness.case(f"JSON bytes {encoding}", "POST", "/mcp", discover_headers, encoded.encode(encoding)))
-            for label, value in (("oversized integer", "1" * 4301), ("nonfinite float", "Infinity")):
+            for label, value in (("oversized integer", "1" * 4301), ("nonfinite float", "Infinity"), ("NaN id", "NaN")):
                 body = encoded.replace('"東京"', value).encode()
                 rows.append(harness.case(label, "POST", "/mcp", discover_headers, body))
+            add("ignored metadata permits lone surrogate", params={"_meta": {
+                VERSION_KEY: VERSION, CAPABILITIES_KEY: {}, "example/ignored": "\ud800"}})
             return rows
 
     class McpModernSubscriptions(McpModern):

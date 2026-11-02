@@ -581,10 +581,10 @@ fn request_id(v: &Value) -> Option<Value> {
     match v {
         Value::String(_) => Some(v.clone()),
         Value::Number(n)
-            if !n
-                .to_string()
+            if n.to_string()
+                .trim_start_matches('-')
                 .bytes()
-                .any(|b| matches!(b, b'.' | b'e' | b'E')) =>
+                .all(|b| b.is_ascii_digit()) =>
         {
             Some(v.clone())
         }
