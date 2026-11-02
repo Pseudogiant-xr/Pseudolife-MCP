@@ -5,6 +5,45 @@ use serde_json::{Map, Value, json};
 use std::path::Path;
 
 #[tokio::test]
+async fn lower_system_no_spawn_does_not_override_the_user_connection() {
+    let home = Home::new();
+    let mut client = Fake::new(&home.0);
+    let plan = plan_replace(&client.config, &home.0, "https://example.com", None, true).unwrap();
+    apply_replace(&mut client, &home.0, plan).await.unwrap();
+    client.config["layers"].as_array_mut().unwrap().insert(0, json!({"name":{"type":"system","file":home.0.join("system.toml")},"version":"system-a","config":{"mcp_servers":{"pseudolife-memory":{"env":{"PSEUDOLIFE_MCP_NO_SPAWN":"0","PSEUDOLIFE_MCP_TOKEN":""}}}}}));
+    let plan = plan_replace(&client.config, &home.0, "https://example.com", None, true).unwrap();
+    client.calls.clear();
+    assert!(apply_replace(&mut client, &home.0, plan).await.is_ok());
+    assert!(
+        client
+            .calls
+            .iter()
+            .all(|(method, _)| method != "config/batchWrite")
+    );
+    // Empty credentials have the same precedence rule: a lower system value
+    // must not redirect a user-key repair to the system configuration.
+    let env = &mut client.config["layers"][1]["config"]["mcp_servers"]["pseudolife-memory"]["env"];
+    env.as_object_mut()
+        .unwrap()
+        .remove("PSEUDOLIFE_MCP_TOKEN_FILE");
+    env["PSEUDOLIFE_MCP_TOKEN"] = json!("");
+    client.config["config"] = client.config["layers"][1]["config"].clone();
+    let config = client.config.clone();
+    let error = pseudolife_stdio::setup::codex::configure_credential_file(
+        &mut client,
+        &home.0,
+        &home.0,
+        Some(config),
+        Some(("https://example.com", None)),
+    )
+    .await
+    .unwrap_err()
+    .to_string();
+    assert!(error.contains("empty in Codex's user"));
+    assert!(!error.contains("system.toml"));
+}
+
+#[tokio::test]
 async fn static_project_no_spawn_refusal_precedes_token_and_config_writes() {
     let home = Home::new();
     let mut client = Fake::new(&home.0);
