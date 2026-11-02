@@ -15,7 +15,9 @@ use yaml_rust2::scanner::TScalarStyle;
 use super::yaml_dump::{
     TAG_BOOL, TAG_FLOAT, TAG_INT, TAG_MERGE, TAG_NULL, TAG_STR, TAG_TIMESTAMP, resolve,
 };
-use crate::config::{Node, UnsupportedKind, resolve_scalar, safe_load_startup_with, safe_load_with};
+use crate::config::{
+    Node, UnsupportedKind, resolve_scalar, safe_load_startup_with, safe_load_with,
+};
 
 /// Startup must preserve values exactly. The editor's read-only projection
 /// may display an oversized integer as a float; startup must not use it.

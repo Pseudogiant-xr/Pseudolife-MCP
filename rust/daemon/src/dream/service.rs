@@ -794,25 +794,6 @@ fn review_queue_judges(cfg: &crate::config::DeepDreamConfig) -> (Map<String, Val
     (judges, judge)
 }
 
-#[cfg(test)]
-mod yaml_mode_tests {
-    #[test]
-    fn review_queue_keeps_false_judge_modes() {
-        let mut config = crate::config::DeepDreamConfig::default();
-        config.judge_mode = "off".into();
-        config.link_judge_mode = "off".into();
-        for key in ["judge_mode", "link_judge_mode"] {
-            config
-                .as_dict
-                .insert(key.into(), serde_json::Value::Bool(false));
-        }
-        let (judges, text) = super::review_queue_judges(&config);
-        assert_eq!(judges["judge_mode"], serde_json::Value::Bool(false));
-        assert_eq!(judges["link_judge_mode"], serde_json::Value::Bool(false));
-        assert_eq!(text, "False");
-    }
-}
-
 /// `dream_status` (`service_dream.py:3035-3118`).
 pub async fn status(ready: &Ready, config: &Config) -> Result<Value, ToolError> {
     let cfg = &config.dream;
@@ -1054,5 +1035,26 @@ async fn run_action(
                 .unwrap_or_default();
             commit(&ready, &config.dream, &service.persist_errors, token).await
         }
+    }
+}
+
+#[cfg(test)]
+mod yaml_mode_tests {
+    #[test]
+    fn review_queue_keeps_false_judge_modes() {
+        let mut config = crate::config::DeepDreamConfig {
+            judge_mode: "off".into(),
+            link_judge_mode: "off".into(),
+            ..Default::default()
+        };
+        for key in ["judge_mode", "link_judge_mode"] {
+            config
+                .as_dict
+                .insert(key.into(), serde_json::Value::Bool(false));
+        }
+        let (judges, text) = super::review_queue_judges(&config);
+        assert_eq!(judges["judge_mode"], serde_json::Value::Bool(false));
+        assert_eq!(judges["link_judge_mode"], serde_json::Value::Bool(false));
+        assert_eq!(text, "False");
     }
 }

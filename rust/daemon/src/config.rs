@@ -3883,8 +3883,7 @@ mod tests {
                 ),
             ] {
                 let error = load_str(&text)
-                    .err()
-                    .expect("consumed binary must refuse")
+                    .expect_err("consumed binary must refuse")
                     .to_string();
                 assert!(
                     error.contains(key)
