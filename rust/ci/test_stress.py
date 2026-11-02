@@ -1070,6 +1070,89 @@ def test_the_report_names_each_items_result_per_iteration_and_in_total(tmp_path)
     assert "row:mail pass" in second and "row:hook fail: no case was compared" in second
 
 
+@pytest.mark.parametrize("kind, names", [
+    ("row", ["mail", "hook", "lease", "lease_operator", "doctor", "transfer", "audit"]),
+    ("scenario", ["tokenless", "session-reap", "security-open", "security-closed", "body-limits",
+                  "static-build", "static-paths"]),
+])
+def test_plan_refuses_more_items_than_one_job_can_run(tmp_path, capsys, kind, names):
+    # Items run one after another in one 45-minute job: about 4-5 minutes of
+    # setup plus 2-3 minutes per row (review of 6ffc6a9f).
+    output = tmp_path / "out"
+    selection = " ".join(f"{kind}:{name}" for name in names)
+    assert stress.main(["plan", "--selection", selection, "--iterations", "20",
+                        "--github-output", str(output)]) == 2
+    assert not output.exists()
+    err = capsys.readouterr().err
+    assert f"{len(names)} items" in err and f"at most {stress.MAX_ITEMS}" in err and "split" in err
+    assert stress.MAX_ITEMS == 6
+    assert stress.parse(" ".join(f"{kind}:{name}" for name in names[:6]))[1] == names[:6]
+    # The budget the cap was sized for is the stress job's own.
+    assert raw_workflow()["jobs"]["stress"]["timeout-minutes"] == stress.ITERATION_MINUTES
+
+
+@pytest.mark.parametrize("selection, message", [
+    # A whole row already runs its cases; the same case twice is one item.
+    ("row:hook row:hook/x", "item 'row:hook/x' overlaps 'row:hook'"),
+    ("row:hook/x row:mail row:hook", "item 'row:hook' overlaps 'row:hook/x'"),
+    ("row:hook/x row:mail row:hook/x", "'row:hook/x' is named twice"),
+])
+def test_overlapping_row_items_are_refused(selection, message):
+    with pytest.raises(ValueError, match=re.escape(message)):
+        stress.parse(selection)
+
+
+def test_distinct_cases_of_one_row_are_separate_items():
+    assert stress.parse("row:hook/x row:hook/y") == ("row", ["hook/x", "hook/y"])
+
+
+def test_the_row_file_is_rewritten_after_each_item(tmp_path, monkeypatch):
+    # A job that times out keeps the finished items' results and names the
+    # item that was running (review of 6ffc6a9f).
+    out = tmp_path / "stress" / "stress-row-1.json"
+    seen = []
+    inner = fake_harness({"mail": 2, "hook": 3, "lease": 1}, [])
+
+    def run(argv, env):
+        seen.append(json.loads(out.read_text(encoding="utf-8")))
+        return inner(argv, env)
+    monkeypatch.setattr(stress.subprocess, "run", run)
+    code, row = run_row(tmp_path, "row:mail row:hook row:lease")
+    assert code == 0 and row["outcome"] == "pass" and "note" not in row
+    during_hook = seen[1]
+    assert during_hook["outcome"] == "fail"
+    assert [(item["item"], item["outcome"]) for item in during_hook["items"]] == [
+        ("row:mail", "pass"), ("row:hook", "fail")]
+    assert during_hook["items"][1]["note"] == "not finished"
+    assert "not finished: row:hook" in during_hook["note"] and "not run: row:lease" in during_hook["note"]
+
+
+@pytest.mark.parametrize("broken", ["command", "environment", "subprocess"])
+def test_an_item_that_raises_is_a_failure_and_the_rest_still_run(tmp_path, monkeypatch, broken):
+    calls = []
+    harness = fake_harness({"mail": 2, "hook": 3, "lease": 1}, calls)
+
+    def boom(*args, **kwargs):
+        raise FileNotFoundError("no such candidate: pseudolife-stdio")
+    if broken == "subprocess":
+        def run(argv, env):
+            return boom() if argv[argv.index("--row") + 1] == "hook" else harness(argv, env)
+        monkeypatch.setattr(stress.subprocess, "run", run)
+    else:
+        monkeypatch.setattr(stress.subprocess, "run", harness)
+        real = getattr(stress, broken)
+        monkeypatch.setattr(stress, broken, lambda kind, names, *rest: boom() if names[0] == "hook"
+                            else real(kind, names, *rest))
+    code, row = run_row(tmp_path, "row:mail row:hook row:lease")
+    assert code == 1 and row["outcome"] == "fail" and row["exit_code"] == 1
+    assert [item["outcome"] for item in row["items"]] == ["pass", "fail", "pass"]
+    hook = row["items"][1]
+    assert hook["exit_code"] is None
+    assert hook["note"] == "FileNotFoundError: no such candidate: pseudolife-stdio"
+    assert [argv[argv.index("--row") + 1] for argv, _ in calls] == ["mail", "lease"]
+    assert "row:hook" in row["note"] and "not run" not in row["note"]
+
+
 def test_a_single_item_report_is_unchanged(tmp_path):
     rows = tmp_path / "rows"
     rows.mkdir()

@@ -43,10 +43,14 @@ each item in turn as its own harness process, with the argv, env and
 scratch directory it would get alone, so items never share a setup and N
 items cost one set of runner jobs instead of N. The iteration passes only
 if every item passed and compared a case; its row lists each item's
-result. One iteration provides every row and every scenario (the job
-downloads the stdio, default static and mutants daemon builds and prepares
-PostgreSQL for both kinds) except REMOTE_BIND's, so ``plan`` refuses a
-selection naming one of those, a mix of kinds, or an item named twice.
+result (an item that raises is that item's failure, and the rest still
+run) and is rewritten before each item, so a timed-out job names the item
+it was running. One iteration provides every row and every scenario (the
+job downloads the stdio, default static and mutants daemon builds and
+prepares PostgreSQL for both kinds) except REMOTE_BIND's, so ``plan``
+refuses a selection naming one of those, a mix of kinds, overlapping
+items (a row twice, or a whole row beside one of its cases), or more than
+MAX_ITEMS items, which would not fit one job's time budget.
 
 Subcommands: ``plan`` checks the inputs and
 lists the iterations, ``archive`` builds a cargo selection's archive,
@@ -86,6 +90,12 @@ STATIC_PREFIXES = ("body-", "security-", "static-")
 REMOTE_BIND = {"trust-bind", "security-remote-open", "security-remote-auth"}
 # The kinds whose items each run as their own harness process.
 ITEM_KINDS = ("row", "scenario")
+# The items of one row or scenario selection run one after another inside one
+# stress job (rust.yml's timeout-minutes, ITERATION_MINUTES). Review of the
+# multi-item change (2026-11-02): a row job spends about 4-5 minutes on setup,
+# then 2-3 minutes per row, so 6 items leave room inside the budget.
+MAX_ITEMS = 6
+ITERATION_MINUTES = 45
 # A cargo item: package and test binary, optionally one test by its libtest
 # path (module::test). lib selects library unit tests; test/lib escapes the
 # reserved name for an integration target. bin/<name> selects binary unit
@@ -116,7 +126,7 @@ def parse(selection: str) -> tuple[str, list[str]]:
             first = kind if kind in ITEM_KINDS else token_kind(stray)
             raise ValueError(f"{first} selection {selection!r}: item {stray!r} is a {token_kind(stray)} item; "
                              f"a selection holds one kind, so dispatch the {token_kind(stray)} item separately")
-        seen = set()
+        seen = {}
         for token in tokens:
             where = "" if len(tokens) == 1 else f": item {token!r}"
             name = token[len(kind) + 1:]
@@ -132,9 +142,21 @@ def parse(selection: str) -> tuple[str, list[str]]:
                 if name in REMOTE_BIND:
                     raise ValueError(f"scenario:{name} needs the debug loopback-bind build, which a stress loop "
                                      "does not build; dispatch manual CI (mode=ci) for it, or pick another scenario:")
-            if token in seen:
-                raise ValueError(f"{kind} selection {selection!r}: {token!r} is named twice; name each {kind} once")
-            seen.add(token)
+            # Identity is (row, case) or (scenario,): a whole row already runs
+            # every case of it, so a row and one of its cases overlap.
+            identity = tuple(item_names(kind, name))
+            for other, earlier in seen.items():
+                if other == identity:
+                    raise ValueError(f"{kind} selection {selection!r}: {token!r} is named twice; "
+                                     f"name each {kind} once")
+                if other[0] == identity[0] and len(other) != len(identity):
+                    raise ValueError(f"{kind} selection {selection!r}: item {token!r} overlaps {earlier!r}, "
+                                     "since a whole row runs every case of it; name the row or its cases, not both")
+            seen[identity] = token
+        if len(tokens) > MAX_ITEMS:
+            raise ValueError(f"{kind} selection {selection!r} names {len(tokens)} items; a loop runs at most "
+                             f"{MAX_ITEMS}, one after another in one {ITERATION_MINUTES}-minute job, so split "
+                             "the dispatch into several of at most that many")
         return kind, [token[len(kind) + 1:] for token in tokens]
     nodes = tokens
     if any(node.startswith("cargo:") for node in nodes):
@@ -441,46 +463,58 @@ def run_items(options, kind: str, items: list[str]) -> int:
     """Several rows or scenarios, one after another: each runs as its own
     harness process with the binary, flags, env and summary a one-item
     selection would give it, in its own scratch directory, and is judged
-    by the same evidence rule. Every item runs even after one fails, so
-    the row names each item's own result."""
+    by the same evidence rule. Every item runs even after one fails or
+    raises, so the row names each item's own result. The row is written
+    before each item starts and once at the end, so a job that times out
+    keeps the finished items' results and names the item still running."""
     scratch = Path(options.out).parent
+    scratch.mkdir(parents=True, exist_ok=True)
     candidates = Path(options.candidates)
-    started, results, code = time.monotonic(), [], 1
-    try:
-        for index, item in enumerate(items, 1):
-            names, here = item_names(kind, item), scratch / f"item-{index}"
-            here.mkdir(parents=True, exist_ok=True)
-            argv = command(kind, names, candidates, here)
-            env = dict(os.environ, **environment(kind, names, candidates, here))
-            result = {"item": f"{kind}:{item}", "exit_code": None, "outcome": "fail"}
-            results.append(result)
-            begun = time.monotonic()
-            try:
-                print("stress: " + " ".join(argv), flush=True)
-                exit_code = subprocess.run(argv, env=env).returncode
-                note = f"exit code {exit_code}" if exit_code else evidence(kind, names, here)
-                result.update(exit_code=exit_code, outcome="fail" if note else "pass",
-                              compared=compared(kind, names, here), **({"note": note} if note else {}))
-                print(f"stress: {result['item']} {result['outcome']}" + (f": {note}" if note else ""), flush=True)
-            finally:
-                result["seconds"] = round(time.monotonic() - begun, 1)
-    finally:
-        failed = [result for result in results if result["outcome"] != "pass"]
-        if len(results) == len(items) and not failed:
+    started, results = time.monotonic(), []
+
+    def record(running: dict | None = None) -> int:
+        """Write the row as it stands and return its exit code."""
+        failed = [result for result in results if result["outcome"] != "pass" and result is not running]
+        if running is None and len(results) == len(items) and not failed:
             code = 0
         else:
             code = next((result["exit_code"] for result in failed if result["exit_code"]), 1)
         unrun = [f"{kind}:{item}" for item in items[len(results):]]
         note = "; ".join(filter(None, (
             f"{len(failed)} of {len(items)} items failed: " + ", ".join(result["item"] for result in failed)
-            if failed else "", "not run: " + ", ".join(unrun) if unrun else "")))
+            if failed else "", f"not finished: {running['item']}" if running else "",
+            "not run: " + ", ".join(unrun) if unrun else "")))
         row = {"iteration": options.iteration, "attempt": int(os.environ.get("GITHUB_RUN_ATTEMPT") or 1),
                "selection": options.selection.strip(), "runner": runner(), "exit_code": code,
                "outcome": "pass" if code == 0 else "fail",
                "seconds": round(time.monotonic() - started, 1),
                **({"note": note} if note else {}), "items": results}
         Path(options.out).write_text(json.dumps(row, indent=2) + "\n", encoding="utf-8")
-    return code
+        return code
+
+    for index, item in enumerate(items, 1):
+        label = f"{kind}:{item}"
+        result = {"item": label, "exit_code": None, "outcome": "fail", "note": "not finished"}
+        results.append(result)
+        record(running=result)
+        begun = time.monotonic()
+        try:
+            names, here = item_names(kind, item), scratch / f"item-{index}"
+            here.mkdir(parents=True, exist_ok=True)
+            argv = command(kind, names, candidates, here)
+            env = dict(os.environ, **environment(kind, names, candidates, here))
+            print("stress: " + " ".join(argv), flush=True)
+            exit_code = subprocess.run(argv, env=env).returncode
+            note = f"exit code {exit_code}" if exit_code else evidence(kind, names, here)
+            result.clear()
+            result.update(item=label, exit_code=exit_code, outcome="fail" if note else "pass",
+                          compared=compared(kind, names, here), **({"note": note} if note else {}))
+        except Exception as error:  # one item that cannot run is that item's failure, not the loop's
+            result["note"] = f"{type(error).__name__}: {error}"
+        result["seconds"] = round(time.monotonic() - begun, 1)
+        print(f"stress: {label} {result['outcome']}" + (f": {result['note']}" if "note" in result else ""),
+              flush=True)
+    return record()
 
 
 def run(options) -> int:
