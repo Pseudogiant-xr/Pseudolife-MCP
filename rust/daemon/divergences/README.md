@@ -46,7 +46,7 @@ whose remaining item is a proof keeps that boundary visible in its entry.
 
 | Entry | Caller | Closing stream or batch |
 |---|---|---|
-| [CONSOLE-SIGNIN](routes-whose-handlers-belong-to/console-sign-in-sessions-and-routes.md) | the Console's sign-in dialog and Settings, Signed-in browsers (`frontend/src/lib/signin.ts`), and `pseudolife-mcp console`, against `/api/console/*` and any `/api/*` call with a session bearer | B5 board; G2 |
+| [CONSOLE-SIGNIN](routes-whose-handlers-belong-to/console-sign-in-sessions-and-routes.md) | the passkey half only (link sign-in served since 2026-11-03): the Console's passkey sign-in option against `/api/console/session`, `/api/console/passkey-challenge` and `/api/console/passkey-bind` (#1166) | B5 board; G2 |
 | [W2F-CLOCK-RETRY](coordination-board-completion-w2/w2f-clock-retry.md) | board sends and daemon notices through `rust/daemon/src/board/dispatch.rs` / `board/notice.rs` during a reconnect | B5 board; B4 writer-session refresh |
 | [W2F-MAIL-PACING](coordination-board-completion-w2/w2f-mail-pacing.md) | production board send/reply wake decisions in `rust/daemon/src/board/mail.rs::Store::send` at the active_seconds boundary | B5 board; B13 differential evidence |
 | [DOC-INGEST-LOCK](document-store-b7-document/doc-ingest-lock.md) | MCP `document_ingest` concurrent with `document_search`/`memory_search`, registered in `rust/daemon/src/mcp/dispatch.rs::registry` | B7 documents |
