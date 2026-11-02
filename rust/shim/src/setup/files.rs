@@ -389,6 +389,21 @@ impl PrivateEdit {
     }
 }
 
+pub(crate) fn read_config(path: &Path) -> Result<Option<Vec<u8>>, SetupError> {
+    crate::credentials::reject_ancestor_redirects(path).map_err(|_| file_error(path, "path"))?;
+    match fs::symlink_metadata(path) {
+        Ok(info)
+            if info.is_file() && !info.file_type().is_symlink() && info.len() <= LIMIT as u64 =>
+        {
+            fs::read(path)
+                .map(Some)
+                .map_err(|_| file_error(path, "read"))
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        _ => Err(file_error(path, "metadata")),
+    }
+}
+
 #[cfg(test)]
 mod recovery_tests {
     use super::*;
@@ -444,20 +459,5 @@ mod recovery_tests {
         assert!(error.contains("could not be published"));
         assert!(!error.contains("changed during setup"));
         assert!(!path.exists());
-    }
-}
-
-pub(crate) fn read_config(path: &Path) -> Result<Option<Vec<u8>>, SetupError> {
-    crate::credentials::reject_ancestor_redirects(path).map_err(|_| file_error(path, "path"))?;
-    match fs::symlink_metadata(path) {
-        Ok(info)
-            if info.is_file() && !info.file_type().is_symlink() && info.len() <= LIMIT as u64 =>
-        {
-            fs::read(path)
-                .map(Some)
-                .map_err(|_| file_error(path, "read"))
-        }
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        _ => Err(file_error(path, "metadata")),
     }
 }
