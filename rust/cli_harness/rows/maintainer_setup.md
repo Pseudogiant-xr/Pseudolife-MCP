@@ -38,7 +38,13 @@ outside this stream. The host helper supports `--host-state` and
 Configuration output is JSON (valid YAML), preserving represented values.
 Read-only state accepts safe YAML tags and timestamps in unrelated settings and
 resolves merge keys with Python's precedence. Writes escape YAML-sensitive Unicode characters and
-both arms validate the retained recipient limit before making a backup.
+both arms validate the retained recipient limit before making a backup. Read-only
+validation keeps timestamps and binary values non-string (projected as JSON null),
+so maintainer names cannot become valid through coercion; quoted date-like strings
+remain strings. Unbounded integer limits retain their exact value and sign during
+read-only checks. Writes also escape U+FFFE and U+FFFF in keys and values.
+The native setup regression suite compares these cases directly with the Python
+oracle, including merged settings and non-mutating `--check` refusals.
 Shared collection aliases, YAML merge keys, timestamps/binary/non-finite values,
 non-string mapping keys and integers outside the loader domain refuse before
 backup or mutation instead of losing data. This bounded rewrite domain is an
