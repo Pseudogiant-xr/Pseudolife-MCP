@@ -195,6 +195,10 @@ fn no_path(recipient: &AgentRow, missing: &str) -> Map<String, Value> {
     m
 }
 
+fn recently_active(last_activity: f64, now: f64, active_seconds: i64) -> bool {
+    last_activity > now - active_seconds as f64
+}
+
 /// `_wake_decision`. The returned object may carry `_ring`, which `send`
 /// pops into the audit payload before storing the decision.
 #[allow(clippy::too_many_arguments)]
@@ -227,7 +231,9 @@ pub async fn wake_decision(
         m
     };
     let attention = park.is_none() && urgent && recipient.has_capability("codex");
-    if !attention && park.is_none() && recipient.last_activity > now - policy.active_seconds as f64
+    if !attention
+        && park.is_none()
+        && recently_active(recipient.last_activity, now, policy.active_seconds)
     {
         return Ok(obj_map(json!({"decision": "hinted", "reason": "active"})));
     }
@@ -399,6 +405,28 @@ pub async fn wake_decision(
     }
     m.insert("_ring".into(), json!(reason));
     Ok(m)
+}
+
+#[cfg(test)]
+mod activity_tests {
+    #[test]
+    fn strict_activity_boundary_matches_python() {
+        let cases: serde_json::Value = serde_json::from_str(include_str!(
+            "../../harness/board/goldens/mail-activity.json"
+        ))
+        .unwrap();
+        for case in cases.as_array().unwrap() {
+            assert_eq!(
+                super::recently_active(
+                    case["last_activity"].as_f64().unwrap(),
+                    case["now"].as_f64().unwrap(),
+                    case["active_seconds"].as_i64().unwrap()
+                ),
+                case["wake"]["decision"] == "hinted",
+                "{case}"
+            );
+        }
+    }
 }
 
 /// `_maintainer_wake`.

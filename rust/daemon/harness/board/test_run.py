@@ -9,6 +9,29 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from board import run  # noqa: E402
 
 
+def test_mail_exact_activity_oracle_remains_current():
+    import json
+    from board.gen_mail_activity import cases
+
+    recorded = json.loads((Path(__file__).with_name("goldens") / "mail-activity.json").read_text())
+    assert recorded == cases()
+
+
+def test_mail_records_both_sides_of_activity_and_checks_the_decisions():
+    import yaml
+    from board.scenarios import Mail
+
+    scenario = Mail()
+    assert yaml.safe_load(scenario.config_yaml)["coordination"]["wake"]["active_seconds"] == 600
+    steps = scenario.steps()
+    assert [step.seconds for step in steps if step.kind == "age"] == [601, 601]
+    for name in ("A to inactive B", "B replies to inactive A"):
+        step = next(step for step in steps if step.name == name)
+        step.save(None, {"wake": {"decision": "not_needed", "reason": "no_park"}})
+        with pytest.raises(AssertionError):
+            step.save(None, {"wake": {"decision": "hinted", "reason": "active"}})
+
+
 @pytest.mark.parametrize("name,status,body", [
     ("coordination hub (authenticated)", 401, {"error": "agent_required"}),
     ("api agents coordination view", 200, {"agents": []}),
