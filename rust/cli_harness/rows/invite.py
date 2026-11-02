@@ -863,8 +863,11 @@ def _cases() -> list[core.Case]:
              extra_env={"PSEUDOLIFE_MCP_DATA_DIR": "{HOME}" + SEP + "data"},
              files={"data/config.yaml": b"coordination:\n  not_owner_principals: [codex]\n"})
     # The config's names as load_config keeps them: stripped, lower-cased.
+    # codex is an environment row here, so reverting the normalisation shows
+    # it as the owner's in one arm only.
     deferral("list-config-names-normalised", ["--list"],
-             extra_env={"PSEUDOLIFE_MCP_DATA_DIR": "{HOME}" + SEP + "data"},
+             extra_env={"PSEUDOLIFE_MCP_DATA_DIR": "{HOME}" + SEP + "data",
+                        "PSEUDOLIFE_MCP_TOKENS": "seed-env-token:codex"},
              files={"data/config.yaml": b"coordination:\n  not_owner_principals: [' Codex ']\n"})
     deferral("defer-mine-and-someone-else", ["laptop", "--mine", "--someone-else", "--url", "u"])
     # PSEUDOLIFE_MCP_CONFIG comes first for the daemon, so the oracle reads it.
