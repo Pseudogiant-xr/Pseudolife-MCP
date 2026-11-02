@@ -5,6 +5,10 @@
   unrelated settings, validates credential ownership before writing, and keeps
   private backups with guarded rollback. The Python installer remains the default.
 - Linked Codex homes and configuration files retain their original resolution,
-  already-enabled project no-spawn choices are preserved, and conflicting
+  explicit no-spawn requests persist in the user layer, and conflicting
   credential settings identify their configuration file and key without
   displaying credential values.
+
+Explicit no-spawn requests now persist in the Codex user configuration even
+when a project layer or installer environment already supplies a truthy value.
+Setup diagnostics distinguish empty user credentials from project overrides.

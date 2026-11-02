@@ -42,7 +42,8 @@ def main(binary: Path) -> int:
                 for token_file in (None, str(root / "external-token")):
                     cases.append(dict(config=copy.deepcopy(base), home=str(home), url=url,
                                       token_file=token_file, no_spawn=no_spawn))
-        for choice in ("file", "truthy", "project", "forwarded", "missing-version", "profile", "empty"):
+        for choice in ("file", "truthy", "project", "forwarded", "missing-version", "profile", "empty",
+                       "forwarded-no-spawn", "project-no-spawn", "user-false-project-true"):
             case = dict(config=copy.deepcopy(base), home=str(home), url="https://example.com",
                         token_file=None, no_spawn=True)
             config = case["config"]
@@ -57,6 +58,14 @@ def main(binary: Path) -> int:
                 config["config"]["mcp_servers"]["pseudolife-memory"]["env"][oracle.TOKEN_KEY] = "project-fixture"
             elif choice == "forwarded":
                 config["config"]["mcp_servers"]["pseudolife-memory"]["env_vars"] = [oracle.TOKEN_FILE_KEY]
+            elif choice in {"forwarded-no-spawn", "project-no-spawn", "user-false-project-true"}:
+                effective = config["config"]["mcp_servers"]["pseudolife-memory"]
+                if choice == "forwarded-no-spawn":
+                    effective["env_vars"] = [oracle.NO_SPAWN_KEY]
+                else:
+                    effective["env"][oracle.NO_SPAWN_KEY] = "yes"
+                    if choice == "user-false-project-true":
+                        user["config"]["mcp_servers"]["pseudolife-memory"]["env"][oracle.NO_SPAWN_KEY] = "0"
             elif choice == "missing-version": user.pop("version")
             else: user["name"]["profile"] = "work"
             cases.append(case)
@@ -97,11 +106,11 @@ def main(binary: Path) -> int:
 
 if __name__ == "__main__":
     if sys.argv[1:] == ["--cargo"]:
-        # Nextest has already built this target. Cargo's artifact record avoids
+        # Match Nextest's workspace/all-targets feature unification exactly. Cargo's artifact record avoids
         # guessing hashes or choosing a stale executable from another profile.
         built = subprocess.run(
             ["cargo", "test", "--manifest-path", str(ROOT / "rust/Cargo.toml"),
-             "--locked", "-p", "pseudolife-stdio", "--test", "setup_codex",
+             "--locked", "--workspace", "--all-targets", "-j", "4",
              "--no-run", "--message-format=json"],
             cwd=ROOT, capture_output=True, text=True, timeout=180,
         )

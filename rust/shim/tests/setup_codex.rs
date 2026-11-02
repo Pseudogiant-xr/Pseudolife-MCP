@@ -6,32 +6,45 @@ use std::path::Path;
 
 #[test]
 fn concurrent_first_lock_publication_is_private_and_never_replaces_the_winner() {
+    use std::sync::{Arc, Condvar, Mutex, mpsc};
+    use std::time::Duration;
+    type Release = Arc<(Mutex<bool>, Condvar)>;
     struct Gated {
         inner: Fake,
-        finish: std::sync::Arc<std::sync::Barrier>,
+        arrived: mpsc::Sender<()>,
+        release: Release,
     }
     impl Rpc for Gated {
         async fn rpc(&mut self, method: &str, params: Value) -> Result<Value, SetupError> {
             if method == "config/batchWrite" {
-                self.finish.wait();
+                self.arrived.send(()).unwrap();
+                let (lock, changed) = &*self.release;
+                let (released, timeout) = changed
+                    .wait_timeout_while(lock.lock().unwrap(), Duration::from_secs(10), |v| !*v)
+                    .unwrap();
+                assert!(
+                    *released && !timeout.timed_out(),
+                    "lock contenders did not finish in time"
+                );
             }
             self.inner.rpc(method, params).await
         }
     }
     for _ in 0..8 {
         let home = Home::new();
-        let start = std::sync::Arc::new(std::sync::Barrier::new(8));
-        let finish = std::sync::Arc::new(std::sync::Barrier::new(8));
+        let release: Release = Arc::new((Mutex::new(false), Condvar::new()));
+        let (arrived, arrivals) = mpsc::channel();
         let results = std::thread::scope(|scope| {
             let handles: Vec<_> = (0..8)
                 .map(|_| {
-                    let start = start.clone();
-                    let finish = finish.clone();
+                    let release = release.clone();
+                    let arrived = arrived.clone();
                     let home = home.0.clone();
                     scope.spawn(move || {
                         let mut client = Gated {
                             inner: Fake::new(&home),
-                            finish: finish.clone(),
+                            arrived: arrived.clone(),
+                            release,
                         };
                         let plan = plan_registration(
                             &client.inner.config,
@@ -45,10 +58,9 @@ fn concurrent_first_lock_publication_is_private_and_never_replaces_the_winner() 
                             .enable_all()
                             .build()
                             .unwrap();
-                        start.wait();
                         let result = runtime.block_on(plan.apply(&mut client, &home));
                         if let Err(error) = &result {
-                            finish.wait();
+                            arrived.send(()).unwrap();
                             assert_eq!(
                                 error.to_string(),
                                 "Another Codex setup is in progress; retry after it finishes."
@@ -58,10 +70,22 @@ fn concurrent_first_lock_publication_is_private_and_never_replaces_the_winner() 
                     })
                 })
                 .collect();
-            handles
+            drop(arrived);
+            let all_arrived =
+                (0..8).all(|_| arrivals.recv_timeout(Duration::from_secs(10)).is_ok());
+            // Release even after a missing/panicked contender: scoped joins must
+            // finish and expose the failure rather than hang at a barrier.
+            *release.0.lock().unwrap() = true;
+            release.1.notify_all();
+            let results = handles
                 .into_iter()
                 .map(|handle| handle.join().unwrap())
-                .collect::<Vec<_>>()
+                .collect::<Vec<_>>();
+            assert!(
+                all_arrived,
+                "a lock contender failed before reporting its result"
+            );
+            results
         });
         assert_eq!(results.iter().filter(|won| **won).count(), 1);
         let lock = home.0.join(".pseudolife-setup.lock");
@@ -402,7 +426,15 @@ async fn rejected_cas_never_undoes_a_competitor_or_deletes_its_adopted_token() {
     let plan = plan_replace(&client.config, &home.0, "https://example.com", None, true).unwrap();
     let expected = plan.env().clone();
     client.rejected_after_competitor = true;
-    assert!(apply_replace(&mut client, &home.0, plan).await.is_err());
+    let error = apply_replace(&mut client, &home.0, plan)
+        .await
+        .err()
+        .unwrap();
+    assert!(
+        error
+            .to_string()
+            .contains("changed while the write outcome was unconfirmed")
+    );
     assert_eq!(
         client.config["layers"][0]["config"]["mcp_servers"]["pseudolife-memory"]["env"],
         json!(expected)
@@ -468,24 +500,11 @@ fn isolated_forwarded_no_spawn_fixture() {
             json!(["PSEUDOLIFE_MCP_NO_SPAWN"]);
     }
     let result = plan_replace(&config, &home.0, "https://example.com", None, true);
-    if mode == "no-spawn-project-false" {
-        let error = result.err().unwrap();
-        assert!(error.to_string().contains("No-spawn settings"));
-        assert!(error.to_string().contains("PSEUDOLIFE_MCP_NO_SPAWN"));
-    } else if mode == "no-spawn-project-true" {
-        assert!(
-            !result
-                .unwrap()
-                .env()
-                .contains_key("PSEUDOLIFE_MCP_NO_SPAWN")
-        );
-    } else {
-        assert_eq!(result.unwrap().env()["PSEUDOLIFE_MCP_NO_SPAWN"], "1");
-    }
+    assert_eq!(result.unwrap().env()["PSEUDOLIFE_MCP_NO_SPAWN"], "1");
 }
 
 #[tokio::test]
-async fn replace_refuses_project_forwarded_no_spawn() {
+async fn replace_persists_no_spawn_over_project_forwarding() {
     isolated_fixture(
         "isolated_forwarded_no_spawn_fixture",
         "no-spawn-project-false",
@@ -499,7 +518,7 @@ async fn replace_accepts_user_owned_forwarded_no_spawn() {
 }
 
 #[tokio::test]
-async fn replace_preserves_truthy_project_forwarded_no_spawn() {
+async fn replace_persists_no_spawn_despite_installer_only_forwarded_truth() {
     isolated_fixture(
         "isolated_forwarded_no_spawn_fixture",
         "no-spawn-project-true",
@@ -508,19 +527,19 @@ async fn replace_preserves_truthy_project_forwarded_no_spawn() {
 }
 
 #[test]
-fn replace_preserves_truthy_project_no_spawn() {
+fn replace_persists_no_spawn_despite_truthy_project_value() {
     let home = Home::new();
     for value in ["1", "true", "yes", " ON "] {
         let mut config = config(&home.0);
         config["config"]["mcp_servers"]["pseudolife-memory"]["env"]["PSEUDOLIFE_MCP_NO_SPAWN"] =
             json!(value);
         let plan = plan_replace(&config, &home.0, "https://example.com", None, true).unwrap();
-        assert!(!plan.env().contains_key("PSEUDOLIFE_MCP_NO_SPAWN"));
+        assert_eq!(plan.env()["PSEUDOLIFE_MCP_NO_SPAWN"], "1");
     }
 }
 
 #[tokio::test]
-async fn replace_verifies_truthy_project_no_spawn_over_unchanged_user_false() {
+async fn replace_updates_user_false_under_truthy_project_no_spawn() {
     let home = Home::new();
     let mut client = Fake::new(&home.0);
     client.config["layers"][0]["config"]["mcp_servers"]["pseudolife-memory"]["env"]["PSEUDOLIFE_MCP_NO_SPAWN"] =
@@ -529,8 +548,12 @@ async fn replace_verifies_truthy_project_no_spawn_over_unchanged_user_false() {
         json!("yes");
     client.project_no_spawn = Some("yes".into());
     let plan = plan_replace(&client.config, &home.0, "https://example.com", None, true).unwrap();
-    assert_eq!(plan.env()["PSEUDOLIFE_MCP_NO_SPAWN"], "0");
+    assert_eq!(plan.env()["PSEUDOLIFE_MCP_NO_SPAWN"], "1");
     apply_replace(&mut client, &home.0, plan).await.unwrap();
+    assert_eq!(
+        client.config["layers"][0]["config"]["mcp_servers"]["pseudolife-memory"]["env"]["PSEUDOLIFE_MCP_NO_SPAWN"],
+        "1"
+    );
     assert_eq!(
         client.config["config"]["mcp_servers"]["pseudolife-memory"]["env"]["PSEUDOLIFE_MCP_NO_SPAWN"],
         "yes"
@@ -1275,4 +1298,52 @@ fn python_plan_parity_fixture() {
         serde_json::to_vec(&results).unwrap(),
     )
     .unwrap();
+}
+
+#[tokio::test]
+async fn empty_user_credential_names_user_layer_and_project_near_miss_keeps_its_authority() {
+    struct NoWrites;
+    impl Rpc for NoWrites {
+        async fn rpc(&mut self, _: &str, _: Value) -> Result<Value, SetupError> {
+            panic!("credential refusal must precede every RPC write");
+        }
+    }
+    let home = Home::new();
+    let mut user = config(&home.0);
+    user["layers"][0]["config"]["mcp_servers"]["pseudolife-memory"]["env"]["PSEUDOLIFE_MCP_TOKEN"] =
+        json!("");
+    user["config"] = user["layers"][0]["config"].clone();
+    let before = std::fs::read(home.0.join("config.toml")).unwrap();
+    let error = pseudolife_stdio::setup::codex::configure_credential_file(
+        &mut NoWrites,
+        &home.0,
+        &home.0,
+        Some(user.clone()),
+        Some(("http://localhost:8765", None)),
+    )
+    .await
+    .unwrap_err()
+    .to_string();
+    assert!(error.contains("user configuration") && error.contains("PSEUDOLIFE_MCP_TOKEN"));
+    assert!(!error.contains("project or managed"));
+    user["layers"][0]["config"]["mcp_servers"]["pseudolife-memory"]["env"]
+        .as_object_mut()
+        .unwrap()
+        .remove("PSEUDOLIFE_MCP_TOKEN");
+    let project = home.0.join("project.toml");
+    user["layers"].as_array_mut().unwrap().push(json!({"name":{"type":"project","file":project},"version":"project-a","config":{"mcp_servers":{"pseudolife-memory":{"env":{"PSEUDOLIFE_MCP_TOKEN":""}}}}}));
+    let error = pseudolife_stdio::setup::codex::configure_credential_file(
+        &mut NoWrites,
+        &home.0,
+        &home.0,
+        Some(user),
+        Some(("http://localhost:8765", None)),
+    )
+    .await
+    .unwrap_err()
+    .to_string();
+    assert!(error.contains("project.toml") && error.contains("comes from"));
+    assert!(!error.contains("empty in Codex's user"));
+    assert_eq!(std::fs::read(home.0.join("config.toml")).unwrap(), before);
+    assert!(!home.0.join("pseudolife").exists());
 }

@@ -83,6 +83,12 @@ pub async fn configure_credential_file(
             effective_env.contains_key(**key)
                 || forwarded.is_some_and(|vars| vars.iter().any(|v| v == *key))
         }) {
+            if before.contains_key(*key) && before.get(*key) == effective_env.get(*key) {
+                return Err(SetupError::detail(format!(
+                    "{key} is empty in Codex's user configuration {:?}; remove that empty key or configure a usable credential, then retry. No connection settings were changed.",
+                    user.path
+                )));
+            }
             return Err(authority_error(&config, key));
         }
         let url = validated_daemon_url(url)?;

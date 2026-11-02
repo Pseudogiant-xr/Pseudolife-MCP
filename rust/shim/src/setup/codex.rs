@@ -264,26 +264,11 @@ pub fn plan_replace(
             "Connection settings come from another Codex configuration layer; replace mode did not change them.",
         ));
     }
-    // An effective false/forwarded no-spawn choice must not be silently overridden.
-    let effective_no_spawn = effective_value(effective, NO_SPAWN_KEY).is_some_and(|v| truthy(&v));
-    if no_spawn
-        && !effective_no_spawn
-        && (effective_env.get(NO_SPAWN_KEY) != before.get(NO_SPAWN_KEY)
-            || (forwarded.is_some_and(|f| f.iter().any(|v| v == NO_SPAWN_KEY))
-                && !before.contains_key(NO_SPAWN_KEY)
-                && !user_server
-                    .get("env_vars")
-                    .and_then(Value::as_array)
-                    .is_some_and(|vars| vars.iter().any(|v| v == NO_SPAWN_KEY))))
-    {
-        return Err(SetupError(
-            "No-spawn settings come from another Codex configuration layer; remove PSEUDOLIFE_MCP_NO_SPAWN from that layer's env or env_vars, then retry replace mode.",
-        ));
-    }
+    // The explicit request is persisted in the user layer. Forwarded values
+    // in this installer's environment do not describe Codex's later process.
     let mut after = before.clone();
     after.insert(URL_KEY.to_owned(), json!(url));
     if no_spawn
-        && !effective_no_spawn
         && !before
             .get(NO_SPAWN_KEY)
             .and_then(Value::as_str)
@@ -315,7 +300,7 @@ pub fn plan_replace(
     }
     let edit = Edit::new(&["mcp_servers", SERVER, "env"], json!(after));
     let mut write = WritePlan::new(config, &home, vec![edit])?;
-    write.preserve_truthy_no_spawn = no_spawn && effective_no_spawn;
+    write.verify_no_spawn = no_spawn;
     Ok(ConnectionPlan {
         home,
         url,
@@ -443,7 +428,7 @@ pub struct WritePlan {
     user: UserConfig,
     edits: Vec<Edit>,
     before: Vec<Value>,
-    preserve_truthy_no_spawn: bool,
+    verify_no_spawn: bool,
 }
 
 fn matches_write(before: &Value, after: &Value, actual: Option<&Value>) -> bool {
@@ -489,7 +474,7 @@ impl WritePlan {
             user,
             edits: changed,
             before,
-            preserve_truthy_no_spawn: false,
+            verify_no_spawn: false,
         })
     }
 
@@ -560,14 +545,14 @@ impl WritePlan {
             let user=user_config(&current,&applied.plan.home)?;
             if Some(&user.version)!=applied.written_version.as_ref() {return Err(ROLLBACK_UNVERIFIED);}
             let mut effective = current["config"].clone();
-            if applied.plan.preserve_truthy_no_spawn {
+            if applied.plan.verify_no_spawn {
                 let configured = server(&effective).ok_or(SetupError("Codex's effective server disappeared during setup."))?;
-                if !effective_value(configured, NO_SPAWN_KEY).is_some_and(|v| truthy(&v)) {
+                if !configured.get("env").and_then(|env|env.get(NO_SPAWN_KEY)).and_then(Value::as_str).is_some_and(truthy) {
                     return Err(SetupError("Codex's effective no-spawn setting changed during setup; retry after reviewing the overriding layer."));
                 }
-                // Keep the user's existing value, while verifying the project
-                // still supplies the truthy choice we deliberately preserved.
-                let user_value = server(&applied.plan.user.config).and_then(|s| s.get("env")).and_then(|e| e.get(NO_SPAWN_KEY)).cloned();
+                // Equivalent truthy project spellings are acceptable, but the
+                // requested user value must also survive the versioned write.
+                let user_value = server(&user.config).and_then(|s| s.get("env")).and_then(|e| e.get(NO_SPAWN_KEY)).cloned();
                 if let Some(env) = effective["mcp_servers"][SERVER]["env"].as_object_mut() {
                     if let Some(value) = user_value { env.insert(NO_SPAWN_KEY.into(), value); }
                     else { env.remove(NO_SPAWN_KEY); }
