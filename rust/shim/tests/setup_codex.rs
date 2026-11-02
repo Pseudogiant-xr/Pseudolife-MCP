@@ -4,6 +4,112 @@ use pseudolife_stdio::setup::codex::{
 use serde_json::{Map, Value, json};
 use std::path::Path;
 
+#[tokio::test]
+async fn static_project_no_spawn_refusal_precedes_token_and_config_writes() {
+    let home = Home::new();
+    let mut client = Fake::new(&home.0);
+    client.project_no_spawn = Some("0".into());
+    client.config["config"]["mcp_servers"]["pseudolife-memory"]["env"]["PSEUDOLIFE_MCP_NO_SPAWN"] =
+        json!("0");
+    client.config["layers"].as_array_mut().unwrap().push(json!({"name":{"type":"project","file":home.0.join("project.toml")},"version":"project-a","config":{"mcp_servers":{"pseudolife-memory":{"env":{"PSEUDOLIFE_MCP_NO_SPAWN":"0"}}}}}));
+    let plan = plan_replace(&client.config, &home.0, "https://example.com", None, true).unwrap();
+    let error = apply_replace(&mut client, &home.0, plan)
+        .await
+        .err()
+        .unwrap()
+        .to_string();
+    assert!(error.contains("project.toml") && error.contains("PSEUDOLIFE_MCP_NO_SPAWN"));
+    assert!(error.contains("remove that key"));
+    assert!(!error.contains("changed during setup"));
+    assert!(
+        client
+            .calls
+            .iter()
+            .all(|(method, _)| method != "config/batchWrite")
+    );
+    assert!(!home.0.join("pseudolife/token").exists());
+    assert!(!home.0.join("pseudolife/connection.json").exists());
+    assert!(!std::fs::read_dir(&home.0).unwrap().any(|entry| {
+        entry
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .contains(".bak-")
+    }));
+}
+
+#[tokio::test]
+async fn unchanged_connection_still_checks_effective_no_spawn_before_success() {
+    let home = Home::new();
+    let mut client = Fake::new(&home.0);
+    let plan = plan_replace(&client.config, &home.0, "https://example.com", None, true).unwrap();
+    apply_replace(&mut client, &home.0, plan).await.unwrap();
+    let connection = home.0.join("pseudolife/connection.json");
+    let before = std::fs::read(&connection).unwrap();
+    let project = home.0.join("project.toml");
+    for (value, named_layer) in [("0", true), ("0", false), ("true", true)] {
+        client.config["config"]["mcp_servers"]["pseudolife-memory"]["env"]["PSEUDOLIFE_MCP_NO_SPAWN"] =
+            json!(value);
+        client.config["layers"].as_array_mut().unwrap().truncate(1);
+        if named_layer {
+            client.config["layers"].as_array_mut().unwrap().push(json!({"name":{"type":"project","file":project},"version":"project-a","config":{"mcp_servers":{"pseudolife-memory":{"env":{"PSEUDOLIFE_MCP_NO_SPAWN":value}}}}}));
+        }
+        let plan =
+            plan_replace(&client.config, &home.0, "https://example.com", None, true).unwrap();
+        assert_eq!(plan.env(), plan.previous_env());
+        client.calls.clear();
+        let result = apply_replace(&mut client, &home.0, plan).await;
+        if value == "0" {
+            let error = result
+                .err()
+                .expect("false effective no-spawn must refuse")
+                .to_string();
+            assert!(
+                error.contains(if named_layer {
+                    "project.toml"
+                } else {
+                    "project or managed"
+                }) && error.contains("PSEUDOLIFE_MCP_NO_SPAWN")
+            );
+            assert!(error.contains("remove that key"));
+        } else {
+            assert!(result.is_ok());
+        }
+        assert!(
+            client
+                .calls
+                .iter()
+                .all(|(method, _)| method != "config/batchWrite")
+        );
+        assert_eq!(std::fs::read(&connection).unwrap(), before);
+    }
+}
+
+#[tokio::test]
+async fn equal_empty_user_and_project_credentials_name_the_project_owner() {
+    let home = Home::new();
+    let mut client = Fake::new(&home.0);
+    client.config["layers"][0]["config"]["mcp_servers"]["pseudolife-memory"]["env"]["PSEUDOLIFE_MCP_TOKEN"] =
+        json!("");
+    client.config["config"] = client.config["layers"][0]["config"].clone();
+    client.config["layers"].as_array_mut().unwrap().push(json!({"name":{"type":"project","file":home.0.join("project.toml")},"version":"project-a","config":{"mcp_servers":{"pseudolife-memory":{"env":{"PSEUDOLIFE_MCP_TOKEN":""}}}}}));
+    let config = client.config.clone();
+    let error = pseudolife_stdio::setup::codex::configure_credential_file(
+        &mut client,
+        &home.0,
+        &home.0,
+        Some(config),
+        Some(("http://localhost:8765", None)),
+    )
+    .await
+    .unwrap_err()
+    .to_string();
+    assert!(error.contains("project.toml") && error.contains("PSEUDOLIFE_MCP_TOKEN"));
+    assert!(!error.contains("empty in Codex's user"));
+    assert!(client.calls.is_empty());
+    assert!(!home.0.join("pseudolife").exists());
+}
+
 #[test]
 fn concurrent_first_lock_publication_is_private_and_never_replaces_the_winner() {
     use std::sync::{Arc, Condvar, Mutex, mpsc};

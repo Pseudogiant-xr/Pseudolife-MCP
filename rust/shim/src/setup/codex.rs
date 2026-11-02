@@ -192,8 +192,8 @@ fn environment(server: &Map<String, Value>) -> Result<Map<String, Value>, SetupE
     }
 }
 
-fn authority_error(config: &Value, key: &str) -> SetupError {
-    let layer = config["layers"].as_array().and_then(|layers| {
+fn foreign_authority<'a>(config: &'a Value, key: &str) -> Option<&'a Value> {
+    config["layers"].as_array().and_then(|layers| {
         layers.iter().rev().find(|layer| {
             layer["name"]["type"] != "user"
                 && server(&layer["config"]).is_some_and(|s| {
@@ -203,8 +203,11 @@ fn authority_error(config: &Value, key: &str) -> SetupError {
                             .is_some_and(|vars| vars.iter().any(|v| v == key))
                 })
         })
-    });
-    let location = layer
+    })
+}
+
+fn authority_error(config: &Value, key: &str) -> SetupError {
+    let location = foreign_authority(config, key)
         .and_then(|layer| layer["name"]["file"].as_str())
         .map(|file| format!("{:?}", Path::new(file)))
         .unwrap_or_else(|| "the project or managed configuration layer".into());
@@ -482,6 +485,42 @@ impl WritePlan {
         !self.edits.is_empty()
     }
 
+    fn check_no_spawn_override(&self, config: &Value) -> Result<(), SetupError> {
+        if self.verify_no_spawn
+            && foreign_authority(config, NO_SPAWN_KEY)
+                .and_then(|layer| server(&layer["config"]))
+                .and_then(|s| s.get("env"))
+                .and_then(|env| env.get(NO_SPAWN_KEY))
+                .and_then(Value::as_str)
+                .is_some_and(|value| !truthy(value))
+        {
+            return Err(authority_error(config, NO_SPAWN_KEY));
+        }
+        Ok(())
+    }
+
+    async fn verify_unchanged(&self, client: &mut impl Rpc, cwd: &Path) -> Result<(), SetupError> {
+        if !self.verify_no_spawn {
+            return Ok(());
+        }
+        let current = client
+            .rpc("config/read", json!({"includeLayers":true,"cwd":cwd}))
+            .await?;
+        let user = user_config(&current, &self.home)?;
+        if user.version != self.user.version || user.config != self.user.config {
+            return Err(CONFIG_CHANGED);
+        }
+        if !server(&current["config"])
+            .and_then(|s| s.get("env"))
+            .and_then(|env| env.get(NO_SPAWN_KEY))
+            .and_then(Value::as_str)
+            .is_some_and(truthy)
+        {
+            return Err(authority_error(&current, NO_SPAWN_KEY));
+        }
+        Ok(())
+    }
+
     pub async fn apply(
         self,
         client: &mut impl Rpc,
@@ -502,6 +541,7 @@ impl WritePlan {
             written_version: None,
         };
         if !applied.plan.changed() {
+            applied.plan.verify_unchanged(client, cwd).await?;
             return Ok(applied);
         }
         if let Some(bytes) = files::read_config(&applied.plan.user.path)? {
@@ -722,6 +762,7 @@ pub async fn apply_replace(
     let current = client
         .rpc("config/read", json!({"includeLayers":true,"cwd":cwd}))
         .await?;
+    plan.write.check_no_spawn_override(&current)?;
     if user_config(&current, &plan.home)?.version != plan.write.user.version {
         return Err(SetupError(
             "Codex configuration changed during setup; no connection settings were written. Retry setup.",
