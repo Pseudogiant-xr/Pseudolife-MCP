@@ -249,7 +249,20 @@ def test_no_database_and_no_docker_is_refused(env, capsys):
 
 def test_the_version_check_answers(capsys):
     assert invite_cli.main(["--version-check"]) == 0
-    assert capsys.readouterr().out.startswith(invite_cli.VERSION_LINE)
+    assert capsys.readouterr().out.splitlines() == list(invite_cli.VERSION_LINES)
+
+
+def test_an_older_host_cli_still_accepts_the_version_check(capsys):
+    """A daemon-only update leaves the host CLI older than the image. The
+    last release's Python CLI took ``re.match(r"pseudolife-mcp invite
+    (\\d+)")`` of the output and the pre-v59 shim required it to start with
+    ``pseudolife-mcp invite 1``: both must still find invite 1, or a plain
+    invite is refused as an image that predates ``invite``."""
+    assert invite_cli.main(["--version-check"]) == 0
+    out = capsys.readouterr().out
+    assert out.startswith("pseudolife-mcp invite 1")
+    old_python = re.compile(r"pseudolife-mcp invite (\d+)").match(out)
+    assert old_python is not None and old_python.group(1) == "1"
 
 
 # -- review fixes (2026-10-02): revoke and list need no healthy daemon ----------------
@@ -284,20 +297,33 @@ def test_a_stopped_daemon_container_revokes_through_postgres(docker, capsys):
     assert not any("pseudolife-mcp-daemon" in call and "exec" in call for call in docker.calls)
 
 
-def test_a_stopped_daemon_container_lists_through_postgres(docker, capsys):
+def test_a_stopped_daemon_container_lists_through_postgres(docker, env, capsys, tmp_path):
     docker.running = False
-    docker.psql["stdout"] = ["t\n", json.dumps({
-        "principals": [["laptop", "core", True, True, False, None, 1.0, 2.0, None, 3.0, 2.5, True],
-                       ["codex", None, None, False, False, None, None, None, None, 3.0, 2.0, False]],
-        "rejected": [["ab12cd34", 3, 1.0, 2.0]]}) + "\n"]
+    listed = json.dumps({
+        "principals": [["laptop", "core", True, True, False, None, 1.0, 2.0, None, 3.0, 2.5, True,
+                        False],
+                       ["codex", None, None, False, False, None, None, None, None, 3.0, 2.0, False,
+                        None]],
+        "rejected": [["ab12cd34", 3, 1.0, 2.0]]}) + "\n"
+    # This host's config is not the stopped daemon's (that one is in its
+    # volume): naming codex here must not decide codex's owner.
+    config = tmp_path / "host.yaml"
+    config.write_text("coordination:\n  not_owner_principals: [codex]\n", encoding="utf-8")
+    env.setenv("PSEUDOLIFE_MCP_CONFIG", str(config))
+    docker.psql["stdout"] = ["t\n", listed]
     code, out, _err = _run(capsys, "--list", "--json")
     report = json.loads(out)
     assert docker.inputs[-2:] == [invite_cli.ACTIVITY_SQL + "\n", invite_cli.LIST_SQL + "\n"]
-    assert code == 0 and [(r["principal"], r["state"], r["last_seen_at"])
-                          for r in report["principals"]] == [("codex", "environment", 2.0),
-                                                              ("laptop", "paired", 2.5)]
+    assert code == 0 and [(r["principal"], r["state"], r["last_seen_at"], r["owner"])
+                          for r in report["principals"]] == [("codex", "environment", 2.0, None),
+                                                              ("laptop", "paired", 2.5, False)]
     assert report["rejected"] == [{"hash_prefix": "ab12cd34", "rejections": 3,
                                    "first_seen_at": 1.0, "last_seen_at": 2.0}]
+    docker.psql["stdout"] = ["t\n", listed]
+    code, out, _err = _run(capsys, "--list")
+    owner = {line.split()[0]: re.search(r" (?:on|off|-) +(yes|no|-) ", line).group(1)
+             for line in out.splitlines()[1:3]}
+    assert code == 0 and owner == {"codex": "-", "laptop": "no"}
 
 
 def test_a_stopped_daemon_container_cannot_invite(docker, capsys):
@@ -574,7 +600,26 @@ def test_an_older_image_refuses_the_ownership_flags_plainly(docker, capsys):
 
 def test_the_version_check_names_the_ownership_flags(capsys):
     assert invite_cli.main(["--version-check"]) == 0
-    assert capsys.readouterr().out == "pseudolife-mcp invite 2\n"
+    assert capsys.readouterr().out == "pseudolife-mcp invite 1\npseudolife-mcp invite 2\n"
+
+
+@pytest.mark.parametrize("answer, admitted", [
+    ("pseudolife-mcp invite 1\npseudolife-mcp invite 2\n", True),
+    ("pseudolife-mcp invite 1\r\npseudolife-mcp invite 2\r\n", True),
+    ("pseudolife-mcp invite 2\npseudolife-mcp invite 1\n", True),
+    ("a banner\npseudolife-mcp invite 3\n", True),
+    ("pseudolife-mcp invite 1\npseudolife-mcp invite 2x\n", False),
+    ("pseudolife-mcp invite 1\n pseudolife-mcp invite 2\n", False),
+], ids=["new-image", "crlf", "any-order", "banner-and-later", "trailing-text", "indented"])
+def test_the_ownership_flags_take_the_highest_version_line(docker, capsys, answer, admitted):
+    """The image's highest exact ``pseudolife-mcp invite <N>`` line decides."""
+    docker.version = answer
+    code, _out, err = _run(capsys, "guest", "--someone-else")
+    if admitted:
+        assert code == 0, err
+        assert docker.calls[-1][-6:-2] == ["guest", "--expires", "900s", "--someone-else"]
+    else:
+        assert code == 4 and "update the daemon to schema 59" in err, err
 
 
 def test_a_paired_machine_changes_owner_without_a_new_code(bank, pg_url, capsys):

@@ -128,7 +128,12 @@ fn invite_refusals_before_the_database_match_the_oracle() {
             "",
             "invite: not interactive: re-run with --yes to revoke\n",
         ),
-        (&["--version-check"], 0, "pseudolife-mcp invite 2\n", ""),
+        (
+            &["--version-check"],
+            0,
+            "pseudolife-mcp invite 1\npseudolife-mcp invite 2\n",
+            "",
+        ),
         (
             &["--list", "--revoke", "a", "--json"],
             2,
@@ -158,6 +163,26 @@ fn invite_refusals_before_the_database_match_the_oracle() {
         "invite: laptop already has a token in PSEUDOLIFE_MCP_TOKENS; an environment principal keeps working as it is, and a stored one of the same name would be shadowed by it\n",
     );
     assert_eq!(home.entries(), Vec::<String>::new());
+}
+
+/// A daemon-only update leaves the host CLI older than the image: the
+/// pre-v59 shim took the version from `strip_prefix("pseudolife-mcp invite
+/// ")` of the whole output and the last release's Python CLI `re.match`ed
+/// it, so both must still read 1 at the start, or a plain invite is refused
+/// as an image that predates `invite`.
+#[test]
+fn invite_version_check_still_answers_an_older_host_cli() {
+    let home = Home::new("invite-version");
+    let mut check = command(&home.0, "invite");
+    check.arg("--version-check");
+    let output = run(check, b"");
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let old_shim = stdout
+        .strip_prefix("pseudolife-mcp invite ")
+        .map(|rest| rest.chars().take_while(char::is_ascii_digit).collect::<String>());
+    assert_eq!(old_shim.as_deref(), Some("1"), "{stdout:?}");
+    assert!(stdout.lines().any(|line| line == "pseudolife-mcp invite 2"));
 }
 
 #[test]

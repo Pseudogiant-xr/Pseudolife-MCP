@@ -540,7 +540,9 @@ if argv[0] == 'inspect':
     print(os.environ['FIXTURE_DOCKER_ENGINE'] if 'Labels' in argv[2]
           else os.environ['FIXTURE_DOCKER_RUNNING'])
 elif '--version-check' in argv:
-    print('pseudolife-mcp invite 1')
+    # An image before v59 prints one line; a v59 image adds a second.
+    for version in range(1, int(os.environ.get('FIXTURE_VERSION', '1')) + 1):
+        print(f'pseudolife-mcp invite {version}')
 elif 'pseudolife-mcp-postgres' in argv:
     if 'to_regclass' in body:
         print(os.environ.get('FIXTURE_ACTIVITY', 't'))
@@ -549,9 +551,14 @@ elif 'pseudolife-mcp-postgres' in argv:
     elif 'UPDATE' in body:
         print('laptop')
     else:
-        print(json.dumps({'principals': [['laptop', 'core', True, True, False, None,
-                                        1700000000.0, 1700000001.0, None, 1700000010.0,
-                                        None, True]], 'rejected': []}))
+        rows = [['laptop', 'core', True, True, False, None, 1700000000.0, 1700000001.0, None,
+                 1700000010.0, None, True, False]]
+        if os.environ.get('FIXTURE_ACTIVITY', 't') == 't':
+            # Seen with no stored row: an environment principal, whose owner
+            # the stopped daemon's own config decides.
+            rows.append(['codex', None, None, False, False, None, None, None, None,
+                         1700000010.0, 1700000005.0, False, None])
+        print(json.dumps({'principals': rows, 'rejected': []}))
 else:
     print('container-invite')
     sys.exit(int(os.environ.get('FIXTURE_DOCKER_EXIT', '0')))
@@ -565,6 +572,10 @@ def _transport_cases():
 
     def setup(arm):
         script = lease_transport._input(arm, 'docker.py', _TRANSPORT_DOCKER)
+        # This host's config, which is not the stopped daemon's: naming codex
+        # here must not decide codex's owner in a stopped-daemon list.
+        lease_transport._input(arm, 'host.yaml',
+                               'coordination:\n  not_owner_principals: [codex]\n')
         wrapper = (f'@echo off\r\n"{sys.executable}" "{script}" %*\r\nexit /b %errorlevel%\r\n'
                    if core.WINDOWS else
                    f'#!/bin/sh\nexec {shlex.quote(sys.executable)} {shlex.quote(str(script))} "$@"\n')
@@ -572,13 +583,23 @@ def _transport_cases():
         if not core.WINDOWS:
             path.chmod(0o700)
 
-    def after(engine, running, nested, argv, exit_code, activity):
+    def after(engine, running, nested, argv, exit_code, activity, forwarded=True):
         def check(arm, obs):
             log = arm.home / 'docker.jsonl'
             calls = [json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
             if nested:
                 assert not calls
                 assert obs['exit'] == 4
+            elif running and argv[1:2] == ['--someone-else']:
+                cli = ['pseudolife-mcp'] if engine == 'rust' else ['python', '-m', 'pseudolife_memory.cli']
+                base = ['-e', 'PSEUDOLIFE_DAEMON_EXEC=1', 'pseudolife-mcp-daemon', *cli, 'invite']
+                assert calls[2]['argv'] == ['exec', *base, '--version-check']
+                if forwarded:
+                    assert calls[3]['argv'] == ['exec', '-i', *base, 'laptop', '--expires', '900s',
+                                                '--someone-else', '--url', 'https://example.com']
+                    assert obs['exit'] == 0
+                else:
+                    assert len(calls) == 3 and obs['exit'] == 4
             elif running:
                 cli = ['pseudolife-mcp'] if engine == 'rust' else ['python', '-m', 'pseudolife_memory.cli']
                 base = ['-e', 'PSEUDOLIFE_DAEMON_EXEC=1', 'pseudolife-mcp-daemon', *cli, 'invite']
@@ -611,15 +632,28 @@ def _transport_cases():
                'FIXTURE_DOCKER_EXIT': str(exit_code)}
         out.append(core.Case('container-' + engine, ['invite', *argv], env=env, setup=setup,
                              after=after(engine, True, False, argv, exit_code, 't')))
+    # The image's version: the highest `pseudolife-mcp invite <N>` line; the
+    # ownership flags need 2 (v59), and a v59 image still prints 1 first.
+    for version, forwarded in [(2, True), (1, False)]:
+        argv = ['laptop', '--someone-else', '--url', 'https://example.com']
+        env = {'PSEUDOLIFE_MCP_DATABASE_URL': None, 'PSEUDOLIFE_DAEMON_EXEC': None,
+               'PSEUDOLIFE_DOCKER': '{HOME}/docker.' + ('cmd' if core.WINDOWS else 'sh'),
+               'FIXTURE_DOCKER_ENGINE': 'rust', 'FIXTURE_DOCKER_RUNNING': 'true',
+               'FIXTURE_VERSION': str(version)}
+        out.append(core.Case(f'container-v{version}-someone-else', ['invite', *argv], env=env,
+                             setup=setup,
+                             after=after('rust', True, False, argv, 0, 't', forwarded)))
     for name, argv, activity, nested in [
             ('stopped-list-v58', ['--list', '--json'], 't', False),
+            ('stopped-list-v58-text', ['--list'], 't', False),
             ('stopped-list-v53', ['--list'], 'f', False),
             ('stopped-revoke', ['--revoke', 'laptop', '--yes'], 't', False),
             ('nested-no-bank', ['--list', '--json'], 't', True)]:
         env = {'PSEUDOLIFE_MCP_DATABASE_URL': None, 'PSEUDOLIFE_DAEMON_EXEC': '1' if nested else None,
                'PSEUDOLIFE_DOCKER': '{HOME}/docker.' + ('cmd' if core.WINDOWS else 'sh'),
                'FIXTURE_DOCKER_ENGINE': 'rust', 'FIXTURE_DOCKER_RUNNING': 'false',
-               'FIXTURE_ACTIVITY': activity}
+               'FIXTURE_ACTIVITY': activity,
+               'PSEUDOLIFE_MCP_CONFIG': '{HOME}/host.yaml'}
         out.append(core.Case(name, ['invite', *argv], env=env, setup=setup,
                              after=after('rust', False, nested, argv, 0, activity)))
     return out

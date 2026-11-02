@@ -17,7 +17,13 @@ const DEFAULT_PORT: u32 = 8765;
 const MIN_SCHEMA: i64 = 53;
 const TIERS: [&str; 3] = ["minimal", "core", "full"];
 const URL_PLACEHOLDER: &str = "<daemon-url>";
-const VERSION_LINE: &str = "pseudolife-mcp invite 2";
+/// `VERSION_LINES`: what `invite --version-check` prints, the highest
+/// version listed being this image's; 2 (v59) takes `--someone-else` and
+/// `--mine`. Line 1 stays first because host CLIs before v59 read only the
+/// start of the output (Python `re.match`ed it, the shim required
+/// `pseudolife-mcp invite 1` there): without it, a host CLI one release
+/// behind refuses a plain invite as an image that predates `invite`.
+const VERSION_LINES: [&str; 2] = ["pseudolife-mcp invite 1", "pseudolife-mcp invite 2"];
 
 #[derive(Default)]
 struct Args {
@@ -417,7 +423,9 @@ pub(super) async fn run(arguments: &[String]) -> Result<u8, Defer> {
         Err(_) => return Err(Defer),
     };
     if args.version_check {
-        super::print(VERSION_LINE);
+        for line in VERSION_LINES {
+            super::print(line);
+        }
         return Ok(EXIT_OK);
     }
     let mut report = Report::new(args.json);
@@ -870,7 +878,11 @@ fn list_report(
             when_or(row.last_seen_at, "never")?,
             tier,
             board,
-            if row.owner { "yes" } else { "no" },
+            match row.owner {
+                None => "-",
+                Some(true) => "yes",
+                Some(false) => "no",
+            },
             when(row.created_at)?,
             when(row.paired_at)?,
             when(row.revoked_at)?
@@ -893,7 +905,7 @@ fn list_report(
             ("paired_at".into(), float(row.paired_at)),
             ("revoked_at".into(), float(row.revoked_at)),
             ("last_seen_at".into(), float(row.last_seen_at)),
-            ("owner".into(), J::Bool(row.owner)),
+            ("owner".into(), row.owner.map_or(J::Null, J::Bool)),
         ]));
     }
     let mut refused_lines = Vec::new();

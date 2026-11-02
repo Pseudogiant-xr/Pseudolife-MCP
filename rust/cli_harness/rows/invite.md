@@ -10,7 +10,7 @@ Oracle: `pseudolife_memory/invite_cli.py`, `principal_store.py`, `principals.py`
 - `invite <name> [--tier T] [--board|--no-board] [--expires D] [--someone-else|--mine] [--replace] [--url U] [--port P] [--bank FP] [--json]` (v59: `--someone-else` / `--mine` set `owned`, refused before any write on a bank before v59 (`prev59` seed); a re-invite without either keeps it; on a paired row either alone changes ownership with no code; the report's `owned` member and the `for a machine that is not yours, add --someone-else` note when neither is given, the row is the owner's and the bank has the column)
 - `invite --list [--bank FP] [--json]` (v59: the owner column and footer line, JSON `owner`; deferred where a `config.yaml` could hold `coordination.not_owner_principals`, `PSEUDOLIFE_MCP_CONFIG` included)
 - `invite --revoke <name> [--yes] [--bank FP] [--json]`
-- `invite --version-check` (the Docker path's image probe)
+- `invite --version-check` (the Docker path's image probe: `pseudolife-mcp invite 1` then `pseudolife-mcp invite 2`, line 1 first for host CLIs before v59 that read only the start; the probe takes the highest line that is exactly `pseudolife-mcp invite <N>`, and `--someone-else` / `--mine` need 2; with the daemon container stopped, `--list` shows an environment row's owner as unknown, `-` and JSON `null`, since the stopped daemon's `coordination.not_owner_principals` is not this host's)
 
 Producers: `docs/guide/remote-bank.md` "Adding a machine", `docs/guide/agent-isolation.md`
 step 4, the installers' help text. Each option at most once, its value the

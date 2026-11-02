@@ -118,9 +118,13 @@ DEFAULT_PORT = expose_cli.DEFAULT_PORT
 MIN_SCHEMA = 53
 TIERS = ("minimal", "core", "full")
 URL_PLACEHOLDER = "<daemon-url>"
-# The first line `invite --version-check` prints: an image that answers it
-# carries this command. 2 (schema v59): it takes --someone-else and --mine.
-VERSION_LINE = "pseudolife-mcp invite 2"
+# What `invite --version-check` prints: an image that answers it carries
+# this command, at the highest version listed. 2 (schema v59): it takes
+# --someone-else and --mine. Line 1 stays first because host CLIs before v59
+# read only the start of the output (the Python CLI `re.match`ed it, the
+# shim required `pseudolife-mcp invite 1` there): without it, a host CLI one
+# release behind refuses a plain invite as an image that predates `invite`.
+VERSION_LINES = ("pseudolife-mcp invite 1", "pseudolife-mcp invite 2")
 _VERSION = re.compile(r"pseudolife-mcp invite (\d+)")
 # The refusal of --someone-else / --mine through an image that predates them.
 OWNERSHIP_NEEDS_NEWER_IMAGE = (
@@ -460,7 +464,8 @@ def _list(report: _Report, rows: list[dict], rejected: list[dict]) -> int:
     for row in rows:
         state = row["state"] + (f" until {_when(row['code_expires_at'])}" if row["state"] == "pending" else "")
         board = "-" if row["board"] is None else "on" if row["board"] else "off"
-        owner = "yes" if row.get("owner", True) else "no"
+        owned = row.get("owner", True)
+        owner = "-" if owned is None else "yes" if owned else "no"
         report.say(f"  {row['principal']:<24} {state:<11} {_when(row['last_seen_at'], 'never'):<21} "
                    f"{row['tier'] or 'default':<8} {board:<6} {owner:<6} {_when(row['created_at']):<21} "
                    f"{_when(row['paired_at']):<21} {_when(row['revoked_at'])}")
@@ -556,8 +561,10 @@ def _through_postgres(args, report: _Report) -> int:
             rows, rejected = listed["principals"], listed["rejected"]
         except (ValueError, IndexError, KeyError, TypeError):
             return by_hand("psql answered something that is not the list")
-        # No environment here: the stopped daemon's is not this shell's.
-        return _list(report, describe_rows(rows, not_owner=_not_owner_names()),
+        # No environment here: the stopped daemon's is not this shell's. Nor
+        # its config: coordination.not_owner_principals is in the daemon's
+        # volume, so an environment row's owner is unknown (None).
+        return _list(report, describe_rows(rows, not_owner=None),
                      describe_rejected(rejected))
     if args.revoke not in output.splitlines():
         return report.fail(EXIT_REFUSED, f"no stored principal is named {args.revoke}")
@@ -565,6 +572,14 @@ def _through_postgres(args, report: _Report) -> int:
     report.say(f"{args.revoke}: revoked; the daemon stops accepting its token within 10 seconds of "
                "starting again")
     return report.finish(EXIT_OK)
+
+
+def _image_version(stdout: str | None) -> int | None:
+    """The highest ``N`` over the lines of ``invite --version-check`` that
+    are exactly ``pseudolife-mcp invite <N>``; None when no line is."""
+    found = [int(m.group(1)) for line in (stdout or "").splitlines()
+             if (m := _VERSION.fullmatch(line))]
+    return max(found, default=None)
 
 
 def _in_container(args, report: _Report) -> int:
@@ -580,7 +595,7 @@ def _in_container(args, report: _Report) -> int:
     executable = daemon_exec.operator_cli(docker, runner=run)
     base = [docker, "exec", "-e", f"{daemon_exec.NESTED_ENV}=1", CONTAINER, *executable, "invite"]
     check = run([*base, "--version-check"])
-    version = _VERSION.match(check.stdout or "") if check.returncode == 0 else None
+    version = _image_version(check.stdout) if check.returncode == 0 else None
     if version is None:
         if check.returncode == 127 or "No such container" in (check.stderr or ""):
             return report.fail(EXIT_REFUSED, (
@@ -588,7 +603,7 @@ def _in_container(args, report: _Report) -> int:
                 f"no {CONTAINER} container: run this on the daemon's host"))
         return report.fail(EXIT_REFUSED, ("the daemon's image predates `invite`: update the daemon "
                                           "first (pseudolife-mcp update), then re-run"))
-    if args.owned is not None and int(version.group(1)) < 2:
+    if args.owned is not None and version < 2:
         return report.fail(EXIT_REFUSED, OWNERSHIP_NEEDS_NEWER_IMAGE)
     proc = run([docker, "exec", "-i", "-e", f"{daemon_exec.NESTED_ENV}=1", CONTAINER, *executable, "invite",
                 *_forward(args)])
@@ -645,7 +660,8 @@ def main(argv: list[str] | None = None) -> int:
     except SystemExit as exc:
         return exc.code if isinstance(exc.code, int) else EXIT_USAGE
     if args.version_check:
-        print(VERSION_LINE)
+        for line in VERSION_LINES:
+            print(line)
         return EXIT_OK
     report = _Report(args.json)
     modes = [bool(args.name), args.list, bool(args.revoke)]

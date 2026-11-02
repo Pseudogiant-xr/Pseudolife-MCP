@@ -686,8 +686,10 @@ def describe_rows(rows, *, environment=(), not_owner=()) -> list[dict]:
     JSON, plus an ``environment`` row for each name in ``environment`` not
     listed, sorted by name. ``owned`` (v59) may be missing, as from an
     older list: such a stored row is the owner's. An environment row is the
-    owner's unless ``not_owner`` names it."""
-    not_owner = frozenset(not_owner)
+    owner's unless ``not_owner`` names it; ``not_owner=None`` means the
+    daemon's ``coordination.not_owner_principals`` is unknown here, so an
+    environment row's ``owner`` is None."""
+    not_owner = None if not_owner is None else frozenset(not_owner)
     out = []
     for row in rows:
         (name, tier, board, paired, pending, expires, created, paired_at, revoked, now,
@@ -720,10 +722,12 @@ def describe_rows(rows, *, environment=(), not_owner=()) -> list[dict]:
 def _environment_row(name: str, last_seen, not_owner=frozenset()) -> dict:
     """A principal with no stored row: its token is in the daemon's
     environment, so it has no tier, board or pairing of its own here. It is
-    the owner's unless ``coordination.not_owner_principals`` names it."""
+    the owner's unless ``coordination.not_owner_principals`` names it (None:
+    unknown, when ``not_owner`` is)."""
     return {"principal": name, "state": "environment", "paired": False, "tier": None,
             "board": None, "code_expires_at": None, "created_at": None, "paired_at": None,
-            "revoked_at": None, "last_seen_at": last_seen, "owner": name not in not_owner}
+            "revoked_at": None, "last_seen_at": last_seen,
+            "owner": None if not_owner is None else name not in not_owner}
 
 
 def revoke(conn, name: str) -> bool:

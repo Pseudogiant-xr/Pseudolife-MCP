@@ -274,15 +274,11 @@ pub(super) async fn run(args: &Args, report: &mut Report, port: u32) -> Result<u
     );
     check.remove(2); // A version probe has no stdin or TTY.
     let checked = capture(&check, None).await;
-    // `_VERSION.match`: `pseudolife-mcp invite <N>` at the start; 2 (v59)
-    // takes --someone-else and --mine.
+    // `_image_version`: the highest N over lines that are exactly
+    // `pseudolife-mcp invite <N>`; 2 (v59) takes --someone-else and --mine.
     let version = (checked.code == 0)
-        .then(|| checked.stdout.strip_prefix("pseudolife-mcp invite "))
-        .flatten()
-        .and_then(|rest| {
-            let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
-            digits.parse::<u64>().ok()
-        });
+        .then(|| image_version(&checked.stdout))
+        .flatten();
     if version.is_none() {
         let message = if checked.code == 127 || checked.stderr.contains("No such container") {
             "no database here (PSEUDOLIFE_MCP_DATABASE_URL is unset and no lite bank was found) and no pseudolife-mcp-daemon container: run this on the daemon's host"
@@ -375,7 +371,7 @@ async fn through_postgres(args: &Args, report: &mut Report) -> Result<u8, Defer>
             .trim()
             .lines()
             .last()
-            .and_then(|s| decode_list(s, &super::not_owner_in_config()).ok());
+            .and_then(|s| decode_list(s).ok());
         let Some((rows, rejected)) = listed else {
             return Ok(by_hand(
                 report,
@@ -400,12 +396,24 @@ async fn through_postgres(args: &Args, report: &mut Report) -> Result<u8, Defer>
     Ok(report.finish(EXIT_OK))
 }
 
-/// `describe_rows` over psql's JSON: a row is 12 columns, or 13 with v59's
-/// `owned` (null for an environment row, whose owner `not_owner` decides).
-fn decode_list(
-    text: &str,
-    not_owner: &[String],
-) -> Result<(Vec<invite_db::Listed>, Vec<invite_db::Rejected>), Defer> {
+/// `_image_version`: the highest `N` over the lines of `invite
+/// --version-check` that are exactly `pseudolife-mcp invite <N>`. ASCII
+/// digits only, where Python's `\d` also takes other decimal digits: the
+/// probe reads our own image's answer, which prints ASCII.
+fn image_version(stdout: &str) -> Option<u64> {
+    stdout
+        .lines()
+        .filter_map(|line| line.strip_prefix("pseudolife-mcp invite "))
+        .filter(|rest| !rest.is_empty() && rest.chars().all(|c| c.is_ascii_digit()))
+        .filter_map(|digits| digits.parse::<u64>().ok())
+        .max()
+}
+
+/// `describe_rows(..., not_owner=None)` over psql's JSON: a row is 12
+/// columns, or 13 with v59's `owned` (null for an environment row). The
+/// stopped daemon's `coordination.not_owner_principals` is in its volume,
+/// not this host's config, so an environment row's owner is unknown.
+fn decode_list(text: &str) -> Result<(Vec<invite_db::Listed>, Vec<invite_db::Rejected>), Defer> {
     let value: serde_json::Value = serde_json::from_str(text).map_err(|_| Defer)?;
     let mut rows = Vec::new();
     for row in value["principals"].as_array().ok_or(Defer)? {
@@ -458,13 +466,11 @@ fn decode_list(
             paired_at: if stored { time(7)? } else { None },
             revoked_at: if stored { revoked } else { None },
             last_seen_at: time(10)?,
-            owner: if stored {
+            owner: stored.then(|| {
                 row.get(12)
                     .and_then(serde_json::Value::as_bool)
                     .unwrap_or(true)
-            } else {
-                !not_owner.iter().any(|name| row[0].as_str() == Some(name))
-            },
+            }),
         });
     }
     rows.sort_by(|a, b| a.principal.cmp(&b.principal));
@@ -486,14 +492,35 @@ mod tests {
     use super::*;
     #[test]
     fn stopped_daemon_rows_keep_state_and_environment_semantics() {
-        let (rows, rejected) = decode_list(r#"{"principals":[["z",null,null,false,false,null,null,null,null,100,99,false],["a","core",true,false,true,101,50,null,null,100,null,true]],"rejected":[["01234567",3,90,99]]}"#, &[]).unwrap();
+        let (rows, rejected) = decode_list(r#"{"principals":[["z",null,null,false,false,null,null,null,null,100,99,false],["a","core",true,false,true,101,50,null,null,100,null,true]],"rejected":[["01234567",3,90,99]]}"#).unwrap();
         assert_eq!(rows[0].principal, "a");
         assert_eq!(rows[0].state, "pending");
         assert_eq!(rows[1].state, "environment");
         assert_eq!(rows[1].board, None);
         assert_eq!(rejected[0].rejections, 3);
-        assert!(decode_list(r#"{"principals":[[]],"rejected":[]}"#, &[]).is_err());
-        assert!(rows.iter().all(|row| row.owner));
+        assert!(decode_list(r#"{"principals":[[]],"rejected":[]}"#).is_err());
+        // A stored row from before v59 is the owner's; an environment
+        // row's owner is the stopped daemon's config, unknown here.
+        assert_eq!(rows[0].owner, Some(true));
+        assert_eq!(rows[1].owner, None);
+    }
+
+    #[test]
+    fn the_image_version_is_the_highest_exact_version_line() {
+        for (stdout, version) in [
+            ("pseudolife-mcp invite 1\npseudolife-mcp invite 2\n", Some(2)),
+            ("pseudolife-mcp invite 1\r\npseudolife-mcp invite 2\r\n", Some(2)),
+            ("pseudolife-mcp invite 2\npseudolife-mcp invite 1\n", Some(2)),
+            ("a banner\npseudolife-mcp invite 3\n", Some(3)),
+            ("pseudolife-mcp invite 1\n", Some(1)),
+            ("pseudolife-mcp invite 1\npseudolife-mcp invite 2x\n", Some(1)),
+            ("pseudolife-mcp invite 1\n pseudolife-mcp invite 2\n", Some(1)),
+            ("pseudolife-mcp invite \n", None),
+            ("pseudolife-mcp invite 2 extra\n", None),
+            ("", None),
+        ] {
+            assert_eq!(image_version(stdout), version, "{stdout:?}");
+        }
     }
 
     #[test]
@@ -531,12 +558,15 @@ mod tests {
 
     #[test]
     fn stopped_daemon_rows_carry_v59_ownership() {
-        let (rows, _) = decode_list(r#"{"principals":[["guest",null,true,true,false,null,1,2,null,100,null,true,false],["env",null,null,false,false,null,null,null,null,100,9,false,null],["mine",null,true,true,false,null,1,2,null,100,null,true,true]],"rejected":[]}"#, &["env".to_owned()]).unwrap();
-        let owner: Vec<(&str, bool)> = rows
+        let (rows, _) = decode_list(r#"{"principals":[["guest",null,true,true,false,null,1,2,null,100,null,true,false],["env",null,null,false,false,null,null,null,null,100,9,false,null],["mine",null,true,true,false,null,1,2,null,100,null,true,true]],"rejected":[]}"#).unwrap();
+        let owner: Vec<(&str, Option<bool>)> = rows
             .iter()
             .map(|r| (r.principal.as_str(), r.owner))
             .collect();
-        assert_eq!(owner, [("env", false), ("guest", false), ("mine", true)]);
+        assert_eq!(
+            owner,
+            [("env", None), ("guest", Some(false)), ("mine", Some(true))]
+        );
     }
 
     #[test]
