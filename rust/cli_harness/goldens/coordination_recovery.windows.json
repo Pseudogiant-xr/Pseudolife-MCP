@@ -1,0 +1,155 @@
+{
+ "row": "CLI-COORDINATION-RECOVERY",
+ "platform": "windows",
+ "oracle_commit": "2c770c4dab8dfaba058fc25d2f935bcdd10ffada",
+ "oracle_commit_source": "git",
+ "cases": {
+  "recovery-help": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIGNvb3JkaW5hdGlvbi1yZWNvdmVyeSBbLWhdIC0tY29uZmlnIENPTkZJRw0KICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1jb25maXJtLWRhZW1vbi1zdG9wcGVkXQ0KICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1jb25maXJtLXJlc3RvcmVdDQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIFstLWFnZW50IEFHRU5UXQ0KICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1wcmluY2lwYWwgUFJJTkNJUEFMXQ0KICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1iYW5rLXVybCBCQU5LX1VSTF0NCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgWy0tc3RhdGUgU1RBVEVdDQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIHtyZWNvdmVyLHJlYmluZH0NCg0KT2ZmbGluZSwgb3BlcmF0b3Itb25seSBtYWlsYm94IHJlY292ZXJ5IGFmdGVyIGFuIGV4cGxpY2l0IGRhdGFiYXNlIHJlc3RvcmUuDQpOZXZlciBzdGFydHMgYSBkYWVtb24sIG9wZW5zIGEgbW9kZWwgc2Vzc2lvbiwgbWlncmF0ZXMgYSBzY2hlbWEsIG9yIHByaW50cw0Ka2V5cy4gU3RvcHBpbmcgdGhlIGRhZW1vbiBpcyBhbiBvcGVyYXRvciBwcmVjb25kaXRpb24sIG5vdCBpbmZlcnJlZCBmcm9tIGENCmNvbmZpZyBmaWxlLg0KDQpwb3NpdGlvbmFsIGFyZ3VtZW50czoNCiAge3JlY292ZXIscmViaW5kfQ0KDQpvcHRpb25zOg0KICAtaCwgLS1oZWxwICAgICAgICAgICAgc2hvdyB0aGlzIGhlbHAgbWVzc2FnZSBhbmQgZXhpdA0KICAtLWNvbmZpZyBDT05GSUcgICAgICAgUmVzdG9yZWQgZGFlbW9uIGNvbmZpZ3VyYXRpb24gZmlsZQ0KICAtLWNvbmZpcm0tZGFlbW9uLXN0b3BwZWQNCiAgLS1jb25maXJtLXJlc3RvcmUNCiAgLS1hZ2VudCBBR0VOVCAgICAgICAgIHRoZSBtYWlsYm94IHRvIHJlYmluZDogYSBmdWxsIGlkLCBvciBhIHVuaXF1ZSBwcmVmaXgNCiAgICAgICAgICAgICAgICAgICAgICAgIG9mIDggb3IgbW9yZSBjaGFyYWN0ZXJzDQogIC0tcHJpbmNpcGFsIFBSSU5DSVBBTA0KICAtLWJhbmstdXJsIEJBTktfVVJMDQogIC0tc3RhdGUgU1RBVEUgICAgICAgICBOZXcgcHJpdmF0ZSBhZGFwdGVyIHN0YXRlIGZpbGUgb3V0c2lkZSB0aGUgcmVwb3NpdG9yeQ0K",
+   "stderr": "",
+   "window": [
+    1793593319.9209392,
+    1793593320.699764
+   ],
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "recovery-default-on": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 1,
+   "stdout": "",
+   "stderr": "Y29vcmRpbmF0aW9uIHJlY292ZXJ5OiBjb29yZGluYXRpb24gbXVzdCBiZSBkaXNhYmxlZCBpbiB0aGUgZGFlbW9uIGNvbmZpZ3VyYXRpb246IHNldCBjb29yZGluYXRpb24uZW5hYmxlZDogZmFsc2UNCg==",
+   "window": [
+    1793593320.7017727,
+    1793593321.486967
+   ],
+   "files": {
+    "config.yaml": "file:bWVtb3J5OiB7cHJlc2V0OiBmbGF0fQ0K",
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "recovery-stop-required": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 1,
+   "stdout": "",
+   "stderr": "Y29vcmRpbmF0aW9uIHJlY292ZXJ5OiBzdG9wIHRoZSBkYWVtb24gYW5kIGFkYXB0ZXJzLCB0aGVuIHBhc3MgLS1jb25maXJtLWRhZW1vbi1zdG9wcGVkDQo=",
+   "window": [
+    1793593321.4887242,
+    1793593322.2015584
+   ],
+   "files": {
+    "config.yaml": "file:Y29vcmRpbmF0aW9uOg0KICBlbmFibGVkOiBmYWxzZQ0KICBhbGxvd2VkX3ByaW5jaXBhbHM6IFthbGljZSwgZGFlbW9uLCBtYWludGFpbmVyXQ0K",
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "recovery-restore-required": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 1,
+   "stdout": "",
+   "stderr": "Y29vcmRpbmF0aW9uIHJlY292ZXJ5OiByZXN0b3JlIHJlY292ZXJ5IHJldm9rZXMgZXZlcnkgaW5zdGFuY2UgY3JlZGVudGlhbDsgLS1jb25maXJtLXJlc3RvcmUgaXMgcmVxdWlyZWQNCg==",
+   "window": [
+    1793593322.205578,
+    1793593322.9305253
+   ],
+   "files": {
+    "config.yaml": "file:Y29vcmRpbmF0aW9uOg0KICBlbmFibGVkOiBmYWxzZQ0KICBhbGxvd2VkX3ByaW5jaXBhbHM6IFthbGljZSwgZGFlbW9uLCBtYWludGFpbmVyXQ0K",
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "recovery-no-automatic-database": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 1,
+   "stdout": "",
+   "stderr": "Y29vcmRpbmF0aW9uIHJlY292ZXJ5OiBQU0VVRE9MSUZFX01DUF9EQVRBQkFTRV9VUkwgaXMgcmVxdWlyZWQ7IG5vIGRhdGFiYXNlIGlzIHN0YXJ0ZWQgYXV0b21hdGljYWxseQ0K",
+   "window": [
+    1793593322.9325347,
+    1793593323.6197512
+   ],
+   "files": {
+    "config.yaml": "file:Y29vcmRpbmF0aW9uOg0KICBlbmFibGVkOiBmYWxzZQ0KICBhbGxvd2VkX3ByaW5jaXBhbHM6IFthbGljZSwgZGFlbW9uLCBtYWludGFpbmVyXQ0K",
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "recovery-rebind-flags-refused": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 1,
+   "stdout": "",
+   "stderr": "Y29vcmRpbmF0aW9uIHJlY292ZXJ5OiByZWJpbmQgcGFyYW1ldGVycyBjYW5ub3QgYmUgdXNlZCBmb3IgcmVjb3Zlcg0K",
+   "window": [
+    1793593323.6217606,
+    1793593324.3167381
+   ],
+   "files": {
+    "config.yaml": "file:Y29vcmRpbmF0aW9uOg0KICBlbmFibGVkOiBmYWxzZQ0KICBhbGxvd2VkX3ByaW5jaXBhbHM6IFthbGljZSwgZGFlbW9uLCBtYWludGFpbmVyXQ0K",
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "rebind-existing-file": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 1,
+   "stdout": "",
+   "stderr": "Y29vcmRpbmF0aW9uIHJlY292ZXJ5OiBzdGF0ZSBvdXRwdXQgbXVzdCBiZSBhIG5ldyBwcml2YXRlIGZpbGU7IGV4aXN0aW5nIGZpbGVzIGFyZSBuZXZlciByZXBsYWNlZA0K",
+   "window": [
+    1793593324.3187501,
+    1793593326.2314365
+   ],
+   "files": {
+    "agent.json": "file:dW5jaGFuZ2Vk",
+    "config.yaml": "file:Y29vcmRpbmF0aW9uOg0KICBlbmFibGVkOiBmYWxzZQ0KICBhbGxvd2VkX3ByaW5jaXBhbHM6IFthbGljZSwgZGFlbW9uLCBtYWludGFpbmVyXQ0K",
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "rebind-git-worktree-refused": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 1,
+   "stdout": "",
+   "stderr": "Y29vcmRpbmF0aW9uIHJlY292ZXJ5OiBwcml2YXRlIHN0YXRlIG11c3QgYmUgb3V0c2lkZSBhIEdpdCByZXBvc2l0b3J5DQo=",
+   "window": [
+    1793593326.2354515,
+    1793593326.9246733
+   ],
+   "files": {
+    "checkout": "dir",
+    "config.yaml": "file:Y29vcmRpbmF0aW9uOg0KICBlbmFibGVkOiBmYWxzZQ0KICBhbGxvd2VkX3ByaW5jaXBhbHM6IFthbGljZSwgZGFlbW9uLCBtYWludGFpbmVyXQ0K",
+    "cwd": "dir",
+    "checkout/.git": "file:Z2l0ZGlyOiBmaXh0dXJl"
+   },
+   "modes": {}
+  },
+  "rebind-no-database-keeps-reservation": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 1,
+   "stdout": "",
+   "stderr": "Y29vcmRpbmF0aW9uIHJlY292ZXJ5OiBQU0VVRE9MSUZFX01DUF9EQVRBQkFTRV9VUkwgaXMgcmVxdWlyZWQ7IG5vIGRhdGFiYXNlIGlzIHN0YXJ0ZWQgYXV0b21hdGljYWxseQ0K",
+   "window": [
+    1793593326.928683,
+    1793593328.763704
+   ],
+   "files": {
+    "agent.json": "file:",
+    "config.yaml": "file:Y29vcmRpbmF0aW9uOg0KICBlbmFibGVkOiBmYWxzZQ0KICBhbGxvd2VkX3ByaW5jaXBhbHM6IFthbGljZSwgZGFlbW9uLCBtYWludGFpbmVyXQ0K",
+    "cwd": "dir"
+   },
+   "modes": {}
+  }
+ }
+}
