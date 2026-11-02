@@ -116,6 +116,29 @@ def test_python_310_says_nothing_without_a_package_in_the_working_directory(monk
     assert capsys.readouterr().err == ""
 
 
+def test_python_310_saved_commands_name_no_package(monkeypatch, tmp_path, capsys):
+    """A saved command (the scheduled update's, the tunnel service's) runs
+    later from the scheduler's working directory, not this one: naming the
+    package here would point at the wrong directory. An immediate spawn
+    afterwards still names it."""
+    from pseudolife_memory import tunnel_runtime, unattended_update
+    checkout = _decoy(tmp_path / "old-checkout")
+    monkeypatch.chdir(checkout)
+    monkeypatch.setattr(child_python.sys, "version_info", (3, 10, 14))
+    monkeypatch.setattr(child_python, "_shadow_named", False)
+    monkeypatch.setenv("PSEUDOLIFE_SHIM_LAUNCHER", str(tmp_path / "no-launcher"))
+    monkeypatch.setenv("PSEUDOLIFE_SHIM_RUNTIMES", str(tmp_path / "rt"))
+    monkeypatch.setattr(tunnel_runtime, "installed_launcher", lambda: None)
+    monkeypatch.setattr(tunnel_runtime.shutil, "which", lambda name: None)
+    monkeypatch.setattr(tunnel_runtime.sys, "base_prefix", tunnel_runtime.sys.prefix)
+    monkeypatch.setattr(tunnel_runtime, "checked_path", lambda path: Path(path))
+    assert unattended_update._command()[-4:] == ["-m", "pseudolife_memory.cli", "update", "--unattended"]
+    assert tunnel_runtime.stable_command()[-2:] == ["-m", "pseudolife_memory.cli"]
+    assert capsys.readouterr().err == ""
+    child_python.cli_argv("serve")
+    assert len(capsys.readouterr().err.splitlines()) == 1
+
+
 @needs_safe_path
 def test_elsewhere_the_child_leaves_the_working_directory_off_its_path(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
@@ -126,11 +149,23 @@ def _ours(value: str) -> bool:
     return value == "pseudolife_memory" or value.startswith("pseudolife_memory.")
 
 
+def _is_dash_m(node: ast.expr) -> bool:
+    return isinstance(node, ast.Constant) and node.value == "-m"
+
+
 def _spawns_in(source: str) -> list[tuple[int, str]]:
-    """``(line, enclosing function)`` of every list or tuple in ``source``
-    that runs one of this package's modules with ``-m``: ``"-m"`` followed by
-    a string naming one, or by a name. A module-level string constant is
-    resolved; any other name counts, since what it holds cannot be told."""
+    """``(line, enclosing function or Class.method)`` of every place in
+    ``source`` that may run one of this package's modules with ``-m``:
+
+    - a list or tuple holding ``"-m"`` followed by a string naming one of
+      its modules, or by any other expression (a name, an attribute such as
+      ``child_python.CLI``, an f-string, a call). A module-level string
+      constant is resolved; anything else counts, since what it holds cannot
+      be told from here;
+    - a list or tuple ending in ``"-m"``, whose module is added later
+      (``+ [module]``, ``.append(module)``);
+    - the joined form, a string ``"-mpseudolife_memory..."``.
+    """
     tree = ast.parse(source)
     constants = {}
     for node in tree.body:
@@ -143,28 +178,37 @@ def _spawns_in(source: str) -> list[tuple[int, str]]:
     def runs_ours(node: ast.expr) -> bool:
         if isinstance(node, ast.Constant):
             return isinstance(node.value, str) and _ours(node.value)
-        if isinstance(node, ast.Name):
-            return _ours(constants[node.id]) if node.id in constants else True
-        return False
+        if isinstance(node, ast.Name) and node.id in constants:
+            return _ours(constants[node.id])
+        return True
+
+    def spawns(node: ast.AST) -> bool:
+        if isinstance(node, (ast.List, ast.Tuple)) and node.elts:
+            pairs = zip(node.elts, node.elts[1:])
+            return (any(_is_dash_m(a) and runs_ours(b) for a, b in pairs)
+                    or _is_dash_m(node.elts[-1]))
+        return (isinstance(node, ast.Constant) and isinstance(node.value, str)
+                and node.value.startswith("-m") and _ours(node.value[2:]))
 
     found = []
 
-    def visit(node: ast.AST, function: str) -> None:
+    def visit(node: ast.AST, scope: tuple[str, ...]) -> None:
         for child in ast.iter_child_nodes(node):
-            inner = child.name if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)) else function
-            if isinstance(child, (ast.List, ast.Tuple)):
-                pairs = zip(child.elts, child.elts[1:])
-                if any(isinstance(a, ast.Constant) and a.value == "-m" and runs_ours(b) for a, b in pairs):
-                    found.append((child.lineno, inner))
-            visit(child, inner)
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                visit(child, (*scope, child.name))
+                continue
+            if spawns(child):
+                found.append((child.lineno, ".".join(scope) or "<module>"))
+            visit(child, scope)
 
-    visit(tree, "<module>")
+    visit(tree, ())
     return found
 
 
 # The call sites that start one of this package's modules without the
-# helper, each on purpose, with how many such lists each holds. A new site,
-# or one of these gone, fails the guard below.
+# helper, each on purpose, keyed by module path under the package and
+# function (Class.method for a method), with how many such places each
+# holds. A new site, or one of these gone, fails the guard below.
 _EXEMPT = {
     # The helper itself: plain -m and -P -m.
     ("child_python.py", "module_argv"): 2,
@@ -179,18 +223,54 @@ _EXEMPT = {
 }
 
 
-def test_every_child_of_this_package_goes_through_the_helper():
+def _package_spawns(root: Path) -> dict:
+    """``(module path under root, function) -> ["path:line", ...]`` over
+    every module under ``root``."""
     found: dict = {}
-    where: dict = {}
-    for path in sorted(PACKAGE.rglob("*.py")):
+    for path in sorted(root.rglob("*.py")):
+        module = path.relative_to(root).as_posix()
         for number, function in _spawns_in(path.read_text(encoding="utf-8")):
-            key = (path.name, function)
-            found[key] = found.get(key, 0) + 1
-            where.setdefault(key, []).append(f"{path.relative_to(PACKAGE.parent)}:{number}")
-    unexpected = {key: where[key] for key in found if found[key] != _EXEMPT.get(key)}
+            found.setdefault((module, function), []).append(f"{module}:{number}")
+    return found
+
+
+def test_every_child_of_this_package_goes_through_the_helper():
+    found = _package_spawns(PACKAGE)
+    unexpected = {key: where for key, where in found.items() if len(where) != _EXEMPT.get(key)}
     assert not unexpected, ("start these through pseudolife_memory.child_python.cli_argv / module_argv, "
                             f"or exempt the call site with its reason: {unexpected}")
     assert set(found) == set(_EXEMPT), f"exempt call sites that no longer exist: {set(_EXEMPT) - set(found)}"
+
+
+def test_the_guard_keys_each_module_by_its_path_in_the_package(tmp_path):
+    """Several modules share a name (coordination.py, __init__.py); each
+    keeps its own count."""
+    spawn = 'def start(py):\n    return [py, "-m", "pseudolife_memory.cli"]\n'
+    for part in ("storage", "web"):
+        (tmp_path / part).mkdir()
+        (tmp_path / part / "coordination.py").write_text(spawn, encoding="utf-8")
+    counts = {key: len(where) for key, where in _package_spawns(tmp_path).items()}
+    assert counts == {("storage/coordination.py", "start"): 1, ("web/coordination.py", "start"): 1}
+
+
+def test_the_guard_tells_same_named_methods_apart():
+    source = ('class A:\n    def start(self, py):\n        return [py, "-m", "pseudolife_memory.cli"]\n'
+              'class B:\n    def start(self, py):\n        return [py, "-m", "pseudolife_memory.cli"]\n')
+    assert [function for _, function in _spawns_in(source)] == ["A.start", "B.start"]
+
+
+def test_the_guard_sees_a_module_named_by_any_expression():
+    cases = {
+        "an attribute": ('import sys\nfrom pseudolife_memory import child_python\n'
+                         'def start():\n    return [sys.executable, "-m", child_python.CLI]\n'),
+        "an f-string": 'def start(py, mode):\n    return [py, "-m", f"pseudolife_memory.{mode}"]\n',
+        "a call": 'def start(py):\n    return [py, "-m", module_name()]\n',
+        "a concatenation": 'def start(py, mod):\n    return [py, "-m"] + [mod]\n',
+        "an append": 'def start(py, mod):\n    argv = [py, "-m"]\n    argv.append(mod)\n    return argv\n',
+        "the joined form": 'def start(py):\n    return [py, "-mpseudolife_memory.cli"]\n',
+    }
+    for case, source in cases.items():
+        assert [function for _, function in _spawns_in(source)] == ["start"], case
 
 
 def test_the_guard_sees_a_spawn_split_over_lines_or_named_by_a_constant():

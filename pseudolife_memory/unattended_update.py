@@ -441,7 +441,7 @@ def _command(daemon_url: str | None = None) -> list[str]:
     except Exception:  # noqa: BLE001 - no runtime layout here
         pass
     from pseudolife_memory import child_python
-    return child_python.cli_argv(*tail)
+    return child_python.cli_argv(*tail, saved=True)
 
 
 def _at(when: str) -> tuple[int, int]:

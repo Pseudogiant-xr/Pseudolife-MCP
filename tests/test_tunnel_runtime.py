@@ -442,12 +442,25 @@ def test_stable_command_falls_back_to_this_interpreter_without_the_working_direc
     interpreter's module; written from a directory that is not the
     package's own, it leaves that directory off the child's import path."""
     import sys
+    from pseudolife_memory import credentials
+
+    def behind_a_junction(path):
+        raise credentials.CredentialError('an ancestor is a junction')
+
+    # Whatever lies under the real interpreter's path (a junction, a
+    # symlink): this checks the arguments, not the path safety checks.
+    monkeypatch.setattr(credentials, '_reject_ancestor_redirects', behind_a_junction)
+    python = tmp_path / 'bin' / 'python'
+    python.parent.mkdir()
+    python.write_text('interpreter', encoding='utf-8')
+    monkeypatch.setattr(runtime.sys, 'executable', str(python))
+    monkeypatch.setattr(runtime, 'checked_path', lambda path: Path(path))
     monkeypatch.setattr(runtime, 'installed_launcher', lambda: None)
     monkeypatch.setattr(runtime.shutil, 'which', lambda name: None)
     monkeypatch.setattr(runtime.sys, 'base_prefix', runtime.sys.prefix)
     monkeypatch.chdir(tmp_path)
     command = runtime.stable_command()
-    assert command[-2:] == ['-m', 'pseudolife_memory.cli']
+    assert command[0] == str(python) and command[-2:] == ['-m', 'pseudolife_memory.cli']
     assert ('-P' in command) == (sys.version_info >= (3, 11))
 
 

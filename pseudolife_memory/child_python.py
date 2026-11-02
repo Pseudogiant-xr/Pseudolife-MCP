@@ -32,16 +32,21 @@ CLI = "pseudolife_memory.cli"
 _shadow_named = False
 
 
-def module_argv(module: str, *args: str) -> list[str]:
+def module_argv(module: str, *args: str, saved: bool = False) -> list[str]:
     """``[python, -m, module, *args]`` for a child that inherits this
     process's working directory: it imports ``pseudolife_memory`` from its
     import path (an installed runtime's site-packages, an editable install's
     checkout), never from that working directory unless this process's own
-    package came from there."""
+    package came from there.
+
+    ``saved``: the command is stored and run later from another working
+    directory (a scheduled task, a service), so the 3.10 notice, which names
+    this one, stays unsaid."""
     if not _imported_from_working_directory():
         if sys.version_info >= (3, 11):
             return [sys.executable, "-P", "-m", module, *args]
-        _name_a_shadowing_package()
+        if not saved:
+            _name_a_shadowing_package()
     return [sys.executable, "-m", module, *args]
 
 
@@ -72,6 +77,6 @@ def _imported_from_working_directory() -> bool:
     return os.path.normcase(str(root)) == os.path.normcase(str(here))
 
 
-def cli_argv(*args: str) -> list[str]:
+def cli_argv(*args: str, saved: bool = False) -> list[str]:
     """``pseudolife-mcp <args>`` run by this interpreter and this package."""
-    return module_argv(CLI, *args)
+    return module_argv(CLI, *args, saved=saved)

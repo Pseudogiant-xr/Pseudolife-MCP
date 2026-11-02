@@ -951,7 +951,7 @@ def stable_command() -> list[str]:
             return [str(checked_path(candidate))]
     if sys.prefix == sys.base_prefix:
         from pseudolife_memory import child_python
-        return [str(checked_path(sys.executable)), *child_python.cli_argv()[1:]]
+        return [str(checked_path(sys.executable)), *child_python.cli_argv(saved=True)[1:]]
     raise TunnelError('a stable installed pseudolife-mcp launcher is required')
 
 
