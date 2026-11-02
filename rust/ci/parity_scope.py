@@ -80,7 +80,7 @@ SHARDS = [
     # 9.8 min. test_login stays here with its container image and record.
     {"suite": "w1c-connection", "w1c_rows": "'test_login', 'move', 'tunnel'",
      "w1c_timeout": 26, "job_timeout": 50},
-    {"suite": "w1c-connect", "w1c_rows": "'connect', 'maintainer'", "w1c_timeout": 25,
+    {"suite": "w1c-connect", "w1c_rows": "'connect', 'maintainer', 'coordination_recovery', 'maintainer_setup'", "w1c_timeout": 25,
      "job_timeout": 29},
     # Hosted step timings for rust.yml runs 2026-10-11 to 10-20, about 300
     # successful steps per suite and OS (h5_linux_measurements.json
@@ -140,6 +140,7 @@ ROW_SUITES = {
     "doctor": "w1c-doctor",
     "transfer": "w1c-pairing", "invite": "w1c-pairing", "pair": "w1c-pairing",
     "test_login": "w1c-connection", "connect": "w1c-connect", "maintainer": "w1c-connect",
+    "coordination_recovery": "w1c-connect", "maintainer_setup": "w1c-connect",
     "move": "w1c-connection", "tunnel": "w1c-connection",
     "audit": "h5-audit", "backup": "h5-backup",
 }
@@ -159,9 +160,10 @@ SHIM_COMMANDS = {
     # The conservative import scan also sees update's private backup module.
     # Include that row rather than exempting the match from the coverage guard.
     "backup": ("backup", "update"), "backup_help.txt": ("backup", "update"),
-    "board_audit": ("audit",),
+    "board_audit": ("audit", "coordination_recovery"),
     "update": ("update",),
-    "connect": ("connect",), "doctor": ("doctor",), "maintainer": ("maintainer",),
+    "connect": ("connect",), "doctor": ("doctor",), "maintainer": ("maintainer", "maintainer_setup"),
+    "coordination_recovery": ("coordination_recovery",),
     "move_cli.rs": ("move",), "test_login": ("test_login",),
     "transfer": ("transfer",), "transfer.rs": ("transfer",), "tunnel": ("tunnel",),
     "episode.rs": ("episode",), "episode_input.rs": ("episode",),

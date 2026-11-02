@@ -125,7 +125,7 @@ STATIC_EXCLUDE = WINDOWS_LIVE_EXCLUDE + [{"os": "windows-latest", "suite": "h5-l
 # row_commands() sees no --row there: the row list and how both passes are
 # built from it are pinned here instead.
 W1C_ROWS = ("transfer", "test_login", "doctor", "connect", "maintainer", "invite", "pair",
-            "move", "tunnel")
+            "move", "tunnel", "coordination_recovery", "maintainer_setup")
 W1C_LINES = (
     "$live = $rows | ForEach-Object { '--row'; $_ }",
     "$replayed = $rows | Where-Object { $_ -ne 'test_login' -or "
@@ -1385,6 +1385,7 @@ def test_w1c_powershell_passes_the_same_rows_live_and_golden(tmp_path, suite, wi
     step = next(s for s in job["steps"] if s.get("name") == "CLI W1-C differential harness")
     script = step["run"].replace("${{ matrix.w1c_rows }}", shard["w1c_rows"])
     script = script.replace("$IsWindows", "$fixtureWindows")
+    script = script.replace("$IsLinux", "(-not $fixtureWindows)")
     bootstrap = r'''
 $fixtureWindows = $env:PL_FIXTURE_WINDOWS -eq '1'
 $global:calls = @()
@@ -1405,6 +1406,18 @@ function python {
     assert result.returncode == 0, result.stdout + result.stderr
     calls = json.loads(result.stdout)
     rows = re.findall(r"'([a-z_]+)'", shard["w1c_rows"])
+    terminals = [call for call in calls if call[:2] == ["-m", "pytest"]]
+    expected_terminals = []
+    if "pair" in rows:
+        expected_terminals.append("rust/cli_harness/test_pair_terminal.py")
+    if "maintainer_setup" in rows:
+        expected_terminals.append("rust/cli_harness/test_maintainer_setup_terminal.py")
+    assert [call[3] for call in terminals] == expected_terminals
+    if "maintainer_setup" in rows:
+        for required in ("test_operator_transport.py", "test_audit_stats.py",
+                         "test_maintainer_setup_native.py"):
+            assert f"rust/cli_harness/{required}" in terminals[-1]
+    calls = [call for call in calls if call not in terminals]
     assert len(calls) == 2
     for call, golden in zip(calls, (False, True)):
         expected = [row for row in rows if not golden or row != "test_login" or golden_exists]

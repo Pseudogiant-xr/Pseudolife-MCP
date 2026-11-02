@@ -93,6 +93,22 @@ def pruning_state():
                          [2, "fixture", "search", None, None, [], 9000000000000.0]]}}}
 
 
+def test_pruning_preserves_seeded_retrieval_clocks_in_golden_comparison():
+    import run as harness
+    prior = pruning_state()
+    prior["rows"]["public.relations"] = {
+        "columns": ["id", "created_at"], "rows": [[1, 123.0]]}
+    after = copy.deepcopy(prior)
+    after["rows"]["public.retrieval_events"]["rows"].pop(0)
+    scenario = harness.SCENARIOS["sweep-pruning"]()
+    normalized = scenario.normalize_db(after, prior, "rust")
+    assert normalized["rows"]["public.retrieval_events"]["rows"][0][-1] == 9000000000000.0
+    assert normalized["rows"]["public.relations"]["rows"][0][-1] == "<created_at>"
+    changed = copy.deepcopy(after)
+    changed["rows"]["public.retrieval_events"]["rows"][0][-1] -= 1
+    assert scenario.normalize_db(changed, prior, "rust") != normalized
+
+
 @pytest.mark.parametrize("change", ["rewrite", "sequence", "new-event", "warmup-extra-sequence"])
 def test_pruning_scrub_rejects_rewrites_and_unexplained_sequence_changes(change):
     import run as harness

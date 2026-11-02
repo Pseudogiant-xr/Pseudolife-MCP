@@ -1,7 +1,7 @@
 //! The routes the CLI calls (`web/routes.py:148-165`): `GET /api/briefing`
 //! (`session_briefing`), `POST /api/episode/start` (`episode_start_session`)
-//! and `POST /api/episode/end` (`episode_end_session`). `/api/stats`, which
-//! `move` calls, is batch B10d's.
+//! and `POST /api/episode/end` (`episode_end_session`), plus `GET /api/stats`
+//! (`MemoryService.stats`, also used by move's authenticated warmup probe).
 //!
 //! The bodies arrive as Python's route lambdas read them. A field Python
 //! would carry into an episode or a registration as some other type than a
@@ -18,6 +18,7 @@ use std::sync::Arc;
 /// The Console registrations this family serves in full.
 #[cfg(test)]
 pub(super) const SERVED: &[(&str, &str)] = &[
+    ("GET", "/api/stats"),
     ("GET", "/api/briefing"),
     ("POST", "/api/episode/start"),
     ("POST", "/api/episode/end"),
@@ -25,10 +26,21 @@ pub(super) const SERVED: &[(&str, &str)] = &[
 
 pub(super) async fn route(req: &mut Request<'_>) -> Option<Response> {
     match (req.method, req.path) {
+        ("GET", "/api/stats") => Some(stats(req).await),
         ("GET", "/api/briefing") => Some(briefing(req).await),
         ("POST", "/api/episode/start") => Some(episode_start(req).await),
         ("POST", "/api/episode/end") => Some(episode_end(req).await),
         _ => None,
+    }
+}
+
+/// The same complete service snapshot as `memory_stats`; the transport's
+/// ordinary API authentication gate has already run. This read initializes
+/// a cold service, without registering an episode or recording a retrieval.
+async fn stats(req: &mut Request<'_>) -> Response {
+    match crate::read::stats::stats(&req.app.service).await {
+        Ok(out) => json_response(200, &Value::Object(out)),
+        Err(e) => raised(e),
     }
 }
 
@@ -261,6 +273,32 @@ async fn episode_end(req: &mut Request<'_>) -> Response {
 #[cfg(test)]
 mod tests {
     use crate::http::tests::{authed_request, mcp_refusal_app};
+
+    #[tokio::test]
+    async fn stats_authentication_precedes_service_initialization() {
+        let app = mcp_refusal_app();
+        let mut request = authed_request("GET", "/api/stats", None);
+        request.headers_mut().remove("authorization");
+        let response = crate::http::handle(axum::extract::State(app.clone()), request).await;
+        assert_eq!(response.status(), 401);
+        assert!(app.service.ready_if_initialized().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn stats_initialization_failure_uses_the_api_error_shape() {
+        let response = crate::http::handle(
+            axum::extract::State(mcp_refusal_app()),
+            authed_request("GET", "/api/stats", None),
+        )
+        .await;
+        assert_eq!(response.status(), 500);
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert!(body["error"].is_string());
+        assert_eq!(body.as_object().unwrap().len(), 1);
+    }
 
     /// A field Python would carry into an episode as another type is refused
     /// with 400 before the bank is opened (the fixture has none to open).

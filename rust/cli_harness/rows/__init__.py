@@ -18,6 +18,8 @@ ROWS = {
     "doctor": "CLI-DOCTOR",
     "connect": "CLI-CONNECT",
     "maintainer": "CLI-MAINTAINER",
+    "maintainer_setup": "CLI-MAINTAINER-SETUP",
+    "coordination_recovery": "CLI-COORDINATION-RECOVERY",
     "invite": "CLI-PAIRING",
     "pair": "CLI-PAIRING",
     "move": "CLI-MOVE-REFUSALS",

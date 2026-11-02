@@ -1,0 +1,1 @@
+SELECT value #>> '{}' FROM public.meta WHERE key = 'coordination_bank_id';

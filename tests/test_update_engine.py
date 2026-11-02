@@ -932,12 +932,11 @@ def test_imported_counters_row_allows_unrenamed_weights_file(engine_host):
 @pytest.mark.parametrize("mode,args", [
     ("lease", ["break", "fixture-lease"]),
     ("maintainer", ["list"]),
-    ("maintainer", ["setup", "--local", "--yes"]),
     ("board-audit", ["export"]),
     ("invite", ["fixture-machine"]),
     ("invite", ["fixture-machine", "--json"]),
 ])
-def test_operator_after_rust_activation_names_python_runtime_fix(engine_host, monkeypatch, capsys, mode, args):
+def test_operator_after_rust_activation_uses_the_native_cli(engine_host, monkeypatch, capsys, mode, args):
     from pseudolife_memory import (board_audit_cli, daemon_exec, invite_cli,
                                    lease_cli, maintainer_cli, maintainer_setup, update_engine as eng)
     s = engine_host
@@ -955,19 +954,20 @@ def test_operator_after_rust_activation_names_python_runtime_fix(engine_host, mo
         if argv[1] == "inspect":
             value = "true" if ".State.Running" in argv[3] else s["running"]["Config"]["Labels"][eng.ENGINE_LABEL]
             return subprocess.CompletedProcess(argv, 0, value, "")
-        # Reproduce Docker's missing executable without touching a real host.
-        return subprocess.CompletedProcess(argv, 127, "", 'exec: "python": executable file not found in $PATH')
+        if "--version-check" in argv:
+            return subprocess.CompletedProcess(argv, 0, "pseudolife-mcp invite 1\n", "")
+        return subprocess.CompletedProcess(argv, 0, "", "")
     for module in (daemon_exec, invite_cli, maintainer_setup):
         monkeypatch.setattr(module, "run", docker)
     main = {"lease": lease_cli.main, "maintainer": maintainer_cli.main,
             "board-audit": board_audit_cli.main, "invite": invite_cli.main}[mode]
-    assert main(args) in (1, 2, 4)
-    out, err = capsys.readouterr()
-    message = json.loads(out)["error"] if "--json" in args else err
-    assert "Rust" in message and "Python" in message
-    assert "--engine python --checkout" in message
-    assert "nothing was changed" in message
-    assert not any("exec" in argv for argv in commands)
+    assert main(args) == 0
+    executions = [argv for argv in commands if argv[1] == "exec"]
+    assert executions
+    for argv in executions:
+        index = argv.index(daemon_exec.CONTAINER)
+        assert argv[index + 1:index + 3] == ["pseudolife-mcp", mode]
+        assert f"{daemon_exec.NESTED_ENV}=1" in argv
 
 
 @pytest.mark.parametrize("returned_from_rust", [False, True])
@@ -992,6 +992,35 @@ def test_python_operator_path_remains_available(engine_host, monkeypatch, return
     assert maintainer_cli.main(["list"]) == 0
     assert commands[-1][-3:] == ["pseudolife_memory.cli", "maintainer", "list"]
     assert commands[-1][1] == "exec"
+
+
+@pytest.mark.parametrize("helper,args,tail", [
+    ("host", ("state",), ["maintainer", "setup", "--host-state"]),
+    ("host", ("write", "localhost", "http://localhost:8765"),
+     ["maintainer", "setup", "--host-write", "localhost", "http://localhost:8765"]),
+    ("maintainer", ("enrol-code",), ["maintainer", "enrol-code"]),
+])
+def test_setup_after_rust_activation_uses_the_native_cli(engine_host, monkeypatch, helper, args, tail):
+    from pseudolife_memory import maintainer_setup, update_engine as eng
+
+    state = engine_host
+    eng.deploy_engine(state["update"](), state["repo"])
+    monkeypatch.setenv("PSEUDOLIFE_DOCKER", "fixture-docker")
+    commands = []
+
+    def docker(argv, **kwargs):
+        commands.append(argv)
+        output = (state["running"]["Config"]["Labels"][eng.ENGINE_LABEL]
+                  if argv[1] == "inspect" else '{"fixture": true}')
+        return subprocess.CompletedProcess(argv, 0, output, "")
+
+    monkeypatch.setattr(maintainer_setup, "run", docker)
+    expected = ["fixture-docker", "exec", maintainer_setup.DAEMON_CONTAINER, "pseudolife-mcp", *tail]
+    if helper == "host":
+        assert maintainer_setup._host("docker", *args) == {"fixture": True}
+        assert commands[-1] == expected
+    else:
+        assert maintainer_setup._maintainer("docker", *args) == expected
 
 
 @pytest.mark.parametrize("docker_exit", [0, 7])

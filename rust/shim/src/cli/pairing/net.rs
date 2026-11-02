@@ -1,26 +1,46 @@
 //! The pairing commands' daemon traffic, as urllib makes it: no proxy and
 //! no redirect followed for `/health` and `POST /api/pair`; the token check
-//! (`codex_connection.installer_credential_valid`) through `urlopen`, which
-//! follows redirects. Environment proxies defer before any request (see
-//! `proxies_configured`).
+//! (`codex_connection.installer_credential_valid`) uses a no-redirect opener
+//! that honours environment proxies. HTTPS uses system trust.
 use super::pyjson::{self, J};
 use std::time::Duration;
 
 /// `pair_cli.MAX_RESPONSE_BYTES`.
 const MAX_RESPONSE_BYTES: usize = 65536;
 
-fn client(timeout: Duration, follow: bool) -> Option<reqwest::Client> {
-    reqwest::Client::builder()
-        .no_proxy()
-        .redirect(if follow {
-            reqwest::redirect::Policy::limited(10)
-        } else {
-            reqwest::redirect::Policy::none()
-        })
+fn client(url: &str, timeout: Duration, use_proxies: bool) -> Option<reqwest::Client> {
+    let mut builder = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
         .timeout(timeout)
-        .pool_max_idle_per_host(0)
-        .build()
-        .ok()
+        .pool_max_idle_per_host(0);
+    if !use_proxies {
+        builder = builder.no_proxy();
+    }
+    // urllib creates its default HTTPS context only for HTTPS requests: a
+    // missing or empty trust override must not prevent a plain HTTP request.
+    if reqwest::Url::parse(url).ok()?.scheme() == "https" {
+        // The native loader honours SSL_CERT_FILE / SSL_CERT_DIR, like Python.
+        let roots = rustls_native_certs::load_native_certs();
+        if !roots.certs.is_empty() {
+            let certs = roots
+                .certs
+                .iter()
+                .map(|cert| reqwest::Certificate::from_der(cert.as_ref()))
+                .collect::<Result<Vec<_>, _>>()
+                .ok()?;
+            builder = builder.tls_certs_only(certs);
+        } else if std::env::var_os("SSL_CERT_FILE").is_some()
+            || std::env::var_os("SSL_CERT_DIR").is_some()
+        {
+            return None;
+        }
+    } else {
+        // The default platform verifier can itself fail while loading an
+        // empty overridden store on Linux, before any HTTP request is sent.
+        // No origin TLS handshake is possible on this no-redirect client.
+        builder = builder.tls_certs_only(Vec::<reqwest::Certificate>::new());
+    }
+    builder.build().ok()
 }
 
 /// `response.read(limit)` (or `read()` with no limit): `Err` when the body
@@ -64,7 +84,7 @@ fn dict(body: &[u8], limit: usize) -> Result<Option<pyjson::Dict>, TooDeep> {
 /// `pair_cli.probe_health(url)`: the body of any HTTP answer (a redirect's
 /// too: `_NoRedirectHandler` turns it into an `HTTPError`) as a dict.
 pub(super) async fn pair_health(url: &str) -> Result<Option<pyjson::Dict>, TooDeep> {
-    let Some(client) = client(Duration::from_secs(5), false) else {
+    let Some(client) = client(url, Duration::from_secs(5), false) else {
         return Ok(None);
     };
     let Ok(mut response) = client.get(format!("{url}/health")).send().await else {
@@ -79,7 +99,7 @@ pub(super) async fn pair_health(url: &str) -> Result<Option<pyjson::Dict>, TooDe
 /// `expose_cli.probe_health(url, 3.0)`: a JSON object from any non-redirect
 /// answer, else `None`.
 pub(super) async fn invite_health(url: &str) -> Result<Option<pyjson::Dict>, TooDeep> {
-    let Some(client) = client(Duration::from_secs(3), false) else {
+    let Some(client) = client(url, Duration::from_secs(3), false) else {
         return Ok(None);
     };
     let Ok(mut response) = client.get(format!("{url}/health")).send().await else {
@@ -99,7 +119,7 @@ pub(super) async fn invite_health(url: &str) -> Result<Option<pyjson::Dict>, Too
 /// object. A 2xx body that cannot be read is no answer; a refusal's
 /// unreadable body is no payload.
 pub(super) async fn post_pair(url: &str, body: &str) -> Result<(u16, Option<pyjson::Dict>), ()> {
-    let client = client(Duration::from_secs(10), false).ok_or(())?;
+    let client = client(url, Duration::from_secs(10), false).ok_or(())?;
     let mut response = client
         .post(format!("{url}/api/pair"))
         .header(reqwest::header::CONTENT_TYPE, "application/json")
@@ -124,9 +144,9 @@ pub(super) async fn post_pair(url: &str, body: &str) -> Result<(u16, Option<pyjs
 }
 
 /// `codex_connection.installer_credential_valid(url, token)`: a 200 to an
-/// authenticated `GET /api/episodes?limit=1`, redirects followed.
+/// authenticated `GET /api/episodes?limit=1`, without following redirects.
 pub(super) async fn credential_valid(url: &str, token: &str) -> bool {
-    let Some(client) = client(Duration::from_secs(3), true) else {
+    let Some(client) = client(url, Duration::from_secs(3), true) else {
         return false;
     };
     let Ok(header) = reqwest::header::HeaderValue::from_str(&format!("Bearer {token}")) else {
@@ -146,12 +166,43 @@ pub(super) async fn credential_valid(url: &str, token: &str) -> bool {
     response.chunk().await.is_ok()
 }
 
-/// Whether urllib's `getproxies()` would read a proxy from the environment
-/// (any non-empty `*_proxy` variable but `no_proxy`, in either case). The
-/// token check honours them in Python; this candidate defers instead.
-pub(super) fn proxies_configured() -> bool {
-    std::env::vars_os().any(|(name, value)| {
-        let name = name.to_string_lossy().to_ascii_lowercase();
-        name.ends_with("_proxy") && name != "no_proxy" && !value.is_empty()
-    })
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    #[tokio::test]
+    async fn credential_verification_does_not_follow_redirects() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let (finished, mut finish) = tokio::sync::oneshot::channel();
+        let server = tokio::spawn(async move {
+            let mut requests = 0;
+            loop {
+                let (mut stream, _) = tokio::select! {
+                    accepted = listener.accept() => accepted.unwrap(),
+                    _ = &mut finish => break,
+                };
+                let mut request = [0; 4096];
+                let read = stream.read(&mut request).await.unwrap();
+                assert!(read > 0, "credential probe must send a request");
+                requests += 1;
+                let response = if requests == 1 {
+                    "HTTP/1.1 302 Found\r\nLocation: /accepted\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                } else {
+                    "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}"
+                };
+                stream.write_all(response.as_bytes()).await.unwrap();
+            }
+            requests
+        });
+        let valid = credential_valid(&format!("http://{address}"), "fixture-token").await;
+        finished.send(()).unwrap();
+        let requests = server.await.unwrap();
+        assert!(!valid, "a redirect must not validate a credential");
+        assert_eq!(
+            requests, 1,
+            "credential verification must not request the redirect target"
+        );
+    }
 }

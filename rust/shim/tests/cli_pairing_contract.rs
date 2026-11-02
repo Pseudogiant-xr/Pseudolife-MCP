@@ -175,9 +175,7 @@ fn invite_defers_before_any_effect() {
     .unwrap();
     let before = home.entries();
     let shapes: Vec<Shape> = vec![
-        (vec!["laptop", "--url", "u"], vec![]),
         (vec!["--list"], vec![]),
-        (vec!["--help"], vec![]),
         (vec!["laptop", "--expires", "30s"], vec![]),
         (vec!["laptop", "--tier", "writer"], vec![]),
         (vec!["laptop", "--url=u"], vec![]),
@@ -188,12 +186,10 @@ fn invite_defers_before_any_effect() {
             vec![("PSEUDOLIFE_MCP_DATA_DIR", home.0.join("data"))],
         ),
     ];
-    for (index, (argv, extra)) in shapes.into_iter().enumerate() {
+    for (argv, extra) in shapes {
         let mut command = command(&home.0, "invite");
         command.args(&argv);
-        if index > 0 {
-            command.env("PSEUDOLIFE_MCP_DATABASE_URL", dsn);
-        }
+        command.env("PSEUDOLIFE_MCP_DATABASE_URL", dsn);
         for (name, value) in extra {
             command.env(name, value);
         }
@@ -206,6 +202,28 @@ fn invite_defers_before_any_effect() {
         .env("PSEUDOLIFE_MCP_TOKENS", "no-separator");
     assert_output(&run(malformed, b""), 1, "", DEFER_INVITE);
     assert_eq!(home.entries(), before);
+}
+
+#[test]
+fn operator_help_and_missing_bank_do_not_need_a_runtime() {
+    let home = Home::new("help-no-bank");
+    for (mode, expected) in [
+        ("invite", include_str!("../src/cli/pairing/invite_help.txt")),
+        ("pair", include_str!("../src/cli/pairing/pair_help.txt")),
+    ] {
+        let mut help = command(&home.0, mode);
+        help.arg("--help");
+        assert_output(&run(help, b""), 0, &expected.replace("\r\n", "\n"), "");
+    }
+    let mut invite = command(&home.0, "invite");
+    invite.arg("--list");
+    assert_output(
+        &run(invite, b""),
+        4,
+        "",
+        "invite: no database found: set PSEUDOLIFE_MCP_DATABASE_URL, or run this on the daemon's host (a Docker install runs it in the daemon container)\n",
+    );
+    assert!(home.entries().is_empty());
 }
 
 /// A stand-in daemon: `/health`, `POST /api/pair` (answers consumed in
@@ -492,7 +510,6 @@ fn pair_defers_before_any_effect() {
     let fixture = daemon(r#"{"status": "ok", "auth": true}"#, vec![]);
     let shapes: Vec<Vec<String>> = vec![
         vec![],
-        vec!["--help".into()],
         vec![
             fixture.url.clone(),
             "--json".into(),
@@ -503,22 +520,12 @@ fn pair_defers_before_any_effect() {
             "abcd-efgh-jkmn".into(),
             "--token-file=x".into(),
         ],
-        vec![
-            fixture.url.replace("http:", "https:"),
-            "abcd-efgh-jkmn".into(),
-        ],
-        vec![fixture.url.clone(), "abcd-efgh-jkm\u{f1}".into()],
     ];
     for argv in shapes {
         let mut pair = command(&home.0, "pair");
         pair.args(&argv);
         assert_output(&run(pair, b""), 1, "", DEFER_PAIR);
     }
-    let mut proxied = command(&home.0, "pair");
-    proxied
-        .args([fixture.url.as_str(), "abcd-efgh-jkmn"])
-        .env("HTTPS_PROXY", "http://127.0.0.1:9");
-    assert_output(&run(proxied, b""), 1, "", DEFER_PAIR);
     assert!(fixture.seen.lock().unwrap().is_empty());
     assert_eq!(home.entries(), Vec::<String>::new());
 }
