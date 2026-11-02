@@ -105,6 +105,7 @@ impl CortexStore {
         r.status = "contested".into();
         r.superseded_at = None;
         r.superseded_by_value = None;
+        r.raw.remove("superseded_by_value");
         let list = self.contested.entry(key.clone()).or_default();
         if !list.contains(&i) {
             list.push(i);
