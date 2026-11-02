@@ -144,6 +144,49 @@ fn config_path_retains_verbatim_spelling_for_long_paths() {
     );
 }
 
+#[cfg(windows)]
+#[tokio::test]
+async fn junction_codex_home_writes_resolved_token_files() {
+    use std::os::windows::process::CommandExt;
+    let home = Home::new();
+    let real = home.0.join("real-home");
+    let linked = home.0.join("junction-home");
+    std::fs::create_dir(&real).unwrap();
+    std::fs::write(real.join("config.toml"), "# fixture\n").unwrap();
+    let result = std::process::Command::new("powershell.exe")
+        .args(["-NoProfile", "-NonInteractive", "-Command",
+            "New-Item -ItemType Junction -Path $env:PSEUDOLIFE_TEST_LINK -Target $env:PSEUDOLIFE_TEST_TARGET | Out-Null"])
+        .env("PSEUDOLIFE_TEST_LINK", &linked)
+        .env("PSEUDOLIFE_TEST_TARGET", &real)
+        .stdin(std::process::Stdio::null())
+        .creation_flags(0x08000000)
+        .output().unwrap();
+    assert!(
+        result.status.success(),
+        "disposable junction could not be created"
+    );
+    let mut client = Fake::new(&linked);
+    let report = pseudolife_stdio::setup::codex::configure_credential_file(
+        &mut client,
+        &linked,
+        &linked,
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+    assert_eq!(report["credential_file_configured"], true);
+    assert_eq!(
+        std::fs::canonicalize(report["credential_file_path"].as_str().unwrap()).unwrap(),
+        std::fs::canonicalize(real.join("pseudolife/token")).unwrap()
+    );
+    let link_metadata = std::fs::symlink_metadata(&linked).unwrap();
+    use std::os::windows::fs::MetadataExt;
+    assert_ne!(link_metadata.file_attributes() & 0x400, 0);
+    // Remove just the link, leaving the disposable target to Home's cleanup.
+    std::fs::remove_dir(&linked).unwrap();
+}
+
 #[tokio::test]
 async fn isolated_credential_bootstrap_fixture() {
     if std::env::var_os("PSEUDOLIFE_TEST_CREDENTIAL_HOME").is_none() {
