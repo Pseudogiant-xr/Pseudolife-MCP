@@ -1554,6 +1554,7 @@ async fn already_rung_privileged_offer_is_not_retained_again() {
     let mut privileged = view(&[1], 1, 2, 0.0);
     privileged.wake.as_mut().unwrap()["reason"] = json!("maintainer_message");
     publish_initial_offer(&rig, &privileged).await;
+    wait_for(|| rig.ledger().iter().filter(|row| row[1] == "bell").count() == 1).await;
     let first = rig.accepted().await;
     assert!(
         rig.pending
@@ -1563,6 +1564,7 @@ async fn already_rung_privileged_offer_is_not_retained_again() {
     peer.delivered = 2;
     peer.wake.as_mut().unwrap()["reason"] = json!("urgent");
     rig.bell.observe(BANK, &peer).await;
+    wait_for(|| rig.ledger().iter().filter(|row| row[1] == "bell").count() == 2).await;
     let second = rig.accepted().await;
     assert!(
         rig.pending
@@ -1579,6 +1581,7 @@ async fn already_rung_privileged_offer_is_not_retained_again() {
         "queue_allowed":true, "recipient_state":"unknown", "message_expires_at":now()+3600.0}),
     );
     rig.bell.observe(BANK, &fresh).await;
+    wait_for(|| rig.ledger().iter().filter(|row| row[1] == "bell").count() == 3).await;
     rig.accepted().await;
     rig.close().await;
     assert_eq!(rig.calls(), 3);
