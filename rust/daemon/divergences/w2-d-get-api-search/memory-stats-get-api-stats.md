@@ -1,3 +1,3 @@
-| Item | Python | Rust | Why / owner |
-|---|---|---|---|
-| `memory_stats` `GET /api/stats` | the same `service.stats()` | not served | a later PR (the REST route over this body) |
+| Item | Python | Rust | Why / owner | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| `memory_stats` `GET /api/stats` | the same `service.stats()` | not served | a later PR (the REST route over this body) | behaviour with a caller | `rust/daemon/src/read/stats.rs::stats` serves MCP but `rust/daemon/src/routes/console.rs::route` still falls through to 501 for GET /api/stats; Python `pseudolife_memory/web/routes.py::ConsoleRoutes` registers service.stats. Body presence does not close the missing route. Caller: `pseudolife_memory/move_cli.py` target probe GET /api/stats; native counterpart `rust/shim/src/cli/move_cli.rs`; B14b owner: B10d via R2. |

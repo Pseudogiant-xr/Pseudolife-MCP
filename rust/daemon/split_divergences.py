@@ -257,6 +257,8 @@ def load_dir(root: Path = ROOT_DIR) -> dict:
                 add_entry(section, text, " / ".join(path))
 
     for top in sorted(root.iterdir()):
+        if top.name == "README.md" and top.is_file():
+            continue  # The summary index is not a declared-divergence entry.
         if not top.is_dir():
             raise LedgerError(f"{top}: only section directories belong in {root.name}/")
         walk(top, ())

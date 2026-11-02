@@ -1,3 +1,3 @@
-| Key | Python | Rust | Owner |
-|---|---|---|---|
-| `capacity_warning` and `dream_tracking_error` while the clock reseed keeps failing | read from the stores once they load, before the late reseed | absent until the reseed succeeds, because the ready service reaches `/health` only then | declared (B4): `/health` is `ready: false` in that window either way |
+| Key | Python | Rust | Owner | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| `capacity_warning` and `dream_tracking_error` while the clock reseed keeps failing | read from the stores once they load, before the late reseed | absent until the reseed succeeds, because the ready service reaches `/health` only then | declared (B4): `/health` is `ready: false` in that window either way | behaviour with a caller | `rust/daemon/src/service.rs::Service::init` publishes `snapshot.ready` only after reseed; `rust/daemon/src/health.rs::capacity_warning`/`dream_tracking_error` read that snapshot; `pseudolife_memory/daemon.py::_build_health_payload` reads stores published before reseed. Caller: `/health` probes from `ops/Dockerfile.daemon-rust` while a late HLC reseed fails; B14b owner: B4 lifecycle/storage. |

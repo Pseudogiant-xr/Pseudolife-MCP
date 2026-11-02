@@ -1,3 +1,3 @@
-| Item | Python | Rust | Owner / why |
-|---|---|---|---|
-| URL credentials in a base URL | percent-decoded before the host split; shown in its log | not decoded; redacted in logs | credentials in an extractor URL are refused on both sides before connecting |
+| Item | Python | Rust | Owner / why | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| URL credentials in a base URL | percent-decoded before the host split; shown in its log | not decoded; redacted in logs | credentials in an extractor URL are refused on both sides before connecting | behaviour with a caller | At `54063c1788f2`: `rust/daemon/src/dream/extractor.rs` `userinfo_refusal` splits raw netloc and redacts text; Python `OpenAIExtractor` uses urllib through `pseudolife_memory/utils/no_redirect.py` `urlopen`. Encoded punctuation can change parsing / failure classification even though both refuse connecting with userinfo. Caller: `rust/daemon/src/dream/extractor.rs` `Compat::post` and `get` receive operator-configured extractor base URLs; B14b owner: B1-P (dream engine), B14b. |

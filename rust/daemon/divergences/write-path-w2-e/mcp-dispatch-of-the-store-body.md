@@ -1,3 +1,3 @@
-| Item | Python | Rust | Owner / why |
-|---|---|---|---|
-| MCP dispatch of the store body | FastMCP | served on `/mcp` (spec.md W0.4); `w2e.py` compares both daemons' `tools/call` answers | closed; the feature-gated harness route is no longer used by any harness |
+| Item | Python | Rust | Owner / why | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| MCP dispatch of the store body | FastMCP | served on `/mcp` (spec.md W0.4); `w2e.py` compares both daemons' `tools/call` answers | closed; the feature-gated harness route is no longer used by any harness | closed | Verified at `54063c17`: `rust/daemon/src/store.rs::mcp_tools` registers `memory_store` and `mcp_memory_store` calls `memory_store`; `rust/daemon/src/mcp/dispatch.rs` consumes that registry. `rust/daemon/harness/w2e.py` issues `tools/call` through MCP, matching `pseudolife_memory/mcp_server.py::memory_store`. B14b owner: none (closed). |

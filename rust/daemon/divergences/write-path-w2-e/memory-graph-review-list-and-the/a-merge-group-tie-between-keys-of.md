@@ -1,3 +1,3 @@
-| Item | Python | Rust | Owner / why |
-|---|---|---|---|
-| A merge-group tie between keys of different types (merge rows with a NULL target) | `TypeError: '<' not supported between instances of …` | `invalid_argument` with Rust's own wording | merge rows always carry a target |
+| Item | Python | Rust | Owner / why | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| A merge-group tie between keys of different types (merge rows with a NULL target) | `TypeError: '<' not supported between instances of …` | `invalid_argument` with Rust's own wording | merge rows always carry a target | behaviour with no caller | At `54063c1788f2`: `rust/daemon/src/graph_review.rs` `key_greater` refuses heterogeneous merge keys; `pseudolife_memory/memory/graph_review.py` `shared_pair_groups` sorts Python keys. Caller search: `rust/daemon/src/dream/deep.rs` merge filing and `pseudolife_memory/storage/postgres.py` entity-proposal insert paths supply both entity_id and into_id for kind=merge. Junk NULL targets are excluded from merge groups; a malformed hand-written merge row is outside these writers. B14b owner: B14b disposition; B1-O (graph review). |

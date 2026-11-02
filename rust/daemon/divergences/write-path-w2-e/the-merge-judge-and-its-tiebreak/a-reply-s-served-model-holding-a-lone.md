@@ -1,3 +1,3 @@
-| Item | Python | Rust | Owner / why |
-|---|---|---|---|
-| A reply's served model holding a lone surrogate | PostgreSQL refuses the response identity's JSON (`invalid input syntax for type json`, with its DETAIL and CONTEXT) | the same statement fails on the same server, its text laid out as psycopg's (message, DETAIL, CONTEXT) without psycopg's closing parameter line | log-only, as the tick's `error` text for a database failure (above) |
+| Item | Python | Rust | Owner / why | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| A reply's served model holding a lone surrogate | PostgreSQL refuses the response identity's JSON (`invalid input syntax for type json`, with its DETAIL and CONTEXT) | the same statement fails on the same server, its text laid out as psycopg's (message, DETAIL, CONTEXT) without psycopg's closing parameter line | log-only, as the tick's `error` text for a database failure (above) | presentation | At `54063c1788f2`: `rust/daemon/src/dream/review_judgments.rs` `set_meta`, `lone_surrogate_json` and `psycopg_text` submit the surrogate JSON so PostgreSQL refuses the same statement; `pseudolife_memory/memory/review_judgments.py` `record_response_identity` submits the Python JSON. The omitted psycopg parameter suffix changes only logged failure text. B14b owner: B14b presentation disposition. |

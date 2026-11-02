@@ -1,3 +1,3 @@
-| Key | Python | Rust | Owner |
-|---|---|---|---|
-| `persist_errors > 0` | counts every failed durable save | counts the dream's failed writes only, until autosave exists | B4 autosave |
+| Key | Python | Rust | Owner | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| `persist_errors > 0` | counts failed canonical-store saves; counters/access-count failures are logged without incrementing this counter | the same canonical-save accounting; autosave and exit-save also log counters/access-count failures without incrementing `persist_errors` | closed: canonical-save accounting and counters-save exception policy match | closed | `rust/daemon/src/fact_set.rs::save_cortex`, `rust/daemon/src/world_tools.rs::save_world` and `rust/daemon/src/forget_tools.rs::save_lessons` count canonical-save failures, matching `pseudolife_memory/service.py::MemoryService._save_cortex`/`_save_world`/`_save_lessons`; `rust/daemon/src/service.rs::Service::save_counters` and Python `_persist_all` both log counters/access-count failures without incrementing this counter. Autosave exists, so the old dream-only accounting gap is closed. B14b owner: none (closed). |

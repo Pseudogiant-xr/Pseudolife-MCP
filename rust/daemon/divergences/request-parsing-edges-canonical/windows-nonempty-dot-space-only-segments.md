@@ -1,3 +1,3 @@
-| Item | Python | Rust |
-|---|---|---|
-| Windows nonempty dot/space-only segments except `.` and `..`, including `. ` and all-space segments | captured path-dependent refusal/fallback observations | `parent-space-refusal`: exact 403 before filesystem access; outside the shipped asset URLs |
+| Item | Python | Rust | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|
+| Windows nonempty dot/space-only segments except `.` and `..`, including `. ` and all-space segments | captured path-dependent refusal/fallback observations | `parent-space-refusal`: exact 403 before filesystem access; outside the shipped asset URLs | behaviour with no caller | `rust/daemon/src/static_files.rs::safe_relative_tail`/`serve_with_resolver` refuse Windows dot/space edge segments before I/O; Python `pseudolife_memory/web/api.py::_inside_static_root` follows platform semantics. Bounded URL-producer search: `pseudolife_memory/web/static/index.html` and shipped `frontend/src` asset references contain no all-space or dot-space segments; only hand-crafted requests reach them. B14b owner: B14b no-caller disposition. |

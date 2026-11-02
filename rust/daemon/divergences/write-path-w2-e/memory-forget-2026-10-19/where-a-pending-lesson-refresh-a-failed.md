@@ -1,3 +1,3 @@
-| Item | Python | Rust | Owner / why |
-|---|---|---|---|
-| Where a pending lesson refresh (a failed mirror after a committed forget) is retried | in `_ensure_init`, before every service call, whose failure fails that call | before the next lesson read (`memory_lesson_search`, the history chain) or lesson save; other tools read no lessons | failure path only |
+| Item | Python | Rust | Owner / why | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| Where a pending lesson refresh (a failed mirror after a committed forget) is retried | in `_ensure_init`, before every service call, whose failure fails that call | Before lesson reads (including history, briefing and Console reads) or lesson saves; unrelated tools do not run the refresh barrier | failure path only | behaviour with a caller | Verified at `54063c17`: `rust/daemon/src/forget_tools.rs::ensure_lessons_refreshed` is called by lesson reads and saves, not `Service::init`; `pseudolife_memory/service.py::MemoryService._ensure_init` calls `_refresh_source_retired_lessons_locked` before returning an initialized service. A failed mirror therefore delays/errors different subsequent tools. Caller: MCP `memory_store` after a committed forget whose lesson mirror failed, versus the next lesson-search/history-chain read; B14b owner: B4 lifecycle / B14b lesson-refresh retry placement. |

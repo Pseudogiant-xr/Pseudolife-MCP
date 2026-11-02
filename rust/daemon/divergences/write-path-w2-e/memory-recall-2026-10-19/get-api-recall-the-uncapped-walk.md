@@ -1,3 +1,3 @@
-| Item | Python | Rust | Owner / why |
-|---|---|---|---|
-| `GET /api/recall` (the uncapped walk) | served | not served | the Console REST rows (PARITY.md) |
+| Item | Python | Rust | Owner / why | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| `GET /api/recall` (the uncapped walk) | served | Served by `read/graph.rs::route` through `recall::recall` without the MCP projection | Closed implementation gap; Console Recall calls it through `frontend/src/lib/api/recall.ts`. | closed | Verified at `54063c17`: `rust/daemon/src/routes/read.rs::SERVED` and `rust/daemon/src/read/graph.rs::route` serve `GET /api/recall` through `recall::recall`, without the MCP projection. `pseudolife_memory/web/routes.py` calls `MemoryService.recall`; `frontend/src/lib/api/recall.ts::recallApi.recall` calls the route. B14b owner: none (closed). |

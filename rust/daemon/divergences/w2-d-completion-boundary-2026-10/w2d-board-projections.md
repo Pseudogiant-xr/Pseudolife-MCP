@@ -1,3 +1,3 @@
-| Named divergence | Omitted surface | Reason / owner |
-|---|---|---|
-| `w2d-board-projections` | None (closed 2026-10-27) | `/api/agents`' default view and the three maintainer reads are served (`read/console.rs`, `read/maintainer.rs`) and compared by `harness/w2d_console.py`; the coordination view was W2-F's. |
+| Named divergence | Omitted surface | Reason / owner | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|
+| `w2d-board-projections` | None (closed 2026-10-27) | `/api/agents`' default view and the three maintainer reads are served (`read/console.rs`, `read/maintainer.rs`) and compared by `harness/w2d_console.py`; the coordination view was W2-F's. | closed | `rust/daemon/src/read/console.rs::PATHS`/`route` serve default agents and `rust/daemon/src/read/maintainer.rs::route` serves the three maintainer reads, matching `pseudolife_memory/web/routes.py::ConsoleRoutes`; existing differential: `rust/daemon/harness/w2d_console.py`. B14b owner: none (closed). |

@@ -62,6 +62,25 @@ def test_the_committed_directory_renders_and_parses_back_to_itself():
     assert sd.parse_ledger(sd.render(ledger)) == ledger
 
 
+def test_root_readme_is_an_index_not_a_divergence(tmp_path):
+    root = converted(tmp_path)
+    before = sd.load_dir(root)
+    (root / "README.md").write_text(
+        "# Divergence triage\n\n| Bucket | Count |\n|---|---|\n| closed | 1 |\n",
+        encoding="utf-8", newline="\n")
+    after = sd.load_dir(root)
+    assert after == before
+    assert sd.parse_ledger(sd.render(after)) == before
+
+
+@pytest.mark.parametrize("name", ["readme.md", "README.txt", "extra.md"])
+def test_root_files_other_than_exact_readme_are_rejected(tmp_path, name):
+    root = converted(tmp_path)
+    (root / name).write_text("not an entry\n", encoding="utf-8", newline="\n")
+    with pytest.raises(sd.LedgerError, match="only section directories"):
+        sd.load_dir(root)
+
+
 def test_conversion_keeps_every_entry_and_rerunning_changes_nothing(tmp_path):
     root = converted(tmp_path)
     ledger = sd.parse_ledger(BASE)

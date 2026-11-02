@@ -1,3 +1,3 @@
-| Item | Python | Rust | Owner / why |
-|---|---|---|---|
-| A batch (`proposal_ids`) | takes the service lock per call, so another request can run between items | holds the writer lock for the whole batch | strictly more serialized; a single client sees the same results |
+| Item | Python | Rust | Owner / why | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| A batch (`proposal_ids`) | takes the service lock per call, so another request can run between items | holds the writer lock for the whole batch | strictly more serialized; a single client sees the same results | behaviour with a caller | At `54063c1788f2`: `rust/daemon/src/graph_review_actions.rs` `run` processes all Plan::Ids under the caller's writer lock; `pseudolife_memory/mcp_server.py` `memory_graph_review` iterates service calls that individually lock. Other writers can change the evidence between Python batch items. Caller: `pseudolife_memory/mcp_server.py` `memory_graph_review(proposal_ids=...)` and `rust/daemon/src/graph_review_tools.rs` `mcp_memory_graph_review`; B14b owner: B1-O (graph review), B14b. |

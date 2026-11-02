@@ -1,3 +1,3 @@
-| Item | Python | Rust | Owner / why |
-|---|---|---|---|
-| Cosine ranking of slots, facts, slot matches and alias candidates | torch float32 matmul | f32 dot products | a near-tie can reorder the vocabulary hint and so the request bytes; the embeddings themselves differ within the measured tolerance |
+| Item | Python | Rust | Owner / why | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| Cosine ranking of slots, facts, slot matches and alias candidates | torch float32 matmul | f32 dot products | a near-tie can reorder the vocabulary hint and so the request bytes; the embeddings themselves differ within the measured tolerance | behaviour with a caller | At `54063c1788f2`: `rust/daemon/src/dream/run.rs` `ranked`, `vocab_ranked`, `facts_ranked` and `resolve_slot` use f32 dot products; `pseudolife_memory/memory/cortex.py` `vocab_ranked` / `facts_ranked` use torch matmul. Ranking feeds extractor hints and slot selection, so it can change results. Caller: `pseudolife_memory/service_dream.py` `_dream_hints` / `_resolve_dream_slot` and `rust/daemon/src/dream/run.rs` `hints` / `resolve_dream_slot` on manual and sweep dreams; B14b owner: B1-P (dream engine), B14b. |

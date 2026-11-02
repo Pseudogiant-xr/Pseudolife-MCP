@@ -1,3 +1,3 @@
-| Item | Python | Rust | Why |
-|---|---|---|---|
-| Hub cache override interpolation | Python expands `~` and environment variables in cache paths | HF_HOME, HF_HUB_CACHE and XDG_CACHE_HOME must already contain expanded paths | interpolation spellings are deferred; ordinary absolute/relative paths and override precedence are supported |
+| Item | Python | Rust | Why | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| Hub cache override interpolation | Python expands `~` and environment variables in cache paths | HF_HOME, HF_HUB_CACHE and XDG_CACHE_HOME must already contain expanded paths | interpolation spellings are deferred; ordinary absolute/relative paths and override precedence are supported | behaviour with no caller | `rust/daemon/src/embed.rs::cache_root_from` directly builds paths from cache environment values; Python `pseudolife_memory/memory/embedding.py::_cached_hf_file` delegates cache resolution to Hugging Face. Bounded launch-producer search: `ops/Dockerfile.daemon-rust`, `ops/docker-compose*.yml`, `ops/install.sh` and `ops/install.ps1` contain no tilde/environment-placeholder HF cache value; explicit already-expanded paths work. B14b owner: B14b no-caller disposition. |

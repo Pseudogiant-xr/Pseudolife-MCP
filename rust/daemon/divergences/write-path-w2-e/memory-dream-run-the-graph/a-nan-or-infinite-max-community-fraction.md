@@ -1,3 +1,3 @@
-| Item | Python | Rust | Owner / why |
-|---|---|---|---|
-| A NaN or infinite `max_community_fraction` | `int()` raises (`ValueError`, `OverflowError`): the refresh answers `error` | NaN gives a split size of 10, infinity one no community exceeds | no producer writes one |
+| Item | Python | Rust | Owner / why | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| A NaN or infinite `max_community_fraction` | `int()` raises (`ValueError`, `OverflowError`): the refresh answers `error` | NaN gives a split size of 10, infinity one no community exceeds | no producer writes one | behaviour with no caller | At `54063c1788f2`: `rust/daemon/src/graph_insight.rs` `detect_communities` casts n*fraction to i64, while `pseudolife_memory/memory/graph_insight.py` `detect_communities` calls int(). Caller search: `max_community_fraction` in `pseudolife_memory/`, `plugin/`, `ops/`, `.github/`, and `pyproject.toml` finds default 0.25 and the refresh consumer, with no shipped generator of NaN/Infinity. Manually supplied non-finite config remains a behavioural edge, not presentation. B14b owner: B14b disposition; B1-P2b (graph insight). |

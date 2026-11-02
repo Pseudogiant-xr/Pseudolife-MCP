@@ -1,3 +1,3 @@
-| Item | Python | Rust | Owner / why |
-|---|---|---|---|
-| A `proposals` `similarity` spelled as a hexadecimal float (`"0x1p-3"`) | parsed by PostgreSQL's `strtof` | refused (`internal_error`) | no producer sends one |
+| Item | Python | Rust | Owner / why | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| A `proposals` `similarity` spelled as a hexadecimal float (`"0x1p-3"`) | parsed by PostgreSQL's `strtof` | refused (`internal_error`) | no producer sends one | behaviour with a caller | At `54063c1788f2`: `rust/daemon/src/graph_review_actions.rs` `real_param` parses string similarity with Rust f32::parse, which rejects hexadecimal floats; `pseudolife_memory/service.py` `_graph_propose_links_locked` passes strings to PostgreSQL REAL parsing. The public dict admits that valid database literal. Caller: `pseudolife_memory/mcp_server.py` `memory_graph_review(action="propose")` and Rust `actions::propose` consume untyped proposal similarity; B14b owner: B1-O (proposal input parity), B14b. |

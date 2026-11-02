@@ -1,3 +1,3 @@
-| Item | Python | Rust | Owner / why |
-|---|---|---|---|
-| Entry insert fails after eviction | the entry stays resident (served until restart) and the error propagates | the entry is not kept; the error propagates | failure path only; keeps bank and table aligned |
+| Item | Python | Rust | Owner / why | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| Entry insert fails after eviction | the entry stays resident (served until restart) and the error propagates | the entry is not kept; the error propagates | failure path only; keeps bank and table aligned | behaviour with a caller | Verified at `54063c17`: `rust/daemon/src/store.rs::cms_store` evicts before inserting, then publishes only after `txn::run` succeeds; `pseudolife_memory/memory/cms.py::ContinuumMemorySystem._store` calls `MIRASBand.store` before write-through insertion. A storage fault can change resident results for a normal store. Caller: `rust/daemon/src/store.rs::mcp_memory_store` during insert failure after capacity eviction; B14b owner: B4 lifecycle / B14b W2-E failed-store recovery. |

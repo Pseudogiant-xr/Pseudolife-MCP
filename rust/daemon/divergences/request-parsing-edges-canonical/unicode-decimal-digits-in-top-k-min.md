@@ -1,3 +1,3 @@
-| Item | Python | Rust |
-|---|---|---|
-| Unicode decimal digits in `top_k` / `min_score` (`top_k=٣`) | `int()` / `float()` accept them (3) | not a number: the route default (delegate ruling 2026-10-09: non-canonical input) |
+| Item | Python | Rust | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|
+| Unicode decimal digits in `top_k` / `min_score` (`top_k=٣`) | `int()` / `float()` accept them (3) | not a number: the route default (delegate ruling 2026-10-09: non-canonical input) | behaviour with no caller | `rust/daemon/src/read/search_route.rs::py_int`/`py_float` use ASCII numeric parsing; `pseudolife_memory/web/routes.py::_i`/`_f` use Python conversions. Bounded query-producer search: `frontend/src/lib/api/stream.ts::searchParams` serializes numeric top_k/min_score and `rust/shim/src/cli` uses ASCII numeric options; no shipped caller constructs Unicode-digit query strings. B14b owner: B14b no-caller disposition. |

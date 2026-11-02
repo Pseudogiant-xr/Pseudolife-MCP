@@ -1,3 +1,3 @@
-| Item | Python | Rust | Owner / why |
-|---|---|---|---|
-| The date mask, `isdigit` and NFC/NFKC in the gates | Python's `re` and `unicodedata` (Unicode 14) | the regex crate's Unicode `\b`/`\d`/`\s` and case folding, an approximated `isdigit`, the normalization crate's tables | rare characters only; `\w` and category M use CPython's exact tables |
+| Item | Python | Rust | Owner / why | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| The date mask, `isdigit` and NFC/NFKC in the gates | Python's `re` and `unicodedata` (Unicode 14) | the regex crate's Unicode `\b`/`\d`/`\s` and case folding, an approximated `isdigit`, the normalization crate's tables | rare characters only; `\w` and category M use CPython's exact tables | behaviour with a caller | At `54063c1788f2`: `rust/daemon/src/dream/gates.rs` `date_like_re`, `py_isdigit`, `citation_text` and `span_norm` use regex / normalization crate tables; `pseudolife_memory/memory/dream.py` `_literal_tokens` / `_span_norm` and `pseudolife_memory/service_dream.py` `_citation_text` / `_citation_backs` use Python re / unicodedata. These gates can admit, drop or quarantine different claims. Caller: `rust/daemon/src/dream/run.rs` `run_locked` applies the gates to user memory and model claims; B14b owner: B1-P (dream engine), B14b. |

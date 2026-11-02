@@ -1,3 +1,3 @@
-| Key | Python | Rust | Owner |
-|---|---|---|---|
-| `migration_partial`, `lesson_reconciliation_required` | a legacy `.pt` import stopped part-way; an uncertain lesson commit latched | never emitted: Rust has no legacy import yet and no lesson latch (both declared elsewhere in this file) | the legacy import (B9, D1); the lesson latch row below |
+| Key | Python | Rust | Owner | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| `migration_partial`, `lesson_reconciliation_required` | a legacy `.pt` import stopped part-way; an uncertain lesson commit latched | never emitted: Rust delegates legacy import to the documented Python migration path and has no health lesson latch (both declared elsewhere in this file) | the legacy import (B9, D1); the lesson latch row below | behaviour with a caller | `rust/daemon/src/health.rs::payload` explicitly omits both latches; `pseudolife_memory/daemon.py::_build_health_payload` emits them for interrupted legacy import or uncertain lesson persistence. Neither fault condition is made callerless by successful-path implementations. Caller: health probes after Python `pseudolife_memory/service.py::MemoryService._hydrate_resident_stores` legacy import or a dream lesson batch's uncertain commit; B14b owner: B11 migration via R4/R5; B1 dream recovery. |

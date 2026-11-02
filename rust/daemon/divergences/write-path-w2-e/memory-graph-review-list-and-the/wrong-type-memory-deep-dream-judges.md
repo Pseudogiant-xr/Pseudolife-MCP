@@ -1,3 +1,3 @@
-| Item | Python | Rust | Owner / why |
-|---|---|---|---|
-| Wrong-type `memory.deep_dream.judges_enabled` / `analyzer_file_duplicates` | taken by truthiness | refused at config load | the existing config-type substitution |
+| Item | Python | Rust | Owner / why | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| Wrong-type `memory.deep_dream.judges_enabled` / `analyzer_file_duplicates` | taken by truthiness | refused at config load | the existing config-type substitution | behaviour with a caller | At `54063c1788f2`: `rust/daemon/src/config.rs` `load_str` / `want_bool` reject wrong-type judges_enabled and analyzer_file_duplicates; `pseudolife_memory/utils/config.py` `load_config` constructs DeepDreamConfig whose consumers use truthiness. Accepted config can refuse Rust startup. Caller: `rust/daemon/src/config.rs` `load` / Python `load_config` read operator config.yaml; B14b owner: B15 (CONFIG-LOAD), B14b. |

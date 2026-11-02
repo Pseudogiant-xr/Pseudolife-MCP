@@ -1,3 +1,3 @@
-| Item | Python | Rust | Owner / why |
-|---|---|---|---|
-| `MUST INCLUDE:` detection | `str.upper()` (Unicode 14) | Rust's `to_uppercase` (the toolchain's Unicode) | only characters whose uppercase changed since Unicode 14 |
+| Item | Python | Rust | Owner / why | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| `MUST INCLUDE:` detection | `str.upper()` (Unicode 14) | Rust's `to_uppercase` (the toolchain's Unicode) | only characters whose uppercase changed since Unicode 14 | behaviour with a caller | At `54063c1788f2`: `rust/daemon/src/dream/stage_calls.rs` `must_include` uses `to_uppercase`; `pseudolife_memory/memory/dream.py` `_must_include` uses `str.upper`. Matching affects the required-value filter on generated rules. Caller: `rust/daemon/src/dream/stage_calls.rs` `Compat::extract_rules` consumes outcome-signal detail created through memory_outcome; B14b owner: B1-P (dream engine), B14b. |

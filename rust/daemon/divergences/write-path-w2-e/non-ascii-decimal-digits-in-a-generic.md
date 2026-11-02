@@ -1,3 +1,3 @@
-| Item | Python | Rust | Owner / why |
-|---|---|---|---|
-| Non-ASCII decimal digits in a generic session title | `\d` matches them | ASCII digits only | titles are `strftime` output or caller text |
+| Item | Python | Rust | Owner / why | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| Non-ASCII decimal digits in a generic session title | `\d` matches them | ASCII digits only | titles are `strftime` output or caller text | behaviour with a caller | Verified at `54063c17`: `rust/daemon/src/episodes.rs::is_generic_title` accepts ASCII digits only; `pseudolife_memory/session_title.py::GENERIC_TITLE_RE` uses Unicode decimal digits. `rust/daemon/src/store.rs::store_body` and `rust/daemon/src/session_close.rs::auto_title` consult this predicate, so caller-supplied valid titles can change hints and automatic retitling. Caller: MCP `memory_session_title` or `/api/episode/start` supplying a Unicode-decimal generic-shaped title, then store/close/reap; B14b owner: B14b episode title-predicate closure / B3 hooks. |

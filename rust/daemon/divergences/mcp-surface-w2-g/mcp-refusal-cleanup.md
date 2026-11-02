@@ -16,4 +16,4 @@ refusals idle and 117 of 2000 under 15 CPU burners, against 0 of 3800 for
 Python. The strict MCP corpus keeps two `body_limit` differences (indices 4
 and 5, GETs declaring 9999999 bytes: the added `Connection: close` on the
 413); `mcp_ci.py` declares exactly those. Indices 0, 2 and 3, which used to
-differ the same way, now match.
+differ the same way, now match. D7 bucket: behaviour with a caller. Code verification: `rust/daemon/src/http.rs::handle` bounds post-response discard and adds close; `rust/daemon/src/linger.rs` lingers the socket, versus the Python uvicorn response path reached by `pseudolife_memory/web/api.py::_read_body`. The extra close changes connection lifetime, not just header typography. Caller: HTTP clients in `rust/shim/src/raw_http.rs` or `pseudolife_memory/shim.py` after a body-limit/early refusal; direct clients may use Expect; B14b owner: B6 MCP/HTTP transport.

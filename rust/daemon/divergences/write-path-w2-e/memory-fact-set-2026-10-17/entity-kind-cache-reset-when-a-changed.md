@@ -1,3 +1,3 @@
-| Item | Python | Rust | Owner / why |
-|---|---|---|---|
-| `_entity_kind_cache` reset when a changed writer lease rehydrates the service (`service.py:1416`) | the next `"auto"` fact write rereads `entity_kinds` | the same: the cache lives in the ready service's write state, which the rehydrate drops | closed (B4) |
+| Item | Python | Rust | Owner / why | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| `_entity_kind_cache` reset when a changed writer lease rehydrates the service (`service.py:1416`) | the next `"auto"` fact write rereads `entity_kinds` | the same: the cache lives in the ready service's write state, which the rehydrate drops | closed (B4) | closed | Verified at `54063c17`: `rust/daemon/src/service.rs::Service::rehydrate_if_bank_changed_hands` drops `inner.ready`; the new `episodes::WriteState` has a fresh `entity_kinds` map, populated by `rust/daemon/src/fact_set.rs::entity_kind`. This matches `pseudolife_memory/service.py::MemoryService._rehydrate_if_bank_changed_hands`. B14b owner: none (closed). |

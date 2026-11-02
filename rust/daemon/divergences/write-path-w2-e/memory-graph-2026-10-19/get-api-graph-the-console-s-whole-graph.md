@@ -1,3 +1,3 @@
-| Item | Python | Rust | Owner / why |
-|---|---|---|---|
-| `GET /api/graph` (the Console's whole graph with `scope` and the `max_nodes` hub cap) | served over `_whole_graph` | not served; the MCP tool's whole graph (no scope, no cap) is | the Console REST rows (PARITY.md) |
+| Item | Python | Rust | Owner / why | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| `GET /api/graph` (the Console's whole graph with `scope` and the `max_nodes` hub cap) | served over `_whole_graph` | Served by `read/graph.rs::route` and `filter_graph` with scope and the iterative hub cap | Closed implementation gap; the production caller is `frontend/src/lib/api/graph.ts::graphApi.graph`. | closed | Verified at `54063c17`: `rust/daemon/src/routes/read.rs::SERVED` includes `GET /api/graph`; `rust/daemon/src/read/graph.rs::route` calls `filter_graph` for the whole graph, preserving scope and iterative degree cap semantics of `pseudolife_memory/service.py::MemoryService._whole_graph`. `frontend/src/lib/api/graph.ts::graphApi.graph` is the production caller. B14b owner: none (closed). |

@@ -1,3 +1,3 @@
-| Item | Python | Rust | Owner / why |
-|---|---|---|---|
-| A `weights.pt` left beside a bank that has a counters row | imported when it is newer than the row and counts at least as many interactions (a rollback's file), else renamed `*.imported` | ignored: the row stands, the file stays where it is | declared (B4, D2): the row is the newer source in every case this daemon creates |
+| Item | Python | Rust | Owner / why | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| A `weights.pt` left beside a bank that has a counters row | imported when it is newer than the row and counts at least as many interactions (a rollback's file), else renamed `*.imported` | ignored: the row stands, the file stays where it is | declared (B4, D2): the row is the newer source in every case this daemon creates | behaviour with a caller | Verified at `54063c17`: `rust/daemon/src/counters.rs::pending_import` returns immediately when a row exists; `pseudolife_memory/service.py::MemoryService._load_counters` can import a newer rollback file and renames old files. This can change counter state, not just filenames. Caller: `pseudolife_memory/daemon.py::run_daemon` startup after rollback, through `MemoryService._load_counters`; B14b owner: R4 / B11 rollback and legacy-counter migration. |

@@ -1,3 +1,3 @@
-| Item | Python | Rust | Why |
-|---|---|---|---|
-| `PSEUDOLIFE_MALLOC_TRIM_SECONDS` | parsed before platform availability is checked; glibc trim runs only on Linux | parsed at start; glibc trim on Linux, no trim elsewhere | canonical finite seconds are implemented; Python-only numeric spellings remain deferred |
+| Item | Python | Rust | Why | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| `PSEUDOLIFE_MALLOC_TRIM_SECONDS` | parsed before platform availability is checked; glibc trim runs only on Linux | parsed at start; glibc trim on Linux, no trim elsewhere | canonical finite seconds are implemented; Python-only numeric spellings remain deferred | behaviour with no caller | `rust/daemon/src/heap_trim.rs::interval` parses Rust finite floats; `pseudolife_memory/utils/heap_trim.py` parses Python floats. Bounded launch-producer search: `ops/Dockerfile.daemon-rust`, `ops/docker-compose.yml` and `ops/install.sh`/`ops/install.ps1` supply no Python-only numeric spelling; canonical finite values have the same platform policy. B14b owner: B14b no-caller disposition. |

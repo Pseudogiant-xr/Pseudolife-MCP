@@ -1,3 +1,3 @@
-| Item | Python | Rust | Why |
-|---|---|---|---|
-| `PSEUDOLIFE_MCP_PORT` with Unicode digits, or `PSEUDOLIFE_MCP_*_SECONDS` with Python-only float spellings | `int()`/`float()` accept them | refuses to start (exit 1) | non-canonical input |
+| Item | Python | Rust | Why | D7 bucket | Code verification / B14b owner |
+|---|---|---|---|---|---|
+| `PSEUDOLIFE_MCP_PORT` with Unicode digits, or `PSEUDOLIFE_MCP_*_SECONDS` with Python-only float spellings | `int()`/`float()` accept them | refuses to start (exit 1) | non-canonical input | behaviour with no caller | `rust/daemon/src/config.rs::DaemonEnv::from_env`/`py_int` and `rust/daemon/src/background.rs::seconds` parse ASCII spellings; `pseudolife_memory/daemon.py::run_daemon` uses Python `int`/`float`. Bounded launch-producer search: `ops/Dockerfile.daemon-rust`, `ops/docker-compose.yml` and installer env writers use ASCII ports/seconds; none emits Unicode digits or Python-only float strings. B14b owner: B14b no-caller disposition. |
