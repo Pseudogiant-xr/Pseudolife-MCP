@@ -40,7 +40,9 @@ Read-only state accepts safe YAML tags and timestamps in unrelated settings and
 resolves merge keys with Python's precedence. Writes escape YAML-sensitive Unicode characters and
 both arms validate the retained recipient limit before making a backup. Read-only
 validation keeps timestamps and binary values non-string (projected as JSON null),
-so maintainer names cannot become valid through coercion; quoted date-like strings
+after non-string mapping keys are filtered, so distinct timestamp or binary keys
+in unrelated settings remain inspectable. Internal scalar markers cannot collide
+with decoded user strings. Maintainer names cannot become valid through coercion; quoted date-like strings
 remain strings. Unbounded integer limits retain their exact value and sign during
 read-only checks. Writes also escape U+FFFE and U+FFFF in keys and values.
 The native setup regression suite compares these cases directly with the Python

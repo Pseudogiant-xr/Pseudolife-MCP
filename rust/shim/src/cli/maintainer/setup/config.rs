@@ -133,6 +133,7 @@ struct Loader {
     shared: bool,
     reading: bool,
     merge_key: Option<String>,
+    opaque_prefix: String,
 }
 impl MarkedEventReceiver for Loader {
     fn on_event(&mut self, event: Event, mark: Marker) {
@@ -172,13 +173,15 @@ impl MarkedEventReceiver for Loader {
                     None,
                 )
             }
-            Event::Scalar(value, style, id, tag) => match scalar(value, style, tag, self.reading) {
-                Ok((value, style, tag)) => Event::Scalar(value, style, id, tag),
-                Err(problem) => {
-                    self.problem = Some(problem);
-                    return;
+            Event::Scalar(value, style, id, tag) => {
+                match scalar(value, style, tag, self.reading, &self.opaque_prefix) {
+                    Ok((value, style, tag)) => Event::Scalar(value, style, id, tag),
+                    Err(problem) => {
+                        self.problem = Some(problem);
+                        return;
+                    }
                 }
-            },
+            }
             _ => event,
         };
         self.loader.on_event(event, mark);
@@ -190,6 +193,7 @@ fn scalar(
     style: TScalarStyle,
     tag: Option<Tag>,
     reading: bool,
+    opaque_prefix: &str,
 ) -> std::result::Result<(String, TScalarStyle, Option<Tag>), String> {
     if tag.is_none() && style == TScalarStyle::Plain && value == "<<" {
         return Err("config.yaml uses YAML merge keys; edit it on the daemon host instead".into());
@@ -205,9 +209,13 @@ fn scalar(
             Some("tag:yaml.org,2002:timestamp" | "tag:yaml.org,2002:binary")
         )
     {
-        // JSON has no date or binary scalar. Preserve their non-string status
-        // for maintainer validation; unrelated values are never rewritten.
-        return Ok(("null".into(), TScalarStyle::Plain, None));
+        // Keep distinct scalar identities until projection: converting keys to
+        // null here would make otherwise valid mappings fail duplicate checks.
+        return Ok((
+            format!("{opaque_prefix}{}:{value}", tag.unwrap()),
+            TScalarStyle::DoubleQuoted,
+            None,
+        ));
     }
     if tag.is_some_and(|t| {
         !matches!(
@@ -274,7 +282,11 @@ fn scalar(
         let timestamp = regex::Regex::new(r"^(?:[0-9]{4}-[0-9]{2}-[0-9]{2}|[0-9]{4}-[0-9]{1,2}-[0-9]{1,2}(?:[Tt]|[ \t]+)[0-9]{1,2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]*)?(?:[ \t]*(?:Z|[-+][0-9]{1,2}(?::[0-9]{2})?))?)$").unwrap();
         if tag.is_none() && timestamp.is_match(&value) {
             if reading {
-                return Ok(("null".into(), TScalarStyle::Plain, None));
+                return Ok((
+                    format!("{opaque_prefix}tag:yaml.org,2002:timestamp:{value}"),
+                    TScalarStyle::DoubleQuoted,
+                    None,
+                ));
             }
             return Err("config.yaml holds a YAML timestamp this command cannot rewrite; edit it on the daemon host instead".into());
         }
@@ -365,14 +377,19 @@ fn decimal_step(value: &mut String, base: u32, mut carry: u32) {
 }
 
 fn json_value(value: &Yaml) -> Result<Value> {
-    projected_value(value, None)
+    projected_value(value, None, None)
 }
 
-fn projected_value(value: &Yaml, merge_key: Option<&str>) -> Result<Value> {
+fn projected_value(
+    value: &Yaml,
+    merge_key: Option<&str>,
+    opaque_prefix: Option<&str>,
+) -> Result<Value> {
     Ok(match value {
         Yaml::Null | Yaml::BadValue => Value::Null,
         Yaml::Boolean(v) => json!(v),
         Yaml::Integer(v) => json!(v),
+        Yaml::String(v) if opaque_prefix.is_some_and(|prefix| v.starts_with(prefix)) => Value::Null,
         Yaml::String(v) => json!(v),
         Yaml::Real(v) => {
             let n = if v
@@ -390,7 +407,7 @@ fn projected_value(value: &Yaml, merge_key: Option<&str>) -> Result<Value> {
         }
         Yaml::Array(v) => Value::Array(
             v.iter()
-                .map(|v| projected_value(v, merge_key))
+                .map(|v| projected_value(v, merge_key, opaque_prefix))
                 .collect::<Result<_>>()?,
         ),
         Yaml::Hash(v) => {
@@ -404,7 +421,8 @@ fn projected_value(value: &Yaml, merge_key: Option<&str>) -> Result<Value> {
                     _ => return Err(Error::refused("invalid YAML merge value")),
                 };
                 for source in sources.into_iter().rev() {
-                    let Value::Object(source) = projected_value(source, merge_key)? else {
+                    let Value::Object(source) = projected_value(source, merge_key, opaque_prefix)?
+                    else {
                         return Err(Error::refused("invalid YAML merge value"));
                     };
                     out.extend(source);
@@ -417,8 +435,13 @@ fn projected_value(value: &Yaml, merge_key: Option<&str>) -> Result<Value> {
                     }
                     return Err(Error::refused("config.yaml holds a non-string mapping key"));
                 };
-                if Some(key) != merge_key {
-                    out.insert(key.into(), projected_value(value, merge_key)?);
+                if Some(key) != merge_key
+                    && !opaque_prefix.is_some_and(|prefix| key.starts_with(prefix))
+                {
+                    out.insert(
+                        key.into(),
+                        projected_value(value, merge_key, opaque_prefix)?,
+                    );
                 }
             }
             Value::Object(out)
@@ -433,9 +456,6 @@ pub(super) fn read(path: &Path, rewriting: bool) -> Result<Value> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(json!({})),
         Err(_) => return Err(Error::refused("cannot read the daemon configuration")),
     };
-    // The ordinary loader first validates structure and duplicate mapping keys.
-    let raw = YamlLoader::load_from_str(&text)
-        .map_err(|_| Error::refused("cannot read the daemon configuration: invalid YAML"))?;
     #[derive(Default)]
     struct Events(Vec<(Event, Marker)>);
     impl MarkedEventReceiver for Events {
@@ -447,6 +467,13 @@ pub(super) fn read(path: &Path, rewriting: bool) -> Result<Value> {
     Parser::new_from_str(&text)
         .load(&mut events, true)
         .map_err(|_| Error::refused("cannot read the daemon configuration: invalid YAML"))?;
+    // Validate duplicate keys after scalar resolution: the ordinary loader
+    // would conflate a plain timestamp key with a quoted string of that date.
+    let document_count = events
+        .0
+        .iter()
+        .filter(|(event, _)| matches!(event, Event::DocumentEnd))
+        .count();
     // A decoded scalar can contain escaped NULs. Choose a marker absent from
     // every decoded scalar so a quoted literal `<<` never becomes a merge key.
     let mut merge_key = "\0maintainer-merge".to_owned();
@@ -457,9 +484,18 @@ pub(super) fn read(path: &Path, rewriting: bool) -> Result<Value> {
     {
         merge_key.push('-');
     }
+    // Decoded strings, including escaped NULs, must never impersonate the
+    // internal representation of a non-JSON scalar, whether key or value.
+    let mut opaque_prefix = "\0maintainer-scalar:".to_owned();
+    while events.0.iter().any(
+        |(event, _)| matches!(event, Event::Scalar(value, ..) if value.starts_with(&opaque_prefix)),
+    ) {
+        opaque_prefix.push('-');
+    }
     let mut loader = Loader {
         reading: !rewriting,
         merge_key: (!rewriting).then_some(merge_key),
+        opaque_prefix,
         ..Default::default()
     };
     for (event, mark) in events.0 {
@@ -474,7 +510,7 @@ pub(super) fn read(path: &Path, rewriting: bool) -> Result<Value> {
         ));
     }
     let docs = loader.loader.documents();
-    if docs.len() != raw.len() {
+    if docs.len() != document_count {
         return Err(Error::refused(
             "cannot read the daemon configuration: duplicate resolved YAML keys",
         ));
@@ -490,7 +526,11 @@ pub(super) fn read(path: &Path, rewriting: bool) -> Result<Value> {
             if rewriting {
                 json_value(value)
             } else {
-                projected_value(value, loader.merge_key.as_deref())
+                projected_value(
+                    value,
+                    loader.merge_key.as_deref(),
+                    Some(&loader.opaque_prefix),
+                )
             }
         })
         .transpose()?

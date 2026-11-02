@@ -168,6 +168,11 @@ def _native_env(tmp_path):
     "other: !!seq [1, 2]\n",
     "other: !!map {one: 1}\n",
     "other: {17: kept, true: kept}\n",
+    "other: {2026-01-02: one, 2026-01-03: two}\n",
+    "other: {!!timestamp 2026-01-02: one, !!timestamp 2026-01-03: two}\n",
+    "other: {!!binary b25l: one, !!binary dHdv: two}\n",
+    "other: {null: null-key, 2026-01-02: date-key, '2026-01-02': string-key}\n",
+    'other: {"\\0maintainer-scalar:timestamp:2026-01-02": literal, 2026-01-02: date}\n',
     "defaults: &defaults {rp_id: ignored.invalid, origin: https://ignored.invalid}\n",
 ])
 def test_native_host_state_reads_safe_yaml_without_rewriting(tmp_path, monkeypatch, text):
@@ -216,6 +221,18 @@ def test_native_host_state_resolves_yaml_merge_precedence(tmp_path, monkeypatch,
     assert path.read_text(encoding="utf-8") == text
 
 
+def test_native_host_state_still_refuses_duplicate_resolved_keys(tmp_path):
+    path = tmp_path / "config.yaml"
+    original = "other: {key: one, key: two}\n"
+    path.write_text(original, encoding="utf-8")
+    result = subprocess.run([_native(), "maintainer", "setup", "--host-state"],
+                            env=_native_env(tmp_path), capture_output=True, text=True, timeout=20)
+    assert result.returncode != 0
+    assert "cannot read the daemon configuration" in result.stderr
+    assert path.read_text(encoding="utf-8") == original
+    assert list(tmp_path.iterdir()) == [path]
+
+
 @pytest.mark.parametrize("special", ["\u2028", "\u2029", "\ufffe", "\uffff", *map(chr, range(0x7f, 0xa0))])
 def test_native_config_write_keeps_yaml_sensitive_unicode(tmp_path, special):
     import yaml
@@ -245,6 +262,7 @@ def test_native_config_write_keeps_date_like_strings(tmp_path, text):
 @pytest.mark.parametrize("value", [
     "2026-01-02", "!!timestamp 2026-01-02", "2026-01-02T01:02:03Z",
     "!!binary MjAyNi0wMS0wMg==", "'2026-01-02'", "!!str 2026-01-02",
+    '"\\0maintainer-scalar:tag:yaml.org,2002:timestamp:2026-01-02"',
 ])
 @pytest.mark.parametrize("merged", [False, True])
 def test_native_host_state_preserves_name_scalar_validation(tmp_path, monkeypatch, value, merged):
