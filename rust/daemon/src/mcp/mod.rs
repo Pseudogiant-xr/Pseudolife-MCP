@@ -8,6 +8,7 @@
 
 pub(crate) mod as_of;
 pub mod binding;
+mod cancellation;
 mod catalogue;
 mod difflib;
 pub mod dispatch;
@@ -51,6 +52,7 @@ pub struct McpState {
     /// Tokenless installs keep the SDK's DNS-rebinding allowlist on.
     auth_configured: bool,
     sessions: Mutex<Sessions>,
+    requests: Arc<cancellation::Registry>,
     modern: Arc<modern::Subscriptions>,
 }
 
@@ -124,6 +126,7 @@ impl McpState {
             overrides: Overrides::new(tiers::OVERRIDE_TTL),
             auth_configured,
             sessions: Mutex::new(Sessions::default()),
+            requests: Arc::new(cancellation::Registry::default()),
             modern: Arc::new(modern::Subscriptions::default()),
         }
     }
@@ -194,6 +197,7 @@ impl McpState {
     fn forget(&self, sid: &str) {
         let mut s = self.sessions.lock().expect("sessions lock");
         s.live.remove(sid);
+        self.requests.forget(sid);
     }
 
     /// Server-initiated message to the session's standalone stream, if open.
@@ -705,6 +709,11 @@ async fn post(
     let (id, method, params) = match message {
         Message::Request { id, method, params } => (id, method, params),
         Message::Notification { method, params } => {
+            if method == "notifications/cancelled" {
+                if let Some(id) = params.get("requestId") {
+                    app.mcp.requests.cancel(sid, id);
+                }
+            }
             if validation::notification(&method, &Value::Object(params))
                 && method == "notifications/initialized"
             {
@@ -717,14 +726,21 @@ async fn post(
     // The call runs as its own task, so a client that drops the connection
     // does not cancel a tool body mid-write (Python runs bodies on worker
     // threads that a disconnect does not stop).
-    let work = tokio::spawn(respond(
-        app.clone(),
-        principal.to_string(),
-        sid.to_string(),
-        headers,
-        id,
-        method,
-        params,
+    let pending = app.mcp.requests.start(sid, &id);
+    let interruptible = method != "tools/call"
+        || params.get("name").and_then(Value::as_str) == Some("memory_toolset");
+    let work = tokio::spawn(pending.run(
+        id.clone(),
+        interruptible,
+        respond(
+            app.clone(),
+            principal.to_string(),
+            sid.to_string(),
+            headers,
+            id,
+            method,
+            params,
+        ),
     ));
     let stream = async_stream(move |tx| async move {
         tokio::pin!(work);
@@ -1155,16 +1171,29 @@ mod sessions {
     #[tokio::test]
     async fn modern_refusal_validates_ids_before_the_envelope() {
         for (body, expected_id) in [
-            (r#"{"jsonrpc":"2.0","method":"tools/list","$serde_json::private::Number":"1","id":7}"#, "7"),
             (
-                r#"{"id":{"$serde_json::private::Number":"1"}}"#,
-                "null",
+                r#"{"jsonrpc":"2.0","method":"tools/list","$serde_json::private::Number":"1","id":7}"#,
+                "7",
             ),
+            (r#"{"id":{"$serde_json::private::Number":"1"}}"#, "null"),
         ] {
             let mut headers = HeaderMap::new();
-            headers.insert(header::ACCEPT, HeaderValue::from_static("application/json, text/event-stream"));
-            headers.insert("mcp-protocol-version", HeaderValue::from_static("2026-07-28"));
-            let response = modern::handle(&app(), "caller", Method::POST, headers, Bytes::copy_from_slice(body.as_bytes())).await;
+            headers.insert(
+                header::ACCEPT,
+                HeaderValue::from_static("application/json, text/event-stream"),
+            );
+            headers.insert(
+                "mcp-protocol-version",
+                HeaderValue::from_static("2026-07-28"),
+            );
+            let response = modern::handle(
+                &app(),
+                "caller",
+                Method::POST,
+                headers,
+                Bytes::copy_from_slice(body.as_bytes()),
+            )
+            .await;
             assert_eq!(response.status(), StatusCode::BAD_REQUEST);
             let bytes = axum::body::to_bytes(response.into_body(), 4096)
                 .await
