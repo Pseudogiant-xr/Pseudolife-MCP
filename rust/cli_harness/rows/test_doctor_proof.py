@@ -258,8 +258,7 @@ def test_corrupt_model_names_repair_and_removes_owned_bank(tmp_path, damage):
     assert banks() == before
 
 
-@pytest.mark.parametrize("fault", ["create-denied", "create-query-canceled", pytest.param(
-    "relative-runtime", marks=pytest.mark.skipif(os.name == "nt", reason="POSIX executable fixture")), "create-timeout", "drop-lost-reply", "drop-checkpoint-delay", pytest.param(
+@pytest.mark.parametrize("fault", ["create-denied", "create-query-canceled", "relative-runtime", "create-timeout", "drop-lost-reply", "drop-checkpoint-delay", pytest.param(
     "create-interrupt", marks=pytest.mark.skipif(os.name == "nt", reason="POSIX SIGTERM contract")), pytest.param(
     "drop-interrupt", marks=pytest.mark.skipif(os.name == "nt", reason="POSIX SIGTERM contract"))])
 def test_lost_database_replies_are_bounded_and_cleanup_is_reported(tmp_path, fault):
@@ -345,15 +344,22 @@ def test_lost_database_replies_are_bounded_and_cleanup_is_reported(tmp_path, fau
     daemon.write_bytes(b"intentionally not executable")
     marker = tmp_path / "runtime-observation.json"
     if fault == "relative-runtime":
-        import sys
         runtime = tmp_path / "runtime" / "synthetic-library"
         runtime.parent.mkdir()
         runtime.write_bytes(b"synthetic runtime")
-        daemon.write_text(f"#!{sys.executable}\n"
-                          "import os,json\nfrom pathlib import Path\n"
-                          "p=Path(os.environ['ORT_DYLIB_PATH'])\n"
-                          f"Path({str(marker)!r}).write_text(json.dumps({{'absolute':p.is_absolute(), 'same_bytes':p.is_file() and p.read_bytes()==b'synthetic runtime'}}))\n")
-        daemon.chmod(0o700)
+        fixture_source = tmp_path / "runtime_fixture.rs"
+        fixture_source.write_text(r'''use std::{env, fs, path::PathBuf};
+fn main() {
+    let library = PathBuf::from(env::var_os("ORT_DYLIB_PATH").unwrap());
+    let same_bytes = fs::read(&library).is_ok_and(|v| v == b"synthetic runtime");
+    let report = format!("{{\"absolute\":{},\"same_bytes\":{}}}", library.is_absolute(), same_bytes);
+    fs::write(env::current_exe().unwrap().with_file_name("runtime-observation.json"), report).unwrap();
+}
+''')
+        compiler = shutil.which("rustc")
+        assert compiler, "the native runtime-path regression requires rustc"
+        subprocess.run([compiler, "--edition=2021", str(fixture_source), "-o", str(daemon)],
+                       check=True, capture_output=True, text=True, timeout=60)
     models = _admission_models(tmp_path / "models")
     with Server(("127.0.0.1", 0), Handler) as server:
         thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True)

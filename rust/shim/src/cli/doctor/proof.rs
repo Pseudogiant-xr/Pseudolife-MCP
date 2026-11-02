@@ -19,6 +19,8 @@ use unicode_casefold::UnicodeCaseFold;
 mod diagnostics;
 #[path = "proof_process.rs"]
 mod process;
+// The isolated proof contract includes this leaf without the CLI module tree.
+#[allow(clippy::duplicate_mod)]
 #[path = "../maintainer/sqlstate.rs"]
 mod sqlstate;
 
