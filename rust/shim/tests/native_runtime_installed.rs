@@ -1,5 +1,6 @@
 //! Installed-home proofs. The fixture child is native Rust; neither launcher
 //! nor selected runtime can find an interpreter on PATH.
+mod native_binary_fixture;
 use pseudolife_stdio::runtime::{self, BINARY, Evidence, Layout, UpdateLock};
 use serde_json::json;
 use std::{
@@ -63,7 +64,10 @@ impl Drop for Home {
 fn installed_production_launcher_ignores_incomplete_and_forged_runtime() {
     let home = Home::new();
     let layout = home.layout();
-    let candidate = PathBuf::from(env!("CARGO_BIN_EXE_pseudolife-stdio"));
+    let candidate = native_binary_fixture::installable(
+        std::path::Path::new(env!("CARGO_BIN_EXE_pseudolife-stdio")),
+        &home.0,
+    );
     let _lock = UpdateLock::acquire(&layout).unwrap();
     let binary = fs::read(&candidate).unwrap();
     let archive = release_archive(&binary);
@@ -151,7 +155,10 @@ fn installed_cli_archive_install_retains_inputs_and_reports_checksum_failure() {
     use sha2::{Digest, Sha256};
     let home = Home::new();
     let layout = home.layout();
-    let candidate = PathBuf::from(env!("CARGO_BIN_EXE_pseudolife-stdio"));
+    let candidate = native_binary_fixture::installable(
+        std::path::Path::new(env!("CARGO_BIN_EXE_pseudolife-stdio")),
+        &home.0,
+    );
     let data = release_archive(&fs::read(&candidate).unwrap());
     let archive = home.0.join("retained-release-archive");
     let sums = home.0.join("SHA256SUMS");

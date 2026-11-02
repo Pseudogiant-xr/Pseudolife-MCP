@@ -1,5 +1,6 @@
 mod auth_fixture;
 mod common;
+mod native_binary_fixture;
 use auth_fixture::DisposableHome;
 use pseudolife_stdio::{
     credentials::CredentialProvider,
@@ -517,6 +518,10 @@ fn runtime_update_fixture_at(profile: Option<&str>) -> (DisposableHome, Output, 
 }
 
 fn native_launcher(home: &DisposableHome) -> PathBuf {
+    let candidate = native_binary_fixture::installable(
+        Path::new(env!("CARGO_BIN_EXE_pseudolife-stdio")),
+        &home.0,
+    );
     let path = home.path(if cfg!(windows) {
         "native launcher/pseudolife-mcp.exe"
     } else {
@@ -533,7 +538,7 @@ fn native_launcher(home: &DisposableHome) -> PathBuf {
         lifecycle::PACKAGE_VERSION,
         "fixture-native",
         None,
-        Path::new(env!("CARGO_BIN_EXE_pseudolife-stdio")),
+        &candidate,
     )
     .unwrap();
     path
