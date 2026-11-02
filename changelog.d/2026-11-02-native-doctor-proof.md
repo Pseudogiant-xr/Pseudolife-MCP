@@ -1,0 +1,2 @@
+### Added (2026-11-02 — Native disposable coordination proof)
+- The Rust CLI can run `doctor --disposable-proof` through the native daemon and adapter using an explicitly selected disposable PostgreSQL server. It checks hint and ring delivery, receive and acknowledgement, then removes the fixture bank and files. Missing native daemon or provisioned models are reported before creating a bank; real host delivery and model acknowledgement remain unverified.
