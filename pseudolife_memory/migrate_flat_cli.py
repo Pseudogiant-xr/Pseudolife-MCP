@@ -227,7 +227,33 @@ def _replace_config(path, raw):
         temporary.unlink(missing_ok=True)
 
 
+def _layout_error(capacity):
+    return ("config.yaml does not provide the migrated flat layout; configure memory.miras "
+            f"with preset: custom and a single balanced band named flat with max_entries >= {capacity}, "
+            "then retry migrate-flat --apply")
+
+
+def _require_flat_entries(conn):
+    try:
+        nonflat = conn.execute("SELECT count(*) FROM public.entries WHERE band <> 'flat'").fetchone()[0]
+    except Exception:
+        raise MigrationError("entry band verification failed") from None
+    if nonflat:
+        raise MigrationError("the migrated bank contains entries outside the flat band; stop all writers and reconcile those entries into flat before retrying migrate-flat --apply")
+
+
 def _finish(conn, path, marker):
+    with conn.transaction():
+        try:
+            conn.execute("SET LOCAL lock_timeout='5s'")
+            conn.execute("LOCK TABLE public.entries IN SHARE ROW EXCLUSIVE MODE")
+        except Exception:
+            raise MigrationError("entry band verification failed") from None
+        _finish_locked(conn, path, marker)
+
+
+def _finish_locked(conn, path, marker):
+    _require_flat_entries(conn)
     raw, config = _read_config(path)
     if _hash(raw) == marker["original_sha256"]:
         target, capacity = flat_config(config, marker["capacity"])
@@ -236,7 +262,7 @@ def _finish(conn, path, marker):
             raise MigrationError("migration config no longer matches its committed plan; restore bank and config together: " + recovery_instructions(marker["backup"]))
         _replace_config(path, rendered)
     elif _hash(raw) != marker["target_sha256"] and not _flat_layout(config, marker["capacity"]):
-        raise MigrationError("config.yaml changed after the migration committed; restore bank and config together: " + recovery_instructions(marker["backup"]))
+        raise MigrationError(_layout_error(marker["capacity"]))
     marker = {**marker, "complete": True}
     try:
         with conn.transaction():
@@ -265,8 +291,9 @@ def migrate(conn, data_dir: Path, *, backup=None):
         if found:
             marker = found[0]
             if marker.get("complete"):
+                _require_flat_entries(conn)
                 if not _flat_layout(config, marker["capacity"]):
-                    raise MigrationError("this bank was migrated but its config is not the matching flat layout; restore bank and config together: " + recovery_instructions(marker["backup"]))
+                    raise MigrationError(_layout_error(marker["capacity"]))
                 return {"status": "unchanged", **marker}
             committed = True
             _finish(conn, path, marker)
@@ -301,7 +328,7 @@ def migrate(conn, data_dir: Path, *, backup=None):
     except Exception as error:
         if committed:
             reason = str(error).replace("; nothing changed", "") if isinstance(error, MigrationError) else "config replacement failed"
-            raise MigrationError("bank migration committed but config finalization failed; keep the daemon stopped and retry migrate-flat --apply; restore bank and config together if needed: " + recovery_instructions(marker["backup"]) + f" ({reason})") from error
+            raise MigrationError("bank migration committed but config finalization failed; keep the daemon stopped and retry migrate-flat --apply: " + reason + "; restore bank and config together only as a last resort: " + recovery_instructions(marker["backup"])) from error
         if isinstance(error, MigrationError):
             raise
         if marker is not None:

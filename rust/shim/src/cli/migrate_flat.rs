@@ -14,7 +14,7 @@ use std::{
 const MARKER: &str = "flat_band_migration_v1";
 const FINGERPRINT: &str =
     "SELECT id, md5((to_jsonb(e)-'band')::text) FROM public.entries e ORDER BY id";
-const RETRY: &str = "bank migration committed but config finalization failed; keep the daemon stopped and retry migrate-flat --apply; restore bank and config together if needed: ";
+const RETRY: &str = "bank migration committed but config finalization failed; keep the daemon stopped and retry migrate-flat --apply";
 
 fn emit(stdout: bool, text: &str) {
     let text = if cfg!(windows) {
@@ -79,7 +79,13 @@ fn planner_command(daemon: &Path) -> Command {
 }
 
 fn plan(daemon: &Path, raw: &[u8], entries: i64) -> Result<Value, String> {
-    let mut child = planner_command(daemon).args(["migrate-flat-config", &entries.to_string()])
+    let mut command = planner_command(daemon);
+    command.args(["migrate-flat-config", &entries.to_string()]);
+    run_planner(command, daemon, raw)
+}
+
+fn run_planner(mut command: Command, daemon: &Path, raw: &[u8]) -> Result<Value, String> {
+    let mut child = command
         .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn()
         .map_err(|_| "the native config planner could not start; install the matching daemon binary on the bank host; nothing changed")?;
     let mut input = child.stdin.take().expect("piped stdin");
@@ -90,10 +96,14 @@ fn plan(daemon: &Path, raw: &[u8], entries: i64) -> Result<Value, String> {
         .map_err(|_| "the native config planner did not finish; retry migrate-flat --apply")?;
     let written = writer.join();
     if !output.status.success() {
-        return Err(String::from_utf8_lossy(&output.stderr)
-            .trim()
-            .trim_start_matches("migrate-flat refused: ")
-            .into());
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(match stderr.trim().strip_prefix("migrate-flat refused:") {
+            Some(reason) if !reason.trim().is_empty() => reason.trim().to_owned(),
+            _ => format!(
+                "the planner at {} does not support migrate-flat-config; install the matching daemon binary on the bank host; nothing changed",
+                daemon.display()
+            ),
+        });
     }
     written
         .map_err(|_| "config planner input failed")?
@@ -164,6 +174,27 @@ async fn finish(
     path: &Path,
     marker: &mut Value,
 ) -> Result<(), String> {
+    client.batch_execute("BEGIN; SET LOCAL lock_timeout='5s'; LOCK TABLE public.entries IN SHARE ROW EXCLUSIVE MODE")
+        .await.map_err(|_| "entry band verification failed")?;
+    match finish_locked(client, daemon, path, marker).await {
+        Ok(()) => client
+            .batch_execute("COMMIT")
+            .await
+            .map_err(|_| "migration marker finalization failed".into()),
+        Err(error) => {
+            let _ = client.batch_execute("ROLLBACK").await;
+            Err(error)
+        }
+    }
+}
+
+async fn finish_locked(
+    client: &Client,
+    daemon: &Path,
+    path: &Path,
+    marker: &mut Value,
+) -> Result<(), String> {
+    require_flat_entries(client).await?;
     let raw = read_config(path)?;
     if hash(&raw) == marker["original_sha256"].as_str().unwrap_or("") {
         let planned = plan(
@@ -193,10 +224,7 @@ async fn finish(
         )?["flat"]
             != true
     {
-        return Err(format!(
-            "config.yaml changed after the migration committed; restore bank and config together: {}",
-            restore(&marker["backup"])
-        ));
+        return Err(layout_error(marker));
     }
     marker["complete"] = Value::Bool(true);
     client
@@ -206,6 +234,28 @@ async fn finish(
         )
         .await
         .map_err(|_| "migration marker finalization failed")?;
+    Ok(())
+}
+
+fn layout_error(marker: &Value) -> String {
+    format!(
+        "config.yaml does not provide the migrated flat layout; configure memory.miras with preset: custom and a single balanced band named flat with max_entries >= {}, then retry migrate-flat --apply",
+        marker["capacity"]
+    )
+}
+
+async fn require_flat_entries(client: &Client) -> Result<(), String> {
+    let nonflat: i64 = client
+        .query_one(
+            "SELECT count(*) FROM public.entries WHERE band <> 'flat'",
+            &[],
+        )
+        .await
+        .map_err(|_| "entry band verification failed")?
+        .get(0);
+    if nonflat != 0 {
+        return Err("the migrated bank contains entries outside the flat band; stop all writers and reconcile those entries into flat before retrying migrate-flat --apply".into());
+    }
     Ok(())
 }
 
@@ -228,6 +278,7 @@ async fn locked(
         let mut marker: Value = serde_json::from_str(&row.get::<_, String>(0))
             .map_err(|_| "migration marker is invalid; restore the backup pair before retrying")?;
         if marker["complete"] == true {
+            require_flat_entries(client).await?;
             let planned = plan(
                 daemon,
                 raw,
@@ -236,10 +287,7 @@ async fn locked(
                     .ok_or("migration marker capacity is invalid")?,
             )?;
             if planned["flat"] != true {
-                return Err(format!(
-                    "this bank was migrated but its config is not the matching flat layout; restore bank and config together: {}",
-                    restore(&marker["backup"])
-                ));
+                return Err(layout_error(&marker));
             }
             marker["status"] = "unchanged".into();
         } else {
@@ -316,7 +364,10 @@ async fn locked(
 
 fn committed_error(marker: &Value, reason: &str) -> String {
     let reason = reason.replace("; nothing changed", "");
-    format!("{RETRY}{} ({reason})", restore(&marker["backup"]))
+    format!(
+        "{RETRY}: {reason}; restore bank and config together only as a last resort: {}",
+        restore(&marker["backup"])
+    )
 }
 
 async fn migrate(
@@ -489,6 +540,60 @@ mod tests {
             "{}",
             String::from_utf8_lossy(&output.stdout)
         );
+        assert!(String::from_utf8_lossy(&output.stdout).contains("1 passed"));
+    }
+
+    fn exiting_planner(reason: &str) -> Command {
+        let mut command = Command::new(std::env::current_exe().unwrap());
+        command
+            .args([
+                "--exact",
+                "cli::migrate_flat::tests::planner_exit_child",
+                "--ignored",
+                "--nocapture",
+            ])
+            .env("PSEUDOLIFE_TEST_PLANNER_STDERR", reason);
+        command
+    }
+
+    #[test]
+    fn planner_stderr_precedes_broken_input_pipe() {
+        let message = run_planner(
+            exiting_planner("migrate-flat refused: fixture planner rejected the config"),
+            Path::new("fixture-daemon"),
+            &vec![b'x'; 1024 * 1024],
+        )
+        .unwrap_err();
+        assert_eq!(message, "fixture planner rejected the config");
+    }
+
+    #[test]
+    fn old_planner_names_matching_binary_fix() {
+        for reason in [
+            "",
+            "storage resolution refused: the Rust daemon requires PSEUDOLIFE_MCP_DATABASE_URL",
+        ] {
+            let message = run_planner(
+                exiting_planner(reason),
+                Path::new("fixture-daemon"),
+                &vec![b'x'; 1024 * 1024],
+            )
+            .unwrap_err();
+            assert_eq!(
+                message,
+                "the planner at fixture-daemon does not support migrate-flat-config; install the matching daemon binary on the bank host; nothing changed"
+            );
+        }
+    }
+
+    #[test]
+    #[ignore = "early-exit subprocess probe"]
+    fn planner_exit_child() {
+        eprint!(
+            "{}",
+            std::env::var("PSEUDOLIFE_TEST_PLANNER_STDERR").unwrap()
+        );
+        std::process::exit(1);
     }
 
     #[test]

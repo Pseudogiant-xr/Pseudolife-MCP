@@ -155,6 +155,21 @@ def rejected_finalization(arm):
     arm.state["before"] = _bank.dump(DB)
 
 
+def invalid_migrated_bank(complete, *, nonflat=False):
+    def prepare(arm):
+        pending(True)(arm)
+        with _bank.connect(DB) as conn:
+            conn.execute("UPDATE meta SET value=jsonb_set(value,'{complete}',%s::jsonb) WHERE key=%s",
+                         (json.dumps(complete), MARKER))
+            if nonflat:
+                conn.execute("UPDATE entries SET band='working' WHERE id=(SELECT min(id) FROM entries)")
+            else:
+                conn.execute("UPDATE meta SET value=jsonb_set(jsonb_set(value,'{capacity}','6000'::jsonb),'{target_sha256}','\"different\"'::jsonb) WHERE key=%s", (MARKER,))
+            conn.commit()
+        arm.state["before"] = _bank.dump(DB)
+    return prepare
+
+
 @normalize.rule("flat-migration-files")
 def files(obs):
     pattern = re.compile(r"(?:^|/)bank/backups/migrate-flat-([0-9a-f]{32})(?:/|$)")
@@ -218,6 +233,13 @@ def cases():
              setup=pending(False, "model: 1e5\nother: 0o17\n"), after=after),
         Case("resume-edited-flat-config", argv, env=env, setup=edited_pending, after=after),
         Case("resume-finalization-refused", argv, env=env, setup=rejected_finalization, after=refused),
+        *[Case(f"{state}-{problem}", argv, env=env,
+               setup=invalid_migrated_bank(complete, nonflat=nonflat), after=refused)
+          for state, complete in (("pending", False), ("complete", True))
+          for problem, nonflat in (("nonflat-entries", True), ("small-flat-layout", False))],
+        Case("collapse-value-keys", argv, env=env,
+             setup=setup("=: plain\n!!value named: explicit\nmemory: {miras: {preset: continuum}}\n"),
+             after=after, rules=("flat-migration-files",), timeout=120, real_programs=("pg_dump",)),
         Case("collapse-nonspecific-tags", argv, env=env,
              setup=setup("updates: {check_releases: ! 'on'}\nmemory: {miras: {preset: continuum}}\n"),
              after=after, rules=("flat-migration-files",), timeout=120, real_programs=("pg_dump",)),

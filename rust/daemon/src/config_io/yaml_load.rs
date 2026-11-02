@@ -16,7 +16,8 @@ use super::yaml_dump::{
     TAG_BOOL, TAG_FLOAT, TAG_INT, TAG_MERGE, TAG_NULL, TAG_STR, TAG_TIMESTAMP, resolve,
 };
 use crate::config::{
-    Node, UnsupportedKind, resolve_scalar, safe_load_startup_with, safe_load_with,
+    Node, UnsupportedKind, resolve_scalar, safe_load_migrating_with, safe_load_startup_with,
+    safe_load_with,
 };
 
 /// Startup must preserve values exactly. The editor's read-only projection
@@ -99,7 +100,7 @@ pub(crate) fn load_rewriting(text: &str) -> Result<Option<Node>, String> {
 /// Migration hashes must preserve startup's non-specific scalar tags while
 /// retaining the editor's refusal of values that cannot be rewritten.
 pub(crate) fn load_migrating(text: &str) -> Result<Option<Node>, String> {
-    safe_load_with(
+    safe_load_migrating_with(
         text,
         |value, style, tag| {
             if tag.as_ref().is_some_and(|t| {

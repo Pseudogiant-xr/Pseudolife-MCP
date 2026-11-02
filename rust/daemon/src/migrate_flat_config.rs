@@ -310,4 +310,18 @@ mod tests {
             "updates:\n  check_releases: true\nmemory:\n  miras:\n    preset: flat\n"
         );
     }
+
+    #[test]
+    fn migration_preserves_value_tag_mapping_keys() {
+        let result = plan(
+            "=: plain\n!!value named: explicit\nmemory: {miras: {preset: continuum}}\n",
+            0,
+        )
+        .unwrap();
+        assert_eq!(
+            result["yaml"],
+            "'=': plain\nnamed: explicit\nmemory:\n  miras:\n    preset: flat\n"
+        );
+        assert!(plan("unused: =\n", 0).is_err());
+    }
 }

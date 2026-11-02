@@ -59,6 +59,46 @@ def test_postcommit_refusal_reports_committed_bank(pg_conn, tmp_path, monkeypatc
     assert "nothing changed" not in str(caught.value)
 
 
+@pytest.mark.parametrize("complete", [False, True])
+def test_migrated_bank_refuses_nonflat_rows_without_rewriting(pg_conn, tmp_path, complete):
+    import json
+    config = tmp_path / "config.yaml"
+    config.write_text("memory: {miras: {preset: flat}}\n")
+    marker = {"complete": complete, "capacity": 5250, "entries": 0,
+              "original_sha256": "original", "target_sha256": migration._hash(config.read_bytes()),
+              "backup": {"dump": "bank.sql.gz", "state": "state.tgz"}}
+    pg_conn.execute("INSERT INTO meta(key,value) VALUES (%s,%s::jsonb)", (migration.MARKER, json.dumps(marker)))
+    pg_conn.execute("INSERT INTO entries(band,text,embedding,ts) VALUES ('working','late writer',%s::vector,2)",
+                    ("[" + ",".join(["0.1"] * 1024) + "]",))
+    pg_conn.commit()
+    before = config.read_bytes()
+    with pytest.raises(migration.MigrationError, match="entries outside the flat band"):
+        migration.migrate(pg_conn, tmp_path, backup=lambda _: pytest.fail("backup repeated"))
+    assert pg_conn.execute("SELECT value FROM meta WHERE key=%s", (migration.MARKER,)).fetchone()[0] == marker
+    assert pg_conn.execute("SELECT band,text FROM entries").fetchall() == [("working", "late writer")]
+    assert config.read_bytes() == before
+
+
+@pytest.mark.parametrize("complete", [False, True])
+def test_small_flat_config_names_required_layout(pg_conn, tmp_path, complete):
+    import json
+    config = tmp_path / "config.yaml"
+    config.write_text("memory: {miras: {preset: flat}}\n")
+    marker = {"complete": complete, "capacity": 6000, "entries": 0,
+              "original_sha256": "original", "target_sha256": "target",
+              "backup": {"dump": "bank.sql.gz", "state": "state.tgz"}}
+    pg_conn.execute("INSERT INTO meta(key,value) VALUES (%s,%s::jsonb)", (migration.MARKER, json.dumps(marker)))
+    pg_conn.commit()
+    with pytest.raises(migration.MigrationError) as caught:
+        migration.migrate(pg_conn, tmp_path, backup=lambda _: pytest.fail("backup repeated"))
+    message = str(caught.value)
+    assert "single balanced band named flat with max_entries >= 6000" in message
+    if "restore" in message:
+        assert message.index("max_entries >= 6000") < message.index("restore")
+        assert "last resort" in message
+    assert pg_conn.execute("SELECT value FROM meta WHERE key=%s", (migration.MARKER,)).fetchone()[0] == marker
+
+
 def test_explicit_target_requires_recovery_acknowledgement_before_effects(tmp_path, monkeypatch, capsys):
     import psycopg
     calls = []

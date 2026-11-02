@@ -14,3 +14,7 @@
 - Migration refuses mismatched config-path overrides and resumes a pending
   marker after unrelated edits to a sufficient flat layout. Native planning
   preserves non-specific YAML tags and cannot inherit the bank's database URL.
+- Migration verifies that every entry is flat before accepting a completed
+  marker, names the required capacity when repairing a flat layout, and
+  preserves YAML value-tag mapping keys. An incompatible native planner now
+  names the matching binary needed instead of reporting a missing database URL.
