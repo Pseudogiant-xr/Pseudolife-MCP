@@ -12,7 +12,7 @@ fn health(version: &str) -> Value {
 fn updates(home: &DisposableHome, no_spawn: bool) -> ClientUpdates {
     ClientUpdates::new(
         home.path("state"),
-        "fixture-python",
+        "fixture-native",
         "0.16.0",
         "fixture-command",
         no_spawn,
@@ -31,10 +31,8 @@ fn test_shim_runs_the_client_half_unattended_when_the_daemon_is_newer() {
         |args, log| {
             calls += 1;
             assert_eq!(
-                &args[..7],
+                &args[..5],
                 [
-                    "-m",
-                    "pseudolife_memory.cli",
                     "update",
                     "--clients-only",
                     "--tag",
@@ -43,9 +41,10 @@ fn test_shim_runs_the_client_half_unattended_when_the_daemon_is_newer() {
                 ]
             );
             assert_eq!(
-                std::path::Path::new(&args[7]),
+                std::path::Path::new(&args[5]),
                 home.path("state").join("update-clients.99.0.0.result")
             );
+            assert_eq!(&args[6..], ["--daemon-url", "http://127.0.0.1:18765"]);
             assert_eq!(log, home.path("state/update-clients.log"));
             Ok(4242)
         },
@@ -269,5 +268,178 @@ fn test_two_sessions_starting_together_spawn_one_run() {
         notes
             .iter()
             .all(|note| !note.is_empty() && !note.contains("--clients-only"))
+    );
+}
+
+#[test]
+fn native_updater_does_not_accept_untrusted_release_syntax() {
+    let home = DisposableHome::new();
+    for version in [
+        "99.0.0rc1",
+        "99.0.0+local",
+        "99.0.0;extra",
+        "99.0.0\n",
+        "99",
+        "９９.0.0",
+    ] {
+        assert!(
+            updates(&home, true)
+                .unattended_with(
+                    "http://127.0.0.1:18765",
+                    &health(version),
+                    SystemTime::now(),
+                    |_, _| panic!("untrusted target must not launch")
+                )
+                .is_empty()
+        );
+    }
+    assert!(!home.path("state").exists());
+}
+
+#[test]
+fn unreadable_or_invalid_result_never_claims_finished_or_running() {
+    let home = DisposableHome::new();
+    updates(&home, true).unattended_with(
+        "http://127.0.0.1:18765",
+        &health("99.0.0"),
+        SystemTime::now(),
+        |_, _| Ok(4242),
+    );
+    let result = home.path("state/update-clients.99.0.0.result");
+    fs::create_dir(&result).unwrap();
+    let note = updates(&home, true).unattended_with(
+        "http://127.0.0.1:18765",
+        &health("99.0.0"),
+        SystemTime::now(),
+        |_, _| panic!("must retain retry interval"),
+    );
+    assert!(note.contains("failed (exit unreadable result"));
+    fs::remove_dir(&result).unwrap();
+    for bytes in [b"\xff".as_slice(), b"", b"0\nextra", b"running", b"999"] {
+        fs::write(&result, bytes).unwrap();
+        let note = updates(&home, true).unattended_with(
+            "http://127.0.0.1:18765",
+            &health("99.0.0"),
+            SystemTime::now(),
+            |_, _| panic!("must retain retry interval"),
+        );
+        assert!(
+            note.contains("unreadable result")
+                && !note.contains("still running")
+                && !note.contains("finished")
+        );
+    }
+}
+
+#[test]
+fn failed_native_spawn_persists_failure_and_retries_after_the_interval() {
+    let home = DisposableHome::new();
+    let now = SystemTime::now();
+    assert!(
+        updates(&home, true)
+            .unattended_with(
+                "http://127.0.0.1:18765",
+                &health("99.0.0"),
+                now,
+                |_, _| Err(std::io::ErrorKind::NotFound.into())
+            )
+            .is_empty()
+    );
+    let result = home.path("state/update-clients.99.0.0.result");
+    assert_eq!(fs::read_to_string(&result).unwrap(), "1\n");
+    let note = updates(&home, true).unattended_with(
+        "http://127.0.0.1:18765",
+        &health("99.0.0"),
+        now,
+        |_, _| panic!("must not immediately retry"),
+    );
+    assert!(note.contains("failed (exit 1"));
+    fs::OpenOptions::new()
+        .write(true)
+        .open(home.path("state/update-clients.99.0.0.attempt"))
+        .unwrap()
+        .set_times(fs::FileTimes::new().set_modified(now - Duration::from_secs(7200)))
+        .unwrap();
+    let note = updates(&home, true).unattended_with(
+        "http://127.0.0.1:18765",
+        &health("99.0.0"),
+        now,
+        |_, _| {
+            assert!(!result.exists());
+            Ok(4242)
+        },
+    );
+    assert!(note.contains("being installed unattended"));
+}
+
+#[test]
+fn two_stale_attempts_racing_still_launch_only_one_native_update() {
+    use std::sync::{
+        Arc, Barrier,
+        atomic::{AtomicUsize, Ordering},
+    };
+    let home = DisposableHome::new();
+    let now = SystemTime::now();
+    fs::create_dir_all(home.path("state")).unwrap();
+    let marker = home.path("state/update-clients.99.0.0.attempt");
+    fs::write(&marker, "old\n").unwrap();
+    fs::OpenOptions::new()
+        .write(true)
+        .open(marker)
+        .unwrap()
+        .set_times(fs::FileTimes::new().set_modified(now - Duration::from_secs(7200)))
+        .unwrap();
+    let barrier = Arc::new(Barrier::new(2));
+    let calls = Arc::new(AtomicUsize::new(0));
+    let workers: Vec<_> = (0..2)
+        .map(|_| {
+            let barrier = barrier.clone();
+            let calls = calls.clone();
+            let state = home.path("state");
+            std::thread::spawn(move || {
+                barrier.wait();
+                ClientUpdates::new(state, "fixture-native", "0.16.0", "fixture-command", true)
+                    .unattended_with("http://127.0.0.1:18765", &health("99.0.0"), now, |_, _| {
+                        calls.fetch_add(1, Ordering::SeqCst);
+                        std::thread::sleep(Duration::from_millis(25));
+                        Ok(4242)
+                    })
+            })
+        })
+        .collect();
+    for worker in workers {
+        assert!(!worker.join().unwrap().is_empty());
+    }
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn native_binary_selection_uses_stable_native_launcher_and_never_python_script() {
+    use pseudolife_stdio::lifecycle::native_update_binary_at;
+    let home = DisposableHome::new();
+    let invoking = std::env::current_exe().unwrap();
+    let launcher = home.path(if cfg!(windows) {
+        "native launcher.exe"
+    } else {
+        "native launcher"
+    });
+    fs::copy(&invoking, &launcher).unwrap();
+    assert_eq!(
+        native_update_binary_at(Some(&launcher), &invoking).unwrap(),
+        std::path::absolute(&launcher).unwrap()
+    );
+    fs::write(&launcher, b"#!/usr/bin/env python\n").unwrap();
+    assert_eq!(
+        native_update_binary_at(Some(&launcher), &invoking).unwrap(),
+        fs::canonicalize(&invoking).unwrap()
+    );
+    fs::write(
+        &launcher,
+        b"MZ\0\0legacy console launcher with a Python selector",
+    )
+    .unwrap();
+    assert_eq!(
+        native_update_binary_at(Some(&launcher), &invoking).unwrap(),
+        fs::canonicalize(invoking).unwrap()
     );
 }

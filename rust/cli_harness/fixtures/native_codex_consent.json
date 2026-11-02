@@ -1,0 +1,181 @@
+[
+  {
+    "name": "end-clamp-high",
+    "input": "{\"hooks\":{\"SessionEnd\":[{\"hooks\":[{\"type\":\"command\",\"command\":\"fixture\",\"timeout\":99}]}]}}",
+    "normalized": {
+      "hooks": {
+        "SessionEnd": [
+          {
+            "hooks": [
+              {
+                "type": "command",
+                "command": "fixture",
+                "timeout": 3
+              }
+            ]
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "end-clamp-low",
+    "input": "{\"hooks\":{\"SessionEnd\":[{\"hooks\":[{\"type\":\"command\",\"command\":\"fixture\",\"timeout\":0}]}]}}",
+    "normalized": {
+      "hooks": {
+        "SessionEnd": [
+          {
+            "hooks": [
+              {
+                "type": "command",
+                "command": "fixture",
+                "timeout": 1
+              }
+            ]
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "interrupt-default",
+    "input": "{\"hooks\":{\"Interrupt\":[{\"hooks\":[{\"type\":\"command\",\"command\":\"fixture\"}]}]}}",
+    "normalized": {
+      "hooks": {
+        "Interrupt": [
+          {
+            "hooks": [
+              {
+                "type": "command",
+                "command": "fixture",
+                "timeout": 1
+              }
+            ]
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "start-no-clamp",
+    "input": "{\"hooks\":{\"SessionStart\":[{\"hooks\":[{\"type\":\"command\",\"command\":\"fixture\",\"timeout\":99}]}]}}",
+    "normalized": {
+      "hooks": {
+        "SessionStart": [
+          {
+            "hooks": [
+              {
+                "type": "command",
+                "command": "fixture",
+                "timeout": 99
+              }
+            ]
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "unknown-boolean-kept",
+    "input": "{\"hooks\":{\"SessionEnd\":[{\"hooks\":[{\"type\":\"command\",\"command\":\"fixture\",\"timeout\":3,\"custom\":true}]}]}}",
+    "normalized": {
+      "hooks": {
+        "SessionEnd": [
+          {
+            "hooks": [
+              {
+                "type": "command",
+                "command": "fixture",
+                "timeout": 3,
+                "custom": true
+              }
+            ]
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "unknown-number-kept",
+    "input": "{\"hooks\":{\"SessionEnd\":[{\"hooks\":[{\"type\":\"command\",\"command\":\"fixture\",\"timeout\":3,\"custom\":1}]}]}}",
+    "normalized": {
+      "hooks": {
+        "SessionEnd": [
+          {
+            "hooks": [
+              {
+                "type": "command",
+                "command": "fixture",
+                "timeout": 3,
+                "custom": 1
+              }
+            ]
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "description-null",
+    "input": "{\"description\":null,\"hooks\":{}}",
+    "normalized": {
+      "description": null,
+      "hooks": {}
+    }
+  },
+  {
+    "name": "duplicate-top",
+    "input": "{\"hooks\":{},\"hooks\":{}}",
+    "normalized": null
+  },
+  {
+    "name": "escaped-duplicate",
+    "input": "{\"hooks\":{\"Stop\":[],\"\\u0053top\":[]}}",
+    "normalized": null
+  },
+  {
+    "name": "negative-zero",
+    "input": "{\"hooks\":{\"Stop\":[{\"hooks\":[{\"type\":\"command\",\"command\":\"fixture\",\"timeout\":-0}]}]}}",
+    "normalized": null
+  },
+  {
+    "name": "boolean-timeout",
+    "input": "{\"hooks\":{\"SessionEnd\":[{\"hooks\":[{\"type\":\"command\",\"command\":\"fixture\",\"timeout\":true}]}]}}",
+    "normalized": null
+  },
+  {
+    "name": "float-timeout",
+    "input": "{\"hooks\":{\"SessionEnd\":[{\"hooks\":[{\"type\":\"command\",\"command\":\"fixture\",\"timeout\":1.0}]}]}}",
+    "normalized": null
+  },
+  {
+    "name": "overflow-timeout",
+    "input": "{\"hooks\":{\"SessionEnd\":[{\"hooks\":[{\"type\":\"command\",\"command\":\"fixture\",\"timeout\":18446744073709551616}]}]}}",
+    "normalized": null
+  },
+  {
+    "name": "unsupported-handler",
+    "input": "{\"hooks\":{\"SessionEnd\":[{\"hooks\":[{\"type\":\"prompt\",\"command\":\"fixture\",\"timeout\":3}]}]}}",
+    "normalized": null
+  },
+  {
+    "name": "blank-command",
+    "input": "{\"hooks\":{\"SessionEnd\":[{\"hooks\":[{\"type\":\"command\",\"command\":\"  \",\"timeout\":3}]}]}}",
+    "normalized": null
+  },
+  {
+    "name": "duplicate-windows-spelling",
+    "input": "{\"hooks\":{\"SessionEnd\":[{\"hooks\":[{\"type\":\"command\",\"command\":\"fixture\",\"timeout\":3,\"commandWindows\":\"a\",\"command_windows\":\"b\"}]}]}}",
+    "normalized": null
+  },
+  {
+    "name": "unpaired-surrogate",
+    "input": "{\"description\":\"\\ud800\",\"hooks\":{}}",
+    "normalized": null
+  },
+  {
+    "name": "unknown-top",
+    "input": "{\"hooks\":{},\"unknown\":true}",
+    "normalized": null
+  }
+]

@@ -592,12 +592,12 @@ mod posix_session {
         }
     }
 }
-fn spawn_detached(python: &Path, args: &[String], log: &Path) -> io::Result<u32> {
+fn spawn_detached(binary: &Path, args: &[String], log: &Path) -> io::Result<u32> {
     if let Some(parent) = log.parent() {
         fs::create_dir_all(parent)?;
     }
     let handle = OpenOptions::new().create(true).append(true).open(log)?;
-    let mut command = Command::new(python);
+    let mut command = Command::new(binary);
     command
         .args(args)
         .stdin(Stdio::null())
@@ -778,11 +778,6 @@ impl Runtime {
         let Some(health) = &self.health else {
             return String::new();
         };
-        let Some(python) =
-            std::env::var_os("PSEUDOLIFE_MCP_PYTHON").filter(|python| !python.is_empty())
-        else {
-            return String::new();
-        };
         let no_spawn = spawn_disabled(std::env::var("PSEUDOLIFE_MCP_NO_SPAWN").ok().as_deref());
         if !no_spawn
             || health
@@ -803,7 +798,10 @@ impl Runtime {
                 .ok()
                 .unwrap_or_else(|| PathBuf::from("."))
                 .join(".pseudolife-mcp"),
-            PathBuf::from(python),
+            match native_update_binary() {
+                Ok(binary) => binary,
+                Err(_) => return String::new(),
+            },
             PACKAGE_VERSION,
             &launcher_command(),
             no_spawn,
@@ -963,9 +961,72 @@ fn version_is_newer(candidate: &str, own: &str) -> bool {
     candidate.len() > own.len()
 }
 
+/// Health is unauthenticated. Only release numbers may become update targets.
+pub fn plain_client_release(version: &str) -> bool {
+    !version.is_empty()
+        && version.len() <= 128
+        && (2..=4).contains(&version.split('.').count())
+        && version
+            .split('.')
+            .all(|part| !part.is_empty() && part.bytes().all(|c| c.is_ascii_digit()))
+}
+
+/// Never use PATH or an interpreter to select the unattended updater.
+pub fn native_update_binary() -> io::Result<PathBuf> {
+    native_update_binary_at(native_launcher_path().as_deref(), &std::env::current_exe()?)
+}
+
+pub fn native_update_binary_at(launcher: Option<&Path>, invoking: &Path) -> io::Result<PathBuf> {
+    if let Some(launcher) = launcher.filter(|path| native_launcher_verified(path, invoking)) {
+        return std::path::absolute(launcher);
+    }
+    fs::canonicalize(invoking)
+}
+
+fn native_launcher_verified(path: &Path, invoking: &Path) -> bool {
+    if !native_binary(path) {
+        return false;
+    }
+    // A Windows distlib console-script launcher is also a PE executable; its
+    // file magic alone cannot establish a Python-free launch path.
+    let Ok(digest) = crate::runtime::hash_file(path) else {
+        return false;
+    };
+    if crate::runtime::hash_file(invoking).is_ok_and(|own| own == digest) {
+        return true;
+    }
+    crate::runtime::default_layout().is_ok_and(|layout| {
+        crate::runtime::same_path(path, &layout.launcher)
+            && crate::runtime::list_runtimes(&layout)
+                .iter()
+                .any(|runtime| runtime.marker.binary_sha256 == digest)
+    })
+}
+
+fn native_binary(path: &Path) -> bool {
+    use std::io::Read;
+    let mut magic = [0; 4];
+    File::open(path)
+        .and_then(|mut file| file.read_exact(&mut magic))
+        .is_ok()
+        && (magic == *b"\x7fELF"
+            || magic[..2] == *b"MZ"
+            || matches!(
+                magic,
+                [0xfe, 0xed, 0xfa, 0xce]
+                    | [0xce, 0xfa, 0xed, 0xfe]
+                    | [0xfe, 0xed, 0xfa, 0xcf]
+                    | [0xcf, 0xfa, 0xed, 0xfe]
+                    | [0xca, 0xfe, 0xba, 0xbe]
+                    | [0xbe, 0xba, 0xfe, 0xca]
+                    | [0xca, 0xfe, 0xba, 0xbf]
+                    | [0xbf, 0xba, 0xfe, 0xca]
+            ))
+}
+
 pub struct ClientUpdates {
     state: PathBuf,
-    python: PathBuf,
+    binary: PathBuf,
     own_version: String,
     command: String,
     no_spawn: bool,
@@ -974,14 +1035,14 @@ pub struct ClientUpdates {
 impl ClientUpdates {
     pub fn new(
         state: impl Into<PathBuf>,
-        python: impl Into<PathBuf>,
+        binary: impl Into<PathBuf>,
         own_version: &str,
         command: &str,
         no_spawn: bool,
     ) -> Self {
         Self {
             state: state.into(),
-            python: python.into(),
+            binary: binary.into(),
             own_version: own_version.into(),
             command: command.into(),
             no_spawn,
@@ -1004,12 +1065,12 @@ impl ClientUpdates {
         )
     }
     pub fn unattended(&mut self, url: &str, health: &Value) -> String {
-        let python = self.python.clone();
+        let binary = self.binary.clone();
         self.unattended_with(url, health, SystemTime::now(), |args, log| {
-            spawn_detached(&python, args, log)
+            spawn_detached(&binary, args, log)
         })
     }
-    /// Inject a disposable launch seam; production invokes the Python CLI only.
+    /// Inject a disposable launch seam; production invokes the native CLI.
     pub fn unattended_with(
         &mut self,
         url: &str,
@@ -1035,7 +1096,7 @@ impl ClientUpdates {
             .get("updates")
             .and_then(|u| u.get("unattended_clients"))
             != Some(&Value::Bool(true))
-            || !version_shaped(version)
+            || !plain_client_release(version)
             || !version_is_newer(version, &self.own_version)
         {
             return String::new();
@@ -1060,13 +1121,28 @@ impl ClientUpdates {
                 .map_or(true, |age| age < Duration::from_secs(3600))
         });
         let note = if recent {
-            let outcome = if result.is_file() {
-                fs::read_to_string(&result)
-                    .unwrap_or_default()
-                    .trim()
-                    .to_owned()
-            } else {
-                String::new()
+            let outcome = match (|| -> io::Result<String> {
+                use std::io::Read;
+                if !fs::metadata(&result)?.is_file() {
+                    return Err(io::ErrorKind::InvalidData.into());
+                }
+                let mut text = String::new();
+                File::open(&result)?.take(32).read_to_string(&mut text)?;
+                if text.len() > 16 {
+                    return Err(io::ErrorKind::InvalidData.into());
+                }
+                Ok(text)
+            })() {
+                Ok(text) => {
+                    let text = text.trim();
+                    if text.parse::<u8>().is_ok() {
+                        text.to_owned()
+                    } else {
+                        "unreadable result".into()
+                    }
+                }
+                Err(error) if error.kind() == io::ErrorKind::NotFound => String::new(),
+                Err(_) => "unreadable result".into(),
             };
             let when: chrono::DateTime<chrono::Local> = stamp.unwrap_or(now).into();
             let when = when.format("%H:%M");
@@ -1099,8 +1175,20 @@ impl ClientUpdates {
                 )
             }
         } else {
+            let mut owns_attempt = false;
             let launch = (|| -> io::Result<u32> {
                 fs::create_dir_all(&self.state)?;
+                // Serialize stale-marker replacement too: two sessions can both
+                // observe an old stamp before either exclusive create happens.
+                let reservation = self.state.join(format!("update-clients.{version}.lock"));
+                let mut lock = SpawnLock::open(&reservation)
+                    .ok_or_else(|| io::Error::other("update reservation is unavailable"))?;
+                if !lock.try_acquire() {
+                    return Err(io::ErrorKind::AlreadyExists.into());
+                }
+                if marker.metadata().and_then(|m| m.modified()).ok() != stamp {
+                    return Err(io::ErrorKind::AlreadyExists.into());
+                }
                 if stamp.is_some() {
                     fs::remove_file(&marker)?;
                 }
@@ -1112,6 +1200,10 @@ impl ClientUpdates {
                     options.mode(0o600);
                 }
                 let mut file = open(&options, &marker)?;
+                owns_attempt = true;
+                #[cfg(windows)]
+                crate::credentials::windows_security::make_private(&file)
+                    .map_err(|_| io::Error::other("update attempt must be owner-only"))?;
                 writeln!(
                     file,
                     "{:.0}",
@@ -1126,14 +1218,14 @@ impl ClientUpdates {
                 }
                 spawn(
                     &[
-                        "-m".into(),
-                        "pseudolife_memory.cli".into(),
                         "update".into(),
                         "--clients-only".into(),
                         "--tag".into(),
                         version.into(),
                         "--result-file".into(),
                         result.to_string_lossy().into_owned(),
+                        "--daemon-url".into(),
+                        url.into(),
                     ],
                     &log,
                 )
@@ -1157,6 +1249,9 @@ impl ClientUpdates {
                     self.own_version
                 ),
                 Err(_) => {
+                    if owns_attempt {
+                        let _ = crate::board::state::atomic_write(&result, b"1\n", None);
+                    }
                     eprintln!("[shim] could not start the unattended client update: OSError");
                     return String::new();
                 }
@@ -1167,7 +1262,7 @@ impl ClientUpdates {
     }
 }
 
-pub fn launcher_command() -> String {
+fn native_launcher_path() -> Option<PathBuf> {
     let user = std::env::var_os("USERPROFILE")
         .filter(|p| !p.is_empty())
         .or_else(|| std::env::var_os("HOME").filter(|p| !p.is_empty()))
@@ -1183,7 +1278,7 @@ pub fn launcher_command() -> String {
             .is_some_and(|e| e.eq_ignore_ascii_case("exe"))
             != cfg!(windows)
         {
-            return "pseudolife-mcp".into();
+            return None;
         }
         path
     } else if cfg!(windows) {
@@ -1203,9 +1298,12 @@ pub fn launcher_command() -> String {
             .join("bin")
             .join("pseudolife-mcp")
     };
-    if !launcher.is_file() {
+    Some(launcher)
+}
+pub fn launcher_command() -> String {
+    let Some(launcher) = native_launcher_path() else {
         return "pseudolife-mcp".into();
-    }
+    };
     launcher_command_for(&launcher, find_executable("pseudolife-mcp").ok().as_deref())
 }
 pub fn launcher_command_for(launcher: &Path, found: Option<&Path>) -> String {

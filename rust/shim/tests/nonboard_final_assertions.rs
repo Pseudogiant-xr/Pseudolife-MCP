@@ -16,21 +16,13 @@ use std::{
     time::{Duration, Instant, SystemTime},
 };
 
-fn python() -> PathBuf {
-    let selected = std::env::var_os("PSEUDOLIFE_MCP_PYTHON")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| "python".into());
-    // Resolve before the disposable child clears PATH and changes directory.
-    lifecycle::find_executable(selected)
-        .expect("selected Python runtime for the disposable fixture")
-}
 fn health() -> Value {
     json!({"status":"ok","auth":false,"version":"99.0.0","updates":{"unattended_clients":true}})
 }
 fn updates(home: &DisposableHome) -> ClientUpdates {
     ClientUpdates::new(
         home.path("state"),
-        python(),
+        "fixture-native",
         "0.16.0",
         "fixture-command",
         true,
@@ -109,7 +101,7 @@ fn child(home: &DisposableHome, mode: &str) -> Command {
         .env("HOME", &home.0)
         .env("USERPROFILE", &home.0)
         .env("NONBOARD_ASSERTION_CHILD", mode)
-        .env("PSEUDOLIFE_MCP_PYTHON", python());
+        .env("PSEUDOLIFE_MCP_PYTHON", "absent-fixture-python");
     cmd
 }
 #[test]
@@ -294,16 +286,9 @@ fn runtime_update_fixture() -> (DisposableHome, Output, Value) {
 #[test]
 fn built_binary_launches_updater_only_after_first_flushed_frame() {
     let home = DisposableHome::new();
-    let package = home.path("pseudolife_memory");
-    fs::create_dir(&package).unwrap();
-    fs::write(package.join("__init__.py"), "").unwrap();
-    let sentinel = home.path("updater.json");
-    let release = home.path("finish-updater");
-    fs::write(package.join("cli.py"), format!(
-        "import json,pathlib,sys,time\ndeadline=time.monotonic()+22\nwhile not pathlib.Path({}).exists():\n if time.monotonic() >= deadline: sys.exit('updater fixture was not released')\n time.sleep(0.005)\npathlib.Path(sys.argv[sys.argv.index('--result-file')+1]).write_text('0\\n')\npathlib.Path({}).write_text(json.dumps(sys.argv[1:]))\n",
-        serde_json::to_string(release.to_str().unwrap()).unwrap(),
-        serde_json::to_string(sentinel.to_str().unwrap()).unwrap()
-    )).unwrap();
+    let launcher = native_launcher(&home);
+    let docker = unavailable_docker(&home);
+    let sentinel = home.path("unused-sentinel");
     let health_gate = std::sync::Arc::new(common::ResponseGate::default());
     let fixture = common::Fixture::start_with(common::Setup {
         health: vec![common::Reply::Gated(
@@ -312,12 +297,16 @@ fn built_binary_launches_updater_only_after_first_flushed_frame() {
         )],
         ..Default::default()
     });
-    let interpreter = python();
     let mut shim = common::Shim::start_with_env(
         &fixture.url,
         &[
-            ("PSEUDOLIFE_MCP_PYTHON", interpreter.to_str().unwrap()),
-            ("PYTHONPATH", home.0.to_str().unwrap()),
+            ("PSEUDOLIFE_MCP_PYTHON", "absent-fixture-python"),
+            ("PSEUDOLIFE_SHIM_LAUNCHER", launcher.to_str().unwrap()),
+            (
+                "PSEUDOLIFE_SHIM_RUNTIMES",
+                home.path("runtimes").to_str().unwrap(),
+            ),
+            ("PSEUDOLIFE_DOCKER", docker.to_str().unwrap()),
         ],
     );
     let attempt = shim
@@ -374,51 +363,77 @@ fn built_binary_launches_updater_only_after_first_flushed_frame() {
         );
         std::thread::sleep(Duration::from_millis(5));
     }
-    // The callback creates the attempt synchronously; the Python child is a
-    // separate completion event. Hold its report until invocation is proved.
-    assert!(!sentinel.exists(), "unreleased updater completed");
-    fs::write(&release, b"finish").unwrap();
-    // Hosted Windows job 114203045799 on 2026-10-10 ran four Python updater
-    // fixtures together: successful cases took 6.1-10.9 s. Allow twice that
-    // observed maximum for interpreter completion, not callback invocation.
+    // Closing the session after the frame must not cancel the owned updater.
+    shim.send(json!({"jsonrpc":"2.0","method":"notifications/initialized"}));
+    assert!(shim.finish().is_empty());
+    // The native updater owns the result independently of the shim session.
+    // Its disposable Docker command refuses before any client/network mutation.
+    let result = shim
+        .state_dir()
+        .join(".pseudolife-mcp/update-clients.99.0.0.result");
     let deadline = Instant::now() + Duration::from_secs(22);
-    let argv: Vec<String> = loop {
-        if let Ok(bytes) = fs::read(&sentinel)
-            && let Ok(argv) = serde_json::from_slice(&bytes)
-        {
-            break argv;
+    loop {
+        if fs::read_to_string(&result).is_ok_and(|text| text.trim() == "2") {
+            break;
         }
         assert!(
             Instant::now() < deadline,
-            "invoked updater did not complete; updater_log={}",
+            "native updater did not finish: {}",
             fs::read_to_string(shim.state_dir().join(".pseudolife-mcp/update-clients.log"))
                 .unwrap_or_default()
         );
         std::thread::sleep(Duration::from_millis(5));
-    };
-    assert_eq!(
-        &argv[..5],
-        [
-            "update",
-            "--clients-only",
-            "--tag",
-            "99.0.0",
-            "--result-file"
-        ]
-    );
-    assert_eq!(
-        Path::new(&argv[5]),
-        shim.state_dir()
-            .join(".pseudolife-mcp/update-clients.99.0.0.result")
-    );
-    assert_eq!(
-        fs::read_to_string(&argv[5]).unwrap(),
-        if cfg!(windows) { "0\r\n" } else { "0\n" }
-    );
-    shim.send(json!({"jsonrpc":"2.0","method":"notifications/initialized"}));
-    assert!(shim.finish().is_empty());
+    }
     assert!(
         shim.stderr()
+            .contains("started the unattended client update")
+    );
+    fixture.assert_deleted();
+}
+
+#[test]
+fn cancelled_session_without_a_first_frame_never_attempts_an_update() {
+    let home = DisposableHome::new();
+    let launcher = native_launcher(&home);
+    let docker = unavailable_docker(&home);
+    let fixture = common::Fixture::start_with(common::Setup {
+        health: vec![common::Reply::Http(200, health().to_string())],
+        ..Default::default()
+    });
+    let mut shim = common::Shim::start_with_env(
+        &fixture.url,
+        &[
+            ("PSEUDOLIFE_MCP_PYTHON", "absent-fixture-python"),
+            ("PSEUDOLIFE_SHIM_LAUNCHER", launcher.to_str().unwrap()),
+            (
+                "PSEUDOLIFE_SHIM_RUNTIMES",
+                home.path("runtimes").to_str().unwrap(),
+            ),
+            ("PSEUDOLIFE_DOCKER", docker.to_str().unwrap()),
+        ],
+    );
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !fixture
+        .records
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|record| record.message["method"] == "initialize")
+    {
+        assert!(
+            Instant::now() < deadline,
+            "candidate did not complete startup"
+        );
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    let attempt = shim
+        .state_dir()
+        .join(".pseudolife-mcp/update-clients.99.0.0.attempt");
+    assert!(shim.finish().is_empty());
+    assert!(!attempt.exists());
+    assert!(
+        !shim
+            .stderr()
             .contains("started the unattended client update")
     );
     fixture.assert_deleted();
@@ -440,15 +455,8 @@ fn assert_updater_absent(sentinel: &Path, attempt: &Path, delay: Duration) {
 }
 fn runtime_update_fixture_at(profile: Option<&str>) -> (DisposableHome, Output, Value) {
     let home = DisposableHome::new();
-    let package = home.path("pseudolife_memory");
-    fs::create_dir(&package).unwrap();
-    fs::write(package.join("__init__.py"), "").unwrap();
-    let report = home.path("spawn.json");
-    let code = format!(
-        "import json,sys,pathlib\nargs=sys.orig_argv\nr=pathlib.Path(sys.argv[sys.argv.index('--result-file')+1])\nr.write_text('0\\n')\npathlib.Path({}).write_text(json.dumps({{'executable':sys.executable,'argv':args,'pid':__import__('os').getpid()}}))\n",
-        serde_json::to_string(report.to_str().unwrap()).unwrap()
-    );
-    fs::write(package.join("cli.py"), code).unwrap();
+    let launcher = native_launcher(&home);
+    let docker = unavailable_docker(&home);
     let socket = TcpListener::bind("127.0.0.1:0").unwrap();
     let url = format!("http://{}", socket.local_addr().unwrap());
     let (cancel, cancelled) = mpsc::channel();
@@ -456,7 +464,10 @@ fn runtime_update_fixture_at(profile: Option<&str>) -> (DisposableHome, Output, 
     let mut command = child(&home, "runtime");
     command
         .current_dir(&home.0)
-        .env("PYTHONPATH", &home.0)
+        .env("PSEUDOLIFE_MCP_PYTHON", "absent-fixture-python")
+        .env("PSEUDOLIFE_SHIM_LAUNCHER", &launcher)
+        .env("PSEUDOLIFE_SHIM_RUNTIMES", home.path("runtimes"))
+        .env("PSEUDOLIFE_DOCKER", docker)
         .env("PSEUDOLIFE_MCP_DAEMON_URL", url)
         .env("PSEUDOLIFE_MCP_NO_SPAWN", "1");
     if let Some(profile) = profile {
@@ -478,63 +489,86 @@ fn runtime_update_fixture_at(profile: Option<&str>) -> (DisposableHome, Output, 
         "{}",
         String::from_utf8_lossy(&out.stderr)
     );
-    let until = Instant::now() + Duration::from_secs(5);
-    let value = loop {
-        if let Ok(bytes) = fs::read(&report)
-            && let Ok(v) = serde_json::from_slice(&bytes)
-        {
-            break v;
+    let result = profile
+        .map_or_else(|| home.0.clone(), |p| home.path(p))
+        .join(".pseudolife-mcp/update-clients.99.0.0.result");
+    let until = Instant::now() + Duration::from_secs(22);
+    loop {
+        if fs::read_to_string(&result).is_ok_and(|text| text.trim() == "2") {
+            break;
         }
-        assert!(Instant::now() < until, "fake updater did not finish");
+        assert!(
+            Instant::now() < until,
+            "native updater did not persist its result"
+        );
         std::thread::sleep(Duration::from_millis(10));
-    };
-    // The disposable module finishes after reporting. No installer is imported.
-    assert_eq!(
-        fs::read_to_string(
-            profile
-                .map_or_else(|| home.0.clone(), |p| home.path(p))
-                .join(".pseudolife-mcp/update-clients.99.0.0.result")
-        )
-        .unwrap(),
-        if cfg!(windows) { "0\r\n" } else { "0\n" }
-    );
+    }
+    let value = json!({"executable":launcher,"result":result,"exit":2});
     (home, out, value)
 }
+
+fn native_launcher(home: &DisposableHome) -> PathBuf {
+    let path = home.path(if cfg!(windows) {
+        "native launcher/pseudolife-mcp.exe"
+    } else {
+        "native launcher/pseudolife-mcp"
+    });
+    let layout = pseudolife_stdio::runtime::Layout {
+        root: home.path("runtimes"),
+        launcher: path.clone(),
+        user_bin: None,
+        user_path: false,
+    };
+    pseudolife_stdio::runtime::install_binary(
+        &layout,
+        lifecycle::PACKAGE_VERSION,
+        "fixture-native",
+        None,
+        Path::new(env!("CARGO_BIN_EXE_pseudolife-stdio")),
+    )
+    .unwrap();
+    path
+}
+fn unavailable_docker(home: &DisposableHome) -> PathBuf {
+    let path = home.path(if cfg!(windows) {
+        "refuse-docker.cmd"
+    } else {
+        "refuse-docker"
+    });
+    fs::write(
+        &path,
+        if cfg!(windows) {
+            "@echo fixture-engine-not-ready\r\n@exit /b 1\r\n"
+        } else {
+            "#!/bin/sh\nprintf 'fixture-engine-not-ready\n'\nexit 1\n"
+        },
+    )
+    .unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o700)).unwrap();
+    }
+    path
+}
+
 #[test]
 fn test_shim_runs_the_client_half_unattended_when_the_daemon_is_newer() {
     let (home, out, record) = runtime_update_fixture();
-    let exe: PathBuf = record["executable"].as_str().unwrap().into();
-    let expected = Command::new(python())
-        .args([
-            "-c",
-            "import sys,json;print(json.dumps([sys.executable,sys.orig_argv[0]]))",
-        ])
-        .output()
-        .unwrap();
-    let expected: Vec<String> = serde_json::from_slice(&expected.stdout).unwrap();
-    assert_eq!(exe, Path::new(&expected[0]));
-    let argv = record["argv"].as_array().unwrap();
-    assert_eq!(argv.len(), 9);
-    // Windows venv's redirector records its base executable in orig_argv.
     assert_eq!(
-        Path::new(argv[0].as_str().unwrap()),
-        Path::new(&expected[1])
+        Path::new(record["executable"].as_str().unwrap()),
+        home.path(if cfg!(windows) {
+            "native launcher/pseudolife-mcp.exe"
+        } else {
+            "native launcher/pseudolife-mcp"
+        })
     );
+    assert_eq!(record["exit"], 2);
     assert_eq!(
-        &argv[1..8],
-        &[
-            json!("-m"),
-            json!("pseudolife_memory.cli"),
-            json!("update"),
-            json!("--clients-only"),
-            json!("--tag"),
-            json!("99.0.0"),
-            json!("--result-file")
-        ]
-    );
-    assert_eq!(
-        Path::new(argv[8].as_str().unwrap()),
-        home.path(".pseudolife-mcp/update-clients.99.0.0.result")
+        fs::read_to_string(record["result"].as_str().unwrap())
+            .unwrap()
+            .trim(),
+        "2"
     );
     assert!(home.path(".pseudolife-mcp/update-clients.log").is_file());
     let note = String::from_utf8(out.stdout).unwrap();
@@ -743,11 +777,14 @@ fn relative_profile_homes_keep_python_path_spelling() {
         "{}",
         String::from_utf8_lossy(&out.stderr)
     );
-    let (_, out, record) = runtime_update_fixture_at(Some("relative-profile"));
+    let (runtime_home, out, record) = runtime_update_fixture_at(Some("relative-profile"));
     let result = Path::new("relative-profile")
         .join(".pseudolife-mcp")
         .join("update-clients.99.0.0.result");
-    assert_eq!(Path::new(record["argv"][8].as_str().unwrap()), result);
+    assert_eq!(
+        Path::new(record["result"].as_str().unwrap()),
+        runtime_home.0.join(&result)
+    );
     assert!(!result.is_absolute());
     assert!(
         String::from_utf8(out.stderr).unwrap().contains(

@@ -30,6 +30,7 @@
 # and nothing here ever runs `down -v`. Run after `git pull`; local edits
 # must be committed first (or deployed with -AllowDirty).
 param(
+    [switch]$Native,
     [ValidateSet("python", "rust")][string]$Engine,
     [switch]$Shadow,
     [string]$Tag = "",
@@ -55,6 +56,33 @@ if ($ClientsOnly) {
     exit 2
 }
 
+$updateArgs = @("--checkout", $repo, "--keep-rollbacks", "$KeepRollbacks", "--keep-cache-hours", "$KeepCacheHours",
+                "--health-retries", "$HealthRetries", "--health-delay-ms", "$HealthDelayMs")
+if ($Tag) { $updateArgs += @("--rollback-tag", $Tag) }
+if ($Engine) { $updateArgs += @("--engine", $Engine) }
+if ($Shadow) { $updateArgs += "--shadow" }
+if ($NoBackup) { $updateArgs += "--no-backup" }
+if ($ForceRollbackTag) { $updateArgs += "--force-rollback-tag" }
+if ($NoCachePrune) { $updateArgs += "--no-cache-prune" }
+if ($All) { $updateArgs += "--all" }
+if ($AllowDirty) { $updateArgs += "--allow-dirty" }
+if ($NoTestLogin) { $updateArgs += "--no-test-login" }
+
+if ($Native -or $env:PSEUDOLIFE_NATIVE_UPDATE -eq "1") {
+    $nativeCli = $env:PSEUDOLIFE_NATIVE_CLI
+    if (-not $nativeCli) { $nativeCli = $env:PSEUDOLIFE_SHIM_LAUNCHER }
+    if (-not $nativeCli) {
+        $localData = if ($env:LOCALAPPDATA) { $env:LOCALAPPDATA } else { Join-Path $HOME 'AppData/Local' }
+        $nativeCli = Join-Path $localData 'pseudolife-mcp/bin/pseudolife-mcp.exe'
+    }
+    if (-not (Test-Path -LiteralPath $nativeCli -PathType Leaf)) {
+        [Console]::Error.WriteLine('native update CLI is missing; install the native runtime or set PSEUDOLIFE_NATIVE_CLI to its binary; nothing was changed')
+        exit 2
+    }
+    & $nativeCli update @updateArgs
+    exit $LASTEXITCODE
+}
+
 # A python that answers (the Store's `python` stub on PATH exits 9009), 3.10 or newer.
 $python = $null
 $pyArgs = @()
@@ -70,18 +98,6 @@ if (-not $python) {
     Write-Warning "No Python >= 3.10 on PATH: the deploy is Python (ops/update.py). Install one and re-run."
     exit 1
 }
-
-$updateArgs = @("--checkout", $repo, "--keep-rollbacks", "$KeepRollbacks", "--keep-cache-hours", "$KeepCacheHours",
-                "--health-retries", "$HealthRetries", "--health-delay-ms", "$HealthDelayMs")
-if ($Tag) { $updateArgs += @("--rollback-tag", $Tag) }
-if ($Engine) { $updateArgs += @("--engine", $Engine) }
-if ($Shadow) { $updateArgs += "--shadow" }
-if ($NoBackup) { $updateArgs += "--no-backup" }
-if ($ForceRollbackTag) { $updateArgs += "--force-rollback-tag" }
-if ($NoCachePrune) { $updateArgs += "--no-cache-prune" }
-if ($All) { $updateArgs += "--all" }
-if ($AllowDirty) { $updateArgs += "--allow-dirty" }
-if ($NoTestLogin) { $updateArgs += "--no-test-login" }
 
 & $python @pyArgs (Join-Path $PSScriptRoot "update.py") @updateArgs
 exit $LASTEXITCODE

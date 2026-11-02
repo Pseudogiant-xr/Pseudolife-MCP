@@ -65,9 +65,11 @@ normalize_env_line_endings() {  # $1 = env file; says so when it rewrote it
 normalize_env_line_endings "$env_file"
 # <<< env line endings <<<
 args=(--checkout "$repo" --health-retries "${HEALTH_RETRIES:-30}" --health-delay-ms "${HEALTH_DELAY_MS:-1500}")
+native_update="${PSEUDOLIFE_NATIVE_UPDATE:-0}"
 
 while [ $# -gt 0 ]; do
     case "$1" in
+        --native)         native_update=1; shift ;;
         --tag)            args+=(--rollback-tag "$2"); shift 2 ;;
         --engine)         args+=(--engine "$2"); shift 2 ;;
         --shadow)         args+=(--shadow); shift ;;
@@ -85,6 +87,17 @@ while [ $# -gt 0 ]; do
         *) echo "unknown argument: $1" >&2; exit 2 ;;
     esac
 done
+
+# Opt in to the installed native CLI; no interpreter probe or fallback on
+# this path. The Python updater remains the default and the parity oracle.
+if [ "$native_update" = 1 ]; then
+    native_cli="${PSEUDOLIFE_NATIVE_CLI:-${PSEUDOLIFE_SHIM_LAUNCHER:-${XDG_DATA_HOME:-$HOME/.local/share}/pseudolife-mcp/bin/pseudolife-mcp}}"
+    if [ ! -x "$native_cli" ]; then
+        echo "native update CLI is missing; install the native runtime or set PSEUDOLIFE_NATIVE_CLI to its binary; nothing was changed" >&2
+        exit 2
+    fi
+    exec "$native_cli" update "${args[@]}"
+fi
 
 python_cmd=""
 for candidate in python3 python; do
