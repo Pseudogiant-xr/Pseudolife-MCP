@@ -204,7 +204,9 @@ async fn psql(sql: &str) -> Output {
     capture(&command, Some(&format!("{sql}\n"))).await
 }
 
-fn forward(args: &Args, url: Option<String>) -> Vec<OsString> {
+/// `_forward(args, version)`: an invite to an image at `version` 2 or later
+/// carries `CALLER_TAKES_OWNERSHIP` (this CLI takes `--someone-else`).
+fn forward(args: &Args, url: Option<String>, version: u64) -> Vec<OsString> {
     let mut out: Vec<String> = Vec::new();
     if args.list {
         out.push("--list".into());
@@ -235,6 +237,9 @@ fn forward(args: &Args, url: Option<String>) -> Vec<OsString> {
             "--url".into(),
             url.unwrap_or_else(|| URL_PLACEHOLDER.into()),
         ]);
+        if version >= 2 {
+            out.push(CALLER_TAKES_OWNERSHIP.into());
+        }
     }
     if let Some(bank) = &args.bank
         && !bank.is_empty()
@@ -279,15 +284,15 @@ pub(super) async fn run(args: &Args, report: &mut Report, port: u32) -> Result<u
     let version = (checked.code == 0)
         .then(|| image_version(&checked.stdout))
         .flatten();
-    if version.is_none() {
+    let Some(version) = version else {
         let message = if checked.code == 127 || checked.stderr.contains("No such container") {
             "no database here (PSEUDOLIFE_MCP_DATABASE_URL is unset and no lite bank was found) and no pseudolife-mcp-daemon container: run this on the daemon's host"
         } else {
             "the daemon's image predates `invite`: update the daemon first (pseudolife-mcp update), then re-run"
         };
         return Ok(report.fail(EXIT_REFUSED, message));
-    }
-    if args.owned.is_some() && version.is_some_and(|v| v < 2) {
+    };
+    if args.owned.is_some() && version < 2 {
         return Ok(report.fail(EXIT_REFUSED, "the daemon's image predates --someone-else and --mine: update the daemon to schema 59 (pseudolife-mcp update), then re-run. Nothing was changed"));
     }
     let url = match args.url.clone().filter(|u| !u.is_empty()) {
@@ -295,8 +300,13 @@ pub(super) async fn run(args: &Args, report: &mut Report, port: u32) -> Result<u
         None if args.name.is_some() => exposed_url(port).await,
         None => None,
     };
-    let command =
-        resolution::container_exec_for_engine(&docker, false, "invite", &forward(args, url), rust);
+    let command = resolution::container_exec_for_engine(
+        &docker,
+        false,
+        "invite",
+        &forward(args, url, version),
+        rust,
+    );
     let output = capture(&command, None).await;
     let _ = std::io::stdout().write_all(&super::super::super::text_bytes(&output.stdout));
     let _ = std::io::stdout().flush();
@@ -397,9 +407,9 @@ async fn through_postgres(args: &Args, report: &mut Report) -> Result<u8, Defer>
 }
 
 /// `_image_version`: the highest `N` over the lines of `invite
-/// --version-check` that are exactly `pseudolife-mcp invite <N>`. ASCII
-/// digits only, where Python's `\d` also takes other decimal digits: the
-/// probe reads our own image's answer, which prints ASCII.
+/// --version-check` that are exactly `pseudolife-mcp invite <N>`: lines as
+/// `str::lines` splits them, `N` ASCII digits that fit a `u64` (leading
+/// zeros allowed). The Python oracle reads it the same way.
 fn image_version(stdout: &str) -> Option<u64> {
     stdout
         .lines()
@@ -538,6 +548,38 @@ mod tests {
         }
     }
 
+    /// The parity cases `tests/test_invite_cli.py` runs through the
+    /// oracle's `_image_version`: both read the probe alike.
+    #[test]
+    fn the_image_version_reads_as_the_oracle_does() {
+        let zeros = format!("pseudolife-mcp invite {}2\n", "0".repeat(5000));
+        let huge = format!("pseudolife-mcp invite 1\npseudolife-mcp invite {}\n", "1".repeat(25));
+        for (stdout, version) in [
+            // A lone \r is no line break: one line, not an exact match.
+            ("pseudolife-mcp invite 1\rpseudolife-mcp invite 2\n", None),
+            ("pseudolife-mcp invite 1\n\rpseudolife-mcp invite 2\n", Some(1)),
+            // A \r ends a line only before \n.
+            ("pseudolife-mcp invite 2\r", None),
+            ("pseudolife-mcp invite 2\r\r\n", None),
+            ("pseudolife-mcp invite 2", Some(2)),
+            // A number past u64 is ignored; leading zeros are not.
+            (huge.as_str(), Some(1)),
+            ("pseudolife-mcp invite 18446744073709551615\n", Some(u64::MAX)),
+            ("pseudolife-mcp invite 18446744073709551616\n", None),
+            (zeros.as_str(), Some(2)),
+            ("pseudolife-mcp invite 0\n", Some(0)),
+            ("", None),
+            ("\n", None),
+            // Decimal digits other than ASCII are not a version.
+            ("pseudolife-mcp invite \u{0662}\n", None),
+            ("pseudolife-mcp invite 1\npseudolife-mcp invite \u{ff12}\n", Some(1)),
+            // Other Unicode line breaks split nothing.
+            ("pseudolife-mcp invite 1\u{2028}pseudolife-mcp invite 2\n", None),
+        ] {
+            assert_eq!(image_version(stdout), version, "{stdout:?}");
+        }
+    }
+
     #[test]
     fn the_container_invite_carries_whose_machine_it_is() {
         let base = |owned| Args {
@@ -546,7 +588,7 @@ mod tests {
             ..Args::default()
         };
         let argv = |args: &Args| -> Vec<String> {
-            forward(args, Some("https://example.com".into()))
+            forward(args, Some("https://example.com".into()), 2)
                 .into_iter()
                 .map(|a| a.to_string_lossy().into_owned())
                 .collect()
@@ -569,6 +611,50 @@ mod tests {
                 .iter()
                 .any(|a| a == "--mine" || a == "--someone-else")
         );
+    }
+
+    #[test]
+    fn only_an_invite_to_a_v2_image_says_the_caller_takes_ownership() {
+        let argv = |args: &Args, version| -> Vec<String> {
+            forward(args, Some("u".into()), version)
+                .into_iter()
+                .map(|a| a.to_string_lossy().into_owned())
+                .collect()
+        };
+        let invite = Args {
+            name: Some("laptop".into()),
+            json: true,
+            ..Args::default()
+        };
+        assert_eq!(
+            argv(&invite, 2),
+            [
+                "laptop",
+                "--expires",
+                "900s",
+                "--url",
+                "u",
+                "--caller-takes-ownership",
+                "--json"
+            ]
+        );
+        assert!(argv(&invite, 3).contains(&"--caller-takes-ownership".to_owned()));
+        // An image before v59 would refuse the flag as unrecognized.
+        assert_eq!(
+            argv(&invite, 1),
+            ["laptop", "--expires", "900s", "--url", "u", "--json"]
+        );
+        // List and revoke never carry it.
+        let list = Args {
+            list: true,
+            ..Args::default()
+        };
+        assert_eq!(argv(&list, 2), ["--list"]);
+        let revoke = Args {
+            revoke: Some("laptop".into()),
+            ..Args::default()
+        };
+        assert_eq!(argv(&revoke, 2), ["--revoke", "laptop", "--yes"]);
     }
 
     #[test]

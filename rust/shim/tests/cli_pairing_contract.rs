@@ -165,11 +165,11 @@ fn invite_refusals_before_the_database_match_the_oracle() {
     assert_eq!(home.entries(), Vec::<String>::new());
 }
 
-/// A daemon-only update leaves the host CLI older than the image: the
-/// pre-v59 shim took the version from `strip_prefix("pseudolife-mcp invite
-/// ")` of the whole output and the last release's Python CLI `re.match`ed
-/// it, so both must still read 1 at the start, or a plain invite is refused
-/// as an image that predates `invite`.
+/// A daemon-only update leaves the host CLI older than the image: every
+/// release before v59, Python CLI and shim alike, accepted the image only
+/// when the output `startswith("pseudolife-mcp invite 1")`, so it must
+/// still start that way, or a plain invite is refused as an image that
+/// predates `invite`.
 #[test]
 fn invite_version_check_still_answers_an_older_host_cli() {
     let home = Home::new("invite-version");
@@ -178,12 +178,10 @@ fn invite_version_check_still_answers_an_older_host_cli() {
     let output = run(check, b"");
     assert!(output.status.success());
     let stdout = String::from_utf8(output.stdout).unwrap();
-    let old_shim = stdout.strip_prefix("pseudolife-mcp invite ").map(|rest| {
-        rest.chars()
-            .take_while(char::is_ascii_digit)
-            .collect::<String>()
-    });
-    assert_eq!(old_shim.as_deref(), Some("1"), "{stdout:?}");
+    assert!(
+        stdout.starts_with("pseudolife-mcp invite 1"),
+        "{stdout:?}"
+    );
     assert!(stdout.lines().any(|line| line == "pseudolife-mcp invite 2"));
 }
 

@@ -551,9 +551,12 @@ elif 'pseudolife-mcp-postgres' in argv:
     elif 'UPDATE' in body:
         print('laptop')
     else:
+        v58 = os.environ.get('FIXTURE_ACTIVITY', 't') == 't'
+        # owned: a v53 bank has no such column, so LIST_SQL_V53's COALESCE
+        # makes every stored row the owner's.
         rows = [['laptop', 'core', True, True, False, None, 1700000000.0, 1700000001.0, None,
-                 1700000010.0, None, True, False]]
-        if os.environ.get('FIXTURE_ACTIVITY', 't') == 't':
+                 1700000010.0, None, True, not v58]]
+        if v58:
             # Seen with no stored row: an environment principal, whose owner
             # the stopped daemon's own config decides.
             rows.append(['codex', None, None, False, False, None, None, None, None,
@@ -595,8 +598,11 @@ def _transport_cases():
                 base = ['-e', 'PSEUDOLIFE_DAEMON_EXEC=1', 'pseudolife-mcp-daemon', *cli, 'invite']
                 assert calls[2]['argv'] == ['exec', *base, '--version-check']
                 if forwarded:
+                    # An image at version 2 hears that this CLI takes
+                    # --someone-else, for the note it prints.
                     assert calls[3]['argv'] == ['exec', '-i', *base, 'laptop', '--expires', '900s',
-                                                '--someone-else', '--url', 'https://example.com']
+                                                '--someone-else', '--url', 'https://example.com',
+                                                '--caller-takes-ownership']
                     assert obs['exit'] == 0
                 else:
                     assert len(calls) == 3 and obs['exit'] == 4
@@ -818,6 +824,20 @@ def _cases() -> list[core.Case]:
     inviting("invite-bank-match", "states", ["laptop", "--bank", FINGERPRINT, "--url", "u"])
     inviting("invite-bank-other", "states", ["laptop", "--bank", OTHER_FINGERPRINT, "--url", "u"])
     inviting("invite-empty-bank", "empty", ["zulu.1", "--url", "u", "--json"])
+    # Inside the daemon container (PSEUDOLIFE_DAEMON_EXEC, as a host CLI
+    # forwards an invite): without --caller-takes-ownership the forwarding
+    # host CLI predates v59 and refuses --someone-else, so the note says to
+    # update it first; with it, the note names the flag.
+    inviting("invite-forwarded-old-host", "empty", ["zulu.1", "--url", "u"],
+             extra_env={"PSEUDOLIFE_DAEMON_EXEC": "1"})
+    inviting("invite-forwarded-old-host-json", "empty", ["zulu.1", "--url", "u", "--json"],
+             extra_env={"PSEUDOLIFE_DAEMON_EXEC": "1"})
+    inviting("invite-forwarded-new-host", "empty",
+             ["zulu.1", "--url", "u", "--caller-takes-ownership"],
+             extra_env={"PSEUDOLIFE_DAEMON_EXEC": "1"})
+    # The marker alone, run directly: the plain note, as without it.
+    inviting("invite-direct-marker-json", "empty",
+             ["zulu.1", "--caller-takes-ownership", "--url", "u", "--json"])
     inviting("invite-health-int-at-limit", "states", ["laptop", "--url", "u", "--json"],
              payload=json.dumps(health())[:-1].encode() + b', "x": -' + b"9" * 4300 + b"}")
     port = free_port()
@@ -922,4 +942,9 @@ MUTANTS = [
     Mutant("invite-expired-is-pending", "invite", "shim/src/cli/pairing/invite_db.rs",
            "expires.is_some_and(|expires| expires > now)",
            "expires.is_some()", cases=("list",)),
+    # An invite forwarded by a host CLI before v59 must not name a flag that
+    # CLI refuses.
+    Mutant("invite-old-host-note", "invite", "shim/src/cli/pairing/invite.rs",
+           "if !forwarded || caller_takes_ownership {",
+           "if true {", cases=("invite-forwarded-old-host",)),
 ]
